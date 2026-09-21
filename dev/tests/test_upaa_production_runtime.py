@@ -67,10 +67,16 @@ from jaeger_ai.main import _run_turn
 
 
 @pytest.fixture
-def clean_upaa_env(tmp_path: Path):
+def clean_upaa_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Provides isolated storage and resets singleton before and after test."""
     state_dir = tmp_path / "upaa_state"
     state_dir.mkdir(parents=True, exist_ok=True)
+    instance_dir = state_dir / "instances" / "jaeger"
+    (instance_dir / "run").mkdir(parents=True, exist_ok=True)
+    (instance_dir / "data").mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(state_dir))
+    monkeypatch.setenv("JAEGER_HOME", str(state_dir))
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(instance_dir))
     EntityRuntime.reset_singleton()
     yield state_dir
     EntityRuntime.reset_singleton()

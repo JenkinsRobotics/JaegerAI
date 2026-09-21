@@ -3682,8 +3682,30 @@ def _run_subordinate_react(
     )
 
 
-def _run_turn(client: Any, user_text: str, *, session_key: str,
-              allow_persona: bool = True) -> dict[str, Any]:
+def _run_direct_model_runner(
+    client: Any,
+    t: str,
+    *,
+    session_key: str,
+    allow_persona: bool = True,
+) -> str:
+    """True direct response cognition runner: no tool catalog and zero mutation capability."""
+    from jaeger_agent.tool_executor import tool_allowlist
+
+    with tool_allowlist([]):
+        res = _run_subordinate_react(client, t, session_key=session_key, allow_persona=allow_persona)
+        return str(res.get("text") or "")
+
+
+def _run_turn(
+    client: Any,
+    user_text: str,
+    *,
+    session_key: str,
+    allow_persona: bool = True,
+    request_id: str | None = None,
+    is_subordinate: bool = False,
+) -> dict[str, Any]:
     """The unified agent turn — the one path every entry point shares.
 
     Executes through the sovereign UPAA EntityRuntime:
@@ -3693,6 +3715,11 @@ def _run_turn(client: Any, user_text: str, *, session_key: str,
 
     JaegerAgent is subordinate as one cognition engine used by the runtime
     for ReAct-style execution."""
+    if is_subordinate:
+        return _run_subordinate_react(
+            client, user_text, session_key=session_key, allow_persona=allow_persona,
+        )
+
     try:
         from jaeger_ai.core.entity.runtime import EntityRuntime
         runtime = EntityRuntime.get_singleton()
@@ -3700,21 +3727,43 @@ def _run_turn(client: Any, user_text: str, *, session_key: str,
             "react_runner": lambda t, session_key=session_key: _run_subordinate_react(
                 client, t, session_key=session_key, allow_persona=allow_persona,
             ),
-            "model_runner": lambda t: _run_subordinate_react(
+            "model_runner": lambda t: _run_direct_model_runner(
                 client, t, session_key=session_key, allow_persona=allow_persona,
-            ).get("text", ""),
+            ),
         }
         return runtime.execute_turn(
             user_text,
             session_id=session_key,
             source="main._run_turn",
+            request_id=request_id,
             context=context,
         )
     except Exception as exc:
-        logging.getLogger("jaeger.main").debug("EntityRuntime execution fallback: %s", exc)
-        return _run_subordinate_react(
-            client, user_text, session_key=session_key, allow_persona=allow_persona,
-        )
+        import logging
+        logging.getLogger("jaeger.main").error("EntityRuntime sovereign execution failed: %s", exc)
+        from jaeger_ai.core.runtime.autonomous_runner import is_actionable_request
+        from jaeger_agent.tool_executor import tool_allowlist
+
+        # If actionable / mutating request, fail-closed into safe halt, never full-power bypass
+        if is_actionable_request(user_text):
+            return {
+                "text": "",
+                "error": f"DegradedRuntimeError: Sovereign EntityRuntime failed ({exc}). Mutating operations refused in degraded mode.",
+                "tool_activity": [],
+                "report": {},
+                "skipped_final": False,
+                "strategy": "degraded_safe_halt",
+                "degraded_mode": True,
+            }
+
+        # Non-mutating conversational query: allow read-only direct reply with zero tools
+        with tool_allowlist([]):
+            res = _run_subordinate_react(
+                client, user_text, session_key=session_key, allow_persona=allow_persona,
+            )
+            res["degraded_mode"] = True
+            res["degraded_warning"] = f"EntityRuntime unavailable: {exc}"
+            return res
 
 
 def run_command(client: Any, user_text: str, session_key: str | None = None) -> str:
@@ -4036,6 +4085,8 @@ def run_for_voice(
     model: str | None = None,
     provider: str | None = None,
     local_only: bool = False,
+    request_id: str | None = None,
+    is_subordinate: bool = False,
 ) -> dict[str, Any]:
     """Run a turn and return a structured dict instead of printing.
     Thin output adapter over :func:`_run_turn` — used by the TUI voice
@@ -4080,7 +4131,13 @@ def run_for_voice(
     client = _session_model_clients[session][1]
     if session == 'dispatcher' and session not in _jaeger_agents_by_session:
         resume_session_from_store(client, session, _pipeline.get('layout'))
-    out = _run_turn(client, user_text, session_key=session)
+    out = _run_turn(
+        client,
+        user_text,
+        session_key=session,
+        request_id=request_id,
+        is_subordinate=is_subordinate,
+    )
     # Persist the turn so conversations survive app close + are listable.
     # ``preview`` (first user line, set by SessionStore.record) already
     # serves as the History list's title fallback — see
@@ -4123,9 +4180,12 @@ def run_for_voice(
     except Exception:  # noqa: BLE001 — persistence never breaks a turn
         pass
     return {
-        "text": out["text"], "tool_activity": out["tool_activity"],
-        "spoke_via_tool": out["spoke_via_tool"], "elapsed_s": out["elapsed_s"],
-        "skipped_final": out["skipped_final"], "error": out["error"],
+        "text": out.get("text", ""),
+        "tool_activity": out.get("tool_activity", []),
+        "spoke_via_tool": out.get("spoke_via_tool", False),
+        "elapsed_s": out.get("elapsed_s", 0.0),
+        "skipped_final": out.get("skipped_final", False),
+        "error": out.get("error"),
         "halt_reason": out.get("halt_reason"),
     }
 

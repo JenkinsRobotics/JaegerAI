@@ -95,6 +95,56 @@ class SelfRefineEngine:
         return revised
 
     @classmethod
+    def build_model_critic(cls, provider: Callable[[str], str]) -> CriticFn:
+        """Create a model-backed critic function using the cognition provider."""
+        def _critic(content: str, rubric: str) -> CritiqueFeedback:
+            prompt = (
+                f"You are an independent technical critic. Critique the following draft against the rubric:\n"
+                f"Rubric: {rubric}\n"
+                f"Draft:\n{content}\n\n"
+                f"Respond strictly in JSON with format:\n"
+                f'{{"approved": bool, "issues_found": [str, ...], "suggestions": [str, ...], "score": float}}'
+            )
+            try:
+                import json
+                import re
+                resp = provider(prompt)
+                m = re.search(r"\{.*\}", resp, re.DOTALL)
+                if m:
+                    data = json.loads(m.group(0))
+                    return CritiqueFeedback(
+                        approved=bool(data.get("approved", False)),
+                        issues_found=list(data.get("issues_found") or []),
+                        suggestions=list(data.get("suggestions") or []),
+                        score=float(data.get("score", 0.5)),
+                    )
+            except Exception as exc:
+                logger.debug("Model critic provider error: %s; using default critic", exc)
+            return cls.default_critic(content, rubric)
+        return _critic
+
+    @classmethod
+    def build_model_reviser(cls, provider: Callable[[str], str]) -> ReviserFn:
+        """Create a model-backed reviser function using the cognition provider."""
+        def _reviser(current: str, feedback: CritiqueFeedback, rubric: str) -> str:
+            prompt = (
+                f"You are a technical revision engine. Revise the following draft to resolve all critic issues:\n"
+                f"Rubric: {rubric}\n"
+                f"Critic Issues: {feedback.issues_found}\n"
+                f"Critic Suggestions: {feedback.suggestions}\n"
+                f"Current Draft:\n{current}\n\n"
+                f"Output only the full revised draft."
+            )
+            try:
+                resp = provider(prompt)
+                if resp.strip():
+                    return resp.strip()
+            except Exception as exc:
+                logger.debug("Model reviser provider error: %s; using default reviser", exc)
+            return cls.default_reviser(current, feedback, rubric)
+        return _reviser
+
+    @classmethod
     def refine_artifact(
         cls,
         initial_draft: str,
@@ -103,11 +153,22 @@ class SelfRefineEngine:
         max_iterations: int = 3,
         critic_fn: CriticFn | None = None,
         reviser_fn: ReviserFn | None = None,
+        cognition_provider: Callable[[str], str] | None = None,
+        critic_provider: Callable[[str], str] | None = None,
     ) -> RefinementResult:
         """Execute the generate -> critique -> revise -> validate refinement loop."""
         t0 = time.time()
-        critic = critic_fn or cls.default_critic
-        reviser = reviser_fn or cls.default_reviser
+        if critic_fn is None and critic_provider is not None:
+            critic = cls.build_model_critic(critic_provider)
+        elif critic_fn is None and cognition_provider is not None:
+            critic = cls.build_model_critic(cognition_provider)
+        else:
+            critic = critic_fn or cls.default_critic
+
+        if reviser_fn is None and cognition_provider is not None:
+            reviser = cls.build_model_reviser(cognition_provider)
+        else:
+            reviser = reviser_fn or cls.default_reviser
 
         current_text = initial_draft
         history: list[CritiqueFeedback] = []

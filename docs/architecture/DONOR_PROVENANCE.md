@@ -45,23 +45,23 @@ All donor repositories were cloned into `.donors/` (gitignored, outside source t
 * **Decision:** **PORT & ADAPT**
 * **Reason:** Implemented `SelfRefineEngine` in `jaeger_ai/core/entity/self_refine.py`. Selectively invoked by Executive for high-stakes or irreversible actions rather than taxing routine chat turns.
 
-### Subsystem: Deliberate Planning (LATS / Tree-Search)
+### Subsystem: Deliberate Planning (DeliberativeSearch / LATS-inspired)
 * **Current Jaeger:** Single linear plan or direct ReAct loop.
 * **Donor:** Language Agent Tree Search & Agent S (`.donors/agent-s`) @ `3aa272d2` (Apache 2.0)
 * **Files Inspected:** `gui_agent/`, `agent_s/`
 * **Decision:** **ADAPT**
-* **Reason:** Implemented `DeliberatePlanner` in `jaeger_ai/core/entity/deliberate_planner.py` generating $\ge 3$ candidate plans, evaluating with independent critic for goal satisfaction, safety, reversibility, and reflection penalties.
+* **Reason:** Implemented `DeliberatePlanner` (`DeliberativeSearch`) in `jaeger_ai/core/entity/deliberate_planner.py` generating $\ge 3$ candidate plans via the cognition provider, evaluating with an independent critic for goal satisfaction, safety, reversibility, and reflection penalties, with bounded replanning upon execution failure.
 
 ### Subsystem: Procedural Skill Learning (Voyager)
 * **Current Jaeger:** Static skill folder or manual authoring.
 * **Donor:** Voyager (`.donors/voyager`) @ `55e45a88` (MIT)
 * **Files Inspected:** `voyager/agents/skill.py`, `voyager/agents/critic.py`
 * **Decision:** **ADAPT TO PRODUCTION REGISTRY**
-* **Reason:** Implemented `SkillPromotionPipeline` in `jaeger_ai/core/entity/skills/promotion.py`. Promoted skills write real production `SKILL.md` frontmatter and executable artifacts directly into Jaeger's instance skills folder (`~/.jaeger/skills/` or instance path), immediately discoverable by existing skill loaders.
+* **Reason:** Implemented `SkillPromotionPipeline` in `jaeger_ai/core/entity/skills/promotion.py`. Promoted skills write canonical v3 packages (`manifest.yaml`, `SKILL.md`, `run.py`, `tests/smoke_test.py`) directly into the instance skills folder, immediately discoverable and registered via Jaeger's real `reload_skills()` infrastructure.
 
 ### Subsystem: Tiered Desktop Perception (ProactiveAgent / ProAgent)
 * **Current Jaeger:** Ad-hoc polling or reactive commands only.
 * **Donor:** ProactiveAgent & ProAgent (`.donors/` reference)
 * **Files Inspected:** ActivityWatch watchers and sensor adapters
 * **Decision:** **ADAPT**
-* **Reason:** Implemented generic 3-tier perception architecture in `jaeger_ai/core/entity/sensors/tiered.py` (Tier 0: Deterministic signals -> Tier 1: Local heuristic/classification -> Tier 2: Expensive multimodal/model synthesis).
+* **Reason:** Implemented generic 3-tier perception architecture in `jaeger_ai/core/entity/sensors/tiered.py` (Tier 0: Deterministic signals -> Tier 1: Local heuristic/classification -> Tier 2: Model provider evaluation on justified escalation) with automated credential/privacy scrubbing (`redact_privacy_signals`) and background `SensorSupervisor` (`supervisor.py`).

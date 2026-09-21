@@ -5,41 +5,41 @@
 
 ---
 
-## 1. Incidents & Test Failures Encountered and Resolved
+## 1. Incidents & Test Failures Encountered and Resolved (Closure Pass)
 
-### 1. Missing `import time` in `packages/jaeger-agent/jaeger_agent/tool_executor.py`
-* **Symptom:** During initial test execution of `dev/scripts/run_tests.sh`, 17 tests in `packages/jaeger-agent/tests/` failed with `NameError: name 'time' is not defined`.
-* **Root Cause:** When integrating `tool.started` and `tool.completed` consequence logging inside `HookedToolExecutor.execute`, `time.time()` was invoked without importing `time` at the top of the module.
-* **Resolution:** Directly imported `time` into `packages/jaeger-agent/jaeger_agent/tool_executor.py`. Verified all tests pass.
+### 1. `run_for_voice` Direct Indexing of Optional Keys
+* **Symptom:** `KeyError: 'spoke_via_tool'` when invoking `run_for_voice` via Bridge integration test.
+* **Root Cause:** `run_for_voice` constructed its return dictionary using direct bracket indexing (`out["spoke_via_tool"]`, `out["elapsed_s"]`) on the dictionary returned by `EntityRuntime.execute_turn()`.
+* **Resolution:** Replaced bracket indexing with `.get("spoke_via_tool", False)` and `.get("elapsed_s", 0.0)` with safe defaults.
 
-### 2. Circular Import in `skills/promotion.py` on `EntityRuntime`
-* **Symptom:** `ImportError: cannot import name 'EntityRuntime' from partially initialized module 'jaeger_ai.core.entity.runtime'`.
-* **Root Cause:** `SkillPromotionPipeline` imported `from jaeger_ai.core.entity.runtime import EntityRuntime` at module top-level, while `runtime.py` imported `CognitionRouter` -> `SleepTimeProcessor` -> `SkillPromotionPipeline`.
-* **Resolution:** Lazily resolved `EntityRuntime.get_singleton()` inside `extract_candidate` and `promote` methods. Eliminated module-level circular dependency at root.
+### 2. Live Instance Modification in Test Isolation Guard
+* **Symptom:** `TEST ISOLATION FAILURE: the suite modified a LIVE instance tree. modified: ~/.jaeger/instances/jaeger/run/native-turns.sqlite3`.
+* **Root Cause:** `_execute_turn` and `run_for_voice` accessed default instance paths because test fixtures did not explicitly set `JAEGER_STATE_DIR`, `JAEGER_HOME`, and `JAEGER_INSTANCE_DIR` in the environment.
+* **Resolution:** Updated `clean_entity_env` and `clean_upaa_env` test fixtures to isolate instance directories under `tmp_path`, and updated `SkillPromotionPipeline` default path resolution to respect `operator_state_root()`.
 
-### 3. Missing `verify_filesystem_write` in `VerificationContract`
-* **Symptom:** `AttributeError: 'VerificationContract' object has no attribute 'verify_filesystem_write'`.
-* **Root Cause:** `EntityRuntime.execute_turn` expected a convenient filesystem write verification wrapper, but `VerificationContract` only exposed generic `verify_disk_state`.
-* **Resolution:** Added `verify_filesystem_write` to `VerificationContract` in `jaeger_ai/core/entity/verification.py` checking existence and content predicates.
+### 3. Missing `import logging` in `_run_turn` Degraded Mode Exception Handler
+* **Symptom:** `NameError: name 'logging' is not defined` when injecting runtime failure in `_run_turn`.
+* **Root Cause:** `logging` was not imported in the local scope of the newly refactored `except Exception as exc:` block.
+* **Resolution:** Added `import logging` within the handler block.
 
-### 4. `CandidatePlan.strategy` attribute mismatch in Deliberate Planner
-* **Symptom:** `AttributeError: 'CandidatePlan' object has no attribute 'strategy'`.
-* **Root Cause:** `CandidatePlan` named its strategy summary field `strategy_summary` while tests queried `plan.strategy`.
-* **Resolution:** Added `@property def strategy(self) -> str` aliasing `strategy_summary`.
+### 4. Bounded Replanning Candidate Filtering
+* **Symptom:** `replan_on_failure` selected the same plan that had just failed execution because critic scores re-elevated the plan.
+* **Root Cause:** Lowering `safety_score` was overwritten by the dynamic critic response during replanning.
+* **Resolution:** Refactored `replan_on_failure` to filter out candidates matching `failed_plan.name` or `failed_plan.strategy_summary` from the candidate pool before passing to critic evaluation.
 
 ---
 
 ## 2. Architectural Boundaries & Operational Limits
 
-### 1. Desktop Sensing Platform Permissions (macOS)
-* **Limitation:** On macOS, querying active window titles and frontmost applications via `NSWorkspace` requires Accessibility permissions.
+### 1. Single Process Runtime Singleton
+* **Limitation:** `EntityRuntime.get_singleton()` manages local process state. While threads and coroutines share this singleton safely, multiple separate operating system processes must coordinate via the Gateway (`:8810`) or Bridge socket (`run/bridge.sock`) rather than instantiating conflicting local SQLite writers.
+* **Boundary:** All out-of-process clients (macOS app, WebUI, CLI) connect to the daemon rather than opening the state SQLite files directly.
+
+### 2. Desktop Sensing Platform Permissions (macOS)
+* **Limitation:** Querying active window titles and frontmost applications via `NSWorkspace` requires Accessibility permissions.
 * **Degradation Mode:** When running headlessly in CI or when Accessibility permissions are declined, `DesktopActivitySensor` safely falls back to environment metadata (`TERM`, process state) and filesystem disk telemetry without crashing.
-* **Security Guardrail:** The sensor explicitly redacts sensitive password manager applications (1Password, Bitwarden, Keychain) to prevent credential leakage.
+* **Security Guardrail:** `redact_privacy_signals` explicitly scrubs passwords, bearer tokens, API keys, email addresses, and password managers (1Password, Bitwarden, Keychain).
 
-### 2. Single-Node SQLite State Architecture
-* **Limitation:** `SqliteEventStore`, `unified_memory.sqlite3`, and `gateway_sessions.sqlite3` are local SQLite databases with WAL mode designed for a single physical machine.
-* **Boundary:** It provides local, embodied multi-client access (Mac App, WebUI, CLI, TUI concurrently), but is not a distributed multi-datacenter consensus engine (e.g. Raft/CockroachDB).
-
-### 3. Skill Candidate Sandboxing
-* **Limitation:** The Voyager-style `SkillPromotionPipeline` enforces that candidate skills must pass automated programmatic test assertions before being written to `SKILL.md`.
-* **Boundary:** Running arbitrary candidate verification code should ideally occur in an isolated execution sandbox or ephemeral subagent worktree to guard against destructive side-effects during candidate test execution.
+### 3. DeliberativeSearch Depth
+* **Limitation:** The current deliberate planning implementation is bounded multi-candidate search with critic and feedback (`DeliberativeSearch`), not an unbounded Monte Carlo Tree Search exploring arbitrary branch depths.
+* **Boundary:** It generates $\ge 3$ distinct candidates, evaluates safety/reversibility/reflection penalties, and supports bounded replanning on failure. Unbounded tree exploration is intentionally bounded to prevent runaway LLM latency on interactive turns.

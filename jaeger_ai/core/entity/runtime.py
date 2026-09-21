@@ -46,16 +46,16 @@ from .reflection import ReflexionStore
 from .self_refine import SelfRefineEngine
 from .self_state import SelfState
 from .sleep_time import SleepTimeProcessor
-from .verification import VerificationContract, VerificationResult
+from .verification import VerificationContract, VerificationRegistry, VerificationResult
 
 logger = logging.getLogger("jaeger.entity.runtime")
 
 
 class EntityRuntime:
-    """The canonical runtime authority for a persistent Jaeger instance."""
+    """The persistent sovereign entity runtime."""
 
     _instance: EntityRuntime | None = None
-    _lock = threading.RLock()
+    _lock = threading.Lock()
 
     def __init__(
         self,
@@ -72,6 +72,7 @@ class EntityRuntime:
         self.salience_engine = salience_engine or SalienceEngine()
         self.executive_selector = ExecutiveStrategySelector()
         self.authority_layer = AuthorityLayer()
+        self.verification_registry = VerificationRegistry()
         self.verification_contract = VerificationContract()
         self.memory_subsystem = MemorySubsystem(self.state_root, self.event_store)
         self.reflexion_store = ReflexionStore(self.state_root)
@@ -141,17 +142,19 @@ class EntityRuntime:
         """
         # 1. Persist
         persisted = self.event_store.append(event)
+        is_duplicate = (persisted.event_id != event.event_id)
 
-        # 2. Update SelfState
+        # 2. Update SelfState only on new event
         with self._state_lock:
-            self._state = reduce_event(self._state, persisted)
+            if not is_duplicate:
+                self._state = reduce_event(self._state, persisted)
             current_state = self._state
 
         # 3. Attention / Salience Evaluation
         decision = self.salience_engine.evaluate(persisted, current_state)
 
-        # 4. Trigger cognition handlers if salient
-        if decision.wake_cognition:
+        # 4. Trigger cognition handlers if salient and new
+        if decision.wake_cognition and not is_duplicate:
             for handler in self._cognition_handlers:
                 try:
                     handler(persisted, current_state)
@@ -169,6 +172,7 @@ class EntityRuntime:
         actor: str = "human:operator",
         request_id: str | None = None,
         context: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute a turn through the sovereign UPAA control path:
         EVENT
@@ -187,6 +191,9 @@ class EntityRuntime:
         -> MEMORY UPDATE
         """
         ctx = dict(context or {})
+        meta = dict(metadata or {})
+        if "metadata" in ctx and isinstance(ctx["metadata"], dict):
+            meta.update(ctx["metadata"])
 
         # 1. Ingest event to Fabric, reduce SelfState, evaluate Salience
         event = JaegerEvent.human_message(
@@ -195,6 +202,7 @@ class EntityRuntime:
             source=source,
             session_id=session_id,
             request_id=request_id,
+            metadata=meta,
         )
         current_state, attention = self.ingest(event)
 
@@ -212,9 +220,18 @@ class EntityRuntime:
 
         # 2. Executive Strategy Selection
         exec_decision = self.executive_selector.select_strategy(event, current_state)
+        self.event_store.append(
+            JaegerEvent.executive_decision(
+                exec_decision.strategy.value,
+                exec_decision.reason,
+                parent_event_id=event.event_id,
+                session_id=session_id,
+            )
+        )
 
         # 3. Cognition Router Execution
         ctx["sleep_processor"] = self.sleep_time_processor
+        ctx["reflexion_store"] = self.reflexion_store
         cog_result = self.cognition_router.execute(
             strategy=exec_decision.strategy,
             event=event,
@@ -227,13 +244,36 @@ class EntityRuntime:
 
         response_text = str((cog_result or {}).get("text") or "")
 
-        # 4. Independent Verification
-        target_path = (cog_result or {}).get("path") or (cog_result or {}).get("target_path")
-        expected_content = (cog_result or {}).get("expected_content")
-        verif = self.verification_contract.verify_filesystem_write(
-            target_path=target_path,
-            expected_content=expected_content,
+        # 4. Action-Specific Independent Verification
+        action = (cog_result or {}).get("action") or {}
+        if not action and (cog_result or {}).get("path"):
+            action = {
+                "action_type": "file_write",
+                "path": (cog_result or {}).get("path"),
+                "expected_content": (cog_result or {}).get("expected_content"),
+            }
+        elif not action and (cog_result or {}).get("tool_activity"):
+            tool_act = (cog_result or {}).get("tool_activity")
+            last_act = tool_act[-1] if isinstance(tool_act, list) and tool_act else ""
+            action = {"tool": last_act, "objective": user_text}
+
+        verif = self.verification_registry.verify(
+            objective=user_text,
+            action=action,
+            result=cog_result or {},
+            context=ctx,
         )
+
+        verif_ev = JaegerEvent.verification_completed(
+            objective=user_text,
+            status=verif.status.value,
+            evidence=verif.evidence,
+            verifier=verif.verifier,
+            error=verif.error,
+            parent_event_id=event.event_id,
+            session_id=session_id,
+        )
+        self.event_store.append(verif_ev)
 
         # 5. Continuous Learning & Memory Update
         self.learning_pipeline.record_turn_experience(
@@ -244,12 +284,21 @@ class EntityRuntime:
             reflexion_store=self.reflexion_store,
             state=current_state,
         )
+        self.event_store.append(
+            JaegerEvent.learning_updated(
+                learning_type="turn_experience",
+                summary=f"Turn experience recorded for {exec_decision.strategy.value} (verif: {verif.status.value})",
+                parent_event_id=verif_ev.event_id,
+                session_id=session_id,
+            )
+        )
 
         # 6. Record Agent Response in Event Fabric
         if response_text:
             self.record_agent_response(
                 response_text,
                 session_id=session_id,
+                parent_event_id=event.event_id,
                 metadata={
                     "strategy": exec_decision.strategy.value,
                     "plan_id": (cog_result or {}).get("plan_id"),
@@ -327,6 +376,7 @@ class EntityRuntime:
         call_id: str,
         session_id: str = "dispatcher",
         actor: str = "agent:jaeger",
+        parent_event_id: str = "",
     ) -> JaegerEvent:
         event = JaegerEvent.tool_started(
             tool_name,
@@ -334,6 +384,7 @@ class EntityRuntime:
             call_id=call_id,
             session_id=session_id,
             actor=actor,
+            parent_event_id=parent_event_id,
         )
         self.ingest(event)
         return event
@@ -347,6 +398,7 @@ class EntityRuntime:
         duration_s: float,
         session_id: str = "dispatcher",
         error: str | None = None,
+        parent_event_id: str = "",
     ) -> JaegerEvent:
         if error:
             event = JaegerEvent.tool_failed(
@@ -355,6 +407,7 @@ class EntityRuntime:
                 call_id=call_id,
                 duration_s=duration_s,
                 session_id=session_id,
+                parent_event_id=parent_event_id,
             )
         else:
             event = JaegerEvent.tool_completed(
@@ -363,6 +416,7 @@ class EntityRuntime:
                 call_id=call_id,
                 duration_s=duration_s,
                 session_id=session_id,
+                parent_event_id=parent_event_id,
             )
         self.ingest(event)
         return event
@@ -375,6 +429,7 @@ class EntityRuntime:
         actor: str = "agent:jaeger",
         model: str = "",
         metadata: dict[str, Any] | None = None,
+        parent_event_id: str = "",
     ) -> JaegerEvent:
         event = JaegerEvent(
             event_id="",
@@ -385,6 +440,7 @@ class EntityRuntime:
             session_id=session_id,
             payload={"text": text, "model": model, **(metadata or {})},
             salience=0.5,
+            parent_event_id=parent_event_id,
         )
         self.ingest(event)
         return event

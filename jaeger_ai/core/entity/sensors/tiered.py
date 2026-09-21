@@ -48,6 +48,30 @@ class TieredObservation:
         )
 
 
+import re
+
+
+def redact_privacy_signals(signals: dict[str, Any]) -> dict[str, Any]:
+    """Scrub sensitive credentials, auth tokens, passwords, and private identifiers."""
+    redacted = dict(signals)
+    # Redact common token patterns or password keys
+    for k, v in list(redacted.items()):
+        if any(s in k.lower() for s in ("token", "secret", "password", "key", "auth", "credential")):
+            redacted[k] = "[REDACTED_CREDENTIAL]"
+        elif isinstance(v, str):
+            # Scrub bearer tokens / JWTs / hex keys
+            v_scrubbed = re.sub(r"(?i)(bearer\s+[a-z0-9\-_\.]+)", "[REDACTED_AUTH]", v)
+            v_scrubbed = re.sub(r"(?i)(api[_-]?key[:=]\s*[a-z0-9\-_]+)", "[REDACTED_API_KEY]", v_scrubbed)
+            v_scrubbed = re.sub(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", "[REDACTED_EMAIL]", v_scrubbed)
+            redacted[k] = v_scrubbed
+    # If active_app or window title contains private indicators
+    if "active_app" in redacted:
+        app_name = str(redacted["active_app"]).lower()
+        if any(p in app_name for p in ("1password", "bitwarden", "keepass", "keychain", "vault", "private")):
+            redacted["active_app"] = "[PROTECTED_APP]"
+    return redacted
+
+
 class TieredPerceptionCoordinator:
     """Coordinates tiered signal intake, escalating only when justified."""
 
@@ -55,9 +79,14 @@ class TieredPerceptionCoordinator:
         self,
         tier1_classifier: Callable[[dict[str, Any]], tuple[bool, float, str]] | None = None,
         tier2_model_evaluator: Callable[[dict[str, Any]], tuple[dict[str, Any], float, str]] | None = None,
+        tier2_provider: Callable[[str, dict[str, Any]], str] | None = None,
     ) -> None:
         self.tier1_classifier = tier1_classifier or self._default_tier1_classifier
+        self.tier2_provider = tier2_provider
         self.tier2_model_evaluator = tier2_model_evaluator or self._default_tier2_evaluator
+        self.tier0_count = 0
+        self.tier1_count = 0
+        self.tier2_call_count = 0
 
     def _default_tier1_classifier(self, t0_signals: dict[str, Any]) -> tuple[bool, float, str]:
         """Cheap local heuristic: check if signals indicate an anomaly or critical alert."""
@@ -73,8 +102,21 @@ class TieredPerceptionCoordinator:
         return False, 0.2, "Routine activity within normal parameters"
 
     def _default_tier2_evaluator(self, t1_signals: dict[str, Any]) -> tuple[dict[str, Any], float, str]:
-        """Synthesize rich context for escalated observation."""
-        rich_data = dict(t1_signals)
+        """Synthesize rich context for escalated observation using model provider after privacy redaction."""
+        self.tier2_call_count += 1
+        redacted_context = redact_privacy_signals(t1_signals)
+        rich_data = dict(redacted_context)
+
+        if callable(self.tier2_provider):
+            prompt = (
+                f"Evaluate the following operational signals and assess anomaly urgency:\n"
+                f"{redacted_context}"
+            )
+            synthesis = self.tier2_provider(prompt, redacted_context)
+            rich_data["tier2_synthesis"] = synthesis
+            rich_data["recommended_action"] = "Provider-evaluated operational action"
+            return rich_data, 0.9, "Tier 2 model provider evaluation completed"
+
         rich_data["tier2_synthesis"] = "High priority operational anomaly assessed"
         rich_data["recommended_action"] = "Alert operator or initiate diagnostic"
         return rich_data, 0.9, "Tier 2 multimodal/reasoning assessment completed"
@@ -88,6 +130,7 @@ class TieredPerceptionCoordinator:
         trail = ["Tier 0: Deterministic signal acquired"]
         signals = dict(deterministic_signals)
         salience = 0.2
+        self.tier0_count += 1
 
         # 1. Tier 0 evaluation
         should_escalate_t1, t1_salience, t1_reason = self.tier1_classifier(signals)
@@ -103,6 +146,7 @@ class TieredPerceptionCoordinator:
             )
 
         # 2. Escalated to Tier 1
+        self.tier1_count += 1
         salience = t1_salience
         signals["tier1_classified"] = True
         signals["tier1_reason"] = t1_reason

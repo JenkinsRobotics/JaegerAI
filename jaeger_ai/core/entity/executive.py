@@ -109,16 +109,28 @@ class ExecutiveStrategySelector:
 
         # 3. Human & Bridge Messages
         if event_type == EventType.HUMAN_MESSAGE.value:
-            text = str(event.payload.get("text", "") if isinstance(event.payload, dict) else "")
+            payload = event.payload if isinstance(event.payload, dict) else {}
+            text = str(payload.get("text", ""))
+            role_s = str(payload.get("role") or event.metadata.get("role") or "")
+            exec_mode = str(payload.get("execution_mode") or event.metadata.get("execution_mode") or "")
+            actionable = bool(payload.get("actionable") or event.metadata.get("actionable"))
 
-            # Check Delegation first
+            # Check Delegation / Specialist first
             m_del = _DELEGATE_HINTS.search(text)
-            if m_del:
-                specialist = m_del.group(0).split()[-1].lower()
+            if role_s == "specialist" or m_del or payload.get("specialist"):
+                spec = str(payload.get("specialist") or (m_del.group(0).split()[-1].lower() if m_del else role_s))
                 return ExecutiveDecision(
                     strategy=CognitiveStrategy.SPECIALIST_DELEGATION,
-                    reason=f"Explicit delegation request targeting {specialist}",
-                    target_specialist=specialist,
+                    reason=f"Specialist routing for {spec}",
+                    target_specialist=spec,
+                )
+
+            # Explicit text-only session without actionable request -> DIRECT_RESPONSE
+            if exec_mode == "text_only" and not actionable:
+                return ExecutiveDecision(
+                    strategy=CognitiveStrategy.DIRECT_RESPONSE,
+                    reason="Explicit text-only session requested without actionable mutation",
+                    estimated_steps=1,
                 )
 
             # Check Deliberate Planning / Batch Work
@@ -130,11 +142,11 @@ class ExecutiveStrategySelector:
                     estimated_steps=20,
                 )
 
-            # Check ReAct Tool Loop
-            if _ACTION_HINTS.search(text):
+            # In agent mode (or when action hints / actionable intent present), use ReAct Tool Loop
+            if (exec_mode and exec_mode != "text_only") or _ACTION_HINTS.search(text) or actionable:
                 return ExecutiveDecision(
                     strategy=CognitiveStrategy.REACT_LOOP,
-                    reason="Action verbs present; requires tool dispatch and environment consequence feedback",
+                    reason="Agent mode or actionable request; requires tool dispatch and environment consequence feedback",
                     estimated_steps=5,
                 )
 

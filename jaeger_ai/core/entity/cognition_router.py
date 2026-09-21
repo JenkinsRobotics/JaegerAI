@@ -93,17 +93,26 @@ class DirectResponseHandler(CognitionStrategyHandler):
         context: Mapping[str, Any],
     ) -> dict[str, Any]:
         text = str(event.payload.get("text") or "")
-        # Check if caller passed a fallback model runner
         model_runner = context.get("model_runner")
-        if callable(model_runner):
-            reply = model_runner(text)
-        else:
-            # Informational prompt answer using context
-            reply = f"Acknowledged: {text[:120]}"
+
+        # Explicitly enforce zero tools at the cognition boundary
+        try:
+            from jaeger_agent.tool_executor import tool_allowlist
+            with tool_allowlist([]):
+                if callable(model_runner):
+                    reply = model_runner(text)
+                else:
+                    reply = f"Acknowledged: {text[:120]}"
+        except Exception:
+            if callable(model_runner):
+                reply = model_runner(text)
+            else:
+                reply = f"Acknowledged: {text[:120]}"
 
         return {
             "strategy": CognitiveStrategy.DIRECT_RESPONSE.value,
             "text": reply,
+            "tools_exposed": [],
             "action_taken": True,
             "llm_invoked": True,
         }
@@ -149,13 +158,31 @@ class DeliberatePlannerHandler(CognitionStrategyHandler):
         context: Mapping[str, Any],
     ) -> dict[str, Any]:
         goal = str(event.payload.get("text") or "")
-        reflections = memory.reflective.get_recent_insights()
+        reflexion_store = context.get("reflexion_store")
+        prior_reflections = []
+        if reflexion_store is not None:
+            try:
+                prior_reflections = reflexion_store.get_relevant_reflections(goal)
+            except Exception as exc:
+                logger.debug("Failed retrieving reflections from reflexion store: %s", exc)
 
-        # 1. Generate >= 3 candidate plans
-        candidates = DeliberatePlanner.generate_candidate_plans(goal)
+        cognition_provider = context.get("cognition_provider")
+        critic_provider = context.get("critic_provider")
+
+        # 1. Generate >= 3 candidate plans informed by prior reflections
+        candidates = DeliberatePlanner.generate_candidate_plans(
+            goal=goal,
+            prior_reflections=prior_reflections,
+            cognition_provider=cognition_provider,
+        )
 
         # 2. Critic pass scoring and selecting best plan
-        winning_plan = DeliberatePlanner.evaluate_and_select(candidates, goal)
+        winning_plan = DeliberatePlanner.evaluate_and_select(
+            candidates,
+            goal,
+            critic_provider=critic_provider,
+            prior_reflections=prior_reflections,
+        )
 
         # 3. If plan contains sensitive mutations, run SelfRefine pass
         if winning_plan.reversibility != "reversible":
@@ -171,6 +198,25 @@ class DeliberatePlannerHandler(CognitionStrategyHandler):
         if callable(react_runner):
             exec_prompt = f"[Deliberate Plan Selected: {winning_plan.name}]\n" + "\n".join(f"- {s}" for s in winning_plan.steps)
             result = react_runner(exec_prompt, session_key=event.session_id)
+
+            # 5. Consequence check & bounded replanning on failure
+            if result.get("error"):
+                logger.warning("Deliberate execution failed, initiating bounded replan: %s", result["error"])
+                replanned = DeliberatePlanner.replan_on_failure(
+                    winning_plan,
+                    failure_evidence=str(result["error"]),
+                    goal=goal,
+                    prior_reflections=prior_reflections,
+                    cognition_provider=cognition_provider,
+                    critic_provider=critic_provider,
+                )
+                replan_prompt = f"[Replanned Strategy: {replanned.name}]\n" + "\n".join(f"- {s}" for s in replanned.steps)
+                result = react_runner(replan_prompt, session_key=event.session_id)
+                result["replanned"] = True
+                result["plan_id"] = replanned.plan_id
+                result["plan_name"] = replanned.name
+                return result
+
             result["plan_id"] = winning_plan.plan_id
             result["plan_name"] = winning_plan.name
             result["candidates_evaluated"] = len(candidates)
