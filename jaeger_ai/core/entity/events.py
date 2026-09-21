@@ -54,6 +54,11 @@ class EventType(str, Enum):
     SLEEP_TIME_COMPLETED = "sleep_time.completed"
     PROVIDER_SELECTED = "provider.selected"
     PROVIDER_REJECTED = "provider.rejected"
+    INDEX_STARTED = "index.started"
+    INDEX_SOURCE_UPDATED = "index.source.updated"
+    INDEX_COMPLETED = "index.completed"
+    MAINTENANCE_STARTED = "maintenance.started"
+    MAINTENANCE_COMPLETED = "maintenance.completed"
 
 
 @dataclass(frozen=True)

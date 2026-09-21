@@ -84,8 +84,7 @@ class NativeTurns:
 
     def finish(self, turn, session, reply):
         self.validate(turn, session)
-        status = ('cancelled' if reply.get('cancelled') or reply.get('halt_reason') == 'interrupted'
-                  else 'failed' if reply.get('error') or reply.get('halt_reason') else 'completed')
+        status = _terminal_status(reply)
         encoded = json.dumps(reply)
         with self.transaction() as db:
             changed = db.execute('UPDATE turns SET status=?, reply=?, updated=? '
@@ -104,11 +103,35 @@ class NativeTurns:
         if row['reply'] is None:
             return {**unknown, 'status': row['status'] if row['epoch'] == self.epoch else 'unknown'}
         reply = json.loads(row['reply'])
-        # Older receipts labelled structured halts "completed". Interpret
-        # their preserved evidence honestly without rewriting that history.
-        status = row['status']
-        if status == 'completed' and reply.get('halt_reason'):
-            status = 'cancelled' if reply['halt_reason'] == 'interrupted' else 'failed'
+        status = _terminal_status(reply, stored=row['status'])
         return {'turn_id': turn, 'session_id': session, 'status': status,
                 'execution_unknown': bool(reply.get('execution_unknown')), 'reply': reply,
                 'observed_at': row['updated'], 'source': 'native_bridge_receipt'}
+
+
+_SUCCESS_HALTS = frozenset({
+    "complete_task", "agent_halted", "final", "done", "stop", "completed", "",
+})
+
+
+def _terminal_status(reply: dict, stored: str | None = None) -> str:
+    """Map a native reply to Gateway terminal state.
+
+    ``complete_task`` / ``agent_halted`` with reply text and no error is
+    a successful completion, not a failure.
+    """
+    if not isinstance(reply, dict):
+        return stored or "failed"
+    if reply.get("cancelled") or reply.get("halt_reason") == "interrupted":
+        return "cancelled"
+    if reply.get("error"):
+        return "failed"
+    halt = str(reply.get("halt_reason") or "").strip()
+    halt_code = str(reply.get("halt_code") or "").strip()
+    if halt in _SUCCESS_HALTS or halt_code in _SUCCESS_HALTS or (reply.get("text") and not halt):
+        return "completed"
+    if halt and halt not in _SUCCESS_HALTS:
+        if reply.get("text") and halt_code in {"agent_halted", "complete_task"}:
+            return "completed"
+        return stored if stored in {"completed", "failed", "cancelled"} else "failed"
+    return stored or "completed"

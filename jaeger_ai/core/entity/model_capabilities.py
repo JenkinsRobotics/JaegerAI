@@ -60,6 +60,25 @@ def is_certified(model: str, role: str, state_root: Path | None = None) -> bool:
     return role_status(model, role, state_root) == PASS
 
 
+def load_capabilities(state_root: Path | None = None) -> dict[str, dict[str, str]]:
+    merged = {k: dict(v) for k, v in DEFAULT_CAPABILITIES.items()}
+    overlay = _load_overlay(state_root)
+    for model, caps in overlay.items():
+        if not isinstance(caps, dict):
+            continue
+        bucket = merged.setdefault(str(model), {})
+        bucket.update({str(k): str(v).lower() for k, v in caps.items()})
+    return merged
+
+
+def certified_for(role: str, caps: dict[str, dict[str, str]] | None = None) -> str | None:
+    table = caps if caps is not None else load_capabilities()
+    for model, roles in table.items():
+        if str(roles.get(role) or "").lower() == PASS:
+            return model
+    return None
+
+
 def current_model_name(client: Any) -> str:
     ext = getattr(client, "ext", None)
     if ext is not None:

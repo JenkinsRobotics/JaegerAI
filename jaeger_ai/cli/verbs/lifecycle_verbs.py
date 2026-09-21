@@ -295,11 +295,14 @@ def _cmd_stop_argv(argv: Sequence[str]) -> int:
 
 def _cmd_start_argv(argv: Sequence[str]) -> int:
     parser = argparse.ArgumentParser(prog="jaeger start", description="Start missing managed services without restarting active work.")
+    parser.add_argument("--instance", default=None, help="Instance name for the resident Agent")
     parser.add_argument("--no-app", action="store_true")
     parser.add_argument("--no-containers", action="store_true")
     parser.add_argument("--no-webui", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
+    if args.instance:
+        os.environ["JAEGER_INSTANCE_NAME"] = str(args.instance)
     print("\n  Starting Jaeger AI stack...\n")
     print("  Preserving installed configurations")
     domain = f"gui/{os.getuid()}"
@@ -473,8 +476,36 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
     if failures:
         print("\n  Startup incomplete: " + "; ".join(failures))
         return 1
+    if not _wait_runtime_ready(timeout_s=45.0):
+        print("\n  Startup incomplete: resident runtime not READY (Gateway / EntityRuntime / Event Fabric).")
+        return 1
     print("\n  Jaeger AI stack started successfully.")
     return 0
+
+
+def _wait_runtime_ready(*, timeout_s: float = 45.0) -> bool:
+    """Boot gate: process fork is not success; EntityRuntime + Gateway must be READY."""
+    import urllib.request
+    deadline = time.time() + timeout_s
+    url = "http://127.0.0.1:8810/v1/runtime/status"
+    last = ""
+    while time.time() < deadline:
+        if not _is_port_open(8810):
+            time.sleep(0.4)
+            continue
+        try:
+            with urllib.request.urlopen(url, timeout=2) as resp:
+                payload = json.loads(resp.read().decode("utf-8") or "{}")
+            last = str(payload.get("Agent", {}).get("entity_id") or "")
+            if payload.get("ready") and last:
+                print(f"  Resident runtime READY entity_id={last}")
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+    if last:
+        print(f"  Resident runtime warming entity_id={last} (not READY)")
+    return False
 
 
 # ── Verb: jaeger restart ─────────────────────────────────────────────
@@ -487,11 +518,14 @@ def _cmd_restart_argv(argv: Sequence[str]) -> int:
     parser.add_argument("--no-app", action="store_true", help="Do not touch JaegerAI.app")
     parser.add_argument("--no-containers", action="store_true", help="Do not restart containers")
     parser.add_argument("--no-webui", action="store_true", help="Do not touch Web UI")
+    parser.add_argument("--instance", default=None, help="Instance name for the resident Agent")
     parser.add_argument("--dry-run", action="store_true", help="Preview without stopping or starting anything")
     args = parser.parse_args(argv)
 
     stop_args = []
     start_args = []
+    if args.instance:
+        start_args.extend(["--instance", args.instance])
     if args.dry_run:
         stop_args.append("--dry-run")
         start_args.append("--dry-run")
@@ -521,7 +555,10 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
         description="Display complete live status dashboard for the Jaeger AI multi-agent fabric.",
     )
     parser.add_argument("--json", action="store_true", help="Output status as JSON")
+    parser.add_argument("--instance", default=None, help="Instance name")
     args = parser.parse_args(argv)
+    if args.instance:
+        os.environ["JAEGER_INSTANCE_NAME"] = str(args.instance)
 
     try:
         jobs = _get_launchd_jobs()
@@ -585,6 +622,13 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
         webui_running = _is_port_open(8790)
         webui_url = "http://127.0.0.1:8790/"
 
+    runtime_doc: dict[str, Any] = {}
+    try:
+        from jaeger_ai.core.entity.runtime_status import collect_runtime_status
+        runtime_doc = collect_runtime_status(include_network=True)
+    except Exception as exc:
+        runtime_doc = {"error": str(exc), "ready": False}
+
     if args.json:
         doc = {
             "app": {"running": len(app_pids) > 0, "pids": app_pids},
@@ -595,13 +639,19 @@ def _cmd_status_argv(argv: Sequence[str]) -> int:
                 "ollama": {"host": ollama_host, "reachable": ollama_ok},
                 "honcho": {"host": "10.15.0.239:8088", "reachable": honcho_ok, "enabled": rack_enabled},
             },
+            "runtime": runtime_doc,
         }
         print(json.dumps(doc, indent=2))
-        return 0
+        return 0 if runtime_doc.get("ready") or runtime_doc.get("error") else 0
 
     # Pretty Terminal Dashboard
     print()
     print(f"  {_bold('=== Jaeger AI Fabric Status ===')}")
+    print()
+    agent = runtime_doc.get("Agent") or {}
+    if agent.get("entity_id"):
+        print(f"  {_bold('Agent:')}        {agent.get('entity_id')}  instance={agent.get('instance')}  {agent.get('status')}")
+        print(f"  {_bold('Events:')}       {runtime_doc.get('Runtime', {}).get('event_count')}  latest={runtime_doc.get('Runtime', {}).get('latest_event_id')}")
     print()
 
     # App Status

@@ -617,3 +617,25 @@ Operator Gateway/WebUI/Bridge now run the Pinocchio kernel (separate identity fr
 D. LIVE VALIDATED FOR PINOCCHIO MERGE is **not** justified.
 
 Do not merge into master.
+
+---
+
+## Operational OS implementation (post Round 3)
+
+Authoritative spec: JAEGER PRODUCTION OS IMPLEMENTATION SPECIFICATION. Readiness write-up: `docs/architecture/JAEGER_OPERATIONAL_READINESS.md`.
+
+Round 3 FAIL/PARTIAL items are **not** silently closed. Code now contains:
+
+| Spec item | Implementation | Live retest |
+| :--- | :--- | :--- |
+| Instance-scoped fabric | `InstanceLayout.memory_dir` event store + identity; legacy `~/.jaeger/entity_*` migrated on OWNER boot | pending resident restart |
+| One OWNER | `EntityRuntimeMode.OWNER` (Gateway) / `ATTACHED_CLIENT` / `TEST` | pending |
+| `jaeger start` READY gate | waits `GET /v1/runtime/status` ready | pending |
+| Gateway terminal `completed` | `native_turns._terminal_status` treats `complete_task`+text as completed | unit PASS; live pending restart |
+| `background.completed` payload | task_id, source_session, originating_event_id, status, result_summary, artifact_refs | unit PASS |
+| Reflexion first-action constraint | `to_planning_constraints` AVOID first tool | unit PASS; live first-action pending |
+| Crash resume scan | `RecoveryManager.scan_resumable_runs` on OWNER boot; pending effects not auto-retried | scan wired; SIGKILL resume still Round 3 FAIL until proven |
+| Indexing | `IndexCoordinator` hash skip + FTS | unit PASS |
+| Maintenance worktree | `MaintenanceCoordinator` isolated branch, protected paths, dry-run candidate | unit PASS |
+
+Do not treat unit PASS as live PASS.

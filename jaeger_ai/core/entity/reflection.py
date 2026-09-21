@@ -178,7 +178,30 @@ class ReflexionStore:
                 f"- [Warning / Confidence {r.confidence:.2f}] When handling {', '.join(r.applicability_conditions)}: "
                 f"{r.hypothesis} (Observed in episode(s): {', '.join(r.supporting_episode_ids[-2:])})"
             )
+        constraints = self.to_planning_constraints(intent_or_prompt, tool_names)
+        if constraints:
+            lines.append("")
+            lines.append(constraints)
         return "\n".join(lines)
+
+    def to_planning_constraints(self, intent_or_prompt: str, tool_names: Sequence[str] | None = None) -> str:
+        """Hard planner/ReAct constraints from high-confidence reflections."""
+        applicable = self.retrieve_applicable(intent_or_prompt, tool_names)
+        lines: list[str] = []
+        for r in applicable:
+            if r.confidence < 0.7:
+                continue
+            banned = [c for c in r.applicability_conditions if c and c not in {"action", "filesystem", "file_io"}]
+            tool = banned[0] if banned else ""
+            if tool:
+                lines.append(
+                    f"AVOID / PENALIZE first-action `{tool}` unless new evidence invalidates "
+                    f"reflection {r.reflection_id}. Verify preconditions first "
+                    f"(existence/list/inspect). Hypothesis: {r.hypothesis}"
+                )
+        if not lines:
+            return ""
+        return "# PLANNING CONSTRAINTS (Reflexion, mandatory):\n" + "\n".join(f"- {ln}" for ln in lines)
 
 
 def formulate_reflection_from_failure(

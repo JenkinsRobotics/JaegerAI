@@ -88,7 +88,11 @@ def _launchd_plist(jaeger_exe: Path, home: Path, args: list[str]) -> str:
         f'    <key>PYTHONPYCACHEPREFIX</key><string>{Path.home() / ".cache" / "jaeger" / "pycache"}</string>\n'
         '  </dict>\n'
         '  <key>RunAtLoad</key><true/>\n'
-        '  <key>KeepAlive</key><true/>\n'
+        '  <key>KeepAlive</key>\n'
+        '  <dict>\n'
+        '    <key>SuccessfulExit</key><false/>\n'
+        '  </dict>\n'
+        '  <key>ThrottleInterval</key><integer>30</integer>\n'
         f'  <key>WorkingDirectory</key><string>{home}</string>\n'
         f'  <key>StandardOutPath</key><string>{log}</string>\n'
         f'  <key>StandardErrorPath</key><string>{log}</string>\n'
@@ -233,6 +237,9 @@ def _cmd_autostart_argv(argv: list[str]) -> int:
         print(_USAGE, file=sys.stderr)
         return 0 if argv else 2
     action, extra = argv[0], argv[1:]
+    if action == "enable" and not extra:
+        from jaeger_ai.core.instance.instance import default_instance_name
+        extra = ["start", "--no-app", "--instance", default_instance_name()]
     if action not in ("enable", "disable", "status"):
         print(f"[autostart] unknown action: {action!r}", file=sys.stderr)
         print(_USAGE, file=sys.stderr)
