@@ -62,10 +62,51 @@ class LearningPipeline:
         state_root: Path,
         event_store: SqliteEventStore,
         memory: MemorySubsystem | None = None,
+        verification: Any | None = None,
     ) -> None:
         self.state_root = state_root
         self.event_store = event_store
         self.memory = memory or MemorySubsystem(state_root, event_store)
+        self.verification = verification
+
+    def record_turn_experience(
+        self,
+        event: JaegerEvent,
+        decision: Any,
+        cog_result: Mapping[str, Any],
+        verification: VerificationResult,
+        reflexion_store: Any | None = None,
+        state: SelfState | None = None,
+    ) -> LearningDecision:
+        """Record turn outcome into episodic, semantic, or reflective memory."""
+        # 1. Update episodic record
+        self.memory.episodic.record_interaction(
+            session_id=event.session_id,
+            user_text=str(event.payload.get("text") or ""),
+            agent_response=str(cog_result.get("text") or ""),
+            tool_calls=cog_result.get("tool_activity") or [],
+        )
+
+        # 2. Check for failure to formulate reflection
+        if verification.status == VerificationStatus.OBJECTIVE_FAILED or (cog_result.get("error") and verification.error):
+            from .reflection import formulate_reflection_from_failure
+            refl = formulate_reflection_from_failure(event, verification)
+            if reflexion_store is not None:
+                reflexion_store.add_reflection(refl)
+            self.memory.reflective.store_insight(
+                topic="turn_failure",
+                observation=f"Turn on '{event.payload.get('text', '')[:60]}' failed: {verification.error or cog_result.get('error')}",
+                implication=refl.hypothesis,
+            )
+
+        if state is not None:
+            return self.process_experience(event, verification, state)
+
+        return LearningDecision(
+            targets=[LearningTarget.EPISODIC],
+            rationale="Turn experience recorded to episodic memory",
+            updates_applied={"event_id": event.event_id},
+        )
 
     def process_experience(
         self,

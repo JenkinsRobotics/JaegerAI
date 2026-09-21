@@ -3664,49 +3664,57 @@ def _run_actionable_turn(
     return output
 
 
-def _run_turn(client: Any, user_text: str, *, session_key: str,
-              allow_persona: bool = True) -> dict[str, Any]:
-    """The unified agent turn — the one path every entry point shares.
-
-    Runs the loop, extracts the answer + tool activity, writes the log,
-    updates session memory, and returns a structured result dict.
-    ``run_command`` and ``run_for_voice`` are thin output adapters over
-    this — see them below. Never prints; never raises.
-
-    ``allow_persona=False`` skips the id/ego front door and drives the
-    clean worker loop directly — heartbeat, idle board pickup, and
-    cron *execution* use that so character lore does not leak into
-    tool work.
-
-    JaegerAgent is the unconditional loop implementation; JaegerAI supplies
-    product prompts, tools, memory, personality, and user-facing policy through
-    its runtime adapter."""
-    try:
-        from jaeger_ai.core.entity.runtime import EntityRuntime
-        EntityRuntime.get_singleton().submit_human_message(
-            user_text, session_id=session_key, source="main._run_turn"
-        )
-    except Exception:
-        pass
-
+def _run_subordinate_react(
+    client: Any,
+    user_text: str,
+    *,
+    session_key: str,
+    allow_persona: bool = True,
+) -> dict[str, Any]:
+    """Subordinate ReAct cognitive engine invocation."""
     actionable = _run_actionable_turn(
         client, user_text, session_key=session_key,
         allow_persona=allow_persona,
     )
-    result = actionable if actionable is not None else _run_turn_via_jaeger_agent(
+    return actionable if actionable is not None else _run_turn_via_jaeger_agent(
         client, user_text, session_key=session_key,
         allow_persona=allow_persona,
     )
+
+
+def _run_turn(client: Any, user_text: str, *, session_key: str,
+              allow_persona: bool = True) -> dict[str, Any]:
+    """The unified agent turn — the one path every entry point shares.
+
+    Executes through the sovereign UPAA EntityRuntime:
+    EVENT -> EVENT FABRIC -> PERSIST -> REDUCTION -> SALIENCE ->
+    EXECUTIVE STRATEGY -> COGNITION ROUTER -> AUTHORITY & VERIFICATION ->
+    LEARNING -> RESPONSE.
+
+    JaegerAgent is subordinate as one cognition engine used by the runtime
+    for ReAct-style execution."""
     try:
         from jaeger_ai.core.entity.runtime import EntityRuntime
-        resp_text = str((result or {}).get("text") or "")
-        if resp_text:
-            EntityRuntime.get_singleton().record_agent_response(
-                resp_text, session_id=session_key, metadata=result
-            )
-    except Exception:
-        pass
-    return result
+        runtime = EntityRuntime.get_singleton()
+        context = {
+            "react_runner": lambda t, session_key=session_key: _run_subordinate_react(
+                client, t, session_key=session_key, allow_persona=allow_persona,
+            ),
+            "model_runner": lambda t: _run_subordinate_react(
+                client, t, session_key=session_key, allow_persona=allow_persona,
+            ).get("text", ""),
+        }
+        return runtime.execute_turn(
+            user_text,
+            session_id=session_key,
+            source="main._run_turn",
+            context=context,
+        )
+    except Exception as exc:
+        logging.getLogger("jaeger.main").debug("EntityRuntime execution fallback: %s", exc)
+        return _run_subordinate_react(
+            client, user_text, session_key=session_key, allow_persona=allow_persona,
+        )
 
 
 def run_command(client: Any, user_text: str, session_key: str | None = None) -> str:

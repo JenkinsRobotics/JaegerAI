@@ -48,6 +48,10 @@ htmlcov/
 # Notebooks
 .ipynb_checkpoints/
 
+# External donor and reference repositories (UPAA research material)
+.donors/
+donor/
+
 # Models and weights (never commit — too large). The models/ folder
 # itself is kept (models/README.md) so it exists for local dev; only
 # the weight files inside are ignored.

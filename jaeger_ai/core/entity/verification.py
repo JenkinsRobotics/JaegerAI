@@ -107,6 +107,28 @@ class VerificationContract:
         )
 
     @staticmethod
+    def verify_filesystem_write(
+        target_path: Path | str | None,
+        expected_content: str | None = None,
+        objective: str = "Verify filesystem write",
+    ) -> VerificationResult:
+        """Verify ground-truth outcome of a file modification or creation."""
+        if not target_path:
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_UNVERIFIED,
+                target_objective=objective,
+                evidence="No target path provided to verify",
+                verifier="none",
+            )
+        pred = (lambda c: expected_content in c) if expected_content is not None else None
+        return VerificationContract.verify_disk_state(
+            target_path,
+            must_exist=True,
+            content_predicate=pred,
+            objective=objective,
+        )
+
+    @staticmethod
     def evaluate_tool_consequence(
         tool_name: str,
         tool_return: Any,

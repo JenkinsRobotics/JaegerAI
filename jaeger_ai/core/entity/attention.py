@@ -21,6 +21,13 @@ class SalienceLevel(float, Enum):
     ATTENTION = 0.6
     URGENT = 0.9
 
+    # Compatibility Aliases
+    IGNORED = 0.1
+    LOW = 0.3
+    MEDIUM = 0.6
+    HIGH = 0.6
+    CRITICAL = 0.9
+
 
 @dataclass(frozen=True)
 class AttentionDecision:
@@ -28,6 +35,16 @@ class AttentionDecision:
     salience: float
     reason: str
     target_role: str = "lead"
+
+    @property
+    def level(self) -> SalienceLevel:
+        if self.salience >= 0.85:
+            return SalienceLevel.URGENT
+        if self.salience >= 0.55:
+            return SalienceLevel.ATTENTION
+        if self.salience >= 0.25:
+            return SalienceLevel.ROUTINE
+        return SalienceLevel.PASSIVE
 
 
 class SalienceEngine:

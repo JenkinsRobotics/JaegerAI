@@ -108,6 +108,52 @@ class EpisodicMemory:
     def replay(self) -> Sequence[JaegerEvent]:
         return list(self.store.replay_all())
 
+    def record_interaction(
+        self,
+        session_id: str,
+        user_text: str,
+        agent_response: str,
+        tool_calls: list[Any] | None = None,
+    ) -> None:
+        event = JaegerEvent(
+            event_id=f"epi-{int(time.time()*1000)}",
+            event_type=EventType.AGENT_RESPONSE.value,
+            actor="agent:jaeger",
+            source="memory.episodic",
+            timestamp=time.time(),
+            session_id=session_id,
+            payload={
+                "user_text": user_text,
+                "agent_response": agent_response,
+                "tool_calls": tool_calls or [],
+            },
+            salience=0.5,
+        )
+        self.store.append(event)
+
+    def get_session_episodes(self, session_id: str) -> list[EpisodeSummary]:
+        events = self.store.query_events(session_id=session_id, limit=100)
+        episodes = []
+        for e in events:
+            if isinstance(e.payload, dict) and "user_text" in e.payload and "agent_response" in e.payload:
+                episodes.append(EpisodeSummary(
+                    session_id=session_id,
+                    user_text=str(e.payload.get("user_text") or ""),
+                    agent_response=str(e.payload.get("agent_response") or ""),
+                    tool_calls=list(e.payload.get("tool_calls") or []),
+                    timestamp=e.timestamp,
+                ))
+        return episodes
+
+
+@dataclass(frozen=True)
+class EpisodeSummary:
+    session_id: str
+    user_text: str
+    agent_response: str
+    tool_calls: list[Any] = field(default_factory=list)
+    timestamp: float = field(default_factory=time.time)
+
 
 # ── 3. Semantic Memory ─────────────────────────────────────────────────
 

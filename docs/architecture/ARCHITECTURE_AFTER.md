@@ -1,166 +1,134 @@
 # ARCHITECTURE_AFTER.md — Pinocchio Persistent Entity Runtime Architecture
 
-**Document Version:** 1.1.0 (Pinocchio Architecture Semantic Audit Release)  
+**Document Version:** 2.0.0 (Universal Persistent Agent Architecture Production Implementation)  
 **Author:** Principal Systems Architect  
 **Status:** Canonical Production Architecture  
-**Audit Standard:** [Universal Persistent Agent Architecture (UPAA)](UNIVERSAL_PERSISTENT_AGENT_ARCHITECTURE.md)
+**Reference Specification:** [Universal Persistent Agent Architecture (UPAA)](UNIVERSAL_PERSISTENT_AGENT_ARCHITECTURE.md)
 
 ---
 
-## 1. Executive Summary: The Consolidated Entity
+## 1. Executive Summary: The Sovereign Entity Runtime
 
-The Pinocchio architecture establishes a single, authoritative **Persistent Entity Runtime** for JaegerAI, implementing the [Universal Persistent Agent Architecture](UNIVERSAL_PERSISTENT_AGENT_ARCHITECTURE.md) baseline.
+In the `pinocchio` release, JaegerAI has completed a full production refactor into the **Universal Persistent Agent Architecture (UPAA)**.
 
-### The Foundational Invariants
-* **MODEL ≠ AGENT:** The Large Language Model is not Jaeger. Models (Hermes, Claude, OpenAI, Gemini, Ollama) are replaceable cognition engines invoked on demand.
-* **PERSONA ≠ IDENTITY:** Persona modulates expressive style, tone, and character. Identity is the persistent, immutable anchor surviving across sessions, hosts, and model swaps.
-* **SESSION ≠ IDENTITY:** Sessions and conversations belong to the entity; the entity never belongs to a session.
-* **AUTHORITY ORDERING:** `COGNITION PROPOSES ACTION → AUTHORITY LAYER → ACTION SYSTEM/EXECUTOR → ENVIRONMENT`. An executor never gets an unapproved action.
-* **VERIFICATION ≠ EFFECT LEDGER:** `TOOL RETURN SUCCESS ≠ OBJECTIVE VERIFIED`. EffectLedger accounts for execution idempotency; VerificationContract inspects independent real-world ground truth.
-* **HEARTBEAT IS A TRIGGER ONLY:** Heartbeat triggers sleep-time cycles; `SleepTimeProcessor` owns consolidation, reflection, and indexing semantics.
-* **SINGLE RUNTIME AUTHORITY:** All ingress paths (CLI, Bridge, Gateway, Heartbeat, Background, Passive/Salient Sensors) execute against the identical `EntityRuntime` singleton instance.
+The control plane inversion is complete:
+- **`EntityRuntime`** is the top-level sovereign authority and sole lifecycle coordinator.
+- **`JaegerAgent`** is demoted to a subordinate cognitive engine used by the runtime when `CognitiveStrategy.REACT_LOOP` is selected.
+- All production ingress paths (CLI, Bridge, Gateway, Web UI, voice, background workers, and heartbeats) execute through `EntityRuntime.execute_turn(...)`.
+
+### Canonical Runtime Control Path
 
 ```
-                         JAEGER ENTITY RUNTIME
-                            (EntityIdentity)
-                                   │
-                                   ▼
-                         SQLITE EVENT STORE
-                         (entity_events.sqlite3)
-                                   │
-                                   ▼
-                         DETERMINISTIC REDUCER
-                                   │
-                                   ▼
-                               SELF STATE
-             ┌─────────────────────┼─────────────────────┐
-             ▼                     ▼                     ▼
-        World Model           Active Goals          Commitments
-     (Entities/Claims)
-             │                     │                     │
-             └─────────────────────┼─────────────────────┘
-                                   │
-                                   ▼
-                            SALIENCE ENGINE
-                     (Passive vs Cognition Wake)
-                                   │
-            ┌──────────────────────┴──────────────────────┐
-            ▼                                             ▼
- [Salience < Threshold]                        [Salience >= Threshold]
-      Silent Record                                EXECUTIVE
-     (0 Model Calls)                       (Strategy Selection)
-                                                          │
-                                                          ▼
-                                                   COGNITION MODES
-                                               (ReAct, Planning, etc.)
-                                                          │
-                                                          ▼
-                                                   PROPOSED ACTION
-                                                          │
-                                                          ▼
-                                                   AUTHORITY LAYER
-                                                (Policy Kernel, Veto)
-                                                          │
-                                                          ▼
-                                                    ACTION SYSTEM
-                                                (EffectLedger, Tools)
-                                                          │
-                                                          ▼
-                                                     ENVIRONMENT
-                                                          │
-                                                          ▼
-                                                  CONSEQUENCE EVENT
-                                                          │
-                                                          ▼
-                                                VERIFICATION CONTRACT
-                                         (Tool Success ≠ Objective Verified)
-                                                          │
-                                                          ▼
-                                                  LEARNING PIPELINE
-                                            ┌─────────────┼─────────────┐
-                                            ▼             ▼             ▼
-                                         Memory         World        Skills
-                                                          │
-                                                          ▼
-                                                SLEEP-TIME PROCESSING
-                                              (Triggered by Heartbeat)
+EVENT
+  │
+  ▼
+EVENT FABRIC (SqliteEventStore append-only WAL)
+  │
+  ▼
+PERSISTENCE & DETERMINISTIC STATE REDUCTION
+  │
+  ▼
+SELF STATE & WORLD MODEL UPDATE
+  │
+  ▼
+ATTENTION & SALIENCE ENGINE
+  │
+  ├────────────────────────────────────────┬────────────────────────────────────────┐
+  ▼                                        ▼                                        ▼
+[Salience < 0.3]                    [Routine Anomaly]                      [Salience >= 0.6]
+Passive Record                      Tiered Perception Escalation           EXECUTIVE STRATEGY SELECTION
+(0 LLM Tokens)                      (Tier 0 -> Tier 1 -> Tier 2)           (ExecutiveStrategySelector)
+                                                                                    │
+                                           ┌────────────────────────────────────────┼────────────────────────────────────────┐
+                                           ▼                                        ▼                                        ▼
+                                     Direct Response                            ReAct Loop                           Deliberate Planner
+                                 (Informational Queries)                   (Subordinate JaegerAgent)              (LATS Tree-Search >= 3 Plans)
+                                           │                                        │                                        │
+                                           └────────────────────────────────────────┼────────────────────────────────────────┘
+                                                                                    │
+                                                                                    ▼
+                                                                           COGNITION ROUTER
+                                                                     (Canonical Strategy Boundary)
+                                                                                    │
+                                                                                    ▼
+                                                                             PROPOSED ACTION
+                                                                                    │
+                                                                                    ▼
+                                                                             AUTHORITY LAYER
+                                                                       (Deterministic Safety Policies)
+                                                                                    │
+                                                                                    ▼
+                                                                              ACTION SYSTEM
+                                                                         (ToolExecutor / Sandboxing)
+                                                                                    │
+                                                                                    ▼
+                                                                               ENVIRONMENT
+                                                                                    │
+                                                                                    ▼
+                                                                            CONSEQUENCE EVENT
+                                                                                    │
+                                                                                    ▼
+                                                                          VERIFICATION CONTRACT
+                                                                   (Tool Success ≠ Objective Verified)
+                                                                                    │
+                                                                                    ▼
+                                                                            LEARNING PIPELINE
+                                                                      (Episodic, Semantic, Reflective)
+                                                                                    │
+                                                                                    ▼
+                                                                           SLEEP-TIME PROCESSING
+                                                                   (Offline Consolidation & Skill Gates)
 ```
 
 ---
 
-## 2. Core Subsystems in `jaeger_ai/core/entity/`
+## 2. Integrated Research Subsystems & Donor Implementations
 
-### 1. `EntityIdentity` (`identity.py`)
-- Persistent identity record anchored at `<state_root>/entity_identity.json`.
-- Holds unique `entity_id` (`jaeger-entity-...`), display name, creation timestamp, and system purpose.
-- Fully decoupled from character sheets, persona presets, and operator identity.
+### A. Persistent Agent Identity & Prompt Hierarchy (Letta / MemGPT)
+* **Identity Decoupling:** `EntityIdentity` anchored at `<state_root>/entity_identity.json` maintains persistent identity across model swaps and host reboots.
+* **Canonical Prompt Assembly:** `packages/jaeger-agent/jaeger_agent/prompts/assemble.py` dynamically injects:
+  1. `entity_self_state`: live current facts, active goals, and commitments via `runtime.current_state.to_prompt_context_block()`.
+  2. `retrieved_reflections`: failure warnings via `ReflexionStore.to_prompt_context_block(query)`.
+* **Zero Model Ownership:** Models do not own or authoritatively mutate the agent's identity.
 
-### 2. `JaegerEvent` (`events.py`) & `SqliteEventStore` (`event_store.py`)
-- Normalized event contract standardizing all occurrences with monotonic IDs and causal provenance.
-- Persistent append-only event log stored in `<state_root>/entity_events.sqlite3` (WAL mode, busy timeout, foreign keys, indexed queries).
-- Complete chronological replay support for cold boot state reconstruction.
+### B. Structured Failure Reflection (Reflexion)
+* **Hypothesis Store:** `ReflexionStore` (`reflection.py`) maintains `StructuredReflection` entries containing `hypothesis`, `confidence`, `failure_conditions`, `applicability_conditions`, and episode provenance.
+* **Adaptive Retrieval:** Automatically queries applicable reflections when planning similar tasks to avoid repeating known failure modes.
 
-### 3. `SelfState` (`self_state.py`) & `reduce_event` (`reducer.py`)
-- Authoritative compact projection of the entity's current reality (identity, active goals, commitments, telemetry, recent insights).
-- Pure deterministic reducer `(SelfState, JaegerEvent) -> SelfState` enabling zero-loss cold boot replay.
+### C. Deliberate Tree-Search Planning (LATS / Agent S)
+* **Candidate Plan Generation:** `DeliberatePlanner` (`deliberate_planner.py`) generates $\ge 3$ distinct execution strategies with varied tool choices.
+* **Independent Critic:** Evaluates candidates across goal satisfaction, safety blast radius, reversibility, and prior reflection penalties.
+* **Refinement Engine:** Uses `SelfRefineEngine` (`self_refine.py`) to iteratively critique and expand plans with sensitive or irreversible mutations.
 
-### 4. `SalienceEngine` (`attention.py`)
-- Evaluates whether an incoming event warrants invoking cognition.
-- Separates routine telemetry and passive heartbeats (salience < 0.3, 0 LLM calls) from urgent alerts, human direct messages, and scheduled briefings (salience >= 0.7, cognition awakened).
+### D. Procedural Skill Acquisition (Voyager)
+* **Automated Promotion:** `SkillPromotionPipeline` (`skills/promotion.py`) gates skill candidates behind automated verification assertions.
+* **Production Registry:** Verified skills are written as standard `SKILL.md` frontmatter and executable artifacts into the instance skills folder (`~/.jaeger/skills/`), instantly available to production loaders.
 
-### 5. `AuthorityLayer` (`authority.py`)
-- Enforces strict canonical authority ordering: `PROPOSED ACTION → AUTHORITY LAYER → ACTION SYSTEM → ENVIRONMENT`.
-- Evaluates `ProposedAction` through deterministic security policies and shell veto hooks (`pre_tool_call`). No executor executes an action without prior authorization.
+### E. Tiered Environmental Perception (ProactiveAgent / ProAgent)
+* **Tier 0:** Cheap deterministic desktop metadata (idle time, active window, disk telemetry).
+* **Tier 1:** Local heuristic classification of alerts and anomalies.
+* **Tier 2:** Expensive multimodal / model assessment only when justified by critical conditions.
 
-### 6. `VerificationContract` (`verification.py`)
-- Separates:
-  1. Execution Attempted (`VerificationStatus.ATTEMPTED`)
-  2. Tool Returned Success (`VerificationStatus.TOOL_SUCCESS`)
-  3. Effect Recorded (`VerificationStatus.EFFECT_RECORDED`)
-  4. Intended Objective Actually Verified (`VerificationStatus.OBJECTIVE_VERIFIED`)
-- A tool return of `ok=True` without an independent external verifier produces `OBJECTIVE_UNVERIFIED`. `verify_disk_state()` independently validates real filesystem outcomes.
-
-### 7. `MemorySubsystem` (`memory.py`)
-Explicitly owns the 5 canonical memory classes:
-1. **Working Memory:** In-memory scratchpad and active goals (`WorkingMemory`).
-2. **Episodic Memory:** Chronological immutable event log (`EpisodicMemory`, `SqliteEventStore`).
-3. **Semantic Memory:** Structured entity/claim relational tables (`SemanticMemory`, `<state_root>/knowledge.sqlite3`).
-4. **Reflective Memory:** Distilled meta-cognitive lessons (`ReflectiveMemory`, `<state_root>/reflective_insights.json`).
-5. **Procedural Memory:** Verified skills and recipes (`ProceduralMemory`, `<state_root>/skills/`).
-*Architectural Boundary Note:* `SessionStore` (`jaeger_ai/core/gateway/session_store.py`) is strictly a transport-level SSE/REST client session cache, NOT the entity's memory system.
-
-### 8. `ExecutiveStrategySelector` (`executive.py`)
-Deterministically selects among 6 cognitive strategies:
-- `PASSIVE_OBSERVE` (salience < 0.3, 0 LLM calls)
-- `DIRECT_RESPONSE` (conversational/informational prompt)
-- `REACT_LOOP` (action verbs, tool loop with consequence feedback)
-- `DELIBERATE_PLANNING` (batch work, /goal command, work ledger)
-- `SPECIALIST_DELEGATION` (routing to specialist model/agent e.g. Codex)
-- `SLEEP_TIME_CONSOLIDATION` (offline reflection triggered by idle/quiet heartbeat)
-
-### 9. `SleepTimeProcessor` (`sleep_time.py`)
-- Decouples heartbeat triggers from consolidation semantics.
-- Scheduler/heartbeat acts as a **trigger only**.
-- Coordinates consolidation (episodic -> semantic claims), reflective synthesis (error analysis -> insights), and skill review.
-- Emits low-salience `memory.consolidated` events into the Event Fabric.
-
-### 10. `LearningPipeline` (`learning.py`)
-- Converts verified real-world experience into durable cross-session updates across:
-  - Episodic memory (durable event log)
-  - Semantic knowledge / World model (verified claims)
-  - Reflective memory (lessons generated from failed objectives)
-  - Skill library (promoted candidate procedures)
-  - Strategy metadata (reinforced or penalized tool confidence)
-
-### 11. `EntityRuntime` (`runtime.py`)
-- The single process-wide runtime coordinator unifying all ingress interfaces (CLI, Bridge, Gateway, Heartbeat, Background tasks, Passive/Salient Sensors).
-- Implements the complete UPAA canonical loop.
+### F. Offline Consolidation (Generative Agents & Sleep-Time Compute)
+* **Decoupled Triggers:** Heartbeats act as a trigger signal; `SleepTimeProcessor` (`sleep_time.py`) owns consolidation semantics.
+* **Unified Pipeline:** Consolidates episodic events into semantic claims, detects contradictions, synthesizes reflections, and checks skill candidate assertions.
 
 ---
 
-## 3. Verification & Compliance Evidence
+## 3. Production Ingress Unification
 
-All subsystems are validated by comprehensive automated test suites:
-- `dev/tests/test_runtime_trace.py`: Verifies authority ordering, verification distinction, memory taxonomy, executive strategy selection, sleep-time processing, learning pipeline, and single runtime authority trace (100% pass).
-- `dev/tests/test_pinocchio_entity.py`: Verifies acceptance criteria A through L (100% pass).
-- Monorepo package suites: 913 tests passing in `packages/jaeger-agent`, 283 tests passing in `packages/jaeger-os` (1,215 total tests passing).
+Every production turn entry point converges through `EntityRuntime.execute_turn(...)`:
+- **CLI (`main.run_command`):** Calls `_run_turn` -> `EntityRuntime.execute_turn(...)`.
+- **Bridge (`bridge.py`):** Drives turns via `_run_turn` -> `EntityRuntime.execute_turn(...)`.
+- **Gateway (`server.py`):** Leads via native MCP `chat` -> `run_for_voice` -> `_run_turn` -> `EntityRuntime.execute_turn(...)`.
+- **Background Workers / Crons:** Call `run_worker_turn` -> `_run_turn` -> `EntityRuntime.execute_turn(...)`.
+
+There are zero parallel or competing runtime authorities.
+
+---
+
+## 4. Verification & Continuous Validation
+
+All UPAA requirements are validated by automated end-to-end integration tests:
+- `dev/tests/test_upaa_production_runtime.py`: 9 comprehensive tests validating real trace execution, 0-model passive paths, active cognition wake, provider swap continuity, interface swap identity sharing, sleep-time processing, Voyager skill promotion, deliberate planning, and tiered perception escalation.
+- `dev/tests/test_runtime_trace.py`: 7 semantic audit tests validating authority ordering, verification contracts, memory taxonomy, and executive strategy selection.

@@ -20,7 +20,6 @@ import time
 from typing import Any, Callable
 
 from jaeger_ai.core.entity.events import EventType, JaegerEvent
-from jaeger_ai.core.entity.runtime import EntityRuntime
 
 logger = logging.getLogger("jaeger.entity.skills.promotion")
 
@@ -69,6 +68,7 @@ class SkillPromotionPipeline:
         )
 
         try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
             runtime = EntityRuntime.get_singleton()
             runtime.ingest(
                 JaegerEvent(
@@ -130,6 +130,30 @@ class SkillPromotionPipeline:
             )
             return False
 
+        # Write real production skill artifact with standard SKILL.md frontmatter
+        skill_folder = self.skills_dir / candidate.skill_name
+        skill_folder.mkdir(parents=True, exist_ok=True)
+        skill_md = skill_folder / "SKILL.md"
+        content = (
+            f"---\n"
+            f"name: {candidate.skill_name}\n"
+            f"description: {candidate.description}\n"
+            f"version: 1.0.0\n"
+            f"verified: true\n"
+            f"---\n\n"
+            f"# {candidate.skill_name}\n\n"
+            f"{candidate.description}\n\n"
+            f"## Verification Proof\n"
+            f"- Evidence: {verification.evidence}\n"
+            f"- Verified: {verification.passed}\n"
+            f"- Timestamp: {verification.tested_at}\n\n"
+            f"## Implementation\n\n"
+            f"```python\n{candidate.code}\n```\n"
+        )
+        skill_md.write_text(content, encoding="utf-8")
+        if candidate.code:
+            (skill_folder / "run.py").write_text(candidate.code, encoding="utf-8")
+
         record = {
             "name": candidate.skill_name,
             "description": candidate.description,
@@ -137,11 +161,13 @@ class SkillPromotionPipeline:
             "parameters": candidate.parameters,
             "verified_at": verification.tested_at,
             "evidence": verification.evidence,
+            "skill_md_path": str(skill_md),
         }
         self._promoted_skills[candidate.skill_name] = record
 
         # Emit skill.promoted event into the canonical entity event stream
         try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
             runtime = EntityRuntime.get_singleton()
             runtime.ingest(
                 JaegerEvent(
