@@ -43,7 +43,7 @@ def _read_json(handler) -> dict:
 
 def _pair(handler):
     from jaeger_ai.features.remote_access.service import consume_pairing_token
-    from api.auth import create_session, set_auth_cookie, csrf_token_for_session
+    from api.auth import create_session, csrf_token_for_session
 
     body = _read_json(handler)
     qs = parse_qs(parsed_query(handler) or "")
@@ -53,7 +53,8 @@ def _pair(handler):
     ua = handler.headers.get("User-Agent") or ""
     device = "iPhone" if "iPhone" in ua else ("iPad" if "iPad" in ua else "Phone")
     cookie = create_session(auth_type="pair", username="operator", remote=True, device=device, user_agent=ua)
-    set_auth_cookie(handler, cookie)
+    from api.auth import _auth_cookie_header, _queue_pending_cookie
+    _queue_pending_cookie(handler, _auth_cookie_header(cookie, handler))
     return j(handler, {
         "ok": True,
         "device": device,

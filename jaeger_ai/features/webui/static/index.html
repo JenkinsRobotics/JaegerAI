@@ -26,8 +26,8 @@
 <script>(function(){try{var t=localStorage.getItem('hermes-theme')||'dark';if(t==='system')t=window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light';var c=t==='dark'?'#141425':'#FAF7F0';document.querySelectorAll('meta[name="theme-color"]').forEach(function(m){m.setAttribute('content',c);m.removeAttribute('media');});}catch(e){}})()</script>
 <script>(function(){try{document.documentElement.dataset.workspacePanel=localStorage.getItem('hermes-webui-workspace-panel')==='open'?'open':'closed';}catch(e){document.documentElement.dataset.workspacePanel='closed';}})()</script>
 <script>(function(){try{if(localStorage.getItem('hermes-webui-sidebar-collapsed')==='1')document.documentElement.dataset.sidebarCollapsed='1';}catch(e){}})()</script>
-<link rel="preload" href="static/pwa-startup.js?v=__WEBUI_VERSION__.jaegerpd6" as="script">
-<script src="static/pwa-startup.js?v=__WEBUI_VERSION__.jaegerpd6"></script>
+<link rel="preload" href="static/pwa-startup.js?v=__WEBUI_VERSION__.jaegerpd7" as="script">
+<script src="static/pwa-startup.js?v=__WEBUI_VERSION__.jaegerpd7"></script>
 <script>window.__HERMES_CONFIG__={maxUploadBytes:__MAX_UPLOAD_BYTES__,csrfToken:__CSRF_TOKEN_JSON__};</script>
 <script>window.__HERMES_WEBUI_BUNDLE_VERSION__='__WEBUI_VERSION__';</script>
 <script>(function(){
@@ -69,7 +69,7 @@
     };
   }
 })()</script>
-<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__.jaegerpd6">
+<link rel="stylesheet" href="static/style.css?v=__WEBUI_VERSION__.jaegerpd7">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" integrity="sha384-LJcOxlx9IMbNXDqJ2axpfEQKkAYbFjJfhXexLfiRJhjDU81mzgkiQq8rkV0j6dVh" crossorigin="anonymous">
   <!-- KaTeX math rendering CSS (loaded eagerly from vendored assets to prevent font CSP noise) -->
   <link rel="stylesheet" href="static/vendor/katex/0.16.22/katex.min.css">
@@ -98,7 +98,7 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
-        navigator.serviceWorker.register('sw.js?v=__WEBUI_VERSION__.jaegerpd6').catch(function(err) {
+        navigator.serviceWorker.register('sw.js?v=__WEBUI_VERSION__.jaegerpd7').catch(function(err) {
           console.warn('[pwa] Service worker registration failed:', err);
         });
       });
@@ -1769,20 +1769,20 @@
   </div>
 </div>
 <div class="toast" id="toast"></div>
-<script src="static/i18n.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/icons.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/assistant_turn_anchors.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/ui.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/workspace.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/terminal.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/sessions.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/commands.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/messages.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/extension_settings.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/panels.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/onboarding.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/boot.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
-<script src="static/outline.js?v=__WEBUI_VERSION__.jaegerpd6" defer></script>
+<script src="static/i18n.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/icons.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/assistant_turn_anchors.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/ui.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/workspace.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/terminal.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/sessions.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/commands.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/messages.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/extension_settings.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/panels.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/onboarding.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/boot.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
+<script src="static/outline.js?v=__WEBUI_VERSION__.jaegerpd7" defer></script>
 
 <!-- Kanban: create/rename board modal — used for both flows. -->
 <div class="kanban-modal-overlay" id="kanbanBoardModal" hidden onclick="if(event.target===this)closeKanbanBoardModal()">

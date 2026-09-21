@@ -230,6 +230,88 @@ def policy_from_store() -> RemoteAccessPolicy:
     return RemoteAccessPolicy(token=token, remote_enabled=enabled)
 
 
+def _webui_launchagent_path() -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / "com.jenkinsrobotics.jaeger-webui.plist"
+
+
+def _password_file() -> Path:
+    from jaeger_ai.core.instance.instance import operator_state_root
+    return operator_state_root() / "webui_remote_password"
+
+
+def retire_stale_serve_routes() -> list[dict[str, Any]]:
+    """Drop Serve routes that proxy dead non-canonical Jaeger ports."""
+    actions = []
+    status = serve_status()
+    text = str(status.get("text") or "")
+    binary = _tailscale_bin()
+    if not binary:
+        return actions
+    # Default :443 historically pointed at 8787 (dead). Canonical phone origin is :8443.
+    if ":8787" in text and "(tailnet only)" in text:
+        try:
+            proc = subprocess.run(
+                [binary, "serve", "--https=443", "off"],
+                capture_output=True, text=True, timeout=15, check=False,
+            )
+            actions.append({"route": "https:443->8787", "ok": proc.returncode == 0, "output": (proc.stdout or proc.stderr or "")[:200]})
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            actions.append({"route": "https:443->8787", "ok": False, "error": str(exc)})
+    if ":8444" in text or ":8788" in text:
+        try:
+            proc = subprocess.run(
+                [binary, "serve", "--https=8444", "off"],
+                capture_output=True, text=True, timeout=15, check=False,
+            )
+            actions.append({"route": "https:8444->8788", "ok": proc.returncode == 0, "output": (proc.stdout or proc.stderr or "")[:200]})
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            actions.append({"route": "https:8444->8788", "ok": False, "error": str(exc)})
+    return actions
+
+
+def _apply_webui_launchagent(password: str) -> dict[str, Any]:
+    """Patch the operator LaunchAgent so KeepAlive respawns loopback+auth WebUI."""
+    import plistlib
+    path = _webui_launchagent_path()
+    if not path.is_file():
+        return {"ok": False, "skipped": True, "reason": "no LaunchAgent"}
+    with path.open("rb") as handle:
+        data = plistlib.load(handle)
+    env = dict(data.get("EnvironmentVariables") or {})
+    env.update({
+        "JAEGER_WEBUI_HOST": "127.0.0.1",
+        "HERMES_WEBUI_HOST": "127.0.0.1",
+        "JAEGER_WEBUI_PORT": str(WEBUI_LOOPBACK_PORT),
+        "HERMES_WEBUI_PORT": str(WEBUI_LOOPBACK_PORT),
+        "HERMES_WEBUI_PASSWORD": password,
+        "HERMES_WEBUI_SECURE": "1",
+        "HERMES_WEBUI_TRUST_FORWARDED_PROTO": "1",
+        "HERMES_WEBUI_PASSKEY": "1",
+        "JAEGER_GATEWAY_URL": "http://127.0.0.1:8810",
+        "JAEGER_RUNNER_BASE_URL": "http://127.0.0.1:8791",
+    })
+    data["EnvironmentVariables"] = env
+    with path.open("wb") as handle:
+        plistlib.dump(data, handle)
+    os.chmod(path, 0o600)
+    uid = os.getuid()
+    domain = f"gui/{uid}"
+    label = "com.jenkinsrobotics.jaeger-webui"
+    bootout = subprocess.run(["launchctl", "bootout", domain, str(path)], capture_output=True, text=True)
+    time.sleep(0.4)
+    bootstrap = subprocess.run(["launchctl", "bootstrap", domain, str(path)], capture_output=True, text=True)
+    kick = subprocess.run(["launchctl", "kickstart", "-k", f"{domain}/{label}"], capture_output=True, text=True)
+    return {
+        "ok": bootstrap.returncode == 0 or kick.returncode == 0,
+        "path": str(path),
+        "bootout": bootout.returncode,
+        "bootstrap": bootstrap.returncode,
+        "kickstart": kick.returncode,
+        "bootstrap_err": (bootstrap.stderr or "")[:200],
+        "kick_err": (kick.stderr or "")[:200],
+    }
+
+
 def _ensure_webui_password() -> dict[str, Any]:
     """Ensure the WebUI process will require a password.
 
@@ -238,10 +320,17 @@ def _ensure_webui_password() -> dict[str, Any]:
     only when this call generated a new password.
     """
     existing = os.environ.get("HERMES_WEBUI_PASSWORD", "").strip()
+    pw_path = _password_file()
+    if not existing and pw_path.is_file():
+        existing = pw_path.read_text(encoding="utf-8").strip()
     if existing:
-        return {"configured": True, "generated": False}
+        os.environ["HERMES_WEBUI_PASSWORD"] = existing
+        return {"configured": True, "generated": False, "password": existing}
     password = secrets.token_urlsafe(18)
     os.environ["HERMES_WEBUI_PASSWORD"] = password
+    pw_path.parent.mkdir(parents=True, exist_ok=True)
+    pw_path.write_text(password, encoding="utf-8")
+    os.chmod(pw_path, 0o600)
     return {"configured": True, "generated": True, "password": password}
 
 
@@ -269,16 +358,34 @@ def enable(*, https_port: int = HTTPS_PORT, start_webui: bool = True, serve: boo
     os.environ["HERMES_WEBUI_SECURE"] = "1"
     os.environ["HERMES_WEBUI_TRUST_FORWARDED_PROTO"] = "1"
     os.environ["HERMES_WEBUI_PASSKEY"] = "1"
+    retired: list[dict[str, Any]] = []
+    if serve:
+        retired = retire_stale_serve_routes()
     webui = {"ok": True, "skipped": True}
+    launchagent = {"ok": False, "skipped": True}
     if start_webui:
-        from jaeger_ai.features.webui.service.service import WebUIService
-        svc = WebUIService()
-        try:
-            svc.stop()
-        except Exception:
-            pass
-        os.environ["JAEGER_WEBUI_HOST"] = "127.0.0.1"
-        webui = svc.start(publish_tailscale=False)
+        pw = str(password.get("password") or os.environ.get("HERMES_WEBUI_PASSWORD") or "")
+        launchagent = _apply_webui_launchagent(pw) if pw else {"ok": False, "reason": "no password"}
+        if not launchagent.get("ok"):
+            from jaeger_ai.features.webui.service.service import WebUIService
+            svc = WebUIService()
+            try:
+                svc.stop()
+            except Exception:
+                pass
+            os.environ["JAEGER_WEBUI_HOST"] = "127.0.0.1"
+            webui = svc.start(publish_tailscale=False)
+        else:
+            # Wait for loopback WebUI after kickstart.
+            deadline = time.time() + 20
+            healthy = False
+            while time.time() < deadline:
+                probe = _http_ok("http://127.0.0.1:8790/api/auth/status")
+                if probe.get("status") in {200, 401, 403}:
+                    healthy = True
+                    break
+                time.sleep(0.4)
+            webui = {"ok": healthy, "launchagent": True, "auth_probe": probe if healthy else _http_ok("http://127.0.0.1:8790/api/auth/status")}
     serve_res = {"ok": True, "skipped": True}
     if serve:
         serve_res = _serve_https(f"http://127.0.0.1:{WEBUI_LOOPBACK_PORT}", https_port)
@@ -305,6 +412,8 @@ def enable(*, https_port: int = HTTPS_PORT, start_webui: bool = True, serve: boo
         "password_generated": bool(password.get("generated")),
         "password": password.get("password"),
         "webui": webui,
+        "launchagent": launchagent,
+        "retired_routes": retired,
         "serve": serve_res,
         "tailscale": ts,
         "trust_boundary": (

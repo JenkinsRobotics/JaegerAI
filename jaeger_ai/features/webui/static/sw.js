@@ -7,11 +7,11 @@
 
 // Cache version is injected by the server at request time (routes.py /sw.js handler).
 // Bumps automatically whenever the git commit changes — no manual edits needed.
-const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__.jaegerpd6';
+const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__.jaegerpd7';
 
 // Static assets that form the app shell.
 //
-// Versioned assets (CSS + JS) include `?v=__WEBUI_VERSION__.jaegerpd6` to match the
+// Versioned assets (CSS + JS) include `?v=__WEBUI_VERSION__.jaegerpd7` to match the
 // query string the page sends — see index.html. Without the version query
 // here, every cache lookup against `?v=...` URLs would miss and fall through
 // to network, defeating the pre-cache.
@@ -20,7 +20,7 @@ const CACHE_NAME = 'hermes-shell-__WEBUI_VERSION__.jaegerpd6';
 // either the authenticated app shell or login code, and stale cached responses
 // can make valid password submits fail until the user clears browser cache.
 // Navigations populate './' only after a successful non-redirect network load.
-const VQ = '?v=__WEBUI_VERSION__.jaegerpd6';
+const VQ = '?v=__WEBUI_VERSION__.jaegerpd7';
 const SHELL_ASSETS = [
   './static/style.css' + VQ,
   './static/pwa-startup.js' + VQ,
