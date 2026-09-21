@@ -12,13 +12,18 @@ the welcome at all for someone who finished it months ago.
 State machine (one direction only, never backwards without an explicit
 reset):
 
-    NOT_STARTED ──► AWAITING_BENCH ──► AWAITING_CHARACTER
-                                             ├─ preset ─► INITIALIZING_PERSONA
-                                             └─ custom ─► AWAITING_SOCIAL
-                                                  ─► AWAITING_VOICE
-                                                  ─► AWAITING_Q2
-                                                  ─► INITIALIZING_PERSONA
-    INITIALIZING_PERSONA ──► COMPLETED
+    NOT_STARTED ──► AWAITING_BENCH (DISCOVERING_HOST)
+                 ──► DISCOVERING_SERVICES
+                 ──► AWAITING_CHARACTER
+                         ├─ custom ─► AWAITING_SOCIAL ─► (HESITANCE?) ─► VOICE ─► Q2
+                         └─ preset ─┐
+                                    ▼
+                 DISCOVERING_PROVIDERS ──► CERTIFYING_PROVIDERS
+                 ──► CONFIGURING_RUNTIME
+                 ──► AWAITING_PERMISSIONS / INTEGRATIONS / KNOWLEDGE
+                 ──► STARTING_RESIDENT ──► VALIDATING_*
+                 ──► RESTARTING_FOR_PERSISTENCE_TEST ──► VERIFYING_PERSISTENCE
+                 ──► INITIAL_INDEXING ──► INITIALIZING_PERSONA ──► COMPLETED
 
 Storage is ``<instance>/first_boot.yaml`` — the same shape as the persona
 drift file and the person index: one small hand-editable YAML under the
@@ -61,15 +66,19 @@ STATE_FILENAME = "first_boot.yaml"
 #: so its status may be a state this build no longer defines; readers fall
 #: back to NOT_STARTED, and ``ensure_migrated`` still protects established
 #: identities from being walked through the welcome again.
-SCHEMA_VERSION = 3
+#: 4 — commissioning stages between calibration and persona handoff.
+SCHEMA_VERSION = 4
 
 
 class FirstBootStatus(str, Enum):
-    """Where this identity is in the welcome sequence."""
+    """Where this identity is in the welcome / commissioning sequence."""
 
     NOT_STARTED = "NOT_STARTED"
     #: Live hardware bench (host probes + model tier) before character pick.
+    #: ``DISCOVERING_HOST`` is the commissioning name for the same wait.
     AWAITING_BENCH = "AWAITING_BENCH"
+    DISCOVERING_HOST = "AWAITING_BENCH"
+    DISCOVERING_SERVICES = "DISCOVERING_SERVICES"
     #: Character preset | custom. Presets skip the mic stance probes because
     #: their complete personality profile is the calibration.
     AWAITING_CHARACTER = "AWAITING_CHARACTER"
@@ -79,6 +88,20 @@ class FirstBootStatus(str, Enum):
     AWAITING_HESITANCE = "AWAITING_HESITANCE"
     AWAITING_VOICE = "AWAITING_VOICE"
     AWAITING_Q2 = "AWAITING_Q2"
+    DISCOVERING_PROVIDERS = "DISCOVERING_PROVIDERS"
+    CERTIFYING_PROVIDERS = "CERTIFYING_PROVIDERS"
+    CONFIGURING_RUNTIME = "CONFIGURING_RUNTIME"
+    AWAITING_PERMISSIONS = "AWAITING_PERMISSIONS"
+    AWAITING_INTEGRATIONS = "AWAITING_INTEGRATIONS"
+    AWAITING_KNOWLEDGE_APPROVAL = "AWAITING_KNOWLEDGE_APPROVAL"
+    STARTING_RESIDENT = "STARTING_RESIDENT"
+    VALIDATING_CORE = "VALIDATING_CORE"
+    VALIDATING_TOOLS = "VALIDATING_TOOLS"
+    VALIDATING_MEMORY = "VALIDATING_MEMORY"
+    VALIDATING_BACKGROUND = "VALIDATING_BACKGROUND"
+    RESTARTING_FOR_PERSISTENCE_TEST = "RESTARTING_FOR_PERSISTENCE_TEST"
+    VERIFYING_PERSISTENCE = "VERIFYING_PERSISTENCE"
+    INITIAL_INDEXING = "INITIAL_INDEXING"
     INITIALIZING_PERSONA = "INITIALIZING_PERSONA"
     COMPLETED = "COMPLETED"
 
@@ -87,11 +110,26 @@ class FirstBootStatus(str, Enum):
 _ORDER: tuple[FirstBootStatus, ...] = (
     FirstBootStatus.NOT_STARTED,
     FirstBootStatus.AWAITING_BENCH,
+    FirstBootStatus.DISCOVERING_SERVICES,
     FirstBootStatus.AWAITING_CHARACTER,
     FirstBootStatus.AWAITING_SOCIAL,
     FirstBootStatus.AWAITING_HESITANCE,
     FirstBootStatus.AWAITING_VOICE,
     FirstBootStatus.AWAITING_Q2,
+    FirstBootStatus.DISCOVERING_PROVIDERS,
+    FirstBootStatus.CERTIFYING_PROVIDERS,
+    FirstBootStatus.CONFIGURING_RUNTIME,
+    FirstBootStatus.AWAITING_PERMISSIONS,
+    FirstBootStatus.AWAITING_INTEGRATIONS,
+    FirstBootStatus.AWAITING_KNOWLEDGE_APPROVAL,
+    FirstBootStatus.STARTING_RESIDENT,
+    FirstBootStatus.VALIDATING_CORE,
+    FirstBootStatus.VALIDATING_TOOLS,
+    FirstBootStatus.VALIDATING_MEMORY,
+    FirstBootStatus.VALIDATING_BACKGROUND,
+    FirstBootStatus.RESTARTING_FOR_PERSISTENCE_TEST,
+    FirstBootStatus.VERIFYING_PERSISTENCE,
+    FirstBootStatus.INITIAL_INDEXING,
     FirstBootStatus.INITIALIZING_PERSONA,
     FirstBootStatus.COMPLETED,
 )
@@ -182,6 +220,8 @@ def _write(instance_root: Path | Any, doc: dict[str, Any]) -> None:
 def status(instance_root: Path | Any) -> FirstBootStatus:
     """Where this identity is. Unknown/corrupt values read as NOT_STARTED."""
     raw = str(_read(instance_root).get("status") or "")
+    if raw == "DISCOVERING_HOST":
+        return FirstBootStatus.AWAITING_BENCH
     try:
         return FirstBootStatus(raw)
     except ValueError:
@@ -270,15 +310,28 @@ def record_bench(
     instance_root: Path | Any,
     recommendation: dict[str, Any] | None = None,
 ) -> FirstBootStatus:
-    """Record live hardware bench results and advance to character pick."""
+    """Record live hardware bench results and run host-service discovery.
+
+    The durable wait is ``DISCOVERING_SERVICES``; that stage is automatic
+    and completes into character pick before this function returns, so a
+    crash mid-probe resumes at services rather than replaying the bench.
+    """
     doc = _read(instance_root)
     if recommendation:
         doc["hardware_bench"] = recommendation
     doc.setdefault("hardware_bench_at", _now())
-    if _advance(doc, FirstBootStatus.AWAITING_CHARACTER):
-        doc["status"] = FirstBootStatus.AWAITING_CHARACTER.value
+    if _advance(doc, FirstBootStatus.DISCOVERING_SERVICES):
+        doc["status"] = FirstBootStatus.DISCOVERING_SERVICES.value
     _write(instance_root, doc)
-    return status(instance_root)
+    try:
+        from jaeger_ai.core.instance.commissioning import CommissioningCoordinator
+        return CommissioningCoordinator(instance_root).discover_services()
+    except Exception:
+        doc = _read(instance_root)
+        if _advance(doc, FirstBootStatus.AWAITING_CHARACTER):
+            doc["status"] = FirstBootStatus.AWAITING_CHARACTER.value
+            _write(instance_root, doc)
+        return status(instance_root)
 
 
 def record_character(
@@ -316,7 +369,7 @@ def record_character(
     doc["calibration_source"] = "character_preset" if path == "preset" else "guided_interview"
     doc.setdefault("character_recorded_at", _now())
     target = (
-        FirstBootStatus.INITIALIZING_PERSONA
+        FirstBootStatus.DISCOVERING_PROVIDERS
         if path == "preset"
         else FirstBootStatus.AWAITING_SOCIAL
     )
@@ -444,19 +497,17 @@ def record_q2(
     doc["q2_response"] = "" if refused else str(response or "")
     doc["q2_refused"] = bool(refused)
     doc.setdefault("q2_recorded_at", _now())
-    entering_persona = _advance(doc, FirstBootStatus.INITIALIZING_PERSONA)
-    if entering_persona:
-        doc["status"] = FirstBootStatus.INITIALIZING_PERSONA.value
+    entering_commissioning = _advance(doc, FirstBootStatus.DISCOVERING_PROVIDERS)
+    if entering_commissioning:
+        doc["status"] = FirstBootStatus.DISCOVERING_PROVIDERS.value
     _write(instance_root, doc)
 
-    # The SI names itself at the State 3 transition, once, using the voice
-    # profile as a hard filter and the Q2 register as a soft one. Done here
-    # rather than lazily at first "what's your name?" so the name exists
-    # before the persona ever speaks — it is part of who arrives, not a
-    # fact looked up later.
-    if entering_persona:
+    # Stance is calibrated from the probes as soon as Q2 is recorded, so it
+    # exists before commissioning finishes. The persona name waits until
+    # commissioning actually reaches INITIALIZING_PERSONA — the installer
+    # must not introduce the SI before the resident OS is proven.
+    if entering_commissioning:
         _calibrate_stance(instance_root)
-        initialize_persona_name(instance_root)
     return status(instance_root)
 
 
@@ -690,8 +741,62 @@ def persona_name_record(instance_root: Path | Any) -> dict[str, Any] | None:
     return record if isinstance(record, dict) else None
 
 
+def enter_initializing_persona(instance_root: Path | Any) -> FirstBootStatus:
+    """Enter the OS 1 → persona handoff after commissioning has actually finished.
+
+    The persona name is chosen here, once, so the SI exists before it
+    speaks and a retried handoff cannot rename someone already met.
+    """
+    doc = _read(instance_root)
+    if not doc.get("latent_stance") and doc.get("calibration_source") != "character_preset":
+        _calibrate_stance(instance_root)
+        doc = _read(instance_root)
+    if _advance(doc, FirstBootStatus.INITIALIZING_PERSONA):
+        doc["status"] = FirstBootStatus.INITIALIZING_PERSONA.value
+        _write(instance_root, doc)
+        if doc.get("calibration_source") != "character_preset":
+            initialize_persona_name(instance_root)
+        commit_to_instance(instance_root)
+    return status(instance_root)
+
+
 def complete(instance_root: Path | Any) -> FirstBootStatus:
-    """Mark first boot finished. The welcome is never shown again."""
+    """Mark first boot finished. The welcome is never shown again.
+
+    Automatic commissioning stages are driven to the persona handoff
+    first. Human waits (permissions, integrations, knowledge) are not
+    skipped — completing those requires an answer.
+    """
+    current = status(instance_root)
+    if current is FirstBootStatus.COMPLETED:
+        commit_to_instance(instance_root)
+        return current
+    try:
+        from jaeger_ai.core.instance.commissioning import CommissioningCoordinator
+        CommissioningCoordinator(instance_root).tick(budget_s=45.0)
+    except Exception:
+        pass
+    current = status(instance_root)
+    if current in {
+        FirstBootStatus.AWAITING_PERMISSIONS,
+        FirstBootStatus.AWAITING_INTEGRATIONS,
+        FirstBootStatus.AWAITING_KNOWLEDGE_APPROVAL,
+        FirstBootStatus.AWAITING_CHARACTER,
+        FirstBootStatus.AWAITING_SOCIAL,
+        FirstBootStatus.AWAITING_HESITANCE,
+        FirstBootStatus.AWAITING_VOICE,
+        FirstBootStatus.AWAITING_Q2,
+        FirstBootStatus.AWAITING_BENCH,
+    }:
+        return current
+    if current is FirstBootStatus.INITIAL_INDEXING:
+        try:
+            from jaeger_ai.core.instance.commissioning import CommissioningCoordinator
+            CommissioningCoordinator(instance_root).initial_indexing()
+        except Exception:
+            enter_initializing_persona(instance_root)
+    elif current is not FirstBootStatus.INITIALIZING_PERSONA:
+        enter_initializing_persona(instance_root)
     doc = _read(instance_root)
     if _advance(doc, FirstBootStatus.COMPLETED):
         doc["status"] = FirstBootStatus.COMPLETED.value
@@ -891,6 +996,7 @@ __all__ = [
     "VOICE_PROFILES",
     "FirstBootStatus",
     "begin",
+    "enter_initializing_persona",
     "record_bench",
     "record_character",
     "classify_existing",

@@ -83,7 +83,15 @@ def main():
             call("command", "first_boot_answer", {"question": "hesitance", "reply": "No"})
         call("command", "first_boot_answer", {"question": "voice", "reply": "female"})
         call("command", "first_boot_answer", {"question": "q2", "reply": "We talk regularly."})
-        assert call("query", "first_boot")["turn"]["speaker"] == "persona"
+        speaker = None
+        for _ in range(40):
+            state = call("query", "first_boot")
+            speaker = (state.get("turn") or {}).get("speaker")
+            if speaker == "persona" or state.get("complete"):
+                break
+            if not (state.get("turn") or {}).get("awaits_reply"):
+                call("command", "first_boot_answer", {"question": "tick", "reply": "ok"})
+        assert speaker == "persona", state
         call("command", "first_boot_complete")
         assert call("query", "first_boot")["complete"]
         print("PASS character, calibration, naming, and durable completion", flush=True)

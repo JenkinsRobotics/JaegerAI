@@ -42,6 +42,12 @@ def _through_character(root):
     return fb.status(root)
 
 
+def _through_commissioning(root):
+    """Drive automatic commissioning to the persona handoff."""
+    from jaeger_ai.core.instance.commissioning import CommissioningCoordinator
+    return CommissioningCoordinator(root).tick(budget_s=30.0)
+
+
 def _to_voice(root):
     """Walk Probe 1 with a steady answer so we land on the voice question."""
     _through_character(root)
@@ -93,6 +99,8 @@ def test_preset_character_skips_the_custom_interview(inst):
     assert fb.status(inst) is FirstBootStatus.AWAITING_CHARACTER
     assert script.next_turn(inst).lines == (script.QUESTION_CHARACTER,)
     fb.record_character(inst, "preset", character_id="jarvis")
+    assert fb.status(inst) is FirstBootStatus.DISCOVERING_PROVIDERS
+    _through_commissioning(inst)
     assert fb.status(inst) is FirstBootStatus.INITIALIZING_PERSONA
     assert script.PERSONA_FIRST_WORDS in script.next_turn(inst).lines
     state = fb.snapshot(inst)
@@ -211,6 +219,7 @@ def test_step_back_never_rewinds_arrival_or_completion(inst):
     fb.record_character(inst, "custom", character_id="assistant")
     fb.record_social(inst, "social."); fb.record_voice(inst, "male")
     fb.record_q2(inst, "close.")
+    _through_commissioning(inst)
     assert fb.status(inst) is FirstBootStatus.INITIALIZING_PERSONA
     assert fb.step_back(inst) is FirstBootStatus.INITIALIZING_PERSONA
     # And re-answering forward after a pending rewind re-asks cleanly.
@@ -303,7 +312,7 @@ def test_q2_response_persists(inst):
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Complicated, but we talk every week.")
     assert fb.snapshot(inst)["q2_response"].startswith("Complicated")
-    assert fb.status(inst) is FirstBootStatus.INITIALIZING_PERSONA
+    assert fb.status(inst) is FirstBootStatus.DISCOVERING_PROVIDERS
 
 
 def test_q2_refusal_is_accepted_and_advances(inst):
@@ -313,7 +322,7 @@ def test_q2_refusal_is_accepted_and_advances(inst):
     snap = fb.snapshot(inst)
     assert snap["q2_refused"] is True
     assert snap["q2_response"] == ""        # a non-answer is not disclosure
-    assert fb.status(inst) is FirstBootStatus.INITIALIZING_PERSONA
+    assert fb.status(inst) is FirstBootStatus.DISCOVERING_PROVIDERS
 
 
 def test_refusal_is_not_re_asked(inst):
@@ -352,6 +361,7 @@ def test_sequence_emits_no_clinical_language(inst):
     fb.record_voice(inst, "female")
     seen.append(script.next_turn(inst).text)
     fb.record_q2(inst, "She was difficult when I was young.")
+    _through_commissioning(inst)
     seen.append(script.next_turn(inst).text)
     blob = " ".join(seen).lower()
     for term in _CLINICAL:
@@ -377,10 +387,13 @@ def test_restart_after_q1_resumes_at_q2(inst):
     assert script.next_turn(inst).lines == (script.QUESTION_Q2,)
 
 
-def test_restart_after_q2_resumes_at_persona_init(inst):
+def test_restart_after_q2_resumes_commissioning_not_the_questions(inst):
     _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Fine.")
+    assert fb.status(inst) is FirstBootStatus.DISCOVERING_PROVIDERS
+    assert script.QUESTION_Q2 not in script.next_turn(inst).text
+    _through_commissioning(inst)
     assert fb.status(inst) is FirstBootStatus.INITIALIZING_PERSONA
     assert script.PERSONA_FIRST_WORDS in script.next_turn(inst).text
 
@@ -401,6 +414,7 @@ def test_persona_first_words_are_exact(inst):
     _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Fine.")
+    _through_commissioning(inst)
     turn = script.next_turn(inst)
     assert turn.speaker == "persona"
     assert turn.lines[0] == script.HANDOFF
@@ -416,6 +430,7 @@ def test_nothing_technical_is_appended_to_the_handoff(inst):
     _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Fine.")
+    _through_commissioning(inst)
     blob = script.next_turn(inst).text.lower()
     for noise in (
         "model loaded", "provider connected", "memory initialized",
@@ -428,6 +443,7 @@ def test_persona_enters_companion_by_asking_what_to_do(inst):
     _to_voice(inst)
     fb.record_voice(inst, "female")
     fb.record_q2(inst, "Fine.")
+    _through_commissioning(inst)
     assert script.PERSONA_OPENING_QUESTION in script.next_turn(inst).text
 
 
@@ -457,6 +473,8 @@ def test_transitions_are_idempotent(inst):
 
     for _ in range(3):
         fb.record_q2(inst, "Fine.")
+    assert fb.status(inst) is FirstBootStatus.DISCOVERING_PROVIDERS
+    _through_commissioning(inst)
     assert fb.status(inst) is FirstBootStatus.INITIALIZING_PERSONA
 
     for _ in range(3):

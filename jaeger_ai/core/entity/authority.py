@@ -122,6 +122,59 @@ def default_permissions_policy(proposal: ProposedAction) -> AuthorityDecision:
     return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="permission_mode")
 
 
+def commissioning_authority_policy(proposal: ProposedAction) -> AuthorityDecision:
+    """Capability-scoped policy written during commissioning.
+
+    Human answers become this document. Missing policy fails open to the
+    existing confirm/allow posture so established instances keep working.
+    """
+    try:
+        from jaeger_ai.core.instance.commissioning import load_authority_policy
+        from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir, default_instance_name
+
+        layout = InstanceLayout(root=resolve_instance_dir(default_instance_name()))
+        policy = load_authority_policy(layout)
+        if not policy:
+            return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="commissioning_authority")
+        tool = proposal.tool_name
+        shell_mode = str((policy.get("shell") or {}).get("risk_mode") or "confirm")
+        if tool in {"run_shell", "exec", "bash", "run_command"} and shell_mode == "deny":
+            return AuthorityDecision(
+                status=AuthorizationStatus.DENIED,
+                reason="Shell use was not authorized during setup",
+                policy_name="commissioning_authority",
+            )
+        files = policy.get("filesystem") or {}
+        if tool in {"write_file", "edit_file", "delete_file"} and not files.get("write"):
+            return AuthorityDecision(
+                status=AuthorizationStatus.DENIED,
+                reason="File writes were not authorized during setup",
+                policy_name="commissioning_authority",
+            )
+        git = policy.get("git") or {}
+        if tool in {"git_push"} and not git.get("push"):
+            return AuthorityDecision(
+                status=AuthorizationStatus.DENIED,
+                reason="Git push was not authorized during setup",
+                policy_name="commissioning_authority",
+            )
+        if tool in {"git_commit"} and git.get("local_commit") is False:
+            return AuthorityDecision(
+                status=AuthorizationStatus.DENIED,
+                reason="Local git commits were not authorized during setup",
+                policy_name="commissioning_authority",
+            )
+        if policy.get("protected_merge_deployment") is False and tool in {"git_merge_master", "deploy"}:
+            return AuthorityDecision(
+                status=AuthorizationStatus.DENIED,
+                reason="Protected merge and deployment operations stay locked",
+                policy_name="commissioning_authority",
+            )
+    except Exception as exc:
+        logger.debug("Commissioning authority policy skipped: %s", exc)
+    return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="commissioning_authority")
+
+
 class AuthorityLayer:
     """The canonical authority boundary guarding the action system.
     
@@ -137,6 +190,7 @@ class AuthorityLayer:
                 default_shell_hooks_policy,
                 default_allowlist_policy,
                 default_permissions_policy,
+                commissioning_authority_policy,
             ]
 
     def register_policy(self, policy: PolicyCheckFn) -> None:
