@@ -107,3 +107,23 @@ def test_restart_expires_tool_confirms_but_keeps_handoff_approvals(tmp_path):
 
     assert store.get_approval("approval_tool")["decision"] == "expired"
     assert [a["approval_id"] for a in store.list_pending_approvals()] == ["approval_handoff"]
+
+
+def test_package_installs_name_the_package(running_app, monkeypatch):
+    from jaeger_os.core.safety.permissions import PermissionTier
+
+    monkeypatch.setattr(gateway_server, "APPROVAL_WAIT_S", 0.3)
+    created = []
+    original = running_app.store.create_approval
+    monkeypatch.setattr(
+        running_app.store, "create_approval",
+        lambda **kw: created.append(kw) or original(**kw),
+    )
+    request = SimpleNamespace(
+        tier=PermissionTier.PRIVILEGED, skill="packages", operation="install_package",
+        summary="pip-install a third-party package", arguments={"package": "pytest"},
+    )
+
+    _GatewayToolConfirmationProvider(running_app, "s", "r").confirm(request)
+
+    assert created[0]["prompt"] == "Allow packages.install_package? package=pytest"

@@ -60,7 +60,10 @@ APPROVAL_WAIT_S = 300.0
 
 # Arguments that name what a tool call will touch, in the order a human
 # reading an approval on a phone needs them.
-_APPROVAL_TARGET_KEYS = ("path", "src", "dst", "command", "url", "code")
+_APPROVAL_TARGET_KEYS = (
+    "path", "src", "dst", "command", "url", "to", "recipient", "package",
+    "script", "code", "target", "name", "query",
+)
 
 
 def _approval_target(request: Any) -> str:
