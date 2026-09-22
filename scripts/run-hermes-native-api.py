@@ -121,6 +121,19 @@ def main():
     from dotenv import load_dotenv
     home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
     load_dotenv(home / ".env", override=False)
+
+    try:
+        from jaeger_ai.core.models.router import resolve_ollama_base_url, _reachable
+        cfg_path = home / "config.yaml"
+        if cfg_path.exists():
+            cfg_text = cfg_path.read_text(encoding="utf-8")
+            if "192.168.64.1" in cfg_text and not _reachable("192.168.64.1", 11434):
+                reachable_base = resolve_ollama_base_url(openai_compat=True)
+                new_text = cfg_text.replace("http://192.168.64.1:11434/v1", reachable_base)
+                cfg_path.write_text(new_text, encoding="utf-8")
+    except Exception:
+        pass
+
     return asyncio.run(serve(options))
 
 

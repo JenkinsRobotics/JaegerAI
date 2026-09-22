@@ -2473,10 +2473,22 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                         return ""
 
                     from jaeger_agent.tool_executor import tool_allowlist
+                    last_activity_time = time.monotonic()
+
+                    def _on_delta_activity(chunk):
+                        nonlocal last_activity_time
+                        last_activity_time = time.monotonic()
+                        deltas.feed(chunk)
+
+                    def _on_reasoning_activity(chunk: str, _session: str = session) -> None:
+                        nonlocal last_activity_time
+                        last_activity_time = time.monotonic()
+                        _emit_reasoning(chunk, _session)
+
                     with (
                         tool_allowlist(req.get("allowed_tools")),
-                        stream_delta_sink(deltas.feed),
-                        stream_reasoning_sink(_emit_reasoning),
+                        stream_delta_sink(_on_delta_activity),
+                        stream_reasoning_sink(_on_reasoning_activity),
                         interaction_request_sink(_request_interaction),
                     ):
                         from jaeger_ai.core.runtime.native_turns import NativeTurns
@@ -2484,28 +2496,55 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                         import concurrent.futures
                         import contextvars
 
-                        turn_timeout_s = 120.0
+                        env_timeout = os.environ.get("JAEGER_TURN_TIMEOUT")
+                        turn_timeout_s = float(env_timeout) if env_timeout else 300.0
+                        idle_timeout_s = 120.0
                         try:
                             from jaeger_ai.core.instance.schemas import Config, load_yaml
                             cfg = load_yaml(ctx.layout.config_path, Config)
                             if cfg and getattr(cfg, "external_model", None):
-                                turn_timeout_s = max(float(getattr(cfg.external_model, "timeout_s", 60.0)) * 2, 120.0)
+                                cfg_timeout = float(getattr(cfg.external_model, "timeout_s", 60.0))
+                                turn_timeout_s = max(cfg_timeout * 5, 300.0)
+                                idle_timeout_s = max(cfg_timeout * 2, 120.0)
                         except Exception:
                             pass
 
                         exec_context = contextvars.copy_context()
                         pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
                         fut = pool.submit(exec_context.run, run_for_voice, ctx.client, current_prompt, **voice_kwargs)
-                        try:
-                            result = fut.result(timeout=turn_timeout_s)
-                            pool.shutdown(wait=False)
-                        except concurrent.futures.TimeoutError:
-                            pool.shutdown(wait=False, cancel_futures=True)
-                            result = {
-                                "text": "",
-                                "error": f"Turn execution timed out after {turn_timeout_s:.0f}s",
-                                "halt_reason": "timeout",
-                            }
+                        started_turn = time.monotonic()
+                        result = None
+                        while not fut.done():
+                            now = time.monotonic()
+                            if now - started_turn > turn_timeout_s:
+                                fut.cancel()
+                                pool.shutdown(wait=False, cancel_futures=True)
+                                result = {
+                                    "text": "",
+                                    "error": f"Turn execution timed out after {turn_timeout_s:.0f}s",
+                                    "halt_reason": "timeout",
+                                }
+                                break
+                            if now - last_activity_time > idle_timeout_s:
+                                fut.cancel()
+                                pool.shutdown(wait=False, cancel_futures=True)
+                                result = {
+                                    "text": "",
+                                    "error": f"Turn stalled (no activity for {idle_timeout_s:.0f}s)",
+                                    "halt_reason": "stalled",
+                                }
+                                break
+                            try:
+                                result = fut.result(timeout=0.25)
+                                pool.shutdown(wait=False)
+                                break
+                            except concurrent.futures.TimeoutError:
+                                continue
+                        if result is None:
+                            try:
+                                result = fut.result(timeout=0.1)
+                            except Exception as exc:
+                                result = {"text": "", "error": str(exc), "halt_reason": "error"}
                 deltas.flush()
 
                 ans = (result.get("text") or "").strip()
