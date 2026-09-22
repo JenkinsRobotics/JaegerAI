@@ -124,3 +124,31 @@ async def test_in_an_image_session_a_question_goes_to_vision(app, image_session)
     await app._execute_turn("s", admitted["turn_id"], "What colour is the square?", request_id="r4")
 
     assert image_session == ["vision_chat"]
+
+
+@pytest.mark.asyncio
+async def test_an_image_name_in_recalled_history_does_not_make_an_image_turn(app, monkeypatch):
+    lanes = []
+
+    class _RecallingRuntime:
+        def execute_turn(self, text, *, context, **_):
+            recalled = "<background>- human.message: what is in panel.png?</background>\n\n" + text
+            return dict(context["react_runner"](recalled))
+
+    async def vision_chat(*args, **kwargs):
+        lanes.append("vision_chat")
+        return "blue"
+
+    async def no_native(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(app, "_ollama_chat", vision_chat)
+    monkeypatch.setattr(app, "_native_lead_turn", no_native)
+    monkeypatch.setattr(app, "_owner_react_turn", lambda prompt, **kw: lanes.append("entity_react") or "NOVA")
+    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: _RecallingRuntime()))
+    monkeypatch.setattr(EntityRuntime, "subordinate_model_name", lambda self: "ollama:test", raising=False)
+    admitted = app.store.admit_request("s", "What is my audit memory token?", request_id="r5")
+
+    await app._execute_turn("s", admitted["turn_id"], "What is my audit memory token?", request_id="r5")
+
+    assert lanes == ["entity_react"]
