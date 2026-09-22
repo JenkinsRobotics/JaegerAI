@@ -12976,7 +12976,10 @@ def _jaeger_gateway_bases() -> list[str]:
         raw = (os.environ.get(key) or "").strip().rstrip("/")
         if raw:
             bases.append(raw)
-    bases.append("http://127.0.0.1:8810")
+    gw_port = os.environ.get("JAEGER_GATEWAY_PORT", "8810")
+    bases.append(f"http://127.0.0.1:{gw_port}")
+    if gw_port != "8810":
+        bases.append("http://127.0.0.1:8810")
     runner = (
         os.environ.get("HERMES_WEBUI_RUNNER_BASE_URL")
         or os.environ.get("JAEGER_RUNNER_BASE_URL")

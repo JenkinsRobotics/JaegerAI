@@ -414,23 +414,31 @@ def _configure_honcho(home: Path | None = None) -> list[Path]:
 
 
 def _configure_agent_models(
-    home: Path | None = None, *, container_host: str = CONTAINER_HOST
+    home: Path | None = None, *, container_host: str | None = None
 ) -> None:
     """Apply the cloud default to WebUI profiles and native agent runtimes."""
     home = (home or Path.home()).expanduser().resolve()
-    container_ollama_url = f"http://{container_host}:11434/v1"
+    from jaeger_ai.core.models.router import resolve_ollama_base_url
+    if container_host is not None:
+        profile_ollama_url = f"http://{container_host}:11434/v1"
+        container_ollama_url = f"http://{container_host}:11434/v1"
+        openclaw_host = container_host
+    else:
+        profile_ollama_url = resolve_ollama_base_url(openai_compat=True)
+        container_ollama_url = f"http://{CONTAINER_HOST}:11434/v1"
+        openclaw_host = CONTAINER_HOST
     profile_homes = [home / ".hermes"] + [home / ".hermes" / "profiles" / name for name in SERVICES]
     for profile_home in profile_homes:
         path = profile_home / "config.yaml"
         _set_yaml_section_value(path, "model", "provider", "ollama")
-        _set_yaml_section_value(path, "model", "base_url", container_ollama_url)
+        _set_yaml_section_value(path, "model", "base_url", profile_ollama_url)
         text = path.read_text(encoding="utf-8")
         if not re.search(r"(?m)^ollama_hosts:", text):
             text += (
                 "ollama_hosts:\n"
                 "  rack:\n    label: Rack PC\n"
                 f"    base_url: {container_ollama_url}\n"
-                f"  mac:\n    label: Mac\n    base_url: {container_ollama_url}\n"
+                f"  mac:\n    label: Mac\n    base_url: {profile_ollama_url}\n"
             )
             path.write_text(text, encoding="utf-8")
     for profile in SERVICES:

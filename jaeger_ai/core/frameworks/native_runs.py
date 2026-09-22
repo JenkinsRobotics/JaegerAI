@@ -481,7 +481,7 @@ def _jaeger_gateway_turn(run, session_id: str) -> dict | None:
     import urllib.error
     import urllib.request
 
-    gw = (os.environ.get("JAEGER_GATEWAY_URL") or "http://127.0.0.1:8810").rstrip("/")
+    gw = (os.environ.get("JAEGER_GATEWAY_URL") or f"http://127.0.0.1:{os.environ.get('JAEGER_GATEWAY_PORT', '8810')}").rstrip("/")
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
     def _call(method: str, path: str, payload: dict | None = None, timeout: float = 15):
