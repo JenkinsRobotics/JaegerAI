@@ -85,6 +85,9 @@ def main(argv: list[str] | None = None) -> int:
         "              run the Jaeger Gateway (sessions + SSE, loopback :8810)\n"
         "  hermes-webui-adapter\n"
         "              run the loopback adapter for the Hermes WebUI\n"
+        "  capability  validate a capability package (`capability validate`)\n"
+        "  provider    report live vs code-supported providers (`provider doctor`)\n"
+        "  device      inspect generic device/node contract (`device inspect`)\n"
         "  dev         developer toolbox (dev TUI, build/run, health, stop)\n"
         "\nrun `jaeger <command> --help` for a command's own options."
     )
