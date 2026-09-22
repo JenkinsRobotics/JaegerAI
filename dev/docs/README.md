@@ -1,47 +1,19 @@
-# Developer documentation
+# Developer notes
 
-The [main documentation index](../../docs/README.md) covers product operation,
-architecture, and package references. This directory holds engineering notes,
-plans, audits, and history. Dated records are evidence from that date, not a
-claim that every described feature is currently deployed.
+Only notes that code or tests cite as rationale, plus assets used by tooling.
+Product and architecture documentation is in [`docs/`](../../docs/README.md).
 
-## Current reference and audits
-
-| Document | Purpose |
+| Path | Why it exists |
 | --- | --- |
-| [Repository triage](reality/REPOSITORY_TRIAGE_2026_09_08.md) | Complete top-level inventory, dependency mapping, cleanup decisions |
-| [Stability cleanup](reality/STABILITY_CLEANUP_2026_09_08.md) | Lifecycle/recovery fixes and live verification |
-| [Upstream integration audit](reality/UPSTREAM_INTEGRATION_AUDIT_2026_09_08.md) | Shared WebUI and external-runtime boundaries |
-| [Runtime/state boundary](reality/system_runtime_user.md) | Source versus operator state |
-| [Status history](reality/STATUS.md) | Accumulated implementation and verification records |
-| [Pipeline reference](pipelines/README.md) | Agent, memory, skills, voice, transport, and permissions |
-| [Packaged agent contract](../../jaeger_ai/docs/agent_contract.md) | Generator-owned reference; kept in the package for distribution |
+| [reality/persona_compiler.md](reality/persona_compiler.md) | Measured basis for persona compilation; cited by `jaeger_agent/prompts/assemble.py` and three prompt tests |
+| [roadmap/PERSONA_PIPELINE_ABC_DESIGN.md](roadmap/PERSONA_PIPELINE_ABC_DESIGN.md) | Design behind Persona Mode C; cited by `jaeger_agent/prompts/persona_lane.py` |
+| [skills/SKILL_TREE.md](skills/SKILL_TREE.md) | XP-progression contract; cited by `jaeger_os/contract/topics.py` and the animation nodes |
+| [core/SELF_MODIFICATION_BOUNDARIES.md](core/SELF_MODIFICATION_BOUNDARIES.md) | Safety limits on the agent editing its own code |
+| [roadmap/future_backlog.md](roadmap/future_backlog.md) | Backlog referenced from `jaeger_agent/tools/reflect.py` |
+| [library_review/mochi_demo.md](library_review/mochi_demo.md) | Animation adapter reference, cited from the adapter docstrings |
+| `skill_template/` | Scaffolding copied when authoring a skill — an asset, not a document |
 
-## Engineering areas
-
-| Directory | Contents |
-| --- | --- |
-| [core/](core/) | Agent loop, tools, context, memory, and execution notes |
-| [audio/](audio/) | Voice pipeline designs and reviews |
-| [avatar/](avatar/) | Animation and UI plans |
-| [skills/](skills/) | Skill formats, sharing, and evolution |
-| [roadmap/](roadmap/) | Proposed and unfinished work |
-| [reality/](reality/) | Runtime reference, status, and audits |
-| [revision_summaries/](revision_summaries/README.md) | Release-by-release summaries |
-| [library_review/](library_review/) | Upstream/library research and reference code |
-| [skill_template/](skill_template/SKILL.md) | Skill authoring template |
-| [history/](history/) | Preserved historical snapshots; not current specifications |
-
-## Related developer resources
-
-- [Developer scripts](../scripts/README.md) and [automated tests](../tests/).
-- [Manual pipeline probes](../pipelines/README.md) and [diagrams](../infographic/README.md).
-- [Benchmarks](../benchmark/) and [evaluation samples](../evals/).
-- [Audio smoke probes](../tools/audio_smoke/README.md).
-- [Design reference images](../reference_ui/): retained reference assets; current runtime use was not established.
-- [JaegerOS ecosystem vision](../../packages/jaeger-os/dev/docs/vision/README.md).
-
-The previous index described absent history, hardware, infra, and archive trees.
-Its original content is preserved in the Desktop structural-cleanup archive;
-this index lists the directories present in this checkout. Existing engineering
-files were not deleted because an older index failed to mention them.
+Release history is in [CHANGELOG.md](../../CHANGELOG.md). Decisions belong in
+[docs/architecture/adr/](../../docs/architecture/adr/). Dated status reports,
+phase plans, and handoff notes do not belong here; they stop being true within
+days and then mislead whoever reads them next.

@@ -11,7 +11,7 @@ and a single runner; the mode is a flag, not a different file:
     python dev/benchmark/bench.py --category kanban,deepthink
     python dev/benchmark/bench.py --models a.gguf,b.gguf   # multi-model sweep
 
-Two entry points share this ONE corpus (see dev/docs/pipelines/):
+Two entry points share this ONE corpus:
   • dev (this script) — the real agentic pipeline, offline, in-process.
   • agent-internal (the ``run_benchmark`` tool) — the SAME cases run by
     the agent inside the live app, all nodes + persona up (full system).

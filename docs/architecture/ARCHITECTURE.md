@@ -4,7 +4,7 @@
 **Status:** Canonical contributor-facing architecture after the Master Architecture Completion program
 **Evidence rule:** `IMPLEMENTED` means code is on the production path. `EXPERIMENTAL` means a module and unit tests exist. `PLANNED` is not shipped. `DEPRECATED` must not be used. `VERIFIED` requires a named test command or live request id.
 
-The design standard remains [UNIVERSAL_PERSISTENT_AGENT_ARCHITECTURE.md](UNIVERSAL_PERSISTENT_AGENT_ARCHITECTURE.md). This document describes what actually survived.
+This document describes what actually survived.
 
 ---
 
@@ -184,23 +184,7 @@ Devices: Mac, Web, and phone are **clients of the control plane**. `DeviceRegist
 
 ---
 
-## 10. Historical documents
-
-Keep, but treat as history unless dated after this program:
-
-| Document | Role |
-| :--- | :--- |
-| UNIVERSAL_PERSISTENT_AGENT_ARCHITECTURE.md | Design standard |
-| JAEGER_LIVE_VALIDATION.md | Append-only live defect log |
-| JAEGER_WEBUI_RUNTIME_TRUTH.md | Gate A evidence |
-| JAEGER_REMOTE_MOBILE.md | Remote access design |
-| ARCHITECTURE_BEFORE.md / AFTER.md | Historical snapshots |
-| master-build-status.md | Dated build record |
-| WORLD_MODEL_INTEGRATION_PLAN.md | Plan; check against `jaeger_ai.core.world` |
-
----
-
-## 11. Answers that must not depend on which path you took
+## 10. Answers that must not depend on which path you took
 
 1. **What is Jaeger?** Persistent entity runtime + control plane. Not the LLM, not the WebUI session.
 2. **Where is identity?** `EntityIdentity` in instance memory.

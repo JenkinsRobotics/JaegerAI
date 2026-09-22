@@ -139,9 +139,6 @@ do" after the fact.
 
 ## See also
 
-- [docs/agent_refactor_phase_9.md](agent_refactor_phase_9.md) — the
-  last big self-modification (pydantic-ai removal) is recorded here
-  for context on what a deliberate Tier C operation looks like.
 - `<instance>/audit/self_modification.jsonl` — the live log on the
   running system.
 - `src/jaeger_os/core/self_modification_audit.py` — the classifier +
