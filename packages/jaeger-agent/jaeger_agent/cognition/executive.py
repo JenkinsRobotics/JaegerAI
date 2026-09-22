@@ -66,7 +66,9 @@ class TurnExecutive:
             if existing is not None:
                 if existing.state == "created":
                     existing = self.runs.transition(existing.id, "active")
-                elif existing.state == "blocked" and existing.reason == "owner_lost":
+                elif existing.state == "recoverable" or (
+                    existing.state == "blocked" and existing.reason == "owner_lost"
+                ):
                     pending = self._pending_effects(existing.id)
                     if not pending:
                         existing, _checkpoint = self.runs.resume(
@@ -90,25 +92,12 @@ class TurnExecutive:
         else:
             commitment = self.commitments.create(TURN_LOOP_KIND, kind=TURN_LOOP_KIND)
             commitment = self.commitments.transition(commitment.id, "active")
-        active = self.runs.list(commitment_id=commitment.id, state="active")
-        if active:
-            run = active[0]
-            self.runs.heartbeat(run.id, owner_pid=os.getpid())
-            self.agent.bind_run(run.id)
-            return run
-        blocked = [
-            r for r in self.runs.list(commitment_id=commitment.id, state="blocked")
-            if r.reason == "owner_lost"
-        ]
-        if blocked:
-            pending = self._pending_effects(blocked[0].id)
-            if not pending:
-                run, _checkpoint = self.runs.resume(blocked[0].id, owner_pid=os.getpid())
-                self.agent.bind_run(run.id)
-                return run
-            # Indeterminate external effect: leave the run BLOCKED and
-            # open a new run for subsequent requests.
-
+        # An unbound turn is a new request and gets its own run. Adopting
+        # some other active or orphaned run here put unrelated requests —
+        # from other sessions and other processes — under one run id, and
+        # effect keys are scoped by run id, so a later request's identical
+        # write could be skipped as "already done". Continuing a specific
+        # run is the caller's decision: it binds that run first.
         run = self.runs.create(
             commitment.id, provider=self.provider, owner_pid=os.getpid(),
         )

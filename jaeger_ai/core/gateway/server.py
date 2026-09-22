@@ -51,6 +51,10 @@ DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", "kimi-k2.7-
 NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S", "300"))
 
 
+# ``native_session`` marker for a request bound to the Entity's own run
+# (owner-react), as opposed to a run on the native MCP server.
+OWNER_RUN_SESSION_PREFIX = "owner:"
+
 # How long a tool call waits for the operator before it is refused.
 APPROVAL_WAIT_S = 300.0
 
@@ -1446,6 +1450,11 @@ class JaegerGatewayApp:
             request_id=request_id,
             confirmation_provider=_GatewayToolConfirmationProvider(self, session_key, request_id),
             native_run_id=native,
+            on_run=lambda run_id: self.store.bind_native(
+                request_id,
+                native_run_id=run_id,
+                native_session=f"{OWNER_RUN_SESSION_PREFIX}{session_key}",
+            ),
         )
 
     async def _execute_turn(
@@ -1689,8 +1698,17 @@ class JaegerGatewayApp:
             logger.exception("Turn execution failed: %s", exc)
             bound = self.store.get_request(rid) or {}
             after_native = bool(bound.get("native_run_id"))
+            owner_run = str(bound.get("native_session") or "").startswith(OWNER_RUN_SESSION_PREFIX)
+            if after_native and owner_run:
+                # The Entity's own run: its effect ledger, not the MCP
+                # receipt store, says whether anything was left half-done.
+                from jaeger_ai.core.entity.runtime import EntityRuntime
+                after_native = EntityRuntime.run_has_indeterminate_effects(str(bound["native_run_id"]))
             status = "execution_unknown" if after_native else "failed"
-            receipt = self._native_receipt(bound.get("native_run_id"), bound.get("native_session")) if after_native else None
+            receipt = (
+                self._native_receipt(bound.get("native_run_id"), bound.get("native_session"))
+                if after_native and not owner_run else None
+            )
             reply = (receipt or {}).get("reply") if isinstance(receipt, dict) else None
             reply = reply if isinstance(reply, dict) else {}
             if receipt and receipt.get("execution_unknown") is False and receipt.get("status") in {"completed", "failed", "cancelled"}:

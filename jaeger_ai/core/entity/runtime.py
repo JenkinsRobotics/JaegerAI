@@ -705,6 +705,7 @@ class EntityRuntime:
         native_run_id: str | None = None,
         max_iterations: int = 12,
         max_tool_calls: int = 8,
+        on_run: Callable[[str], None] | None = None,
     ) -> str:
         """Execute subordinate ReAct loop inside the EntityRuntime.
 
@@ -767,9 +768,26 @@ class EntityRuntime:
         )
         os.environ.setdefault("JAEGER_ACCEPT_HOOKS", "1")
         run = turn_exec.ensure_run()
+        if on_run is not None:
+            # Before any effect: a crash from here on must be attributable
+            # to this run, or recovery cannot tell done work from undone.
+            on_run(run.id)
         out = turn_exec.run_turn(prompt)
         out = (out or "").strip()
         return out if out else "(No response text returned)"
+
+    @staticmethod
+    def run_has_indeterminate_effects(run_id: str) -> bool:
+        """True when ``run_id`` claimed an effect it never resolved.
+
+        Fails closed: if the ledger cannot be read, the outcome is unknown.
+        """
+        try:
+            from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
+            return any(e.run_id == run_id for e in SqliteEffectLedger().list(status="pending"))
+        except Exception:
+            logger.warning("effect ledger unreadable for run %s; treating as indeterminate", run_id)
+            return True
 
     def subordinate_model_name(self) -> str:
         """The model :meth:`run_subordinate_react` calls, as its provider names it."""
