@@ -68,8 +68,8 @@ ONE REQUEST
 
 | **GATE E** | **WS 21** | **Test-Suite Tiering & Determinism** | **COMPLETED** | `b8cbaeda` | 7/7 runner doctrine, 177/177 security, 44/44 production-path, 1/1 soak | `dev/scripts/run_tests.sh` flags are honest; RUN_PACKAGES gates package suites; production-path is kernel contracts not two unit files |
 | **GATE F** | **WS 22** | **Documentation Truth Pass** | **COMPLETED** | `ff5ab919` | 1/1 architecture truth doc | Canonical `ARCHITECTURE.md` classifies IMPLEMENTED / EXPERIMENTAL / PLANNED; unit tests are not production proof |
-| **GATE F** | **WS 23** | **Developer / Platform API** | **COMPLETED** | *(this commit)* | 6/6 platform API | `jaeger capability validate`, `jaeger provider doctor`, `jaeger device inspect` |
-| **GATE F** | **WS 24** | **Clean-Machine Release Validation** | PENDING | — | — | Isolated state install (not a wiped Mac VM) |
+| **GATE F** | **WS 23** | **Developer / Platform API** | **COMPLETED** | `1279edfa` | 6/6 platform API | `jaeger capability validate`, `jaeger provider doctor`, `jaeger device inspect` |
+| **GATE F** | **WS 24** | **Clean-Machine Release Validation** | **COMPLETED** | *(this commit)* | 3/3 isolated state | Isolated `JAEGER_STATE_DIR` identity + Gateway store; not a wiped macOS VM |
 | **GATE F** | **WS 25** | **Public-Release / Contributor Hardening** | PENDING | — | — | Contributor guide, license audit, release readiness |
 
 ---
