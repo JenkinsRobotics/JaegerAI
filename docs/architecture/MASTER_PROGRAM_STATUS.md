@@ -54,7 +54,8 @@ ONE REQUEST
 | **GATE C** | **WS 15** | **Durable Background Work & Scheduling** | **COMPLETED** | `651ff0e5` | 4/4 durable tasks, 78/78 combined | SqliteDurableTaskStore; DurableTaskManager; background thread pool; survives client disconnect & restart recovery |
 | **GATE D** | **WS 16** | **Observability & Provenance Tracing** | **COMPLETED** | `cd066661` | 5/5 unified trace, 83/83 combined | End-to-end trace correlation (request -> attention -> executive -> context -> cognition -> proposal -> authority -> effect -> verification -> learning); SqliteTraceStore; automatic secret redaction |
 
-| **GATE D** | **WS 17** | **External Agent Evaluation Suite** | **COMPLETED** | *pending* | 6/6 eval suite, 89/89 combined | ExternalEvalHarness for BFCL, SWE-bench, Terminal-Bench, and AgentDojo; independent grading; 5-category failure classification; markdown evaluation reporting |
+| **GATE D** | **WS 17** | **External Agent Evaluation Suite** | **COMPLETED** | `20002f20` | 6/6 eval suite, 89/89 combined | ExternalEvalHarness for BFCL, SWE-bench, Terminal-Bench, and AgentDojo; independent grading; 5-category failure classification; markdown evaluation reporting |
+
 
 | **GATE D** | **WS 18** | **Fault Injection, Resilience & Soak** | PENDING | — | — | Crash mid-task, reconnect, soak testing |
 | **GATE E** | **WS 19** | **Security Hardening** | PENDING | — | — | Threat model, CSRF, passkeys, sandbox traversal |
