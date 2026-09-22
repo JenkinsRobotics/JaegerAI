@@ -41,6 +41,32 @@ from jaeger_agent.loop.loop_backstop import MAX_TOOL_CALLS
 from jaeger_agent.loop.turn_budget import TurnBudgetLimits
 
 
+def _inject_usage_callbacks(cb: AgentCallbacks) -> AgentCallbacks:
+    """Inject usage statistics callbacks into AgentCallbacks for dependency inversion."""
+    try:
+        from jaeger_ai.core.runtime.usage_stats import (
+            record_model_usage,
+            record_skill,
+            record_skill_outcome,
+            record_skill_route,
+            record_tool,
+        )
+        if cb.record_skill_route is None:
+            cb.record_skill_route = record_skill_route
+        if cb.record_skill is None:
+            cb.record_skill = record_skill
+        if cb.record_skill_outcome is None:
+            cb.record_skill_outcome = record_skill_outcome
+        if cb.record_model_usage is None:
+            cb.record_model_usage = record_model_usage
+        if cb.record_tool is None:
+            cb.record_tool = record_tool
+    except ImportError:
+        pass
+    return cb
+
+
+
 def _resolve_local_max_tokens() -> int:
     """Read ``model.max_tokens`` off the active pipeline config so the
     in-process adapter honours it. Falls back to the
@@ -383,8 +409,10 @@ def build_jaeger_agent(
         toolsets=toolsets if tools is None else None,
         skip_final_tools=frozenset(skip_final_tools or ()),
         skip_final_finalizer=_make_fast_finalize_finalizer(client),
-        callbacks=callbacks or AgentCallbacks(),
+        callbacks=_inject_usage_callbacks(callbacks or AgentCallbacks()),
+
         max_iterations=max_iterations,
+
         context_guard=guard,
         toolset_resolver=resolve_toolsets,
         tool_visibility=tool_visible,

@@ -63,7 +63,8 @@ ONE REQUEST
 | **GATE E** | **WS 19** | **Security Hardening** | **COMPLETED** | `0b68381b` | 6/6 security, 100/100 combined | Formalized THREAT_MODEL.md (6 trust domains); SafeArchiveExtractor (Zip Slip prevention); ToolArgumentSanitizer (command exploit & sandbox traversal checks); CsrfGuard |
 
 
-| **GATE E** | **WS 20** | **Repository Architecture Cleanup** | PENDING | — | — | Invert jaeger-agent dependencies, remove dead code |
+| **GATE E** | **WS 20** | **Repository Architecture Cleanup** | **COMPLETED** | *pending* | 2/2 boundary purity, 50/50 jaeger-agent, 102/102 combined | Dependency inversion: eliminated upward jaeger_ai imports from jaeger_agent loop; AgentCallbacks telemetry injection; boundary purity enforced via AST inspection |
+
 | **GATE E** | **WS 21** | **Test-Suite Tiering & Determinism** | PENDING | — | — | Tiered test commands (unit, integration, soak, etc.) |
 | **GATE F** | **WS 22** | **Documentation Truth Pass** | PENDING | — | **Implemented/Experimental/Planned/Deprecated** | Clean spec |
 | **GATE F** | **WS 23** | **Developer / Platform API** | PENDING | — | — | Public CLI commands & extension contracts |

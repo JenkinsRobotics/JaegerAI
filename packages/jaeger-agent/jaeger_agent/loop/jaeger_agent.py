@@ -1007,11 +1007,7 @@ class JaegerAgent:
                 query,
                 available_tools={t.name for t in self._all_tools},
             )
-            try:
-                from jaeger_ai.core.runtime.usage_stats import record_skill_route
-                record_skill_route(None if matched is None else matched.name, reason=reason)
-            except Exception:  # noqa: BLE001
-                pass
+            self.callbacks.on_record_skill_route(None if matched is None else matched.name, reason=reason)
             if matched is None:
                 self.last_skill_route = {"skill": None, "score": score, "reason": reason}
                 return user_message
@@ -1031,11 +1027,7 @@ class JaegerAgent:
             self.last_skill_route = {
                 "skill": matched.name, "score": score, "reason": reason,
             }
-            try:
-                from jaeger_ai.core.runtime.usage_stats import record_skill
-                record_skill(matched.name)
-            except Exception:  # noqa: BLE001
-                pass
+            self.callbacks.on_record_skill(matched.name)
             return (
                 f"[Auto-selected playbook: {matched.name}]\n"
                 "Follow this recipe for the request below. Its instructions "
@@ -1056,12 +1048,8 @@ class JaegerAgent:
             outcome = "issues"
         else:
             outcome = "smooth"
-        try:
-            from jaeger_ai.core.runtime.usage_stats import record_skill_outcome
-            for name in self._turn_skill_names:
-                record_skill_outcome(name, outcome=outcome, halt_reason=halt)
-        except Exception:  # noqa: BLE001 — telemetry must never fail a turn
-            pass
+        for name in self._turn_skill_names:
+            self.callbacks.on_record_skill_outcome(name, outcome=outcome, halt_reason=halt)
         if outcome == "smooth":
             return
         try:
@@ -1591,8 +1579,7 @@ class JaegerAgent:
                     cached = details.get("cached_tokens", 0)
                 else:
                     cached = getattr(details, "cached_tokens", 0) if details else 0
-                from jaeger_ai.core.runtime.usage_stats import record_model_usage
-                record_model_usage(
+                self.callbacks.on_record_model_usage(
                     str(getattr(adapter, "provider", "") or "unknown"),
                     str(getattr(adapter, "model", "") or "unknown"),
                     prompt_tokens=per_call_prompt,
@@ -1601,6 +1588,7 @@ class JaegerAgent:
                 )
             except Exception:  # noqa: BLE001 — telemetry is best-effort
                 pass
+
         return per_call_prompt
 
     # ── stale-call timeout (Phase-8) ───────────────────────────────
@@ -2178,11 +2166,7 @@ class JaegerAgent:
         # the single point every dispatched tool passes through with its
         # outcome and duration already resolved, so count it here rather
         # than at each call site. Best-effort: telemetry never breaks a turn.
-        try:
-            from jaeger_ai.core.runtime.usage_stats import record_tool
-            record_tool(name, ok=_ok, elapsed=elapsed)
-        except Exception:  # noqa: BLE001
-            pass
+        self.callbacks.on_record_tool(name, ok=_ok, elapsed=elapsed)
 
         # File-mutation verifier bookkeeping: remember failures per
         # (tool, path); a later SUCCESS on the same target supersedes.
