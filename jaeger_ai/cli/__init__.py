@@ -88,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         "  capability  validate a capability package (`capability validate`)\n"
         "  provider    report live vs code-supported providers (`provider doctor`)\n"
         "  device      inspect generic device/node contract (`device inspect`)\n"
+        "  voice       talk to the resident Entity (`voice status`, `voice --wav`)\n"
         "  dev         developer toolbox (dev TUI, build/run, health, stop)\n"
         "\nrun `jaeger <command> --help` for a command's own options."
     )
