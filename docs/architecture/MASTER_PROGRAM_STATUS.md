@@ -70,7 +70,7 @@ ONE REQUEST
 | **GATE F** | **WS 22** | **Documentation Truth Pass** | **COMPLETED** | `ff5ab919` | 1/1 architecture truth doc | Canonical `ARCHITECTURE.md` classifies IMPLEMENTED / EXPERIMENTAL / PLANNED; unit tests are not production proof |
 | **GATE F** | **WS 23** | **Developer / Platform API** | **COMPLETED** | `1279edfa` | 6/6 platform API | `jaeger capability validate`, `jaeger provider doctor`, `jaeger device inspect` |
 | **GATE F** | **WS 24** | **Clean-Machine Release Validation** | **COMPLETED** | `97a8f5dc` | 3/3 isolated state | Isolated `JAEGER_STATE_DIR` identity + Gateway store; not a wiped macOS VM |
-| **GATE F** | **WS 25** | **Public-Release / Contributor Hardening** | **COMPLETED** | *(this commit)* | 3/3 contributor files | CONTRIBUTING, extension guide, PR/issue templates |
+| **GATE F** | **WS 25** | **Public-Release / Contributor Hardening** | **COMPLETED** | `47d454df` | 3/3 contributor files | CONTRIBUTING, extension guide, PR/issue templates |
 
 ---
 
@@ -101,6 +101,7 @@ ONE REQUEST
 | WS-22 | `ff5ab919` |
 | WS-23 | `1279edfa` |
 | WS-24 | `97a8f5dc` |
+| WS-25 | `47d454df` |
 | Architecture | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Tests | [TEST_ARCHITECTURE.md](TEST_ARCHITECTURE.md) |
 
