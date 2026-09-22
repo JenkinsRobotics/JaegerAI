@@ -57,7 +57,8 @@ ONE REQUEST
 | **GATE D** | **WS 17** | **External Agent Evaluation Suite** | **COMPLETED** | `20002f20` | 6/6 eval suite, 89/89 combined | ExternalEvalHarness for BFCL, SWE-bench, Terminal-Bench, and AgentDojo; independent grading; 5-category failure classification; markdown evaluation reporting |
 
 
-| **GATE D** | **WS 18** | **Fault Injection, Resilience & Soak** | **COMPLETED** | *pending* | 5/5 resilience, 94/94 combined | FaultInjectionEngine (timeout, 500 error, kill mid-effect idempotency, durable task recovery, 5-turn leak-free soak testing) |
+| **GATE D** | **WS 18** | **Fault Injection, Resilience & Soak** | **COMPLETED** | `4bb0e5c4` | 5/5 resilience, 94/94 combined | FaultInjectionEngine (timeout, 500 error, kill mid-effect idempotency, durable task recovery, 5-turn leak-free soak testing) |
+
 
 | **GATE E** | **WS 19** | **Security Hardening** | PENDING | — | — | Threat model, CSRF, passkeys, sandbox traversal |
 | **GATE E** | **WS 20** | **Repository Architecture Cleanup** | PENDING | — | — | Invert jaeger-agent dependencies, remove dead code |
