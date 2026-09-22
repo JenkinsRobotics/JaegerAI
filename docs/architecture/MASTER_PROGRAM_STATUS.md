@@ -48,7 +48,7 @@ ONE REQUEST
 | **GATE B** | **WS 9** | **Typed Effect & Verification Model** | **COMPLETED** | `bdd4f47e` | 5/5 effects, 55/55 Gate B suite | EffectIntent -> EffectLedger -> Execution -> EffectResult -> VerificationResult; connected IDs; disk probes; tool ok != verified |
 | **GATE C** | **WS 10** | **Programmable Capability Layer** | **COMPLETED** | `9993b417` | 3/3 capabilities, 58/58 combined | CapabilityManifest (permissions, deps, tools, rollback, verification); CapabilityRegistry; installed, verified & removed without core edits |
 | **GATE C** | **WS 11** | **Capability Lifecycle & Self-Improvement** | **COMPLETED** | `3a41bd85` | 4/4 lifecycle, 62/62 combined | Candidate -> Sandbox -> Static AST Checks -> Unit Tests -> Evaluation -> Review -> Verified -> Installed; provenance tracking |
-| **GATE C** | **WS 12** | **Multi-Agent Architecture** | PENDING | — | — | RuntimeHost with isolated EntityRuntime instances |
+| **GATE C** | **WS 12** | **Multi-Agent Architecture** | **COMPLETED** | `in-progress` | 4/4 multi-agent, 66/66 combined | RuntimeHost (multi-entity concurrent hosting); private memory isolation; scoped delegation; cancellation; AgentMessage bus |
 | **GATE C** | **WS 13** | **Generic Device / Node Architecture** | PENDING | — | — | Device pairing, capabilities, and telemetry |
 | **GATE C** | **WS 14** | **Provider Abstraction & Cognition Profiles** | PENDING | — | — | Canonical runtime inventory & cognition profiles |
 | **GATE C** | **WS 15** | **Durable Background Work & Scheduling** | PENDING | — | — | Resilient background jobs surviving restart |
