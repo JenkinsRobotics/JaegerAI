@@ -51,7 +51,7 @@ import inspect
 import json
 import sys
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import IntEnum
 from pathlib import Path
 from typing import Any, Protocol, TypeVar, cast, runtime_checkable
@@ -136,12 +136,16 @@ class PermissionRequest:
             (``create_text_file``, ``send_email``, ...).
         summary: Optional one-line description shown to a human in the
             confirmation UI.
+        arguments: The arguments of this particular call. ``summary``
+            describes the operation; these say what it will touch, which
+            is what a human is actually being asked to approve.
     """
 
     tier: PermissionTier
     skill: str
     operation: str
     summary: str = ""
+    arguments: dict[str, Any] = field(default_factory=dict, compare=False, hash=False)
 
 
 @runtime_checkable
@@ -577,11 +581,20 @@ def requires_tier(
     )
 
     def decorate(fn: F) -> F:
+        signature = inspect.signature(fn)
+
+        def for_call(args: tuple[Any, ...], kwargs: dict[str, Any]) -> PermissionRequest:
+            try:
+                bound = signature.bind_partial(*args, **kwargs)
+            except TypeError:
+                return request_template
+            return replace(request_template, arguments=dict(bound.arguments))
+
         if asyncio.iscoroutinefunction(fn):
 
             @functools.wraps(fn)
             async def async_wrap(*args: Any, **kwargs: Any) -> Any:
-                current_policy().check(request_template)
+                current_policy().check(for_call(args, kwargs))
                 return await fn(*args, **kwargs)
 
             # Tag the wrapper so introspection tools can recover the tier.
@@ -590,7 +603,7 @@ def requires_tier(
 
         @functools.wraps(fn)
         def sync_wrap(*args: Any, **kwargs: Any) -> Any:
-            current_policy().check(request_template)
+            current_policy().check(for_call(args, kwargs))
             return fn(*args, **kwargs)
 
         sync_wrap.__lilith_permission__ = request_template  # type: ignore[attr-defined]
