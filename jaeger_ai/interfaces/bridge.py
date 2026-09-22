@@ -734,6 +734,13 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
     lay = getattr(boot, "layout", None)
     if what == "contract":
         return _integration_contract()
+    if what == "status":
+        return {
+            "ok": True,
+            "agent_name": _agent_name(boot),
+            "display_name": _display_name(boot),
+            "model": _model_name(boot),
+        }
     if what == "background_messages":
         from jaeger_ai.core.sessions import get_store
         store = get_store(lay)
@@ -2474,7 +2481,31 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
                     ):
                         from jaeger_ai.core.runtime.native_turns import NativeTurns
                         NativeTurns(ctx.layout.run_dir).bind_tool_grant(session, req.get("allowed_tools"))
-                        result = run_for_voice(ctx.client, current_prompt, **voice_kwargs)
+                        import concurrent.futures
+                        import contextvars
+
+                        turn_timeout_s = 120.0
+                        try:
+                            from jaeger_ai.core.instance.schemas import Config, load_yaml
+                            cfg = load_yaml(ctx.layout.config_path, Config)
+                            if cfg and getattr(cfg, "external_model", None):
+                                turn_timeout_s = max(float(getattr(cfg.external_model, "timeout_s", 60.0)) * 2, 120.0)
+                        except Exception:
+                            pass
+
+                        exec_context = contextvars.copy_context()
+                        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                        fut = pool.submit(exec_context.run, run_for_voice, ctx.client, current_prompt, **voice_kwargs)
+                        try:
+                            result = fut.result(timeout=turn_timeout_s)
+                            pool.shutdown(wait=False)
+                        except concurrent.futures.TimeoutError:
+                            pool.shutdown(wait=False, cancel_futures=True)
+                            result = {
+                                "text": "",
+                                "error": f"Turn execution timed out after {turn_timeout_s:.0f}s",
+                                "halt_reason": "timeout",
+                            }
                 deltas.flush()
 
                 ans = (result.get("text") or "").strip()

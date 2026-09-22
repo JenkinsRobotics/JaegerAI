@@ -6,6 +6,12 @@ import pytest
 from jaeger_ai.features.webui.server_controls import ServerControls, SERVICES
 
 
+def test_webui_ready_probe_does_not_require_auth():
+    """Auth-gated /api/profiles returns 401 and was marking a live WebUI down."""
+    assert SERVICES["webui"][2] == 8790
+    assert SERVICES["webui"][3] == "/health"
+
+
 @pytest.fixture
 def controls(tmp_path, monkeypatch):
     calls = []
@@ -74,3 +80,15 @@ def test_partial_failure_is_visible_and_other_services_continue(controls, monkey
     result = controls.change('all', 'start')
     assert not result['ok'] and 'test failure' in result['error']
     assert seen == list(SERVICES)
+
+
+def test_change_reset_delegates_to_stack_reset(controls, monkeypatch):
+    called = []
+    monkeypatch.setattr(
+        "jaeger_ai.core.runtime.stack.stack_reset",
+        lambda timeout_s=60.0: called.append(timeout_s) or {"ok": True, "step": "completed"},
+    )
+    result = controls.change("all", "reset")
+    assert result["ok"] is True
+    assert called == [60.0]
+
