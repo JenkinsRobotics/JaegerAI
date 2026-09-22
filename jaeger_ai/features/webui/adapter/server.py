@@ -317,8 +317,11 @@ class RunnerBroker:
         from jaeger_ai.core.frameworks.run_input import inline_webui_text_attachments
 
         session_id = str(request.get("session_id") or "").strip()
+        attachments = request.get("attachments")
+        if not isinstance(attachments, list) or not attachments:
+            attachments = self._gateway_attachments(session_id)
         text = inline_webui_text_attachments(
-            request.get("message"), request.get("attachments")
+            request.get("message"), attachments
         )
         if not text or not session_id:
             raise ValueError("message and session_id are required")
@@ -509,6 +512,35 @@ class RunnerBroker:
         if name.endswith(":cloud") or name.endswith("-cloud"):
             return "ollama"
         return "ollama"
+
+    def _gateway_attachments(self, session_id: str) -> list[dict[str, Any]]:
+        sid = str(session_id or "").strip()
+        if not sid:
+            return []
+        try:
+            from urllib.request import Request, urlopen
+            url = f"http://127.0.0.1:8810/v1/sessions/{sid}/attachments"
+            req = Request(url, headers={"Accept": "application/json"})
+            with urlopen(req, timeout=4) as resp:
+                data = json.loads(resp.read().decode("utf-8") or "{}")
+            rows = data.get("attachments") if isinstance(data, dict) else None
+            if not isinstance(rows, list):
+                return []
+            out = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                mime = str(row.get("mime_type") or "")
+                out.append({
+                    "path": row.get("safe_path"),
+                    "name": row.get("original_filename") or row.get("stored_filename"),
+                    "mime": mime,
+                    "is_image": mime.startswith("image/"),
+                    "attachment_id": row.get("attachment_id"),
+                })
+            return out
+        except Exception:
+            return []
 
     def _session_snapshot(self, session_id: str, prompt: str, answer: str) -> dict[str, Any]:
         rows = self.bridge.query("load_session", {"id": session_id, "resume": False})

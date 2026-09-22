@@ -216,6 +216,31 @@ def route(handler, parsed, method: str) -> bool:
     if path in ("/api/jaeger/runtime/status", "/api/runtime/status"):
         return _proxy(handler, "GET", "/v1/runtime/status")
 
+    if method == "GET" and path in ("/api/jaeger/runtime/frameworks", "/api/runtime/frameworks"):
+        return _proxy(handler, "GET", "/v1/runtime/frameworks")
+
+    if method == "GET" and path in ("/api/jaeger/runtime/models", "/api/runtime/models"):
+        return _proxy(handler, "GET", "/v1/runtime/models")
+
+    if method == "GET" and path in ("/api/jaeger/runtime/capabilities", "/api/runtime/capabilities"):
+        return _proxy(handler, "GET", "/v1/runtime/capabilities")
+
+    if method == "GET" and path == "/api/models":
+        from api.profiles import get_active_profile_name
+        from jaeger_ai.contract.frameworks import UnknownFramework, canonical_runtime
+        try:
+            runtime = canonical_runtime(get_active_profile_name() or "jaeger")
+        except UnknownFramework:
+            runtime = "jaeger"
+        if runtime == "jaeger":
+            try:
+                from jaeger_ai.core.runtime.truth import webui_model_catalog
+                from api.helpers import j
+                j(handler, webui_model_catalog())
+                return True
+            except Exception:
+                return False
+
     if method == "GET" and path in ("/api/jaeger/approvals", "/v1/approvals"):
         return _proxy(handler, "GET", "/v1/approvals")
 
@@ -251,6 +276,13 @@ def route(handler, parsed, method: str) -> bool:
     # /v1/sessions/{id}/stream — long-lived, handled separately
     if len(parts) == 2 and parts[1] == "stream" and method == "GET":
         return _proxy_stream(handler, session_id, query)
+
+    if len(parts) == 2 and parts[1] == "attachments":
+        if method == "GET":
+            return _proxy(handler, "GET", f"/v1/sessions/{session_id}/attachments")
+        if method == "POST":
+            return _proxy(handler, "POST", f"/v1/sessions/{session_id}/attachments", _body_bytes(handler))
+        return False
 
     # /v1/sessions/{id}/{turns|cancel|reconcile}
     if len(parts) == 2 and method == "POST" and parts[1] in {"turns", "cancel", "reconcile"}:

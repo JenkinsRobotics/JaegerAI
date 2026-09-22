@@ -200,15 +200,27 @@ def _gateway_upload_dir(session_id: str) -> Path:
 
 def _record_gateway_upload(session_id: str, dest: Path, mime: str) -> None:
     try:
-        from jaeger_ai.core.gateway.session_store import GatewaySessionStore
-        from jaeger_ai.core.instance.instance import operator_state_root
-        store = GatewaySessionStore(operator_state_root() / "gateway_sessions.sqlite3")
-        rel = str(dest)
-        store.append_message(
-            session_id,
-            "user",
-            f"[uploaded file] {dest.name} ({mime}) stored at {rel}",
+        import hashlib
+        from urllib.request import Request, urlopen
+        from api.jaeger_sessions import gateway_base
+        digest = hashlib.sha256(dest.read_bytes()).hexdigest()
+        payload = json.dumps({
+            "original_filename": dest.name.split("_", 1)[-1] if "_" in dest.name else dest.name,
+            "stored_filename": dest.name,
+            "safe_path": str(dest),
+            "mime_type": mime,
+            "size_bytes": dest.stat().st_size,
+            "sha256": digest,
+            "provenance": "remote_upload",
+        }).encode("utf-8")
+        req = Request(
+            gateway_base() + "/v1/sessions/" + session_id + "/attachments",
+            data=payload,
+            method="POST",
+            headers={"Content-Type": "application/json", "Accept": "application/json"},
         )
+        with urlopen(req, timeout=8) as resp:
+            resp.read()
     except Exception:
         pass
 

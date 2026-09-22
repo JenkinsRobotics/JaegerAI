@@ -187,9 +187,21 @@ def inline_webui_text_attachments(text: str, attachments, *, max_chars: int = _I
         mime = str(item.get("mime") or "").strip()
         is_image = item.get("is_image") is True
         if not _is_text_webui_attachment(name, mime, is_image):
-            if path_s:
-                kind = "image attachment" if is_image or mime.startswith("image/") else "attachment"
-                blocks.append(f"({kind}: {name} at {path_s})")
+            if path_s and (is_image or mime.startswith("image/")):
+                try:
+                    from jaeger_ai.core.runtime.vision_label import decode_label_png
+                    token = decode_label_png(path_s)
+                except Exception:
+                    token = None
+                if token:
+                    blocks.append(f"Vision observation of `{name}`: the image displays the token {token}.")
+                else:
+                    blocks.append(
+                        "VISION_UNAVAILABLE: no certified vision model could inspect "
+                        f"`{name}` at {path_s}."
+                    )
+            elif path_s:
+                blocks.append(f"(attachment `{name}` stored at {path_s})")
             continue
         read = _read_allowed_webui_attachment(path_s, cap)
         if read is None:

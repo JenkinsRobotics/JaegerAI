@@ -9,7 +9,12 @@ import threading
 import time
 from urllib.request import Request, urlopen
 
-from jaeger_ai.contract.frameworks import DEBATE_MEMBERS, FRAMEWORKS, SOLO_RUNTIMES
+from jaeger_ai.contract.frameworks import (
+    DEBATE_MEMBERS,
+    FRAMEWORKS,
+    PRODUCT_DEFAULT_RUNTIME,
+    SOLO_RUNTIMES,
+)
 
 #: (profile, runtime, display_name) per framework, in contract order.
 #: Kept as a tuple-of-tuples for the call sites that unpack it positionally.
@@ -66,6 +71,6 @@ class ProfileCatalog:
                     runtime_status=('Ready' if states[f.runtime] else
                         'Unavailable: ' + ', '.join(missing) if f.composes else 'Unavailable'),
                     skill_count=None, enabled_skills=None, total_skills=None,
-                    visible=True, is_default=f.profile == 'default') for f in FRAMEWORKS]
+                    visible=True, is_default=f.runtime == PRODUCT_DEFAULT_RUNTIME) for f in FRAMEWORKS]
                 self.expires = time.monotonic() + self.ttl
             return [dict(row) for row in self.cached]

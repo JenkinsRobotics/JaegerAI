@@ -254,6 +254,29 @@ webui:
     return {"path": str(dst), "source": source, "bytes": dst.stat().st_size}
 
 
+def ensure_webui_env_dotenv(profile_home: Path) -> None:
+    """Ensure .env does not poison host-side execution with container-internal Ollama IPs."""
+    env_file = profile_home / ".env"
+    if not env_file.is_file():
+        return
+    try:
+        raw = env_file.read_text(encoding="utf-8")
+        locked_ollama = OLLAMA_URL
+        changed = False
+        for bad in (
+            "http://100.78.245.49:11434",
+            "http://192.168.65.1:11434",
+        ):
+            if bad in raw:
+                raw = raw.replace(bad + "/v1", locked_ollama + "/v1")
+                raw = raw.replace(bad, locked_ollama)
+                changed = True
+        if changed:
+            env_file.write_text(raw, encoding="utf-8")
+    except Exception:
+        pass
+
+
 def ensure_profile_state_schemas(agent_home: Path, shared_profiles: Path | None = None) -> dict[str, Any]:
     """Ensure every profile ``state.db`` has the ``source`` column WebUI requires."""
     fixed: list[str] = []
@@ -313,6 +336,16 @@ def prepare_webui_home(
                 named_written[folder] = label
     schema = ensure_agent_state_schema(agent)
     config = ensure_webui_config_yaml(agent)
+    ensure_webui_env_dotenv(agent)
+    ensure_webui_env_dotenv(hermes)
+    if (hermes / "profiles").is_dir():
+        for p in (hermes / "profiles").iterdir():
+            if p.is_dir():
+                ensure_webui_env_dotenv(p)
+    # Default active profile to jaeger so fresh browser sessions start on Jaeger AI
+    active_profile_file = agent / "active_profile"
+    if not active_profile_file.exists():
+        active_profile_file.write_text("jaeger\n", encoding="utf-8")
     # A catalog entry must be selectable even on a fresh installation. Seed
     # only model selection, never another profile's credentials or history.
     import yaml

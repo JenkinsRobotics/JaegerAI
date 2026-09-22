@@ -46,7 +46,7 @@ _ISOLATED_PROFILE_SHAPE_WITHOUT_OPT_IN_WARNING_EMITTED = False
 _ISOLATED_PROFILE_TRUTHY_VALUES = frozenset({'1', 'true', 'yes', 'on'})
 
 # ── Module state ────────────────────────────────────────────────────────────
-_active_profile = 'default'
+_active_profile = 'jaeger'
 _profile_lock = threading.Lock()
 _loaded_profile_env_keys: set[str] = set()
 
@@ -362,7 +362,7 @@ def _read_active_profile_file() -> str:
                 return name
         except Exception:
             logger.debug("Failed to read active profile file")
-    return 'default'
+    return 'jaeger'
 
 
 # ── Public API ──────────────────────────────────────────────────────────────
@@ -2031,7 +2031,7 @@ def _build_profile_rows_fast() -> list | None:
     if default_home.is_dir():
         # Upstream hardcodes the base home's display name to "default" even when
         # the directory is literally ".hermes" — match that exactly.
-        rows.append(_row(default_home, 'default', True))
+        rows.append(_row(default_home, 'default', False))
 
     profiles_root = _get_profiles_root()
     if profiles_root.is_dir():
@@ -2040,7 +2040,7 @@ def _build_profile_rows_fast() -> list | None:
                 continue
             if not _UPSTREAM_PROFILE_ID_RE.match(entry.name):
                 continue
-            rows.append(_row(entry, entry.name, False))
+            rows.append(_row(entry, entry.name, entry.name == 'jaeger'))
 
     return rows
 
@@ -2179,7 +2179,7 @@ def list_profiles_api() -> list:
                 'name': p.name,
                 'display_name': _profile_display_name_from_meta(p.path, p.name),
                 'path': str(p.path),
-                'is_default': p.is_default,
+                'is_default': p.name == 'jaeger',
                 'is_active': p.name == active,
                 'gateway_running': p.gateway_running,
                 'model': p.model,

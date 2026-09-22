@@ -64,6 +64,11 @@ def _route(mod, path, method="GET"):
     ("/api/jaeger/approvals/ap_1", "POST", ("POST", "/v1/approvals/ap_1")),
     ("/api/jaeger/approvals", "GET", ("GET", "/v1/approvals")),
     ("/v1/approvals", "GET", ("GET", "/v1/approvals")),
+    ("/api/jaeger/runtime/frameworks", "GET", ("GET", "/v1/runtime/frameworks")),
+    ("/api/jaeger/runtime/models", "GET", ("GET", "/v1/runtime/models")),
+    ("/api/jaeger/runtime/capabilities", "GET", ("GET", "/v1/runtime/capabilities")),
+    ("/api/jaeger/sessions/abc/attachments", "GET", ("GET", "/v1/sessions/abc/attachments")),
+    ("/api/jaeger/sessions/abc/attachments", "POST", ("POST", "/v1/sessions/abc/attachments")),
 ])
 def test_routes_map_to_audited_gateway_paths(overlay, path, method, expected):
     assert _route(overlay, path, method) is True
@@ -89,7 +94,7 @@ def test_stream_forwards_the_resume_cursor(overlay):
 
 def test_unrelated_paths_are_declined(overlay):
     """Returning False lets the WebUI's own handlers run."""
-    assert _route(overlay, "/api/models") is False
+    assert _route(overlay, "/api/not-a-jaeger-route") is False
     assert overlay._calls == []
 
 

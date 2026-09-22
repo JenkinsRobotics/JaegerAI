@@ -428,8 +428,209 @@ XAI_CURATED: tuple[str, ...] = (
     "grok-3",
 )
 
+# ── 5. Canonical Runtime Inventory (Phase B) ──────────────────────────────
+import threading
+import time
+
+_CANONICAL_CACHE: dict[str, Any] = {}
+_CANONICAL_CACHE_TS: float = 0.0
+_CANONICAL_LOCK = threading.Lock()
+
+
+def canonical_runtime_inventory(
+    instance_root: Any | None = None,
+    *,
+    refresh: bool = False,
+    cached_only: bool = False,
+) -> dict[str, Any]:
+    """Return the unified, credential-aware provider and model runtime inventory.
+
+    Consolidates:
+      1. Ollama local and Ollama cloud models via live /api/tags probe
+      2. Local LM Studio server via /v1/models probe
+      3. Certified roles (REACT, CHAT, VISION) from model_capabilities / provider_certification
+      4. Cloud providers (Anthropic, OpenAI, Gemini, xAI, etc.) with verified credentials
+
+    Unavailable servers or providers without credentials appear as unavailable
+    and do not expose selectable models.
+    """
+    global _CANONICAL_CACHE, _CANONICAL_CACHE_TS
+    with _CANONICAL_LOCK:
+        now = time.monotonic()
+        if not refresh and _CANONICAL_CACHE and (cached_only or (now - _CANONICAL_CACHE_TS < 15.0)):
+            return dict(_CANONICAL_CACHE)
+
+    from jaeger_ai.core.entity.model_capabilities import capabilities_for
+    from jaeger_ai.core.instance.provider_certification import load_matrix, select_production_model
+
+    # Determine certified production baseline
+    try:
+        matrix = load_matrix(instance_root)
+        _, default_model_name = select_production_model(matrix)
+    except Exception:
+        default_model_name = "kimi-k2.7-code:cloud"
+
+    groups: list[dict[str, Any]] = []
+
+    # 1. Ollama (split into Cloud and Local groups)
+    ollama_res = discover_ollama()
+    ollama_online = bool(ollama_res.get("online"))
+    all_ollama_models = ollama_res.get("models") or []
+
+    cloud_models: list[dict[str, Any]] = []
+    local_models: list[dict[str, Any]] = []
+
+    for m in all_ollama_models:
+        name = str(m.get("name") or "")
+        if not name or "embed" in name.lower():
+            continue
+        caps = capabilities_for(name)
+        ollama_caps = list(m.get("capabilities") or [])
+        certified_roles = [r.upper() for r, s in caps.items() if s == "pass"]
+        failed_roles = [r.upper() for r, s in caps.items() if s == "fail"]
+        
+        badge = ""
+        if "REACT" in certified_roles:
+            badge = "REACT ✓"
+        elif "REACT" in failed_roles:
+            badge = "REACT ✗"
+        elif "CHAT" in certified_roles:
+            badge = "CHAT ✓"
+
+        multimodal = "vision" in ollama_caps or "VISION" in certified_roles or "vision" in name.lower() or "v:" in name.lower()
+        tool_use = "tools" in ollama_caps or "REACT" in certified_roles
+
+        display_label = f"{name} [{badge}]" if badge else name
+        is_cloud = bool(m.get("remote_host")) or name.endswith(":cloud") or name.endswith("-cloud")
+
+        model_entry = {
+            "id": f"@ollama-cloud:{name}" if is_cloud else f"@ollama-local:{name}",
+            "name": name,
+            "label": display_label,
+            "size_gb": m.get("size_gb"),
+            "capabilities": ollama_caps,
+            "certified_roles": certified_roles,
+            "failed_roles": failed_roles,
+            "multimodal": multimodal,
+            "tool_use": tool_use,
+            "certified_badge": badge,
+        }
+
+        if is_cloud:
+            cloud_models.append(model_entry)
+        else:
+            local_models.append(model_entry)
+
+    # Add Ollama Cloud group
+    groups.append({
+        "provider": "Ollama Cloud",
+        "provider_id": "ollama-cloud",
+        "status": "online" if ollama_online and cloud_models else ("online" if ollama_online else "unavailable"),
+        "credentials_available": ollama_online,
+        "endpoint": "https://ollama.com",
+        "models": cloud_models,
+        "host": "cloud",
+        "base_url": "http://127.0.0.1:11434",
+    })
+
+    # Add Ollama Local group
+    groups.append({
+        "provider": "Ollama Local",
+        "provider_id": "ollama-local",
+        "status": "online" if ollama_online and local_models else ("online" if ollama_online else "unavailable"),
+        "credentials_available": ollama_online,
+        "endpoint": "http://127.0.0.1:11434",
+        "models": local_models,
+        "host": "local",
+        "base_url": "http://127.0.0.1:11434",
+    })
+
+    # 2. LM Studio
+    lm_res = discover_lmstudio()
+    lm_online = bool(lm_res.get("online"))
+    lm_models = [
+        {
+            "id": f"@lmstudio:{m['name']}",
+            "name": m["name"],
+            "label": m["name"],
+            "capabilities": ["completion"],
+            "certified_roles": [],
+            "multimodal": False,
+            "tool_use": False,
+            "certified_badge": "",
+        }
+        for m in (lm_res.get("models") or [])
+    ]
+    groups.append({
+        "provider": "LM Studio",
+        "provider_id": "lmstudio",
+        "status": "online" if lm_online else "unavailable",
+        "credentials_available": lm_online,
+        "endpoint": LMSTUDIO_URL,
+        "models": lm_models,
+        "error": None if lm_online else "LM Studio server offline",
+    })
+
+    # 3. Cloud Providers with Credential Verification
+    from jaeger_ai.core.models.external_model import ExternalModelConfig, resolve_api_key
+
+    cloud_registry = [
+        ("anthropic", "Anthropic", ANTHROPIC_CURATED),
+        ("openai", "OpenAI", OPENAI_CURATED),
+        ("gemini", "Google Gemini", GEMINI_CURATED),
+        ("xai", "xAI Grok", XAI_CURATED),
+    ]
+
+    for p_id, p_label, curated in cloud_registry:
+        key = resolve_api_key(ExternalModelConfig(provider=p_id), layout=instance_root)
+        has_key = bool(key)
+        models = []
+        if has_key:
+            for m_name in curated:
+                caps = capabilities_for(m_name)
+                c_roles = [r.upper() for r, s in caps.items() if s == "pass"]
+                badge = "REACT ✓" if "REACT" in c_roles else ("CHAT ✓" if "CHAT" in c_roles else "")
+                lbl = f"{m_name} [{badge}]" if badge else m_name
+                models.append({
+                    "id": f"@{p_id}:{m_name}",
+                    "name": m_name,
+                    "label": lbl,
+                    "capabilities": ["completion", "tools"],
+                    "certified_roles": c_roles,
+                    "multimodal": "vision" in m_name.lower() or "flash" in m_name.lower() or "4o" in m_name.lower(),
+                    "tool_use": True,
+                    "certified_badge": badge,
+                })
+
+        groups.append({
+            "provider": p_label,
+            "provider_id": p_id,
+            "status": "online" if has_key else "unavailable",
+            "credentials_available": has_key,
+            "endpoint": f"cloud:{p_id}",
+            "models": models,
+            "error": None if has_key else "No credential configured",
+        })
+
+    active_provider = "ollama-cloud" if cloud_models else ("ollama-local" if local_models else "ollama")
+    default_full_id = f"@{active_provider}:{default_model_name}"
+
+    result = {
+        "active_provider": active_provider,
+        "default_model": default_full_id,
+        "groups": groups,
+    }
+
+    with _CANONICAL_LOCK:
+        _CANONICAL_CACHE = result
+        _CANONICAL_CACHE_TS = time.monotonic()
+
+    return result
+
+
 __all__ = [
     "DiscoveredModel",
+    "canonical_runtime_inventory",
     "discover_all",
     "discover_jaeger",
     "discover_local_gguf",
@@ -448,3 +649,4 @@ __all__ = [
     "GEMINI_CURATED",
     "XAI_CURATED",
 ]
+

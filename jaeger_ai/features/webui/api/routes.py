@@ -14858,6 +14858,7 @@ def handle_get(handler, parsed) -> bool:
                 "name": active_profile_name,
                 "path": _active_home,
                 "is_default": profiles_api._is_root_profile(active_profile_name),
+                "is_product_default": str(active_profile_name or "") in {"jaeger"},
                 "default_workspace": _profile_default_workspace,
             },
         )
