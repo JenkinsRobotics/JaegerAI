@@ -36,8 +36,8 @@ ONE REQUEST
 
 | Gate | Workstream | Description | Status | Commits | Tests Passing | Dependencies / Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **GATE A** | **WS 1** | **WebUI Runtime Truth & Acceptance Suite** | **COMPLETED** | *Pending commit 1* | 9/9 acceptance, 6/6 runtime truth, 25/25 proxy | Verified live DOM == SQLite == Provider == Multimodal |
-| **GATE A** | **BASE** | **Baseline Evaluation Snapshot** | **IN PROGRESS** | *Pending* | Snapshot captures | Immutable baseline record before WS 2 |
+| **GATE A** | **WS 1** | **WebUI Runtime Truth & Acceptance Suite** | **COMPLETED** | `675fb3e7` | 9/9 acceptance, 6/6 runtime truth, 25/25 proxy | Verified live DOM == SQLite == Provider == Multimodal |
+| **GATE A** | **BASE** | **Baseline Evaluation Snapshot** | **COMPLETED** | *Pending commit* | 12/12 Pinocchio, 17/17 UPAA, 63/63 Contract | Immutable baseline captured in BASELINE_EVALUATION_SNAPSHOT.md |
 | **GATE B** | **WS 2** | **Execution-Model Consolidation** | PENDING | — | — | One canonical run lifecycle |
 | **GATE B** | **WS 3** | **Control-Plane Consolidation** | PENDING | — | — | Gateway as control plane, EntityRuntime as brain |
 | **GATE B** | **WS 4** | **Typed Contracts & Versioned Schemas** | PENDING | — | — | Pydantic v2 wire/storage schemas |

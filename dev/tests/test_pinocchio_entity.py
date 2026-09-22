@@ -148,8 +148,9 @@ def test_acceptance_d_heartbeat_truth(isolated_state_dir: Path):
     mock_layout.memory_dir = isolated_state_dir / "memory"
 
     # Quiet beat (no briefing due, no urgent work)
+    from datetime import datetime
     with patch.object(EntityRuntime, "get_singleton", return_value=runtime):
-        event, wake_cognition, prompt = hb.execute_heartbeat_event(mock_layout)
+        event, wake_cognition, prompt = hb.execute_heartbeat_event(mock_layout, now=datetime(2026, 1, 1, 14, 0, 0))
 
     assert event.event_type == EventType.SYSTEM_HEARTBEAT.value
     assert event.actor == "system:heartbeat"
