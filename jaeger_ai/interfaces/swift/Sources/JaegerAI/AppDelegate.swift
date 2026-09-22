@@ -42,13 +42,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                          progress: 0.12)
             splash.complete("interface", detail: "Native shell ready", progress: 0.22)
 
+            splash.start("stack", "Jaeger stack",
+                         detail: "Bringing host services up (Gateway, Ollama, Agent bridge, WebUI)…",
+                         progress: 0.24)
+            do {
+                _ = try await StackManager.shared.up()
+                splash.complete("stack", detail: "Host services online", progress: 0.32)
+            } catch {
+                NSLog("[AppDelegate] stack up failed: \(error)")
+                splash.fail("stack", detail: error.localizedDescription, progress: 0.32)
+            }
+
             // Try to connect to the agent right away.  ``tryConnect``
             // logs + records lastError on failure instead of throwing —
             // a missing bridge is the expected state for an operator
             // who has not started the agent yet, not an exception.
             splash.start("bridge", "Agent bridge",
-                         detail: "Starting JaegerAI bridge and waiting for model readiness",
-                         progress: 0.32)
+                         detail: "Connecting to JaegerAI bridge and waiting for model readiness",
+                         progress: 0.36)
             await AgentBridge.shared.tryConnect()
             if AgentBridge.shared.needsOnboarding {
                 await splash.finish("Setup")
@@ -229,6 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         shutdownStarted = true
         Task { @MainActor in
             await AgentBridge.shared.shutdownForQuit()
+            _ = try? await StackManager.shared.down()
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

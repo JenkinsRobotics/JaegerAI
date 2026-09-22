@@ -614,8 +614,26 @@ private struct AppPage: View {
                 .font(.system(size: 12)).padding(.top, 8)
         }
         Spacer().frame(height: 16)
+        StartupSection()
+        Spacer().frame(height: 16)
         UpdatesSection(store: store)
     }
+
+private struct StartupSection: View {
+    @ObservedObject private var launch = LaunchAtLogin.shared
+
+    var body: some View {
+        HUD.section("Startup")
+        HStack(spacing: 10) {
+            Toggle("Start Jaeger at login", isOn: $launch.isEnabled)
+                .tint(HUD.accent)
+                .font(.system(size: 12))
+                .foregroundStyle(HUD.ink)
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+}
 
     @ViewBuilder private func groupSection(_ group: SettingGroup) -> some View {
         let basic = group.settings.filter { !$0.advanced }

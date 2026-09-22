@@ -7,6 +7,7 @@ struct ServerStatus: Decodable, Identifiable {
     let ready: Bool
     let configured: Bool
     let state: String
+    let stale: Bool?
 }
 
 struct ServerReply: Decodable {
@@ -43,6 +44,9 @@ final class ServerControls: ObservableObject {
             let errorPipe = Pipe()
             process.executableURL = URL(fileURLWithPath: BridgeProcess.jaegerPath())
             process.arguments = ["webui", "servers"] + arguments
+            // Accessory apps have no stdin. Python 3.12 fatals on EBADF during
+            // init_sys_streams if fd 0 is inherited closed.
+            process.standardInput = FileHandle.nullDevice
             process.standardOutput = outputPipe
             process.standardError = errorPipe
             try process.run()
@@ -94,6 +98,22 @@ final class ServerControls: ObservableObject {
         busy = false
     }
 
+    func resetStack() async {
+        guard !busy else { return }
+        busy = true
+        error = nil
+        do {
+            let reply = try await StackManager.shared.reset()
+            if !reply.ok {
+                self.error = reply.error ?? "Stack reset failed verification"
+            }
+            await refresh()
+        } catch {
+            self.error = error.localizedDescription
+        }
+        busy = false
+    }
+
     func openWebUI() async {
         do { NSWorkspace.shared.open(try await WebUIEndpoint.resolve()) }
         catch { self.error = error.localizedDescription }
@@ -118,8 +138,16 @@ struct ServerControlsView: View {
             }
             ForEach(controls.services) { service in
                 HStack(spacing: 6) {
-                    Circle().fill(service.ready ? Color.green : Color.orange).frame(width: 7, height: 7)
+                    Circle().fill(service.ready ? Color.green : (service.configured ? Color.orange : Color.gray)).frame(width: 7, height: 7)
                     Text(service.name).font(.system(size: 12))
+                    if service.stale == true {
+                        Text("STALE")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Capsule().fill(Color.purple))
+                    }
                     Spacer()
                     Text(service.state).font(.system(size: 10)).foregroundStyle(.secondary)
                     Menu {
@@ -136,6 +164,8 @@ struct ServerControlsView: View {
             HStack {
                 Button("Start All") { change("start", "all") }
                 Button("Stop All") { change("stop", "all") }
+                Button("Reset") { Task { await controls.resetStack() } }
+                    .help("Restart entire Jaeger stack and verify with a Gateway test turn")
                 Spacer()
                 Button { Task { await controls.openWebUI() } } label: {
                     Image(systemName: "globe")
