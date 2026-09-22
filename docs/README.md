@@ -11,6 +11,8 @@ them without creating another copy.
 | Document | Purpose |
 | --- | --- |
 | [Project README](../README.md) | Installation and product overview |
+| [Contributing](../CONTRIBUTING.md) | Branch policy, test tiers, architecture rules |
+| [Extension guide](EXTENSION_GUIDE.md) | Public capability / provider / device contracts |
 | [Commands](../COMMANDS.md) | Operator CLI reference |
 | [Daily-driver foundation](DAILY_DRIVER_FOUNDATION.md) | Standalone ownership, reliability boundaries, and daily checks |
 | [Product identity](PRODUCT_IDENTITY.md) | Product scope and ownership |
@@ -24,8 +26,12 @@ them without creating another copy.
 
 | Document | Purpose |
 | --- | --- |
+| [Architecture (surviving design)](architecture/ARCHITECTURE.md) | Canonical topology, ownership, and IMPLEMENTED / EXPERIMENTAL / PLANNED / DEPRECATED status |
+| [Test architecture](architecture/TEST_ARCHITECTURE.md) | What each `run_tests.sh` tier actually proves |
+| [State ownership map](architecture/STATE_OWNERSHIP_MAP.md) | One fact = one owner |
+| [Threat model](architecture/THREAT_MODEL.md) | Trust domains and negatives |
 | [Architecture decisions](architecture/adr/) | ADRs and ownership boundaries |
-| [Architecture status](architecture/master-build-status.md) | Architecture implementation record; check its date |
+| [Architecture status](architecture/master-build-status.md) | Dated historical implementation record |
 | [World-model integration plan](WORLD_MODEL_INTEGRATION_PLAN.md) | Pending build sequence, existing code boundaries, and end-to-end acceptance for relational knowledge and action |
 | [Apple platform integration](architecture/apple-platform-integration.md) | Permanent-droid architecture for macOS, iPhone, Watch, Apple apps, and iOS 27 intelligence |
 | [Backend acceptance and benchmarks](BACKEND_ACCEPTANCE.md) | Current priority: native agent, gateway stability, then agent connections; UI-independent scoring and live measurements |

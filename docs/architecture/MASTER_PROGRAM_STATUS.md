@@ -66,10 +66,10 @@ ONE REQUEST
 | **GATE E** | **WS 20** | **Repository Architecture Cleanup** | **COMPLETED** | `12d05659` | 2/2 boundary purity, 50/50 jaeger-agent, 102/102 combined | Dependency inversion: eliminated upward jaeger_ai imports from jaeger_agent loop; AgentCallbacks telemetry injection; boundary purity enforced via AST inspection |
 
 
-| **GATE E** | **WS 21** | **Test-Suite Tiering & Determinism** | **COMPLETED** | *(this commit)* | 7/7 runner doctrine, 177/177 security, 44/44 production-path, 1/1 soak | `dev/scripts/run_tests.sh` flags are honest; RUN_PACKAGES gates package suites; production-path is kernel contracts not two unit files |
-| **GATE F** | **WS 22** | **Documentation Truth Pass** | PENDING | — | **Implemented/Experimental/Planned/Deprecated** | Clean spec |
+| **GATE E** | **WS 21** | **Test-Suite Tiering & Determinism** | **COMPLETED** | `b8cbaeda` | 7/7 runner doctrine, 177/177 security, 44/44 production-path, 1/1 soak | `dev/scripts/run_tests.sh` flags are honest; RUN_PACKAGES gates package suites; production-path is kernel contracts not two unit files |
+| **GATE F** | **WS 22** | **Documentation Truth Pass** | **COMPLETED** | *(this commit)* | 1/1 architecture truth doc | Canonical `ARCHITECTURE.md` classifies IMPLEMENTED / EXPERIMENTAL / PLANNED; unit tests are not production proof |
 | **GATE F** | **WS 23** | **Developer / Platform API** | PENDING | — | — | Public CLI commands & extension contracts |
-| **GATE F** | **WS 24** | **Clean-Machine Release Validation** | PENDING | — | — | Zero-dependency clean environment install |
+| **GATE F** | **WS 24** | **Clean-Machine Release Validation** | PENDING | — | — | Isolated state install (not a wiped Mac VM) |
 | **GATE F** | **WS 25** | **Public-Release / Contributor Hardening** | PENDING | — | — | Contributor guide, license audit, release readiness |
 
 ---
