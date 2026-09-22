@@ -3009,8 +3009,18 @@ function _getOptionProviderId(opt){
 }
 function _providerFromModelValue(modelId){
   const value=String(modelId||'').trim();
-  if(value.startsWith('@')&&value.includes(':')) return value.slice(1,value.lastIndexOf(':'));
-  return '';
+  if(!(value.startsWith('@')&&value.includes(':'))) return '';
+  const rest=value.slice(1);
+  const known=['ollama-cloud','ollama-local','openai-codex','lmstudio','anthropic','openai','gemini','xai','openrouter','groq','deepseek','together','nous'];
+  const lower=rest.toLowerCase();
+  for(const prefix of known){
+    if(lower.startsWith(prefix+':')) return prefix;
+  }
+  if(rest.startsWith('custom:')){
+    const third=rest.indexOf(':', 'custom:'.length);
+    return third>=0 ? rest.slice(0, third) : 'custom';
+  }
+  return rest.slice(0, rest.indexOf(':'));
 }
 function _modelPickerOptionIdentity(modelId, providerId){
   let value=String(modelId||'');
@@ -3709,7 +3719,11 @@ async function populateModelDropdown(opts={}){
     }
     // Kick off a background live-model fetch for the active provider.
     // This runs after the static list is already shown (no blocking flicker).
-    if(data.active_provider && !willRetry) _fetchLiveModels(data.active_provider, sel, requestSeq);
+    // Jaeger's canonical inventory is already live Ollama/cloud truth; a second
+    // Hermes /api/models/live pass splits :cloud ids into fake providers.
+    if(data.active_provider && !willRetry && data.source!=='jaeger.runtime.truth'){
+      _fetchLiveModels(data.active_provider, sel, requestSeq);
+    }
     if(willRetry){
       _modelCatalogFallbackRetried=true;
       populateModelDropdown({...opts,freshness:'session_visit'}).catch(()=>{});
@@ -4406,9 +4420,6 @@ function renderModelDropdown(){
     });
   }
   // Create search input FIRST before filterModels definition
-  const _scopeNote=document.createElement('div');
-  _scopeNote.className='model-scope-note';
-  _scopeNote.textContent=opts.scopeNoteText||(t('model_scope_advisory')||'Applies to this conversation from your next message.');
   const _searchRow=document.createElement('div');
   _searchRow.className='model-search-row';
   _searchRow.innerHTML=`<input class="model-search-input" type="text" placeholder="${esc(t('model_search_placeholder')||'Search models…')}" spellcheck="false" autocomplete="off"><button class="model-search-clear" title="Clear search">${li('x',10)}</button>`;
@@ -4453,10 +4464,10 @@ function renderModelDropdown(){
   const _buildModelRow=(m,withProviderChip)=>{
     const row=document.createElement('div');
     row.className='model-opt'+(_isSelectedModelRow(m)?' active':'');
-    const badgeHtml=m.badge?`<span class="model-opt-badge model-opt-badge--${esc(m.badge.role||'configured')}">${esc(m.badge.label||'Configured')}</span>`:'';
     const _plainGroup=m.group?String(m.group).replace(/\s*\(\d+\s+of\s+\d+\)\s*$/,''):'';
     const providerChip=(_plainGroup&&withProviderChip)?`<span class="model-opt-provider">${esc(_plainGroup)}</span>`:'';
-    row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(m.name)}</span>${badgeHtml}${_selectedModelBadge(m)}${providerChip}</div><span class="model-opt-id">${esc(m.id)}</span>`;
+    const displayName=String(m.name||'').replace(/\s*\[(?:REACT [✓✗]|agent certified|chat only|chat certified|ReAct (?:PASS|FAIL))\]\s*$/i,'').trim()||m.name;
+    row.innerHTML=`<div class="model-opt-top"><span class="model-opt-name">${esc(displayName)}</span>${_selectedModelBadge(m)}${providerChip}</div>`;
     row.onclick=()=>selectFromDropdown(m.value,m.providerId||(m.badge&&m.badge.provider)||null);
     return row;
   };
@@ -4644,10 +4655,7 @@ function renderModelDropdown(){
       && !configuredSemanticKeys.has(`${_configuredProviderKey(m)}::${_configuredModelKey(m)}`)
     ).length;
     dd.innerHTML='';
-    dd.appendChild(_scopeNote);
     dd.appendChild(_searchRow);
-    dd.appendChild(_custSep);
-    dd.appendChild(_custRow);
     if(configuredModels.length){
       const configuredHeading=document.createElement('div');
       configuredHeading.className='model-group';
@@ -4864,10 +4872,7 @@ function renderModelDropdown(){
   _cb.onclick=_applyCustom;
   _ci.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();_applyCustom();}if(e.key==='Escape'){closeDropdown();}});
   _ci.addEventListener('click',e=>e.stopPropagation());
-  dd.appendChild(_scopeNote);
   dd.appendChild(_searchRow);
-  dd.appendChild(_custSep);
-  dd.appendChild(_custRow);
   _filterModels('');
 }
 

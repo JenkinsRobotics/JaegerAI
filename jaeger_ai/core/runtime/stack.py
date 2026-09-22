@@ -170,6 +170,12 @@ def _gateway_env() -> dict[str, str]:
     return env
 
 
+def _ollama_env() -> dict[str, str]:
+    env = _common_env()
+    env["OLLAMA_HOST"] = "0.0.0.0:11434"
+    return env
+
+
 # Authoritative service registry in boot order
 STACK_SERVICES: list[ServiceDef] = [
     ServiceDef(
@@ -179,7 +185,7 @@ STACK_SERVICES: list[ServiceDef] = [
         port=OLLAMA_PORT,
         health_path="/api/tags",
         command_builder=_ollama_command,
-        env_builder=_common_env,
+        env_builder=_ollama_env,
     ),
     ServiceDef(
         id="agent",
@@ -439,10 +445,17 @@ def stack_up(services: list[ServiceDef] | None = None, wait_timeout: float = 25.
     # Step 1: Migrate legacy LaunchAgents
     migrate_legacy_launchagents()
 
-    # Step 2: Write plists to ~/.jaeger/launchd/
+    # Step 2: Ensure agent models & container networks are configured
+    try:
+        from jaeger_ai.core.frameworks.setup import _configure_agent_models
+        _configure_agent_models()
+    except Exception:
+        pass
+
+    # Step 3: Write plists to ~/.jaeger/launchd/
     sync_plists()
 
-    # Step 3: Bootstrap each service
+    # Step 4: Bootstrap each service
     for s in target:
         p_path = plist_path_for(s)
         # Check if already loaded
@@ -681,11 +694,14 @@ def main(argv: list[str] | None = None) -> int:
 
     p_up = sub.add_parser("up", help="Start all or specified services")
     p_up.add_argument("services", nargs="*", help="Service IDs to start")
+    p_up.add_argument("--json", action="store_true", help="Output JSON")
 
-    sub.add_parser("down", help="Stop all services and kill stragglers")
+    p_down = sub.add_parser("down", help="Stop all services and kill stragglers")
+    p_down.add_argument("--json", action="store_true", help="Output JSON")
 
     p_reset = sub.add_parser("reset", help="Down + Up + Real Gateway test turn verification")
     p_reset.add_argument("--timeout", type=float, default=60.0, help="Verification timeout in seconds")
+    p_reset.add_argument("--json", action="store_true", help="Output JSON")
 
     p_status = sub.add_parser("status", help="Inspect status, git commit freshness, and health")
     p_status.add_argument("--json", action="store_true", help="Output JSON")
@@ -721,18 +737,24 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.action == "down":
         res = stack_down()
-        print(f"[stack] down: {'CLEAN' if res['ok'] else 'LEAKED'}")
-        if res["stragglers_killed"]:
-            print(f"  stragglers killed: {res['stragglers_killed']}")
+        if getattr(args, "json", False):
+            print(json.dumps(res, indent=2))
+        else:
+            print(f"[stack] down: {'CLEAN' if res['ok'] else 'LEAKED'}")
+            if res["stragglers_killed"]:
+                print(f"  stragglers killed: {res['stragglers_killed']}")
         return 0 if res["ok"] else 1
 
     if args.action == "reset":
         res = stack_reset(timeout_s=args.timeout)
-        if res["ok"]:
-            print("[stack] reset: READY (test turn passed)")
-            return 0
-        print(f"[stack] reset: FAILED at step '{res.get('step')}': {res.get('error')}", file=sys.stderr)
-        return 1
+        if getattr(args, "json", False):
+            print(json.dumps(res, indent=2))
+        else:
+            if res["ok"]:
+                print("[stack] reset: READY (test turn passed)")
+            else:
+                print(f"[stack] reset: FAILED at step '{res.get('step')}': {res.get('error')}", file=sys.stderr)
+        return 0 if res["ok"] else 1
 
     return 2
 

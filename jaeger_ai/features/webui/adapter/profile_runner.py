@@ -251,10 +251,17 @@ class ProfileRunner:
                         payload = {'status': state, 'session_id': session, 'stream_id': run_id,
                                    'profile': profile, 'native': receipt.get('native', {}),
                                    'execution_unknown': receipt.get('execution_unknown', False)}
-                        if state == 'completed':
-                            payload['session'] = self.snapshot(session, profile, run_id, prompt, run.output)
-                        else:
-                            payload['message'] = event.get('error') or ('Run cancelled' if state == 'cancelled' else 'Native execution interrupted')
+                        answer = (run.output or '').strip()
+                        if not answer and state != 'completed':
+                            answer = event.get('error') or (
+                                'Run cancelled' if state == 'cancelled' else 'Native execution interrupted'
+                            )
+                        if answer:
+                            payload['session'] = self.snapshot(session, profile, run_id, prompt, answer)
+                        if state != 'completed':
+                            payload['message'] = event.get('error') or (
+                                'Run cancelled' if state == 'cancelled' else 'Native execution interrupted'
+                            )
                         self.store.append(run_id, 'done' if state == 'completed' else 'apperror', payload)
                         self.store.set_state(run_id, status=state, terminal_state=state, active_controls=[],
                                              pending_approval_id=None, native=receipt.get('native', {}),

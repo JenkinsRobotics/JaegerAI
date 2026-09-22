@@ -488,32 +488,20 @@ def canonical_runtime_inventory(
         ollama_caps = list(m.get("capabilities") or [])
         certified_roles = [r.upper() for r, s in caps.items() if s == "pass"]
         failed_roles = [r.upper() for r, s in caps.items() if s == "fail"]
-        
-        badge = ""
-        if "REACT" in certified_roles:
-            badge = "REACT ✓"
-        elif "REACT" in failed_roles:
-            badge = "REACT ✗"
-        elif "CHAT" in certified_roles:
-            badge = "CHAT ✓"
-
         multimodal = "vision" in ollama_caps or "VISION" in certified_roles or "vision" in name.lower() or "v:" in name.lower()
         tool_use = "tools" in ollama_caps or "REACT" in certified_roles
-
-        display_label = f"{name} [{badge}]" if badge else name
         is_cloud = bool(m.get("remote_host")) or name.endswith(":cloud") or name.endswith("-cloud")
 
         model_entry = {
             "id": f"@ollama-cloud:{name}" if is_cloud else f"@ollama-local:{name}",
             "name": name,
-            "label": display_label,
+            "label": name,
             "size_gb": m.get("size_gb"),
             "capabilities": ollama_caps,
             "certified_roles": certified_roles,
             "failed_roles": failed_roles,
             "multimodal": multimodal,
             "tool_use": tool_use,
-            "certified_badge": badge,
         }
 
         if is_cloud:
@@ -521,31 +509,31 @@ def canonical_runtime_inventory(
         else:
             local_models.append(model_entry)
 
-    # Add Ollama Cloud group
-    groups.append({
-        "provider": "Ollama Cloud",
-        "provider_id": "ollama-cloud",
-        "status": "online" if ollama_online and cloud_models else ("online" if ollama_online else "unavailable"),
-        "credentials_available": ollama_online,
-        "endpoint": "https://ollama.com",
-        "models": cloud_models,
-        "host": "cloud",
-        "base_url": "http://127.0.0.1:11434",
-    })
+    if cloud_models:
+        groups.append({
+            "provider": "Ollama Cloud",
+            "provider_id": "ollama-cloud",
+            "status": "online" if ollama_online else "unavailable",
+            "credentials_available": ollama_online,
+            "endpoint": "https://ollama.com",
+            "models": cloud_models,
+            "host": "cloud",
+            "base_url": "http://127.0.0.1:11434",
+        })
 
-    # Add Ollama Local group
-    groups.append({
-        "provider": "Ollama Local",
-        "provider_id": "ollama-local",
-        "status": "online" if ollama_online and local_models else ("online" if ollama_online else "unavailable"),
-        "credentials_available": ollama_online,
-        "endpoint": "http://127.0.0.1:11434",
-        "models": local_models,
-        "host": "local",
-        "base_url": "http://127.0.0.1:11434",
-    })
+    if local_models:
+        groups.append({
+            "provider": "Ollama Local",
+            "provider_id": "ollama-local",
+            "status": "online" if ollama_online else "unavailable",
+            "credentials_available": ollama_online,
+            "endpoint": "http://127.0.0.1:11434",
+            "models": local_models,
+            "host": "local",
+            "base_url": "http://127.0.0.1:11434",
+        })
 
-    # 2. LM Studio
+    # 2. LM Studio — only when the server actually lists models
     lm_res = discover_lmstudio()
     lm_online = bool(lm_res.get("online"))
     lm_models = [
@@ -557,19 +545,19 @@ def canonical_runtime_inventory(
             "certified_roles": [],
             "multimodal": False,
             "tool_use": False,
-            "certified_badge": "",
         }
         for m in (lm_res.get("models") or [])
+        if m.get("name")
     ]
-    groups.append({
-        "provider": "LM Studio",
-        "provider_id": "lmstudio",
-        "status": "online" if lm_online else "unavailable",
-        "credentials_available": lm_online,
-        "endpoint": LMSTUDIO_URL,
-        "models": lm_models,
-        "error": None if lm_online else "LM Studio server offline",
-    })
+    if lm_models:
+        groups.append({
+            "provider": "LM Studio",
+            "provider_id": "lmstudio",
+            "status": "online" if lm_online else "unavailable",
+            "credentials_available": lm_online,
+            "endpoint": LMSTUDIO_URL,
+            "models": lm_models,
+        })
 
     # 3. Cloud Providers with Credential Verification
     from jaeger_ai.core.models.external_model import ExternalModelConfig, resolve_api_key
@@ -589,28 +577,25 @@ def canonical_runtime_inventory(
             for m_name in curated:
                 caps = capabilities_for(m_name)
                 c_roles = [r.upper() for r, s in caps.items() if s == "pass"]
-                badge = "REACT ✓" if "REACT" in c_roles else ("CHAT ✓" if "CHAT" in c_roles else "")
-                lbl = f"{m_name} [{badge}]" if badge else m_name
                 models.append({
                     "id": f"@{p_id}:{m_name}",
                     "name": m_name,
-                    "label": lbl,
+                    "label": m_name,
                     "capabilities": ["completion", "tools"],
                     "certified_roles": c_roles,
                     "multimodal": "vision" in m_name.lower() or "flash" in m_name.lower() or "4o" in m_name.lower(),
                     "tool_use": True,
-                    "certified_badge": badge,
                 })
 
-        groups.append({
-            "provider": p_label,
-            "provider_id": p_id,
-            "status": "online" if has_key else "unavailable",
-            "credentials_available": has_key,
-            "endpoint": f"cloud:{p_id}",
-            "models": models,
-            "error": None if has_key else "No credential configured",
-        })
+        if models:
+            groups.append({
+                "provider": p_label,
+                "provider_id": p_id,
+                "status": "online",
+                "credentials_available": True,
+                "endpoint": f"cloud:{p_id}",
+                "models": models,
+            })
 
     active_provider = "ollama-cloud" if cloud_models else ("ollama-local" if local_models else "ollama")
     default_full_id = f"@{active_provider}:{default_model_name}"

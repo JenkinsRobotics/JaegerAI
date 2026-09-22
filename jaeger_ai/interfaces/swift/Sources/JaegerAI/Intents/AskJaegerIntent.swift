@@ -52,6 +52,7 @@ enum JaegerIntentSupport {
             let err = Pipe()
             process.executableURL = URL(fileURLWithPath: BridgeProcess.jaegerPath())
             process.arguments = arguments
+            process.standardInput = FileHandle.nullDevice
             process.standardOutput = output
             process.standardError = err
             try process.run()

@@ -223,15 +223,9 @@ def test_runner_contract_translates_streamed_chat_to_hermes_events(tmp_path, mon
             status = json.load(response)
         assert status["status"] == "completed"
         assert status["terminal_state"] == "completed"
-        # context_length rides along from the probe so the serving window
-        # follows the model being configured.
-        assert bridge.commands == [
-            ("configure_model", {
-                "provider": "ollama",
-                "model": "qwen:latest",
-                "context_length": 65_536,
-            }),
-        ]
+        # Per-turn model and provider are now passed to bridge.turn directly
+        # without mutating global bridge state via configure_model (785870d7).
+        assert bridge.commands == []
     finally:
         server.shutdown()
         server.server_close()

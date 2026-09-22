@@ -392,7 +392,7 @@ def _get_config_path() -> Path:
 
 
 _WEBUI_SESSION_SAVE_MODES = {"deferred", "eager"}
-_DEFAULT_WEBUI_SESSION_SAVE_MODE = "deferred"
+_DEFAULT_WEBUI_SESSION_SAVE_MODE = "eager"
 _DEFAULT_EXPERIMENTAL_CONFIG = {
     # Dormant first slice for the unified SessionDB migration. Runtime WebUI
     # session call sites must continue using the existing JSON paths unless a
@@ -3466,7 +3466,14 @@ def get_effective_default_model(config_data: dict | None = None) -> str:
         os.getenv("HERMES_MODEL") or os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL")
     )
     if env_model:
-        default_model = env_model.strip()
+        return env_model.strip()
+    try:
+        from jaeger_ai.core.models.discovery import canonical_runtime_inventory
+        live = str((canonical_runtime_inventory(cached_only=True) or {}).get("default_model") or "").strip()
+        if live:
+            return live
+    except Exception:
+        pass
     return default_model
 
 

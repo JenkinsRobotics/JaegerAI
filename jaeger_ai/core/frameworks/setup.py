@@ -460,6 +460,11 @@ def _configure_agent_models(
         document = json.loads(openclaw_path.read_text(encoding="utf-8"))
         provider_name = "ollama-cloud-via-host"
         provider = document.setdefault("models", {}).setdefault("providers", {}).setdefault(provider_name, {})
+        container_ollama = container_ollama_url.removesuffix("/v1")
+        provider["baseUrl"] = container_ollama
+        local = document.setdefault("models", {}).setdefault("providers", {}).setdefault("ollama-local", {})
+        if isinstance(local, dict):
+            local["baseUrl"] = container_ollama
         models = provider.setdefault("models", [])
         for model_id in AVAILABLE_AGENT_MODELS:
             if not any(item.get("id") == model_id for item in models if isinstance(item, dict)):

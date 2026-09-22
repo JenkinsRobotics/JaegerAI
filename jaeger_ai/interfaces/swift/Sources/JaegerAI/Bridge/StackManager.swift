@@ -51,19 +51,19 @@ final class StackManager: Sendable {
 
     /// Bring the whole stack up: plists generated into ~/.jaeger/launchd/, services bootstrapped
     func up(services: [String] = []) async throws -> StackActionReply {
-        var args = ["stack", "up"]
+        var args = ["stack", "up", "--json"]
         args.append(contentsOf: services)
         return try await runStackCommand(args)
     }
 
     /// Bring the whole stack down: bootout, wait, SIGKILL stragglers
     func down() async throws -> StackActionReply {
-        return try await runStackCommand(["stack", "down"])
+        return try await runStackCommand(["stack", "down", "--json"])
     }
 
     /// Reset: down, up, and verify with a real Gateway synthetic test turn
     func reset(timeout: Double = 60.0) async throws -> StackActionReply {
-        return try await runStackCommand(["stack", "reset", "--timeout", "\(timeout)"])
+        return try await runStackCommand(["stack", "reset", "--timeout", "\(timeout)", "--json"])
     }
 
     /// Query live status of all services

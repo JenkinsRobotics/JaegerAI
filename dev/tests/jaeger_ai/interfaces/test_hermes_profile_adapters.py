@@ -414,6 +414,7 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
         "model": setup.OPENCLAW_EMBEDDING_MODEL,
         "remote": {"baseUrl": "http://192.168.64.1:11434"},
     }
+    assert config["models"]["providers"]["ollama-cloud-via-host"]["baseUrl"] == "http://192.168.64.1:11434"
     assert config["gateway"]["tailscale"]["resetOnExit"] is False
     assert config["meta"]["lastTouchedAt"] == "old"
     assert config["meta"]["lastTouchedVersion"] == "2026.7"

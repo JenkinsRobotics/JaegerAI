@@ -100,6 +100,19 @@ def ensure_role_client(client: Any, role: str, state_root: Path | None = None) -
     status = role_status(model, role, state_root)
     if status != FAIL:
         return client
+    # A live Ollama listing is an operator-selected model. Certification
+    # governs the production *default*, not an explicit picker choice.
+    try:
+        from jaeger_ai.core.models.discovery import discover_ollama
+        listed = {
+            str((row or {}).get("name") or "")
+            for row in (discover_ollama().get("models") or [])
+        }
+        if model in listed:
+            logger.info("Keeping operator-selected live model %s for %s", model, role)
+            return client
+    except Exception:
+        pass
     logger.warning("Provider %s is certified %s for %s — routing away", model, status, role)
     try:
         from jaeger_ai.core.entity.events import EventType, JaegerEvent
