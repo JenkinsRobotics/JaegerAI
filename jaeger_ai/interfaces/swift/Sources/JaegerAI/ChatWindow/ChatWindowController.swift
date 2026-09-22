@@ -23,6 +23,10 @@ import SwiftUI
 
 enum AppNavTab: String, CaseIterable, Identifiable {
     case chat = "Chat"
+    case kanban = "Kanban"
+    case workspace = "Workspace"
+    case tasks = "Tasks"
+    case skills = "Skills"
     case avatar = "Avatar"
     case work = "Work"
     var id: String { rawValue }

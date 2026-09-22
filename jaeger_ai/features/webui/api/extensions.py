@@ -250,7 +250,14 @@ def _extension_root() -> Optional[Path]:
         if default_root.is_dir() and not default_root.is_symlink():
             return default_root.resolve()
     except OSError:
-        return None
+        pass
+    try:
+        from api.config import REPO_ROOT
+        repo_ext = (REPO_ROOT.parents[2] / "extensions").resolve()
+        if repo_ext.is_dir():
+            return repo_ext
+    except Exception:
+        pass
     return None
 
 
@@ -994,13 +1001,20 @@ def _manifest_asset_base(root: Path, manifest_file: Path) -> str:
 def _gallery_installed_runtime_manifest(
     root: Path, diagnostics: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, object]]:
-    """Build a runtime manifest from gallery-installed extension manifests."""
     install_manifest = _load_install_manifest()
     installed = install_manifest.get("installed", {})
-    if not isinstance(installed, dict):
-        return None
+    candidate_ids = set()
+    if isinstance(installed, dict):
+        candidate_ids.update(ext_id for ext_id in installed if _valid_extension_id(ext_id))
+    try:
+        if root and root.is_dir():
+            for child in root.iterdir():
+                if child.is_dir() and _valid_extension_id(child.name) and (child / "manifest.json").is_file():
+                    candidate_ids.add(child.name)
+    except OSError:
+        pass
     entries: List[Dict[str, object]] = []
-    for ext_id in sorted(installed):
+    for ext_id in sorted(candidate_ids):
         if not _valid_extension_id(ext_id):
             continue
         manifest_file = root / ext_id / "manifest.json"
@@ -1024,7 +1038,11 @@ def _gallery_installed_runtime_manifest(
         asset_base = ext_id
         if isinstance(manifest, dict):
             top_entry: Dict[str, object] = {"id": ext_id}
-            for key in ("name", "enabled", "scripts", "stylesheets", "sidecar", "permissions", "settings_schema"):
+            for key in (
+                "name", "enabled", "scripts", "stylesheets", "sidecar", "permissions",
+                "settings_schema", "tab", "tools", "category", "description", "version",
+                "homepage", "author", "capabilities"
+            ):
                 if key in manifest:
                     top_entry[key] = manifest[key]
             if any(

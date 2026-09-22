@@ -150,6 +150,13 @@ def _discover_agent_dir() -> Path:
 
     candidates = []
 
+    # 1. First-party internal vendor agent inside JaegerAI
+    try:
+        internal_vendor = REPO_ROOT.parents[2] / "jaeger_ai" / "vendor" / "hermes_agent"
+        candidates.append(internal_vendor)
+    except IndexError:
+        pass
+
     # 2. HERMES_HOME / hermes-agent
     hermes_home = os.getenv("HERMES_HOME", str(_DEFAULT_HERMES_HOME))
     candidates.append(Path(hermes_home).expanduser() / "hermes-agent")

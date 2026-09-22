@@ -140,6 +140,15 @@ struct PillView: View {
 
             hudStatusRow
 
+            if bridge.isAgentBusy {
+                LiveActivityBanner(
+                    agentName: "Jaeger",
+                    phase: .thinking,
+                    activityText: "Executing turn...",
+                    onStop: { agent.cancelTurn() }
+                )
+            }
+
             if let progress = agent.taskProgress, !progress.completed {
                 hudProgress(progress)
             }

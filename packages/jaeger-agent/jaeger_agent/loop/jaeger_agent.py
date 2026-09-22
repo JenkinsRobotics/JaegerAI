@@ -17,12 +17,15 @@ constructs its own ``JaegerAgent``.
 
 from __future__ import annotations
 
+import logging
 import re as _re
 import threading
 import time
 from typing import Any
 
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 from jaeger_agent.adapters.base import ProviderAdapter
 from jaeger_agent.loop.callbacks import AgentCallbacks
@@ -683,6 +686,37 @@ class JaegerAgent:
             # always append before deciding next steps.
             tool_calls = assistant_msg.get("tool_calls") or []
             final_text = assistant_msg.get("content") or ""
+            if not tool_calls and final_text:
+                # OpenClaw-grade plain-text tool-call recovery:
+                # Local or open models (Ollama, DeepSeek, Qwen) often emit tool
+                # calls as plain text (<tool_call>, <function=...>, [call: ...],
+                # or markdown JSON). If no structured tool_calls were emitted,
+                # attempt repair before assuming the model finished speaking.
+                try:
+                    from jaeger_agent.parsing.tool_call_repair import repair_plain_text_tool_calls
+
+                    allowed_names = (
+                        {getattr(t, "name", "") for t in (self.tools or []) if getattr(t, "name", "")}
+                        or None
+                    )
+                    repaired_calls, scrubbed_text = repair_plain_text_tool_calls(
+                        final_text,
+                        allowed_tool_names=allowed_names,
+                    )
+                    if repaired_calls:
+                        tool_calls = repaired_calls
+                        final_text = scrubbed_text
+                        assistant_msg = {
+                            **assistant_msg,
+                            "tool_calls": tool_calls,
+                            "content": scrubbed_text,
+                        }
+                        self.callbacks.on_thinking(
+                            f"[promoted {len(tool_calls)} plain-text tool call(s) to execution]"
+                        )
+                except Exception as exc:
+                    logger.debug("tool_call_repair error: %s", exc)
+
             if not tool_calls and final_text:
                 guarded_text, repetitions = collapse_generated_repetition(final_text)
                 if repetitions > 1:

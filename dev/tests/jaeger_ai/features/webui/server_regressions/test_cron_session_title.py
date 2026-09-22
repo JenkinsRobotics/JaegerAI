@@ -72,6 +72,7 @@ def fake_hermes_home(tmp_path, monkeypatch):
     import api.profiles as profiles
     monkeypatch.setattr(profiles, "get_active_hermes_home", lambda: home)
     monkeypatch.setattr(profiles, "get_active_profile_name", lambda: None)
+    monkeypatch.setenv("HERMES_WEBUI_TEST_STATE_DIR", str(home))
 
     return home
 

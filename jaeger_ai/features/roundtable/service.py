@@ -13,6 +13,7 @@ import uuid
 
 from jaeger_ai.core.frameworks.native_runs import Run, Runs, TERMINAL
 from jaeger_ai.core.frameworks.resilience import ClassifiedError, failure_category
+from jaeger_ai.core.frameworks.adapter_protocol import clean_transcript_text, is_benign_stderr
 from .policy import MEMBERS, COLLABORATION_TASKS, assign_owners, plan, chair_for, decide, peer_context
 from .progress import Progress
 from jaeger_ai.core.frameworks.table_store import TableStore
@@ -212,13 +213,20 @@ class TableService:
                     if snapshot['status'] == 'failed':
                         outcome.update({k: child.events[-1].get(k) for k in ('error', 'error_category')})
                     label = {'jaeger': 'Jaeger', 'hermes': 'Hermes', 'openclaw': 'OpenClaw'}[member]
-                    text = snapshot.get('output') or ''
+                    text = clean_transcript_text(snapshot.get('output') or '')
                     if snapshot['status'] != 'completed':
-                        text += '\n[' + label + ' error: ' + str(outcome.get('error') or snapshot['status']) + ']'
+                        err_str = str(outcome.get('error') or snapshot['status'])
+                        if is_benign_stderr(err_str) and text.strip():
+                            outcome['status'] = 'completed'
+                            outcome['execution_unknown'] = False
+                            snapshot['status'] = 'completed'
+                        else:
+                            text += '\n[' + label + ' error: ' + err_str + ']'
                     # Plain chat clients also need the actual member responses.
                     # Keep native member events for richer clients, and publish
                     # completed contributions as readable transcript sections.
                     parent.emit('message.delta', delta='\n### ' + label + '\n' + text + '\n')
+                    outcome['output'] = text
                     outcomes[member] = outcome
                     self.store.finish_attempt(child.id, outcome)
                     parent.emit('member.finished', member=member, phase=phase,
@@ -270,7 +278,7 @@ class TableService:
                 involvement[m] += 1
             return result
         def successful(results):
-            return {m: r['output'] for m, r in results.items() if r['status'] == 'completed'
+            return {m: clean_transcript_text(r['output']) for m, r in results.items() if r['status'] == 'completed'
                     and not r['execution_unknown'] and str(r.get('output') or '').strip()}
         members = selected['participants']
         if selected.get('retry'):

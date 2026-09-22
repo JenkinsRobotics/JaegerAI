@@ -25057,15 +25057,6 @@ def _handle_chat_start(handler, body, diag=None):
                     s.profile = target_prof
                     session_profile = s.profile
                     visible = True
-            elif not requested_profile and session_profile:
-                try:
-                    from api.profiles import set_request_profile
-
-                    set_request_profile(session_profile)
-                    active_profile = session_profile
-                    visible = True
-                except Exception:
-                    pass
         if not visible:
             return bad(handler, "Session not found", 404)
         regeneration = None

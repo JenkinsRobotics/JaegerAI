@@ -211,10 +211,11 @@ class ReActHandler(CognitionStrategyHandler):
                     "llm_invoked": True,
                 }
         except Exception as exc:
-            logger.debug("ReActHandler runtime subordinate execution failed: %s", exc)
+            logger.error("ReActHandler runtime subordinate execution failed: %s", exc, exc_info=True)
 
         model_runner = context.get("model_runner") or context.get("cognition_provider")
         if callable(model_runner):
+            logger.warning("ReActHandler falling back to model_runner after runtime subordinate execution failure")
             reply = model_runner(text)
             if isinstance(reply, dict):
                 return reply
