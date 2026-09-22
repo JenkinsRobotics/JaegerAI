@@ -1,0 +1,49 @@
+"""The deliberate planner must hand the executor the operator's request.
+
+Live defect (audit Task A, 2026-09-21): the executor received only
+``[Deliberate Plan Selected: <name>]`` and the steps. It read that as a
+request to write a plan, saved one to ``skills/plans/``, and the turn reported
+success while none of the requested files existed. The verifier recorded
+``objective_failed``; the operator was told it was done.
+"""
+from __future__ import annotations
+
+from jaeger_ai.core.entity.cognition_router import CognitionRouter
+from jaeger_ai.core.entity.events import JaegerEvent
+from jaeger_ai.core.entity.executive import CognitiveStrategy
+
+
+GOAL = "Create workspace/audit/task_a/notes.md containing 'status: draft' and read it back."
+
+
+def _run(react_result: dict) -> list[str]:
+    seen: list[str] = []
+
+    def react_runner(prompt: str, session_key: str = "") -> dict:
+        seen.append(prompt)
+        return dict(react_result)
+
+    CognitionRouter().execute(
+        strategy=CognitiveStrategy.DELIBERATE_PLANNING,
+        event=JaegerEvent.human_message(GOAL, session_id="s"),
+        decision=None,
+        state=None,
+        memory=None,
+        authority=None,
+        context={"react_runner": react_runner},
+    )
+    return seen
+
+
+def test_executor_receives_the_request_not_only_the_plan():
+    [prompt] = _run({"text": "done"})
+
+    assert prompt.startswith(GOAL)
+    assert "Carry out this request now" in prompt
+
+
+def test_replan_after_failure_still_carries_the_request():
+    prompts = _run({"text": "", "error": "tool failed"})
+
+    assert len(prompts) == 2
+    assert all(p.startswith(GOAL) for p in prompts)
