@@ -27,9 +27,15 @@ struct SettingsView: View {
 
 private struct GeneralSettings: View {
     @ObservedObject private var tts = TTSManager.shared
+    @ObservedObject private var launch = LaunchAtLogin.shared
 
     var body: some View {
         Form {
+            Section("Startup") {
+                Toggle("Start Jaeger at login", isOn: $launch.isEnabled)
+                Text("Launch Jaeger menu-bar app automatically when logging in.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("Voice") {
                 Toggle("Auto-speak replies", isOn: $tts.autoSpeakEnabled)
                 Text("Speak the agent's reply aloud after each turn.")
