@@ -1573,8 +1573,12 @@ class JaegerGatewayApp:
                 session_atts = self.store.list_attachments(session_id)
                 has_image = any(str(a.get("mime_type") or "").startswith("image/") for a in session_atts)
                 if not has_image:
+                    # The operator's request, not ``prompt``: the Entity
+                    # prefixes recalled history, and an image filename from
+                    # another session's turn sent an unrelated WebUI question
+                    # down the tool-less vision lane.
                     import re as _re
-                    has_image = bool(_re.search(r"\.(?:png|jpg|jpeg|webp)\b", prompt, _re.IGNORECASE))
+                    has_image = bool(_re.search(r"\.(?:png|jpg|jpeg|webp)\b", text, _re.IGNORECASE))
                 # A question about an image goes straight to a vision model.
                 # Anything that asks for work goes through the Entity with its
                 # tools and Authority: in an image session, "save this to a
