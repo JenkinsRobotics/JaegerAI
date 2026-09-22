@@ -205,6 +205,22 @@ class ReActHandler(CognitionStrategyHandler):
         }
 
 
+def _execution_prompt(goal: str, plan_name: str, steps: list[str]) -> str:
+    """Hand the executor the operator's request, with the plan as guidance.
+
+    The executor used to receive only ``[Deliberate Plan Selected: …]`` and
+    the steps. With the request gone it treated the turn as "write a plan",
+    saved one, and reported success while nothing the operator asked for
+    existed (audit Task A, 2026-09-21).
+    """
+    plan = "\n".join(f"- {s}" for s in steps)
+    return (
+        f"{goal}\n\n"
+        f"Carry out this request now with your tools. Suggested plan ({plan_name}):\n"
+        f"{plan}"
+    )
+
+
 class DeliberatePlannerHandler(CognitionStrategyHandler):
     """LATS-style deliberate tree-search planning: candidate plans -> critic evaluation -> execution."""
 
@@ -318,7 +334,7 @@ class DeliberatePlannerHandler(CognitionStrategyHandler):
         # 4. Execute via ReAct subordinate if runner provided
         react_runner = context.get("react_runner")
         if callable(react_runner):
-            exec_prompt = f"[Deliberate Plan Selected: {winning_plan.name}]\n" + "\n".join(f"- {s}" for s in winning_plan.steps)
+            exec_prompt = _execution_prompt(goal, winning_plan.name, winning_plan.steps)
             result = react_runner(exec_prompt, session_key=event.session_id)
 
             # 5. Consequence check & bounded replanning on failure
@@ -332,7 +348,7 @@ class DeliberatePlannerHandler(CognitionStrategyHandler):
                     cognition_provider=cognition_provider,
                     critic_provider=critic_provider,
                 )
-                replan_prompt = f"[Replanned Strategy: {replanned.name}]\n" + "\n".join(f"- {s}" for s in replanned.steps)
+                replan_prompt = _execution_prompt(goal, replanned.name, replanned.steps)
                 result = react_runner(replan_prompt, session_key=event.session_id)
                 result["replanned"] = True
                 result["plan_id"] = replanned.plan_id
