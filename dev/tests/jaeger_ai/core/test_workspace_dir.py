@@ -257,3 +257,17 @@ def test_workspace_config_accepts_a_path():
     from jaeger_ai.core.instance.schemas import WorkspaceConfig
     cfg = WorkspaceConfig(location="~/Documents/Jaeger")
     assert cfg.location == "~/Documents/Jaeger"
+
+
+def test_listing_a_missing_directory_is_an_error_not_an_empty_listing(tmp_path):
+    """An empty listing was reported to the operator as "exists and is empty"."""
+    from jaeger_agent import tools as jaeger_tools
+
+    layout = InstanceLayout(root=tmp_path / "inst")
+    layout.ensure_dirs()
+    jaeger_tools.bind(layout)
+
+    result = file_tools.list_skill_dir(str(tmp_path / "does-not-exist"))
+
+    assert result["listed"] is False
+    assert result["error"] == "no such directory"
