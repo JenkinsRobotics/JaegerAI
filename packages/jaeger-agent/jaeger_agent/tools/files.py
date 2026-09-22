@@ -450,7 +450,9 @@ def list_skill_dir(path: str = ".") -> dict[str, Any]:
     except SandboxError as exc:
         return {"listed": False, "error": str(exc)}
     if not target.exists():
-        return {"listed": True, "path": path, "entries": []}
+        # An empty listing here was read as "exists and is empty" and
+        # reported to the operator as a verified fact (audit, 2026-09-21).
+        return {"listed": False, "error": "no such directory", "path": path}
     if not target.is_dir():
         return {"listed": False, "error": "not a directory", "path": path}
 
