@@ -362,6 +362,9 @@ def main(argv: list[str] | None = None) -> int:
             },
         })
         return 0 if ok else 1
+    if not args.once and not args.repair:
+        print("[fabric_supervisor] Retired: stack lifecycle is owned by JaegerAI Mac App / jaeger stack.")
+        return 0
     while True:
         write_state(supervisor.tick())
         if args.once:
