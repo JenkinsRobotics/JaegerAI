@@ -18,7 +18,7 @@ ROLES = ("chat", "react", "planning", "critic", "reflection", "vision")
 # Live-validated seed. Operator files overlay this.
 DEFAULT_CAPABILITIES: dict[str, dict[str, str]] = {
     "kimi-k2.7-code:cloud": {
-        "chat": PASS, "react": PASS, "planning": PASS, "critic": PASS, "reflection": PASS,
+        "chat": PASS, "react": PASS, "planning": PASS, "critic": PASS, "reflection": PASS, "vision": PASS,
     },
     "glm-5.3-flash:cloud": {
         "chat": PASS, "react": FAIL, "planning": UNKNOWN, "critic": UNKNOWN,

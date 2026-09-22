@@ -34,6 +34,12 @@ from typing import Callable
 
 DEFAULT_AGENT_MODEL = "glm-5.3-flash:cloud"
 
+#: Jaeger is the product. Fresh WebUI with no profile cookie/session uses this
+#: runtime. Hermes keeps profile name ``default`` for upstream WebUI compatibility;
+#: that implementation detail must not become the Jaeger product default.
+PRODUCT_DEFAULT_RUNTIME = "jaeger"
+PRODUCT_DEFAULT_PROFILE = "jaeger"
+
 
 @dataclass(frozen=True)
 class Framework:
@@ -191,6 +197,16 @@ def profile_name(value: object) -> str:
     return framework(value).profile
 
 
+def product_default_profile() -> str:
+    """Profile id a fresh Jaeger WebUI session must start on."""
+    return PRODUCT_DEFAULT_PROFILE
+
+
+def product_default_runtime() -> str:
+    """Runtime id a fresh Jaeger WebUI session must execute on."""
+    return PRODUCT_DEFAULT_RUNTIME
+
+
 def display_name(value: object) -> str:
     """The human-facing label for any spelling."""
     return framework(value).display_name
@@ -232,6 +248,8 @@ def backend_protocol(value: object) -> BackendProtocol:
 __all__ = [
     "DEFAULT_AGENT_MODEL",
     "DEBATE_MEMBERS",
+    "PRODUCT_DEFAULT_PROFILE",
+    "PRODUCT_DEFAULT_RUNTIME",
     "BackendProtocol",
     "FRAMEWORKS",
     "Framework",
@@ -243,5 +261,7 @@ __all__ = [
     "display_name",
     "framework",
     "is_known",
+    "product_default_profile",
+    "product_default_runtime",
     "profile_name",
 ]

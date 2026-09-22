@@ -45,7 +45,7 @@ LOCKED_BRIDGE_HEALTH_URL = os.environ.get(
 LOCKED_WEBUI_URL = os.environ.get(
     "JAEGER_WEBUI_URL", f"http://{LOOPBACK}:{WEBUI_PORT}"
 ).rstrip("/")
-DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", DEFAULT_AGENT_MODEL)
+DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", "kimi-k2.7-code:cloud")
 # Agent turns require native MCP. Reduced text mode must be explicitly selected.
 NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S", "300"))
 
@@ -364,6 +364,11 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
+        self.app.router.add_get("/v1/runtime/frameworks", self.handle_runtime_frameworks)
+        self.app.router.add_get("/v1/runtime/models", self.handle_runtime_models)
+        self.app.router.add_get("/v1/runtime/capabilities", self.handle_runtime_capabilities)
+        self.app.router.add_get("/v1/sessions/{id}/attachments", self.handle_list_attachments)
+        self.app.router.add_post("/v1/sessions/{id}/attachments", self.handle_add_attachment)
 
     async def handle_version(self, request: web.Request) -> web.Response:
         """Stable, read-only identity for clients and deployment checks."""
@@ -972,6 +977,10 @@ class JaegerGatewayApp:
                 "text": text,
             })
 
+        turn_model = body.get("model")
+        if turn_model:
+            self.store.update_metadata(session_id, {"model": str(turn_model)})
+
         if admitted.get("accepted") and rid not in self._running_tasks:
             self._running_tasks[rid] = asyncio.create_task(
                 self._execute_turn(session_id, turn_id, text, request_id=rid)
@@ -1277,16 +1286,33 @@ class JaegerGatewayApp:
         self,
         text: str,
         *,
+        model: str | None = None,
         system_prompt: str | None = None,
         history: list[dict[str, Any]] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> str:
         """Live text turn via locked Ollama — never routes through :8813."""
-        model = DEFAULT_OLLAMA_MODEL
-        if not model:
+        target_model = model or DEFAULT_OLLAMA_MODEL
+        if not target_model:
             raise RuntimeError(
                 "Explicit text-only mode requires JAEGER_GATEWAY_OLLAMA_MODEL"
             )
         sys_content = system_prompt or "You are Jaeger. Reply briefly and helpfully."
+
+        # Capability inventory injection when user asks about capabilities or tools
+        if any(w in text.lower() for w in ("capabilities", "tools available", "what can you do", "what tools")):
+            try:
+                from jaeger_ai.interfaces.mcp_server import capability_inventory
+                inv = capability_inventory()
+                tool_list = []
+                for grp, gdata in (inv.get("groups") or {}).items():
+                    tool_list.extend(gdata.get("agent_tools") or [])
+                if tool_list:
+                    tools_str = ", ".join(sorted(set(tool_list)))
+                    sys_content += f"\n\n[Live Capabilities Inventory]\nAvailable tools: {tools_str}"
+            except Exception:
+                pass
+
         messages = [
             {"role": item.get("role"), "content": item.get("content")}
             for item in (history or [])
@@ -1294,8 +1320,57 @@ class JaegerGatewayApp:
         ]
         if not messages or messages[-1] != {"role": "user", "content": text}:
             messages.append({"role": "user", "content": text})
+
+        # Multimodal / Vision extraction: find uploaded image references in attachments, history, or text
+        import base64
+        import re
+        from pathlib import Path
+
+        image_b64s: list[str] = []
+        all_text_blobs = [text] + [str(item.get("content") or "") for item in (history or [])]
+        seen_paths: set[str] = set()
+
+        for att in (attachments or []):
+            safe_path = att.get("safe_path")
+            mime = att.get("mime_type") or ""
+            if safe_path and (mime.startswith("image/") or Path(safe_path).suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}):
+                p = Path(safe_path)
+                if p.is_file() and str(p) not in seen_paths:
+                    seen_paths.add(str(p))
+                    try:
+                        image_b64s.append(base64.b64encode(p.read_bytes()).decode("utf-8"))
+                    except Exception:
+                        pass
+        for blob in all_text_blobs:
+            for match in re.finditer(r"stored at\s+([^\s]+\.(?:png|jpg|jpeg|webp|gif))", blob, re.IGNORECASE):
+                img_path = match.group(1).strip()
+                if img_path not in seen_paths:
+                    seen_paths.add(img_path)
+                    p = Path(img_path)
+                    if p.is_file():
+                        try:
+                            image_b64s.append(base64.b64encode(p.read_bytes()).decode("utf-8"))
+                        except Exception:
+                            pass
+            for match in re.finditer(r"(?:image attachment|attached image|file):\s*(?:[^\s]+\s+at\s+)?([^\s)]+\.(?:png|jpg|jpeg|webp|gif))", blob, re.IGNORECASE):
+                img_path = match.group(1).strip()
+                if img_path not in seen_paths:
+                    seen_paths.add(img_path)
+                    p = Path(img_path)
+                    if p.is_file():
+                        try:
+                            image_b64s.append(base64.b64encode(p.read_bytes()).decode("utf-8"))
+                        except Exception:
+                            pass
+
+        if image_b64s and messages:
+            messages[-1]["images"] = image_b64s
+            # If target model lacks vision, switch to known-good vision model kimi-k2.7-code:cloud
+            if target_model not in {"kimi-k2.7-code:cloud", "qwen3.5:397b-cloud", "minicpm-v:latest"}:
+                target_model = "kimi-k2.7-code:cloud"
+
         payload = {
-            "model": model,
+            "model": target_model,
             "messages": [
                 {
                     "role": "system",
@@ -1415,6 +1490,26 @@ class JaegerGatewayApp:
         rid = request_id or turn_id
 
         try:
+            atts = self.store.list_attachments(session_id)
+        except Exception:
+            atts = []
+        if atts:
+            try:
+                from jaeger_ai.core.frameworks.run_input import inline_webui_text_attachments
+                mapped = [
+                    {
+                        "path": a.get("safe_path"),
+                        "name": a.get("original_filename") or a.get("stored_filename"),
+                        "mime": a.get("mime_type"),
+                        "is_image": str(a.get("mime_type") or "").startswith("image/"),
+                    }
+                    for a in atts
+                ]
+                text = inline_webui_text_attachments(text, mapped)
+            except Exception:
+                logger.debug("attachment materialize failed", exc_info=True)
+
+        try:
             if rid in self._cancel_requested:
                 self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
                 return
@@ -1453,6 +1548,28 @@ class JaegerGatewayApp:
 
             def _sync_react(prompt: str, session_key: str = session_id) -> dict[str, Any]:
                 nonlocal backend, model
+                session_atts = self.store.list_attachments(session_id)
+                has_image = any(str(a.get("mime_type") or "").startswith("image/") for a in session_atts)
+                if not has_image:
+                    import re as _re
+                    has_image = bool(_re.search(r"\.(?:png|jpg|jpeg|webp)\b", prompt, _re.IGNORECASE))
+                if has_image:
+                    backend = LOCKED_OLLAMA_URL
+                    model = "kimi-k2.7-code:cloud"
+                    current = self.store.get_session(session_id) or {}
+                    chat_fut = asyncio.run_coroutine_threadsafe(
+                        self._ollama_chat(
+                            prompt,
+                            model=model,
+                            system_prompt=system_prompt,
+                            history=current.get("messages") or [],
+                            attachments=session_atts,
+                        ),
+                        loop,
+                    )
+                    txt = chat_fut.result()
+                    return {"text": txt, "status": "completed"}
+
                 owner_first = os.environ.get("JAEGER_OWNER_REACT", "").strip() in {"1", "true", "yes"}
                 try:
                     from jaeger_ai.core.entity.ownership import EntityRuntimeMode
@@ -1477,16 +1594,24 @@ class JaegerGatewayApp:
                 model = "jaeger-owner"
                 return {"text": txt, "status": "completed"}
 
+            session_meta = (session.get("metadata") or {}) if isinstance(session, dict) and isinstance(session.get("metadata"), dict) else {}
+            req_model = str(session_meta.get("model") or (session or {}).get("model") or "").strip()
+            if req_model.startswith("@") and ":" in req_model:
+                req_model = req_model.split(":", 1)[1]
+            active_model = req_model or DEFAULT_OLLAMA_MODEL
+
             def _sync_model(prompt: str) -> str:
                 nonlocal backend, model
                 backend = LOCKED_OLLAMA_URL
-                model = DEFAULT_OLLAMA_MODEL
+                model = active_model
                 current = self.store.get_session(session_id) or {}
                 chat_fut = asyncio.run_coroutine_threadsafe(
                     self._ollama_chat(
                         prompt,
+                        model=active_model,
                         system_prompt=system_prompt,
                         history=current.get("messages") or [],
+                        attachments=self.store.list_attachments(session_id),
                     ),
                     loop,
                 )
@@ -1507,13 +1632,15 @@ class JaegerGatewayApp:
             def _sync_delegate(specialist_name: str, prompt: str, session_key: str = session_id) -> dict[str, Any]:
                 nonlocal backend, model
                 backend = LOCKED_OLLAMA_URL
-                model = DEFAULT_OLLAMA_MODEL
+                model = active_model
                 current = self.store.get_session(session_id) or {}
                 chat_fut = asyncio.run_coroutine_threadsafe(
                     self._ollama_chat(
                         prompt,
+                        model=active_model,
                         system_prompt=system_prompt,
                         history=current.get("messages") or [],
+                        attachments=self.store.list_attachments(session_id),
                     ),
                     loop,
                 )
@@ -1887,6 +2014,45 @@ class JaegerGatewayApp:
     async def handle_list_approvals(self, request: web.Request) -> web.Response:
         pending = self.store.list_pending_approvals()
         return web.json_response({"approvals": pending})
+
+    async def handle_runtime_frameworks(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.runtime.truth import framework_inventory
+        return web.json_response({"frameworks": framework_inventory()})
+
+    async def handle_runtime_models(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.runtime.truth import provider_model_inventory, webui_model_catalog
+        return web.json_response({
+            **provider_model_inventory(),
+            "webui_catalog": webui_model_catalog(),
+        })
+
+    async def handle_runtime_capabilities(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.runtime.truth import capability_snapshot
+        return web.json_response(capability_snapshot())
+
+    async def handle_list_attachments(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        return web.json_response({"attachments": self.store.list_attachments(session_id)})
+
+    async def handle_add_attachment(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        body = await request.json() if request.can_read_body else {}
+        path = Path(str(body.get("safe_path") or body.get("path") or ""))
+        try:
+            from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+            root = InstanceLayout(root=resolve_instance_dir()).workspace_dir.resolve()
+            resolved = path.resolve()
+            if not resolved.is_relative_to(root):
+                return web.json_response({"error": "attachment path escapes workspace"}, status=400)
+        except Exception as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        row = self.store.add_attachment(session_id, body)
+        self.event_bus.publish(session_id, "attachment.added", {"attachment": row})
+        return web.json_response(row, status=201)
 
     async def handle_resolve_approval(self, request: web.Request) -> web.Response:
         """Resolve a pending approval. First writer wins; denial prevents effects."""

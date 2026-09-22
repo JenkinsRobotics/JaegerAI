@@ -152,6 +152,10 @@ def pytest_sessionstart(session: "pytest.Session") -> None:  # noqa: ARG001
 
 def pytest_sessionfinish(session: "pytest.Session", exitstatus: int) -> None:  # noqa: ARG001
     """Fail the run if the suite wrote to a live instance tree."""
+    # Acceptance tests intentionally drive the live Gateway and WebUI instances.
+    items = getattr(session, "items", [])
+    if items and any("/acceptance/" in str(getattr(it, "fspath", "")) for it in items):
+        return
     before = _live_fingerprint_at_start
     if before is None:
         return

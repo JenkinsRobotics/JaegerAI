@@ -34,6 +34,7 @@ export HERMES_WEBUI_RUNNER_BASE_URL="${JAEGER_RUNNER_BASE_URL:-http://127.0.0.1:
 # Health uses JAEGER_GATEWAY_URL. Do not synthesize a global chat gateway
 # override: named profiles own their individual native gateway addresses.
 export JAEGER_GATEWAY_URL="${JAEGER_GATEWAY_URL:-http://127.0.0.1:8810}"
+export JAEGER_OLLAMA_URL="${JAEGER_OLLAMA_URL:-http://127.0.0.1:11434}"
 export HERMES_WEBUI_EXTENSION_DIR="$repo_root/jaeger_ai/assets"
 export HERMES_WEBUI_EXTENSION_SCRIPT_URLS=/extensions/jaeger_webui_branding.js
 export HERMES_WEBUI_FOREGROUND=1

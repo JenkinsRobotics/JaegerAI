@@ -3585,7 +3585,7 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
       if (p && typeof p === 'object' && typeof p.name === 'string') {
         _bootActiveProfileUnauthRedirectBudget.clearAttempted(markerStorage);
         if (p.default_workspace) S._profileDefaultWorkspace = p.default_workspace;
-        return {status: 'resolved', profile: p.name || 'default', isDefault: !!p.is_default};
+        return {status: 'resolved', profile: p.name || 'jaeger', isDefault: !!(p.is_product_default || p.name === 'jaeger')};
       }
       if (p === undefined && !alreadyAttempted) {
         if (_bootActiveProfileUnauthRedirectBudget.spendOnRedirect(markerStorage)) {
@@ -3595,7 +3595,7 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
       }
       if (p === undefined) _bootActiveProfileUnauthRedirectBudget.spendOnFallback(markerStorage);
       else _bootActiveProfileUnauthRedirectBudget.clearAttempted(markerStorage);
-      return {status: 'fallback', profile: 'default', isDefault: true};
+      return {status: 'fallback', profile: 'jaeger', isDefault: true};
     } catch (e) {
       _bootActiveProfileUnauthRedirectBudget.clearAttempted(markerStorage);
       if (!alreadyAttempted && e && e.status === 401) {
@@ -3605,7 +3605,7 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
         return {status: 'recovery-redirect'};
       }
       if (e && e.status === 401) _bootActiveProfileUnauthRedirectBudget.spendOnFallback(markerStorage);
-      return {status: 'fallback', profile: 'default', isDefault: true};
+      return {status: 'fallback', profile: 'jaeger', isDefault: true};
     }
   }
 

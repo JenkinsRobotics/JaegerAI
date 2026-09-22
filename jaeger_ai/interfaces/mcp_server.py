@@ -133,6 +133,56 @@ def _tool_names(payload: Any) -> list[str]:
     return names
 
 
+def capability_inventory(bridge: Any | None = None) -> dict[str, Any]:
+    """Return Jaeger's live tool inventory and shared protocol endpoints."""
+    names: list[str] = []
+    runtime_initialized = False
+    inventory_error = None
+    if bridge is not None:
+        try:
+            payload = bridge.query("list_tools")
+            names = _tool_names(payload)
+            if isinstance(payload, dict):
+                runtime_initialized = bool(payload.get("runtime_initialized"))
+        except Exception as exc:  # noqa: BLE001
+            inventory_error = str(exc)
+    apple_groups = {
+        "calendar": ["get_events", "create_event", "calendar_list", "calendar_create"],
+        "reminders": ["reminders_list", "reminders_create"],
+        "contacts": ["lookup_contact"],
+        "mail": ["send_email", "list_mail", "list_mailboxes", "move_mail"],
+        "notes": ["notes_list", "notes_read", "notes_create"],
+        "shortcuts": ["list_shortcuts", "run_shortcut", "shortcuts_list", "shortcuts_run"],
+        "files": ["spotlight_search", "read_file", "write_file", "move_file", "copy_file"],
+        "system": ["notify", "system_control", "media_control", "now_playing"],
+    }
+    groups = {
+        group: {
+            "agent_tools": tools,
+            "entrypoint": "chat",
+        }
+        for group, tools in apple_groups.items()
+    }
+    result: dict[str, Any] = {
+        "ok": True,
+        "authority": "jaeger",
+        "mcp": MCP_HTTP_URL,
+        "a2a": A2A_URL,
+        "external_mcp_tools": names,
+        "external_mcp_runtime_initialized": runtime_initialized,
+        "groups": groups,
+        "apple": groups,
+        "apple_authority": (
+            "Apple capabilities remain behind Jaeger's chat controller, "
+            "identity grants, approvals, and WorkLedger verification."
+        ),
+        "completion_authority": "JaegerAgentController+WorkLedger",
+    }
+    if inventory_error:
+        result["inventory_error"] = inventory_error
+    return result
+
+
 def build_server(client: Any, instance: str, model: str | None,
                  run_turn: TurnFn | None = None, bridge: Any | None = None,
                  host: str = MCP_HTTP_HOST, port: int = MCP_HTTP_PORT) -> Any:
@@ -232,56 +282,9 @@ def build_server(client: Any, instance: str, model: str | None,
 
     @mcp.tool()
     @_off_event_loop
-    def capability_inventory() -> dict:
-        """Return Jaeger's live tool inventory and shared protocol endpoints.
-
-        This is discovery only. Calling a capability still goes through the
-        bridge's normal identity, permission, approval, and completion rules.
-        """
-        names: list[str] = []
-        runtime_initialized = False
-        inventory_error = None
-        if bridge is not None:
-            try:
-                payload = bridge.query("list_tools")
-                names = _tool_names(payload)
-                if isinstance(payload, dict):
-                    runtime_initialized = bool(payload.get("runtime_initialized"))
-            except Exception as exc:  # noqa: BLE001
-                inventory_error = str(exc)
-        apple_groups = {
-            "calendar": ["get_events", "create_event", "calendar_list", "calendar_create"],
-            "reminders": ["reminders_list", "reminders_create"],
-            "contacts": ["lookup_contact"],
-            "mail": ["send_email", "list_mail", "list_mailboxes", "move_mail"],
-            "notes": ["notes_list", "notes_read", "notes_create"],
-            "shortcuts": ["list_shortcuts", "run_shortcut", "shortcuts_list", "shortcuts_run"],
-            "files": ["spotlight_search", "read_file", "write_file", "move_file", "copy_file"],
-            "system": ["notify", "system_control", "media_control", "now_playing"],
-        }
-        groups = {
-            group: {
-                "agent_tools": tools,
-                "entrypoint": "chat",
-            }
-            for group, tools in apple_groups.items()
-        }
-        result: dict[str, Any] = {
-            "authority": "jaeger",
-            "mcp": MCP_HTTP_URL,
-            "a2a": A2A_URL,
-            "external_mcp_tools": names,
-            "external_mcp_runtime_initialized": runtime_initialized,
-            "apple": groups,
-            "apple_authority": (
-                "Apple capabilities remain behind Jaeger's chat controller, "
-                "identity grants, approvals, and WorkLedger verification."
-            ),
-            "completion_authority": "JaegerAgentController+WorkLedger",
-        }
-        if inventory_error:
-            result["inventory_error"] = inventory_error
-        return result
+    def capability_inventory_tool() -> dict:
+        """Return Jaeger's live tool inventory and shared protocol endpoints."""
+        return capability_inventory(bridge=bridge)
 
     @mcp.tool()
     @_off_event_loop

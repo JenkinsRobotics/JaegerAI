@@ -293,6 +293,13 @@ class EntityRuntime:
                 ctx["durable_recall"] = "\n".join(recall_lines)
         except Exception:
             pass
+        try:
+            from jaeger_ai.core.runtime.truth import capability_prompt_block
+            ctx["runtime_truth"] = capability_prompt_block(
+                self.layout.root if getattr(self, "layout", None) else None
+            )
+        except Exception:
+            pass
 
         # Passive gate: if salience indicates no wake
         if not attention.wake_cognition:

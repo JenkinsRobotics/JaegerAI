@@ -6932,6 +6932,13 @@ def get_available_models(*, prefer_cache: bool = False, force_refresh: bool = Fa
     mtime_stale = _current_mtime != _cfg_mtime
     if path_changed or (mtime_stale and not _cfg_has_in_memory_overrides()):
         reload_config_if_stale()
+    try:
+        from jaeger_ai.core.models.discovery import canonical_runtime_inventory
+        canonical_inv = canonical_runtime_inventory(refresh=force_refresh, cached_only=prefer_cache)
+        if canonical_inv and canonical_inv.get("groups"):
+            return canonical_inv
+    except Exception:
+        pass
     from api.jaeger_ollama import catalog as ollama_host_catalog
     host_catalog = ollama_host_catalog(cfg, refresh=force_refresh, cached_only=prefer_cache)
     if host_catalog is not None:

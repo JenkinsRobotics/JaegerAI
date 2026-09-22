@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 MAX_RETAINED_EVENTS = 5000
 REQUEST_ID_MAX = 128
 
@@ -228,6 +228,26 @@ class GatewaySessionStore:
             conn.execute("CREATE TABLE IF NOT EXISTS background_deliveries ("
                          "delivery_key TEXT PRIMARY KEY, digest TEXT NOT NULL, receipt_json TEXT NOT NULL)")
             current = 4
+        if current < 5:
+            conn.executescript("""
+                CREATE TABLE IF NOT EXISTS attachments (
+                    attachment_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    original_filename TEXT NOT NULL,
+                    stored_filename TEXT NOT NULL,
+                    safe_path TEXT NOT NULL,
+                    mime_type TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    sha256 TEXT,
+                    provenance TEXT NOT NULL DEFAULT 'remote_upload',
+                    created_at REAL NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
+                    FOREIGN KEY(session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+                );
+                CREATE INDEX IF NOT EXISTS idx_attachments_session
+                    ON attachments(session_id, created_at);
+            """)
+            current = 5
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -1038,3 +1058,66 @@ class GatewaySessionStore:
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
+
+    def add_attachment(self, session_id: str, record: dict[str, Any]) -> dict[str, Any]:
+        now = time.time()
+        aid = str(record.get("attachment_id") or f"att_{uuid.uuid4().hex[:16]}")
+        row = {
+            "attachment_id": aid,
+            "session_id": session_id,
+            "original_filename": str(record.get("original_filename") or record.get("filename") or ""),
+            "stored_filename": str(record.get("stored_filename") or ""),
+            "safe_path": str(record.get("safe_path") or record.get("path") or ""),
+            "mime_type": str(record.get("mime_type") or record.get("mime") or "application/octet-stream"),
+            "size_bytes": int(record.get("size_bytes") or record.get("size") or 0),
+            "sha256": str(record.get("sha256") or "") or None,
+            "provenance": str(record.get("provenance") or "remote_upload"),
+            "created_at": float(record.get("created_at") or now),
+            "metadata": record.get("metadata") if isinstance(record.get("metadata"), dict) else {},
+        }
+        with self._immediate() as conn:
+            conn.execute(
+                """
+                INSERT INTO attachments(
+                    attachment_id, session_id, original_filename, stored_filename,
+                    safe_path, mime_type, size_bytes, sha256, provenance, created_at, metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    row["attachment_id"],
+                    row["session_id"],
+                    row["original_filename"],
+                    row["stored_filename"],
+                    row["safe_path"],
+                    row["mime_type"],
+                    row["size_bytes"],
+                    row["sha256"],
+                    row["provenance"],
+                    row["created_at"],
+                    json.dumps(row["metadata"]),
+                ),
+            )
+        return row
+
+    def list_attachments(self, session_id: str) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM attachments WHERE session_id=? ORDER BY created_at",
+                (session_id,),
+            ).fetchall()
+            out = []
+            for r in rows:
+                out.append({
+                    "attachment_id": r["attachment_id"],
+                    "session_id": r["session_id"],
+                    "original_filename": r["original_filename"],
+                    "stored_filename": r["stored_filename"],
+                    "safe_path": r["safe_path"],
+                    "mime_type": r["mime_type"],
+                    "size_bytes": r["size_bytes"],
+                    "sha256": r["sha256"],
+                    "provenance": r["provenance"],
+                    "created_at": r["created_at"],
+                    "metadata": _row_meta(r["metadata_json"]),
+                })
+            return out

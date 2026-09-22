@@ -93,6 +93,9 @@ class DirectResponseHandler(CognitionStrategyHandler):
         context: Mapping[str, Any],
     ) -> dict[str, Any]:
         text = str(event.payload.get("text") or "")
+        truth = str(context.get("runtime_truth") or "")
+        if truth:
+            text = f"{truth}\n\n{text}"
         recall = str(context.get("durable_recall") or "")
         if recall:
             text = f"{recall}\n\n{text}"
@@ -158,6 +161,9 @@ class ReActHandler(CognitionStrategyHandler):
             except Exception as exc:
                 logger.debug("ReAct reflexion inject skipped: %s", exc)
         if not constraints:
+            truth = str(context.get("runtime_truth") or "")
+            if truth:
+                text = f"{truth}\n\n{text}"
             recall = str(context.get("durable_recall") or "")
             if recall:
                 text = f"{recall}\n\n{text}"

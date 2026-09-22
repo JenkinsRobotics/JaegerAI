@@ -5,7 +5,7 @@
 // legacy reverse-scan over S.messages — that keeps new clients working
 // against old servers (Phase 1 may not yet be deployed everywhere).
 // See api/todo_state.py for the wire contract.
-const S={session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'default',activeProfileIsDefault:true,showHiddenWorkspaceFiles:false,todos:[],todoStateMeta:null,_pendingSessionToolsets:null};
+const S={session:null,messages:[],entries:[],busy:false,pendingFiles:[],toolCalls:[],activeStreamId:null,currentDir:'.',activeProfile:'jaeger',activeProfileIsDefault:false,showHiddenWorkspaceFiles:false,todos:[],todoStateMeta:null,_pendingSessionToolsets:null};
 
 function profileDisplayName(profileOrName){
   // Prefer API display_name over internal id. Always return a plain string.
@@ -16,24 +16,24 @@ function profileDisplayName(profileOrName){
       if(typeof dn === 'string' && dn.trim()) return dn.trim();
       const n = profileOrName.name;
       if(typeof n === 'string' && n.trim()) return FALLBACK[n.trim()] || n.trim();
-      return 'Hermes Agent';
+      return 'Jaeger';
     }
     const name = (typeof profileOrName === 'string' && profileOrName.trim())
       ? profileOrName.trim()
-      : ((S && S.activeProfile) || 'default');
+      : ((S && S.activeProfile) || 'jaeger');
     if(typeof _profilesCache !== 'undefined' && _profilesCache && Array.isArray(_profilesCache.profiles)){
       const hit = _profilesCache.profiles.find(p => p && p.name === name);
       if(hit && typeof hit.display_name === 'string' && hit.display_name.trim()) return hit.display_name.trim();
     }
     return FALLBACK[name] || (name.charAt(0).toUpperCase() + name.slice(1));
   }catch(_){
-    return 'Hermes Agent';
+    return 'Jaeger';
   }
 }
 function assistantDisplayName(){
-  const label = profileDisplayName(S.activeProfile || 'default');
+  const label = profileDisplayName(S.activeProfile || 'jaeger');
   if(typeof label === 'string' && label && label !== 'default') return label;
-  return window._botName||'Hermes';
+  return window._botName||'Jaeger';
 }
 const INFLIGHT={};  // keyed by session_id while request in-flight
 const SESSION_QUEUES={};  // keyed by session_id for queued follow-up turns
