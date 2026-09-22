@@ -208,6 +208,9 @@ def commissioning_authority_policy(proposal: ProposedAction) -> AuthorityDecisio
     return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="commissioning_authority")
 
 
+from ..authority import AuthorityDecisionType, PolicyKernel
+
+
 class AuthorityLayer:
     """The canonical authority boundary guarding the action system.
     
@@ -215,26 +218,54 @@ class AuthorityLayer:
     prior evaluation against registered policy rules and operator hooks.
     """
 
-    def __init__(self, policies: list[PolicyCheckFn] | None = None) -> None:
-        if policies is not None:
-            self._policies: list[PolicyCheckFn] = list(policies)
-        else:
-            self._policies = [
-                default_shell_hooks_policy,
-                default_allowlist_policy,
-                default_permissions_policy,
-                commissioning_authority_policy,
-            ]
+    def __init__(
+        self,
+        policies: list[PolicyCheckFn] | None = None,
+        kernel: PolicyKernel | None = None,
+    ) -> None:
+        self.kernel = kernel or PolicyKernel.get_default()
+        self._policies: list[PolicyCheckFn] = list(policies) if policies is not None else [
+            default_shell_hooks_policy,
+            default_allowlist_policy,
+            default_permissions_policy,
+            commissioning_authority_policy,
+        ]
 
     def register_policy(self, policy: PolicyCheckFn) -> None:
         self._policies.append(policy)
 
     def authorize(self, proposal: ProposedAction) -> AuthorityDecision:
-        """Evaluate the proposed action against all policies in order.
+        """Evaluate the proposed action against PolicyKernel and registered policies.
         
         First denial or confirmation gate immediately blocks dispatch.
         """
-        current_args = proposal.arguments
+        # 1. Canonical PolicyKernel check
+        from ..authority import ProposedAction as KernelProposal
+        k_proposal = KernelProposal(
+            tool_name=proposal.tool_name,
+            arguments=proposal.arguments,
+            session_id=proposal.session_id,
+            actor=proposal.actor,
+            context=proposal.context,
+            proposed_at=proposal.proposed_at,
+        )
+        kernel_decision = self.kernel.evaluate(k_proposal)
+        if not kernel_decision.is_authorized:
+            logger.warning(
+                "Proposed action %r blocked by PolicyKernel (%s): %s",
+                proposal.tool_name,
+                kernel_decision.policy_name,
+                kernel_decision.reason,
+            )
+            return AuthorityDecision(
+                status=kernel_decision.status,
+                reason=kernel_decision.reason,
+                authorized_arguments=kernel_decision.authorized_arguments,
+                policy_name=kernel_decision.policy_name,
+            )
+
+        # 2. Registered policies
+        current_args = kernel_decision.authorized_arguments if kernel_decision.authorized_arguments is not None else proposal.arguments
 
         for policy in self._policies:
             try:
