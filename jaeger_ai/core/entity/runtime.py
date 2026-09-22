@@ -629,6 +629,82 @@ class EntityRuntime:
 
         return result_dict
 
+    def run_subordinate_react(
+        self,
+        prompt: str,
+        *,
+        session_key: str = "dispatcher",
+        request_id: str | None = None,
+        confirmation_provider: Any = None,
+        native_run_id: str | None = None,
+        max_iterations: int = 12,
+        max_tool_calls: int = 8,
+    ) -> str:
+        """Execute subordinate ReAct loop inside the EntityRuntime.
+
+        Provides canonical execution of tool-using ReAct cognition owned
+        by the EntityRuntime, ensuring consistent permission policies,
+        turn commitments, and execution tracking across all clients.
+        """
+        import os
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+        from jaeger_ai.core.models.external_model import ExternalModelClient
+        from jaeger_agent.cognition.executive import TurnExecutive
+        from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+        from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
+        from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
+        from jaeger_agent.memory import sqlite_store
+
+        layout = self.layout
+        if layout is None:
+            raise RuntimeError("OWNER layout missing; cannot run in-process ReAct")
+        sqlite_store.bind(layout)
+        try:
+            from jaeger_agent.workspace import bind as bind_workspace
+            bind_workspace(layout)
+        except Exception:
+            pass
+
+        if confirmation_provider is not None:
+            try:
+                from jaeger_os.core.safety.permissions import PermissionPolicy, PolicyMode, install_policy
+                install_policy(PermissionPolicy(
+                    mode=PolicyMode.NORMAL,
+                    confirmation=confirmation_provider,
+                ))
+            except Exception:
+                try:
+                    from jaeger_ai.core.instance.commissioning import install_commissioning_permissions
+                    install_commissioning_permissions(layout)
+                except Exception:
+                    pass
+        else:
+            try:
+                from jaeger_ai.core.instance.commissioning import install_commissioning_permissions
+                install_commissioning_permissions(layout)
+            except Exception:
+                pass
+
+        cfg = load_yaml(layout.config_path, Config)
+        client = ExternalModelClient(cfg.external_model, layout)
+        agent = build_jaeger_agent(client, max_iterations=max_iterations, max_tool_calls=max_tool_calls)
+        if native_run_id:
+            try:
+                agent.bind_run(native_run_id)
+            except Exception:
+                pass
+        turn_exec = TurnExecutive(
+            agent,
+            SqliteRunStore(),
+            SqliteCommitmentStore(),
+            provider=str(cfg.external_model.provider or "ollama"),
+        )
+        os.environ.setdefault("JAEGER_ACCEPT_HOOKS", "1")
+        run = turn_exec.ensure_run()
+        out = turn_exec.run_turn(prompt)
+        out = (out or "").strip()
+        return out if out else "(No response text returned)"
+
     # ── Specialized Ingress Helpers ───────────────────────────────────
 
     def submit_human_message(

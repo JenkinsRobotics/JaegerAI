@@ -178,6 +178,24 @@ class ReActHandler(CognitionStrategyHandler):
         if callable(react_runner):
             return react_runner(text, session_key=event.session_id)
 
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            rt = EntityRuntime.get_singleton()
+            if getattr(rt, "layout", None) is not None:
+                reply = rt.run_subordinate_react(
+                    text,
+                    session_key=event.session_id,
+                    request_id=getattr(event, "request_id", None),
+                )
+                return {
+                    "strategy": CognitiveStrategy.REACT_LOOP.value,
+                    "text": reply,
+                    "action_taken": True,
+                    "llm_invoked": True,
+                }
+        except Exception as exc:
+            logger.debug("ReActHandler runtime subordinate execution failed: %s", exc)
+
         # Fallback subordinate execution
         return {
             "strategy": CognitiveStrategy.REACT_LOOP.value,

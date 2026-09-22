@@ -1396,66 +1396,23 @@ class JaegerGatewayApp:
         return content
 
     def _owner_react_turn(self, prompt: str, *, session_key: str, request_id: str) -> str:
-        """Run ReAct in the Gateway OWNER process when native MCP is not this instance."""
+        """Run ReAct in the EntityRuntime OWNER process."""
         from jaeger_ai.core.entity.runtime import EntityRuntime
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
-        from jaeger_ai.core.models.external_model import ExternalModelClient
-        from jaeger_agent.cognition.executive import TurnExecutive
-        from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
-        from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore
-        from jaeger_agent.loop.runtime_bridge import build_jaeger_agent
-        from jaeger_agent.memory import sqlite_store
 
         runtime = EntityRuntime.get_singleton()
-        layout = runtime.layout
-        if layout is None:
-            raise RuntimeError("OWNER layout missing; cannot run in-process ReAct")
-        sqlite_store.bind(layout)
-        try:
-            from jaeger_agent.workspace import bind as bind_workspace
-            bind_workspace(layout)
-        except Exception:
-            pass
-        try:
-            from jaeger_os.core.safety.permissions import PermissionPolicy, PolicyMode, install_policy
-            install_policy(PermissionPolicy(
-                mode=PolicyMode.NORMAL,
-                confirmation=_GatewayToolConfirmationProvider(self, session_key, request_id),
-            ))
-        except Exception:
-            try:
-                from jaeger_ai.core.instance.commissioning import install_commissioning_permissions
-                install_commissioning_permissions(layout)
-            except Exception:
-                pass
-        cfg = load_yaml(layout.config_path, Config)
-        client = ExternalModelClient(cfg.external_model, layout)
-        agent = build_jaeger_agent(client, max_iterations=12, max_tool_calls=8)
+        native = None
         try:
             row = self.store.get_request(request_id)
-            native = str((row or {}).get("native_run_id") or "")
-            if native:
-                agent.bind_run(native)
+            native = str((row or {}).get("native_run_id") or "") or None
         except Exception:
             pass
-        execu = TurnExecutive(
-            agent,
-            SqliteRunStore(),
-            SqliteCommitmentStore(),
-            provider=str(cfg.external_model.provider or "ollama"),
+        return runtime.run_subordinate_react(
+            prompt,
+            session_key=session_key,
+            request_id=request_id,
+            confirmation_provider=_GatewayToolConfirmationProvider(self, session_key, request_id),
+            native_run_id=native,
         )
-        os.environ.setdefault("JAEGER_ACCEPT_HOOKS", "1")
-        run = execu.ensure_run()
-        try:
-            self.store.bind_native(
-                request_id,
-                native_run_id=str(run.id),
-                native_session=session_key,
-                status="running",
-            )
-        except Exception:
-            pass
-        return str(execu.run_turn(prompt) or "")
 
     async def _execute_turn(
         self,
