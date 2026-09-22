@@ -15,6 +15,8 @@ imported. Never re-derived, never re-typed.
 * :mod:`~jaeger_ai.contract.ports` — the default port for every service.
 * :mod:`~jaeger_ai.contract.sessions` — how a session id encodes the
   framework and surface that created it.
+* :mod:`~jaeger_ai.contract.model_ids` — how a picker id (``@lane:model``)
+  encodes the provider lane, and the bare name the provider accepts.
 
 **This package imports nothing from the rest of** ``jaeger_ai``. That is the
 rule that makes it safe for any module to import, and it is load-bearing: the
@@ -28,6 +30,6 @@ copy one into the other.
 """
 from __future__ import annotations
 
-from . import frameworks, ports, schemas, sessions
+from . import frameworks, model_ids, ports, schemas, sessions
 
-__all__ = ["frameworks", "ports", "schemas", "sessions"]
+__all__ = ["frameworks", "model_ids", "ports", "schemas", "sessions"]
