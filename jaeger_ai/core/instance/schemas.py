@@ -737,6 +737,17 @@ class ExternalModelConfig(BaseModel):
         json_schema_extra=_setting("model", restart=True),
         description="Model id the provider expects (a 'claude-…' id, or an LM Studio model name).",
     )
+
+    @field_validator("model")
+    @classmethod
+    def _provider_model_name(cls, value: str) -> str:
+        # A picker id (``@ollama-cloud:glm-5.3-flash:cloud``) persisted here
+        # reached Ollama verbatim and failed every tool turn with
+        # ``400 invalid model name``. Validating on the field covers every
+        # writer and heals a config.yaml that already holds one.
+        from jaeger_ai.contract.model_ids import provider_model_name
+        return provider_model_name(value)
+
     api_key_credential: str = Field(
         "external_model_api_key",
         json_schema_extra=_setting("model", restart=True, advanced=True),

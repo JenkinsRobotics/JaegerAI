@@ -20,6 +20,7 @@ correct. The code still ran. Only the behaviour was wrong.
 | :--- | :--- |
 | `frameworks.py` | The four backends a turn can run on, and every name each answers to — runtime, WebUI profile, display name, agent id, container. |
 | `ports.py` | The default port for each service. |
+| `model_ids.py` | The `@lane:model` picker id grammar, and the bare model name a provider accepts. |
 
 ## The one rule
 

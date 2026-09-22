@@ -21,6 +21,7 @@ from aiohttp import ClientSession, ClientTimeout, web
 
 from jaeger_ai import __version__ as JAEGER_VERSION
 from jaeger_ai.contract.frameworks import DEFAULT_AGENT_MODEL
+from jaeger_ai.contract.model_ids import provider_model_name
 from jaeger_ai.contract.ports import (
     GATEWAY_PORT,
     LOOPBACK,
@@ -1552,9 +1553,7 @@ class JaegerGatewayApp:
                 return {"text": txt, "status": "completed"}
 
             session_meta = (session.get("metadata") or {}) if isinstance(session, dict) and isinstance(session.get("metadata"), dict) else {}
-            req_model = str(session_meta.get("model") or (session or {}).get("model") or "").strip()
-            if req_model.startswith("@") and ":" in req_model:
-                req_model = req_model.split(":", 1)[1]
+            req_model = provider_model_name(session_meta.get("model") or (session or {}).get("model") or "")
             active_model = req_model or DEFAULT_OLLAMA_MODEL
 
             def _sync_model(prompt: str) -> str:

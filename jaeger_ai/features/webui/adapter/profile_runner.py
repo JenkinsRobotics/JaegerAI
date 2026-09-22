@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from jaeger_ai.contract.model_ids import split_routed_model_id
 from jaeger_ai.contract.sessions import native_session_id
 from jaeger_ai.core.frameworks.native_runs import Run, Runs, TERMINAL
 
@@ -118,9 +119,8 @@ class ProfileRunner:
             raise ValueError(f'{profile} attachment transfer is not configured; use native attachment tools')
         model = str(request.get('model') or '').strip()
         provider = str(request.get('provider') or '').strip()
-        if model.startswith('@') and ':' in model:
-            qualifier, model = model[1:].split(':', 1)
-            provider = provider or qualifier
+        qualifier, model = split_routed_model_id(model)
+        provider = provider or qualifier or ''
         if provider in {'ollama-local', 'ollama-cloud'}:
             provider = 'ollama'
         manager = self.manager(profile)
