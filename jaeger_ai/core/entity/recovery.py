@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import logging
 from typing import Any
 
@@ -15,6 +15,8 @@ class RecoveryReport:
     pending_effects: list[str]
     resumed: list[str]
     errors: list[str]
+    # Owner died, no half-done effect: safe to continue once a caller binds it.
+    recoverable: list[str] = field(default_factory=list)
 
 
 class RecoveryManager:
@@ -58,11 +60,18 @@ class RecoveryManager:
                     )
                     continue
                 try:
-                    resumed, checkpoint = store.resume(run.id, owner_pid=os.getpid())
-                    report.resumed.append(resumed.id)
+                    # Mark it resumable; do not claim it. Relabelling it
+                    # ``active`` under this pid with nothing executing it left
+                    # hundreds of runs "active" forever and handed them to
+                    # unrelated requests. Whoever re-dispatches the request
+                    # binds the run and resumes it, so the run-scoped effect
+                    # ledger skips work that already completed.
+                    recoverable = store.transition(run.id, "recoverable", reason="owner_lost")
+                    checkpoint = store.latest_checkpoint(run.id)
+                    report.recoverable.append(recoverable.id)
                     logger.info(
-                        "Resumed run %s from checkpoint seq=%s",
-                        resumed.id,
+                        "Run %s is recoverable from checkpoint seq=%s",
+                        recoverable.id,
                         getattr(checkpoint, "seq", None),
                     )
                     try:
@@ -75,8 +84,8 @@ class RecoveryManager:
                                 if not hasattr(EventType, "RUN_RESUMED")
                                 else EventType.LEARNING_UPDATED.value,
                                 {
-                                    "run_id": resumed.id,
-                                    "reason": "owner_lost_resume",
+                                    "run_id": recoverable.id,
+                                    "reason": "owner_lost_recoverable",
                                     "checkpoint": getattr(checkpoint, "cursor", None),
                                     "effect_keys_done": True,
                                 },
@@ -93,9 +102,9 @@ class RecoveryManager:
             report.errors.append(f"run recover: {exc}")
 
         logger.info(
-            "Recovery scan blocked_runs=%s resumed=%s pending_effects=%s errors=%s",
+            "Recovery scan blocked_runs=%s recoverable=%s pending_effects=%s errors=%s",
             len(report.blocked_runs),
-            len(report.resumed),
+            len(report.recoverable),
             len(report.pending_effects),
             report.errors,
         )
