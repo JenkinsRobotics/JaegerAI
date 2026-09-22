@@ -6,5 +6,5 @@ separate feature under `jaeger_ai/features/webui`.
 
 The host service is launched by `scripts/hermes-native-api-service.py` from the
 Hermes Agent checkout configured by `JAEGER_HERMES_AGENT_SRC` (default
-`~/GitHub/hermes-agent`). Runtime state remains in `~/.hermes` and the API binds
+`jaeger_ai/vendor/hermes_agent` inside JaegerAI). Runtime state remains in `~/.hermes` and the API binds
 only to `127.0.0.1:8645`.

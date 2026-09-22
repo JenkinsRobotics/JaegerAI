@@ -3648,9 +3648,14 @@ def _run_subordinate_react(
     user_text: str,
     *,
     session_key: str,
-    allow_persona: bool = True,
+    allow_persona: bool = False,
 ) -> dict[str, Any]:
-    """Subordinate ReAct cognitive engine invocation."""
+    """Subordinate ReAct cognitive engine invocation.
+
+    Subordinate ReAct is an explicit tool-using execution loop; allow_persona
+    defaults to False so the Mode-C id/persona lane does not intercept the turn
+    and suppress tool execution.
+    """
     actionable = _run_actionable_turn(
         client, user_text, session_key=session_key,
         allow_persona=allow_persona,
@@ -3716,7 +3721,7 @@ def _run_turn(
     for ReAct-style execution."""
     if is_subordinate:
         return _run_subordinate_react(
-            client, user_text, session_key=session_key, allow_persona=allow_persona,
+            client, user_text, session_key=session_key, allow_persona=False,
         )
 
     try:
@@ -3726,7 +3731,7 @@ def _run_turn(
         client = ensure_role_client(client, "react", runtime.state_root)
         context = {
             "react_runner": lambda t, session_key=session_key: _run_subordinate_react(
-                client, t, session_key=session_key, allow_persona=allow_persona,
+                client, t, session_key=session_key, allow_persona=False,
             ),
             "model_runner": lambda t: _run_direct_model_runner(
                 client, t, session_key=session_key, allow_persona=allow_persona,
@@ -5111,6 +5116,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--doctor-check", action="store_true",
                    help="With --doctor: non-interactive mode. Skip the "
                         "install-missing prompt; exit code reflects health.")
+    p.add_argument("--doctor-fix", "--fix", dest="doctor_fix", action="store_true",
+                   help="With --doctor: automatically repair/install missing components without prompting.")
     p.add_argument("--no-warmup", action="store_true", help="Skip llama-cpp warmup.")
     p.add_argument("--no-cron", action="store_true", help="Don't start the cron runner.")
     p.add_argument("--set-credential", metavar="NAME",
@@ -6008,16 +6015,23 @@ def _main_dispatch() -> int:
             return 1 if missing(checks) else 0
         print(format_report(checks))
         cmds = fixable(checks)
-        # --doctor-check: non-interactive. Skip the install prompt
-        # even when stdin is a TTY; exit code reflects health.
-        if cmds and sys.stdin.isatty() and not getattr(args, "doctor_check", False):
-            print("  These can be installed for you:")
-            for cmd in cmds:
-                print(f"    {' '.join(cmd)}")
-            try:
-                ans = input("  Install them now? [y/N]: ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                ans = ""
+        auto_fix = getattr(args, "doctor_fix", False)
+        # --doctor-check: non-interactive health check without prompting.
+        # --fix / --doctor-fix: non-interactive automatic repair.
+        if cmds and (auto_fix or (sys.stdin.isatty() and not getattr(args, "doctor_check", False))):
+            if auto_fix:
+                ans = "y"
+                print("  [doctor --fix] Auto-installing missing components:")
+                for cmd in cmds:
+                    print(f"    {' '.join(cmd)}")
+            else:
+                print("  These can be installed for you:")
+                for cmd in cmds:
+                    print(f"    {' '.join(cmd)}")
+                try:
+                    ans = input("  Install them now? [y/N]: ").strip().lower()
+                except (EOFError, KeyboardInterrupt):
+                    ans = ""
             if ans.startswith("y"):
                 print()
                 checks = install_missing(checks)

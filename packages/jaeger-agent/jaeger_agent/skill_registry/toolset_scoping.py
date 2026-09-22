@@ -53,8 +53,8 @@ def _scoping_enabled() -> bool:
 # for ambiguous requests; these hints avoid spending an extra meta-tool turn
 # for clear intent.  Matching is intentionally conservative and additive.
 _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
-    "files": (r"\b(files?|folders?|director(?:y|ies)|patch|rename|copy|move)\b",),
-    "code": (r"\b(code|python|swift|javascript|typescript|shell|terminal|command|test suite|debug|package)\b",),
+    "files": (r"\b(files?|folders?|director(?:y|ies)|patch|rename|copy|move|read|write|disk|space|path|content)\b",),
+    "code": (r"\b(code|python|swift|javascript|typescript|shell|terminal|command|test suite|debug|package|disk|system|process|cpu|memory usage|df|ls|cat|ps|kill|curl|git|ping|port)\b",),
     "containers": (r"\b(container|containers|containerized)\b",),
     "media": (r"\b(image|video|audio|speech|voice|camera|microphone|listen)\b",),
     "web": (r"\b(weather|forecast)\b",),

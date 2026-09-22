@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 from .resilience import failure_category, timeout_setting
 from .run_ownership import Ownership
 from .ingress import BodyReadTimeout, ProfileIngress
+from .adapter_protocol import clean_transcript_text, is_benign_stderr, parse_tool_line
 
 TERMINAL = {"completed", "failed", "cancelled", "interrupted"}
 
@@ -588,54 +589,99 @@ def jaeger_turn(run, workspace=None):
                 raise RuntimeError(gateway_result["error"])
             return gateway_result.get("text") or ""
 
-    from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
-    bridge = jaeger_bridge()
-    if workspace:
-        workspace = host_workspace(workspace)
-    accepted = threading.Event()
-
-    def cancel():
-        if accepted.is_set():
-            bridge.control("cancel", turn_id=run.id)
-
-    run.cancel_native = cancel
-
-    def event(frame):
-        kind = frame.get("type")
-        if kind in {"queued", "state"}:
-            accepted.set()
-            if kind == 'queued' or frame.get('busy') is True:
-                run.emit('native.state', state='queued' if kind == 'queued' else 'running')
-            if run.cancelled.is_set():
-                cancel()
-        if kind == "delta":
-            run.emit("message.delta", delta=frame.get("text", ""))
-        elif kind == "reasoning":
-            run.emit("reasoning.available", text=frame.get("text", ""))
-        elif kind == "tool":
-            done = frame.get("phase") in {"done", "error"}
-            run.emit("tool.completed" if done else "tool.started", tool=frame.get("name"),
-                     args=frame.get("args", {}), preview=frame.get("detail", ""),
-                     status="error" if frame.get("phase") == "error" else "completed" if done else "running")
-
-    def approval(frame):
-        if frame.get("kind") != "approval":
-            run.emit("reasoning.available", text="Native clarification needs a reply in Jaeger's native session.")
-            return "deny"
-        return run.request_approval(frame.get("prompt", "Tool approval required"),
-                                    choices=tuple(frame.get("options") or ["once", "deny"]))
-
+    from jaeger_ai.features.webui.adapter.bridge_client import HermesWebUIAdapterBridgeError, jaeger_bridge
     native_session = getattr(run, 'native_session', run.session)
     run.dispatch(session_id=native_session, run_id=run.id)
-    overrides = {key: getattr(run, key) for key in ("model", "provider") if getattr(run, key, None)}
-    result = bridge.turn(run.message, native_session, event, approval, turn_id=run.id, workspace=workspace, **overrides)
-    run.execution_unknown = result.get("execution_unknown", False) is not False
-    if run.execution_unknown:
-        raise RuntimeError(result.get("error") or "Native terminal receipt is uncertain; reconcile before retrying")
-    run.cancel_confirmed = bool(result.get("cancelled"))
-    if result.get("error") and not run.cancel_confirmed:
-        raise RuntimeError(result["error"])
-    return result.get("text") or ""
+    try:
+        bridge = jaeger_bridge()
+        if workspace:
+            workspace = host_workspace(workspace)
+        accepted = threading.Event()
+
+        def cancel():
+            if accepted.is_set():
+                bridge.control("cancel", turn_id=run.id)
+
+        run.cancel_native = cancel
+
+        def event(frame):
+            kind = frame.get("type")
+            if kind in {"queued", "state"}:
+                accepted.set()
+                if kind == 'queued' or frame.get('busy') is True:
+                    run.emit('native.state', state='queued' if kind == 'queued' else 'running')
+                if run.cancelled.is_set():
+                    cancel()
+            if kind == "delta":
+                raw_text = frame.get("text", "")
+                tool_info = parse_tool_line(raw_text)
+                if tool_info:
+                    done = tool_info.get("phase") in {"done", "error"}
+                    run.emit("tool.completed" if done else "tool.started",
+                             tool=tool_info.get("name"),
+                             args=tool_info.get("args", {}),
+                             preview=raw_text,
+                             status="error" if tool_info.get("phase") == "error" else "completed" if done else "running")
+                cleaned = clean_transcript_text(raw_text)
+                if cleaned:
+                    run.emit("message.delta", delta=cleaned)
+            elif kind == "reasoning":
+                run.emit("reasoning.available", text=clean_transcript_text(frame.get("text", "")))
+            elif kind == "tool":
+                done = frame.get("phase") in {"done", "error"}
+                run.emit("tool.completed" if done else "tool.started", tool=frame.get("name"),
+                         args=frame.get("args", {}), preview=frame.get("detail", ""),
+                         status="error" if frame.get("phase") == "error" else "completed" if done else "running")
+
+        def approval(frame):
+            if frame.get("kind") != "approval":
+                run.emit("reasoning.available", text="Native clarification needs a reply in Jaeger's native session.")
+                return "deny"
+            return run.request_approval(frame.get("prompt", "Tool approval required"),
+                                        choices=tuple(frame.get("options") or ["once", "deny"]))
+
+        overrides = {key: getattr(run, key) for key in ("model", "provider") if getattr(run, key, None)}
+        result = bridge.turn(run.message, native_session, event, approval, turn_id=run.id, workspace=workspace, **overrides)
+        run.execution_unknown = result.get("execution_unknown", False) is not False
+        if run.execution_unknown:
+            raise RuntimeError(result.get("error") or "Native terminal receipt is uncertain; reconcile before retrying")
+        run.cancel_confirmed = bool(result.get("cancelled"))
+        if result.get("error") and not run.cancel_confirmed:
+            err_msg = str(result["error"])
+            if not (is_benign_stderr(err_msg) and result.get("text")):
+                raise RuntimeError(result["error"])
+        raw_out = result.get("text") or ""
+        return clean_transcript_text(raw_out)
+    except (HermesWebUIAdapterBridgeError, ConnectionError, OSError) as exc:
+        # Fallback to direct in-process ReAct execution when external bridge socket is offline
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            rt = EntityRuntime.get_singleton()
+            run.emit("native.state", state="running")
+            out = rt.run_subordinate_react(
+                run.message,
+                session_key=str(native_session),
+                native_run_id=run.id,
+            )
+            cleaned = clean_transcript_text(out)
+            run.emit("message.delta", delta=cleaned)
+            return cleaned
+        except Exception as inner_exc:
+            raise RuntimeError(f"Native turn failed (bridge offline: {exc}, in-process: {inner_exc})") from inner_exc
+
+
+def _in_process_jaeger_turn(run, native_session: str) -> str:
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+    rt = EntityRuntime.get_singleton()
+    run.emit("native.state", state="running")
+    out = rt.run_subordinate_react(
+        run.message,
+        session_key=str(native_session),
+        native_run_id=run.id,
+    )
+    cleaned = clean_transcript_text(out)
+    run.emit("message.delta", delta=cleaned)
+    return cleaned
 
 
 def host_workspace(workspace):

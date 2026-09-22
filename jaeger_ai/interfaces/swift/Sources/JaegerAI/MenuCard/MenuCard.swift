@@ -48,11 +48,19 @@ struct MenuCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            if agent.isBusy {
+                LiveActivityBanner(
+                    agentName: displayName,
+                    phase: .thinking,
+                    activityText: "In deep thought · executing turn...",
+                    onStop: { agent.cancelTurn() }
+                )
+            }
             actionBar
             ServerControlsView()
         }
         .padding(14)
-        .frame(width: 300)
+        .frame(width: 320)
         // Fresh identity every open — a character switched from another
         // surface (or edited on disk) shows up the next time the card drops.
         .task { await agent.refreshIdentity() }

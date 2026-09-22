@@ -119,19 +119,39 @@ struct ChatView: View {
 
                 switch tabState.currentTab {
                 case .chat:
-                    if ChatSurfaceFeatureFlags.useWebUITranscript {
-                        // Spike (card_b1a5afefda): the WebUI renderer is the
-                        // canonical transcript; the native branch below stays
-                        // the default until embedded-view acceptance passes.
-                        WebUIChatContainer()
-                    } else if chat.messages.isEmpty {
-                        emptyStateHero
-                    } else {
-                        messageList
-                        Rectangle().fill(Color.white.opacity(0.04)).frame(height: 1)
-                        slashPalette
-                        floatingComposer
+                    VStack(spacing: 0) {
+                        if chat.isSending {
+                            LiveActivityBanner(
+                                agentName: activeAgentName,
+                                phase: .usingTool,
+                                activityText: "Orchestrating agent run & tool execution...",
+                                onStop: { agent.cancelTurn() }
+                            )
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                        }
+                        if ChatSurfaceFeatureFlags.useWebUITranscript {
+                            // Embedded WebUI mode: loads the localhost:8810 WebUI in a WKWebView.
+                            // Kept behind a flag for safety; native SwiftUI messageList remains
+                            // the default until embedded-view acceptance passes.
+                            WebUIChatContainer()
+                        } else if chat.messages.isEmpty {
+                            emptyStateHero
+                        } else {
+                            messageList
+                            Rectangle().fill(Color.white.opacity(0.04)).frame(height: 1)
+                            slashPalette
+                            floatingComposer
+                        }
                     }
+                case .kanban:
+                    KanbanView()
+                case .workspace:
+                    WorkspaceView()
+                case .tasks:
+                    TasksView()
+                case .skills:
+                    SkillsView()
                 case .avatar:
                     avatarStageView
                 case .work:
@@ -555,9 +575,13 @@ struct ChatView: View {
 
             Spacer()
 
-            // Centered Nav Pills: [ Chat ] [ Avatar ] [ Work ]
+            // Centered Nav Pills: [ Chat ] [ Kanban ] [ Workspace ] [ Tasks ] [ Skills ] [ Avatar ] [ Work ]
             HStack(spacing: 2) {
                 tabPillButton(title: "Chat", icon: "bubble.left.and.bubble.right.fill", tab: .chat)
+                tabPillButton(title: "Kanban", icon: "square.grid.3x1.folder.fill.badge.plus", tab: .kanban)
+                tabPillButton(title: "Workspace", icon: "folder.badge.gearshape", tab: .workspace)
+                tabPillButton(title: "Tasks", icon: "clock.badge.checkmark", tab: .tasks)
+                tabPillButton(title: "Skills", icon: "wrench.and.screwdriver.fill", tab: .skills)
                 tabPillButton(title: "Avatar", icon: "waveform.circle.fill", tab: .avatar)
                 tabPillButton(title: "Work", icon: "briefcase.fill", tab: .work)
             }
@@ -1165,6 +1189,9 @@ struct ChatView: View {
             Spacer()
 
             if let ctx = chat.contextUsage {
+                ContextWindowIndicatorView(
+                    snapshot: ContextWindowSnapshot(usedTokens: ctx.used, maxTokens: ctx.max)
+                )
                 Text("ctx \(ChatViewModel.fmtTokens(ctx.used))/\(ChatViewModel.fmtTokens(ctx.max))")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Term.inkDim)

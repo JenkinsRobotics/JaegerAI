@@ -19,8 +19,9 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
+_DEFAULT_AGENT_SRC = ROOT / "jaeger_ai/vendor/hermes_agent"
 HERMES_AGENT_SRC = Path(
-    os.environ.get("JAEGER_HERMES_AGENT_SRC", str(Path.home() / "GitHub/hermes-agent"))
+    os.environ.get("JAEGER_HERMES_AGENT_SRC", str(_DEFAULT_AGENT_SRC if _DEFAULT_AGENT_SRC.is_dir() else Path.home() / "GitHub/hermes-agent"))
 ).expanduser()
 if not (HERMES_AGENT_SRC / "gateway").is_dir():
     raise RuntimeError(f"Hermes Agent checkout is missing: {HERMES_AGENT_SRC}")

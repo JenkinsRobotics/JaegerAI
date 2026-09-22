@@ -17,7 +17,7 @@ metadata:
     - deep-think
     - writing-plans
     - subagent-driven-development
-    version: 1.5.0
+    version: 1.6.0
     platforms:
     - linux
     - macos
@@ -78,12 +78,12 @@ needs the Deep Think coder model, ALSO call `propose_deep_think_task(description
 - Budget: an idle tick is 1-3 tool calls; a filing turn is one `board_add` per
   card plus the confirmation. If a board turn is heading past ~6 calls, you are
   doing work the board did not ask for.
-- LONG WORK: a real card can legitimately need more than a tick's budget.
-  When a board turn passes ~10 tool calls on one card, STOP ballooning the
-  turn: `board_update(card_id, note="<current state> + next step")`, leave
-  the card in_progress (or blocked if operator-gated), and resume next tick.
-  A checkpointed card beats a 50-call turn — the next tick resumes exactly
-  where the note says.
+- HARD STOP: a real card can legitimately need more than a tick's budget,
+  but a single turn must never balloon. Count your tool calls for this card.
+  At 10 calls, STOP: `board_update(card_id, note="<current state> + exact next step")`,
+  leave the card in_progress (or blocked if operator-gated), and resume on the
+  next tick. Do not squeeze in "just one more" read or retry. A checkpointed
+  card beats a 50-call turn — the next tick resumes exactly where the note says.
 
 ## LARGE BOARDS
 - `board_view()` returns FULL card text, including long notes/results — payloads
