@@ -147,4 +147,10 @@ markers = [
     "smoke: a tiny set tagged so ``pytest -m smoke`` is a 30-second sanity check.",
     "regression: pins a specific bug fix — run on every PR even when narrowing markers.",
     "requires_agent_modules: requires the optional Hermes Agent source checkout.",
+    "production_path: canonical execution, authority, effects, and runtime-truth contracts.",
+    "acceptance: live client/WebUI runtime truth against a running stack.",
+    "security: negative tests for trust domains, path traversal, CSRF, injection.",
+    "fault_injection: systematic failure campaigns in the resilience harness.",
+    "external_eval: independent benchmark harness contracts.",
+    "soak: multi-turn leak and resource-growth checks.",
 ]

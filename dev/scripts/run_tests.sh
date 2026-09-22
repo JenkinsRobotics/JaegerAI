@@ -3,15 +3,17 @@
 # JaegerAI test runner — deterministic local runs, CI-equivalent defaults.
 #
 # Usage:
-#   dev/scripts/run_tests.sh                 # fast deterministic unit tests
-#   dev/scripts/run_tests.sh --smoke         # the 30-second sanity check
-#   dev/scripts/run_tests.sh --regression    # bug-fix pins (always runs in CI)
+#   dev/scripts/run_tests.sh                 # fast deterministic unit tests (default)
+#   dev/scripts/run_tests.sh --smoke         # 30-second sanity check
+#   dev/scripts/run_tests.sh --unit          # fast deterministic unit tests
 #   dev/scripts/run_tests.sh --integration   # cross-module / filesystem-heavy
-#   dev/scripts/run_tests.sh --subprocess    # adds tests that fork real procs
-#   dev/scripts/run_tests.sh --ui            # adds TUI / tray rendering tests
-#   dev/scripts/run_tests.sh --slow          # adds slow daemon / IO tests
-#   dev/scripts/run_tests.sh --model         # adds tests that load a real GGUF
-#   dev/scripts/run_tests.sh --all           # everything, no marker filter
+#   dev/scripts/run_tests.sh --production-path # kernel routing, authority, effects, lifecycle
+#   dev/scripts/run_tests.sh --acceptance    # end-to-end acceptance & WebUI truth
+#   dev/scripts/run_tests.sh --security      # security hardening & negative tests
+#   dev/scripts/run_tests.sh --fault-injection # fault injection & resilience
+#   dev/scripts/run_tests.sh --external-eval # external benchmark evaluation harness
+#   dev/scripts/run_tests.sh --soak          # soak & leak verification
+#   dev/scripts/run_tests.sh --full          # full suite across all tiers
 #   dev/scripts/run_tests.sh -- <args>       # everything after -- passes to pytest
 #
 # Why this exists:
@@ -23,6 +25,8 @@
 #     to serial when not installed.
 #   * Default to fast deterministic tests; opt in to heavier tiers
 #     via the flags above. Markers are defined in pyproject.toml.
+#   * Passing a tier proves only what docs/architecture/TEST_ARCHITECTURE.md
+#     says that tier proves. File lists here are the source of truth.
 
 set -euo pipefail
 
@@ -47,7 +51,7 @@ export LC_ALL="C.UTF-8"
 export PYTHONHASHSEED="0"
 # Never write bytecode or caches into the repo tree
 export PYTHONDONTWRITEBYTECODE="1"
-export PYTHONPYCACHEPREFIX="${XDG_CACHE_HOME:-$HOME/.cache}/jaeger_pycache"
+export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
 # Headless: don't open Terminal.app / Safari windows during tests.
 export JAEGER_TEST_HEADLESS="1"
 # Never share the operator's RUNNING agent. ``create_runtime`` tries the
@@ -82,30 +86,137 @@ done < <(env)
 
 MARKER_EXPR='not slow and not integration and not model and not ui and not subprocess'
 EXPLICIT=0
+RUN_PACKAGES=1
+TIER_NAME="unit"
 EXTRA_ARGS=()
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --smoke)        MARKER_EXPR="smoke"                              ; EXPLICIT=1 ;;
-        --regression)   MARKER_EXPR="regression"                         ; EXPLICIT=1 ;;
-        --integration)  MARKER_EXPR="integration"                        ; EXPLICIT=1 ;;
-        --subprocess)   MARKER_EXPR="subprocess"                         ; EXPLICIT=1 ;;
-        --ui)           MARKER_EXPR="ui"                                 ; EXPLICIT=1 ;;
-        --slow)         MARKER_EXPR="slow"                               ; EXPLICIT=1 ;;
-        --model)        MARKER_EXPR="model"                              ; EXPLICIT=1 ;;
-        --all)          MARKER_EXPR=""                                   ; EXPLICIT=1 ;;
-        --)             shift; EXTRA_ARGS+=("$@")                        ; break     ;;
+        --smoke)
+            MARKER_EXPR="smoke"
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="smoke"
+            ;;
+        --unit)
+            MARKER_EXPR='not slow and not integration and not model and not ui and not subprocess'
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="unit"
+            ;;
+        --regression)
+            MARKER_EXPR="regression"
+            EXPLICIT=1
+            RUN_PACKAGES=1
+            TIER_NAME="regression"
+            ;;
+        --integration)
+            MARKER_EXPR="integration"
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="integration"
+            ;;
+        --production-path)
+            EXTRA_ARGS+=(
+                "dev/tests/jaeger_ai/core/test_execution_lifecycle.py"
+                "dev/tests/jaeger_ai/core/test_control_plane_consolidation.py"
+                "dev/tests/jaeger_ai/core/test_runtime_truth.py"
+                "dev/tests/jaeger_ai/core/test_effects_verification.py"
+                "dev/tests/jaeger_ai/core/test_policy_kernel.py"
+                "dev/tests/jaeger_ai/core/test_architecture_boundary_purity.py"
+                "dev/tests/jaeger_ai/core/test_state_ownership.py"
+                "dev/tests/test_upaa_production_runtime.py"
+            )
+            MARKER_EXPR=""
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="production-path"
+            ;;
+        --acceptance)
+            EXTRA_ARGS+=("dev/tests/acceptance/")
+            MARKER_EXPR=""
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="acceptance"
+            ;;
+        --security)
+            EXTRA_ARGS+=(
+                "dev/tests/jaeger_ai/core/test_security_hardening.py"
+                "dev/tests/jaeger_ai/core/test_skills_guard.py"
+                "dev/tests/jaeger_ai/interfaces/test_legacy_adapters_security.py"
+                "packages/jaeger-agent/tests/security/"
+            )
+            MARKER_EXPR=""
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="security"
+            ;;
+        --fault-injection)
+            EXTRA_ARGS+=("dev/tests/jaeger_ai/core/test_fault_injection_and_resilience.py")
+            MARKER_EXPR=""
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="fault-injection"
+            ;;
+        --external-eval)
+            EXTRA_ARGS+=("dev/tests/jaeger_ai/core/test_external_evaluation.py")
+            MARKER_EXPR=""
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="external-eval"
+            ;;
+        --soak)
+            EXTRA_ARGS+=("dev/tests/jaeger_ai/core/test_fault_injection_and_resilience.py" "-k" "soak")
+            MARKER_EXPR=""
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="soak"
+            ;;
+        --full|--all)
+            MARKER_EXPR=""
+            EXPLICIT=1
+            RUN_PACKAGES=1
+            TIER_NAME="full"
+            ;;
+        --subprocess)
+            MARKER_EXPR="subprocess"
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="subprocess"
+            ;;
+        --ui)
+            MARKER_EXPR="ui"
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="ui"
+            ;;
+        --slow)
+            MARKER_EXPR="slow"
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="slow"
+            ;;
+        --model)
+            MARKER_EXPR="model"
+            EXPLICIT=1
+            RUN_PACKAGES=0
+            TIER_NAME="model"
+            ;;
+        --)
+            shift
+            EXTRA_ARGS+=("$@")
+            break
+            ;;
         -h|--help)
             sed -n '3,21p' "${BASH_SOURCE[0]}" | sed 's/^# *//'
             exit 0
             ;;
-        *)              EXTRA_ARGS+=("$1") ;;
+        *)
+            EXTRA_ARGS+=("$1")
+            ;;
     esac
     shift
 done
-
-export PYTHONDONTWRITEBYTECODE="1"
-export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
 
 # ── pytest invocation ──────────────────────────────────────────────
 
@@ -138,7 +249,7 @@ if [ "$EXPLICIT" -eq 0 ]; then
     printf '[run_tests] default tier — fast unit tests (%s)\n' \
         "$MARKER_EXPR" >&2
 else
-    printf '[run_tests] tier: %s\n' "${MARKER_EXPR:-ALL}" >&2
+    printf '[run_tests] tier: %s\n' "$TIER_NAME" >&2
 fi
 printf '[run_tests] %s\n' "${CMD[*]}" >&2
 
@@ -162,10 +273,12 @@ PACKAGE_SUITES=(
 STATUS=0
 "${CMD[@]}" || STATUS=$?
 
-for suite in "${PACKAGE_SUITES[@]}"; do
-    [ -d "$suite" ] || continue
-    printf '[run_tests] %s\n' "$suite" >&2
-    "$PYTEST" -q ${XDIST_ARGS[@]+"${XDIST_ARGS[@]}"} "$suite" || STATUS=$?
-done
+if [ "$RUN_PACKAGES" -eq 1 ]; then
+    for suite in "${PACKAGE_SUITES[@]}"; do
+        [ -d "$suite" ] || continue
+        printf '[run_tests] %s\n' "$suite" >&2
+        "$PYTEST" -q ${XDIST_ARGS[@]+"${XDIST_ARGS[@]}"} "$suite" || STATUS=$?
+    done
+fi
 
 exit "$STATUS"
