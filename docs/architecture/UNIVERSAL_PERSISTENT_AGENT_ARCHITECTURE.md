@@ -3,6 +3,7 @@
 **Status:** Canonical Architectural Standard for JaegerAI  
 **Baseline Date:** 2026-09-20  
 **Authority:** Architectural Baseline Document  
+**Surviving implementation:** [ARCHITECTURE.md](ARCHITECTURE.md) — use that document for IMPLEMENTED vs EXPERIMENTAL vs PLANNED. This file is the design standard, not production evidence.  
 
 ---
 
