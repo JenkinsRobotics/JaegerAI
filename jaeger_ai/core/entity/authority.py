@@ -224,8 +224,10 @@ class AuthorityLayer:
         kernel: PolicyKernel | None = None,
     ) -> None:
         self.kernel = kernel or PolicyKernel.get_default()
+        # Shell hooks live in PolicyKernel._check_shell_hooks. Registering
+        # default_shell_hooks_policy here would fire pre_tool_call twice
+        # (kernel + this list) on every authorized tool.
         self._policies: list[PolicyCheckFn] = list(policies) if policies is not None else [
-            default_shell_hooks_policy,
             default_allowlist_policy,
             default_permissions_policy,
             commissioning_authority_policy,

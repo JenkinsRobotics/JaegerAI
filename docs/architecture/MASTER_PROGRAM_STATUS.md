@@ -66,7 +66,7 @@ ONE REQUEST
 | **GATE E** | **WS 20** | **Repository Architecture Cleanup** | **COMPLETED** | `12d05659` | 2/2 boundary purity, 50/50 jaeger-agent, 102/102 combined | Dependency inversion: eliminated upward jaeger_ai imports from jaeger_agent loop; AgentCallbacks telemetry injection; boundary purity enforced via AST inspection |
 
 
-| **GATE E** | **WS 21** | **Test-Suite Tiering & Determinism** | PENDING | — | — | Tiered test commands (unit, integration, soak, etc.) |
+| **GATE E** | **WS 21** | **Test-Suite Tiering & Determinism** | **COMPLETED** | *(this commit)* | 7/7 runner doctrine, 177/177 security, 44/44 production-path, 1/1 soak | `dev/scripts/run_tests.sh` flags are honest; RUN_PACKAGES gates package suites; production-path is kernel contracts not two unit files |
 | **GATE F** | **WS 22** | **Documentation Truth Pass** | PENDING | — | **Implemented/Experimental/Planned/Deprecated** | Clean spec |
 | **GATE F** | **WS 23** | **Developer / Platform API** | PENDING | — | — | Public CLI commands & extension contracts |
 | **GATE F** | **WS 24** | **Clean-Machine Release Validation** | PENDING | — | — | Zero-dependency clean environment install |
@@ -83,5 +83,8 @@ ONE REQUEST
 ---
 
 ## 4. Known Technical Debt & Immediate Dependencies
-- Live Gateway OWNER in-process turn execution (`server.py`) has multiple branching pathways (`_owner_react_turn`, `_sync_model`, `_native_lead_turn`, `_sync_react`) which will be consolidated in Workstream 2 and Workstream 3 into `EntityRuntime.execute_turn`.
-- State stores: `gateway_sessions.sqlite3`, `native-turns.sqlite3`, `events.sqlite3` will be strictly owned and mediated as mapped in Workstream 5.
+- Gateway `server.py` still contains historical turn helpers (`_owner_react_turn`, `_sync_model`, `_native_lead_turn`, `_sync_react`). WS-3 added `EntityRuntime.run_subordinate_react` and a control-plane test; residual branches remain until a later deletion pass proves they are unreachable.
+- State ownership is documented in `STATE_OWNERSHIP_MAP.md`. Duplicate SQLite files still exist on disk (`gateway_sessions.sqlite3`, `native-turns.sqlite3`, `events.sqlite3`); readers must use the mapped owner, not open a sibling store.
+- Workstreams 10–18 added module packages (capabilities, devices, RuntimeHost, eval/fault harnesses) whose unit tests pass. Production Gateway wiring of those packages is **experimental** unless a production-path or acceptance test names them.
+- Physical iPhone Face ID / PWA / photo picker remains operator-hardware-only (section 3).
+- PolicyKernel owns `pre_tool_call`. `AuthorityLayer` no longer registers `default_shell_hooks_policy` by default (double-fire defect).
