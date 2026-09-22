@@ -172,3 +172,8 @@ class DurableTaskManager:
             for t in orphans:
                 self.start_background_task(t.task_id, resumer_fn)
         return orphans
+
+    def shutdown(self, wait: bool = False) -> None:
+        """Shut down the background worker thread pool."""
+        self._executor.shutdown(wait=wait)
+
