@@ -121,11 +121,18 @@ while [ $# -gt 0 ]; do
                 "dev/tests/jaeger_ai/core/test_execution_lifecycle.py"
                 "dev/tests/jaeger_ai/core/test_control_plane_consolidation.py"
                 "dev/tests/jaeger_ai/core/test_runtime_truth.py"
-                "dev/tests/jaeger_ai/core/test_effects_verification.py"
                 "dev/tests/jaeger_ai/core/test_policy_kernel.py"
                 "dev/tests/jaeger_ai/core/test_architecture_boundary_purity.py"
-                "dev/tests/jaeger_ai/core/test_state_ownership.py"
                 "dev/tests/test_upaa_production_runtime.py"
+                # Real Gateway / EntityRuntime / run store / effect ledger;
+                # only the model is scripted. (test_effects_verification.py and
+                # test_state_ownership.py test modules nothing in production
+                # imports, so they are unit tests and run under --unit.)
+                "dev/tests/jaeger_ai/core/test_gateway_single_terminal.py"
+                "dev/tests/jaeger_ai/core/test_owner_run_recovery.py"
+                "dev/tests/jaeger_ai/core/test_turn_memory_projection.py"
+                "dev/tests/jaeger_ai/core/test_deliberate_execution_prompt.py"
+                "dev/tests/jaeger_ai/features/test_voice_session.py"
             )
             MARKER_EXPR=""
             EXPLICIT=1
@@ -143,6 +150,8 @@ while [ $# -gt 0 ]; do
             EXTRA_ARGS+=(
                 "dev/tests/jaeger_ai/core/test_security_hardening.py"
                 "dev/tests/jaeger_ai/core/test_skills_guard.py"
+                "dev/tests/jaeger_ai/core/test_gateway_cross_site.py"
+                "dev/tests/jaeger_ai/core/test_gateway_approval_expiry.py"
                 "dev/tests/jaeger_ai/interfaces/test_legacy_adapters_security.py"
                 "packages/jaeger-agent/tests/security/"
             )
