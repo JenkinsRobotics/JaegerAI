@@ -1575,7 +1575,12 @@ class JaegerGatewayApp:
                 if not has_image:
                     import re as _re
                     has_image = bool(_re.search(r"\.(?:png|jpg|jpeg|webp)\b", prompt, _re.IGNORECASE))
-                if has_image:
+                # A question about an image goes straight to a vision model.
+                # Anything that asks for work goes through the Entity with its
+                # tools and Authority: in an image session, "save this to a
+                # file" used to be answered "I'll create the file" by a model
+                # with no tools, and recorded as completed.
+                if has_image and not actionable:
                     backend = LOCKED_OLLAMA_URL
                     model = "kimi-k2.7-code:cloud"
                     current = self.store.get_session(session_id) or {}

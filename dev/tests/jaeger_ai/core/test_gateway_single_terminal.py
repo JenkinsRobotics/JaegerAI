@@ -72,3 +72,55 @@ async def test_a_failure_after_thinking_is_reported_as_a_failure(app, monkeypatc
     assert terminal.event == "turn.failed"
     assert "invalid model name" in terminal.data["error"]
     assert app.store.get_request("r2")["status"] == "failed"
+
+
+class _ReActRuntime:
+    def execute_turn(self, text, *, context, **_):
+        return dict(context["react_runner"](text))
+
+
+@pytest.fixture
+def image_session(app, tmp_path, monkeypatch):
+    lanes = []
+
+    async def vision_chat(*args, **kwargs):
+        lanes.append("vision_chat")
+        return "the square is blue"
+
+    async def no_native(*args, **kwargs):
+        return None
+
+    def owner_react(prompt, **kwargs):
+        lanes.append("entity_react")
+        return "saved workspace/audit/task_g/phrase.txt"
+
+    monkeypatch.setattr(app, "_ollama_chat", vision_chat)
+    monkeypatch.setattr(app, "_native_lead_turn", no_native)
+    monkeypatch.setattr(app, "_owner_react_turn", owner_react)
+    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: _ReActRuntime()))
+    monkeypatch.setattr(EntityRuntime, "subordinate_model_name", lambda self: "ollama:test", raising=False)
+    app.store.add_attachment("s", {"safe_path": str(tmp_path / "panel.png"), "original_filename": "panel.png",
+                                   "mime_type": "image/png"})
+    return lanes
+
+
+@pytest.mark.asyncio
+async def test_in_an_image_session_work_goes_through_the_entity(app, image_session):
+    """Live defect: "save the phrase to a file" in an image session was sent
+    to a tool-less vision chat, answered "I'll create the file", and recorded
+    as completed with nothing written."""
+    admitted = app.store.admit_request("s", "Save the phrase into workspace/audit/task_g/phrase.txt", request_id="r3")
+
+    await app._execute_turn("s", admitted["turn_id"], "Save the phrase into workspace/audit/task_g/phrase.txt",
+                            request_id="r3")
+
+    assert image_session == ["entity_react"]
+
+
+@pytest.mark.asyncio
+async def test_in_an_image_session_a_question_goes_to_vision(app, image_session):
+    admitted = app.store.admit_request("s", "What colour is the square?", request_id="r4")
+
+    await app._execute_turn("s", admitted["turn_id"], "What colour is the square?", request_id="r4")
+
+    assert image_session == ["vision_chat"]
