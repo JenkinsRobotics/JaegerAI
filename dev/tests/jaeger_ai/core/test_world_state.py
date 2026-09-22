@@ -139,3 +139,21 @@ def test_semantic_memory_delegation():
         db_claims = sem_mem.world_store.query_claims("operator")
         assert len(db_claims) == 1
         assert db_claims[0].value == "zsh"
+
+
+def test_a_withdrawn_claim_is_not_recalled(temp_store: SqliteWorldStore):
+    """Recall ignored ``valid_until``, so a withdrawn claim (the audit's
+    ``user.remembered_word=voice``) kept being fed to the model as belief."""
+    import sqlite3
+    import time
+
+    kept = temp_store.record_claim("user", "audit_memory_token", "AUDIT-MEMORY-NOVA-7319")
+    withdrawn = temp_store.record_claim("user", "remembered_word", "voice")
+    with sqlite3.connect(temp_store.db_path) as conn:
+        conn.execute("UPDATE world_claims SET valid_until=? WHERE claim_id=?",
+                     (time.time() - 1, withdrawn.claim_id))
+
+    recalled = [c.claim_id for c in temp_store.list_recent_claims(10)]
+
+    assert kept.claim_id in recalled
+    assert withdrawn.claim_id not in recalled

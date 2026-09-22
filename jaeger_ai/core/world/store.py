@@ -235,9 +235,13 @@ class SqliteWorldStore:
             ]
 
     def list_recent_claims(self, limit: int = 20) -> list[WorldClaim]:
+        """Claims still in force, newest first. An expired claim was withdrawn
+        (``valid_until`` set) and must not come back as something believed."""
         with self._get_connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM world_claims ORDER BY created_at DESC LIMIT ?", (limit,)
+                "SELECT * FROM world_claims WHERE valid_until IS NULL OR valid_until > ? "
+                "ORDER BY created_at DESC LIMIT ?",
+                (time.time(), limit),
             ).fetchall()
             return [
                 WorldClaim(
