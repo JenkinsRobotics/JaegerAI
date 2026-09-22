@@ -78,6 +78,27 @@ def _approval_target(request: Any) -> str:
     return "; ".join(parts)
 
 
+# Opening words of a request that only asks about what an image shows.
+_IMAGE_QUESTION_OPENERS = frozenset({
+    "what", "which", "who", "where", "when", "why", "how", "is", "are", "does",
+    "do", "can", "read", "describe", "look", "tell", "identify", "count",
+})
+
+
+def _asks_about_the_image(request: str) -> bool:
+    """True for a question about an image; anything else goes to the Entity.
+
+    The direct vision lane has no tools. Defaulting to it made "save the
+    phrase to a file" in an image session a tool-less reply recorded as
+    completed, and ``is_actionable_request`` does not recognise that
+    sentence as work. So the tool-less lane is opt-in by shape of request:
+    a question, or a read/describe-style ask. A heuristic, deliberately
+    narrow — a misread costs a slower turn, not a lost action.
+    """
+    words = request.strip().lower().split()
+    return bool(words) and (request.strip().endswith("?") or words[0].strip(",.:") in _IMAGE_QUESTION_OPENERS)
+
+
 _LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
@@ -1524,6 +1545,10 @@ class JaegerGatewayApp:
             }
         role_s = str(agent_fields.get("role") or "")
         rid = request_id or turn_id
+        # What the operator wrote, before attachment notes are inlined. Lane
+        # decisions read this: an inlined "inspect it with the vision_analyze
+        # tool" note made a plain question about an image look actionable.
+        request_text = text
 
         try:
             atts = self.store.list_attachments(session_id)
@@ -1558,7 +1583,7 @@ class JaegerGatewayApp:
             from jaeger_ai.core.runtime.autonomous_runner import is_actionable_request
             actionable = bool(
                 (session or {}).get("metadata", {}).get("actionable")
-                or is_actionable_request(text)
+                or is_actionable_request(request_text)
             )
 
             loop = asyncio.get_running_loop()
@@ -1578,13 +1603,13 @@ class JaegerGatewayApp:
                     # another session's turn sent an unrelated WebUI question
                     # down the tool-less vision lane.
                     import re as _re
-                    has_image = bool(_re.search(r"\.(?:png|jpg|jpeg|webp)\b", text, _re.IGNORECASE))
+                    has_image = bool(_re.search(r"\.(?:png|jpg|jpeg|webp)\b", request_text, _re.IGNORECASE))
                 # A question about an image goes straight to a vision model.
                 # Anything that asks for work goes through the Entity with its
                 # tools and Authority: in an image session, "save this to a
                 # file" used to be answered "I'll create the file" by a model
                 # with no tools, and recorded as completed.
-                if has_image and not actionable:
+                if has_image and not actionable and _asks_about_the_image(request_text):
                     backend = LOCKED_OLLAMA_URL
                     model = "kimi-k2.7-code:cloud"
                     current = self.store.get_session(session_id) or {}
