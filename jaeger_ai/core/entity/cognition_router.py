@@ -233,7 +233,7 @@ def _execution_prompt(goal: str, plan_name: str, steps: list[str]) -> str:
     plan = "\n".join(f"- {s}" for s in steps)
     return (
         f"{goal}\n\n"
-        f"Carry out this request now with your tools. Suggested plan ({plan_name}):\n"
+        f"Carry out this request now with your tools. Suggested steps ({plan_name}):\n"
         f"{plan}"
     )
 
