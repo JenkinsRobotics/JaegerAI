@@ -166,8 +166,8 @@ class SqliteRunStore:
         run = self._require(run_id)
         check_transition(run.id, run.state, new_state, error=RunError)
         check_wait(new_state, wake_key)
-        key = wake_key if new_state == "waiting_for_event" else None
-        pid = run.owner_pid if new_state == "active" else None
+        key = wake_key if (wake_key and new_state in {"waiting_for_event", "waiting_for_user", "waiting_for_approval"}) else None
+        pid = run.owner_pid if new_state in {"active", "running", "verifying"} else None
         now = _now()
         with sqlite_store.writer() as conn:
             conn.execute(
@@ -250,14 +250,14 @@ class SqliteRunStore:
         now = _now()
         with sqlite_store.writer() as conn:
             rows = conn.execute(
-                "SELECT * FROM runs WHERE state = 'waiting_for_event' "
+                "SELECT * FROM runs WHERE state IN ('waiting_for_event', 'waiting_for_user', 'waiting_for_approval') "
                 "AND wake_key = ? ORDER BY created_at", (wake_key,),
             ).fetchall()
             if not rows:
                 return []
             conn.execute(
                 "UPDATE runs SET state = 'active', wake_key = NULL, reason = NULL, "
-                "updated_at = ? WHERE state = 'waiting_for_event' AND wake_key = ?",
+                "updated_at = ? WHERE state IN ('waiting_for_event', 'waiting_for_user', 'waiting_for_approval') AND wake_key = ?",
                 (now, wake_key),
             )
         woken = []

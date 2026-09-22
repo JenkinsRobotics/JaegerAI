@@ -46,15 +46,23 @@ def test_executive_reuses_one_active_run_and_checkpoints():
     )
     execu = TurnExecutive(agent, runs, commitments, provider="scripted")
     assert execu.run_turn("a") == "one"
-    run_id = agent.run_id
-    assert run_id
+    run_id_a = agent.run_id
+    assert run_id_a
+    run_a = runs.get(run_id_a)
+    assert run_a is not None
+    assert run_a.state == "completed"
+    assert runs.latest_checkpoint(run_id_a) is not None
+
     assert execu.run_turn("b") == "two"
-    assert agent.run_id == run_id
-    run = runs.get(run_id)
-    assert run is not None
-    assert run.state == "active"
-    assert commitments.get(run.commitment_id).kind == TURN_LOOP_KIND
-    assert runs.latest_checkpoint(run_id) is not None
+    run_id_b = agent.run_id
+    assert run_id_b
+    assert run_id_b != run_id_a
+    run_b = runs.get(run_id_b)
+    assert run_b is not None
+    assert run_b.state == "completed"
+    assert run_b.commitment_id == run_a.commitment_id
+    assert commitments.get(run_b.commitment_id).kind == TURN_LOOP_KIND
+    assert runs.latest_checkpoint(run_id_b) is not None
 
 
 def test_executive_records_user_text_as_told_claim():

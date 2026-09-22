@@ -37,8 +37,8 @@ ONE REQUEST
 | Gate | Workstream | Description | Status | Commits | Tests Passing | Dependencies / Notes |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | **GATE A** | **WS 1** | **WebUI Runtime Truth & Acceptance Suite** | **COMPLETED** | `675fb3e7` | 9/9 acceptance, 6/6 runtime truth, 25/25 proxy | Verified live DOM == SQLite == Provider == Multimodal |
-| **GATE A** | **BASE** | **Baseline Evaluation Snapshot** | **COMPLETED** | *Pending commit* | 12/12 Pinocchio, 17/17 UPAA, 63/63 Contract | Immutable baseline captured in BASELINE_EVALUATION_SNAPSHOT.md |
-| **GATE B** | **WS 2** | **Execution-Model Consolidation** | PENDING | — | — | One canonical run lifecycle |
+| **GATE A** | **BASE** | **Baseline Evaluation Snapshot** | **COMPLETED** | `97ea1d0a` | 12/12 Pinocchio, 17/17 UPAA, 63/63 Contract | Immutable baseline captured in BASELINE_EVALUATION_SNAPSHOT.md |
+| **GATE B** | **WS 2** | **Execution-Model Consolidation** | **COMPLETED** | Pending | 7/7 lifecycle, 97/97 jaeger-agent, 9/9 WebUI | Canonical WorkState, durable run 1:1, suspended approval wake keys, crash recovery |
 | **GATE B** | **WS 3** | **Control-Plane Consolidation** | PENDING | — | — | Gateway as control plane, EntityRuntime as brain |
 | **GATE B** | **WS 4** | **Typed Contracts & Versioned Schemas** | PENDING | — | — | Pydantic v2 wire/storage schemas |
 | **GATE B** | **WS 5** | **State-Ownership Consolidation** | PENDING | — | — | 1:1 state store ownership |

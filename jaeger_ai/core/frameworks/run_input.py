@@ -124,6 +124,18 @@ def _webui_attachment_roots() -> list[Path]:
             add(Path(state).expanduser() / "attachments")
     add(Path.home() / ".jaeger" / "hermes-webui-state" / "attachments")
     add(Path.home() / ".hermes" / "webui" / "attachments")
+    try:
+        from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+        inst = resolve_instance_dir()
+        layout = InstanceLayout(root=inst)
+        add(layout.workspace_dir / "uploads")
+        add(layout.workspace_dir)
+        add(layout.root / "uploads")
+        add(layout.root)
+    except Exception:
+        pass
+    home = Path(os.environ.get("JAEGER_HOME", str(Path.home() / ".jaeger")))
+    add(home / "instances")
     return roots
 
 
