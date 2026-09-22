@@ -1,7 +1,10 @@
 <h1 align="center">JaegerAI</h1>
 
 <p align="center">
-  <em>A general-purpose AI assistant platform — local or hosted models, tools, skills, memory, automation, delegation, and native chat, web, terminal, and voice experiences.</em>
+  <em>A persistent artificial entity with one continuing identity — it thinks
+  through different models, acts through software and physical devices,
+  remembers its life, learns capabilities, and appears through whatever body
+  or interface is available.</em>
 </p>
 
 <p align="center">
@@ -18,28 +21,34 @@
 
 ## What it is
 
-See the [documentation index](docs/README.md) for operator commands,
-architecture, developer tooling, and integration notes.
+The goal is a persistent artificial entity: one continuing identity that
+thinks through different models, acts through software and physical devices,
+remembers its life, learns capabilities, and appears through whatever body or
+interface is available.
 
-The surviving architecture, including what is **IMPLEMENTED** versus
-**EXPERIMENTAL**, is [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md).
-Contributor workflow is in [CONTRIBUTING.md](CONTRIBUTING.md). Extensions
-use public contracts ([docs/EXTENSION_GUIDE.md](docs/EXTENSION_GUIDE.md));
-do not edit `EntityRuntime` to add a skill.
+That shapes every design decision here. The model is a component the entity
+thinks with, not the thing itself — swap Ollama for Claude and the same
+entity continues, with its memory, its learned skills, and its history
+intact. Sessions, interfaces, and devices belong to the entity; it never
+belongs to them. Identity survives a restart, a model change, and a move
+from the desktop app to a phone browser to a terminal.
 
-JaegerAI is a complete, general-purpose assistant platform. It can answer
-questions, work with files and code, browse and research, manage personal
-information, run scheduled and background work, use external services, and
-delegate larger jobs to other agent runtimes. It supports local, hosted, and
-CLI-backed models and provides native desktop, web, terminal, voice, and
-headless experiences.
+In practice, today, that means an assistant that works across your computer
+and your accounts, keeps durable memory you can inspect, runs scheduled and
+background work on its own, learns and stores verified procedures as skills,
+and checks whether its actions actually happened rather than trusting what a
+model said. It runs on your own hardware, with local, hosted, or CLI-backed
+models, reachable from a desktop app, a browser, a terminal, or voice.
 
-JaegerAI combines the reusable JaegerAgent runtime with a broad tool surface,
-skills, persistent memory, permissions, automation, model routing, and an
-optional personality system. Voice, avatars, and physical-device capabilities
-are extensions of the same assistant—not requirements and not its defining
-scope. A laptop assistant, a private server, and a hardware deployment all run
-the same product with different capabilities enabled.
+Physical embodiment is a supported direction, not a requirement — the same
+entity runs headless on a server or drives hardware through JaegerOS.
+
+What is actually built versus experimental versus planned is tracked in
+[docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md), with
+each claim marked. Contributor workflow is in
+[CONTRIBUTING.md](CONTRIBUTING.md). Extensions use public contracts
+([docs/EXTENSION_GUIDE.md](docs/EXTENSION_GUIDE.md)); do not edit
+`EntityRuntime` to add a skill.
 
 ### What it can do
 
@@ -285,6 +294,8 @@ retirement rehearsal. It imports ARES sessions, documents, schedules, worker
 health observations, passkeys, and Kanban state without modifying ARES. ARES
 must remain installed until the rehearsal reports no blockers.
 
+### Running the WebUI in development
+
 For the standard native development layout, start the browser process with:
 
 ```bash
@@ -349,11 +360,6 @@ pytest dev/tests                   # full suite (204 test files)
 ./dev/benchmark/scenarios.py       # 51-case hermetic full-system scenario suite
 ./dev/benchmark/scenarios.py --lane security   # the 15 security gates only
 ```
-
-The 0.9 split validated this repo standalone before the filter-repo cut:
-2490/2500 tests passing (0 real fails; the remainder were environment-only,
-not code) plus an instance-boot-identical check — a real model + real
-tools booting the same way post-split as pre-split.
 
 Test markers (`slow`, `integration`, `model`, `ui`, `subprocess`,
 `smoke`, `regression`) let CI and local iteration pick the right subset

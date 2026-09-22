@@ -54,5 +54,4 @@ Do not move `scripts/install.sh`: its raw URL is a public installation contract.
 Root `install.sh` installs an existing checkout; root `run.sh` and `jaeger`
 launch the runtime/CLI. Installed launchd services, container commands, tests,
 and integration documentation reference other paths in this directory, so path
-changes require coordinated updates. See the
-[repository triage](../dev/docs/reality/REPOSITORY_TRIAGE_2026_09_08.md) for evidence.
+changes require coordinated updates.

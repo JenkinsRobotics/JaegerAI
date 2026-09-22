@@ -1829,8 +1829,6 @@ user customisation.
 
 ### Architecture — System / Runtime / User layers
 
-New canonical reference at
-[`dev/docs/reality/system_runtime_user.md`](dev/docs/reality/system_runtime_user.md).
 Every persistent file in a JaegerAI deployment now belongs to exactly one
 of three layers:
 

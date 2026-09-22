@@ -1,59 +1,28 @@
 # JaegerAI documentation
 
-Backend evidence trial: [Chronicler research and memory benchmark](benchmarks/chronicler-trial.md).
-
-Start here for the current product and its repository. Existing package and
-integration documents stay beside the code they describe; this index links to
-them without creating another copy.
-
-## Product and operation
+Everything here is either enforced by a test or carries an obligation we
+can't drop. Operator instructions live in the root [README](../README.md)
+and [COMMANDS.md](../COMMANDS.md); contributor workflow lives in
+[CONTRIBUTING.md](../CONTRIBUTING.md).
 
 | Document | Purpose |
 | --- | --- |
-| [Project README](../README.md) | Installation and product overview |
-| [Contributing](../CONTRIBUTING.md) | Branch policy, test tiers, architecture rules |
-| [Extension guide](EXTENSION_GUIDE.md) | Public capability / provider / device contracts |
-| [Commands](../COMMANDS.md) | Operator CLI reference |
-| [Daily-driver foundation](DAILY_DRIVER_FOUNDATION.md) | Standalone ownership, reliability boundaries, and daily checks |
-| [Product identity](PRODUCT_IDENTITY.md) | Product scope and ownership |
-| [Shared WebUI profiles](HERMES_SHARED_PROFILES.md) | Direct agent profiles and Roundtable; see integration status for current transport limitations |
-| [WebUI feature](../jaeger_ai/features/webui/README.md) | Authoritative browser implementation and operation |
-| [Security](../SECURITY.md) | Security guidance |
-| [Changelog](../CHANGELOG.md) | Release history |
-| [Repair log](reports/FIXES.md) | Dated operational repairs |
+| [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) | Topology and ownership, with each capability marked IMPLEMENTED / EXPERIMENTAL / PLANNED / DEPRECATED |
+| [architecture/STATE_OWNERSHIP_MAP.md](architecture/STATE_OWNERSHIP_MAP.md) | Which component owns which fact. One fact, one owner |
+| [architecture/TEST_ARCHITECTURE.md](architecture/TEST_ARCHITECTURE.md) | What each `run_tests.sh` tier actually proves |
+| [architecture/THREAT_MODEL.md](architecture/THREAT_MODEL.md) | Trust domains, and what we explicitly do not defend against |
+| [architecture/MASTER_PROGRAM_STATUS.md](architecture/MASTER_PROGRAM_STATUS.md) | Open release blockers |
+| [architecture/DONOR_PROVENANCE.md](architecture/DONOR_PROVENANCE.md) | Attribution for ported code, with upstream commit SHAs and licenses |
+| [architecture/adr/](architecture/adr/) | Why each architectural decision was made |
+| [EXTENSION_GUIDE.md](EXTENSION_GUIDE.md) | Public capability, provider, and device contracts |
 
-## Architecture and implementation
+`index.html` is the source for the project website published on `gh-pages`.
 
-| Document | Purpose |
-| --- | --- |
-| [Architecture (surviving design)](architecture/ARCHITECTURE.md) | Canonical topology, ownership, and IMPLEMENTED / EXPERIMENTAL / PLANNED / DEPRECATED status |
-| [Test architecture](architecture/TEST_ARCHITECTURE.md) | What each `run_tests.sh` tier actually proves |
-| [State ownership map](architecture/STATE_OWNERSHIP_MAP.md) | One fact = one owner |
-| [Threat model](architecture/THREAT_MODEL.md) | Trust domains and negatives |
-| [Architecture decisions](architecture/adr/) | ADRs and ownership boundaries |
-| [Architecture status](architecture/master-build-status.md) | Dated historical implementation record |
-| [World-model integration plan](WORLD_MODEL_INTEGRATION_PLAN.md) | Pending build sequence, existing code boundaries, and end-to-end acceptance for relational knowledge and action |
-| [Apple platform integration](architecture/apple-platform-integration.md) | Permanent-droid architecture for macOS, iPhone, Watch, Apple apps, and iOS 27 intelligence |
-| [Backend acceptance and benchmarks](BACKEND_ACCEPTANCE.md) | Current priority: native agent, gateway stability, then agent connections; UI-independent scoring and live measurements |
-| [JaegerAgent](../packages/jaeger-agent/README.md) | Reusable agent package |
-| [JaegerOS](../packages/jaeger-os/README.md) | Runtime foundation |
-| [Generated agent contract](../jaeger_ai/docs/agent_contract.md) | Generator-owned reference shipped as package data |
-| [WebUI consolidation decision](architecture/adr/0013-absorb-hermes-webui.md) | Why the Hermes WebUI fork and container overlay were absorbed |
-| [Workspace integration](../integrations/agent_workspaces/README.md) | Deployment mounts and container identities |
+Component docs stay with their code: [JaegerAgent](../packages/jaeger-agent/README.md),
+[JaegerOS](../packages/jaeger-os/README.md),
+[WebUI](../jaeger_ai/features/webui/README.md).
 
-## Development
-
-- [Developer documentation](../dev/docs/README.md): engineering areas, plans, audits, and history.
-- [Operator scripts](../scripts/README.md) and [developer scripts](../dev/scripts/README.md).
-- [Pipeline probes](../dev/pipelines/README.md) and [pipeline diagrams](../dev/infographic/README.md).
-- [Repository triage](../dev/docs/reality/REPOSITORY_TRIAGE_2026_09_08.md): structure, dependencies, and cleanup decisions.
-
-## Where new documentation belongs
-
-User and architecture guides belong in `docs/`; engineering investigations and
-dated audits belong in `dev/docs/`; historical snapshots belong in
-`dev/docs/history/`. Package-distributed/generated documents remain in
-`jaeger_ai/docs/`, and component-specific contracts remain with their package or
-integration. Root entry documents and `docs/index.html` retain their existing
-paths. Check dates and implementation evidence before treating a plan or old
-verification result as current behavior.
+Before adding a file here, check whether it belongs in a docstring, an ADR,
+or a commit message instead. Status reports, dated audits, phase trackers,
+and before/after snapshots do not belong in this directory — they go stale
+in days and then actively mislead.
