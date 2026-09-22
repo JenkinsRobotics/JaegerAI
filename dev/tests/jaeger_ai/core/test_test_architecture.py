@@ -32,11 +32,21 @@ PRODUCTION_PATH_FILES = (
     "dev/tests/jaeger_ai/core/test_execution_lifecycle.py",
     "dev/tests/jaeger_ai/core/test_control_plane_consolidation.py",
     "dev/tests/jaeger_ai/core/test_runtime_truth.py",
-    "dev/tests/jaeger_ai/core/test_effects_verification.py",
     "dev/tests/jaeger_ai/core/test_policy_kernel.py",
     "dev/tests/jaeger_ai/core/test_architecture_boundary_purity.py",
-    "dev/tests/jaeger_ai/core/test_state_ownership.py",
     "dev/tests/test_upaa_production_runtime.py",
+    "dev/tests/jaeger_ai/core/test_gateway_single_terminal.py",
+    "dev/tests/jaeger_ai/core/test_owner_run_recovery.py",
+    "dev/tests/jaeger_ai/core/test_turn_memory_projection.py",
+    "dev/tests/jaeger_ai/core/test_deliberate_execution_prompt.py",
+    "dev/tests/jaeger_ai/features/test_voice_session.py",
+)
+
+# Tests of modules nothing in production imports. They are unit tests and
+# must not be offered as production-path evidence (2026-09-21 audit).
+NOT_PRODUCTION_PATH = (
+    "dev/tests/jaeger_ai/core/test_effects_verification.py",
+    "dev/tests/jaeger_ai/core/test_state_ownership.py",
 )
 
 SECURITY_PATHS = (
@@ -77,6 +87,8 @@ def test_production_path_is_not_only_unit_kernel_files():
     for path in PRODUCTION_PATH_FILES:
         assert path in case, f"production-path omitted {path}"
         assert (REPO / path).is_file(), f"production-path target missing: {path}"
+    for path in NOT_PRODUCTION_PATH:
+        assert f'"{path}"' not in case, f"{path} tests an unwired module; it is not production-path"
     # Honesty: two PolicyKernel/effects files alone are not a production path.
     assert "test_control_plane_consolidation.py" in case
     assert "test_runtime_truth.py" in case
