@@ -720,7 +720,7 @@ class ExternalModelConfig(BaseModel):
     environment variable. A local LM Studio server needs no real key.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
     enabled: bool = Field(False, json_schema_extra=_setting("model", restart=True))
     provider: Literal[
         "lmstudio", "ollama", "ollama-cloud", "openai", "anthropic", "gemini", "xai",
