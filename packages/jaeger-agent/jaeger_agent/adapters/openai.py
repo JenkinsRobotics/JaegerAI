@@ -268,7 +268,9 @@ class OpenAIAdapter(ProviderAdapter):
         if self._client is not None:
             return self._client
         from openai import OpenAI
-        kwargs: dict[str, Any] = {"timeout": self.timeout_s}
+        import httpx
+        timeout = httpx.Timeout(self.timeout_s, connect=10.0, read=self.timeout_s, write=30.0, pool=10.0)
+        kwargs: dict[str, Any] = {"timeout": timeout}
         key = self._resolve_key()
         if key:
             kwargs["api_key"] = key
@@ -380,11 +382,12 @@ class OpenAIAdapter(ProviderAdapter):
         client = self._ensure_client()
         api_kwargs = {**formatted, **kwargs}
         self.last_ttft_s = None
+        effective_stale = stale_timeout if stale_timeout is not None else self.timeout_s
         if not self.stream_transport:
             return interruptible_call(
                 lambda: client.chat.completions.create(**api_kwargs),
                 interrupt_event,
-                stale_timeout=stale_timeout,
+                stale_timeout=effective_stale,
                 on_heartbeat=on_heartbeat,
                 on_abandon=on_abandon,
                 join_on_abandon=join_on_abandon,
@@ -412,7 +415,7 @@ class OpenAIAdapter(ProviderAdapter):
         raw = interruptible_call(
             _streamed,
             interrupt_event,
-            stale_timeout=stale_timeout,
+            stale_timeout=effective_stale,
             on_heartbeat=on_heartbeat,
             on_abandon=on_abandon,
             join_on_abandon=join_on_abandon,

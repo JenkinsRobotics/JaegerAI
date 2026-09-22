@@ -48,10 +48,9 @@ class BridgeClient:
         except Exception:
             pass
         try:
-            with self._connection() as (_sock, rx):
-                ready = self._ready(rx)
+            status_data = self.query("status", timeout_s=3.0)
             payload["ok"] = True
-            payload["ready"] = ready
+            payload["status"] = status_data
             return payload
         except Exception as exc:  # noqa: BLE001
             payload["error"] = str(exc)

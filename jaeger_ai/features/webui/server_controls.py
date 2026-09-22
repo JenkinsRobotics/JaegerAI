@@ -9,6 +9,7 @@ import shutil
 import socket
 import subprocess
 import time
+from urllib.error import HTTPError
 from urllib.request import urlopen
 
 # Fixed service identities: never accept an arbitrary launchctl label or command.
@@ -20,7 +21,7 @@ SERVICES = {
     'hermes': ('Hermes', 'com.jenkinsrobotics.hermes-native-api', None, None),
     'openclaw': ('OpenClaw', None, 18789, None),
     'runner': ('Chat Runner', 'com.jenkinsrobotics.jaeger-hermes-webui-adapter', 8791, '/health'),
-    'webui': ('Web UI', 'com.jenkinsrobotics.jaeger-webui', 8790, '/api/profiles'),
+    'webui': ('Web UI', 'com.jenkinsrobotics.jaeger-webui', 8790, '/health'),
 }
 
 
@@ -39,6 +40,11 @@ class ServerControls:
         return shutil.which('container') or '/opt/homebrew/bin/container'
 
     def plist(self, service):
+        from jaeger_ai.core.instance.instance import operator_state_root
+        label = SERVICES[service][1]
+        managed = operator_state_root() / 'launchd' / f'{label}.plist'
+        if managed.is_file():
+            return managed
         return self.home / 'Library/LaunchAgents' / (SERVICES[service][1] + '.plist')
 
     def loaded(self, label):
@@ -66,8 +72,12 @@ class ServerControls:
                 with socket.create_connection((url.hostname, url.port), timeout=1):
                     return True
             if path:
-                with urlopen(f'http://127.0.0.1:{port}{path}', timeout=2) as response:
-                    return response.status == 200
+                try:
+                    with urlopen(f'http://127.0.0.1:{port}{path}', timeout=2) as response:
+                        return 200 <= int(response.status) < 500
+                except HTTPError as exc:
+                    # Auth-gated routes still prove the process is serving.
+                    return 400 <= int(getattr(exc, "code", 0) or 0) < 500
             with socket.create_connection(('127.0.0.1', port), timeout=1):
                 return True
         except Exception:
@@ -143,6 +153,10 @@ class ServerControls:
             self.launch(service, action)
 
     def change(self, service, action):
+        if action == 'reset':
+            from jaeger_ai.core.runtime.stack import stack_reset
+            res = stack_reset(timeout_s=60.0)
+            return {'ok': res.get('ok', False), 'error': res.get('error'), 'services': self.status(), 'details': res}
         if service not in {*SERVICES, 'all'} or action not in {'start', 'stop', 'restart'}:
             raise ValueError('Unknown server or action')
         targets = list(SERVICES) if service == 'all' else [service]
@@ -160,7 +174,7 @@ class ServerControls:
 def main(argv):
     import argparse
     parser = argparse.ArgumentParser(prog='jaeger webui servers')
-    parser.add_argument('action', choices=['status', 'start', 'stop', 'restart'], nargs='?', default='status')
+    parser.add_argument('action', choices=['status', 'start', 'stop', 'restart', 'reset'], nargs='?', default='status')
     parser.add_argument('service', choices=[*SERVICES, 'all'], nargs='?', default='all')
     args = parser.parse_args(argv)
     controls = ServerControls()
