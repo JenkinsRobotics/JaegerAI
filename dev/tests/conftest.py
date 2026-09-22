@@ -56,6 +56,7 @@ os.environ.setdefault("JAEGER_NO_ATTACH", "1")
 # patch unwinds it returns here, never to the operator's live instance.
 _TEST_STATE_HOME = Path(tempfile.mkdtemp(prefix="jaeger-tests-", dir="/tmp"))
 os.environ["JAEGER_HOME"] = str(_TEST_STATE_HOME)
+os.environ.setdefault("ARES_CAPABILITY_AUDIT", str(_TEST_STATE_HOME / "audit" / "host-capabilities.jsonl"))
 
 
 # ── live-instance isolation guard ──────────────────────────────────
@@ -111,7 +112,10 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
                     # memory, sessions, and every other durable state file.
                     if (path.suffix == ".log" or "logs" in path.parts
                             or "memory" in path.parts or path.name == ".DS_Store"
-                            or path.name.endswith(("-shm", "-wal"))):
+                            or path.name.endswith(("-shm", "-wal"))
+                            or "hermes-webui-state" in path.parts
+                            or "hermes-webui-adapter" in path.parts
+                            or "openclaw" in path.parts):
                         continue
                     # The independent production supervisor rewrites this
                     # non-sensitive liveness snapshot every 20 seconds. Its

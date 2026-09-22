@@ -352,6 +352,24 @@ def capability_snapshot(instance_root: Path | None = None) -> dict[str, Any]:
     }
 
 
+def _tool_capability_summary() -> str:
+    """The real tool inventory, for turns that never call a tool to check.
+
+    ``DIRECT_RESPONSE`` (and any path that skips ReAct) runs with an empty
+    tool allowlist by design — it cannot call ``list_tools``/``help_me`` to
+    answer "what tools do you have". Without this, that question landed on
+    a tool-less turn with zero grounding, and the model filled the gap from
+    generic training-data assumptions: an operator asking to open a URL was
+    told, confidently and repeatedly, that no such tool existed — a
+    capability the instance actually has (audit, 2026-09-22).
+    """
+    try:
+        from jaeger_agent.tools.delegation import CAPABILITY_SUMMARY
+        return CAPABILITY_SUMMARY
+    except Exception:
+        return ""
+
+
 def capability_prompt_block(instance_root: Path | None = None) -> str:
     snap = capability_snapshot(instance_root)
     active = (snap.get("models") or {}).get("active") or {}
@@ -366,7 +384,7 @@ def capability_prompt_block(instance_root: Path | None = None) -> str:
         else:
             providers.append(f"{p['display_name']}=unavailable")
     vision = snap.get("vision") or {}
-    return (
+    block = (
         "# Runtime truth (authoritative; do not invent providers or frameworks):\n"
         f"- product_default_runtime={PRODUCT_DEFAULT_RUNTIME}\n"
         f"- entity_id={((snap.get('identity') or {}).get('entity_id'))}\n"
@@ -378,6 +396,14 @@ def capability_prompt_block(instance_root: Path | None = None) -> str:
         f" reason={vision.get('reason') or 'certified'}\n"
         "- Do not present unsupported or unconfigured providers as currently available."
     )
+    tools = _tool_capability_summary()
+    if tools:
+        block += (
+            "\n\n# Tool capabilities (authoritative; this instance actually has these tools "
+            "even on a turn where you cannot call one — do not claim a narrower toolset):\n"
+            f"{tools}"
+        )
+    return block
 
 
 def attachment_id_for(session_id: str, stored_name: str, digest: str) -> str:

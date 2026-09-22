@@ -213,6 +213,18 @@ class ReActHandler(CognitionStrategyHandler):
         except Exception as exc:
             logger.debug("ReActHandler runtime subordinate execution failed: %s", exc)
 
+        model_runner = context.get("model_runner") or context.get("cognition_provider")
+        if callable(model_runner):
+            reply = model_runner(text)
+            if isinstance(reply, dict):
+                return reply
+            return {
+                "strategy": CognitiveStrategy.REACT_LOOP.value,
+                "text": reply,
+                "action_taken": True,
+                "llm_invoked": True,
+            }
+
         # Fallback subordinate execution
         return {
             "strategy": CognitiveStrategy.REACT_LOOP.value,

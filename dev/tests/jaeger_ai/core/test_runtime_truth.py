@@ -12,6 +12,7 @@ from jaeger_ai.contract.frameworks import (
 )
 from jaeger_ai.core.runtime.truth import (
     _active_model,
+    capability_prompt_block,
     capability_snapshot,
     framework_inventory,
     webui_model_catalog,
@@ -53,6 +54,24 @@ def test_capability_snapshot_does_not_claim_unconfigured_cloud():
 def test_product_default_model_is_kimi():
     from jaeger_ai.contract.frameworks import DEFAULT_AGENT_MODEL
     assert DEFAULT_AGENT_MODEL == "kimi-k2.7-code:cloud"
+
+
+def test_prompt_block_carries_the_real_tool_list_for_tool_less_turns():
+    """``DIRECT_RESPONSE`` runs with an empty tool allowlist by design, so it
+    cannot call ``list_tools``/``help_me`` to answer "what tools do you have".
+
+    Live defect (audit, 2026-09-22): with no tool list in ``runtime_truth``,
+    that question (and "open youtube for me", which read as informational
+    too) landed on a tool-less turn with zero grounding. The model guessed
+    from generic assumptions and repeatedly, confidently told the operator
+    it had no web/browser tool at all — a capability this instance actually
+    has (``web_search``, ``open_on_host``).
+    """
+    block = capability_prompt_block(None)
+
+    assert "web_search" in block
+    assert "open_on_host" in block
+    assert "do not claim a narrower toolset" in block
 
 
 def test_webui_catalog_shape():

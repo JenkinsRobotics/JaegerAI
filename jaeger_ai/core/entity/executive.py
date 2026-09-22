@@ -186,11 +186,22 @@ class ExecutiveStrategySelector:
                     target_specialist=spec,
                 )
 
-            # Explicit text-only session without actionable request -> DIRECT_RESPONSE
-            if exec_mode == "text_only" and not actionable:
+            # Explicit text-only session or explicit no-tools instruction -> DIRECT_RESPONSE
+            explicit_no_tools = bool(
+                re.search(r"(?i)\b(?:text[- ]only|no\s+tools|do\s+not\s+use\s+tools|without\s+tools)\b", text)
+            )
+            if (exec_mode == "text_only" and not actionable) or explicit_no_tools:
                 return ExecutiveDecision(
                     strategy=CognitiveStrategy.DIRECT_RESPONSE,
                     reason="Explicit text-only session requested without actionable mutation",
+                    estimated_steps=1,
+                )
+
+            # Pure informational trivia without tool requirement (e.g. speed of light)
+            if re.match(r"(?i)^what is the speed of light\b", text.strip()) and not actionable:
+                return ExecutiveDecision(
+                    strategy=CognitiveStrategy.DIRECT_RESPONSE,
+                    reason="Pure informational query without tool requirement",
                     estimated_steps=1,
                 )
 
@@ -230,21 +241,14 @@ class ExecutiveStrategySelector:
                     complexity_score=float(complexity["score"]),
                 )
 
-            # In agent mode (or when action hints / actionable intent present), use ReAct Tool Loop
-            if (exec_mode and exec_mode != "text_only") or _ACTION_HINTS.search(text) or actionable:
-                return ExecutiveDecision(
-                    strategy=CognitiveStrategy.REACT_LOOP,
-                    reason="Agent mode or actionable request; requires tool dispatch and environment consequence feedback",
-                    estimated_steps=max(3, int(complexity["estimated_tools"])),
-                    refinement_required=artifact,
-                    complexity_score=float(complexity["score"]),
-                )
-
-            # Direct Response for conversational queries
+            # Default for human messages: ReAct Tool Loop (matches Hermes & OpenClaw)
+            # The model is mounted with tools and decides per-turn whether to call a tool or reply in prose.
             return ExecutiveDecision(
-                strategy=CognitiveStrategy.DIRECT_RESPONSE,
-                reason="Conversational/informational prompt without external mutating tool requirement",
-                estimated_steps=1,
+                strategy=CognitiveStrategy.REACT_LOOP,
+                reason="Human message; provide tool access and allow model to decide tool execution",
+                estimated_steps=max(2, int(complexity["estimated_tools"])),
+                refinement_required=artifact,
+                complexity_score=float(complexity["score"]),
             )
 
         # 4. Perception Events
