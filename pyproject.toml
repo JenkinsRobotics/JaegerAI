@@ -123,7 +123,13 @@ cache-dir = "~/.cache/ruff"
 
 [tool.pytest.ini_options]
 cache_dir = "~/.cache/pytest"
-pythonpath = [".", "packages/jaeger-os", "packages/jaeger-agent", "jaeger_ai"]
+# "jaeger_ai" is deliberately NOT on this path. With both "." and "jaeger_ai"
+# present, jaeger_ai/contract/ports.py imports as TWO distinct module objects
+# (jaeger_ai.contract.ports and contract.ports), each with its own module-level
+# globals — so a process-wide singleton like EntityRuntime.get_singleton() can
+# exist twice in one interpreter. Verified: `a is b` was False. Nothing imports
+# these subpackages bare, so the entry only created the hazard.
+pythonpath = [".", "packages/jaeger-os", "packages/jaeger-agent"]
 # The application suite only. The packages carry their own suites and are run
 # as SEPARATE pytest processes by dev/scripts/run_tests.sh — jaeger-os's app
 # tests assert on process singletons ("second instance refused") and fail once
