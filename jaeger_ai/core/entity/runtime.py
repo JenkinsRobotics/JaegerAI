@@ -118,6 +118,8 @@ class EntityRuntime:
             self.memory_subsystem,
         )
         self.cognition_router = CognitionRouter()
+        from jaeger_ai.core.context_compiler import ContextCompiler
+        self.context_compiler = ContextCompiler()
         try:
             from .resident import try_become_resident
             if self.mode == EntityRuntimeMode.OWNER:
@@ -411,6 +413,28 @@ class EntityRuntime:
             ctx["cognition_provider"] = ctx["model_runner"]
         if "critic_provider" not in ctx and callable(ctx.get("model_runner")):
             ctx["critic_provider"] = ctx["model_runner"]
+        try:
+            raw_claims = list(self.memory_subsystem.semantic.list_recent(12))
+        except Exception:
+            raw_claims = []
+        try:
+            compiled = self.context_compiler.compile(
+                user_text,
+                identity=self.identity,
+                self_state=current_state,
+                runtime_truth=ctx.get("runtime_truth"),
+                claims=raw_claims,
+                events=recent if 'recent' in locals() else [],
+                reflections=refs if 'refs' in locals() else [],
+                documents=hits if 'hits' in locals() else [],
+                skills=matched_skills if 'matched_skills' in locals() else [],
+                budget_tokens=ctx.get("budget_tokens") or 4096,
+            )
+            ctx["compiled_context"] = compiled
+            ctx["system_prompt"] = compiled.system_prompt
+        except Exception as exc:
+            logger.debug("Context compilation skipped/failed: %s", exc)
+
         ctx["parent_event_id"] = event.event_id
         ctx["session_id"] = session_id
         ctx["event_store"] = self.event_store
