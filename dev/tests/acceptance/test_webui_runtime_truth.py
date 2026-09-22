@@ -21,6 +21,8 @@ import sqlite3
 import subprocess
 import time
 import urllib.request
+from typing import Any
+
 import pytest
 from PIL import Image, ImageDraw
 from playwright.sync_api import sync_playwright
@@ -46,8 +48,11 @@ def _get_auth_cookie() -> str:
             return f"{token}.{sig}"
         except Exception:
             pass
-    # Fallback: login via API
-    password = os.environ.get("HERMES_WEBUI_PASSWORD", "b3sXcxWdC3KJ81UotYsrg9Mj")
+    password = os.environ.get("HERMES_WEBUI_PASSWORD") or ""
+    if not password:
+        pw_file = Path.home() / ".jaeger" / "webui_remote_password"
+        if pw_file.is_file():
+            password = pw_file.read_text(encoding="utf-8").strip()
     data = json.dumps({"password": password}).encode("utf-8")
     req = urllib.request.Request(
         f"{WEBUI_URL}/api/auth/login",
@@ -403,7 +408,24 @@ def test_non_image_file_attachment(auth_cookie, verify_stack_health):
         assert matching["size_bytes"] == len(content)
         assert matching["mime_type"] == "text/plain"
 
-        TEST_RESULTS.append({"Test": "File attachment", "UI": "uploaded txt", "Gateway": "attached metadata", "Runtime": "metadata coherent", "Result": "PASS"})
+        turn_body = json.dumps({
+            "text": "Read the attached file and return only its token.",
+            "role": "lead",
+            "actionable": False,
+            "model": "kimi-k2.7-code:cloud",
+        }).encode("utf-8")
+        turn_req = urllib.request.Request(
+            f"{WEBUI_URL}/api/jaeger/sessions/{session_id}/turns",
+            data=turn_body,
+            headers=_auth_headers(auth_cookie),
+        )
+        with urllib.request.urlopen(turn_req, timeout=45) as resp:
+            turn_data = json.loads(resp.read().decode("utf-8"))
+        completed = _wait_for_turn(turn_data["request_id"])
+        assert completed["status"] == "completed"
+        assert "JAEGER-TEXT-PAYLOAD-9921" in (completed.get("output") or "")
+
+        TEST_RESULTS.append({"Test": "File attachment", "UI": "uploaded txt", "Gateway": "attached metadata", "Runtime": "content received", "Result": "PASS"})
     finally:
         doc_path.unlink(missing_ok=True)
         if matching and matching.get("safe_path"):

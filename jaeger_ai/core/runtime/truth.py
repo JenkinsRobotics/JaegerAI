@@ -196,6 +196,13 @@ def provider_model_inventory(instance_root: Path | None = None) -> dict[str, Any
 
 def webui_model_catalog(instance_root: Path | None = None) -> dict[str, Any]:
     """Shape expected by the WebUI model picker (`groups` / `default_model`)."""
+    try:
+        from jaeger_ai.core.models.discovery import canonical_runtime_inventory
+        cat = canonical_runtime_inventory(instance_root)
+        if cat.get("groups"):
+            return {**cat, "source": "jaeger.runtime.truth"}
+    except Exception:
+        pass
     inv = provider_model_inventory(instance_root)
     groups = []
     for provider in inv["providers"]:
