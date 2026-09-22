@@ -37,6 +37,7 @@ model the Entity used, and measured latencies (`speech_end_to_transcript`,
 | Speech-to-text | `STTAdapter` (`jaeger_os.core.audio`) | stt slot |
 | Text-to-speech | `KokoroTTS.speak` / `stop` | tts slot |
 | Reply cleanup | `jaeger_os.core.voice.clean_voice_reply` | jaeger-os |
+| Capability truth | `jaeger_ai.core.voice.status` (also feeds `/v1/runtime/capabilities` `audio`) | core |
 
 `WavFileListener` and `TypedListener` implement the same `STTAdapter` shape
 as the microphone engines, so tests and unattended runs drive the real

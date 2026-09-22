@@ -16,8 +16,9 @@ import json
 import sys
 
 from jaeger_ai.core.gateway.client import GatewayUnavailable
+from jaeger_ai.core.voice.status import stt_status, tts_status, voice_status
 
-from .engines import make_kokoro_speaker, make_microphone_listener, stt_status, tts_status, voice_status
+from .engines import make_kokoro_speaker, make_microphone_listener
 from .listeners import TypedListener, WavFileListener
 from .session import PrintSpeaker, VoiceSession, VoiceTurn
 
