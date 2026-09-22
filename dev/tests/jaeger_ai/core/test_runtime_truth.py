@@ -15,7 +15,6 @@ from jaeger_ai.core.runtime.truth import (
     framework_inventory,
     webui_model_catalog,
 )
-from jaeger_ai.core.runtime.vision_label import decode_label_png, encode_label_png
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
 
@@ -55,14 +54,29 @@ def test_webui_catalog_shape():
     assert cat.get("source") == "jaeger.runtime.truth"
 
 
-def test_vision_label_roundtrip(tmp_path: Path):
-    token = "VISION-TOKEN-7421"
-    png = encode_label_png(token)
-    path = tmp_path / "label.png"
-    path.write_bytes(png)
-    assert decode_label_png(path) == token.replace("-", "") or decode_label_png(path).startswith("VISION")
-    # hyphen is in the font; full token should round-trip
-    assert decode_label_png(path) == token
+def test_composer_has_no_hardcoded_orphan_models():
+    html = Path("jaeger_ai/features/webui/static/index.html").read_text(encoding="utf-8")
+    assert "openai/gpt-4o" not in html
+    assert "anthropic/claude-sonnet" not in html
+    assert 'optgroup label="Other"' not in html
+
+
+def test_webui_catalog_is_provider_and_model_only():
+    cat = webui_model_catalog()
+    for group in cat.get("groups") or []:
+        models = group.get("models") or []
+        assert models, f"{group.get('provider')} must not be an empty provider row"
+        assert group.get("provider")
+        assert group.get("provider_id")
+        for model in models:
+            label = str(model.get("label") or "")
+            name = str(model.get("name") or "")
+            assert label == name
+            assert "REACT" not in label.upper()
+            assert "certified" not in label.lower()
+            assert "FAIL" not in label
+            assert "[" not in label
+            assert model.get("certified_badge") in (None, "")
 
 
 def test_gateway_attachments_do_not_escape_via_store(tmp_path: Path):

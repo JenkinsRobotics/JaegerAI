@@ -200,18 +200,14 @@ def inline_webui_text_attachments(text: str, attachments, *, max_chars: int = _I
         is_image = item.get("is_image") is True
         if not _is_text_webui_attachment(name, mime, is_image):
             if path_s and (is_image or mime.startswith("image/")):
-                try:
-                    from jaeger_ai.core.runtime.vision_label import decode_label_png
-                    token = decode_label_png(path_s)
-                except Exception:
-                    token = None
-                if token:
-                    blocks.append(f"Vision observation of `{name}`: the image displays the token {token}.")
-                else:
-                    blocks.append(
-                        "VISION_UNAVAILABLE: no certified vision model could inspect "
-                        f"`{name}` at {path_s}."
-                    )
+                # Say where the image is and how to look at it. This used to
+                # decode a synthetic bitmap only its own test fixture could
+                # produce, and tell the model every other image was
+                # VISION_UNAVAILABLE while a vision-certified model and the
+                # vision_analyze tool were both there.
+                blocks.append(
+                    f"(image `{name}` attached at {path_s}; inspect it with the vision_analyze tool)"
+                )
             elif path_s:
                 blocks.append(f"(attachment `{name}` stored at {path_s})")
             continue
