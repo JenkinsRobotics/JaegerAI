@@ -690,9 +690,6 @@ def print_latency(report: LatencyReport) -> None:
 def write_log(entry: dict[str, Any]) -> None:
     layout: InstanceLayout = _pipeline["layout"]
     layout.logs_dir.mkdir(parents=True, exist_ok=True)
-    memory_entry = dict(entry)
-    if _pipeline["with_memory"]:
-        _record_episodic(memory_entry)
     user = str(entry.get("user") or "")
     answer = str(entry.get("answer") or "")
     session = str(entry.get("session_key") or "")
@@ -720,24 +717,6 @@ def write_log(entry: dict[str, Any]) -> None:
     with layout.latency_log_path.open("a", encoding="utf-8") as fh:
         fh.write(json.dumps(safe_entry, ensure_ascii=True, default=str) + "\n")
     os.chmod(layout.latency_log_path, 0o600)
-
-
-def _record_episodic(entry: dict[str, Any]) -> None:
-    user = entry.get("user")
-    if not user:
-        return
-    try:
-        mem.append_episodic({
-            "timestamp": entry.get("timestamp"),
-            "framework": "jaeger_os",
-            "session_key": entry.get("session_key"),
-            "user": user,
-            "decision_raw": json.dumps(entry.get("decision"), ensure_ascii=True, default=str)
-                if entry.get("decision") is not None else None,
-            "answer": entry.get("answer"),
-        })
-    except Exception as exc:
-        print(f"[jaeger] episodic append failed: {exc}", file=sys.stderr, flush=True)
 
 
 def _estimate_model_context_length(model_name: str) -> int:

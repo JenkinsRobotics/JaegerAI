@@ -276,21 +276,6 @@ class EntityRuntime:
             unified_trace.spans[-1].finish(extra_data={"salience": getattr(attention, "salience_score", None)})
 
         try:
-            import re as _re
-            for token in _re.findall(
-                r"(?i)\bremember(?:\s+(?:the\s+)?(?:word|token|code|phrase))?\s+[\"']?([A-Za-z][A-Za-z0-9_-]{1,48})",
-                user_text,
-            ):
-                self.memory_subsystem.semantic.record_claim(
-                    "user",
-                    "remembered_word",
-                    token,
-                    source_id=event.event_id,
-                    confidence=0.95,
-                )
-        except Exception:
-            pass
-        try:
             recall_lines = ["# Durable fabric (not a new conversation):"]
             for claim in self.memory_subsystem.semantic.list_recent(12):
                 recall_lines.append(
@@ -649,6 +634,7 @@ class EntityRuntime:
 
         # 6. Record Agent Response in Event Fabric
         if response_text:
+            self._project_episodic(user_text, response_text, session_id=session_id)
             self.record_agent_response(
                 response_text,
                 session_id=session_id,
@@ -775,6 +761,29 @@ class EntityRuntime:
         out = turn_exec.run_turn(prompt)
         out = (out or "").strip()
         return out if out else "(No response text returned)"
+
+    @staticmethod
+    def _project_episodic(user_text: str, answer: str, *, session_id: str) -> None:
+        """Keep the agent's ``search_memory`` index a projection of every turn.
+
+        The index used to be written only by the bridge's turn logger, so
+        nothing said through the Gateway (WebUI, voice, CLI one-shots) could
+        be found, and the agent answered from a stale match instead.
+        """
+        try:
+            from datetime import datetime, timezone
+            from jaeger_agent.memory import memory as episodic
+
+            episodic.append_episodic({
+                "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                "framework": "jaeger_os",
+                "session_key": session_id,
+                "user": user_text,
+                "decision_raw": None,
+                "answer": answer,
+            })
+        except Exception as exc:  # noqa: BLE001 — a projection must not fail the turn
+            logger.warning("episodic projection failed for session %s: %s", session_id, exc)
 
     @staticmethod
     def run_has_indeterminate_effects(run_id: str) -> bool:
