@@ -1488,21 +1488,7 @@ class JaegerGatewayApp:
             async def _run_native_coro(prompt: str) -> tuple[str, str] | None:
                 if rid in self._cancel_requested:
                     raise RuntimeError("cancelled before native dispatch")
-                res = await self._native_lead_turn(session_id, prompt, request_id=rid, is_subordinate=True)
-                if res is not None:
-                    txt, b_end = res
-                    early_res = {
-                        "output": txt,
-                        "status": "completed",
-                        "backend": b_end,
-                        "model": "jaeger-mcp",
-                        "turn_id": turn_id,
-                        "execution_mode": "agent",
-                        "capabilities": {"native_tools": True, "native_memory": True},
-                        **agent_fields,
-                    }
-                    self._persist_terminal(rid, session_id, "completed", early_res, assistant_text=txt, record_entity_event=False)
-                return res
+                return await self._native_lead_turn(session_id, prompt, request_id=rid, is_subordinate=True)
 
             def _sync_react(prompt: str, session_key: str = session_id) -> dict[str, Any]:
                 nonlocal backend, model
@@ -1549,7 +1535,7 @@ class JaegerGatewayApp:
                         logger.warning("Native MCP unavailable; OWNER in-process ReAct: %s", ex)
                 txt = self._owner_react_turn(prompt, session_key=session_key, request_id=rid)
                 backend = "owner-react"
-                model = "jaeger-owner"
+                model = runtime.subordinate_model_name()
                 return {"text": txt, "status": "completed"}
 
             session_meta = (session.get("metadata") or {}) if isinstance(session, dict) and isinstance(session.get("metadata"), dict) else {}
@@ -1571,19 +1557,11 @@ class JaegerGatewayApp:
                     ),
                     loop,
                 )
-                txt = chat_fut.result()
-                early_res = {
-                    "output": txt,
-                    "status": "completed",
-                    "backend": backend,
-                    "model": model,
-                    "turn_id": turn_id,
-                    "execution_mode": "text_only",
-                    "capabilities": {"native_tools": False, "native_memory": False},
-                    **agent_fields,
-                }
-                self._persist_terminal(rid, session_id, "completed", early_res, assistant_text=txt, record_entity_event=False)
-                return txt
+                # No terminal write here. The planner, critic and self-refine
+                # call this runner for intermediate thoughts; persisting from
+                # inside it published candidate plans as the user's answer
+                # and hid the real outcome (audit Task A, 2026-09-21).
+                return chat_fut.result()
 
             def _sync_delegate(specialist_name: str, prompt: str, session_key: str = session_id) -> dict[str, Any]:
                 nonlocal backend, model
@@ -1657,17 +1635,20 @@ class JaegerGatewayApp:
                 **agent_fields,
             })
 
+            agent_lane = str(backend).startswith("mcp") or backend == "owner-react"
             result = {
                 "output": response_text,
                 "status": "completed",
                 "backend": backend,
                 "model": model,
                 "turn_id": turn_id,
-                "execution_mode": "agent" if str(backend).startswith("mcp") else "text_only",
+                "execution_mode": "agent" if agent_lane else "text_only",
                 "capabilities": {
-                    "native_tools": str(backend).startswith("mcp"),
-                    "native_memory": str(backend).startswith("mcp"),
+                    "native_tools": agent_lane,
+                    "native_memory": agent_lane,
                 },
+                "verification": turn_result.get("verification"),
+                "trace_id": turn_result.get("trace_id"),
                 **agent_fields,
             }
             self._persist_terminal(rid, session_id, "completed", result, assistant_text=response_text, record_entity_event=False)
