@@ -63,6 +63,8 @@ def test_operator_state_root_defaults_to_user_home(monkeypatch):
 
     monkeypatch.delenv("JAEGER_HOME", raising=False)
     monkeypatch.delenv("JAEGER_STATE_DIR", raising=False)
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("JAEGER_NO_ATTACH", raising=False)
 
     expected = Path.home() / ".jaeger"
     assert operator_state_root() == expected
