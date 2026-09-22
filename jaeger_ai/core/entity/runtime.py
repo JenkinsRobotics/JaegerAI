@@ -674,6 +674,12 @@ class EntityRuntime:
             result_dict["skipped_final"] = False
         result_dict["strategy"] = exec_decision.strategy.value
         result_dict["text"] = response_text
+        result_dict["verification"] = {
+            "status": verif.status.value,
+            "verifier": verif.verifier,
+            "evidence": verif.evidence,
+            "event_id": verif_ev.event_id,
+        }
 
         turn_err = result_dict.get("error")
         unified_trace.tool_calls = list(result_dict.get("tool_activity") or [])
@@ -764,6 +770,15 @@ class EntityRuntime:
         out = turn_exec.run_turn(prompt)
         out = (out or "").strip()
         return out if out else "(No response text returned)"
+
+    def subordinate_model_name(self) -> str:
+        """The model :meth:`run_subordinate_react` calls, as its provider names it."""
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+
+        if self.layout is None:
+            return ""
+        external = load_yaml(self.layout.config_path, Config).external_model
+        return f"{external.provider}:{external.model}" if external.enabled else "local"
 
     # ── Specialized Ingress Helpers ───────────────────────────────────
 
