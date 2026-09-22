@@ -28,6 +28,6 @@ copy one into the other.
 """
 from __future__ import annotations
 
-from . import frameworks, ports, sessions
+from . import frameworks, ports, schemas, sessions
 
-__all__ = ["frameworks", "ports", "sessions"]
+__all__ = ["frameworks", "ports", "schemas", "sessions"]

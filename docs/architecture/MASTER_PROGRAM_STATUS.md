@@ -40,7 +40,7 @@ ONE REQUEST
 | **GATE A** | **BASE** | **Baseline Evaluation Snapshot** | **COMPLETED** | `97ea1d0a` | 12/12 Pinocchio, 17/17 UPAA, 63/63 Contract | Immutable baseline captured in BASELINE_EVALUATION_SNAPSHOT.md |
 | **GATE B** | **WS 2** | **Execution-Model Consolidation** | **COMPLETED** | `33d2ce68` | 7/7 lifecycle, 97/97 jaeger-agent, 9/9 WebUI | Canonical WorkState, durable run 1:1, suspended approval wake keys, crash recovery |
 | **GATE B** | **WS 3** | **Control-Plane Consolidation** | **COMPLETED** | `acd7de83` | 4/4 control-plane, 26/26 regression | Gateway reduced to pure control plane; EntityRuntime owns ReAct and execution |
-| **GATE B** | **WS 4** | **Typed Contracts & Versioned Schemas** | PENDING | — | — | Pydantic v2 wire/storage schemas |
+| **GATE B** | **WS 4** | **Typed Contracts & Versioned Schemas** | **COMPLETED** | Pending | 10/10 schemas, 73/73 contract suite | Pydantic v2 versioned wire & storage schemas for all 18 core entities |
 | **GATE B** | **WS 5** | **State-Ownership Consolidation** | PENDING | — | — | 1:1 state store ownership |
 | **GATE B** | **WS 6** | **Memory & Context Architecture** | PENDING | — | — | Context compiler (select, rank, budget, provenance) |
 | **GATE B** | **WS 7** | **World-State Model** | PENDING | — | — | Entity, Claim, Observation, Provenance model |
