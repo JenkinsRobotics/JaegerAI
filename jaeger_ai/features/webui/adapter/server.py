@@ -556,13 +556,18 @@ class RunnerBroker:
         if kind == "reasoning":
             return "reasoning", {"text": str(frame.get("text") or "")}
         if kind == "tool":
-            status = str(frame.get("status") or "").lower()
-            event = "tool_complete" if status in {"complete", "completed", "done", "error", "failed"} else "tool"
+            # The bridge contract (``jaeger_os.contract.protocol.tool_frame``)
+            # carries ``phase``: start | done | error. Reading a ``status``
+            # key that the bridge never sends left every tool "running" in
+            # the browser, with a second start row where the end should be.
+            phase = str(frame.get("phase") or "").lower()
+            event = "tool_complete" if phase in {"done", "error"} else "tool"
             return event, {
-                "name": str(frame.get("name") or frame.get("tool") or "tool"),
-                "args": frame.get("args") or frame.get("arguments") or {},
-                "result": frame.get("result"),
-                "is_error": status in {"error", "failed"},
+                "name": str(frame.get("name") or "tool"),
+                "args": frame.get("args") or {},
+                "preview": str(frame.get("detail") or ""),
+                "is_error": phase == "error",
+                "duration": frame.get("elapsed_s"),
             }
         if kind == "request":
             req_kind = str(frame.get("kind") or "approval").strip().lower()

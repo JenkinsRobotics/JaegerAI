@@ -255,3 +255,37 @@ def test_search_skips_rows_without_text(bound, monkeypatch):
     # No exception, may or may not return a row depending on the
     # zero-length text — important is that we don't crash.
     assert isinstance(out, list)
+
+
+def test_search_tool_marks_which_hits_are_this_conversation(bound, monkeypatch):
+    """Hits from other sessions must be distinguishable from this one.
+
+    Live regression (WebUI, 2026-09-22): unlabelled cross-session hits let
+    the model answer "what did I first ask you in this conversation?" with
+    a command from an unrelated diagnostic session.
+    """
+    import numpy as np
+    from jaeger_agent import workspace
+    import importlib
+    # ``jaeger_agent.tools.memory`` the attribute is the ``memory()`` tool
+    # function; the module has to be imported by its full name.
+    memory_tool = importlib.import_module("jaeger_agent.tools.memory")
+
+    class _FakeModel:
+        def encode(self, texts, **_):
+            return np.ones((len(texts), 4), dtype="float32")
+
+    monkeypatch.setattr(mem, "_ensure_semantic_model", lambda: _FakeModel())
+    mem.append_episodic({"user": "mine", "answer": "a", "session_key": "here"})
+    mem.append_episodic({"user": "theirs", "answer": "b", "session_key": "elsewhere"})
+
+    previous = workspace.get_current_session()
+    workspace.set_current_session("here")
+    try:
+        out = memory_tool.search_memory("anything", k=5)
+    finally:
+        workspace.set_current_session(previous)
+    by_user = {hit["user"]: hit for hit in out["results"]}
+    assert by_user["mine"]["session"] == "here"
+    assert by_user["mine"]["this_conversation"] is True
+    assert by_user["theirs"]["this_conversation"] is False

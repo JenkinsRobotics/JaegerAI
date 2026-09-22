@@ -3290,11 +3290,17 @@ def _run_turn_via_jaeger_agent(
     *,
     session_key: str,
     allow_persona: bool = True,
+    request: str | None = None,
 ) -> dict[str, Any]:
     """Phase-6 parallel implementation of :func:`_run_turn` that drives
     the loop through :class:`JaegerAgent`. Returns the exact same dict
     shape so ``run_command`` / ``run_for_voice`` don't need to know
-    which loop ran."""
+    which loop ran.
+
+    ``request`` is the operator's text when ``user_text`` carries recalled
+    background; routing and budgets are decided on it (see
+    :func:`jaeger_ai.features.dispatcher.router.prepare_turn_text`)."""
+    intent = user_text if request is None else request
     from jaeger_agent.loop.runtime_bridge import drive_one_turn
     from jaeger_ai.features.dispatcher.router import prepare_turn_text
 
@@ -3307,7 +3313,7 @@ def _run_turn_via_jaeger_agent(
         )
         from jaeger_ai.core.runtime.execution import inner_max as _inner_max
         _turn_inner_max = _inner_max(
-            batch=bool(ledger_open() or looks_like_batch(user_text)),
+            batch=bool(ledger_open() or looks_like_batch(intent)),
         )
         jaeger_agent.max_iterations = _turn_inner_max
         # TurnBudgetLimits is immutable so replace the snapshot atomically;
@@ -3323,7 +3329,9 @@ def _run_turn_via_jaeger_agent(
         pass
     # Domain recall + work-ledger + compaction land on the MODEL copy of
     # the prompt. Session transcripts still record ``user_text``.
-    model_text = prepare_turn_text(jaeger_agent, user_text, session_key=key)
+    model_text = prepare_turn_text(
+        jaeger_agent, user_text, session_key=key, request=request,
+    )
 
     lock = _pipeline["llm_lock"]
     started = time.perf_counter()
@@ -3575,6 +3583,7 @@ def _run_actionable_turn(
     *,
     session_key: str,
     allow_persona: bool,
+    request: str | None = None,
 ) -> dict[str, Any] | None:
     """Route an explicitly actionable request through the existing authority.
 
@@ -3582,15 +3591,24 @@ def _run_actionable_turn(
     existing JaegerAgent implementation directly, avoiding a recursive
     ``_run_turn`` dispatch while preserving the ordinary conversational path.
     ``None`` means the request is informational and should use one inner turn.
+
+    ``user_text`` is the prompt the model sees; the Entity prefixes it with a
+    ``<background>`` block of recalled turns from other sessions. ``request``
+    is what the operator actually typed. Intent is classified on ``request``
+    only: classifying the enriched prompt made any turn actionable whenever
+    recalled history contained a verb like "run" or "fix", so "what time is
+    it?" opened a three-phase ledger named after the background block and
+    ended ``awaiting_approval: blocked`` after answering correctly.
     """
     from jaeger_ai.core.runtime.autonomous_runner import (
         ensure_autonomous_ledger,
         should_run_autonomous,
     )
 
-    if _actionable_controller_depth.get() or not should_run_autonomous(user_text):
+    intent = user_text if request is None else request
+    if _actionable_controller_depth.get() or not should_run_autonomous(intent):
         return None
-    ledger = ensure_autonomous_ledger(user_text)
+    ledger = ensure_autonomous_ledger(intent)
     if ledger is None:
         return None
 
@@ -3604,11 +3622,14 @@ def _run_actionable_turn(
         session_key: str,
         allow_persona: bool = True,
     ) -> dict[str, Any]:
+        # The first step is the enriched request itself; later steps are
+        # the controller's own continuation prompts and route as written.
         return _run_turn_via_jaeger_agent(
             step_client,
             prompt,
             session_key=session_key,
             allow_persona=allow_persona,
+            request=intent if prompt == user_text else None,
         )
 
     token = _actionable_controller_depth.set(_actionable_controller_depth.get() + 1)
@@ -3623,7 +3644,7 @@ def _run_actionable_turn(
         ).run_to_completion(
             user_text,
             session_key,
-            objective=user_text,
+            objective=intent,
         )
     finally:
         _actionable_controller_depth.reset(token)
@@ -3649,20 +3670,23 @@ def _run_subordinate_react(
     *,
     session_key: str,
     allow_persona: bool = False,
+    request: str | None = None,
 ) -> dict[str, Any]:
     """Subordinate ReAct cognitive engine invocation.
 
     Subordinate ReAct is an explicit tool-using execution loop; allow_persona
     defaults to False so the Mode-C id/persona lane does not intercept the turn
-    and suppress tool execution.
+    and suppress tool execution. ``request`` is the operator's own text when
+    ``user_text`` has been enriched with background (see
+    :func:`_run_actionable_turn`).
     """
     actionable = _run_actionable_turn(
         client, user_text, session_key=session_key,
-        allow_persona=allow_persona,
+        allow_persona=allow_persona, request=request,
     )
     return actionable if actionable is not None else _run_turn_via_jaeger_agent(
         client, user_text, session_key=session_key,
-        allow_persona=allow_persona,
+        allow_persona=allow_persona, request=request,
     )
 
 
@@ -3730,8 +3754,11 @@ def _run_turn(
         runtime = EntityRuntime.get_singleton()
         client = ensure_role_client(client, "react", runtime.state_root)
         context = {
+            # ``t`` arrives wrapped in recalled background; intent is judged
+            # on what the operator typed, which only this closure still has.
             "react_runner": lambda t, session_key=session_key: _run_subordinate_react(
                 client, t, session_key=session_key, allow_persona=False,
+                request=user_text,
             ),
             "model_runner": lambda t: _run_direct_model_runner(
                 client, t, session_key=session_key, allow_persona=allow_persona,

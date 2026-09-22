@@ -276,20 +276,40 @@ class EntityRuntime:
             unified_trace.spans[-1].finish(extra_data={"salience": getattr(attention, "salience_score", None)})
 
         try:
-            recall_lines = ["# Durable fabric (not a new conversation):"]
+            # Other conversations only, each line labelled with where it
+            # came from. This conversation's own turns are already in the
+            # model's message history; repeating them here unlabelled, above
+            # "Current request", let the model mistake another session's
+            # turns (and the request itself) for this conversation's
+            # opening — "what did I first ask you?" was answered with a
+            # command from an unrelated diagnostic session, and that wrong
+            # answer was then recalled into every later turn.
+            recall_lines = [
+                "# Recent turns from your OTHER conversations "
+                "(not this one; this conversation's history is the message thread):"
+            ]
             for claim in self.memory_subsystem.semantic.list_recent(12):
                 recall_lines.append(
                     f"- claim {claim.get('subject')}.{claim.get('predicate')}={claim.get('value')}"
                 )
-            recent = self.event_store.query_events(
-                event_types=[EventType.HUMAN_MESSAGE.value, EventType.AGENT_RESPONSE.value],
-                since_id=max(0, self.event_store.latest_id() - 400),
-                limit=400,
-            )[-12:]
+            recent = [
+                ev for ev in self.event_store.query_events(
+                    event_types=[EventType.HUMAN_MESSAGE.value, EventType.AGENT_RESPONSE.value],
+                    since_id=max(0, self.event_store.latest_id() - 400),
+                    limit=400,
+                )
+                if ev.session_id != session_id
+            ][-12:]
+            speaker = {
+                EventType.HUMAN_MESSAGE.value: "user",
+                EventType.AGENT_RESPONSE.value: "you",
+            }
             for ev in recent:
                 text = str((ev.payload or {}).get("text") or "")[:240]
                 if text:
-                    recall_lines.append(f"- {ev.event_type}: {text}")
+                    recall_lines.append(
+                        f"- [conversation {ev.session_id}] {speaker[ev.event_type]}: {text}"
+                    )
             if len(recall_lines) > 1:
                 ctx["durable_recall"] = "\n".join(recall_lines)
         except Exception:

@@ -747,7 +747,7 @@ def _ensure_embeddings_up_to_date() -> int:
 def search_memory(query: str, k: int = 5) -> list[dict[str, Any]]:
     """Return up to ``k`` semantically-closest episodic entries for
     ``query``. Each result has ``user`` / ``answer`` / ``timestamp``
-    / ``score`` (cosine, 0-1).
+    / ``session`` (the conversation it came from) / ``score`` (cosine, 0-1).
 
     Encodes missing embeddings on first call after new turns have
     been appended — incremental, not a full rebuild. Uses
@@ -768,7 +768,7 @@ def search_memory(query: str, k: int = 5) -> list[dict[str, Any]]:
 
     conn = sqlite_store.connection()
     rows = conn.execute(
-        "SELECT e.id, e.user, e.answer, e.ts, em.vector "
+        "SELECT e.id, e.session_key, e.user, e.answer, e.ts, em.vector "
         "FROM episodic e "
         "JOIN episodic_embeddings em ON em.episodic_id = e.id"
     ).fetchall()
@@ -796,6 +796,7 @@ def search_memory(query: str, k: int = 5) -> list[dict[str, Any]]:
             "user": row["user"] or "",
             "answer": row["answer"] or "",
             "timestamp": row["ts"],
+            "session": row["session_key"] or "",
             "score": float(scores[int(i)]),
         })
     return out

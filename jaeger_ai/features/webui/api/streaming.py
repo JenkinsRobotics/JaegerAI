@@ -12946,6 +12946,17 @@ def _handle_chat_steer(handler, body: dict) -> bool:
         except KeyError:
             active_stream_id = None
         if active_stream_id:
+            # A runner-owned run (Jaeger, Hermes, OpenClaw, Roundtable over
+            # :8791) has no in-process agent to steer and is not in STREAMS.
+            # Answer "queued" so the browser holds the message and sends it
+            # when the run ends, exactly as for a gateway run. Before this,
+            # every message typed during a Jaeger turn failed with
+            # "no_cached_agent" and bounced back into the composer.
+            with _cfg.ACTIVE_RUNS_LOCK:
+                runner_run = bool(((_cfg.ACTIVE_RUNS or {}).get(str(active_stream_id)) or {}).get("runner"))
+            if runner_run:
+                return j(handler, {"accepted": False, "fallback": "gateway_steer_queued",
+                                   "stream_id": active_stream_id})
             with _cfg.STREAMS_LOCK:
                 stream_alive = active_stream_id in _cfg.STREAMS
             if stream_alive:

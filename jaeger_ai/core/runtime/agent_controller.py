@@ -278,7 +278,14 @@ class JaegerAgentController:
         output = dict(self._last)
         output["state"] = self.state.value
         output["status"] = self.state.value
-        output["halt_reason"] = self.reason
+        # ``halt_reason`` means the loop stopped short (the agent loop sets it
+        # None on a clean finish, and every client treats a non-empty value
+        # as a failure). A completed objective is not a halt, so its reason
+        # travels as ``controller_reason``. Reporting "complete_task" here
+        # made the WebUI runner fail a run whose file was written and
+        # verified.
+        output["halt_reason"] = None if self.state is AgentState.COMPLETED else self.reason
+        output["controller_reason"] = self.reason
         output["steps"] = self.step_count
         output["elapsed_s"] = time.perf_counter() - self._started
         output["autonomous"] = True
