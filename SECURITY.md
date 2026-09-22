@@ -4,6 +4,11 @@ Report suspected vulnerabilities privately through GitHub's security-advisory
 workflow for this repository. Do not include credentials, user data, or an
 active exploit in a public issue.
 
+Trust domains, capability promotion, attachments, and agent-to-agent
+boundaries are documented in
+[docs/architecture/THREAT_MODEL.md](docs/architecture/THREAT_MODEL.md).
+Automated negatives: `dev/scripts/run_tests.sh --security`.
+
 ## Supported code
 
 Security fixes target the current default branch and the latest published

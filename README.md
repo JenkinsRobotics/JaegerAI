@@ -21,6 +21,12 @@
 See the [documentation index](docs/README.md) for operator commands,
 architecture, developer tooling, and integration notes.
 
+The surviving architecture, including what is **IMPLEMENTED** versus
+**EXPERIMENTAL**, is [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md).
+Contributor workflow is in [CONTRIBUTING.md](CONTRIBUTING.md). Extensions
+use public contracts ([docs/EXTENSION_GUIDE.md](docs/EXTENSION_GUIDE.md));
+do not edit `EntityRuntime` to add a skill.
+
 JaegerAI is a complete, general-purpose assistant platform. It can answer
 questions, work with files and code, browse and research, manage personal
 information, run scheduled and background work, use external services, and

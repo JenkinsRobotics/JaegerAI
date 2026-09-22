@@ -1,0 +1,32 @@
+name: Feature or extension
+description: A capability, provider, device, or client change
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What should a persistent Jaeger be able to do?
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Layer
+      options:
+        - Capability package (no core edit)
+        - Provider / cognition profile
+        - Device / node contract
+        - Control plane / Gateway
+        - EntityRuntime kernel
+        - Client (Web/Mac/CLI)
+        - Docs / tests
+    validations:
+      required: true
+  - type: checkboxes
+    id: constraints
+    attributes:
+      label: Constraints
+      options:
+        - label: This can be an extension (capability/provider/device) without editing EntityRuntime
+        - label: I have read docs/architecture/ARCHITECTURE.md and docs/EXTENSION_GUIDE.md
