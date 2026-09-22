@@ -151,39 +151,24 @@ class EpisodeSummary:
     timestamp: float = field(default_factory=time.time)
 
 
+from ..world import EpistemicProvenance, SqliteWorldStore
+
+
 # ── 3. Semantic Memory ─────────────────────────────────────────────────
 
 class SemanticMemory:
     """Structured knowledge, entities, claims, and verified world facts.
     
-    Canonical Store: WorldModel & SqliteKnowledgeStore (<state_root>/knowledge.sqlite3).
+    Canonical Store: SqliteWorldStore (<state_root>/knowledge.sqlite3).
     Write Path: Extracted during consolidation or turn intake -> `record_claim()`.
-    Retrieval Interface: `query_claims()`, `get_entity_facts()`.
+    Retrieval Interface: `query_claims()`, `list_recent()`, `world_store`.
     Persistence: Durable relational SQLite entity/claim tables.
     """
 
     def __init__(self, state_root: Path) -> None:
-        self.state_root = state_root
-        self._db_path = state_root / "knowledge.sqlite3"
-        self._init_db()
-
-    def _init_db(self) -> None:
-        self.state_root.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self._db_path) as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS semantic_claims (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    subject TEXT NOT NULL,
-                    predicate TEXT NOT NULL,
-                    value TEXT NOT NULL,
-                    source_id TEXT,
-                    confidence REAL,
-                    created_at REAL
-                )
-                """
-            )
-            conn.commit()
+        self.state_root = Path(state_root)
+        self._db_path = self.state_root / "knowledge.sqlite3"
+        self.world_store = SqliteWorldStore(self._db_path)
 
     def record_claim(
         self,
@@ -191,41 +176,43 @@ class SemanticMemory:
         predicate: str,
         value: str,
         *,
-        source_id: str = "",
+        source_id: str = "operator",
         confidence: float = 1.0,
+        provenance: str | EpistemicProvenance = EpistemicProvenance.TOLD,
     ) -> dict[str, Any]:
         """Record a verified factual proposition about an entity."""
-        with sqlite3.connect(self._db_path) as conn:
-            conn.execute(
-                "INSERT INTO semantic_claims (subject, predicate, value, source_id, confidence, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-                (subject, predicate, value, source_id, confidence, time.time()),
-            )
-            conn.commit()
-        return {"subject": subject, "predicate": predicate, "value": value, "status": "recorded"}
+        claim = self.world_store.record_claim(
+            subject=subject,
+            predicate=predicate,
+            value=value,
+            provenance=provenance,
+            confidence=confidence,
+            source_id=source_id,
+        )
+        return {
+            "claim_id": claim.claim_id,
+            "subject": claim.subject,
+            "predicate": claim.predicate,
+            "value": claim.value,
+            "confidence": claim.confidence,
+            "provenance": claim.provenance.value,
+            "status": "recorded",
+        }
 
     def query_claims(self, subject: str) -> list[dict[str, Any]]:
         """Retrieve established semantic claims for a given subject."""
-        with sqlite3.connect(self._db_path) as conn:
-            cur = conn.execute(
-                "SELECT predicate, value, confidence FROM semantic_claims WHERE subject = ?",
-                (subject,),
-            )
-            return [
-                {"predicate": r[0], "value": r[1], "confidence": r[2]}
-                for r in cur.fetchall()
-            ]
+        claims = self.world_store.query_claims(subject)
+        return [
+            {"predicate": c.predicate, "value": c.value, "confidence": c.confidence, "provenance": c.provenance.value}
+            for c in claims
+        ]
 
     def list_recent(self, limit: int = 20) -> list[dict[str, Any]]:
-        with sqlite3.connect(self._db_path) as conn:
-            cur = conn.execute(
-                "SELECT subject, predicate, value, confidence FROM semantic_claims "
-                "ORDER BY created_at DESC LIMIT ?",
-                (int(limit),),
-            )
-            return [
-                {"subject": r[0], "predicate": r[1], "value": r[2], "confidence": r[3]}
-                for r in cur.fetchall()
-            ]
+        claims = self.world_store.list_recent_claims(limit)
+        return [
+            {"subject": c.subject, "predicate": c.predicate, "value": c.value, "confidence": c.confidence, "provenance": c.provenance.value}
+            for c in claims
+        ]
 
 
 # ── 4. Reflective Memory ───────────────────────────────────────────────

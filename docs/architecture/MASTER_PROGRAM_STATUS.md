@@ -43,7 +43,7 @@ ONE REQUEST
 | **GATE B** | **WS 4** | **Typed Contracts & Versioned Schemas** | **COMPLETED** | `df037bbd` | 10/10 schemas, 73/73 contract suite | Pydantic v2 versioned wire & storage schemas for all 18 core entities |
 | **GATE B** | **WS 5** | **State-Ownership Consolidation** | **COMPLETED** | `dc5b7158` | 4/4 ownership, 25/25 combined | Single Source of Truth map; strict subsystem persistence boundaries enforced |
 | **GATE B** | **WS 6** | **Memory & Context Architecture** | **COMPLETED** | `b1025ff0` | 5/5 compiler, 30/30 combined | Canonical ContextCompiler: SELECT -> RANK -> BUDGET -> PROVENANCE -> FORMAT |
-| **GATE B** | **WS 7** | **World-State Model** | PENDING | — | — | Entity, Claim, Observation, Provenance model |
+| **GATE B** | **WS 7** | **World-State Model** | **COMPLETED** | `in-progress` | 5/5 world-state, 25/25 combined | Epistemic Invariants (Observation != Claim != Belief != Fact), SqliteWorldStore in knowledge.sqlite3, SemanticMemory integration |
 | **GATE B** | **WS 8** | **Unified Policy / Capability / Authority** | PENDING | — | — | Policy kernel, deterministic fail-closed authority |
 | **GATE B** | **WS 9** | **Typed Effect & Verification Model** | PENDING | — | — | EffectIntent -> EffectLedger -> Verification |
 | **GATE C** | **WS 10** | **Programmable Capability Layer** | PENDING | — | — | Dynamic packages/manifests without core edits |
