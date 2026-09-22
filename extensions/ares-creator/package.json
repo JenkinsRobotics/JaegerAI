@@ -1,0 +1,14 @@
+{
+  "name": "ares-creator",
+  "version": "1.0.0",
+  "description": "Live VTuber Overlay and Video Automation for ARES",
+  "scripts": {
+    "start": "python -m server.server"
+  },
+  "dependencies": {
+    "@mediapipe/camera_utils": "^0.4.1675466862",
+    "@mediapipe/face_mesh": "^0.4.1633559619",
+    "@pixiv/three-vrm": "^3.1.0",
+    "three": "^0.170.0"
+  }
+}

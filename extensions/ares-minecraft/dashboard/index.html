@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARES Minecraft Companion & Server Manager</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="hud-container">
+    <!-- Top Bar: Navigation Tabs & Health -->
+    <header class="hud-header">
+      <div class="header-left">
+        <div class="bot-avatar-frame">
+          <img src="https://mc-heads.net/avatar/ARES/48" alt="Bot Head" class="bot-head-img" id="botHeadImg" onerror="this.src='https://mc-heads.net/avatar/Steve/48'">
+          <span class="status-indicator-dot online" id="statusDot"></span>
+        </div>
+        <div class="bot-meta">
+          <div class="bot-name-row">
+            <h1 class="bot-name" id="botName">ARES</h1>
+            <span class="hud-badge status-badge" id="statusBadge">CONNECTING...</span>
+            <span class="hud-badge dimension-badge" id="dimensionBadge">Overworld</span>
+          </div>
+          <div class="server-endpoint" id="serverEndpoint">Server: 127.0.0.1:25565</div>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <div class="nav-tabs-wrapper">
+        <button class="nav-tab active" id="tabBtnCompanion" onclick="switchTab('companion')">
+          <span class="nav-icon">🎮</span> Companion HUD
+        </button>
+        <button class="nav-tab" id="tabBtnServer" onclick="switchTab('server')">
+          <span class="nav-icon">🖥️</span> Server Manager & PS5
+        </button>
+      </div>
+
+      <div class="header-right" id="vitalsContainer">
+        <!-- Health Bar -->
+        <div class="vital-group">
+          <div class="vital-label-row">
+            <span class="vital-label">HEALTH</span>
+            <span class="vital-val" id="healthVal">20 / 20</span>
+          </div>
+          <div class="progress-bar-bg health-bar">
+            <div class="progress-bar-fill" id="healthFill" style="width: 100%;"></div>
+          </div>
+        </div>
+
+        <!-- Food / Hunger Bar -->
+        <div class="vital-group">
+          <div class="vital-label-row">
+            <span class="vital-label">HUNGER</span>
+            <span class="vital-val" id="foodVal">20 / 20</span>
+          </div>
+          <div class="progress-bar-bg food-bar">
+            <div class="progress-bar-fill" id="foodFill" style="width: 100%;"></div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- VIEW 1: COMPANION HUD                                       -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <main class="hud-grid" id="viewCompanion">
+      <!-- Left Column: Navigation, Coordinates & Radar -->
+      <section class="hud-card location-card">
+        <div class="card-header">
+          <div class="card-title">LOCATION & RADAR</div>
+          <button class="icon-btn" id="btnRefreshLoc" title="Refresh Position">⟳</button>
+        </div>
+
+        <div class="coords-display">
+          <div class="coord-box">
+            <span class="coord-axis">X</span>
+            <span class="coord-val" id="coordX">0.0</span>
+          </div>
+          <div class="coord-box">
+            <span class="coord-axis">Y</span>
+            <span class="coord-val" id="coordY">64.0</span>
+          </div>
+          <div class="coord-box">
+            <span class="coord-axis">Z</span>
+            <span class="coord-val" id="coordZ">0.0</span>
+          </div>
+        </div>
+
+        <div class="biome-heading-row">
+          <div class="mini-stat">
+            <span class="mini-label">HEADING:</span>
+            <span class="mini-val" id="headingVal">North (0°)</span>
+          </div>
+          <div class="mini-stat">
+            <span class="mini-label">BIOME:</span>
+            <span class="mini-val" id="biomeVal">Plains</span>
+          </div>
+        </div>
+
+        <!-- Player Radar -->
+        <div class="radar-section">
+          <div class="section-subtitle">NEARBY PLAYERS</div>
+          <div class="player-radar-list" id="playerRadarList">
+            <div class="player-row vip-player">
+              <img src="https://mc-heads.net/avatar/Shu_Walker/24" class="player-head" alt="Shu_Walker">
+              <div class="player-info">
+                <span class="player-name">Shu_Walker (Matthew)</span>
+                <span class="player-dist" id="distMatthew">Searching...</span>
+              </div>
+              <button class="mini-action-btn" onclick="followPlayer('Shu_Walker')">Follow</button>
+            </div>
+            <div class="player-row vip-player">
+              <img src="https://mc-heads.net/avatar/Blackstar3156/24" class="player-head" alt="Blackstar3156">
+              <div class="player-info">
+                <span class="player-name">Blackstar3156 (Sean)</span>
+                <span class="player-dist" id="distSean">Searching...</span>
+              </div>
+              <button class="mini-action-btn" onclick="followPlayer('Blackstar3156')">Follow</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Center Column: Quick Action Deck -->
+      <section class="hud-card actions-card">
+        <div class="card-header">
+          <div class="card-title">COMMAND DECK</div>
+          <span class="status-indicator" id="botActivity">IDLE</span>
+        </div>
+
+        <div class="command-grid">
+          <button class="cmd-btn cmd-follow" onclick="runCommand('follow_closest')">
+            <span class="cmd-icon">🏃</span>
+            <span class="cmd-text">Follow Me</span>
+          </button>
+          <button class="cmd-btn cmd-guard" onclick="runCommand('guard_here')">
+            <span class="cmd-icon">🛡️</span>
+            <span class="cmd-text">Guard Position</span>
+          </button>
+          <button class="cmd-btn cmd-mine" onclick="runCommand('mine_iron')">
+            <span class="cmd-icon">⛏️</span>
+            <span class="cmd-text">Mine Iron/Ores</span>
+          </button>
+          <button class="cmd-btn cmd-gather" onclick="runCommand('gather_wood')">
+            <span class="cmd-icon">🪓</span>
+            <span class="cmd-text">Chop Wood</span>
+          </button>
+          <button class="cmd-btn cmd-eat" onclick="runCommand('eat_food')">
+            <span class="cmd-icon">🍖</span>
+            <span class="cmd-text">Eat Food</span>
+          </button>
+          <button class="cmd-btn cmd-stop danger-btn" onclick="runCommand('stop')">
+            <span class="cmd-icon">🛑</span>
+            <span class="cmd-text">Stop All</span>
+          </button>
+        </div>
+
+        <!-- Custom Coordinate Move Input -->
+        <div class="custom-target-box">
+          <div class="section-subtitle">PATHFIND TO COORDINATES</div>
+          <div class="target-input-row">
+            <input type="number" id="targetX" placeholder="X" class="coord-input">
+            <input type="number" id="targetY" placeholder="Y" class="coord-input">
+            <input type="number" id="targetZ" placeholder="Z" class="coord-input">
+            <button class="btn-primary" onclick="goToCoords()">Go</button>
+          </div>
+        </div>
+
+        <!-- Village of Antigravity Civil Engine -->
+        <div style="background:rgba(8,235,241,0.06);border:1px solid rgba(8,235,241,0.25);border-radius:8px;padding:12px;margin-top:14px;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+            <div style="font-weight:700;font-size:12px;color:#08EBF1;letter-spacing:1px;">VILLAGE OF ANTIGRAVITY</div>
+            <span style="font-size:10px;background:rgba(0,255,136,0.15);color:#00FF88;padding:2px 6px;border-radius:3px;font-weight:700;">AUTONOMOUS AI</span>
+          </div>
+          <div style="font-size:11px;color:#9aa5b8;margin-bottom:10px;">
+            ARES uses local Ollama LLM (<strong>qwen3.6:35b-mlx</strong>) to explore, harvest, build, and expand the settlement.
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:6px;">
+            <button class="sm-btn" onclick="buildStructure('monument')" style="background:#192233;border:1px solid #28354d;color:#08EBF1;padding:6px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">⛲ Monument</button>
+            <button class="sm-btn" onclick="buildStructure('townhall')" style="background:#192233;border:1px solid #28354d;color:#08EBF1;padding:6px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">🏛️ Town Hall</button>
+            <button class="sm-btn" onclick="buildStructure('farm')" style="background:#192233;border:1px solid #28354d;color:#08EBF1;padding:6px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">🌾 Farm</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Inventory & Hotbar -->
+      <section class="hud-card inventory-card">
+        <div class="card-header">
+          <div class="card-title">INVENTORY & GEAR</div>
+          <span class="inv-count" id="invTotalCount">0 items</span>
+        </div>
+
+        <!-- Equipped Armor -->
+        <div class="equipped-gear-row">
+          <div class="gear-slot" id="slotHelmet" title="Helmet">🪖</div>
+          <div class="gear-slot" id="slotChest" title="Chestplate">🦺</div>
+          <div class="gear-slot" id="slotLegs" title="Leggings">👖</div>
+          <div class="gear-slot" id="slotBoots" title="Boots">🥾</div>
+          <div class="gear-slot" id="slotMainHand" title="Main Hand">⚔️</div>
+          <div class="gear-slot" id="slotOffHand" title="Off Hand">🛡️</div>
+        </div>
+
+        <!-- Hotbar / Inventory Grid -->
+        <div class="section-subtitle">HOTBAR & BAG</div>
+        <div class="inventory-grid" id="inventoryGrid">
+          <!-- Populated dynamically by app.js -->
+        </div>
+      </section>
+    </main>
+
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <!-- VIEW 2: SERVER MANAGER & PS5 CROSS-PLAY                     -->
+    <!-- ═══════════════════════════════════════════════════════════ -->
+    <main class="hud-grid server-manager-grid" id="viewServer" style="display:none;">
+      <!-- Server Status & Control -->
+      <section class="hud-card server-status-card">
+        <div class="card-header">
+          <div class="card-title">SERVER LIFECYCLE & RACK PC STATUS</div>
+          <span class="hud-badge" id="srvStatusBadge">ONLINE</span>
+        </div>
+
+        <!-- Host PC Info Banner -->
+        <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(8,235,241,0.06);border:1px solid rgba(8,235,241,0.2);padding:10px 14px;border-radius:8px;margin-bottom:14px;">
+          <div>
+            <div style="font-size:11px;color:#7e8b9f;font-weight:600;">ACTIVE HOST</div>
+            <div style="font-size:14px;font-weight:700;color:#08EBF1;" id="srvHostName">RackPC001 (Jenkins Rack)</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:11px;color:#7e8b9f;font-weight:600;">RACK LAN IP</div>
+            <div style="font-size:13px;font-weight:700;color:#fff;font-family:monospace;" id="srvHostIp">10.15.0.239</div>
+          </div>
+        </div>
+
+        <div class="server-control-row">
+          <button class="btn-action btn-start" id="btnStartServer" onclick="startServer()">▶ Start Server</button>
+          <button class="btn-action btn-stop" id="btnStopServer" onclick="stopServer()">⏹ Stop Server</button>
+          <button class="btn-action btn-restart" id="btnRestartServer" onclick="restartServer()">🔄 Restart</button>
+        </div>
+
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <span class="metric-label">HOST STATUS</span>
+            <span class="metric-val highlight" id="srvBackendType" style="color:#00FF88;">Rack PC (Online)</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">MEMORY USAGE</span>
+            <span class="metric-val" id="srvMemVal">1.75 GB</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">ONLINE PLAYERS</span>
+            <span class="metric-val" id="srvPlayersVal">0 players</span>
+          </div>
+          <div class="metric-card">
+            <span class="metric-label">SERVER ENGINE</span>
+            <span class="metric-val highlight" id="srvEngineVal">Paper 1.21.11</span>
+          </div>
+        </div>
+
+        <!-- Multi-Device Join Cards -->
+        <div style="margin-top:16px;">
+          <div class="section-subtitle" style="margin-bottom:10px;font-weight:700;letter-spacing:1px;color:#08EBF1;">CONNECT YOUR DEVICES (PS5 / IOS / PC / FRIENDS)</div>
+          
+          <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(240px, 1fr));gap:12px;">
+            <!-- PS5 Native Auto-Detect Card -->
+            <div style="background:#0c1017;border:1px solid #1f2738;border-radius:8px;padding:12px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <span style="font-size:18px;">🎮</span>
+                <span style="font-weight:700;font-size:13px;color:#fff;">PlayStation 5 (PS5)</span>
+                <span style="font-size:10px;background:rgba(0,255,136,0.15);color:#00FF88;padding:2px 6px;border-radius:3px;font-weight:700;">AUTO-DETECT</span>
+              </div>
+              <div style="font-size:11px;color:#9aa5b8;line-height:1.4;margin-bottom:10px;">
+                <strong>⚡ Native LAN Discovery (No Apps / No DNS):</strong><br>
+                1. On PS5 Minecraft, go to <strong>Play → Friends</strong> tab<br>
+                2. Look under <strong>LAN Games</strong> — <strong style="color:#08EBF1;">ARES | Jenkins Rack</strong> will appear automatically!<br>
+                3. Click to join directly from your couch!
+              </div>
+              <button class="sm-btn" onclick="navigator.clipboard.writeText('10.15.0.239:19132');alert('Copied 10.15.0.239:19132 to clipboard!');" style="width:100%;background:#192233;border:1px solid #28354d;color:#08EBF1;padding:6px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">📋 Copy PS5 Bedrock IP</button>
+            </div>
+
+            <!-- iOS / iPad Card -->
+            <div style="background:#0c1017;border:1px solid #1f2738;border-radius:8px;padding:12px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <span style="font-size:18px;">📱</span>
+                <span style="font-weight:700;font-size:13px;color:#fff;">iPhone / iPad (iOS Bedrock)</span>
+              </div>
+              <div style="font-size:11px;color:#9aa5b8;line-height:1.4;margin-bottom:10px;">
+                <strong>Auto-Detect:</strong> Check <strong>Play → Friends → LAN Games</strong><br>
+                <strong>Manual Add:</strong> Tap <strong>Play → Servers → Add Server</strong><br>
+                Address: <code style="color:#08EBF1;background:#141a26;padding:2px 4px;border-radius:3px;" id="srvJoinIosIp">10.15.0.239</code> | Port: <code style="color:#08EBF1;background:#141a26;padding:2px 4px;border-radius:3px;">19132</code>
+              </div>
+              <button class="sm-btn" onclick="navigator.clipboard.writeText('10.15.0.239:19132');alert('Copied 10.15.0.239:19132 to clipboard!');" style="width:100%;background:#192233;border:1px solid #28354d;color:#08EBF1;padding:6px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">📋 Copy iOS Bedrock IP</button>
+            </div>
+
+            <!-- PC / Mac Java Card -->
+            <div style="background:#0c1017;border:1px solid #1f2738;border-radius:8px;padding:12px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <span style="font-size:18px;">💻</span>
+                <span style="font-weight:700;font-size:13px;color:#fff;">PC / Mac (Java Edition)</span>
+              </div>
+              <div style="font-size:11px;color:#9aa5b8;line-height:1.4;margin-bottom:10px;">
+                1. In Minecraft Java, click <strong>Multiplayer → Direct Connect</strong><br>
+                2. Server Address: <code style="color:#08EBF1;background:#141a26;padding:2px 4px;border-radius:3px;" id="srvJoinJavaIp">10.15.0.239:25565</code><br>
+                3. Away from home (Tailscale): <code style="color:#08EBF1;">100.78.245.49:25565</code>
+              </div>
+              <button class="sm-btn" onclick="navigator.clipboard.writeText('10.15.0.239:25565');alert('Copied 10.15.0.239:25565 to clipboard!');" style="width:100%;background:#192233;border:1px solid #28354d;color:#08EBF1;padding:6px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">📋 Copy Java Address</button>
+            </div>
+
+            <!-- Public Global / Friends Card -->
+            <div style="background:#0c1017;border:1px solid rgba(8,235,241,0.3);border-radius:8px;padding:12px;">
+              <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <span style="font-size:18px;">🌍</span>
+                <span style="font-weight:700;font-size:13px;color:#08EBF1;">Play with Friends Anywhere</span>
+              </div>
+              <div style="font-size:11px;color:#9aa5b8;line-height:1.4;margin-bottom:10px;">
+                <strong>Global Public Address (Playit.gg Tunnel):</strong><br>
+                Share this address with friends anywhere in the world (no VPN or port forwarding needed):<br>
+                <code style="color:#00FF88;background:#141a26;padding:3px 6px;border-radius:3px;display:inline-block;margin-top:4px;font-weight:700;">nih-whoever.tun.ply.gg</code>
+              </div>
+              <button class="sm-btn" onclick="navigator.clipboard.writeText('nih-whoever.tun.ply.gg');alert('Copied Public Domain nih-whoever.tun.ply.gg to clipboard!');" style="width:100%;background:#08EBF1;border:none;color:#0a0d14;padding:6px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:700;">📋 Copy Public Address for Friends</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Server Settings Editor -->
+      <section class="hud-card server-config-card">
+        <div class="card-header">
+          <div class="card-title">SERVER & WORLD SETTINGS</div>
+          <button class="btn-primary" onclick="saveServerConfig()">Save Settings</button>
+        </div>
+
+        <div class="config-form">
+          <div class="form-group">
+            <label for="cfgMotd">Server Description (MOTD)</label>
+            <input type="text" id="cfgMotd" class="form-input" placeholder="ARES Companion Server">
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label for="cfgDifficulty">Difficulty</label>
+              <select id="cfgDifficulty" class="form-select">
+                <option value="peaceful">Peaceful</option>
+                <option value="easy">Easy</option>
+                <option value="normal" selected>Normal</option>
+                <option value="hard">Hard</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="cfgGamemode">Gamemode</label>
+              <select id="cfgGamemode" class="form-select">
+                <option value="survival" selected>Survival</option>
+                <option value="creative">Creative</option>
+                <option value="adventure">Adventure</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div class="form-group">
+              <label for="cfgMaxPlayers">Max Players</label>
+              <input type="number" id="cfgMaxPlayers" class="form-input" value="20" min="1" max="100">
+            </div>
+            <div class="form-group">
+              <label for="cfgSeed">World Seed (Optional)</label>
+              <input type="text" id="cfgSeed" class="form-input" placeholder="Random or Custom Seed">
+            </div>
+          </div>
+
+          <div class="form-group checkbox-group">
+            <label>
+              <input type="checkbox" id="cfgPvp" checked> Enable PvP (Player vs Player)
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <!-- Live Server Console & RCON Terminal -->
+      <section class="hud-card server-console-card">
+        <div class="card-header">
+          <div class="card-title">SERVER CONSOLE & RCON</div>
+          <button class="icon-btn" onclick="fetchServerLogs()">⟳ Refresh</button>
+        </div>
+
+        <div class="console-output" id="consoleOutput">
+          <div class="console-line system">[ServerManager] Ready. Streaming logs from Rack PC (C:\MinecraftServer\logs\latest.log)...</div>
+        </div>
+
+        <!-- Quick RCON action chips -->
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;">
+          <button class="sm-btn" onclick="sendQuickCommand('time set day')" style="background:#192233;border:1px solid #28354d;color:#08EBF1;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">☀️ /time set day</button>
+          <button class="sm-btn" onclick="sendQuickCommand('weather clear')" style="background:#192233;border:1px solid #28354d;color:#08EBF1;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">🌤️ /weather clear</button>
+          <button class="sm-btn" onclick="sendQuickCommand('difficulty peaceful')" style="background:#192233;border:1px solid #28354d;color:#08EBF1;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">🕊️ /difficulty peaceful</button>
+          <button class="sm-btn" onclick="sendQuickCommand('difficulty normal')" style="background:#192233;border:1px solid #28354d;color:#08EBF1;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">⚔️ /difficulty normal</button>
+          <button class="sm-btn" onclick="sendQuickCommand('gamemode creative @a')" style="background:#192233;border:1px solid #28354d;color:#08EBF1;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">🧱 /gamemode creative</button>
+          <button class="sm-btn" onclick="sendQuickCommand('gamemode survival @a')" style="background:#192233;border:1px solid #28354d;color:#08EBF1;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">❤️ /gamemode survival</button>
+          <button class="sm-btn" onclick="sendQuickCommand('list')" style="background:#192233;border:1px solid #28354d;color:#08EBF1;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:11px;font-weight:600;">👥 /list</button>
+        </div>
+
+        <div class="console-input-row">
+          <span class="console-prompt">&gt;</span>
+          <input type="text" id="consoleInput" placeholder="Enter server command (e.g. op Shu_Walker, time set day)..." onkeydown="if(event.key==='Enter') sendConsoleCommand()">
+          <button class="btn-primary" onclick="sendConsoleCommand()">Execute</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Section: Stacked Server Chat AND ARES Neural Thought Process Windows -->
+    <footer class="hud-footer" style="display:flex;flex-direction:column;gap:16px;background:var(--panel-bg);border:1px solid var(--panel-border);border-radius:12px;padding:16px;">
+      
+      <!-- WINDOW 1: MINECRAFT SERVER CHAT & LOG -->
+      <div class="chat-panel" style="background:#0c1017;border:1px solid #1a2333;border-radius:8px;padding:12px;">
+        <div class="chat-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:12px;font-weight:700;color:var(--accent-cyan);letter-spacing:1px;">🎮 MINECRAFT SERVER CHAT & LOG</span>
+            <span style="font-size:9px;background:rgba(8,235,241,0.12);color:#08EBF1;padding:2px 6px;border-radius:3px;font-weight:700;">WORLD CHAT</span>
+          </div>
+          <button class="icon-btn" onclick="clearChatLog()" style="color:#7e8b9f;font-size:11px;cursor:pointer;background:none;border:none;">Clear</button>
+        </div>
+
+        <div class="chat-feed" id="chatFeed" style="height:110px;background:#06090e;border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:8px 12px;overflow-y:auto;font-family:var(--font-mono);font-size:12px;display:flex;flex-direction:column;gap:4px;">
+          <div class="chat-msg system-msg">[System] ARES Minecraft Sidecar ready. Connected to world.</div>
+        </div>
+
+        <div class="chat-input-bar" style="display:flex;gap:8px;margin-top:8px;">
+          <input type="text" id="chatInput" placeholder="Send chat to Minecraft server..." style="flex:1;background:#141c2b;border:1px solid rgba(255,255,255,0.12);color:var(--text-main);border-radius:6px;padding:8px 12px;font-size:13px;" onkeydown="if(event.key==='Enter') sendChatMsg()">
+          <button class="btn-primary" onclick="sendChatMsg()" style="background:#08EBF1;color:#0a0d14;font-weight:700;border:none;border-radius:6px;padding:8px 16px;cursor:pointer;">Send</button>
+        </div>
+      </div>
+
+      <!-- WINDOW 2: ARES NEURAL THOUGHT PROCESS & DIRECT TASK DISPATCHER -->
+      <div class="brain-panel" style="background:#0c1017;border:1px solid rgba(0,255,136,0.3);border-radius:8px;padding:12px;box-shadow:0 0 15px rgba(0,255,136,0.05);">
+        
+        <!-- Header & Live Telemetry -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;border-bottom:1px solid #1a2333;padding-bottom:8px;">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span style="font-size:12px;font-weight:800;color:#00FF88;letter-spacing:1px;display:flex;align-items:center;gap:6px;">
+              <span>🧠 ARES NEURAL THOUGHT PROCESS & TASK DISPATCHER</span>
+            </span>
+            <span style="font-size:9px;background:rgba(0,255,136,0.15);color:#00FF88;padding:2px 6px;border-radius:3px;font-weight:800;border:1px solid rgba(0,255,136,0.3);">🟢 LIVE AI REASONING (~38ms)</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:11px;color:#7e8b9f;font-family:monospace;" id="brainPerceptionState">Pos (-402, 65, 363) • HP 20/20</span>
+            <button class="icon-btn" onclick="clearThoughtsLog()" style="color:#7e8b9f;font-size:11px;cursor:pointer;background:none;border:none;">Clear Thoughts</button>
+          </div>
+        </div>
+
+        <!-- Active Objective Banner -->
+        <div style="display:flex;align-items:center;justify-content:space-between;background:rgba(0,255,136,0.06);border:1px solid rgba(0,255,136,0.2);padding:8px 12px;border-radius:6px;margin-bottom:10px;">
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:11px;color:#7e8b9f;font-weight:700;">ACTIVE MISSION:</span>
+            <span style="font-size:12px;font-weight:700;color:#00FF88;" id="brainActiveGoal">Guarding Shu_Walker & Overseeing Roman Domus</span>
+          </div>
+          <div style="font-size:11px;color:#08EBF1;font-weight:700;" id="brainModelName">qwen2.5:3b (Local MLX GPU)</div>
+        </div>
+
+        <!-- Live Streaming Neural Thought Feed -->
+        <div id="neuralThoughtsFeed" style="height:140px;background:#06090e;border:1px solid rgba(255,255,255,0.06);border-radius:6px;padding:10px 12px;overflow-y:auto;font-family:var(--font-mono);font-size:11px;display:flex;flex-direction:column;gap:6px;margin-bottom:10px;">
+          <div style="background:#0c1017;border:1px solid #1a2333;border-left:3px solid #00FF88;border-radius:4px;padding:6px 10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:2px;">
+              <span style="font-size:9px;background:rgba(0,255,136,0.15);color:#00FF88;padding:1px 5px;border-radius:2px;font-weight:800;">SOUL</span>
+              <span style="font-size:10px;color:#64748b;">Ready</span>
+            </div>
+            <div style="color:#cbd5e1;">ARES Neural Core online. Connected to local qwen2.5:3b GPU. Ready for direct tasks!</div>
+          </div>
+        </div>
+
+        <!-- Quick Mission Action Chips -->
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:8px;overflow-x:auto;padding-bottom:2px;">
+          <span style="font-size:10px;color:#7e8b9f;font-weight:700;white-space:nowrap;">QUICK TASKS:</span>
+          <button class="sm-btn" onclick="dispatchQuickMission('Harvest 20 oak logs with diamond axe')" style="background:#141c2b;border:1px solid #28354d;color:#00FF88;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;font-weight:600;">🪓 Chop 20 Wood</button>
+          <button class="sm-btn" onclick="dispatchQuickMission('Mine 32 cobblestone for construction')" style="background:#141c2b;border:1px solid #28354d;color:#00FF88;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;font-weight:600;">⛏️ Mine 32 Stone</button>
+          <button class="sm-btn" onclick="dispatchQuickMission('Build the Roman Domus Villa Colonnade')" style="background:#141c2b;border:1px solid #28354d;color:#00FF88;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;font-weight:600;">🏛️ Build Roman Villa</button>
+          <button class="sm-btn" onclick="dispatchQuickMission('Till soil and plant community wheat farm')" style="background:#141c2b;border:1px solid #28354d;color:#00FF88;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;font-weight:600;">🌾 Plant Farm</button>
+          <button class="sm-btn" onclick="dispatchQuickMission('Stow all building supplies into the nearest chest')" style="background:#141c2b;border:1px solid #28354d;color:#00FF88;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;font-weight:600;">📦 Stow in Chest</button>
+          <button class="sm-btn" onclick="dispatchQuickMission('Guard Commander Shu_Walker and defend against mobs')" style="background:#141c2b;border:1px solid #28354d;color:#00FF88;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:11px;white-space:nowrap;font-weight:600;">🛡️ Guard Shu_Walker</button>
+        </div>
+
+        <!-- Direct Task Input Row -->
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="directTaskInput" placeholder="Give ARES a direct task (e.g. 'Chop 30 oak trees', 'Mine diamond vein', 'Scout north cave', 'Craft 4 chests')..." style="flex:1;background:#141c2b;border:1px solid rgba(0,255,136,0.3);color:#fff;border-radius:6px;padding:9px 12px;font-size:13px;" onkeydown="if(event.key==='Enter') dispatchDirectTask()">
+          <button onclick="dispatchDirectTask()" style="background:#00FF88;color:#0a0d14;font-weight:800;border:none;border-radius:6px;padding:9px 18px;cursor:pointer;font-size:12px;letter-spacing:0.5px;box-shadow:0 0 10px rgba(0,255,136,0.3);">🚀 EXECUTE TASK</button>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

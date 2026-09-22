@@ -1,0 +1,43 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-ssr
+*.local
+
+# Env files (contain API keys — NEVER commit these)
+.env
+.env.local
+.env.*.local
+server/.env
+server/.env.local
+
+# Credential files
+credentials.json
+*.pem
+*.key
+
+# Editor directories and files
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.vercel
+.env*
+# ...but the template must stay tracked — it is the setup path for forks
+!.env.example
+
+# Local agent/session working notes — not part of the public project
+SESSION_LEDGER.md

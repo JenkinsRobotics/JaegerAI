@@ -1,0 +1,121 @@
+{
+  "id": "ares-minecraft",
+  "name": "ARES Minecraft Companion",
+  "version": "1.0.0",
+  "description": "Embodied autonomous Minecraft AI companion powered by Mineflayer, dynamic pathfinding, and ARES.",
+  "author": "Jenkins Robotics",
+  "homepage": "https://github.com/JenkinsRobotics/ares-minecraft",
+  "license": "MIT",
+  "category": "Gaming & Robotics",
+  "capabilities": [
+    "sidecar",
+    "dashboard_tab",
+    "agent_tools",
+    "mcp"
+  ],
+  "scripts": [
+    "dashboard/app.js"
+  ],
+  "stylesheets": [],
+  "sidecar": {
+    "type": "loopback",
+    "origin": "http://127.0.0.1:3847",
+    "health_path": "/health"
+  },
+  "tab": {
+    "id": "minecraft",
+    "label": "Minecraft",
+    "path": "/minecraft",
+    "entry": "dashboard/index.html",
+    "icon": "Gamepad2"
+  },
+  "tools": {
+    "module": "tools.minecraft",
+    "definitions": [
+      "mc_status",
+      "mc_server_status",
+      "mc_server_start",
+      "mc_server_stop",
+      "mc_server_restart",
+      "mc_server_config",
+      "mc_server_command",
+      "mc_server_logs",
+      "mc_chat",
+      "mc_move_to",
+      "mc_follow_player",
+      "mc_mine",
+      "mc_craft",
+      "mc_attack",
+      "mc_inventory",
+      "mc_save_location",
+      "mc_get_locations"
+    ]
+  },
+  "permissions": {
+    "storage": {
+      "owned": true
+    }
+  },
+  "settings_schema": [
+    {
+      "key": "server_host",
+      "type": "string",
+      "label": "Minecraft Server Host",
+      "default": "localhost",
+      "description": "Hostname or IP address of the Minecraft server"
+    },
+    {
+      "key": "server_port",
+      "type": "integer",
+      "label": "Java Edition Server Port",
+      "default": 25565,
+      "description": "Port for Minecraft Java Edition (default 25565)"
+    },
+    {
+      "key": "bedrock_port",
+      "type": "integer",
+      "label": "PS5 / Bedrock Cross-Play Port",
+      "default": 19132,
+      "description": "UDP port for GeyserMC Bedrock cross-play (default 19132)"
+    },
+    {
+      "key": "bot_username",
+      "type": "string",
+      "label": "Companion Bot Name",
+      "default": "ARES",
+      "description": "Username the companion uses when logging into Minecraft"
+    },
+    {
+      "key": "bot_mode",
+      "type": "enum",
+      "label": "Companion Default Mode",
+      "default": "autopilot",
+      "options": [
+        {
+          "value": "autopilot",
+          "label": "Autopilot (Autonomous)"
+        },
+        {
+          "value": "follow",
+          "label": "Follow Player"
+        },
+        {
+          "value": "guard",
+          "label": "Guard Area"
+        },
+        {
+          "value": "idle",
+          "label": "Idle / Manual"
+        }
+      ],
+      "description": "Behavior mode when companion enters the game"
+    },
+    {
+      "key": "auto_start_server",
+      "type": "boolean",
+      "label": "Auto-Start Server",
+      "default": true,
+      "description": "Automatically boot the Paper Java server when ARES launches"
+    }
+  ]
+}

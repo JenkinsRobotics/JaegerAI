@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARES Creator Studio</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <div class="creator-app">
+    <!-- Header -->
+    <header class="creator-header">
+      <div class="brand">
+        <div class="brand-icon">🎬</div>
+        <div>
+          <h1>ARES Creator Studio</h1>
+          <p class="subtitle">Live VTuber Avatar Overlay • Hybrid Video Pipeline • YouTube Autonomous Learning</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="status-badge" id="sidecarStatus">
+          <span class="dot"></span> Creator Sidecar Online
+        </div>
+        <button id="copyObsBtn" class="btn-accent">
+          📋 Copy OBS Overlay URL
+        </button>
+      </div>
+    </header>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="nav-tab active" data-tab="vtuberTab">🎭 Live VTuber Overlay</button>
+      <button class="nav-tab" data-tab="videoTab">🎥 Script & Video Generator</button>
+      <button class="nav-tab" data-tab="learnTab">🧠 YouTube Learning Ingest</button>
+    </nav>
+
+    <!-- Tab 1: Live VTuber Avatar Studio -->
+    <section id="vtuberTab" class="tab-content active">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <h2>3D Avatar Real-Time Viewport</h2>
+            <span class="badge badge-cyan">Three.js 3D Core</span>
+          </div>
+          <div class="avatar-canvas-container" id="threeStage">
+            <div class="avatar-hud">
+              <div class="hud-tag">TRACKING: IDLE FLOATING</div>
+              <div class="hud-tag">ENGINE: WEBGL</div>
+            </div>
+          </div>
+          <div class="control-row">
+            <button id="toggleLipSyncBtn" class="btn-secondary">🔊 Test Speech Lip-Sync</button>
+            <button id="toggleWebcamBtn" class="btn-primary">📷 Enable Webcam Tracking</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>OBS Streaming Integration</h2>
+            <span class="badge">Port 3849</span>
+          </div>
+          <p class="section-desc">Paste this URL as a <strong>Browser Source</strong> in OBS, vMix, or Streamlabs:</p>
+          <div class="code-box">
+            <code>http://127.0.0.1:3849/overlay/avatar</code>
+          </div>
+
+          <h3 class="subsection-title">Tracking & Audio Viseme Sync</h3>
+          <div class="settings-list">
+            <div class="setting-item">
+              <span>Dynamic Head Tilt & Rotation</span>
+              <input type="checkbox" checked id="tiltCheck">
+            </div>
+            <div class="setting-item">
+              <span>Automatic Speech Visemes (Audio FFT)</span>
+              <input type="checkbox" checked id="visemeCheck">
+            </div>
+            <div class="setting-item">
+              <span>Transparent Alpha Channel</span>
+              <input type="checkbox" checked disabled>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 2: Script & Video Pipeline -->
+    <section id="videoTab" class="tab-content">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <h2>Video Script & Remotion Generator</h2>
+            <span class="badge badge-purple">Remotion React</span>
+          </div>
+          <div class="form-group">
+            <label>Video Topic or Title Idea</label>
+            <input type="text" id="videoTopicInput" placeholder="e.g. Next-Gen Robotics in 2026: Why Autonomous Agents Change Everything">
+          </div>
+          <div class="form-group">
+            <label>Format Template</label>
+            <select id="videoFormatSelect" class="form-select">
+              <option value="shorts_9_16">YouTube Short / TikTok (9:16 Vertical)</option>
+              <option value="explainer_16_9">Tech Explainer Video (16:9 Horizontal)</option>
+            </select>
+          </div>
+          <button id="generateScriptBtn" class="btn-primary">✨ Generate Script & Remotion Schema</button>
+          
+          <div class="storyboard-preview" id="storyboardContainer">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>Remotion Composition Specs</h2>
+            <button id="exportMp4Btn" class="btn-accent">🎬 Export Render Command</button>
+          </div>
+          <div id="renderSpecsBox" class="code-box">
+            <em>Generate a script to view Remotion composition props and render command.</em>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tab 3: YouTube Autonomous Learning -->
+    <section id="learnTab" class="tab-content">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header">
+            <h2>Ingest YouTube Video Knowledge</h2>
+            <span class="badge badge-cyan">yt-dlp • Transcript API</span>
+          </div>
+          <p class="section-desc">Extract transcripts and ingest takeaways into agent memory:</p>
+          <div class="optimizer-input-row">
+            <input type="text" id="ytUrlInput" placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ">
+            <button id="learnYtBtn" class="btn-primary">🧠 Ingest</button>
+          </div>
+
+          <div id="learningResults" class="learning-results">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <h2>Ingested Knowledge Base</h2>
+            <span class="badge" id="libraryCount">0 Videos</span>
+          </div>
+          <div class="library-list" id="knowledgeLibraryList">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
