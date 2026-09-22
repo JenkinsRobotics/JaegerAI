@@ -50,7 +50,7 @@ ONE REQUEST
 | **GATE C** | **WS 11** | **Capability Lifecycle & Self-Improvement** | **COMPLETED** | `3a41bd85` | 4/4 lifecycle, 62/62 combined | Candidate -> Sandbox -> Static AST Checks -> Unit Tests -> Evaluation -> Review -> Verified -> Installed; provenance tracking |
 | **GATE C** | **WS 12** | **Multi-Agent Architecture** | **COMPLETED** | `72e2f3c9` | 4/4 multi-agent, 66/66 combined | RuntimeHost (multi-entity concurrent hosting); private memory isolation; scoped delegation; cancellation; AgentMessage bus |
 | **GATE C** | **WS 13** | **Generic Device / Node Architecture** | **COMPLETED** | `fac249b3` | 5/5 devices, 71/71 combined | DeviceRegistry (Mac, Web, Phone, Robot, Sensor); secure pairing tokens; revocation; capability negotiation; telemetry & stale detection |
-| **GATE C** | **WS 14** | **Provider Abstraction & Cognition Profiles** | **COMPLETED** | `in-progress` | 3/3 cognition profiles, 74/74 combined | 8 Provider Lifecycle States; Cognition Profiles for baseline & discovered models; Model swap identity immutability |
+| **GATE C** | **WS 14** | **Provider Abstraction & Cognition Profiles** | **COMPLETED** | `c26cbaf0` | 3/3 cognition profiles, 74/74 combined | 8 Provider Lifecycle States; Cognition Profiles for baseline & discovered models; Model swap identity immutability |
 | **GATE C** | **WS 15** | **Durable Background Work & Scheduling** | PENDING | — | — | Resilient background jobs surviving restart |
 | **GATE D** | **WS 16** | **Observability & Provenance Tracing** | PENDING | — | — | End-to-end trace correlation |
 | **GATE D** | **WS 17** | **External Agent Evaluation Suite** | PENDING | — | — | Independent benchmark harness (isolated) |
