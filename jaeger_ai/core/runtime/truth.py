@@ -114,11 +114,37 @@ def _certifications_for(model: str, instance_root: Path | None) -> dict[str, str
 
 
 def _active_model(instance_root: Path | None) -> dict[str, str]:
+    """The provider/model actually configured to serve turns right now.
+
+    ``config.yaml``'s own ``external_model`` block is the one authoritative
+    source for this — the same value every real turn and
+    ``EntityRuntime.subordinate_model_name()`` use. It used to be
+    ``select_production_model(load_matrix(...))`` instead, a *different*
+    fact ("what model is certified for a role"), whose hardcoded fallback
+    (``kimi-k2.7-code:cloud``, fired whenever no certification matrix file
+    exists) was reported into the prompt as authoritative ``active_model``.
+    An operator whose config genuinely said ``glm-5.3-flash:cloud`` was told
+    by their own agent, in good faith, that it was running a model it
+    was not — the agent had no way to know the "authoritative" context it
+    was handed was wrong (audit, 2026-09-22).
+
+    Certification is still consulted, but only when there is no live
+    external-model config to read (local-only llama.cpp mode).
+    """
+    root = instance_root or _instance_root()
+    if root is None:
+        return {"provider": "", "model": ""}
+    try:
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+        config_path = root / "config.yaml"
+        if config_path.is_file():
+            external = load_yaml(config_path, Config).external_model
+            if external.enabled and external.model:
+                return {"provider": external.provider, "model": external.model}
+    except Exception:
+        pass
     try:
         from jaeger_ai.core.instance.provider_certification import load_matrix, select_production_model
-        root = instance_root or _instance_root()
-        if root is None:
-            return {"provider": "", "model": ""}
         provider, model = select_production_model(load_matrix(root))
         return {"provider": provider, "model": model}
     except Exception:

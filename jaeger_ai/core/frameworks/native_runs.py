@@ -472,6 +472,82 @@ def jaeger_reconcile(native):
             'output': (receipt.get('reply') or {}).get('text', '')}
 
 
+def _jaeger_gateway_turn(run, session_id: str) -> dict | None:
+    """Talk to the resident Gateway OWNER. The AF_UNIX bridge is a client and
+    can sit in ``queued`` forever while Roundtable members appear silent."""
+    import json
+    import os
+    import time
+    import urllib.error
+    import urllib.request
+
+    gw = (os.environ.get("JAEGER_GATEWAY_URL") or "http://127.0.0.1:8810").rstrip("/")
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+
+    def _call(method: str, path: str, payload: dict | None = None, timeout: float = 15):
+        data = None if payload is None else json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(gw + path, data=data, method=method, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8") or "null")
+
+    try:
+        _call("POST", "/v1/sessions", {
+            "session_id": session_id,
+            "title": "roundtable-jaeger",
+            "profile": "jaeger",
+        })
+    except urllib.error.HTTPError as exc:
+        if exc.code not in {200, 201, 409}:
+            return None
+    except Exception:
+        return None
+    request_id = str(getattr(run, "id", "") or "") or None
+    model = getattr(run, "model", None)
+    body = {"text": run.message, "request_id": request_id}
+    if model:
+        body["model"] = model
+    try:
+        admitted = _call("POST", f"/v1/sessions/{session_id}/turns", body)
+    except Exception:
+        return None
+    rid = str((admitted or {}).get("request_id") or request_id or "")
+    if not rid:
+        return None
+    run.emit("native.state", state="running")
+    deadline = time.monotonic() + 180
+    last = admitted
+    while time.monotonic() < deadline:
+        if run.cancelled.is_set():
+            try:
+                _call("POST", f"/v1/sessions/{session_id}/cancel", {"request_id": rid})
+            except Exception:
+                pass
+            return {"text": "", "cancelled": True, "execution_unknown": False}
+        try:
+            last = _call("GET", f"/v1/sessions/{session_id}/requests/{rid}", timeout=20)
+        except Exception:
+            time.sleep(1.5)
+            continue
+        status = str((last or {}).get("status") or "")
+        if status in {"completed", "failed", "cancelled", "execution_unknown"}:
+            result = last.get("result") if isinstance(last, dict) else {}
+            if isinstance(last.get("result_json"), str) and last.get("result_json"):
+                try:
+                    result = json.loads(last["result_json"])
+                except Exception:
+                    pass
+            if not isinstance(result, dict):
+                result = {}
+            text = str(result.get("output") or result.get("text") or "")
+            if text:
+                run.emit("message.delta", delta=text)
+            if status == "failed":
+                raise RuntimeError(str(result.get("error") or "Jaeger gateway turn failed"))
+            return {"text": text, "cancelled": status == "cancelled", "execution_unknown": status == "execution_unknown"}
+        time.sleep(1.5)
+    return {"text": "", "execution_unknown": True, "error": "Jaeger gateway turn timed out"}
+
+
 def jaeger_turn(run, workspace=None):
     """Run a turn on Jaeger's own instance.
 
@@ -487,8 +563,20 @@ def jaeger_turn(run, workspace=None):
     Jaeger seat talks to are different questions. Only the second one belongs
     here, and it has exactly one answer.
     """
-    from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
+    native_session = getattr(run, 'native_session', run.session)
     run.execution_unknown = False
+    from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
+    is_mocked_bridge = getattr(BridgeClient, "__module__", "") != "jaeger_ai.features.webui.adapter.bridge_client"
+    if not is_mocked_bridge and str(native_session).startswith("roundtable-"):
+        gateway_result = _jaeger_gateway_turn(run, native_session)
+        if gateway_result is not None:
+            run.execution_unknown = bool(gateway_result.get("execution_unknown"))
+            run.cancel_confirmed = bool(gateway_result.get("cancelled"))
+            if gateway_result.get("error") and not run.cancel_confirmed:
+                raise RuntimeError(gateway_result["error"])
+            return gateway_result.get("text") or ""
+
+    from jaeger_ai.features.webui.adapter.bridge_client import jaeger_bridge
     bridge = jaeger_bridge()
     if workspace:
         workspace = host_workspace(workspace)

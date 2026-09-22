@@ -476,6 +476,35 @@ def test_openclaw_native_keeps_rest_session_key_and_filters_peer_events(tmp_path
     assert calls[-1] == ("chat.abort", {"sessionKey": "agent:main:openai-user:hermes:existing-session", "runId": run.id})
 
 
+def test_openclaw_native_keeps_configured_model_when_picker_id_is_unknown(tmp_path, monkeypatch):
+    from jaeger_ai.core.frameworks import openclaw_native as native
+    run = Run(tmp_path, "picker-session", "hello")
+    run.model = "kimi-k2.7-code:cloud"
+    run.provider = "ollama"
+    calls = []
+
+    class Gateway:
+        def __init__(self, *args):
+            self.frames = iter([
+                {"event": "chat", "payload": {"runId": run.id, "state": "final",
+                    "message": {"content": [{"type": "text", "text": "kept-default"}]}}},
+            ])
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def request(self, method, params):
+            calls.append((method, params))
+            if method == "models.list":
+                return {"models": [{"provider": "ollama-cloud-via-host", "id": "glm-5.3-flash:cloud"}]}
+            if method == "sessions.list":
+                return {"sessions": []}
+            return {"runId": run.id}
+        def next_event(self): return next(self.frames)
+
+    monkeypatch.setattr(native, "NativeGateway", Gateway)
+    assert native.openclaw_turn(run) == "kept-default"
+    assert [method for method, _ in calls] == ["models.list", "chat.send"]
+
+
 @pytest.mark.parametrize(
     ("receipt", "expected"),
     [
@@ -541,8 +570,7 @@ def test_mcp_credential_is_resolved_at_call_time(tmp_path, monkeypatch):
 
     monkeypatch.delenv("JAEGERS_MCP_API_KEY", raising=False)
     monkeypatch.setattr(jaeger, "_profile_secret", lambda _name: "")
-    with pytest.raises(RuntimeError, match="MCP credential missing"):
-        jaeger.mcp_api_key()
+    assert jaeger.mcp_api_key() == ""
     monkeypatch.setenv("JAEGERS_MCP_API_KEY", "rotated-key")
     assert jaeger.mcp_api_key() == "rotated-key"
 

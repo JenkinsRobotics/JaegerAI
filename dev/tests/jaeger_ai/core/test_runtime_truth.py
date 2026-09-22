@@ -11,11 +11,14 @@ from jaeger_ai.contract.frameworks import (
     product_default_profile,
 )
 from jaeger_ai.core.runtime.truth import (
+    _active_model,
     capability_snapshot,
     framework_inventory,
     webui_model_catalog,
 )
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+from jaeger_ai.core.instance.instance import InstanceLayout
+from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml, load_yaml
 
 
 def test_product_default_is_jaeger():
@@ -45,6 +48,11 @@ def test_capability_snapshot_does_not_claim_unconfigured_cloud():
         assert by_id["anthropic"]["reachable"] is False
         assert by_id["anthropic"]["models"] == []
     assert "entity_id" in (snap.get("identity") or {})
+
+
+def test_product_default_model_is_kimi():
+    from jaeger_ai.contract.frameworks import DEFAULT_AGENT_MODEL
+    assert DEFAULT_AGENT_MODEL == "kimi-k2.7-code:cloud"
 
 
 def test_webui_catalog_shape():
@@ -77,6 +85,53 @@ def test_webui_catalog_is_provider_and_model_only():
             assert "FAIL" not in label
             assert "[" not in label
             assert model.get("certified_badge") in (None, "")
+
+
+def _layout(tmp_path: Path) -> InstanceLayout:
+    layout = InstanceLayout(root=tmp_path / "instance")
+    layout.root.mkdir(parents=True)
+    layout.ensure_dirs()
+    dump_yaml(layout.config_path, Config(
+        instance_name="test", model=ModelConfig(model_path="/dev/null")))
+    return layout
+
+
+def test_active_model_reports_the_configured_external_model(tmp_path: Path):
+    """``active_model`` must be config.yaml's own value, not a certification
+    lookup with a hardcoded fallback.
+
+    Live defect (audit, 2026-09-22): config.yaml said ``glm-5.3-flash:cloud``
+    while the "authoritative; do not invent" prompt block told the model
+    ``active_model=kimi-k2.7-code:cloud`` — the hardcoded fallback
+    ``select_production_model()`` returns when no certification matrix file
+    exists. The agent repeated that wrong name to the operator as fact.
+    """
+    layout = _layout(tmp_path)
+    config = load_yaml(layout.config_path, Config)
+    config.external_model.enabled = True
+    config.external_model.provider = "ollama"
+    config.external_model.model = "glm-5.3-flash:cloud"
+    dump_yaml(layout.config_path, config)
+    # No certification matrix file exists in this fresh instance — that must
+    # not matter once a live external model is configured.
+
+    assert _active_model(layout.root) == {"provider": "ollama", "model": "glm-5.3-flash:cloud"}
+
+
+def test_active_model_falls_back_to_certification_when_local_only(tmp_path: Path):
+    """With no external model configured (local llama.cpp mode), the
+    certification matrix's production pick is still the right fallback."""
+    layout = _layout(tmp_path)
+    assert load_yaml(layout.config_path, Config).external_model.enabled is False
+
+    from jaeger_ai.core.instance.provider_certification import CERT_FILENAME
+
+    (layout.root / CERT_FILENAME).write_text(
+        '{"assignments": {"REACT": {"provider": "ollama", "model": "committee-pick:cloud"}}}',
+        encoding="utf-8",
+    )
+
+    assert _active_model(layout.root) == {"provider": "ollama", "model": "committee-pick:cloud"}
 
 
 def test_gateway_attachments_do_not_escape_via_store(tmp_path: Path):

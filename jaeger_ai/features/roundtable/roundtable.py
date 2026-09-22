@@ -41,7 +41,7 @@ SHARED_CONTEXT_CHARS = 18000
 _inflight_members: set[str] = set()
 _inflight_lock = threading.Lock()
 OPENCLAW_ADAPTER_URL = os.environ.get(
-    "ROUNDTABLE_OPENCLAW_ADAPTER_URL", "http://192.168.64.1:8644"
+    "ROUNDTABLE_OPENCLAW_ADAPTER_URL", "http://127.0.0.1:8644"
 ).rstrip("/")
 JAEGER_ADAPTER_URL = os.environ.get(
     "ROUNDTABLE_JAEGER_ADAPTER_URL", "http://127.0.0.1:8642"

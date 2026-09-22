@@ -88,6 +88,7 @@ def test_native_failure_surfaces_without_fallback(broker):
     assert wait_done(broker, result['run_id'])['status'] == 'failed'
     events = broker.store.events_after(result['run_id'], None)['events']
     assert events[-1]['payload']['message'] == 'native offline'
+    assert events[-1]['payload']['session']['messages'][-1]['content'] == 'native offline'
     assert broker.bridge.calls == []
 
 

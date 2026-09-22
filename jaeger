@@ -42,6 +42,12 @@ fi
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
 
+# Accessory/menu-bar Process() often inherits a closed stdin. CPython 3.12
+# then fatals in init_sys_streams (EBADF) before any Python code runs.
+if ! { true <&0; } 2>/dev/null; then
+  exec 0</dev/null
+fi
+
 # Dispatch now lives in jaeger_ai.cli.entry — ONE routing table behind both
 # this wrapper and the installed `jaeger` console script. It re-execs the same
 # `python -m <module>` (or launch.py) targets this case statement used to, so

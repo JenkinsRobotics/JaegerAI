@@ -8,6 +8,7 @@ enum WebUIEndpoint {
             let output = Pipe()
             process.executableURL = URL(fileURLWithPath: BridgeProcess.jaegerPath())
             process.arguments = ["webui", "url"] + (instance.map { ["--instance", $0] } ?? [])
+            process.standardInput = FileHandle.nullDevice
             process.standardOutput = output
             process.standardError = FileHandle.nullDevice
             try process.run()

@@ -220,7 +220,7 @@ def ensure_webui_config_yaml(agent_home: Path) -> dict[str, Any]:
                 break
     if not raw:
         raw = f"""model:
-  default: glm-5.3-flash:cloud
+  default: kimi-k2.7-code:cloud
   provider: ollama
   base_url: {OLLAMA_OPENAI_URL}
 providers:
@@ -228,7 +228,7 @@ providers:
 webui:
   host: 0.0.0.0
   port: 8790
-  session_save_mode: deferred
+  session_save_mode: eager
 """
         source = "builtin-default"
     # Rewrite stale hosts to the endpoint owned by the shared contract.
@@ -244,7 +244,7 @@ webui:
 webui:
   host: 0.0.0.0
   port: 8790
-  session_save_mode: deferred
+  session_save_mode: eager
 """
     dst.write_text(raw, encoding="utf-8")
     try:

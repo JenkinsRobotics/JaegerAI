@@ -16,6 +16,7 @@ from typing import Any
 
 
 _RUNNER_BASE_URL_ENV = "HERMES_WEBUI_RUNNER_BASE_URL"
+_RUNNER_BASE_URL_ENV_ALIASES = ("JAEGER_RUNNER_BASE_URL",)
 _RUNNER_API_KEY_ENV = "HERMES_WEBUI_RUNNER_API_KEY"
 
 
@@ -23,9 +24,17 @@ class RunnerClientError(RuntimeError):
     """Raised when a configured runner endpoint rejects or fails a request."""
 
 
-def runner_client_configured(environ: dict[str, str] | None = None) -> bool:
+def _runner_base_url(environ: dict[str, str] | None = None) -> str:
     source = os.environ if environ is None else environ
-    return bool(str(source.get(_RUNNER_BASE_URL_ENV) or "").strip())
+    for key in (_RUNNER_BASE_URL_ENV, *_RUNNER_BASE_URL_ENV_ALIASES):
+        raw = str(source.get(key) or "").strip()
+        if raw:
+            return raw
+    return ""
+
+
+def runner_client_configured(environ: dict[str, str] | None = None) -> bool:
+    return bool(_runner_base_url(environ))
 
 
 class HttpRunnerClient:
@@ -48,7 +57,7 @@ class HttpRunnerClient:
     @classmethod
     def from_env(cls, environ: dict[str, str] | None = None) -> "HttpRunnerClient":
         source = os.environ if environ is None else environ
-        base_url = str(source.get(_RUNNER_BASE_URL_ENV) or "").strip()
+        base_url = _runner_base_url(source)
         if not base_url:
             raise NotImplementedError("runner-local chat backend is not configured")
         return cls(base_url=base_url, api_key=str(source.get(_RUNNER_API_KEY_ENV) or ""))

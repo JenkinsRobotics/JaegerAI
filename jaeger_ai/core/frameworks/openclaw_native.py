@@ -263,18 +263,29 @@ def openclaw_turn(run, workspace=None):
             exact = [row for row in matches if row.get("provider") == provider]
             if exact:
                 matches = exact
-            elif provider and provider not in {'ollama', 'ollama-mac', 'ollama-rack', 'ollama-cloud', 'ollama-local'}:
+            elif provider and provider not in {
+                'ollama', 'ollama-mac', 'ollama-rack', 'ollama-cloud', 'ollama-local',
+                'ollama-cloud-via-host',
+            }:
                 matches = []
-            if len(matches) != 1:
-                raise ValueError("Select an unambiguous model from OpenClaw's native model catalog")
-            chosen = matches[0]
-            inventory = gateway.request("sessions.list", {"limit": 1000})
-            current = next((row for row in inventory.get("sessions", []) if row.get("key") == session_key), inventory.get("defaults", {}))
-            if (current.get("modelProvider"), current.get("model")) != (chosen["provider"], chosen["id"]):
-                with NativeGateway(OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE,
-                                   scopes=[*SCOPES, "operator.admin"]) as settings:
-                    settings.request("sessions.patch", {"key": session_key,
-                        "model": chosen["provider"] + "/" + chosen["id"]})
+            # WebUI picker IDs are Jaeger catalog names. If OpenClaw does not
+            # have that exact row, keep the session's configured primary model
+            # instead of failing the whole Roundtable seat.
+            if len(matches) == 1:
+                chosen = matches[0]
+                inventory = gateway.request("sessions.list", {"limit": 1000})
+                current = next((row for row in inventory.get("sessions", []) if row.get("key") == session_key), inventory.get("defaults", {}))
+                if (current.get("modelProvider"), current.get("model")) != (chosen["provider"], chosen["id"]):
+                    try:
+                        with NativeGateway(OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE,
+                                           scopes=[*SCOPES, "operator.admin"]) as settings:
+                            settings.request("sessions.patch", {"key": session_key,
+                                "model": chosen["provider"] + "/" + chosen["id"]})
+                    except Exception:
+                        pass
+            else:
+                run.emit('native.state', state='running',
+                         message='OpenClaw kept its configured model; the WebUI picker id is not in its catalog')
         run.dispatch(session_id=session_key, run_id=run.id)
         sent = gateway.request("chat.send", {"sessionKey": session_key, "message": run.message,
                                               "idempotencyKey": run.id})

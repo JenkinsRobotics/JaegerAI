@@ -3002,6 +3002,10 @@ def _cancelled_run_is_stale(run_entry) -> bool:
         return False
 
 
+_RUNNER_WRITEBACK_LOCK = threading.Lock()
+_RUNNER_WRITEBACK_STARTED: set[str] = set()
+
+
 def _clear_stale_stream_state(session) -> bool:
     """Clear persisted streaming flags when the in-memory stream no longer exists.
 
@@ -3028,6 +3032,13 @@ def _clear_stale_stream_state(session) -> bool:
             worker_alive = stream_id in (_live_config.ACTIVE_RUNS or {})
     except Exception:
         worker_alive = False
+    if not worker_alive:
+        try:
+            with _RUNNER_WRITEBACK_LOCK:
+                if stream_id in _RUNNER_WRITEBACK_STARTED:
+                    worker_alive = True
+        except Exception:
+            pass
     if worker_alive:
         # #6623: a worker stuck in C-level I/O may never reach its finally to
         # unregister the run, so ACTIVE_RUNS could hold the row forever and
@@ -19024,11 +19035,6 @@ def _persist_runner_done_to_webui_session(session_id: str, done_payload, *, run_
     embedded = payload.get("session") if isinstance(payload.get("session"), dict) else None
     if embedded is None and ("messages" in payload or "context_messages" in payload):
         embedded = payload
-    if not isinstance(embedded, dict):
-        return False
-    messages = embedded.get("messages")
-    if not isinstance(messages, list) or not messages:
-        return False
     try:
         from api.models import Session, get_session
         from api.config import LOCK, SESSIONS
@@ -19044,23 +19050,53 @@ def _persist_runner_done_to_webui_session(session_id: str, done_payload, *, run_
                 # Materialize a WebUI sidecar for first-turn deferred sessions.
                 s = Session(
                     session_id=sid,
-                    title=str(embedded.get("title") or "Untitled"),
-                    workspace=str(embedded.get("workspace") or ""),
-                    model=str(embedded.get("model") or ""),
-                    model_provider=embedded.get("model_provider"),
-                    profile=str(embedded.get("profile") or "default"),
+                    title=str((embedded or {}).get("title") or "Untitled"),
+                    workspace=str((embedded or {}).get("workspace") or ""),
+                    model=str((embedded or {}).get("model") or ""),
+                    model_provider=(embedded or {}).get("model_provider"),
+                    profile=str((embedded or {}).get("profile") or "default"),
                 )
+
+        messages = (embedded or {}).get("messages")
+        if not isinstance(messages, list) or not messages:
+            output_text = str(payload.get("output") or payload.get("text") or "").strip()
+            if output_text:
+                user_msg = str(getattr(s, "pending_user_message", None) or getattr(s, "last_user_message", None) or "")
+                existing_clean = [
+                    m for m in (getattr(s, "messages", None) or [])
+                    if not (isinstance(m, dict) and (m.get("_error") or "Response interrupted" in str(m.get("content", ""))))
+                ]
+                if user_msg and (not existing_clean or existing_clean[-1].get("content") != user_msg):
+                    existing_clean.append({
+                        "role": "user",
+                        "content": user_msg,
+                        "timestamp": int(getattr(s, "pending_started_at", None) or time.time()),
+                    })
+                existing_clean.append({
+                    "role": "assistant",
+                    "content": output_text,
+                    "timestamp": int(time.time()),
+                })
+                messages = existing_clean
+
+        if not isinstance(messages, list) or not messages:
+            return False
+
         existing = list(getattr(s, "messages", None) or [])
-        if len(existing) >= len(messages):
+        has_error_marker = any(
+            isinstance(m, dict) and (m.get("_error") or "Response interrupted" in str(m.get("content", "")))
+            for m in existing
+        )
+        if len(existing) >= len(messages) and not has_error_marker:
             # Already persisted (or longer); still clear pending/stream markers.
             pass
         else:
             s.messages = [dict(m) if isinstance(m, dict) else m for m in messages]
-        if embedded.get("title"):
+        if embedded and embedded.get("title"):
             s.title = embedded.get("title")
-        if embedded.get("model"):
+        if embedded and embedded.get("model"):
             s.model = embedded.get("model")
-        if embedded.get("model_provider") is not None:
+        if embedded and embedded.get("model_provider") is not None:
             s.model_provider = embedded.get("model_provider")
         s.message_count = len(s.messages or [])
         s.pending_user_message = None
@@ -19070,7 +19106,7 @@ def _persist_runner_done_to_webui_session(session_id: str, done_payload, *, run_
         s.active_stream_id = None
         s.is_streaming = False
         if not getattr(s, "profile", None):
-            s.profile = embedded.get("profile") or "default"
+            s.profile = (embedded or {}).get("profile") or "default"
         if not getattr(s, "source", None):
             try:
                 s.source = "webui"
@@ -19095,10 +19131,6 @@ def _persist_runner_done_to_webui_session(session_id: str, done_payload, *, run_
         return False
 
 
-_RUNNER_WRITEBACK_LOCK = threading.Lock()
-_RUNNER_WRITEBACK_STARTED: set[str] = set()
-
-
 def _spawn_runner_session_writeback(run_id: str, session_id: str) -> None:
     """Background observer: persist done.session even if no browser SSE attaches."""
     rid = str(run_id or "").strip()
@@ -19110,13 +19142,20 @@ def _spawn_runner_session_writeback(run_id: str, session_id: str) -> None:
             return
         _RUNNER_WRITEBACK_STARTED.add(rid)
 
+    try:
+        from api.config import register_active_run
+        register_active_run(rid, session_id=sid, runner=True)
+    except Exception:
+        pass
+
     def _worker():
         try:
-            from api.runtime_adapter import build_runtime_adapter, runtime_adapter_runner_enabled
+            from api.runtime_adapter import RunnerRuntimeAdapter
+            from api.runner_client import runner_client_configured
 
-            if not runtime_adapter_runner_enabled():
+            if not runner_client_configured():
                 return
-            adapter = build_runtime_adapter(runner_client_factory=_runtime_runner_client_factory)
+            adapter = RunnerRuntimeAdapter(client=_runtime_runner_client_factory())
             if adapter is None:
                 return
             cursor = None
@@ -19133,7 +19172,7 @@ def _spawn_runner_session_writeback(run_id: str, session_id: str) -> None:
                         continue
                     event = _runner_event_name(entry)
                     payload = _runner_event_payload(entry)
-                    if event in ("done", "error", "apperror", "stream_end") or event in SSE_RELAY_CLOSE_EVENTS:
+                    if event in ("done", "error", "apperror", "stream_end", "run.completed", "run.failed", "run.cancelled") or event in SSE_RELAY_CLOSE_EVENTS:
                         if isinstance(payload, dict):
                             _persist_runner_done_to_webui_session(sid, payload, run_id=rid)
                         return
@@ -19150,7 +19189,7 @@ def _spawn_runner_session_writeback(run_id: str, session_id: str) -> None:
                     try:
                         final = adapter.observe_run(rid, cursor=None)
                         for entry in list(getattr(final, "events", []) or []):
-                            if isinstance(entry, dict) and _runner_event_name(entry) in ("done", "error", "apperror"):
+                            if isinstance(entry, dict) and _runner_event_name(entry) in ("done", "error", "apperror", "run.completed", "run.failed", "run.cancelled"):
                                 _persist_runner_done_to_webui_session(sid, _runner_event_payload(entry), run_id=rid)
                                 return
                     except Exception:
@@ -19160,6 +19199,11 @@ def _spawn_runner_session_writeback(run_id: str, session_id: str) -> None:
         except Exception:
             logger.exception("runner writeback worker crashed for run %s", rid)
         finally:
+            try:
+                from api.config import unregister_active_run
+                unregister_active_run(rid)
+            except Exception:
+                pass
             with _RUNNER_WRITEBACK_LOCK:
                 _RUNNER_WRITEBACK_STARTED.discard(rid)
 
@@ -19172,11 +19216,12 @@ def _stream_runner_run_events(handler, run_id: str, cursor: str | None = None) -
     if not run_id:
         return False
     try:
-        from api.runtime_adapter import build_runtime_adapter, runtime_adapter_runner_enabled
+        from api.runtime_adapter import RunnerRuntimeAdapter, runtime_adapter_runner_enabled
+        from api.runner_client import runner_client_configured
 
-        if not runtime_adapter_runner_enabled():
+        if not runtime_adapter_runner_enabled() and not runner_client_configured():
             return False
-        adapter = build_runtime_adapter(runner_client_factory=_runtime_runner_client_factory)
+        adapter = RunnerRuntimeAdapter(client=_runtime_runner_client_factory())
     except NotImplementedError:
         return False
     if adapter is None:
@@ -24037,6 +24082,89 @@ def _runtime_adapter_goal_action(goal_args: str) -> str:
     return "set"
 
 
+def _native_table_runtime(profile) -> str | None:
+    """Return hermes/openclaw/roundtable when that profile owns native execution."""
+    from jaeger_ai.contract.frameworks import UnknownFramework, canonical_runtime
+
+    try:
+        runtime = canonical_runtime(profile or "")
+    except UnknownFramework:
+        return None
+    if runtime in {"hermes", "openclaw", "roundtable"}:
+        return runtime
+    return None
+
+
+def _start_native_profile_run(
+    s,
+    *,
+    msg: str,
+    attachments,
+    workspace: str,
+    model,
+    model_provider,
+    source: str,
+    route: str,
+):
+    """Send Roundtable/Hermes/OpenClaw turns to the native runner, not AIAgent."""
+    from api.runtime_adapter import RunnerRuntimeAdapter, StartRunRequest
+    from api.runner_client import RunnerClientError
+
+    if attachments:
+        return {
+            "error": "This profile cannot receive WebUI attachments; use the native tools.",
+            "_status": 400,
+        }
+    try:
+        adapter = RunnerRuntimeAdapter(client=_runtime_runner_client_factory())
+        result = adapter.start_run(
+            StartRunRequest(
+                session_id=s.session_id,
+                message=msg,
+                attachments=[],
+                workspace=workspace if workspace in ("", "/workspace") else "",
+                profile=getattr(s, "profile", None),
+                provider=model_provider,
+                model=model,
+                source=source,
+                metadata={"route": route},
+            )
+        )
+    except NotImplementedError as exc:
+        return {"error": str(exc), "_status": 501}
+    except (RunnerClientError, ValueError) as exc:
+        return {"error": str(exc), "_status": 503}
+    stream_id = result.stream_id or result.run_id
+    try:
+        from api.config import register_active_run
+        register_active_run(
+            stream_id,
+            session_id=s.session_id,
+            profile=getattr(s, "profile", None),
+            runner=True,
+        )
+    except Exception:
+        pass
+    _prepare_chat_start_session_for_stream(
+        s,
+        msg=msg,
+        attachments=[],
+        workspace=workspace,
+        model=model,
+        model_provider=model_provider,
+        stream_id=stream_id,
+        source=source,
+    )
+    try:
+        _spawn_runner_session_writeback(stream_id, s.session_id)
+    except Exception:
+        logger.debug("failed to spawn runner writeback for %s", s.session_id, exc_info=True)
+    response = _chat_start_response_from_run_start(result)
+    response.setdefault("stream_id", stream_id)
+    response.setdefault("session_id", s.session_id)
+    return response
+
+
 def _start_run(
     s,
     *,
@@ -24073,11 +24201,25 @@ def _start_run(
     """
     from api.runtime_adapter import (
         LegacyJournalRuntimeAdapter,
+        RunStartResult,
         StartRunRequest,
         build_runtime_adapter,
         runtime_adapter_enabled,
         runtime_adapter_runner_enabled,
     )
+
+    native_runtime = _native_table_runtime(getattr(s, "profile", None))
+    if native_runtime:
+        return _start_native_profile_run(
+            s,
+            msg=msg,
+            attachments=attachments,
+            workspace=workspace,
+            model=model,
+            model_provider=model_provider,
+            source=source,
+            route=route,
+        )
 
     if runtime_adapter_enabled() or runtime_adapter_runner_enabled():
         if regeneration is not None and runtime_adapter_runner_enabled():
@@ -24879,7 +25021,6 @@ def _handle_chat_start(handler, body, diag=None):
             return bad(handler, "Read-only imported sessions cannot be continued from WebUI", 403)
         diag.stage("validate_profile") if diag else None
         requested_profile = str(body.get("profile") or "").strip()
-        active_profile = _get_active_profile_name()
         if requested_profile:
             try:
                 from api.profiles import _PROFILE_ID_RE
@@ -24894,17 +25035,36 @@ def _handle_chat_start(handler, body, diag=None):
             or getattr(s, "context_messages", None)
             or getattr(s, "pending_user_message", None)
         )
-        if not _session_visible_to_active_profile(session_profile, handler):
-            if (
-                requested_profile
-                and _profiles_match(requested_profile, active_profile)
-                and not has_persisted_turns
-            ):
-                # Empty placeholders can still be retagged when the
-                # requested profile matches the active request profile.
-                s.profile = requested_profile
-            else:
-                return bad(handler, "Session not found", 404)
+        if requested_profile:
+            try:
+                from api.profiles import set_request_profile
+
+                set_request_profile(requested_profile)
+            except Exception:
+                pass
+        active_profile = _get_active_profile_name()
+        visible = (
+            _session_visible_to_active_profile(session_profile, handler)
+            or (bool(requested_profile) and _profiles_match(session_profile, requested_profile))
+        )
+        if not visible:
+            if not has_persisted_turns:
+                target_prof = requested_profile or active_profile
+                if target_prof:
+                    s.profile = target_prof
+                    session_profile = s.profile
+                    visible = True
+            elif not requested_profile and session_profile:
+                try:
+                    from api.profiles import set_request_profile
+
+                    set_request_profile(session_profile)
+                    active_profile = session_profile
+                    visible = True
+                except Exception:
+                    pass
+        if not visible:
+            return bad(handler, "Session not found", 404)
         regeneration = None
         if body.get("regenerate") is True:
             if any(key in body for key in ("message", "attachments", "keep_count", "prompt", "prompt_index")):
