@@ -40,7 +40,7 @@ SUBCOMMANDS: frozenset[str] = frozenset({
     "autostart", "launcher",
     "skill", "settings", "memory", "kill",
     "container", "webui", "delegate", "remote",
-    "capability", "provider", "device",
+    "capability", "provider", "device", "voice",
 })
 
 
@@ -139,6 +139,9 @@ def dispatch(argv: Sequence[str]) -> int:
     if argv[0] == "device":
         from jaeger_ai.cli.verbs.platform_api import _cmd_device_argv
         return _cmd_device_argv(list(argv[1:]))
+    if argv[0] == "voice":
+        from jaeger_ai.features.voice.__main__ import main as voice_main
+        return voice_main(list(argv[1:]))
     # ``health`` was folded into ``jaeger doctor`` (one doctor — deps +
     # runtime probe). Removed 2026-06-20.
     _print_usage()
@@ -223,7 +226,7 @@ def _print_usage() -> None:
     print(
         "Usage: jaeger {start|stop|restart|status|bench|agent|migrate|backup|restore|update|"
         "reinstall|uninstall|autostart|launcher|skill|settings|memory|kill|container|webui|delegate|remote|"
-        "capability|provider|device} [args]\n"
+        "capability|provider|device|voice} [args]\n"
         "\n"
         "  start    Cold boot the full Jaeger AI multi-agent stack (services, containers, app).\n"
         "  stop     Cleanly stop the full Jaeger AI stack (quits app, services, and containers).\n"
@@ -249,6 +252,7 @@ def _print_usage() -> None:
         "  capability  Validate a capability package without editing core.\n"
         "  provider    Doctor live vs code-supported cognition providers.\n"
         "  device      Inspect the generic device/node contract.\n"
+        "  voice       Talk to the resident Entity (microphone, WAV, or typed).\n"
         "  health   Runtime substrate probe (post-boot diagnostics).\n"
         "           Pairs with ``--doctor`` which checks deps BEFORE boot.\n"
         "           ``--deep`` adds live agent-loop turns.\n"
