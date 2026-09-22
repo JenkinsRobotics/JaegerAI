@@ -1244,6 +1244,88 @@ def redact_session_data(session_dict: dict) -> dict:
     return result
 
 
+_REQUEST_BODY_CONSUMED_ATTR = "_jaeger_request_body_consumed"
+
+
+def mark_request_body_consumed(handler) -> None:
+    """Record that this request's Content-Length bytes have been read."""
+    try:
+        setattr(handler, _REQUEST_BODY_CONSUMED_ATTR, True)
+    except Exception:
+        pass
+
+
+def reset_request_body_consumed(handler) -> None:
+    """Clear the per-request body-consumed flag on a keep-alive handler."""
+    try:
+        setattr(handler, _REQUEST_BODY_CONSUMED_ATTR, False)
+    except Exception:
+        pass
+
+
+def consume_unread_request_body(handler, *, max_bytes: int | None = None) -> None:
+    """Discard an unread request body so HTTP/1.1 keep-alive can continue.
+
+    CSRF/auth rejections run before route body parsers. Leaving those bytes
+    on the socket makes the next request line start with leftover JSON
+    (``{"title":...}POST /...``), which Python reports as 400 and reverse
+    proxies often remap to 501 Unsupported method.
+    """
+    if getattr(handler, _REQUEST_BODY_CONSUMED_ATTR, False):
+        return
+    mark_request_body_consumed(handler)
+    command = str(getattr(handler, "command", "") or "").upper()
+    if command in {"GET", "HEAD", "OPTIONS", "TRACE"}:
+        return
+    headers = getattr(handler, "headers", None)
+    if headers is None:
+        return
+    transfer = str(headers.get("Transfer-Encoding") or "").strip().lower()
+    if transfer and transfer != "identity":
+        try:
+            handler.close_connection = True
+        except Exception:
+            pass
+        return
+    try:
+        length = int(headers.get("Content-Length") or 0)
+    except (TypeError, ValueError):
+        try:
+            handler.close_connection = True
+        except Exception:
+            pass
+        return
+    if length <= 0:
+        return
+    cap = MAX_BODY_BYTES if max_bytes is None else max_bytes
+    if length > cap:
+        try:
+            handler.close_connection = True
+        except Exception:
+            pass
+        return
+    rfile = getattr(handler, "rfile", None)
+    if rfile is None:
+        try:
+            handler.close_connection = True
+        except Exception:
+            pass
+        return
+    remaining = length
+    try:
+        while remaining > 0:
+            chunk = rfile.read(min(65536, remaining))
+            if not chunk:
+                handler.close_connection = True
+                return
+            remaining -= len(chunk)
+    except Exception:
+        try:
+            handler.close_connection = True
+        except Exception:
+            pass
+
+
 def read_body(handler) -> dict:
     """Read and JSON-parse a POST request body (capped at 20MB)."""
     raw_length = handler.headers.get('Content-Length', 0)
@@ -1268,6 +1350,7 @@ def read_body(handler) -> dict:
             pass
         raise ValueError(f'Request body too large ({length} bytes, max {MAX_BODY_BYTES})')
     raw = handler.rfile.read(length) if length else b'{}'
+    mark_request_body_consumed(handler)
     try:
         return _json.loads(raw)
     except Exception:

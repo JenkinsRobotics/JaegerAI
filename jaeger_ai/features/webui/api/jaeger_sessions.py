@@ -69,8 +69,10 @@ def _proxy(handler, method: str, path: str, body: bytes | None = None) -> bool:
             try:
                 parsed = json.loads(payload.decode("utf-8") or "null")
             except json.JSONDecodeError:
-                return bad(handler, "gateway returned non-JSON", 502)
-            return j(handler, parsed, status=int(getattr(resp, "status", 200) or 200))
+                bad(handler, "gateway returned non-JSON", 502)
+                return True
+            j(handler, parsed, status=int(getattr(resp, "status", 200) or 200))
+            return True
     except HTTPError as exc:
         # Relay the gateway's own error body and status. A 409 (turn already
         # in flight) and a 410 (resume cursor expired) both mean something
@@ -80,9 +82,11 @@ def _proxy(handler, method: str, path: str, body: bytes | None = None) -> bool:
             parsed = json.loads(raw.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             parsed = {"error": exc.reason}
-        return j(handler, parsed, status=int(exc.code))
+        j(handler, parsed, status=int(exc.code))
+        return True
     except (URLError, OSError) as exc:
-        return bad(handler, f"gateway unreachable at {gateway_base()}: {exc}", 503)
+        bad(handler, f"gateway unreachable at {gateway_base()}: {exc}", 503)
+        return True
 
 
 def _body_bytes(handler) -> bytes:
@@ -133,11 +137,13 @@ def _proxy_stream(handler, session_id: str, query: str) -> bool:
             parsed = json.loads(raw.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             parsed = {"error": exc.reason}
-        return j(handler, parsed, status=int(exc.code))
+        j(handler, parsed, status=int(exc.code))
+        return True
     except (URLError, OSError) as exc:
         from api.helpers import bad
 
-        return bad(handler, f"gateway unreachable at {gateway_base()}: {exc}", 503)
+        bad(handler, f"gateway unreachable at {gateway_base()}: {exc}", 503)
+        return True
 
     handler.send_response(200)
     handler.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -218,7 +224,8 @@ def route(handler, parsed, method: str) -> bool:
         if not approval_id:
             from api.helpers import bad
 
-            return bad(handler, "missing approval id", 400)
+            bad(handler, "missing approval id", 400)
+            return True
         return _proxy(handler, "POST", f"/v1/approvals/{approval_id}", _body_bytes(handler))
 
     if not any(path.startswith(p) for p in PREFIXES):

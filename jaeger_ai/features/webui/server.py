@@ -398,6 +398,11 @@ class Handler(BaseHTTPRequestHandler):
 
     def _handle_write(self, route_func) -> None:
         self._req_t0 = time.time(); reset_trusted_auth_request_state(self)
+        try:
+            from api.helpers import reset_request_body_consumed
+            reset_request_body_consumed(self)
+        except Exception:
+            pass
         cookie_profile = get_profile_cookie(self)
         if cookie_profile:
             set_request_profile(cookie_profile)
@@ -422,6 +427,14 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 self._safe_webui_print(traceback.format_exc())
         finally:
+            try:
+                from api.helpers import consume_unread_request_body
+                consume_unread_request_body(self)
+            except Exception:
+                try:
+                    self.close_connection = True
+                except Exception:
+                    pass
             clear_request_profile()
 
     def do_POST(self) -> None:

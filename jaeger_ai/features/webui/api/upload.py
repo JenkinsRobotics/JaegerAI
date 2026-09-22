@@ -47,7 +47,7 @@ def _max_extracted_bytes() -> int:
 _MAX_EXTRACTED_BYTES = 10 * MAX_UPLOAD_BYTES
 
 
-def parse_multipart(rfile, content_type, content_length) -> tuple:
+def parse_multipart(rfile, content_type, content_length, handler=None) -> tuple:
     import re as _re, email.parser as _ep
     # Imported locally (not just module-level) so the function stays
     # self-contained — some tests exec() this function's source in an isolated
@@ -73,6 +73,12 @@ def parse_multipart(rfile, content_type, content_length) -> tuple:
     if length > _MAX_UPLOAD_BYTES:
         raise ValueError(f'Upload too large (max {_MAX_UPLOAD_BYTES} bytes)')
     raw = rfile.read(length)
+    if handler is not None:
+        try:
+            from api.helpers import mark_request_body_consumed
+            mark_request_body_consumed(handler)
+        except Exception:
+            pass
     fields = {}
     files = {}
     delimiter = b'--' + boundary
@@ -253,7 +259,7 @@ def handle_upload(handler):
         content_length = int(handler.headers.get('Content-Length', 0) or 0)
         if content_length > MAX_UPLOAD_BYTES:
             return j(handler, {'error': f'File too large (max {MAX_UPLOAD_BYTES//1024//1024}MB)'}, status=413)
-        fields, files = parse_multipart(handler.rfile, content_type, content_length)
+        fields, files = parse_multipart(handler.rfile, content_type, content_length, handler)
         session_id = fields.get('session_id', '')
         if 'file' not in files:
             return j(handler, {'error': 'No file field in request'}, status=400)
@@ -442,7 +448,7 @@ def handle_upload_extract(handler):
         content_length = int(handler.headers.get('Content-Length', 0) or 0)
         if content_length > MAX_UPLOAD_BYTES:
             return j(handler, {'error': f'File too large (max {MAX_UPLOAD_BYTES//1024//1024}MB)'}, status=413)
-        fields, files = parse_multipart(handler.rfile, content_type, content_length)
+        fields, files = parse_multipart(handler.rfile, content_type, content_length, handler)
         session_id = fields.get('session_id', '')
         if 'file' not in files:
             return j(handler, {'error': 'No file field in request'}, status=400)
@@ -474,7 +480,7 @@ def handle_transcribe(handler):
         content_length = int(handler.headers.get('Content-Length', 0) or 0)
         if content_length > MAX_UPLOAD_BYTES:
             return j(handler, {'error': f'File too large (max {MAX_UPLOAD_BYTES//1024//1024}MB)'}, status=413)
-        fields, files = parse_multipart(handler.rfile, content_type, content_length)
+        fields, files = parse_multipart(handler.rfile, content_type, content_length, handler)
         if 'file' not in files:
             return j(handler, {'error': 'No file field in request'}, status=400)
         filename, file_bytes = files['file']
@@ -659,7 +665,7 @@ def handle_workspace_upload(handler):
         if content_length > MAX_UPLOAD_BYTES:
             return j(handler, {'error': f'File too large (max {MAX_UPLOAD_BYTES//1024//1024}MB)'}, status=413)
 
-        fields, files = parse_multipart(handler.rfile, content_type, content_length)
+        fields, files = parse_multipart(handler.rfile, content_type, content_length, handler)
         session_id = fields.get('session_id', '')
         subpath = fields.get('path', '')
 

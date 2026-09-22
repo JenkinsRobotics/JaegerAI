@@ -5799,7 +5799,13 @@ def _read_body_bytes(handler) -> bytes:
         except Exception:
             pass
         raise ValueError(f"Request body too large ({length} bytes, max {MAX_BODY_BYTES})")
-    return handler.rfile.read(length) if length else b""
+    raw = handler.rfile.read(length) if length else b""
+    try:
+        from api.helpers import mark_request_body_consumed
+        mark_request_body_consumed(handler)
+    except Exception:
+        pass
+    return raw
 
 
 def _extension_sidecar_proxy_request_headers(handler) -> dict[str, str]:
@@ -6341,6 +6347,11 @@ def _read_csp_report_payload(handler):
         return {"discarded": "invalid_content_length", "error": str(exc)}
     raw = handler.rfile.read(length) if length else b"{}"
     try:
+        from api.helpers import mark_request_body_consumed
+        mark_request_body_consumed(handler)
+    except Exception:
+        pass
+    try:
         return json.loads(raw.decode("utf-8"))
     except Exception:
         return {"invalid": True, "bytes": len(raw)}
@@ -6431,6 +6442,11 @@ def _read_client_event_payload(handler) -> dict:
     except ValueError:
         return {"event": "invalid", "reason": "invalid_content_length"}
     raw = handler.rfile.read(length) if length else b"{}"
+    try:
+        from api.helpers import mark_request_body_consumed
+        mark_request_body_consumed(handler)
+    except Exception:
+        pass
     try:
         decoded = raw.decode("utf-8")
         payload = json.loads(decoded)
@@ -18351,6 +18367,11 @@ def _read_json_request_body(handler, *, max_bytes: int = 4096) -> dict:
     except (ValueError, OverflowError) as exc:
         raise ValueError(_sanitize_error(exc)) from exc
     raw = handler.rfile.read(length) if length else b"{}"
+    try:
+        from api.helpers import mark_request_body_consumed
+        mark_request_body_consumed(handler)
+    except Exception:
+        pass
     try:
         payload = json.loads(raw.decode("utf-8"))
     except Exception as exc:
