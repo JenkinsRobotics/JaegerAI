@@ -514,7 +514,19 @@ def _jaeger_gateway_turn(run, session_id: str) -> dict | None:
     if not rid:
         return None
     run.emit("native.state", state="running")
-    deadline = time.monotonic() + 180
+    # Roundtable's own stall detector (jaeger_ai/features/roundtable/progress.py)
+    # deliberately does not treat a repeated "still here" signal as progress —
+    # only a real state change does, and a bare REST poll produces none for the
+    # whole wait. Every other member streams real tool/reasoning events the
+    # whole time and gets the roomier 300s "tool" budget; this member reported
+    # nothing until the end and sat on the 120s "idle" budget instead — Jaeger
+    # silently failed to vote in two consecutive live Roundtable rounds this way
+    # (audit, 2026-09-22), while the other members correctly kept reporting.
+    # This is not a synthetic heartbeat: since the executive defaults every
+    # human turn to tool-capable REACT_LOOP, a Gateway-routed Jaeger turn
+    # genuinely is real agentic work, so it earns the same budget class.
+    run.emit("tool.started", tool="jaeger_gateway_turn", args={"session_id": session_id})
+    deadline = time.monotonic() + 300
     last = admitted
     while time.monotonic() < deadline:
         if run.cancelled.is_set():

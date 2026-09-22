@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from jaeger_ai.core.frameworks.native_runs import Run, Runs, RunsHTTP, jaeger_turn
+from jaeger_ai.core.frameworks.native_runs import Run, Runs, RunsHTTP, _jaeger_gateway_turn, jaeger_turn
 
 
 def wait_for(predicate):
@@ -377,6 +377,115 @@ def test_jaeger_translates_native_events_and_targets_cancellation(tmp_path, monk
     assert jaeger_turn(run) == "hello"
     assert controls == [("cancel", {"turn_id": run.id})]
     assert [e["event"] for e in run.events][1:4] == ["tool.started", "tool.completed", "message.delta"]
+
+
+class _FakeGateway(BaseHTTPRequestHandler):
+    """Minimal stand-in for the real Gateway's session/turn REST surface.
+
+    ``status_sequence`` lets a test control how many polls see "running"
+    before the turn completes, without actually waiting that long —
+    :func:`_jaeger_gateway_turn` sleeps 1.5s between polls, so the test
+    monkeypatches that sleep to advance a fake clock instead.
+    """
+
+    status_sequence: list[str] = []
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        self.rfile.read(length)
+        if self.path == "/v1/sessions":
+            body = {"session_id": "roundtable-jaeger"}
+        else:
+            body = {"request_id": "req-1"}
+        self._reply(201, body)
+
+    def do_GET(self):
+        status = self.status_sequence.pop(0) if self.status_sequence else "completed"
+        body = {"status": status}
+        if status == "completed":
+            body["result"] = {"output": "the roundtable answer"}
+        self._reply(200, body)
+
+    def _reply(self, code, body):
+        data = json.dumps(body).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *_):
+        pass
+
+
+def test_jaeger_gateway_turn_reports_tool_progress_not_bare_idle(tmp_path, monkeypatch):
+    """Roundtable's stall detector (``roundtable/progress.py``) grants a
+    silent member only the 120s "idle" budget, and only a real state change
+    resets it — a bare heartbeat deliberately does not. A Gateway-routed
+    Jaeger turn used to report nothing at all until the very end, so it sat
+    on the tight idle budget for its whole (now commonly minutes-long, since
+    the executive defaults to tool-capable REACT_LOOP) duration. Live
+    Roundtable session (audit, 2026-09-22): Jaeger silently failed to vote
+    in two consecutive rounds this way while Hermes and OpenClaw, which do
+    stream real progress the whole time, kept reporting and survived.
+
+    It must emit a real ``tool.started`` up front — not a fabricated
+    ``tool.completed`` (that specifically creates an evidence receipt
+    elsewhere in Roundtable, which would misrepresent a REST poll as a
+    verified tool execution).
+    """
+    _FakeGateway.status_sequence = []
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeGateway)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("JAEGER_GATEWAY_URL", f"http://127.0.0.1:{server.server_port}")
+    try:
+        run = Run(tmp_path, "session", "hello")
+        result = _jaeger_gateway_turn(run, "roundtable-jaeger")
+    finally:
+        server.shutdown()
+
+    assert result == {"text": "the roundtable answer", "cancelled": False, "execution_unknown": False}
+    kinds = [e["event"] for e in run.events]
+    assert "tool.started" in kinds
+    assert "tool.completed" not in kinds
+    assert kinds.index("tool.started") < len(kinds) - 1
+
+
+def test_jaeger_gateway_turn_waits_past_the_old_180s_ceiling(tmp_path, monkeypatch):
+    """The deadline used to be 180s — tight enough that a normal deliberate-
+    planning turn (which now runs by default) could time out mid-answer.
+    Simulate 200s of elapsed wall time between polls (without a real 200s
+    sleep) and confirm the turn still completes rather than giving up."""
+    _FakeGateway.status_sequence = ["running"]
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _FakeGateway)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setenv("JAEGER_GATEWAY_URL", f"http://127.0.0.1:{server.server_port}")
+
+    real_monotonic = time.monotonic
+    elapsed = {"n": 0}
+
+    def jumping_sleep(_seconds):
+        # First wait jumps 200s in one step — past the old 180s deadline,
+        # inside the new 300s one — then behaves normally.
+        if elapsed["n"] == 0:
+            elapsed["n"] += 200
+        else:
+            elapsed["n"] += 1
+
+    monkeypatch.setattr(
+        "jaeger_ai.core.frameworks.native_runs.time.monotonic",
+        lambda: real_monotonic() + elapsed["n"],
+    )
+    monkeypatch.setattr("jaeger_ai.core.frameworks.native_runs.time.sleep", jumping_sleep)
+    try:
+        run = Run(tmp_path, "session", "hello")
+        result = _jaeger_gateway_turn(run, "roundtable-jaeger")
+    finally:
+        server.shutdown()
+
+    assert result == {"text": "the roundtable answer", "cancelled": False, "execution_unknown": False}
 
 
 def test_http_runs_approval_replay_and_missing_run(tmp_path):
