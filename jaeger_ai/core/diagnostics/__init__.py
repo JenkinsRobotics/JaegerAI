@@ -24,8 +24,11 @@ status panel, future external monitoring.
 
 from .doctor import doctor_summary, run_doctor  # noqa: F401
 from .probe import HealthCheck, HealthResult, run_health_checks  # noqa: F401
+from .unified_trace import ExecutionTrace, SqliteTraceStore, TraceSpan  # noqa: F401
 
 __all__ = [
     "HealthCheck", "HealthResult", "run_health_checks",
     "run_doctor", "doctor_summary",
+    "TraceSpan", "ExecutionTrace", "SqliteTraceStore",
 ]
+

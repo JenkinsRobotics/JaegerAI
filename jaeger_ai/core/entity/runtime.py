@@ -120,7 +120,10 @@ class EntityRuntime:
         self.cognition_router = CognitionRouter()
         from jaeger_ai.core.context_compiler import ContextCompiler
         self.context_compiler = ContextCompiler()
+        from jaeger_ai.core.diagnostics.unified_trace import SqliteTraceStore
+        self.trace_store = SqliteTraceStore(self.state_root / "execution_traces.sqlite3")
         try:
+
             from .resident import try_become_resident
             if self.mode == EntityRuntimeMode.OWNER:
                 lock_root = self.layout.run_dir if self.layout is not None else self.state_root
@@ -251,6 +254,15 @@ class EntityRuntime:
         # 1. Ingest event to Fabric, reduce SelfState, evaluate Salience
         trace_id = str(meta.get("trace_id") or request_id or f"T{int(time.time()*1000)}")
         meta["trace_id"] = trace_id
+        from jaeger_ai.core.diagnostics.unified_trace import ExecutionTrace
+        unified_trace = ExecutionTrace(
+            trace_id=f"tr_{trace_id}" if not trace_id.startswith("tr_") else trace_id,
+            request_id=request_id or trace_id,
+            session_id=session_id,
+            actor=actor,
+            goal=user_text,
+        )
+        unified_trace.start_span("attention")
         event = JaegerEvent.human_message(
             user_text,
             actor=actor,
@@ -260,6 +272,8 @@ class EntityRuntime:
             metadata=meta,
         )
         current_state, attention = self.ingest(event)
+        if unified_trace.spans:
+            unified_trace.spans[-1].finish(extra_data={"salience": getattr(attention, "salience_score", None)})
 
         try:
             import re as _re
@@ -358,7 +372,11 @@ class EntityRuntime:
                 ctx["learned_skills_prompt"] = "\n".join(lines)
         except Exception:
             pass
+        unified_trace.start_span("executive")
         exec_decision = self.executive_selector.select_strategy(event, current_state)
+        if unified_trace.spans:
+            unified_trace.spans[-1].finish(extra_data={"strategy": exec_decision.strategy.value, "reason": exec_decision.reason})
+        unified_trace.strategy = exec_decision.strategy.value
         self.event_store.append(
             JaegerEvent.executive_decision(
                 exec_decision.strategy.value,
@@ -435,6 +453,7 @@ class EntityRuntime:
         except Exception as exc:
             logger.debug("Context compilation skipped/failed: %s", exc)
 
+        unified_trace.start_span("cognition")
         ctx["parent_event_id"] = event.event_id
         ctx["session_id"] = session_id
         ctx["event_store"] = self.event_store
@@ -447,6 +466,10 @@ class EntityRuntime:
             authority=self.authority_layer,
             context=ctx,
         )
+        if unified_trace.spans:
+            unified_trace.spans[-1].finish()
+        unified_trace.model = str(ctx.get("model") or getattr(self.cognition_router, "default_model", None) or "")
+        unified_trace.provider = str(ctx.get("provider") or getattr(self.cognition_router, "default_provider", None) or "")
 
         response_text = str((cog_result or {}).get("text") or "")
 
@@ -587,6 +610,7 @@ class EntityRuntime:
             )
 
         tool_ids = [str(getattr(e, "event_id", "") or "") for e in turn_tools if getattr(e, "event_id", "")]
+        unified_trace.verification = {"status": verif.status.value, "verifier": verif.verifier, "error": verif.error}
         verif_ev = JaegerEvent.verification_completed(
             objective=user_text,
             status=verif.status.value,
@@ -650,6 +674,18 @@ class EntityRuntime:
             result_dict["skipped_final"] = False
         result_dict["strategy"] = exec_decision.strategy.value
         result_dict["text"] = response_text
+
+        turn_err = result_dict.get("error")
+        unified_trace.tool_calls = list(result_dict.get("tool_activity") or [])
+        unified_trace.finish(
+            status="failed" if turn_err else "success",
+            error=turn_err,
+        )
+        try:
+            self.trace_store.save_trace(unified_trace)
+        except Exception as exc:
+            logger.debug("Failed saving trace: %s", exc)
+        result_dict["trace_id"] = unified_trace.trace_id
 
         return result_dict
 
