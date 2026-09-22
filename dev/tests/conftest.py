@@ -110,7 +110,8 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
                     # test leakage; continue protecting config, credentials,
                     # memory, sessions, and every other durable state file.
                     if (path.suffix == ".log" or "logs" in path.parts
-                            or "memory" in path.parts or path.name == ".DS_Store"):
+                            or "memory" in path.parts or path.name == ".DS_Store"
+                            or path.name.endswith(("-shm", "-wal"))):
                         continue
                     # The independent production supervisor rewrites this
                     # non-sensitive liveness snapshot every 20 seconds. Its

@@ -60,8 +60,9 @@ def _jaeger_exe(home: Path) -> Path:
     return venv_exe if venv_exe.exists() else home / "jaeger"
 
 
-def _log_path(home: Path) -> Path:
-    return home / ".jaeger_ai" / "autostart.log"
+def _log_path(home: Path | None = None) -> Path:
+    from jaeger_ai.core.instance.instance import operator_state_root
+    return operator_state_root() / "logs" / "autostart.log"
 
 
 # ── service-file content (pure — unit-tested) ──────────────────────
