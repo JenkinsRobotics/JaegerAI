@@ -75,6 +75,39 @@ def _approval_target(request: Any) -> str:
     return "; ".join(parts)
 
 
+_LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+@web.middleware
+async def _reject_browser_cross_site(request: web.Request, handler: Any) -> web.StreamResponse:
+    """Refuse requests a web page could forge.
+
+    The Gateway has no credentials of its own; loopback is its boundary. That
+    boundary does not stop a browser: any page the operator opens can send a
+    ``text/plain`` POST here without a CORS preflight, and ``request.json()``
+    does not check the content type. The 2026-09-21 audit created a session
+    and started an agent turn that way with ``Origin: https://evil.example``.
+
+    Its real clients (the WebUI's server-side proxy, the Mac app, CLIs, the
+    MCP server) send no ``Origin``. A browser always does on a cross-origin
+    POST, and a DNS-rebinding page cannot fake ``Host``.
+    """
+    if request.url.host not in _LOOPBACK_HOSTNAMES:
+        return web.json_response({"error": "Gateway accepts loopback Host only"}, status=421)
+    origin = request.headers.get("Origin")
+    if origin is not None:
+        try:
+            from yarl import URL
+            source = URL(origin)
+        except ValueError:
+            source = None
+        if source is None or source.host not in _LOOPBACK_HOSTNAMES or source.port != request.url.port:
+            return web.json_response({"error": "Cross-origin requests are refused"}, status=403)
+    if request.headers.get("Sec-Fetch-Site") == "cross-site":
+        return web.json_response({"error": "Cross-site requests are refused"}, status=403)
+    return await handler(request)
+
+
 class _GatewayToolConfirmationProvider:
     """Park WRITE_LOCAL (and similar) confirms on the Gateway approval bus.
 
@@ -190,7 +223,7 @@ class JaegerGatewayApp:
         self._owner_task: asyncio.Task | None = None
         self._pending_resume = False
         self._loop: asyncio.AbstractEventLoop | None = None
-        self.app = web.Application()
+        self.app = web.Application(middlewares=[_reject_browser_cross_site])
         self.app.on_startup.append(self._recover_interrupted)
         self.app.on_cleanup.append(self._bounded_shutdown)
         self._setup_routes()
