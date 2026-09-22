@@ -1,0 +1,53 @@
+{
+  "id": "ares-worldview",
+  "name": "ARES WorldView",
+  "version": "0.1.0",
+  "description": "Tactical 3D globe sidecar for ARES: live flights, satellites, ships, earthquakes, and traffic on CesiumJS.",
+  "author": "Jenkins Robotics",
+  "homepage": "https://github.com/JenkinsRobotics/ares-worldview",
+  "license": "MIT",
+  "category": "Geospatial Intelligence",
+  "capabilities": [
+    "sidecar",
+    "dashboard_tab"
+  ],
+  "scripts": [
+    "dashboard/app.js"
+  ],
+  "stylesheets": [
+    "dashboard/style.css"
+  ],
+  "sidecar": {
+    "type": "loopback",
+    "origin": "http://127.0.0.1:3001",
+    "health_path": "/api/health"
+  },
+  "tab": {
+    "id": "worldview",
+    "label": "WorldView",
+    "path": "/worldview",
+    "entry": "dashboard/index.html",
+    "icon": "Globe"
+  },
+  "permissions": {
+    "storage": {
+      "owned": true
+    }
+  },
+  "settings_schema": [
+    {
+      "key": "sidecar_port",
+      "type": "integer",
+      "label": "WorldView Proxy Port",
+      "default": 3001,
+      "description": "Loopback port for the Express API/WebSocket sidecar"
+    },
+    {
+      "key": "globe_port",
+      "type": "integer",
+      "label": "Globe UI Port",
+      "default": 5173,
+      "description": "Vite dev-server port for the Cesium globe (npm run dev)"
+    }
+  ]
+}

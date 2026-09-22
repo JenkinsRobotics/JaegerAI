@@ -1,0 +1,70 @@
+{
+  "id": "ares-creator",
+  "name": "ARES Creator Studio",
+  "version": "1.0.0",
+  "description": "Live VTuber avatar overlay (MediaPipe + Three.js VRM), OBS streaming tools, YouTube video generation pipeline, and autonomous YouTube transcript knowledge ingestion.",
+  "author": "Jenkins Robotics",
+  "homepage": "https://github.com/JenkinsRobotics/ares-creator",
+  "license": "MIT",
+  "category": "Media & Creative",
+  "capabilities": [
+    "sidecar",
+    "dashboard_tab",
+    "agent_tools",
+    "mcp"
+  ],
+  "scripts": [
+    "dashboard/app.js"
+  ],
+  "stylesheets": [
+    "dashboard/style.css"
+  ],
+  "sidecar": {
+    "type": "loopback",
+    "origin": "http://127.0.0.1:3849",
+    "health_path": "/health"
+  },
+  "tab": {
+    "id": "creator",
+    "label": "Creator Studio",
+    "path": "/creator",
+    "entry": "dashboard/index.html",
+    "icon": "Video"
+  },
+  "tools": {
+    "module": "tools.creator_tools",
+    "definitions": [
+      "yt_research_video",
+      "generate_video_script",
+      "render_video_composition"
+    ]
+  },
+  "permissions": {
+    "storage": {
+      "owned": true
+    }
+  },
+  "settings_schema": [
+    {
+      "key": "sidecar_port",
+      "type": "integer",
+      "label": "Creator Sidecar Port",
+      "default": 3849,
+      "description": "Loopback port for the video rendering and YouTube ingestion daemon"
+    },
+    {
+      "key": "vrm_avatar_model",
+      "type": "string",
+      "label": "Default VRM Avatar Model Path",
+      "default": "assets/default_avatar.vrm",
+      "description": "Path to the 3D VRM model used for VTuber tracking and stream overlay"
+    },
+    {
+      "key": "youtube_knowledge_dir",
+      "type": "string",
+      "label": "Knowledge Ingestion Directory",
+      "default": "data/knowledge",
+      "description": "Where to store extracted YouTube transcripts, notes, and research summaries"
+    }
+  ]
+}

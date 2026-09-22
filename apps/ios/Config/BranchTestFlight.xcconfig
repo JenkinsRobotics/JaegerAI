@@ -1,0 +1,13 @@
+// Side-by-side TestFlight/dev build settings.
+//
+// Use with:
+// xcodebuild ... -xcconfig Config/BranchTestFlight.xcconfig CURRENT_PROJECT_VERSION=<unique-build-number>
+//
+// The derived bundle IDs are:
+// - com.uzairansar.hermesmobile.branch
+// - com.uzairansar.hermesmobile.branch.shareextension
+// - com.uzairansar.hermesmobile.branch.liveactivitywidget
+
+APP_IDENTIFIER_SUFFIX = .branch
+APP_DISPLAY_NAME = Hermex Branch
+APP_URL_SCHEME_SUFFIX = -branch

@@ -1,0 +1,117 @@
+{
+  "id": "ares-finance",
+  "name": "ARES Financial Intelligence",
+  "version": "1.3.0",
+  "description": "Monarch Money automation, category & budget management, recurring bills tracking, bank refreshes, offline SQLite storage, and credit card reward optimizer for ARES & JaegerAI.",
+  "author": "Jenkins Robotics",
+  "homepage": "https://github.com/JenkinsRobotics/ares-finance",
+  "license": "MIT",
+  "category": "Finance & Productivity",
+  "enabled": true,
+  "capabilities": [
+    "sidecar",
+    "dashboard_tab",
+    "agent_tools",
+    "mcp"
+  ],
+  "scripts": [
+    "dashboard/app.js"
+  ],
+  "stylesheets": [
+    "dashboard/style.css"
+  ],
+  "sidecar": {
+    "type": "loopback",
+    "origin": "http://127.0.0.1:3848",
+    "health_path": "/health"
+  },
+  "tab": {
+    "id": "finance",
+    "label": "Finance",
+    "path": "/finance",
+    "entry": "dashboard/index.html",
+    "icon": "Wallet"
+  },
+  "tools": {
+    "module": "tools.finance_tools",
+    "definitions": [
+      "finance_summary",
+      "list_accounts",
+      "refresh_bank_accounts",
+      "check_institution_health",
+      "list_categories",
+      "create_category",
+      "delete_category",
+      "get_budgets",
+      "set_budget",
+      "list_recurring_bills",
+      "search_transactions",
+      "spending_by_category",
+      "edit_transaction",
+      "create_transaction",
+      "recommend_card",
+      "list_cards",
+      "monarch_status",
+      "monarch_setup",
+      "sync_monarch",
+      "search_transactions_advanced",
+      "cashflow_summary",
+      "delete_transaction",
+      "get_cashflow"
+    ]
+  },
+  "permissions": {
+    "storage": {
+      "owned": true
+    }
+  },
+  "settings_schema": [
+    {
+      "key": "sidecar_port",
+      "type": "integer",
+      "label": "Finance Sidecar Port",
+      "default": 3848,
+      "description": "Loopback port for the FastAPI financial sidecar"
+    },
+    {
+      "key": "sync_interval_hours",
+      "type": "integer",
+      "label": "Monarch Auto-Sync Interval (Hours)",
+      "default": 6,
+      "description": "How often to background-sync data from Monarch Money"
+    }
+  ],
+  "mcp": {
+    "transport": "stdio",
+    "command": "python",
+    "args": [
+      "-m",
+      "server.mcp_server"
+    ],
+    "tools": [
+      "finance_summary",
+      "list_accounts",
+      "refresh_bank_accounts",
+      "check_institution_health",
+      "list_categories",
+      "create_category",
+      "delete_category",
+      "get_budgets",
+      "set_budget",
+      "list_recurring_bills",
+      "search_transactions",
+      "spending_by_category",
+      "edit_transaction",
+      "create_transaction",
+      "recommend_card",
+      "list_cards",
+      "monarch_status",
+      "monarch_setup",
+      "sync_monarch",
+      "search_transactions_advanced",
+      "cashflow_summary",
+      "delete_transaction",
+      "get_cashflow"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+[project]
+name = "ares-finance"
+version = "1.2.0"
+description = "ARES Financial Intelligence — Monarch Money sidecar, MCP tools, and dashboard."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+  "live: hits the real Monarch Money API (never mutates; requires ARES_FINANCE_LIVE=1)",
+]
+filterwarnings = [
+  "ignore::DeprecationWarning",
+]

@@ -1,0 +1,19 @@
+{
+  "name": "ares-minecraft",
+  "version": "1.0.0",
+  "description": "ARES Minecraft Companion & Paper Server Manager with PS5 Bedrock cross-play",
+  "type": "module",
+  "main": "bot/server.js",
+  "scripts": {
+    "start": "node bot/server.js"
+  },
+  "dependencies": {
+    "minecraft-data": "^3.113.2",
+    "mineflayer": "^4.20.1",
+    "mineflayer-armor-manager": "^2.0.1",
+    "mineflayer-auto-eat": "^5.0.3",
+    "mineflayer-collectblock": "^1.6.0",
+    "mineflayer-pathfinder": "^2.4.5",
+    "vec3": "^0.1.10"
+  }
+}

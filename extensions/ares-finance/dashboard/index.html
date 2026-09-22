@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARES Financial Intelligence</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="finance-app">
+    <header class="finance-header">
+      <div class="brand">
+        <div class="brand-icon">💳</div>
+        <div>
+          <h1>ARES Financial Command</h1>
+          <p class="subtitle">Monarch Money Sync • Offline SQLite Store • Card Multiplier Engine</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <div class="status-badge" id="sidecarStatus">
+          <span class="dot"></span> Sidecar Online
+        </div>
+        <button id="refreshBtn" class="btn-secondary" title="Force bank aggregator refresh">↻ Refresh Banks</button>
+        <button id="authModalBtn" class="btn-secondary">🔑 Monarch Auth</button>
+        <button id="syncBtn" class="btn-primary">
+          <span class="btn-icon">⚡</span> Sync Monarch
+        </button>
+      </div>
+    </header>
+
+    <div id="provenanceBanner" class="provenance-banner demo" hidden>
+      DEMO DATA — figures below are seeded samples, not your real accounts.
+    </div>
+
+    <nav class="nav-tabs">
+      <button class="nav-tab active" data-tab="overviewTab">Overview</button>
+      <button class="nav-tab" data-tab="budgetsTab">Budgets</button>
+      <button class="nav-tab" data-tab="billsTab">Subscriptions</button>
+      <button class="nav-tab" data-tab="walletTab">Wallet</button>
+      <button class="nav-tab" data-tab="analyticsTab">Analytics</button>
+    </nav>
+
+    <section id="overviewTab" class="tab-content active">
+      <div class="dashboard-grid">
+        <div class="card stat-card">
+          <div class="card-header">
+            <h2>Net Worth &amp; Balances</h2>
+            <span class="badge" id="lastUpdated">Updated just now</span>
+          </div>
+          <div class="stat-highlight">
+            <span class="currency">$</span>
+            <span class="amount" id="netWorthDisplay">—</span>
+          </div>
+          <div class="breakdown-grid" id="accountsBreakdown"></div>
+        </div>
+
+        <div class="card optimizer-card">
+          <div class="card-header">
+            <h2>Credit Card Optimizer</h2>
+            <span class="badge badge-accent">Auto-Multiplier</span>
+          </div>
+          <p class="section-desc">Type a merchant or store to identify the maximum point multiplier in your wallet:</p>
+          <div class="optimizer-input-row">
+            <input type="text" id="merchantInput" placeholder="e.g. Whole Foods, Chevron, Starbucks, Delta, Costco..." />
+            <button id="optimizeBtn" class="btn-accent">Evaluate</button>
+          </div>
+          <div id="optimizerResult" class="optimizer-result">
+            <div class="rec-box">
+              <span class="rec-label">RECOMMENDED CARD</span>
+              <div class="rec-card-name" id="recCardName">Chase Sapphire Preferred</div>
+              <div class="rec-multiplier" id="recMultiplier">3.0x Multiplier (DINING)</div>
+            </div>
+            <div class="rec-tip" id="recTip">Swipe for 3x points on worldwide restaurants &amp; food delivery.</div>
+          </div>
+        </div>
+
+        <div class="card full-width">
+          <div class="card-header">
+            <h2>Institution Health</h2>
+            <span class="badge" id="healthBadge">—</span>
+          </div>
+          <div id="healthList" class="health-list">Connect Monarch to audit bank logins.</div>
+        </div>
+
+        <div class="card full-width">
+          <div class="card-header">
+            <h2>Recent Activity Ledger</h2>
+            <span class="badge" id="txCountBadge">0 Transactions</span>
+          </div>
+          <div class="table-container">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Merchant</th>
+                  <th>Category</th>
+                  <th>Amount</th>
+                </tr>
+              </thead>
+              <tbody id="txTableBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="budgetsTab" class="tab-content">
+      <div class="card full-width">
+        <div class="card-header">
+          <h2>Monthly Budgets vs Spend</h2>
+          <span class="badge badge-accent" id="budgetCountBadge">0 categories</span>
+        </div>
+        <p class="section-desc">Planned monthly limits, actual spend, and remaining room. Live data after a Monarch sync.</p>
+        <div id="budgetsContainer" class="analytics-bars-container"></div>
+      </div>
+    </section>
+
+    <section id="billsTab" class="tab-content">
+      <div class="card full-width">
+        <div class="card-header">
+          <h2>Recurring Bills &amp; Subscriptions</h2>
+          <span class="badge" id="billsTotalBadge">$0 / mo</span>
+        </div>
+        <p class="section-desc">Active streams from Monarch: providers, cadence, next date, and amount.</p>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Merchant</th>
+                <th>Category</th>
+                <th>Frequency</th>
+                <th>Next</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody id="billsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="walletTab" class="tab-content">
+      <div class="card full-width">
+        <div class="card-header">
+          <h2>Active Wallet Cards &amp; Bonus Rules</h2>
+          <button id="addCardBtn" class="btn-primary">+ Add New Card</button>
+        </div>
+        <p class="section-desc">The optimizer evaluates these cards against merchant category codes and spend caps:</p>
+        <div class="cards-grid" id="cardsGridContainer"></div>
+      </div>
+    </section>
+
+    <section id="analyticsTab" class="tab-content">
+      <div class="card full-width">
+        <div class="card-header">
+          <h2>Spending Breakdown by Category</h2>
+          <span class="badge badge-accent">Auto-Categorized</span>
+        </div>
+        <div class="analytics-bars-container" id="analyticsBarsContainer"></div>
+      </div>
+    </section>
+  </div>
+
+  <div id="authModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="card-header">
+        <h2>Monarch Money Credentials</h2>
+        <button id="closeAuthModal" class="btn-close">✕</button>
+      </div>
+      <p class="section-desc">Token is used if present. Otherwise email + password (and optional TOTP secret) mint a session. Credentials stay on this machine.</p>
+      <div class="form-group">
+        <label>Session Token / API Key</label>
+        <input type="password" id="monarchTokenInput" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+      </div>
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="monarchEmailInput" autocomplete="username" placeholder="you@example.com">
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="monarchPasswordInput" autocomplete="current-password">
+      </div>
+      <div class="form-group">
+        <label>TOTP secret (optional, unattended MFA)</label>
+        <input type="password" id="monarchMfaInput" placeholder="Base32 secret from authenticator setup">
+      </div>
+      <p id="authStatus" class="section-desc"></p>
+      <div class="modal-actions">
+        <button id="saveTokenBtn" class="btn-primary">Save &amp; Connect</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="addCardModal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="card-header">
+        <h2>Add Credit Card</h2>
+        <button id="closeAddCardModal" class="btn-close">✕</button>
+      </div>
+      <div class="form-group">
+        <label>Card Name</label>
+        <input type="text" id="newCardName" placeholder="e.g. Chase Freedom Unlimited">
+      </div>
+      <div class="form-group">
+        <label>Issuer</label>
+        <input type="text" id="newCardIssuer" placeholder="e.g. Chase">
+      </div>
+      <div class="form-group">
+        <label>Top Categories (JSON Multipliers)</label>
+        <input type="text" id="newCardRewards" placeholder='{"dining": 3.0, "drugstores": 3.0, "default": 1.5}'>
+      </div>
+      <div class="modal-actions">
+        <button id="saveNewCardBtn" class="btn-primary">Add to Wallet</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
