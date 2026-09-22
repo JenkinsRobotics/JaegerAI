@@ -210,17 +210,12 @@ def webui_model_catalog(instance_root: Path | None = None) -> dict[str, Any]:
             continue
         models = []
         for m in provider.get("models") or []:
-            label = str(m["id"])
-            certs = m.get("certifications") or {}
-            react = str(certs.get("REACT") or "")
-            if react == "FAIL":
-                label = f"{label} (ReAct FAIL)"
-            elif react == "PASS":
-                label = f"{label} (ReAct PASS)"
+            name = str(m["id"])
             models.append({
-                "id": m["id"],
-                "label": label,
-                "certifications": certs,
+                "id": name,
+                "name": name,
+                "label": name,
+                "certifications": m.get("certifications") or {},
                 "usable_for_react": m.get("usable_for_react"),
             })
         if models:
@@ -237,6 +232,22 @@ def webui_model_catalog(instance_root: Path | None = None) -> dict[str, Any]:
         "default_model": default_model,
         "groups": groups,
         "source": "jaeger.runtime.truth",
+    }
+
+
+def _audio_truth() -> dict[str, Any]:
+    from jaeger_ai.core.voice.status import voice_status
+
+    status = voice_status()
+    available = status["spoken_input"] or status["spoken_output"]
+    return {
+        "supported": status["stt"]["supported"] or status["tts"]["supported"],
+        "configured": status["stt"]["configured"] or status["tts"]["configured"],
+        "available": available,
+        "spoken_input": status["spoken_input"],
+        "spoken_output": status["spoken_output"],
+        "reason": None if available else "no usable speech input or output on this machine",
+        "detail": status,
     }
 
 
@@ -310,7 +321,7 @@ def capability_snapshot(instance_root: Path | None = None) -> dict[str, Any]:
         "shell": {"supported": True, "configured": True, "available": True, "authorized": True},
         "memory": {"supported": True, "configured": True, "available": True, "authorized": True},
         "remote_access": {"supported": True, "configured": True, "available": True, "authorized": True},
-        "audio": {"supported": True, "configured": False, "available": False, "reason": "not enabled on this instance"},
+        "audio": _audio_truth(),
         "browser": {"supported": True, "configured": False, "available": False, "reason": "not probed in this snapshot"},
     }
 

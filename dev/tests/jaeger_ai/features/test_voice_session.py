@@ -161,3 +161,21 @@ def test_gateway_client_round_trip_against_the_real_gateway(tmp_path, monkeypatc
     assert result.ok
     assert result.text == "heard: what is my token"
     assert result.verification == {"status": "objective_unverified"}
+
+
+def test_runtime_audio_truth_is_the_measured_voice_status(monkeypatch):
+    """The capability snapshot hard-coded audio as "not enabled" while Kokoro
+    and Whisper were installed and working; now it reports the probe."""
+    from jaeger_ai.core.runtime import truth
+    from jaeger_ai.core.voice import status
+
+    probe = {
+        "stt": {"supported": True, "configured": True}, "tts": {"supported": True, "configured": False},
+        "microphone": {}, "spoken_input": True, "spoken_output": False,
+    }
+    monkeypatch.setattr(status, "voice_status", lambda: probe)
+
+    audio = truth._audio_truth()
+
+    assert audio["available"] is True and audio["spoken_input"] is True and audio["spoken_output"] is False
+    assert audio["detail"] is probe
