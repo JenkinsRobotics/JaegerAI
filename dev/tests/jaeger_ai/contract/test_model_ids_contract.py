@@ -44,3 +44,11 @@ def test_a_config_already_holding_a_picker_id_heals_on_load(tmp_path):
     cfg = load_yaml(path, ExternalModelConfig)
 
     assert cfg.model == "glm-5.3-flash:cloud"
+
+
+def test_assignment_is_validated_too():
+    """``selected_model_config`` assigns the field; without validate_assignment
+    the picker id was written back to config.yaml verbatim."""
+    cfg = ExternalModelConfig(provider="ollama", model="glm-5.3-flash:cloud")
+    cfg.model = "@ollama-cloud:kimi-k2.7-code:cloud"
+    assert cfg.model == "kimi-k2.7-code:cloud"
