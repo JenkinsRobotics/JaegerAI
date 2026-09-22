@@ -52,6 +52,8 @@ def _route(argv: list[str], py: str) -> list[str]:
             gui_rest = [arg for arg in rest if arg not in ("gui", "--gui")]
             return [py, "-m", "jaeger_ai.cli.run", "agent", "create", *gui_rest]
         return [py, "-m", "jaeger_ai.cli.run", "setup", *rest]
+    if cmd == "stack":
+        return [py, "-m", "jaeger_ai.core.runtime.stack", *rest]
     if cmd == "bridge":
         return [py, "-m", "jaeger_ai.interfaces.bridge", *rest]
     if cmd == "mcp":
