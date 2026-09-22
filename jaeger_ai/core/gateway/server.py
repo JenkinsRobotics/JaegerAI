@@ -51,6 +51,26 @@ DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", "kimi-k2.7-
 NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S", "300"))
 
 
+# How long a tool call waits for the operator before it is refused.
+APPROVAL_WAIT_S = 300.0
+
+# Arguments that name what a tool call will touch, in the order a human
+# reading an approval on a phone needs them.
+_APPROVAL_TARGET_KEYS = ("path", "src", "dst", "command", "url", "code")
+
+
+def _approval_target(request: Any) -> str:
+    """What this call will touch, for the approval prompt."""
+    arguments = getattr(request, "arguments", None) or {}
+    parts = []
+    for key in _APPROVAL_TARGET_KEYS:
+        value = arguments.get(key)
+        if value not in (None, ""):
+            text = str(value)
+            parts.append(f"{key}={text[:200]}{'…' if len(text) > 200 else ''}")
+    return "; ".join(parts)
+
+
 class _GatewayToolConfirmationProvider:
     """Park WRITE_LOCAL (and similar) confirms on the Gateway approval bus.
 
@@ -83,6 +103,8 @@ class _GatewayToolConfirmationProvider:
         skill = str(getattr(request, "skill", "") or "")
         op = str(getattr(request, "operation", "") or "")
         summary = str(getattr(request, "summary", "") or "")
+        target = _approval_target(request) or summary
+        tier_name = getattr(getattr(request, "tier", None), "name", str(getattr(request, "tier", "")))
         aid = f"approval_{uuid.uuid4().hex[:12]}"
         box: dict[str, Any] = {"done": threading.Event(), "approved": False}
 
@@ -91,22 +113,23 @@ class _GatewayToolConfirmationProvider:
             self.app.pending_approvals[aid] = fut
             self.app.store.create_approval(
                 kind="tool_confirm",
-                prompt=f"Allow {skill}.{op}? {summary}".strip(),
+                prompt=f"Allow {skill}.{op}? {target}".strip(),
                 options=["once", "deny"],
                 session_id=self.session_id,
                 request_id=self.request_id,
                 approval_id=aid,
                 metadata={
                     "tool": f"{skill}.{op}" if skill else op,
-                    "target": summary,
-                    "reason": str(getattr(request, "tier", "")),
+                    "target": target,
+                    "summary": summary,
+                    "reason": tier_name,
                 },
             )
             self.app.event_bus.publish(self.session_id, "approval.request", {
                 "approval_id": aid,
                 "tool": f"{skill}.{op}" if skill else op,
-                "target": summary,
-                "reason": str(getattr(request, "tier", "")),
+                "target": target,
+                "reason": tier_name,
                 "session_id": self.session_id,
                 "request_id": self.request_id,
             })
@@ -121,9 +144,16 @@ class _GatewayToolConfirmationProvider:
             fut.add_done_callback(_done)
 
         loop.call_soon_threadsafe(_arm)
-        if not box["done"].wait(timeout=300):
+        if box["done"].wait(timeout=APPROVAL_WAIT_S):
+            return bool(box["approved"])
+        # The tool call is about to be refused. Close the row so the phone
+        # does not keep offering an approval that can no longer take effect;
+        # if the operator's answer won the race, honour it instead.
+        self.app.pending_approvals.pop(aid, None)
+        if self.app.store.resolve_approval(aid, approved=False, decision="expired") is not None:
             return False
-        return bool(box["approved"])
+        row = self.app.store.get_approval(aid) or {}
+        return row.get("decision") not in {None, "deny", "expired"}
 
 
 class JaegerGatewayApp:
@@ -168,6 +198,9 @@ class JaegerGatewayApp:
             raise RuntimeError(f"Gateway store is owned by live pid {lease.get('owner_pid')}")
         self._owns_store = True
         self.store.recover_interrupted_sessions()
+        expired = self.store.expire_orphaned_tool_confirms()
+        if expired:
+            logger.info("Expired %d tool approvals orphaned by the previous process", expired)
         try:
             from jaeger_ai.core.entity.ownership import EntityRuntimeMode
             from jaeger_ai.core.entity.runtime import EntityRuntime

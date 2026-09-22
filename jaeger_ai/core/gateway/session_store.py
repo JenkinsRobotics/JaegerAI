@@ -924,6 +924,22 @@ class GatewaySessionStore:
             ).fetchall()
             return [self._approval_row(r) for r in rows]
 
+    def expire_orphaned_tool_confirms(self) -> int:
+        """Close ``tool_confirm`` approvals left by a previous process.
+
+        Their waiter was a thread in that process; it is gone, and the tool
+        call it guarded was refused with it. Left ``pending`` they are offered
+        on the phone forever and approving one does nothing. Handoff
+        approvals resume from stored state and are not touched.
+        """
+        with self._immediate() as conn:
+            cur = conn.execute(
+                "UPDATE approvals SET status='resolved', decision='expired', resolved_at=? "
+                "WHERE status='pending' AND kind='tool_confirm'",
+                (time.time(),),
+            )
+            return cur.rowcount
+
     def resolve_approval(
         self,
         approval_id: str,
