@@ -47,7 +47,7 @@ ONE REQUEST
 | **GATE B** | **WS 8** | **Unified Policy / Capability / Authority** | **COMPLETED** | `7270cb87` | 7/7 policy kernel, 40/40 combined | Unified PolicyKernel (ALLOW, DENY, MODIFY, REQUIRE_APPROVAL), strict fail-closed, AuthorityLayer integration |
 | **GATE B** | **WS 9** | **Typed Effect & Verification Model** | **COMPLETED** | `bdd4f47e` | 5/5 effects, 55/55 Gate B suite | EffectIntent -> EffectLedger -> Execution -> EffectResult -> VerificationResult; connected IDs; disk probes; tool ok != verified |
 | **GATE C** | **WS 10** | **Programmable Capability Layer** | **COMPLETED** | `9993b417` | 3/3 capabilities, 58/58 combined | CapabilityManifest (permissions, deps, tools, rollback, verification); CapabilityRegistry; installed, verified & removed without core edits |
-| **GATE C** | **WS 11** | **Capability Lifecycle & Self-Improvement** | **COMPLETED** | `in-progress` | 4/4 lifecycle, 62/62 combined | Candidate -> Sandbox -> Static AST Checks -> Unit Tests -> Evaluation -> Review -> Verified -> Installed; provenance tracking |
+| **GATE C** | **WS 11** | **Capability Lifecycle & Self-Improvement** | **COMPLETED** | `3a41bd85` | 4/4 lifecycle, 62/62 combined | Candidate -> Sandbox -> Static AST Checks -> Unit Tests -> Evaluation -> Review -> Verified -> Installed; provenance tracking |
 | **GATE C** | **WS 12** | **Multi-Agent Architecture** | PENDING | — | — | RuntimeHost with isolated EntityRuntime instances |
 | **GATE C** | **WS 13** | **Generic Device / Node Architecture** | PENDING | — | — | Device pairing, capabilities, and telemetry |
 | **GATE C** | **WS 14** | **Provider Abstraction & Cognition Profiles** | PENDING | — | — | Canonical runtime inventory & cognition profiles |
