@@ -45,7 +45,7 @@ ONE REQUEST
 | **GATE B** | **WS 6** | **Memory & Context Architecture** | **COMPLETED** | `b1025ff0` | 5/5 compiler, 30/30 combined | Canonical ContextCompiler: SELECT -> RANK -> BUDGET -> PROVENANCE -> FORMAT |
 | **GATE B** | **WS 7** | **World-State Model** | **COMPLETED** | `fd1f48d7` | 5/5 world-state, 25/25 combined | Epistemic Invariants (Observation != Claim != Belief != Fact), SqliteWorldStore in knowledge.sqlite3, SemanticMemory integration |
 | **GATE B** | **WS 8** | **Unified Policy / Capability / Authority** | **COMPLETED** | `7270cb87` | 7/7 policy kernel, 40/40 combined | Unified PolicyKernel (ALLOW, DENY, MODIFY, REQUIRE_APPROVAL), strict fail-closed, AuthorityLayer integration |
-| **GATE B** | **WS 9** | **Typed Effect & Verification Model** | PENDING | — | — | EffectIntent -> EffectLedger -> Verification |
+| **GATE B** | **WS 9** | **Typed Effect & Verification Model** | **COMPLETED** | `in-progress` | 5/5 effects, 55/55 Gate B suite | EffectIntent -> EffectLedger -> Execution -> EffectResult -> VerificationResult; connected IDs; disk probes; tool ok != verified |
 | **GATE C** | **WS 10** | **Programmable Capability Layer** | PENDING | — | — | Dynamic packages/manifests without core edits |
 | **GATE C** | **WS 11** | **Capability Lifecycle & Self-Improvement** | PENDING | — | — | Candidate -> Sandbox -> Test -> Gate -> Install |
 | **GATE C** | **WS 12** | **Multi-Agent Architecture** | PENDING | — | — | RuntimeHost with isolated EntityRuntime instances |
