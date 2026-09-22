@@ -227,15 +227,39 @@ def test_audit_4_executive_strategy_selection():
     dec_passive = ExecutiveStrategySelector.select_strategy(ev_passive, base_state)
     assert dec_passive.strategy == CognitiveStrategy.PASSIVE_OBSERVE
 
-    # 2. Direct Response (Conversational query)
-    ev_direct = JaegerEvent.human_message("What is the speed of light?")
+    # 2. Direct Response — only for an EXPLICIT no-tools/text-only request.
+    # A plain informational question ("what is the speed of light") is NOT
+    # this case: it used to be, via a keyword classifier that denied tools
+    # to anything not matching a fixed verb list, and a live operator asking
+    # "what tools do you have" or "open youtube for me" got confidently told
+    # neither was possible — both real capabilities the classifier just
+    # never recognised the wording for (audit, 2026-09-22). Tool access is
+    # now the default for a human message; DIRECT_RESPONSE is the opt-out,
+    # triggered by what the request says, not by a hardcoded example phrase.
+    ev_direct = JaegerEvent.human_message("Answer in text only, no tools: what is the speed of light?")
     dec_direct = ExecutiveStrategySelector.select_strategy(ev_direct, base_state)
     assert dec_direct.strategy == CognitiveStrategy.DIRECT_RESPONSE
 
-    # 3. ReAct Tool Loop (Action prompt)
+    # 2b. The same trivia question with no opt-out phrase gets tools like any
+    # other message. The model decides per turn whether it needs one — it is
+    # not pre-judged unable to have one by a keyword gate.
+    ev_trivia = JaegerEvent.human_message("What is the speed of light?")
+    dec_trivia = ExecutiveStrategySelector.select_strategy(ev_trivia, base_state)
+    assert dec_trivia.strategy == CognitiveStrategy.REACT_LOOP
+
+    # 3. ReAct Tool Loop (Action prompt, using an action verb)
     ev_react = JaegerEvent.human_message("Create a new directory called /tmp/build and inspect it")
     dec_react = ExecutiveStrategySelector.select_strategy(ev_react, base_state)
     assert dec_react.strategy == CognitiveStrategy.REACT_LOOP
+
+    # 3c. ReAct Tool Loop for an ordinary request sharing no vocabulary with
+    # any action-verb list — the exact shape of request that fell through to
+    # a tool-less turn before this fix (send an email, list your tools, open
+    # a URL). Tool access must not depend on the request happening to use
+    # one of a fixed set of words.
+    ev_ordinary = JaegerEvent.human_message("Can you check my email and pull up my schedule?")
+    dec_ordinary = ExecutiveStrategySelector.select_strategy(ev_ordinary, base_state)
+    assert dec_ordinary.strategy == CognitiveStrategy.REACT_LOOP
 
     # 3b. Memory writes are mutating actions, not chat (live Phase 6 defect)
     ev_remember = JaegerEvent.human_message(

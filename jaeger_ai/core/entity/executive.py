@@ -197,14 +197,6 @@ class ExecutiveStrategySelector:
                     estimated_steps=1,
                 )
 
-            # Pure informational trivia without tool requirement (e.g. speed of light)
-            if re.match(r"(?i)^what is the speed of light\b", text.strip()) and not actionable:
-                return ExecutiveDecision(
-                    strategy=CognitiveStrategy.DIRECT_RESPONSE,
-                    reason="Pure informational query without tool requirement",
-                    estimated_steps=1,
-                )
-
             meta_reflections = payload.get("reflection_count") or event.metadata.get("reflection_count") or 0
             complexity = score_task_complexity(
                 text,
