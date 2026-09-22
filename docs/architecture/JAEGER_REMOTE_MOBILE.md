@@ -138,6 +138,8 @@ Live HTTPS proofs (iPhone user-agent):
 
 Resident OWNER turns use in-process ReAct (same production verification as Round 6). WRITE_LOCAL parks on the Gateway approval bus; the stock WebUI approval card polls that bus through `/api/approval/pending`.
 
-Tailscale Serve HTTP/1.1 connection reuse can surface as `501 Unsupported method ('{json}POST')` after a 403. That is proxy keep-alive, not a CSRF logic failure. Clients should send `Connection: close` (the WebUI fetch interceptor already attaches CSRF).
+HTTP/1.1 keep-alive: CSRF/auth rejections now consume the unread `Content-Length` body before the next request is parsed. Leaving those bytes on the socket made the next request line start with leftover JSON (`{"title":...}POST /...`). Python reported that as `400 Bad request syntax`; Tailscale Serve remapped the same leftover to `501 Unsupported method ('{json}POST')`. The Gateway overlay also returns `True` after writing a mutation response so a successful `201` cannot be followed by a second `404` on the same connection.
+
+Live keep-alive proof (loopback and `https://matthews-mac-studio.tail80f206.ts.net:8443`): 403 → 403 → 201, then 90 mixed missing/invalid/valid CSRF mutations, 60×403 + 30×201, zero malformed-method responses.
 
 Verdict remains **PHONE ACCESS — NOT READY** until physical iPhone Safari / Add to Home Screen / passkey (Face ID) and a real Wi-Fi ↔ cellular reconnect are observed on the device.

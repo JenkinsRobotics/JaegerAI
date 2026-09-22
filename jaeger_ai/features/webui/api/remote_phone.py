@@ -35,6 +35,11 @@ def _read_json(handler) -> dict:
         length = 0
     raw = handler.rfile.read(max(0, min(length, 64_000))) if length else b"{}"
     try:
+        from api.helpers import mark_request_body_consumed
+        mark_request_body_consumed(handler)
+    except Exception:
+        pass
+    try:
         data = json.loads(raw.decode("utf-8") or "{}")
     except json.JSONDecodeError:
         data = {}

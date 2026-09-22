@@ -49,17 +49,21 @@ def _proxy(handler, method: str, path: str, body: bytes | None = None,
             try:
                 parsed = json.loads(payload.decode("utf-8") or "null")
             except json.JSONDecodeError:
-                return bad(handler, "gateway returned non-JSON", 502)
-            return j(handler, parsed, status=int(getattr(resp, "status", 200) or 200))
+                bad(handler, "gateway returned non-JSON", 502)
+                return True
+            j(handler, parsed, status=int(getattr(resp, "status", 200) or 200))
+            return True
     except HTTPError as exc:
         raw = exc.read() or b"{}"
         try:
             parsed = json.loads(raw.decode("utf-8") or "{}")
         except json.JSONDecodeError:
             parsed = {"error": exc.reason}
-        return j(handler, parsed, status=int(exc.code))
+        j(handler, parsed, status=int(exc.code))
+        return True
     except (OSError, URLError) as exc:
-        return bad(handler, f"gateway unreachable: {exc}", 503)
+        bad(handler, f"gateway unreachable: {exc}", 503)
+        return True
 
 
 def route(handler, parsed, method: str) -> bool:
@@ -75,8 +79,10 @@ def route(handler, parsed, method: str) -> bool:
         from api.jaeger_sessions import route as _sessions_route
     except ImportError:  # pragma: no cover — overlay not installed
         _sessions_route = None
-    if _sessions_route is not None and _sessions_route(handler, parsed, method):
-        return True
+    if _sessions_route is not None:
+        handled = _sessions_route(handler, parsed, method)
+        if handled is not False:
+            return True
 
     # Per-framework session index — each backend's own conversations, split by
     # where they were started. Served by the RUNNER, not the gateway.
