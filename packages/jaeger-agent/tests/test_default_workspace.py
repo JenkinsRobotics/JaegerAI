@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import pathlib
 
+import pytest
+
 from jaeger_agent import workspace
 
 
@@ -51,6 +53,42 @@ def test_bare_write_of_an_existing_workspace_file_stays_in_workspace(tmp_path) -
         assert fresh.is_relative_to(layout.skills_dir)
         prefixed = workspace._resolve_write("workspace/report.md")
         assert prefixed.is_relative_to(layout.workspace_dir)
+    finally:
+        workspace._layout = None
+
+
+def test_write_to_a_real_out_of_sandbox_path_raises_instead_of_phantom_404(
+    tmp_path, monkeypatch
+) -> None:
+    """A path that resolves to a REAL file outside workspace/skills (e.g.
+    framework code under packages/...) must raise SandboxError, not
+    silently re-root under skills_dir and 404.
+
+    Regression for the loop that hit production: the agent's own
+    dispatcher session (2026-09-22 03:06-03:11, cards card_6c9153233c and
+    card_14425a5598) called patch() on a real, existing file outside the
+    sandbox, got a misleading "not found", re-verified with read_file
+    (which succeeded — reads are unconfined), got confused by the
+    contradiction, and looped: 2 identical patch failures, then 4
+    identical workspace_read calls before the loop backstop halted the
+    turn. The fix must fail clearly on the FIRST attempt instead.
+    """
+    repo = tmp_path / "repo"
+    real_file = repo / "packages" / "real_pkg" / "file.py"
+    real_file.parent.mkdir(parents=True)
+    real_file.write_text("existing framework content\n")
+    monkeypatch.chdir(repo)
+
+    layout = workspace.DefaultWorkspace(tmp_path / "inst").create()
+    workspace.bind(layout)
+    try:
+        rel_path = "packages/real_pkg/file.py"
+        # Sanity: reads DO find the real file (unconfined, per docstring).
+        assert workspace._resolve_read(rel_path) == real_file.resolve()
+        # Writes must refuse it loudly, not silently target a phantom
+        # nonexistent path under skills_dir.
+        with pytest.raises(workspace.SandboxError):
+            workspace._resolve_write(rel_path)
     finally:
         workspace._layout = None
 

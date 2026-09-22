@@ -324,7 +324,35 @@ def _resolve_write(path: str) -> Path:
             existing = None
         if existing is not None and existing.exists():
             return existing
-    return _resolve_under(layout.skills_dir, path)
+    target = _resolve_under(layout.skills_dir, path)
+    if not target.exists():
+        # The path doesn't exist as a new-skill-file candidate under
+        # skills_dir — before treating it as "create a new file here",
+        # check whether it's actually a REAL file elsewhere (repo/
+        # framework code, e.g. packages/jaeger-agent/...). Reads are
+        # unconfined (see _resolve_read), so read_file(path) succeeds on
+        # framework files while this write path silently re-roots under
+        # skills_dir and 404s — the model sees "read confirms the text is
+        # there" and "patch says not found" as contradictory signals and
+        # loops (verified: dispatcher session 2026-09-22 03:06-03:11,
+        # card_6c9153233c and card_14425a5598 both hit this — "patch
+        # returning 'not found' despite the text being present in
+        # read_file" — 2 identical patch failures + 4 identical
+        # workspace_read calls before the loop backstop halted the turn).
+        # Raise a clear, distinct error instead of a misleading "not
+        # found" so the model can switch strategy on the first try.
+        try:
+            real = _resolve_read(path)
+        except SandboxError:
+            real = None
+        if real is not None and real.exists() and real != target:
+            raise SandboxError(
+                f"{path!r} exists but is outside the writable sandbox — "
+                "write tools only reach workspace/... or skills/... "
+                "(this looks like framework/repo code; edit it with "
+                "terminal/execute_code instead)"
+            )
+    return target
 
 
 def _resolve_read(path: str) -> Path:

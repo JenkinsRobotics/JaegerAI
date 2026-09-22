@@ -1475,9 +1475,37 @@ class JaegerGatewayApp:
             ],
             "stream": False,
         }
+        # Ollama Cloud models (":cloud" suffix, e.g. kimi-k2.7-code:cloud)
+        # require Authorization: Bearer <key>. This call never attached one,
+        # unlike every other model path in the codebase (see
+        # external_model.py:556) — confirmed root cause of real 401s
+        # ("Ollama chat HTTP 401: {\"error\":\"Unauthorized\"}\n") on the
+        # vision-test / non-image-doc-test sessions in
+        # gateway_sessions.sqlite3. Local Ollama needs no key, so an absent
+        # one is fine (matches external_model.py's `if key else {}`).
+        ollama_headers: dict[str, str] = {}
+        ollama_key = (
+            os.environ.get("OLLAMA_API_KEY")
+            or os.environ.get("OLLAMA_CLOUD_API_KEY")
+            or os.environ.get("OLLAMA_KEY")
+        )
+        if not ollama_key:
+            try:
+                from jaeger_ai.core.entity.runtime import EntityRuntime
+                from jaeger_agent import credentials as creds
+                layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+                if layout is not None:
+                    ollama_key = creds.get_credential(layout, "ollama_cloud_api_key") or None
+            except Exception:
+                ollama_key = None
+        if ollama_key:
+            ollama_headers["Authorization"] = f"Bearer {ollama_key}"
+
         timeout = ClientTimeout(total=90)
         async with ClientSession(timeout=timeout) as session:
-            async with session.post(f"{LOCKED_OLLAMA_URL}/api/chat", json=payload) as resp:
+            async with session.post(
+                f"{LOCKED_OLLAMA_URL}/api/chat", json=payload, headers=ollama_headers
+            ) as resp:
                 body = await resp.text()
                 if resp.status >= 400:
                     raise RuntimeError(
@@ -1615,7 +1643,20 @@ class JaegerGatewayApp:
                     current = self.store.get_session(session_id) or {}
                     chat_fut = asyncio.run_coroutine_threadsafe(
                         self._ollama_chat(
-                            prompt,
+                            # request_text, not prompt: prompt has been
+                            # rewritten by inline_webui_text_attachments to
+                            # say "inspect it with the vision_analyze tool",
+                            # a tool this bare _ollama_chat call never
+                            # attaches. The model spent its whole output
+                            # budget narrating a tool call it couldn't make
+                            # and returned empty content (verified against
+                            # real failures: session da59748d.../97afa8d5...,
+                            # "Ollama returned empty content", thinking cut
+                            # off mid-"I'll use visi[on_analyze]"). This path
+                            # already sends the image directly as base64 via
+                            # attachments=session_atts below, so it needs the
+                            # operator's actual question, not a tool note.
+                            request_text,
                             model=model,
                             system_prompt=system_prompt,
                             history=current.get("messages") or [],
