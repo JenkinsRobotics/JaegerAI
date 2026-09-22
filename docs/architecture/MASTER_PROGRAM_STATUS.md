@@ -49,7 +49,7 @@ ONE REQUEST
 | **GATE C** | **WS 10** | **Programmable Capability Layer** | **COMPLETED** | `9993b417` | 3/3 capabilities, 58/58 combined | CapabilityManifest (permissions, deps, tools, rollback, verification); CapabilityRegistry; installed, verified & removed without core edits |
 | **GATE C** | **WS 11** | **Capability Lifecycle & Self-Improvement** | **COMPLETED** | `3a41bd85` | 4/4 lifecycle, 62/62 combined | Candidate -> Sandbox -> Static AST Checks -> Unit Tests -> Evaluation -> Review -> Verified -> Installed; provenance tracking |
 | **GATE C** | **WS 12** | **Multi-Agent Architecture** | **COMPLETED** | `72e2f3c9` | 4/4 multi-agent, 66/66 combined | RuntimeHost (multi-entity concurrent hosting); private memory isolation; scoped delegation; cancellation; AgentMessage bus |
-| **GATE C** | **WS 13** | **Generic Device / Node Architecture** | PENDING | — | — | Device pairing, capabilities, and telemetry |
+| **GATE C** | **WS 13** | **Generic Device / Node Architecture** | **COMPLETED** | `in-progress` | 5/5 devices, 71/71 combined | DeviceRegistry (Mac, Web, Phone, Robot, Sensor); secure pairing tokens; revocation; capability negotiation; telemetry & stale detection |
 | **GATE C** | **WS 14** | **Provider Abstraction & Cognition Profiles** | PENDING | — | — | Canonical runtime inventory & cognition profiles |
 | **GATE C** | **WS 15** | **Durable Background Work & Scheduling** | PENDING | — | — | Resilient background jobs surviving restart |
 | **GATE D** | **WS 16** | **Observability & Provenance Tracing** | PENDING | — | — | End-to-end trace correlation |
