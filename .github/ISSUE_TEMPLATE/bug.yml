@@ -1,0 +1,44 @@
+name: Bug report
+description: A defect in Jaeger behavior, not a design discussion
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Observed behavior, including request/run/effect ids if you have them.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - Gateway
+        - EntityRuntime
+        - WebUI
+        - CLI
+        - Bridge
+        - Authority / effects
+        - Tests
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: sha
+    attributes:
+      label: Commit SHA
+      placeholder: pinocchio HEAD
+  - type: checkboxes
+    id: isolation
+    attributes:
+      label: Isolation
+      options:
+        - label: Reproduced with JAEGER_STATE_DIR (not operator ~/.jaeger) where possible
+        - label: This report contains no secrets or personal transcripts

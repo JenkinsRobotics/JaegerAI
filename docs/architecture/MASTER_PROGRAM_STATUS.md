@@ -69,8 +69,8 @@ ONE REQUEST
 | **GATE E** | **WS 21** | **Test-Suite Tiering & Determinism** | **COMPLETED** | `b8cbaeda` | 7/7 runner doctrine, 177/177 security, 44/44 production-path, 1/1 soak | `dev/scripts/run_tests.sh` flags are honest; RUN_PACKAGES gates package suites; production-path is kernel contracts not two unit files |
 | **GATE F** | **WS 22** | **Documentation Truth Pass** | **COMPLETED** | `ff5ab919` | 1/1 architecture truth doc | Canonical `ARCHITECTURE.md` classifies IMPLEMENTED / EXPERIMENTAL / PLANNED; unit tests are not production proof |
 | **GATE F** | **WS 23** | **Developer / Platform API** | **COMPLETED** | `1279edfa` | 6/6 platform API | `jaeger capability validate`, `jaeger provider doctor`, `jaeger device inspect` |
-| **GATE F** | **WS 24** | **Clean-Machine Release Validation** | **COMPLETED** | *(this commit)* | 3/3 isolated state | Isolated `JAEGER_STATE_DIR` identity + Gateway store; not a wiped macOS VM |
-| **GATE F** | **WS 25** | **Public-Release / Contributor Hardening** | PENDING | — | — | Contributor guide, license audit, release readiness |
+| **GATE F** | **WS 24** | **Clean-Machine Release Validation** | **COMPLETED** | `97a8f5dc` | 3/3 isolated state | Isolated `JAEGER_STATE_DIR` identity + Gateway store; not a wiped macOS VM |
+| **GATE F** | **WS 25** | **Public-Release / Contributor Hardening** | **COMPLETED** | *(this commit)* | 3/3 contributor files | CONTRIBUTING, extension guide, PR/issue templates |
 
 ---
 
@@ -88,3 +88,33 @@ ONE REQUEST
 - Workstreams 10–18 added module packages (capabilities, devices, RuntimeHost, eval/fault harnesses) whose unit tests pass. Production Gateway wiring of those packages is **experimental** unless a production-path or acceptance test names them.
 - Physical iPhone Face ID / PWA / photo picker remains operator-hardware-only (section 3).
 - PolicyKernel owns `pre_tool_call`. `AuthorityLayer` no longer registers `default_shell_hooks_policy` by default (double-fire defect).
+
+---
+
+## 5. Program summary (end of 25 workstreams)
+
+| Item | Value |
+| :--- | :--- |
+| Starting baseline | `b8c9312b` |
+| Branch | `pinocchio` (do not merge to `master`) |
+| WS-21 | `b8cbaeda` |
+| WS-22 | `ff5ab919` |
+| WS-23 | `1279edfa` |
+| WS-24 | `97a8f5dc` |
+| Architecture | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| Tests | [TEST_ARCHITECTURE.md](TEST_ARCHITECTURE.md) |
+
+### Verdict
+
+`JAEGER PLATFORM — NOT READY FOR PUBLIC TECHNICAL REVIEW`
+
+Concrete blockers:
+
+1. Capability registry, RuntimeHost, DeviceRegistry, and the new DurableTaskManager are unit-tested modules. They are not the production Gateway/cron path.
+2. Gateway `server.py` still contains residual turn helpers beside `EntityRuntime.execute_turn` / `run_subordinate_react`.
+3. External evaluation and fault-injection suites are harnesses. They do not include live published benchmark scores or SIGKILL of the operator Gateway.
+4. Clean-machine proof is isolated `JAEGER_STATE_DIR`, not a wiped macOS install with no `~/.jaeger`.
+5. Physical iPhone Face ID, PWA home-screen, Wi-Fi↔cellular, and native photo picker are unchecked.
+6. Typed contract schemas exist; not every control-plane frame validates on the wire.
+
+Do not treat Gates A–F checkboxes as production proof. Runtime evidence is listed per workstream and in ARCHITECTURE.md.
