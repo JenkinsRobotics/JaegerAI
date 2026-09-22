@@ -225,22 +225,6 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path in ("/api/jaeger/runtime/capabilities", "/api/runtime/capabilities"):
         return _proxy(handler, "GET", "/v1/runtime/capabilities")
 
-    if method == "GET" and path == "/api/models":
-        from api.profiles import get_active_profile_name
-        from jaeger_ai.contract.frameworks import UnknownFramework, canonical_runtime
-        try:
-            runtime = canonical_runtime(get_active_profile_name() or "jaeger")
-        except UnknownFramework:
-            runtime = "jaeger"
-        if runtime == "jaeger":
-            try:
-                from jaeger_ai.core.runtime.truth import webui_model_catalog
-                from api.helpers import j
-                j(handler, webui_model_catalog())
-                return True
-            except Exception:
-                return False
-
     if method == "GET" and path in ("/api/jaeger/approvals", "/v1/approvals"):
         return _proxy(handler, "GET", "/v1/approvals")
 
