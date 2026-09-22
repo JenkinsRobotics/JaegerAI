@@ -60,7 +60,8 @@ ONE REQUEST
 | **GATE D** | **WS 18** | **Fault Injection, Resilience & Soak** | **COMPLETED** | `4bb0e5c4` | 5/5 resilience, 94/94 combined | FaultInjectionEngine (timeout, 500 error, kill mid-effect idempotency, durable task recovery, 5-turn leak-free soak testing) |
 
 
-| **GATE E** | **WS 19** | **Security Hardening** | PENDING | — | — | Threat model, CSRF, passkeys, sandbox traversal |
+| **GATE E** | **WS 19** | **Security Hardening** | **COMPLETED** | *pending* | 6/6 security, 100/100 combined | Formalized THREAT_MODEL.md (6 trust domains); SafeArchiveExtractor (Zip Slip prevention); ToolArgumentSanitizer (command exploit & sandbox traversal checks); CsrfGuard |
+
 | **GATE E** | **WS 20** | **Repository Architecture Cleanup** | PENDING | — | — | Invert jaeger-agent dependencies, remove dead code |
 | **GATE E** | **WS 21** | **Test-Suite Tiering & Determinism** | PENDING | — | — | Tiered test commands (unit, integration, soak, etc.) |
 | **GATE F** | **WS 22** | **Documentation Truth Pass** | PENDING | — | **Implemented/Experimental/Planned/Deprecated** | Clean spec |
