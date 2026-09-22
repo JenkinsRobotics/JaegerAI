@@ -48,22 +48,33 @@ def prepare_turn_text(
     session_key: str = "",
     domain: bool = True,
     ledger: bool = True,
+    request: str | None = None,
 ) -> str:
     """Compact history if needed, then prepend domain + ledger blocks.
 
     The original ``user_text`` is unchanged for session transcripts —
     callers pass this prepared string only to the model loop.
+
+    ``request`` is the operator's own words when ``user_text`` arrives
+    already enriched (the Entity prefixes a ``<background>`` block of
+    recalled turns). Every decision here — skill routing, ledger, domain
+    recall, world admission — is about the request, so it reads
+    ``request``; only the returned model text carries the enrichment.
+    Routing on the enriched text auto-selected an 11 KB "Box" playbook and
+    opened a ledger named "<background> Reference only…" for "My favorite
+    color is teal" (live capture, 2026-09-22).
     """
     from jaeger_ai.core.runtime.continuation import is_continuation_prompt
 
-    continuing = is_continuation_prompt(user_text)
+    intent = user_text if request is None else request
+    continuing = is_continuation_prompt(intent)
     # Skill selection sees the request, never ledger/world scaffolding.
-    agent._skill_route_query = "" if continuing else user_text
+    agent._skill_route_query = "" if continuing else intent
     if not continuing:
-        agent._task_objective = user_text
+        agent._task_objective = intent
     compact_agent(agent)
     from jaeger_ai.core.runtime.autonomous_runner import conversation_only
-    ledger = ledger and not conversation_only(user_text)
+    ledger = ledger and not conversation_only(intent)
     parts: list[str] = []
     if ledger:
         try:
@@ -71,13 +82,13 @@ def prepare_turn_text(
                 ACCEPTANCE_GUIDANCE,
                 ensure_autonomous_ledger,
             )
-            opened = ensure_autonomous_ledger(user_text)
+            opened = ensure_autonomous_ledger(intent)
             if opened is not None:
                 parts.append(ACCEPTANCE_GUIDANCE)
         except Exception:  # noqa: BLE001 — setup must never lose the request
             pass
     if domain and not continuing and is_primary_session(session_key):
-        extra = domain_block(user_text, session_key=session_key)
+        extra = domain_block(intent, session_key=session_key)
         if extra:
             parts.append(extra)
     if ledger:
@@ -94,7 +105,7 @@ def prepare_turn_text(
     if sqlite_store.is_bound() and not continuing:
         from jaeger_agent.cognition.world import WorldEvent, WorldModel
         from jaeger_agent.memory.sqlite_knowledge import SqliteKnowledgeStore
-        event = WorldEvent.for_session(user_text, session_key)
+        event = WorldEvent.for_session(intent, session_key)
         agent._world_event = event
         world = WorldModel(SqliteKnowledgeStore())
         packet = world.prepare(event)

@@ -212,7 +212,8 @@ def test_short_worker_task_exits_after_one_settled_turn():
         object(), "what's the capital of France?", turn_fn=_turn, max_steps=10,
     )
     assert len(calls) == 1
-    assert out["halt_reason"] == "settled"
+    assert out["halt_reason"] is None
+    assert out["controller_reason"] == "settled"
     assert out["steps"] == 1
 
 
@@ -262,7 +263,8 @@ def test_worker_loops_fifty_items_without_a_reprompt():
         turn_fn=_turn,
         max_steps=20,
     )
-    assert out["halt_reason"] == "complete_task"
+    assert out["halt_reason"] is None
+    assert out["controller_reason"] == "complete_task"
     assert out["steps"] == 5  # 10 items per turn × 5
     assert out["summary"] == "processed 50 items"
     assert out["text"] == "processed 50 items"
@@ -290,7 +292,8 @@ def test_question_stops_the_worker():
     out = run_worker_goal(
         object(), "process all 20 items", turn_fn=_turn, max_steps=10,
     )
-    assert out["halt_reason"] == "settled" or out["steps"] == 1
+    assert out["controller_reason"] == "question"
+    assert out["halt_reason"] == "question"  # stopped short, not completed
     assert out["steps"] == 1
 
 
@@ -307,3 +310,56 @@ def test_harness_prompt_carries_progress():
 def test_terminal_native_failure_cannot_restart_through_open_ledger(halt):
     assert next_continuation_prompt('', force_ledger=True, halt_reason=halt, steps_left=10) is None
     assert next_continuation_prompt('', isolated=True, batch=True, halt_reason=halt, steps_left=10) is None
+
+
+def test_recalled_background_does_not_make_a_question_actionable(monkeypatch):
+    """Intent comes from the operator's words, not the enriched prompt.
+
+    Live regression (WebUI, 2026-09-22): "Use a tool to check the current
+    date and time" answered correctly, then failed ``awaiting_approval:
+    blocked`` because recalled history above it contained "run"/"fix" and
+    the classifier promoted the whole prompt to a ledgered task.
+    """
+    import jaeger_ai.main as main
+    from jaeger_ai.core.entity.cognition_router import _with_background
+
+    request = "Use a tool to check the current date and time, then tell me."
+    enriched = _with_background(
+        request, {"durable_recall": "user: run the tests and fix the bug"}
+    )
+    assert is_actionable_request(enriched)  # the trap this test guards
+    assert not is_actionable_request(request)
+
+    assert main._run_actionable_turn(
+        object(), enriched, session_key="test", allow_persona=False,
+        request=request,
+    ) is None
+    assert work_ledger.active_ledger() is None
+
+
+def test_prepare_turn_text_routes_on_the_request_not_the_background():
+    """Skill routing and the ledger read the operator's words.
+
+    Live capture (2026-09-22): routing on the enriched prompt picked an
+    11 KB "Box" playbook and opened a ledger named "<background> …" for
+    "My favorite color is teal".
+    """
+    from jaeger_ai.core.entity.cognition_router import _with_background
+    from jaeger_ai.features.dispatcher import router
+
+    class Agent:
+        messages: list = []
+
+    request = "My favorite color is teal. Just acknowledge."
+    enriched = _with_background(
+        request, {"durable_recall": "user: run the tests and fix the bug"}
+    )
+    agent = Agent()
+    prepared = router.prepare_turn_text(
+        agent, enriched, session_key="webui-x", domain=False, request=request,
+    )
+    assert agent._skill_route_query == request
+    assert agent._task_objective == request
+    assert work_ledger.active_ledger() is None
+    assert ACCEPTANCE_GUIDANCE not in prepared
+    assert prepared.endswith(enriched)

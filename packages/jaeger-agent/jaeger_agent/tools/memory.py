@@ -90,6 +90,11 @@ def search_memory(query: str, k: int = 5) -> dict[str, Any]:
     about yesterday?" or "what's that thing I mentioned about the
     printer?". Returns up to k past turns with cosine-similarity scores.
 
+    Results span EVERY past conversation. ``this_conversation`` is true
+    only for turns from the one you are in; anything else happened
+    elsewhere. For "what did I just say" in this conversation, read the
+    message thread instead of searching.
+
     Index is built lazily on first call from episodic.jsonl and cached
     on disk; subsequent calls reuse the cache until the log changes."""
     clean = (query or "").strip()
@@ -100,6 +105,12 @@ def search_memory(query: str, k: int = 5) -> dict[str, Any]:
     except AttributeError:
         # Older memory module without semantic search — graceful fall-through.
         return {"found": 0, "results": [], "error": "search_memory not available in this build"}
+    # Unlabelled hits let a model answer "what did I first ask you in this
+    # conversation?" with another session's turn (live WebUI, 2026-09-22).
+    from jaeger_agent.workspace import get_current_session
+    current = get_current_session()
+    for hit in hits:
+        hit["this_conversation"] = bool(current) and hit.get("session") == current
     return {"found": len(hits), "query": clean, "results": hits}
 
 

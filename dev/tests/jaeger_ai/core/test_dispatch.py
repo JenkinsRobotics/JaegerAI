@@ -69,7 +69,8 @@ def test_twenty_step_worker_returns_a_clean_summary():
         turn_fn=_batch_turn(20, per_turn=4),
         max_steps=20,
     )
-    assert out["halt_reason"] == "complete_task"
+    assert out["halt_reason"] is None
+    assert out["controller_reason"] == "complete_task"
     assert out["steps"] == 5
     assert out["summary"] == "processed 20 items"
     assert "▸ work_ledger" in "".join(str(x) for x in out["tool_activity"])

@@ -60,7 +60,8 @@ def test_run_to_completion_reaches_completed_on_complete_task():
     assert packed["status"] == AgentState.COMPLETED
     assert packed["state"] is AgentState.COMPLETED
     assert packed["steps"] == 5
-    assert packed["output"]["halt_reason"] == "complete_task"
+    assert packed["output"]["halt_reason"] is None
+    assert packed["output"]["controller_reason"] == "complete_task"
     assert packed["output"]["summary"] == "processed 50 items"
 
 
@@ -91,7 +92,8 @@ def test_prose_complete_does_not_exit_an_open_batch():
     ).run_to_completion("process all 4 items", "delegate")
     assert calls["n"] > 1
     assert packed["status"] == AgentState.COMPLETED
-    assert packed["output"]["halt_reason"] == "complete_task"
+    assert packed["output"]["halt_reason"] is None
+    assert packed["output"]["controller_reason"] == "complete_task"
 
 
 def test_a_question_is_awaiting_approval_not_completed():
