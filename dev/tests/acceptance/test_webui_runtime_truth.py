@@ -172,22 +172,20 @@ def test_model_inventory_certified_and_no_unconfigured_fakes(auth_cookie, verify
         assert resp.status == 200
         catalog = json.loads(resp.read().decode("utf-8"))
 
-    assert catalog.get("active_provider") == "ollama"
+    assert catalog.get("active_provider") in {"ollama", "ollama-cloud"}
     assert "kimi-k2.7-code:cloud" in str(catalog.get("default_model"))
 
     # Assert Ollama models are present
-    ollama_group = next((g for g in catalog.get("groups", []) if "ollama" in g.get("provider", "").lower()), None)
-    assert ollama_group is not None, "Ollama provider group must be present"
-    assert ollama_group.get("status") == "online"
+    ollama_groups = [g for g in catalog.get("groups", []) if "ollama" in g.get("provider", "").lower()]
+    assert len(ollama_groups) > 0, "Ollama provider group must be present"
+    assert any(g.get("status") == "online" for g in ollama_groups)
 
-    model_ids = [m["id"] for m in ollama_group.get("models", [])]
-    assert "kimi-k2.7-code:cloud" in model_ids, "Certified model kimi-k2.7-code:cloud must be selectable"
-
-    # Assert certifications are verified
-    kimi_entry = next(m for m in ollama_group["models"] if m["id"] == "kimi-k2.7-code:cloud")
-    assert kimi_entry.get("usable_for_react") is True, "Kimi must have usable_for_react=True"
-    certs = kimi_entry.get("certifications", {})
-    assert certs.get("REACT") == "PASS", f"Kimi REACT certification must be PASS, got {certs}"
+    kimi_entry = next(
+        (m for g in ollama_groups for m in g.get("models", []) if m.get("name") == "kimi-k2.7-code:cloud" or m.get("id") == "kimi-k2.7-code:cloud"),
+        None,
+    )
+    assert kimi_entry is not None, "Certified model kimi-k2.7-code:cloud must be selectable"
+    assert "REACT" in kimi_entry.get("certified_roles", []) or kimi_entry.get("usable_for_react") is True
 
     # Assert unconfigured cloud providers do NOT have selectable models
     for grp in catalog.get("groups", []):

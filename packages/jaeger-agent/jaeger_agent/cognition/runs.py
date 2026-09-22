@@ -225,8 +225,8 @@ class InMemoryRunStore:
         check_wait(new_state, wake_key)
         run.state = new_state
         run.reason = reason
-        run.wake_key = wake_key if new_state == "waiting_for_event" else None
-        if new_state != "active":
+        run.wake_key = wake_key if (wake_key and new_state in {"waiting_for_event", "waiting_for_user", "waiting_for_approval"}) else None
+        if new_state not in {"active", "running", "verifying"}:
             run.owner_pid = None  # the claim ends with the activity
         run.updated_at = _now()
         return run
@@ -277,8 +277,9 @@ class InMemoryRunStore:
 
     def deliver_event(self, wake_key: str) -> list[Run]:
         waiting = [
-            r for r in self.list(state="waiting_for_event")
-            if r.wake_key == wake_key
+            r for r in self.list()
+            if r.state in {"waiting_for_event", "waiting_for_user", "waiting_for_approval"}
+            and r.wake_key == wake_key
         ]
         woken = []
         for run in waiting:

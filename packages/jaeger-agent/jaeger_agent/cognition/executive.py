@@ -80,12 +80,16 @@ class TurnExecutive:
                     self.runs.heartbeat(existing.id, owner_pid=os.getpid())
                     return existing
         open_commitments = [
-            item for item in self.commitments.list(state="active")
-            if item.kind == TURN_LOOP_KIND
+            item for item in self.commitments.list()
+            if item.kind == TURN_LOOP_KIND and item.state in {"created", "active"}
         ]
-        commitment = open_commitments[0] if open_commitments else self.commitments.create(
-            TURN_LOOP_KIND, kind=TURN_LOOP_KIND,
-        )
+        if open_commitments:
+            commitment = open_commitments[0]
+            if commitment.state == "created":
+                commitment = self.commitments.transition(commitment.id, "active")
+        else:
+            commitment = self.commitments.create(TURN_LOOP_KIND, kind=TURN_LOOP_KIND)
+            commitment = self.commitments.transition(commitment.id, "active")
         active = self.runs.list(commitment_id=commitment.id, state="active")
         if active:
             run = active[0]

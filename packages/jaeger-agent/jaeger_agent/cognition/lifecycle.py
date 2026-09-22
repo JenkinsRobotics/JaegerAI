@@ -23,11 +23,17 @@ from datetime import datetime, timezone
 
 STATES = (
     "created",
+    "queued",
     "active",
+    "running",
     "waiting_for_user",
+    "waiting_for_approval",
     "waiting_for_event",
+    "verifying",
     "blocked",
     "paused",
+    "interrupted",
+    "recoverable",
     "completed",
     "failed",
     "cancelled",
@@ -41,24 +47,36 @@ TERMINAL = frozenset({"completed", "cancelled"})
 # outage is not a verdict on the goal.
 RESUMABLE = frozenset({
     "waiting_for_user",
+    "waiting_for_approval",
     "waiting_for_event",
     "blocked",
     "paused",
+    "interrupted",
+    "recoverable",
     "failed",
 })
 
 ALLOWED: dict[str, frozenset[str]] = {
-    "created": frozenset({"active", "cancelled"}),
+    "created": frozenset({"active", "running", "queued", "cancelled"}),
+    "queued": frozenset({"active", "running", "cancelled", "interrupted"}),
     "active": frozenset({
-        "waiting_for_user", "waiting_for_event", "blocked",
-        "paused", "completed", "failed", "cancelled",
+        "waiting_for_user", "waiting_for_approval", "waiting_for_event",
+        "verifying", "blocked", "paused", "interrupted", "completed", "failed", "cancelled",
     }),
-    "waiting_for_user": frozenset({"active", "cancelled", "failed"}),
-    "waiting_for_event": frozenset({"active", "cancelled", "failed"}),
-    "blocked": frozenset({"active", "cancelled", "failed"}),
-    "paused": frozenset({"active", "cancelled"}),
+    "running": frozenset({
+        "waiting_for_user", "waiting_for_approval", "waiting_for_event",
+        "verifying", "blocked", "paused", "interrupted", "completed", "failed", "cancelled",
+    }),
+    "waiting_for_user": frozenset({"active", "running", "cancelled", "failed", "interrupted"}),
+    "waiting_for_approval": frozenset({"active", "running", "cancelled", "failed", "interrupted"}),
+    "waiting_for_event": frozenset({"active", "running", "cancelled", "failed", "interrupted"}),
+    "verifying": frozenset({"active", "running", "completed", "failed", "cancelled", "interrupted"}),
+    "blocked": frozenset({"active", "running", "cancelled", "failed", "recoverable"}),
+    "paused": frozenset({"active", "running", "cancelled"}),
+    "interrupted": frozenset({"recoverable", "active", "running", "failed", "cancelled"}),
+    "recoverable": frozenset({"active", "running", "queued", "cancelled", "failed"}),
     "completed": frozenset(),
-    "failed": frozenset({"active"}),
+    "failed": frozenset({"active", "running", "recoverable"}),
     "cancelled": frozenset(),
 }
 
