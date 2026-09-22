@@ -434,6 +434,7 @@ def stack_up(services: list[ServiceDef] | None = None, wait_timeout: float = 25.
     """Bring the stack up: migrate legacy plists, bootstrap into launchd, wait for health."""
     target = services or STACK_SERVICES
     domain = get_user_domain()
+    head = _current_git_commit()
 
     # Step 1: Migrate legacy LaunchAgents
     migrate_legacy_launchagents()
