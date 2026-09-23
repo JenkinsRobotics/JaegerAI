@@ -75,14 +75,23 @@ jobs:
             whisper) python -m pip install -e packages/jaeger-os -e packages/jaeger-whisper-stt pytest ;;
           esac
       - name: Test suite
+        # Same runner as local development: pinned env, isolated state root,
+        # no bytecode in the tree, live acceptance excluded, exact tiers.
         run: |
           case "${{ matrix.suite }}" in
-            root) python -m pytest dev/tests -q ;;
-            agent) python -m pytest packages/jaeger-agent/tests -q ;;
-            os) cd packages/jaeger-os && python -m pytest dev/tests -q ;;
-            kokoro) cd packages/jaeger-kokoro-tts && python -m pytest -q ;;
-            whisper) cd packages/jaeger-whisper-stt && python -m pytest -q ;;
+            root)
+              dev/scripts/run_tests.sh --unit
+              dev/scripts/run_tests.sh --integration -- \
+                dev/tests/jaeger_ai/core/test_gateway_daemon.py \
+                dev/tests/jaeger_ai/core/test_gateway_process_recovery.py \
+                dev/tests/jaeger_ai/core/test_gateway_owned_process_contract.py
+              ;;
+            *) dev/scripts/run_tests.sh --package "${{ matrix.suite }}" ;;
           esac
+      - name: No runtime junk in the checkout
+        run: |
+          junk="$(git status --porcelain --ignored | grep -E '__pycache__|\.pytest_cache|\.jaeger_ai|\.jaeger_agent' || true)"
+          if [ -n "$junk" ]; then echo "$junk"; exit 1; fi
       - name: Critical static and dependency security gates
         if: matrix.suite == 'root' && matrix.python == '3.11'
         run: |
@@ -98,8 +107,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build and test native app
-        working-directory: jaeger_ai/interfaces/swift
-        run: swift test
+        # External scratch path (no in-tree .build); DispatcherLiveTests drive
+        # launchctl against operator services and stay unqualified until they
+        # are migrated to an owned fixture.
+        run: |
+          swift test --package-path jaeger_ai/interfaces/swift \
+            --scratch-path "$RUNNER_TEMP/swift-build" \
+            --skip DispatcherLiveTests
   release-artifacts:
     name: Build and inspect distributions
     runs-on: ubuntu-latest
@@ -113,11 +127,11 @@ jobs:
       - run: python -m pip install build
       - name: Build distributions from clean checkout
         run: |
-          mkdir -p dist/all
+          mkdir -p "$RUNNER_TEMP/dist"
           for project in packages/jaeger-os packages/jaeger-agent packages/jaeger-kokoro-tts packages/jaeger-whisper-stt .; do
-            python -m build "$project" --outdir "$PWD/dist/all"
+            python -m build "$project" --outdir "$RUNNER_TEMP/dist"
           done
       - name: Reject unsafe artifact contents
-        run: python dev/scripts/inspect_release_artifacts.py dist/all
+        run: python dev/scripts/inspect_release_artifacts.py "$RUNNER_TEMP/dist"
       - name: Installer and test-runner syntax
         run: bash -n install.sh scripts/*.sh dev/scripts/*.sh

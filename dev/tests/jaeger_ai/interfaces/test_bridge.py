@@ -307,6 +307,58 @@ def test_fast_ready_then_agent_state_then_turn(monkeypatch):
     assert boot.cleaned is True  # graceful teardown ran
 
 
+def test_gateway_turn_forwards_display_text_subordinate_and_empty_attachments():
+    captured: dict = {}
+
+    class FakeGateway:
+        def stream_turn(self, session, text, *, on_event, request_id=None, **choices):
+            captured.update(session=session, text=text, request_id=request_id, **choices)
+            from jaeger_ai.core.gateway.client import TurnResult
+            return TurnResult(request_id or "r", "completed", "ok")
+
+        def resolve_approval(self, *a, **k):
+            return {}
+
+    ctx = bridge._Ctx()
+    ctx.gateway = FakeGateway()
+    req = {
+        "display_text": "visible question",
+        "is_subordinate": True,
+        "attachment_ids": [],
+        "allowed_tools": [],
+    }
+    result = bridge._gateway_turn(
+        io.StringIO(), ctx, req, "[directive] visible question", "sess", "rid-1",
+    )
+    assert result["text"] == "ok"
+    assert captured["display_text"] == "visible question"
+    assert captured["is_subordinate"] is True
+    assert captured["attachment_ids"] == []
+    assert captured["allowed_tools"] == []
+    assert captured["text"] == "[directive] visible question"
+
+
+def test_gateway_turn_omits_absent_display_subordinate_and_attachment_fields():
+    captured: dict = {}
+
+    class FakeGateway:
+        def stream_turn(self, session, text, *, on_event, request_id=None, **choices):
+            captured.update(choices)
+            from jaeger_ai.core.gateway.client import TurnResult
+            return TurnResult(request_id or "r", "completed", "ok")
+
+        def resolve_approval(self, *a, **k):
+            return {}
+
+    ctx = bridge._Ctx()
+    ctx.gateway = FakeGateway()
+    bridge._gateway_turn(io.StringIO(), ctx, {}, "hello", "sess", "rid-2")
+    assert "display_text" not in captured
+    assert "is_subordinate" not in captured
+    assert "attachment_ids" not in captured
+    assert "allowed_tools" not in captured
+
+
 def test_turn_executes_enriched_prompt_but_persists_display_text(monkeypatch):
     seen = {}
 
@@ -580,6 +632,7 @@ def test_bridge_starts_and_stops_cron_and_surfaces_fired_reminder(monkeypatch):
     ``_pipeline['llm_lock']`` internally, so handing the SAME lock here
     would deadlock the fired turn."""
     _FakeCron.instances.clear()
+    monkeypatch.setenv("JAEGER_BACKGROUND_PRODUCERS", "1")
     monkeypatch.setattr(
         "jaeger_agent.background.cron_runner.CronRunner", _FakeCron,
         raising=False)
@@ -599,6 +652,43 @@ def test_bridge_starts_and_stops_cron_and_surfaces_fired_reminder(monkeypatch):
                     if f["type"] == "reply" and f["session"] == "cron:reminder"]
     assert cron_replies, f"no cron reply frame surfaced: {frames}"
     assert cron_replies[0]["text"] == "echo:check the logs"
+
+
+def test_gateway_execution_bridge_does_not_start_cron(monkeypatch):
+    _FakeCron.instances.clear()
+    monkeypatch.setenv("JAEGER_BRIDGE_EXECUTION", "gateway")
+    monkeypatch.setenv("JAEGER_GATEWAY_URL", "http://127.0.0.1:1")
+    monkeypatch.setattr(
+        "jaeger_agent.background.cron_runner.CronRunner", _FakeCron, raising=False,
+    )
+    rc, frames, _ = _run(monkeypatch, '{"op":"quit"}\n')
+    assert rc == 1
+    assert _FakeCron.instances == []
+    assert any(f.get("type") == "agent_state" and f.get("state") == "failed" for f in frames)
+    assert any(f.get("type") == "fatal" and f.get("kind") == "gateway" for f in frames)
+
+
+def test_local_bridge_skips_cron_when_producer_lease_is_held(monkeypatch):
+    import fcntl
+
+    from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+    from jaeger_ai.core.runtime.background_producers import LOCK_NAME
+
+    _FakeCron.instances.clear()
+    layout = InstanceLayout(resolve_instance_dir("test-inst"))
+    layout.ensure_dirs()
+    lock = (layout.run_dir / LOCK_NAME).open("a+")
+    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        monkeypatch.setattr(
+            "jaeger_agent.background.cron_runner.CronRunner", _FakeCron, raising=False,
+        )
+        rc, _, _ = _run(monkeypatch, '{"op":"quit"}\n')
+        assert rc == 0
+        assert _FakeCron.instances == []
+    finally:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        lock.close()
 
 
 def test_no_instance_streams_failed_then_no_instance_fatal(monkeypatch, tmp_path):

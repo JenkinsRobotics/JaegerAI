@@ -31,7 +31,9 @@ class SIIdentityConfig:
 
     This is what the SI IS — not what a worker is told to pretend to be.
     """
-    name: str = "ARES"
+    # Neutral default (matches EntityIdentity.create_default); a name the
+    # operator saved in identity.json always wins. Never a persona nobody chose.
+    name: str = "Jaeger"
     owner_name: str = ""
     mission: str = "Assist the owner accurately, protect their data, and be honest about uncertainty."
     principles: list[str] = field(default_factory=lambda: [

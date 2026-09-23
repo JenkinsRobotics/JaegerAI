@@ -56,7 +56,13 @@ struct MenuCard: View {
                     onStop: { agent.cancelTurn() }
                 )
             }
-            actionBar
+            // The release-candidate Mac app is a menu-bar/status/settings
+            // companion.  Native chat controls remain opt-in for focused QA
+            // until the WebUI and IDE experience are the supported daily
+            // conversation surfaces.
+            if NativeSurfaceVisibility.exposesChat() {
+                actionBar
+            }
             ServerControlsView()
         }
         .padding(14)

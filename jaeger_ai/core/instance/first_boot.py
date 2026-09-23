@@ -508,6 +508,7 @@ def record_q2(
     # must not introduce the SI before the resident OS is proven.
     if entering_commissioning:
         _calibrate_stance(instance_root)
+        initialize_persona_name(instance_root)
     return status(instance_root)
 
 

@@ -92,7 +92,10 @@ def image_session(app, tmp_path, monkeypatch):
 
     def owner_react(prompt, **kwargs):
         lanes.append("entity_react")
-        return "saved workspace/audit/task_g/phrase.txt"
+        return {
+            "text": "saved workspace/audit/task_g/phrase.txt",
+            "halt_reason": None,
+        }
 
     monkeypatch.setattr(app, "_ollama_chat", vision_chat)
     monkeypatch.setattr(app, "_native_lead_turn", no_native)
@@ -144,7 +147,14 @@ async def test_an_image_name_in_recalled_history_does_not_make_an_image_turn(app
 
     monkeypatch.setattr(app, "_ollama_chat", vision_chat)
     monkeypatch.setattr(app, "_native_lead_turn", no_native)
-    monkeypatch.setattr(app, "_owner_react_turn", lambda prompt, **kw: lanes.append("entity_react") or "NOVA")
+    monkeypatch.setattr(
+        app,
+        "_owner_react_turn",
+        lambda prompt, **kw: (
+            lanes.append("entity_react")
+            or {"text": "NOVA", "halt_reason": None}
+        ),
+    )
     monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: _RecallingRuntime()))
     monkeypatch.setattr(EntityRuntime, "subordinate_model_name", lambda self: "ollama:test", raising=False)
     admitted = app.store.admit_request("s", "What is my audit memory token?", request_id="r5")

@@ -170,6 +170,16 @@ class TurnExecutive:
                 self.runs.transition(run.id, "completed")
             except Exception:
                 pass
+        elif self.agent.last_halt_reason == "interrupted":
+            # The turn was stopped, not finished. Close the run so it is not
+            # left "active" forever: cancelled when every claimed effect has
+            # an outcome (completed effects stay recorded in the ledger), or
+            # interrupted — non-terminal, reconcilable — when one is pending.
+            state = "interrupted" if self._pending_effects(run.id) else "cancelled"
+            try:
+                self.runs.transition(run.id, state, reason="interrupted")
+            except Exception:
+                pass
         if self.claims is not None:
             self.claims.add_claim(Claim.create(
                 subject="agent", predicate="responded", value=result[:2000],

@@ -319,7 +319,7 @@ def select_client(default: Any, config: Any, layout: Any, model: str | None = No
 
     selected = str(model).strip()
     current = str(getattr(default, "model_name", "") or "")
-    if selected.lower() in ("default", "jaeger", "local", "none") or selected == current:
+    if selected.lower() in ("default", "jaeger", "local", "none") or (selected == current and not provider):
         return default
 
     owner = normalize_ollama_provider(str(provider or "").strip().lower())
@@ -437,4 +437,3 @@ __all__ = [
     "resolve_ollama_base_url",
     "select_client",
 ]
-

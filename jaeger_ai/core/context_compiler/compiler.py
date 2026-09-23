@@ -15,9 +15,11 @@ Invariants:
 """
 from __future__ import annotations
 
+import json
 import math
-from typing import Any, Mapping
-from .models import ContextItem, CompiledContext
+from typing import Any
+
+from .models import CompiledContext, ContextItem
 from .provenance import MemoryProvenance
 
 
@@ -34,6 +36,75 @@ class ContextCompiler:
         if not text:
             return 0
         return max(1, math.ceil(len(text) / self.CHARS_PER_TOKEN))
+
+    @staticmethod
+    def project_conversation_history(
+        messages: list[dict[str, Any]] | None,
+        *,
+        current_user_is_last: bool = False,
+        max_messages: int = 24,
+        max_chars: int = 12_000,
+    ) -> str:
+        """Project the authoritative current-session transcript for cognition.
+
+        The Gateway persists conversation messages, while the subordinate
+        JaegerAgent used by the owner runtime is intentionally rebuilt for a
+        request.  This projection reconnects those two ownership boundaries so
+        a restarted owner receives the same prior user/assistant turns.  It is
+        bounded JSON; the current admitted user message is omitted when it is
+        already the final row, because the cognition handler appends that
+        request separately. JSON string escaping prevents stored content from
+        forging another transcript row or the surrounding prompt delimiters.
+        """
+        rows = [row for row in (messages or []) if isinstance(row, dict)]
+        if current_user_is_last and rows and str(rows[-1].get("role") or "") == "user":
+            rows = rows[:-1]
+        limit = max(0, int(max_messages))
+        if limit == 0:
+            return ""
+        rows = rows[-limit:]
+        char_limit = max(0, int(max_chars))
+        if char_limit < 2:
+            return ""
+
+        def encode(items: list[dict[str, str]]) -> str:
+            # Escaping angle brackets keeps a quoted transcript value from
+            # spelling ``</conversation_history>`` in the outer prompt.
+            return (
+                json.dumps(items, ensure_ascii=True, separators=(",", ":"))
+                .replace("<", "\\u003c")
+                .replace(">", "\\u003e")
+                .replace("&", "\\u0026")
+            )
+
+        selected: list[dict[str, str]] = []
+        for row in reversed(rows):
+            role = str(row.get("role") or "").strip().lower()
+            if role not in {"user", "assistant"}:
+                continue
+            content = str(row.get("content") or row.get("text") or "").strip()
+            if not content:
+                continue
+            candidate = [{"role": role, "content": content}, *selected]
+            if len(encode(candidate)) <= char_limit:
+                selected = candidate
+                continue
+
+            # Keep the newest suffix of the oldest included row. Binary search
+            # preserves valid JSON even when escaping expands a character.
+            low, high = 0, len(content)
+            while low < high:
+                size = (low + high + 1) // 2
+                partial = [{"role": role, "content": content[-size:]}, *selected]
+                if len(encode(partial)) <= char_limit:
+                    low = size
+                else:
+                    high = size - 1
+            if low:
+                selected = [{"role": role, "content": content[-low:]}, *selected]
+                break
+            break
+        return encode(selected) if selected else ""
 
     def select(
         self,

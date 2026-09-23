@@ -23,6 +23,26 @@ def test_external_pick_preserves_instance_config_and_other_client(monkeypatch):
     assert select_client(default,config,None,'original','ollama') is default
 
 
+def test_same_named_model_can_switch_provider_without_mutating_default(monkeypatch):
+    from jaeger_ai.core.models import external_model
+
+    config = Config(instance_name="test", model={"model_path": "test.gguf"})
+    config.external_model.enabled = True
+    config.external_model.provider = "openai"
+    config.external_model.model = "shared-model"
+    original = config.model_dump()
+    default = SimpleNamespace(model_name="shared-model", provider="openai")
+    monkeypatch.setattr(external_model, "ExternalModelClient", lambda ext, layout: SimpleNamespace(
+        ext=ext, model_name=ext.model, provider=ext.provider,
+    ))
+    selected = select_client(default, config, None, "shared-model", "lmstudio")
+    assert selected is not default
+    assert selected.provider == "lmstudio"
+    assert selected.model_name == "shared-model"
+    assert config.model_dump() == original
+    assert select_client(default, config, None, "shared-model", None) is default
+
+
 def test_conversation_pick_preserves_history_and_does_not_change_another_session(monkeypatch):
     from jaeger_ai import main
     from jaeger_ai.core import sessions
@@ -41,7 +61,9 @@ def test_conversation_pick_preserves_history_and_does_not_change_another_session
         main._jaeger_agents_by_session.pop(session,None)
         main._session_model_clients.pop(session,None)
     monkeypatch.setattr(main,'evict_session',evict)
-    def turn(client,text,session_key):
+    def turn(client, text, session_key, *, request_id=None, is_subordinate=False):
+        assert request_id is None
+        assert is_subordinate is False
         agent=main._jaeger_agents_by_session.setdefault(session_key,SimpleNamespace(messages=main._carried_session_messages.pop(session_key,[])))
         agent.messages.append(text)
         picks.append((session_key,client.model_name,list(agent.messages)))

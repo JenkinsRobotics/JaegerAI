@@ -270,3 +270,26 @@ def test_computer_do_accepts_a_list_of_action_dicts():
     assert out["ok"] is True
     assert len(out["steps"]) == 2
     assert step1.execute_count == 2
+
+
+def test_vision_engine_callable_contract_delegates_to_computer_use(monkeypatch):
+    """Verify VisionEngine delegates to computer_use module without AttributeError."""
+    from jaeger_agent.skills.macos_computer_v1.engines.vision_engine import VisionEngine
+    from jaeger_agent.skills.computer_use_v1 import computer_use as cu
+
+    monkeypatch.setattr(cu, "click", lambda x, y: {"ok": True, "clicked": [x, y]})
+    monkeypatch.setattr(cu, "type_text", lambda text: {"ok": True, "typed": len(text)})
+    monkeypatch.setattr(cu, "screenshot", lambda path: {"ok": True, "path": path})
+
+    engine = VisionEngine()
+    r_click = engine.execute(Action(kind="click_xy", args={"x": 100, "y": 200}, target=""))
+    assert r_click.ok is True
+    assert r_click.result.get("clicked") == [100, 200]
+
+    r_type = engine.execute(Action(kind="type_text", args={"text": "hello"}, target=""))
+    assert r_type.ok is True
+    assert r_type.result.get("typed") == 5
+
+    r_shot = engine.execute(Action(kind="screenshot", args={"path": "test.png"}, target=""))
+    assert r_shot.ok is True
+    assert r_shot.result.get("path") == "test.png"

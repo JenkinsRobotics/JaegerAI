@@ -16,8 +16,10 @@ This runner is the missing outer loop. It owns control between turns:
 
 Ordinary ``/auto`` stall-detection (a narrated promise with no ledger)
 stays in :mod:`jaeger_ai.core.runtime.continuation` — this module does
-not replace it. Surfaces that already loop (the TUI worker) call
-:func:`next_continuation_prompt`; the bridge and ``run_command`` call
+not replace it. The canonical execution owner calls
+:func:`run_continued_turn` around a single inner ReAct step. Surfaces
+that still loop locally (the TUI worker) call
+:func:`next_continuation_prompt`; ``run_command`` calls
 :class:`AutonomousGoalRunner`.
 """
 
@@ -446,6 +448,71 @@ def next_continuation_prompt(
     return continuation.continuation_prompt(execution.run_progress()["objective"])
 
 
+def run_continued_turn(
+    turn_fn: TurnFn,
+    prompt: str,
+    *,
+    objective: str = "",
+    is_cancelled: Callable[[], bool] | None = None,
+    max_steps: int | None = None,
+) -> dict[str, Any]:
+    """Re-fire one inner turn until the stall/ledger rule says stop.
+
+    This is the owner-side loop the local bridge used to run around
+    ``run_for_voice``. One admitted request, several inner steps, one
+    accumulated answer. Continuation prompts are not new user messages
+    and must not be persisted as such. Cancellation, a loop-breaker
+    halt, a turn error, or the step budget ends the run.
+    """
+    from jaeger_ai.core.runtime.work_ledger import pause_active_ledger
+
+    current = prompt
+    goal = objective or prompt
+    budget = execution.max_steps() if max_steps is None else max(1, int(max_steps))
+    step = 0
+    accumulated: list[str] = []
+    result: dict[str, Any] = {}
+
+    while True:
+        if is_cancelled is not None and is_cancelled():
+            result = {
+                "text": "",
+                "error": "Cancelled before execution",
+                "halt_reason": "interrupted",
+            }
+            break
+        result = dict(turn_fn(current) or {})
+        ans = str(result.get("text") or "").strip()
+        if ans:
+            accumulated.append(ans)
+        if result.get("error") or execution.stop_requested():
+            break
+        if is_cancelled is not None and is_cancelled():
+            result = {**result, "halt_reason": "interrupted"}
+            break
+        nxt = None
+        halt = result.get("halt_reason")
+        if continuation.is_loop_breaker(halt):
+            break
+        if ledger_open() or continuation.hit_inner_cap(halt):
+            nxt = next_continuation_prompt(
+                ans, force_ledger=ledger_open(), halt_reason=halt, objective=goal,
+            )
+        elif continuation.enabled() and step < budget:
+            if continuation.classify(ans) == "continue":
+                nxt = continuation.continuation_prompt(goal)
+        if nxt and step < budget:
+            step += 1
+            current = nxt
+            continue
+        break
+
+    if result.get("error") or continuation.is_loop_breaker(result.get("halt_reason")):
+        pause_active_ledger(str(result.get("error") or result.get("halt_reason")))
+    final_text = "\n\n".join(accumulated) if accumulated else str(result.get("text") or "")
+    return {**result, "text": final_text, "continuation_steps": step}
+
+
 WORKER_PREAMBLE = (
     "You are a focused worker for the main session. Keep the parent's "
     "chat clean: do the work HERE. For countable items, open a "
@@ -581,6 +648,7 @@ __all__ = [
     "ledger_open",
     "harness_prompt",
     "next_continuation_prompt",
+    "run_continued_turn",
     "run_autonomous",
     "run_worker_goal",
 ]

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # build-app.sh — assemble a real .app bundle from the SwiftPM
-# executable.  Produces ``apps/JaegerAI/.build/JaegerAI.app`` ready
-# to launch via ``open``.
+# executable.  Produces ``~/.jaeger/apps/swift-build/JaegerAI.app``
+# (or ``$JAEGER_SWIFT_BUILD/JaegerAI.app``) outside the checkout.
 #
 # Why a build script vs. a real Xcode project: SwiftPM gives us
 # fast incremental builds, a single Package.swift to read, no
@@ -28,18 +28,21 @@
 #   4. Print the bundle path so the caller can open it
 #
 # Usage:
-#   apps/JaegerAI/Scripts/build-app.sh           # debug
-#   apps/JaegerAI/Scripts/build-app.sh --release # release
+#   Scripts/build-app.sh                         # debug  → ~/.jaeger/apps/swift-build/JaegerAI.app
+#   Scripts/build-app.sh --release               # release
+#   JAEGER_SWIFT_BUILD=/elsewhere Scripts/build-app.sh   # custom build root
 
 set -euo pipefail
 
 CONFIG="debug"
 INSTALL=0
+PRINT_BUILD_DIR=0
 for arg in "$@"; do
     case "$arg" in
         --release) CONFIG="release" ;;
         --install) INSTALL=1; CONFIG="release" ;;   # installs are always release
         --dev)     ;;   # accepted for compat — debug config (the default)
+        --print-build-dir) PRINT_BUILD_DIR=1 ;;
     esac
 done
 
@@ -71,18 +74,64 @@ if [[ ! -f "$REPO_ROOT/jaeger_ai/__init__.py" ]]; then
   echo "[build-app] cannot locate the JaegerAI checkout above $APP_ROOT" >&2
   exit 1
 fi
-BUILD_DIR="$APP_ROOT/.build"
 ASSETS_DIR="$REPO_ROOT/jaeger_ai/assets"
+
+# ── External build root — resolved via the canonical Python resolver ────────
+# All SwiftPM scratch, icon staging, and the final .app live here.
+# Default: ~/.jaeger/apps/swift-build; override with JAEGER_SWIFT_BUILD.
+# The pre-existing $APP_ROOT/.build (repo) is left untouched.
+#
+# Validation (symlink resolution, in-repo rejection, dangerous-root rejection)
+# is performed by jaeger_ai.cli._common.swift_build_dir so there is ONE
+# implementation. Hard diagnostic + exit if the resolver cannot be loaded;
+# no silent fallback.
+BUILD_DIR="$(PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache" PYTHONPATH="$REPO_ROOT" python3 -B - "$REPO_ROOT" <<'PYEOF'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+try:
+    from jaeger_ai.cli._common import swift_build_dir
+    print(swift_build_dir(Path(sys.argv[1])))
+except ValueError as e:
+    print(f"[build-app] ERROR — {e}", file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print(f"[build-app] ERROR — cannot load path resolver: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+)" || { echo "[build-app] ERROR — build root resolver failed (see above)" >&2; exit 1; }
+
+if [[ "$PRINT_BUILD_DIR" == "1" ]]; then
+    printf '%s\n' "$BUILD_DIR"
+    exit 0
+fi
+
+mkdir -p "$BUILD_DIR"
+echo "[build-app] build root: $BUILD_DIR"
+
+# Capture source fingerprint BEFORE the build. If sources change during
+# compilation the pre-build hash won't match the post-build working tree,
+# so the resulting artifact is correctly reported stale on the next check.
+SOURCE_HASH="$(PYTHONDONTWRITEBYTECODE=1 PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache" PYTHONPATH="$REPO_ROOT" python3 -B - "$REPO_ROOT" <<'PYEOF'
+import sys
+from pathlib import Path
+try:
+    from jaeger_ai.cli._common import _swift_source_fingerprint
+    print(_swift_source_fingerprint(Path(sys.argv[1])))
+except Exception as e:
+    print(f"[build-app] WARN — source fingerprint failed: {e}", file=sys.stderr)
+PYEOF
+)"
 
 # Step 1 — Swift build.
 echo "[build-app] swift build -c $CONFIG"
 cd "$APP_ROOT"
-swift build -c "$CONFIG"
+swift build -c "$CONFIG" --build-path "$BUILD_DIR"
 
 # Locate the built executable.  SwiftPM puts it under
-# .build/<triple>/<config>/<name>; on Apple Silicon the triple is
+# <build-path>/<triple>/<config>/<name>; on Apple Silicon the triple is
 # arm64-apple-macosx.
-SWIFT_BIN="$(swift build -c "$CONFIG" --show-bin-path)/JaegerAI"
+SWIFT_BIN="$(swift build -c "$CONFIG" --build-path "$BUILD_DIR" --show-bin-path)/JaegerAI"
 if [[ ! -x "$SWIFT_BIN" ]]; then
     echo "[build-app] ERROR — built executable not found at $SWIFT_BIN" >&2
     exit 1
@@ -238,11 +287,15 @@ else
     echo "[build-app] WARN — Kokoro assets absent; setup voice unavailable offline" >&2
 fi
 
-# Stamp the bundle with the commit it was built from — update/launch paths
-# compare this against the Swift tree to decide staleness (rebuilds keyed to
-# "what did this pull change" miss manual pulls and failed builds). Must be
-# written BEFORE codesign: adding a file afterwards invalidates the signature.
+# Stamp the bundle with the commit it was built from (kept for attribution).
+# Must be written BEFORE codesign: adding a file afterwards invalidates the signature.
 git -C "$REPO_ROOT" rev-parse HEAD > "$APP_BUNDLE/Contents/Resources/build-commit" 2>/dev/null || true
+
+# Write the pre-build source fingerprint — swift_app_is_stale() uses this to
+# detect dirty/untracked changes that git-diff-only checks would miss.
+if [[ -n "$SOURCE_HASH" ]]; then
+    printf '%s\n' "$SOURCE_HASH" > "$APP_BUNDLE/Contents/Resources/build-source-hash"
+fi
 
 # Ad-hoc code-sign with the new entitlements (required on Apple
 # Silicon for TCC prompts to actually fire — an unsigned app's
@@ -261,12 +314,6 @@ codesign --force --options runtime --entitlements \
     "$APP_ROOT/Resources/JaegerAI.entitlements" \
     --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"
-
-# Keep the app VISIBLE at the repo root (gitignored symlink) — the
-# bundle itself lives in swift/.build, which nobody should have to find.
-# (One-app collapse 2026-07-14: also drop the old dev-shell symlink.)
-rm -f "$REPO_ROOT/JaegerAI-dev.app"
-ln -sfn "$APP_BUNDLE" "$REPO_ROOT/JaegerAI.app"
 
 if [[ "$INSTALL" == "1" ]]; then
     echo "[build-app] installing -> /Applications/$APP_NAME.app"

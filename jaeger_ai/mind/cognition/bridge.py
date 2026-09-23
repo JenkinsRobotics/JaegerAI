@@ -72,7 +72,7 @@ def compose_prompt_from_briefing(briefing: ContextBriefing, message: str) -> str
     # 1. Identity — Companion speaks; workers are tools (do not brand-switch)
     if briefing.si_identity:
         ident = briefing.si_identity
-        name = ident.name or "ARES"
+        name = ident.name or "Jaeger"
         owner = ident.owner_name or "the owner"
         parts.append(
             f"[Identity]\n"

@@ -58,6 +58,7 @@ def test_webui_branding_extension_reuses_mac_app_icons():
     assert "apple-touch-icon" in script
 
 
+@pytest.mark.integration
 def test_health_endpoint_uses_bridge_contract(tmp_path):
     server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     server.bridge = _Bridge()
@@ -108,6 +109,7 @@ class _ScheduleBridge(_Bridge):
         return super().query(what, args)
 
 
+@pytest.mark.integration
 def test_schedule_compatibility_routes_translate_hermes_webui_contract(tmp_path):
     server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     bridge = _ScheduleBridge()
@@ -178,6 +180,7 @@ def test_schedule_compatibility_routes_translate_hermes_webui_contract(tmp_path)
         thread.join(timeout=2)
 
 
+@pytest.mark.integration
 def test_runner_contract_translates_streamed_chat_to_hermes_events(tmp_path, monkeypatch):
     # The adapter probes the live serving window so configure_model does not
     # leave Ollama at its 4096 default. That probe talks to 127.0.0.1:11434
@@ -232,6 +235,7 @@ def test_runner_contract_translates_streamed_chat_to_hermes_events(tmp_path, mon
         thread.join(timeout=2)
 
 
+@pytest.mark.integration
 def test_runner_service_does_not_serve_the_retired_custom_ui(tmp_path):
     server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     server.bridge = _Bridge()
@@ -247,6 +251,7 @@ def test_runner_service_does_not_serve_the_retired_custom_ui(tmp_path):
         thread.join(timeout=2)
 
 
+@pytest.mark.integration
 def test_runner_resolves_hermes_transport_provider_from_jaeger_catalog(tmp_path):
     server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
 
@@ -265,6 +270,7 @@ def test_runner_resolves_hermes_transport_provider_from_jaeger_catalog(tmp_path)
     server.server_close()
 
 
+@pytest.mark.integration
 def test_runner_uses_catalog_route_instead_of_product_lane(tmp_path):
     server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
 
@@ -285,6 +291,7 @@ def test_runner_uses_catalog_route_instead_of_product_lane(tmp_path):
         server.server_close()
 
 
+@pytest.mark.integration
 def test_runner_routes_both_ollama_picker_lanes_through_mac_daemon(tmp_path):
     server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     try:
@@ -294,6 +301,7 @@ def test_runner_routes_both_ollama_picker_lanes_through_mac_daemon(tmp_path):
         server.server_close()
 
 
+@pytest.mark.integration
 def test_approval_broker_is_fail_closed_and_resolvable(tmp_path):
     server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     answer = []
@@ -326,6 +334,7 @@ class _ClarifyBridge(_Bridge):
         return {"text": f"using {answer}"}
 
 
+@pytest.mark.integration
 def test_native_run_clarify_respond_unblocks_turn(tmp_path):
     server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
     bridge = _ClarifyBridge()

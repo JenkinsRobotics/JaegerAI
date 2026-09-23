@@ -315,7 +315,8 @@ def discover_playbooks() -> list[PlaybookSkill]:
             except OSError:
                 continue
             fm = _parse_frontmatter(text)
-            lifecycle = str(_meta_value(fm, "lifecycle", default="core")).lower()
+            declared_lifecycle = _meta_value(fm, "lifecycle", default=None)
+            lifecycle = str(declared_lifecycle or "core").lower()
             if fm.get("archived") or lifecycle == "archived":
                 continue  # retired skill — metadata flag, excluded from the surface
             try:
@@ -347,6 +348,12 @@ def discover_playbooks() -> list[PlaybookSkill]:
                 skill.skill_class = "first-class"
             if skill.name in lifecycle_policy:
                 skill.lifecycle = lifecycle_policy[skill.name]
+            elif root == _SKILLS_DIR and declared_lifecycle is None:
+                # The distribution catalog is the explicit prompt-visibility
+                # policy. A newly bundled skill remains installed, searchable,
+                # and explicitly loadable, but does not silently expand every
+                # model request's routing surface.
+                skill.lifecycle = "optional"
             if skill.name in knowledge_packs:
                 skill.skill_class = "knowledge-pack"
             if skill.lifecycle == "archived":
@@ -379,16 +386,26 @@ def _select_available(
     return out
 
 
-def available_playbooks(
+def prompt_playbooks(
     available_tools: set[str] | None = None,
 ) -> list[PlaybookSkill]:
-    """Playbook skills the agent should actually see: every discovered skill
-    minus those for another platform, those disabled in the instance config,
-    and (when ``available_tools`` is given) those whose required tools are
-    absent. The `skill` tool and the prompt index use this; the raw
-    :func:`discover_playbooks` is kept for internal callers (e.g. curation)."""
+    """The deliberately scoped set eligible for automatic model routing."""
     return _select_available(discover_playbooks(), _disabled_playbook_names(),
                              available_tools)
+
+
+def callable_playbooks() -> list[PlaybookSkill]:
+    """Every installed skill the operator can discover and explicitly load.
+
+    Availability requirements remain metadata on the returned skill. They do
+    not erase a capability from discovery merely because a credential, plugin,
+    tool, or device is absent on this host.
+    """
+    disabled = _disabled_playbook_names()
+    return [
+        skill for skill in discover_playbooks()
+        if _platform_ok(skill) and skill.name not in disabled
+    ]
 
 
 _ROUTE_WORD = re.compile(r"[a-z0-9]+")
@@ -427,7 +444,7 @@ def match_playbook(
     if not clean or not qtokens:
         return None, 0.0, "empty"
     scored: list[tuple[float, PlaybookSkill, str]] = []
-    for skill in available_playbooks(available_tools):
+    for skill in prompt_playbooks(available_tools):
         if skill.origin == "marketplace":
             continue
         names = [skill.name, *skill.aliases]
@@ -468,7 +485,7 @@ def build_skill_index(available_tools: set[str] | None = None) -> str:
     space), so the old ~1.9k-token prose menu is gone — this just reminds the
     model the capability exists and which tool loads a skill. ``skill(list)``
     still gives the full enriched catalog on demand."""
-    skills = available_playbooks(available_tools)
+    skills = prompt_playbooks(available_tools)
     if not skills:
         return ""
     return (

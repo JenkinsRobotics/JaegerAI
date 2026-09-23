@@ -23,6 +23,11 @@ from jaeger_ai.contract.ports import GATEWAY_PORT, LOOPBACK
 
 #: Request states after which the Gateway will not change its answer.
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "execution_unknown"})
+#: Event names that end a request's stream.
+TERMINAL_EVENTS = frozenset({"turn.finish", "turn.failed", "turn.cancelled", "turn.unknown"})
+#: A quiet stream is re-opened from its cursor after this long (the Gateway
+#: sends no keep-alives while a model thinks).
+STREAM_READ_TIMEOUT_S = 30.0
 
 
 class GatewayUnavailable(RuntimeError):
@@ -78,6 +83,30 @@ class GatewayTurnClient:
     def health(self) -> dict[str, Any]:
         return self._call("GET", "/health")
 
+    def probe(self) -> dict[str, Any]:
+        """Is the Gateway there to take turns? Returns its health report.
+
+        ``/health`` answers 503 whenever any backend check is not green,
+        even though the Gateway itself is up and admitting turns, so a
+        report from the Gateway counts as reachable (``degraded`` says
+        whether it was all green). Only a transport failure — nothing
+        answering, or something that is not the Gateway — raises.
+        """
+        req = urllib.request.Request(self.base_url + "/health", headers={"Accept": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=self.request_timeout_s) as resp:
+                report = json.loads(resp.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as exc:
+            try:
+                report = json.loads(exc.read().decode("utf-8") or "{}")
+            except ValueError:
+                report = {}
+            if report.get("service") != "jaeger-gateway":
+                raise GatewayUnavailable(f"GET /health: HTTP {exc.code}") from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise GatewayUnavailable(f"GET /health: {exc}") from exc
+        return {**report, "degraded": not report.get("all_green", report.get("status") == "healthy")}
+
     def entity_id(self) -> str:
         return str((self.health().get("diagnostics") or {}).get("entity_id") or "")
 
@@ -86,10 +115,105 @@ class GatewayTurnClient:
             "session_id": session_id, "title": title, "profile": "jaeger", "source": source,
         })
 
-    def submit(self, session_id: str, text: str, *, request_id: str | None = None) -> str:
+    def submit(self, session_id: str, text: str, *, request_id: str | None = None,
+               **choices: Any) -> str:
+        return self._submit(session_id, text, request_id=request_id, **choices)["request_id"]
+
+    def _submit(self, session_id: str, text: str, *, request_id: str | None = None,
+                **choices: Any) -> dict[str, Any]:
+        """POST a turn. ``choices`` are the admission's explicit execution
+        inputs (model, provider, attachment_ids, workspace, options); a
+        retry must repeat them exactly or the Gateway answers 409."""
         rid = request_id or uuid.uuid4().hex
-        self._call("POST", f"/v1/sessions/{session_id}/turns", {"text": text, "request_id": rid})
-        return rid
+        # Only absent/None values are dropped. [] is meaningful for a tool
+        # grant or attachment list (no tools / no files) and must never be
+        # widened to "unrestricted". Empty display_text is also meaningful
+        # (persist nothing visible) and must not become the execution text.
+        body = {"text": text, "request_id": rid}
+        for key, value in choices.items():
+            if value is None:
+                continue
+            if value == "" and key != "display_text":
+                continue
+            body[key] = value
+        receipt = self._call("POST", f"/v1/sessions/{session_id}/turns", body)
+        return {**receipt, "request_id": rid}
+
+    def list_sessions(self) -> list[dict[str, Any]]:
+        return list(self._call("GET", "/v1/sessions").get("sessions") or [])
+
+    def get_session(self, session_id: str) -> dict[str, Any]:
+        from urllib.parse import quote
+
+        return self._call("GET", f"/v1/sessions/{quote(session_id, safe='')}")
+
+    def cancel(self, session_id: str, request_id: str) -> dict[str, Any]:
+        return self._call("POST", f"/v1/sessions/{session_id}/cancel", {"request_id": request_id})
+
+    def resolve_approval(self, approval_id: str, decision: str) -> dict[str, Any]:
+        """Answer one approval: ``once`` / ``always`` / ``deny``."""
+        return self._call("POST", f"/v1/approvals/{approval_id}",
+                          {"decision": decision, "approved": decision != "deny"})
+
+    def stream_turn(
+        self,
+        session_id: str,
+        text: str,
+        *,
+        on_event: Any,
+        request_id: str | None = None,
+        timeout_s: float = 3600.0,
+        **choices: Any,
+    ) -> TurnResult:
+        """Submit a turn and follow its durable events until the terminal one.
+
+        ``on_event(name, data)`` receives every event of THIS request in
+        order (``turn.delta``, ``turn.reasoning``, ``approval.request`` …),
+        including the terminal event. The stream resumes from the last seen
+        event id if the connection drops, so nothing is lost or repeated.
+        """
+        submitted_at = time.time()
+        receipt = self._submit(session_id, text, request_id=request_id, **choices)
+        rid = receipt["request_id"]
+        if str(receipt.get("status") or "") in TERMINAL_STATUSES:
+            return self.wait(session_id, rid, timeout_s=5, submitted_at=submitted_at)
+        cursor = max(int(receipt.get("start_event_id") or 1) - 1, 0)
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            try:
+                for event_id, name, data in self._events(session_id, cursor):
+                    cursor = event_id
+                    if data.get("request_id") != rid:
+                        continue
+                    on_event(name, data)
+                    if name in TERMINAL_EVENTS:
+                        return self.wait(session_id, rid, timeout_s=5, submitted_at=submitted_at)
+            except GatewayUnavailable:
+                raise
+            except (OSError, ValueError):
+                time.sleep(0.2)   # dropped stream: resume from ``cursor``
+        return TurnResult(rid, "timeout", "", error=f"no terminal result in {timeout_s:.0f}s",
+                          submitted_at=submitted_at, finished_at=time.time())
+
+    def _events(self, session_id: str, since: int):
+        """Yield ``(event_id, event, data)`` from the session's SSE stream."""
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/sessions/{session_id}/stream?last_event_id={since}",
+            headers={"Accept": "text/event-stream"},
+        )
+        try:
+            stream = urllib.request.urlopen(req, timeout=STREAM_READ_TIMEOUT_S)
+        except urllib.error.HTTPError as exc:
+            raise GatewayUnavailable(f"stream {session_id}: HTTP {exc.code}") from exc
+        except urllib.error.URLError as exc:
+            raise GatewayUnavailable(f"stream {session_id}: {exc.reason}") from exc
+        with stream:
+            for raw in stream:
+                if not raw.startswith(b"data: "):
+                    continue
+                record = json.loads(raw[6:])
+                data = record.get("data") if isinstance(record.get("data"), dict) else {}
+                yield int(record.get("event_id") or since), str(record.get("event") or ""), data
 
     def wait(self, session_id: str, request_id: str, *, timeout_s: float = 600.0,
              poll_s: float = 0.5, submitted_at: float | None = None) -> TurnResult:

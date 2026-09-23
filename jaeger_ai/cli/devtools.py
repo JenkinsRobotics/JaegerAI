@@ -737,7 +737,12 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
     from its own bundle path, so no PATH injection is needed."""
     if not (SWIFT_DIR / "Package.swift").exists():
         return None
-    bundle = SWIFT_DIR / ".build" / "JaegerAI.app"
+    from jaeger_ai.cli._common import swift_app_bundle
+    try:
+        bundle = swift_app_bundle(REPO)
+    except ValueError as exc:
+        fail(f"invalid JAEGER_SWIFT_BUILD: {exc}")
+        return 1
     bundle_bin = bundle / "Contents" / "MacOS" / "JaegerAI"
     # Rebuild when forced, missing, OR stale (build-commit stamp older than
     # the Swift tree) — the stale case is what keeps a station that pulls by
@@ -762,7 +767,9 @@ def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
     say("launching JaegerAI (jaeger-dev instance) — menu-bar tray + chat window…",
         prefix="launch")
     sys.stdout.flush()
-    return subprocess.run([str(bundle_bin)], env=env).returncode
+    launch_env = dict(env)
+    launch_env["JAEGER_REPO"] = str(REPO)
+    return subprocess.run([str(bundle_bin)], env=launch_env).returncode
 
 
 # ─── main ─────────────────────────────────────────────────────────────
@@ -794,8 +801,13 @@ def cmd_update() -> int:
     # Staleness beats "what did THIS pull change": the bundle's build-commit
     # stamp catches pulls done by hand outside this command and rebuilds that
     # failed last time — a diff-keyed check misses both.
-    from jaeger_ai.cli._common import swift_app_is_stale
-    if swift_app_is_stale(REPO, SWIFT_DIR / ".build" / "JaegerAI.app"):
+    from jaeger_ai.cli._common import swift_app_bundle, swift_app_is_stale
+    try:
+        _dev_bundle = swift_app_bundle(REPO)
+    except ValueError as _e:
+        fail(f"invalid JAEGER_SWIFT_BUILD: {_e}")
+        return 1
+    if swift_app_is_stale(REPO, _dev_bundle):
         say("Swift app lags the tree — rebuilding JaegerAI.app…",
             prefix="update")
         subprocess.run([str(REPO / "jaeger_ai/interfaces/swift/Scripts/build-app.sh"),

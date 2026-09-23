@@ -155,6 +155,9 @@ struct Setting: Codable, Identifiable, Equatable {
     let restart: Bool
     let advanced: Bool
     let validation: Validation
+    /// Secrets only: whether a value is stored. The catalog never sends the
+    /// secret itself (``current`` is always ""), so this is the only status.
+    let configured: Bool?
 
     var id: String { path }
     var isOverridden: Bool { current != defaultValue }
@@ -168,14 +171,21 @@ struct Setting: Codable, Identifiable, Equatable {
     enum CodingKeys: String, CodingKey {
         case path, label, group, type, choices
         case defaultValue = "default"
-        case current, description, restart, advanced, validation
+        case current, description, restart, advanced, validation, configured
     }
 
     func withCurrent(_ v: SettingValue) -> Setting {
         Setting(path: path, label: label, group: group, type: type,
                 choices: choices, defaultValue: defaultValue, current: v,
                 description: description, restart: restart, advanced: advanced,
-                validation: validation)
+                validation: validation, configured: configured)
+    }
+
+    /// ``settings_set`` echoes the RAW stored value. For scalars that is the
+    /// display value; json (a list/dict, not the catalog's string) and secrets
+    /// (always "") need a catalog read-back instead.
+    var acceptsSetReplyValue: Bool {
+        ["bool", "int", "float", "str", "enum"].contains(type)
     }
 }
 
@@ -186,6 +196,41 @@ struct SettingGroup: Identifiable, Equatable {
     var id: String { name }
 }
 
+/// Where the catalog fetch stands. A failure keeps any previously loaded
+/// groups on screen; the page flags them as possibly stale.
+enum SettingsLoadState: Equatable {
+    case idle
+    case loading
+    case loaded
+    case failed(String)
+}
+
+/// Where one setting's most recent save stands. ``saved`` means the bridge
+/// wrote the instance config and the row now shows the stored value — NOT
+/// that a running process (bridge, Gateway) has applied it.
+enum SettingSaveState: Equatable {
+    case saving
+    case saved(restartRequired: Bool)
+    /// The write reported success but the stored value couldn't be read back,
+    /// so the row still shows the value from before the save.
+    case savedUnconfirmed(restartRequired: Bool)
+    case failed(String)
+}
+
+/// The two bridge calls the settings catalog needs. ``AgentBridge`` is the
+/// production conformer; tests substitute a scripted backend.
+@MainActor
+protocol SettingsBackend: AnyObject {
+    func query(_ what: String, args: [String: any Sendable]) async -> QueryResult
+    func settingsSet(path: String, value: SettingValue) async -> QueryResult
+}
+
+extension AgentBridge: SettingsBackend {
+    func settingsSet(path: String, value: SettingValue) async -> QueryResult {
+        await command("settings_set", args: ["path": path, "value": value.sendable])
+    }
+}
+
 // MARK: - store
 
 @MainActor
@@ -193,6 +238,7 @@ final class SettingsStore: ObservableObject {
     static let shared = SettingsStore(agent: AgentBridge.shared)
 
     private let agent: AgentBridge
+    private let backend: SettingsBackend
     private var isPreloading = false
 
     @Published var characters: [CharacterSummary] = []
@@ -201,11 +247,24 @@ final class SettingsStore: ObservableObject {
     /// The schema-derived settings, grouped + page-ordered. Rendered
     /// generically by the App Settings page — no field is hardcoded.
     @Published var settingsGroups: [SettingGroup] = []
-    /// A change this session asked for an agent restart to take effect.
+    /// A change saved this session is marked as needing a restart to take effect.
     @Published var settingsRestartNeeded = false
-    /// Last settings error, surfaced inline on the App page.
-    @Published var settingsError: String?
+    /// Catalog fetch state — failures surface on the App page with Retry.
+    @Published private(set) var settingsLoad: SettingsLoadState = .idle
+    /// Per-path outcome of the latest save, shown under that setting's row.
+    @Published private(set) var settingSaves: [String: SettingSaveState] = [:]
     @Published var busy = false
+
+    // Ordering for rapid edits. Every save gets a sequence number; only the
+    // newest save for a path may publish its result. Writes run one at a time
+    // (``writeTail``) so the bridge — which handles requests in pipe order —
+    // persists them in the order they were made, and each read-back reflects
+    // exactly its own write.
+    private var writeSeq = 0
+    private var latestWrite: [String: Int] = [:]
+    private var pendingWrites: [String: Int] = [:]
+    private var writeTail: Task<Void, Never>?
+    private var catalogLoadSeq = 0
 
     /// Last-known ``check_update`` result — the Updates row and the
     /// menu-bar dot both read this, so a single background poll (app
@@ -229,7 +288,10 @@ final class SettingsStore: ObservableObject {
         "security", "avatar", "hardware", "retention", "general",
     ]
 
-    init(agent: AgentBridge) { self.agent = agent }
+    init(agent: AgentBridge, backend: SettingsBackend? = nil) {
+        self.agent = agent
+        self.backend = backend ?? agent
+    }
 
     func preload() async {
         guard !isPreloading else { return }
@@ -258,15 +320,99 @@ final class SettingsStore: ObservableObject {
         let args: [String: any Sendable] = id.map { ["id": $0] } ?? [:]
         detail = await decode(CharacterDetail.self, "character", args: args)
     }
-    /// Fetch + decode the grouped catalog. Idempotent unless ``force``.
+    /// Fetch + decode the grouped catalog. Idempotent unless ``force``. A
+    /// failure lands on ``settingsLoad`` (never silent). The newest load wins,
+    /// and a row saved while this load was in flight keeps its read-back
+    /// value — the load may have read the file before that write.
     func loadSettingsCatalog(force: Bool = false) async {
         if !settingsGroups.isEmpty && !force { return }
-        let r = await agent.query("settings_catalog")
-        guard r.ok, let json = r.json,
-              let dict = try? JSONDecoder().decode([String: [Setting]].self,
-                                                   from: json)
-        else { return }
-        settingsGroups = Self.order(dict)
+        catalogLoadSeq += 1
+        let seq = catalogLoadSeq
+        let writesBefore = writeSeq
+        settingsLoad = .loading
+        let result = await fetchCatalog()
+        guard seq == catalogLoadSeq else { return }
+        switch result {
+        case .success(let dict):
+            settingsGroups = merge(Self.order(dict), keepingWritesAfter: writesBefore)
+            settingsLoad = .loaded
+        case .failure(let failure):
+            settingsLoad = .failed(failure.message)
+        }
+    }
+
+    private struct CatalogFailure: Error { let message: String }
+
+    private func fetchCatalog(group: String? = nil) async
+        -> Result<[String: [Setting]], CatalogFailure> {
+        let args: [String: any Sendable] = group.map { ["group": $0] } ?? [:]
+        let r = await backend.query("settings_catalog", args: args)
+        guard r.ok else {
+            return .failure(CatalogFailure(message: Self.loadFailureMessage(r.error)))
+        }
+        guard let json = r.json else {
+            return .failure(CatalogFailure(message:
+                "Couldn't load settings: the bridge answered with no data. Retry."))
+        }
+        do {
+            return .success(try JSONDecoder().decode([String: [Setting]].self, from: json))
+        } catch {
+            return .failure(CatalogFailure(message:
+                "Couldn't read the settings the bridge sent (\(Self.describe(error))). "
+                + "The app and the Jaeger backend may be different versions."))
+        }
+    }
+
+    /// Turn a bridge error into a message the operator can act on.
+    static func loadFailureMessage(_ error: String?) -> String {
+        let raw = (error ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = raw.lowercased()
+        if lower.contains("not connected") || lower.contains("not running")
+            || lower.contains("bridge exited") {
+            return "Couldn't load settings: the app isn't connected to its Jaeger "
+                + "bridge. Check the status on Home, then Retry."
+        }
+        if lower.contains("timed out") {
+            return "Couldn't load settings: the bridge didn't answer in time "
+                + "(it may still be starting). Retry."
+        }
+        return "Couldn't load settings: \(raw.isEmpty ? "unknown bridge error" : raw)"
+    }
+
+    private static func describe(_ error: Error) -> String {
+        switch error as? DecodingError {
+        case .keyNotFound(let key, let ctx)?:
+            return "missing \(Self.codingPath(ctx.codingPath + [key]))"
+        case .typeMismatch(_, let ctx)?, .valueNotFound(_, let ctx)?:
+            return "unexpected value at \(Self.codingPath(ctx.codingPath))"
+        case .dataCorrupted?:
+            return "malformed JSON"
+        default:
+            return error.localizedDescription
+        }
+    }
+
+    private static func codingPath(_ keys: [CodingKey]) -> String {
+        keys.map { $0.intValue.map { "[\($0)]" } ?? $0.stringValue }
+            .joined(separator: ".")
+    }
+
+    /// A save issued after ``mark`` (or still queued) is newer than a load
+    /// that started at ``mark``; that row keeps its local value.
+    private func hasWrite(_ path: String, after mark: Int) -> Bool {
+        (pendingWrites[path] ?? 0) > 0 || (latestWrite[path] ?? 0) > mark
+    }
+
+    private func merge(_ fresh: [SettingGroup],
+                       keepingWritesAfter mark: Int) -> [SettingGroup] {
+        let local = Dictionary(settingsGroups.flatMap(\.settings).map { ($0.path, $0) },
+                               uniquingKeysWith: { first, _ in first })
+        return fresh.map { g in
+            SettingGroup(name: g.name, settings: g.settings.map { s in
+                guard hasWrite(s.path, after: mark), let mine = local[s.path] else { return s }
+                return mine
+            })
+        }
     }
 
     private static func order(_ dict: [String: [Setting]]) -> [SettingGroup] {
@@ -276,8 +422,8 @@ final class SettingsStore: ObservableObject {
         return names.map { SettingGroup(name: $0, settings: dict[$0] ?? []) }
     }
 
-    func loadPermissions() async {
-        if permissions != nil { return }
+    func loadPermissions(force: Bool = false) async {
+        if permissions != nil && !force { return }
         permissions = await decode(PermissionsInfo.self, "permissions")
     }
 
@@ -313,35 +459,95 @@ final class SettingsStore: ObservableObject {
         await run("save_traits", ["traits": traits])
     }
     /// Validate + persist ONE setting through the schema-derived catalog
-    /// (``settings_set`` → ``core/settings/catalog.set_value``). Optimistic:
-    /// the local model updates immediately; on a backend rejection the error
-    /// surfaces on ``settingsError`` and the catalog is reloaded to snap the
-    /// UI back to the true value. Returns true on success.
+    /// (``settings_set`` → ``core/settings/catalog.set_value``). The row's
+    /// ``current`` changes only to what the backend stored — the catalog
+    /// read-back, else the normalized value the save echoed — never the
+    /// submitted value. The outcome lands on ``settingSaves[path]``.
+    /// Returns true when THIS edit was written (even if a newer edit has since
+    /// taken over the row); false when it failed or was superseded before it
+    /// was sent.
     @discardableResult
     func setSetting(_ path: String, _ value: SettingValue) async -> Bool {
-        busy = true
-        defer { busy = false }
-        settingsError = nil
-        let r = await agent.command("settings_set",
-                                    args: ["path": path, "value": value.sendable])
+        writeSeq += 1
+        let seq = writeSeq
+        latestWrite[path] = seq
+        pendingWrites[path, default: 0] += 1
+        settingSaves[path] = .saving
+        let previous = writeTail
+        let write = Task { () -> Bool in
+            await previous?.value
+            return await self.performWrite(path, value, seq: seq)
+        }
+        writeTail = Task { _ = await write.value }
+        return await write.value
+    }
+
+    private func performWrite(_ path: String, _ value: SettingValue, seq: Int) async -> Bool {
+        defer {
+            pendingWrites[path, default: 1] -= 1
+            if pendingWrites[path] == 0 { pendingWrites[path] = nil }
+        }
+        // A newer edit to this path is already queued; send only that one.
+        guard latestWrite[path] == seq else { return false }
+        let before = setting(at: path)
+        let r = await backend.settingsSet(path: path, value: value)
+        let reply = r.json.flatMap { try? JSONDecoder().decode(SetReply.self, from: $0) }
+        // Re-read even after an error: a failed reply doesn't prove the file
+        // is unchanged (the write can land before the reply fails to encode).
+        let stored = await readBack(path, group: before?.group)
+        // A newer edit to this path was queued meanwhile; its result owns the
+        // row. Publishing ours would flash an older value over the newer one.
+        guard latestWrite[path] == seq else { return r.ok }
+
         guard r.ok else {
-            settingsError = r.error ?? "couldn't save \(path)"
-            await loadSettingsCatalog(force: true)   // snap back to truth
+            let error = r.error ?? "Couldn't save \(path)."
+            if let stored {
+                replace(stored)
+                if let before, stored.current != before.current
+                    || stored.configured != before.configured {
+                    settingSaves[path] = .failed(
+                        "\(error) The stored value changed anyway — showing what's saved now.")
+                    return false
+                }
+            }
+            settingSaves[path] = .failed(error)
             return false
         }
-        if let json = r.json,
-           let obj = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any],
-           obj["restart_required"] as? Bool == true {
-            settingsRestartNeeded = true
+        let restart = reply?.restart_required ?? before?.restart ?? false
+        if restart { settingsRestartNeeded = true }
+        if let stored {
+            replace(stored)
+            settingSaves[path] = .saved(restartRequired: restart)
+        } else if let before, before.acceptsSetReplyValue, let echoed = reply?.value {
+            replace(before.withCurrent(echoed))
+            settingSaves[path] = .saved(restartRequired: restart)
+        } else {
+            settingSaves[path] = .savedUnconfirmed(restartRequired: restart)
         }
-        applyLocal(path: path, value: value)
         return true
     }
 
-    private func applyLocal(path: String, value: SettingValue) {
+    /// ``settings_set`` reply: ``{restart_required, path, value}``.
+    private struct SetReply: Decodable {
+        let restart_required: Bool?
+        let value: SettingValue?
+    }
+
+    /// The authoritative descriptor for ``path`` straight from the catalog
+    /// (narrowed to its group when known), or nil if it can't be read.
+    private func readBack(_ path: String, group: String?) async -> Setting? {
+        guard case .success(let dict) = await fetchCatalog(group: group) else { return nil }
+        return dict.values.lazy.flatMap { $0 }.first { $0.path == path }
+    }
+
+    private func setting(at path: String) -> Setting? {
+        settingsGroups.lazy.flatMap(\.settings).first { $0.path == path }
+    }
+
+    private func replace(_ stored: Setting) {
         settingsGroups = settingsGroups.map { g in
             SettingGroup(name: g.name, settings: g.settings.map { s in
-                s.path == path ? s.withCurrent(value) : s
+                s.path == stored.path ? stored : s
             })
         }
     }

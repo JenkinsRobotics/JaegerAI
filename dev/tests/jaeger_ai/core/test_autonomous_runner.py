@@ -12,6 +12,7 @@ from jaeger_ai.core.runtime.autonomous_runner import (
     is_actionable_request,
     looks_like_batch,
     next_continuation_prompt,
+    run_continued_turn,
     run_worker_goal,
     should_run_autonomous,
 )
@@ -327,7 +328,10 @@ def test_recalled_background_does_not_make_a_question_actionable(monkeypatch):
     enriched = _with_background(
         request, {"durable_recall": "user: run the tests and fix the bug"}
     )
-    assert is_actionable_request(enriched)  # the trap this test guards
+    # The classifier itself is now background-aware; its safe result is the
+    # same as the raw request.  The regression remains pinned below because
+    # the execution path must also route on ``request``, not recalled text.
+    assert not is_actionable_request(enriched)
     assert not is_actionable_request(request)
 
     assert main._run_actionable_turn(
@@ -363,3 +367,82 @@ def test_prepare_turn_text_routes_on_the_request_not_the_background():
     assert work_ledger.active_ledger() is None
     assert ACCEPTANCE_GUIDANCE not in prepared
     assert prepared.endswith(enriched)
+
+
+STALL = "Let me start by reading the notes and I'll process everything."
+
+
+def test_run_continued_turn_refires_a_stall_and_accumulates_answers():
+    prompts: list[str] = []
+
+    def turn(text):
+        prompts.append(text)
+        if "SYSTEM NUDGE" in text:
+            return {"text": "All 14 folders processed.", "halt_reason": None}
+        return {"text": STALL, "halt_reason": None}
+
+    result = run_continued_turn(turn, "process every folder", max_steps=4)
+    assert len(prompts) == 2
+    assert prompts[0] == "process every folder"
+    assert "SYSTEM NUDGE" in prompts[1]
+    assert result["continuation_steps"] == 1
+    assert result["text"] == f"{STALL}\n\nAll 14 folders processed."
+
+
+def test_run_continued_turn_does_not_refire_an_interrupt():
+    prompts: list[str] = []
+
+    def turn(text):
+        prompts.append(text)
+        return {"text": STALL, "halt_reason": "interrupted"}
+
+    result = run_continued_turn(turn, "process every folder", max_steps=4)
+    assert prompts == ["process every folder"]
+    assert result["halt_reason"] == "interrupted"
+    assert result["continuation_steps"] == 0
+
+
+def test_run_continued_turn_inner_cap_refires_settled_prose():
+    prompts: list[str] = []
+
+    def turn(text):
+        prompts.append(text)
+        if len(prompts) == 1:
+            return {"text": "Here is a summary of the first batch.",
+                    "halt_reason": "hit max_iterations=24 without a final answer"}
+        return {"text": "The capital of France is Paris.", "halt_reason": None}
+
+    result = run_continued_turn(turn, "process notes", max_steps=4)
+    assert len(prompts) == 2
+    assert result["continuation_steps"] == 1
+
+
+def test_run_continued_turn_honours_cancel_between_steps(monkeypatch):
+    cancelled = False
+    prompts: list[str] = []
+
+    def turn(text):
+        nonlocal cancelled
+        prompts.append(text)
+        cancelled = True
+        return {"text": STALL, "halt_reason": None}
+
+    result = run_continued_turn(
+        turn, "process every folder", max_steps=4, is_cancelled=lambda: cancelled,
+    )
+    assert prompts == ["process every folder"]
+    assert result["halt_reason"] == "interrupted"
+    assert result["continuation_steps"] == 0
+
+
+def test_run_continued_turn_kill_switch_stops_stall_refire(monkeypatch):
+    monkeypatch.setenv("JAEGER_AUTO_CONTINUE", "0")
+    prompts: list[str] = []
+
+    def turn(text):
+        prompts.append(text)
+        return {"text": STALL, "halt_reason": None}
+
+    result = run_continued_turn(turn, "process every folder", max_steps=4)
+    assert prompts == ["process every folder"]
+    assert result["continuation_steps"] == 0

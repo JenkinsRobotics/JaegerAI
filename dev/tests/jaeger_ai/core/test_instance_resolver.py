@@ -10,6 +10,9 @@ These tests pin the post-INST-1/-10 resolver shape.
 
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -138,7 +141,10 @@ def test_legacy_operator_state_migrates_without_data_loss(monkeypatch, tmp_path)
 
     assert destination == tmp_path / ".jaeger_ai"
     assert (destination / "active_instance").read_text(encoding="utf-8").strip() == "work"
-    assert legacy.is_symlink()
+    # F04: the legacy directory is left intact (no compatibility symlink —
+    # nothing reads the old path once the destination is active).
+    assert not legacy.is_symlink()
+    assert (legacy / "active_instance").read_text(encoding="utf-8").strip() == "work"
     assert instance_module.operator_state_root() == destination
 
 
@@ -251,3 +257,100 @@ def test_check_wheel_main_returns_nonzero_on_dirty(tmp_path, check_wheel_module,
     assert code == 1
     err = capsys.readouterr().err
     assert "config.yaml" in err
+
+
+# ── F02: import purity (release convergence, RELEASE_AUDIT.md A02) ──
+
+
+def test_importing_instance_module_creates_no_state_directory(tmp_path):
+    """Merely importing ``instance.py`` must never resolve or create the
+    operator state root. A prior revision assigned a module-level
+    ``USER_ROOT = operator_state_root()`` with zero internal or external
+    readers (confirmed dead: no callsite anywhere in the tree imported
+    ``USER_ROOT``) — a pure import triggered ``mkdir`` and potential legacy
+    migration purely as an unused side effect. This runs a real fresh
+    subprocess (not just ``importlib.reload`` in-process) so no already-
+    imported module or conftest env override can mask the regression.
+    """
+    home = tmp_path / "home"
+    home.mkdir()
+    env = dict(os.environ)
+    env["HOME"] = str(home)
+    env.pop("JAEGER_HOME", None)
+    env.pop("JAEGER_STATE_DIR", None)
+    env.pop("PYTEST_CURRENT_TEST", None)
+    env.pop("JAEGER_NO_ATTACH", None)
+    result = subprocess.run(
+        [sys.executable, "-c", "import jaeger_ai.core.instance.instance"],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not (home / ".jaeger").exists(), (
+        "importing instance.py created ~/.jaeger — resolution is not pure"
+    )
+
+
+def test_pytest_fallback_state_dir_is_stable_but_not_a_shared_fixed_path(
+    monkeypatch, tmp_path,
+):
+    """The pytest-context fallback (no explicit override, but
+    ``PYTEST_CURRENT_TEST`` set) must still return the *same* directory on
+    repeated calls within one process — callers rely on a stable root for
+    the run — but must not be the old hardcoded ``/tmp/jaeger_test_state``,
+    which let concurrent test processes on the same machine race on one
+    shared directory.
+    """
+    monkeypatch.delenv("JAEGER_HOME", raising=False)
+    monkeypatch.delenv("JAEGER_STATE_DIR", raising=False)
+    monkeypatch.setenv("PYTEST_CURRENT_TEST", "synthetic::case")
+    monkeypatch.setattr(instance_module, "_PROCESS_TEST_STATE_DIR", None)
+
+    first = instance_module.operator_state_root()
+    second = instance_module.operator_state_root()
+
+    assert first == second
+    assert first != Path("/tmp/jaeger_test_state")
+    assert first.is_dir()
+
+
+# ── F02: JAEGER_HOME pointing into a source checkout fails loudly (A02) ──
+
+
+def _fake_checkout(root: Path) -> Path:
+    root.mkdir(parents=True)
+    (root / ".git").mkdir()
+    (root / "pyproject.toml").write_text("", encoding="utf-8")
+    return root
+
+
+def test_jaeger_home_inside_a_checkout_raises_instead_of_nesting_state(monkeypatch, tmp_path):
+    checkout = _fake_checkout(tmp_path / "opt-jaeger")
+    monkeypatch.delenv("JAEGER_STATE_DIR", raising=False)
+    monkeypatch.setenv("JAEGER_HOME", str(checkout))
+
+    with pytest.raises(RuntimeError, match="inside a source checkout"):
+        instance_module.operator_state_root()
+
+    assert not (checkout / instance_module.OPERATOR_STATE_DIR_NAME).exists()
+
+
+def test_explicit_state_dir_is_never_second_guessed_by_the_checkout_guard(monkeypatch, tmp_path):
+    checkout = _fake_checkout(tmp_path / "opt-jaeger")
+    state = tmp_path / "state"
+    monkeypatch.setenv("JAEGER_HOME", str(checkout))
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(state))
+
+    assert instance_module.operator_state_root() == state.resolve()
+
+
+def test_jaeger_home_outside_any_checkout_keeps_historical_behavior(monkeypatch, tmp_path):
+    home = tmp_path / "plain-home"
+    home.mkdir()
+    monkeypatch.delenv("JAEGER_STATE_DIR", raising=False)
+    monkeypatch.setenv("JAEGER_HOME", str(home))
+
+    assert instance_module.operator_state_root() == home.resolve() / ".jaeger_ai"

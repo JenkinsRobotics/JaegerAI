@@ -11,12 +11,8 @@
     "sidecar",
     "dashboard_tab"
   ],
-  "scripts": [
-    "dashboard/app.js"
-  ],
-  "stylesheets": [
-    "dashboard/style.css"
-  ],
+  "scripts": [],
+  "stylesheets": [],
   "sidecar": {
     "type": "loopback",
     "origin": "http://127.0.0.1:3001",

@@ -25,13 +25,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV="${HOME}/.jaeger/venv"
-if [[ ! -d "$VENV" ]]; then
-  VENV="$REPO_ROOT/.venv"
-fi
+# Outside the checkout (AGENTS.md §1), matching install.sh.
+VENV="${JAEGER_VENV:-${HOME}/.jaeger/venv}"
 
 if [[ ! -d "$VENV" ]]; then
-  echo "✗ Python environment not found at ~/.jaeger/venv or $REPO_ROOT/.venv" >&2
+  echo "✗ Python environment not found at $VENV" >&2
   echo "  run ./install.sh first" >&2
   exit 1
 fi

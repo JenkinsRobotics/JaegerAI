@@ -35,7 +35,7 @@ def _stub_playbook(name: str, category: str, desc: str = "") -> Any:
 
 @pytest.fixture
 def fake_playbooks(monkeypatch):
-    """Replace ``available_playbooks()`` with a fixed corpus so the
+    """Replace ``callable_playbooks()`` with a fixed corpus so the
     pagination tests don't depend on the real skill library."""
     corpus = [
         _stub_playbook("alpha",   "files"),
@@ -46,7 +46,7 @@ def fake_playbooks(monkeypatch):
         _stub_playbook("zeta",    "research"),
     ]
     from jaeger_agent.skill_registry import playbook_skills as _pb
-    monkeypatch.setattr(_pb, "available_playbooks", lambda: list(corpus))
+    monkeypatch.setattr(_pb, "callable_playbooks", lambda: list(corpus))
     return corpus
 
 

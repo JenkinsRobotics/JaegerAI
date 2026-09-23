@@ -159,6 +159,18 @@ def _common_env() -> dict[str, str]:
     }
 
 
+def _bridge_env() -> dict[str, str]:
+    """The managed bridge is always a client of the execution owner.
+
+    A GUI-launched attach process already sets this variable, but the
+    launchd-owned bridge has no parent shell to inherit it from.  Omitting it
+    silently selects the legacy local runtime and creates a second entity.
+    """
+    env = _common_env()
+    env["JAEGER_BRIDGE_EXECUTION"] = "gateway"
+    return env
+
+
 def _gateway_env() -> dict[str, str]:
     env = _common_env()
     env.update({
@@ -188,15 +200,6 @@ STACK_SERVICES: list[ServiceDef] = [
         env_builder=_ollama_env,
     ),
     ServiceDef(
-        id="agent",
-        name="Jaeger Agent",
-        label="com.jenkinsrobotics.jaeger-bridge",
-        port=None,
-        health_path=None,
-        command_builder=_bridge_command,
-        env_builder=_common_env,
-    ),
-    ServiceDef(
         id="gateway",
         name="Gateway",
         label="com.jenkinsrobotics.jaeger-gateway",
@@ -204,6 +207,15 @@ STACK_SERVICES: list[ServiceDef] = [
         health_path="/health",
         command_builder=_gateway_command,
         env_builder=_gateway_env,
+    ),
+    ServiceDef(
+        id="agent",
+        name="Jaeger Agent",
+        label="com.jenkinsrobotics.jaeger-bridge",
+        port=None,
+        health_path=None,
+        command_builder=_bridge_command,
+        env_builder=_bridge_env,
     ),
     ServiceDef(
         id="runner",

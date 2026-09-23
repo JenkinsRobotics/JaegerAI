@@ -194,7 +194,11 @@ def test_heartbeat_uses_character_path_and_durable_delivery(layout, monkeypatch)
     monkeypatch.setattr(board, "has_actionable_work", lambda *a: False)
     monkeypatch.setattr(completions, "pending_count", lambda: 0)
     monkeypatch.setattr(idle_supervisor, "decide", lambda **kw: idle_supervisor.Action.HEARTBEAT)
-    monkeypatch.setattr(heartbeat, "build_prompt", lambda *a: "Scheduled check")
+    monkeypatch.setattr(
+        heartbeat,
+        "execute_heartbeat_event",
+        lambda *a, **kw: (object(), True, "Scheduled check"),
+    )
     monkeypatch.setattr(main, "run_for_voice", lambda client, prompt, **kw: calls.append(kw) or {"text": "A useful update"})
     monkeypatch.setattr(main, "_run_turn", lambda *a, **kw: pytest.fail("persona bypass"))
     bridge._idle_once(io.StringIO(), ctx)

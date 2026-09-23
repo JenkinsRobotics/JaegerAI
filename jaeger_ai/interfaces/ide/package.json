@@ -1,0 +1,34 @@
+{
+  "name": "jaeger-ide",
+  "displayName": "Jaeger",
+  "description": "A local IDE conversation surface for your persistent Jaeger Gateway.",
+  "version": "0.1.0",
+  "publisher": "jenkins-robotics",
+  "engines": { "vscode": "^1.96.0" },
+  "categories": ["Other"],
+  "extensionKind": ["ui"],
+  "main": "./extension.js",
+  "files": ["extension.js", "gateway.js", "conversation.js", "contract.json", "media/**", "README.md", "VERIFICATION.md", "THIRD_PARTY_NOTICES.md"],
+  "activationEvents": ["onView:jaeger.conversation"],
+  "capabilities": { "untrustedWorkspaces": { "supported": false } },
+  "contributes": {
+    "commands": [
+      { "command": "jaeger.open", "title": "Jaeger: Open Conversation" },
+      { "command": "jaeger.settings", "title": "Jaeger: Connection Settings" },
+      { "command": "jaeger.diagnostics", "title": "Jaeger: Connection Diagnostics" }
+    ],
+    "viewsContainers": { "activitybar": [
+      { "id": "jaeger", "title": "Jaeger", "icon": "media/jaeger.svg" }
+    ] },
+    "views": { "jaeger": [
+      { "type": "webview", "id": "jaeger.conversation", "name": "Conversation" }
+    ] },
+    "configuration": {
+      "title": "Jaeger",
+      "properties": {
+        "jaeger.gatewayUrl": { "type": "string", "default": "", "scope": "application", "description": "Local Gateway URL. Empty uses the canonical Jaeger port embedded during packaging. No remote/public access in this release." },
+        "jaeger.model": { "type": "string", "default": "", "description": "Default model identifier for new turns. Overridden by the panel's own model picker when one is chosen there; empty preserves the session/Gateway selection." }
+      }
+    }
+  }
+}

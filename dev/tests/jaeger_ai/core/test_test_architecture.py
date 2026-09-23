@@ -119,6 +119,35 @@ def test_acceptance_is_the_live_webui_suite():
     assert (REPO / "dev/tests/acceptance").is_dir()
 
 
+def test_live_acceptance_requires_explicit_isolated_state():
+    text = _runner_text()
+    assert "--ignore=dev/tests/acceptance" in text
+    assert "JAEGER_STATE_DIR" in text
+    assert '"$HOME/.jaeger"' in text
+    suite = (REPO / "dev/tests/acceptance/test_webui_runtime_truth.py").read_text(
+        encoding="utf-8"
+    )
+    assert 'os.environ.get("JAEGER_ACCEPTANCE") != "1"' in suite
+    assert 'STATE_ROOT / "gateway_sessions.sqlite3"' in suite
+
+
+def test_socket_and_child_process_tests_are_not_in_the_unit_tier():
+    conftest = (REPO / "dev/tests/conftest.py").read_text(encoding="utf-8")
+    for path in (
+        "/jaeger_ai/core/test_gateway_cross_site",
+        "/jaeger_ai/core/test_attach_isolation",
+        "/jaeger_ai/interfaces/test_roundtable_ingress",
+        "/jaeger_ai/nodes/test_frame_bridge",
+    ):
+        assert f'("{path}", ("integration"' in conftest
+    for path in (
+        "/jaeger_ai/core/test_code_bridge",
+        "/jaeger_ai/core/test_run_python_workspace",
+        "/jaeger_ai/core/test_tool_interrupt",
+    ):
+        assert f'("{path}", ("subprocess",))' in conftest
+
+
 def test_doctrine_refuses_mock_as_production_proof():
     doctrine = DOCTRINE.read_text(encoding="utf-8")
     assert "MOCK PASS != PRODUCTION VERIFICATION" in doctrine

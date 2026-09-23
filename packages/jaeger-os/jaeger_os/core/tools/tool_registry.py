@@ -11,10 +11,13 @@ Two registration paths converge into one map:
     its servers). This is the path that keeps the dynamic JROS skill
     model working without forcing every skill into a decorator.
 
-The registry is intentionally a flat dict keyed by tool name.
-Versioning (``get_time`` overridden by ``get_time_v2``) is the loader's
-concern — by the time a ToolDef is registered here, the loader has
-already decided which version wins.
+The registry is a flat dict keyed by tool name, and a name has exactly one
+owner. Registering a *different* handler under a taken name raises
+:class:`ToolConflict` naming both owners — it used to overwrite silently
+(last write wins), so two modules could claim one name and the model would
+reach whichever imported last. A deliberate override (a versioned skill
+replacing a built-in) must say so with ``replace=True``. Re-registering the
+same handler (a module reload) is idempotent.
 """
 
 from __future__ import annotations
@@ -45,6 +48,7 @@ def register_tool(
     check_fn: Callable[[], bool] | None = None,
     requires_env: tuple[str, ...] = (),
     examples: tuple[str, ...] = (),
+    replace: bool = False,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Decorator: bind ``fn`` as the handler for tool ``name``.
 
@@ -80,7 +84,7 @@ def register_tool(
             check_fn=check_fn,
             requires_env=requires_env,
             examples=examples,
-        ))
+        ), replace=replace)
         return fn
 
     return decorator
@@ -101,6 +105,7 @@ def register_tool_from_function(
     check_fn: Callable[[], bool] | None = None,
     requires_env: tuple[str, ...] = (),
     examples: tuple[str, ...] = (),
+    replace: bool = False,
 ) -> Any:
     """Decorator that registers ``fn`` by introspecting its signature.
 
@@ -147,7 +152,7 @@ def register_tool_from_function(
             check_fn=check_fn,
             requires_env=requires_env,
             examples=examples,
-        ))
+        ), replace=replace)
         return target
 
     # Called as a bare decorator: ``@register_tool_from_function``.
@@ -191,11 +196,29 @@ def _synthesize_args_model(
     )
 
 
-def register_tool_instance(tool_def: ToolDef) -> None:
-    """Runtime registration path. Used by ``skill_loader.py`` and the
-    MCP bridge — anywhere a ToolDef is built outside a module-level
-    decorator. Last write wins, mirroring how versioned skills override
-    built-ins of the same name."""
+class ToolConflict(ValueError):
+    """Two owners claimed one tool name without a declared override."""
+
+
+def _owner(tool_def: ToolDef) -> str:
+    fn = tool_def.fn
+    return f"{getattr(fn, '__module__', '?')}.{getattr(fn, '__qualname__', repr(fn))}"
+
+
+def register_tool_instance(tool_def: ToolDef, *, replace: bool = False) -> None:
+    """Runtime registration path. Used by the MCP bridge, hardware
+    capabilities and the decorators — anywhere a ToolDef is built.
+
+    Raises :class:`ToolConflict` when ``tool_def.name`` is already owned by a
+    different handler and ``replace`` is not set. The same handler again
+    (a module reload, a hardware re-registration) replaces quietly."""
+    existing = _registry.get(tool_def.name)
+    if existing is not None and not replace and _owner(existing) != _owner(tool_def):
+        raise ToolConflict(
+            f"tool {tool_def.name!r} is already registered by {_owner(existing)}; "
+            f"{_owner(tool_def)} would silently replace it. Rename one, or register "
+            "the intended override with replace=True."
+        )
     _registry[tool_def.name] = tool_def
 
 
@@ -245,6 +268,7 @@ def restore_registry(snapshot: dict[str, ToolDef]) -> None:
 
 
 __all__ = [
+    "ToolConflict",
     "register_tool",
     "register_tool_from_function",
     "register_tool_instance",

@@ -89,7 +89,8 @@ def test_entity_runtime_owns_subordinate_react(isolated_entity_runtime):
             request_id="req_123",
         )
 
-        assert res == "Subordinate ReAct completed by EntityRuntime"
+        assert res["text"] == "Subordinate ReAct completed by EntityRuntime"
+        assert "halt_reason" in res
         mock_builder.assert_called_once()
         mock_exec.run_turn.assert_called_once_with("Do a task")
 
@@ -112,7 +113,8 @@ def test_cognition_router_react_handler_defaults_to_runtime_subordinate(isolated
     mock_decision.strategy = CognitiveStrategy.REACT_LOOP
     mock_decision.refinement_required = False
 
-    with patch.object(rt, "run_subordinate_react", return_value="Runtime native result") as mock_sub:
+    with patch.object(rt, "run_subordinate_react",
+                      return_value={"text": "Runtime native result", "halt_reason": None}) as mock_sub:
         result = router.execute(
             strategy=CognitiveStrategy.REACT_LOOP,
             event=mock_event,

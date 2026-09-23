@@ -15,13 +15,13 @@ import os
 import threading
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from aiohttp import ClientSession, ClientTimeout, web
 
 from jaeger_ai import __version__ as JAEGER_VERSION
 from jaeger_ai.contract.frameworks import DEFAULT_AGENT_MODEL
-from jaeger_ai.contract.model_ids import provider_model_name
+from jaeger_ai.contract.model_ids import provider_model_name, split_routed_model_id
 from jaeger_ai.contract.ports import (
     GATEWAY_PORT,
     LOOPBACK,
@@ -32,7 +32,9 @@ from jaeger_ai.contract.ports import (
 from jaeger_ai.contract.sessions import normalise_surface, runtime_from_session_id
 
 from .event_bus import GatewayEventBus, ReplayGap
-from .session_store import GatewaySessionStore, RequestBusy, RequestConflict
+from jaeger_ai.core.runtime.cancellation import CancellationRegistry
+
+from .session_store import EXECUTION_INPUT_KEYS, GatewaySessionStore, RequestBusy, RequestConflict
 
 logger = logging.getLogger("jaeger.gateway")
 
@@ -83,6 +85,55 @@ _IMAGE_QUESTION_OPENERS = frozenset({
     "what", "which", "who", "where", "when", "why", "how", "is", "are", "does",
     "do", "can", "read", "describe", "look", "tell", "identify", "count",
 })
+
+
+#: Streamed answer text is batched into durable ``turn.delta`` events at
+#: whichever comes first: this many characters or this many seconds.
+TURN_DELTA_BATCH_CHARS = 96
+TURN_DELTA_BATCH_S = 0.1
+TOOL_EVENT_NAME_MAX = 80
+TOOL_EVENT_DURATION_MAX_S = 86_400.0
+
+
+def _safe_tool_event_name(value: Any) -> str:
+    """Return a bounded identifier, never arbitrary tool-supplied text.
+
+    Tool names normally come from the registered catalog, but this callback is
+    an observability boundary.  If a malformed provider invents a name, do not
+    copy it into the durable client stream where it could contain prompts,
+    arguments, terminal control characters, or secrets.
+    """
+    name = str(value or "")
+    if (
+        not name
+        or len(name) > TOOL_EVENT_NAME_MAX
+        or any(
+            not (char.isascii() and (char.isalnum() or char in "_.:-"))
+            for char in name
+        )
+    ):
+        return "tool"
+    return name
+
+
+def _safe_tool_duration(value: Any) -> float:
+    """Normalize the sole tool-result datum allowed onto the public stream."""
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if not 0.0 <= seconds <= TOOL_EVENT_DURATION_MAX_S:
+        return 0.0
+    return round(seconds, 3)
+
+
+def _admitted_execution(request_row: dict[str, Any]) -> dict[str, Any] | None:
+    """The frozen execution snapshot of an admitted request, or ``None`` for a
+    digest-v1 receipt admitted before snapshots existed."""
+    if int(request_row.get("digest_version") or 1) < 2:
+        return None
+    execution = request_row.get("execution")
+    return execution if isinstance(execution, dict) else None
 
 
 def _asks_about_the_image(request: str) -> bool:
@@ -144,8 +195,24 @@ class _GatewayToolConfirmationProvider:
         self.session_id = session_id
         self.request_id = request_id
 
+    def _grants(self) -> Any:
+        """The instance's persistent per-skill grants — the same
+        ``<instance>/permissions.json`` the bridge and console read, so an
+        "always" answered on any client applies on every client."""
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        from jaeger_os.core.safety.permissions import PermissionGrants
+
+        layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+        return PermissionGrants.load(layout.root if layout is not None else None)
+
     def confirm(self, request: Any) -> bool:
         from jaeger_os.core.safety.permissions import PermissionTier
+        skill_name = str(getattr(request, "skill", "") or "")
+        try:
+            if self._grants().is_granted(skill_name):
+                return True
+        except Exception:  # noqa: BLE001 — unreadable grants mean "ask", never "allow"
+            pass
         try:
             from jaeger_ai.core.instance.commissioning import load_authority_policy
             from jaeger_ai.core.entity.runtime import EntityRuntime
@@ -205,8 +272,25 @@ class _GatewayToolConfirmationProvider:
             fut.add_done_callback(_done)
 
         loop.call_soon_threadsafe(_arm)
-        if box["done"].wait(timeout=APPROVAL_WAIT_S):
-            return bool(box["approved"])
+        scope = self.app._cancellations.get(self.request_id)
+        deadline = time.monotonic() + APPROVAL_WAIT_S
+        while not box["done"].wait(timeout=0.05):
+            if scope is not None and scope.cancelled:
+                # Cancelled while parked: close the approval (first writer
+                # wins) and refuse, whatever a racing decision says.
+                self.app.pending_approvals.pop(aid, None)
+                self.app.store.resolve_approval(aid, approved=False, decision="cancelled")
+                return False
+            if time.monotonic() >= deadline:
+                break
+        else:
+            approved = bool(box["approved"]) and not (scope is not None and scope.cancelled)
+            if approved and (self.app.store.get_approval(aid) or {}).get("decision") == "always":
+                try:
+                    self._grants().grant_persistent(skill)
+                except Exception:  # noqa: BLE001 — the call itself stays approved
+                    logger.warning("could not persist grant for %s", skill, exc_info=True)
+            return approved
         # The tool call is about to be refused. Close the row so the phone
         # does not keep offering an approval that can no longer take effect;
         # if the operator's answer won the race, honour it instead.
@@ -223,6 +307,7 @@ class JaegerGatewayApp:
         store: GatewaySessionStore | None = None,
         event_bus: GatewayEventBus | None = None,
         background_client: Any = None,
+        orchestration: Any | None = None,
     ) -> None:
         # Explicit stores are used by embedded/test gateways and never attach
         # to the operator's running bridge unless a client is supplied.
@@ -237,8 +322,10 @@ class JaegerGatewayApp:
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
-        self._running_tasks: dict[str, asyncio.Task[None]] = {}
-        self._cancel_requested: set[str] = set()
+        self._running_tasks: dict[str | tuple[str, str], asyncio.Future[Any]] = {}
+        # Request-scoped cancellation (R03): registered at admission, bound
+        # to the executing agent, released when the worker returns.
+        self._cancellations = CancellationRegistry()
         self._mcp_transport_lock = threading.RLock()
         self._mcp_transport_signature: tuple[Any, ...] | None = None
         self._mcp_transport: Any = None
@@ -247,6 +334,18 @@ class JaegerGatewayApp:
         self._owner_task: asyncio.Task | None = None
         self._pending_resume = False
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._background_producers: Any = None
+        self._last_human_at = time.monotonic()
+        self._last_human_session = "desktop-app"
+        if orchestration is not None:
+            self.orchestration = orchestration
+        else:
+            try:
+                from jaeger_ai.features.ide_orchestration.service import create_default_orchestration_service
+                self.orchestration = create_default_orchestration_service()
+            except Exception as exc:
+                logger.debug("Failed to initialize default ide_orchestration: %s", exc)
+                self.orchestration = None
         self.app = web.Application(middlewares=[_reject_browser_cross_site])
         self.app.on_startup.append(self._recover_interrupted)
         self.app.on_cleanup.append(self._bounded_shutdown)
@@ -262,6 +361,7 @@ class JaegerGatewayApp:
         expired = self.store.expire_orphaned_tool_confirms()
         if expired:
             logger.info("Expired %d tool approvals orphaned by the previous process", expired)
+        runtime_for_producers = None
         try:
             from jaeger_ai.core.entity.ownership import EntityRuntimeMode
             from jaeger_ai.core.entity.runtime import EntityRuntime
@@ -277,6 +377,7 @@ class JaegerGatewayApp:
             except Exception as exc:
                 logger.debug("sqlite_store/workspace bind skipped: %s", exc)
             rt = EntityRuntime.get_singleton(mode=EntityRuntimeMode.OWNER)
+            runtime_for_producers = rt
             logger.info(
                 "Gateway attached EntityRuntime %s resident=%s",
                 rt.identity.entity_id,
@@ -313,6 +414,8 @@ class JaegerGatewayApp:
                 self._pending_resume = True
         except Exception as exc:
             logger.debug("Gateway EntityRuntime attach skipped: %s", exc)
+        if self._background_producers is None:
+            self._start_background_producers(runtime_for_producers)
         if self._background_client is not None:
             self._background_task = asyncio.create_task(self._background_loop())
 
@@ -327,6 +430,23 @@ class JaegerGatewayApp:
             self._owner_task.cancel()
             await asyncio.gather(self._owner_task, return_exceptions=True)
             self._owner_task = None
+        if self._background_producers is not None:
+            try:
+                self._background_producers.stop()
+            except Exception:
+                logger.debug("background producer shutdown skipped", exc_info=True)
+            self._background_producers = None
+        cancel_all = getattr(self.orchestration, "cancel_all", None)
+        if callable(cancel_all):
+            try:
+                unresolved = await cancel_all(timeout_seconds=1.5)
+                if unresolved:
+                    logger.warning(
+                        "IDE worker cancellation unconfirmed during shutdown: %s",
+                        ", ".join(unresolved),
+                    )
+            except Exception:
+                logger.exception("IDE orchestration shutdown failed")
         tasks = list(self._running_tasks.values())
         for task in tasks:
             task.cancel()
@@ -370,22 +490,147 @@ class JaegerGatewayApp:
             await asyncio.sleep(max(1.0, interval))
 
     def _owner_tick(self, runtime: Any) -> None:
-        from jaeger_ai.core.runtime.heartbeat import execute_heartbeat_event
+        """Sleep-time consolidation. Heartbeat/board/cron live on the producer lease."""
+        sleep_due = os.environ.get("JAEGER_SLEEP_DUE", "").strip() in {"1", "true", "yes"}
+        force_hb = os.environ.get("JAEGER_HEARTBEAT_DUE", "").strip() in {"1", "true", "yes"}
+        if not (sleep_due or force_hb):
+            return
+        try:
+            runtime.sleep_time_processor.run_sleep_cycle(reason="gateway_idle")
+        except Exception as exc:
+            logger.debug("Sleep-time cycle skipped: %s", exc)
+
+    def _start_background_producers(self, runtime: Any) -> None:
+        from jaeger_ai.core.runtime.background_producers import BackgroundProducers
 
         layout = getattr(runtime, "layout", None)
         if layout is None:
-            return
-        force_hb = os.environ.get("JAEGER_HEARTBEAT_DUE", "").strip() in {"1", "true", "yes"}
-        event, woke, prompt = execute_heartbeat_event(layout)
-        quiet = (not woke) or force_hb
-        sleep_due = os.environ.get("JAEGER_SLEEP_DUE", "").strip() in {"1", "true", "yes"}
-        if quiet and (sleep_due or force_hb):
             try:
-                runtime.sleep_time_processor.run_sleep_cycle(reason="gateway_idle")
+                from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+                inst = os.environ.get("JAEGER_INSTANCE_DIR")
+                layout = InstanceLayout(root=Path(inst) if inst else resolve_instance_dir())
             except Exception as exc:
-                logger.debug("Sleep-time cycle skipped: %s", exc)
-        _ = prompt
-        _ = event
+                logger.debug("Gateway background producer layout unavailable: %s", exc)
+                return
+        name = ""
+        try:
+            name = str(getattr(runtime.identity, "display_name", "") or "")
+        except Exception:
+            name = ""
+        producers = BackgroundProducers(layout, self._background_sink(), display_name=name)
+        if producers.try_start():
+            self._background_producers = producers
+            logger.info("Gateway owns instance background producers")
+        else:
+            logger.info("Gateway skipped background producers; another process holds the lease")
+
+    def _background_sink(self) -> Any:
+        app = self
+
+        class _Sink:
+            def is_busy(self) -> bool:
+                return bool(app._running_tasks)
+
+            def last_user_quiet_s(self) -> float:
+                return time.monotonic() - app._last_human_at
+
+            def last_user_session(self) -> str:
+                return app._last_human_session or "desktop-app"
+
+            def submit_turn(self, prompt: str, *, session: str, request_id: str, source: str) -> dict[str, Any]:
+                return app.submit_background_turn(
+                    prompt, session_id=session, request_id=request_id, source=source,
+                )
+
+        return _Sink()
+
+    def submit_background_turn(
+        self,
+        prompt: str,
+        *,
+        session_id: str,
+        request_id: str,
+        source: str,
+    ) -> dict[str, Any]:
+        """Admit and run a background turn on the Gateway event loop.
+
+        Safe to call from a producer thread. Identical request_id replays;
+        a busy session is skipped rather than crashing the producer.
+        """
+        loop = self._loop
+        if loop is None or not loop.is_running():
+            return {"text": "", "error": "gateway loop is not running", "halt_reason": "error"}
+        future = asyncio.run_coroutine_threadsafe(
+            self._run_background_turn(
+                prompt, session_id=session_id, request_id=request_id, source=source,
+            ),
+            loop,
+        )
+        return future.result(timeout=float(os.environ.get("JAEGER_BACKGROUND_TURN_WAIT_S") or 3600))
+
+    async def _run_background_turn(
+        self,
+        prompt: str,
+        *,
+        session_id: str,
+        request_id: str,
+        source: str,
+    ) -> dict[str, Any]:
+        requested = {"options": {"source": source, "background": True}}
+        try:
+            admitted = self.store.admit_request(
+                session_id, prompt, request_id=request_id, requested=requested,
+            )
+        except RequestConflict as exc:
+            # Same request_id with different text or choices is a conflict.
+            # Returning the old output would hide the changed input.
+            return {
+                "text": "",
+                "error": str(exc),
+                "status": "conflict",
+                "replayed": False,
+                "halt_reason": "conflict",
+            }
+        except RequestBusy:
+            return {"text": "", "error": "Turn already in progress", "halt_reason": "busy", "skipped": True}
+        except ValueError as exc:
+            return {"text": "", "error": str(exc), "halt_reason": "error"}
+
+        self._start_admitted_turn(admitted, session_id, prompt)
+        rid = admitted["request_id"]
+        task = self._running_tasks.get(rid)
+        if task is not None:
+            await task
+        row = self.store.get_request(rid) or {}
+        result = row.get("result") if isinstance(row.get("result"), dict) else {}
+        return {
+            "text": str(result.get("output") or ""),
+            "error": result.get("error"),
+            "status": row.get("status"),
+            "replayed": bool(admitted.get("replayed")),
+            "halt_reason": "interrupted" if row.get("status") == "cancelled" else None,
+            "execution_unknown": row.get("status") == "execution_unknown",
+        }
+
+    def _start_admitted_turn(
+        self, admitted: dict[str, Any], session_id: str, text: str,
+    ) -> None:
+        turn_id = admitted["turn_id"]
+        rid = admitted["request_id"]
+        if admitted.get("event"):
+            self.event_bus.fanout(admitted["event"])
+        elif not admitted.get("replayed"):
+            self.event_bus.publish(session_id, "turn.start", {
+                "turn_id": turn_id, "request_id": rid, "text": text,
+            })
+        if admitted.get("accepted") and rid not in self._running_tasks:
+            self._cancellations.register(rid)
+            self._running_tasks[rid] = asyncio.create_task(
+                self._execute_turn(
+                    session_id, turn_id, text, request_id=rid,
+                    execution=_admitted_execution(admitted),
+                )
+            )
 
     def _resume_safe_unknown_requests(self, runtime: Any) -> None:
         """Continue execution_unknown turns whose runs RecoveryManager resumed.
@@ -421,8 +666,10 @@ class JaegerGatewayApp:
             if rid in self._running_tasks:
                 continue
             logger.info("Re-dispatching recovered request %s run=%s", rid, native or "unbound")
+            self._cancellations.register(rid)
             self._running_tasks[rid] = asyncio.create_task(
-                self._execute_turn(sid, turn_id, text, request_id=rid)
+                self._execute_turn(sid, turn_id, text, request_id=rid,
+                                   execution=_admitted_execution(req))
             )
 
     async def _background_loop(self) -> None:
@@ -464,6 +711,10 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/runtime/capabilities", self.handle_runtime_capabilities)
         self.app.router.add_get("/v1/sessions/{id}/attachments", self.handle_list_attachments)
         self.app.router.add_post("/v1/sessions/{id}/attachments", self.handle_add_attachment)
+        self.app.router.add_get("/v1/orchestration/workers", self.handle_list_orchestration_workers)
+        self.app.router.add_post("/v1/orchestration/tasks", self.handle_create_orchestration_task)
+        self.app.router.add_get("/v1/orchestration/tasks/{id}", self.handle_get_orchestration_task)
+        self.app.router.add_post("/v1/orchestration/tasks/{id}/cancel", self.handle_cancel_orchestration_task)
 
     async def handle_version(self, request: web.Request) -> web.Response:
         """Stable, read-only identity for clients and deployment checks."""
@@ -1043,8 +1294,16 @@ class JaegerGatewayApp:
         if request_id is not None:
             request_id = str(request_id).strip() or None
 
+        requested = {key: body.get(key) for key in EXECUTION_INPUT_KEYS if body.get(key) is not None}
+        if requested.get("model") and not requested.get("provider"):
+            # A routed id ("ollama-cloud/glm") names its provider lane.
+            lane, _ = split_routed_model_id(str(requested["model"]))
+            if lane:
+                requested["provider"] = lane
         try:
-            admitted = self.store.admit_request(session_id, text, request_id=request_id)
+            admitted = self.store.admit_request(
+                session_id, text, request_id=request_id, requested=requested,
+            )
         except RequestConflict as exc:
             return web.json_response({"error": str(exc), "session_id": session_id}, status=409)
         except RequestBusy as exc:
@@ -1063,23 +1322,11 @@ class JaegerGatewayApp:
 
         turn_id = admitted["turn_id"]
         rid = admitted["request_id"]
-        if admitted.get("event"):
-            self.event_bus.fanout(admitted["event"])
-        elif not admitted.get("replayed"):
-            self.event_bus.publish(session_id, "turn.start", {
-                "turn_id": turn_id,
-                "request_id": rid,
-                "text": text,
-            })
-
-        turn_model = body.get("model")
-        if turn_model:
-            self.store.update_metadata(session_id, {"model": str(turn_model)})
-
-        if admitted.get("accepted") and rid not in self._running_tasks:
-            self._running_tasks[rid] = asyncio.create_task(
-                self._execute_turn(session_id, turn_id, text, request_id=rid)
-            )
+        options = (admitted.get("execution") or {}).get("options") or {}
+        if not options.get("background"):
+            self._last_human_at = time.monotonic()
+            self._last_human_session = session_id
+        self._start_admitted_turn(admitted, session_id, text)
 
         result = admitted.get("result") or {}
         payload = {
@@ -1091,6 +1338,10 @@ class JaegerGatewayApp:
         }
         if result.get("output") is not None:
             payload["output"] = result.get("output")
+        if admitted.get("event"):
+            # Durable cursor of this turn's turn.start: a client streams
+            # ``?last_event_id=<start_event_id - 1>`` to follow just this turn.
+            payload["start_event_id"] = admitted["event"]["event_id"]
         return web.json_response(payload)
 
     def _session_agent_id(self, session: dict[str, Any] | None) -> str | None:
@@ -1377,6 +1628,32 @@ class JaegerGatewayApp:
                 raise RuntimeError(f"MCP credential rejected (HTTP {exc.code})") from exc
             return None
 
+    @staticmethod
+    def _history_before_admitted_user(
+        session: dict[str, Any] | None,
+        request_row: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Return history before this request's separately supplied prompt.
+
+        Admission persists the current user message and request row with the
+        same timestamp. Model callsites then pass the current prompt as a
+        separate argument. Remove only that exact final admitted row; never
+        value-deduplicate, because an earlier identical user message is valid
+        conversation history. Callers without a durable admission row retain
+        their history unchanged.
+        """
+        messages = list((session or {}).get("messages") or [])
+        if not messages or not request_row:
+            return messages
+        tail = messages[-1]
+        if (
+            isinstance(tail, dict)
+            and tail.get("role") == "user"
+            and tail.get("timestamp") == request_row.get("created_at")
+        ):
+            return messages[:-1]
+        return messages
+
     async def _ollama_chat(
         self,
         text: str,
@@ -1518,8 +1795,152 @@ class JaegerGatewayApp:
             raise RuntimeError(f"Ollama returned empty content: {body[:500]}")
         return content
 
-    def _owner_react_turn(self, prompt: str, *, session_key: str, request_id: str) -> str:
-        """Run ReAct in the EntityRuntime OWNER process."""
+    def _turn_attachments(
+        self, session_id: str, execution: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Attachments this turn may use: exactly those frozen at admission.
+
+        An upload after admission belongs to a later turn. A snapshotted
+        attachment whose content no longer matches its admitted sha256 is
+        withheld rather than silently substituted.
+        """
+        rows = self.store.list_attachments(session_id)
+        if execution is None:
+            return rows
+        by_id = {row.get("attachment_id"): row for row in rows}
+        chosen = []
+        for ref in execution.get("attachments") or []:
+            row = by_id.get(ref.get("attachment_id"))
+            if row is None:
+                continue
+            if ref.get("sha256") and row.get("sha256") and ref["sha256"] != row["sha256"]:
+                logger.warning("Attachment %s changed after admission; withheld", ref.get("attachment_id"))
+                continue
+            chosen.append(row)
+        return chosen
+
+    def _turn_stream_callbacks(self, session_id: str, request_id: str) -> tuple[Any, Callable[[], None]]:
+        """Agent callbacks that stream this turn to clients as durable events.
+
+        ``turn.delta`` carries answer text (what Swift's voice loop and the
+        bridge speak/render incrementally); ``turn.reasoning`` carries model
+        deliberation, never part of the answer. Tool lifecycle events contain
+        only a catalog-shaped name, phase, outcome, and bounded duration: raw
+        arguments, results, and errors never enter the client event stream.
+        Deltas are batched — each publish is a durable row — and are flushed
+        before reasoning/tool boundaries and the terminal event so replay
+        reproduces the exact observed order.
+        """
+        from jaeger_agent.loop.callbacks import AgentCallbacks
+
+        row = self.store.get_request(request_id) or {}
+        ids = {"turn_id": row.get("turn_id") or request_id, "request_id": request_id}
+        lock = threading.Lock()
+        pending: list[str] = []
+        last = [time.monotonic()]
+        # ``AgentCallbacks`` predates call ids.  Starts and finishes are serial
+        # at the loop boundary (including parallel read batches), so a FIFO per
+        # raw catalog name pairs them without publishing either the args or the
+        # raw name. UUIDs remain stable because the event payload is durable.
+        active_tools: dict[str, list[str]] = {}
+
+        def flush() -> None:
+            with lock:
+                text = "".join(pending)
+                pending.clear()
+                last[0] = time.monotonic()
+            if text:
+                self.event_bus.publish(session_id, "turn.delta", {**ids, "delta": text})
+
+        def on_delta(piece: str) -> None:
+            with lock:
+                pending.append(str(piece))
+                due = sum(map(len, pending)) >= TURN_DELTA_BATCH_CHARS or (
+                    time.monotonic() - last[0] >= TURN_DELTA_BATCH_S)
+            if due:
+                flush()
+
+        def on_reasoning(text: str) -> None:
+            flush()
+            if text:
+                self.event_bus.publish(session_id, "turn.reasoning", {**ids, "text": str(text)})
+
+        def on_tool_progress(name: str, phase: str, data: Any) -> None:
+            # ``done`` is followed immediately by the richer ``tool_done``
+            # callback, which knows success/failure. Publishing here would
+            # create two terminal rows for one call.
+            if phase != "start":
+                return
+            del data
+            flush()
+            raw_name = str(name or "")
+            activity_id = f"tool_{uuid.uuid4().hex}"
+            with lock:
+                active_tools.setdefault(raw_name, []).append(activity_id)
+            self.event_bus.publish(session_id, "tool.started", {
+                **ids,
+                "session_id": session_id,
+                "activity_id": activity_id,
+                "call_id": activity_id,
+                "tool": _safe_tool_event_name(name),
+                "phase": "started",
+                "success": None,
+                "ok": None,
+                "text": "Started",
+            })
+
+        def on_tool_done(
+            name: str,
+            args: dict[str, Any],
+            result: Any,
+            ok: bool,
+            error: str | None,
+            elapsed_s: float,
+        ) -> None:
+            # Arguments, result and error are intentionally unused. They can
+            # contain credentials, file contents, prompts, or command output.
+            del args, result, error
+            flush()
+            raw_name = str(name or "")
+            with lock:
+                queued = active_tools.get(raw_name)
+                activity_id = queued.pop(0) if queued else f"tool_{uuid.uuid4().hex}"
+                if queued == []:
+                    active_tools.pop(raw_name, None)
+            succeeded = bool(ok)
+            duration = _safe_tool_duration(elapsed_s)
+            phase = "completed" if succeeded else "failed"
+            detail = (
+                f"Completed in {duration:.3f}s"
+                if succeeded
+                else f"Failed after {duration:.3f}s"
+            )
+            self.event_bus.publish(session_id, f"tool.{phase}", {
+                **ids,
+                "session_id": session_id,
+                "activity_id": activity_id,
+                "call_id": activity_id,
+                "tool": _safe_tool_event_name(name),
+                "phase": phase,
+                "success": succeeded,
+                "ok": succeeded,
+                "elapsed_s": duration,
+                "text": detail,
+            })
+
+        return AgentCallbacks(
+            stream_delta=on_delta,
+            reasoning=on_reasoning,
+            tool_progress=on_tool_progress,
+            tool_done=on_tool_done,
+        ), flush
+
+    def _owner_react_turn(
+        self, prompt: str, *, session_key: str, request_id: str,
+        on_model: Callable[[str], None] | None = None,
+        execution: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Run one inner ReAct step in the EntityRuntime OWNER process."""
         from jaeger_ai.core.entity.runtime import EntityRuntime
 
         runtime = EntityRuntime.get_singleton()
@@ -1529,17 +1950,66 @@ class JaegerGatewayApp:
             native = str((row or {}).get("native_run_id") or "") or None
         except Exception:
             pass
-        return runtime.run_subordinate_react(
-            prompt,
-            session_key=session_key,
-            request_id=request_id,
-            confirmation_provider=_GatewayToolConfirmationProvider(self, session_key, request_id),
-            native_run_id=native,
-            on_run=lambda run_id: self.store.bind_native(
-                request_id,
-                native_run_id=run_id,
-                native_session=f"{OWNER_RUN_SESSION_PREFIX}{session_key}",
-            ),
+        if execution is not None:
+            # Admitted request: execute exactly what was frozen at admission.
+            selection = execution
+            lane, selected_model = split_routed_model_id(str(execution.get("model") or ""))
+        else:
+            # Pre-snapshot (digest v1) request recovered after upgrade.
+            session = self.store.get_session(session_key) or {}
+            selection = session.get("metadata") or {}
+            lane, selected_model = split_routed_model_id(str(selection.get("model") or session.get("model") or ""))
+        callbacks, flush = self._turn_stream_callbacks(session_key, request_id)
+        from jaeger_agent.tool_executor import tool_allowlist
+
+        grant = execution.get("allowed_tools") if execution is not None else None
+        try:
+            # The admitted tool grant scopes the agent built for this turn
+            # ([] = no tools; absent = the owner's normal catalog).
+            with tool_allowlist(list(grant) if grant is not None else None):
+                return runtime.run_subordinate_react(
+                    prompt,
+                    session_key=session_key,
+                    request_id=request_id,
+                    callbacks=callbacks,
+                    confirmation_provider=_GatewayToolConfirmationProvider(self, session_key, request_id),
+                    native_run_id=native,
+                    model=selected_model or None,
+                    provider=str(selection.get("provider") or lane or "") or None,
+                    on_model=on_model,
+                    cancellation=self._cancellations.get(request_id),
+                    on_run=lambda run_id: self.store.bind_native(
+                        request_id,
+                        native_run_id=run_id,
+                        native_session=f"{OWNER_RUN_SESSION_PREFIX}{session_key}",
+                    ),
+                )
+        finally:
+            flush()
+
+    def _continued_owner_react(
+        self, prompt: str, *, session_key: str, request_id: str,
+        on_model: Callable[[str], None] | None = None,
+        execution: dict[str, Any] | None = None,
+        objective: str = "",
+    ) -> dict[str, Any]:
+        """One admitted request: inner ReAct plus owner-side continuation."""
+        from jaeger_ai.core.runtime.autonomous_runner import run_continued_turn
+
+        def step(inner_prompt: str) -> dict[str, Any]:
+            out = self._owner_react_turn(
+                inner_prompt, session_key=session_key, request_id=request_id,
+                on_model=on_model, execution=execution,
+            )
+            return {
+                "text": out.get("text") or "",
+                "halt_reason": out.get("halt_reason"),
+                "status": "completed",
+            }
+
+        return run_continued_turn(
+            step, prompt, objective=objective or prompt,
+            is_cancelled=lambda: self._cancellations.is_cancelled(request_id),
         )
 
     async def _execute_turn(
@@ -1549,8 +2019,13 @@ class JaegerGatewayApp:
         text: str,
         *,
         request_id: str | None = None,
+        execution: dict[str, Any] | None = None,
     ) -> None:
         """Background turn executor: lead via native MCP, specialist via Ollama.
+
+        ``execution`` is the snapshot frozen at admission (model, provider,
+        attachment revisions). ``None`` only for a pre-snapshot request
+        recovered after upgrade, which keeps the historical session reads.
 
         Final assistant text is persisted before turn.finish is published.
         Cancellation is explicit; a dropped SSE client does not stop work.
@@ -1573,13 +2048,14 @@ class JaegerGatewayApp:
             }
         role_s = str(agent_fields.get("role") or "")
         rid = request_id or turn_id
+        admitted_request = self.store.get_request(rid)
         # What the operator wrote, before attachment notes are inlined. Lane
         # decisions read this: an inlined "inspect it with the vision_analyze
         # tool" note made a plain question about an image look actionable.
         request_text = text
 
         try:
-            atts = self.store.list_attachments(session_id)
+            atts = self._turn_attachments(session_id, execution)
         except Exception:
             atts = []
         if atts:
@@ -1599,7 +2075,7 @@ class JaegerGatewayApp:
                 logger.debug("attachment materialize failed", exc_info=True)
 
         try:
-            if rid in self._cancel_requested:
+            if self._cancellations.is_cancelled(rid):
                 self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
                 return
 
@@ -1617,13 +2093,13 @@ class JaegerGatewayApp:
             loop = asyncio.get_running_loop()
 
             async def _run_native_coro(prompt: str) -> tuple[str, str] | None:
-                if rid in self._cancel_requested:
+                if self._cancellations.is_cancelled(rid):
                     raise RuntimeError("cancelled before native dispatch")
                 return await self._native_lead_turn(session_id, prompt, request_id=rid, is_subordinate=True)
 
             def _sync_react(prompt: str, session_key: str = session_id) -> dict[str, Any]:
                 nonlocal backend, model
-                session_atts = self.store.list_attachments(session_id)
+                session_atts = self._turn_attachments(session_id, execution)
                 has_image = any(str(a.get("mime_type") or "").startswith("image/") for a in session_atts)
                 if not has_image:
                     # The operator's request, not ``prompt``: the Entity
@@ -1659,7 +2135,9 @@ class JaegerGatewayApp:
                             request_text,
                             model=model,
                             system_prompt=system_prompt,
-                            history=current.get("messages") or [],
+                            history=self._history_before_admitted_user(
+                                current, admitted_request,
+                            ),
                             attachments=session_atts,
                         ),
                         loop,
@@ -1686,13 +2164,23 @@ class JaegerGatewayApp:
                             return {"text": txt, "status": "completed"}
                     except Exception as ex:
                         logger.warning("Native MCP unavailable; OWNER in-process ReAct: %s", ex)
-                txt = self._owner_react_turn(prompt, session_key=session_key, request_id=rid)
+                def selected_model(name: str) -> None:
+                    nonlocal model
+                    model = name
+
                 backend = "owner-react"
-                model = runtime.subordinate_model_name()
-                return {"text": txt, "status": "completed"}
+                return self._continued_owner_react(
+                    prompt, session_key=session_key, request_id=rid,
+                    on_model=selected_model,
+                    execution=execution if session_key == session_id else None,
+                    objective=request_text,
+                )
 
             session_meta = (session.get("metadata") or {}) if isinstance(session, dict) and isinstance(session.get("metadata"), dict) else {}
-            req_model = provider_model_name(session_meta.get("model") or (session or {}).get("model") or "")
+            if execution is not None:
+                req_model = provider_model_name(execution.get("model") or "")
+            else:
+                req_model = provider_model_name(session_meta.get("model") or (session or {}).get("model") or "")
             active_model = req_model or DEFAULT_OLLAMA_MODEL
 
             def _sync_model(prompt: str) -> str:
@@ -1705,8 +2193,10 @@ class JaegerGatewayApp:
                         prompt,
                         model=active_model,
                         system_prompt=system_prompt,
-                        history=current.get("messages") or [],
-                        attachments=self.store.list_attachments(session_id),
+                        history=self._history_before_admitted_user(
+                            current, admitted_request,
+                        ),
+                        attachments=self._turn_attachments(session_id, execution),
                     ),
                     loop,
                 )
@@ -1726,8 +2216,10 @@ class JaegerGatewayApp:
                         prompt,
                         model=active_model,
                         system_prompt=system_prompt,
-                        history=current.get("messages") or [],
-                        attachments=self.store.list_attachments(session_id),
+                        history=self._history_before_admitted_user(
+                            current, admitted_request,
+                        ),
+                        attachments=self._turn_attachments(session_id, execution),
                     ),
                     loop,
                 )
@@ -1754,25 +2246,41 @@ class JaegerGatewayApp:
                 "metadata": turn_meta,
             }
 
-            turn_result = await asyncio.to_thread(
-                runtime.execute_turn,
-                text,
-                session_id=session_id,
-                source="gateway",
-                request_id=rid,
-                context=context,
-                metadata=turn_meta,
-            )
+            if execution and execution.get("is_subordinate"):
+                # Match local run_for_voice(is_subordinate=True): skip the
+                # EntityRuntime salience/strategy wrap and run owner ReAct
+                # (with continuation) as the worker itself.
+                def selected_model(name: str) -> None:
+                    nonlocal model
+                    model = name
+                turn_result = await asyncio.to_thread(
+                    self._continued_owner_react,
+                    text,
+                    session_key=session_id,
+                    request_id=rid,
+                    on_model=selected_model,
+                    execution=execution,
+                    objective=request_text,
+                )
+                backend = "owner-react"
+            else:
+                turn_result = await asyncio.to_thread(
+                    runtime.execute_turn,
+                    text,
+                    session_id=session_id,
+                    source="gateway",
+                    request_id=rid,
+                    context=context,
+                    metadata=turn_meta,
+                )
 
-            if rid in self._cancel_requested:
-                bound = self.store.get_request(rid)
-                if bound and bound.get("native_run_id"):
-                    raise RuntimeError(
-                        "Cancellation requested after native acceptance; "
-                        "outcome is unconfirmed until reconcile"
-                    )
-                self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native acceptance")
-                return
+            if self._cancellations.is_cancelled(rid):
+                if self._settle_cancelled(session_id, turn_id, rid, agent_fields):
+                    return
+                raise RuntimeError(
+                    "Cancellation requested after native acceptance; "
+                    "outcome is unconfirmed until reconcile"
+                )
 
             if turn_result.get("error"):
                 raise RuntimeError(str(turn_result["error"]))
@@ -1806,6 +2314,10 @@ class JaegerGatewayApp:
             }
             self._persist_terminal(rid, session_id, "completed", result, assistant_text=response_text, record_entity_event=False)
         except Exception as exc:
+            if self._cancellations.is_cancelled(rid) and self._settle_cancelled(
+                session_id, turn_id, rid, agent_fields,
+            ):
+                return
             logger.exception("Turn execution failed: %s", exc)
             bound = self.store.get_request(rid) or {}
             after_native = bool(bound.get("native_run_id"))
@@ -1844,6 +2356,42 @@ class JaegerGatewayApp:
             )
         finally:
             self._running_tasks.pop(rid, None)
+            self._cancellations.release(rid)
+
+    def _settle_cancelled(
+        self,
+        session_id: str,
+        turn_id: str,
+        request_id: str,
+        agent_fields: dict[str, Any],
+    ) -> bool:
+        """Persist the single authoritative outcome of a cancelled request.
+
+        The effect ledger decides: no run bound yet → ``cancelled``; the
+        Entity's own run with every claimed effect resolved → ``cancelled``
+        (completed effects stay recorded); a pending effect →
+        ``execution_unknown`` until reconciled. Returns False for a legacy
+        MCP-dispatched run, whose outcome only its native receipt can settle.
+        """
+        bound = self.store.get_request(request_id) or {}
+        run_id = str(bound.get("native_run_id") or "")
+        if not run_id:
+            self._finish_cancelled(session_id, turn_id, request_id, agent_fields,
+                                   "cancelled before native acceptance")
+            return True
+        if not str(bound.get("native_session") or "").startswith(OWNER_RUN_SESSION_PREFIX):
+            return False
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        if EntityRuntime.run_has_indeterminate_effects(run_id):
+            self._persist_terminal(request_id, session_id, "execution_unknown", {
+                "status": "execution_unknown", "turn_id": turn_id, "output": None,
+                "error": "cancelled with an external effect whose outcome is unknown; reconcile",
+                **agent_fields,
+            })
+            return True
+        self._finish_cancelled(session_id, turn_id, request_id, agent_fields,
+                               "cancelled during execution")
+        return True
 
     def _persist_terminal(
         self,
@@ -1940,25 +2488,46 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Request not found"}, status=404)
         if row["status"] in {"completed", "failed", "cancelled"}:
             return web.json_response({**row, "cancel_requested": False, "already_terminal": True})
-        self._cancel_requested.add(row["request_id"])
+        scope = self._cancellations.cancel(row["request_id"])
         updated = self.store.mark_request_status(row["request_id"], "cancelling") or row
         native_requested = False
-        if updated.get("native_run_id"):
+        owner_run = str(updated.get("native_session") or "").startswith(OWNER_RUN_SESSION_PREFIX)
+        if updated.get("native_run_id") and not owner_run:
+            # Legacy MCP-dispatched run: only the native side can stop it.
             native_requested = await self._request_native_cancel(
                 updated["native_run_id"], updated.get("native_session") or "dispatcher"
             )
+        self._close_pending_approvals(row["request_id"])
         self.event_bus.publish(session_id, "turn.cancel", {
             "request_id": updated["request_id"],
             "turn_id": updated["turn_id"],
             "native_cancel_requested": native_requested,
             "native_cancel_confirmed": False,
+            "interrupt_delivered": scope.interrupt_delivered,
         })
         return web.json_response({
             **updated,
             "cancel_requested": True,
             "native_cancel_requested": native_requested,
+            "interrupt_delivered": scope.interrupt_delivered,
             "cancellation_confirmed": False,
         })
+
+    def _close_pending_approvals(self, request_id: str) -> None:
+        """Deny every approval still pending for a cancelled request.
+
+        First writer wins in the store, so an operator decision that landed
+        first is kept on record — but the confirm wait also sees the
+        cancellation and refuses the action either way.
+        """
+        for approval in self.store.list_pending_approvals():
+            if approval.get("request_id") != request_id:
+                continue
+            aid = approval["approval_id"]
+            self.store.resolve_approval(aid, approved=False, decision="cancelled")
+            future = self.pending_approvals.pop(aid, None)
+            if future is not None and not future.done():
+                future.set_result(False)
 
     async def _request_native_cancel(self, native_run_id: str, native_session: str) -> bool:
         try:
@@ -2149,7 +2718,26 @@ class JaegerGatewayApp:
                 return web.json_response({"error": "attachment path escapes workspace"}, status=400)
         except Exception as exc:
             return web.json_response({"error": str(exc)}, status=400)
-        row = self.store.add_attachment(session_id, body)
+        # The Gateway receives a workspace file reference, not verified client
+        # metadata. Freeze the bytes' actual size/hash here for every surface.
+        def file_metadata():
+            import hashlib
+
+            if not resolved.is_file():
+                raise ValueError("attachment must reference an existing regular file")
+            digest = hashlib.sha256()
+            size = 0
+            with resolved.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    digest.update(chunk)
+                    size += len(chunk)
+            return {"safe_path": str(resolved), "size_bytes": size, "sha256": digest.hexdigest()}
+
+        try:
+            metadata = await asyncio.to_thread(file_metadata)
+        except (OSError, ValueError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        row = self.store.add_attachment(session_id, {**body, **metadata})
         self.event_bus.publish(session_id, "attachment.added", {"attachment": row})
         return web.json_response(row, status=201)
 
@@ -2166,6 +2754,11 @@ class JaegerGatewayApp:
         resolved = self.store.resolve_approval(approval_id, approved=approved, decision=decision)
         future = self.pending_approvals.pop(approval_id, None)
         if resolved is None and future is None:
+            existing = self.store.get_approval(approval_id) or {}
+            if existing.get("decision") == "cancelled":
+                return web.json_response(
+                    {"error": "Request was cancelled; approval no longer applies"}, status=409,
+                )
             return web.json_response({"error": "Approval not found"}, status=404)
         if future is not None and not future.done():
             future.set_result(approved)
@@ -2299,13 +2892,138 @@ class JaegerGatewayApp:
             raise RuntimeError("Specialist native execution returned no confirmed result")
         return native
 
+    async def handle_list_orchestration_workers(self, request: web.Request) -> web.Response:
+        """List registered IDE orchestration workers and their availability."""
+        if self.orchestration is None:
+            return web.json_response({"workers": []})
+        workers = await self.orchestration.list_workers()
+        return web.json_response({"workers": workers})
+
+    async def handle_create_orchestration_task(self, request: web.Request) -> web.Response:
+        """Validate and reserve a worker request before acknowledging admission."""
+        if self.orchestration is None:
+            return web.json_response({"error": "IDE orchestration service unavailable"}, status=503)
+
+        from jaeger_ai.features.ide_orchestration.contracts import (
+            ParentTask,
+            TaskBudget,
+        )
+        from jaeger_ai.features.ide_orchestration.service import (
+            DuplicateSubmissionConflict,
+            WorkerUnavailableError,
+        )
+
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise TypeError("Request body must be an object")
+            for field in ("task_id", "goal", "worker"):
+                if not isinstance(body.get(field), str) or not body[field].strip():
+                    raise ValueError(f"{field} must be a nonempty string")
+            task_id = body["task_id"].strip()
+            key = body.get("idempotency_key", task_id)
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("idempotency_key must be a nonempty string")
+            read_only = body.get("read_only", True)
+            if not isinstance(read_only, bool):
+                raise TypeError("read_only must be a boolean")
+            if not read_only:
+                return web.json_response(
+                    {
+                        "error": (
+                            "Writable IDE orchestration requires a server-owned "
+                            "authorization and verification plan"
+                        )
+                    },
+                    status=403,
+                )
+            metadata = body.get("metadata", {})
+            if not isinstance(metadata, dict):
+                raise TypeError("metadata must be an object")
+            capabilities = body.get("required_capabilities", [])
+            if not isinstance(capabilities, list) or any(
+                not isinstance(value, str) or not value.strip() for value in capabilities
+            ):
+                raise ValueError("required_capabilities must be a list of nonempty strings")
+            workspace = body.get("workspace")
+            if workspace is not None and (not isinstance(workspace, str) or not workspace):
+                raise ValueError("workspace must be an absolute path or null")
+            budget_raw = body.get("budget", {})
+            if not isinstance(budget_raw, dict):
+                raise TypeError("budget must be an object")
+            for field in ("max_seconds", "max_cost_usd"):
+                value = budget_raw.get(field, 300.0 if field == "max_seconds" else 0.0)
+                if isinstance(value, bool) or not isinstance(value, (int, float)):
+                    raise TypeError(f"{field} must be numeric")
+            turns = budget_raw.get("max_turns", 1)
+            if isinstance(turns, bool) or not isinstance(turns, int):
+                raise TypeError("max_turns must be an integer")
+            parent_task = ParentTask(
+                task_id=task_id,
+                goal=body["goal"].strip(),
+                assigned_worker=body["worker"].strip(),
+                idempotency_key=key.strip(),
+                workspace=Path(workspace) if workspace is not None else None,
+                read_only=read_only,
+                budget=TaskBudget(
+                    max_seconds=float(budget_raw.get("max_seconds", 300.0)),
+                    max_turns=turns,
+                    max_cost_usd=float(budget_raw.get("max_cost_usd", 0.0)),
+                ),
+                metadata=metadata,
+                required_capabilities=frozenset(capabilities),
+            )
+            operation, replayed = self.orchestration.admit_parent_task(parent_task)
+        except DuplicateSubmissionConflict as exc:
+            return web.json_response({"error": str(exc)}, status=409)
+        except WorkerUnavailableError as exc:
+            return web.json_response({"error": str(exc)}, status=404)
+        except (ValueError, TypeError, OverflowError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        if not replayed:
+            # Reuse the Gateway's existing shutdown/cancellation tracking. There
+            # is no untracked fire-and-forget task or guessed queued response.
+            operation_key = ("orchestration", task_id)
+            self._running_tasks[operation_key] = operation
+
+            def completed(done: asyncio.Task) -> None:
+                if self._running_tasks.get(operation_key) is done:
+                    self._running_tasks.pop(operation_key, None)
+                if not done.cancelled() and done.exception() is not None:
+                    logger.error("Orchestration task %s failed: %s", task_id, done.exception())
+
+            operation.add_done_callback(completed)
+        return web.json_response(
+            self.orchestration.get_task(task_id), status=200 if replayed else 201,
+        )
+
+    async def handle_get_orchestration_task(self, request: web.Request) -> web.Response:
+        """Get the current process-local worker task, progress and result."""
+        if self.orchestration is None:
+            return web.json_response({"error": "IDE orchestration service unavailable"}, status=503)
+        task_id = request.match_info["id"]
+        task = self.orchestration.get_task(task_id)
+        if task is None:
+            return web.json_response({"error": f"Task {task_id} not found"}, status=404)
+        return web.json_response(task)
+
+    async def handle_cancel_orchestration_task(self, request: web.Request) -> web.Response:
+        """Cancel an in-flight orchestration task."""
+        if self.orchestration is None:
+            return web.json_response({"error": "IDE orchestration service unavailable"}, status=503)
+        task_id = request.match_info["id"]
+        cancelled = await self.orchestration.cancel_task(task_id)
+        return web.json_response({"cancelled": cancelled, "task_id": task_id})
+
 
 def create_gateway_server(
     host: str = DEFAULT_GATEWAY_HOST,
     port: int = DEFAULT_GATEWAY_PORT,
     store: GatewaySessionStore | None = None,
+    orchestration: Any | None = None,
 ) -> tuple[JaegerGatewayApp, web.AppRunner]:
-    gateway = JaegerGatewayApp(store=store)
+    gateway = JaegerGatewayApp(store=store, orchestration=orchestration)
     runner = web.AppRunner(gateway.app)
     return gateway, runner
 

@@ -1,4 +1,4 @@
-"""No two files may define the same port constant with different values.
+"""Canonical service port facts may not be redefined with different values.
 
 This is not hypothetical. Until 2026-09-14 a dead ``jaeger_ai/contract/ports.py``
 declared ``ANIMATION_BRIDGE_DEFAULT_PORT = 9999`` while the live
@@ -12,20 +12,28 @@ from __future__ import annotations
 
 import ast
 import pathlib
-import re
 
 import pytest
 
 from jaeger_ai.contract import ports
+from jaeger_os.contract import ports as engine_ports
 
 REPO = pathlib.Path(__file__).resolve().parents[4]
 SKIP_PARTS = {"__pycache__", ".build", "vendor", "node_modules", ".git", "worktrees"}
+CANONICAL_PORT_NAMES = {
+    name for contract in (ports, engine_ports) for name in contract.__all__
+    if name.endswith("_PORT")
+}
 
 
-def _port_constants() -> dict[str, dict[int, list[str]]]:
-    """Every module-level ``NAME_PORT = <int>`` in the repo, grouped by name."""
+def _port_constants(root: pathlib.Path = REPO) -> dict[str, dict[int, list[str]]]:
+    """Definitions of public contract port names, grouped by name and value.
+
+    Generic local names such as ``DEFAULT_PORT`` describe different facts in
+    unrelated modules and are intentionally outside this one-definition gate.
+    """
     found: dict[str, dict[int, list[str]]] = {}
-    for path in REPO.rglob("*.py"):
+    for path in root.rglob("*.py"):
         if SKIP_PARTS & set(path.parts):
             continue
         try:
@@ -33,19 +41,28 @@ def _port_constants() -> dict[str, dict[int, list[str]]]:
         except SyntaxError:
             continue
         for node in tree.body:
-            if not isinstance(node, ast.Assign):
+            if not isinstance(node, (ast.Assign, ast.AnnAssign)):
                 continue
             if not isinstance(node.value, ast.Constant) or not isinstance(node.value.value, int):
                 continue
-            for target in node.targets:
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            for target in targets:
                 if not isinstance(target, ast.Name):
                     continue
-                if not re.search(r"_PORTS?$", target.id):
+                if target.id not in CANONICAL_PORT_NAMES:
                     continue
                 found.setdefault(target.id, {}).setdefault(
                     node.value.value, []
-                ).append(str(path.relative_to(REPO)))
+                ).append(str(path.relative_to(root)))
     return found
+
+
+def test_port_scan_detects_drift_against_annotated_contract(tmp_path):
+    (tmp_path / "contract.py").write_text("GATEWAY_PORT: Final = 8810\n")
+    (tmp_path / "client.py").write_text("GATEWAY_PORT = 9999\nDEFAULT_PORT = 8000\n")
+    definitions = _port_constants(tmp_path)
+    assert set(definitions["GATEWAY_PORT"]) == {8810, 9999}
+    assert "DEFAULT_PORT" not in definitions
 
 
 def test_no_port_constant_has_two_different_values() -> None:

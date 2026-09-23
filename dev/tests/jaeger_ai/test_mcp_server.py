@@ -121,7 +121,7 @@ def test_http_tool_list_includes_bridge_tools():
     assert {
         "chat",
         "agent_info",
-        "capability_inventory",
+        "capability_inventory_tool",
         "bridge_health",
         "bridge_query",
         "bridge_command",
@@ -202,3 +202,73 @@ def test_main_stdio_attaches_to_live_bridge(monkeypatch):
     ret = mcp_server.main(["jaeger-test"])
     assert ret == 0
     assert ran == ["run"]
+
+
+def test_main_stdio_attaches_to_gateway_when_bridge_unavailable(monkeypatch):
+    from jaeger_ai.interfaces import mcp_server
+
+    class DeadBridge:
+        def health(self):
+            return {"ok": False, "error": "dead socket"}
+
+    class LiveGateway:
+        def probe(self):
+            return {"service": "jaeger-gateway", "all_green": True}
+
+    ran = []
+
+    class DummyServer:
+        def run(self):
+            ran.append("gw_run")
+
+    monkeypatch.setattr("jaeger_ai.features.webui.adapter.bridge_client.BridgeClient", lambda instance: DeadBridge())
+    monkeypatch.setattr("jaeger_ai.core.gateway.client.GatewayTurnClient", lambda: LiveGateway())
+    monkeypatch.setattr(mcp_server, "build_server", lambda client, inst, model, gateway: DummyServer())
+
+    ret = mcp_server.main(["jaeger-test"])
+    assert ret == 0
+    assert ran == ["gw_run"]
+
+
+def test_main_stdio_truthful_error_when_gateway_unavailable(monkeypatch, capsys):
+    from jaeger_ai.interfaces import mcp_server
+
+    class DeadBridge:
+        def health(self):
+            return {"ok": False, "error": "dead socket"}
+
+    class DeadGateway:
+        def probe(self):
+            raise RuntimeError("no gateway")
+
+    monkeypatch.setattr("jaeger_ai.features.webui.adapter.bridge_client.BridgeClient", lambda instance: DeadBridge())
+    monkeypatch.setattr("jaeger_ai.core.gateway.client.GatewayTurnClient", lambda: DeadGateway())
+
+    ret = mcp_server.main(["jaeger-test"])
+    assert ret == 1
+    stderr = capsys.readouterr().err
+    assert "Neither live bridge nor canonical Jaeger Gateway (127.0.0.1:8810) is running" in stderr
+    assert "kimi-k2.7-code:cloud" not in stderr
+    assert "11434" not in stderr
+
+
+def test_build_server_routes_chat_through_gateway():
+    from jaeger_ai.core.gateway.client import TurnResult
+    from jaeger_ai.interfaces.mcp_server import build_server
+
+    class DummyGW:
+        base_url = "http://127.0.0.1:8810"
+        def turn(self, session, message):
+            assert session == "test_session"
+            assert message == "hello gateway"
+            return TurnResult(request_id="rid_1", status="completed", text="reply from gateway")
+
+    server = build_server(None, "jaeger-test", "gateway", gateway=DummyGW())
+    tools = {t.name: t for t in asyncio.run(server.list_tools())}
+    assert "chat" in tools
+    assert "cancel_turn" in tools
+
+    # Call chat
+    chat_fn = server._tool_manager.get_tool("chat").fn
+    out = asyncio.run(chat_fn("hello gateway", session_id="test_session"))
+    assert out == "reply from gateway"

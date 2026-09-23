@@ -33,34 +33,22 @@ struct ToolCommandGroupView: View {
     let items: [ToolCallItem]
     let isStreaming: Bool
 
-    /// Set only once the operator clicks. Until then the section follows the
-    /// run: open while the tools are executing so the work is visible, shut
-    /// when they settle so a finished turn reads as its answer rather than
-    /// its mechanics. A deliberate choice outranks that for the rest of the
-    /// session — collapsing a section the operator just opened (or reopening
-    /// one they shut) to follow a late ``tool.result`` would fight them.
+    /// Activity is compact by default. The operator controls expansion;
+    /// streaming updates must not repeatedly open or close the details.
     @State private var expandedOverride: Bool?
 
-    private var isExpanded: Bool { expandedOverride ?? isStreaming }
+    private var isExpanded: Bool { expandedOverride ?? false }
 
     /// Failures stay findable while collapsed — the one thing worth
     /// surfacing from a section the operator can't see into.
     private var failureCount: Int { items.filter { !$0.ok && !$0.isStreaming }.count }
 
     private var summaryTitle: String {
-        if items.count <= 1, let single = items.first {
-            let base = "Ran \(cleanToolName(single.name))"
-            if !single.detail.isEmpty {
-                return "\(base) · \(single.detail)"
-            }
-            return base
-        }
-        return "Ran \(items.count) command\(items.count == 1 ? "" : "s")"
+        ChatPresentation.activityTitle(items: items, running: isStreaming)
     }
 
     private func cleanToolName(_ raw: String) -> String {
-        return raw.replacingOccurrences(of: "mcp__ares-native__", with: "")
-                  .replacingOccurrences(of: "mcp__", with: "")
+        ChatPresentation.toolName(raw)
     }
 
     var body: some View {
@@ -75,16 +63,7 @@ struct ToolCommandGroupView: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(red: 0.05, green: 0.06, blue: 0.08))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(Color.white.opacity(0.08), lineWidth: 1)
-        )
-        .padding(.vertical, 4)
+        .padding(.vertical, 6)
     }
 
     private var header: some View {
@@ -96,7 +75,7 @@ struct ToolCommandGroupView: View {
                     .font(.system(size: 11))
                     .foregroundColor(Term.inkDim)
                 Text(summaryTitle)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
+                    .font(.system(size: 13, weight: .medium))
                     .foregroundColor(Term.inkDim)
                     .lineLimit(1)
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -104,7 +83,8 @@ struct ToolCommandGroupView: View {
                     .foregroundColor(Term.inkDim.opacity(0.8))
                 if isStreaming {
                     ProgressView().controlSize(.mini)
-                } else if !isExpanded && failureCount > 0 {
+                }
+                if failureCount > 0 {
                     Text("\(failureCount) failed")
                         .font(.system(size: 10, weight: .semibold, design: .monospaced))
                         .foregroundColor(.red)
@@ -127,7 +107,7 @@ struct ToolCommandGroupView: View {
                 Text(item.detail)
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Term.inkDim)
-                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
             if item.isStreaming {

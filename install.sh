@@ -93,7 +93,7 @@ esac
 
 # 2. Create or reuse the .venv
 if [[ ! -d "$VENV" ]]; then
-  echo "→ Creating .venv..."
+  echo "→ Creating the Python environment at $VENV..."
   "$PY" -m venv "$VENV"
 fi
 PIP="$VENV/bin/pip"
@@ -163,7 +163,7 @@ if [[ "$SKIP_DEPS" -eq 0 ]]; then
   "$VENV/bin/playwright" install chromium ||
     echo "  ⚠ playwright install chromium failed — browser tool won't work until you run it manually"
 else
-  echo "→ --skip-deps: leaving .venv untouched"
+  echo "→ --skip-deps: leaving $VENV untouched"
 fi
 
 # 4. Scaffold ~/.jaeger/ (idempotent) — operator state root (OpenClaw standard)

@@ -68,13 +68,13 @@ def test_find_playbook_is_fuzzy() -> None:
 
 
 def test_skill_list() -> None:
-    """``list`` returns the FULL active catalog by default (limit=0) — the
+    """``list`` returns the FULL callable catalog by default (limit=0) — the
     coordinator doesn't gate scope; the agent is the routing intelligence.
-    ``total`` carries the intentionally lean active catalog."""
+    prompt-routing subset remains intentionally lean and separate."""
     r = skill(action="list")
     assert r["ok"] is True
-    assert 25 <= r["total"] <= 45
-    # Default is the complete list (no cap): every active skill returned.
+    assert r["total"] >= 100
+    # Default is the complete list (no cap): every callable skill returned.
     assert r["limit"] == 0
     assert len(r["skills"]) == r["total"]
     # Category counts are always included so the model can pick a
@@ -84,17 +84,18 @@ def test_skill_list() -> None:
 
 
 def test_optional_skill_is_explicitly_resolvable_but_not_auto_listed() -> None:
-    active = {s.name for s in pb.available_playbooks()}
-    assert "comfyui" not in active
+    prompt_visible = {s.name for s in pb.prompt_playbooks()}
+    assert "comfyui" not in prompt_visible
+    assert "comfyui" in {s.name for s in pb.callable_playbooks()}
     skill = pb.find_playbook("comfyui")
     assert skill is not None
     assert skill.lifecycle == "optional"
 
 
 def test_loader_level_alias_does_not_create_second_candidate() -> None:
-    active = {s.name for s in pb.available_playbooks()}
-    assert "skill-builder" in active
-    assert "hermes-agent-skill-authoring" not in active
+    prompt_visible = {s.name for s in pb.prompt_playbooks()}
+    assert "skill-builder" in prompt_visible
+    assert "hermes-agent-skill-authoring" not in prompt_visible
     assert pb.find_playbook("hermes-agent-skill-authoring").name == "skill-builder"
 
 

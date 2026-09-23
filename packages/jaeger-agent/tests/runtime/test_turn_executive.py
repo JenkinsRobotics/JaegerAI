@@ -228,3 +228,31 @@ def test_failure_after_claim_is_indeterminate():
         executor.execute(tool, {"n": 3})
     with pytest.raises(EffectIndeterminate):
         executor.execute(tool, {"n": 3})
+
+
+# ── R03: an interrupted (cancelled) turn closes its durable run ──────
+
+
+def _interrupted_turn(monkeypatch, pending):
+    import threading
+
+    runs = InMemoryRunStore()
+    agent = JaegerAgent(adapter=_Scripted([{"role": "assistant", "content": "unused"}]), tools=[])
+    signal = threading.Event()
+    signal.set()
+    agent.bind_cancel_signal(signal)
+    monkeypatch.setattr(TurnExecutive, "_pending_effects", staticmethod(lambda run_id: pending))
+    execu = TurnExecutive(agent, runs, InMemoryCommitmentStore(), provider="scripted")
+    execu.run_turn("stop me")
+    return runs.get(agent.run_id)
+
+
+def test_interrupted_turn_with_no_pending_effect_cancels_the_run(monkeypatch):
+    run = _interrupted_turn(monkeypatch, pending=[])
+    assert run.state == "cancelled"
+    assert run.reason == "interrupted"
+
+
+def test_interrupted_turn_with_a_pending_effect_stays_reconcilable(monkeypatch):
+    run = _interrupted_turn(monkeypatch, pending=[object()])
+    assert run.state == "interrupted", "an unknown external effect must not be reported as cancelled"

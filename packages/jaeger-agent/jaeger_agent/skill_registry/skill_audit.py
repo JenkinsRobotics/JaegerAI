@@ -140,7 +140,9 @@ def audit_catalog(
     return {
         "ok": counts["error"] == 0,
         "skill_count": len(skills),
-        "active_count": len(pb.available_playbooks()),
+        "active_count": len(pb.prompt_playbooks()),
+        "callable_count": len(pb.callable_playbooks()),
+        "prompt_visible_count": len(pb.prompt_playbooks()),
         "knowledge_pack_count": sum(s.skill_class == "knowledge-pack" for s in skills),
         "lifecycle_counts": dict(sorted(lifecycle_counts.items())),
         "counts": counts,

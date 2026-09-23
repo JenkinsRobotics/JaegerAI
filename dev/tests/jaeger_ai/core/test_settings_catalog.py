@@ -10,6 +10,7 @@ from it. These tests pin that derivation.
 
 from __future__ import annotations
 
+import json
 import pathlib
 
 import pytest
@@ -207,6 +208,16 @@ def test_unknown_path_raises(layout):
         set_value(layout, "voice.nonexistent", 1)
     with pytest.raises(KeyError):
         get_value(layout, "voice.nonexistent")
+
+
+def test_path_setting_serializes_to_str_and_json(layout):
+    res = set_value(layout, "model.model_path", "/tmp/fake-model.gguf")
+    assert res["ok"] is True
+    assert isinstance(res["value"], str)
+    assert res["value"] == "/tmp/fake-model.gguf"
+    # Verify JSON serialization succeeds (e.g. for bridge transport)
+    encoded = json.dumps(res)
+    assert "/tmp/fake-model.gguf" in encoded
 
 
 if __name__ == "__main__":

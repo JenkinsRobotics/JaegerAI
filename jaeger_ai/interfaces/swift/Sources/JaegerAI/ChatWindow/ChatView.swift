@@ -7,7 +7,7 @@
 //       ~/.jaeger/desktop/projects.json, optional AGENTS from Gateway when up,
 //       and RECENT sessions (no fake roster when gateway is down).
 //    2. ChatGPT-style clean empty state hero ("What's on your mind today?") with quick chips.
-//    3. Detached floating pill composer with model selector (Instant ▾), attachment +,
+//    3. Multiline composer with the actual model selector, attachment +,
 //       live voice transcription, and duplex voice mode.
 //    4. Chat / Avatar / Work stage nav.
 //
@@ -56,6 +56,7 @@ struct ChatView: View {
     @State private var expandedProjects: Set<String> = []
     @State private var desktopProjects: [DesktopProject] = DesktopProjectStore.defaults
     @State private var gatewayAgentsAvailable = false
+    @State private var turnStartedAt: Date?
 
     @State private var agentRoster: [AgentRosterItem] = []
 
@@ -66,22 +67,11 @@ struct ChatView: View {
     }
 
     private var activeAgentName: String {
-        agent.status?.displayName ?? "Chief of Staff"
+        agent.status?.displayName ?? "Jaeger"
     }
 
     private var activeAgentColor: Color {
         Color(red: 0.96, green: 0.55, blue: 0.16)
-    }
-
-    private var selectedAgent: AgentRosterItem {
-        AgentRosterItem(
-            id: selectedAgentId,
-            name: activeAgentName,
-            preview: "Primary Assistant",
-            timestamp: "Active",
-            color: activeAgentColor,
-            unread: false
-        )
     }
 
     private var filteredSessions: [SessionSummary] {
@@ -92,13 +82,8 @@ struct ChatView: View {
         }
     }
 
-    private var currentModelShortName: String {
-        guard let name = agent.status?.modelName else { return "Instant" }
-        if name.contains("flash") { return "Flash" }
-        if name.contains("gemma") { return "Gemma" }
-        if name.contains("kimi") { return "Kimi" }
-        if name.contains("qwen") { return "Qwen" }
-        return name.components(separatedBy: ":").first ?? "Instant"
+    private var currentModelLabel: String {
+        ChatPresentation.modelLabel(agent.status?.modelName)
     }
 
     var body: some View {
@@ -121,14 +106,9 @@ struct ChatView: View {
                 case .chat:
                     VStack(spacing: 0) {
                         if chat.isSending {
-                            LiveActivityBanner(
-                                agentName: activeAgentName,
-                                phase: .usingTool,
-                                activityText: "Orchestrating agent run & tool execution...",
-                                onStop: { agent.cancelTurn() }
-                            )
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 6)
+                            ChatRunStatusView(startedAt: turnStartedAt ?? chat.messages.last?.timestamp ?? .now) {
+                                Task { await chat.send("/stop") }
+                            }
                         }
                         if ChatSurfaceFeatureFlags.useWebUITranscript {
                             // Embedded WebUI mode: loads the localhost:8810 WebUI in a WKWebView.
@@ -139,7 +119,6 @@ struct ChatView: View {
                             emptyStateHero
                         } else {
                             messageList
-                            Rectangle().fill(Color.white.opacity(0.04)).frame(height: 1)
                             slashPalette
                             floatingComposer
                         }
@@ -162,7 +141,7 @@ struct ChatView: View {
             }
         }
         .frame(minWidth: 640, minHeight: 520)
-        .background(Term.canvas)
+        .background(tabState.currentTab == .chat ? ChatPresentation.canvas : Term.canvas)
         .onAppear {
             drainPendingPillPrompt()
             PillBridge.shared.isAgentBusy = chat.isSending
@@ -180,6 +159,7 @@ struct ChatView: View {
         }
         .onChange(of: chat.isSending) { _, newValue in
             PillBridge.shared.isAgentBusy = newValue
+            turnStartedAt = newValue ? Date() : nil
         }
         .sheet(item: approvalRequest) { request in
             ApprovalSheetView(request: request) { answer in
@@ -536,7 +516,7 @@ struct ChatView: View {
 
     // MARK: - Main Toolbar
 
-    private var mainToolbar: some View {
+    private var toolbarHeader: some View {
         HStack(spacing: 12) {
             Button(action: { withAnimation(.easeInOut(duration: 0.18)) { showSidebar.toggle() } }) {
                 Image(systemName: "sidebar.leading")
@@ -555,38 +535,6 @@ struct ChatView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(Term.ink)
             }
-
-            // Model selector pill (Instant ▾)
-            Button(action: { chat.showModelPicker = true }) {
-                HStack(spacing: 4) {
-                    Text(currentModelShortName)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(Term.inkDim)
-                    Image(systemName: "chevron.down")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundColor(Term.inkDim.opacity(0.8))
-                }
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(Color.white.opacity(0.06)))
-            }
-            .buttonStyle(.plain)
-            .help("Switch model")
-
-            Spacer()
-
-            // Centered Nav Pills: [ Chat ] [ Kanban ] [ Workspace ] [ Tasks ] [ Skills ] [ Avatar ] [ Work ]
-            HStack(spacing: 2) {
-                tabPillButton(title: "Chat", icon: "bubble.left.and.bubble.right.fill", tab: .chat)
-                tabPillButton(title: "Kanban", icon: "square.grid.3x1.folder.fill.badge.plus", tab: .kanban)
-                tabPillButton(title: "Workspace", icon: "folder.badge.gearshape", tab: .workspace)
-                tabPillButton(title: "Tasks", icon: "clock.badge.checkmark", tab: .tasks)
-                tabPillButton(title: "Skills", icon: "wrench.and.screwdriver.fill", tab: .skills)
-                tabPillButton(title: "Avatar", icon: "waveform.circle.fill", tab: .avatar)
-                tabPillButton(title: "Work", icon: "briefcase.fill", tab: .work)
-            }
-            .padding(3)
-            .background(Capsule().fill(Color.white.opacity(0.05)).overlay(Capsule().stroke(Color.white.opacity(0.08), lineWidth: 1)))
 
             Spacer()
 
@@ -628,8 +576,28 @@ struct ChatView: View {
             .help("Open WebUI chat in Safari")
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .background(Color(red: 0.05, green: 0.06, blue: 0.08))
+        .padding(.vertical, 12)
+    }
+
+    private var mainToolbar: some View {
+        VStack(spacing: 0) {
+            toolbarHeader
+            // Keep every feature accessible without squeezing the conversation header.
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 2) {
+                    tabPillButton(title: "Chat", icon: "bubble.left.and.bubble.right.fill", tab: .chat)
+                    tabPillButton(title: "Kanban", icon: "square.grid.3x1.folder.fill.badge.plus", tab: .kanban)
+                    tabPillButton(title: "Workspace", icon: "folder.badge.gearshape", tab: .workspace)
+                    tabPillButton(title: "Tasks", icon: "clock.badge.checkmark", tab: .tasks)
+                    tabPillButton(title: "Skills", icon: "wrench.and.screwdriver.fill", tab: .skills)
+                    tabPillButton(title: "Avatar", icon: "waveform.circle.fill", tab: .avatar)
+                    tabPillButton(title: "Work", icon: "briefcase.fill", tab: .work)
+                }
+                .padding(.horizontal, 12)
+            }
+            .padding(.bottom, 8)
+        }
+        .background(tabState.currentTab == .chat ? ChatPresentation.canvas : Term.panel)
     }
 
     private func tabPillButton(title: String, icon: String, tab: AppNavTab) -> some View {
@@ -977,124 +945,23 @@ struct ChatView: View {
         .buttonStyle(.plain)
     }
 
-    // MARK: - Floating Capsule Composer (Image 1 & 2 reference)
+    // MARK: - Native agent composer
 
     private var floatingComposer: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if !attachedURLs.isEmpty {
-                attachmentChips
-            }
-
-            HStack(alignment: .center, spacing: 8) {
-                // Plus attachment button
-                Button(action: pickAttachments) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(Term.inkDim)
-                        .padding(6)
-                        .background(Circle().fill(Color.white.opacity(0.06)))
-                }
-                .buttonStyle(.plain)
-                .help("Attach files")
-                .disabled(!agent.isConnected)
-
-                // Input text field
-                TextField(
-                    text: $chat.composerText,
-                    prompt: Text("Message \(selectedAgent.name)…").foregroundColor(Term.inkDim.opacity(0.8)),
-                    axis: .vertical
-                ) { Text("Message") }
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...5)
-                    .font(.system(size: 14))
-                    .foregroundColor(Term.ink)
-                    .tint(Term.accent)
-                    .onSubmit(sendCurrent)
-                    .onKeyPress(.return) {
-                        if NSEvent.modifierFlags.contains(.shift) {
-                            return .ignored
-                        }
-                        sendCurrent()
-                        return .handled
-                    }
-
-                Spacer(minLength: 4)
-
-                // Model Selector pill inside composer
-                Button(action: { chat.showModelPicker = true }) {
-                    HStack(spacing: 3) {
-                        Text(currentModelShortName)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(Term.inkDim)
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(Term.inkDim.opacity(0.8))
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Capsule().fill(Color.white.opacity(0.06)))
-                }
-                .buttonStyle(.plain)
-
-                // Voice mic tap toggle
-                Button(action: toggleDictation) {
-                    Image(systemName: voice.isRecording ? "stop.circle.fill" : "mic.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(voice.isRecording ? Color.red : Term.inkDim)
-                        .padding(6)
-                }
-                .buttonStyle(.plain)
-                .disabled(!agent.isConnected)
-                .help(voice.isRecording ? "Stop recording" : "Dictate prompt")
-
-                // One-turn voice conversation: record, transcribe through the
-                // Jaeger Whisper lane, send immediately, then speak the reply.
-                Button(action: toggleLiveVoice) {
-                    ZStack {
-                        Circle()
-                            .fill(voice.isRecording ? Color.red : Term.accent)
-                            .frame(width: 28, height: 28)
-                        Image(systemName: "waveform")
-                            .font(.system(size: 12, weight: .bold))
-                            .foregroundColor(.white)
-                    }
-                }
-                .buttonStyle(.plain)
-                .help(voice.isRecording && liveVoiceMode
-                      ? "Stop, send, and speak the reply"
-                      : "Start a live voice turn")
-
-                // Send button
-                if canSend {
-                    Button(action: sendCurrent) {
-                        Image(systemName: "arrow.up.circle.fill")
-                            .font(.system(size: 26))
-                            .foregroundColor(Term.accent)
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 22)
-                    .fill(Color(red: 0.10, green: 0.11, blue: 0.14))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 22)
-                            .strokeBorder(borderColor, lineWidth: 1)
-                    )
-                    .shadow(color: Color.black.opacity(0.35), radius: 10, x: 0, y: 4)
-            )
-            .overlay(alignment: .bottom) {
-                if voice.isRecording {
-                    LevelBar(level: voice.levelMeter)
-                        .frame(height: 2)
-                        .padding(.horizontal, 16)
-                }
-            }
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        ChatComposerView(
+            text: $chat.composerText, attachments: $attachedURLs,
+            agentName: activeAgentName, modelName: currentModelLabel,
+            mode: chat.operatingMode, connected: agent.isConnected,
+            canSend: canSend, isSending: chat.isSending,
+            isRecording: voice.isRecording, isTranscribing: chat.isTranscribing,
+            level: voice.levelMeter, queuedMessages: chat.pendingSends,
+            onSend: sendCurrent,
+            onStop: { Task { await chat.send("/stop") } },
+            onAttach: pickAttachments,
+            onSelectModel: { chat.showModelPicker = true },
+            onSelectMode: { chat.setOperatingMode($0) },
+            onDictate: toggleDictation, onVoice: toggleLiveVoice
+        )
     }
 
     // MARK: - Message List
@@ -1102,7 +969,7 @@ struct ChatView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 10) {
+                LazyVStack(alignment: .leading, spacing: 20) {
                     ForEach(chat.messages) { msg in
                         TranscriptRow(
                             message: msg,
@@ -1113,8 +980,10 @@ struct ChatView: View {
                         .id(msg.id)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.vertical, 16)
+                .frame(maxWidth: ChatPresentation.contentWidth, alignment: .leading)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity)
             }
             .onChange(of: chat.messages.count) { _, _ in
                 if let last = chat.messages.last {
@@ -1146,6 +1015,8 @@ struct ChatView: View {
                 Text(agent.status?.modelName ?? "connected")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Term.inkDim)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                 if let inst = agent.status?.instance {
                     Text("· \(inst)")
                         .font(.system(size: 11, design: .monospaced))
@@ -1321,32 +1192,6 @@ struct ChatView: View {
 
     // MARK: - Helpers & Actions
 
-    private var attachmentChips: some View {
-        HStack(spacing: 6) {
-            ForEach(attachedURLs, id: \.path) { url in
-                HStack(spacing: 4) {
-                    Image(systemName: "doc")
-                        .font(.system(size: 10))
-                    Text(url.lastPathComponent)
-                        .font(.system(size: 11, design: .monospaced))
-                        .lineLimit(1)
-                    Button {
-                        attachedURLs.removeAll { $0 == url }
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 8, weight: .bold))
-                    }
-                    .buttonStyle(.plain)
-                }
-                .foregroundColor(Term.inkDim)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(Capsule().fill(Term.panel))
-            }
-        }
-        .padding(.leading, 8)
-    }
-
     private func pickAttachments() {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
@@ -1357,12 +1202,6 @@ struct ChatView: View {
         for url in panel.urls where !attachedURLs.contains(url) {
             attachedURLs.append(url)
         }
-    }
-
-    private var borderColor: Color {
-        if voice.isRecording { return Color.red.opacity(0.6) }
-        if chat.isTranscribing { return Term.accent.opacity(0.6) }
-        return Color.white.opacity(0.09)
     }
 
     private func toggleDictation() {
@@ -1387,13 +1226,16 @@ struct ChatView: View {
     }
 
     private var canSend: Bool {
-        agent.isConnected
-            && !chat.isTranscribing
-            && (!chat.composerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                || !attachedURLs.isEmpty)
+        ChatPresentation.canSubmit(
+            text: chat.composerText, attachmentCount: attachedURLs.count,
+            connected: agent.isConnected, transcribing: chat.isTranscribing,
+            switchingSession: chat.isSwitchingSession,
+            dispatcherBusy: chat.isSending && chat.sessionKey == "dispatcher"
+        )
     }
 
     private func sendCurrent() {
+        guard canSend else { return }
         var text = chat.composerText
         if !attachedURLs.isEmpty {
             let listing = attachedURLs.map { "- \($0.path)" }.joined(separator: "\n")

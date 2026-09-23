@@ -104,19 +104,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 splash.fail("bridge", detail: error, progress: 0.68)
             }
 
-            // ⌥Space — global hotkey toggles the floating pill launcher.
-            // Routes through the same controller as the menu-bar item, so
-            // both surfaces share one panel and one show/hide state
-            // machine.  Carbon's RegisterEventHotKey requires no
-            // Accessibility permission (unlike NSEvent global monitors)
-            // so first-run UX has no permission wall.
-            splash.start("hotkey", "Operator controls",
-                         detail: "Registering Option-Space launcher",
-                         progress: 0.92)
-            PillHotkey.shared.register {
-                PillPanelController.toggle(agent: AgentBridge.shared)
+            // The native quick-chat/pill remains available for focused QA,
+            // but is not part of the release-candidate daily surface.  The
+            // supported human conversations are WebUI and the IDE panel;
+            // leaving this unregistered prevents an accidental Option-Space
+            // launch into the deferred native transcript.
+            if NativeSurfaceVisibility.exposesChat() {
+                splash.start("hotkey", "Native chat QA",
+                             detail: "Registering Option-Space launcher",
+                             progress: 0.92)
+                PillHotkey.shared.register {
+                    PillPanelController.toggle(agent: AgentBridge.shared)
+                }
+                splash.complete("hotkey", detail: "Native chat QA ready", progress: 0.97)
             }
-            splash.complete("hotkey", detail: "Operator controls ready", progress: 0.97)
 
             await splash.finish(AgentBridge.shared.isConnected
                                 ? "All systems online"
@@ -142,12 +143,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // a launched app is not a launched microphone.
             AmbientCoordinator.shared.activate()
 
-            let args = ProcessInfo.processInfo.arguments
-            // --setup / --onboard already returned through presentHybridOnboard.
-            if args.contains("--avatar") {
-                ChatWindowController.show(agent: AgentBridge.shared, tab: .avatar)
-            } else {
-                ChatWindowController.show(agent: AgentBridge.shared, tab: .chat)
+            // Native chat is retained but opt-in during this release.  The
+            // default macOS experience is the menu-bar controller + Settings.
+            if let tab = NativeSurfaceVisibility.requestedTab() {
+                ChatWindowController.show(agent: AgentBridge.shared, tab: tab)
             }
         }
 
@@ -192,7 +191,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !(await gate.startSelectedModel()) {
                 NSLog("[Onboard] saved model failed: \(gate.setupError ?? "unknown")")
             }
-            ChatWindowController.show(agent: agent)
+            if NativeSurfaceVisibility.exposesChat() {
+                ChatWindowController.show(agent: agent)
+            }
         case .unavailable(let reason):
             NSLog("[Onboard] first_boot unavailable: \(reason) — form fallback")
             OnboardingWindowController.shared.show(agent: agent)

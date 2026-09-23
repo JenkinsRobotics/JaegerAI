@@ -4,20 +4,29 @@ set -eu
 script_dir=${0:A:h}
 repo_root=${script_dir:h}
 webui_root="$repo_root/jaeger_ai/features/webui"
-default_python="${HOME}/.jaeger/venv/bin/python"
-if [[ ! -x "$default_python" && -x "$repo_root/.venv/bin/python" ]]; then
-  default_python="$repo_root/.venv/bin/python"
-fi
+# The environment lives outside the checkout (AGENTS.md §1).
+default_python="${JAEGER_VENV:-${HOME}/.jaeger/venv}/bin/python"
 python_exe="${JAEGER_WEBUI_PYTHON:-$default_python}"
-jaeger_state_home="${JAEGER_STATE_HOME:-${HOME}/.jaeger}"
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
 
 if [[ ! -f "$webui_root/server.py" ]]; then
   print -u2 "Jaeger WebUI server is missing from jaeger_ai/features/webui"
   exit 1
 fi
 if [[ ! -x "$python_exe" ]]; then
-  print -u2 "Jaeger Python is missing at $python_exe (checked ~/.jaeger/venv and repo .venv). Run the JaegerAI installer first."
+  print -u2 "Jaeger Python is missing at $python_exe. Run the JaegerAI installer first."
   exit 1
+fi
+
+# State root: the stack passes JAEGER_STATE_HOME explicitly; a direct launch
+# uses the one canonical resolver, so JAEGER_STATE_DIR isolation (and the
+# refusal to nest state inside a checkout) applies here too.
+if [[ -n "${JAEGER_STATE_HOME:-}" ]]; then
+  jaeger_state_home="$JAEGER_STATE_HOME"
+else
+  jaeger_state_home="$(PYTHONPATH="$repo_root" "$python_exe" -c \
+    'from jaeger_ai.core.instance.instance import operator_state_root; print(operator_state_root())')" || exit 1
 fi
 
 export HERMES_HOME="${JAEGER_WEBUI_AGENT_STATE:-$jaeger_state_home/hermes-webui-agent}"
@@ -28,8 +37,6 @@ export HERMES_WEBUI_BOT_NAME="${JAEGER_WEBUI_BOT_NAME:-JaegerAI}"
 export HERMES_WEBUI_DEFAULT_WORKSPACE="${JAEGER_WEBUI_WORKSPACE:-${HOME}/workspace}"
 export HERMES_WEBUI_RUNTIME_ADAPTER=runner-local
 export HERMES_WEBUI_RUNNER_PROFILES=1
-export PYTHONDONTWRITEBYTECODE=1
-export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
 export HERMES_WEBUI_RUNNER_BASE_URL="${JAEGER_RUNNER_BASE_URL:-http://127.0.0.1:8791}"
 # Health uses JAEGER_GATEWAY_URL. Do not synthesize a global chat gateway
 # override: named profiles own their individual native gateway addresses.
@@ -39,9 +46,13 @@ export HERMES_WEBUI_EXTENSION_DIR="$repo_root/jaeger_ai/assets"
 export HERMES_WEBUI_EXTENSION_SCRIPT_URLS=/extensions/jaeger_webui_branding.js
 export HERMES_WEBUI_FOREGROUND=1
 
-# Profile listing/switching imports hermes_cli + agent.* from the hermes-agent checkout.
-hermes_agent_src="${JAEGER_HERMES_AGENT_SRC:-${HOME}/GitHub/hermes-agent}"
-if [[ -d "$hermes_agent_src" ]]; then
+# Profile listing/switching imports hermes_cli + agent.* from the vendored
+# Hermes agent (jaeger_ai/vendor/hermes_agent), which the WebUI discovers on
+# its own. A separate Hermes checkout is used only when named explicitly —
+# never picked up just because ~/GitHub/hermes-agent happens to exist, which
+# made the WebUI's behaviour depend on the machine it ran on.
+hermes_agent_src="${JAEGER_HERMES_AGENT_SRC:-}"
+if [[ -n "$hermes_agent_src" && -d "$hermes_agent_src" ]]; then
   export HERMES_WEBUI_AGENT_DIR="${HERMES_WEBUI_AGENT_DIR:-$hermes_agent_src}"
   export PYTHONPATH="${repo_root}:${hermes_agent_src}${PYTHONPATH:+:$PYTHONPATH}"
 else

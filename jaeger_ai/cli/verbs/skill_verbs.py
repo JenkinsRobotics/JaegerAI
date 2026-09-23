@@ -86,7 +86,7 @@ def _skill_list(argv: list[str]) -> int:
     print(f"# Playbook skills (loaded via skill(action='view'))")
     try:
         from jaeger_agent.skill_registry import playbook_skills as _pb
-        playbooks = _pb.available_playbooks()
+        playbooks = _pb.callable_playbooks()
     except Exception as exc:  # noqa: BLE001
         print(f"  (couldn't load playbook list: {exc})", file=sys.stderr)
         return 0
@@ -148,7 +148,7 @@ def _skill_clone(argv: list[str]) -> int:
         try:
             from jaeger_agent.skill_registry import playbook_skills as _pb
             pb_match = next(
-                (p for p in _pb.available_playbooks() if p.name == args.name),
+                (p for p in _pb.callable_playbooks() if p.name == args.name),
                 None,
             )
             if pb_match is not None:

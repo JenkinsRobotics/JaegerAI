@@ -3,9 +3,9 @@ and the compact prompt-side skill index.
 
 Skills gained discovery metadata: ``platforms`` (with ``macos`` first-class),
 ``requires_tools`` / ``requires_toolsets``, and a
-config-driven disabled list. ``available_playbooks`` is the agent-facing
-view — discovered skills minus those for another OS and those disabled in
-config — and ``build_skill_index`` renders a compact index for the prompt.
+config-driven disabled list. ``prompt_playbooks`` is the scoped automatic
+routing view, while ``callable_playbooks`` remains the full explicit discovery
+surface. ``build_skill_index`` renders a compact index for the prompt.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from jaeger_agent.skill_registry.playbook_skills import (
     _platform_ok,
     _select_available,
     _str_list,
-    available_playbooks,
+    prompt_playbooks,
     build_skill_index,
     discover_playbooks,
 )
@@ -90,7 +90,7 @@ def test_discovery_and_index_run_against_the_real_library():
     cleanly — a smoke test over the production filesystem path."""
     discovered = discover_playbooks()
     assert discovered, "expected the bundled skill library to be non-empty"
-    available = available_playbooks()
+    available = prompt_playbooks()
     # availability is a subset of discovery
     assert len(available) <= len(discovered)
     index = build_skill_index()

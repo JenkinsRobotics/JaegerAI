@@ -30,6 +30,15 @@ def test_build_plist_structure(tmp_path: Path):
     assert "StandardErrorPath" in data
 
 
+def test_managed_bridge_is_always_a_gateway_client():
+    bridge = plistlib.loads(build_plist(
+        SERVICE_BY_ID["agent"], commit_sha="abcdef1234567890"
+    ).encode("utf-8"))
+    assert bridge["EnvironmentVariables"]["JAEGER_BRIDGE_EXECUTION"] == "gateway"
+    ids = [service.id for service in STACK_SERVICES]
+    assert ids.index("gateway") < ids.index("agent")
+
+
 def test_sync_plists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Test that plists for all services are written to launchd dir."""
     launchd_dir = tmp_path / "launchd"

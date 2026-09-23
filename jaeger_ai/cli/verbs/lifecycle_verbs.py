@@ -122,16 +122,31 @@ def _find_app_pids() -> list[int]:
 
 
 def _find_app_bundle() -> Path | None:
-    """Find installed or built JaegerAI.app."""
-    candidates = (
-        REPO_ROOT / "jaeger_ai" / "interfaces" / "swift" / ".build" / "JaegerAI.app",
+    """Find an external JaegerAI.app bundle, then well-known install locations.
+
+    The in-repo .build path is NOT checked here — build output is external
+    by design (JAEGER_SWIFT_BUILD / ~/.jaeger/apps/swift-build).
+    """
+    from jaeger_ai.cli._common import swift_app_bundle
+    candidates: list[Path] = []
+    try:
+        candidates.append(swift_app_bundle(REPO_ROOT))
+    except ValueError as exc:
+        print(f"Invalid Swift build configuration: {exc}", file=sys.stderr)
+        return None
+    candidates += [
         Path.home() / "Applications" / "JaegerAI.app",
         Path("/Applications/JaegerAI.app"),
-    )
+    ]
     for c in candidates:
         if c.exists():
             return c
     return None
+
+
+def _open_app_bundle(bundle: Path) -> subprocess.CompletedProcess:
+    """External builds cannot find the checkout by ascending from their bundle."""
+    return _command(["open", "--env", f"JAEGER_REPO={REPO_ROOT}", str(bundle)])
 
 
 def _get_container_cli() -> str | None:
@@ -422,7 +437,7 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
             if bundle and args.dry_run:
                 print(f"  [dry-run] Would launch {bundle}")
             elif bundle:
-                res = _command(["open", str(bundle)])
+                res = _open_app_bundle(bundle)
                 if res.returncode:
                     failures.append("desktop app")
                 else:

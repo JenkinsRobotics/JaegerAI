@@ -257,10 +257,8 @@ def _iter_sse_lines_cancellable(resp, cancel_event):
 def webui_chat_backend_mode(config_data=None, environ: dict[str, str] | None = None) -> str:
     """Return the explicitly selected browser chat backend.
 
-    The default remains the in-process WebUI runtime. Only explicit gateway
-    values opt browser chat into the Hermes API server bridge; generic truthy
-    strings are deliberately ignored so deployments do not change execution
-    ownership by accident.
+    The default remains the in-process WebUI runtime unless JAEGER_GATEWAY_URL,
+    HERMES_WEBUI_GATEWAY_URL, or explicit gateway backend env is set.
     """
     source = os.environ if environ is None else environ
     cfg = config_data if isinstance(config_data, dict) else {}
@@ -270,6 +268,8 @@ def webui_chat_backend_mode(config_data=None, environ: dict[str, str] | None = N
         or ""
     ).strip().lower()
     if raw in _GATEWAY_CHAT_BACKENDS:
+        return "gateway"
+    if source.get("JAEGER_GATEWAY_URL") or source.get("HERMES_WEBUI_GATEWAY_URL"):
         return "gateway"
     return "legacy"
 
@@ -282,11 +282,32 @@ def _gateway_base_url(config_data=None, environ: dict[str, str] | None = None) -
     source = os.environ if environ is None else environ
     cfg = config_data if isinstance(config_data, dict) else {}
     raw = str(
-        source.get(_WEBUI_GATEWAY_BASE_URL_ENV)
+        source.get("JAEGER_GATEWAY_URL")
+        or source.get("HERMES_WEBUI_GATEWAY_URL")
+        or source.get(_WEBUI_GATEWAY_BASE_URL_ENV)
         or cfg.get("webui_gateway_base_url")
-        or "http://127.0.0.1:8642"
+        or "http://127.0.0.1:8810"
     ).strip()
-    return raw.rstrip("/") or "http://127.0.0.1:8642"
+    return raw.rstrip("/") or "http://127.0.0.1:8810"
+
+
+def _is_jaeger_gateway(base_url: str) -> bool:
+    """Return True if base_url targets a canonical Jaeger Gateway daemon."""
+    target = (base_url or "").rstrip("/")
+    jg = (os.environ.get("JAEGER_GATEWAY_URL") or "").rstrip("/")
+    if jg and target == jg:
+        return True
+    if target.endswith(":8810"):
+        return True
+    try:
+        req = urllib.request.Request(f"{target}/version", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=1.0) as resp:
+            data = json.loads(resp.read().decode("utf-8") or "{}")
+            if data.get("component") == "jaeger-gateway":
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def _gateway_api_key(environ: dict[str, str] | None = None) -> str:
@@ -777,11 +798,15 @@ def _run_gateway_runs_api_streaming(
 
 
 def stop_gateway_run(run_id: str) -> bool:
-    """Request gateway interruption and report whether it was acknowledged."""
+    """Request interruption; confirm the canonical owner's terminal outcome.
+
+    Jaeger's cancel endpoint acknowledges delivery before execution settles.
+    The caller must not tear down SSE or admit another turn on that receipt.
+    """
     run_id = str(run_id or "").strip()
     if not run_id:
         return False
-    from api.config import get_config
+    from api.config import get_config, stream_owner_session_id
 
     cfg = get_config()
     base_url = _gateway_base_url(cfg)
@@ -790,6 +815,51 @@ def stop_gateway_run(run_id: str) -> bool:
     pinned_route = lookup(run_id)
     if pinned_route:
         base_url, api_key = pinned_route
+
+    owner_sid = stream_owner_session_id(run_id)
+    if _is_jaeger_gateway(base_url) and owner_sid:
+        cancel_url = f"{base_url.rstrip('/')}/v1/sessions/{urllib.parse.quote(owner_sid, safe='')}/cancel"
+        headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        req = urllib.request.Request(
+            cancel_url,
+            data=json.dumps({"request_id": run_id}).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as response:
+                status = int(getattr(response, "status", getattr(response, "code", 0)) or 0)
+                if not 200 <= status < 300:
+                    return False
+                payload = json.loads(response.read() or b"{}")
+            status_req = urllib.request.Request(
+                f"{base_url.rstrip('/')}/v1/sessions/{urllib.parse.quote(owner_sid, safe='')}/requests/"
+                f"{urllib.parse.quote(run_id, safe='')}",
+                headers=headers, method="GET",
+            )
+            deadline = time.monotonic() + 5.0
+            while isinstance(payload, dict):
+                if payload.get("execution_unknown") is True:
+                    return False
+                if payload.get("status") in {"cancelled", "completed", "failed"}:
+                    return True
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return False
+                with urllib.request.urlopen(status_req, timeout=remaining) as response:
+                    payload = json.loads(response.read() or b"{}")
+                if isinstance(payload, dict) and payload.get("status") in {"running", "cancelling", "queued"}:
+                    time.sleep(0.05)
+            return False
+        except urllib.error.HTTPError as http_err:
+            logger.debug("Jaeger Gateway cancel failed for run %s: %s", run_id, http_err, exc_info=True)
+            return False
+        except Exception:
+            logger.debug("Jaeger Gateway cancel failed for run %s", run_id, exc_info=True)
+            return False
+
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -900,6 +970,12 @@ def _clear_gateway_pending_state(session: Any, stream_id: str) -> None:
     session.pending_started_at = None
     session.pending_user_source = None
     session.save()
+    try:
+        from api.config import LOCK, SESSIONS
+        with LOCK:
+            SESSIONS[session.session_id] = session
+    except Exception:
+        pass
 
 
 def _cleanup_gateway_pending_mirror(session_id: str) -> None:
@@ -911,6 +987,308 @@ def _cleanup_gateway_pending_mirror(session_id: str) -> None:
         retire_gateway_pending_mirror(session_id)
     except Exception:
         logger.debug("Failed to reconcile gateway pending mirror during teardown", exc_info=True)
+
+
+def _run_jaeger_gateway_streaming(
+    session_id: str,
+    msg_text: str,
+    model: str,
+    workspace: Any,
+    stream_id: str,
+    base_url: str,
+    api_key: str,
+    *,
+    attachments: list | None = None,
+    model_provider: str | None = None,
+    options: dict[str, Any] | None = None,
+    put_gateway_event: Any,
+    cancel_event: threading.Event,
+    cfg: dict[str, Any] | None = None,
+    session: Any = None,
+) -> tuple[str, dict[str, Any]]:
+    """Bridge WebUI turn through the canonical Jaeger Gateway on /v1/sessions."""
+    if session is None:
+        put_gateway_event("apperror", {
+            "label": "WebUI session unavailable",
+            "type": "session_error",
+            "message": "The conversation session could not be loaded. Reload it and try again.",
+            "session_id": session_id,
+        })
+        return "", {"input_tokens": 0, "output_tokens": 0, "estimated_cost": 0}
+
+    from api.jaeger_gateway_routes import remember
+    remember(stream_id, base_url, api_key)
+
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    # 1. Ensure session exists on Jaeger Gateway
+    profile = getattr(session, "profile", "jaeger") or "jaeger"
+    sess_body = json.dumps({
+        "session_id": session_id,
+        "profile": profile,
+        "workspace": str(workspace or ""),
+        "source": "webui",
+    }).encode("utf-8")
+    try:
+        sess_req = urllib.request.Request(f"{base_url}/v1/sessions", data=sess_body, headers=headers, method="POST")
+        with urllib.request.urlopen(sess_req, timeout=5.0):
+            pass
+    except Exception:
+        logger.debug("Gateway ensure_session notice for %s", session_id, exc_info=True)
+
+    # Never admit a partial attachment set: an invalid item or malformed upload
+    # receipt must be visible to the sender, not silently discarded.
+    attachment_ids = []
+    for att in attachments or []:
+        att_path = ""
+        try:
+            if not isinstance(att, dict):
+                raise ValueError("Attachment metadata must be an object")
+            aid = att.get("attachment_id") or att.get("id")
+            if aid:
+                if not isinstance(aid, str) or not aid.strip():
+                    raise ValueError("Attachment ID must be a nonempty string")
+                attachment_ids.append(aid)
+            else:
+                att_path = str(att.get("path") or "").strip()
+                if not att_path:
+                    raise ValueError("Attachment requires an ID or file path")
+                att_body = json.dumps({
+                    "filename": att.get("name") or att.get("filename") or os.path.basename(att_path),
+                    "path": att_path,
+                    "mime": att.get("mime") or "application/octet-stream",
+                    "size": att.get("size") or 0,
+                }).encode("utf-8")
+                att_req = urllib.request.Request(
+                    f"{base_url}/v1/sessions/{urllib.parse.quote(session_id, safe='')}/attachments",
+                    data=att_body, headers=headers, method="POST",
+                )
+                with urllib.request.urlopen(att_req, timeout=5.0) as att_resp:
+                    uploaded = json.loads(att_resp.read().decode("utf-8") or "{}")
+                uploaded_id = uploaded.get("attachment_id") if isinstance(uploaded, dict) else None
+                if not isinstance(uploaded_id, str) or not uploaded_id.strip():
+                    raise ValueError("Gateway upload response did not include an attachment ID")
+                attachment_ids.append(uploaded_id)
+        except Exception as exc:
+            logger.warning("Failed to forward attachment to gateway", exc_info=True)
+            put_gateway_event("apperror", {
+                "label": "Attachment upload failed",
+                "type": "attachment_error",
+                "message": (
+                    f"The attachment {os.path.basename(att_path) or 'file'} could not be sent "
+                    "to Jaeger. The message was not submitted."
+                ),
+                "details": _redact_text(str(exc))[:500],
+                "session_id": session_id,
+            })
+            return "", {"input_tokens": 0, "output_tokens": 0, "estimated_cost": 0}
+
+    # 2. Post turn to /v1/sessions/{id}/turns
+    turn_body = {
+        "text": str(msg_text or ""),
+        "request_id": stream_id,
+        "model": _gateway_model_field(model) or model or "default",
+    }
+    if model_provider:
+        turn_body["provider"] = model_provider
+    if workspace:
+        turn_body["workspace"] = str(workspace)
+    if options:
+        turn_body["options"] = dict(options)
+    # An omitted field means "all session attachments" to the Gateway.  The
+    # WebUI must send [] explicitly so files from earlier turns are not reused.
+    turn_body["attachment_ids"] = attachment_ids
+
+    turn_req = urllib.request.Request(
+        f"{base_url}/v1/sessions/{urllib.parse.quote(session_id, safe='')}/turns",
+        data=json.dumps(turn_body).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    admitted: dict[str, Any] = {}
+    try:
+        with urllib.request.urlopen(turn_req, timeout=10.0) as turn_resp:
+            admitted = json.loads(turn_resp.read().decode("utf-8") or "{}")
+    except urllib.error.HTTPError as exc:
+        err_body = exc.read(2048).decode("utf-8", errors="replace")
+        put_gateway_event("apperror", _gateway_http_error_event(exc, err_body, api_key_configured=bool(api_key)))
+        return "", {"input_tokens": 0, "output_tokens": 0, "estimated_cost": 0}
+    except Exception as exc:
+        safe = _redact_text(str(exc))[:500]
+        put_gateway_event("apperror", {
+            "label": "Gateway turn failed",
+            "type": "gateway_error",
+            "message": safe or "Failed to start turn on Jaeger Gateway.",
+        })
+        return "", {"input_tokens": 0, "output_tokens": 0, "estimated_cost": 0}
+
+    # Cancellation may target this ID only after the owner has admitted it.
+    # Publishing earlier races /cancel against an as-yet nonexistent request.
+    _publish_gateway_run_id(stream_id, stream_id)
+
+    # 3. Stream events from GET /v1/sessions/{session_id}/stream
+    start_event_id = admitted.get("start_event_id")
+    stream_url = f"{base_url}/v1/sessions/{urllib.parse.quote(session_id, safe='')}/stream"
+    if start_event_id is not None:
+        last_id = max(0, int(start_event_id) - 1)
+        stream_url += f"?last_event_id={last_id}"
+
+    stream_req = urllib.request.Request(
+        stream_url,
+        headers={
+            "Accept": "text/event-stream",
+            "Cache-Control": "no-cache",
+            **({"Authorization": f"Bearer {api_key}"} if api_key else {}),
+        },
+        method="GET",
+    )
+    update_active_run(stream_id, phase="gateway-streaming")
+    final_text = ""
+    # Absence of owner telemetry is not proof of a free, zero-token turn.
+    usage = {"input_tokens": None, "output_tokens": None, "estimated_cost": None, "measured": False}
+    current_sse_event = "message"
+    saw_finish = False
+
+    with urllib.request.urlopen(stream_req, timeout=_gateway_read_timeout_secs()) as resp:
+        for raw_line in _iter_sse_lines_cancellable(resp, cancel_event):
+            if cancel_event.is_set():
+                cancel_req = urllib.request.Request(
+                    f"{base_url}/v1/sessions/{urllib.parse.quote(session_id, safe='')}/cancel",
+                    data=json.dumps({"request_id": stream_id}).encode("utf-8"),
+                    headers=headers,
+                    method="POST",
+                )
+                try:
+                    with urllib.request.urlopen(cancel_req, timeout=5.0):
+                        pass
+                except Exception:
+                    pass
+                put_gateway_event("cancel", {"message": "Cancelled by user"})
+                return final_text, usage
+
+            line = raw_line.decode("utf-8", errors="replace").strip()
+            if not line:
+                current_sse_event = "message"
+                continue
+            if line.startswith("event:"):
+                current_sse_event = line[6:].strip() or "message"
+                continue
+            if line.startswith("data:"):
+                data_str = line[5:].strip()
+                try:
+                    payload_json = json.loads(data_str)
+                except json.JSONDecodeError:
+                    continue
+                evt_name = payload_json.get("event") or current_sse_event
+                evt_data = payload_json.get("data") if isinstance(payload_json, dict) and "data" in payload_json else payload_json
+                if not isinstance(evt_data, dict):
+                    evt_data = {}
+
+                req_id = evt_data.get("request_id")
+                if req_id and str(req_id) != str(stream_id) and evt_name.startswith("turn."):
+                    continue
+
+                if evt_name == "turn.delta":
+                    delta = str(evt_data.get("delta") or "")
+                    if delta:
+                        final_text += delta
+                        with STREAMS_LOCK:
+                            STREAM_PARTIAL_TEXT[stream_id] = final_text
+                        put_gateway_event("token", {"text": delta})
+
+                elif evt_name == "turn.reasoning":
+                    r_text = str(evt_data.get("text") or "")
+                    if r_text:
+                        with STREAMS_LOCK:
+                            curr = STREAM_REASONING_TEXT.get(stream_id, "")
+                            STREAM_REASONING_TEXT[stream_id] = curr + r_text
+                        put_gateway_event("reasoning", {"text": r_text})
+
+                elif evt_name == "approval.request":
+                    put_gateway_event("approval", evt_data)
+
+                elif evt_name == "turn.finish":
+                    saw_finish = True
+                    output = evt_data.get("output")
+                    if output and not final_text:
+                        final_text = str(output)
+                    raw_usage = evt_data.get("usage")
+                    if isinstance(raw_usage, dict):
+                        prompt_tokens = raw_usage.get("prompt_tokens", raw_usage.get("input_tokens"))
+                        completion_tokens = raw_usage.get("completion_tokens", raw_usage.get("output_tokens"))
+                        cost = raw_usage.get("estimated_cost")
+                        usage["input_tokens"] = int(prompt_tokens) if prompt_tokens is not None else None
+                        usage["output_tokens"] = int(completion_tokens) if completion_tokens is not None else None
+                        usage["estimated_cost"] = float(cost) if cost is not None else None
+                        usage["measured"] = prompt_tokens is not None and completion_tokens is not None
+                    break
+
+                elif evt_name == "turn.cancelled":
+                    # The canonical owner has reached a durable terminal state.
+                    # Release the WebUI admission guard before telling the
+                    # browser cancellation is complete, so its next send is
+                    # accepted on the first attempt rather than transiently 409.
+                    _clear_gateway_pending_state(session, stream_id)
+                    unregister_active_run(stream_id)
+                    put_gateway_event("cancel", {"message": "Cancelled by user"})
+                    return final_text, usage
+
+                elif evt_name in ("turn.failed", "turn.unknown"):
+                    err_msg = str(evt_data.get("error") or "Gateway turn failed")
+                    put_gateway_event("apperror", {
+                        "label": "Gateway execution failed",
+                        "type": "gateway_error",
+                        "message": err_msg,
+                    })
+                    return final_text, usage
+
+    # Terminal success guard: stream EOF without turn.finish is a connection drop/failure
+    if not saw_finish:
+        put_gateway_event("apperror", {
+            "label": "Gateway stream dropped",
+            "type": "gateway_stream_error",
+            "message": "Gateway stream closed before completion.",
+            "session_id": session_id,
+        })
+        return final_text, usage
+
+    # Persist session messages on successful finish
+    if session is not None:
+        with _get_session_agent_lock(session_id):
+            if not isinstance(session.messages, list):
+                session.messages = []
+            user_msg = {
+                "role": "user",
+                "content": str(msg_text or ""),
+                "timestamp": getattr(session, "pending_started_at", None) or time.time(),
+            }
+            asst_msg = {
+                "role": "assistant",
+                "content": final_text,
+                "timestamp": time.time(),
+            }
+            if not session.messages or session.messages[-1].get("content") != user_msg["content"] or session.messages[-1].get("role") != "user":
+                session.messages.append(user_msg)
+            session.messages.append(asst_msg)
+            session.pending_user_message = None
+            session.active_stream_id = None
+            session.updated_at = time.time()
+            session.last_message_at = time.time()
+            session.save()
+            try:
+                from api.models import LOCK, SESSIONS
+                with LOCK:
+                    SESSIONS[session.session_id] = session
+            except Exception:
+                pass
+
+    from api.streaming import _session_payload_with_full_messages
+    gateway_session_payload = _session_payload_with_full_messages(session, tool_calls=[])
+    put_gateway_event("done", {"session": redact_session_data(gateway_session_payload), "usage": usage})
+    put_gateway_event("stream_end", {"session_id": session_id})
+    return final_text, usage
 
 
 def _run_gateway_chat_streaming(
@@ -1031,6 +1409,42 @@ def _run_gateway_chat_streaming(
             )
         except Exception:
             _gw_overrides = {}
+        if _is_jaeger_gateway(base_url):
+            try:
+                options = {}
+                if reasoning_effort:
+                    options["reasoning_effort"] = reasoning_effort
+                if _gw_overrides:
+                    options.update(_gw_overrides)
+                final_text, usage = _run_jaeger_gateway_streaming(
+                    session_id,
+                    msg_text,
+                    model,
+                    workspace,
+                    stream_id,
+                    base_url,
+                    api_key,
+                    attachments=attachments,
+                    model_provider=model_provider,
+                    options=options,
+                    put_gateway_event=put_gateway_event,
+                    cancel_event=cancel_event,
+                    cfg=cfg,
+                    session=s,
+                )
+            except Exception as exc:
+                error_payload = _settle_gateway_terminal_error(
+                    session_id,
+                    stream_id,
+                    workspace,
+                    model,
+                    model_provider,
+                    str(exc),
+                )
+                if error_payload is not None:
+                    put_gateway_event("apperror", error_payload)
+            return
+
         _runs_api_enabled = _gateway_use_runs_api_enabled(cfg)
         _use_runs_api = _runs_api_enabled and gateway_supports_approval(base_url, api_key)
         if not _use_runs_api and runs_api_pending_marked:

@@ -29,7 +29,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from jaeger_ai.core.instance.procshape import is_real_jaeger_command, pid_cmdline
 from jaeger_ai.core.instance.schemas import (
@@ -99,6 +99,124 @@ def install_root() -> Path:
     return PACKAGE_ROOT.parent
 
 
+def is_source_checkout(path: Path) -> Path | None:
+    """The nearest ancestor of ``path`` (``path`` itself included) that
+    looks like a Python source checkout — a directory containing both a
+    ``.git`` entry and a ``pyproject.toml`` — or ``None`` if none is found
+    walking up to the filesystem root. Symlinks are canonicalized first
+    (M1.2: "Reject internal-state roots within source checkouts after
+    canonicalizing symlinks").
+
+    Generic on purpose: this must catch JaegerAI's own checkout AND a
+    sibling framework checkout (``jaeger-os``, ``jaeger-agent``, …) —
+    anything a careless ``JAEGER_HOME``/``JAEGER_STATE_DIR`` value could
+    point into. A ``.git`` directory alone is not sufficient (many non-code
+    directories are git repos); requiring ``pyproject.toml`` alongside it
+    keeps this scoped to actual Python project checkouts and avoids
+    flagging an operator's ordinary git-tracked dotfiles/notes directory.
+    """
+    current = path.expanduser().resolve()
+    for candidate in (current, *current.parents):
+        if (candidate / ".git").exists() and (candidate / "pyproject.toml").is_file():
+            return candidate
+    return None
+
+
+@dataclass(frozen=True)
+class StatePaths:
+    """The operator state-root paths, purely resolved (M1.1,
+    ``RELEASE_AGENT_PROMPT.md`` section 7).
+
+    Computing a ``StatePaths`` performs **no I/O**: no ``mkdir``, no legacy
+    migration, no database open. That is deliberate — a caller that only
+    wants to know or print where state *would* live (a log line, a wizard
+    banner, an admission-time snapshot) must not have that innocuous read
+    silently create directories or migrate an old layout as a side effect.
+    Call :meth:`ensure` once, at an explicit startup boundary, to create
+    the directory on disk. Migration remains a separate, explicit act
+    (``legacy_state.migrate_operator_state``, orchestrated today by
+    :func:`operator_state_root`; F04 gives it its own phased lifecycle).
+
+    Precedence, matching :func:`operator_state_root` exactly: explicit
+    ``JAEGER_STATE_DIR`` wins, then ``JAEGER_HOME`` (as a state-root basis,
+    with ``.jaeger_ai`` appended), then ``~/.jaeger``. A blank or
+    whitespace-only override is ignored, same as the legacy resolver.
+
+    This intentionally does NOT special-case ``PYTEST_CURRENT_TEST`` —
+    that env-driven safety net exists only to protect the real operator
+    home from the *side-effecting* legacy resolver when a test forgets to
+    set ``JAEGER_HOME``. A pure resolver that never touches disk without
+    an explicit ``ensure()`` does not need it; every real test path
+    already sets ``JAEGER_HOME`` (see ``dev/tests/conftest.py``).
+    """
+
+    state_root: Path
+    source: str  # "JAEGER_STATE_DIR" | "JAEGER_HOME" | "default"
+
+    @classmethod
+    def resolve(
+        cls,
+        env: Mapping[str, str] | None = None,
+        *,
+        reject_source_checkouts: bool = False,
+    ) -> "StatePaths":
+        """Compute the state root from ``env`` (default: ``os.environ``)
+        with no side effects.
+
+        ``reject_source_checkouts=True`` raises :class:`ValueError` when the
+        resolved root sits inside a Python source checkout (see
+        :func:`is_source_checkout`) — the concrete A02 hazard: the
+        installer's own documented usage (``JAEGER_HOME=/opt/jaeger curl
+        ... | bash``) sets ``JAEGER_HOME`` to a *checkout* location, but if
+        that value is later exported persistently and read here, the
+        ``JAEGER_HOME`` branch below would compute a state root nested
+        *inside* that checkout (``/opt/jaeger/.jaeger_ai``) — exactly the
+        in-repo runtime state ``AGENTS.md`` section 1 forbids. Defaults to
+        ``False`` — :func:`operator_state_root`'s 84 existing call sites
+        are not migrated to this check yet (that is the next explicit F02
+        continuation task); this flag exists for new callers and tests
+        that want the invariant enforced today.
+        """
+        source_env = env if env is not None else os.environ
+        state_override = source_env.get("JAEGER_STATE_DIR", "").strip()
+        if state_override:
+            result = cls(Path(state_override).expanduser().resolve(), "JAEGER_STATE_DIR")
+        else:
+            home_override = source_env.get("JAEGER_HOME", "").strip()
+            if home_override:
+                root = Path(home_override).expanduser().resolve()
+                result = cls(root / OPERATOR_STATE_DIR_NAME, "JAEGER_HOME")
+            else:
+                result = cls((Path.home() / ".jaeger").resolve(), "default")
+
+        if reject_source_checkouts:
+            checkout = is_source_checkout(result.state_root)
+            if checkout is not None:
+                raise ValueError(
+                    f"resolved state root {result.state_root} is inside a source "
+                    f"checkout ({checkout}) — state must never live in a repository "
+                    "tree (AGENTS.md section 1). Point JAEGER_STATE_DIR at a "
+                    "non-checkout directory."
+                )
+        return result
+
+    @property
+    def instances_root(self) -> Path:
+        return self.state_root / INSTANCES_DIR_NAME
+
+    @property
+    def active_instance_file(self) -> Path:
+        return self.state_root / ACTIVE_INSTANCE_FILE
+
+    def ensure(self) -> "StatePaths":
+        """Create the state root on disk. The one side effect this type
+        performs, and only when explicitly asked. Returns ``self`` so a
+        caller can write ``paths = StatePaths.resolve().ensure()``. Does
+        not migrate a legacy layout — see the class docstring."""
+        self.state_root.mkdir(parents=True, exist_ok=True)
+        return self
+
+
 def operator_state_root() -> Path:
     """The operator state directory.
 
@@ -108,6 +226,26 @@ def operator_state_root() -> Path:
 
     When JAEGER_HOME is explicitly set (e.g., in test fixtures or sandboxes),
     state is isolated under that directory.
+
+    This function still performs the historical side effects (mkdir, and
+    legacy-state migration on the JAEGER_HOME path, and a disposable
+    pytest-context fallback) on every call — its 84 existing call sites
+    across the tree rely on that. :class:`StatePaths` is the new pure
+    primitive for callers that want the resolved path without those side
+    effects; this function is not yet rebuilt on top of explicit startup
+    injection (that migration is F02's remaining, larger scope).
+
+    Raises:
+        RuntimeError: when JAEGER_HOME resolves inside a Python source
+            checkout (A02: ``scripts/install.sh`` documents
+            ``JAEGER_HOME=/opt/jaeger curl ... | bash``, where JAEGER_HOME
+            means *checkout location* — a persisted export of that value
+            would otherwise nest operator state inside the checkout,
+            exactly what ``AGENTS.md`` section 1 forbids). Fails loudly
+            instead of silently polluting the repository tree; the message
+            names both fixes (unset JAEGER_HOME, or set JAEGER_STATE_DIR
+            explicitly). ``JAEGER_STATE_DIR`` is unaffected — an operator
+            who sets that explicitly is never second-guessed.
     """
     state_override = os.environ.get("JAEGER_STATE_DIR", "").strip()
     if state_override:
@@ -118,28 +256,49 @@ def operator_state_root() -> Path:
     home_override = os.environ.get("JAEGER_HOME", "").strip()
     if home_override:
         root = Path(home_override).expanduser().resolve()
+        checkout = is_source_checkout(root)
+        if checkout is not None:
+            raise RuntimeError(
+                f"JAEGER_HOME={root} is inside a source checkout ({checkout}) — "
+                "refusing to nest operator state inside a repository tree "
+                "(AGENTS.md section 1). This usually means a shell profile "
+                "still exports JAEGER_HOME from the installer's checkout-clone "
+                "step (scripts/install.sh: `JAEGER_HOME=<dir> curl ... | bash`). "
+                "Unset JAEGER_HOME (state then defaults to ~/.jaeger), or set "
+                "JAEGER_STATE_DIR explicitly to where state should live."
+            )
         destination = root / OPERATOR_STATE_DIR_NAME
         from .legacy_state import migrate_operator_state
         return migrate_operator_state(root, destination)
 
-    # Protect live operator state: if executing under pytest or test isolation without
-    # an explicit override, isolate to a disposable temporary test directory.
+    # Protect live operator state: if executing under pytest or test isolation
+    # without an explicit override, isolate to a disposable temporary test
+    # directory instead of falling through to the real operator home.
+    #
+    # This directory is unique per process (not a single fixed path) — a
+    # fixed shared path let concurrent test processes on one machine race
+    # on the same directory. Every call within this process returns the
+    # same directory (memoized), matching the stable-location contract the
+    # explicit-override branches above already provide.
     if "PYTEST_CURRENT_TEST" in os.environ or os.environ.get("JAEGER_NO_ATTACH") == "1":
-        test_dir = Path("/tmp") / "jaeger_test_state"
-        test_dir.mkdir(parents=True, exist_ok=True)
-        return test_dir
+        global _PROCESS_TEST_STATE_DIR
+        if _PROCESS_TEST_STATE_DIR is None:
+            import tempfile
+            _PROCESS_TEST_STATE_DIR = Path(
+                tempfile.mkdtemp(prefix="jaeger_test_state_")
+            )
+        _PROCESS_TEST_STATE_DIR.mkdir(parents=True, exist_ok=True)
+        return _PROCESS_TEST_STATE_DIR
 
     home_dir = Path.home() / ".jaeger"
     home_dir.mkdir(parents=True, exist_ok=True)
     return home_dir
 
 
-# Legacy alias kept for any internal call-site that still references it
-# before the migration sweep finishes. The semantics changed in 0.2.6:
-# ``USER_ROOT`` is no longer ``~/.jaeger`` — it's now
-# ``<install_root>/.jaeger_ai``. The name is preserved to avoid a
-# wholesale rename.
-USER_ROOT = operator_state_root()
+# Memoized per-process fallback directory for the untested-override branch
+# above. Populated lazily on first use, never at import time — see
+# ``_PROCESS_TEST_STATE_DIR`` usage in operator_state_root().
+_PROCESS_TEST_STATE_DIR: Path | None = None
 
 
 def user_instances_root() -> Path:

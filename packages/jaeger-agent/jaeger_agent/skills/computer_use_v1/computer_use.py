@@ -358,3 +358,26 @@ def register(agent: Any) -> None:
         menu='File', item='New Window'. The most reliable way to drive
         an app, since menu names are stable."""
         return menu_select(menu=menu, item=item)
+
+
+# Module-level functions matching the vision_engine and external tool adapter contracts:
+def computer_screenshot(path: str = "screen.png") -> dict[str, Any]:
+    return screenshot(path=path)
+
+def computer_read_screen() -> dict[str, Any]:
+    return read_screen()
+
+def computer_open_app(name: str) -> dict[str, Any]:
+    return open_app(name=name)
+
+def computer_click(x: int, y: int) -> dict[str, Any]:
+    return click(x=x, y=y)
+
+def computer_type_text(text: str) -> dict[str, Any]:
+    return type_text(text=text)
+
+def computer_press_key(key: str) -> dict[str, Any]:
+    return press_key(key=key)
+
+def computer_menu_select(menu: str, item: str) -> dict[str, Any]:
+    return menu_select(menu=menu, item=item)

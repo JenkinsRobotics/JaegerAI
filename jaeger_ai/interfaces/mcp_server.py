@@ -185,17 +185,19 @@ def capability_inventory(bridge: Any | None = None) -> dict[str, Any]:
 
 def build_server(client: Any, instance: str, model: str | None,
                  run_turn: TurnFn | None = None, bridge: Any | None = None,
+                 gateway: Any | None = None,
                  host: str = MCP_HTTP_HOST, port: int = MCP_HTTP_PORT) -> Any:
     """Build the FastMCP server exposing JaegerAI.
 
     ``run_turn`` defaults to the real ``run_for_voice`` (stdio / in-process).
     When ``bridge`` is provided (HTTP mode), tools call the live BridgeClient
     and do not boot a second model.
+    When ``gateway`` is provided, turns route to the canonical Jaeger Gateway.
     """
     from mcp.server.fastmcp import FastMCP
     from mcp.server.transport_security import TransportSecuritySettings
 
-    if run_turn is None and bridge is None:
+    if run_turn is None and bridge is None and gateway is None:
         from jaeger_ai.main import run_for_voice as run_turn  # noqa: PLW0127
 
     mcp = FastMCP(
@@ -242,6 +244,11 @@ def build_server(client: Any, instance: str, model: str | None,
                 bridge, message, session=session, request_id=request_id,
                 allowed_tools=allowed_tools, is_subordinate=is_subordinate,
             )
+        if gateway is not None:
+            res = gateway.turn(session, message)
+            if not res.ok:
+                raise RuntimeError(f"Gateway turn failed: {res.error or res.status}")
+            return res.text
         from jaeger_agent.tool_executor import tool_allowlist
         with tool_allowlist(allowed_tools):
             return _run_chat(
@@ -263,6 +270,16 @@ def build_server(client: Any, instance: str, model: str | None,
                 return {"ok": True, "requested": True, "confirmed": False, "request_id": request_id}
             except Exception as exc:  # noqa: BLE001
                 return {"ok": False, "requested": False, "confirmed": False, "error": str(exc)}
+    elif gateway is not None:
+        @mcp.tool()
+        @_off_event_loop
+        def cancel_turn(session_id: str = "", request_id: str = "") -> dict:
+            """Request Gateway turn cancellation."""
+            try:
+                gateway.cancel(session_id or "mcp", request_id)
+                return {"ok": True, "requested": True, "confirmed": False, "request_id": request_id}
+            except Exception as exc:  # noqa: BLE001
+                return {"ok": False, "requested": False, "confirmed": False, "error": str(exc)}
 
     @mcp.tool()
     @_off_event_loop
@@ -278,6 +295,9 @@ def build_server(client: Any, instance: str, model: str | None,
                 info["bridge_error"] = str(exc)
             info.setdefault("model", model or "unknown")
             info["instance"] = instance
+        elif gateway is not None:
+            info["gateway"] = getattr(gateway, "base_url", "http://127.0.0.1:8810")
+            info["transport"] = "gateway"
         return info
 
     @mcp.tool()
@@ -456,26 +476,42 @@ def main(argv: list[str] | None = None) -> int:
         instance = instance or default_instance_name()
         bridge = BridgeClient(instance=instance)
         health = bridge.health()
-        if not health.get("ok"):
-            print(
-                f"[jaeger-mcp] live bridge is not available for {instance}: "
-                f"{health.get('error') or 'unknown error'}",
-                file=sys.stderr,
-            )
-            return 1
-        model = None
-        try:
-            ident = bridge.query("identity")
-            if isinstance(ident, dict):
-                model = ident.get("model")
-        except Exception:  # noqa: BLE001
+        if health.get("ok"):
             model = None
-        server = build_server(None, instance, model, bridge=bridge, host=args.host, port=args.port)
-        token = resolve_mcp_token()
-        import uvicorn
+            try:
+                ident = bridge.query("identity")
+                if isinstance(ident, dict):
+                    model = ident.get("model")
+            except Exception:  # noqa: BLE001
+                model = None
+            server = build_server(None, instance, model, bridge=bridge, host=args.host, port=args.port)
+            token = resolve_mcp_token()
+            import uvicorn
 
-        uvicorn.run(http_app(server, token), host=args.host, port=args.port)
-        return 0
+            uvicorn.run(http_app(server, token), host=args.host, port=args.port)
+            return 0
+
+        # Gateway fallback for HTTP
+        from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
+        gw = GatewayTurnClient()
+        try:
+            gw_probe = gw.probe()
+            if gw_probe.get("service") == "jaeger-gateway" or gw_probe.get("component") == "jaeger-gateway":
+                server = build_server(None, instance, "gateway", gateway=gw, host=args.host, port=args.port)
+                token = resolve_mcp_token()
+                import uvicorn
+
+                uvicorn.run(http_app(server, token), host=args.host, port=args.port)
+                return 0
+        except (GatewayUnavailable, Exception):
+            pass
+
+        print(
+            f"[jaeger-mcp] Neither live bridge nor canonical Jaeger Gateway (127.0.0.1:8810) is available for {instance}. "
+            "Start the Gateway with 'jaeger gateway daemon'.",
+            file=sys.stderr,
+        )
+        return 1
 
     from jaeger_ai.core.instance.instance import default_instance_name
     from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
@@ -495,26 +531,26 @@ def main(argv: list[str] | None = None) -> int:
         server.run()
         return 0
 
-    from jaeger_ai.interfaces.bridge import _model_name
-    from jaeger_ai.main import boot_for_tui
-
-    # Boot the agent with all noise on stderr; MCP owns stdout.
-    with contextlib.redirect_stdout(sys.stderr):
-        try:
-            boot = boot_for_tui(instance_name=instance)
-        except Exception as exc:  # noqa: BLE001
-            print(f"[jaeger-mcp] boot failed: {exc}", file=sys.stderr)
-            return 1
-
-    server = build_server(boot.client, instance, _model_name(boot))
+    # Gateway fallback for stdio
+    from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
+    gw = GatewayTurnClient()
     try:
-        server.run()              # stdio transport; blocks until the client closes
-    finally:
-        cleanup = getattr(boot, "cleanup", None)
-        if callable(cleanup):
-            with contextlib.suppress(Exception):
-                cleanup()
-    return 0
+        gw_probe = gw.probe()
+        if gw_probe.get("service") == "jaeger-gateway" or gw_probe.get("component") == "jaeger-gateway":
+            server = build_server(None, instance, "gateway", gateway=gw)
+            server.run()
+            return 0
+    except (GatewayUnavailable, Exception):
+        pass
+
+    # Neither bridge nor gateway is running. Truthfully report the Gateway is unavailable,
+    # rather than attempting to boot an in-process model that crashes on uninstalled Ollama.
+    print(
+        f"[jaeger-mcp] Neither live bridge nor canonical Jaeger Gateway (127.0.0.1:8810) is running for {instance}. "
+        "Start the Gateway with 'jaeger gateway daemon'.",
+        file=sys.stderr,
+    )
+    return 1
 
 
 if __name__ == "__main__":
