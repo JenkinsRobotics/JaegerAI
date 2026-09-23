@@ -99,6 +99,7 @@ def test_library_model_includes_support_model(tmp_path: Path, monkeypatch: pytes
     assert model["agents"]["counts"]["jaeger_native"] >= 1
 
 
+@pytest.mark.integration
 class TestGatewayAgentsAPI(AioHTTPTestCase):
     async def get_application(self):
         import tempfile
@@ -190,6 +191,7 @@ def test_standing_specialists_seeded(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert catalog["counts"]["jaeger_native"] >= 4
 
 
+@pytest.mark.integration
 class TestGatewayHandoffAPI(AioHTTPTestCase):
     async def get_application(self):
         import os
@@ -331,6 +333,7 @@ def test_role_defaults_and_catalog_lead(tmp_path: Path, monkeypatch: pytest.Monk
     assert catalog["counts"]["specialist"] >= 1
 
 
+@pytest.mark.integration
 class TestGatewaySessionHandoff(AioHTTPTestCase):
     async def get_application(self):
         import os
@@ -760,6 +763,7 @@ def test_si_soul_prompt_uses_instance_layout(monkeypatch: pytest.MonkeyPatch, tm
     assert JaegerGatewayApp._si_soul_prompt() is None
 
 
+@pytest.mark.integration
 class TestGatewayTurnUsesSessionAgent(AioHTTPTestCase):
     """Live-turn path must resolve session agent_id into turn.finish fields."""
 

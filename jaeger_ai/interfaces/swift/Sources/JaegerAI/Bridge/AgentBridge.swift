@@ -114,6 +114,22 @@ final class AgentBridge: ObservableObject {
     /// Diagnostic string for the About panel — the launcher we spawn.
     var socketPath: String? { BridgeProcess.jaegerPath() }
 
+    /// Initial lifecycle derived from the bridge handshake.  Attached
+    /// clients may join after the owner's one-time `agent_state` transition,
+    /// so a warm `ready` handshake must be sufficient on its own.  Unknown
+    /// states fail visibly instead of leaving launch stuck on "booting".
+    static func initialLifecycle(for ready: BridgeReady) -> AgentLifecycle {
+        switch ready.agent {
+        case "ready":
+            return .ready(model: ready.model, character: ready.character,
+                          icon: ready.icon, agentName: ready.agentName)
+        case "booting", "setup":
+            return .booting
+        default:
+            return .failed("Bridge reported unsupported agent state: \(ready.agent)")
+        }
+    }
+
     // MARK: - Connect / disconnect
 
     /// Launch the bridge child and await its (fast) ready handshake.
@@ -176,11 +192,7 @@ final class AgentBridge: ObservableObject {
             state = .ready
             lastError = nil
             needsOnboarding = ready.agent == "setup"
-            if ready.agent == "ready" {          // already-warm core (attach)
-                agentState = .ready(model: ready.model,
-                                    character: ready.character, icon: ready.icon,
-                                    agentName: ready.agentName)
-            }
+            agentState = Self.initialLifecycle(for: ready)
             status = AgentStatus(rawDict: [
                 "instance": ready.instance,
                 "model": ready.model as Any,

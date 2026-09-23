@@ -1516,6 +1516,7 @@ class Session:
 
         tmp = self.path.with_suffix(f'.tmp.{os.getpid()}.{threading.current_thread().ident}')
         try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
             with open(tmp, 'w', encoding='utf-8') as f:
                 f.write(payload)
                 f.flush()

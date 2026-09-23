@@ -13,9 +13,7 @@
     "agent_tools",
     "mcp"
   ],
-  "scripts": [
-    "dashboard/app.js"
-  ],
+  "scripts": [],
   "stylesheets": [],
   "sidecar": {
     "type": "loopback",

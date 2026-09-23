@@ -180,6 +180,83 @@ def test_a_stale_socket_file_is_still_reclaimed(instance_root):
         stale.unlink(missing_ok=True)
 
 
+def test_gateway_owner_replays_warm_readiness_to_later_attach_client(instance_root):
+    """A warm Gateway is the runtime in Gateway execution mode.
+
+    There is deliberately no local ``ctx.client`` in this mode.  A desktop
+    attaching after the initial Gateway probe must still receive both a warm
+    ready handshake and the lifecycle replay; otherwise the native splash
+    waits for a transition which happened before it connected.
+    """
+    class _Gateway:
+        base_url = "http://127.0.0.1:8810"
+        probes = 0
+
+        def probe(self):
+            self.probes += 1
+            return {"status": "ok", "all_green": True}
+
+    ctx = _ctx_for(instance_root)
+    ctx.gateway = _Gateway()
+    B._start_bridge_socket(ctx, queue.Queue(), None)
+    client = None
+    stream = None
+    try:
+        client = bsock.try_connect(instance_root / "run" / "bridge.sock", timeout_s=1.0)
+        assert client is not None
+        stream = client.makefile("r", encoding="utf-8")
+        ready = json.loads(stream.readline())
+        lifecycle = json.loads(stream.readline())
+        assert ready["type"] == "ready" and ready["agent"] == "ready"
+        assert lifecycle["type"] == "agent_state" and lifecycle["state"] == "ready"
+        # The Gateway health endpoint also probes the adapter which is
+        # attaching here.  Re-probing it during the handshake recurses until
+        # the bridge exhausts descriptors; the initial admission probe is the
+        # only health check needed before serving this warm owner.
+        assert ctx.gateway.probes == 0
+    finally:
+        if stream is not None:
+            stream.close()
+        bsock.close_quietly(client)
+        bsock.close_quietly(ctx.bridge_sock)
+
+
+def test_gateway_owner_initial_failure_exits_without_publishing_socket(instance_root):
+    from jaeger_ai.core.gateway.client import GatewayUnavailable
+
+    class _Gateway:
+        base_url = "http://127.0.0.1:8810"
+        available = False
+
+        def probe(self):
+            if not self.available:
+                raise GatewayUnavailable("connection refused")
+            return {"status": "ok", "all_green": True}
+
+    ctx = _ctx_for(instance_root)
+    sink = _RecordingSink()
+    ctx.gateway = _Gateway()
+    ctx.inbound = queue.Queue()
+
+    # Patch the constructor used by _attach_gateway, not the probe contract.
+    import jaeger_ai.core.gateway.client as gateway_client
+    original = gateway_client.GatewayTurnClient
+    gateway_client.GatewayTurnClient = lambda: ctx.gateway
+    try:
+        B._attach_gateway(sink, ctx)
+    finally:
+        gateway_client.GatewayTurnClient = original
+
+    assert ctx.gateway is None
+    assert ctx.exit_requested.is_set()
+    assert ctx.inbound.get_nowait() is None
+    assert not (instance_root / "run" / "bridge.sock").exists()
+    assert [frame["state"] for frame in sink.frames if frame.get("type") == "agent_state"] == ["failed"]
+    fatal = next(frame for frame in sink.frames if frame.get("type") == "fatal")
+    assert fatal["kind"] == "gateway"
+    assert "Start it with `jaeger gateway daemon`" in fatal["error"]
+
+
 # The mutual-exclusion half of the invariant — that one instance admits one
 # lock holder — is covered by dev/tests/jaeger_ai/core/test_instance_lock.py,
 # which exercises acquisition, the stale-PID heuristic and lock breaking. It is

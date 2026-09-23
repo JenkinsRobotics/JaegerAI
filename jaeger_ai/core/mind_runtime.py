@@ -125,21 +125,29 @@ class JaegerAIRuntime:
 def create_runtime(*, bus: Any, config: Mapping[str, Any] | None = None) -> Any:
     """Factory consumed by JaegerAgent's manifest/programmatic API.
 
-    If another first-party process (ARES, ``jaeger bridge``) already holds
-    the instance lock and is listening on ``run/bridge.sock``, attach to
-    that brain instead of calling ``boot_for_tui`` and crashing on the flock.
+    Prefer the resident Gateway, then a live ``run/bridge.sock``, and only
+    then boot a local agent. ``JAEGER_NO_ATTACH`` skips both remote owners
+    so tests reach their own ``boot_for_tui`` patch.
     """
 
     cfg = dict(config or {})
+    from jaeger_ai.core.runtime import attach_policy
     from jaeger_ai.core.runtime.attached import try_attach_runtime
+    from jaeger_ai.core.runtime.gateway_runtime import try_gateway_runtime
 
-    attached = try_attach_runtime(instance_name=cfg.get("instance_name"))
-    if attached is not None:
-        return attached
+    if not attach_policy.attach_disabled():
+        gateway = try_gateway_runtime()
+        if gateway is not None:
+            return gateway
+        attached = try_attach_runtime(instance_name=cfg.get("instance_name"))
+        if attached is not None:
+            return attached
     try:
         return JaegerAIRuntime(bus=bus, config=cfg)
     except RuntimeError as exc:
         if "locked by pid" not in str(exc):
+            raise
+        if attach_policy.attach_disabled():
             raise
         attached = try_attach_runtime(instance_name=cfg.get("instance_name"))
         if attached is not None:

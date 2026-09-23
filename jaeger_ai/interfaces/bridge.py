@@ -1159,10 +1159,11 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # keyed) so History can populate while the model is still warming.
         from jaeger_ai.core.sessions import get_store
         store = get_store(lay)
-        if store is None:
-            return []
-        return _stamp_cron_running(
-            store.list_sessions(limit=int(args.get("limit") or 50)))
+        limit = int(args.get("limit") or 50)
+        rows = store.list_sessions(limit=limit) if store is not None else []
+        if gateway_execution_enabled():
+            rows = _merge_gateway_sessions(rows, limit)
+        return _stamp_cron_running(rows)
     if what == "session_contract":
         return _session_contract()
     if what == "search_sessions":
@@ -1187,11 +1188,14 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         if not raw_sid:
             return []
         sid = canonical_session_id(raw_sid)
-        if args.get("resume") is False:
+        if args.get("resume") is False or gateway_execution_enabled():
             from jaeger_ai.core.sessions import get_store
 
             store = get_store(lay)
-            return store.history(sid) if store is not None else []
+            local = store.history(sid) if store is not None else []
+            # Gateway mode: turns live with the Gateway (their owner); there is
+            # no local agent to resume, only history to show.
+            return _merge_gateway_history(local, sid) if gateway_execution_enabled() else local
         return resume_session_from_store(
             getattr(boot, "client", None), sid, layout=lay)
     if what == "check_update":
@@ -1540,6 +1544,7 @@ class _Ctx:
         self.boot: Any = None
         self.client: Any = None
         self.cron: Any = None                 # CronRunner — fires scheduled prompts
+        self.producers: Any = None            # lease-gated BackgroundProducers
         self.supervisor_stop: Any = None      # idle/heartbeat thread Event
         self.bridge_sock: Any = None
         self.webhook_httpd: Any = None
@@ -1594,6 +1599,12 @@ class _Ctx:
         # JaegerAgent's workspace binding is process-global. Serialize every
         # bridge/cron turn while a per-request ARES workspace is installed.
         self.workspace_lock = threading.RLock()
+        # Gateway execution mode (see ``gateway_execution_enabled``): the
+        # Jaeger Gateway owns every product turn and this bridge only
+        # translates. ``gateway_active`` maps an in-flight request id to its
+        # session so ``cancel`` can reach the owner.
+        self.gateway: Any = None
+        self.gateway_active: dict[str, str] = {}
 
 
 @contextmanager
@@ -1754,6 +1765,180 @@ def _request_exit(ctx: _Ctx) -> None:
             pass
 
 
+#: ``JAEGER_BRIDGE_EXECUTION=gateway`` makes this bridge a translating client
+#: of the Jaeger Gateway (R02/C01): chat turns are admitted, executed and
+#: persisted by the Gateway's resident Entity; the bridge boots no agent and
+#: takes no instance lock, so Swift, the TUI and the Web share one owner.
+BRIDGE_EXECUTION_ENV = "JAEGER_BRIDGE_EXECUTION"
+
+
+def gateway_execution_enabled() -> bool:
+    return os.environ.get(BRIDGE_EXECUTION_ENV, "").strip().lower() == "gateway"
+
+
+def _merge_gateway_history(local: list[dict[str, Any]], session_id: str) -> list[dict[str, Any]]:
+    """Local (pre-Gateway) history followed, in time order, by the turns the
+    Gateway owns for the same session — in the bridge's row shape. Read over
+    the Gateway's API; the bridge never opens the Gateway's database."""
+    from jaeger_ai.core.gateway.client import GatewayTurnClient
+
+    try:
+        owned = GatewayTurnClient().get_session(session_id).get("messages") or []
+    except GatewayUnavailable:
+        return local
+    rows = list(local) + [
+        {"role": m.get("role"), "text": m.get("content") or "", "ts": m.get("timestamp"),
+         "source": "gateway"}
+        for m in owned
+    ]
+    return sorted(rows, key=lambda row: float(row.get("ts") or 0))
+
+
+def _merge_gateway_sessions(local: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    """History rows for sessions from both stores, one row per id, most
+    recently active first."""
+    from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
+
+    try:
+        owned = GatewayTurnClient().list_sessions()
+    except GatewayUnavailable:
+        return local
+    merged = {row["id"]: dict(row) for row in local}
+    for s in owned:
+        sid = str(s.get("session_id") or "")
+        if not sid:
+            continue
+        row = merged.setdefault(sid, {"id": sid, "title": s.get("title") or sid, "preview": "",
+                                      "created_at": s.get("created_at"), "last_active": 0,
+                                      "messages": 0, "model": (s.get("metadata") or {}).get("model")})
+        row["last_active"] = max(float(row.get("last_active") or 0), float(s.get("updated_at") or 0))
+        row["messages"] = int(row.get("messages") or 0) + int(s.get("message_count") or 0)
+    rows = sorted(merged.values(), key=lambda row: float(row.get("last_active") or 0), reverse=True)
+    return rows[:limit]
+
+
+def _attach_gateway(proto: TextIO, ctx: _Ctx) -> None:
+    """Gateway execution mode's stand-in for ``_boot_agent``.
+
+    Reports ``ready`` when the Gateway answers ``/health``.  If the execution
+    owner is unavailable this process fails and exits instead of publishing a
+    permanently degraded attach socket.  launchd's KeepAlive then retries the
+    thin client after the Gateway starts; it never falls back to a local agent.
+    """
+    from jaeger_os.contract import protocol
+
+    from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
+
+    ctx.gateway = GatewayTurnClient()
+    if _probe_attached_gateway(ctx):
+        _emit(proto, protocol.agent_state_frame("ready", agent_name=_agent_name(ctx)))
+    else:
+        _emit(proto, protocol.agent_state_frame("failed", error=ctx.boot_error))
+        _emit(proto, protocol.fatal_frame(ctx.boot_error or "Gateway unavailable", kind="gateway"))
+        # Do not let the socket publisher interpret a client object whose
+        # one readiness probe failed as an executable runtime.
+        ctx.gateway = None
+        _request_exit(ctx)
+    ctx.booted.set()
+
+
+def _probe_attached_gateway(ctx: _Ctx) -> bool:
+    """Refresh a Gateway-backed bridge's executable readiness.
+
+    A successfully attached owner can re-check readiness for later clients.
+    Initial connection failure is handled by ``_attach_gateway`` as a
+    terminal process failure so launchd, not a brainless socket, retries it.
+    """
+    from jaeger_ai.core.gateway.client import GatewayUnavailable
+
+    try:
+        report = ctx.gateway.probe()
+        if report.get("degraded"):
+            print(f"[bridge] Gateway reachable but degraded: {report.get('checks')}",
+                  file=sys.stderr, flush=True)
+    except GatewayUnavailable as exc:
+        ctx.boot_error = _gateway_unavailable_message(ctx, exc)
+    else:
+        ctx.boot_error = None
+        return True
+    return False
+
+
+def _gateway_unavailable_message(ctx: _Ctx, exc: Exception) -> str:
+    return (f"Jaeger Gateway unavailable at {ctx.gateway.base_url} ({exc}). "
+            "Start it with `jaeger gateway daemon`; this bridge does not run "
+            "turns on its own.")
+
+
+def _gateway_turn(out: TextIO, ctx: _Ctx, req: dict[str, Any], text: str,
+                  session: str, turn_id: str) -> dict[str, Any]:
+    """Run one chat turn through the Gateway, translating its durable events
+    into this bridge's existing frames: ``turn.delta`` → ``delta``,
+    ``turn.reasoning`` → ``reasoning``, ``approval.request`` → an interactive
+    ``request`` whose answer resolves the Gateway approval. Returns the same
+    result shape the local executor produced."""
+    import uuid
+
+    from jaeger_ai.core.gateway.client import GatewayUnavailable
+
+    rid = turn_id or uuid.uuid4().hex
+    deltas = _DeltaStream(out, session)
+    asker = BridgeConfirmationProvider(out, ctx)
+    asker.current_session = session
+
+    def answer_approval(approval_id: str, prompt: str) -> None:
+        answer = asker.request("approval", prompt, ("once", "always", "deny")).lower()
+        decision = answer if answer in {"once", "always"} else "deny"
+        try:
+            ctx.gateway.resolve_approval(approval_id, decision)
+        except GatewayUnavailable:
+            pass  # already closed (cancelled/expired) — the Gateway's answer stands
+
+    def on_event(name: str, data: dict[str, Any]) -> None:
+        if name == "turn.delta":
+            deltas.feed(str(data.get("delta") or data.get("text") or ""))
+        elif name == "turn.reasoning":
+            deltas.flush()
+            _emit(out, _reasoning_frame(str(data.get("text") or ""), session))
+        elif name == "approval.request" and data.get("approval_id"):
+            deltas.flush()
+            prompt = f"Allow {data.get('tool') or 'this action'}?"
+            if data.get("target"):
+                prompt = f"{prompt} {data['target']}"
+            threading.Thread(target=answer_approval, args=(str(data["approval_id"]), prompt),
+                             name="bridge-gateway-approval", daemon=True).start()
+
+    choices: dict[str, Any] = {key: req.get(key) for key in ("model", "provider", "workspace")
+                               if isinstance(req.get(key), str) and req.get(key)}
+    if isinstance(req.get("allowed_tools"), list):
+        choices["allowed_tools"] = req["allowed_tools"]   # [] stays [] — no tools
+    if isinstance(req.get("attachment_ids"), list):
+        choices["attachment_ids"] = req["attachment_ids"]  # [] stays [] — no files
+    if req.get("display_text") is not None:
+        choices["display_text"] = str(req.get("display_text"))
+    if req.get("is_subordinate"):
+        choices["is_subordinate"] = True
+    with ctx.turn_control_lock:
+        ctx.gateway_active[rid] = session
+    try:
+        result = ctx.gateway.stream_turn(session, text, on_event=on_event,
+                                         request_id=rid, **choices)
+    except GatewayUnavailable as exc:
+        return {"text": "", "error": _gateway_unavailable_message(ctx, exc),
+                "halt_reason": "error"}
+    finally:
+        deltas.flush()
+        with ctx.turn_control_lock:
+            ctx.gateway_active.pop(rid, None)
+    return {
+        "text": result.text,
+        "error": None if result.status == "completed" else (result.error or result.status),
+        "halt_reason": "interrupted" if result.status == "cancelled" else None,
+        "execution_unknown": result.status == "execution_unknown",
+        "request_id": rid,
+    }
+
+
 def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     """Background boot: load the model, wire tool/permission forwarding,
     then stream the ``agent_state`` transition. Never raises."""
@@ -1879,78 +2064,6 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     except Exception:  # noqa: BLE001 — an optimization, never a boot failure
         pass
 
-    # Scheduled prompts (reminders / timed tasks) fire here. The daemon
-    # and the messaging gateway start a CronRunner; the bridge — now the
-    # PRIMARY surface behind the native app — never did, so a
-    # ``schedule_prompt`` persisted but nothing ever fired it. Start one
-    # whose callback runs the scheduled prompt as a normal turn and
-    # SURFACES the result as a reply frame, so a fired reminder shows up
-    # in the chat (and speaks, when the instance voices its replies).
-    #
-    # ``llm_lock=None`` on purpose: ``_run_turn`` already serializes every
-    # turn on ``_pipeline['llm_lock']`` internally, so a cron turn and a
-    # user turn can't decode against the same KV cache at once. Handing
-    # the SAME lock to the CronRunner would re-enter that non-reentrant
-    # lock (cron acquires → callback → _run_turn re-acquires → deadlock).
-    def _cron_cb(prompt: str, session_key: str | None = None) -> None:
-        session = session_key or "cron"
-        job_name = _cron_job_name(session)
-        _mark_cron_running(job_name)
-        try:
-            _emit_state(proto, ctx, True, session)
-            try:
-                from jaeger_ai.main import run_for_voice
-                with ctx.workspace_lock:
-                    result = run_for_voice(ctx.client, prompt, session_key=session)
-                    _record_background_result(ctx, result, source="cron", session=session)
-                text = result.get("text") or ""
-                _emit(proto, protocol.reply_frame(
-                    text, result.get("error"), session,
-                    elapsed_s=result.get("elapsed_s"),
-                    halt_reason=result.get("halt_reason")))
-                try:
-                    from jaeger_ai.core.runtime.cron_delivery import deliver_text
-                    sent = deliver_text(ctx.layout, job_name, text)
-                    if sent and not sent.get("sent"):
-                        print(f"[bridge] cron deliver skipped: {sent.get('error')}",
-                              file=sys.stderr, flush=True)
-                except Exception as exc:  # noqa: BLE001
-                    print(f"[bridge] cron deliver failed: {exc}",
-                          file=sys.stderr, flush=True)
-                # Speak a fired reminder when the instance voices its
-                # replies and the turn didn't already speak via a tool.
-                if text and not result.get("spoke_via_tool"):
-                    try:
-                        from jaeger_ai.main import _pipeline
-                        cfg = _pipeline.get("config")
-                        if cfg is not None and cfg.voice.enabled and cfg.voice.speak_replies:
-                            from jaeger_agent.tools.speak import speak
-                            speak(text=text)
-                    except Exception as exc:  # noqa: BLE001 — TTS is best-effort
-                        print(f"[bridge] cron speak failed: {exc}",
-                              file=sys.stderr, flush=True)
-            finally:
-                _emit_state(proto, ctx, False, session)
-        except Exception as exc:  # noqa: BLE001 — a fired turn must never kill the bridge
-            print(f"[bridge] cron turn failed: {exc}",
-                  file=sys.stderr, flush=True)
-        finally:
-            _mark_cron_done(job_name)
-
-    try:
-        from jaeger_agent.background.cron_runner import CronRunner
-        ctx.cron = CronRunner(_cron_cb, llm_lock=None)
-        ctx.cron.start()
-    except Exception as exc:  # noqa: BLE001 — no cron is degraded, not fatal
-        print(f"[bridge] cron runner skipped: {exc}",
-              file=sys.stderr, flush=True)
-
-    try:
-        _start_idle_supervisor(proto, ctx)
-    except Exception as exc:  # noqa: BLE001 — no idle loop is degraded, not fatal
-        print(f"[bridge] idle supervisor skipped: {exc}",
-              file=sys.stderr, flush=True)
-
     try:
         from jaeger_ai.main import _pipeline, autostart_plugins
         autostart_plugins(_pipeline.get("config"))
@@ -1958,10 +2071,13 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
         print(f"[bridge] plugin autostart skipped: {exc}",
               file=sys.stderr, flush=True)
 
+    # Cron / idle / webhooks: one lease per instance. The Gateway takes it
+    # when it is resident OWNER; this local-execution bridge takes it only
+    # when that lease is free. Gateway-backed bridges never reach here.
     try:
-        _start_webhooks(ctx)
-    except Exception as exc:  # noqa: BLE001
-        print(f"[bridge] webhooks skipped: {exc}",
+        _start_local_producers(proto, ctx)
+    except Exception as exc:  # noqa: BLE001 — no producers is degraded, not fatal
+        print(f"[bridge] background producers skipped: {exc}",
               file=sys.stderr, flush=True)
 
     name, icon = _active_character(boot)
@@ -2259,6 +2375,74 @@ def _idle_once_locked(proto: TextIO, ctx: _Ctx) -> None:
         _emit_state(proto, ctx, False, session)
 
 
+def _start_local_producers(proto: TextIO, ctx: _Ctx) -> None:
+    """Take the instance producer lease if the Gateway has not.
+
+    CronRunner uses ``llm_lock=None``: ``_run_turn`` already serializes
+    on ``_pipeline['llm_lock']``. Handing the same lock here deadlocks.
+    """
+    from jaeger_ai.core.runtime.background_producers import BackgroundProducers
+
+    class _Sink:
+        def is_busy(self) -> bool:
+            return bool(ctx.busy)
+
+        def last_user_quiet_s(self) -> float:
+            return time.monotonic() - ctx.last_user_at
+
+        def last_user_session(self) -> str:
+            return ctx.last_user_session or "desktop-app"
+
+        def submit_turn(self, prompt: str, *, session: str, request_id: str, source: str) -> dict[str, Any]:
+            from jaeger_os.contract import protocol
+            from jaeger_ai.main import _run_turn, run_for_voice
+
+            if source == "cron":
+                _mark_cron_running(_cron_job_name(session))
+            _emit_state(proto, ctx, True, session)
+            try:
+                with ctx.workspace_lock:
+                    if source == "board":
+                        result = _run_turn(
+                            ctx.client, prompt, session_key=session, allow_persona=False,
+                        )
+                    else:
+                        result = run_for_voice(
+                            ctx.client, prompt, session_key=session,
+                        )
+                text = result.get("text") or ""
+                _emit(proto, protocol.reply_frame(
+                    text, result.get("error"), session,
+                    elapsed_s=result.get("elapsed_s"),
+                    halt_reason=result.get("halt_reason")))
+                if source == "cron" and text and not result.get("spoke_via_tool"):
+                    try:
+                        from jaeger_ai.main import _pipeline
+                        cfg = _pipeline.get("config")
+                        if cfg is not None and cfg.voice.enabled and cfg.voice.speak_replies:
+                            from jaeger_agent.tools.speak import speak
+                            speak(text=text)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[bridge] cron speak failed: {exc}", file=sys.stderr, flush=True)
+                return result
+            finally:
+                _emit_state(proto, ctx, False, session)
+                if source == "cron":
+                    _mark_cron_done(_cron_job_name(session))
+
+    producers = BackgroundProducers(
+        ctx.layout, _Sink(), display_name=_display_name(ctx.boot) or ctx.layout.root.name,
+    )
+    if not producers.try_start():
+        print("[bridge] background producers owned by another process",
+              file=sys.stderr, flush=True)
+        return
+    ctx.producers = producers
+    ctx.cron = producers.cron
+    ctx.supervisor_stop = producers.stop_event
+    ctx.webhook_httpd = producers.webhook_httpd
+
+
 def _start_idle_supervisor(proto: TextIO, ctx: _Ctx) -> None:
     """Poll for completions, board work, and standing heartbeats."""
     stop = threading.Event()
@@ -2376,6 +2560,39 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         if goal_text is not None:
             text = goal_text
         ctx.booted.wait()
+        if ctx.gateway is not None:
+            turn_id = str(req.get("turn_id") or "")
+            with ctx.turn_control_lock:
+                if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
+                    ctx.turn_controls.pop(turn_id, None)
+                    reply({**protocol.reply_frame("", "Cancelled before execution", session),
+                           "cancelled": True})
+                    continue
+                if turn_id:
+                    ctx.turn_controls[turn_id] = "active"
+            _emit_state(out, ctx, True, session)
+            try:
+                result = _gateway_turn(out, ctx, req, text, session, turn_id)
+                if session.startswith("focus:") and turn_id:
+                    # Same report the local path files for Dispatcher focus
+                    # threads, before this bridge's reply.
+                    from jaeger_ai.features.dispatcher.store import DispatcherStore
+                    DispatcherStore(ctx.layout).report(
+                        turn_id, session, result.get("text") or "", result.get("error"),
+                        cancelled=result.get("halt_reason") == "interrupted")
+                frame = protocol.reply_frame(result.get("text") or "", result.get("error"),
+                                             session, halt_reason=result.get("halt_reason"))
+                extra = {"cancelled": result.get("halt_reason") == "interrupted"} if turn_id else {}
+                if result.get("execution_unknown"):
+                    extra["execution_unknown"] = True
+                reply({**frame, **extra})
+            except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
+                reply(protocol.reply_frame("", str(exc), session))
+            finally:
+                with ctx.turn_control_lock:
+                    ctx.turn_controls.pop(turn_id, None)
+                _emit_state(out, ctx, False, session)
+            continue
         if ctx.client is None:
             reply(protocol.reply_frame(
                 "", ctx.boot_error or "agent failed to boot", session))
@@ -2687,23 +2904,42 @@ def _start_bridge_socket(
     print(f"[bridge] attach socket {path}", file=sys.stderr, flush=True)
 
     def _client(conn: Any) -> None:
-        f = None
+        text = None
         try:
-            f = conn.makefile("rwb", buffering=0)
             text = conn.makefile("rw", buffering=1, encoding="utf-8", newline="\n")
             text._jaeger_attach_stream = True
+            # Gateway-backed owners intentionally never create ``ctx.client``:
+            # the resident Gateway owns execution.  Once ``_attach_gateway``
+            # has successfully probed it, ``ctx.gateway`` is the warm runtime
+            # signal.  Checking only the local-model client left every later
+            # desktop attachment permanently at ``agent=booting`` even though
+            # turns were already available.
+            # Do not call Gateway ``/health`` from an attach handshake.
+            # ``/health`` probes the WebUI adapter, whose own health handler
+            # attaches here.  Probing it from this path formed a recursive
+            # Gateway → adapter → bridge → Gateway loop and eventually
+            # exhausted the bridge's file descriptors.  A bridge only
+            # publishes this socket after its initial Gateway admission probe
+            # has succeeded; subsequent turn requests provide the real
+            # availability check and report a Gateway error normally.
+            agent_ready = (ctx.boot_error is None
+                           and (ctx.client is not None or ctx.gateway is not None))
             _emit(text, protocol.ready_frame(
                 getattr(getattr(ctx.layout, "root", None), "name", None) or "default",
                 _model_name(ctx.boot) if ctx.boot is not None else None,
-                agent="ready" if ctx.client is not None else "booting",
+                agent="ready" if agent_ready else "booting",
                 agent_name=_agent_name(ctx.boot if ctx.boot is not None else ctx),
             ))
-            if ctx.client is not None:
+            if agent_ready:
                 name, icon = _active_character(ctx.boot)
                 _emit(text, protocol.agent_state_frame(
                     "ready", model=_model_name(ctx.boot),
                     character=name, icon=icon,
                     agent_name=_agent_name(ctx.boot)))
+            elif ctx.boot_error:
+                _emit(text, protocol.agent_state_frame(
+                    "failed", error=ctx.boot_error,
+                    agent_name=_agent_name(ctx.boot if ctx.boot is not None else ctx)))
             for raw in text:
                 line = raw.strip()
                 if not line:
@@ -2718,15 +2954,20 @@ def _start_bridge_socket(
             print(f"[bridge] attach client dropped: {exc}",
                   file=sys.stderr, flush=True)
         finally:
+            # ``socket.makefile`` owns a separate file descriptor.  Closing
+            # only ``conn`` leaves that descriptor behind for every attached
+            # client; the bridge health adapter is itself an attached client,
+            # so that turned routine readiness polling into an FD leak and
+            # eventually stopped the accept loop with EMFILE.
+            if text is not None:
+                try:
+                    text.close()
+                except Exception:  # noqa: BLE001
+                    pass
             try:
                 conn.close()
             except Exception:  # noqa: BLE001
                 pass
-            if f is not None:
-                try:
-                    f.close()
-                except Exception:  # noqa: BLE001
-                    pass
 
     def _accept() -> None:
         retryable = {errno.EINTR, errno.EAGAIN, errno.EWOULDBLOCK, errno.ETIMEDOUT}
@@ -2882,6 +3123,9 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
             msg, kind="no_instance",
             suggested_name=_suggested_name(instance)))
         ctx.booted.set()
+    elif gateway_execution_enabled():
+        # No local agent, no instance lock: the Gateway owns execution.
+        _attach_gateway(proto, ctx)
     else:
         _emit(proto, protocol.agent_state_frame("booting"))
         booter = threading.Thread(
@@ -2907,6 +3151,9 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
         turns a no-instance transport into a real agent."""
         ctx.boot_error = None
         ctx.booted.clear()
+        if gateway_execution_enabled():
+            _attach_gateway(proto, ctx)
+            return
         _emit(proto, protocol.agent_state_frame("booting"))
         threading.Thread(target=_boot_agent, args=(proto, ctx, inst),
                          name="bridge-boot", daemon=True).start()
@@ -3002,8 +3249,8 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
     # path from a zombie holder.
     def _publish_attach_socket() -> None:
         ctx.booted.wait()
-        if ctx.exit_requested.is_set() or ctx.client is None:
-            return                      # no agent to attach to; stay unpublished
+        if ctx.exit_requested.is_set() or (ctx.client is None and ctx.gateway is None):
+            return                      # nothing to serve turns; stay unpublished
         try:
             _start_bridge_socket(ctx, inbound, owner_out)
         except Exception as exc:  # noqa: BLE001 — stdio still works alone
@@ -3029,8 +3276,23 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 # blocked in inference or a tool. Keep this fire-and-forget so
                 # a second client thread can interrupt without competing to
                 # read a control acknowledgement from stdout.
-                from jaeger_ai.main import request_turn_cancel
                 turn_id = str(req.get("turn_id") or "")
+                if ctx.gateway is not None:
+                    with ctx.turn_control_lock:
+                        if turn_id and _cancel_queued_turn(ctx, turn_id):
+                            continue
+                        active = ({turn_id: ctx.gateway_active[turn_id]}
+                                  if turn_id in ctx.gateway_active else
+                                  {} if turn_id else dict(ctx.gateway_active))
+                        if turn_id in ctx.turn_controls:
+                            ctx.turn_controls[turn_id] = "cancelled"
+                    for request_id, session_id in active.items():
+                        try:
+                            ctx.gateway.cancel(session_id, request_id)
+                        except Exception as exc:  # noqa: BLE001 — the turn reports the outcome
+                            print(f"[bridge] gateway cancel failed: {exc}", file=sys.stderr, flush=True)
+                    continue
+                from jaeger_ai.main import request_turn_cancel
                 with ctx.turn_control_lock:
                     if not turn_id:
                         request_turn_cancel()  # Legacy owner UI control.
@@ -3587,6 +3849,12 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
         ctx.booted.wait(timeout=180)
         # Stop the scheduled-prompt thread before tearing down the agent
         # it fires turns against.
+        if ctx.producers is not None:
+            try:
+                ctx.producers.stop()
+            except Exception:  # noqa: BLE001 — best-effort teardown
+                pass
+            ctx.producers = None
         if ctx.cron is not None:
             try:
                 ctx.cron.shutdown(wait=False)

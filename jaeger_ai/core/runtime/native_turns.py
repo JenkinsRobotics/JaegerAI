@@ -133,5 +133,5 @@ def _terminal_status(reply: dict, stored: str | None = None) -> str:
     if halt and halt not in _SUCCESS_HALTS:
         if reply.get("text") and halt_code in {"agent_halted", "complete_task"}:
             return "completed"
-        return stored if stored in {"completed", "failed", "cancelled"} else "failed"
+        return "failed"
     return stored or "completed"

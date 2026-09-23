@@ -19,10 +19,18 @@ All donor repositories were cloned into `.donors/` (gitignored, outside source t
 | **Agent S / S2** | `https://github.com/simular-ai/Agent-S.git` | `3aa272d2` | Apache 2.0 | Hierarchical executive planning, specialist routing, computer-use task decomposition. |
 | **ProactiveAgent** | `https://github.com/PKU-YuanGroup/ProactiveAgent.git` | `695a0bc` | MIT | Desktop activity perception, privacy filtering, salience threshold gating. |
 | **ActivityWatch** | `https://github.com/ActivityWatch/activitywatch.git` | `v0.12.x` | MPL 2.0 | Low-overhead desktop metadata polling (active app, idle time, system telemetry). |
+| **Kilo Code** | `https://github.com/Kilo-Org/kilocode.git` | `d52877ea1c0a02284a4a87d2da0082d2f6dbefb7` (`v7.7.9`) | MIT | Selective frame-queue and stable-key transcript mechanisms for the build-free IDE client; no donor runtime. |
 
 ---
 
 ## 2. Research-to-Subsystem Decision Records
+
+### Subsystem: IDE streaming transcript (Kilo Code)
+* **Current Jaeger:** Gateway-owned build-free panel rebuilt the complete transcript DOM on every delta and kept separate answer/reasoning/activity accumulators that lost wire order.
+* **Donor:** Kilo Code v7.7.9 @ `d52877ea1c0a02284a4a87d2da0082d2f6dbefb7` (MIT).
+* **Files inspected/adapted:** `packages/kilo-vscode/webview-ui/src/context/frame-queue.ts`, `packages/kilo-vscode/webview-ui/src/context/transcript-rows.ts`.
+* **Decision:** **SELECTIVE ADAPTATION**.
+* **Reason:** Added plain browser/CommonJS frame batching, Gateway-specific ordered reduction, and keyed row reconciliation without SolidJS, Kilo's daemon, provider SDK, sessions, accounts, or agent loop. Cline won the live operational comparison, but its React/runtime surface is heavier and was not copied.
 
 ### Subsystem: Persistent Entity & Context Hierarchy (Letta / MemGPT)
 * **Current Jaeger:** Fragmented session state and persona layers; model owned chat loop.

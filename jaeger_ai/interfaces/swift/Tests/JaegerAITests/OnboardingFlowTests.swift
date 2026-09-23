@@ -53,6 +53,63 @@ final class OnboardingFlowTests: XCTestCase {
                        ["bridge", "--attach"])
     }
 
+    func testLaunchEnvironmentUsesGatewayUnlessOverridden() {
+        XCTAssertEqual(BridgeProcess.launchEnvironment([:])["JAEGER_BRIDGE_EXECUTION"], "gateway")
+        XCTAssertEqual(
+            BridgeProcess.launchEnvironment(["JAEGER_BRIDGE_EXECUTION": "local"])["JAEGER_BRIDGE_EXECUTION"],
+            "local"
+        )
+    }
+
+    func testNativeChatSurfaceIsExplicitlyOptIn() {
+        XCTAssertFalse(NativeSurfaceVisibility.exposesChat(arguments: [], environment: [:]))
+        XCTAssertNil(NativeSurfaceVisibility.requestedTab(arguments: ["--chat"], environment: [:]))
+        XCTAssertEqual(
+            NativeSurfaceVisibility.requestedTab(
+                arguments: ["--native-chat", "--chat"], environment: [:]),
+            .chat
+        )
+        XCTAssertEqual(
+            NativeSurfaceVisibility.requestedTab(
+                arguments: ["--avatar"], environment: ["JAEGER_ENABLE_NATIVE_CHAT": "1"]),
+            .avatar
+        )
+    }
+
+    @MainActor
+    func testWarmGatewayAttachHandshakeIsImmediatelyAgentReady() {
+        let ready = BridgeReady(
+            instance: "jaeger", model: "kimi-test", character: "Analyst",
+            icon: nil, proto: ProtocolV1.version, capabilities: ["sessions"],
+            agent: "ready", agentName: "Jaeger"
+        )
+        XCTAssertEqual(
+            AgentBridge.initialLifecycle(for: ready),
+            .ready(model: "kimi-test", character: "Analyst", icon: nil,
+                   agentName: "Jaeger")
+        )
+    }
+
+    @MainActor
+    func testGatewayAttachBootingAndInvalidStatesDoNotFakeReadiness() {
+        let booting = BridgeReady(
+            instance: "jaeger", model: nil, character: nil, icon: nil,
+            proto: ProtocolV1.version, capabilities: [], agent: "booting",
+            agentName: "Jaeger"
+        )
+        XCTAssertEqual(AgentBridge.initialLifecycle(for: booting), .booting)
+
+        let invalid = BridgeReady(
+            instance: "jaeger", model: nil, character: nil, icon: nil,
+            proto: ProtocolV1.version, capabilities: [], agent: "degraded",
+            agentName: "Jaeger"
+        )
+        guard case .failed(let reason) = AgentBridge.initialLifecycle(for: invalid) else {
+            return XCTFail("an unknown/degraded wire state must be actionable")
+        }
+        XCTAssertTrue(reason.contains("degraded"))
+    }
+
     // MARK: answers → create_instance args
 
     func testCommandArgsAlwaysCarryRequiredTriple() {

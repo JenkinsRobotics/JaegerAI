@@ -1,8 +1,76 @@
 # JaegerAI Master Architecture Completion & Public-Release Hardening Program
 
-**Branch:** `pinocchio`  
-**Starting Baseline Commit:** `b8c9312b9463545bac135cc839675ab455543bd7`  
-**Target:** Public Technical Review & Production-Grade Persistent Agent Engine  
+## Current release direction — 2026-09-23
+
+**Personal companion-assistant RC target: September 28. NOT YET QUALIFIED.**
+Authoritative scope, nine acceptance gates, deferrals, five-day schedule and
+continuation prompt: [master personal-release plan](GROK_PERSONAL_RELEASE_PROMPT.md#current-release-contract--five-day-revision-2026-09-23).
+Current inspected checkout: `next/clean-app`, `917e1eb8`, with extensive uncommitted
+work. Preserve staged roadmap and operator Swift changes.
+
+This is a release-scope cut, not a rewrite or a declaration of architectural
+convergence. The supported release surfaces are the Gateway owner, existing
+WebUI, Antigravity IDE extension, and the macOS menu-bar + Settings control
+surface. Native macOS chat, avatar, pill, and other unfinished windows remain
+in source but are hidden behind explicit QA opt-in; they are neither removed nor
+release gates. Promote useful memory and one contextual proactive workflow.
+Product clarification: after RC1–RC3, RC7 also requires one real existing
+IDE-worker conversation (task, observed reply, contextual follow-up,
+independently verified result) plus visible desktop action feedback and Stop/yield.
+The earlier blanket worker deferral was too broad. This adds remaining release
+effort without restarting the plan or promising the five-day deadline. Defer
+universal worker/provider support, elaborate dashboards, 3D animation, full feature
+UI parity, full donor removal and repo-wide restructuring. No capability deletion.
+
+Current code has significant owner/client/settings progress and reusable character
+and audio components. The candidate still needs final-artifact/live-provider UI
+qualification, physical voice latency/stop proof, proactive delivery and external
+Mac packaging. All RC gates remain pending; this documentation pass did not run
+application tests. See [current audit](CURRENT_PRODUCT_AUDIT.md).
+
+Reuse the existing IDE panel, Gateway, DelegateRuntime, `ide_orchestration` service,
+computer-use skills and browser tools. The orchestration API exists; the default
+adapter is CLI-based and its service/task/idempotency/handle records are in-memory.
+The bounded service correction now distinguishes completion from verification,
+protects terminal cancellation, snapshots concurrent retries, enforces awaited
+deadlines and rejects unsupported CLI capabilities/read-only claims. RC7 must
+still connect to existing durable owner records and
+task-specific verification, and demonstrate control of the actual IDE conversation.
+Gateway HTTP now shares the service snapshot contract, forwards all accepted
+fields and tracks operations for shutdown. Focused verification: 30 unit tests
+and 2 isolated Gateway integration tests passed, both exit 0; no live IDE-worker
+or release qualification is claimed. Current built-in CLI adapters reject default
+read-only requests because their launchers cannot enforce that mode, and public
+writable requests fail closed until server-owned authorization and verification
+exist. Public CLI orchestration is therefore intentionally unusable and cannot
+satisfy RC7 yet.
+
+[Installed-stack findings and reuse order](GROK_PERSONAL_RELEASE_PROMPT.md#reuse-decisions-for-this-release):
+Codex in Antigravity uses OpenAI computer-use runtime/helper components, including
+resources bundled in the installed ChatGPT app. Evaluate supported, licensed
+reuse of that current stack first. Cua Driver is a fallback candidate, not the
+identified current implementation or a finalized dependency. Open Codex App
+Server remains a worker lifecycle/protocol reference; selective Cline UI/editor
+code is only for an identified gap. In the measured local Ollama comparison,
+Cline passed the larger sequence including restart recovery; Kilo v7.7.9 was
+selected only as the bounded MIT source donor for frame batching and stable-key
+transcript projection. Jaeger's Gateway remains the execution owner; neither
+donor runtime is embedded.
+Host/model compatibility is unqualified; keep version
+and license records in the existing donor ledger. No full extension/runtime fork
+or claim that open Codex supplies all the coordinator's computer-control tools.
+
+## Historical program baseline — not current release certification
+
+The tables below retain historical component milestones and reported test counts.
+`COMPLETED` in these tables does **not** certify production wiring, today's dirty
+source, or the five-day RC. Their branch/baseline describes the old program only.
+
+**Historical branch:** `pinocchio`
+
+**Historical baseline:** `b8c9312b9463545bac135cc839675ab455543bd7`
+
+**Long-term target:** Public Technical Review & Production-Grade Persistent Agent Engine
 
 ---
 

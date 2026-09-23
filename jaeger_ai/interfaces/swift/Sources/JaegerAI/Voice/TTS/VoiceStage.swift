@@ -135,12 +135,20 @@ enum VoiceStageResolver {
     }
 
     /// First identifier actually present on this machine.
+    ///
+    /// Checks against the enumerated installed-voice catalog
+    /// (`AVSpeechSynthesisVoice.speechVoices()`), not
+    /// `AVSpeechSynthesisVoice(identifier:) != nil`. That initializer is
+    /// documented to return nil for an invalid identifier, but on some
+    /// macOS versions — notably headless CI runners with no full Speech
+    /// daemon — it constructs a placeholder voice for ANY string, so
+    /// `firstInstalled(from: ["not.a.real.voice"])` returned
+    /// `"not.a.real.voice"` instead of nil (GitHub Actions macos-15,
+    /// 2026-09-22). The catalog list is the actual source of truth either
+    /// way; the initializer was never the right check.
     static func firstInstalled(from candidates: [String]) -> String? {
-        for identifier in candidates
-        where AVSpeechSynthesisVoice(identifier: identifier) != nil {
-            return identifier
-        }
-        return nil
+        let installed = Set(AVSpeechSynthesisVoice.speechVoices().map(\.identifier))
+        return candidates.first { installed.contains($0) }
     }
 
     /// Whether two stages would actually sound different here.

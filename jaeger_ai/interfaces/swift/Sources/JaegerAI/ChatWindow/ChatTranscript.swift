@@ -95,9 +95,11 @@ struct TranscriptRow: View {
                     .foregroundColor(Term.accent)
                     .padding(.top, 1)
                 Text(message.text)
-                    .font(.system(size: 14, weight: .regular))
+                    .font(.system(size: 15, weight: .regular))
                     .foregroundColor(Term.ink)
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(5)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 14)
@@ -120,10 +122,11 @@ struct TranscriptRow: View {
                 ThinkingDots()
             } else {
                 markdownText
-                    .font(.system(size: 14, weight: .regular))
+                    .font(.system(size: 15, weight: .regular))
                     .foregroundColor(Term.ink)
                     .textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(6)
 
                 // Reaction and action bar matching Image 1:
                 if !message.text.isEmpty {

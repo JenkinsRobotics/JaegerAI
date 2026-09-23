@@ -70,6 +70,73 @@ def test_file_write_verification_uses_disk_probe(tmp_path: Path):
     assert str(target) in result.evidence
 
 
+def test_file_write_verification_prefers_the_tools_routed_skills_path(tmp_path: Path):
+    skills = tmp_path / "skills"
+    skills.mkdir()
+    target = skills / "audit-tool.txt"
+    target.write_text("TOOL-OK", encoding="utf-8")
+    layout = type("Layout", (), {
+        "workspace_dir": tmp_path / "workspace",
+        "skills_dir": skills,
+    })()
+    started = JaegerEvent.tool_started(
+        "write_file", {"path": "audit-tool.txt", "content": "TOOL-OK"}, call_id="routed",
+    )
+    completed = JaegerEvent.tool_completed(
+        "write_file", {"written": True, "path": "skills/audit-tool.txt"},
+        call_id="routed", duration_s=0.01,
+    )
+
+    action = derive_verification_action(
+        "Create audit-tool.txt containing exactly TOOL-OK", {}, [started, completed],
+        strategy="react_loop",
+        context={"layout": layout, "instance_root": str(tmp_path)},
+    )
+    result = VerificationRegistry().verify(
+        "Create audit-tool.txt containing exactly TOOL-OK", action, {},
+        {"layout": layout, "instance_root": str(tmp_path)},
+    )
+
+    assert action["path"] == str(target)
+    assert result.status == VerificationStatus.OBJECTIVE_VERIFIED
+
+
+def test_file_write_verification_rejects_a_reported_skills_path_escape(tmp_path: Path):
+    instance = tmp_path / "instance"
+    skills = instance / "skills"
+    workspace = instance / "workspace"
+    skills.mkdir(parents=True)
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("FORGED-OK", encoding="utf-8")
+    layout = type("Layout", (), {
+        "workspace_dir": workspace,
+        "skills_dir": skills,
+    })()
+    started = JaegerEvent.tool_started(
+        "write_file", {"path": "note.txt", "content": "FORGED-OK"}, call_id="escape",
+    )
+    completed = JaegerEvent.tool_completed(
+        "write_file", {"written": True, "path": "skills/../../outside.txt"},
+        call_id="escape", duration_s=0.01,
+    )
+
+    action = derive_verification_action(
+        "Create note.txt containing exactly FORGED-OK", {}, [started, completed],
+        strategy="react_loop",
+        context={"layout": layout, "instance_root": str(instance)},
+    )
+    result = VerificationRegistry().verify(
+        "Create note.txt containing exactly FORGED-OK", action, {},
+        {"layout": layout, "instance_root": str(instance)},
+    )
+
+    assert action["path"] == ""
+    assert action["verification_error"]
+    assert result.status == VerificationStatus.OBJECTIVE_FAILED
+    assert result.error == "InvalidPath"
+
+
 def test_authority_uses_bound_instance_not_default(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     a = tmp_path / "inst-a"
     b = tmp_path / "inst-b"

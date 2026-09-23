@@ -14517,6 +14517,7 @@ def handle_get(handler, parsed) -> bool:
         if not _stream_id_visible_to_request_profile(handler, stream_id):
             return True
         gateway_stop_blocked = False
+        run_id = None
         try:
             from api.gateway_chat import (
                 GATEWAY_RUN_ID_WAIT_TIMEOUT,
@@ -14556,6 +14557,16 @@ def handle_get(handler, parsed) -> bool:
             cancelled = adapter.cancel_run(stream_id).accepted
         else:
             cancelled = cancel_stream(stream_id)
+        if cancelled and run_id:
+            # A successful Gateway stop is not the same as the WebUI worker
+            # having finished its teardown.  Do not acknowledge Stop while the
+            # admission guard would still reject the browser's next message.
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline:
+                with ACTIVE_RUNS_LOCK:
+                    if stream_id not in ACTIVE_RUNS:
+                        break
+                time.sleep(0.01)
         return j(handler, {"ok": True, "cancelled": cancelled, "stream_id": stream_id})
 
     if parsed.path == "/api/chat/stream":
@@ -15140,6 +15151,8 @@ def handle_post(handler, parsed) -> bool:
         finally:
             if diag:
                 diag.finish()
+    if parsed.path == "/api/chat/cancel":
+        return handle_get(handler, parsed)
     # T1 deprecation alias for the legacy ack endpoint that the pre-rename
     # WebUI used to POST to after handling ``process_complete``. The new
     # canonical SSE event is ``bg_task_complete`` and the new ack endpoint
@@ -24224,6 +24237,27 @@ def _start_run(
             route=route,
         )
 
+    if gateway_chat_enabled is None:
+        from api.gateway_chat import webui_gateway_chat_enabled
+        from api.config import get_config
+        gateway_chat_enabled = webui_gateway_chat_enabled(get_config())
+
+    if gateway_chat_enabled:
+        return _start_chat_stream_for_session(
+            s,
+            msg=msg,
+            attachments=attachments,
+            workspace=workspace,
+            model=model,
+            model_provider=model_provider,
+            normalized_model=normalized_model,
+            diag=diag,
+            source=source,
+            moa_config=moa_config,
+            external_runtime_owned=True,
+            regeneration=regeneration,
+        )
+
     if runtime_adapter_enabled() or runtime_adapter_runner_enabled():
         if regeneration is not None and runtime_adapter_runner_enabled():
             return {"error": "Regeneration is not supported by the runner backend.", "code": "unsupported_regeneration_backend", "_status": 409}
@@ -24927,6 +24961,8 @@ def _is_silent_control_message(message) -> bool:
 
 
 def _handle_chat_start(handler, body, diag=None):
+    from api.gateway_chat import webui_gateway_chat_enabled
+
     try:
         diag.stage("validate_session_id") if diag else None
         try:
@@ -24969,13 +25005,27 @@ def _handle_chat_start(handler, body, diag=None):
             # message disappear into the empty state.
             synth, reason = _claim_or_synthesize_cli_session(body["session_id"])
             if synth is None:
-                # 'was_webui' (deleted WebUI session, client should self-heal
-                # via the existing 404 path), 'no_foreign_state' (sid has
-                # no recoverable state anywhere), or 'invalid_sid' (path
-                # safety violation). All collapse to 404 — the client only
-                # knows the right thing to do for "this session is gone".
-                return bad(handler, "Session not found", 404)
-            if reason == "not_claimable":
+                if webui_gateway_chat_enabled() and is_safe_session_id(body["session_id"]):
+                    s = Session(
+                        session_id=body["session_id"],
+                        workspace=str(resolve_trusted_workspace(get_last_workspace())),
+                        model=body.get("model", DEFAULT_MODEL),
+                        profile=body.get("profile") or get_active_profile_name(),
+                    )
+                    with LOCK:
+                        SESSIONS[s.session_id] = s
+                    try:
+                        s.save()
+                    except Exception:
+                        pass
+                else:
+                    # 'was_webui' (deleted WebUI session, client should self-heal
+                    # via the existing 404 path), 'no_foreign_state' (sid has
+                    # no recoverable state anywhere), or 'invalid_sid' (path
+                    # safety violation). All collapse to 404 — the client only
+                    # knows the right thing to do for "this session is gone".
+                    return bad(handler, "Session not found", 404)
+            elif reason == "not_claimable":
                 # Foreign store says this session is read-only / owned by
                 # a non-WebUI process (messaging, claude_code,
                 # external_agent, cron, gateway/unknown, or explicit
@@ -24992,34 +25042,32 @@ def _handle_chat_start(handler, body, diag=None):
                     "session is read-only in its foreign store; cannot be claimed writeable in WebUI",
                     403,
                 )
-            try:
-                synth.save()
-            except Exception as _save_err:
-                # Persisting the sidecar failed: surface a generic 500 to
-                # the client (paths sanitised, see _sanitize_error) and log
-                # the full exception server-side. Returning the raw str(exc)
-                # would leak /root/.hermes/webui/sessions/<sid>.json or any
-                # other absolute filesystem path the OSError happened to
-                # carry — #4911 review feedback.
-                logger.exception(
-                    "failed to persist materialised sidecar for foreign session %s",
-                    body["session_id"],
-                )
-                return bad(
-                    handler,
-                    f"failed to claim session: {_sanitize_error(_save_err)}",
-                    500,
-                )
-            s = synth
-            try:
-                with LOCK:
-                    SESSIONS[s.session_id] = s
-                    SESSIONS.move_to_end(s.session_id)
-            except Exception:
-                # If the in-memory LRU refuses the new session, fall through
-                # with the just-persisted sidecar; _start_run will load it
-                # from disk if needed.
-                pass
+            else:
+                try:
+                    synth.save()
+                except Exception as _save_err:
+                    # Persisting the sidecar failed: surface a generic 500 to
+                    # the client (paths sanitised, see _sanitize_error) and log
+                    # the full exception server-side. Returning the raw str(exc)
+                    # would leak /root/.hermes/webui/sessions/<sid>.json or any
+                    # other absolute filesystem path the OSError happened to
+                    # carry — #4911 review feedback.
+                    logger.exception(
+                        "failed to persist materialised sidecar for foreign session %s",
+                        body["session_id"],
+                    )
+                    return bad(
+                        handler,
+                        f"failed to claim session: {_sanitize_error(_save_err)}",
+                        500,
+                    )
+                s = synth
+                try:
+                    with LOCK:
+                        SESSIONS[s.session_id] = s
+                        SESSIONS.move_to_end(s.session_id)
+                except Exception:
+                    pass
         except PermissionError:
             return bad(handler, "Read-only imported sessions cannot be continued from WebUI", 403)
         diag.stage("validate_profile") if diag else None

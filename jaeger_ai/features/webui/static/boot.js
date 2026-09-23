@@ -2248,7 +2248,7 @@ function _applySessionContextMetadataUpdate(data){
     _syncCtxIndicator({
       input_tokens:_pick(u.input_tokens,S.session.input_tokens),
       output_tokens:_pick(u.output_tokens,S.session.output_tokens),
-      estimated_cost:_pick(u.estimated_cost,S.session.estimated_cost),
+      estimated_cost:_pick(u.estimated_cost,S.session.estimated_cost,null),
       context_length:S.session.context_length||0,
       last_prompt_tokens:_pick(u.last_prompt_tokens,S.session.last_prompt_tokens),
       post_compression_context_tokens_estimate:S.session.post_compression_context_tokens_estimate,

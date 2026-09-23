@@ -251,6 +251,37 @@ class EntityRuntime:
         if "metadata" in ctx and isinstance(ctx["metadata"], dict):
             meta.update(ctx["metadata"])
 
+        try:
+            context_budget_tokens = max(0, int(ctx.get("budget_tokens") or 4096))
+        except (TypeError, ValueError):
+            context_budget_tokens = 4096
+        # ``budget_tokens`` covers the current request plus recalled context.
+        # Reserve the request first and bound the prompt-only context that the
+        # cognition router may prepend. Conversation history gets at most half
+        # of that remainder so runtime truth and relevant memory still fit.
+        prompt_context_chars = max(
+            0,
+            int(context_budget_tokens * self.context_compiler.CHARS_PER_TOKEN)
+            - len(user_text),
+        )
+        ctx["prompt_context_max_chars"] = prompt_context_chars
+
+        # Gateway owns the durable transcript.  The owner-side subordinate
+        # JaegerAgent is rebuilt for each admitted request, so it cannot carry
+        # an in-memory message list across turns or process restarts.  Compile
+        # the same-session history from the authoritative Gateway projection
+        # before cognition.  The trailing user row is this admitted request and
+        # is sent separately by the cognition handler.
+        gateway_session = ctx.get("gateway_session")
+        if isinstance(gateway_session, dict):
+            conversation = self.context_compiler.project_conversation_history(
+                gateway_session.get("messages"),
+                current_user_is_last=True,
+                max_chars=min(12_000, prompt_context_chars // 2),
+            )
+            if conversation:
+                ctx["conversation_history"] = conversation
+
         # 1. Ingest event to Fabric, reduce SelfState, evaluate Salience
         trace_id = str(meta.get("trace_id") or request_id or f"T{int(time.time()*1000)}")
         meta["trace_id"] = trace_id
@@ -709,11 +740,27 @@ class EntityRuntime:
         request_id: str | None = None,
         confirmation_provider: Any = None,
         native_run_id: str | None = None,
+        model: str | None = None,
+        provider: str | None = None,
+        on_model: Callable[[str], None] | None = None,
         max_iterations: int = 12,
         max_tool_calls: int = 8,
         on_run: Callable[[str], None] | None = None,
-    ) -> str:
+        cancellation: Any = None,
+        callbacks: Any = None,
+    ) -> dict[str, Any]:
         """Execute subordinate ReAct loop inside the EntityRuntime.
+
+        Returns ``{"text", "halt_reason"}``. ``halt_reason`` is None on a
+        clean finish and a string when the inner loop hit a backstop
+        (budget, interrupt, identical-call, overflow). The Gateway owner
+        uses that to decide whether to re-fire the same admitted request.
+
+        ``cancellation`` is the request's
+        :class:`~jaeger_ai.core.runtime.cancellation.CancellationScope`. It is
+        bound to the agent before its run is created, so a cancel requested
+        at any point from admission onward interrupts this turn, and a cancel
+        that already happened stops it before any run or effect exists.
 
         Provides canonical execution of tool-using ReAct cognition owned
         by the EntityRuntime, ensuring consistent permission policies,
@@ -738,10 +785,19 @@ class EntityRuntime:
         except Exception:
             pass
 
+        import contextlib
+        # The request's approval policy is scoped to THIS turn's context. It
+        # used to be install_policy()'d, which also sets JaegerOS's
+        # process-wide fallback: a thread outside this turn (another
+        # session's, a background worker) then resolved to this request's
+        # provider and parked approvals under the wrong request. A thread
+        # that does not inherit the context now falls back to the boot
+        # policy (fail closed), never to a foreign request.
+        turn_policy: contextlib.AbstractContextManager[Any] = contextlib.nullcontext()
         if confirmation_provider is not None:
             try:
-                from jaeger_os.core.safety.permissions import PermissionPolicy, PolicyMode, install_policy
-                install_policy(PermissionPolicy(
+                from jaeger_os.core.safety.permissions import PermissionPolicy, PolicyMode, use_policy
+                turn_policy = use_policy(PermissionPolicy(
                     mode=PolicyMode.NORMAL,
                     confirmation=confirmation_provider,
                 ))
@@ -760,7 +816,20 @@ class EntityRuntime:
 
         cfg = load_yaml(layout.config_path, Config)
         client = ExternalModelClient(cfg.external_model, layout)
-        agent = build_jaeger_agent(client, max_iterations=max_iterations, max_tool_calls=max_tool_calls)
+        if model:
+            from jaeger_ai.core.models.router import select_client
+            client = select_client(client, cfg, layout, model, provider)
+        if on_model is not None:
+            on_model(f"{client.provider}:{client.model_name}")
+        if cancellation is not None and cancellation.cancelled:
+            return {"text": "(Cancelled before the turn started.)", "halt_reason": "interrupted"}
+        # ``callbacks`` (an AgentCallbacks) carries the caller's per-turn
+        # observers — the Gateway streams stream_delta/reasoning to clients.
+        agent = build_jaeger_agent(client, max_iterations=max_iterations,
+                                   max_tool_calls=max_tool_calls, callbacks=callbacks)
+        if cancellation is not None:
+            from jaeger_ai.core.runtime.cancellation import bind_agent
+            bind_agent(cancellation, agent)
         if native_run_id:
             try:
                 agent.bind_run(native_run_id)
@@ -770,17 +839,21 @@ class EntityRuntime:
             agent,
             SqliteRunStore(),
             SqliteCommitmentStore(),
-            provider=str(cfg.external_model.provider or "ollama"),
+            provider=str(getattr(client, "provider", None) or cfg.external_model.provider or "ollama"),
         )
         os.environ.setdefault("JAEGER_ACCEPT_HOOKS", "1")
-        run = turn_exec.ensure_run()
-        if on_run is not None:
-            # Before any effect: a crash from here on must be attributable
-            # to this run, or recovery cannot tell done work from undone.
-            on_run(run.id)
-        out = turn_exec.run_turn(prompt)
+        with turn_policy:
+            run = turn_exec.ensure_run()
+            if on_run is not None:
+                # Before any effect: a crash from here on must be attributable
+                # to this run, or recovery cannot tell done work from undone.
+                on_run(run.id)
+            out = turn_exec.run_turn(prompt)
         out = (out or "").strip()
-        return out if out else "(No response text returned)"
+        return {
+            "text": out if out else "(No response text returned)",
+            "halt_reason": getattr(turn_exec.agent, "last_halt_reason", None),
+        }
 
     @staticmethod
     def _project_episodic(user_text: str, answer: str, *, session_id: str) -> None:

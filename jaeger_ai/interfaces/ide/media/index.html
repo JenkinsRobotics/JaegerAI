@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP}}; script-src 'nonce-{{NONCE}}'; img-src https:;">
+<link rel="stylesheet" href="{{CSS}}"><title>Jaeger</title></head>
+<body>
+<header><div class="brand"><span class="mark">J</span><strong>Jaeger</strong><span class="subtle">Your ongoing work</span></div>
+<button id="settings" title="Connection settings" aria-label="Connection settings">⚙</button></header>
+<nav aria-label="Conversations"><select id="sessions" aria-label="Conversation"><option value="">Select a conversation</option></select><button id="new" title="New conversation" aria-label="New conversation">＋</button><button id="refresh" title="Reload history and reconnect" aria-label="Reload history and reconnect">↻</button></nav>
+<div id="status" role="status">Connecting…</div>
+<div id="error" role="alert" hidden></div>
+<div id="copied" role="status" class="sr-only" aria-live="polite"></div>
+<main id="timeline" aria-label="Conversation timeline"><section class="empty"><h1>What are we working on?</h1><p>One Jaeger. A focused conversation here, with work owned by your Gateway.</p><p>Create a conversation or reopen an existing one.</p></section></main>
+<div id="approvals" aria-label="Pending approvals"></div>
+<footer>
+<div id="staged" aria-label="Attached files"></div>
+<form id="composer">
+<label class="sr-only" for="prompt">Message Jaeger</label>
+<textarea id="prompt" placeholder="Message Jaeger…" rows="3"></textarea>
+<div class="composer-bottom">
+  <button id="attach" type="button" title="Attach a file from your Jaeger workspace" aria-label="Attach a file from your Jaeger workspace">📎</button>
+  <span id="context">Gateway-owned conversation</span>
+  <label class="sr-only" for="model">Model</label>
+  <select id="model" aria-label="Model" title="Model"><option value="">Gateway default</option></select>
+  <button id="stop" type="button" hidden>Stop</button>
+  <button id="send" type="submit" disabled>Send ↑</button>
+</div>
+</form>
+<div class="hint">Enter to send · Shift+Enter for a new line</div>
+</footer>
+<script type="module" nonce="{{NONCE}}">
+  // streaming-markdown (MIT, thetarnav) — see ../THIRD_PARTY_NOTICES.md.
+  // Absent in an unpackaged dev checkout; that is expected, not an error.
+  try { window.smd = await import('{{SMD}}'); }
+  catch { window.smd = null; }
+</script>
+<script nonce="{{NONCE}}" src="{{FRAME_QUEUE}}"></script>
+<script nonce="{{NONCE}}" src="{{TIMELINE}}"></script>
+<script nonce="{{NONCE}}" src="{{KEYED_RENDERER}}"></script>
+<script nonce="{{NONCE}}" src="{{PRESENTATION}}"></script>
+<script nonce="{{NONCE}}" src="{{MARKDOWN}}"></script>
+<script nonce="{{NONCE}}" src="{{JS}}"></script>
+</body></html>

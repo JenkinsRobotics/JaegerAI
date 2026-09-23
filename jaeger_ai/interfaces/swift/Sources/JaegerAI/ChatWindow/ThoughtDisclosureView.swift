@@ -12,14 +12,10 @@ struct ThoughtDisclosureView: View {
     let thoughtText: String
     let isStreaming: Bool
 
-    /// Same rule as ``ToolCommandGroupView``: open while the agent is
-    /// deliberating, shut once it settles, and the operator's own click wins
-    /// from then on. The two section kinds interleave in one feed, so they
-    /// have to behave identically or expanding one reads as a different
-    /// control from expanding the other.
+    /// Compact like tool activity, with expansion controlled by the operator.
     @State private var expandedOverride: Bool?
 
-    private var isExpanded: Bool { expandedOverride ?? isStreaming }
+    private var isExpanded: Bool { expandedOverride ?? false }
 
     var body: some View {
         if thoughtText.isEmpty && !isStreaming {
@@ -33,8 +29,8 @@ struct ThoughtDisclosureView: View {
                         Image(systemName: "clock")
                             .font(.system(size: 11))
                             .foregroundColor(Term.inkDim)
-                        Text("Thought process")
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        Text(isStreaming ? "Reasoning…" : "Reasoning")
+                            .font(.system(size: 13, weight: .medium))
                             .foregroundColor(Term.inkDim)
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 10, weight: .bold))
@@ -48,7 +44,7 @@ struct ThoughtDisclosureView: View {
                     .padding(.vertical, 4)
                     .contentShape(Rectangle())
                 }
-                .accessibilityLabel("Thought process")
+                .accessibilityLabel("Reasoning")
                 .accessibilityHint(isExpanded ? "Collapse thought process" : "Expand thought process")
                 .buttonStyle(.plain)
 

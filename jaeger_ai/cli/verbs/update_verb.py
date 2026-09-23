@@ -249,9 +249,13 @@ def _rebuild_swift_app(home: Path, *, only_if_stale: bool = False) -> None:
     if not script.exists():
         return
     flag = "--dev" if (home / "dev").exists() else "--release"
-    built = swift_dir / ".build" / "JaegerAI.app"
+    from jaeger_ai.cli._common import swift_app_bundle, swift_app_is_stale
+    try:
+        built = swift_app_bundle(home)
+    except ValueError as exc:
+        print(f"[jaeger update] ⚠ skipping Swift rebuild: {exc}", file=sys.stderr)
+        return
     if only_if_stale:
-        from jaeger_ai.cli._common import swift_app_is_stale
         if not swift_app_is_stale(home, built):
             return
     if shutil.which("swift") is None:

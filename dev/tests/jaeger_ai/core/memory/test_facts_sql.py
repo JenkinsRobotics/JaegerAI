@@ -60,6 +60,24 @@ def test_forget_returns_true_when_present(bound):
     assert mem.recall("k") is None
 
 
+def test_remember_survives_store_restart_then_forget_is_durable(tmp_path):
+    memory_dir = tmp_path / "memory"
+    layout = SimpleNamespace(memory_dir=memory_dir)
+    key = "restart_marker"
+
+    mem.bind(layout)
+    mem.remember(key, "nebula-482")
+    sqlite_store.close()
+
+    mem.bind(layout)
+    assert mem.recall(key) == "nebula-482"
+    assert mem.forget(key) is True
+    sqlite_store.close()
+
+    mem.bind(layout)
+    assert mem.recall(key) is None
+
+
 # ── fuzzy recall (model phrasing drift) ───────────────────────────
 
 

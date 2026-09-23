@@ -70,8 +70,12 @@ class VoiceTurn:
             "transcript_to_submitted": span("transcript_ready", "submitted"),
             "entity_turn": span("submitted", "reply_ready"),
             "reply_to_tts_start": span("reply_ready", "tts_start"),
-            "tts_playback": span("tts_start", "tts_end"),
-            "speech_end_to_first_audio": span("speech_end", "tts_start"),
+            # speak() may synthesize or only print text before returning. Its
+            # invocation is not evidence that a device has produced sound.
+            "tts_call": span("tts_start", "tts_end"),
+            "speech_end_to_tts_call": span("speech_end", "tts_start"),
+            "tts_playback": span("first_audio", "playback_end"),
+            "speech_end_to_first_audio": span("speech_end", "first_audio"),
         }
         return {k: v for k, v in spans.items() if v is not None}
 

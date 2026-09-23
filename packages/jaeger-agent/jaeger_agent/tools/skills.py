@@ -68,7 +68,7 @@ def skill(action: str, name: str = "", query: str = "",
     """Discover and read playbook skills — experienced procedures for a
     task. ``action`` selects the operation:
 
-      - ``list``   — the FULL active catalog: every active skill,
+      - ``list``   — the FULL callable catalog: every installed skill,
         enriched (name · category · description · tier · tools).
         This is the research-step lookup — call it when
         STARTING a non-trivial task to see everything available, then
@@ -108,7 +108,7 @@ def skill(action: str, name: str = "", query: str = "",
         return audit_catalog()
 
     if act in ("list", "all", ""):
-        skills = _pb.available_playbooks()
+        skills = _pb.callable_playbooks()
         # Build category counts first — that's the always-cheap
         # part of the response that lets the model decide whether
         # to deepen with category= or search.
@@ -150,7 +150,7 @@ def skill(action: str, name: str = "", query: str = "",
         if not q:
             return {"ok": False, "error": "search needs a query"}
         hits = []
-        for s in _pb.available_playbooks():
+        for s in _pb.callable_playbooks():
             hay = (f"{s.name} {s.description} {s.category} "
                    f"{' '.join(s.tags)}").lower()
             if all(term in hay for term in q.split()):
@@ -389,7 +389,7 @@ def _t_record_skill_revision(skill: str, version: str, summary: str = "",
 def _register_use_skill() -> None:
     import typing
     from jaeger_os.core.tools.tool_registry import register_tool_from_function
-    skills = _pb.available_playbooks()
+    skills = _pb.prompt_playbooks()
     names = [s.name for s in skills]
     if not names:
         return

@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import uuid
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, Mapping, Protocol, runtime_checkable
@@ -345,8 +346,11 @@ class CheckpointingToolExecutor:
 
 class LedgerToolExecutor:
     """Production executor: ``side_effect="external"`` tools go through
-    :meth:`EffectLedger.once`. Validation happens *before* the claim so
-    a bad argument list does not leave an indeterminate pending row.
+    :meth:`EffectLedger.once` keyed by their arguments (a crash replay of
+    the same run must not re-send). Validation happens *before* the claim
+    so a bad argument list does not leave an indeterminate pending row.
+    Every other non-read call (local write, hardware, unclassified) gets a
+    per-invocation intent/outcome record — see :meth:`_record_local`.
 
     Keys include the bound ``run_id`` so a new run may legitimately
     repeat the same tool+args (a second user request) while a crash
@@ -369,8 +373,11 @@ class LedgerToolExecutor:
 
     def execute(self, tool: ToolDef, arguments: Mapping[str, Any]) -> Any:
         args = dict(arguments)
-        if getattr(tool, "side_effect", "") not in AUTHORITATIVE_SIDE_EFFECTS:
+        side_effect = getattr(tool, "side_effect", "")
+        if side_effect == "read":
             return self._inner.execute(tool, args)
+        if side_effect not in AUTHORITATIVE_SIDE_EFFECTS:
+            return self._record_local(tool, args)
 
         # Resilient validation check (Hermes pattern)
         validation_error = self._validate(tool, args)
@@ -392,6 +399,33 @@ class LedgerToolExecutor:
                     pass
             raise
         return result
+
+    def _record_local(self, tool: ToolDef, args: dict[str, Any]) -> Any:
+        """Durable intent/outcome for a local, hardware or unclassified call.
+
+        Unclassified counts as a mutation (fail closed). The key is unique
+        per invocation, so this never skips a deliberate repeat — rerunning
+        the same command is new intent. It exists for crash truth: a process
+        that dies inside the call leaves the claim pending, and the run's
+        outcome is then reported unknown instead of failed or cancelled.
+        A call that returns or raises has an observed outcome and is
+        resolved either way; only the small outcome marker is stored.
+        """
+        key = f"{self._run_id or 'unbound'}:{tool.name}:call:{uuid.uuid4().hex}"
+        box: dict[str, Any] = {}
+
+        def run() -> dict[str, Any]:
+            try:
+                box["value"] = self._inner.execute(tool, args)
+                return {"ok": True}
+            except Exception as exc:  # observed failure, not an unknown outcome
+                box["error"] = exc
+                return {"ok": False, "error": type(exc).__name__}
+
+        self._ledger.once(key, tool.name, run, run_id=self._run_id)
+        if "error" in box:
+            raise box["error"]
+        return box["value"]
 
     def _effect_key(self, tool_name: str, args: dict[str, Any]) -> str:
         payload = json.dumps(args, sort_keys=True, default=str)

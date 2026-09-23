@@ -12,6 +12,9 @@ def isolate_gateway(monkeypatch):
     import jaeger_ai.features.agentgateway.service as gateway
     monkeypatch.setattr(gateway, 'start', lambda: {'ok': True})
     monkeypatch.setattr(gateway, 'stop', lambda: {'ok': True})
+    # Unit cases exercise lifecycle decisions, not the real loopback readiness
+    # probe. Runtime readiness has its own integration coverage.
+    monkeypatch.setattr(lifecycle, '_wait_runtime_ready', lambda **_: True)
 
 
 def test_restart_dry_run_never_performs_real_stop_or_start(monkeypatch):

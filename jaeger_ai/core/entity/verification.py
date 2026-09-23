@@ -231,6 +231,14 @@ class VerificationRegistry:
             or res_dict.get("path")
             or nested.get("path")
         )
+        if act_dict.get("verification_error"):
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence=f"File write verification rejected: {act_dict['verification_error']}",
+                verifier="file_write_verifier",
+                error="InvalidPath",
+            )
         if not path:
             return VerificationResult(
                 status=VerificationStatus.OBJECTIVE_FAILED,
@@ -246,10 +254,19 @@ class VerificationRegistry:
             or nested.get("expected_content")
         )
         raw = Path(str(path))
-        if raw.is_absolute():
-            target = raw.resolve()
-        else:
-            target = _resolve_existing_or_candidate(str(path), context)
+        try:
+            if raw.is_absolute():
+                target = raw.resolve()
+            else:
+                target = _resolve_existing_or_candidate(str(path), context)
+        except ValueError as exc:
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence=f"File write verification rejected: {exc}",
+                verifier="file_write_verifier",
+                error="InvalidPath",
+            )
         if not target.exists():
             return VerificationResult(
                 status=VerificationStatus.OBJECTIVE_FAILED,
@@ -287,6 +304,14 @@ class VerificationRegistry:
     @staticmethod
     def _verify_file_delete(objective: str, action: Any, result: Any, context: Any) -> VerificationResult:
         act_dict = dict(action) if isinstance(action, (dict, list)) else {}
+        if act_dict.get("verification_error"):
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence=f"File delete verification rejected: {act_dict['verification_error']}",
+                verifier="file_delete_verifier",
+                error="InvalidPath",
+            )
         path = act_dict.get("path") or act_dict.get("target_path") or (result.get("path") if isinstance(result, dict) else None)
         if not path:
             return VerificationResult(
@@ -296,7 +321,21 @@ class VerificationRegistry:
                 verifier="file_delete_verifier",
                 error="MissingPath",
             )
-        target = Path(path).resolve()
+        try:
+            raw = Path(str(path))
+            target = (
+                raw.resolve()
+                if raw.is_absolute()
+                else _resolve_existing_or_candidate(str(path), context)
+            )
+        except ValueError as exc:
+            return VerificationResult(
+                status=VerificationStatus.OBJECTIVE_FAILED,
+                target_objective=objective,
+                evidence=f"File delete verification rejected: {exc}",
+                verifier="file_delete_verifier",
+                error="InvalidPath",
+            )
         if target.exists():
             return VerificationResult(
                 status=VerificationStatus.OBJECTIVE_FAILED,
@@ -548,7 +587,7 @@ _CD_GIT = re.compile(r"cd\s+(\S+)\s+&&\s+git\b")
 def _workspace_roots(context: Any) -> list[Path]:
     roots: list[Path] = []
     ctx = dict(context) if isinstance(context, dict) else {}
-    for key in ("workspace", "workspace_path", "cwd"):
+    for key in ("workspace", "workspace_path", "instance_root", "cwd"):
         val = ctx.get(key)
         if val:
             roots.append(Path(str(val)))
@@ -567,24 +606,48 @@ def _workspace_roots(context: Any) -> list[Path]:
 
 
 def _resolve_existing_or_candidate(path: str, context: Any) -> Path:
-    raw = Path(path)
+    text = str(path)
+    raw = Path(text)
     if raw.is_absolute():
-        return raw
+        return raw.resolve()
+    # Tool paths are portable slash-separated identifiers even when a model
+    # emits Windows separators. Relative traversal is never an authoritative
+    # artifact location; callers can provide an explicit absolute path when
+    # verification outside a configured root is intended.
+    relative = Path(text.replace("\\", "/"))
+    if any(part == ".." for part in relative.parts):
+        raise ValueError("verification path escapes its declared root")
+
+    def under(root: Path, rel: Path) -> Path:
+        base = root.resolve()
+        candidate = (base / rel).resolve()
+        try:
+            candidate.relative_to(base)
+        except ValueError as exc:
+            raise ValueError("verification path escapes its declared root") from exc
+        return candidate
+
     ctx = dict(context) if isinstance(context, dict) else {}
     layout = ctx.get("layout")
-    text = str(path)
-    if text.startswith("workspace/") or text.startswith("workspace\\"):
-        rel = text.split("/", 1)[-1].split("\\", 1)[-1]
+    if relative.parts and relative.parts[0] == "workspace":
+        rel = Path(*relative.parts[1:])
         if layout is not None and getattr(layout, "workspace_dir", None) is not None:
-            return (Path(layout.workspace_dir) / rel).resolve()
+            return under(Path(layout.workspace_dir), rel)
         ws = ctx.get("workspace")
         if ws:
-            return (Path(ws) / rel).resolve()
+            return under(Path(ws), rel)
+    if relative.parts and relative.parts[0] == "skills":
+        rel = Path(*relative.parts[1:])
+        if layout is not None and getattr(layout, "skills_dir", None) is not None:
+            return under(Path(layout.skills_dir), rel)
+        instance_root = ctx.get("instance_root")
+        if instance_root:
+            return under(Path(str(instance_root)) / "skills", rel)
     for root in _workspace_roots(context):
-        cand = (root / path).resolve()
+        cand = under(root, relative)
         if cand.exists() or cand.parent.exists():
             return cand
-    return (Path.cwd() / path).resolve()
+    return under(Path.cwd(), relative)
 
 
 def _tool_records(tool_events: Sequence[Any]) -> list[dict[str, Any]]:
@@ -655,7 +718,11 @@ def derive_verification_action(
         args = rec.get("arguments") if isinstance(rec.get("arguments"), dict) else {}
         res = rec.get("result") if isinstance(rec.get("result"), dict) else {}
         if name in {"write_file", "append_file", "patch"}:
-            path = args.get("path") or res.get("path")
+            # The tool result is the canonical routed artifact path. A bare
+            # input like ``note.txt`` intentionally lands under ``skills/``;
+            # verifying the raw argument under workspace reports a false
+            # failure even though the independently observed write exists.
+            path = res.get("path") or args.get("path")
             content = args.get("content") or args.get("expected_content")
             if path:
                 writes.append({"path": path, "expected_content": content})
@@ -703,9 +770,18 @@ def derive_verification_action(
 
     if wants_delete and deletes:
         path = deletes[-1]["path"]
+        try:
+            resolved = str(_resolve_existing_or_candidate(path, context))
+        except ValueError as exc:
+            return {
+                "action_type": "file_delete",
+                "path": "",
+                "tool": "delete_file",
+                "verification_error": str(exc),
+            }
         return {
             "action_type": "file_delete",
-            "path": str(_resolve_existing_or_candidate(path, context)),
+            "path": resolved,
             "tool": "delete_file",
         }
 
@@ -719,7 +795,16 @@ def derive_verification_action(
         elif Path(raw_path).is_absolute():
             path = raw_path
         else:
-            path = str(_resolve_existing_or_candidate(raw_path, context))
+            try:
+                path = str(_resolve_existing_or_candidate(raw_path, context))
+            except ValueError as exc:
+                return {
+                    "action_type": "file_write",
+                    "path": "",
+                    "expected_content": chosen.get("expected_content"),
+                    "tool": "write_file",
+                    "verification_error": str(exc),
+                }
             if abs_obj:
                 path = abs_obj[0]
         expected = chosen.get("expected_content")

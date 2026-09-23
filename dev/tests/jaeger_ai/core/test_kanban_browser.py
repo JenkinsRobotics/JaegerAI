@@ -73,3 +73,36 @@ def test_browser_headless_env(monkeypatch) -> None:
     assert _headless() is False             # headed by default — user watches
     monkeypatch.setenv("JAEGER_BROWSER_HEADLESS", "1")
     assert _headless() is True
+
+
+def test_browser_logs_and_errors_dispatch() -> None:
+    state = {
+        "console_logs": [{"type": "error", "text": "Uncaught TypeError"}],
+        "failed_requests": [{"url": "http://127.0.0.1/bad", "method": "GET"}],
+    }
+    res = _dispatch(None, state, "logs", {})
+    assert len(res["console_logs"]) == 1
+    assert len(res["failed_requests"]) == 1
+
+
+def test_browser_screenshot_dispatch_mocked(tmp_path) -> None:
+    from pathlib import Path
+    target_img = tmp_path / "test.png"
+    class _FakePage:
+        url = "http://127.0.0.1:8790"
+        def title(self):
+            return "Jaeger"
+        def screenshot(self, path=None, full_page=False):
+            Path(path).write_bytes(b"\x89PNG\r\n\x1a\nfake-png-bytes")
+        def query_selector_all(self, sel):
+            return []
+        def evaluate(self, script):
+            return "Visible text on screen"
+
+    state = {"handles": []}
+    res = _dispatch(_FakePage(), state, "screenshot", {"path": str(target_img)})
+    assert res["path"] == str(target_img)
+    assert res["bytes"] > 0
+    assert len(res["image_data"]) > 0
+    assert "data:image/png;base64," in res["image_url"]
+    assert res["text_content"] == "Visible text on screen"

@@ -11,26 +11,56 @@ Grader does NOT trust UI text alone; it cross-references:
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
 import os
-from pathlib import Path
 import sqlite3
-import subprocess
 import time
 import urllib.request
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
+
+pytestmark = pytest.mark.acceptance
+
+if os.environ.get("JAEGER_ACCEPTANCE") != "1":
+    pytest.skip(
+        "live WebUI acceptance requires dev/scripts/run_tests.sh --acceptance",
+        allow_module_level=True,
+    )
+
+_state_override = os.environ.get("JAEGER_STATE_DIR", "").strip()
+if not _state_override:
+    raise RuntimeError("live acceptance requires an isolated JAEGER_STATE_DIR")
+
+STATE_ROOT = Path(_state_override).expanduser().resolve()
+for protected in (Path(__file__).resolve().parents[3], Path.home() / ".jaeger"):
+    if STATE_ROOT.is_relative_to(protected.resolve()):
+        raise RuntimeError("acceptance state must be outside the repository and operator state")
+
+def _isolated_endpoint(key: str) -> str:
+    value = os.environ.get(key, "").strip().rstrip("/")
+    endpoint = urlsplit(value)
+    if (endpoint.scheme != "http" or endpoint.hostname not in {"127.0.0.1", "localhost", "::1"}
+            or endpoint.port is None or endpoint.port in {8810, 8790}
+            or endpoint.username or endpoint.password or endpoint.path
+            or endpoint.query or endpoint.fragment):
+        raise RuntimeError(f"{key} must specify an isolated loopback HTTP listener on a non-production port")
+    return value
+
+
+WEBUI_URL = _isolated_endpoint("JAEGER_WEBUI_URL")
+GATEWAY_URL = _isolated_endpoint("JAEGER_GATEWAY_URL")
+
+# Validate isolation before importing optional browser dependencies.
 from PIL import Image, ImageDraw
 from playwright.sync_api import sync_playwright
 
-WEBUI_URL = os.environ.get("JAEGER_WEBUI_URL", "http://127.0.0.1:8790")
-GATEWAY_URL = os.environ.get("JAEGER_GATEWAY_URL", "http://127.0.0.1:8810")
-STATE_DIR = Path.home() / ".jaeger" / "hermes-webui-state"
-GATEWAY_DB = Path.home() / ".jaeger" / "gateway_sessions.sqlite3"
+STATE_DIR = STATE_ROOT / "hermes-webui-state"
+GATEWAY_DB = STATE_ROOT / "gateway_sessions.sqlite3"
 
 TEST_RESULTS: list[dict[str, str]] = []
 
@@ -50,7 +80,7 @@ def _get_auth_cookie() -> str:
             pass
     password = os.environ.get("HERMES_WEBUI_PASSWORD") or ""
     if not password:
-        pw_file = Path.home() / ".jaeger" / "webui_remote_password"
+        pw_file = STATE_ROOT / "webui_remote_password"
         if pw_file.is_file():
             password = pw_file.read_text(encoding="utf-8").strip()
     data = json.dumps({"password": password}).encode("utf-8")
@@ -255,10 +285,10 @@ def test_deterministic_turn_multi_layer_agreement(auth_cookie, verify_stack_heal
     TEST_RESULTS.append({"Test": "Kimi selection turn", "UI": "kimi-k2.7", "Gateway": "jaeger session", "Runtime": "kimi-k2.7-code", "Result": "PASS"})
 
 
-def test_vision_token_acceptance(auth_cookie, verify_stack_health):
+def test_vision_token_acceptance(auth_cookie, verify_stack_health, tmp_path):
     """Generate fixture image with VISION-TOKEN-7421, upload through real /api/upload, and verify cognition reads it."""
     token = "VISION-TOKEN-7421"
-    img_path = Path("/tmp") / f"{token}.png"
+    img_path = tmp_path / f"{token}.png"
 
     # 1. Generate real image fixture
     img = Image.new("RGB", (320, 90), color=(255, 255, 255))
@@ -342,18 +372,15 @@ def test_vision_token_acceptance(auth_cookie, verify_stack_health):
         TEST_RESULTS.append({"Test": "Image attachment", "UI": "visible /api/upload", "Gateway": "attached in db", "Runtime": f"vision read: {token}", "Result": "PASS"})
     finally:
         img_path.unlink(missing_ok=True)
-        if stored_path:
-            try:
-                Path(stored_path).unlink(missing_ok=True)
-            except Exception:
-                pass
+        # Uploaded artifacts belong to the isolated server's state lifecycle.
+        # Never unlink arbitrary host paths returned in an HTTP response.
 
 
-def test_non_image_file_attachment(auth_cookie, verify_stack_health):
+def test_non_image_file_attachment(auth_cookie, verify_stack_health, tmp_path):
     """Upload non-image file and assert attachment metadata persists in Gateway session."""
     filename = "doc-7421.txt"
     content = b"JAEGER-TEXT-PAYLOAD-9921"
-    doc_path = Path("/tmp") / filename
+    doc_path = tmp_path / filename
     doc_path.write_bytes(content)
 
     create_body = json.dumps({"title": "non-image-doc-test"}).encode("utf-8")
@@ -424,11 +451,6 @@ def test_non_image_file_attachment(auth_cookie, verify_stack_health):
         TEST_RESULTS.append({"Test": "File attachment", "UI": "uploaded txt", "Gateway": "attached metadata", "Runtime": "content received", "Result": "PASS"})
     finally:
         doc_path.unlink(missing_ok=True)
-        if matching and matching.get("safe_path"):
-            try:
-                Path(matching["safe_path"]).unlink(missing_ok=True)
-            except Exception:
-                pass
 
 
 def test_capabilities_inventory_truth(auth_cookie, verify_stack_health):
@@ -502,7 +524,15 @@ def test_framework_switching_integrity(auth_cookie, verify_stack_health):
         TEST_RESULTS.append({"Test": "Framework switch", "UI": "Jaeger->Hermes->OpenClaw->Jaeger", "Gateway": "profile aligned", "Runtime": "same entity resident", "Result": "PASS"})
 
 
-def test_keepalive_resilience_and_restart(auth_cookie, verify_stack_health):
+@pytest.fixture
+def restart_acceptance_stack():
+    pytest.fail(
+        "Restart acceptance requires an owned-process fixture; "
+        "operator launchd services must never be restarted by this suite"
+    )
+
+
+def test_keepalive_resilience_and_restart(auth_cookie, verify_stack_health, restart_acceptance_stack):
     """Run persistent HTTP connections and verify restart keeps sessions coherent."""
     # 1. Create a session before restart
     create_body = json.dumps({"title": "pre-restart-session"}).encode("utf-8")
@@ -515,9 +545,8 @@ def test_keepalive_resilience_and_restart(auth_cookie, verify_stack_health):
         sess_data = json.loads(resp.read().decode("utf-8"))
     session_id = sess_data["session_id"]
 
-    # 2. Restart Gateway and WebUI via launchctl kickstart
-    subprocess.run(["launchctl", "kickstart", "-k", "gui/501/com.jenkinsrobotics.jaeger-gateway"], check=True)
-    subprocess.run(["launchctl", "kickstart", "-k", "gui/501/com.jenkinsrobotics.jaeger-webui"], check=True)
+    # 2. Restart only processes owned by the isolated acceptance harness.
+    restart_acceptance_stack()
     assert _wait_healthy(f"{GATEWAY_URL}/health", timeout=20), "Gateway must be healthy after restart"
     assert _wait_healthy(f"{WEBUI_URL}/health", timeout=20), "WebUI must be healthy after restart"
 

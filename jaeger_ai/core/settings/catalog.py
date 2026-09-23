@@ -250,6 +250,8 @@ def set_value(layout: Any, path: str, value: Any) -> dict[str, Any]:
     saved = _read_path(new, path)
     if desc["type"] == "secret":
         saved = ""
+    elif isinstance(saved, Path):
+        saved = str(saved)
     return {"ok": True, "restart_required": desc["restart"],
             "path": path, "value": saved}
 

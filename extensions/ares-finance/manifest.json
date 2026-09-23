@@ -14,12 +14,8 @@
     "agent_tools",
     "mcp"
   ],
-  "scripts": [
-    "dashboard/app.js"
-  ],
-  "stylesheets": [
-    "dashboard/style.css"
-  ],
+  "scripts": [],
+  "stylesheets": [],
   "sidecar": {
     "type": "loopback",
     "origin": "http://127.0.0.1:3848",

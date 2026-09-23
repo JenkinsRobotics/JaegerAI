@@ -6859,9 +6859,9 @@ function _syncMobileCtxDisplay(state){
     if (!arc || !num) return;
     var offset = 87.96 * (1 - Math.min(pct, 100) / 100);
     arc.setAttribute('stroke-dashoffset', offset);
-    num.textContent = Math.round(pct);
+    num.textContent = state.unknown ? '?' : Math.round(pct);
     arc.setAttribute('stroke',
-      pct <= 50 ? '#22c55e' : pct <= 85 ? '#f97316' : '#ef4444'
+      state.unknown ? 'currentColor' : pct <= 50 ? '#22c55e' : pct <= 85 ? '#f97316' : '#ef4444'
     );
   })(state.pct);
   if(mobileConfigBtn){
@@ -6952,6 +6952,22 @@ function _syncCtxIndicator(usage){
   const DEFAULT_CTX=128*1024;
   const ctxWindow=usage.context_length||DEFAULT_CTX;
   const cost=usage.estimated_cost;
+  // Owner telemetry may be unavailable (distinct from measured zero usage).
+  // Keep this visible, including on reload of an unmeasured session.
+  if(usage.measured===false||(!promptTok&&!totalTok&&cost==null&&!cacheReadTok&&!cacheWriteTok)){
+    if(wrap){wrap.classList.remove('composer-control-hidden');wrap.removeAttribute('aria-hidden');wrap.style.display='';}
+    el.classList.remove('ctx-mid','ctx-high');
+    el.setAttribute('aria-label','Usage not measured');
+    const center=$('ctxPercent'),ring=$('ctxRingValue');
+    if(center)center.textContent='?';
+    if(ring)ring.style.strokeDashoffset='61.261056745';
+    for(const [id,text] of [['ctxTooltipUsage','Usage not measured'],['ctxTooltipTokens','Token counts unavailable'],['ctxTooltipCost','Cost not measured — not necessarily free']]){
+      const line=$(id);if(line){line.textContent=text;line.style.display='';}
+    }
+    for(const id of ['ctxTooltipThreshold','ctxTooltipCompress']){const line=$(id);if(line)line.style.display='none';}
+    _syncMobileCtxDisplay({visible:true,unknown:true,pct:0,label:'Usage not measured',usageText:'Usage not measured',tokensText:'Token counts unavailable',costText:'Cost not measured — not necessarily free'});
+    return;
+  }
   // Show indicator whenever we have any usage data (tokens or cost)
   if(!promptTok&&!totalTok&&!cost&&!cacheReadTok&&!cacheWriteTok){
     if(wrap) wrap.style.display='none';
@@ -7018,7 +7034,7 @@ function _syncCtxIndicator(usage){
   }
   let costText='';
   if(costLine){
-    if(cost){
+    if(cost!=null){
       costText=`Estimated cost: $${cost<0.01?cost.toFixed(4):cost.toFixed(2)}`;
       if(cacheText) costText+=` \u00b7 ${cacheText}`;
       costLine.style.display='';
@@ -7028,8 +7044,9 @@ function _syncCtxIndicator(usage){
       costLine.style.display='';
       costLine.textContent=costText;
     }else{
-      costLine.style.display='none';
-      costLine.textContent='';
+      costText='Cost not measured — not necessarily free';
+      costLine.style.display='';
+      costLine.textContent=costText;
     }
   }
   _syncMobileCtxDisplay({

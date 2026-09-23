@@ -9,9 +9,12 @@ ROOT = Path(__file__).resolve().parents[4]
 APPROVED = {Path("jaeger_ai/core/instance/legacy_state.py")}
 
 
-def test_runtime_sources_have_no_retired_brand_or_personal_defaults():
+def test_runtime_sources_have_no_machine_specific_or_retired_state_defaults():
     roots = [ROOT / "jaeger_ai", ROOT / "clients", ROOT / "scripts"]
-    forbidden = ("jros", ".jaeger_os", "/users/", "minecraft")
+    # Match actual ownership facts, not generic cross-platform path examples,
+    # persisted schema identifiers, or intentional product capabilities such
+    # as the Minecraft integration.
+    forbidden = ("/users/matthewjenkins", ".jaeger_os")
     findings: list[str] = []
     for root in roots:
         for path in root.rglob("*"):
@@ -28,7 +31,7 @@ def test_runtime_sources_have_no_retired_brand_or_personal_defaults():
             for literal in forbidden:
                 if literal in source:
                     findings.append(f"{relative}: {literal}")
-    assert findings == [], "retired ownership literals must stay behind migration boundaries:\n" + "\n".join(findings)
+    assert findings == [], "machine/retired state defaults must stay behind migration boundaries:\n" + "\n".join(findings)
 
 
 # The ONE module allowed to resolve ARES's home. Everything else must go
@@ -53,20 +56,15 @@ def test_runtime_does_not_read_ares_private_session_state():
     fail on both of those legitimate integrations — and a guard that fails on
     correct code is one people learn to skip.
     """
-    forbidden = (
-        "ARES_SESSION_DIR",
-        "ARES_CONTROLLER_PORT",
-        '"/api/sessions"',
-    )
+    # Product-qualified state/controller identifiers prove an ARES coupling.
+    # A bare HTTP path does not: Jaeger, Hermes, and test fixtures each own
+    # independent `/api/sessions` endpoints.
+    forbidden = ("ARES_SESSION_DIR", "ARES_CONTROLLER_PORT")
     findings: list[str] = []
     for path in (ROOT / "jaeger_ai").rglob("*.py"):
         if not path.is_file():
             continue
         relative = path.relative_to(ROOT)
-        if relative.parts[:4] == ("jaeger_ai", "features", "webui", "api"):
-            # Jaeger WebUI owns its own /api/sessions route. This guard is
-            # about reading ARES private state, not first-party browser APIs.
-            continue
         source = path.read_text(encoding="utf-8")
         for literal in forbidden:
             if literal in source:

@@ -139,7 +139,9 @@ struct AgentSettingsHUD: View {
         case .character, .traits:
             if store.detail == nil { await store.loadDetail() }
         case .app:
-            if store.settingsGroups.isEmpty { await store.loadSettingsCatalog() }
+            // Always re-read: the file may have changed via the CLI or
+            // another client. Cached values stay visible while it refreshes.
+            await store.loadSettingsCatalog(force: true)
         case .permissions:
             if store.permissions == nil { await store.loadPermissions() }
         case .ares:
@@ -600,12 +602,13 @@ private struct AppPage: View {
             Spacer()
             if store.settingsRestartNeeded { restartBadge }
         }
-        if let err = store.settingsError {
-            Text(err).font(.system(size: 12)).foregroundStyle(Color.red)
-        }
-        if store.settingsGroups.isEmpty {
-            Text("Loading…").foregroundStyle(HUD.inkDim)
-        } else {
+        Text("Changes save to this instance's config file. The app can't yet "
+             + "confirm when the running assistant picks a change up; ⟳ marks "
+             + "settings that need a restart.")
+            .font(.system(size: 11)).foregroundStyle(HUD.inkDim)
+            .fixedSize(horizontal: false, vertical: true)
+        loadStatus
+        if !store.settingsGroups.isEmpty {
             ForEach(store.settingsGroups) { group in
                 groupSection(group)
             }
@@ -651,12 +654,39 @@ private struct StartupSection: View {
         }
     }
 
+    @ViewBuilder private var loadStatus: some View {
+        switch store.settingsLoad {
+        case .failed(let message):
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(store.settingsGroups.isEmpty ? message
+                     : "\(message) Showing values from the last successful load.")
+                    .font(.system(size: 12)).foregroundStyle(Color.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                Button("Retry") { Task { await store.loadSettingsCatalog(force: true) } }
+                    .buttonStyle(.plain).foregroundStyle(HUD.accent)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+        case .loading:
+            Text(store.settingsGroups.isEmpty ? "Loading settings…" : "Refreshing…")
+                .font(.system(size: 12)).foregroundStyle(HUD.inkDim)
+        case .idle where store.settingsGroups.isEmpty:
+            Text("Loading settings…").font(.system(size: 12)).foregroundStyle(HUD.inkDim)
+        default:
+            EmptyView()
+        }
+    }
+
     private var restartBadge: some View {
-        Text("RESTART REQUIRED")
+        Text("SAVED · RESTART TO APPLY")
             .font(.system(size: 9, weight: .bold)).tracking(1)
             .foregroundStyle(Color.black)
             .padding(.horizontal, 8).padding(.vertical, 3)
             .background(Capsule().fill(HUD.accent))
+            .help("Some changes saved this session only take effect after the "
+                  + "process that reads them restarts — the Jaeger bridge or the "
+                  + "Gateway, depending on the setting. Reopening this window "
+                  + "does not apply them.")
     }
 }
 
@@ -761,10 +791,37 @@ private struct SettingRow: View {
                     .font(.system(size: 11)).foregroundStyle(HUD.inkDim)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            saveStatus
         }
         .padding(.vertical, 3)
         .onAppear { sync() }
         .onChange(of: setting.current) { _, _ in sync() }
+        // A rejected edit leaves ``current`` unchanged, so resync on the
+        // outcome too — otherwise the control keeps showing the rejected value.
+        .onChange(of: store.settingSaves[setting.path]) { _, state in
+            if state != .saving { sync() }
+        }
+    }
+
+    @ViewBuilder private var saveStatus: some View {
+        switch store.settingSaves[setting.path] {
+        case .saving?:
+            Text("Saving…").font(.system(size: 11)).foregroundStyle(HUD.inkDim)
+        case .saved(let restart)?:
+            Text(restart ? "Saved to config · takes effect after a restart"
+                         : "Saved to config · not yet confirmed in the running assistant")
+                .font(.system(size: 11)).foregroundStyle(HUD.accent)
+        case .savedUnconfirmed?:
+            Text("Save reported success, but the stored value couldn't be read "
+                 + "back. Reopen App Settings to check it.")
+                .font(.system(size: 11)).foregroundStyle(Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        case .failed(let message)?:
+            Text(message).font(.system(size: 11)).foregroundStyle(Color.red)
+                .fixedSize(horizontal: false, vertical: true)
+        case nil:
+            EmptyView()
+        }
     }
 
     @ViewBuilder private var control: some View {
@@ -805,7 +862,16 @@ private struct SettingRow: View {
                 Text(setting.label).foregroundStyle(HUD.ink)
                     .font(.system(size: 13))
                 Spacer()
-                SecureField("Enter replacement", text: $text, onCommit: commitText)
+                if let configured = setting.configured {
+                    Text(configured ? "Configured" : "Not set")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(configured ? HUD.accent : HUD.inkDim)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .overlay(Capsule().stroke(configured ? HUD.accent : HUD.stroke,
+                                                  lineWidth: 1))
+                }
+                SecureField(setting.configured == true ? "Enter replacement" : "Enter value",
+                            text: $text, onCommit: commitText)
                     .textFieldStyle(.plain).multilineTextAlignment(.trailing)
                     .font(.system(size: 13)).foregroundStyle(HUD.ink)
                     .frame(maxWidth: 180).padding(6)
@@ -871,7 +937,19 @@ private struct PermissionsPage: View {
                 // permissions.mode is a schema field — persist it through the
                 // SAME catalog everything else uses (no hardcoded save path).
                 await store.setSetting("permissions.mode", .string(mode))
-                await store.loadPermissions()
+                await store.loadPermissions(force: true)   // read back; don't trust the draft
+                mode = store.permissions?.mode ?? mode
+            }
+        }
+        if let state = store.settingSaves["permissions.mode"] {
+            switch state {
+            case .saving:
+                Text("Saving…").font(.system(size: 11)).foregroundStyle(HUD.inkDim)
+            case .saved, .savedUnconfirmed:
+                Text("Saved to config · not yet confirmed in the running assistant")
+                    .font(.system(size: 11)).foregroundStyle(HUD.accent)
+            case .failed(let message):
+                Text(message).font(.system(size: 11)).foregroundStyle(Color.red)
             }
         }
         Spacer().frame(height: 10)

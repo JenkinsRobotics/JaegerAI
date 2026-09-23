@@ -1,0 +1,188 @@
+{
+  "_ceilings": {
+    "core_or_mind_imports_webui_api": 19,
+    "jaeger_agent_imports_product": 53,
+    "jaeger_os_imports_product_or_agent": 1
+  },
+  "core_or_mind_imports_webui_api": {
+    "jaeger_ai/core/diagnostics/doctor.py": [
+      "jaeger_ai.features.webui.service.service"
+    ],
+    "jaeger_ai/core/frameworks/conversation.py": [
+      "jaeger_ai.features.webui.adapter.bridge_client"
+    ],
+    "jaeger_ai/core/frameworks/jaeger.py": [
+      "jaeger_ai.features.webui.adapter.bridge_client",
+      "jaeger_ai.features.webui.service.session_unify"
+    ],
+    "jaeger_ai/core/frameworks/native_runs.py": [
+      "jaeger_ai.features.webui.adapter.bridge_client",
+      "jaeger_ai.features.webui.service.session_unify"
+    ],
+    "jaeger_ai/core/frameworks/recovery.py": [
+      "jaeger_ai.features.webui.service.session_unify"
+    ],
+    "jaeger_ai/core/gateway/server.py": [
+      "jaeger_ai.features.webui.adapter.bridge_client"
+    ],
+    "jaeger_ai/core/runtime/fabric_supervisor.py": [
+      "jaeger_ai.features.webui.adapter.bridge_client"
+    ],
+    "jaeger_ai/core/runtime/stack.py": [
+      "jaeger_ai.features.webui.adapter.bridge_client"
+    ],
+    "jaeger_ai/core/runtime/truth.py": [
+      "jaeger_ai.features.webui.adapter.bridge_client",
+      "jaeger_ai.features.webui.adapter.profile_catalog"
+    ],
+    "jaeger_ai/core/sessions.py": [
+      "jaeger_ai.features.webui.service.session_unify"
+    ],
+    "jaeger_ai/mind/cognition/bridge.py": [
+      "api.backends.router",
+      "api.config"
+    ],
+    "jaeger_ai/mind/cognition/context_compiler.py": [
+      "api.journal.schema"
+    ],
+    "jaeger_ai/mind/cognition/orchestrator.py": [
+      "api.journal.paths"
+    ],
+    "jaeger_ai/mind/cognition/router.py": [
+      "api.worker_rankings"
+    ],
+    "jaeger_ai/mind/cognition/trust_engine.py": [
+      "api.journal.paths"
+    ]
+  },
+  "jaeger_agent_imports_product": {
+    "packages/jaeger-agent/jaeger_agent/adapters/cli_backend.py": [
+      "jaeger_ai.features.cli_backends.discovery"
+    ],
+    "packages/jaeger-agent/jaeger_agent/adapters/local_llama.py": [
+      "jaeger_ai.core.runtime.tool_repair"
+    ],
+    "packages/jaeger-agent/jaeger_agent/credentials.py": [
+      "jaeger_ai.core.instance.instance"
+    ],
+    "packages/jaeger-agent/jaeger_agent/dialects/_shared.py": [
+      "jaeger_ai.core.runtime.tool_repair"
+    ],
+    "packages/jaeger-agent/jaeger_agent/dialects/chatml.py": [
+      "jaeger_ai.core.runtime.tool_repair"
+    ],
+    "packages/jaeger-agent/jaeger_agent/instance_config.py": [
+      "jaeger_ai.core.instance.schemas"
+    ],
+    "packages/jaeger-agent/jaeger_agent/loop/bus_confirm.py": [
+      "jaeger_ai.core.runtime"
+    ],
+    "packages/jaeger-agent/jaeger_agent/loop/runtime_bridge.py": [
+      "jaeger_ai.core.runtime.usage_stats",
+      "jaeger_ai.main"
+    ],
+    "packages/jaeger-agent/jaeger_agent/memory/memory.py": [
+      "jaeger_ai.core.instance.schemas"
+    ],
+    "packages/jaeger-agent/jaeger_agent/prompts/assemble.py": [
+      "jaeger_ai.core.entity.runtime",
+      "jaeger_ai.core.instance.instance",
+      "jaeger_ai.core.instance.schemas"
+    ],
+    "packages/jaeger-agent/jaeger_agent/prompts/context_blocks.py": [
+      "jaeger_ai.core.instance.instance",
+      "jaeger_ai.core.instance.schemas"
+    ],
+    "packages/jaeger-agent/jaeger_agent/prompts/persona_lane.py": [
+      "jaeger_ai.core.instance.schemas",
+      "jaeger_ai.plugins"
+    ],
+    "packages/jaeger-agent/jaeger_agent/skill_registry/curator.py": [
+      "jaeger_ai.core.runtime.usage_stats"
+    ],
+    "packages/jaeger-agent/jaeger_agent/skill_registry/playbook_skills.py": [
+      "jaeger_ai.core.instance.schemas"
+    ],
+    "packages/jaeger-agent/jaeger_agent/skill_registry/skill_audit.py": [
+      "jaeger_ai.core.safety.skills_guard"
+    ],
+    "packages/jaeger-agent/jaeger_agent/skill_registry/skill_loader.py": [
+      "jaeger_ai.core.instance.instance",
+      "jaeger_ai.core.safety.skills_guard"
+    ],
+    "packages/jaeger-agent/jaeger_agent/skill_registry/skill_package.py": [
+      "jaeger_ai.core.instance.schemas"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tool_executor.py": [
+      "jaeger_ai.core.entity.authority",
+      "jaeger_ai.core.entity.events",
+      "jaeger_ai.core.entity.runtime"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/bench.py": [
+      "jaeger_ai.core.bench",
+      "jaeger_ai.main"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/call_agent.py": [
+      "jaeger_ai.core.agent_registry"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/container.py": [
+      "jaeger_ai.core.runtime"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/diagnostics.py": [
+      "jaeger_ai.core.diagnostics"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/host.py": [
+      "jaeger_ai.core.runtime.autonomy",
+      "jaeger_ai.core.runtime.modes"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/identity_tools.py": [
+      "jaeger_ai.core.instance.schemas"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/insights.py": [
+      "jaeger_ai.features.shared_memory.honcho_client"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/listen.py": [
+      "jaeger_ai.main"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/messaging.py": [
+      "jaeger_ai.core",
+      "jaeger_ai.plugins"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/models.py": [
+      "jaeger_ai.core.instance.schemas",
+      "jaeger_ai.core.models.model_resolver",
+      "jaeger_ai.main"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/persona.py": [
+      "jaeger_ai.core",
+      "jaeger_ai.features.personality.character"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/plugins.py": [
+      "jaeger_ai",
+      "jaeger_ai.plugins",
+      "jaeger_ai.plugins.manifest"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/skills.py": [
+      "jaeger_ai.core.runtime.usage_stats",
+      "jaeger_ai.core.safety.skills_guard"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/speak.py": [
+      "jaeger_ai.main"
+    ],
+    "packages/jaeger-agent/jaeger_agent/trace.py": [
+      "jaeger_ai.core.instance.instance"
+    ],
+    "packages/jaeger-agent/jaeger_agent/util/lazy_deps.py": [
+      "jaeger_ai.main"
+    ],
+    "packages/jaeger-agent/jaeger_agent/workspace.py": [
+      "jaeger_ai.core.instance.instance",
+      "jaeger_ai.core.instance.subprocess_env"
+    ]
+  },
+  "jaeger_os_imports_product_or_agent": {
+    "packages/jaeger-os/jaeger_os/core/safety/command_guard.py": [
+      "jaeger_agent"
+    ]
+  }
+}

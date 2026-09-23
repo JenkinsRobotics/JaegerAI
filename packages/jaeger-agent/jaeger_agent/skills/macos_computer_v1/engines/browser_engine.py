@@ -90,7 +90,8 @@ class BrowserEngine:
             "click_selector": "click", "browser_click": "click",
             "fill": "type", "browser_type": "type",
             "extract_text": "snapshot", "browser_read": "snapshot",
-            "screenshot_page": "snapshot", "browser_snapshot": "snapshot",
+            "screenshot_page": "screenshot", "browser_snapshot": "snapshot",
+            "screenshot": "screenshot", "browser_screenshot": "screenshot",
         }
         verb = verb_map.get(kind, kind)
         try:
@@ -101,6 +102,7 @@ class BrowserEngine:
                 text=str(args.get("text", "") or args.get("value", "")),
                 direction=str(args.get("direction", "down")),
                 key=str(args.get("key", "Enter")),
+                path=str(args.get("path", "") or ""),
             )
         except Exception as exc:  # noqa: BLE001
             return EngineResult(

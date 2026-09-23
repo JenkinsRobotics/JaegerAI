@@ -1,8 +1,8 @@
 # JaegerAI — native macOS desktop app
 
-> The primary UI since 0.7.0. `JaegerAI.app` (default instance) and
-> `JaegerAI-dev.app` (the `jaeger-dev` dev instance) are built from this
-> package; `jaeger` launches the app, `jaeger --tui` / `jaeger dev` keep the
+> The primary UI since 0.7.0. `JaegerAI.app` is built from this package
+> into `~/.jaeger/apps/swift-build/JaegerAI.app` (outside the checkout);
+> `jaeger` launches the app, `jaeger --tui` / `jaeger dev` keep the
 > terminal first-class. (`launch.py` was removed in 0.7.)
 
 One Swift process owns the tray card, the native chat window, the avatar orb,
@@ -12,15 +12,27 @@ the floating pill (⌥Space), and the voice loop. It spawns `jaeger bridge`
 
 ## Build, test, run
 
+Build output is always **outside the checkout** at `~/.jaeger/apps/swift-build/JaegerAI.app`
+(or `$JAEGER_SWIFT_BUILD/JaegerAI.app`). A pre-existing `interfaces/swift/.build/`
+in the repo is left untouched; it is not used by the build script.
+
 ```bash
-cd jaeger_os/interfaces/swift
-swift build            # debug build
-swift test             # ProtocolFixtureTests — the wire contract
-Scripts/build-app.sh --dev   # .build/JaegerAI-dev.app (pins the jaeger-dev instance)
-Scripts/build-app.sh         # .build/JaegerAI.app (product)
+cd jaeger_ai/interfaces/swift
+swift test --scratch-path "$HOME/.cache/jaeger/swift-tests" # external test build
+Scripts/build-app.sh         # debug  → ~/.jaeger/apps/swift-build/JaegerAI.app
+Scripts/build-app.sh --release  # release build (same path)
+JAEGER_SWIFT_BUILD=/path/to/dir Scripts/build-app.sh  # custom root
+open --env "JAEGER_REPO=$(git rev-parse --show-toplevel)" ~/.jaeger/apps/swift-build/JaegerAI.app
 ```
 
 `xed Package.swift` opens the package in Xcode.
+
+`Scripts/build-app.sh --print-build-dir` resolves and validates the selected
+output without creating directories or starting a build. CLI launchers pass the
+checkout through `JAEGER_REPO`; direct Finder launch from an arbitrary checkout
+still needs qualification. This is external-build support, not a self-contained
+or GUI-qualified release artifact. No installed app is replaced unless the
+operator explicitly invokes installation.
 
 ## Source layout
 

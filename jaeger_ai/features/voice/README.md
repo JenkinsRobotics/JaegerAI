@@ -26,8 +26,13 @@ jaeger voice --no-speech       # print replies instead of speaking
 ```
 
 Each turn prints one JSON line on stderr: what was heard, the request id, the
-model the Entity used, and measured latencies (`speech_end_to_transcript`,
-`entity_turn`, `speech_end_to_first_audio`, …).
+model the Entity used, and call-level timings (`speech_end_to_transcript`,
+`entity_turn`, `speech_end_to_tts_call`, `tts_call`, …). `reply_to_tts_start`
+means entry into the speaker call, not audible output. `speech_end_to_first_audio`
+and `tts_playback` require observed `first_audio` / `playback_end` timestamps;
+the current speaker interface does not supply them, so these metrics are omitted.
+Older output mislabeled speaker-call timing as audio latency; do not use it to
+qualify the release's first-audible-response target.
 
 ## What it relies on
 
@@ -51,8 +56,10 @@ session, Gateway and Entity with only the capture swapped.
   "Orion 4, Blackwell"; `medium.en` heard it correctly. Choose with
   `--stt-model`.
 * **Latency is dominated by the Entity turn** (≈20–35 s measured with a cloud
-  model and the deliberate planner). STT is ≈0.4–0.5 s; TTS starts within
-  1 ms of the reply. This is turn-based voice, not real-time conversation.
+  model and the deliberate planner). Historical STT is ≈0.4–0.5 s. The old
+  “TTS within 1 ms” observation measured calling `speak()`, not the first audible
+  output. Physical first-audio latency remains unmeasured. This is turn-based
+  voice, not real-time conversation.
 * **Barge-in**: speech detected while a stoppable speaker is playing calls
   `stop()`. `KokoroTTS.speak` blocks, so the default loop pauses the mic while
   speaking; interruption during playback is **EXPERIMENTAL** and has not been

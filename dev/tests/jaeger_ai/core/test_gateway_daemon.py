@@ -11,6 +11,29 @@ from jaeger_ai.core.gateway.event_bus import GatewayEventBus
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
 
 
+@pytest.fixture(autouse=True)
+def isolated_entity_runtime(tmp_path, monkeypatch):
+    """HTTP startup creates an OWNER; it must not leak into another test."""
+    from jaeger_ai.core.entity.resident import release_resident
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+    from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+    from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml
+
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("JAEGER_OWNER_REACT", raising=False)
+    monkeypatch.delenv("JAEGER_RUNTIME_MODE", raising=False)
+    EntityRuntime.reset_singleton()
+    release_resident()
+    layout = InstanceLayout(root=resolve_instance_dir())
+    layout.ensure_dirs()
+    dump_yaml(layout.config_path, Config(
+        instance_name="default", model=ModelConfig(model_path="/dev/null"),
+    ))
+    yield
+    EntityRuntime.reset_singleton()
+    release_resident()
+
+
 def test_session_store_lifecycle(tmp_path: Path):
     db_file = tmp_path / "test_sessions.sqlite3"
     store = GatewaySessionStore(db_file)
@@ -141,11 +164,10 @@ class TestGatewayServerAPI(AioHTTPTestCase):
         assert data["checks"]["native_mcp"]["ok"] is False
 
     async def test_sessions_crud_and_turn(self):
-        finished = asyncio.Event()
-        async def native(session_id, text, **kwargs):
-            finished.set()
-            return "Audit response", "mcp:test"
-        self.gateway_app._native_lead_turn = native
+        # Real startup selects resident OWNER execution, not the legacy MCP lane.
+        def owner(text, **kwargs):
+            return {"text": "Audit response", "halt_reason": None}
+        self.gateway_app._owner_react_turn = owner
         # 1. Create session
         resp = await self.client.request(
             "POST",
@@ -175,7 +197,9 @@ class TestGatewayServerAPI(AioHTTPTestCase):
         assert turn_data["status"] == "running"
 
         # Wait for background turn execution
-        await asyncio.wait_for(finished.wait(), timeout=2)
+        await asyncio.wait_for(
+            asyncio.gather(*self.gateway_app._running_tasks.values()), timeout=2,
+        )
 
         # 4. Fetch session history
         resp = await self.client.request("GET", "/v1/sessions/test-uuid")
@@ -276,11 +300,10 @@ async def test_missing_mcp_credential_fails_before_native_ownership(monkeypatch,
         transport, "mcp_api_key",
         lambda: (_ for _ in ()).throw(RuntimeError("MCP credential missing: configure it")),
     )
-    await app._execute_turn("s", admitted["turn_id"], "hello", request_id="request")
+    with pytest.raises(RuntimeError, match="MCP credential missing"):
+        await app._native_lead_turn("s", "hello", request_id="request")
     assert store.get_request("request")["native_run_id"] is None
-    event = app.event_bus.get_replay_events("s", since_event_id=0)[-1]
-    assert event.event == "turn.failed"
-    assert "MCP credential missing" in event.data["error"]
+    assert store.get_request("request")["status"] == admitted["status"]
 
 
 @pytest.mark.asyncio
@@ -326,7 +349,7 @@ async def test_execute_turn_specialist_skips_mcp(monkeypatch, tmp_path):
     async def _boom_native(*a, **k):
         raise AssertionError("specialist must not call native MCP")
 
-    async def _ollama(text, *, system_prompt=None, history=None):
+    async def _ollama(text, *, system_prompt=None, history=None, model=None, attachments=None):
         assert "specialist" in (system_prompt or "").lower()
         return "SPECIALIST:Ops"
 
@@ -341,7 +364,7 @@ async def test_execute_turn_specialist_skips_mcp(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_native_failure_does_not_silently_complete_with_text(monkeypatch, tmp_path):
+async def test_owner_failure_does_not_silently_complete_with_text(monkeypatch, tmp_path):
     store = GatewaySessionStore(tmp_path / "failure.sqlite3")
     app = JaegerGatewayApp(store=store)
     store.ensure_session("s")
@@ -349,14 +372,17 @@ async def test_native_failure_does_not_silently_complete_with_text(monkeypatch, 
         return None
     async def forbidden(*args, **kwargs):
         raise AssertionError("implicit text fallback")
+    def owner_unavailable(*args, **kwargs):
+        raise RuntimeError("subordinate unavailable")
     monkeypatch.setattr(app, "_resolve_session_agent", lambda sid: None)
     monkeypatch.setattr(app, "_native_lead_turn", unavailable)
+    monkeypatch.setattr(app, "_owner_react_turn", owner_unavailable)
     monkeypatch.setattr(app, "_ollama_chat", forbidden)
     await app._execute_turn("s", "t", "Remember this")
     assert store.get_session("s")["status"] == "failed"
     events = app.event_bus.get_replay_events("s", since_event_id=0)
     assert [e.event for e in events] == ["turn.failed"]
-    assert "did not return a confirmed result" in events[0].data["error"]
+    assert "subordinate unavailable" in events[0].data["error"]
 
 
 @pytest.mark.asyncio
@@ -416,7 +442,7 @@ async def test_text_mode_sends_history_without_a_128_token_cap(monkeypatch, tmp_
         def __init__(self, *args, **kwargs): pass
         async def __aenter__(self): return self
         async def __aexit__(self, *args): pass
-        def post(self, url, *, json):
+        def post(self, url, *, json, headers=None):
             captured.update(json)
             return Response()
 
@@ -674,7 +700,9 @@ async def test_duplicate_turn_submission_executes_once(tmp_path: Path):
     task = app._running_tasks.get("c" * 32)
     if task:
         await asyncio.wait_for(task, timeout=2)
-    assert calls == ["do the thing"]
+    assert len(calls) == 1
+    # EntityRuntime prepends recalled context before invoking the model lane.
+    assert calls[0].endswith("do the thing")
     session = store.get_session("sess")
     assert sum(1 for m in session["messages"] if m["role"] == "user") == 1
 
@@ -693,7 +721,7 @@ async def test_cancel_before_native_prevents_effect(tmp_path: Path):
 
     app._native_lead_turn = native  # type: ignore[method-assign]
     admitted = store.admit_request("s", "work", request_id="d" * 32)
-    app._cancel_requested.add(admitted["request_id"])
+    app._cancellations.cancel(admitted["request_id"])
     await app._execute_turn("s", admitted["turn_id"], "work", request_id=admitted["request_id"])
     release.set()
     assert called == []

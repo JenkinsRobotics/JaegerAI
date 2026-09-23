@@ -315,7 +315,7 @@ def compile_context(
 
             cfg = load_identity()
             si_identity = SIIdentity(
-                name=cfg.name or "ARES",
+                name=cfg.name or "Jaeger",
                 owner_name=cfg.owner_name or "User",
                 mission=cfg.mission or "",
                 principles=list(cfg.principles or []),
@@ -323,7 +323,7 @@ def compile_context(
             )
         except Exception:
             si_identity = SIIdentity(
-                name="ARES",
+                name="Jaeger",
                 owner_name="User",
                 mission="Assist the owner accurately, protect their data, and be honest about uncertainty.",
                 principles=[

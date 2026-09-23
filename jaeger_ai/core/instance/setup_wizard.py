@@ -504,14 +504,16 @@ def run_wizard(
     else:
         print("  Who is this Jaeger? Their name also names the instance folder.")
     # Default order: CLI-passed name (this instance's --name pin) wins,
-    # then the picked character's name, then the hard-coded "Jarvis" —
+    # then the picked character's name, then the neutral "Jaeger" default —
     # always editable, matching the bridge's onboarding precedence
-    # (pin > character preset > … ; here "…" is just the built-in
-    # placeholder since there's no separate user-edit state in a
-    # single ``input()`` prompt).
+    # (pin > character preset > neutral default) and
+    # ``EntityIdentity.create_default``'s own generic fallback
+    # (jaeger_ai/core/entity/identity.py). No unpicked character name is
+    # ever the silent default — that would hand every fresh install a
+    # persona nobody chose.
     agent_name = _ask(
         "Agent display name",
-        name or (p_id.display_name if p_id else "Jarvis"),
+        name or (p_id.display_name if p_id else "Jaeger"),
     )
     # WIZ-2: surface the role length cap AND split a too-long role
     # gracefully — first sentence goes into identity.role, the full
@@ -1460,6 +1462,7 @@ def create_instance(
     # evidence that this operator has already completed the welcome.
     from jaeger_ai.core.instance.first_boot import (
         begin,
+        enter_initializing_persona,
         record_bench,
         record_character,
         record_model_selection,
@@ -1475,6 +1478,8 @@ def create_instance(
         "custom" if character_id == "assistant" else "preset",
         character_id=character_id,
     )
+    if character_id != "assistant":
+        enter_initializing_persona(layout)
     # Characters are the persona — wire the instance to the chosen one
     # so the running agent plays it (identity / soul / traits / voice).
     from jaeger_ai.features.personality.character import set_active_character

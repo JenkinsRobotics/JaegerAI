@@ -230,6 +230,16 @@ actor BridgeProcess {
         return (repo as NSString).appendingPathComponent("jaeger")
     }
 
+    /// Product chats go through the resident Gateway. An explicit
+    /// ``JAEGER_BRIDGE_EXECUTION`` in the parent environment is kept.
+    static func launchEnvironment(_ base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
+        var environment = base
+        if (environment["JAEGER_BRIDGE_EXECUTION"] ?? "").isEmpty {
+            environment["JAEGER_BRIDGE_EXECUTION"] = "gateway"
+        }
+        return environment
+    }
+
     static func launchArguments(instance: String?, setupOnly: Bool) -> [String] {
         var args = ["bridge"]
         if let instance { args.append(instance) }
@@ -278,7 +288,7 @@ actor BridgeProcess {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: path)
         proc.arguments = Self.launchArguments(instance: instance, setupOnly: setupOnly)
-        var environment = ProcessInfo.processInfo.environment
+        var environment = Self.launchEnvironment(ProcessInfo.processInfo.environment)
         if let systemModel = Self.bundledSystemModelPath() {
             environment["JAEGER_SYSTEM_MODEL"] = systemModel
         }

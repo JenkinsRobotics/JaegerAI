@@ -1265,10 +1265,9 @@ def _register_builtins(client: Any) -> None:
         value = str(sink("secret", prompt, ()) or "")
         return {"received": bool(value), "name": name, "secret": value}
 
-    @register_tool_from_function
-    def help_me() -> dict:
-        """Capability overview — call when asked 'what can you do?'."""
-        return t.help_me()
+    # help_me is owned by jaeger_agent.tools.delegation (annotated
+    # side_effect="read"); a second registration here used to overwrite it
+    # with an unannotated wrapper. One owner per tool name (T01).
 
 
 
@@ -1501,7 +1500,11 @@ def _register_builtins(client: Any) -> None:
 
 
 
-    @register_tool_from_function
+    # Declared override of jaeger_agent.tools.skills.reload_skills: the
+    # product's version honours the instance config (run_smoke_tests,
+    # enabled_base_skills allowlist) and the audit hook; the package default
+    # knows neither. It always won by import order — now it wins on purpose.
+    @register_tool_from_function(replace=True)
     def reload_skills() -> dict:
         """Re-scan core skills/ + instance skills/ and register any
         newly-authored or newly-versioned skills onto this agent.

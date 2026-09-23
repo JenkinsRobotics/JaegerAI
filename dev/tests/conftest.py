@@ -44,18 +44,28 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 # (bare ``jaeger``, ``agent create``) honour this as the headless gate.
 os.environ.setdefault("JAEGER_NO_GUI", "1")
 # Never attach to the operator's RUNNING agent from a test. ``create_runtime``
-# tries ``run/bridge.sock`` before it tries ``boot_for_tui``, so on any machine
-# where ARES (or ``jaeger bridge``) is live, a test that monkeypatches
-# ``boot_for_tui`` never reaches its own patch — it proxies real turns to the
-# real brain, against real memory. CI has no live socket, so CI could not see
-# it. ``setdefault``, not assignment, so the opt-in fixture below can lift it.
+# tries the resident Gateway, then ``run/bridge.sock``, before ``boot_for_tui``.
+# On a machine where Gateway or ``jaeger bridge`` is live, a test that
+# monkeypatches ``boot_for_tui`` would otherwise proxy real turns to the real
+# brain. ``setdefault``, not assignment, so the opt-in fixture below can lift it.
 os.environ.setdefault("JAEGER_NO_ATTACH", "1")
 
 # Resolve every unqualified instance path into disposable state. Individual
 # tests may still monkeypatch JAEGER_HOME to their own tmp_path; when their
 # patch unwinds it returns here, never to the operator's live instance.
 _TEST_STATE_HOME = Path(tempfile.mkdtemp(prefix="jaeger-tests-", dir="/tmp"))
+if os.environ.get("JAEGER_ACCEPTANCE") != "1":
+    # Direct pytest invocation must be as safe as the shell runner. These
+    # higher-priority overrides otherwise bypass every JAEGER_HOME fixture.
+    os.environ.pop("JAEGER_STATE_DIR", None)
+    os.environ.pop("JAEGER_INSTANCE_DIR", None)
+    os.environ["HERMES_HOME"] = str(_TEST_STATE_HOME / "hermes")
+    os.environ["HERMES_WEBUI_STATE_DIR"] = str(_TEST_STATE_HOME / "webui")
 os.environ["JAEGER_HOME"] = str(_TEST_STATE_HOME)
+# Collection imports WebUI configuration before per-test fixtures can run.
+# Give its workspace probe disposable state too; otherwise collection tries
+# ~/workspace and fails on read-only homes (or creates operator directories).
+os.environ["HERMES_WEBUI_DEFAULT_WORKSPACE"] = str(_TEST_STATE_HOME / "workspace")
 os.environ.setdefault("ARES_CAPABILITY_AUDIT", str(_TEST_STATE_HOME / "audit" / "host-capabilities.jsonl"))
 
 
@@ -202,6 +212,34 @@ _PATH_MARKERS: list[tuple[str, tuple[str, ...]]] = [
     ("/jaeger_ai/agent/test_runtime_bridge",  ("integration",)),
     ("/jaeger_ai/agent/test_liveness",        ("integration",)),
     ("/jaeger_ai/agent/test_run_turn",        ("integration",)),
+    # These modules bind TCP or AF_UNIX sockets, run an HTTP server, or
+    # exercise a live transport. They are valuable integration coverage but
+    # cannot be part of the hermetic unit tier (and fail in denied-network
+    # sandboxes before exercising product behavior).
+    ("/jaeger_ai/core/mcp/test_lifecycle", ("integration",)),
+    ("/jaeger_ai/core/models/test_external_model_live_faults", ("integration",)),
+    ("/jaeger_ai/core/test_attach_isolation", ("integration",)),
+    ("/jaeger_ai/core/test_attached_runtime", ("integration",)),
+    ("/jaeger_ai/core/test_bridge_socket", ("integration",)),
+    ("/jaeger_ai/core/test_bridge_ownership", ("integration",)),
+    ("/jaeger_ai/core/test_gateway_cross_site", ("integration", "security")),
+    ("/jaeger_ai/core/test_gateway_daemon", ("integration",)),
+    ("/jaeger_ai/features/webui/server_regressions/test_keepalive_csrf_body_drain", ("integration", "security")),
+    ("/jaeger_ai/interfaces/test_adapter_resilience", ("integration",)),
+    ("/jaeger_ai/interfaces/test_bridge_attach", ("integration",)),
+    ("/jaeger_ai/interfaces/test_dispatcher", ("integration",)),
+    ("/jaeger_ai/interfaces/test_hermes_profile_adapters", ("integration",)),
+    ("/jaeger_ai/interfaces/test_legacy_adapters_security", ("integration", "security")),
+    ("/jaeger_ai/interfaces/test_native_runs", ("integration",)),
+    ("/jaeger_ai/interfaces/test_roundtable_ingress", ("integration", "security")),
+    ("/jaeger_ai/interfaces/test_roundtable_native", ("integration",)),
+    ("/jaeger_ai/nodes/test_animation_e2e", ("integration",)),
+    ("/jaeger_ai/nodes/test_frame_bridge", ("integration",)),
+    ("/jaeger_ai/nodes/test_vision", ("integration",)),
+    # These execute real child Python processes rather than mocking the API.
+    ("/jaeger_ai/core/test_code_bridge", ("subprocess",)),
+    ("/jaeger_ai/core/test_run_python_workspace", ("subprocess",)),
+    ("/jaeger_ai/core/test_tool_interrupt", ("subprocess",)),
 ]
 
 
@@ -381,8 +419,15 @@ def allow_bridge_attach(bindable_instance_root):
     from it rather than re-deriving one.
     """
     previous = os.environ.pop("JAEGER_NO_ATTACH", None)
+    # Lifting the bridge gate must not also reach the operator Gateway on :8810.
+    previous_url = os.environ.get("JAEGER_GATEWAY_URL")
+    os.environ["JAEGER_GATEWAY_URL"] = "http://127.0.0.1:9"
     try:
         yield bindable_instance_root
     finally:
         if previous is not None:
             os.environ["JAEGER_NO_ATTACH"] = previous
+        if previous_url is None:
+            os.environ.pop("JAEGER_GATEWAY_URL", None)
+        else:
+            os.environ["JAEGER_GATEWAY_URL"] = previous_url

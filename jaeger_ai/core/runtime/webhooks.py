@@ -128,6 +128,13 @@ class _Handler(BaseHTTPRequestHandler):
         except json.JSONDecodeError:
             body = {"prompt": raw}
         interpreted = interpret(urlparse(self.path).path, body, raw=raw)
+        delivery = (
+            self.headers.get("X-Jaeger-Delivery-Id")
+            or self.headers.get("X-GitHub-Delivery")
+            or (body.get("delivery_id") if isinstance(body, dict) else None)
+        )
+        if delivery:
+            interpreted["delivery_id"] = str(delivery).strip()
         callback = getattr(self.server, "webhook_callback", None)
         result: dict[str, Any] = {"ok": True, **interpreted}
         if callable(callback):

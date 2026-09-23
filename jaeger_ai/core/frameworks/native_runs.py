@@ -663,7 +663,7 @@ def jaeger_turn(run, workspace=None):
                 session_key=str(native_session),
                 native_run_id=run.id,
             )
-            cleaned = clean_transcript_text(out)
+            cleaned = clean_transcript_text(out["text"])
             run.emit("message.delta", delta=cleaned)
             return cleaned
         except Exception as inner_exc:
@@ -679,7 +679,7 @@ def _in_process_jaeger_turn(run, native_session: str) -> str:
         session_key=str(native_session),
         native_run_id=run.id,
     )
-    cleaned = clean_transcript_text(out)
+    cleaned = clean_transcript_text(out["text"])
     run.emit("message.delta", delta=cleaned)
     return cleaned
 

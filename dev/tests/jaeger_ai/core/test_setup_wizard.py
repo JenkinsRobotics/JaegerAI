@@ -264,6 +264,37 @@ def test_wizard_step1_defaults_agent_name_to_the_cli_pin(monkeypatch, tmp_path):
     assert ident.name == "lilith"
 
 
+def test_wizard_step1_defaults_agent_name_to_neutral_jaeger_with_no_pin_or_persona(
+    monkeypatch, tmp_path,
+):
+    """No ``--name`` pin and a falsy persona shim (``_pick_character``
+    returning a real character id but no shim — the "unknown/unreadable
+    persona" edge case) must default Step 1's agent-name prompt to the
+    neutral "Jaeger", matching ``EntityIdentity.create_default``'s own
+    generic fallback — never to an unrequested persona name. A bare Enter
+    accepts the default, so the persisted identity must read "Jaeger".
+
+    Regression for the hardcoded ``"Jarvis"`` fallback: onboarding must not
+    hand a fresh install a persona nobody chose. ``character_id="assistant"``
+    (the bundled neutral character) keeps the rest of the flow — which
+    re-resolves the character shim from ``char_id`` independently — on its
+    normal, real path; only the Step 1 default is exercised here.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(tmp_path / "inst"))
+    monkeypatch.setenv("JAEGER_SKIP_PREPARE", "1")
+    monkeypatch.setattr(W, "_pick_character", lambda: ("assistant", None))
+    monkeypatch.setattr("builtins.input", lambda prompt: "")
+    monkeypatch.setattr(W, "_git_init", lambda root: None)
+
+    layout = W.run_wizard()
+    from jaeger_ai.core.instance.schemas import Identity, load_yaml
+    ident = load_yaml(layout.identity_path, Identity)
+    assert ident.name == "Jaeger"
+    assert ident.name != "Jarvis"
+
+
 # ── Agent-identity create-flow fix (2026-07-10) ─────────────────────
 # Walk-the-flow gate (a)/(b)/(c): the lilith/anakin bug was an explicit
 # CLI-passed name getting silently orphaned behind a picked character's

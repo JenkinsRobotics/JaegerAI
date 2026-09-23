@@ -49,7 +49,8 @@ _MAX_ELEMENTS = 60
 
 def _snapshot(page, state: dict[str, Any]) -> dict[str, Any]:
     """Number the page's visible interactive elements; stash their
-    handles in ``state`` so a later click/type can resolve an index."""
+    handles in ``state`` so a later click/type can resolve an index.
+    Also capture full rendered visible text, console errors, and failed requests."""
     try:
         handles = page.query_selector_all(_INTERACTIVE)
     except Exception:
@@ -93,8 +94,32 @@ def _snapshot(page, state: dict[str, Any]) -> dict[str, Any]:
         title = page.title()
     except Exception:
         title = ""
-    return {"url": page.url, "title": title,
-            "elements": elements, "count": len(elements)}
+
+    # Capture rendered body text content
+    text_content = ""
+    try:
+        raw_text = page.evaluate("() => document.body ? document.body.innerText : ''")
+        text_content = str(raw_text or "").strip()
+        if len(text_content) > 8000:
+            text_content = text_content[:8000] + "... [truncated]"
+    except Exception:
+        text_content = ""
+
+    console_errors = [
+        item for item in state.get("console_logs", [])
+        if str(item.get("type", "")).lower() in ("error", "warning")
+    ][-20:]
+    failed_reqs = list(state.get("failed_requests", []))[-20:]
+
+    return {
+        "url": page.url,
+        "title": title,
+        "elements": elements,
+        "count": len(elements),
+        "text_content": text_content,
+        "console_errors": console_errors,
+        "failed_requests": failed_reqs,
+    }
 
 
 def _element(state: dict[str, Any], index: Any) -> Any:
@@ -120,6 +145,40 @@ def _dispatch(page, state: dict[str, Any], action: str,
         return _snapshot(page, state)
     if action in ("snapshot", "read", "look", "elements"):
         return _snapshot(page, state)
+    if action in ("screenshot", "capture"):
+        import base64
+        import tempfile
+        import time
+        path = str(args.get("path") or "").strip()
+        if not path:
+            path = os.path.join(tempfile.gettempdir(), f"jaeger_browser_{int(time.time() * 1000)}.png")
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        page.screenshot(path=path, full_page=bool(args.get("full_page", False)))
+        b64 = ""
+        size = 0
+        try:
+            with open(path, "rb") as f:
+                img_data = f.read()
+                size = len(img_data)
+                b64 = base64.b64encode(img_data).decode("ascii")
+        except Exception:
+            pass
+        snap = _snapshot(page, state)
+        return {
+            "path": path,
+            "bytes": size,
+            "image_data": b64,
+            "image_url": f"data:image/png;base64,{b64}" if b64 else "",
+            **snap,
+        }
+    if action in ("content", "extract_text", "text"):
+        snap = _snapshot(page, state)
+        return {"text": snap.get("text_content", ""), **snap}
+    if action in ("logs", "errors", "console"):
+        return {
+            "console_logs": list(state.get("console_logs", [])),
+            "failed_requests": list(state.get("failed_requests", [])),
+        }
     if action == "click":
         h = _element(state, args.get("element"))
         if h is None:
@@ -180,7 +239,45 @@ class _Session:
                 except Exception:  # noqa: BLE001
                     pass
             return
-        state: dict[str, Any] = {"handles": []}
+
+        console_logs: list[dict[str, Any]] = []
+        failed_requests: list[dict[str, Any]] = []
+
+        def _on_console(msg: Any) -> None:
+            try:
+                console_logs.append({
+                    "type": str(getattr(msg, "type", "log")),
+                    "text": str(getattr(msg, "text", "")),
+                    "location": getattr(msg, "location", None),
+                })
+                if len(console_logs) > 100:
+                    console_logs.pop(0)
+            except Exception:
+                pass
+
+        def _on_req_failed(req: Any) -> None:
+            try:
+                failed_requests.append({
+                    "url": str(getattr(req, "url", "")),
+                    "method": str(getattr(req, "method", "GET")),
+                    "failure": str(getattr(req, "failure", None)),
+                })
+                if len(failed_requests) > 100:
+                    failed_requests.pop(0)
+            except Exception:
+                pass
+
+        try:
+            page.on("console", _on_console)
+            page.on("requestfailed", _on_req_failed)
+        except Exception:
+            pass
+
+        state: dict[str, Any] = {
+            "handles": [],
+            "console_logs": console_logs,
+            "failed_requests": failed_requests,
+        }
         self._ready.set()
         while True:
             action, args, reply = self._cmds.get()
@@ -227,17 +324,21 @@ _session = _Session()
 
 
 def browser(action: str, url: str = "", element: int = 0, text: str = "",
-            direction: str = "down", key: str = "Enter") -> dict[str, Any]:
+            direction: str = "down", key: str = "Enter", path: str = "",
+            **kwargs: Any) -> dict[str, Any]:
     """Drive a real web browser — ONE tool, action-dispatch.
 
-      - ``open``     — load a URL (``url``); returns the page's elements
-      - ``snapshot`` — re-list the current page's interactive elements
-      - ``click``    — click element ``element`` (index from a snapshot)
-      - ``type``     — type ``text`` into element ``element``
-      - ``scroll``   — scroll the page (``direction`` up / down)
-      - ``back``     — go back one page
-      - ``press``    — press ``key`` (Enter, Tab, …)
-      - ``close``    — close the browser
+      - ``open``       — load a URL (``url``); returns the page's elements
+      - ``snapshot``   — re-list the current page's interactive elements and rendered text
+      - ``screenshot`` — capture screenshot of page to PNG and return path + base64 image data
+      - ``content``    — extract visible page text and headings
+      - ``errors``     — inspect console errors and failed network requests
+      - ``click``      — click element ``element`` (index from a snapshot)
+      - ``type``       — type ``text`` into element ``element``
+      - ``scroll``     — scroll the page (``direction`` up / down)
+      - ``back``       — go back one page
+      - ``press``      — press ``key`` (Enter, Tab, …)
+      - ``close``      — close the browser
 
     Every action returns the page's interactive elements, each with an
     ``index`` — click / type by that index. Workflow: open a page, read
@@ -255,10 +356,13 @@ def browser(action: str, url: str = "", element: int = 0, text: str = "",
     if is_interrupted():
         return {"ok": False, "interrupted": True,
                 "error": "browser action interrupted by user"}
-    return _session.call(act, {
+    dispatch_args = {
         "url": url, "element": element, "text": text,
-        "direction": direction, "key": key,
-    })
+        "direction": direction, "key": key, "path": path,
+    }
+    dispatch_args.update(kwargs)
+    return _session.call(act, dispatch_args)
+
 
 
 # ── Agent-tool wrapper (migrated from main.py::_register_builtins) ──
@@ -270,15 +374,14 @@ def browser(action: str, url: str = "", element: int = 0, text: str = "",
                summary="drive a real web browser")
 def _t_browser(action: str, url: str = "", element: int = 0,
                text: str = "", direction: str = "down",
-               key: str = "Enter") -> dict:
+               key: str = "Enter", path: str = "", **kwargs: Any) -> dict:
     """Drive the agent's OWN automation browser (a separate chromium,
     NOT the user's Safari/Chrome) — only for when YOU must read or
     interact with page content (scrape, fill a form, click through a
     flow). "Open <site>" / "open <site> in <browser>" for the USER is
     NEVER this tool — that's one open_on_host call (app="Safari" etc.),
     which uses their real browser. Actions: open / snapshot / click /
-    type / scroll / back / press / close. Open a page → read its
-    returned elements → click/type by index. See
-    ``describe_tool("browser")`` for the full action map + args."""
+    type / scroll / back / press / close / screenshot / content / errors.
+    See ``describe_tool("browser")`` for the full action map + args."""
     return browser(action=action, url=url, element=element,
-                    text=text, direction=direction, key=key)
+                   text=text, direction=direction, key=key, path=path, **kwargs)

@@ -28,13 +28,12 @@ while [ -L "$SELF" ]; do
   [[ "$SELF" != /* ]] && SELF="$DIR/$SELF"
 done
 REPO_ROOT="$(cd "$(dirname "$SELF")" && pwd)"
-VENV_PY="${HOME}/.jaeger/venv/bin/python"
-if [ ! -x "$VENV_PY" ]; then
-  VENV_PY="$REPO_ROOT/.venv/bin/python"
-fi
+# The environment lives outside the checkout (AGENTS.md §1), wherever
+# install.sh put it: $JAEGER_VENV, else ~/.jaeger/venv.
+VENV_PY="${JAEGER_VENV:-${HOME}/.jaeger/venv}/bin/python"
 
 if [ ! -x "$VENV_PY" ]; then
-  echo "[jaeger] Python environment not found at ~/.jaeger/venv or $REPO_ROOT/.venv — run ./install.sh first" >&2
+  echo "[jaeger] Python environment not found at ${JAEGER_VENV:-~/.jaeger/venv} — run ./install.sh first" >&2
   exit 1
 fi
 

@@ -14,6 +14,7 @@
 #   dev/scripts/run_tests.sh --external-eval # external benchmark evaluation harness
 #   dev/scripts/run_tests.sh --soak          # soak & leak verification
 #   dev/scripts/run_tests.sh --full          # full suite across all tiers
+#   dev/scripts/run_tests.sh --package NAME  # one package suite (agent|os|kokoro|whisper)
 #   dev/scripts/run_tests.sh -- <args>       # everything after -- passes to pytest
 #
 # Why this exists:
@@ -87,6 +88,8 @@ done < <(env)
 MARKER_EXPR='not slow and not integration and not model and not ui and not subprocess'
 EXPLICIT=0
 RUN_PACKAGES=1
+RUN_ROOT=1
+PACKAGE_ONLY=""
 TIER_NAME="unit"
 EXTRA_ARGS=()
 
@@ -211,6 +214,17 @@ while [ $# -gt 0 ]; do
             RUN_PACKAGES=0
             TIER_NAME="model"
             ;;
+        --package)
+            # One standalone package suite, from its own rootdir, with the
+            # same isolation as every other tier. CI calls this per package
+            # so CI and local runs share one definition of each suite.
+            shift
+            PACKAGE_ONLY="${1:-}"
+            RUN_ROOT=0
+            RUN_PACKAGES=1
+            EXPLICIT=1
+            TIER_NAME="package:${PACKAGE_ONLY}"
+            ;;
         --)
             shift
             EXTRA_ARGS+=("$@")
@@ -229,12 +243,45 @@ done
 
 # ── pytest invocation ──────────────────────────────────────────────
 
-PYTEST="${HOME}/.jaeger/venv/bin/pytest"
-if [ ! -x "$PYTEST" ]; then
-    PYTEST=".venv/bin/pytest"
+# Live acceptance is deliberately not part of unit or broad offline runs.  It
+# imports browser dependencies and drives real listeners; collecting it by
+# accident used to make a plain unit run inspect the operator's live stores.
+if [ "$TIER_NAME" != "acceptance" ]; then
+    EXTRA_ARGS=(--ignore=dev/tests/acceptance ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
+    # Isolation must precede collection, including the standalone package
+    # suites. Inherited overrides outrank their per-test JAEGER_HOME fixtures.
+    unset JAEGER_STATE_DIR JAEGER_INSTANCE_DIR JAEGER_ACCEPTANCE
+    TEST_STATE_ROOT="$(mktemp -d /tmp/jaeger-test-run.XXXXXXXX)"
+    export JAEGER_HOME="$TEST_STATE_ROOT"
+    export HERMES_HOME="$TEST_STATE_ROOT/hermes"
+    export HERMES_WEBUI_STATE_DIR="$TEST_STATE_ROOT/webui"
+    export HERMES_WEBUI_DEFAULT_WORKSPACE="$TEST_STATE_ROOT/workspace"
+else
+    if [ -z "${JAEGER_STATE_DIR:-}" ]; then
+        printf '%s\n' \
+            '[run_tests] --acceptance requires an explicit isolated JAEGER_STATE_DIR' >&2
+        exit 2
+    fi
+    case "$JAEGER_STATE_DIR" in
+        "$REPO"|"$REPO"/*|"$HOME/.jaeger"|"$HOME/.jaeger"/*)
+            printf '%s\n' \
+                '[run_tests] refusing acceptance state inside the repository or operator ~/.jaeger' >&2
+            exit 2
+            ;;
+    esac
+    export JAEGER_ACCEPTANCE="1"
 fi
+
+# The development environment lives outside the checkout (AGENTS.md §1):
+# $JAEGER_VENV, else ~/.jaeger/venv, else whatever pytest is on PATH (CI's
+# setup-python environment). Never an in-repository .venv.
+PYTEST="${JAEGER_VENV:-${HOME}/.jaeger/venv}/bin/pytest"
 if [ ! -x "$PYTEST" ]; then
-    PYTEST="pytest"
+    PYTEST="$(command -v pytest || true)"
+fi
+if [ -z "$PYTEST" ]; then
+    echo "[run_tests] no pytest: set JAEGER_VENV or install pytest on PATH" >&2
+    exit 2
 fi
 
 # pytest-xdist parallel workers if installed — falls back to serial.
@@ -271,22 +318,42 @@ printf '[run_tests] %s\n' "${CMD[*]}" >&2
 #
 # Separate processes also mean a packages failure is visible. Before this, only
 # dev/tests ran by default and one packages test had been failing unnoticed.
+# Each entry is a package root; its own pyproject testpaths select the tests,
+# exactly as ``cd <package> && pytest`` would.
 PACKAGE_SUITES=(
-    "packages/jaeger-agent/tests"
-    "packages/jaeger-os/dev/tests"
+    "packages/jaeger-agent"
+    "packages/jaeger-os"
+    "packages/jaeger-kokoro-tts"
+    "packages/jaeger-whisper-stt"
 )
+if [ -n "$PACKAGE_ONLY" ]; then
+    case "$PACKAGE_ONLY" in
+        agent|os|kokoro-tts|whisper-stt) PACKAGE_SUITES=("packages/jaeger-${PACKAGE_ONLY}") ;;
+        kokoro) PACKAGE_SUITES=("packages/jaeger-kokoro-tts") ;;
+        whisper) PACKAGE_SUITES=("packages/jaeger-whisper-stt") ;;
+        *) echo "[run_tests] unknown package '${PACKAGE_ONLY}' (agent|os|kokoro|whisper)" >&2; exit 2 ;;
+    esac
+fi
 
 # `|| STATUS=$?` not a bare call: `set -e` is on, so an unguarded non-zero
 # exit here would end the script before the package suites ever ran — which is
 # exactly what happened, silently, the first time.
 STATUS=0
-"${CMD[@]}" || STATUS=$?
+if [ "$RUN_ROOT" -eq 1 ]; then
+    "${CMD[@]}" || STATUS=$?
+fi
 
 if [ "$RUN_PACKAGES" -eq 1 ]; then
     for suite in "${PACKAGE_SUITES[@]}"; do
         [ -d "$suite" ] || continue
         printf '[run_tests] %s\n' "$suite" >&2
-        "$PYTEST" -q ${XDIST_ARGS[@]+"${XDIST_ARGS[@]}"} "$suite" || STATUS=$?
+        # Extra pytest arguments apply to a package suite only when it was
+        # selected explicitly (--package); otherwise they target dev/tests.
+        PACKAGE_ARGS=()
+        if [ -n "$PACKAGE_ONLY" ]; then
+            PACKAGE_ARGS=(${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"})
+        fi
+        (cd "$suite" && "$PYTEST" -q ${XDIST_ARGS[@]+"${XDIST_ARGS[@]}"} ${PACKAGE_ARGS[@]+"${PACKAGE_ARGS[@]}"}) || STATUS=$?
     done
 fi
 

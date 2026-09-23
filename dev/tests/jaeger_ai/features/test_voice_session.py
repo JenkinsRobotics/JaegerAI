@@ -13,7 +13,7 @@ import pytest
 
 from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable, TurnResult
 from jaeger_ai.features.voice.listeners import TypedListener
-from jaeger_ai.features.voice.session import PrintSpeaker, VoiceSession
+from jaeger_ai.features.voice.session import PrintSpeaker, VoiceSession, VoiceTurn
 
 
 class _Gateway:
@@ -64,7 +64,28 @@ def test_a_spoken_phrase_is_a_gateway_turn_on_a_voice_session():
     assert gateway.turns == [("voice-t", "What is my text audit token?")]
     assert speaker.said == ["ORION-4812"]
     assert turn.spoken and turn.result.model == "ollama:test"
-    assert set(turn.latencies_ms()) >= {"entity_turn", "speech_end_to_first_audio"}
+    assert set(turn.latencies_ms()) >= {"entity_turn", "speech_end_to_tts_call", "tts_call"}
+    assert "speech_end_to_first_audio" not in turn.latencies_ms()
+    assert "tts_playback" not in turn.latencies_ms()
+
+
+def test_audio_latencies_require_observed_playback_not_speak_invocation():
+    turn = VoiceTurn("hello", None, spoken=True, timing={
+        "speech_end": 10, "tts_start": 11, "first_audio": 13,
+        "playback_end": 15, "tts_end": 16,
+    })
+    assert turn.latencies_ms()["speech_end_to_first_audio"] == 3000
+    assert turn.latencies_ms()["tts_playback"] == 2000
+    assert turn.latencies_ms()["tts_call"] == 5000
+
+
+def test_text_only_speaker_cannot_claim_audio_latency():
+    session = VoiceSession(TypedListener(["hi"]), PrintSpeaker(lambda _: None), gateway=_Gateway())
+    session.open()
+    turn = session.step()
+    assert not turn.spoken
+    assert "speech_end_to_first_audio" not in turn.latencies_ms()
+    assert "tts_playback" not in turn.latencies_ms()
 
 
 def test_no_speech_output_degrades_to_printed_text():
@@ -122,6 +143,7 @@ def test_speech_during_playback_interrupts_a_speaker_that_can_stop():
     assert speaker.stopped == 1
 
 
+@pytest.mark.integration
 def test_gateway_client_round_trip_against_the_real_gateway(tmp_path, monkeypatch):
     """Client ↔ server contract over a socket; only the Entity is scripted."""
     from aiohttp import web

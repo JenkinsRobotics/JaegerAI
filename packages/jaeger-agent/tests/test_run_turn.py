@@ -414,6 +414,37 @@ def test_interrupt_set_before_loop_halts_immediately():
     assert agent.interrupted is False
 
 
+def test_host_cancel_signal_set_before_turn_survives_the_per_turn_reset():
+    """A host-owned cancel signal (a request cancelled before its agent
+    started) is NOT cleared by ``run_turn``'s reset, unlike the agent's own
+    stale interrupt above: the turn halts before any model call."""
+    import threading
+
+    adapter = _ScriptedAdapter([
+        {"role": "assistant", "content": "must not be produced"},
+    ])
+    agent = JaegerAgent(adapter=adapter)
+    signal = threading.Event()
+    signal.set()
+    agent.bind_cancel_signal(signal)
+
+    agent.run_turn("hello")
+
+    assert agent.last_halt_reason == "interrupted"
+    assert adapter.call_count == 0
+    assert signal.is_set(), "the loop must never clear a host-owned signal"
+
+
+def test_unset_host_cancel_signal_does_not_affect_the_turn():
+    import threading
+
+    adapter = _ScriptedAdapter([{"role": "assistant", "content": "answered"}])
+    agent = JaegerAgent(adapter=adapter)
+    agent.bind_cancel_signal(threading.Event())
+    assert agent.run_turn("hello") == "answered"
+    assert agent.last_halt_reason is None
+
+
 def test_interrupt_mid_loop_halts_after_current_call():
     """An interrupt fired between iterations is honoured at the top of
     the next iteration."""

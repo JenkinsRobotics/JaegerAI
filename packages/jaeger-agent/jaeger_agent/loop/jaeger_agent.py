@@ -315,6 +315,9 @@ class JaegerAgent:
         # ``last_turn_messages`` for the per-turn slice.
         self._turn_messages: list[Message] = []
         self._interrupt_event = threading.Event()
+        # Externally owned cancel signal (e.g. a host's per-request scope).
+        # Never cleared by this loop — see bind_cancel_signal.
+        self._cancel_signal: threading.Event | None = None
 
         # Loop-backstop counters. Reset at the start of every turn so a
         # spinning previous turn can't carry over and trip the new one.
@@ -511,6 +514,10 @@ class JaegerAgent:
         self._read_result_hashes.clear()
         self._read_result_cache.clear()
         self._interrupt_event.clear()
+        if self._cancel_signal is not None and self._cancel_signal.is_set():
+            # Cancelled before this turn started: the per-turn reset above
+            # must not swallow a signal the host owns.
+            self._interrupt_event.set()
         self._turn_messages = []
         self._post_tool_nudge_used = False
         self._nudge_pending = False
@@ -989,6 +996,18 @@ class JaegerAgent:
             self.callbacks.on_thinking(
                 f"[mid-turn steer injected: {text[:80]}]"
             )
+
+    def bind_cancel_signal(self, signal: threading.Event | None) -> None:
+        """Honour a host-owned cancellation signal for this agent's turns.
+
+        Unlike the agent's own interrupt event, which ``run_turn`` resets at
+        the top of every turn so a stale barge-in cannot kill the next one,
+        this signal is never cleared here: a host that cancels a request
+        before (or while) its turn starts still gets an interrupted turn.
+        The host should also call :meth:`interrupt` when it cancels, so an
+        in-flight provider call is woken immediately.
+        """
+        self._cancel_signal = signal
 
     def reset_interrupt(self) -> None:
         """Clear the interrupt event manually. ``run_turn`` does this on

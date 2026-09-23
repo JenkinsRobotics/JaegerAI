@@ -57,6 +57,68 @@ def input_fingerprint(text: str, *, extra: dict[str, Any] | None = None) -> str:
     return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+#: Client-supplied turn fields that change what an admitted request executes.
+#: A retry must carry the same values to replay; different values under the
+#: same request_id are a conflict, never a silent re-selection.
+EXECUTION_INPUT_KEYS = (
+    "model", "provider", "attachment_ids", "workspace", "options",
+    "allowed_tools", "display_text", "is_subordinate",
+)
+#: Version 1 digests covered text only (pre-2026-09-22 receipts). Version 2
+#: covers text plus every explicit ``EXECUTION_INPUT_KEYS`` value.
+REQUEST_FINGERPRINT_VERSION = 2
+
+
+def request_fingerprint(text: str, requested: dict[str, Any] | None = None) -> str:
+    """Versioned digest of everything the client asked this request to run."""
+    return input_fingerprint(
+        text, extra={"_fingerprint": REQUEST_FINGERPRINT_VERSION, "request": requested or {}},
+    )
+
+
+def _normalize_requested(requested: dict[str, Any] | None) -> dict[str, Any]:
+    """Keep only explicit execution choices, in canonical types.
+
+    Absent and blank values are omitted so ``{"model": ""}`` and ``{}``
+    are the same request (both mean "use the session default").
+    """
+    out: dict[str, Any] = {}
+    for key in EXECUTION_INPUT_KEYS:
+        value = (requested or {}).get(key)
+        if value is None:
+            continue
+        if key == "attachment_ids":
+            if not isinstance(value, (list, tuple)) or not all(isinstance(v, str) for v in value):
+                raise ValueError("attachment_ids must be a list of strings")
+            out[key] = [v for v in value]
+        elif key == "allowed_tools":
+            # A host tool grant. [] is meaningful — no tools at all — and is
+            # never widened to "unrestricted" (absent).
+            if not isinstance(value, (list, tuple)) or not all(
+                    isinstance(v, str) and v.strip() for v in value):
+                raise ValueError("allowed_tools must be a list of nonempty tool names")
+            out[key] = sorted({v.strip() for v in value})
+        elif key == "display_text":
+            # Visible user text. Empty is distinct from omitted: omitted
+            # means persist the execution prompt; empty means persist "".
+            out[key] = str(value)
+        elif key == "is_subordinate":
+            # False/omitted are the same request (primary turn). True is
+            # an explicit subordinate grant and must replay identically.
+            if value in (True, "true", "1", 1):
+                out[key] = True
+        elif key == "options":
+            if not isinstance(value, dict):
+                raise ValueError("options must be an object")
+            if value:
+                out[key] = value
+        else:
+            text = str(value).strip()
+            if text:
+                out[key] = text
+    return out
+
+
 def pid_is_alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -248,6 +310,18 @@ class GatewaySessionStore:
                     ON attachments(session_id, created_at);
             """)
             current = 5
+        if current < 6:
+            # Admission snapshot (R01): the resolved model/provider/attachments
+            # an admitted request executes with, frozen at admission, and the
+            # digest schema its identity was computed under. Existing rows
+            # stay digest_version 1 with an empty snapshot; they replay by
+            # their original text-only digest and are never reinterpreted.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(client_requests)")}
+            if "execution_json" not in columns:
+                conn.execute("ALTER TABLE client_requests ADD COLUMN execution_json TEXT NOT NULL DEFAULT '{}'")
+            if "digest_version" not in columns:
+                conn.execute("ALTER TABLE client_requests ADD COLUMN digest_version INTEGER NOT NULL DEFAULT 1")
+            current = 6
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -517,6 +591,8 @@ class GatewaySessionStore:
             "owner_pid": row["owner_pid"],
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
+            "execution": _row_meta(row["execution_json"]) if "execution_json" in row.keys() else {},
+            "digest_version": row["digest_version"] if "digest_version" in row.keys() else 1,
         }
 
     def list_requests(self, *, status: str | None = None) -> list[dict[str, Any]]:
@@ -552,12 +628,32 @@ class GatewaySessionStore:
         text: str,
         *,
         request_id: str | None = None,
-        extra: dict[str, Any] | None = None,
+        requested: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Atomically accept a client request. Identical retries replay.
+        """Atomically accept a client request and freeze what it executes.
+
+        ``requested`` carries the client's explicit execution choices
+        (``EXECUTION_INPUT_KEYS``). They are part of the request identity:
+        an identical retry replays the original receipt and changes nothing;
+        the same request_id with a different text *or* different choices is
+        a :class:`RequestConflict`.
+
+        On acceptance the *resolved* execution input — explicit choices, else
+        the session's current defaults, plus the attachment revisions present
+        right now — is persisted with the request in the same transaction.
+        Execution reads that snapshot, so a later session edit or upload can
+        never alter a request that was already admitted. An explicit model
+        choice also becomes the session default for later turns (existing
+        continuity contract), but only when the request is accepted, never on
+        replay.
+
+        Pre-upgrade receipts (``digest_version`` 1, text-only digest) replay
+        by their original digest with their original (empty) snapshot; they
+        are never recomputed under the new schema or executed again.
 
         Returns a dict with ``replayed`` True when an existing execution is
-        returned. Raises RequestConflict / RequestBusy on illegal reuse.
+        returned. Raises RequestConflict / RequestBusy on illegal reuse and
+        ValueError on invalid input (including unknown attachment ids).
         """
         if not str(text or "").strip():
             raise ValueError("Missing turn text")
@@ -565,7 +661,8 @@ class GatewaySessionStore:
         rid = str(request_id or uuid.uuid4().hex)
         if not rid or len(rid) > REQUEST_ID_MAX:
             raise ValueError("Invalid request_id")
-        digest = input_fingerprint(text, extra=extra)
+        choices = _normalize_requested(requested)
+        digest = request_fingerprint(text, choices)
         now = time.time()
         pid = os.getpid()
         with self._immediate() as conn:
@@ -581,7 +678,11 @@ class GatewaySessionStore:
                 "SELECT * FROM client_requests WHERE request_id=?", (rid,)
             ).fetchone()
             if existing:
-                if existing["digest"] != digest:
+                if existing["digest_version"] == 1:
+                    same = existing["digest"] == input_fingerprint(text)
+                else:
+                    same = existing["digest"] == digest
+                if not same:
                     raise RequestConflict(
                         "Request identity was already used for different input"
                     )
@@ -590,7 +691,8 @@ class GatewaySessionStore:
                 payload["accepted"] = False
                 return payload
             session = conn.execute(
-                "SELECT status FROM sessions WHERE session_id=?", (session_id,)
+                "SELECT status, workspace, metadata_json FROM sessions WHERE session_id=?",
+                (session_id,),
             ).fetchone()
             status = session["status"] if session else "idle"
             if status in {"running", "execution_unknown", "cancelling"}:
@@ -599,26 +701,42 @@ class GatewaySessionStore:
                     if status == "execution_unknown"
                     else "Turn already in progress"
                 )
+            meta = _row_meta(session["metadata_json"] if session else "{}")
+            execution = self._resolve_execution(conn, session_id, choices, meta,
+                                                session["workspace"] if session else "")
+            if "model" in choices:
+                meta["model"] = choices["model"]
+                if choices.get("provider"):
+                    meta["provider"] = choices["provider"]
+                else:
+                    # A new model without a provider must not inherit the
+                    # previous model's provider (it was paired with that model).
+                    meta.pop("provider", None)
+            elif choices.get("provider"):
+                meta["provider"] = choices["provider"]
             turn_id = uuid.uuid4().hex
             conn.execute(
                 """
                 INSERT INTO client_requests (
                     request_id, session_id, digest, turn_id, native_run_id, native_session,
-                    status, input_text, result_json, owner_pid, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, NULL, NULL, 'admitted', ?, '{}', ?, ?, ?)
+                    status, input_text, result_json, owner_pid, created_at, updated_at,
+                    execution_json, digest_version
+                ) VALUES (?, ?, ?, ?, NULL, NULL, 'admitted', ?, '{}', ?, ?, ?, ?, ?)
                 """,
-                (rid, session_id, digest, turn_id, text, pid, now, now),
+                (rid, session_id, digest, turn_id, text, pid, now, now,
+                 json.dumps(execution, sort_keys=True), REQUEST_FINGERPRINT_VERSION),
             )
-            msg_id = self.append_message(session_id, "user", text, timestamp=now, conn=conn)
+            visible = choices["display_text"] if "display_text" in choices else text
+            msg_id = self.append_message(session_id, "user", visible, timestamp=now, conn=conn)
             conn.execute(
-                "UPDATE sessions SET status='running', updated_at=? WHERE session_id=?",
-                (now, session_id),
+                "UPDATE sessions SET status='running', metadata_json=?, updated_at=? WHERE session_id=?",
+                (json.dumps(meta), now, session_id),
             )
             event = self._insert_event(
                 conn,
                 session_id,
                 "turn.start",
-                {"turn_id": turn_id, "request_id": rid, "message_id": msg_id, "text": text},
+                {"turn_id": turn_id, "request_id": rid, "message_id": msg_id, "text": visible},
                 now,
             )
             return {
@@ -634,11 +752,58 @@ class GatewaySessionStore:
                 "owner_pid": pid,
                 "created_at": now,
                 "updated_at": now,
+                "execution": execution,
+                "digest_version": REQUEST_FINGERPRINT_VERSION,
                 "message_id": msg_id,
                 "event": event,
                 "replayed": False,
                 "accepted": True,
             }
+
+    @staticmethod
+    def _resolve_execution(
+        conn: sqlite3.Connection,
+        session_id: str,
+        choices: dict[str, Any],
+        meta: dict[str, Any],
+        session_workspace: str,
+    ) -> dict[str, Any]:
+        """Resolve explicit choices against session defaults, inside the
+        admission transaction, into the immutable execution snapshot."""
+        if "model" in choices:
+            model = choices["model"]
+            provider = choices.get("provider")
+        else:
+            model = meta.get("model")
+            provider = choices.get("provider") or meta.get("provider")
+        rows = conn.execute(
+            "SELECT attachment_id, sha256, size_bytes FROM attachments "
+            "WHERE session_id=? ORDER BY created_at",
+            (session_id,),
+        ).fetchall()
+        available = {r["attachment_id"]: r for r in rows}
+        wanted = choices.get("attachment_ids")
+        if wanted is None:
+            selected = [r["attachment_id"] for r in rows]
+        else:
+            unknown = [a for a in wanted if a not in available]
+            if unknown:
+                raise ValueError(f"Unknown attachment id(s): {', '.join(unknown)}")
+            selected = list(wanted)
+        return {
+            "model": model or None,
+            "provider": provider or None,
+            "attachments": [
+                {"attachment_id": a, "sha256": available[a]["sha256"],
+                 "size_bytes": available[a]["size_bytes"]}
+                for a in selected
+            ],
+            "workspace": choices.get("workspace") or session_workspace or "",
+            "options": choices.get("options") or {},
+            "allowed_tools": choices.get("allowed_tools"),
+            "display_text": choices["display_text"] if "display_text" in choices else None,
+            "is_subordinate": bool(choices.get("is_subordinate")),
+        }
 
     def bind_native(
         self,

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "scope": "jaeger_ai/features/webui/api/routes.py named HTTP dispatchers",
+  "evidence": "Python AST only",
+  "route_count": 256,
+  "method_counts": {
+    "DELETE": 3,
+    "GET": 103,
+    "PATCH": 2,
+    "POST": 147,
+    "PUT": 1
+  },
+  "route_fingerprint_sha256": "292e0124f0acbd415e365814398ede467312146d175ed4d08df248f9dea5b7e8",
+  "required_routes": [
+    ["GET", "reference", "/health", "handle_get"],
+    ["GET", "reference", "/api/auth/status", "handle_get"],
+    ["GET", "reference", "/api/models", "handle_get"],
+    ["GET", "reference", "/api/profiles", "handle_get"],
+    ["GET", "reference", "/api/sessions", "handle_get"],
+    ["POST", "reference", "/api/auth/login", "handle_post"],
+    ["POST", "reference", "/api/chat/start", "handle_post"],
+    ["POST", "reference", "/api/upload", "handle_post"],
+    ["DELETE", "prefix", "/api/mcp/servers/", "handle_delete"]
+  ],
+  "unverified": [
+    "delegated and computed routes",
+    "authentication outcomes",
+    "request and response schemas",
+    "status codes and headers",
+    "stream ordering and replay",
+    "client consumers"
+  ]
+}
