@@ -50,11 +50,14 @@ test('safeRenderer: blocks a javascript: href but keeps a safe one, blocks any n
 // path is verified without pulling in a browser or jsdom dependency.
 function fakeDocument() {
   function makeElement(tag) {
-    return {
-      tagName: tag, className: '', textContent: '', children: [],
+    const el = {
+      tagName: tag, className: '', children: [], _text: '',
+      get textContent() { return this._text + this.children.map(child => child.textContent).join(''); },
+      set textContent(value) { this._text = String(value); this.children = []; },
       append(...nodes) { this.children.push(...nodes); },
       replaceChildren() { this.children = []; },
     };
+    return el;
   }
   return { createElement: makeElement };
 }

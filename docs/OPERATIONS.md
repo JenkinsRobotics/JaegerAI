@@ -6,16 +6,15 @@ certify the current installed build.
 
 ## Current release qualification
 
-The [master personal-release plan](architecture/GROK_PERSONAL_RELEASE_PROMPT.md)
-defines the September 28 companion-assistant RC scope and required evidence.
-It is **not yet qualified**. Do not infer live voice, remote phone access or IDE
-worker automation from available source files. Final handoff must identify the
-external `.app` and VSIX artifacts, exact startup/configuration, enabled features,
-remaining limitations and activation/rollback steps. No live installation was
-changed by the planning/review passes. The Swift build script now defaults to
-`~/.jaeger/apps/swift-build` (override `JAEGER_SWIFT_BUILD`) and supports read-only
-`--print-build-dir`. CLI launchers pass the checkout via `JAEGER_REPO`. External
-path tests pass; actual `.app` build/GUI launch is still an RC qualification task.
+The current release scope and remaining work are in
+[CONTINUE_FROM_HERE.md](CONTINUE_FROM_HERE.md). It is **not yet qualified**.
+Do not infer live-provider conversation, live voice, off-LAN phone access, or
+IDE-worker steering from source files or scripted tests. Final handoff must
+identify the external `.app` and VSIX artifacts, exact startup/configuration,
+enabled features, remaining limitations, and activation/rollback steps. No live
+installation is changed by documentation work. The Swift build script defaults
+to `~/.jaeger/apps/swift-build` (override `JAEGER_SWIFT_BUILD`) and supports
+read-only `--print-build-dir`; actual GUI launch remains a release task.
 
 ## Where state lives
 
@@ -120,8 +119,10 @@ jaeger onboarding status --json            # first-boot state
 
 ## Not yet qualified
 
-- The native app talks to both the Gateway (`:8810`) and `jaeger bridge`, and
-  each can run the assistant. Converging them is planned work.
+- The native app has two client transports: direct Gateway REST/SSE and the
+  NDJSON bridge. Product bridge launches default to Gateway execution; local
+  execution is an explicit diagnostic override. A complete installed-app journey
+  is still unqualified.
 - A full install that resolves every dependency from PyPI has not been
   qualified on a clean machine.
 - Swift `DispatcherLiveTests` drive `launchctl` against real services and are

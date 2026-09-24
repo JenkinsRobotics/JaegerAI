@@ -1,3 +1,6 @@
+> **Classification:** CURRENT AUTHORITATIVE.
+> **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../CONTINUE_FROM_HERE.md)
+
 # JaegerAI Formal State Ownership Map
 
 **Doctrine:** One Fact = One Authoritative Owner.  

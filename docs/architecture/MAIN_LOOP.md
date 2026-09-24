@@ -1,3 +1,6 @@
+> **Classification:** CURRENT AUTHORITATIVE.
+> **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../CONTINUE_FROM_HERE.md)
+
 # The main loop
 
 One path runs every Jaeger turn. Everything else plugs into it; nothing else executes a turn.

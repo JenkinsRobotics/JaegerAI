@@ -353,6 +353,8 @@ repo ultimately talks to).
 
 ## Development
 
+Current continuation state and remaining release work: [`docs/CONTINUE_FROM_HERE.md`](docs/CONTINUE_FROM_HERE.md).
+
 ```bash
 pytest dev/tests -m smoke          # ~30s sanity check
 pytest dev/tests                   # full suite (204 test files)

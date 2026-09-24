@@ -4,6 +4,8 @@ Jaeger is a persistent-agent platform. The LLM is a replaceable cognition
 provider. Please read [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md)
 before changing execution, authority, state, or clients.
 
+Current continuation state: [`docs/CONTINUE_FROM_HERE.md`](docs/CONTINUE_FROM_HERE.md).
+
 ## Branch policy
 
 - Work on `pinocchio` (or a topic branch based on it).

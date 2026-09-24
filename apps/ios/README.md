@@ -1,3 +1,10 @@
+> **Classification:** HISTORICAL / DONOR DOCUMENTATION.
+> This tree is an imported Hermes-branded iOS client. It currently targets
+> Hermes WebUI endpoints and branding, not the Jaeger Gateway, and is **not**
+> the qualified Jaeger phone/field client. Current continuation and adoption
+> work are defined in [`docs/CONTINUE_FROM_HERE.md`](../../docs/CONTINUE_FROM_HERE.md).
+> Do not treat the text below as current Jaeger product status.
+
 <div align="center">
 
 <img src="docs/assets/readme/hermex-icon.png" alt="Hermex app icon" width="96" />
