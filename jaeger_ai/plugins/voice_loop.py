@@ -323,8 +323,6 @@ def main() -> int:
             "no module is filling the 'tts' slot — install one "
             "(e.g. jaeger-kokoro-tts) or disable the voice loop"
         )
-    if reference_buffer is not None:
-        tts.reference_buffer = reference_buffer
     # 0.3.0: tell the TTS pipeline which audio backend BEFORE warm() —
     # warm() opens the PersistentKokoroPlayer against ``audio_backend``,
     # so setting it later would open the persistent stream against the

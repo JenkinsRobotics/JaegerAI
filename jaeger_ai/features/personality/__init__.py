@@ -22,11 +22,7 @@ exactly so existing personas port without conversion.
 
 Public surface::
 
-<<<<<<<< HEAD:jaeger_ai/features/personality/__init__.py
     from jaeger_ai.features.personality import (
-========
-    from jaeger_ai.features.personality import (
->>>>>>>> 5fa5e684 (Consolidate saved 0.12 multimodal changes for main integration):jaeger_ai/features/personality/characters/__init__.py
         Personality, HEXACO, SPECIAL, Expression, Domains,
         load_personality, save_personality, compose_block,
     )

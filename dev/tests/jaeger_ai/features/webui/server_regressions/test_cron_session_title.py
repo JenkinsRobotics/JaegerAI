@@ -85,7 +85,7 @@ def test_cron_session_uses_job_name_when_title_missing(fake_hermes_home):
         ("cron_cd65df6fc1a8_20260417_191049", None, "cron"),
     ])
 
-    sessions = models.get_cli_sessions()
+    sessions = models.get_cli_sessions(include_claude_code=False)
 
     assert len(sessions) == 1
     assert sessions[0]["title"] == "wiki-auto-ingest"
@@ -97,7 +97,7 @@ def test_cron_session_falls_back_when_jobs_json_missing(fake_hermes_home):
         ("cron_abc123_20260417_191049", None, "cron"),
     ])
 
-    sessions = models.get_cli_sessions()
+    sessions = models.get_cli_sessions(include_claude_code=False)
 
     assert sessions[0]["title"] == "Cron Session"
 
@@ -111,7 +111,7 @@ def test_cron_session_falls_back_when_job_id_not_in_jobs_json(fake_hermes_home):
         ("cron_orphan_20260417_191049", None, "cron"),
     ])
 
-    sessions = models.get_cli_sessions()
+    sessions = models.get_cli_sessions(include_claude_code=False)
 
     assert sessions[0]["title"] == "Cron Session"
 
@@ -122,7 +122,7 @@ def test_cli_projection_hides_session_ids_routes_cannot_address(fake_hermes_home
         ("valid-session", "Real conversation", "cli"),
     ])
 
-    sessions = models.get_cli_sessions()
+    sessions = models.get_cli_sessions(include_claude_code=False)
 
     assert [row["session_id"] for row in sessions] == ["valid-session"]
 
@@ -158,7 +158,7 @@ def test_archived_sidecars_do_not_consume_interactive_cli_window(
             encoding="utf-8",
         )
 
-    sessions = models.get_cli_sessions()
+    sessions = models.get_cli_sessions(include_claude_code=False)
 
     assert "live-older" in {row["session_id"] for row in sessions}
     assert not ({sid for sid, _title, _source in archived} & {
@@ -176,7 +176,7 @@ def test_explicit_title_is_preserved(fake_hermes_home):
         ("cron_cd65df6fc1a8_20260417_191049", "User-edited title", "cron"),
     ])
 
-    sessions = models.get_cli_sessions()
+    sessions = models.get_cli_sessions(include_claude_code=False)
 
     assert sessions[0]["title"] == "User-edited title"
 
@@ -203,6 +203,6 @@ def test_non_cron_sessions_unaffected(fake_hermes_home):
     conn.commit()
     conn.close()
 
-    sessions = models.get_cli_sessions()
+    sessions = models.get_cli_sessions(include_claude_code=False)
 
     assert sessions[0]["title"] == "Cli Session"

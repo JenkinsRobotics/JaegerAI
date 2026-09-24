@@ -55,6 +55,8 @@ os.environ.setdefault("JAEGER_NO_ATTACH", "1")
 # tests may still monkeypatch JAEGER_HOME to their own tmp_path; when their
 # patch unwinds it returns here, never to the operator's live instance.
 _TEST_STATE_HOME = Path(tempfile.mkdtemp(prefix="jaeger-tests-", dir="/tmp"))
+# An inherited higher-priority override must not bypass disposable test state.
+os.environ.pop("JAEGER_STATE_DIR", None)
 os.environ["JAEGER_HOME"] = str(_TEST_STATE_HOME)
 
 

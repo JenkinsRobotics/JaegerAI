@@ -70,7 +70,7 @@ jobs:
           python -m pip install --upgrade pip "setuptools>=83"
           case "${{ matrix.suite }}" in
             root) python scripts/install-packages.py packages/jaeger-os 'packages/jaeger-agent[multimodal-duplex]' packages/jaeger-kokoro-tts packages/jaeger-whisper-stt '.[test]' ;;
-            agent) python scripts/install-packages.py packages/jaeger-os packages/jaeger-agent; python -m pip install pytest ;;
+            agent) python scripts/install-packages.py packages/jaeger-os packages/jaeger-agent; python -m pip install pytest onnxruntime ;;
             os) python scripts/install-packages.py packages/jaeger-os; python -m pip install pytest ;;
             kokoro) python scripts/install-packages.py packages/jaeger-os packages/jaeger-kokoro-tts; python -m pip install pytest ;;
             whisper) python scripts/install-packages.py packages/jaeger-os packages/jaeger-whisper-stt; python -m pip install pytest ;;
@@ -100,7 +100,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build and test native app
         working-directory: jaeger_ai/interfaces/swift
-        run: swift test
+        run: swift test --scratch-path "$RUNNER_TEMP/jaeger-swift-build"
   release-artifacts:
     name: Build and inspect distributions
     runs-on: ubuntu-latest

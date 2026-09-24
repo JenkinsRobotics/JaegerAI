@@ -27,17 +27,8 @@ from typing import Any
 import msgspec
 import yaml
 
-<<<<<<<< HEAD:jaeger_ai/features/personality/character.py
 from jaeger_ai.features.personality.schema import (
     HEXACO, SPECIAL, Domains, Expression, Personality,
-========
-from jaeger_ai.features.personality.schema import (
-    HEXACO,
-    SPECIAL,
-    Domains,
-    Expression,
-    Personality,
->>>>>>>> 5fa5e684 (Consolidate saved 0.12 multimodal changes for main integration):jaeger_ai/features/personality/characters/character.py
 )
 
 CHARACTER_SCHEMA = "character/v1"
@@ -179,11 +170,7 @@ class Character:
         prompt), so this runs on edit, not per turn. Main agent only — a
         sub-agent gets no persona (its preamble is its whole identity).
         See dev/docs/reality/persona_compiler.md."""
-<<<<<<<< HEAD:jaeger_ai/features/personality/character.py
         from jaeger_ai.features.personality.compose import (
-========
-        from jaeger_ai.features.personality.compose import (
->>>>>>>> 5fa5e684 (Consolidate saved 0.12 multimodal changes for main integration):jaeger_ai/features/personality/characters/character.py
             PERSONA_BOUNDARY, disposition_clauses, domain_lens,
             expression_clauses,
         )
@@ -466,11 +453,7 @@ def active_character_signature(instance_root: Path) -> str:
     """id + sheet mtime + runtime-override mtime — changes when the
     character switches, when its sheet is edited, or when this instance
     adapts a trait, so instant-apply rebuilds the prompt for all three."""
-<<<<<<<< HEAD:jaeger_ai/features/personality/character.py
     from jaeger_ai.features.personality import persona_state
-========
-    from jaeger_ai.features.personality import persona_state
->>>>>>>> 5fa5e684 (Consolidate saved 0.12 multimodal changes for main integration):jaeger_ai/features/personality/characters/character.py
     cid = active_character_id(instance_root)
     try:
         mt = (characters_root() / cid / "character.yaml").stat().st_mtime
@@ -495,13 +478,8 @@ def active_character(instance_root: Path) -> Character | None:
     (``persona_state.yaml`` — what ``adjust_trait`` learned) are applied
     on top. The definition file itself is never written by the runtime,
     so the same character stays identical for every other instance
-<<<<<<<< HEAD:jaeger_ai/features/personality/character.py
     playing it. See :mod:`jaeger_ai.features.personality.persona_state`."""
     from jaeger_ai.features.personality import persona_state
-========
-    playing it. See :mod:`jaeger_ai.features.personality.persona_state`."""
-    from jaeger_ai.features.personality import persona_state
->>>>>>>> 5fa5e684 (Consolidate saved 0.12 multimodal changes for main integration):jaeger_ai/features/personality/characters/character.py
     for cid in (active_character_id(instance_root), DEFAULT_CHARACTER_ID):
         folder = characters_root() / cid
         if (folder / "character.yaml").exists():
