@@ -136,21 +136,9 @@ include = ["jaeger_agent*"]
 exclude = ["jaeger_agent*.__pycache__", "jaeger_agent*.__pycache__.*"]
 
 [tool.setuptools.package-data]
-# "**/*" and not an extension allowlist. setuptools auto-includes only
-# .py for a found package, and this package is 528 non-.py files:
-# module.yaml, the prompt .md files, thinking_runner.yaml, every node.json plus
-# its weights/stats lineage, and — the big one — every SKILL.md under skills/,
-# which IS the 107-recipe corpus.
-#
-# The 0.11 move made this load-bearing. While the agent lived inside
-# JaegerAI it rode that project's `jaeger_ai = ["**/*"]`; the moment it
-# became its own distribution, `["module.yaml"]` meant a real
-# (non-editable) install shipped the loop and ZERO skills. Editable
-# installs read straight from the source tree and hide it completely,
-# so this only ever breaks for the people who pip-install a release.
-#
-# An allowlist would also silently miss whatever the next skill adds —
-# these already include .xsd, .sty, .tex, .bst and .sh.
+# Runtime data must ship in non-editable installs. Keep explicit resource
+# patterns so bytecode, databases, logs and build residue cannot enter a wheel.
+# Installed-package asset tests guard the prompts, skills, nodes and manifests.
 jaeger_agent = [
     "skills/**/*.md", "skills/**/*.yaml", "skills/**/*.yml",
     "skills/**/*.json", "skills/**/*.xsd", "skills/**/*.sty",
@@ -158,7 +146,7 @@ jaeger_agent = [
     "skills/**/*.pdf", "skills/**/*.html", "skills/**/*.txt",
     "skills/**/*.js", "skills/**/*.ini", "skills/**/*.sh",
     "skills/**/LICENSE", "skills/**/Makefile",
-    "module.yaml", "prompts/**/*.md", "prompts/**/*.yaml",
+    "module.yaml", "prompts/**/*.md", "prompts/**/*.yaml", "background/*.yaml",
     "nodes/*/node.json", "nodes/*/weights/*.md", "nodes/*/stats/*.md",
     "assets/silero/*.onnx", "assets/silero/*.txt", "assets/silero/*.md",
 ]

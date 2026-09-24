@@ -17,9 +17,10 @@ in a routing score nobody reads until Friday.
 from __future__ import annotations
 
 import pathlib
+import jaeger_agent
 import pytest
 
-PACKAGE = pathlib.Path(__file__).parents[1] / "jaeger_agent"
+PACKAGE = pathlib.Path(jaeger_agent.__file__).resolve().parent
 NODES = (
     "audio-duplex-io",
     "llm-gemma",
