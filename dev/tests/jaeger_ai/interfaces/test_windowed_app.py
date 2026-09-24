@@ -40,6 +40,16 @@ from jaeger_ai.interfaces.pyside6.rich_tui.window import ChatWindow  # noqa: E40
 from jaeger_ai.interfaces.pyside6.tray.qt import QtTray  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _isolate_voice_resources(monkeypatch):
+    """Keep UI/bus tests independent of speakers and downloaded voice models."""
+    from jaeger_kokoro_tts.engine import KokoroTTS
+    from jaeger_os.nodes import runtime as node_runtime
+
+    monkeypatch.setattr(KokoroTTS, "warm", lambda self: {"ok": True})
+    monkeypatch.setattr(node_runtime, "ensure_audio_io_node", lambda **kwargs: None)
+
+
 @pytest.fixture(scope="module")
 def qapp():
     app = QApplication.instance() or QApplication([])
