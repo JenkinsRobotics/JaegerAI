@@ -81,7 +81,7 @@ openai>=1.0
 anthropic>=0.40
 
 # --- messaging bridges (Discord / Telegram / Slack Socket Mode) ---
-aiohttp>=3.9
+aiohttp>=3.14.3
 discord.py>=2.4
 python-telegram-bot>=21.0
 

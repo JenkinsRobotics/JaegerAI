@@ -156,5 +156,6 @@ cache_dir = "~/.cache/pytest"
 testpaths = ["tests"]
 
 [tool.ruff]
+cache-dir = "~/.cache/ruff/jaeger-agent"
 line-length = 100
 target-version = "py311"
