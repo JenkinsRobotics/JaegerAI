@@ -62,7 +62,9 @@ def main() -> None:
     }) + "\n")
     print(f"STAGE={stage}", flush=True)
     if not args.stage_only:
-        target = stage / "jaeger-ide-0.1.0.vsix"
+        # The version lives in package.json only; the file name follows it.
+        version = json.loads((stage / "package.json").read_text())["version"]
+        target = stage / f"jaeger-ide-{version}.vsix"
         env = {**os.environ, "npm_config_cache": str(output / "npm-cache")}
         subprocess.run([
             "npx", "--yes", "--package", "@vscode/vsce@3.6.2", "vsce", "package",
