@@ -276,16 +276,16 @@ Audit findings:
 | `docs/architecture/THREAT_MODEL.md` | CURRENT AUTHORITATIVE | Security model |
 | `docs/architecture/DONOR_PROVENANCE.md` | CURRENT REFERENCE | Donor attribution |
 | `docs/architecture/adr/` | CURRENT REFERENCE | Accepted decisions |
-| `docs/architecture/CURRENT_PRODUCT_AUDIT.md` | HISTORICAL | Dated 2026-09-23 evidence; superseded here |
-| `docs/architecture/MASTER_PROGRAM_STATUS.md` | HISTORICAL | Old architecture program and old baseline |
-| `docs/architecture/GROK_PERSONAL_RELEASE_PROMPT.md` | HISTORICAL | Old five-day plan and old branch evidence |
-| `docs/architecture/RELEASE_AGENT_PROMPT.md` | HISTORICAL | Old convergence prompt |
+| `docs/architecture/CURRENT_PRODUCT_AUDIT.md` | REMOVED FROM ACTIVE TREE | Dated 2026-09-23 evidence; preserved in Git history |
+| `docs/architecture/MASTER_PROGRAM_STATUS.md` | REMOVED FROM ACTIVE TREE | Old architecture program and old baseline; preserved in Git history |
+| `docs/architecture/GROK_PERSONAL_RELEASE_PROMPT.md` | REMOVED FROM ACTIVE TREE | Old five-day plan and old branch evidence; preserved in Git history |
+| `docs/architecture/RELEASE_AGENT_PROMPT.md` | REMOVED FROM ACTIVE TREE | Old convergence prompt; preserved in Git history |
 | `docs/architecture/IDE_FIRST_PRODUCT_DIRECTION.md` | HISTORICAL | Useful product requirements and old worker direction |
 | `docs/architecture/CAPABILITY_EQUIVALENCE_AUDIT.md` | HISTORICAL | Capability matrix and acceptance ideas |
 | `docs/architecture/CODEX_PARITY_BACKLOG.md` | BACKLOG / DEFERRED | Selective parity work only |
-| `docs/architecture/CONVERGENCE.md` | HISTORICAL | Dated convergence evidence |
-| `docs/architecture/RELEASE_AUDIT.md` | HISTORICAL | Old release audit |
-| `docs/architecture/UI_EXPLORATORY_AGENT_PROMPT.md` | HISTORICAL | Old UI exploration prompt |
+| `docs/architecture/CONVERGENCE.md` | REMOVED FROM ACTIVE TREE | Dated convergence evidence; preserved in Git history |
+| `docs/architecture/RELEASE_AUDIT.md` | REMOVED FROM ACTIVE TREE | Old release audit; preserved in Git history |
+| `docs/architecture/UI_EXPLORATORY_AGENT_PROMPT.md` | REMOVED FROM ACTIVE TREE | Old UI exploration prompt; preserved in Git history |
 | `docs/benchmarks/chronicler-trial.md` | HISTORICAL | Dated benchmark evidence |
 | `dev/docs/README.md` | CURRENT REFERENCE | Developer-note index |
 | `dev/docs/core/SELF_MODIFICATION_BOUNDARIES.md` | CURRENT REFERENCE | Safety boundaries |

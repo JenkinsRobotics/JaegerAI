@@ -96,7 +96,7 @@ PERSISTENT ENTITY RUNTIME   EntityRuntime (OWNER, resident=true)
 | Test tiers | **IMPLEMENTED** | [TEST_ARCHITECTURE.md](TEST_ARCHITECTURE.md) | |
 | Platform extension CLI | **IMPLEMENTED** | `jaeger capability validate`, `jaeger provider doctor`, `jaeger device inspect` | Validate/inspect public contracts; device registry is experimental |
 | Clean-machine install | **EXPERIMENTAL** | isolated `JAEGER_STATE_DIR` test | Not a wiped macOS VM |
-| Physical iPhone | **PLANNED** | checklist in MASTER_PROGRAM_STATUS | Software remote path exists |
+| Physical iPhone | **PLANNED** | P3 acceptance in [CONTINUE_FROM_HERE.md](../CONTINUE_FROM_HERE.md) | Software remote path exists |
 
 ---
 

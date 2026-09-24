@@ -1,14 +1,14 @@
 """Resolved application configuration snapshot.
 
-M1.1 (``docs/architecture/RELEASE_AGENT_PROMPT.md`` section 7): "Create
-immutable ``StatePaths`` values and a resolved application configuration
-snapshot using the existing serialized configuration as input."
+Historical M1.1 requirement: create immutable ``StatePaths`` values and a
+resolved application configuration snapshot using the existing serialized
+configuration as input.
 
 ``ResolvedRuntimeConfig`` here is deliberately NOT the same thing as
 :class:`jaeger_ai.core.instance.schemas.RuntimeConfig` — that existing name
 already means something else (per-format inference-engine selection:
-``gguf_engine`` / ``mlx_engine``, persisted inside ``Config.runtime``). See
-``docs/architecture/RELEASE_AUDIT.md`` finding A05. This module's
+``gguf_engine`` / ``mlx_engine``, persisted inside ``Config.runtime``). This
+separation was identified by the historical release-audit A05. This module's
 ``ResolvedRuntimeConfig`` is the *whole-application* snapshot: where state
 lives (:class:`~jaeger_ai.core.instance.instance.StatePaths`) plus a
 point-in-time, defensively-copied view of the loaded, validated

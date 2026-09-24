@@ -21,21 +21,25 @@ Operator instructions live in the root [README](../README.md) and
 | [architecture/THREAT_MODEL.md](architecture/THREAT_MODEL.md) | CURRENT AUTHORITATIVE | Trust domains and mitigations |
 | [architecture/DONOR_PROVENANCE.md](architecture/DONOR_PROVENANCE.md) | CURRENT REFERENCE | Donor sources, licenses, and decision records |
 | [architecture/adr/](architecture/adr/) | CURRENT REFERENCE | Accepted architectural decisions |
-| [architecture/CURRENT_PRODUCT_AUDIT.md](architecture/CURRENT_PRODUCT_AUDIT.md) | HISTORICAL | 2026-09-23 audit evidence |
-| [architecture/MASTER_PROGRAM_STATUS.md](architecture/MASTER_PROGRAM_STATUS.md) | HISTORICAL | Old architecture-completion program |
-| [architecture/GROK_PERSONAL_RELEASE_PROMPT.md](architecture/GROK_PERSONAL_RELEASE_PROMPT.md) | HISTORICAL | Old five-day release plan |
-| [architecture/RELEASE_AGENT_PROMPT.md](architecture/RELEASE_AGENT_PROMPT.md) | HISTORICAL | Old convergence prompt |
 | [architecture/IDE_FIRST_PRODUCT_DIRECTION.md](architecture/IDE_FIRST_PRODUCT_DIRECTION.md) | HISTORICAL | Old IDE product direction and worker requirements |
 | [architecture/CAPABILITY_EQUIVALENCE_AUDIT.md](architecture/CAPABILITY_EQUIVALENCE_AUDIT.md) | HISTORICAL | Old capability-equivalence audit |
 | [architecture/CODEX_PARITY_BACKLOG.md](architecture/CODEX_PARITY_BACKLOG.md) | BACKLOG / DEFERRED | Selective Codex parity ideas |
-| [architecture/CONVERGENCE.md](architecture/CONVERGENCE.md) | HISTORICAL | Dated convergence ledger |
-| [architecture/RELEASE_AUDIT.md](architecture/RELEASE_AUDIT.md) | HISTORICAL | Old release audit |
-| [architecture/UI_EXPLORATORY_AGENT_PROMPT.md](architecture/UI_EXPLORATORY_AGENT_PROMPT.md) | HISTORICAL | Old UI exploration prompt |
 | [benchmarks/chronicler-trial.md](benchmarks/chronicler-trial.md) | HISTORICAL | Dated benchmark evidence |
 
-Historical files remain as evidence only. They may reference `next/clean-app`,
-`917e1eb8`, dirty worktrees, or old acceptance dates; none of that describes
-the current checkout or authorizes skipping current source inspection.
+Historical files remain as evidence only. They may reference old dates, branches,
+HEADs, dirty worktrees, or acceptance schedules; none of that describes the current
+checkout or authorizes skipping current source inspection.
+
+The following stale execution/audit ledgers were removed from the active tree on
+2026-09-24; Git history preserves them:
+
+- `docs/architecture/CURRENT_PRODUCT_AUDIT.md`
+- `docs/architecture/MASTER_PROGRAM_STATUS.md`
+- `docs/architecture/GROK_PERSONAL_RELEASE_PROMPT.md`
+- `docs/architecture/RELEASE_AGENT_PROMPT.md`
+- `docs/architecture/CONVERGENCE.md`
+- `docs/architecture/RELEASE_AUDIT.md`
+- `docs/architecture/UI_EXPLORATORY_AGENT_PROMPT.md`
 
 Component docs stay with their code: [JaegerAgent](../packages/jaeger-agent/README.md),
 [JaegerOS](../packages/jaeger-os/README.md),
