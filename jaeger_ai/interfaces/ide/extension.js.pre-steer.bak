@@ -273,12 +273,6 @@ function activate(context) {
         if (message.type === 'cancelBackgroundTask' && typeof message.id === 'string') return controller.cancelBackgroundTask(message.id);
         if (message.type === 'cancel') return controller.cancel();
         if (message.type === 'approve' && typeof message.id === 'string' && typeof message.approved === 'boolean') return controller.approve(message.id, message.approved);
-        // Mid-turn steering: queue client-side while the agent is busy; the
-        // composer draft is restored if the queue refused the message.
-        if (message.type === 'steer' && typeof message.text === 'string') {
-          if (!controller.steer(message.text)) view?.webview.postMessage({ steerRejected: message.text });
-          return;
-        }
         if (message.type === 'attach') {
           const picked = await vscode.window.showOpenDialog({
             canSelectMany: true, openLabel: 'Attach to conversation',

@@ -1,8 +1,13 @@
 """Loopback runtime adapter for Jaeger's first-party WebUI.
 
 This process does not serve the browser application. The WebUI server owns port
-8790 and calls this service through ``runner-local``. The selected framework
-owns inference, tools, sessions and controls; this service translates events.
+8790 and calls this service through ``runner-local``.
+
+The Gateway (:8810) is the single store of record and the single event source.
+This service is an auth/transport shim: it owns OIDC/passkeys/remote-access and
+translates the browser's runner protocol onto the Gateway's session API. It
+keeps no session truth of its own — runs are Gateway turns, events are Gateway
+stream events, and the session list is the Gateway's list.
 """
 
 from __future__ import annotations
@@ -18,7 +23,9 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.error import HTTPError, URLError
+from urllib.parse import parse_qs, quote, unquote, urlparse
+from urllib.request import Request as _HttpRequest, build_opener
 
 from jaeger_ai.features.oidc import (
     OIDCAuthError,
@@ -60,6 +67,53 @@ _SCHEDULE_ACTION_ROUTE = re.compile(
 _AGENT_ACTIVATE_ROUTE = re.compile(
     r"^/(?:v1|api)/agents/([^/]+)/activate$"
 )
+
+
+def gateway_base_url() -> str:
+    """The Gateway is the single store of record; this is where it lives."""
+    return (
+        os.environ.get("JAEGER_GATEWAY_URL")
+        or "http://127.0.0.1:8810"
+    ).rstrip("/")
+
+
+def gateway_request(
+    method: str,
+    path: str,
+    *,
+    body: dict[str, Any] | None = None,
+    timeout: float = 8.0,
+) -> tuple[int, dict[str, Any]]:
+    """One JSON call to the Gateway. Returns ``(status, payload)``.
+
+    The shim never interprets session truth — it forwards and renders. A
+    Gateway error is surfaced with its status so the browser sees the same
+    answer the IDE would.
+    """
+    url = f"{gateway_base_url()}{path}"
+    data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+    req = _HttpRequest(url, data=data, method=method)
+    if body is not None:
+        req.add_header("Content-Type", "application/json")
+    req.add_header("Accept", "application/json")
+    try:
+        with build_opener().open(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8") or "{}"
+            try:
+                payload = json.loads(raw)
+            except json.JSONDecodeError:
+                payload = {"raw": raw}
+            return resp.status, payload if isinstance(payload, dict) else {"data": payload}
+    except HTTPError as exc:
+        try:
+            payload = json.loads(exc.read().decode("utf-8") or "{}")
+        except Exception:
+            payload = {}
+        return exc.code, payload if isinstance(payload, dict) else {"error": f"HTTP {exc.code}"}
+    except URLError as exc:
+        return 503, {"error": f"Gateway unreachable: {exc.reason}"}
+    except Exception as exc:  # noqa: BLE001
+        return 503, {"error": str(exc)}
 
 
 class ApprovalBroker:
@@ -313,7 +367,106 @@ class RunnerBroker:
                 return self.profiles.start(request)
             return self._start_jaeger(request)
 
+    def run_status(self, run_id: str) -> dict[str, Any]:
+        """Run status, Gateway-first.
+
+        A gateway-admitted run (the normal case since the shim) is not in the
+        local RunStore — its truth lives in the Gateway's request record. The
+        RunStore row is only consulted for legacy local runs (profile runs,
+        pre-shim restarts); a KeyError there falls through to the Gateway.
+        """
+        try:
+            return self.store.status(run_id)
+        except KeyError:
+            pass
+        # The Gateway knows the request; /v1/requests/{id} resolves it by
+        # request_id or turn_id without needing the session id up front.
+        http_status, payload = gateway_request(
+            "GET", f"/v1/requests/{quote(run_id, safe='')}",
+        )
+        if http_status >= 400 or not isinstance(payload, dict):
+            raise KeyError("run not found")
+        session_id = str(payload.get("session_id") or "")
+        result = payload.get("result") or {}
+        status = str(payload.get("status") or "running")
+        terminal = status in {"completed", "failed", "cancelled", "execution_unknown"}
+        return {
+            "run_id": run_id,
+            "session_id": session_id,
+            "status": status,
+            "terminal_state": status if terminal else None,
+            "last_event_id": None,
+            "active_controls": [] if terminal else ["cancel", "approval"],
+            "pending_approval_id": None,
+            "pending_clarify_id": None,
+            "profile": "jaeger",
+            "native": {},
+            "execution_unknown": status == "execution_unknown",
+            "gateway": payload,
+            "result": result,
+        }
+
+    def run_events(self, run_id: str, cursor: str | None) -> dict[str, Any]:
+        """The browser's event feed, proxied from the Gateway's durable replay.
+
+        One event schema: the Gateway's. The cursor is the Gateway's
+        event_id; the response shape matches the old RunStore.events_after
+        contract ({run_id, events, cursor, last_event_id}) so the browser's
+        poller is unchanged — only the source of truth moved.
+        """
+        try:
+            status = self.store.status(run_id)
+        except KeyError:
+            status = self.run_status(run_id)
+        session_id = str(status.get("session_id") or "")
+        if not session_id:
+            raise KeyError("run not found")
+        since = 0
+        text = str(cursor or "").strip()
+        if text:
+            try:
+                since = max(0, int(text.rsplit(":", 1)[-1]))
+            except ValueError:
+                since = 0
+        http_status, payload = gateway_request(
+            "GET",
+            f"/v1/sessions/{quote(session_id, safe='')}/events"
+            f"?since_event_id={since}",
+            timeout=4.0,
+        )
+        if http_status >= 400 or not isinstance(payload, dict):
+            raise KeyError("run not found")
+        rows = []
+        for evt in payload.get("events") or []:
+            if not isinstance(evt, dict):
+                continue
+            # Only this run's events: the session stream carries every turn.
+            data = evt.get("data") or {}
+            if str(data.get("request_id") or "") not in {"", run_id}:
+                continue
+            rows.append({
+                "event_id": str(evt.get("event_id") or ""),
+                "seq": int(evt.get("event_id") or 0),
+                "event": str(evt.get("event") or ""),
+                "payload": data,
+            })
+        next_cursor = str(rows[-1]["seq"]) if rows else str(since)
+        return {
+            "run_id": run_id,
+            "events": rows,
+            "cursor": next_cursor,
+            "last_event_id": rows[-1]["event_id"] if rows else None,
+        }
+
     def _start_jaeger(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Start a Jaeger turn by proxying to the Gateway.
+
+        The Gateway owns the session, the turn, the events and the approvals.
+        This shim creates nothing: it forwards the browser's message to
+        ``POST /v1/sessions/{id}/turns`` and returns the Gateway's admission
+        receipt. The run id IS the Gateway's request_id, so the browser's
+        event polling maps onto the Gateway's durable stream one-to-one.
+        """
         from jaeger_ai.core.frameworks.run_input import inline_webui_text_attachments
 
         session_id = str(request.get("session_id") or "").strip()
@@ -325,127 +478,40 @@ class RunnerBroker:
         )
         if not text or not session_id:
             raise ValueError("message and session_id are required")
-        request = {**request, "message": text, "session_id": session_id}
-        run_id = uuid.uuid4().hex
-        self.store.create(run_id=run_id, session_id=session_id, prompt=text)
-        self.store.set_state(run_id, profile="jaeger")
-        self._live_jaeger.add(run_id)
-        threading.Thread(
-            target=self._worker,
-            args=(run_id, request),
-            daemon=True,
-            name=f"jaeger-runner-{run_id[:8]}",
-        ).start()
+        model = str(request.get("model") or "").strip()
+        provider = str(request.get("provider") or "").strip()
+        jaeger_provider = self._jaeger_provider(provider, model) if model else None
+        workspace = str(request.get("workspace") or "").strip()
+        body: dict[str, Any] = {"text": text}
+        if model:
+            body["model"] = model
+        if jaeger_provider:
+            body["provider"] = jaeger_provider
+        if workspace:
+            body["workspace"] = workspace
+        status, payload = gateway_request(
+            "POST", f"/v1/sessions/{quote(session_id, safe='')}/turns", body=body,
+        )
+        if status >= 400:
+            raise ValueError(str(payload.get("error") or f"Gateway returned HTTP {status}"))
+        request_id = str(payload.get("request_id") or "")
+        if not request_id:
+            raise ValueError("Gateway admitted the turn without a request_id")
         return {
-            "run_id": run_id,
-            "stream_id": run_id,
+            "run_id": request_id,
+            "stream_id": request_id,
             "session_id": session_id,
-            "status": "running",
+            "status": str(payload.get("status") or "running"),
             "started_at": time.time(),
             "active_controls": ["cancel", "approval"],
+            "start_event_id": payload.get("start_event_id"),
+            "replayed": bool(payload.get("replayed")),
         }
 
-    def _worker(self, run_id: str, request: dict[str, Any]) -> None:
-        text = str(request["message"])
-        session_id = str(request["session_id"])
-        emitted_text = False
-        try:
-            model = str(request.get("model") or "").strip()
-            provider = str(request.get("provider") or "").strip()
-            jaeger_provider = self._jaeger_provider(provider, model) if model else None
-
-            def on_event(frame: dict[str, Any]) -> None:
-                nonlocal emitted_text
-                event, payload = self._translate_frame(run_id, session_id, frame)
-                if event:
-                    if event == "token" and payload.get("text"):
-                        emitted_text = True
-                    self.store.append(run_id, event, payload)
-
-            def on_request(frame: dict[str, Any]) -> str:
-                req_kind = str(frame.get("kind") or "approval").strip().lower()
-                request_id = str(frame.get("id") or uuid.uuid4().hex)
-                if req_kind == "clarify":
-                    pending = self.clarifications.submit(
-                        session_key=session_id,
-                        question=str(frame.get("prompt") or frame.get("message") or ""),
-                        run_id=run_id,
-                        clarify_id=request_id,
-                        choices=list(frame.get("options") or []),
-                    )
-                    self.store.set_state(
-                        run_id,
-                        pending_clarify_id=pending["clarify_id"],
-                        active_controls=["cancel", "approval", "clarification"],
-                    )
-                    try:
-                        on_event({
-                            **frame,
-                            "id": pending["clarify_id"],
-                            "type": "request",
-                            "kind": "clarify",
-                        })
-                        return self.clarifications.wait(pending["clarify_id"])
-                    finally:
-                        self.store.set_state(
-                            run_id,
-                            pending_clarify_id=None,
-                            active_controls=["cancel", "approval"],
-                        )
-                self.store.set_state(run_id, pending_approval_id=request_id)
-                try:
-                    on_event({**frame, "id": request_id, "type": "request", "kind": req_kind or "approval"})
-                    return self.approvals.request({**frame, "id": request_id, "run_id": run_id})
-                finally:
-                    self.store.set_state(run_id, pending_approval_id=None)
-
-            workspace = str(request.get("workspace") or "").strip() or None
-            result = self.bridge.turn(
-                text,
-                session_id,
-                on_event,
-                on_request,
-                turn_id=run_id,
-                workspace=workspace,
-                model=model or None,
-                provider=jaeger_provider or None,
-            )
-            if result.get("cancelled"):
-                self.store.append(run_id, "apperror", {"message": "Run cancelled", "status": "cancelled",
-                    "session_id": session_id, "stream_id": run_id})
-                self.store.set_state(run_id, status="cancelled", terminal_state="cancelled", active_controls=[])
-                return
-            error = str(result.get("error") or result.get("halt_reason") or "").strip()
-            answer = str(result.get("text") or "")
-            if error:
-                self.store.append(run_id, "apperror", {
-                    "type": "error",
-                    "message": error,
-                    "session_id": session_id,
-                    "stream_id": run_id,
-                })
-                self.store.set_state(run_id, status="failed", terminal_state="failed", active_controls=[])
-                return
-            if answer and not emitted_text:
-                self.store.append(run_id, "token", {"text": answer})
-            session = self._session_snapshot(session_id, text, answer)
-            self.store.append(run_id, "done", {
-                "status": "completed",
-                "session_id": session_id,
-                "stream_id": run_id,
-                "session": session,
-            })
-            self.store.set_state(run_id, status="completed", terminal_state="completed", active_controls=[])
-        except Exception as exc:  # noqa: BLE001
-            self.store.append(run_id, "apperror", {
-                "type": "error",
-                "message": str(exc),
-                "session_id": session_id,
-                "stream_id": run_id,
-            })
-            self.store.set_state(run_id, status="failed", terminal_state="failed", active_controls=[])
-        finally:
-            self._live_jaeger.discard(run_id)
+    # _worker removed: the shim no longer drives bridge.turn() in a thread.
+    # The Gateway executes the turn and owns the event stream; the browser
+    # follows it through /v1/runs/{id}/events, which proxies the Gateway's
+    # durable replay. There is no second event schema to translate anymore.
 
     def _jaeger_provider(self, requested: str, model: str) -> str:
         """Translate a WebUI transport provider into Jaeger's model owner."""
@@ -518,138 +584,109 @@ class RunnerBroker:
         except Exception:
             return []
 
-    def _session_snapshot(self, session_id: str, prompt: str, answer: str) -> dict[str, Any]:
-        rows = self.bridge.query("load_session", {"id": session_id, "resume": False})
-        messages = []
-        if isinstance(rows, list):
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                messages.append({
-                    "role": str(row.get("role") or "assistant"),
-                    "content": str(row.get("text") or row.get("content") or ""),
-                    "_ts": row.get("ts") or row.get("timestamp") or time.time(),
-                })
-        if not messages:
-            messages = [
-                {"role": "user", "content": prompt, "_ts": time.time()},
-                {"role": "assistant", "content": answer, "_ts": time.time()},
-            ]
-        title = next(
-            (str(row.get("content") or "")[:80] for row in messages if row.get("role") == "user"),
-            "Jaeger conversation",
-        )
-        return {
-            "session_id": session_id,
-            "title": title,
-            "messages": messages,
-            "message_count": len(messages),
-            "tool_calls": [],
-            "updated_at": time.time(),
-        }
+    # _session_snapshot removed: it was the per-turn sync that copied the
+    # runtime session into the WebUI catalog at the end of WebUI-originated
+    # turns only. The Gateway is the single store of record; the WebUI pulls
+    # history from GET /v1/sessions/{id} and lists sessions from
+    # GET /v1/sessions. No backfill of any kind (operator decision).
 
-    @staticmethod
-    def _translate_frame(run_id: str, session_id: str, frame: dict[str, Any]) -> tuple[str | None, dict[str, Any]]:
-        kind = str(frame.get("type") or "")
-        if kind == "delta":
-            return "token", {"text": str(frame.get("text") or "")}
-        if kind == "reasoning":
-            return "reasoning", {"text": str(frame.get("text") or "")}
-        if kind == "tool":
-            # The bridge contract (``jaeger_os.contract.protocol.tool_frame``)
-            # carries ``phase``: start | done | error. Reading a ``status``
-            # key that the bridge never sends left every tool "running" in
-            # the browser, with a second start row where the end should be.
-            phase = str(frame.get("phase") or "").lower()
-            event = "tool_complete" if phase in {"done", "error"} else "tool"
-            return event, {
-                "name": str(frame.get("name") or "tool"),
-                "args": frame.get("args") or {},
-                "preview": str(frame.get("detail") or ""),
-                "is_error": phase == "error",
-                "duration": frame.get("elapsed_s"),
-            }
-        if kind == "request":
-            req_kind = str(frame.get("kind") or "approval").strip().lower()
-            request_id = str(frame.get("id") or "")
-            prompt = str(frame.get("prompt") or frame.get("message") or "")
-            if req_kind == "clarify":
-                return "clarification", {
-                    "clarify_id": request_id,
-                    "run_id": run_id,
-                    "question": prompt or "Clarification required",
-                    "choices": list(frame.get("options") or []),
-                    "session_id": session_id,
-                }
-            command = str(frame.get("command") or "").strip()
-            if not command:
-                command = prompt
-            return "approval", {
-                "approval_id": request_id,
-                "run_id": run_id,
-                "description": prompt or "Tool approval required",
-                "command": command,
-                "tool": str(frame.get("tool") or command or ""),
-                "options": frame.get("options") or ["once", "always", "deny"],
-                "session_id": session_id,
-            }
-        return None, {}
+    # _translate_frame removed: it was the second event schema — bridge
+    # frames (delta→token, tool→tool/tool_complete) translated for the
+    # browser while the IDE rendered the Gateway's native stream. One schema
+    # now: the Gateway's EVENT_TYPES registry. The browser follows the same
+    # durable events the IDE does, so a tool can never be stuck "running"
+    # because a translated status key never arrived.
 
     def cancel(self, run_id: str) -> dict[str, Any]:
-        status = self.store.status(run_id)
+        status = self.run_status(run_id)
         if status.get("profile") in {"hermes", "openclaw", "roundtable"}:
             return self.profiles.cancel(run_id)
-        if status["terminal_state"]:
+        # Jaeger runs are Gateway turns: cancellation is the Gateway's
+        # POST /v1/sessions/{id}/cancel. The shim holds no run state to
+        # consult — the Gateway decides whether the turn is still active.
+        session_id = str(status.get("session_id") or "")
+        if not session_id:
             return {"ok": False, "status": "not-active", "message": "Run is not active."}
-        self.bridge.control("cancel", turn_id=run_id)
-        self.store.set_state(run_id, status="cancelling")
-        return {"ok": True, "status": "accepted"}
+        http_status, payload = gateway_request(
+            "POST", f"/v1/sessions/{quote(session_id, safe='')}/cancel",
+            body={"request_id": run_id},
+        )
+        if http_status == 404:
+            return {"ok": False, "status": "not-active", "message": "Run is not active."}
+        if http_status >= 400:
+            return {"ok": False, "status": "error", "message": str(payload.get("error") or f"HTTP {http_status}")}
+        return {"ok": True, "status": "accepted", "already_terminal": bool(payload.get("already_terminal"))}
 
     def approve(self, run_id: str, approval_id: str, choice: str) -> dict[str, Any]:
-        status = self.store.status(run_id)
+        status = self.run_status(run_id)
         if status.get("profile") in {"hermes", "openclaw", "roundtable"}:
             return self.profiles.approve(run_id, approval_id, choice)
-        if status.get("pending_approval_id") != approval_id:
-            return {"ok": False, "status": "not-active", "message": "Approval does not belong to this run."}
-        bridge_choice = "once" if choice == "session" else choice
-        accepted = self.approvals.respond(approval_id, bridge_choice)
-        return {
-            "ok": accepted,
-            "status": "accepted" if accepted else "not-active",
-            "message": None if accepted else "Approval is no longer active.",
-        }
+        # Approvals are Gateway records: resolve through POST /v1/approvals/{id},
+        # which publishes approval.resolved on the same stream the browser
+        # and the IDE both follow.
+        approved = choice in {"once", "always", "session"}
+        http_status, payload = gateway_request(
+            "POST", f"/v1/approvals/{quote(approval_id, safe='')}",
+            body={"approved": approved, "decision": choice},
+        )
+        if http_status == 404:
+            return {"ok": False, "status": "not-active", "message": "Approval is no longer active."}
+        if http_status >= 400:
+            return {"ok": False, "status": "error", "message": str(payload.get("error") or f"HTTP {http_status}")}
+        return {"ok": True, "status": "accepted"}
 
     def respond_clarify(self, run_id: str, clarify_id: str, response: str) -> dict[str, Any]:
-        """Unblock a mid-turn clarify waiting on this native run."""
-        self.store.status(run_id)  # raises KeyError if unknown
-        accepted = self.clarifications.respond(clarify_id, response)
+        """Unblock a mid-turn clarify waiting on this native run.
+
+        The clarify card is a first-class Gateway event (clarify.request); the
+        answer rides the Gateway as a normal turn on the same session.
+        """
+        status = self.run_status(run_id)
+        session_id = str(status.get("session_id") or "").strip()
+        if not session_id:
+            return {
+                "ok": False,
+                "status": "not-active",
+                "message": "Clarification is no longer active.",
+                "clarify_id": clarify_id,
+                "run_id": run_id,
+            }
+        http_status, payload = gateway_request(
+            "POST", f"/v1/sessions/{quote(session_id, safe='')}/turns",
+            body={"text": response, "options": {"clarify_id": clarify_id}},
+        )
+        if http_status >= 400:
+            return {
+                "ok": False,
+                "status": "error",
+                "message": str(payload.get("error") or f"HTTP {http_status}"),
+                "clarify_id": clarify_id,
+                "run_id": run_id,
+            }
         return {
-            "ok": accepted,
-            "status": "accepted" if accepted else "not-active",
-            "message": None if accepted else "Clarification is no longer active.",
+            "ok": True,
+            "status": "accepted",
             "clarify_id": clarify_id,
             "run_id": run_id,
+            "request_id": payload.get("request_id"),
         }
 
     def reconcile(self, run_id: str) -> dict[str, Any]:
-        status = self.store.status(run_id)
+        status = self.run_status(run_id)
         if status.get("profile") in {"hermes", "openclaw", "roundtable"}:
             return self.profiles.reconcile(run_id)
-        from jaeger_ai.core.frameworks.native_runs import jaeger_reconcile
-        if status.get("execution_unknown"):
-            try:
-                evidence = jaeger_reconcile({"run_id": run_id, "session_id": status.get("session_id")})
-                if not evidence.get("execution_unknown"):
-                    terminal_st = evidence.get("status", "failed")
-                    self.store.set_state(
-                        run_id,
-                        status=terminal_st,
-                        terminal_state=terminal_st,
-                        execution_unknown=False,
-                    )
-            except Exception:
-                pass
-        return self.store.status(run_id)
+        # The Gateway persists execution state for its own turns; its
+        # POST /v1/sessions/{id}/reconcile is the authority on unknown runs.
+        session_id = str(status.get("session_id") or "")
+        if not session_id:
+            return status
+        http_status, payload = gateway_request(
+            "POST", f"/v1/sessions/{quote(session_id, safe='')}/reconcile",
+            body={"request_id": run_id},
+        )
+        if http_status >= 400:
+            return status
+        return payload if isinstance(payload, dict) else status
 
 
 class ScheduleBroker:
@@ -981,9 +1018,9 @@ class HermesWebUIAdapterHandler(BaseHTTPRequestHandler):
                 run_id, action = match.groups()
                 if action == "events":
                     cursor = str(parse_qs(parsed.query).get("cursor", [""])[0] or "") or None
-                    return self._json(self.store.events_after(run_id, cursor))
+                    return self._json(self.runner.run_events(run_id, cursor))
                 if action is None:
-                    return self._json(self.store.status(run_id))
+                    return self._json(self.runner.run_status(run_id))
             return self._json({"error": "not found"}, HTTPStatus.NOT_FOUND)
         except KeyError as exc:
             return self._json({"error": str(exc)}, HTTPStatus.NOT_FOUND)

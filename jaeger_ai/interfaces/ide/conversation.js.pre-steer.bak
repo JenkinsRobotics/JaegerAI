@@ -50,22 +50,19 @@ class Conversation {
     // attached to a sent turn — kept out of persisted state; an unsent
     // attachment does not survive a panel reload, matching the composer text.
     this.staged = [];
-    // Mid-turn steering queue: messages typed while a turn is running.
-    // Small, persisted, and flushed as normal turns when the run settles.
-    this.steers = Array.isArray(restored.steers) ? restored.steers.slice(-20) : [];
     this.modelsLoaded = false;
     this.workersLoaded = false;
     this.timelineState = createTimelineState();
     this.state = { session: null, sessions: [], text: '', reasoning: '', activity: [], timeline: [],
       approvals: [], models: null, modelsError: null, workers: [], workersError: null,
-      activeTask: null, backgroundTasks: [], busy: false, steers: [],
+      activeTask: null, backgroundTasks: [], busy: false,
       connected: false, status: 'Not connected', error: '', endpoint: gateway.url };
     this.observer = null; this.epoch = 0; this.stagedGen = 0; this.sending = false;
     this.disposed = false;
   }
   emit(updateKind = 'control') {
     if (this.disposed) return;
-    this.publish({ ...this.state, staged: this.staged, steers: this.steers,
+    this.publish({ ...this.state, staged: this.staged,
       workTurns: this.workBySession[this.state.session?.session_id] || [],
       updateKind,
       canCancel: Boolean(this.pending[this.state.session?.session_id] || this.pendingTask) });
@@ -117,7 +114,7 @@ class Conversation {
     if (this.disposed) return;
     await this.save({ selected: this.state.session?.session_id, pending: this.pending,
       pendingTask: this.pendingTask, completedTimelines: this.completedTimelines,
-      workBySession: this.workBySession, steers: this.steers });
+      workBySession: this.workBySession });
   }
   async refresh(selected = this.state.session?.session_id, explicit = false) {
     if (this.disposed) return;
@@ -355,8 +352,6 @@ class Conversation {
       ? String(receipt.result?.error || receipt.status) : '';
     await this.loadApprovals(epoch); await this.loadTasks(epoch); this.emit();
     if (this.gateway.activity) this.watchSession(sid, epoch);
-    // A queued steer rides out as its own turn only after this one settled.
-    await this.flushSteers(sid);
   }
   async observe(sid, rid, cursor, epoch) {
     const observer = new AbortController(); this.observer?.abort(); this.observer = observer;
@@ -416,27 +411,6 @@ class Conversation {
     await this.gateway.cancel(sid, rid);
     this.state.status = 'Cancellation requested · waiting for owner'; this.emit();
     if (!this.observer || this.observer.signal.aborted) await this.refresh(sid);
-  }
-  // Mid-turn steering. The Gateway HTTP layer exposes no live-injection
-  // endpoint (a search of core/gateway for 'steer' finds none), so a message
-  // sent while a turn runs is queued here and auto-sent as a normal turn the
-  // moment the running one settles (finish → flushSteers). Returns false when
-  // nothing was queued so the composer can restore the draft.
-  steer(text) {
-    text = String(text).trim();
-    const sid = this.state.session?.session_id;
-    if (!text || !this.state.connected || !this.state.busy || this.sending || !sid) return false;
-    this.steers.push({ id: randomUUID(), sessionId: sid, text, queuedAt: Date.now() });
-    this.state.status = 'Steering queued · sends when this turn finishes';
-    this.emit();
-    return true;
-  }
-  async flushSteers(sid) {
-    const queued = this.steers.filter(item => item.sessionId === sid);
-    if (!queued.length || this.disposed) return;
-    this.steers = this.steers.filter(item => item.sessionId !== sid);
-    this.emit();
-    for (const item of queued) await this.send(item.text);
   }
   async submitParentTask({ goal, worker, taskId, idempotencyKey, readOnly = true }) {
     goal = String(goal || '').trim();

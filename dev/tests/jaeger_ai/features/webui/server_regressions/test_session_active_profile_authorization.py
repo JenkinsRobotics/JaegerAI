@@ -229,11 +229,16 @@ def test_cli_metadata_lookup_finds_older_session_outside_visible_cap(monkeypatch
     assert metadata["source_tag"] == "cli"
 
 
-def test_session_delete_jaeger_fails_closed_when_authoritative_cleanup_fails(
+def test_session_delete_jaeger_fails_closed_when_gateway_delete_fails(
     monkeypatch,
 ):
-    from jaeger_ai.features.webui.service import session_unify
+    """Deleting from the WebUI deletes from the Gateway — and fails closed.
 
+    The Gateway is the single store of record: /api/session/delete calls
+    DELETE /v1/sessions/{id} there. When the Gateway refuses (or is
+    unreachable) the WebUI must refuse too, and must not touch its local
+    projection. The old session_unify mirror path is retired.
+    """
     handler = _FakeHandler()
     cli_stub = _SimpleSession("jaeger_delete", profile=None)
     monkeypatch.setattr(routes, "_check_csrf", lambda _handler: True)
@@ -254,9 +259,9 @@ def test_session_delete_jaeger_fails_closed_when_authoritative_cleanup_fails(
     )
     monkeypatch.setattr(routes, "_get_active_profile_name", lambda: "jaeger")
     monkeypatch.setattr(
-        session_unify,
-        "delete_authoritative_jaeger_session",
-        lambda _sid: False,
+        routes,
+        "_gateway_delete_session",
+        lambda _sid: {"ok": False, "error": "Gateway returned HTTP 503", "status": 503},
     )
     monkeypatch.setattr(
         routes,
@@ -269,7 +274,7 @@ def test_session_delete_jaeger_fails_closed_when_authoritative_cleanup_fails(
     cap = _capture(monkeypatch)
     routes.handle_post(handler, urlparse("/api/session/delete"))
 
-    assert cap["bad"] == ("Authoritative session cleanup failed", 503)
+    assert cap["bad"] == ("Gateway returned HTTP 503", 503)
 
 
 def test_file_read_foreign_profile_session_returns_404_before_file_ops(monkeypatch):

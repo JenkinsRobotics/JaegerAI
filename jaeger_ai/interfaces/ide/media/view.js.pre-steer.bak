@@ -21,9 +21,7 @@ window.JaegerPostMessage = post;
 let ideContextOn = api.getState()?.ideContext !== false;
 const persistView = () => api.setState({ drafts, ideContext: ideContextOn });
 function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
-// While the agent is busy the send button becomes a steering send: the text
-// is queued client-side and auto-sent when the running turn settles.
-function eligibility() { $('send').disabled = !state.connected || !$('prompt').value.trim(); }
+function eligibility() { $('send').disabled = !state.connected || state.busy || !$('prompt').value.trim(); }
 
 function announceCopied() {
   const node = $('copied');
@@ -140,16 +138,6 @@ function reasoningSection(text, live = false) {
   return details;
 }
 
-// A queued mid-turn steering note: visually distinct from a sent message so
-// the operator can see it has not reached the agent yet.
-function steerNote(text) {
-  const node = document.createElement('div'); node.className = 'steer-note';
-  const label = document.createElement('span'); label.className = 'steer-label'; label.textContent = 'Steering · queued';
-  const body = document.createElement('div'); body.className = 'steer-text'; body.textContent = text;
-  node.append(label, body);
-  return node;
-}
-
 function renderTurn(turn) {
   const node = document.createElement('div'); node.className = 'turn';
   if (turn.user) node.append(message('user', turn.user.content));
@@ -200,9 +188,6 @@ function transcriptRows() {
     if (placed.has(row.requestId) && (state.busy || row.kind !== 'answer')) continue;
     if (legacyActivity.includes(row) || row.kind === 'control' || row.kind === 'terminal') continue;
     rows.push({ ...row, key: `live:${row.key}` });
-  }
-  for (const steer of state.steers || []) if (state.session && steer.sessionId === state.session.session_id) {
-    rows.push({ key: `steer:${steer.id}`, kind: 'steer', text: steer.text, live: true });
   }
   if (state.preview) rows.push({ key: `diff:${state.preview.requestId}:${state.preview.path}`, kind: 'diff', file: state.preview });
   if (!rows.length) rows.push({ key: 'empty', kind: 'empty', live: false });
@@ -287,8 +272,6 @@ function updateTimelineRow(node, row) {
     content = activitySection(row.items, row.live);
   } else if (row.kind === 'diff') {
     content = renderDiff(row.file);
-  } else if (row.kind === 'steer') {
-    content = steerNote(row.text || '');
   } else if (row.kind === 'empty') {
     content = document.createElement('section'); content.className = 'empty';
     const logo = document.createElement('img'); logo.src = $('logo-source').src || '';
@@ -512,7 +495,6 @@ function renderDiff(file) {
 const stateQueue = createFrameQueue(batch => {
   const data = batch.at(-1);
   if (data.editDraft !== undefined) { $('prompt').value = data.editDraft; saveDraft(); eligibility(); $('prompt').focus(); return; }
-  if (data.steerRejected !== undefined) { $('prompt').value = data.steerRejected; saveDraft(); eligibility(); $('prompt').focus(); return; }
   if (data.accepted) {
     if (submittedDraftSession !== null && String(drafts[submittedDraftSession] || '').trim() === data.submittedText) {
       drafts[submittedDraftSession] = '';
@@ -655,10 +637,8 @@ $('composer').onsubmit = event => {
   // keep-session, 'config' as the static setting, and 'provider::model' as
   // an explicit catalog choice — the display matches the behaviour.
   if (!$('send').disabled) {
-    const text = $('prompt').value;
-    if (state.busy) { post('steer', { text }); $('prompt').value = ''; saveDraft(); eligibility(); return; }
     submittedDraftSession = draftSession;
-    post('send', { text, model: $('model').value, ideContext: ideContextOn });
+    post('send', { text: $('prompt').value, model: $('model').value, ideContext: ideContextOn });
   }
 };
 $('prompt').oninput = () => { saveDraft(); eligibility(); slashDismissed = false; slashIndex = 0; renderSlashMenu(); };

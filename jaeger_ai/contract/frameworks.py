@@ -32,7 +32,7 @@ import inspect
 from dataclasses import dataclass
 from typing import Callable
 
-DEFAULT_AGENT_MODEL = "kimi-k2.7-code:cloud"
+DEFAULT_AGENT_MODEL = "glm-5.3-flash:cloud"
 
 #: Jaeger is the product. Fresh WebUI with no profile cookie/session uses this
 #: runtime. Hermes keeps profile name ``default`` for upstream WebUI compatibility;

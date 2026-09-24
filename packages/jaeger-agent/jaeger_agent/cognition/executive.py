@@ -121,6 +121,8 @@ class TurnExecutive:
     def run_turn(self, text: str) -> str:
         run = self.ensure_run()
         if run.state == "blocked":
+            if run.reason == "turn_failed":
+                raise RuntimeError(f"Run {run.id} is permanently BLOCKED ({run.reason}).")
             return (
                 f"Run {run.id} is BLOCKED ({run.reason or 'indeterminate effect'}). "
                 "Not retrying an indeterminate external effect."

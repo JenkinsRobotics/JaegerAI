@@ -152,12 +152,11 @@ class SessionStore:
                 "UPDATE sessions SET execution_state='interrupted' "
                 "WHERE execution_state='running'"
             )
-        if sync_webui:
-            try:
-                from jaeger_ai.features.webui.service.session_unify import sync_jaeger_sessions_to_hermes_webui
-                sync_jaeger_sessions_to_hermes_webui()
-            except Exception:
-                pass
+        # sync_webui removed: the WebUI catalog is a read-only projection of
+        # the Gateway's session store now. Opening a runtime store must not
+        # mirror anything into HERMES_HOME — that was the bulk half of the
+        # session_unify sync the operator retired (no backfill of any kind).
+        # The parameter is kept so existing callers don't break; it is inert.
 
     def _ensure_brain_columns(self) -> None:
         """Sessions record the brain that served them so get_mode /
@@ -358,11 +357,10 @@ class SessionStore:
                     "provider=COALESCE(?, provider) WHERE id=?",
                     (model or None, provider or None, session_id),
                 )
-        try:
-            from jaeger_ai.features.webui.service.session_unify import sync_single_session_to_hermes_webui
-            sync_single_session_to_hermes_webui(session_id, store=self)
-        except Exception:
-            pass
+        # Per-message WebUI mirror removed: the WebUI catalog is a read-only
+        # projection of the Gateway's session store. This was the per-turn
+        # half of the session_unify sync (sync_single_session_to_hermes_webui)
+        # the operator retired — no backfill, no mirror, no second writer.
 
     def record_background(self, delivery_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Commit an unsolicited reply and its delivery obligation together.

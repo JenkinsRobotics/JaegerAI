@@ -189,18 +189,3 @@ form { background: var(--panel) !important; border: 1px solid var(--line) !impor
   background: transparent !important; box-shadow: none !important; 
 }
 .code-card pre code { background: transparent !important; padding: 0 !important; }
-
-/* ── Mid-turn steering ──────────────────────────────────────────────────── */
-.steer-note {
-  display: flex; flex-direction: column; gap: 4px;
-  margin: 8px 0 8px auto; max-width: 78%;
-  padding: 8px 12px;
-  border: 1px dashed var(--vscode-panel-border, #8884);
-  border-radius: 10px;
-  background: var(--vscode-editorWidget-background, #252526);
-}
-.steer-note .steer-label {
-  font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
-  color: var(--vscode-descriptionForeground, #9d9d9d);
-}
-.steer-note .steer-text { font-size: 13px; white-space: pre-wrap; word-break: break-word; }

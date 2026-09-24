@@ -32,19 +32,27 @@ class TestRenameRoute(AioHTTPTestCase):
             self.db_path.unlink()
 
     async def test_rename_updates_lists_and_announces(self):
-        await self.client.request("POST", "/v1/sessions", json={"session_id": "s1"})
-        resp = await self.client.request("PATCH", "/v1/sessions/s1", json={"title": "  Fix the loop  "})
+        # The Gateway mints and owns session IDs; a client adopts the id the
+        # create response returns (a client-supplied id is never trusted).
+        created = await (await self.client.request(
+            "POST", "/v1/sessions", json={"session_id": "s1"},
+        )).json()
+        sid = created["session_id"]
+        resp = await self.client.request("PATCH", f"/v1/sessions/{sid}", json={"title": "  Fix the loop  "})
         assert resp.status == 200
         assert (await resp.json())["title"] == "Fix the loop"
         listed = (await (await self.client.request("GET", "/v1/sessions")).json())["sessions"]
         assert listed[0]["title"] == "Fix the loop"
-        events = [e.event for e in self.gateway_app.event_bus.get_replay_events("s1")]
+        events = [e.event for e in self.gateway_app.event_bus.get_replay_events(sid)]
         assert "session.updated" in events
 
     async def test_rejects_bad_bodies_and_unknown_sessions(self):
-        await self.client.request("POST", "/v1/sessions", json={"session_id": "s1"})
+        created = await (await self.client.request(
+            "POST", "/v1/sessions", json={"session_id": "s1"},
+        )).json()
+        sid = created["session_id"]
         for body in ({}, {"title": ""}, {"title": "   "}, {"title": 5}, []):
-            resp = await self.client.request("PATCH", "/v1/sessions/s1", json=body)
+            resp = await self.client.request("PATCH", f"/v1/sessions/{sid}", json=body)
             assert resp.status == 400, body
         resp = await self.client.request("PATCH", "/v1/sessions/nope", json={"title": "x"})
         assert resp.status == 404

@@ -363,7 +363,7 @@ def select_production_model(matrix: CertificationMatrix) -> tuple[str, str]:
     chat = matrix.assignments.get("CHAT")
     if chat:
         return str(chat.get("provider") or "ollama"), str(chat.get("model") or "")
-    return "ollama", "kimi-k2.7-code:cloud"
+    return "ollama", "glm-5.3-flash:cloud"
 
 
 __all__ = [

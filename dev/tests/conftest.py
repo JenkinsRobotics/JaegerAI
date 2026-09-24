@@ -133,6 +133,16 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
                     # tests must still use an isolated JAEGER_HOME root.
                     if path == root / "shared/health/agent-fabric.json":
                         continue
+                    # The live Gateway daemon owns the operator session
+                    # store and checkpoints its (already excluded) WAL into
+                    # this main file continuously while pytest runs — it holds
+                    # the file open for the whole session, so a stat delta on
+                    # it is the daemon's write, not test leakage. A test that
+                    # needs a session store gets one under the pinned
+                    # JAEGER_HOME root above; session files under every other
+                    # live path remain fingerprinted.
+                    if path == root / "gateway_sessions.sqlite3":
+                        continue
                     st = path.stat()
                     out[str(path)] = (st.st_size, st.st_mtime_ns)
             except OSError:  # racing with the running app is not our failure
