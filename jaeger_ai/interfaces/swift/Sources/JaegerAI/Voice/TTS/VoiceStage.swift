@@ -136,11 +136,10 @@ enum VoiceStageResolver {
 
     /// First identifier actually present on this machine.
     static func firstInstalled(from candidates: [String]) -> String? {
-        for identifier in candidates
-        where AVSpeechSynthesisVoice(identifier: identifier) != nil {
-            return identifier
-        }
-        return nil
+        // The identifier initializer can return a fallback voice for an
+        // unknown identifier on macOS. Enumerate availability explicitly.
+        let installed = Set(AVSpeechSynthesisVoice.speechVoices().map(\.identifier))
+        return candidates.first(where: installed.contains)
     }
 
     /// Whether two stages would actually sound different here.
