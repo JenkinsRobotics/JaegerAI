@@ -8071,6 +8071,84 @@ def _lookup_gateway_session_identity(session_id: str) -> dict:
     return metadata if isinstance(metadata, dict) else {}
 
 
+def _gateway_base_url() -> str:
+    """The Gateway is the single store of record; this is where it lives."""
+    import os
+    return (
+        os.environ.get("JAEGER_GATEWAY_URL")
+        or "http://127.0.0.1:8810"
+    ).rstrip("/")
+
+
+def _gateway_delete_session(session_id: str) -> dict:
+    """Delete a session from the Gateway store — the one delete that counts.
+
+    The WebUI is a projection: deleting from the UI must actually delete from
+    the Gateway (DELETE /v1/sessions/{id}), which cascades messages, clears
+    activity history, and publishes ``session.deleted`` on the event stream.
+    Returns ``{"ok": True}`` or ``{"ok": False, "error": str, "status": int}``.
+    """
+    sid = str(session_id or "").strip()
+    if not sid:
+        return {"ok": False, "error": "session_id is required", "status": 400}
+    import json as _json
+
+    url = f"{_gateway_base_url()}/v1/sessions/{quote(sid, safe='')}"
+    req = Request(url, method="DELETE")
+    try:
+        with build_opener().open(req, timeout=5) as resp:
+            body = resp.read().decode("utf-8") or "{}"
+            payload = _json.loads(body) if resp.status != 204 else {}
+            if resp.status < 400:
+                return {"ok": True, "gateway": payload}
+            return {"ok": False, "error": payload.get("error") or f"HTTP {resp.status}",
+                    "status": resp.status}
+    except HTTPError as exc:
+        try:
+            payload = _json.loads(exc.read().decode("utf-8") or "{}")
+        except Exception:
+            payload = {}
+        return {"ok": False, "error": payload.get("error") or f"Gateway returned HTTP {exc.code}",
+                "status": exc.code}
+    except URLError as exc:
+        return {"ok": False, "error": f"Gateway unreachable: {exc.reason}", "status": 503}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": str(exc), "status": 503}
+
+
+def _gateway_list_sessions(profile: str | None = None) -> dict:
+    """Read the session list from the Gateway store (read-only projection)."""
+    import json as _json
+
+    url = f"{_gateway_base_url()}/v1/sessions"
+    if profile:
+        url += f"?profile={quote(profile, safe='')}"
+    req = Request(url, headers={"Accept": "application/json"})
+    try:
+        with build_opener().open(req, timeout=5) as resp:
+            payload = _json.loads(resp.read().decode("utf-8") or "{}")
+        return payload if isinstance(payload, dict) else {"sessions": []}
+    except Exception as exc:  # noqa: BLE001
+        return {"sessions": [], "error": str(exc)}
+
+
+def _gateway_get_session(session_id: str) -> dict:
+    """Pull one session's live history from the Gateway store (history-on-open)."""
+    import json as _json
+
+    sid = str(session_id or "").strip()
+    if not sid:
+        return {}
+    url = f"{_gateway_base_url()}/v1/sessions/{quote(sid, safe='')}"
+    req = Request(url, headers={"Accept": "application/json"})
+    try:
+        with build_opener().open(req, timeout=5) as resp:
+            payload = _json.loads(resp.read().decode("utf-8") or "{}")
+        return payload if isinstance(payload, dict) else {}
+    except Exception:
+        return {}
+
+
 def _lookup_cli_session_metadata(session_id: str, *, all_profiles: bool = False) -> dict:
     if not session_id:
         return {}
@@ -16178,24 +16256,23 @@ def handle_post(handler, parsed) -> bool:
         # deleting this mirror, otherwise the next projection sync resurrects
         # the conversation in the sidebar. Keep the hook optional so upstream
         # Hermes deployments without Jaeger retain their normal behavior.
-        if str(event_profile or "").strip().lower() == "jaeger":
-            try:
-                from jaeger_ai.features.webui.service.session_unify import (
-                    delete_authoritative_jaeger_session,
-                )
-            except ImportError:
-                delete_authoritative_jaeger_session = None
-            if delete_authoritative_jaeger_session is not None:
-                try:
-                    if not delete_authoritative_jaeger_session(sid):
-                        return bad(handler, "Authoritative session cleanup failed", 503)
-                except Exception:
-                    logger.exception(
-                        "Failed to delete authoritative Jaeger session %s", sid
-                    )
-                    return bad(handler, "Authoritative session cleanup failed", 503)
-        # Serialize with recovery, but bound contention so a browser timeout
-        # cannot be followed by a delayed server-side delete.
+        # The Gateway is the single store of record. Deleting from the WebUI
+        # calls the Gateway's DELETE /v1/sessions/{id} — the same API the IDE
+        # and CLI use — so the session is actually gone from the gateway store
+        # (messages cascade, activity history cleared, session.deleted event
+        # published). The old path (delete_authoritative_jaeger_session +
+        # local sidecar unlink) was a second writer of session truth and is
+        # retired; legacy sidecar files may be deleted outright, no migration.
+        gateway_deleted = _gateway_delete_session(sid)
+        if not gateway_deleted.get("ok"):
+            return bad(
+                handler,
+                gateway_deleted.get("error") or "Gateway session delete failed",
+                gateway_deleted.get("status") or 503,
+            )
+        # Local projection cleanup: drop the browser-side sidecar and caches
+        # for this session id. This is projection hygiene, not truth: if the
+        # files are already gone the delete still succeeded above.
         session_lock = _get_session_agent_lock(sid)
         if not session_lock.acquire(timeout=5):
             return bad(handler, "Session busy, try again", 503)
@@ -16207,12 +16284,10 @@ def handle_post(handler, parsed) -> bool:
                 p.relative_to(SESSION_DIR.resolve())
             except Exception:
                 return bad(handler, "Invalid session_id", 400)
-            sidecar_deleted = False
             try:
                 p.unlink(missing_ok=True)
             except Exception:
                 logger.debug("Failed to unlink session file %s", p)
-            sidecar_deleted = not p.exists()
             try:
                 prune_session_from_index(sid)
             except Exception:
@@ -16221,11 +16296,6 @@ def handle_post(handler, parsed) -> bool:
                 p.with_suffix('.json.bak').unlink(missing_ok=True)
             except Exception:
                 logger.debug("Failed to unlink session backup file %s", p.with_suffix('.json.bak'))
-            if sidecar_deleted and not is_messaging_session:
-                try:
-                    _record_webui_deleted_session_tombstone(sid)
-                except Exception:
-                    logger.debug("Failed to tombstone deleted WebUI session %s", sid, exc_info=True)
         finally:
             session_lock.release()
         # Evict outside the mutation lock: lifecycle commit may perform provider

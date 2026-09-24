@@ -203,7 +203,7 @@ def test_model_inventory_certified_and_no_unconfigured_fakes(auth_cookie, verify
         catalog = json.loads(resp.read().decode("utf-8"))
 
     assert catalog.get("active_provider") in {"ollama", "ollama-cloud"}
-    assert "kimi-k2.7-code:cloud" in str(catalog.get("default_model"))
+    assert "glm-5.3-flash:cloud" in str(catalog.get("default_model"))
 
     # Assert Ollama models are present
     ollama_groups = [g for g in catalog.get("groups", []) if "ollama" in g.get("provider", "").lower()]

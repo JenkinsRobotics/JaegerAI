@@ -2,6 +2,12 @@
 
 Live subscribers receive in-process notifications. Replay uses the session
 store when attached so reconnects and restarts share one event cursor.
+
+Event schema — the ONE stream contract. The IDE, Mac app, CLI and WebUI all
+render from these names; no client maintains a second schema. WebUI-specific
+interactions (clarify cards, approval cards, dispatcher board updates) are
+first-class event types here so nothing is lost when a client is only a
+projection of this stream.
 """
 
 from __future__ import annotations
@@ -18,6 +24,46 @@ from .session_store import GatewaySessionStore
 
 class ReplayGap(RuntimeError):
     """The client must reload its transcript because events were retired."""
+
+
+#: First-class event names on the gateway stream. The bus itself accepts any
+#: name (the store column is TEXT), but clients should render from this
+#: registry: it is the union of what the IDE renders natively and what the
+#: WebUI used to translate out of bridge frames. Adding a name here is the
+#: contract for a new card/interaction; removing one is a breaking change.
+EVENT_TYPES = frozenset({
+    # Turn lifecycle (IDE + WebUI + CLI render these identically).
+    "turn.start", "turn.delta", "turn.reasoning", "turn.progress",
+    "turn.plan", "turn.finish", "turn.failed", "turn.cancelled",
+    "turn.unknown", "turn.cancel",
+    # Tools and files.
+    "tool.started", "tool.done", "tool.error", "files.changed",
+    # Session lifecycle (the projection's list is built from these).
+    "session.created", "session.updated", "session.deleted",
+    # Approvals — the approval card. ``approval.request`` carries
+    # {approval_id, kind, prompt, options, session_id}; resolve via
+    # POST /v1/approvals/{id} which emits ``approval.resolved``.
+    "approval.request", "approval.resolved",
+    # Clarify cards — a mid-turn question the operator answers in place.
+    # ``clarify.request`` carries {clarify_id, run_id, question, choices,
+    # session_id}; the answer rides POST /v1/sessions/{id}/turns as a normal
+    # turn or the dedicated respond endpoint, which emits ``clarify.resolved``.
+    "clarify.request", "clarify.resolved",
+    # Dispatcher board — kanban card moves surface here so a phone watching
+    # the board sees the same updates the IDE does.
+    "board.updated",
+    # IDE bridge + attachments + agent lifecycle.
+    "ide.request", "attachment.added",
+    "agent.created", "agent.activated", "agent.handoff", "agent.handoff.finished",
+})
+
+#: Names that carry a card the WebUI renders interactively. The adapter shim
+#: forwards these verbatim; it never re-derives them from bridge frames.
+CARD_EVENTS = frozenset({
+    "approval.request", "approval.resolved",
+    "clarify.request", "clarify.resolved",
+    "board.updated",
+})
 
 
 @dataclass(frozen=True, slots=True)

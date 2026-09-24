@@ -370,11 +370,9 @@ class RunHandler(RunsHTTP, BaseHTTPRequestHandler):
         if os.environ.get("JAEGERS_ADAPTER_NATIVE_RUNS", "true").lower() in {"1", "true"} and self.native_route("GET"):
             return
         if self.path in ("/health", "/v1/health", "/health/detailed"):
-            try:
-                from jaeger_ai.features.webui.service.session_unify import sync_jaeger_sessions_to_hermes_webui
-                sync_jaeger_sessions_to_hermes_webui()
-            except Exception:
-                pass
+            # Health no longer triggers a session mirror: the WebUI catalog is
+            # a read-only projection of the Gateway's store, and a health probe
+            # must never write session truth anywhere.
             self._send_json(200, {"ok": True, "status": "ready"})
         elif self.path == "/v1/capabilities":
             self._send_json(200, {

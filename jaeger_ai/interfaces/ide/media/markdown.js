@@ -68,20 +68,77 @@ function safeRenderer(smd, el) {
 // deltas to a few times a second) is cheap at chat-reply sizes and keeps
 // there being exactly one code path, tested exactly once.
 // Falls back to literal text + fenced <pre> blocks when smd is unavailable.
+function enhanceCodeBlocks(el) {
+  const blocks = el.querySelectorAll('pre');
+  blocks.forEach(pre => {
+    if (pre.parentElement && pre.parentElement.classList.contains('code-card')) return;
+    const code = pre.querySelector('code');
+    if (!code) return;
+    
+    const card = document.createElement('div');
+    card.className = 'code-card';
+    
+    const langMatch = code.className.match(/language-(\w+)/);
+    const lang = langMatch ? langMatch[1] : 'code';
+    
+    const header = document.createElement('div');
+    header.className = 'code-header';
+    
+    const chip = document.createElement('span');
+    chip.className = 'code-lang-chip';
+    chip.textContent = lang;
+    
+    const actions = document.createElement('div');
+    actions.className = 'code-actions';
+    
+    const copyBtn = document.createElement('button');
+    copyBtn.className = 'copy-code-btn';
+    copyBtn.title = 'Copy code';
+    copyBtn.setAttribute('aria-label', 'Copy code');
+    const svgIcon = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M9 8V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3M5 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z"/></svg>';
+    copyBtn.innerHTML = svgIcon + ' Copy';
+    
+    copyBtn.onclick = () => {
+      const text = code.textContent;
+      if (typeof window !== 'undefined' && window.JaegerPostMessage) {
+          window.JaegerPostMessage('copy', { text });
+      } else if (navigator.clipboard) {
+          navigator.clipboard.writeText(text);
+      }
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => { copyBtn.innerHTML = svgIcon + ' Copy'; }, 1200);
+    };
+    
+    actions.append(copyBtn);
+    header.append(chip, actions);
+    
+    pre.parentNode.insertBefore(card, pre);
+    card.append(header, pre);
+  });
+}
+
 function renderMarkdownOnce(smd, el, text) {
   el.replaceChildren();
   if (smd) {
     const parser = smd.parser(safeRenderer(smd, el));
     smd.parser_write(parser, String(text || ''));
     smd.parser_end(parser);
+    enhanceCodeBlocks(el);
     return;
   }
   for (const part of splitFencedText(text)) {
     const node = document.createElement(part.type === 'code' ? 'pre' : 'div');
     node.className = 'content';
-    node.textContent = part.value;
+    if (part.type === 'code') {
+      const codeNode = document.createElement('code');
+      codeNode.textContent = part.value;
+      node.append(codeNode);
+    } else {
+      node.textContent = part.value;
+    }
     el.append(node);
   }
+  enhanceCodeBlocks(el);
 }
 
 const exportsObject = { isSafeMarkdownUrl, splitFencedText, safeRenderer, renderMarkdownOnce };

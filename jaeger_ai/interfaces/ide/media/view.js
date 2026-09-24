@@ -16,11 +16,14 @@ let submittedDraftSession = null;
 let showAllChats = false;
 const drafts = api.getState()?.drafts || {};
 const post = (type, extra = {}) => api.postMessage({ type, ...extra });
+window.JaegerPostMessage = post;
 
 let ideContextOn = api.getState()?.ideContext !== false;
 const persistView = () => api.setState({ drafts, ideContext: ideContextOn });
 function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
-function eligibility() { $('send').disabled = !state.connected || state.busy || !$('prompt').value.trim(); }
+// While the agent is busy the send button becomes a steering send: the text
+// is queued client-side and auto-sent when the running turn settles.
+function eligibility() { $('send').disabled = !state.connected || !$('prompt').value.trim(); }
 
 function announceCopied() {
   const node = $('copied');
@@ -62,8 +65,10 @@ function copyButton(text) {
 function message(role, text) {
   const node = document.createElement('article'); node.className = role === 'user' ? 'user message' : 'assistant message';
   const label = document.createElement('div'); label.className = 'speaker';
-  const name = document.createElement('span'); name.textContent = role === 'user' ? 'You' : 'Jaeger';
-  label.append(name);
+  const avatar = document.createElement('div'); avatar.className = 'avatar';
+  avatar.textContent = role === 'user' ? 'U' : 'J';
+  const name = document.createElement('span'); name.className = 'role-name'; name.textContent = role === 'user' ? 'You' : 'Jaeger';
+  label.append(avatar, name);
   if (role === 'assistant' && text) label.append(copyButton(text));
   const content = document.createElement('div'); content.className = 'content';
   if (role === 'user') content.textContent = text;
@@ -86,19 +91,26 @@ function message(role, text) {
 // Failures stay visible as a count on the (possibly closed) header — the
 // one thing worth surfacing from a section the operator hasn't opened.
 function activitySection(items, running) {
-  const details = document.createElement('details'); details.className = 'activity' + (running ? ' running' : '');
+  const details = document.createElement('details'); details.className = 'activity' + (running ? ' running tool-card' : ' tool-card');
   const summary = document.createElement('summary');
   const title = document.createElement('span'); title.textContent = activitySummary(items, running);
   summary.title = title.textContent;
   const glyph = icon(activityIcon(items)); glyph.setAttribute('class', 'activity-icon');
   title.className = 'activity-label';
   summary.append(glyph, title);
+  
+  const statusBadge = document.createElement('span'); 
+  statusBadge.className = 'status-badge ' + (running ? 'running' : 'completed');
+  statusBadge.textContent = running ? 'running' : 'completed';
+  
   const failed = failureCount(items);
   if (failed > 0) {
-    const badge = document.createElement('span'); badge.className = 'activity-fail';
-    badge.textContent = `${failed} failed`; summary.append(badge);
+    statusBadge.className = 'status-badge failed';
+    statusBadge.textContent = `${failed} failed`; 
   }
+  summary.append(statusBadge);
   details.append(summary);
+  
   for (const item of items) {
     const row = document.createElement('div'); row.className = 'activity-item' + (item.ok === false ? ' failed' : '');
     const tool = document.createElement('span'); tool.className = 'tool'; tool.textContent = toolName(item.name);
@@ -126,6 +138,16 @@ function reasoningSection(text, live = false) {
   const content = document.createElement('div'); content.className = 'content'; content.textContent = text;
   details.append(content);
   return details;
+}
+
+// A queued mid-turn steering note: visually distinct from a sent message so
+// the operator can see it has not reached the agent yet.
+function steerNote(text) {
+  const node = document.createElement('div'); node.className = 'steer-note';
+  const label = document.createElement('span'); label.className = 'steer-label'; label.textContent = 'Steering · queued';
+  const body = document.createElement('div'); body.className = 'steer-text'; body.textContent = text;
+  node.append(label, body);
+  return node;
 }
 
 function renderTurn(turn) {
@@ -178,6 +200,9 @@ function transcriptRows() {
     if (placed.has(row.requestId) && (state.busy || row.kind !== 'answer')) continue;
     if (legacyActivity.includes(row) || row.kind === 'control' || row.kind === 'terminal') continue;
     rows.push({ ...row, key: `live:${row.key}` });
+  }
+  for (const steer of state.steers || []) if (state.session && steer.sessionId === state.session.session_id) {
+    rows.push({ key: `steer:${steer.id}`, kind: 'steer', text: steer.text, live: true });
   }
   if (state.preview) rows.push({ key: `diff:${state.preview.requestId}:${state.preview.path}`, kind: 'diff', file: state.preview });
   if (!rows.length) rows.push({ key: 'empty', kind: 'empty', live: false });
@@ -262,6 +287,8 @@ function updateTimelineRow(node, row) {
     content = activitySection(row.items, row.live);
   } else if (row.kind === 'diff') {
     content = renderDiff(row.file);
+  } else if (row.kind === 'steer') {
+    content = steerNote(row.text || '');
   } else if (row.kind === 'empty') {
     content = document.createElement('section'); content.className = 'empty';
     const logo = document.createElement('img'); logo.src = $('logo-source').src || '';
@@ -485,6 +512,7 @@ function renderDiff(file) {
 const stateQueue = createFrameQueue(batch => {
   const data = batch.at(-1);
   if (data.editDraft !== undefined) { $('prompt').value = data.editDraft; saveDraft(); eligibility(); $('prompt').focus(); return; }
+  if (data.steerRejected !== undefined) { $('prompt').value = data.steerRejected; saveDraft(); eligibility(); $('prompt').focus(); return; }
   if (data.accepted) {
     if (submittedDraftSession !== null && String(drafts[submittedDraftSession] || '').trim() === data.submittedText) {
       drafts[submittedDraftSession] = '';
@@ -627,8 +655,10 @@ $('composer').onsubmit = event => {
   // keep-session, 'config' as the static setting, and 'provider::model' as
   // an explicit catalog choice — the display matches the behaviour.
   if (!$('send').disabled) {
+    const text = $('prompt').value;
+    if (state.busy) { post('steer', { text }); $('prompt').value = ''; saveDraft(); eligibility(); return; }
     submittedDraftSession = draftSession;
-    post('send', { text: $('prompt').value, model: $('model').value, ideContext: ideContextOn });
+    post('send', { text, model: $('model').value, ideContext: ideContextOn });
   }
 };
 $('prompt').oninput = () => { saveDraft(); eligibility(); slashDismissed = false; slashIndex = 0; renderSlashMenu(); };

@@ -175,7 +175,7 @@ class TestGatewayServerAPI(AioHTTPTestCase):
         def owner(text, **kwargs):
             return {"text": "Audit response", "halt_reason": None}
         self.gateway_app._owner_react_turn = owner
-        # 1. Create session
+        # 1. Create session — the Gateway mints the id; the client adopts it.
         resp = await self.client.request(
             "POST",
             "/v1/sessions",
@@ -183,7 +183,8 @@ class TestGatewayServerAPI(AioHTTPTestCase):
         )
         assert resp.status == 201
         data = await resp.json()
-        assert data["session_id"] == "test-uuid"
+        sid = data["session_id"]
+        assert sid and sid != "test-uuid"
         assert data["profile"] == "roundtable"
 
         # 2. List sessions
@@ -195,12 +196,12 @@ class TestGatewayServerAPI(AioHTTPTestCase):
         # 3. Post turn
         resp = await self.client.request(
             "POST",
-            "/v1/sessions/test-uuid/turns",
+            f"/v1/sessions/{sid}/turns",
             json={"text": "Audit security posture"},
         )
         assert resp.status == 200
         turn_data = await resp.json()
-        assert turn_data["session_id"] == "test-uuid"
+        assert turn_data["session_id"] == sid
         assert turn_data["status"] == "running"
 
         # Wait for background turn execution
@@ -209,7 +210,7 @@ class TestGatewayServerAPI(AioHTTPTestCase):
         )
 
         # 4. Fetch session history
-        resp = await self.client.request("GET", "/v1/sessions/test-uuid")
+        resp = await self.client.request("GET", f"/v1/sessions/{sid}")
         assert resp.status == 200
         sess_data = await resp.json()
         assert len(sess_data["messages"]) >= 2

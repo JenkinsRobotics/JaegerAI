@@ -3476,7 +3476,7 @@ def get_effective_default_model(config_data: dict | None = None) -> str:
         return env_model.strip()
     try:
         from jaeger_ai.core.models.discovery import canonical_runtime_inventory
-        live = str((canonical_runtime_inventory(cached_only=True) or {}).get("default_model") or "").strip()
+        live = str((canonical_runtime_inventory(refresh=True) or {}).get("default_model") or "").strip()
         if live:
             return live
     except Exception:
@@ -5804,6 +5804,35 @@ def _static_models_catalog_without_live_probes() -> dict:
                     {"id": model_id, "label": _format_ollama_label(model_id)}
                     for model_id in configured_model_ids.get(pid, [])
                 ]
+                # In the cold-cache static fallback, also pin the prominent
+                # agentic / coding cloud models so the Ollama Cloud group is
+                # never empty when the aggregate endpoint is configured.
+                if pid == "ollama-cloud":
+                    _PROMINENT_OLLAMA_CLOUD_MODELS = [
+                        "glm-5.3-flash:cloud",
+                        "deepseek-v4.1-flash:cloud",
+                        "kimi-k2.7-code:cloud",
+                        "deepseek-v4-pro:cloud",
+                    ]
+                    _prominent_entries = [
+                        {"id": mid, "label": _format_ollama_label(mid)}
+                        for mid in _PROMINENT_OLLAMA_CLOUD_MODELS
+                        if not any(m.get("id") == mid for m in raw_models)
+                    ]
+                    raw_models = _prominent_entries + raw_models
+                    # Ensure the configured default (if any) is the very
+                    # first entry in the Ollama Cloud group.
+                    _default_model = str(
+                        (cfg.get("model") or {}).get("default") if isinstance(cfg.get("model"), dict) else ""
+                    ).strip()
+                    if _default_model:
+                        _default_idx = next(
+                            (i for i, m in enumerate(raw_models) if m.get("id") == _default_model),
+                            None,
+                        )
+                        if _default_idx is not None:
+                            raw_models.insert(0, raw_models.pop(_default_idx))
+
             elif isinstance(provider_cfg, dict) and "models" in provider_cfg:
                 raw_models = _configured_model_options(provider_cfg["models"])
             if not raw_models and not (
@@ -8074,6 +8103,23 @@ def get_available_models(*, prefer_cache: bool = False, force_refresh: bool = Fa
                     except Exception:
                         logger.warning("Failed to load Ollama Cloud models from hermes_cli")
 
+                    # Prominently surface the cloud models best suited for
+                    # agentic / coding work.  These are pinned at the top of the
+                    # Ollama Cloud group so they remain discoverable even when
+                    # the live catalog is large or unordered.
+                    _PROMINENT_OLLAMA_CLOUD_MODELS = [
+                        "glm-5.3-flash:cloud",
+                        "deepseek-v4.1-flash:cloud",
+                        "kimi-k2.7-code:cloud",
+                        "deepseek-v4-pro:cloud",
+                    ]
+                    _prominent_entries = [
+                        {"id": mid, "label": _format_ollama_label(mid)}
+                        for mid in _PROMINENT_OLLAMA_CLOUD_MODELS
+                        if not any(m.get("id") == mid for m in raw_models)
+                    ]
+                    raw_models = _prominent_entries + raw_models
+
                     if raw_models:
                         _append_picker_group(provider_name, pid, raw_models)
                 elif pid == "openai-codex":
@@ -9903,7 +9949,7 @@ _SETTINGS_DEFAULTS = {
     "api_redact_enabled": True,  # redact sensitive data (API keys, secrets) from API responses
     "dashboard_plugins": {},  # plugin_name -> bool, opt-in per plugin (default off per PF-10b)
     "sidebar_density": "compact",  # compact | detailed
-    "auto_title_refresh_every": "0",  # adaptive title refresh: 0=off, 5/10/20=every N exchanges
+    "auto_title_refresh_every": "5",  # adaptive title refresh: 0=off, 5/10/20=every N exchanges (default 5 so titles keep tracking the conversation topic)
     "default_message_mode": "steer",  # behavior when sending while agent is running: queue | interrupt | steer
     "password_hash": None,  # PBKDF2-HMAC-SHA256 hash; None = auth disabled
     "auth_disabled_acknowledged": False,  # user acknowledged unauthenticated risk
@@ -10124,11 +10170,16 @@ def load_settings() -> dict:
     )
     settings["default_model"] = get_effective_default_model()
     try:
-        model_cfg = get_config().get("model", {})
-        if isinstance(model_cfg, dict) and model_cfg.get("provider"):
-            settings["default_model_provider"] = str(model_cfg.get("provider"))
+        from jaeger_ai.core.models.discovery import canonical_runtime_inventory
+        inv = canonical_runtime_inventory(refresh=True) or {}
+        provider = inv.get("active_provider") or inv.get("default_provider")
+        if provider:
+            settings["default_model_provider"] = str(provider)
+        default_model_full = inv.get("default_model_full_id")
+        if default_model_full:
+            settings["default_model"] = str(default_model_full)
     except Exception:
-        logger.debug("Failed to resolve default model provider for settings")
+        logger.debug("Failed to resolve default model provider from runtime inventory")
     from jaeger_ai.contract.legacy_paths import HIDDEN_WEBUI_TABS, legacy_paths_enabled
 
     if not legacy_paths_enabled():

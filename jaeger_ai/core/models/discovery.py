@@ -468,7 +468,7 @@ def canonical_runtime_inventory(
         matrix = load_matrix(instance_root)
         _, default_model_name = select_production_model(matrix)
     except Exception:
-        default_model_name = "kimi-k2.7-code:cloud"
+        default_model_name = "glm-5.3-flash:cloud"
 
     groups: list[dict[str, Any]] = []
 
@@ -597,12 +597,22 @@ def canonical_runtime_inventory(
                 "models": models,
             })
 
-    active_provider = "ollama-cloud" if cloud_models else ("ollama-local" if local_models else "ollama")
+    # The default model is a cloud tag, so route it through Ollama Cloud
+    # when no live catalog is available; otherwise prefer the discovered group.
+    if cloud_models:
+        active_provider = "ollama-cloud"
+    elif local_models:
+        active_provider = "ollama-local"
+    elif default_model_name.endswith(":cloud"):
+        active_provider = "ollama-cloud"
+    else:
+        active_provider = "ollama-local"
     default_full_id = f"@{active_provider}:{default_model_name}"
 
     result = {
         "active_provider": active_provider,
-        "default_model": default_full_id,
+        "default_model": default_model_name,
+        "default_model_full_id": default_full_id,
         "groups": groups,
     }
 

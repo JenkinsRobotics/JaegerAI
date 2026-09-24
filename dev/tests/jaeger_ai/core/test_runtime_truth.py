@@ -51,9 +51,9 @@ def test_capability_snapshot_does_not_claim_unconfigured_cloud():
     assert "entity_id" in (snap.get("identity") or {})
 
 
-def test_product_default_model_is_kimi():
+def test_product_default_model_is_glm_flash():
     from jaeger_ai.contract.frameworks import DEFAULT_AGENT_MODEL
-    assert DEFAULT_AGENT_MODEL == "kimi-k2.7-code:cloud"
+    assert DEFAULT_AGENT_MODEL == "glm-5.3-flash:cloud"
 
 
 def test_prompt_block_carries_the_real_tool_list_for_tool_less_turns():

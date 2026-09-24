@@ -31,7 +31,7 @@ from jaeger_ai.contract.ports import (
     WEBUI_ADAPTER_PORT,
     WEBUI_PORT,
 )
-from jaeger_ai.contract.sessions import normalise_surface, runtime_from_session_id
+from jaeger_ai.contract.sessions import normalise_surface
 
 from .event_bus import GatewayEventBus, ReplayGap
 from jaeger_ai.core.runtime.cancellation import CancellationRegistry
@@ -773,6 +773,8 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/sessions/{id}/requests/{request_id}/changes/undo", self.handle_file_changes)
         self.app.router.add_post("/v1/sessions/{id}/handoff", self.handle_session_handoff)
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
+        self.app.router.add_get("/v1/sessions/{id}/events", self.handle_session_events_json)
+        self.app.router.add_get("/v1/requests/{request_id}", self.handle_get_request_any_session)
         self.app.router.add_get("/v1/sessions/{id}/activity", self.handle_activity_history)
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
@@ -1275,16 +1277,27 @@ class JaegerGatewayApp:
 
     async def handle_create_session(self, request: web.Request) -> web.Response:
         body = await request.json() if request.can_read_body else {}
-        session_id = str(body.get("session_id") or uuid.uuid4().hex)
+        # The Gateway mints and owns session IDs. A client-supplied id is a
+        # hint at most: it is never trusted as the stored identity, because a
+        # second writer of the namespace is how three session stores happened.
+        # Clients adopt the id the Gateway returns (cross-client continuation
+        # works because every client reads the same row).
+        session_id = uuid.uuid4().hex
         title = str(body.get("title") or "New Conversation")
         workspace = str(body.get("workspace") or "")
-        metadata = body.get("metadata") or {}
-        # Fall back to what the id says, not to "jaeger". Defaulting here is
-        # why a live store held 65 sessions ALL labelled jaeger, including the
-        # Hermes and OpenClaw ones, so no profile could list its own history.
+        metadata = dict(body.get("metadata") or {})
+        # Profile binding is enforced HERE, gateway-side. The client may name a
+        # profile; the gateway validates it against the framework registry and
+        # stamps it — the id no longer carries the profile, so a client cannot
+        # mint a "hermes" session by shaping its id.
         profile = str(body.get("profile") or "").strip()
         if not profile:
-            profile = runtime_from_session_id(session_id) or "jaeger"
+            profile = "jaeger"
+        from jaeger_ai.contract.frameworks import canonical_runtime, UnknownFramework
+        try:
+            profile = canonical_runtime(profile)
+        except UnknownFramework:
+            return web.json_response({"error": f"Unknown profile: {profile}"}, status=400)
         # Record where it was started so the sidebar can split browser from
         # terminal conversations for each framework.
         surface = normalise_surface(body.get("source") or metadata.get("source"))
@@ -1415,6 +1428,21 @@ class JaegerGatewayApp:
         text = str(body.get("text") or body.get("input") or "").strip()
         if not text:
             return web.json_response({"error": "Missing turn text"}, status=400)
+        # Profile binding is enforced gateway-side: a turn may not switch the
+        # profile a session was created with. Cross-client continuation
+        # (start on the phone, finish in the IDE) works because both clients
+        # address the same gateway-owned session id.
+        requested_profile = str(body.get("profile") or "").strip()
+        if requested_profile:
+            session = self.store.get_session(session_id)
+            if session is None:
+                return web.json_response({"error": "Session not found"}, status=404)
+            bound = str(session.get("profile") or "").strip().lower()
+            if bound and bound != requested_profile.strip().lower():
+                return web.json_response(
+                    {"error": f"This conversation belongs to {bound}; start a new chat to talk to {requested_profile}"},
+                    status=409,
+                )
         request_id = body.get("request_id")
         if request_id is not None:
             request_id = str(request_id).strip() or None
@@ -2668,6 +2696,36 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Request not found"}, status=404)
         return web.json_response(row)
 
+    async def handle_get_request_any_session(self, request: web.Request) -> web.Response:
+        """GET /v1/requests/{request_id} — request lookup without knowing the session.
+
+        The WebUI shim holds only the request_id a turn admission returned;
+        the session id is the Gateway's business. Resolves by request_id
+        first, then by turn_id (the same fallback handle_cancel_turn uses).
+        """
+        rid = request.match_info["request_id"]
+        row = self.store.get_request(rid) or self.store.get_request_by_turn(rid)
+        if row is None:
+            return web.json_response({"error": "Request not found"}, status=404)
+        return web.json_response(row)
+
+    async def handle_session_events_json(self, request: web.Request) -> web.Response:
+        """GET /v1/sessions/{id}/events?since_event_id=N — the replay window as JSON.
+
+        The SSE stream is for live subscribers; polling clients (the WebUI
+        shim's run feed) need the same durable events as one JSON document.
+        Same store, same schema, same cursor semantics as the stream.
+        """
+        session_id = request.match_info["id"]
+        if not self.store.get_session(session_id):
+            return web.json_response({"error": "Session not found"}, status=404)
+        try:
+            since = int(request.query.get("since_event_id") or 0)
+        except ValueError:
+            return web.json_response({"error": "Invalid since_event_id"}, status=400)
+        window = self.event_bus.replay_window(session_id, since)
+        return web.json_response(window)
+
     async def handle_cancel_turn(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
         body = await request.json() if request.can_read_body else {}
@@ -2802,7 +2860,8 @@ class JaegerGatewayApp:
         try:
             from jaeger_ai.core.runtime.native_turns import NativeTurns
             root = self._instance_root() / "run"
-            return NativeTurns(root, read_only=True).get(native_run_id, native_session)
+            result = NativeTurns(root, read_only=True).get(native_run_id, native_session)
+            return result if result is not None else {"execution_unknown": True, "error": "run_not_found"}
         except Exception as exc:  # noqa: BLE001 — reconciliation must not crash
             logger.warning("native receipt lookup failed: %s", exc)
             return {"execution_unknown": True, "error": type(exc).__name__}
