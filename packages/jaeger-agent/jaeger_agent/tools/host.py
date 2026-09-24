@@ -18,6 +18,7 @@ import subprocess
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
+from jaeger_agent.task_port import ide_request
 from jaeger_agent.tools.time_and_math import system_status
 from jaeger_agent.workspace import SandboxError, _require_layout, _resolve_under
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
@@ -141,6 +142,36 @@ def _t_open_on_host(target: str, kind: str = "auto", app: str = "") -> dict:
     file, else → app name). File targets are sandbox-resolved under
     <instance>/skills/."""
     return open_on_host(target=target, kind=kind, app=app)
+
+
+@register_tool_from_function(name="ide_context", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="ide", operation="ide_context",
+               summary="read what the operator has open in the IDE")
+def ide_context() -> dict:
+    """What the operator has open in their IDE right now: the workspace, the active
+    file, the selected lines and the other open tabs. Use it when you need the
+    current state ("this file", "what I'm looking at") mid-task."""
+    return ide_request("context")
+
+
+@register_tool_from_function(name="ide_open_file", side_effect="external")
+@requires_tier(PermissionTier.READ_ONLY, skill="ide", operation="ide_open_file",
+               summary="open a file in the operator's editor")
+def ide_open_file(path: str, line: int = 0) -> dict:
+    """Open a file in the operator's IDE editor and, if `line` is given (1-based),
+    jump to it. Relative paths are relative to the open workspace. Use it to show
+    the operator the code you are talking about or have just changed."""
+    return ide_request("open_file", {"path": str(path or ""), "line": int(line or 0)})
+
+
+@register_tool_from_function(name="ide_diagnostics", side_effect="read")
+@requires_tier(PermissionTier.READ_ONLY, skill="ide", operation="ide_diagnostics",
+               summary="read the problems the IDE shows")
+def ide_diagnostics(path: str = "") -> dict:
+    """The errors and warnings the IDE currently shows in its Problems panel
+    (type checker, linter, language server), optionally for one file. Check it
+    after an edit to see whether you introduced a problem."""
+    return ide_request("diagnostics", {"path": str(path or "")})
 
 
 @register_tool_from_function(name="set_mode")

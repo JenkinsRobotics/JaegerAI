@@ -37,6 +37,37 @@ function activate(context) {
       view?.webview.postMessage({ autonomy: { mode: result.autonomy, options: result.options } });
     } catch (error) { if (mode) throw error; /* reading is best-effort: the pill just stays unknown */ }
   };
+  // What the agent's ide_* tools can ask of the editor. Reads are bounded; opening a
+  // file only changes what the operator is looking at.
+  const ideCall = async (kind, args) => {
+    const roots = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
+    const absolute = file => (path.isAbsolute(file) ? file : path.join(roots[0] || '', file));
+    const shown = file => { const root = roots.find(r => file.startsWith(r + path.sep)); return root ? file.slice(root.length + 1) : file; };
+    if (kind === 'context') return ideContext() || { note: 'Nothing is open in the editor' };
+    if (kind === 'open_file') {
+      const file = absolute(String(args.path || ''));
+      const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)), { preview: false });
+      const line = Number(args.line) > 0 ? Number(args.line) - 1 : -1;
+      if (line >= 0) {
+        const position = new vscode.Position(Math.min(line, editor.document.lineCount - 1), 0);
+        editor.selection = new vscode.Selection(position, position);
+        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
+      }
+      return { opened: shown(file), line: line >= 0 ? line + 1 : null };
+    }
+    if (kind === 'diagnostics') {
+      const only = args.path ? absolute(String(args.path)) : '';
+      const levels = ['error', 'warning', 'info', 'hint'], found = [];
+      for (const [uri, list] of vscode.languages.getDiagnostics()) {
+        if (uri.scheme !== 'file' || (only && uri.fsPath !== only)) continue;
+        for (const item of list) found.push({ path: shown(uri.fsPath), severity: levels[item.severity] || 'info',
+          line: item.range.start.line + 1, message: String(item.message).slice(0, 300), source: item.source || '' });
+      }
+      found.sort((a, b) => levels.indexOf(a.severity) - levels.indexOf(b.severity));
+      return { count: found.length, diagnostics: found.slice(0, 60), truncated: found.length > 60 };
+    }
+    throw new Error(`Unsupported IDE request: ${kind}`);
+  };
   const ideContext = () => {
     const editor = vscode.window.activeTextEditor;
     const chosen = editor && !editor.selection.isEmpty ? editor.selection : null;
@@ -134,7 +165,7 @@ function activate(context) {
           if (answer === 'Replace draft') view?.webview.postMessage({ editDraft: message.text });
           return;
         }
-        if (message.type === 'ready') { selected = createController(); void refreshChanges(); void sendAutonomy(); return controller.refresh(selected); }
+        if (message.type === 'ready') { selected = createController(); controller.ideHandler = ideCall; void refreshChanges(); void sendAutonomy(); return controller.refresh(selected); }
         if (message.type === 'turnChanges' && !controller?.state.busy) {
           const turns = controller?.workBySession[controller?.state.session?.session_id] || [];
           if (!turns.some(turn => turn.requestId === message.requestId)) return;

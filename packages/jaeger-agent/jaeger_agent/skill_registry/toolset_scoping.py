@@ -228,6 +228,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
     # Planning primitives (Codex ``update_plan`` / ``wait``): stateless display
     # of the model's plan and a cancellable bounded pause.
     "planning": frozenset({"update_plan", "wait"}),
+    # Ask the operator's editor: open a file at a line, list Problems, read what is open.
+    "ide": frozenset({"ide_context", "ide_open_file", "ide_diagnostics"}),
     "sessions": frozenset({"session_search"}),
     "board": frozenset({
         # board_add / board_view are CORE; the rest load on intent.
@@ -340,6 +342,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "web": "weather lookups (web_search / web_extract are always-on)",
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
     "planning": "show and update a step plan (update_plan); wait for a bounded time",
+    "ide": "the operator's editor: open a file at a line, list Problems, read what is open",
     "sessions": "search and inspect canonical conversation history",
     "board": "board_move / board_update / board_delete (board_add + board_view are CORE)",
     "kanban": "multi-agent worker/orchestrator protocol — claim, heartbeat, "

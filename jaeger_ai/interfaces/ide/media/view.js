@@ -105,6 +105,14 @@ function activitySection(items, running) {
     row.append(tool);
     if (item.detail) { const detail = document.createElement('span'); detail.textContent = item.detail; row.append(detail); }
     details.append(row);
+    // What ran and what it printed, as text (never HTML): IN then OUT, like an IDE terminal.
+    for (const [label, text] of [['IN', item.input], ['OUT', item.output]]) {
+      if (!text) continue;
+      const block = document.createElement('div'); block.className = 'io-block';
+      const tag = document.createElement('span'); tag.className = 'io-tag'; tag.textContent = label;
+      const body = document.createElement('pre'); body.textContent = text;
+      block.append(tag, body); details.append(block);
+    }
   }
   return details;
 }

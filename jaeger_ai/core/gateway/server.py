@@ -12,6 +12,7 @@ import time
 import json
 import logging
 import os
+import re
 import threading
 import uuid
 from pathlib import Path
@@ -94,6 +95,40 @@ TURN_DELTA_BATCH_CHARS = 96
 TURN_DELTA_BATCH_S = 0.1
 TOOL_EVENT_NAME_MAX = 80
 TOOL_EVENT_DURATION_MAX_S = 86_400.0
+
+
+#: Shell-like tools whose command and output the operator sees inline, as in any IDE
+#: agent. Everything else (file contents, credentials, arbitrary results) stays
+#: unpublished. ``write_stdin`` is excluded on purpose: what is typed into a live
+#: process can be a password.
+_INLINE_INPUT_KEY = {"terminal": "command", "run_shell": "command", "exec_command": "cmd", "execute_code": "code"}
+_INLINE_OUTPUT_KEYS = ("output", "stdout", "stderr", "result")
+_INLINE_INPUT_MAX = 600
+_INLINE_OUTPUT_MAX = 1500
+_SECRET_TEXT = re.compile(
+    r"(?i)((?:api[_-]?key|token|secret|passwd|password|authorization|bearer)\s*[=:]\s*['\"]?|\bsk-)[A-Za-z0-9_\-./+=]{8,}"
+)
+
+
+def _inline_text(text: Any, limit: int) -> str:
+    """Bounded, secret-redacted text for an inline tool block (best effort)."""
+    value = _SECRET_TEXT.sub(lambda m: m.group(1) + "***", str(text or "")).strip()
+    if len(value) <= limit:
+        return value
+    half = limit // 2
+    return f"{value[:half]}\n…\n{value[-half:]}"
+
+
+def _tool_input_text(name: str, args: Any) -> str:
+    key = _INLINE_INPUT_KEY.get(name)
+    return _inline_text(args.get(key), _INLINE_INPUT_MAX) if key and isinstance(args, dict) else ""
+
+
+def _tool_output_text(name: str, result: Any) -> str:
+    if name not in _INLINE_INPUT_KEY or not isinstance(result, dict):
+        return ""
+    parts = [str(result[k]) for k in _INLINE_OUTPUT_KEYS if isinstance(result.get(k), (str, int, float)) and str(result[k]).strip()]
+    return _inline_text("\n".join(parts), _INLINE_OUTPUT_MAX)
 
 
 def _safe_tool_event_name(value: Any) -> str:
@@ -336,6 +371,10 @@ class JaegerGatewayApp:
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
+        # Requests the agent has sent to the operator's editor, awaiting its answer.
+        self._ide_pending: dict[str, tuple[str, Any]] = {}
+        from jaeger_agent import task_port
+        task_port.install_ide_requester(self._ide_request)
         self._running_tasks: dict[str | tuple[str, str], asyncio.Future[Any]] = {}
         # Request-scoped cancellation (R03): registered at admission, bound
         # to the executing agent, released when the worker returns.
@@ -742,6 +781,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/runtime/models", self.handle_runtime_models)
         self.app.router.add_get("/v1/runtime/capabilities", self.handle_runtime_capabilities)
         self.app.router.add_get("/v1/runtime/skills", self.handle_runtime_skills)
+        self.app.router.add_post("/v1/sessions/{id}/ide/{ide_request_id}", self.handle_ide_result)
         self.app.router.add_get("/v1/runtime/autonomy", self.handle_get_autonomy)
         self.app.router.add_post("/v1/runtime/autonomy", self.handle_set_autonomy)
         self.app.router.add_get("/v1/sessions/{id}/attachments", self.handle_list_attachments)
@@ -1993,6 +2033,7 @@ class JaegerGatewayApp:
                 "success": None,
                 "ok": None,
                 "text": "Started",
+                **({"input": shown} if (shown := _tool_input_text(raw_name, data)) else {}),
             })
 
         def on_tool_done(
@@ -2008,6 +2049,7 @@ class JaegerGatewayApp:
             # The one exception is ``update_plan``: its result is the plan the
             # model chose to show the operator, and only that validated payload
             # (steps, statuses, an optional note) leaves this callback.
+            output_text = _tool_output_text(str(name or ""), result)
             plan_payload = None
             if str(name or "") == "update_plan" and ok and isinstance(result, dict) and result.get("ok"):
                 plan_payload = {
@@ -2055,6 +2097,7 @@ class JaegerGatewayApp:
                 "ok": succeeded,
                 "elapsed_s": duration,
                 "text": detail,
+                **({"output": output_text} if output_text else {}),
             })
             if plan_payload is not None:
                 self.event_bus.publish(session_id, "turn.plan", {**ids, **plan_payload})
@@ -2845,6 +2888,47 @@ class JaegerGatewayApp:
     async def handle_runtime_capabilities(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.runtime.truth import capability_snapshot
         return web.json_response(capability_snapshot())
+
+    # ── IDE bridge: the agent asks the operator's editor to do something ──────
+
+    _IDE_KINDS = frozenset({"context", "open_file", "diagnostics"})
+
+    def _ide_request(self, session_id: str, request_id: str, kind: str, args: dict, timeout: float) -> dict[str, Any]:
+        """Blocking; called from the agent's worker thread. Publishes ``ide.request`` on the
+        session stream, which the IDE extension answers via POST .../ide/{id}."""
+        import concurrent.futures
+
+        loop = getattr(self, "_loop", None)
+        if kind not in self._IDE_KINDS or loop is None or not loop.is_running():
+            return {"ok": False, "error": "The IDE bridge is unavailable"}
+        ide_request_id = uuid.uuid4().hex[:12]
+        future: concurrent.futures.Future = concurrent.futures.Future()
+        self._ide_pending[ide_request_id] = (session_id, future)
+        payload = {"ide_request_id": ide_request_id, "request_id": request_id, "kind": kind,
+                   "args": {k: (v if isinstance(v, (int, float)) else str(v)[:500]) for k, v in (args or {}).items()}}
+        loop.call_soon_threadsafe(self.event_bus.publish, session_id, "ide.request", payload)
+        try:
+            return future.result(timeout=timeout)
+        except concurrent.futures.TimeoutError:
+            return {"ok": False, "error": "The IDE did not answer. Is the Jaeger panel open in your editor?"}
+        finally:
+            self._ide_pending.pop(ide_request_id, None)
+
+    async def handle_ide_result(self, request: web.Request) -> web.Response:
+        """POST /v1/sessions/{id}/ide/{ide_request_id}: the extension's answer. First one wins."""
+        pending = self._ide_pending.get(request.match_info["ide_request_id"])
+        if pending is None or pending[0] != request.match_info["id"]:
+            return web.json_response({"error": "No such pending IDE request"}, status=404)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "Body must be an object"}, status=400)
+        answer = {"ok": bool(body.get("ok")), **({"result": body["result"]} if body.get("ok") else {"error": str(body.get("error") or "IDE request failed")[:300]})}
+        if not pending[1].done():
+            pending[1].set_result(answer)
+        return web.json_response({"delivered": True})
 
     def _config_path(self) -> Path | None:
         from jaeger_ai.core.entity.runtime import EntityRuntime

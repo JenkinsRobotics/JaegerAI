@@ -367,6 +367,8 @@ class Conversation {
         // Child task notifications belong to the session, not the currently
         // streaming foreground request. Keep them visible during that turn.
         if (event.event.startsWith('task.')) { await this.loadTasks(epoch); this.emit(); }
+        // The agent asking the editor to do something (open a file, list Problems).
+        if (event.event === 'ide.request') { void this.answerIde(sid, data); continue; }
         if (event.event === 'message.created') {
           const session = await this.gateway.session(sid);
           if (epoch !== this.epoch) return;
@@ -387,6 +389,15 @@ class Conversation {
       this.state.busy = true; this.emit();
       if (this.gateway.activity) this.reconnectTimer = setTimeout(() => { if (epoch === this.epoch) this.refresh(sid); }, 1000);
     } finally { observer.abort(); }
+  }
+  // ``ideHandler`` is supplied by the extension host (it owns the VS Code API).
+  async answerIde(sid, request) {
+    if (!this.ideHandler || !request?.ide_request_id) return;
+    let body;
+    try { body = { ok: true, result: await this.ideHandler(request.kind, request.args || {}) }; }
+    catch (error) { body = { ok: false, error: String(error?.message || error) }; }
+    try { await this.gateway.ideResult(sid, request.ide_request_id, body); }
+    catch { /* another window answered first, or the request expired */ }
   }
   async cancel() {
     if (this.pendingTask) {

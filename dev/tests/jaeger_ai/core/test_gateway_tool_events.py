@@ -80,12 +80,12 @@ def test_tool_failure_is_sanitized_and_replays_from_durable_cursor(tmp_path):
     callbacks, _flush = app._turn_stream_callbacks("session", "request")
 
     callbacks.on_tool_progress(
-        "run_shell", "start", {"command": "echo ARG_SECRET", "token": "ARG_TOKEN"},
+        "run_shell", "start", {"command": "echo SHOWN_COMMAND", "token": "ARG_TOKEN"},
     )
     callbacks.on_tool_progress("run_shell", "done", {"elapsed_s": 1.23456})
     callbacks.on_tool_done(
         "run_shell",
-        {"command": "echo ARG_SECRET"},
+        {"command": "echo SHOWN_COMMAND"},
         {"ok": False, "error": "RESULT_SECRET"},
         False,
         "ERROR_SECRET",
@@ -108,8 +108,11 @@ def test_tool_failure_is_sanitized_and_replays_from_durable_cursor(tmp_path):
         "elapsed_s": 1.235,
         "text": "Failed after 1.235s",
     }
+    # A shell command is shown inline on purpose; every other argument, the result
+    # and the error are never published.
+    assert started.data["input"] == "echo SHOWN_COMMAND"
     serialized = json.dumps([event.data for event in events])
-    for secret in ("ARG_SECRET", "ARG_TOKEN", "RESULT_SECRET", "ERROR_SECRET"):
+    for secret in ("ARG_TOKEN", "RESULT_SECRET", "ERROR_SECRET"):
         assert secret not in serialized
     assert "args" not in failed.data
     assert "result" not in failed.data
@@ -224,3 +227,20 @@ def test_oversized_plans_are_bounded(tmp_path):
     flush()
     (event,) = _events_named(app, "session", "request", "turn.plan")
     assert len(event.data["plan"]) == 50 and len(event.data["plan"][0]["step"]) == 500
+
+
+def test_shell_commands_and_output_are_shown_inline_with_secrets_redacted_and_nothing_else(tmp_path):
+    app, _store, _ = _admitted_app(tmp_path)
+    callbacks, flush = app._turn_stream_callbacks("session", "request")
+    callbacks.on_tool_progress("exec_command", "start", {"cmd": "curl -H 'Authorization: Bearer sk-abcdef1234567890' x"})
+    callbacks.on_tool_done("exec_command", {}, {"output": "ok\nAPI_KEY=supersecretvalue123", "exit_code": 0}, True, None, 0.1)
+    callbacks.on_tool_progress("read_file", "start", {"path": "/p", "content": "FILE-BODY"})
+    callbacks.on_tool_done("read_file", {}, {"content": "FILE-BODY"}, True, None, 0.1)
+    flush()
+    events = _request_events(app, "session", "request")
+    started = [e for e in events if e.event == "tool.started"]
+    done = [e for e in events if e.event == "tool.completed"]
+    assert "sk-***" in started[0].data["input"] and "abcdef1234567890" not in started[0].data["input"]
+    assert "API_KEY=***" in done[0].data["output"] and "supersecretvalue123" not in done[0].data["output"]
+    assert "input" not in started[1].data and "output" not in done[1].data  # file tools publish nothing
+    assert "FILE-BODY" not in str([e.data for e in events])
