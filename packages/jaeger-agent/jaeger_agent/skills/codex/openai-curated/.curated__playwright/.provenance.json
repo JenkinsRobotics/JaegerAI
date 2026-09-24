@@ -1,0 +1,10 @@
+{
+  "name": "playwright",
+  "original_name": "playwright",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/playwright",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "0ffaabcc8e0990627c4725f18bf1c7955534a796c1c199e872909de2013ce6a8"
+}

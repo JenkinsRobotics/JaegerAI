@@ -1,0 +1,10 @@
+{
+  "name": "figma-generate-design",
+  "original_name": "figma-generate-design",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/figma-generate-design",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "45d2b97103bdeb31cb2744fca2c79bcefb659c88faca626bea30ec2f9342dcc9"
+}

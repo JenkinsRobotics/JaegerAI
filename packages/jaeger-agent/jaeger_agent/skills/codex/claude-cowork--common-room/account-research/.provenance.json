@@ -1,0 +1,10 @@
+{
+  "name": "common-room:account-research",
+  "original_name": "account-research",
+  "source": "claude-cowork--common-room",
+  "origin_path": "plugins/cache/claude-cowork/common-room/1.0.0/skills/account-research",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--common-room",
+  "skill_md_sha256": "66288f1275c427efeea6de62ca0679874195e1c01d2ff5c3b32269f53614571a"
+}

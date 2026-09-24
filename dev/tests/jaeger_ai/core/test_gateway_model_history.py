@@ -6,31 +6,22 @@ import json as std_json
 
 import pytest
 
-from jaeger_ai.core.entity.runtime import EntityRuntime
+from jaeger_ai.core.entity.runtime import EntityRuntime, PreparedTurn
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("lane", ["model", "delegate", "vision"])
-async def test_gateway_model_callsite_removes_only_current_admitted_row(
-    lane,
+async def test_gateway_vision_callsite_removes_only_current_admitted_row(
     monkeypatch,
     tmp_path,
 ):
-    current_text = (
-        "What is shown in this image?"
-        if lane == "vision"
-        else "Explain the repeated request."
-    )
-    prompt = {
-        "model": (
-            "<background>read-only context</background>\n\n"
-            f"Current request — act on this and nothing else:\n{current_text}"
-        ),
-        "delegate": f"Delegate this request to Ops: {current_text}",
-        "vision": current_text,
-    }[lane]
+    """The vision lane is the Gateway's one direct model callsite. The turn's
+    request (with its recalled context) and the stored history must not repeat
+    the admitted user row."""
+    lane = "vision"
+    current_text = "What is shown in this image?"
+    prompt = current_text
 
     store = GatewaySessionStore(tmp_path / f"{lane}.sqlite3")
     app = JaegerGatewayApp(store=store)
@@ -91,17 +82,12 @@ async def test_gateway_model_callsite_removes_only_current_admitted_row(
             return Response()
 
     class Runtime:
-        def execute_turn(self, text, *, context, **_kwargs):
-            if lane == "vision":
-                assert text.startswith(current_text)
-            else:
-                assert text == current_text
-            if lane == "model":
-                answer = context["model_runner"](prompt)
-                return {"text": answer}
-            if lane == "delegate":
-                return context["delegate_runner"]("ops", prompt)
-            return dict(context["react_runner"](prompt))
+        def prepare_turn(self, text, *, session_id, **_kwargs):
+            assert text.startswith(current_text)
+            return PreparedTurn(prompt=prompt, event=None, user_text=text, session_id=session_id)
+
+        def finish_turn(self, prepared, response_text):
+            pass
 
     monkeypatch.setattr("jaeger_ai.core.gateway.server.ClientSession", Session)
     monkeypatch.setattr(app, "_resolve_session_agent", lambda _sid: None)

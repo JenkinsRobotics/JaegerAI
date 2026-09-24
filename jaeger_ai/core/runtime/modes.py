@@ -59,100 +59,39 @@ def serving_brain() -> dict[str, Any]:
     presets are idle — reporting them as "the model" is how the
     status bar said DeepSeek while ``get_mode`` said Gemma.
     """
-    try:
-        from pathlib import Path
+    from jaeger_ai.core.models.model_resolver import serving_model
 
-        from jaeger_ai.main import _pipeline
-
-        client = _pipeline.get("client")
-        cfg = _pipeline.get("config")
-        ext = getattr(cfg, "external_model", None) if cfg is not None else None
-        # Prefer the live client — that is what THIS session's turn
-        # is talking to. Fall back to the session row if the client
-        # has not been built yet (History / pre-boot).
-        if client is not None and getattr(client, "kind", "local") == "external":
-            ctx = int(getattr(client, "loaded_ctx", 0) or 0)
-            if not ctx:
-                try:
-                    from jaeger_ai.main import _context_budget_for
-                    budgeted, _reserve = _context_budget_for(cfg)
-                    ctx = int(budgeted or 0)
-                except Exception:  # noqa: BLE001
-                    ctx = int(getattr(ext, "ctx", 0) or 0) if ext is not None else 0
-            return {
-                "kind": "external",
-                "provider": getattr(client, "provider", None)
-                or (getattr(ext, "provider", None) if ext is not None else None),
-                "model": getattr(client, "model_name", None)
-                or (getattr(ext, "model", None) if ext is not None else None),
-                "ctx": ctx or None,
-            }
-        if client is None:
-            # Pre-boot / History: use the model THIS session last used.
-            try:
-                from jaeger_ai.core.sessions import get_store
-
-                sid = str(_pipeline.get("current_session") or "")
-                store = get_store()
-                if store is not None and sid:
-                    stamped = store.brain(sid)
-                    if stamped.get("model"):
-                        kind = (
-                            "external"
-                            if stamped.get("provider")
-                            and stamped.get("provider") != "local"
-                            else "local"
-                        )
-                        return {
-                            "kind": kind,
-                            "provider": stamped.get("provider"),
-                            "model": stamped.get("model"),
-                            "ctx": None,
-                        }
-            except Exception:  # noqa: BLE001
-                pass
-        model_path = getattr(getattr(cfg, "model", None), "model_path", "") if cfg else ""
-        name = Path(str(model_path)).name if model_path else ""
-        if not name:
-            name = str(getattr(client, "model_name", "") or "")
-        ctx = int(getattr(client, "loaded_ctx", 0) or 0) if client is not None else 0
-        if not ctx and cfg is not None:
-            try:
-                from jaeger_ai.main import _context_budget_for
-                budgeted, _reserve = _context_budget_for(cfg)
-                ctx = int(budgeted or 0)
-            except Exception:  # noqa: BLE001
-                ctx = int(getattr(getattr(cfg, "model", None), "ctx", 0) or 0)
-        return {
-            "kind": "local",
-            "provider": "local",
-            "model": name or None,
-            "ctx": ctx or None,
-        }
-    except Exception:  # noqa: BLE001
+    row = serving_model()
+    if row is None:
         return {"kind": "unknown", "provider": None, "model": None, "ctx": None}
+    return {
+        "kind": row["kind"], "provider": row["provider"],
+        "model": row["model"], "ctx": row["context_length"],
+        "location": row["location"], "source": "execution_client",
+    }
 
 
 def mode_info() -> dict:
     """The CURRENT mode + the model that is actually serving.
 
-    ``model`` is the serving brain (external when one is on). The local
-    preset name stays on ``local_preset_model`` so "what mode am I in?"
-    and "which LLM is answering?" cannot disagree.
+    ``model`` comes from the shared execution-client resolver. Inactive local
+    preset values are absent rather than passed off as current runtime facts.
     """
     m = _state["mode"]
     preset = MODES.get(m, {})
     brain = serving_brain()
+    local_active = brain.get("kind") == "local"
     return {
-        "mode": m,
-        "model": brain.get("model") or preset.get("model"),
+        "mode": m if local_active else None,
+        "model": brain.get("model"),
         "provider": brain.get("provider"),
         "kind": brain.get("kind"),
         "ctx": brain.get("ctx"),
         "serving": brain,
-        "local_preset_model": preset.get("model"),
-        "voice": bool(preset.get("voice", True)),
-        "options": list(MODES),
+        "local_preset_model": preset.get("model") if local_active else None,
+        "local_preset_active": local_active,
+        "voice": bool(preset.get("voice", True)) if local_active else None,
+        "options": list(MODES) if local_active else [],
     }
 
 

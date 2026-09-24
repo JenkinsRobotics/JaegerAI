@@ -1,0 +1,10 @@
+{
+  "name": "anthropic-skills:pdf",
+  "original_name": "pdf",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/pdf",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "9f78b8359fbd4943ad260a7a1e436e5a96503406d6c34e99f69223d647d85b9c"
+}

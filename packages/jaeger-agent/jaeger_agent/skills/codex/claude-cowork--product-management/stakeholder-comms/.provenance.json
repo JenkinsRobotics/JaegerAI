@@ -1,0 +1,10 @@
+{
+  "name": "stakeholder-comms",
+  "original_name": "stakeholder-comms",
+  "source": "claude-cowork--product-management",
+  "origin_path": "plugins/cache/claude-cowork/product-management/1.1.0/skills/stakeholder-comms",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--product-management",
+  "skill_md_sha256": "7a46aaa7bb2183ece264cc89504a6f736079b4e8a1014e045ef80a92bc838c2b"
+}

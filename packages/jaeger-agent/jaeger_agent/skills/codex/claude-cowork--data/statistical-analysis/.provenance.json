@@ -1,0 +1,10 @@
+{
+  "name": "statistical-analysis",
+  "original_name": "statistical-analysis",
+  "source": "claude-cowork--data",
+  "origin_path": "plugins/cache/claude-cowork/data/1.0.0/skills/statistical-analysis",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--data",
+  "skill_md_sha256": "bc3ba97bd77717a9a2a9defcec4f3d1bdf6921d587306754396c9a6ba40e22c2"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "deploy-checklist",
+  "original_name": "deploy-checklist",
+  "source": "claude-cowork--engineering",
+  "origin_path": "plugins/cache/claude-cowork/engineering/1.2.0/skills/deploy-checklist",
+  "plugin_version": "1.2.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "85ca53dc471970e3e12c36ec814ebf5f6cb9419016c55adb05ff34789bae3be9"
+}

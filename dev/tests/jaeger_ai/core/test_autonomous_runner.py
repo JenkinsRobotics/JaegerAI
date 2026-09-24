@@ -322,10 +322,10 @@ def test_recalled_background_does_not_make_a_question_actionable(monkeypatch):
     the classifier promoted the whole prompt to a ledgered task.
     """
     import jaeger_ai.main as main
-    from jaeger_ai.core.entity.cognition_router import _with_background
+    from jaeger_ai.core.entity.cognition_router import with_background
 
     request = "Use a tool to check the current date and time, then tell me."
-    enriched = _with_background(
+    enriched = with_background(
         request, {"durable_recall": "user: run the tests and fix the bug"}
     )
     # The classifier itself is now background-aware; its safe result is the
@@ -348,14 +348,14 @@ def test_prepare_turn_text_routes_on_the_request_not_the_background():
     11 KB "Box" playbook and opened a ledger named "<background> …" for
     "My favorite color is teal".
     """
-    from jaeger_ai.core.entity.cognition_router import _with_background
+    from jaeger_ai.core.entity.cognition_router import with_background
     from jaeger_ai.features.dispatcher import router
 
     class Agent:
         messages: list = []
 
     request = "My favorite color is teal. Just acknowledge."
-    enriched = _with_background(
+    enriched = with_background(
         request, {"durable_recall": "user: run the tests and fix the bug"}
     )
     agent = Agent()
@@ -372,7 +372,7 @@ def test_prepare_turn_text_routes_on_the_request_not_the_background():
 STALL = "Let me start by reading the notes and I'll process everything."
 
 
-def test_run_continued_turn_refires_a_stall_and_accumulates_answers():
+def test_run_continued_turn_refires_a_stall_without_concatenating_checkpoints():
     prompts: list[str] = []
 
     def turn(text):
@@ -386,7 +386,8 @@ def test_run_continued_turn_refires_a_stall_and_accumulates_answers():
     assert prompts[0] == "process every folder"
     assert "SYSTEM NUDGE" in prompts[1]
     assert result["continuation_steps"] == 1
-    assert result["text"] == f"{STALL}\n\nAll 14 folders processed."
+    assert result["text"] == "All 14 folders processed."
+    assert result["checkpoints"][0]["text"] == STALL
 
 
 def test_run_continued_turn_does_not_refire_an_interrupt():

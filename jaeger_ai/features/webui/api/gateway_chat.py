@@ -257,8 +257,9 @@ def _iter_sse_lines_cancellable(resp, cancel_event):
 def webui_chat_backend_mode(config_data=None, environ: dict[str, str] | None = None) -> str:
     """Return the explicitly selected browser chat backend.
 
-    The default remains the in-process WebUI runtime unless JAEGER_GATEWAY_URL,
-    HERMES_WEBUI_GATEWAY_URL, or explicit gateway backend env is set.
+    The default is the Jaeger Gateway. The in-process WebUI runtime ("legacy") is
+    an isolated path, selected only with JAEGER_LEGACY_PATHS enabled and no
+    gateway URL or explicit gateway backend configured.
     """
     source = os.environ if environ is None else environ
     cfg = config_data if isinstance(config_data, dict) else {}
@@ -271,7 +272,10 @@ def webui_chat_backend_mode(config_data=None, environ: dict[str, str] | None = N
         return "gateway"
     if source.get("JAEGER_GATEWAY_URL") or source.get("HERMES_WEBUI_GATEWAY_URL"):
         return "gateway"
-    return "legacy"
+    # One execution path: the Gateway. The in-process WebUI agent is an isolated
+    # legacy path and is selected only when the operator re-enabled it.
+    from jaeger_ai.contract.legacy_paths import legacy_paths_enabled
+    return "legacy" if legacy_paths_enabled(environ) else "gateway"
 
 
 def webui_gateway_chat_enabled(config_data=None, environ: dict[str, str] | None = None) -> bool:
@@ -1206,13 +1210,44 @@ def _run_jaeger_gateway_streaming(
                             STREAM_REASONING_TEXT[stream_id] = curr + r_text
                         put_gateway_event("reasoning", {"text": r_text})
 
+                elif evt_name in ("turn.progress", "turn.checkpoint"):
+                    put_gateway_event("interim_assistant", {
+                        "text": final_text or str(evt_data.get("text") or ""),
+                        "channel": "checkpoint" if evt_name == "turn.checkpoint" else "progress",
+                    })
+                    final_text = ""
+                    with STREAMS_LOCK:
+                        STREAM_PARTIAL_TEXT[stream_id] = ""
+
+                elif evt_name in ("tool.started", "tool.completed", "tool.failed"):
+                    completed = evt_name != "tool.started"
+                    tool_payload = {
+                        "name": evt_data.get("tool"), "id": evt_data.get("activity_id"),
+                        "tid": evt_data.get("activity_id"),
+                        "tool_call_id": evt_data.get("activity_id"),
+                        "event_type": "tool.completed" if completed else "tool.started",
+                        "done": completed,
+                        "status": "failed" if evt_name == "tool.failed" else "completed" if completed else "running",
+                        "is_error": evt_name == "tool.failed",
+                        "preview": evt_data.get("text", "") if completed else "",
+                        "snippet": evt_data.get("text", "") if completed else "",
+                    }
+                    with STREAMS_LOCK:
+                        calls = STREAM_LIVE_TOOL_CALLS.setdefault(stream_id, [])
+                        existing = next((call for call in calls if call.get("tid") == tool_payload["tid"]), None)
+                        if existing is None:
+                            calls.append(dict(tool_payload))
+                        else:
+                            existing.update(tool_payload)
+                    put_gateway_event("tool_complete" if completed else "tool", tool_payload)
+
                 elif evt_name == "approval.request":
                     put_gateway_event("approval", evt_data)
 
                 elif evt_name == "turn.finish":
                     saw_finish = True
                     output = evt_data.get("output")
-                    if output and not final_text:
+                    if output is not None:
                         final_text = str(output)
                     raw_usage = evt_data.get("usage")
                     if isinstance(raw_usage, dict):
@@ -1272,6 +1307,10 @@ def _run_jaeger_gateway_streaming(
             if not session.messages or session.messages[-1].get("content") != user_msg["content"] or session.messages[-1].get("role") != "user":
                 session.messages.append(user_msg)
             session.messages.append(asst_msg)
+            with STREAMS_LOCK:
+                calls = [dict(call, assistant_msg_idx=len(session.messages) - 1)
+                         for call in STREAM_LIVE_TOOL_CALLS.get(stream_id, [])]
+            session.tool_calls = list(getattr(session, "tool_calls", None) or []) + calls
             session.pending_user_message = None
             session.active_stream_id = None
             session.updated_at = time.time()
@@ -1285,10 +1324,21 @@ def _run_jaeger_gateway_streaming(
                 pass
 
     from api.streaming import _session_payload_with_full_messages
-    gateway_session_payload = _session_payload_with_full_messages(session, tool_calls=[])
+    gateway_session_payload = _session_payload_with_full_messages(
+        session, tool_calls=list(getattr(session, "tool_calls", None) or []))
     put_gateway_event("done", {"session": redact_session_data(gateway_session_payload), "usage": usage})
     put_gateway_event("stream_end", {"session_id": session_id})
     return final_text, usage
+
+
+def _reconcile_with_gateway(session_id: str) -> None:
+    """Make the WebUI copy of a just-finished turn match the Gateway's transcript."""
+    try:
+        from api import gateway_mirror
+
+        gateway_mirror.mirror_session(session_id)
+    except Exception:
+        logger.warning("gateway reconcile failed for %s", session_id, exc_info=True)
 
 
 def _run_gateway_chat_streaming(
@@ -1827,6 +1877,10 @@ def _run_gateway_chat_streaming(
                 _restore_cancelled_success_writeback()
                 return
             success_writeback_committed = True
+        # The local rows above are an optimistic cache so the page updates at
+        # once. The Gateway owns the transcript: re-read it now so any
+        # difference (a missed row, a title) is resolved in its favour.
+        _reconcile_with_gateway(session_id)
         try:
             from api.goals import evaluate_goal_after_turn, has_active_goal
             from api.profiles import get_hermes_home_for_profile

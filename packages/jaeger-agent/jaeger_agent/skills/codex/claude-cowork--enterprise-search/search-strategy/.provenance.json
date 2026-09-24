@@ -1,0 +1,10 @@
+{
+  "name": "search-strategy",
+  "original_name": "search-strategy",
+  "source": "claude-cowork--enterprise-search",
+  "origin_path": "plugins/cache/claude-cowork/enterprise-search/1.1.0/skills/search-strategy",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--enterprise-search",
+  "skill_md_sha256": "2b06a74db5f9c359f43c5976869ea32c934f3a1c97c688d9e3b2b5a7ebf113f2"
+}

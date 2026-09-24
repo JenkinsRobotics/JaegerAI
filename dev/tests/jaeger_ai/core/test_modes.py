@@ -69,11 +69,15 @@ def test_set_mode_tool_registered() -> None:
     assert "set_mode" in {t.name for t in R.get_tools()}
 
 
-def test_mode_info_reports_current_from_fact() -> None:
+def test_mode_info_reports_current_from_fact(monkeypatch) -> None:
+    from types import SimpleNamespace
+    from jaeger_ai import main
     from jaeger_ai.core.runtime import modes
     high_model = modes.MODES["high"]["model"]
     modes._state["mode"] = "high"
     modes._state["model"] = high_model
+    monkeypatch.setitem(main._pipeline, "client", SimpleNamespace(
+        kind="local", provider="mlx", model_name=high_model, loaded_ctx=8192))
     info = modes.mode_info()
     assert info["mode"] == "high" and info["voice"] is False
     assert info["local_preset_model"] == high_model
@@ -105,7 +109,9 @@ def test_mode_info_reports_the_external_brain_when_one_is_serving(monkeypatch) -
     assert info["provider"] == "ollama-cloud"
     assert info["kind"] == "external"
     assert info["ctx"] == 1_048_576
-    assert info["local_preset_model"] == modes.MODES["normal"]["model"]
+    assert info["local_preset_model"] is None
+    assert info["voice"] is None
+    assert info["options"] == []
     _reset()
 
 

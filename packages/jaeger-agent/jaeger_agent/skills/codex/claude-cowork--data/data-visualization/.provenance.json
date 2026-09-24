@@ -1,0 +1,10 @@
+{
+  "name": "data-visualization",
+  "original_name": "data-visualization",
+  "source": "claude-cowork--data",
+  "origin_path": "plugins/cache/claude-cowork/data/1.0.0/skills/data-visualization",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--data",
+  "skill_md_sha256": "728d3b95b9ebc744594076a2263c02b2a3f8f16a947437e66c035ef2329a12df"
+}

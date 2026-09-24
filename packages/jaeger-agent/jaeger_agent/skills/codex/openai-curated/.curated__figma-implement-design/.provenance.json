@@ -1,0 +1,10 @@
+{
+  "name": "figma-implement-design",
+  "original_name": "figma-implement-design",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/figma-implement-design",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "63f3d12d444547bbf68c10a12982b1f42e0f6e26fc074324564a13184d4b15ad"
+}

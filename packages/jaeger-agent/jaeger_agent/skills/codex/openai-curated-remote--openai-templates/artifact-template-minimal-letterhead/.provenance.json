@@ -1,0 +1,10 @@
+{
+  "name": "artifact-template-minimal-letterhead",
+  "original_name": "artifact-template-minimal-letterhead",
+  "source": "openai-curated-remote--openai-templates",
+  "origin_path": "plugins/cache/openai-curated-remote/openai-templates/0.1.1/skills/artifact-template-minimal-letterhead",
+  "plugin_version": "0.1.1",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "880ef094d4d0c89a7bde5ce9bbe4086625c186651e9e6efc8ba8bdd7cc77f9d5"
+}

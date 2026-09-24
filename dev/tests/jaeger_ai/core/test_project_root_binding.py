@@ -121,17 +121,17 @@ def test_relative_reads_resolve_against_the_project(project, monkeypatch, tmp_pa
     assert ws._resolve_read("src/main.py") == (project / "src" / "main.py").resolve()
 
 
-def test_relative_reads_fall_back_to_cwd_when_the_project_lacks_the_file(
+def test_relative_reads_do_not_fall_back_when_project_lacks_file(
     project, monkeypatch, tmp_path
 ):
-    """A bound project must not make previously-readable paths unreadable."""
+    """A missing project output must not resolve to a stale unrelated file."""
     elsewhere = tmp_path / "elsewhere"
     elsewhere.mkdir()
     (elsewhere / "only-here.txt").write_text("x", encoding="utf-8")
     monkeypatch.chdir(elsewhere)
 
     ws.set_project_root(project)
-    assert ws._resolve_read("only-here.txt") == (elsewhere / "only-here.txt").resolve()
+    assert ws._resolve_read("only-here.txt") == (project / "only-here.txt").resolve()
 
 
 def test_project_root_and_workspace_override_stay_separate(project, tmp_path):
@@ -178,3 +178,16 @@ def test_the_bridge_binds_project_root_per_turn():
         "_turn_workspace no longer binds the project root — an ARES workspace "
         "switch would silently stop reaching the agent's tools again"
     )
+
+
+def test_run_python_writes_and_imports_in_selected_project(project):
+    from jaeger_agent.tools.code import run_python
+
+    ws.set_project_root(project)
+    (project / "calculator.py").write_text("def total(values): return sum(values)\n")
+    result = run_python("from calculator import total; from pathlib import Path; Path('report.txt').write_text(str(total([1, 2, 3, 4])))")
+    assert result["ok"], result
+    assert (project / "report.txt").read_text() == "10"
+    assert not (ws._require_layout().skills_dir / "report.txt").exists()
+    assert not list(project.rglob("__pycache__"))
+    assert not list(project.glob(".jaeger_run_*"))

@@ -119,6 +119,10 @@ def _drive_main(monkeypatch, root, observer):
             cleanup=lambda: None)
 
     monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(root))
+    # The bridge defaults to Gateway execution, which boots no local agent. These
+    # tests exercise the local-boot path (where the bridge owns the instance lock
+    # and must register itself), so they select it explicitly.
+    monkeypatch.setenv("JAEGER_BRIDGE_EXECUTION", "local")
     monkeypatch.setattr("jaeger_ai.main.boot_for_tui", fake_boot, raising=False)
     monkeypatch.setattr("jaeger_ai.main.run_for_voice",
                         lambda *a, **k: {"text": "", "error": None}, raising=False)
@@ -128,6 +132,9 @@ def _drive_main(monkeypatch, root, observer):
 
 
 def _minimal_instance(tmp_path):
+    # Deliberately under pytest's long tmp_path: the bridge then skips binding its
+    # AF_UNIX socket (macOS caps the path near 104 bytes) and falls through to
+    # teardown, which is what lets ``bridge.main`` return inside a unit test.
     root = tmp_path / "inst"
     root.mkdir()
     for f in ("identity.yaml", "config.yaml", "manifest.json"):

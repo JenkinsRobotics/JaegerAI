@@ -102,6 +102,17 @@ def set_project_root(path: Path | str | None) -> None:
     _project_root_var.set(root)
 
 
+@contextlib.contextmanager
+def project_scope(path: Path | str | None):
+    """Request-local project; never leak a client's workspace into another turn."""
+    token = _project_root_var.set(None)
+    try:
+        set_project_root(path)
+        yield
+    finally:
+        _project_root_var.reset(token)
+
+
 class DefaultWorkspace:
     """The seven paths every tool in this module needs, and nothing else.
 
@@ -301,6 +312,14 @@ def _resolve_write(path: str) -> Path:
         raise SandboxError("path must be non-empty")
     p = Path(path)
     # Lead component picks the sandbox root.
+    project = get_project_root()
+    if project is not None and (not p.parts or p.parts[0] not in {"workspace", "skills"}):
+        # The client-selected project is an explicit write scope. Resolve
+        # symlinks/traversal through the same sandbox guard as workspace/.
+        candidate = (project / p).resolve()
+        if not candidate.is_relative_to(project):
+            raise SandboxError("path escapes the selected project")
+        return candidate
     if p.parts and p.parts[0] == "workspace":
         # Strip the ``workspace/`` prefix BEFORE passing to
         # ``_resolve_under``. The leading-strip inside that helper
@@ -383,12 +402,10 @@ def _resolve_read(path: str) -> Path:
         full = None
         project_root = get_project_root()
         if project_root is not None:
-            candidate = (project_root / p).resolve()
-            if candidate.exists():
-                full = candidate
+            full = (project_root / p).resolve()
         if full is None:
             full = (Path.cwd() / p).resolve()
-        if not full.exists() and _layout is not None:
+        if project_root is None and not full.exists() and _layout is not None:
             # Fall back through the instance-relative roots a WRITE could
             # have targeted, so a bare relative name round-trips with the
             # write tools. ``_resolve_write`` sends bare names (e.g.

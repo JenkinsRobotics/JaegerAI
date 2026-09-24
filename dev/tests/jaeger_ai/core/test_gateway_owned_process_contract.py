@@ -1203,3 +1203,34 @@ def test_gateway_mode_bridge_does_not_take_the_producer_lease(gateway, bridge):
     bridge.until(lambda f: f.get("type") == "agent_state")
     layout = _contract_layout(gateway)
     assert other_holder_pid(layout) == gateway.process.pid
+
+
+def test_durable_task_uses_real_owner_tools_and_delivers_after_restart(gateway):
+    workspace = gateway.root / 'instances/contract'
+    gateway.request('/v1/sessions', {'session_id':'durable-parent', 'profile':'jaeger', 'workspace':str(workspace)})
+    body = {'session_id':'durable-parent', 'goal':'CONTRACT-DURABLE: produce and verify the report',
+            'execution':{'workspace':str(workspace)}, 'artifacts':['workspace/durable-report.txt']}
+    _, admitted = gateway.request('/v1/tasks', body)
+    tid = admitted['task_id']
+    assert admitted['status'] == 'queued'
+    deadline = time.monotonic() + 25
+    while time.monotonic() < deadline:
+        for approval in gateway.request('/v1/approvals')[1]['approvals']:
+            gateway.request('/v1/approvals/' + approval['approval_id'], {'approved':True, 'decision':'once'})
+        _, row = gateway.request('/v1/tasks/' + tid)
+        task = row.get('task', row)
+        if task['state'] in {'completed','failed','cancelled'}:
+            break
+        time.sleep(0.05)
+    assert task['state'] == 'completed', (task, (gateway.root/'gateway.log').read_text()[-15000:])
+    assert (workspace/'workspace/durable-report.txt').read_text() == 'DURABLE-VERIFIED-CONTENT'
+    before = (gateway.root/'provider-calls.jsonl').read_text()
+    gateway.stop()
+    gateway.start()
+    _, replay = gateway.request('/v1/tasks', body)
+    assert replay['replayed']
+    assert replay['task_id'] == tid
+    _, session = gateway.request('/v1/sessions/durable-parent')
+    messages = session.get('session', session)['messages']
+    assert len([m for m in messages if m['role'] == 'assistant']) == 1
+    assert (gateway.root/'provider-calls.jsonl').read_text() == before

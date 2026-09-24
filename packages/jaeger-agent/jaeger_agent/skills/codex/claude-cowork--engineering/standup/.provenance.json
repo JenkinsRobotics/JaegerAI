@@ -1,0 +1,10 @@
+{
+  "name": "standup",
+  "original_name": "standup",
+  "source": "claude-cowork--engineering",
+  "origin_path": "plugins/cache/claude-cowork/engineering/1.2.0/skills/standup",
+  "plugin_version": "1.2.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "598d9082631326ee810056c787188ee021c6325f990989732ba178ea111adf45"
+}

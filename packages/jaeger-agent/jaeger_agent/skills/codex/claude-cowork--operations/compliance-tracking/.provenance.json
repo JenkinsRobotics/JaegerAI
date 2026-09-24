@@ -1,0 +1,10 @@
+{
+  "name": "compliance-tracking",
+  "original_name": "compliance-tracking",
+  "source": "claude-cowork--operations",
+  "origin_path": "plugins/cache/claude-cowork/operations/1.1.0/skills/compliance-tracking",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "644d393abdfddc8c37f7a7804f601e7bbd476e95571e6dcb4d916e478ba8ebd5"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "marketing:competitive-analysis",
+  "original_name": "competitive-analysis",
+  "source": "claude-cowork--marketing",
+  "origin_path": "plugins/cache/claude-cowork/marketing/1.1.0/skills/competitive-analysis",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--marketing",
+  "skill_md_sha256": "cbce9a731eac10569e20347495ae14ab980f7917bd697d24cea89f10248e20bd"
+}

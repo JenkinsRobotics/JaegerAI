@@ -1,0 +1,10 @@
+{
+  "name": "figma-code-connect-components",
+  "original_name": "figma-code-connect-components",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/figma-code-connect-components",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "0f19edad8aed28063a3517c419fbcbef5421d024f189fd02a17fae25093ec69d"
+}

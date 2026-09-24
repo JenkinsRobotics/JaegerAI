@@ -1,0 +1,10 @@
+{
+  "name": "sql-queries",
+  "original_name": "sql-queries",
+  "source": "claude-cowork--data",
+  "origin_path": "plugins/cache/claude-cowork/data/1.0.0/skills/sql-queries",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--data",
+  "skill_md_sha256": "dd4879f528bd904ef44b2a81b35f503e9170c87a0b65a85d508a7fe0da7bfc6d"
+}

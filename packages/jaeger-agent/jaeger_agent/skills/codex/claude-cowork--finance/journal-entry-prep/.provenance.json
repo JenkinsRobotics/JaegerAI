@@ -1,0 +1,10 @@
+{
+  "name": "journal-entry-prep",
+  "original_name": "journal-entry-prep",
+  "source": "claude-cowork--finance",
+  "origin_path": "plugins/cache/claude-cowork/finance/1.1.0/skills/journal-entry-prep",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--finance",
+  "skill_md_sha256": "40fd4cf722cb96259dfbd7c98d6b477987f975bb681052c1dc04fd183f347d73"
+}

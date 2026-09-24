@@ -1,0 +1,10 @@
+{
+  "name": "artifact-template-sales-pipeline",
+  "original_name": "artifact-template-sales-pipeline",
+  "source": "openai-curated-remote--openai-templates",
+  "origin_path": "plugins/cache/openai-curated-remote/openai-templates/0.1.1/skills/artifact-template-sales-pipeline",
+  "plugin_version": "0.1.1",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "15cfeeedf440021f16ed3f3ad8c7c1ef6d48898b9447741e223d2fb41cfc9800"
+}

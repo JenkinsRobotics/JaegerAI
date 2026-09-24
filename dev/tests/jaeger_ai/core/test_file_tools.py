@@ -350,3 +350,46 @@ def test_file_read_whole_file_unchanged(bound_instance):
     assert result["content"] == "hello\n"
     assert result["total_lines"] == 1
     assert result["truncated"] is False
+
+
+# ── edit_file tolerance and diagnostics (models re-type snippets imperfectly) ──
+
+
+def test_edit_accepts_trailing_whitespace_and_indent_drift_when_unambiguous(bound_instance):
+    tools.file_write("m.py", "def f():\n    a = 1   \n    b = 2\n    return a + b\n")
+    # The model re-typed the snippet with a different indent and no trailing spaces.
+    result = tools.edit_file("m.py", "  a = 1\n  b = 2", "  a = 10\n  b = 20")
+    assert result["edited"] is True and result["matched"] == "whitespace-tolerant"
+    assert tools.file_read("skills/m.py")["content"] == "def f():\n    a = 10\n    b = 20\n    return a + b\n"
+
+
+def test_tolerant_match_that_is_ambiguous_is_refused_with_line_numbers(bound_instance):
+    tools.file_write("m.py", "x = 1\ny = 2\n\nx = 1  \ny = 2\n")
+    result = tools.edit_file("m.py", " x = 1\n y = 2", "x = 9\ny = 9")
+    assert result["edited"] is False and "2 places" in result["error"] and "1, 4" in result["error"]
+    assert tools.file_read("skills/m.py")["content"] == "x = 1\ny = 2\n\nx = 1  \ny = 2\n"
+
+
+def test_not_found_shows_the_closest_region_so_the_retry_can_succeed(bound_instance):
+    tools.file_write("m.py", "import os\n\n\ndef load(path):\n    return open(path).read()\n")
+    result = tools.edit_file("m.py", "def load(p):\n    return open(p).read()", "pass")
+    assert result["edited"] is False
+    assert "closest match at lines 4-5" in result["error"] and "def load(path):" in result["error"]
+
+
+def test_not_found_with_nothing_similar_says_to_reread(bound_instance):
+    tools.file_write("m.py", "alpha = 1\n")
+    result = tools.edit_file("m.py", "completely unrelated text here", "x")
+    assert "read_file" in result["error"] and "closest" not in result["error"]
+
+
+def test_ambiguous_exact_match_lists_the_lines(bound_instance):
+    tools.file_write("m.py", "a = 0\nb = 1\na = 0\n")
+    result = tools.edit_file("m.py", "a = 0", "a = 1")
+    assert "not unique" in result["error"] and "lines 1, 3" in result["error"]
+
+
+def test_exact_edit_is_unchanged_and_reports_no_tolerance_flag(bound_instance):
+    tools.file_write("m.py", "x = 1\ny = 2\n")
+    result = tools.edit_file("m.py", "y = 2", "y = 3")
+    assert result["edited"] is True and "matched" not in result

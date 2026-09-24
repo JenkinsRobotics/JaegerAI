@@ -38,9 +38,9 @@ async function* decodeSSE(body) {
 
 class Gateway {
   constructor(url) { this.url = localEndpoint(url); }
-  async json(path, body) {
+  async json(path, body, method) {
     const response = await fetch(this.url + path, {
-      method: body === undefined ? 'GET' : 'POST', redirect: 'error',
+      method: method || (body === undefined ? 'GET' : 'POST'), redirect: 'error',
       headers: { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
@@ -49,8 +49,13 @@ class Gateway {
     if (!response.ok) throw new GatewayError(String(result.error || `Gateway HTTP ${response.status}`), response.status);
     return result;
   }
+  tasks() { return this.json('/v1/tasks'); }
+  rename(id, title) { return this.json(`/v1/sessions/${encodeURIComponent(id)}`, { title }, 'PATCH'); }
+  skills(query = '') { return this.json(`/v1/runtime/skills${query ? `?q=${encodeURIComponent(query)}` : ''}`); }
+  cancelTask(id) { return this.json(`/v1/tasks/${encodeURIComponent(id)}/cancel`, {}); }
   sessions() { return this.json('/v1/sessions'); }
   session(id) { return this.json(`/v1/sessions/${encodeURIComponent(id)}`); }
+  activity(id, after = 0) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/activity?after=${after}`); }
   create(body) { return this.json('/v1/sessions', body); }
   send(id, body) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/turns`, body); }
   receipt(id, rid) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/requests/${encodeURIComponent(rid)}`); }

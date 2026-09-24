@@ -1,0 +1,10 @@
+{
+  "name": "testing-strategy",
+  "original_name": "testing-strategy",
+  "source": "claude-cowork--engineering",
+  "origin_path": "plugins/cache/claude-cowork/engineering/1.2.0/skills/testing-strategy",
+  "plugin_version": "1.2.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "5c5e95830754bbdd838213fa05fc8f07523f591fd558fd3c86031ffd479f7a9e"
+}

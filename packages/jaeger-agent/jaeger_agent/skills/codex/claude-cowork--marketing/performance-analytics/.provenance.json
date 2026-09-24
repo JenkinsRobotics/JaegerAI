@@ -1,0 +1,10 @@
+{
+  "name": "performance-analytics",
+  "original_name": "performance-analytics",
+  "source": "claude-cowork--marketing",
+  "origin_path": "plugins/cache/claude-cowork/marketing/1.1.0/skills/performance-analytics",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--marketing",
+  "skill_md_sha256": "9b8649d5aa6739d0f92843f3c01a2614cd32757f4e9b41cc632ad912973088be"
+}

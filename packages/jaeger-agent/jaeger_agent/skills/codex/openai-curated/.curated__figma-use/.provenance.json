@@ -1,0 +1,10 @@
+{
+  "name": "figma-use",
+  "original_name": "figma-use",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/figma-use",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "afa9c4ae068a18b93e4914b2d224180ace113db7713dd66f4df397f16ba9c4b4"
+}

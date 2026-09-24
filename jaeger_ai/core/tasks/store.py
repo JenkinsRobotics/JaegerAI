@@ -1,6 +1,6 @@
 """SQLite Storage for Durable Background Work (Workstream 15).
 
-Persisted in <state_root>/durable_tasks.sqlite3.
+Persisted in the Gateway session database.
 Survives client disconnects, UI reloads, and host restarts.
 """
 from __future__ import annotations
@@ -12,6 +12,8 @@ import time
 from typing import Any
 
 from .models import DurableTask, TaskKind, TaskState
+from collections.abc import Callable
+from contextlib import closing
 
 
 class SqliteDurableTaskStore:
@@ -30,7 +32,7 @@ class SqliteDurableTaskStore:
         return conn
 
     def _init_db(self) -> None:
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS durable_tasks (
@@ -51,7 +53,7 @@ class SqliteDurableTaskStore:
     def save_task(self, task: DurableTask) -> None:
         task.updated_at = time.time()
         payload = json.dumps(task.to_dict())
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             conn.execute(
                 """
                 INSERT INTO durable_tasks (task_id, owning_agent, goal, kind, state, task_json, created_at, updated_at)
@@ -77,7 +79,7 @@ class SqliteDurableTaskStore:
             )
 
     def get_task(self, task_id: str) -> DurableTask | None:
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             row = conn.execute("SELECT task_json FROM durable_tasks WHERE task_id = ?", (task_id,)).fetchone()
             if not row:
                 return None
@@ -106,23 +108,35 @@ class SqliteDurableTaskStore:
             params.append(k_val)
 
         query += " ORDER BY created_at DESC"
-        with self._get_conn() as conn:
+        with closing(self._get_conn()) as conn, conn:
             rows = conn.execute(query, params).fetchall()
             return [DurableTask.from_dict(json.loads(r["task_json"])) for r in rows]
 
-    def recover_orphaned_tasks(self) -> list[DurableTask]:
-        """Find active tasks from crashed/interrupted sessions and mark for recovery."""
-        orphaned = []
-        with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT task_json FROM durable_tasks WHERE state = ?",
-                (TaskState.RUNNING.value,),
-            ).fetchall()
-            for r in rows:
-                task = DurableTask.from_dict(json.loads(r["task_json"]))
-                # Reset to queued with incremented retry
-                task.state = TaskState.QUEUED
-                task.retry_policy.current_retries += 1
-                self.save_task(task)
-                orphaned.append(task)
-        return orphaned
+    def admit_task(self, task: DurableTask) -> tuple[DurableTask, bool]:
+        """Atomic insert; a stable identity never overwrites an existing execution."""
+        with closing(self._get_conn()) as conn, conn:
+            conn.execute('BEGIN IMMEDIATE')
+            old = conn.execute('SELECT task_json FROM durable_tasks WHERE task_id=?', (task.task_id,)).fetchone()
+            if old:
+                previous = DurableTask.from_dict(json.loads(old[0]))
+                if previous.goal != task.goal or any(previous.payload.get(k) != v for k, v in task.payload.items()):
+                    raise ValueError('Task identity conflicts with an admitted objective or execution configuration')
+                return previous, True
+            conn.execute('INSERT INTO durable_tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                         (task.task_id, task.owning_agent, task.goal, task.kind.value,
+                          task.state.value, json.dumps(task.to_dict()), task.created_at, task.updated_at))
+        return task, False
+
+    def update_task(self, task_id: str, change: Callable[[DurableTask], None]) -> DurableTask:
+        """Serialize state transitions so cancellation cannot be overwritten by a stale worker."""
+        with closing(self._get_conn()) as conn, conn:
+            conn.execute('BEGIN IMMEDIATE')
+            row = conn.execute('SELECT task_json FROM durable_tasks WHERE task_id=?', (task_id,)).fetchone()
+            if row is None:
+                raise KeyError(task_id)
+            task = DurableTask.from_dict(json.loads(row[0]))
+            change(task)
+            task.updated_at = time.time()
+            conn.execute('UPDATE durable_tasks SET state=?, task_json=?, updated_at=? WHERE task_id=?',
+                         (task.state.value, json.dumps(task.to_dict()), task.updated_at, task_id))
+        return task

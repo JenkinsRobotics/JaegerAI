@@ -1,0 +1,10 @@
+{
+  "name": "ticket-triage",
+  "original_name": "ticket-triage",
+  "source": "claude-cowork--customer-support",
+  "origin_path": "plugins/cache/claude-cowork/customer-support/1.1.0/skills/ticket-triage",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--customer-support",
+  "skill_md_sha256": "66519a68852578ed707bd2bbc60dbe426fb1e7d7431c18230ce03d6c43c03aa8"
+}

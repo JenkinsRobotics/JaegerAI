@@ -1,0 +1,10 @@
+{
+  "name": "yeet",
+  "original_name": "yeet",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/yeet",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "4829d4909081e1abf91507fb581e6f566ce7064001892414f32191895b08a595"
+}

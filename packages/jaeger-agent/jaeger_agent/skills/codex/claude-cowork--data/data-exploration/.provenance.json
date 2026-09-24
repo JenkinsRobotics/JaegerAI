@@ -1,0 +1,10 @@
+{
+  "name": "data-exploration",
+  "original_name": "data-exploration",
+  "source": "claude-cowork--data",
+  "origin_path": "plugins/cache/claude-cowork/data/1.0.0/skills/data-exploration",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--data",
+  "skill_md_sha256": "c8b1888ca08326bc4a1bef761b98846025b03c0db816a51e8fc7603e5c8c81bb"
+}

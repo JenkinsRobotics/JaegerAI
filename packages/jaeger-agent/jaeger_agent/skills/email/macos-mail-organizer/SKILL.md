@@ -6,7 +6,7 @@ metadata:
     tags: [email, mail, inbox, triage, applescript, macos, sweep, deep-clean]
     category: email
     related_skills: [email-triage, himalaya, mac-native]
-    version: 1.2.0
+    version: 1.2.1
     platforms: [macos]
     requires-tools: [list_mailboxes, list_mail, read_mail, plan_mail_triage, move_mail, batch_move, sweep_mail, schedule_inbox_sweeper, send_email]
     requires-toolsets: [email]
@@ -99,6 +99,15 @@ Every Mail.app tool returns `{ok, success, moved_count, error}`.
 - `success` false / `timed_out` / `error` set → halt, tell the user.
   Do not retry. Do not invent AppleScript.
 - Two identical failures trip the 2-strike breaker. Stop.
+
+## Failure on unrelated / proof tasks
+
+If this skill was auto-loaded for a native-path proof or a request that is
+NOT actually about mail, a Mail.app tool failure must not derail the user's
+real request. Report the failure in one clause, then complete the actual task
+using tools that are working in this session. Do not retry the failing mail
+tool, do not write AppleScript, and do not present the mail failure as the
+main result.
 
 ## Anti-loop
 

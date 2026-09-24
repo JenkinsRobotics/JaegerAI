@@ -12,7 +12,7 @@ Four ways to hand off work, in rising order of independence:
 
 * ``_delegate_internal``  — another Jaeger agent, same process, inline.
 * ``_delegate_external``  — a different runtime entirely (a CLI backend, a peer).
-* ``_delegate_background``— fire-and-forget on a worker thread.
+* ``_delegate_background``— durable child work admitted by the Gateway.
 * ``_delegate_parallel``  — a fan-out of subtasks, gathered when all finish.
 
 The depth guard (``DELEGATE_MAX_DEPTH``, default 2) is what stops a delegate
@@ -465,76 +465,30 @@ def _max_parallel_subagents() -> int:
 
 
 def _delegate_background(client: Any, subtasks: list[str], *, role: str = "leaf") -> dict[str, Any]:
-    """Dispatch subtasks and return NOW; results arrive on a later turn.
-
-    The parent's turn does not wait. Each subtask runs on a daemon
-    thread and pushes its result onto the completion rail
-    (:mod:`jaeger_ai.core.runtime.completions`), which the turn worker
-    drains between turns — never mid-turn, because a completion spliced
-    between an assistant message and its tool results breaks role
-    alternation and invalidates the prompt prefix.
-
-    Daemon threads on purpose: background delegation is best-effort
-    detached work, so a long child must never hold the process open at
-    shutdown. A child still running when Jaeger exits is dropped, which
-    is the right trade for work nobody is waiting on.
-
-    Returns the handles immediately — the model is told the work is
-    running, not what it produced.
-    """
-    import uuid
-
+    """Admit durable child tasks; never detach best-effort daemon threads."""
+    from jaeger_agent.task_port import current_task_context
+    context = current_task_context()
     clean = [s.strip() for s in (subtasks or []) if s and s.strip()]
     if not clean:
         return {"ok": False, "error": "no subtasks given"}
-
-    parent_depth = getattr(_delegate_depth, "value", 0)
+    parent_depth = int((context or {}).get('execution', {}).get('options', {}).get('delegation_depth', 0))
     if parent_depth >= _DELEGATE_MAX_DEPTH:
-        return {
-            "ok": False,
-            "error": f"delegate recursion limit hit ({_DELEGATE_MAX_DEPTH})",
-        }
-
-    from jaeger_ai.core.runtime.completions import record_delegation
-
-    handles: list[dict[str, str]] = []
-    for task in clean:
-        delegation_id = uuid.uuid4().hex[:8]
-        dispatched_at = time.time()
-
-        def _run(task: str = task, delegation_id: str = delegation_id,
-                 dispatched_at: float = dispatched_at) -> None:
-            _delegate_depth.value = parent_depth + 1
-            _delegate_role.value = role
-            try:
-                result = _main()._delegate_internal(client, task)
-            except Exception as exc:  # noqa: BLE001 — a crash still reports
-                result = {
-                    "delegated": False,
-                    "error": f"{type(exc).__name__}: {exc}",
-                }
-            finally:
-                _delegate_depth.value = parent_depth
-            record_delegation(
-                task=task, result=result,
-                delegation_id=delegation_id, dispatched_at=dispatched_at,
-            )
-
-        threading.Thread(
-            target=_run, name=f"subagent-bg-{delegation_id}", daemon=True,
-        ).start()
-        handles.append({"id": delegation_id, "task": task})
-
-    return {
-        "ok": True,
-        "background": True,
-        "dispatched": len(handles),
-        "handles": handles,
-        "note": (
-            "Running in the background — results arrive on a later turn. "
-            "Carry on with what the user asked; do not wait for these."
-        ),
-    }
+        return {"ok": False, "error": f"delegate recursion limit hit ({_DELEGATE_MAX_DEPTH})"}
+    if context is None:
+        return {"ok": False, "error": "Background delegation requires the Gateway execution owner"}
+    inherited = dict(context)
+    # The call was authorized under the parent's tool policy. Child effects
+    # retain that workspace/model/tool scope and their own normal confirmations.
+    inherited['source'] = 'client'
+    execution = dict(context.get('execution') or {})
+    execution['options'] = {**(execution.get('options') or {}), 'delegation_depth': parent_depth + 1}
+    inherited['execution'] = execution
+    handles = []
+    for objective in clean:
+        task = context['owner'].submit(objective, context=inherited,
+            key=f"delegate:{context['request_id']}:{objective}")
+        handles.append({'id':task['task_id'], 'task':objective, 'status':task['status']})
+    return {'ok':True, 'background':True, 'dispatched':len(handles), 'handles':handles}
 
 
 def _delegate_parallel(client: Any, subtasks: list[str], *, role: str = "leaf") -> dict[str, Any]:

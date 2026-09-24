@@ -1,0 +1,10 @@
+{
+  "name": "sales:call-prep",
+  "original_name": "call-prep",
+  "source": "claude-cowork--sales",
+  "origin_path": "plugins/cache/claude-cowork/sales/1.1.0/skills/call-prep",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--sales",
+  "skill_md_sha256": "51b075cf1a1cecdd1022034de5a552971917a1fea2304f564bb550bdc6dbbf72"
+}

@@ -111,8 +111,11 @@ def test_a_flood_is_capped_and_the_rest_follow():
     for i in range(9):
         completions.record_delegation(task=f"task {i}", result=_ok())
     prompt = completions.completion_prompt(completions.consume_pending())
-    assert "more, which will follow" in prompt
-    assert prompt.count("- Subagent") <= 5
+    assert prompt.count("- Subagent") == 5
+    assert completions.pending_count() == 4
+    follow = completions.next_completion_turn()
+    assert "task 8" in follow
+    assert completions.pending_count() == 0
 
 
 def test_process_completions_merge_onto_the_same_rail(monkeypatch):
@@ -122,7 +125,7 @@ def test_process_completions_merge_onto_the_same_rail(monkeypatch):
 
     monkeypatch.setattr(
         processes, "consume_pending_completions",
-        lambda layout: [{"id": "p1", "name": "render", "status": "exited",
+        lambda layout, **kwargs: [{"id": "p1", "name": "render", "status": "exited",
                          "exit_code": 0, "finished_at": time.time()}],
     )
     completions.record_delegation(task="a subagent task", result=_ok())
@@ -135,7 +138,7 @@ def test_process_completions_merge_onto_the_same_rail(monkeypatch):
 def test_a_broken_process_queue_never_blocks_a_turn(monkeypatch):
     from jaeger_agent.background import processes
 
-    def _boom(layout):
+    def _boom(layout, **kwargs):
         raise RuntimeError("store unreadable")
 
     monkeypatch.setattr(processes, "consume_pending_completions", _boom)
@@ -146,55 +149,35 @@ def test_a_broken_process_queue_never_blocks_a_turn(monkeypatch):
 # ── dispatch returns immediately ────────────────────────────────────
 
 
-def test_background_delegation_returns_before_the_work_finishes(monkeypatch):
-    started = __import__("threading").Event()
-    release = __import__("threading").Event()
-
-    def _slow(client, task):
-        started.set()
-        release.wait(timeout=5)
-        return _ok(f"done: {task}")
-
-    monkeypatch.setattr(main, "_delegate_internal", _slow)
-
-    result = main._delegate_background(object(), ["a slow task"])
-    assert result["ok"] is True
-    assert result["background"] is True
-    assert result["dispatched"] == 1
-    assert result["handles"][0]["task"] == "a slow task"
-    # The child is still running — the parent did not wait for it.
-    assert started.wait(timeout=5)
-    assert completions.pending_count() == 0
-
-    release.set()
-    for _ in range(100):
-        if completions.pending_count():
-            break
-        time.sleep(0.02)
-    assert completions.pending_count() == 1
+def test_background_delegation_requires_execution_owner():
+    result = main._delegate_background(object(), ["do work"])
+    assert not result["ok"]
+    assert "Gateway" in result["error"]
 
 
-def test_a_crashing_child_still_reports(monkeypatch):
-    """Silence is the one outcome a dispatched task must never have."""
-    def _crash(client, task):
-        raise RuntimeError("child exploded")
+def test_background_dispatch_admits_children_without_local_execution(monkeypatch):
+    from jaeger_agent.task_port import task_scope
+    admitted = []
+    def submit(goal, *, context, key):
+        admitted.append((goal, context, key))
+        return {"task_id": key, "status": "queued"}
+    monkeypatch.setattr(main, "_delegate_internal", lambda *a: pytest.fail("local detached execution"))
+    with task_scope(SimpleNamespace(submit=submit), session_id="parent", request_id="request",
+                    execution={"workspace":"/tmp/work", "model":"configured"}, user_text="Build"):
+        result = main._delegate_background(object(), ["a", "b", "c"])
+    assert result["dispatched"] == 3
+    assert len({h["id"] for h in result["handles"]}) == 3
+    assert all(c["execution"]["model"] == "configured" for _, c, _ in admitted)
+    assert all(c["execution"]["options"]["delegation_depth"] == 1 for _, c, _ in admitted)
+    assert all(c["session_id"] == "parent" for _, c, _ in admitted)
 
-    monkeypatch.setattr(main, "_delegate_internal", _crash)
-    main._delegate_background(object(), ["doomed"])
 
-    for _ in range(100):
-        if completions.pending_count():
-            break
-        time.sleep(0.02)
-    prompt = completions.next_completion_turn()
-    assert "FAILED" in prompt and "child exploded" in prompt
-
-
-def test_background_dispatch_respects_the_depth_limit(monkeypatch):
-    monkeypatch.setattr(main._delegate_depth, "value", main._DELEGATE_MAX_DEPTH,
-                        raising=False)
-    result = main._delegate_background(object(), ["nested"])
-    assert result["ok"] is False
+def test_background_dispatch_respects_the_depth_limit():
+    from jaeger_agent.task_port import task_scope
+    with task_scope(None, session_id="parent", request_id="request", user_text="Build",
+                    execution={"options":{"delegation_depth":main._DELEGATE_MAX_DEPTH}}):
+        result = main._delegate_background(object(), ["nested"])
+    assert not result["ok"]
     assert "recursion" in result["error"]
 
 
@@ -203,16 +186,14 @@ def test_background_dispatch_rejects_empty_work():
     assert main._delegate_background(object(), ["  "])["ok"] is False
 
 
-def test_several_subtasks_all_get_handles(monkeypatch):
-    monkeypatch.setattr(
-        main, "_delegate_internal", lambda client, task: _ok(task),
-    )
-    result = main._delegate_background(object(), ["a", "b", "c"])
-    assert result["dispatched"] == 3
-    assert len({h["id"] for h in result["handles"]}) == 3
-
-    for _ in range(100):
-        if completions.pending_count() == 3:
-            break
-        time.sleep(0.02)
-    assert completions.pending_count() == 3
+def test_unacknowledged_batch_survives_reload_and_replays_with_same_id():
+    import importlib
+    completions.record_delegation(task="durable", result=_ok(), delegation_id="stable-child")
+    first = completions.pending_batch()
+    ident = completions.batch_id(first)
+    importlib.reload(completions)
+    assert completions.batch_id(completions.pending_batch()) == ident
+    completions.acknowledge(first)
+    assert completions.pending_count() == 0
+    completions.record_delegation(task="durable", result=_ok(), delegation_id="stable-child")
+    assert completions.pending_count() == 0

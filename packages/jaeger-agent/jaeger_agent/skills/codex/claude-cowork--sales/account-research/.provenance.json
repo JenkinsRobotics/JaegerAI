@@ -1,0 +1,10 @@
+{
+  "name": "sales:account-research",
+  "original_name": "account-research",
+  "source": "claude-cowork--sales",
+  "origin_path": "plugins/cache/claude-cowork/sales/1.1.0/skills/account-research",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--sales",
+  "skill_md_sha256": "9b73bf462b1e96516ed7de68c628c34c5416b233ddda249d5186fdd4bbdabc17"
+}

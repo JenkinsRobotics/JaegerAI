@@ -12,6 +12,8 @@ const scripts = [
   'timeline.js',
   'keyed-renderer.js',
   'presentation.js',
+  'turn-duration.js',
+  'slash-commands.js',
   'markdown.js',
   'view.js',
 ];
@@ -42,6 +44,7 @@ test('classic browser scripts share one context and boot the webview once', () =
     TextDecoder,
     setTimeout,
     clearTimeout,
+    setInterval: () => 1,
     requestAnimationFrame: callback => setTimeout(callback, 0),
     cancelAnimationFrame: clearTimeout,
     Option: function Option(text, value) { this.text = text; this.value = value; },

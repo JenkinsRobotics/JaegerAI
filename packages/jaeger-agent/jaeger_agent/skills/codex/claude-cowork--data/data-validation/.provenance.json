@@ -1,0 +1,10 @@
+{
+  "name": "data-validation",
+  "original_name": "data-validation",
+  "source": "claude-cowork--data",
+  "origin_path": "plugins/cache/claude-cowork/data/1.0.0/skills/data-validation",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--data",
+  "skill_md_sha256": "48886570df5ce7f94590b132cac0b3ca7e51a85fc27caf78f7605ae61f3f96de"
+}

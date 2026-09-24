@@ -1,0 +1,10 @@
+{
+  "name": "vendor-management",
+  "original_name": "vendor-management",
+  "source": "claude-cowork--operations",
+  "origin_path": "plugins/cache/claude-cowork/operations/1.1.0/skills/vendor-management",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "85a5eb993452124e1d2a75fa0550906750ddc9149e16aeef031eb4f833371cde"
+}

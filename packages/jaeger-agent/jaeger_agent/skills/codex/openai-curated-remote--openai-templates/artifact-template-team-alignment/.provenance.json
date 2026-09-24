@@ -1,0 +1,10 @@
+{
+  "name": "artifact-template-team-alignment",
+  "original_name": "artifact-template-team-alignment",
+  "source": "openai-curated-remote--openai-templates",
+  "origin_path": "plugins/cache/openai-curated-remote/openai-templates/0.1.1/skills/artifact-template-team-alignment",
+  "plugin_version": "0.1.1",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "26d7cafdcd1899a937b325c5d02ac57c162d45002153be33a934d35f81eb6110"
+}

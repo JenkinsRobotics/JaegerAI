@@ -1,0 +1,10 @@
+{
+  "name": "gh-address-comments",
+  "original_name": "gh-address-comments",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/gh-address-comments",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "77389eefd3fb6584210668ca8e43f4b8de87e7722ddd953474bc9e24cdfaaedd"
+}

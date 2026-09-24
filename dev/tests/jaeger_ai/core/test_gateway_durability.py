@@ -97,6 +97,7 @@ async def test_foreign_owner_prevents_startup_and_cleanup_mutations(tmp_path):
 
 @pytest.mark.asyncio
 async def test_native_type_error_does_not_execute_twice(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAEGER_LEGACY_PATHS", "1")  # the native-MCP-first path is isolated by default
     store = GatewaySessionStore(tmp_path / "sessions.db")
     row = store.admit_request("s", "work", request_id="one-dispatch")
     app = JaegerGatewayApp(store=store)
@@ -118,7 +119,27 @@ async def test_native_type_error_does_not_execute_twice(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_native_lead_turn_is_never_attempted_by_default(tmp_path, monkeypatch):
+    """One executor: without the legacy switch the resident Entity runs the turn."""
+    monkeypatch.delenv("JAEGER_LEGACY_PATHS", raising=False)
+    store = GatewaySessionStore(tmp_path / "sessions.db")
+    row = store.admit_request("s", "work", request_id="default-path")
+    app = JaegerGatewayApp(store=store)
+    calls = []
+
+    async def native(*args, **kwargs):
+        calls.append(1)
+        return "native", "backend"
+
+    monkeypatch.setattr(app, "_resolve_session_agent", lambda _: None)
+    monkeypatch.setattr(app, "_native_lead_turn", native)
+    await app._execute_turn("s", row["turn_id"], "work", request_id=row["request_id"])
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_confirmed_native_halt_is_failed_not_unknown(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAEGER_LEGACY_PATHS", "1")  # the native-MCP-first path is isolated by default
     store = GatewaySessionStore(tmp_path / "sessions.db")
     row = store.admit_request("s", "research", request_id="halt")
     app = JaegerGatewayApp(store=store)
@@ -168,3 +189,17 @@ def test_list_requests_filters_execution_unknown(tmp_path):
     unknown = store.list_requests(status="execution_unknown")
     assert any(r["request_id"] == "running-one" for r in unknown)
     assert store.list_requests(status="completed") == []
+
+
+def test_activity_history_survives_replay_retention_and_pages(tmp_path, monkeypatch):
+    from jaeger_ai.core.gateway import session_store as module
+    monkeypatch.setattr(module, "MAX_RETAINED_EVENTS", 3)
+    store = module.GatewaySessionStore(tmp_path / "history.sqlite3")
+    for index in range(520):
+        store.append_event("one", "turn.delta", {"delta": str(index)})
+    store.append_event("other", "turn.delta", {"delta": "PRIVATE"})
+    first = store.activity_history("one")
+    second = store.activity_history("one", first["next_cursor"])
+    assert first["has_more"] and not second["has_more"]
+    assert [e["data"]["delta"] for e in first["events"] + second["events"]] == [str(i) for i in range(520)]
+    assert len(store.replay_events("one")["events"]) < 520

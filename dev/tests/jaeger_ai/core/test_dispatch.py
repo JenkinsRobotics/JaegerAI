@@ -76,49 +76,52 @@ def test_twenty_step_worker_returns_a_clean_summary():
     assert "▸ work_ledger" in "".join(str(x) for x in out["tool_activity"])
 
 
-def test_background_dispatch_keeps_the_parent_free_and_surfaces_the_summary(
-    monkeypatch,
-):
-    """Main session: delegate_task(background=True) → worker loop → rail.
+class _Owner:
+    """The Gateway task owner, reduced to what background delegation uses."""
 
-    The parent returns immediately. The worker finishes all 20 items
-    without a user re-prompt. The completion notice carries the summary,
-    not the raw per-item tool log.
-    """
-    monkeypatch.setattr(
-        main, "_delegate_internal",
-        lambda client, task: run_worker_goal(
-            client, task, turn_fn=_batch_turn(20, per_turn=4), max_steps=20,
-        ) | {"delegated": True, "answer": "processed 20 items",
-             "summary": "processed 20 items"},
-    )
+    def __init__(self):
+        self.submitted = []
 
-    parent_messages = [
-        {"role": "user", "content": "process all 20 notes"},
-        {"role": "assistant", "content": "I'll hand that to a worker."},
-    ]
-    result = main._delegate_background(
-        object(), ["process all 20 items. do not stop until done."],
-    )
-    assert result["ok"] is True
-    assert result["background"] is True
-    assert result["dispatched"] == 1
+    def submit(self, objective, *, context, key, **_):
+        self.submitted.append((objective, context, key))
+        return {"task_id": f"task_{len(self.submitted)}", "status": "queued"}
 
-    for _ in range(200):
-        if completions.pending_count():
-            break
-        time.sleep(0.01)
-    assert completions.pending_count() == 1
 
-    prompt = completions.next_completion_turn()
-    assert prompt is not None
-    assert "processed 20 items" in prompt
-    assert "work_ledger" not in prompt  # raw worker tools stay off the rail
-    # The parent transcript is untouched by the worker's tool trace.
-    assert parent_messages == [
-        {"role": "user", "content": "process all 20 notes"},
-        {"role": "assistant", "content": "I'll hand that to a worker."},
-    ]
+def _scope(owner, depth=0):
+    from jaeger_agent.task_port import task_scope
+
+    return task_scope(owner, session_id="s", request_id="r1", user_text="process all 20 notes",
+                      execution={"options": {"delegation_depth": depth}})
+
+
+def test_background_dispatch_admits_durable_child_tasks_and_keeps_the_parent_free():
+    """Main session: delegate_task(background=True) hands each objective to the
+    Gateway's durable task owner and returns at once with handles. The worker runs
+    later under the owner (results return through the completion outbox), not on a
+    daemon thread that would die with the process."""
+    owner = _Owner()
+    with _scope(owner):
+        result = main._delegate_background(object(), ["process all 20 items", "  ", "then summarise"])
+    assert result["ok"] is True and result["background"] is True and result["dispatched"] == 2
+    assert [h["id"] for h in result["handles"]] == ["task_1", "task_2"]
+    (first, ctx, key), _second = owner.submitted
+    assert first == "process all 20 items"
+    assert key == "delegate:r1:process all 20 items"  # idempotent per request + objective
+    # The child keeps the parent's admission but is one level deeper, so a worker
+    # cannot fan out forever.
+    assert ctx["source"] == "client"
+    assert ctx["execution"]["options"]["delegation_depth"] == 1
+
+
+def test_background_dispatch_stops_at_the_recursion_limit_and_without_an_owner():
+    owner = _Owner()
+    with _scope(owner, depth=main._DELEGATE_MAX_DEPTH):
+        limited = main._delegate_background(object(), ["x"])
+    assert limited["ok"] is False and "recursion limit" in limited["error"] and owner.submitted == []
+    outside = main._delegate_background(object(), ["x"])  # no Gateway task context
+    assert outside["ok"] is False and "Gateway execution owner" in outside["error"]
+    with _scope(owner):
+        assert main._delegate_background(object(), ["   "])["error"] == "no subtasks given"
 
 
 def test_main_session_can_inspect_worker_ledger_by_id():

@@ -152,7 +152,7 @@ def _sandboxed_python_command(
         profile = "\n".join(rules)
         return [
             "/usr/bin/sandbox-exec", "-p", profile,
-            executable, "-I", "-c", launcher,
+            executable, "-I", "-B", "-c", launcher,
         ], "macos-seatbelt"
 
     bwrap = shutil.which("bwrap")
@@ -191,7 +191,7 @@ def _sandboxed_python_command(
             # create files in an unmapped parent directory such as /tmp.
             "--remount-ro", "/",
             "--chdir", workspace,
-            executable, "-I", "-c", launcher,
+            executable, "-I", "-B", "-c", launcher,
         ))
         return command, "linux-bwrap"
 
@@ -207,7 +207,8 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
       - OS filesystem confinement: macOS Seatbelt or Linux bubblewrap. Reads
         are limited to runtime files plus the workspace; writes are limited
         to the workspace and private scratch directory; network is denied.
-      - cwd AND sys.path[0] are the instance ``skills/`` workspace, so
+      - cwd AND sys.path[0] are the selected project (instance ``skills/``
+        when no project is selected), so
         code can both ``open()`` and ``import`` the files ``write_file``
         just created. "Write a file then run it" is the core code
         workflow and depends on this.
@@ -223,22 +224,20 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
     started = time.perf_counter()
     timed_out = False
     interrupted = False
-    # Run inside the agent's skills/ workspace so generated code sees the
-    # files it just wrote. Falls back to the scratch dir when no instance
-    # is bound (standalone tests).
+    # Share the admitted project binding with file tools. Unbound standalone
+    # execution uses instance skills or an external scratch directory.
     workdir = None
     try:
-        from jaeger_agent.workspace import _require_layout
-        workdir = _require_layout().skills_dir
+        from jaeger_agent.workspace import _require_layout, get_project_root
+        workdir = get_project_root() or _require_layout().skills_dir
         workdir.mkdir(parents=True, exist_ok=True)
     except Exception:
         workdir = None
     with tempfile.TemporaryDirectory(prefix="jaeger_run_") as scratch:
         run_dir = os.path.realpath(str(workdir) if workdir is not None else scratch)
-        # Execute as a real script file inside the workspace: that puts
-        # the workspace on sys.path[0] (so `import sibling` works even
-        # under `-I` isolation) and gives tracebacks true line numbers.
-        script = os.path.join(run_dir, f".jaeger_run_{os.urandom(4).hex()}.py")
+        # Keep execution scaffolding outside the selected project; the
+        # sandbox launcher explicitly adds that project to sys.path.
+        script = os.path.join(scratch, 'snippet.py')
         try:
             with open(script, "w", encoding="utf-8") as fh:
                 fh.write(cleaned)
@@ -406,12 +405,12 @@ def run_shell(command: str, timeout_s: float = 60.0) -> dict[str, Any]:
 @register_tool_from_function(name="execute_code")
 @requires_tier(PermissionTier.WRITE_LOCAL, skill="code",
                operation="execute_code",
-               summary="run Python code in the skills workspace")
+               summary="run Python code in the selected workspace")
 def _t_execute_code(code: str, timeout_s: float = 10.0) -> dict:
     """Run Python code and return its output. Reach for this for
     computational work: arithmetic that can't be done with
     `calculate`, string transforms, quick logic — and to run files
-    you wrote with write_file (code runs IN the skills/ workspace,
+    you wrote with write_file (code runs IN the selected project workspace,
     so `import name` and `open('file')` see them). To run a file you
     wrote, pass Python (e.g. code="import fib10" or
     open('fib10.py').read()) — NOT a shell line like

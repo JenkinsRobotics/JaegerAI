@@ -1,0 +1,10 @@
+{
+  "name": "figma-create-design-system-rules",
+  "original_name": "figma-create-design-system-rules",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/figma-create-design-system-rules",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "1f4d7e16ba5325a80da32e2e6bde0ea850ba9287f35f4675d51d55d2f0dc6e2a"
+}

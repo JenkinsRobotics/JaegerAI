@@ -1,0 +1,10 @@
+{
+  "name": "standardize-tab",
+  "original_name": "standardize-tab",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/standardize-tab",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "76ef41dadd6cce6b6337cf35fbc6cf50ea3569e7ecab74964d9fb70126a498be"
+}

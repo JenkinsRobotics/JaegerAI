@@ -1,0 +1,10 @@
+{
+  "name": "apollo:prospect",
+  "original_name": "prospect",
+  "source": "claude-cowork--apollo",
+  "origin_path": "plugins/cache/claude-cowork/apollo/0.1.0/skills/prospect",
+  "plugin_version": "0.1.0",
+  "license": "MIT",
+  "license_file": "../LICENSE.claude-cowork--apollo",
+  "skill_md_sha256": "6ec8535206190b38599a13f2df2786626a2f6790e4d9bd40ecd0b97b2e4a8e3c"
+}

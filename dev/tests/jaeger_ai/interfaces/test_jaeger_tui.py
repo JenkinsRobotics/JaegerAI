@@ -201,3 +201,34 @@ def test_auto_idle_defaults_to_thirty_minutes() -> None:
     """Jaegers use free time — auto-idle Deep Think is on by default."""
     from jaeger_ai.core.instance.schemas import DeepThinkConfig
     assert DeepThinkConfig().auto_idle_minutes == 30
+
+
+def test_tui_attaches_gateway_without_booting_another_agent(monkeypatch):
+    from jaeger_ai.core.gateway.client import GatewayTurnClient
+    import jaeger_ai.main as main
+    monkeypatch.delenv('JAEGER_BRIDGE_EXECUTION', raising=False)
+    monkeypatch.setattr(GatewayTurnClient, 'probe', lambda self:{'service':'jaeger-gateway'})
+    monkeypatch.setattr(GatewayTurnClient, 'ensure_session', lambda *a, **k:{})
+    monkeypatch.setattr(main, 'boot_for_tui', lambda **k: (_ for _ in ()).throw(AssertionError('second owner')))
+    tui = JaegerTUI(skip_model=False)
+    assert isinstance(tui._ensure_agent(), GatewayTurnClient)
+    assert tui._boot is None
+    assert tui._post_turn_completion_check() is None
+    assert tui._post_turn_auto_check() is None
+
+
+def test_tui_uses_gateway_model_and_tool_events(monkeypatch):
+    from jaeger_ai.core.gateway.client import GatewayTurnClient, TurnResult
+    client = GatewayTurnClient()
+    tui = JaegerTUI(skip_model=True)
+    events = []
+    tui._on_tool_event = lambda *args: events.append(args)
+    def stream(session, text, *, request_id, on_event):
+        on_event('tool.started', {'tool':'read_file'})
+        on_event('tool.completed', {'tool':'read_file', 'text':'Completed', 'elapsed_s':0.1})
+        return TurnResult(request_id, 'completed', 'Actual answer', model='actual-provider-model')
+    monkeypatch.setattr(client, 'stream_turn', stream)
+    result = tui._execute_client_turn(client, 'Read the file')
+    assert result['text'] == 'Actual answer'
+    assert tui.model_name == 'actual-provider-model'
+    assert [e[0] for e in events] == ['start','done']

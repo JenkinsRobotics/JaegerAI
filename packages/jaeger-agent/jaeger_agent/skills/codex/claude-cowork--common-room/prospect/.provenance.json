@@ -1,0 +1,10 @@
+{
+  "name": "common-room:prospect",
+  "original_name": "prospect",
+  "source": "claude-cowork--common-room",
+  "origin_path": "plugins/cache/claude-cowork/common-room/1.0.0/skills/prospect",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--common-room",
+  "skill_md_sha256": "52f94d6084af91a0872a93b4d60ffda3c7578cc6d1d3246819954835d88637b5"
+}

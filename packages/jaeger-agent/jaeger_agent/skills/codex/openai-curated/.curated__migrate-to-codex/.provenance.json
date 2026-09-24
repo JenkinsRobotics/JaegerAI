@@ -1,0 +1,10 @@
+{
+  "name": "migrate-to-codex",
+  "original_name": "migrate-to-codex",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/migrate-to-codex",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "145b7fe48360642cb7a42bad3a817f10833fa8a387ffcb4c2df8a47c01a832e2"
+}

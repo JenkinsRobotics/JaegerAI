@@ -36,3 +36,15 @@ def test_generic_chat_does_not_auto_select_a_skill():
 def test_ambiguous_generic_fix_does_not_guess():
     skill, _score, _reason = playbook_skills.match_playbook("Please fix this issue")
     assert skill is None
+
+
+def test_implementation_and_negated_planning_do_not_select_plan():
+    for prompt in (
+        'Implement the backend fixes; do not stop at planning.',
+        'Fix repeated inspection and plan loops, then implement and verify.',
+        '[Autonomous Harness] Continue implementation of the plan.',
+    ):
+        skill, _, _ = playbook_skills.match_playbook(prompt)
+        assert skill is None or skill.name != 'plan'
+    skill, _, _ = playbook_skills.match_playbook('Write a plan for the backend migration')
+    assert skill is not None and skill.name == 'plan'

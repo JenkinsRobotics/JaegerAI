@@ -8,7 +8,7 @@
   "categories": ["Other"],
   "extensionKind": ["ui"],
   "main": "./extension.js",
-  "files": ["extension.js", "gateway.js", "conversation.js", "contract.json", "media/**", "README.md", "VERIFICATION.md", "THIRD_PARTY_NOTICES.md"],
+  "files": ["extension.js", "gateway.js", "conversation.js", "commands.js", "contract.json", "media/**", "README.md", "VERIFICATION.md", "THIRD_PARTY_NOTICES.md"],
   "activationEvents": ["onView:jaeger.conversation"],
   "capabilities": { "untrustedWorkspaces": { "supported": false } },
   "contributes": {
@@ -21,7 +21,7 @@
       { "id": "jaeger", "title": "Jaeger", "icon": "media/jaeger.svg" }
     ] },
     "views": { "jaeger": [
-      { "type": "webview", "id": "jaeger.conversation", "name": "Conversation" }
+      { "type": "webview", "id": "jaeger.conversation", "name": "Jaeger" }
     ] },
     "configuration": {
       "title": "Jaeger",

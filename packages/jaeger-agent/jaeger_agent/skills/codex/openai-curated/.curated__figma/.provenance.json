@@ -1,0 +1,10 @@
+{
+  "name": "figma",
+  "original_name": "figma",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/figma",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "5b11f7c8d0ce4c047b401323e7b8fe6559bd3162a3397bf5248634a5444609d5"
+}

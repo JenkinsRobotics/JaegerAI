@@ -6489,15 +6489,7 @@ if(typeof window!=='undefined'){
 })();
 function _fmtTokens(n){if(!n||n<0)return'0';if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'k';return String(n);}
 function _formatTurnDuration(seconds){
-  const n=Number(seconds);
-  if(!Number.isFinite(n)||n<0)return'';
-  const total=Math.max(0,Math.round(n));
-  if(total<60)return`${total}s`;
-  const h=Math.floor(total/3600);
-  const m=Math.floor((total%3600)/60);
-  const s=total%60;
-  if(h)return`${h}h ${m}m`;
-  return`${m}m ${s}s`;
+  return window.JaegerTurnDuration.formatTurnDuration(seconds);
 }
 function _formatFirstToken(ms){
   const n=Number(ms);

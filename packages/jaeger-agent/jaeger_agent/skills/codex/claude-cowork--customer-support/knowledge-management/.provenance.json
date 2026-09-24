@@ -1,0 +1,10 @@
+{
+  "name": "knowledge-management",
+  "original_name": "knowledge-management",
+  "source": "claude-cowork--customer-support",
+  "origin_path": "plugins/cache/claude-cowork/customer-support/1.1.0/skills/knowledge-management",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--customer-support",
+  "skill_md_sha256": "518320b80d5535d5f9ee56ae677710bc320391b011b5c22a62f5c99a447f9499"
+}

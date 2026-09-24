@@ -1,0 +1,10 @@
+{
+  "name": "code-review",
+  "original_name": "code-review",
+  "source": "claude-cowork--engineering",
+  "origin_path": "plugins/cache/claude-cowork/engineering/1.2.0/skills/code-review",
+  "plugin_version": "1.2.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "6303932f1b301c614a6f5a0099cd87a19e1cd1b7cbfa1a1e11e996edbca6426b"
+}

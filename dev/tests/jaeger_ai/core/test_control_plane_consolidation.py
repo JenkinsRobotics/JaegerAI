@@ -93,6 +93,16 @@ def test_entity_runtime_owns_subordinate_react(isolated_entity_runtime):
         assert "halt_reason" in res
         mock_builder.assert_called_once()
         mock_exec.run_turn.assert_called_once_with("Do a task")
+        state = {}
+        mock_builder.reset_mock()
+        rt.run_subordinate_react("Inspect once", continuation_state=state)
+        mock_agent.messages = [{"role": "tool", "content": "inspection evidence"}]
+        rt.run_subordinate_react("Continue implementation", continuation_state=state)
+        mock_builder.assert_called_once()
+        assert state["agent"] is mock_agent
+        assert mock_agent.messages[0]["content"] == "inspection evidence"
+        assert mock_agent._skill_route_query == ""
+
 
 
 def test_cognition_router_react_handler_defaults_to_runtime_subordinate(isolated_entity_runtime):
@@ -153,3 +163,25 @@ def test_canonical_execute_turn_contract(isolated_entity_runtime):
     types = [e.event_type for e in events]
     assert EventType.HUMAN_MESSAGE.value in types
     assert EventType.AGENT_RESPONSE.value in types
+
+
+def test_project_write_scope_is_explicit_contained_and_request_local(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+    from jaeger_agent import workspace
+
+    project = tmp_path / 'project'
+    project.mkdir()
+    outside = tmp_path / 'other'
+    outside.mkdir()
+    (project / 'escape').symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(workspace, '_layout', SimpleNamespace(skills_dir=outside, workspace_dir=outside))
+    with workspace.project_scope(project):
+        assert workspace._resolve_write('new.py') == project / 'new.py'
+        assert workspace._resolve_write(str(project / 'new.py')) == project / 'new.py'
+        for path in ('../other/new.py', 'escape/new.py', str(outside / 'new.py')):
+            with pytest.raises(workspace.SandboxError):
+                workspace._resolve_write(path)
+    with workspace.project_scope(None):
+        assert workspace.get_project_root() is None

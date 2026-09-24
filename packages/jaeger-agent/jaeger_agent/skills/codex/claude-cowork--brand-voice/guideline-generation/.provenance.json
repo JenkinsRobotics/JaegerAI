@@ -1,0 +1,10 @@
+{
+  "name": "guideline-generation",
+  "original_name": "guideline-generation",
+  "source": "claude-cowork--brand-voice",
+  "origin_path": "plugins/cache/claude-cowork/brand-voice/1.0.0/skills/guideline-generation",
+  "plugin_version": "1.0.0",
+  "license": "MIT",
+  "license_file": "../LICENSE.claude-cowork--brand-voice",
+  "skill_md_sha256": "9f5fd0e3d9ce41b02017cbbfe2663d8c788e015cd69ba71e87cbc44a8cad9be2"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "instrument-data-to-allotrope",
+  "original_name": "instrument-data-to-allotrope",
+  "source": "claude-cowork--bio-research",
+  "origin_path": "plugins/cache/claude-cowork/bio-research/1.0.0/skills/instrument-data-to-allotrope",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--bio-research",
+  "skill_md_sha256": "6167bf1731e568b63110a8f27e987cfe386f44e64cd2d78d9080d5d7628a79c5"
+}

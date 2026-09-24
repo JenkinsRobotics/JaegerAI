@@ -32,8 +32,11 @@ def adapter(monkeypatch):
     monkeypatch.setattr(jaeger_gateway_routes, "remember", lambda *_: None)
     monkeypatch.setattr(gateway_chat, "update_active_run", lambda *_, **__: None)
     monkeypatch.setattr(gateway_chat, "STREAM_PARTIAL_TEXT", {})
+    monkeypatch.setattr(gateway_chat, "STREAM_LIVE_TOOL_CALLS", {})
     monkeypatch.setattr(models, "SESSIONS", {})
-    monkeypatch.setattr(streaming, "_session_payload_with_full_messages", lambda session, **_: {"session_id": session.session_id})
+    monkeypatch.setattr(streaming, "_session_payload_with_full_messages", lambda session, **kwargs: {
+        "session_id": session.session_id, **kwargs,
+    })
     monkeypatch.setattr(gateway_chat, "_iter_sse_lines_cancellable", lambda response, _: iter(response))
 
     def run(attachments=None):
@@ -102,3 +105,34 @@ def test_terminal_usage_distinguishes_missing_measurements_from_zero(adapter, ra
     assert usage == expected
     done = next(data for event, data in adapter.events if event == "done")
     assert done["usage"] == expected
+
+
+def test_checkpoints_and_tool_activity_do_not_pollute_final_answer(adapter):
+    packets = [
+        ('turn.delta', {'delta': 'Inspecting.'}),
+        ('turn.progress', {}),
+        ('tool.started', {'tool': 'read_file', 'activity_id': 't'}),
+        ('tool.completed', {'tool': 'read_file', 'activity_id': 't'}),
+        ('turn.delta', {'delta': 'Checkpoint.'}),
+        ('turn.checkpoint', {'text': 'Checkpoint.'}),
+        ('turn.delta', {'delta': 'Final partial'}),
+        ('turn.finish', {'output': 'Implemented and verified.'}),
+    ]
+    adapter.stream.body = b''.join(
+        f'event: {name}\ndata: {json.dumps({**data, "request_id": "request"})}\n\n'.encode()
+        for name, data in packets
+    )
+    text, _ = adapter.run()
+    assert text == 'Implemented and verified.'
+    assert [e for e, _ in adapter.events] == [
+        'token', 'interim_assistant', 'tool', 'tool_complete',
+        'token', 'interim_assistant', 'token', 'done', 'stream_end',
+    ]
+    completed = next(data for event, data in adapter.events if event == 'tool_complete')
+    assert completed['tid'] == 't'
+    assert completed['done'] is True
+    assert completed['event_type'] == 'tool.completed'
+    assert gateway_chat.STREAM_LIVE_TOOL_CALLS['request'] == [completed]
+    done = next(data for event, data in adapter.events if event == 'done')
+    assert done['session']['tool_calls'][0]['done'] is True
+    assert done['session']['tool_calls'][0]['assistant_msg_idx'] == 1

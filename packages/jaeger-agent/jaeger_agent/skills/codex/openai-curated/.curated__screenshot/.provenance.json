@@ -1,0 +1,10 @@
+{
+  "name": "screenshot",
+  "original_name": "screenshot",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/screenshot",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "081935a6a163277537d46365f49d6b4a3cb40b4748347e7e88759c5927fa8cf5"
+}

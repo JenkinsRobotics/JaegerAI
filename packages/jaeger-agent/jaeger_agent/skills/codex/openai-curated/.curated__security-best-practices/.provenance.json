@@ -1,0 +1,10 @@
+{
+  "name": "security-best-practices",
+  "original_name": "security-best-practices",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/security-best-practices",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "7b3dae1ffc5434d890f3c65c8f552af52d0307fab3b35dec13013c9ca3844c4f"
+}

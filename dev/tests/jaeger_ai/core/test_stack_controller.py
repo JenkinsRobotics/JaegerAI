@@ -39,6 +39,32 @@ def test_managed_bridge_is_always_a_gateway_client():
     assert ids.index("gateway") < ids.index("agent")
 
 
+def test_gui_services_find_python_and_coding_workers(monkeypatch):
+    monkeypatch.setenv("PATH", "/usr/bin:/bin")
+    monkeypatch.setattr("jaeger_ai.core.runtime.stack._default_python", lambda: "/test/venv/bin/python")
+    data = plistlib.loads(build_plist(SERVICE_BY_ID["gateway"]).encode())
+    paths = data["EnvironmentVariables"]["PATH"].split(":")
+    assert paths[0] == "/test/venv/bin"
+    assert "/opt/homebrew/bin" in paths
+    assert "/usr/local/bin" in paths
+    assert len(paths) == len(set(paths))
+
+
+def test_stack_up_reloads_loaded_job_configuration(monkeypatch):
+    from jaeger_ai.core.runtime import stack
+
+    commands = []
+    monkeypatch.setattr(stack, "_launchctl", lambda args: commands.append(args) or MagicMock(returncode=0))
+    monkeypatch.setattr(stack, "migrate_legacy_launchagents", lambda: None)
+    monkeypatch.setattr(stack, "sync_plists", list)
+    monkeypatch.setattr("jaeger_ai.core.frameworks.setup._configure_agent_models", lambda: None)
+    monkeypatch.setattr(stack, "stack_status", lambda services: [{"ready": True}])
+    service = SERVICE_BY_ID["gateway"]
+    assert stack.stack_up([service])["ok"]
+    actions = [command[0] for command in commands]
+    assert actions == ["print", "bootout", "bootstrap", "kickstart"]
+
+
 def test_sync_plists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     """Test that plists for all services are written to launchd dir."""
     launchd_dir = tmp_path / "launchd"

@@ -1,0 +1,10 @@
+{
+  "name": "artifact-template-simple-light-mode",
+  "original_name": "artifact-template-simple-light-mode",
+  "source": "openai-curated-remote--openai-templates",
+  "origin_path": "plugins/cache/openai-curated-remote/openai-templates/0.1.1/skills/artifact-template-simple-light-mode",
+  "plugin_version": "0.1.1",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "7c68430c6cf57b55b457d4735dbd1a46b889bef135a32222902dd0848b6e1752"
+}

@@ -257,7 +257,7 @@ def stop_background(layout: Any, process_id: str) -> dict[str, Any]:
     return {"ok": True, "process_id": process_id, "status": "stopped"}
 
 
-def consume_pending_completions(layout: Any) -> list[dict[str, Any]]:
+def consume_pending_completions(layout: Any, *, persist=None) -> list[dict[str, Any]]:
     """Return every newly-completed background process whose completion
     has not yet been surfaced to the agent — and mark each one notified
     so the next call returns only the newer ones.
@@ -291,6 +291,10 @@ def consume_pending_completions(layout: Any) -> list[dict[str, Any]]:
             "exit_code": meta.get("exit_code"),
             "finished_at": meta.get("finished_at"),
         })
+        if persist is not None:
+            # Transfer to a durable owner before releasing this producer's
+            # notification. Failed writes remain eligible on the next poll.
+            persist(out[-1])
         meta["notified"] = True
         _write_meta(child, meta)
     return out

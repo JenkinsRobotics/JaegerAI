@@ -48,7 +48,9 @@ class TurnExecutive:
         planner: Planner | None = None,
         world_event=None,
         prepare_world_context: bool = True,
+        durable_task: bool = False,
     ) -> None:
+        self.durable_task = durable_task
         self.agent = agent
         self.runs = runs
         self.commitments = commitments
@@ -163,9 +165,10 @@ class TurnExecutive:
         cursor: dict[str, Any] = {
             "halt": self.agent.last_halt_reason,
             "iterations": self.agent.last_iteration_count,
+            "messages": list(getattr(self.agent, "messages", [])),
         }
         self.runs.checkpoint(run.id, cursor)
-        if not self.agent.last_halt_reason:
+        if not self.agent.last_halt_reason and not self.durable_task:
             try:
                 self.runs.transition(run.id, "completed")
             except Exception:
@@ -190,9 +193,13 @@ class TurnExecutive:
     def _checkpoint_tool_result(
         self, run_id: str, name: str, args: dict[str, Any], message: dict[str, Any],
     ) -> None:
+        messages = list(getattr(self.agent, "messages", []))
+        if not messages or messages[-1] != message:
+            messages.append(dict(message))
         self.runs.checkpoint(run_id, {
             "event": "tool_result", "tool": name, "args": dict(args or {}),
             "message": dict(message),
+            "messages": messages,
         })
         if self.claims is not None:
             self.claims.add_claim(Claim.create(

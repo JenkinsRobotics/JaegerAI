@@ -1,0 +1,10 @@
+{
+  "name": "anthropic-skills:docx",
+  "original_name": "docx",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/docx",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "8017469ea95fb7d28225c62daf8e2f3492a7b516fc64c18c28977cbf8980b7fe"
+}

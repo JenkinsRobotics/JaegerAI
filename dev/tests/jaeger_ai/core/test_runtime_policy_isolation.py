@@ -18,6 +18,16 @@ import pytest
 from jaeger_os.core.safety import permissions
 
 
+class _Config(SimpleNamespace):
+    """The slice of a pydantic ``Config`` the turn touches: it snapshots the config with
+    ``model_copy(deep=True)`` so a per-turn model choice never mutates the shared one."""
+
+    def model_copy(self, *, deep=False):
+        import copy
+
+        return copy.deepcopy(self) if deep else copy.copy(self)
+
+
 @pytest.fixture
 def runtime(monkeypatch, tmp_path):
     from jaeger_ai.core.entity import runtime as runtime_module
@@ -46,8 +56,8 @@ def runtime(monkeypatch, tmp_path):
             return "ok"
 
     monkeypatch.setattr(sqlite_store, "bind", lambda layout: None)
-    monkeypatch.setattr(schemas, "load_yaml", lambda path, model: SimpleNamespace(
-        external_model=SimpleNamespace(provider="scripted")))
+    monkeypatch.setattr(schemas, "load_yaml", lambda path, model: _Config(
+        external_model=SimpleNamespace(provider="scripted", enabled=True)))
     monkeypatch.setattr(external_model, "ExternalModelClient",
                         lambda ext, layout: SimpleNamespace(provider="scripted", model_name="m"))
     monkeypatch.setattr(runtime_bridge, "build_jaeger_agent",

@@ -1,0 +1,10 @@
+{
+  "name": "nextflow-development",
+  "original_name": "nextflow-development",
+  "source": "claude-cowork--bio-research",
+  "origin_path": "plugins/cache/claude-cowork/bio-research/1.0.0/skills/nextflow-development",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--bio-research",
+  "skill_md_sha256": "f30017df5d499427a701ec6cedfc5c9948ca3bd04ee1a2b6a585a29cd93ad0d7"
+}

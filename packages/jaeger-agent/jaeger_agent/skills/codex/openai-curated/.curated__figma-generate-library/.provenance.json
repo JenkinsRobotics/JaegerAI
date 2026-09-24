@@ -1,0 +1,10 @@
+{
+  "name": "figma-generate-library",
+  "original_name": "figma-generate-library",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/figma-generate-library",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "7f42103c59fc181d7081404a56545f321c458d97f5ee7f7a0ab2af75ea69a85f"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "risk-assessment",
+  "original_name": "risk-assessment",
+  "source": "claude-cowork--operations",
+  "origin_path": "plugins/cache/claude-cowork/operations/1.1.0/skills/risk-assessment",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "82e29810a762c396a56f92bbd5c5afd252f7a07c6be69a246c28f7b82c4086d9"
+}

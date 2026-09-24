@@ -1,0 +1,10 @@
+{
+  "name": "artifact-template-investment-committee-memo",
+  "original_name": "artifact-template-investment-committee-memo",
+  "source": "openai-curated-remote--openai-templates",
+  "origin_path": "plugins/cache/openai-curated-remote/openai-templates/0.1.1/skills/artifact-template-investment-committee-memo",
+  "plugin_version": "0.1.1",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "68abd08cfe5e073e3c446a3f675f44c5bf98f57434dba679e8acd8a763379a8b"
+}

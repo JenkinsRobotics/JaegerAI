@@ -1,0 +1,10 @@
+{
+  "name": "Presentations",
+  "original_name": "Presentations",
+  "source": "openai-primary-runtime--presentations",
+  "origin_path": "plugins/cache/openai-primary-runtime/presentations/26.905.11957/skills/presentations",
+  "plugin_version": "26.905.11957",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "4b40a55cd7747ed101498889b1dbb63f05aae478d44af96423657888e33b48ae"
+}

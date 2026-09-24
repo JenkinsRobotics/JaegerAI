@@ -458,6 +458,16 @@ class AutomationConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+    autonomy: Literal["ask", "scoped", "auto"] = Field(
+        "auto",
+        json_schema_extra=_setting("autonomy"),
+        description=(
+            "Whether the agent pauses for approval before tier-gated actions. "
+            "'auto' (default): none: it is your assistant on your machine; only "
+            "catastrophic commands are still blocked, and every action is audited. "
+            "'scoped': prompt once per new kind of action. 'ask': prompt every time."
+        ),
+    )
     inner_max_iterations: int = Field(
         24, ge=1, le=200,
         json_schema_extra=_setting("autonomy"),

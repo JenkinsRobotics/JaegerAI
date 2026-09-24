@@ -37,6 +37,8 @@ import pathlib
 import shutil
 import sys
 import urllib.request
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Any
 
 # ── Registry ────────────────────────────────────────────────────────
@@ -480,6 +482,27 @@ def download_model(name: str, *, progress: bool = True) -> pathlib.Path:
 # ── Helpers for the CLI / agent tools ───────────────────────────────
 
 
+_serving_context: ContextVar[tuple[Any, Any] | None] = ContextVar("serving_model_context", default=None)
+
+
+@contextmanager
+def serving_model_scope(client: Any, config: Any):
+    """Bind the actual execution client per request, including tool threads."""
+    token = _serving_context.set((client, config))
+    try:
+        yield
+    finally:
+        _serving_context.reset(token)
+
+
+def _serving_runtime() -> tuple[Any, Any]:
+    scoped = _serving_context.get()
+    if scoped is not None:
+        return scoped
+    from jaeger_ai.main import _pipeline
+    return _pipeline.get("client"), _pipeline.get("config")
+
+
 def serving_model() -> dict[str, Any] | None:
     """The model actually answering right now, or ``None`` before boot.
 
@@ -491,9 +514,7 @@ def serving_model() -> dict[str, Any] | None:
     not serving.
     """
     try:
-        from jaeger_ai.main import _pipeline
-
-        client = _pipeline.get("client")
+        client, cfg = _serving_runtime()
     except Exception:  # noqa: BLE001 — pre-boot / import cycle
         return None
     if client is None:
@@ -518,9 +539,8 @@ def serving_model() -> dict[str, Any] | None:
         # with the trimmer is worse than no number.
         try:
             from jaeger_ai.main import _context_budget_for
-            from jaeger_ai.main import _pipeline as _p
 
-            budgeted, _reserve = _context_budget_for(_p.get("config"))
+            budgeted, _reserve = _context_budget_for(cfg)
             window = int(budgeted or 0)
         except Exception:  # noqa: BLE001
             window = 0
@@ -534,8 +554,8 @@ def serving_model() -> dict[str, Any] | None:
     elif provider == "cli" or provider.endswith("-cli"):
         location = "local-cli"
     elif kind == "external":
-        # Local Ollama / LM Studio — on this machine, not a hosted API.
-        location = "local"
+        location = "cloud" if provider in _HOSTED_CLOUD_PROVIDERS else (
+            "local" if provider in {"ollama", "lmstudio"} else "unknown")
     else:
         location = "local"
     row: dict[str, Any] = {
@@ -568,9 +588,6 @@ def serving_model() -> dict[str, Any] | None:
     row["requested"] = None
     row["fallback_active"] = False
     try:
-        from jaeger_ai.main import _pipeline
-
-        cfg = _pipeline.get("config")
         ext = getattr(cfg, "external_model", None)
         if ext is not None and getattr(ext, "enabled", False):
             wanted = str(getattr(ext, "model", "") or "")
@@ -608,9 +625,8 @@ def _omit_local_catalog_rows() -> bool:
     while a cloud provider is enabled.
     """
     try:
-        from jaeger_ai.main import _pipeline
-
-        ext = getattr(_pipeline.get("config"), "external_model", None)
+        _client, cfg = _serving_runtime()
+        ext = getattr(cfg, "external_model", None)
         if ext is not None and getattr(ext, "enabled", False):
             provider = str(getattr(ext, "provider", "") or "").strip().lower()
             if provider in _HOSTED_CLOUD_PROVIDERS:

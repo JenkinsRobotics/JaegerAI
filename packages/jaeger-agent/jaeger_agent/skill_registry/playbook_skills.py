@@ -447,9 +447,16 @@ def match_playbook(
     for skill in prompt_playbooks(available_tools):
         if skill.origin == "marketplace":
             continue
+        # Planning-only recipes require an actual request for a plan. A
+        # substring in "implementation", or "do not stop at planning", is
+        # not authorization to replace implementation with a planning gate.
+        if skill.name == "plan" and not re.search(
+            r"^(?:/plan\b|(?:please )?(?:make|create|write|draft|give me|show me) (?:a |the )?plan\b)", blob,
+        ):
+            continue
         names = [skill.name, *skill.aliases]
         normalized_names = [" ".join(_ROUTE_WORD.findall(name.lower())) for name in names]
-        exact = next((name for name in normalized_names if name and name in clean), "")
+        exact = next((name for name in normalized_names if name and f" {name} " in f" {clean} "), "")
         if exact:
             scored.append((100.0 + len(exact.split()), skill, f"exact phrase {exact!r}"))
             continue

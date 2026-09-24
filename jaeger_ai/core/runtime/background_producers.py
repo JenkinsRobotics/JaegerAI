@@ -305,7 +305,7 @@ class BackgroundProducers:
         from jaeger_agent.prompts import AUTO_BOARD_PROMPT
 
         from jaeger_ai.core.runtime import heartbeat as hb
-        from jaeger_ai.core.runtime.completions import next_completion_turn, pending_count
+        from jaeger_ai.core.runtime.completions import pending_batch, pending_count, completion_prompt, batch_id, acknowledge
         from jaeger_ai.core.runtime.idle_supervisor import Action, decide, window_elapsed
         from jaeger_ai.core.runtime.task_liveness import reclaim_stale
 
@@ -324,13 +324,6 @@ class BackgroundProducers:
             idle_minutes = int(cfg.deep_think.auto_idle_minutes)
         except Exception:  # noqa: BLE001
             idle_minutes = 30
-        has_dt = False
-        try:
-            from jaeger_agent.background.deep_think import queue_for_layout
-            has_dt = queue_for_layout(layout).next_pending() is not None
-        except Exception:  # noqa: BLE001
-            has_dt = False
-
         quiet = self.sink.last_user_quiet_s()
         idle_ready = _env_flag("JAEGER_IDLE_READY") or window_elapsed(
             idle_minutes * 60, quiet_for=quiet,
@@ -339,26 +332,19 @@ class BackgroundProducers:
             busy=self.sink.is_busy(),
             has_completions=pending_count() > 0,
             idle_ready=idle_ready,
-            has_deep_think=has_dt,
+            has_deep_think=False,
             has_board=has_actionable_work(layout),
             heartbeat_due=hb.is_due(layout, interval_minutes=interval, enabled=enabled),
         )
         if action is Action.SKIP or action is Action.IDLE:
             return
-        if action is Action.DEEP_THINK:
-            action = Action.BOARD if has_actionable_work(layout) else (
-                Action.HEARTBEAT if hb.is_due(
-                    layout, interval_minutes=interval, enabled=enabled,
-                ) else Action.IDLE
-            )
-            if action is Action.IDLE:
-                return
-
         session = self.sink.last_user_session() or "desktop-app"
         prompt = None
         source = action.value
+        completion_events = []
         if action is Action.COMPLETION:
-            prompt = next_completion_turn(layout)
+            completion_events = pending_batch(layout)
+            prompt = completion_prompt(completion_events) if completion_events else None
             session = "completions"
         elif action is Action.BOARD:
             prompt = AUTO_BOARD_PROMPT
@@ -377,7 +363,7 @@ class BackgroundProducers:
         if not prompt:
             return
 
-        request_id = f"{source}:{int(time.time())}"
+        request_id = batch_id(completion_events) if completion_events else f"{source}:{int(time.time())}"
         if action is Action.HEARTBEAT:
             request_id = f"heartbeat:{int(hb.last_beat_at(layout) or time.time())}"
         result = self.sink.submit_turn(
@@ -385,6 +371,8 @@ class BackgroundProducers:
         )
         if result.get("skipped"):
             return
+        if completion_events and result.get("status") == "completed" and not result.get("error"):
+            acknowledge(completion_events)
         from jaeger_ai.core.runtime.background_delivery import record_result
         try:
             record_result(

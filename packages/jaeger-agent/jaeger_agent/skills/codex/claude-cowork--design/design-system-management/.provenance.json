@@ -1,0 +1,10 @@
+{
+  "name": "design-system-management",
+  "original_name": "design-system-management",
+  "source": "claude-cowork--design",
+  "origin_path": "plugins/cache/claude-cowork/design/1.1.0/skills/design-system-management",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "2e80d05162548b27396601e8a7160206dbf8513954108777776dc8a69e5beca7"
+}

@@ -87,6 +87,7 @@ class ServiceDef:
     health_path: str | None
     command_builder: Callable[[], list[str]]
     env_builder: Callable[[], dict[str, str]]
+    optional: bool = False
 
 
 def _ollama_command() -> list[str]:
@@ -149,7 +150,17 @@ def _common_env() -> dict[str, str]:
     state_root = operator_state_root()
     pycache = Path.home() / ".cache" / "jaeger" / "pycache"
     pythonpath = f"{REPO_ROOT}:{REPO_ROOT}/packages/jaeger-agent:{REPO_ROOT}/packages/jaeger-os"
+    # GUI/launchd jobs do not inherit the operator's interactive shell PATH.
+    # Resolve Python and installed coding workers consistently for every client.
+    path_entries = [
+        str(Path(_default_python()).parent),
+        str(Path.home() / ".local" / "bin"),
+        "/opt/homebrew/bin", "/usr/local/bin",
+        *os.environ.get("PATH", "").split(os.pathsep),
+        "/usr/bin", "/bin", "/usr/sbin", "/sbin",
+    ]
     return {
+        "PATH": os.pathsep.join(dict.fromkeys(p for p in path_entries if p)),
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONPYCACHEPREFIX": str(pycache),
         "PYTHONPATH": pythonpath,
@@ -225,6 +236,10 @@ STACK_SERVICES: list[ServiceDef] = [
         health_path="/health",
         command_builder=_runner_command,
         env_builder=_common_env,
+        # A second execution path (the WebUI's Hermes/OpenClaw/Roundtable
+        # runner). Isolated: a turn runs on the Gateway, so a default
+        # ``stack up`` does not start it. See jaeger_ai/contract/legacy_paths.py.
+        optional=True,
     ),
     ServiceDef(
         id="webui",
@@ -252,6 +267,7 @@ STACK_SERVICES: list[ServiceDef] = [
         health_path=None,
         command_builder=_a2a_command,
         env_builder=_common_env,
+        optional=True,
     ),
     ServiceDef(
         id="hermes",
@@ -261,11 +277,13 @@ STACK_SERVICES: list[ServiceDef] = [
         health_path=None,
         command_builder=_hermes_command,
         env_builder=_common_env,
+        optional=True,
     ),
 ]
 
 SERVICE_BY_ID = {s.id: s for s in STACK_SERVICES}
 SERVICE_BY_LABEL = {s.label: s for s in STACK_SERVICES}
+CORE_SERVICES = [s for s in STACK_SERVICES if not s.optional]
 
 
 def _xml_text(value: str) -> str:
@@ -450,7 +468,7 @@ def sync_plists(commit_sha: str | None = None) -> list[Path]:
 
 def stack_up(services: list[ServiceDef] | None = None, wait_timeout: float = 25.0) -> dict[str, Any]:
     """Bring the stack up: migrate legacy plists, bootstrap into launchd, wait for health."""
-    target = services or STACK_SERVICES
+    target = CORE_SERVICES if services is None else services
     domain = get_user_domain()
     head = _current_git_commit()
 
@@ -473,10 +491,21 @@ def stack_up(services: list[ServiceDef] | None = None, wait_timeout: float = 25.
         # Check if already loaded
         chk = _launchctl(["print", f"{domain}/{s.label}"])
         if chk.returncode == 0:
-            # Kickstart reload
-            _launchctl(["kickstart", "-k", f"{domain}/{s.label}"])
-        else:
-            _launchctl(["bootstrap", domain, str(p_path)])
+            # kickstart restarts the cached job; it does not reread its plist.
+            _launchctl(["bootout", f"{domain}/{s.label}"])
+        # Removal can still be settling when bootout returns. Retry admission
+        # briefly, and surface failures rather than reporting a stopped stack.
+        reload_deadline = time.monotonic() + 10.0
+        while True:
+            loaded = _launchctl(["bootstrap", domain, str(p_path)])
+            if loaded.returncode == 0:
+                break
+            if time.monotonic() >= reload_deadline:
+                raise RuntimeError(f"Cannot load {s.label}: {loaded.stderr.strip()}")
+            time.sleep(0.25)
+        started = _launchctl(["kickstart", f"{domain}/{s.label}"])
+        if started.returncode != 0:
+            raise RuntimeError(f"Cannot start {s.label}: {started.stderr.strip()}")
 
     # Step 4: Wait for readiness
     deadline = time.time() + wait_timeout

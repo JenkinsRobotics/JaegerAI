@@ -1,0 +1,10 @@
+{
+  "name": "compose-outreach",
+  "original_name": "compose-outreach",
+  "source": "claude-cowork--common-room",
+  "origin_path": "plugins/cache/claude-cowork/common-room/1.0.0/skills/compose-outreach",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--common-room",
+  "skill_md_sha256": "6bba827598fce66ed3ce3672b62bb4d21e4ec7dd3dc54d7264bec8b515df0a43"
+}

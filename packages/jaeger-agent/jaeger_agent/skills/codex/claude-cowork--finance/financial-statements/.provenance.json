@@ -1,0 +1,10 @@
+{
+  "name": "financial-statements",
+  "original_name": "financial-statements",
+  "source": "claude-cowork--finance",
+  "origin_path": "plugins/cache/claude-cowork/finance/1.1.0/skills/financial-statements",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--finance",
+  "skill_md_sha256": "430a41aeec6d283987058290394681e4563a8f472679a0a665fc614afe5f7d19"
+}

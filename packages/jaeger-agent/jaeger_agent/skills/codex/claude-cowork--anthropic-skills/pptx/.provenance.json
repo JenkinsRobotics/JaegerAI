@@ -1,0 +1,10 @@
+{
+  "name": "pptx",
+  "original_name": "pptx",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/pptx",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "a7ff03e2c85b636f55232a6b1555f5dd90216b7a1a359ab289d8364e6acbc6a0"
+}

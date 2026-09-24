@@ -379,3 +379,33 @@ def test_direct_response_does_not_use_file_verifier(isolated: Path):
     assert ver
     assert ver[-1].payload.get("status") == "objective_unverified"
     assert ver[-1].payload.get("verifier") != "file_write_verifier"
+
+
+def test_write_verification_uses_artifact_not_objective_workspace(tmp_path):
+    project = tmp_path / 'project'
+    project.mkdir()
+    artifact = project / 'calculator.py'
+    artifact.write_text('return sum(values)')
+    action = derive_verification_action(
+        f'Implement and write tests in {project}',
+        {'tool_records': [{'tool': 'write_file', 'arguments': {'path': str(artifact), 'content': 'return sum(values)'}, 'result': {'path': str(artifact)}}]},
+    )
+    assert action['path'] == str(artifact)
+
+
+def test_last_read_does_not_verify_unclassified_mutating_turn():
+    objective = "Run code to create a report, then read it"
+    action = derive_verification_action(objective, {"tool_records": [
+        {"tool": "execute_code", "arguments": {}, "result": {"ok": True}},
+        {"tool": "read_file", "arguments": {}, "result": {"ok": True}},
+    ]})
+    result = VerificationRegistry().verify(objective, action, {"ok": True})
+    assert result.status == VerificationStatus.OBJECTIVE_UNVERIFIED
+    assert result.verifier != "read_only_verifier"
+
+
+def test_memory_mutation_is_not_classified_as_read_only():
+    action = derive_verification_action("Remember a value", {"tool_records": [
+        {"tool": "memory", "arguments": {"operation": "write"}, "result": {"ok": True}},
+    ]})
+    assert action["action_type"] == "unknown"

@@ -1,0 +1,10 @@
+{
+  "name": "single-cell-rna-qc",
+  "original_name": "single-cell-rna-qc",
+  "source": "claude-cowork--bio-research",
+  "origin_path": "plugins/cache/claude-cowork/bio-research/1.0.0/skills/single-cell-rna-qc",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--bio-research",
+  "skill_md_sha256": "49cb573916deec6fcf6cc2cb1b573469cbc8c34b84326597ce2db22d0202393f"
+}

@@ -146,6 +146,8 @@ from .reflect import reflect
 
 # In-session task list (planning scratchpad)
 from .todo import reset_todos, todo
+from .plan import normalize_plan, wait_for  # registers update_plan + wait
+from . import pty_exec  # noqa: F401  (registers exec_command, write_stdin, kill_command)
 
 # Self-update — the agent editing its own identity.yaml / soul.md
 from .identity_tools import set_name, update_soul

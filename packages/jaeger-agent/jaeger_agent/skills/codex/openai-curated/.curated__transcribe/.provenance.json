@@ -1,0 +1,10 @@
+{
+  "name": "transcribe",
+  "original_name": "transcribe",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/transcribe",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "f530021da9f377362ee4214e0bc689cbb5404640d2eb88ee272d51d61f530a09"
+}

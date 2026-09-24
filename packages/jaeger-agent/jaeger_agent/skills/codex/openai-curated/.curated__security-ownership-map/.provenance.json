@@ -1,0 +1,10 @@
+{
+  "name": "security-ownership-map",
+  "original_name": "security-ownership-map",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/security-ownership-map",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "f06c1a59247569326702c945f397af163ea96cf2ecfdf2dde280605bf89a3ec8"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "reconciliation",
+  "original_name": "reconciliation",
+  "source": "claude-cowork--finance",
+  "origin_path": "plugins/cache/claude-cowork/finance/1.1.0/skills/reconciliation",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--finance",
+  "skill_md_sha256": "3412ddd23f36ab61a2fd8b664982f127a533469f8f707e59499fa1e7380e7d5d"
+}

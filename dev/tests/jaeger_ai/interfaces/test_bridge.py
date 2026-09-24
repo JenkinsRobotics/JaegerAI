@@ -58,11 +58,21 @@ def _instance_on_disk(tmp_path, monkeypatch):
     so the faked-boot paths exercise the normal flow; the no-instance
     tests below override ``JAEGER_INSTANCE_DIR`` to a missing dir."""
     root = tmp_path / "inst"
+    # These protocol tests intentionally exercise the isolated local worker.
+    # Product launches use the Gateway unless explicitly overridden.
+    monkeypatch.setenv("JAEGER_BRIDGE_EXECUTION", "local")
     root.mkdir()
     for f in ("identity.yaml", "config.yaml", "manifest.json"):
         (root / f).write_text("{}", encoding="utf-8")
     monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(root))
     return root
+
+
+def test_bridge_defaults_to_gateway_owner(monkeypatch):
+    monkeypatch.delenv('JAEGER_BRIDGE_EXECUTION', raising=False)
+    assert bridge.gateway_execution_enabled()
+    monkeypatch.setenv('JAEGER_BRIDGE_EXECUTION', '')
+    assert bridge.gateway_execution_enabled()
 
 
 def test_character_catalog_exposes_authored_profile_for_onboarding(_instance_on_disk):

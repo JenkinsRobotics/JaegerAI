@@ -1,0 +1,10 @@
+{
+  "name": "sites-building",
+  "original_name": "sites-building",
+  "source": "openai-bundled--sites",
+  "origin_path": "plugins/cache/openai-bundled/sites/0.1.70/skills/sites-building",
+  "plugin_version": "0.1.70",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "5651e54e471d30405f0890b65d163d093224f01607556b3e445e7c3d5bd3877b"
+}

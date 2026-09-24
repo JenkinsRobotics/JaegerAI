@@ -26,6 +26,58 @@ function activityTitle(items, running) {
   return `${running ? 'Using' : 'Used'} ${items.length} tools`;
 }
 
+function activitySummary(items, running) {
+  const phrases = items.map(item => {
+    const name = String(item.name || '');
+    if (/^(file_read|read_file|read|list_skill_dir|search_files)$/.test(name)) return running ? 'Reading files' : 'Read files';
+    if (/^(file_write|write_file|edit_file|append_file|delete_file|apply_patch|patch|move_file|copy_file)$/.test(name)) return running ? 'Editing files' : 'Edited files';
+    if (/^(exec_command|run_command|shell|terminal|execute_command)$/.test(name)) return running ? 'Running commands' : 'Ran commands';
+    if (name.startsWith('mcp__')) return `${running ? 'Using' : 'Used'} ${name.split('__')[1].replace(/_/g, ' ')} integration`;
+    return `${running ? 'Using' : 'Used'} ${toolName(name)}`;
+  });
+  return [...new Set(phrases)].map((phrase, index) => index ? phrase[0].toLowerCase() + phrase.slice(1) : phrase).join(', ');
+}
+
+// Mixed activity uses the same cursor/click mark as computer integrations.
+// Inspect tool names, never prose arguments (which may mention unrelated tools).
+function activityIcon(items) {
+  const kinds = new Set(items.map(item => {
+    const name = String(item.name || '').split('__').pop();
+    if (/^(file_read|read_file|read|list_skill_dir|search_files)$/.test(name)) return 'read';
+    if (/^(file_write|write_file|edit_file|append_file|delete_file|apply_patch|patch|move_file|copy_file)$/.test(name)) return 'edit';
+    if (/^(exec_command|run_command|shell|terminal|execute_command)$/.test(name)) return 'tool';
+    return 'integration';
+  }));
+  return kinds.size === 1 ? [...kinds][0] : 'integration';
+}
+
+function groupWorkRows(rows) {
+  const result = [];
+  for (const row of rows) {
+    if (row.kind !== 'tool') { result.push(row); continue; }
+    let group = result.at(-1);
+    if (group?.kind !== 'tool-group') {
+      group = { key: `group:${row.key}`, kind: 'tool-group', items: [], live: false };
+      result.push(group);
+    }
+    group.items.push(row); group.live ||= row.phase === 'running';
+  }
+  return result;
+}
+
+function diffLines(diff) {
+  let oldLine = 0, newLine = 0, inHunk = false;
+  return String(diff || '').split('\n').flatMap(text => {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text);
+    if (hunk) { inHunk = true; oldLine = Number(hunk[1]); newLine = Number(hunk[2]); return [{ kind: 'hunk', text }]; }
+    if (!inHunk) return [];
+    if (text.startsWith('+')) return [{ kind: 'addition', oldLine: '', newLine: newLine++, text: text.slice(1) }];
+    if (text.startsWith('-')) return [{ kind: 'deletion', oldLine: oldLine++, newLine: '', text: text.slice(1) }];
+    if (text.startsWith(' ')) return [{ kind: 'context', oldLine: oldLine++, newLine: newLine++, text: text.slice(1) }];
+    return [];
+  });
+}
+
 // One group per uninterrupted run of tool-shaped activity events — split
 // whenever a non-tool event (anything without a `name`, e.g. a status
 // marker) appears between them. Mirrors ToolCommandGroupView's doc comment:
@@ -121,7 +173,7 @@ function selectableModels(catalog) {
 }
 
 const exportsObject = {
-  modelLabel, toolName, activityTitle, groupActivity, failureCount, statusLabel,
+  modelLabel, toolName, activityTitle, activitySummary, activityIcon, groupWorkRows, diffLines, groupActivity, failureCount, statusLabel,
   groupTurns, selectableModels, providerModelValue, parseProviderModel,
 };
 if (typeof module !== 'undefined') module.exports = exportsObject;

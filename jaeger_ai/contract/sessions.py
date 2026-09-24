@@ -160,7 +160,28 @@ def attribute(session_id: object, source: object = None,
     return Attribution(runtime=runtime, surface=surface)
 
 
+#: Session ids the Gateway keeps for its own lanes, not for a person's conversation.
+INTERNAL_SESSION_IDS = frozenset({"dispatcher", "heartbeat", "kanban_idle", "deepthink"})
+
+
+def is_conversation_session(session: dict) -> bool:
+    """True for a session a person converses in (IDE, WebUI, terminal, app).
+
+    False for the Gateway's internal lanes and for durable-task child sessions,
+    which hold machine work (one live one has 14,000 messages) and must not fill
+    a sidebar. A projection of the Gateway's sessions filters through this so the
+    rule lives in one place.
+    """
+    sid = str(session.get("session_id") or "")
+    if not sid or sid in INTERNAL_SESSION_IDS or sid.startswith("task:"):
+        return False
+    meta = session.get("metadata") or {}
+    return not (meta.get("task_id") or meta.get("parent_session_id") or meta.get("native_session"))
+
+
 __all__ = [
+    "INTERNAL_SESSION_IDS",
+    "is_conversation_session",
     "Attribution",
     "BROWSER_SURFACES",
     "SURFACES",

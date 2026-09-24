@@ -1,0 +1,10 @@
+{
+  "name": "playwright-interactive",
+  "original_name": "playwright-interactive",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/playwright-interactive",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "f6c1155d923e6ae3ccc12abfef2266f119f8e9546df2ddeee1f5eb369845a0a1"
+}

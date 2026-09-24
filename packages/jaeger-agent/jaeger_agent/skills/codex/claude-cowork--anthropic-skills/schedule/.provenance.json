@@ -1,0 +1,10 @@
+{
+  "name": "schedule",
+  "original_name": "schedule",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/schedule",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "682d93b67369e7517fb21eee4f587fb8ba3a1dc594e21515b1bf71bc33f11a03"
+}

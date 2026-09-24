@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import sqlite3
+from contextlib import closing
 import time
 from collections.abc import Callable
 from dataclasses import asdict, replace
@@ -34,17 +36,86 @@ class DuplicateSubmissionConflict(IDEOrchestrationError):
 
 
 class IDEOrchestrationService:
-    """Process-local worker coordination; durable owner integration is pending."""
+    """Worker coordination with Gateway-owned durable admission and result receipts."""
 
     def __init__(self, adapters: dict[str, IDEWorkerAdapter] | None = None) -> None:
+        self._db_path = None
+        self._snapshots: dict[str, str] = {}
         self._adapters = dict(adapters or {})
         self._idempotency_records: dict[str, dict[str, Any]] = {}
         self._tasks: dict[str, dict[str, Any]] = {}
         self._active_executions: dict[str, dict[str, Any]] = {}
         self._progress_hooks: list[Callable[[WorkerProgress], None]] = []
 
+    def bind_store(self, path) -> None:
+        """Use the owner database. A lost process never erases accepted task identity."""
+        self._db_path = str(path)
+        for adapter in self._adapters.values():
+            binder = getattr(adapter, 'bind_store', None)
+            if callable(binder):
+                binder(path)
+        with closing(sqlite3.connect(self._db_path)) as conn, conn:
+            conn.execute('CREATE TABLE IF NOT EXISTS orchestration_tasks (task_id TEXT PRIMARY KEY, idempotency_key TEXT UNIQUE NOT NULL, snapshot TEXT NOT NULL, record TEXT NOT NULL)')
+            rows = conn.execute('SELECT task_id, snapshot, record FROM orchestration_tasks').fetchall()
+        for task_id, snapshot, record in rows:
+            data = json.loads(record)
+            if data.get('result') is None:
+                data['state'] = 'unknown'
+                data['result'] = dict(task_id=task_id, worker_id=data['worker'], state='unknown', output='Owner restarted; reconcile the worker before resubmission',
+                    verified=False, reason='No terminal worker receipt', checked_artifacts=[], budget_used_seconds=0,
+                    evidence={'delivery_unknown':True, 'handle':data.get('handle')})
+            self._tasks[task_id] = data
+            self._snapshots[task_id] = snapshot
+            self._persist(task_id)
+
+    def _persist(self, task_id):
+        if self._db_path is None:
+            return
+        row = self._tasks[task_id]
+        with closing(sqlite3.connect(self._db_path, timeout=10)) as conn, conn:
+            conn.execute('INSERT INTO orchestration_tasks VALUES (?,?,?,?) ON CONFLICT(task_id) DO UPDATE SET record=excluded.record',
+                         (task_id, row['idempotency_key'], self._snapshots[task_id], json.dumps(row)))
+
+    @staticmethod
+    def _restored_result(data):
+        return OrchestrationResult(data['task_id'], data['worker_id'], data['state'], data['output'],
+            VerificationResult(data['verified'], data['reason'], tuple(data.get('checked_artifacts') or [])),
+            data.get('budget_used_seconds', 0), data.get('evidence') or {})
+
     def register_adapter(self, adapter: IDEWorkerAdapter) -> None:
         self._adapters[adapter.worker_id] = adapter
+        binder = getattr(adapter, 'bind_store', None)
+        if self._db_path and callable(binder):
+            binder(self._db_path)
+
+    def resume_pending(self):
+        """Reattach persistent worker receipts, without another submit call."""
+        from pathlib import Path
+        from .contracts import TaskBudget
+        for task_id, row in self._tasks.items():
+            if row.get('state') != 'unknown' or task_id in self._active_executions:
+                continue
+            adapter = self._adapters.get(row['worker'])
+            restore = getattr(adapter, 'restore_handle', None)
+            if not callable(restore):
+                continue
+            data = json.loads(self._snapshots[task_id])
+            data['workspace'] = Path(data['workspace']) if data.get('workspace') else None
+            data['budget'] = TaskBudget(**data['budget'])
+            data['required_capabilities'] = frozenset(data['required_capabilities'])
+            task = ParentTask(**data)
+            handle = restore(task, row.get('handle'))
+            if handle is None:
+                continue
+            execution = {'cancelled':False, 'started':False, 'handle':handle,
+                         'submit_started':True, 'recovered':True, 'operation':None}
+            row['result'] = None
+            row['state'] = 'running'
+            self._persist(task_id)
+            operation = asyncio.create_task(self._execute(task, adapter, execution, None))
+            execution['operation'] = operation
+            self._active_executions[task_id] = execution
+            self._idempotency_records[task.idempotency_key] = {'snapshot':self._snapshots[task_id], 'operation':operation}
 
     def unregister_adapter(self, worker_id: str) -> None:
         self._adapters.pop(worker_id, None)
@@ -67,7 +138,7 @@ class IDEOrchestrationService:
         return workers
 
     def get_task(self, task_id: str) -> dict[str, Any] | None:
-        """Read process-local state, not a durable owner record."""
+        """Read the in-memory projection of the durable owner record."""
         return self._tasks.get(task_id)
 
     def add_progress_hook(self, hook: Callable[[WorkerProgress], None]) -> None:
@@ -79,6 +150,7 @@ class IDEOrchestrationService:
             progress = replace(progress, sequence=len(record["progress"]))
             record["state"] = progress.state
             record["progress"].append(asdict(progress))
+            self._persist(progress.task_id)
         for hook in self._progress_hooks:
             try:
                 hook(progress)
@@ -177,9 +249,16 @@ class IDEOrchestrationService:
         """Synchronously reserve an immutable request before HTTP acknowledges it.
 
         Returns the tracked operation and whether this is an identical replay.
-        This is atomic within the owner event loop, not restart-persistent.
+        Admission is persisted before dispatch; replay survives owner restart.
         """
         snapshot = self._snapshot(task)
+        restored = next((r for r in self._tasks.values() if r['idempotency_key'] == task.idempotency_key), None)
+        if restored is not None and task.idempotency_key not in self._idempotency_records:
+            if self._snapshots.get(restored['task_id']) != snapshot:
+                raise DuplicateSubmissionConflict('Idempotency key conflicts with durable accepted request')
+            future = asyncio.get_running_loop().create_future()
+            future.set_result(self._restored_result(restored['result']))
+            return future, True
         existing = self._idempotency_records.get(task.idempotency_key)
         if existing is not None:
             if existing["snapshot"] != snapshot:
@@ -217,6 +296,8 @@ class IDEOrchestrationService:
             "submit_started": False,
             "operation": None,
         }
+        self._snapshots[task.task_id] = snapshot
+        self._persist(task.task_id)
         self._active_executions[task.task_id] = execution
         operation = asyncio.create_task(
             self._execute(task, adapter, execution, verifier)
@@ -273,37 +354,51 @@ class IDEOrchestrationService:
                 raise asyncio.CancelledError
             # Covers silent probe/submit/stream/result, not only event boundaries.
             async with asyncio.timeout(task.budget.max_seconds):
-                status = await adapter.probe()
-                if not status.get("available", False):
-                    reason = status.get("state")
-                    state = (
-                        reason if reason in {"quota", "auth", "blocked"} else "blocked"
-                    )
-                    output = str(status.get("detail") or "Worker offline")
+                if execution.get('recovered'):
+                    previous = max((p.get('metadata', {}).get('delegate_sequence', -1)
+                                    for p in self._tasks[task.task_id]['progress']), default=-1)
+                    async for progress in adapter.observe(task.task_id, execution['handle']):
+                        if execution['cancelled']:
+                            raise asyncio.CancelledError
+                        if progress.metadata.get('delegate_sequence', -1) > previous:
+                            self._notify_progress(progress)
+                    state, output, evidence = await adapter.get_raw_result(execution['handle'])
                 else:
-                    required = set(task.required_capabilities)
-                    if task.read_only:
-                        required.add("read_only_enforced")
-                    missing = required - set(status.get("capabilities", ()))
-                    if missing:
-                        state = "blocked"
-                        output = (
-                            f"Worker lacks required capabilities: {sorted(missing)}"
+                    status = await adapter.probe()
+                    if not status.get("available", False):
+                        reason = status.get("state")
+                        state = (
+                            reason if reason in {"quota", "auth", "blocked"} else "blocked"
                         )
+                        output = str(status.get("detail") or "Worker offline")
                     else:
-                        execution["submit_started"] = True
-                        execution["handle"] = await adapter.submit(task)
-                        async for progress in adapter.observe(
-                            task.task_id, execution["handle"]
-                        ):
+                        required = set(task.required_capabilities)
+                        if task.read_only:
+                            required.add("read_only_enforced")
+                        missing = required - set(status.get("capabilities", ()))
+                        if missing:
+                            state = "blocked"
+                            output = (
+                                f"Worker lacks required capabilities: {sorted(missing)}"
+                            )
+                        else:
+                            execution["submit_started"] = True
+                            self._tasks[task.task_id]["submit_started"] = True
+                            self._persist(task.task_id)
+                            execution["handle"] = await adapter.submit(task)
+                            self._tasks[task.task_id]["handle"] = execution["handle"]
+                            self._persist(task.task_id)
+                            async for progress in adapter.observe(
+                                task.task_id, execution["handle"]
+                            ):
+                                if execution["cancelled"]:
+                                    raise asyncio.CancelledError
+                                self._notify_progress(progress)
                             if execution["cancelled"]:
                                 raise asyncio.CancelledError
-                            self._notify_progress(progress)
-                        if execution["cancelled"]:
-                            raise asyncio.CancelledError
-                        state, output, evidence = await adapter.get_raw_result(
-                            execution["handle"]
-                        )
+                            state, output, evidence = await adapter.get_raw_result(
+                                execution["handle"]
+                            )
         except asyncio.CancelledError:
             state, output = "failed", "Task cancelled by orchestrator"
             evidence = {"cancelled": True}

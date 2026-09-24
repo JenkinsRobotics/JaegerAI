@@ -892,3 +892,73 @@ async def test_http_rejects_writable_orchestration_before_submit(tmp_path):
         assert service.get_task("write") is None
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_completed_worker_receipt_survives_owner_restart(tmp_path):
+    adapter = DeterministicFakeWorkerAdapter(worker_id='codex', outcome_text='Completed work')
+    first = IDEOrchestrationService({'codex':adapter})
+    first.bind_store(tmp_path/'gateway.sqlite3')
+    task = ParentTask(task_id='persisted', goal='Perform work', assigned_worker='codex', idempotency_key='persistent-key')
+    original = await first.execute_parent_task(task)
+    second = IDEOrchestrationService({'codex':adapter})
+    second.bind_store(tmp_path/'gateway.sqlite3')
+    replay = await second.execute_parent_task(task)
+    assert replay.output == original.output
+    assert len(adapter.submissions) == 1
+    assert second.get_task(task.task_id)['progress'] == first.get_task(task.task_id)['progress']
+
+
+@pytest.mark.asyncio
+async def test_live_worker_recovery_after_owner_sigkill(tmp_path):
+    import asyncio
+    import os
+    import subprocess
+    import sys
+    from jaeger_agent.delegates.process import CommandSpec, SubprocessDelegateRuntime
+    from jaeger_ai.features.ide_orchestration.adapters import DelegateRuntimeAdapter
+    program = "from pathlib import Path; import time; p=Path('effects.txt'); p.write_text(p.read_text()+'x' if p.exists() else 'x'); time.sleep(1); print('recovered actual result')"
+    script = tmp_path/'owner.py'
+    script.write_text('''import asyncio, sys
+from pathlib import Path
+from jaeger_agent.delegates.process import CommandSpec, SubprocessDelegateRuntime
+from jaeger_ai.features.ide_orchestration import IDEOrchestrationService, ParentTask, TaskBudget
+from jaeger_ai.features.ide_orchestration.adapters import DelegateRuntimeAdapter
+root=Path(sys.argv[1])
+program=sys.argv[2]
+async def main():
+    spec=CommandSpec('recover', (sys.executable,), lambda *a: ('-c',program), frozenset(), True)
+    service=IDEOrchestrationService({'recover':DelegateRuntimeAdapter(SubprocessDelegateRuntime(spec))})
+    service.bind_store(root/'gateway.sqlite3')
+    task=ParentTask('live','Build report','recover','live-key',workspace=root,read_only=False,budget=TaskBudget(max_seconds=10))
+    service.admit_parent_task(task)
+    while not service.get_task('live').get('handle'):
+        await asyncio.sleep(.01)
+    (root/'owner-ready').touch()
+    await asyncio.Event().wait()
+asyncio.run(main())
+''')
+    child = subprocess.Popen([sys.executable, '-B', str(script), str(tmp_path), program],
+        env={**os.environ, 'PYTHONDONTWRITEBYTECODE':'1'}, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        for _ in range(500):
+            if (tmp_path/'owner-ready').exists():
+                break
+            if child.poll() is not None:
+                raise AssertionError(child.communicate()[1].decode())
+            await asyncio.sleep(.01)
+        assert (tmp_path/'owner-ready').exists()
+        child.kill(); child.wait(timeout=5)
+        spec = CommandSpec('recover', (sys.executable,), lambda *a: ('-c',program), frozenset(), True)
+        adapter = DelegateRuntimeAdapter(SubprocessDelegateRuntime(spec))
+        restored = IDEOrchestrationService({'recover':adapter})
+        restored.bind_store(tmp_path/'gateway.sqlite3')
+        restored.resume_pending()
+        task = ParentTask('live','Build report','recover','live-key',workspace=tmp_path,read_only=False,budget=TaskBudget(max_seconds=10))
+        result = await restored.execute_parent_task(task)
+        assert result.state == 'completed'
+        assert result.output == 'recovered actual result'
+        assert (tmp_path/'effects.txt').read_text() == 'x'
+    finally:
+        if child.poll() is None:
+            child.kill(); child.wait(timeout=5)

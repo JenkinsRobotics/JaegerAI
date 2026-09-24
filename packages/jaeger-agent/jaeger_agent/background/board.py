@@ -520,7 +520,7 @@ def has_actionable_work(layout: Any) -> bool:
     try:
         board = board_for_layout(layout)
         for c in board.list():
-            if c.column in ("backlog", "ready", "in_progress"):
+            if c.column in ("backlog", "ready", "in_progress") and "gateway-owned" not in c.tags:
                 return True
     except Exception:  # noqa: BLE001
         return False

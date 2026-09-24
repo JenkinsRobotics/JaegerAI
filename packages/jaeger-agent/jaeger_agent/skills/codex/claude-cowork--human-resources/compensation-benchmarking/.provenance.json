@@ -1,0 +1,10 @@
+{
+  "name": "compensation-benchmarking",
+  "original_name": "compensation-benchmarking",
+  "source": "claude-cowork--human-resources",
+  "origin_path": "plugins/cache/claude-cowork/human-resources/1.1.0/skills/compensation-benchmarking",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "410353b37500334dbf475785f321735163c543e0ddeea705a04b47f0b3f9589a"
+}

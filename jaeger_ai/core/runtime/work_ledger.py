@@ -19,6 +19,10 @@ raw tool JSON that produced it.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+from types import SimpleNamespace
+
 import hashlib
 import json
 import os
@@ -42,6 +46,31 @@ _lock = threading.RLock()
 # ``work_ledger(action="status", task_id=...)`` to read a worker's
 # progress without sharing its thread.
 _tls = threading.local()
+_owner_state: ContextVar[Any] = ContextVar("owner_work_ledger", default=None)
+
+
+def _state():
+    return _owner_state.get() or _tls
+
+
+@contextmanager
+def ledger_scope(session: str, *, resume_completed: bool = False):
+    """One mutable request context, propagated to tool threads by copy_context."""
+    state = SimpleNamespace(session=session, active=None, completion=None)
+    token = _owner_state.set(state)
+    try:
+        path = _session_pointer(session)
+        if path is not None and path.exists():
+            ident = json.loads(path.read_text()).get("task_id")
+            state.active = get_ledger(ident) if ident else None
+            if state.active is not None and state.active.completed:
+                if resume_completed:
+                    state.completion = _completion_payload(state.active)
+                else:
+                    state.active = None
+        yield
+    finally:
+        _owner_state.reset(token)
 _by_id: dict[str, WorkLedger] = {}
 # Optional process-wide verifier. Tests and hosts can register a
 # callable ``(WorkLedger) -> error|None``. The ledger-attached
@@ -162,17 +191,17 @@ class WorkLedger:
 
 
 def _tls_active() -> WorkLedger | None:
-    return getattr(_tls, "active", None)
+    return getattr(_state(), "active", None)
 
 
 def _tls_completion() -> dict[str, Any] | None:
-    payload = getattr(_tls, "completion", None)
+    payload = getattr(_state(), "completion", None)
     return dict(payload) if payload else None
 
 
 def _set_tls_active(ledger: WorkLedger | None) -> None:
-    _tls.active = ledger
-    session = getattr(_tls, "session", None)
+    _state().active = ledger
+    session = getattr(_state(), "session", None)
     if session is not None:
         path = _session_pointer(session)
         if path is not None:
@@ -197,14 +226,14 @@ def bind_session(session: str) -> None:
     on one thread. Keep native ledgers resumable without injecting one table's
     acceptance contract or completion marker into another conversation.
     """
-    if getattr(_tls, "session", None) == session:
-        _tls.completion = None
+    if getattr(_state(), "session", None) == session:
+        _state().completion = None
         if _tls_active() is not None and _tls_active().completed:
             _set_tls_active(None)
         return
-    _tls.session = session
-    _tls.active = None
-    _tls.completion = None
+    _state().session = session
+    _state().active = None
+    _state().completion = None
     path = _session_pointer(session)
     if path is None:
         return
@@ -215,7 +244,7 @@ def bind_session(session: str) -> None:
     if isinstance(task_id, str) and task_id:
         restored = get_ledger(task_id)
         if restored is not None and not restored.completed:
-            _tls.active = restored
+            _state().active = restored
 
 
 def pause_active_ledger(reason: str) -> None:
@@ -227,18 +256,18 @@ def pause_active_ledger(reason: str) -> None:
     ledger = _tls_active()
     if ledger is None:
         return
-    session = getattr(_tls, "session", None)
+    session = getattr(_state(), "session", None)
     path = _session_pointer(session) if session is not None else None
     if path is not None:
         with _lock:
             _atomic_write(path, json.dumps({"task_id": None, "paused_task_id": ledger.task_id,
                                            "reason": reason, "paused_at": time.time()}))
-    _tls.active = None
-    _tls.completion = None
+    _state().active = None
+    _state().completion = None
 
 
 def _set_tls_completion(payload: dict[str, Any] | None) -> None:
-    _tls.completion = payload
+    _state().completion = payload
 
 
 def active_ledger() -> WorkLedger | None:
@@ -379,7 +408,7 @@ def reset() -> None:
     global _completion_verifier
     _set_tls_active(None)
     _set_tls_completion(None)
-    _tls.session = None
+    _state().session = None
     _completion_verifier = None
     with _lock:
         _by_id.clear()
@@ -391,7 +420,9 @@ def _layout_run_dir() -> Path | None:
         layout = _pipeline.get("layout")
         root = getattr(layout, "root", None)
         if root is None:
-            return None
+            from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+            layout = InstanceLayout(root=resolve_instance_dir())
+            root = layout.root
         run_dir = getattr(layout, "run_dir", None)
         path = Path(str(run_dir)) if run_dir is not None else Path(str(root)) / "run"
         path.mkdir(parents=True, exist_ok=True)
@@ -681,6 +712,18 @@ def work_ledger(
     return {"ok": True, "action": "update", "ledger": current.as_dict()}
 
 
+def _completion_payload(current: WorkLedger) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "completed": True,
+        "task_id": current.task_id,
+        "summary": current.summary,
+        "evidence": current.evidence,
+        "verification_receipts": list(current.verification_receipts),
+        "ledger": current.as_dict(),
+    }
+
+
 def complete_task(
     task_id: str = "",
     summary: str = "",
@@ -724,15 +767,7 @@ def complete_task(
     current.verification_receipts = _verification_receipts(current)
     current.updated_at = time.time()
     _persist(current)
-    payload = {
-        "ok": True,
-        "completed": True,
-        "task_id": current.task_id,
-        "summary": current.summary,
-        "evidence": proof,
-        "verification_receipts": list(current.verification_receipts),
-        "ledger": current.as_dict(),
-    }
+    payload = _completion_payload(current)
     _set_tls_completion(payload)
     _emit_progress(current, state="COMPLETED", phase="done")
     return payload

@@ -1,0 +1,10 @@
+{
+  "name": "cli-creator",
+  "original_name": "cli-creator",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/cli-creator",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "24058eabf0aafce6def3fb937ac93cbe3fa341c653c658dc589edb77f73d6152"
+}

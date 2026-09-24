@@ -135,6 +135,21 @@ class DelegateRuntimeAdapter:
         self.worker_id = str(getattr(runtime, "runtime_id", "unknown"))
         self._handles: dict[str, Any] = {}
 
+    def bind_store(self, path):
+        from pathlib import Path
+        if hasattr(self.runtime, 'receipt_root'):
+            self.runtime.receipt_root = Path(path).parent / 'delegate_receipts'
+
+    def restore_handle(self, task, handle=None):
+        from jaeger_agent.delegates.contracts import DelegateHandle
+        delegate = DelegateHandle(task.task_id, self.worker_id)
+        directory = getattr(self.runtime, '_directory', None)
+        if not callable(directory) or not (directory(delegate) / 'admission.json').exists():
+            return None
+        key = handle or f'{self.worker_id}:{task.task_id}:{task.idempotency_key}'
+        self._handles[key] = delegate
+        return key
+
     async def probe(self) -> dict[str, Any]:
         try:
             status = await self.runtime.probe()
@@ -234,7 +249,7 @@ class DelegateRuntimeAdapter:
                     sequence=seq,
                     message=str(message),
                     timestamp=time.time(),
-                    metadata=payload,
+                    metadata={**payload, 'delegate_sequence':getattr(event, 'sequence', seq)},
                 )
                 seq += 1
         except Exception as exc:  # noqa: BLE001 — preserve external runtime stream errors

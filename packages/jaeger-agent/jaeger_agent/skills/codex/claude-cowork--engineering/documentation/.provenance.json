@@ -1,0 +1,10 @@
+{
+  "name": "documentation",
+  "original_name": "documentation",
+  "source": "claude-cowork--engineering",
+  "origin_path": "plugins/cache/claude-cowork/engineering/1.2.0/skills/documentation",
+  "plugin_version": "1.2.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "1d469418f786a05be83d2a05f04d68788aeed584d13863a650f5ad73c6c4cf50"
+}

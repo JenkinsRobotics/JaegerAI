@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jaeger_ai.features.webui.server_controls import ServerControls, SERVICES
+from jaeger_ai.features.webui.server_controls import ServerControls, SERVICES, DEFAULT_SERVICES
 
 
 def test_webui_ready_probe_does_not_require_auth():
@@ -48,7 +48,7 @@ def test_stop_all_reverses_dependency_order(controls, monkeypatch):
     seen = []
     monkeypatch.setattr(controls, 'change_one', lambda service, action: seen.append(service))
     assert controls.change('all', 'stop')['ok']
-    assert seen == list(reversed(SERVICES))
+    assert seen == list(reversed(DEFAULT_SERVICES))
 
 
 def test_hermes_agent_uses_native_launch_agent_only(controls):
@@ -79,7 +79,12 @@ def test_partial_failure_is_visible_and_other_services_continue(controls, monkey
     monkeypatch.setattr(controls, 'change_one', change)
     result = controls.change('all', 'start')
     assert not result['ok'] and 'test failure' in result['error']
-    assert seen == list(SERVICES)
+    assert seen == list(DEFAULT_SERVICES)
+
+
+def test_default_controls_exclude_optional_runtimes():
+    assert not {"hermes", "openclaw", "container", "a2a"}.intersection(DEFAULT_SERVICES)
+    assert {"gateway", "agent", "webui", "ollama"}.issubset(DEFAULT_SERVICES)
 
 
 def test_change_reset_delegates_to_stack_reset(controls, monkeypatch):
@@ -91,4 +96,3 @@ def test_change_reset_delegates_to_stack_reset(controls, monkeypatch):
     result = controls.change("all", "reset")
     assert result["ok"] is True
     assert called == [60.0]
-

@@ -1,0 +1,10 @@
+{
+  "name": "setup-cowork",
+  "original_name": "setup-cowork",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/setup-cowork",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "3e65d887ccca001cfaf1c6987d39696fcbce2d92c24bffdd2bc396026207f393"
+}

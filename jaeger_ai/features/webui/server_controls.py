@@ -12,17 +12,16 @@ import time
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
-# Fixed service identities: never accept an arbitrary launchctl label or command.
-SERVICES = {
+# Use the lifecycle owner's registry so UI and startup agree on core services.
+from jaeger_ai.core.runtime.stack import CORE_SERVICES, STACK_SERVICES
+
+SERVICES = {service.id: (service.name, service.label, service.port, service.health_path)
+            for service in STACK_SERVICES}
+SERVICES.update({
     'container': ('Container Daemon', None, None, None),
-    'ollama': ('Ollama', 'com.jenkinsrobotics.ares-ollama', 11434, '/api/tags'),
-    'gateway': ('Gateway', 'com.jenkinsrobotics.jaeger-gateway', 8810, '/health'),
-    'agent': ('Jaeger Agent', 'com.jenkinsrobotics.jaeger-bridge', None, None),
-    'hermes': ('Hermes', 'com.jenkinsrobotics.hermes-native-api', None, None),
     'openclaw': ('OpenClaw', None, 18789, None),
-    'runner': ('Chat Runner', 'com.jenkinsrobotics.jaeger-hermes-webui-adapter', 8791, '/health'),
-    'webui': ('Web UI', 'com.jenkinsrobotics.jaeger-webui', 8790, '/health'),
-}
+})
+DEFAULT_SERVICES = tuple(service.id for service in CORE_SERVICES)
 
 
 class ServerControls:
@@ -98,7 +97,7 @@ class ServerControls:
 
     def status(self):
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-            return list(pool.map(self.status_one, SERVICES))
+            return list(pool.map(self.status_one, DEFAULT_SERVICES))
 
     def checked(self, args):
         result = self.execute(args)
@@ -159,7 +158,7 @@ class ServerControls:
             return {'ok': res.get('ok', False), 'error': res.get('error'), 'services': self.status(), 'details': res}
         if service not in {*SERVICES, 'all'} or action not in {'start', 'stop', 'restart'}:
             raise ValueError('Unknown server or action')
-        targets = list(SERVICES) if service == 'all' else [service]
+        targets = list(DEFAULT_SERVICES) if service == 'all' else [service]
         if action == 'stop':
             targets.reverse()
         errors = []

@@ -1,0 +1,10 @@
+{
+  "name": "daily-briefing",
+  "original_name": "daily-briefing",
+  "source": "claude-cowork--sales",
+  "origin_path": "plugins/cache/claude-cowork/sales/1.1.0/skills/daily-briefing",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--sales",
+  "skill_md_sha256": "9f2c4976aed1326edbf6d7d9d499df63f3c178d2c14c6254c8a9c0a15eb0d04a"
+}

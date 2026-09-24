@@ -1,0 +1,10 @@
+{
+  "name": "winui-app",
+  "original_name": "winui-app",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/winui-app",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "917341ec9eb688d73e21362910a7178a92b2ae49544b7d8f17ee9e19adfe2ea8"
+}

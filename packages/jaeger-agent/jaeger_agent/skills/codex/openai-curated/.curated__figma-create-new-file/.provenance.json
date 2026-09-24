@@ -1,0 +1,10 @@
+{
+  "name": "figma-create-new-file",
+  "original_name": "figma-create-new-file",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/figma-create-new-file",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "23f429203bd57f186905b2523d4ff8bdf10d3b85b39fc7eed4786097d81f1adc"
+}

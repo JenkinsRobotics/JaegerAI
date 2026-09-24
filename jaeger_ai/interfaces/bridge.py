@@ -1765,22 +1765,22 @@ def _request_exit(ctx: _Ctx) -> None:
             pass
 
 
-#: ``JAEGER_BRIDGE_EXECUTION=gateway`` makes this bridge a translating client
-#: of the Jaeger Gateway (R02/C01): chat turns are admitted, executed and
+#: The bridge is a translating client of the Jaeger Gateway by default:
+#: chat turns are admitted, executed and
 #: persisted by the Gateway's resident Entity; the bridge boots no agent and
 #: takes no instance lock, so Swift, the TUI and the Web share one owner.
 BRIDGE_EXECUTION_ENV = "JAEGER_BRIDGE_EXECUTION"
 
 
 def gateway_execution_enabled() -> bool:
-    return os.environ.get(BRIDGE_EXECUTION_ENV, "").strip().lower() == "gateway"
+    return os.environ.get(BRIDGE_EXECUTION_ENV, "gateway").strip().lower() != "local"
 
 
 def _merge_gateway_history(local: list[dict[str, Any]], session_id: str) -> list[dict[str, Any]]:
     """Local (pre-Gateway) history followed, in time order, by the turns the
     Gateway owns for the same session — in the bridge's row shape. Read over
     the Gateway's API; the bridge never opens the Gateway's database."""
-    from jaeger_ai.core.gateway.client import GatewayTurnClient
+    from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
 
     try:
         owned = GatewayTurnClient().get_session(session_id).get("messages") or []

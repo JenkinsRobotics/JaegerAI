@@ -1,0 +1,10 @@
+{
+  "name": "sentry",
+  "original_name": "sentry",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/sentry",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "508c6f5c100586c81a34397d30f00f4b8771b66d698a7ac1836998df925dd007"
+}

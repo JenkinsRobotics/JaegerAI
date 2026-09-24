@@ -1,0 +1,10 @@
+{
+  "name": "variance-analysis",
+  "original_name": "variance-analysis",
+  "source": "claude-cowork--finance",
+  "origin_path": "plugins/cache/claude-cowork/finance/1.1.0/skills/variance-analysis",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--finance",
+  "skill_md_sha256": "ebfe7448e7c0c2eb6a67eeb943c3f588bfb95122c5926f6ecc31759b66a56de9"
+}

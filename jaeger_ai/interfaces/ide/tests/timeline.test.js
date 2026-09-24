@@ -55,8 +55,9 @@ test('control events flush preceding text and preserve text/tool/text order', ()
   r.queue.push({ event_id: 3, event: 'tool.started', data: { request_id: 'r', activity_id: 'c', tool: 'read_file' } });
   r.queue.push(delta(4, 'C'));
   r.queue.push({ event_id: 5, event: 'tool.completed', data: { request_id: 'r', activity_id: 'c', tool: 'read_file', ok: true } });
-  assert.deepEqual(r.state().rows.map(row => row.kind), ['answer', 'tool', 'answer']);
-  assert.deepEqual(r.state().rows.filter(row => row.kind === 'answer').map(row => row.text), ['AB', 'C']);
+  assert.deepEqual(r.state().rows.map(row => row.kind), ['progress', 'tool', 'answer']);
+  assert.equal(r.state().rows[0].text, 'AB');
+  assert.deepEqual(r.state().rows.filter(row => row.kind === 'answer').map(row => row.text), ['C']);
 });
 
 test('keyed rows preserve settled node and disclosure identity', () => {
@@ -79,4 +80,61 @@ test('manual scroll and stale event rejection survive streaming', () => {
   r.queue.push(delta(2, 'duplicate')); r.queue.push(delta(1, 'stale')); r.clock.frame();
   assert.equal(r.renderer.reconciliations, reconciliations);
   assert.equal(r.state().rows[0].text, 'AB');
+});
+
+test('explicit checkpoint stays in order and is never part of final answer', () => {
+  const state = applyEvents(createTimelineState(), [
+    { event_id: 1, event: 'turn.delta', data: { request_id: 'r', delta: 'Inspected.' } },
+    { event_id: 2, event: 'turn.checkpoint', data: { request_id: 'r', text: 'Inspected.' } },
+    { event_id: 3, event: 'turn.delta', data: { request_id: 'r', delta: 'Implemented and verified.' } },
+    { event_id: 4, event: 'turn.finish', data: { request_id: 'r' } },
+  ]);
+  assert.deepEqual(state.rows.map(r => r.kind), ['checkpoint', 'answer', 'terminal']);
+  assert.equal(state.rows[0].text, 'Inspected.');
+  assert.equal(state.rows[1].text, 'Implemented and verified.');
+});
+
+const planEvent = (id, plan, extra = {}) => ({
+  event_id: id, event: 'turn.plan', data: { request_id: 'r', plan, ...extra },
+});
+
+test('turn.plan becomes one plan row per request and the latest plan replaces it in place', () => {
+  let state = createTimelineState();
+  state = applyEvents(state, [
+    delta(1, 'looking'),
+    planEvent(2, [{ step: 'read', status: 'in_progress' }, { step: 'fix', status: 'pending' }], { explanation: 'start' }),
+    { event_id: 3, event: 'tool.started', data: { request_id: 'r', activity_id: 'a', tool: 'read_file' } },
+    planEvent(4, [{ step: 'read', status: 'completed' }, { step: 'fix', status: 'in_progress' }]),
+  ]);
+  const plans = state.rows.filter(row => row.kind === 'plan');
+  assert.equal(plans.length, 1);
+  assert.deepEqual(plans[0].plan.map(item => item.status), ['completed', 'in_progress']);
+  assert.equal(plans[0].explanation, '');
+  // The plan keeps the chronological position of its first appearance.
+  assert.deepEqual(state.rows.map(row => row.kind), ['progress', 'plan', 'tool']);
+});
+
+test('plan rows for different requests stay separate', () => {
+  const state = applyEvents(createTimelineState(), [
+    planEvent(1, [{ step: 'a', status: 'pending' }]),
+    { event_id: 2, event: 'turn.plan', data: { request_id: 'other', plan: [{ step: 'b', status: 'pending' }] } },
+  ]);
+  assert.deepEqual(state.rows.map(row => row.key), ['plan:r', 'plan:other']);
+});
+
+test('malformed plans are cleaned or ignored, never rendered raw', () => {
+  const state = applyEvents(createTimelineState(), [
+    planEvent(1, [{ step: 'ok', status: 'weird' }, { step: '', status: 'pending' }, null, { step: 'kept' }]),
+    planEvent(2, 'not a list'),
+    planEvent(3, []),
+  ]);
+  const [row] = state.rows;
+  assert.deepEqual(row.plan, [{ step: 'ok', status: 'pending' }, { step: 'kept', status: 'pending' }]);
+  assert.equal(state.rows.length, 1);
+});
+
+test('replayed plan events are applied once', () => {
+  const event = planEvent(5, [{ step: 'a', status: 'pending' }]);
+  const once = applyEvents(createTimelineState(), [event]);
+  assert.equal(applyEvents(once, [event]), once);
 });

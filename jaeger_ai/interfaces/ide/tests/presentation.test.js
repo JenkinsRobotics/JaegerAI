@@ -1,6 +1,29 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+
+const { activitySummary, groupWorkRows } = require('../media/presentation');
+
+test('tool summaries group adjacent actions without crossing progress messages', () => {
+  const rows = groupWorkRows([
+    { key: 'a', kind: 'tool', name: 'read_file', phase: 'completed' },
+    { key: 'b', kind: 'tool', name: 'edit_file', phase: 'completed' },
+    { key: 'c', kind: 'progress', text: 'Now testing' },
+    { key: 'd', kind: 'tool', name: 'exec_command', phase: 'running' },
+  ]);
+  assert.deepEqual(rows.map(r => r.kind), ['tool-group', 'progress', 'tool-group']);
+  assert.equal(activitySummary(rows[0].items, false), 'Read files, edited files');
+  assert.equal(activitySummary(rows[2].items, true), 'Running commands');
+  assert.equal(rows[2].live, true);
+});
+test('inline diffs keep old/new line numbers and render source as text', () => {
+  const { diffLines } = require('../media/presentation');
+  const rows = diffLines('--- a\n+++ b\n@@ -2,2 +2,2 @@\n same\n-<script>old</script>\n+<script>new</script>');
+  assert.deepEqual(rows.slice(1).map(r => [r.kind, r.oldLine, r.newLine]), [
+    ['context', 2, 2], ['deletion', 3, ''], ['addition', '', 3],
+  ]);
+  assert.equal(rows.at(-1).text, '<script>new</script>');
+});
 const {
   modelLabel, toolName, activityTitle, groupActivity, failureCount,
   statusLabel, groupTurns, selectableModels, providerModelValue, parseProviderModel,
@@ -125,4 +148,18 @@ test('parseProviderModel: empty/Gateway-default sentinel returns empty strings',
 
 test('providerModelValue: same model-id from different providers yields distinct values', () => {
   assert.notEqual(providerModelValue('openai', 'claude-3'), providerModelValue('anthropic', 'claude-3'));
+});
+
+
+test('activity icons describe tools and use a cursor for mixed or integration work', () => {
+  const { activityIcon } = require('../media/presentation');
+  const icon = (...names) => activityIcon(names.map(name => ({ name })));
+  assert.equal(icon('read_file', 'file_read'), 'read');
+  assert.equal(icon('mcp__files__read_file'), 'read');
+  assert.equal(icon('apply_patch'), 'edit');
+  assert.equal(icon('exec_command'), 'tool');
+  assert.equal(icon('mcp__com_google_antigravity__click'), 'integration');
+  assert.equal(icon('read_file', 'apply_patch', 'exec_command'), 'integration');
+  assert.equal(icon('get_mode'), 'integration');
+  assert.equal(icon(), 'integration');
 });

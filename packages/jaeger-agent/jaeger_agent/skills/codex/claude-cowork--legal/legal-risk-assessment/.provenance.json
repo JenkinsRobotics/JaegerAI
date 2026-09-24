@@ -1,0 +1,10 @@
+{
+  "name": "legal-risk-assessment",
+  "original_name": "legal-risk-assessment",
+  "source": "claude-cowork--legal",
+  "origin_path": "plugins/cache/claude-cowork/legal/1.1.0/skills/legal-risk-assessment",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--legal",
+  "skill_md_sha256": "9f7985e3a98ac8419b52067cdaa1b72f754fa38c20489e7f0bf9de36347d4d89"
+}

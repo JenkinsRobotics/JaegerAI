@@ -74,9 +74,10 @@ def collect_runtime_status(*, include_network: bool = True) -> dict[str, Any]:
         goals = 0
         runtime = None
 
-    gw_port = int(os.environ.get("JAEGER_GATEWAY_PORT") or 8810)
+    from jaeger_ai.contract.ports import GATEWAY_PORT, WEBUI_PORT
+    gw_port = int(os.environ.get("JAEGER_GATEWAY_PORT") or GATEWAY_PORT)
     gateway_ok = _port_open(gw_port) if include_network else False
-    webui_ok = _port_open(8790) if include_network else False
+    webui_ok = _port_open(WEBUI_PORT) if include_network else False
     bridge_ok = False
     if include_network:
         try:
@@ -85,21 +86,18 @@ def collect_runtime_status(*, include_network: bool = True) -> dict[str, Any]:
         except Exception:
             bridge_ok = _port_open(8791)
 
+    # Certification records describe eligibility, never the running model.
+    from jaeger_ai.core.models.model_resolver import serving_model
+    live = serving_model() or {}
     provider = {
-        "active_chat_provider": os.environ.get("JAEGER_CHAT_PROVIDER") or "",
-        "active_react_provider": "",
+        "active_chat_provider": live.get("provider") or "",
+        "active_react_provider": live.get("provider") or "",
+        "model": live.get("model"),
+        "location": live.get("location"),
+        "source": "execution_client" if live else "unavailable",
         "planner_provider": "",
         "critic_provider": "",
     }
-    try:
-        from jaeger_ai.core.entity.model_capabilities import load_capabilities, certified_for
-        caps = load_capabilities(getattr(runtime, "state_root", None) if runtime else None)
-        provider["active_react_provider"] = certified_for("react", caps) or ""
-        provider["active_chat_provider"] = certified_for("chat", caps) or provider["active_chat_provider"]
-        provider["planner_provider"] = certified_for("planning", caps) or certified_for("react", caps) or ""
-        provider["critic_provider"] = certified_for("critic", caps) or provider["planner_provider"]
-    except Exception:
-        pass
 
     services = {
         "gateway": HealthStatus.HEALTHY.value if gateway_ok else HealthStatus.FAILED.value,
@@ -111,7 +109,7 @@ def collect_runtime_status(*, include_network: bool = True) -> dict[str, Any]:
         entity_health == HealthStatus.HEALTHY.value
         and fabric_health == HealthStatus.HEALTHY.value
         and services["gateway"] == HealthStatus.HEALTHY.value
-        and bool(provider.get("active_chat_provider") or provider.get("active_react_provider") or True)
+        and bool(live)
     )
 
     return {

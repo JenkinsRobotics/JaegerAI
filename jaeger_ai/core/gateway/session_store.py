@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 7
 MAX_RETAINED_EVENTS = 5000
 REQUEST_ID_MAX = 128
 
@@ -322,6 +322,13 @@ class GatewaySessionStore:
             if "digest_version" not in columns:
                 conn.execute("ALTER TABLE client_requests ADD COLUMN digest_version INTEGER NOT NULL DEFAULT 1")
             current = 6
+        if current < 7:
+            conn.execute("CREATE TABLE IF NOT EXISTS activity_history (event_id INTEGER PRIMARY KEY, "
+                         "session_id TEXT NOT NULL, event TEXT NOT NULL, "
+                         "data_json TEXT NOT NULL, timestamp REAL NOT NULL)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_session ON activity_history(session_id, event_id)")
+            conn.execute("INSERT OR IGNORE INTO activity_history SELECT * FROM events WHERE session_id != '*' ")
+            current = 7
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -502,6 +509,22 @@ class GatewaySessionStore:
             )
         return self.get_session(session_id) or {}
 
+    def rename_session(self, session_id: str, title: str) -> dict[str, Any] | None:
+        """Set a session's title. The Gateway owns titles; clients project them.
+
+        Returns the updated session, or ``None`` when the session is unknown.
+        Does not touch ``updated_at``: a rename is not conversation activity and
+        must not reorder the sidebar.
+        """
+        with self._get_conn() as conn:
+            cursor = conn.execute(
+                "UPDATE sessions SET title = ? WHERE session_id = ?",
+                (title, session_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self.get_session(session_id)
+
     def update_status(self, session_id: str, status: str) -> None:
         now = time.time()
         with self._get_conn() as conn:
@@ -545,6 +568,7 @@ class GatewaySessionStore:
     def delete_session(self, session_id: str) -> bool:
         with self._get_conn() as conn:
             res = conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+            conn.execute("DELETE FROM activity_history WHERE session_id = ?", (session_id,))
             return res.rowcount > 0
 
     def update_metadata(self, session_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
@@ -912,6 +936,9 @@ class GatewaySessionStore:
             (session_id, event, json.dumps(data), now),
         )
         event_id = int(cursor.lastrowid or 0)
+        if session_id != "*":
+            conn.execute("INSERT INTO activity_history VALUES (?, ?, ?, ?, ?)",
+                         (event_id, session_id, event, json.dumps(data), now))
         overflow = conn.execute("SELECT COUNT(*) AS n FROM events").fetchone()["n"] - MAX_RETAINED_EVENTS
         if overflow > 0:
             conn.execute(
@@ -981,6 +1008,20 @@ class GatewaySessionStore:
     def append_event(self, session_id: str, event: str, data: dict[str, Any]) -> dict[str, Any]:
         with self._immediate() as conn:
             return self._insert_event(conn, session_id, event, data)
+
+    def activity_history(self, session_id: str, after: int = 0, limit: int = 500) -> dict[str, Any]:
+        """Paged durable work history; independent of the bounded SSE replay window."""
+        limit = max(1, min(limit, 500))
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM activity_history WHERE session_id=? AND event_id>? "
+                "ORDER BY event_id LIMIT ?", (session_id, after, limit + 1),
+            ).fetchall()
+            events = [{**dict(row), "data": json.loads(row["data_json"])} for row in rows[:limit]]
+            for event in events:
+                del event["data_json"]
+            return {"events": events, "has_more": len(rows) > limit,
+                    "next_cursor": events[-1]["event_id"] if events else after}
 
     def replay_events(
         self,
@@ -1302,3 +1343,26 @@ class GatewaySessionStore:
                     "metadata": _row_meta(r["metadata_json"]),
                 })
             return out
+
+
+    def deliver_task_result(self, task_id: str, session_id: str, text: str, status: str) -> dict:
+        """Atomic owner-only delivery to the originating conversation, exactly once."""
+        key = json.dumps(['durable_task', task_id])
+        with self._immediate() as conn:
+            old = conn.execute('SELECT receipt_json FROM background_deliveries WHERE delivery_key=?', (key,)).fetchone()
+            if old:
+                return {**json.loads(old[0]), 'replayed': True}
+            if not conn.execute('SELECT 1 FROM sessions WHERE session_id=?', (session_id,)).fetchone():
+                raise ValueError('Originating session no longer exists; task result remains durable')
+            now = time.time()
+            cursor = conn.execute("INSERT INTO messages(session_id,role,content,timestamp) VALUES(?,'assistant',?,?)",
+                                  (session_id, text, now))
+            conn.execute('UPDATE sessions SET updated_at=? WHERE session_id=?', (now, session_id))
+            event = self._insert_event(conn, session_id, 'message.created', {
+                'session_id': session_id, 'message_id': cursor.lastrowid, 'role': 'assistant',
+                'text': text, 'content': text, 'task_id': task_id, 'status': status,
+                'source': 'durable_task', 'initiated_by': 'agent'}, now)
+            receipt = {'task_id': task_id, 'event': event, 'message_id': cursor.lastrowid}
+            conn.execute('INSERT INTO background_deliveries VALUES(?,?,?)',
+                         (key, input_fingerprint(text), json.dumps(receipt)))
+            return {**receipt, 'replayed': False}
