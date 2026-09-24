@@ -17,7 +17,9 @@ let showAllChats = false;
 const drafts = api.getState()?.drafts || {};
 const post = (type, extra = {}) => api.postMessage({ type, ...extra });
 
-function saveDraft() { drafts[draftSession] = $('prompt').value; api.setState({ drafts }); }
+let ideContextOn = api.getState()?.ideContext !== false;
+const persistView = () => api.setState({ drafts, ideContext: ideContextOn });
+function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
 function eligibility() { $('send').disabled = !state.connected || state.busy || !$('prompt').value.trim(); }
 
 function announceCopied() {
@@ -389,7 +391,7 @@ function render() {
     + Boolean((state.session?.messages || []).length || state.busy);
   if (revision !== sessionOptions) { revision = sessionOptions; renderChats(); }
   $('context').textContent = state.session?.workspace ? state.session.workspace.split('/').filter(Boolean).at(-1) : 'Work locally';
-  $('stop').hidden = !state.busy || !state.canCancel; eligibility();
+  $('stop').hidden = !state.busy || !state.canCancel; eligibility(); renderComposerBar();
   $('attach').disabled = !state.connected || state.busy;
   renderModels(); renderStaged();
 
@@ -504,6 +506,47 @@ function showInfo(info) {
 
 window.addEventListener('message', ({ data }) => { if (data?.info) showInfo(data.info); else stateQueue.push(data); });
 
+// ── composer bar: permission pill + IDE-context toggle ─────────────────────
+const ACCESS = {
+  auto: { label: 'Full access', hint: 'No approval prompts. Catastrophic commands are still blocked.' },
+  scoped: { label: 'Ask once', hint: 'Ask the first time for each kind of action.' },
+  ask: { label: 'Ask each time', hint: 'Ask before every action that changes something.' },
+};
+
+function renderComposerBar() {
+  const mode = state.autonomy?.mode;
+  const pill = $('access');
+  pill.hidden = !ACCESS[mode];
+  if (ACCESS[mode]) {
+    $('access-label').textContent = ACCESS[mode].label;
+    pill.classList.toggle('full', mode === 'auto');
+  }
+  $('ide-context').setAttribute('aria-pressed', String(ideContextOn));
+}
+
+function closeAccessMenu() {
+  $('access-menu').hidden = true; $('access').setAttribute('aria-expanded', 'false');
+}
+
+function openAccessMenu() {
+  const menu = $('access-menu');
+  menu.replaceChildren(...Object.keys(ACCESS).filter(name => (state.autonomy?.options || []).includes(name)).map(name => {
+    const row = document.createElement('div');
+    row.className = 'slash-item'; row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', String(name === state.autonomy.mode));
+    const label = document.createElement('span'); label.className = 'access-name'; label.textContent = ACCESS[name].label;
+    const hint = document.createElement('span'); hint.className = 'slash-description'; hint.textContent = ACCESS[name].hint;
+    row.append(label, hint);
+    row.onmousedown = event => { event.preventDefault(); closeAccessMenu(); if (name !== state.autonomy.mode) post('setAutonomy', { mode: name }); };
+    return row;
+  }));
+  menu.hidden = false; $('access').setAttribute('aria-expanded', 'true');
+}
+
+$('access').onclick = () => ($('access-menu').hidden ? openAccessMenu() : closeAccessMenu());
+$('access').onblur = () => closeAccessMenu();
+$('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); };
+
 // ── slash commands ─────────────────────────────────────────────────────────
 let slashItems = [], slashIndex = 0, slashDismissed = false;
 
@@ -577,7 +620,7 @@ $('composer').onsubmit = event => {
   // an explicit catalog choice — the display matches the behaviour.
   if (!$('send').disabled) {
     submittedDraftSession = draftSession;
-    post('send', { text: $('prompt').value, model: $('model').value });
+    post('send', { text: $('prompt').value, model: $('model').value, ideContext: ideContextOn });
   }
 };
 $('prompt').oninput = () => { saveDraft(); eligibility(); slashDismissed = false; slashIndex = 0; renderSlashMenu(); };

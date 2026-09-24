@@ -51,6 +51,8 @@ class Gateway {
   }
   tasks() { return this.json('/v1/tasks'); }
   rename(id, title) { return this.json(`/v1/sessions/${encodeURIComponent(id)}`, { title }, 'PATCH'); }
+  autonomy() { return this.json('/v1/runtime/autonomy'); }
+  setAutonomy(autonomy) { return this.json('/v1/runtime/autonomy', { autonomy }); }
   skills(query = '') { return this.json(`/v1/runtime/skills${query ? `?q=${encodeURIComponent(query)}` : ''}`); }
   cancelTask(id) { return this.json(`/v1/tasks/${encodeURIComponent(id)}/cancel`, {}); }
   sessions() { return this.json('/v1/sessions'); }

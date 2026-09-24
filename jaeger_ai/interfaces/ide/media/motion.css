@@ -85,3 +85,5 @@ form:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-focusB
 /* The command menu and result card enter like other on-demand surfaces. */
 #slash-menu { animation: j-scale-in var(--dur-basic) var(--ease-enter) both; transform-origin: bottom left }
 #info { animation: j-rise-in var(--dur-enter) var(--ease-enter) both }
+
+#access-menu { animation: j-scale-in var(--dur-basic) var(--ease-enter) both; transform-origin: bottom left }
