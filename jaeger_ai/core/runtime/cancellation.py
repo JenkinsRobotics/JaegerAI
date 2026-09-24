@@ -1,4 +1,4 @@
-"""Request-scoped cancellation (R03, ``RELEASE_AGENT_PROMPT.md`` section 8).
+"""Request-scoped cancellation (historical R03 task).
 
 One :class:`CancellationScope` per admitted request. The Gateway registers it
 at admission — before any worker can execute — and the execution owner binds

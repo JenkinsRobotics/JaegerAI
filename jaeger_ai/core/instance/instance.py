@@ -124,8 +124,7 @@ def is_source_checkout(path: Path) -> Path | None:
 
 @dataclass(frozen=True)
 class StatePaths:
-    """The operator state-root paths, purely resolved (M1.1,
-    ``RELEASE_AGENT_PROMPT.md`` section 7).
+    """The operator state-root paths, purely resolved (historical M1.1).
 
     Computing a ``StatePaths`` performs **no I/O**: no ``mkdir``, no legacy
     migration, no database open. That is deliberate — a caller that only

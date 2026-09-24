@@ -15,8 +15,8 @@ voice, avatar and pill code remain preserved but hidden behind explicit QA opt-i
 a full native chat redesign remains deferred. Qualify the existing local Jaeger IDE extension
 and make bounded transcript/composer improvements, not a new IDE.
 Preserve the usable WebUI appearance and repair its conversation lifecycle.
-[The master plan](GROK_PERSONAL_RELEASE_PROMPT.md)'s **five-day RC contract** is
-authoritative for implementation order. Human IDE use and Jaeger-controlled IDE
+[CONTINUE_FROM_HERE.md](../CONTINUE_FROM_HERE.md) is authoritative for
+implementation order. Human IDE use and Jaeger-controlled IDE
 workers are distinct; both are part of the intended product. The earlier blanket
 worker deferral was too broad. After RC1–RC3, RC7 requires one actual existing
 IDE-worker conversation and visible desktop control: task → observed reply →
@@ -135,9 +135,9 @@ active app/target, feedback and Stop; yield to human interaction. A cursor or
 target highlight follows real input actions, never fabricated motion during API
 calls. Verify target acknowledgment and the resulting task outcome separately.
 
-The coordinator used `mcp__cua_repl`. [The master plan's installed-stack findings](GROK_PERSONAL_RELEASE_PROMPT.md#reuse-decisions-for-this-release)
-trace Codex in Antigravity to bundled ChatGPT app resources and the signed OpenAI
-computer-use helper with cursor symbols; exact visible frames were not traced.
+The coordinator used `mcp__cua_repl`. The historical installed-stack findings remain in Git history. They traced Codex in
+Antigravity to bundled ChatGPT app resources and the signed OpenAI computer-use
+helper with cursor symbols, but exact visible frames were not traced.
 Evaluate supported, licensed access to that existing stack first. Cua Driver is
 a fallback native Accessibility/input/screenshot/overlay candidate, not an
 identified component of the installed Codex engine or a finalized dependency.

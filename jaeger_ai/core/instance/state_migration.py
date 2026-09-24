@@ -1,4 +1,4 @@
-"""Recoverable state-directory migration (F04, ``RELEASE_AGENT_PROMPT.md`` M1.3).
+"""Recoverable state-directory migration (historical F04/M1.3 task).
 
 Moves one Jaeger-owned state directory to a new location as a phased state
 machine::
