@@ -1,3 +1,6 @@
+> **Classification:** CURRENT REFERENCE.
+> **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](CONTINUE_FROM_HERE.md)
+
 # Gateway task ownership
 
 The Jaeger Gateway owns admission, execution receipts, background task scheduling,

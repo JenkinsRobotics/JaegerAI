@@ -1,3 +1,7 @@
+> **Classification:** HISTORICAL.
+> **Superseded by:** [`docs/CONTINUE_FROM_HERE.md`](../../../docs/CONTINUE_FROM_HERE.md) (or `../../../docs/CONTINUE_FROM_HERE.md` from `dev/docs`).
+> This is dated evidence. It may reference an old branch, HEAD, dirty worktree, or schedule. Do not treat it as current status, implementation order, or release qualification.
+
 # Mochi demo audit (operator's animation engine, vendoring-source for 0.5)
 
 **Date:** 2026-06-08

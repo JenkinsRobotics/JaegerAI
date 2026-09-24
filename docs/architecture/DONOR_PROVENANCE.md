@@ -1,3 +1,6 @@
+> **Classification:** CURRENT REFERENCE.
+> **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../CONTINUE_FROM_HERE.md)
+
 # DONOR_PROVENANCE.md — Donor Code & Pattern Attribution
 
 **Policy:** OpenClaw / JaegerAI Clean Architecture Doctrine  

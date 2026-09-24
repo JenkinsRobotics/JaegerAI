@@ -1,3 +1,6 @@
+> **Classification:** CURRENT AUTHORITATIVE.
+> **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../CONTINUE_FROM_HERE.md)
+
 # JaegerAI Test Architecture & Verification Standards (Workstream 21)
 
 **Branch:** `pinocchio`

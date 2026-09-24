@@ -2,6 +2,8 @@
 
 Telegraph style. Root rules only. Applies to all human contributors, subagents, and AI coding assistants.
 
+Current execution entry point: [`docs/CONTINUE_FROM_HERE.md`](docs/CONTINUE_FROM_HERE.md). Read it before planning or editing release-path work.
+
 ---
 
 ## 1. Zero In-Repo State & Clean Architecture Doctrine (OpenClaw Standard)

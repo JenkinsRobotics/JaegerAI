@@ -194,14 +194,16 @@ final class BargeInWiringTests: XCTestCase {
         XCTAssertTrue(fired, "onset hook must be invocable by the tap")
     }
 
-    func testAttachWiresBothCallbacks() {
+    func testAttachWiresBothCallbacks() throws {
+        try XCTSkipUnless(VoiceRecorder.hasAudioInput,
+                          "This host has no usable microphone; attach wiring is not a live CoreAudio test")
         let loop = AmbientLoop(gateway: GatewayClient(baseURL: GatewayClient.defaultBaseURL),
                                tts: TTSManager(),
                                detector: SpeechEnergyDetector())
         let recorder = VoiceRecorder()
         // startMonitoring may fail on a headless CI box with no input
         // device; the wiring is what is under test, so tolerate that.
-        try? loop.attach(recorder: recorder)
+        try loop.attach(recorder: recorder)
         XCTAssertNotNil(recorder.onSpeechOnset)
         XCTAssertNotNil(recorder.onSpeechEnded)
 
@@ -244,11 +246,13 @@ final class BargeInWiringTests: XCTestCase {
         XCTAssertEqual(loop.state, .listening)
     }
 
-    func testMonitoringDoesNotRetainAudio() {
+    func testMonitoringDoesNotRetainAudio() throws {
+        try XCTSkipUnless(VoiceRecorder.hasAudioInput,
+                          "This host has no usable microphone; monitoring cannot open a real input tap")
         // An always-open mic that stores nothing is a level meter, not a
         // recording — the privacy-relevant difference from startRecording.
         let recorder = VoiceRecorder()
-        try? recorder.startMonitoring()
+        try recorder.startMonitoring()
         XCTAssertNil(recorder.takeCapturedAudio()?.samples.isEmpty == false ? true : nil)
         recorder.stopMonitoring()
         XCTAssertFalse(recorder.isMonitoring)

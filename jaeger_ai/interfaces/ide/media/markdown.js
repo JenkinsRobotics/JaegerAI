@@ -69,6 +69,10 @@ function safeRenderer(smd, el) {
 // there being exactly one code path, tested exactly once.
 // Falls back to literal text + fenced <pre> blocks when smd is unavailable.
 function enhanceCodeBlocks(el) {
+  // This module is imported by Node tests that exercise the pure fallback with
+  // minimal element fixtures. The enhancement is optional DOM work, so hosts
+  // without a queryable element must keep the already-rendered literal nodes.
+  if (typeof el?.querySelectorAll !== 'function' || typeof document?.createElement !== 'function') return;
   const blocks = el.querySelectorAll('pre');
   blocks.forEach(pre => {
     if (pre.parentElement && pre.parentElement.classList.contains('code-card')) return;

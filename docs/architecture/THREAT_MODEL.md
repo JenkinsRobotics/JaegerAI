@@ -1,7 +1,10 @@
+> **Classification:** CURRENT AUTHORITATIVE.
+> **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../CONTINUE_FROM_HERE.md)
+
 # JaegerAI Architectural Threat Model & Security Specification (Workstream 19)
 
 **Branch:** `pinocchio`  
-**Classification:** Engineering Security Architecture & Threat Specification  
+**Classification:** Engineering Security Architecture & Threat Specification
 **Status:** Canonical & Implemented  
 
 ---

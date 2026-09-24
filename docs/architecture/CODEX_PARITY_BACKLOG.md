@@ -1,3 +1,7 @@
+> **Classification:** BACKLOG / DEFERRED.
+> **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../../docs/CONTINUE_FROM_HERE.md).
+> These are deferred ideas, not current release scope. Full Codex parity, every slash command, universal provider/worker support, and exhaustive donor cleanup are explicitly deferred.
+
 # Codex parity backlog
 
 Everything identified in the installed Codex (extension `openai.chatgpt-26.908.40401`,

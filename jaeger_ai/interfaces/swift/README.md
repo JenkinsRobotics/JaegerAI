@@ -1,3 +1,6 @@
+> **Classification:** CURRENT REFERENCE.
+> **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../../../docs/CONTINUE_FROM_HERE.md)
+
 # JaegerAI — native macOS desktop app
 
 > The primary UI since 0.7.0. `JaegerAI.app` is built from this package

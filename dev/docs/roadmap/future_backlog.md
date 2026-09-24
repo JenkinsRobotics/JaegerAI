@@ -1,3 +1,7 @@
+> **Classification:** BACKLOG / DEFERRED.
+> **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../../../docs/CONTINUE_FROM_HERE.md).
+> These are deferred ideas, not current release scope. Full Codex parity, every slash command, universal provider/worker support, and exhaustive donor cleanup are explicitly deferred.
+
 # JROS — future backlog (things to look at, not yet built)
 
 Living list of deferred work. Each item says WHY it's deferred and roughly what
