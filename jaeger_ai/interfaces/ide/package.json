@@ -2,7 +2,7 @@
   "name": "jaeger-ide",
   "displayName": "Jaeger",
   "description": "A local IDE conversation surface for your persistent Jaeger Gateway.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "jenkins-robotics",
   "engines": { "vscode": "^1.96.0" },
   "categories": ["Other"],
