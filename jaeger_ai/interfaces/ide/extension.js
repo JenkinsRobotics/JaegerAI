@@ -29,6 +29,14 @@ function activate(context) {
   let view, controller;
   // What the operator has open right now. The active editor stays "active" while the
   // Jaeger panel has focus, so this reflects their file, not the panel.
+  // The permission pill: what the agent may do without asking, saved on the instance.
+  const sendAutonomy = async mode => {
+    try {
+      const gw = controller?.gateway || new Gateway(endpoint());
+      const result = mode ? await gw.setAutonomy(mode) : await gw.autonomy();
+      view?.webview.postMessage({ autonomy: { mode: result.autonomy, options: result.options } });
+    } catch (error) { if (mode) throw error; /* reading is best-effort: the pill just stays unknown */ }
+  };
   const ideContext = () => {
     const editor = vscode.window.activeTextEditor;
     const chosen = editor && !editor.selection.isEmpty ? editor.selection : null;
@@ -126,7 +134,7 @@ function activate(context) {
           if (answer === 'Replace draft') view?.webview.postMessage({ editDraft: message.text });
           return;
         }
-        if (message.type === 'ready') { selected = createController(); void refreshChanges(); return controller.refresh(selected); }
+        if (message.type === 'ready') { selected = createController(); void refreshChanges(); void sendAutonomy(); return controller.refresh(selected); }
         if (message.type === 'turnChanges' && !controller?.state.busy) {
           const turns = controller?.workBySession[controller?.state.session?.session_id] || [];
           if (!turns.some(turn => turn.requestId === message.requestId)) return;
@@ -188,10 +196,11 @@ function activate(context) {
           } else if (typeof message.model === 'string' && message.model) {
             ({ model, provider } = parseProviderModel(message.model));
           }
-          return controller.send(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', ideContext());
+          return controller.send(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext());
         }
         // Slash commands that need the Gateway or a file dialog. Each maps to a real
         // capability; the panel never lists one whose backend is missing.
+        if (message.type === 'setAutonomy' && typeof message.mode === 'string') return sendAutonomy(message.mode);
         if (message.type === 'rename' && typeof message.title === 'string') {
           const id = controller.state.session?.session_id;
           if (!id) throw new Error('Open a conversation first.');

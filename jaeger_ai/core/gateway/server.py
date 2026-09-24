@@ -742,6 +742,8 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/runtime/models", self.handle_runtime_models)
         self.app.router.add_get("/v1/runtime/capabilities", self.handle_runtime_capabilities)
         self.app.router.add_get("/v1/runtime/skills", self.handle_runtime_skills)
+        self.app.router.add_get("/v1/runtime/autonomy", self.handle_get_autonomy)
+        self.app.router.add_post("/v1/runtime/autonomy", self.handle_set_autonomy)
         self.app.router.add_get("/v1/sessions/{id}/attachments", self.handle_list_attachments)
         self.app.router.add_post("/v1/sessions/{id}/attachments", self.handle_add_attachment)
         self.app.router.add_get("/v1/tasks", self.handle_tasks)
@@ -2843,6 +2845,39 @@ class JaegerGatewayApp:
     async def handle_runtime_capabilities(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.runtime.truth import capability_snapshot
         return web.json_response(capability_snapshot())
+
+    def _config_path(self) -> Path | None:
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+
+        layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+        return getattr(layout, "config_path", None)
+
+    async def handle_get_autonomy(self, request: web.Request) -> web.Response:
+        """GET /v1/runtime/autonomy: how much the agent asks before acting (saved setting)."""
+        from jaeger_ai.core.runtime.autonomy import AUTONOMY, effective_autonomy
+
+        return web.json_response({"autonomy": effective_autonomy(self._config_path()), "options": list(AUTONOMY)})
+
+    async def handle_set_autonomy(self, request: web.Request) -> web.Response:
+        """POST /v1/runtime/autonomy ``{"autonomy": "auto|scoped|ask"}``: saved to the
+        instance config, which the approval provider reads on every tool call."""
+        from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
+        from jaeger_ai.core.runtime.autonomy import AUTONOMY
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        mode = str((body or {}).get("autonomy") or "").strip().lower() if isinstance(body, dict) else ""
+        if mode not in AUTONOMY:
+            return web.json_response({"error": f"autonomy must be one of {list(AUTONOMY)}"}, status=400)
+        path = self._config_path()
+        if path is None or not Path(path).is_file():
+            return web.json_response({"error": "No instance config to save to"}, status=409)
+        config = load_yaml(Path(path), Config)
+        config.automation.autonomy = mode
+        dump_yaml(Path(path), config)
+        return web.json_response({"autonomy": mode, "options": list(AUTONOMY)})
 
     async def handle_runtime_skills(self, request: web.Request) -> web.Response:
         """GET /v1/runtime/skills[?q=text] — the skills a client can offer, one row each.

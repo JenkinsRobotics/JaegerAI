@@ -59,3 +59,24 @@ footer{position:relative}
 #info{margin:0 16px 8px;padding:9px 12px;border:1px solid var(--line);border-radius:11px;background:var(--vscode-editorWidget-background,#242424);font-size:12px;max-height:34vh;overflow:auto}
 .info-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted);font-size:11px;letter-spacing:.04em;margin-bottom:5px}.info-heading .icon-button{width:22px;height:22px;font-size:16px}
 .info-lines>div{line-height:1.6;overflow-wrap:anywhere}
+
+/* Composer bar: attach + permission on the left; model, IDE context and send on the right. */
+form{position:relative}
+.composer-bar{display:flex;align-items:center;justify-content:space-between;gap:8px;padding-top:6px}
+.bar-left,.bar-right{display:flex;align-items:center;gap:6px;min-width:0}.bar-right{margin-left:auto}
+.bar-icon{display:grid;place-items:center;width:28px;height:28px;padding:0;border-radius:50%;color:var(--muted)}.bar-icon:hover{background:var(--hover);color:var(--vscode-foreground,#ddd)}
+.pill{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 9px;border-radius:999px;font-size:12px;color:var(--muted);white-space:nowrap;position:relative}
+.pill:hover{background:var(--hover);color:var(--vscode-foreground,#ddd)}
+.pill.access.full{color:var(--vscode-editorWarning-foreground,#d9b24a)}.pill.access.full:hover{background:color-mix(in srgb,var(--vscode-editorWarning-foreground,#d9b24a) 14%,transparent)}
+.pill.toggle[aria-pressed="false"]{opacity:.55;text-decoration:line-through;text-decoration-color:color-mix(in srgb,currentColor 50%,transparent)}
+.pill.toggle[aria-pressed="true"]{color:var(--vscode-foreground,#ddd)}
+.model-pill{padding-right:7px;cursor:pointer}.model-pill #model{appearance:none;-webkit-appearance:none;background:transparent;border:0;color:inherit;font:inherit;max-width:160px;padding:0 2px;margin:0;text-overflow:ellipsis;cursor:pointer}
+.model-pill #model:focus-visible{outline:1px solid var(--vscode-focusBorder,#75a7e8);outline-offset:3px;border-radius:6px}.model-pill .chev{opacity:.7;pointer-events:none}
+.send-button{display:grid;place-items:center;width:30px;height:30px;padding:0;border-radius:50%;margin-left:2px}
+#access-menu{position:absolute;left:8px;bottom:calc(100% + 6px);z-index:6;min-width:270px;padding:4px;border:1px solid var(--line);border-radius:11px;background:var(--vscode-editorWidget-background,#242424);box-shadow:0 6px 18px #0005}
+#access-menu .slash-item{flex-direction:column;align-items:flex-start;gap:1px}#access-menu .slash-item[aria-selected="true"] .access-name::after{content:' ✓';color:var(--muted)}
+.access-name{font-size:13px}
+form,.composer-bar{min-width:0}.bar-left{flex:0 0 auto}.bar-right{min-width:0;flex:0 1 auto;justify-content:flex-end}
+.model-pill{min-width:0;flex:0 1 auto}.model-pill #model{min-width:0;width:100%;max-width:170px}.pill.toggle{flex:0 0 auto}
+@media(max-width:470px){.pill.toggle span{display:none}.pill.toggle{padding:0 8px}}
+@media(max-width:340px){.model-pill #model{max-width:90px}}
