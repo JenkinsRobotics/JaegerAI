@@ -1,0 +1,10 @@
+{
+  "name": "accessibility-review",
+  "original_name": "accessibility-review",
+  "source": "claude-cowork--design",
+  "origin_path": "plugins/cache/claude-cowork/design/1.1.0/skills/accessibility-review",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "a3f61cf61fb47ad14095965460d64a663a4c6d53df32ca040b120e6eecc889de"
+}

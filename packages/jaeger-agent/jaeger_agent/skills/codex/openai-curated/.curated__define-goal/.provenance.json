@@ -1,0 +1,10 @@
+{
+  "name": "define-goal",
+  "original_name": "define-goal",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/define-goal",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "708df89ff19cbae82a762efae036735d1914b5c7e44df1832e0b723f6cd9ee30"
+}

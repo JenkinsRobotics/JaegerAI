@@ -1,0 +1,10 @@
+{
+  "name": "people-analytics",
+  "original_name": "people-analytics",
+  "source": "claude-cowork--human-resources",
+  "origin_path": "plugins/cache/claude-cowork/human-resources/1.1.0/skills/people-analytics",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "1c802a3bc27f4f0476fd3016889ece7cd05f1a78eba9e9458f0b2e8e984d3b9e"
+}

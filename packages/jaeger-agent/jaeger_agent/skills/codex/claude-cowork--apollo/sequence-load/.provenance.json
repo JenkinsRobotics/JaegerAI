@@ -1,0 +1,10 @@
+{
+  "name": "sequence-load",
+  "original_name": "sequence-load",
+  "source": "claude-cowork--apollo",
+  "origin_path": "plugins/cache/claude-cowork/apollo/0.1.0/skills/sequence-load",
+  "plugin_version": "0.1.0",
+  "license": "MIT",
+  "license_file": "../LICENSE.claude-cowork--apollo",
+  "skill_md_sha256": "a536c7d818bc8bd42df0d1e116270b51ffcfc12be7472f2eb48a46e2aab5a5c6"
+}

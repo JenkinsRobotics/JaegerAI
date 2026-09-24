@@ -1,0 +1,10 @@
+{
+  "name": "resource-planning",
+  "original_name": "resource-planning",
+  "source": "claude-cowork--operations",
+  "origin_path": "plugins/cache/claude-cowork/operations/1.1.0/skills/resource-planning",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "9b4c6d5a8b98d010d9ba5334fc3929eccef2f4ebfb067d49a181ccd93a810a57"
+}

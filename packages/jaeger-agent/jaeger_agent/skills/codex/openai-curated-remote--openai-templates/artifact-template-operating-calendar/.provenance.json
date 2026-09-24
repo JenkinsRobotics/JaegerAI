@@ -1,0 +1,10 @@
+{
+  "name": "artifact-template-operating-calendar",
+  "original_name": "artifact-template-operating-calendar",
+  "source": "openai-curated-remote--openai-templates",
+  "origin_path": "plugins/cache/openai-curated-remote/openai-templates/0.1.1/skills/artifact-template-operating-calendar",
+  "plugin_version": "0.1.1",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "33bb660791a0b9a21628a42c34934932220203b6aabd84e98cb1b45327d0384c"
+}

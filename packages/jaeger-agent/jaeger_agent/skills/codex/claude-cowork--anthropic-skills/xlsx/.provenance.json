@@ -1,0 +1,10 @@
+{
+  "name": "anthropic-skills:xlsx",
+  "original_name": "xlsx",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/xlsx",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "6712b39718fe815054abca9c3ee72f989613e6f771c8a5c58f30a65a6c905622"
+}

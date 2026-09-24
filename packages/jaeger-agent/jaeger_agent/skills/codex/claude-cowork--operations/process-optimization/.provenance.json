@@ -1,0 +1,10 @@
+{
+  "name": "process-optimization",
+  "original_name": "process-optimization",
+  "source": "claude-cowork--operations",
+  "origin_path": "plugins/cache/claude-cowork/operations/1.1.0/skills/process-optimization",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "14099838fdbfca24057e934fc22ed17f94629c5e9c9cec470f32e3063d0575f9"
+}

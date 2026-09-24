@@ -1,35 +1,49 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP}}; script-src 'nonce-{{NONCE}}'; img-src https:;">
-<link rel="stylesheet" href="{{CSS}}"><title>Jaeger</title></head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{CSP}}; script-src 'nonce-{{NONCE}}'; img-src https: {{CSP}};">
+<link rel="stylesheet" href="{{CSS}}"><link rel="stylesheet" href="{{MOTION}}"><title>Jaeger</title></head>
 <body>
-<header><div class="brand"><span class="mark">J</span><strong>Jaeger</strong><span class="subtle">Your ongoing work</span></div>
-<button id="settings" title="Connection settings" aria-label="Connection settings">⚙</button></header>
-<nav aria-label="Conversations"><select id="sessions" aria-label="Conversation"><option value="">Select a conversation</option></select><button id="new" title="New conversation" aria-label="New conversation">＋</button><button id="refresh" title="Reload history and reconnect" aria-label="Reload history and reconnect">↻</button></nav>
-<div id="status" role="status">Connecting…</div>
+<header class="app-header">
+  <button id="back" class="icon-button" title="Back to chats" aria-label="Back to chats">←</button>
+  <span id="chat-heading" class="app-name">Chats</span>
+  <div class="header-actions">
+    <button id="refresh" class="icon-button" title="Reload chats" aria-label="Reload chats">↻</button>
+    <button id="settings" class="icon-button" title="Settings" aria-label="Settings">⚙</button>
+    <button id="new" class="icon-button compose-button" title="New chat" aria-label="New chat"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7M16 3l5 5M10 14l-1 4 4-1L22 8a2 2 0 0 0-5-5Z"/></svg></button>
+  </div>
+</header>
+<section id="chat-home" class="chat-home" aria-label="Chats">
+  <h1>Chats</h1>
+  <div id="chat-list" class="chat-list"></div>
+</section>
+<div id="status" role="status" aria-live="polite"></div>
 <div id="error" role="alert" hidden></div>
 <div id="copied" role="status" class="sr-only" aria-live="polite"></div>
-<main id="timeline" aria-label="Conversation timeline"><section class="empty"><h1>What are we working on?</h1><p>One Jaeger. A focused conversation here, with work owned by your Gateway.</p><p>Create a conversation or reopen an existing one.</p></section></main>
+<img id="logo-source" class="sr-only" src="{{LOGO}}" alt="">
+<main id="timeline" aria-label="Conversation timeline">
+  <section class="empty" aria-label="Start a chat"><img src="{{LOGO}}" alt=""><span>Jaeger</span></section>
+</main>
+<section id="background-tasks" aria-label="Background work" hidden></section>
+<section id="changes" aria-label="Workspace changes" hidden></section>
+<section id="info" aria-label="Command result" hidden></section>
 <div id="approvals" aria-label="Pending approvals"></div>
 <footer>
-<div id="staged" aria-label="Attached files"></div>
-<form id="composer">
-<label class="sr-only" for="prompt">Message Jaeger</label>
-<textarea id="prompt" placeholder="Message Jaeger…" rows="3"></textarea>
-<div class="composer-bottom">
-  <button id="attach" type="button" title="Attach a file from your Jaeger workspace" aria-label="Attach a file from your Jaeger workspace">📎</button>
-  <span id="context">Gateway-owned conversation</span>
-  <label class="sr-only" for="model">Model</label>
-  <select id="model" aria-label="Model" title="Model"><option value="">Gateway default</option></select>
-  <button id="stop" type="button" hidden>Stop</button>
-  <button id="send" type="submit" disabled>Send ↑</button>
-</div>
-</form>
-<div class="hint">Enter to send · Shift+Enter for a new line</div>
+  <div id="staged" aria-label="Attached files"></div>
+  <div id="slash-menu" role="listbox" aria-label="Commands" hidden></div>
+  <form id="composer">
+    <label class="sr-only" for="prompt">Message Jaeger</label>
+    <textarea id="prompt" placeholder="Ask Jaeger anything, or type / for commands" rows="2" aria-autocomplete="list" aria-controls="slash-menu"></textarea>
+    <div class="composer-bottom">
+      <button id="attach" class="icon-button composer-icon" type="button" title="Attach files" aria-label="Attach files">＋</button>
+      <label class="sr-only" for="model">Model</label>
+      <select id="model" aria-label="Model" title="Choose model"><option value="">Gateway default</option></select>
+      <button id="stop" type="button" hidden>Stop</button>
+      <button id="send" class="send-button" type="submit" disabled aria-label="Send message" title="Send message">↑</button>
+    </div>
+  </form>
+  <div class="workspace" title="Current workspace"><span class="workspace-icon">▱</span><span id="context">Work locally</span><span>⌄</span></div>
 </footer>
 <script type="module" nonce="{{NONCE}}">
-  // streaming-markdown (MIT, thetarnav) — see ../THIRD_PARTY_NOTICES.md.
-  // Absent in an unpackaged dev checkout; that is expected, not an error.
   try { window.smd = await import('{{SMD}}'); }
   catch { window.smd = null; }
 </script>
@@ -37,6 +51,8 @@
 <script nonce="{{NONCE}}" src="{{TIMELINE}}"></script>
 <script nonce="{{NONCE}}" src="{{KEYED_RENDERER}}"></script>
 <script nonce="{{NONCE}}" src="{{PRESENTATION}}"></script>
+<script nonce="{{NONCE}}" src="{{DURATION}}"></script>
+<script nonce="{{NONCE}}" src="{{SLASH}}"></script>
 <script nonce="{{NONCE}}" src="{{MARKDOWN}}"></script>
 <script nonce="{{NONCE}}" src="{{JS}}"></script>
 </body></html>

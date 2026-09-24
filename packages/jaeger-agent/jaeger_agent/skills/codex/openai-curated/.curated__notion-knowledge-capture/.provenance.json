@@ -1,0 +1,10 @@
+{
+  "name": "notion-knowledge-capture",
+  "original_name": "notion-knowledge-capture",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/notion-knowledge-capture",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "b49383b229bc766190ea22bb58502cfcf7e08449f5fce55a104eef1e54e27f00"
+}

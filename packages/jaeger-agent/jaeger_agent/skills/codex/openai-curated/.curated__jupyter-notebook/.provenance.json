@@ -1,0 +1,10 @@
+{
+  "name": "openai-curated:jupyter-notebook",
+  "original_name": "jupyter-notebook",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/jupyter-notebook",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "62f102e8554b25716dccef0ffab4572d4e3eaf05ccc76562d33a065bc9c521fb"
+}

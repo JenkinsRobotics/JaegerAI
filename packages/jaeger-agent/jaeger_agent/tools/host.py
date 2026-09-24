@@ -145,14 +145,10 @@ def _t_open_on_host(target: str, kind: str = "auto", app: str = "") -> dict:
 
 @register_tool_from_function(name="set_mode")
 def _t_set_mode(mode: str) -> dict:
-    """Switch the agent's runtime mode — model + voice profile:
-      • normal — small fast model (gemma-12B) + voice (the default)
-      • high — larger model (gemma-26B), voice off; heavier reasoning
-      • deep-sleep — high model + work the Deep Think queue
-    Use when the user asks to switch ("use the bigger model", "go high
-    agentic mode", "back to normal mode"). The model swap is SLOW (~60-90s)
-    — tell the user it's switching, it's not stuck. Returns {ok, mode,
-    model, voice} or {ok:false, error}."""
+    """Switch a local in-process model/voice preset on explicit request.
+    Does not change an external provider or a Gateway session model selection.
+    Check get_mode first; inactive local presets are not the serving model.
+    Returns {ok, mode, model, voice} or {ok:false, error}."""
     from jaeger_ai.core.runtime.modes import set_mode as _set_mode
     return _set_mode(mode)
 
@@ -161,7 +157,9 @@ def _t_set_mode(mode: str) -> dict:
 def _t_get_mode() -> dict:
     """Report the agent's CURRENT runtime mode + its model/voice profile —
     use this to answer "what mode are you in?" / "which model is running?"
-    from fact, never guess. Returns {mode, model, voice, options}."""
+    from the current execution client, never a default or past conversation.
+    External clients have no active local mode. Local presets are separate,
+    inactive options. Missing execution evidence returns an unknown model."""
     from jaeger_ai.core.runtime.modes import mode_info
     return mode_info()
 

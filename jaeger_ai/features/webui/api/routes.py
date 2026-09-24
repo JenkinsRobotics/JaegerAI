@@ -13633,6 +13633,7 @@ def handle_get(handler, parsed) -> bool:
         if not sid:
             if _diag: _diag.finish()
             return j(handler, {"error": "session_id is required"}, status=400)
+        _mirror_gateway_session(sid)
         # ?messages=0 skips the message payload for fast session switching.
         # The frontend uses this when switching conversations in the sidebar
         # (only needs metadata). The full message array is loaded lazily
@@ -14251,6 +14252,7 @@ def handle_get(handler, parsed) -> bool:
         diag = RequestDiagnostics.maybe_start("GET", parsed.path, logger=logger, print_fn=getattr(handler, '_safe_webui_print', None))
         try:
             from api import profiles as profiles_api
+            _mirror_gateway_conversations()
 
             diag.stage("load_settings")
             settings = load_settings()
@@ -15861,6 +15863,7 @@ def handle_post(handler, parsed) -> bool:
             from api.session_ops import apply_session_title_rename
             apply_session_title_rename(s, body["title"])
             s.save()
+        _push_title_to_gateway(s)
         _sync_session_title_to_insights(s)
         publish_session_list_changed(
             "session_rename",
@@ -16586,12 +16589,16 @@ def handle_post(handler, parsed) -> bool:
         return _handle_session_compress_start(handler, body)
 
     if parsed.path == "/api/session/compress":
+        if _isolated_legacy_path(handler, "In-process session compression"):
+            return True
         return _handle_session_compress(handler, body)
 
     if parsed.path == "/api/session/conversation-rounds":
         return _handle_conversation_rounds(handler, body)
 
     if parsed.path == "/api/session/handoff-summary":
+        if _isolated_legacy_path(handler, "In-process handoff summary"):
+            return True
         return _handle_handoff_summary(handler, body)
 
     if parsed.path == "/api/session/retry":
@@ -16650,9 +16657,13 @@ def handle_post(handler, parsed) -> bool:
         return j(handler, payload, status=status)
 
     if parsed.path == "/api/btw":
+        if _isolated_legacy_path(handler, "The in-process /btw side agent"):
+            return True
         return _handle_btw(handler, body)
 
     if parsed.path == "/api/background":
+        if _isolated_legacy_path(handler, "The in-process background agent"):
+            return True
         return _handle_background(handler, body)
 
     if parsed.path == "/api/goal":
@@ -16665,6 +16676,8 @@ def handle_post(handler, parsed) -> bool:
         return _handle_chat_start(handler, body, diag=diag)
 
     if parsed.path == "/api/chat":
+        if _isolated_legacy_path(handler, "The synchronous in-process chat endpoint"):
+            return True
         return _handle_chat_sync(handler, body)
 
     if parsed.path == "/api/chat/steer":
@@ -24098,6 +24111,71 @@ def _runtime_adapter_goal_action(goal_args: str) -> str:
     return "set"
 
 
+def _mirror_gateway_conversations() -> None:
+    """Refresh the sidebar cache from the Gateway, the source of truth for sessions."""
+    from api.gateway_chat import webui_gateway_chat_enabled
+
+    if not webui_gateway_chat_enabled(get_config()):
+        return
+    try:
+        from api import gateway_mirror
+
+        if gateway_mirror.mirror_all():
+            _clear_session_list_cache()
+            publish_session_list_changed("gateway_mirror")
+    except Exception:
+        logger.warning("gateway session mirror failed", exc_info=True)
+
+
+def _mirror_gateway_session(sid: str) -> None:
+    """Refresh one session's transcript from the Gateway before it is read."""
+    from api.gateway_chat import webui_gateway_chat_enabled
+
+    if not webui_gateway_chat_enabled(get_config()):
+        return
+    try:
+        from api import gateway_mirror
+
+        gateway_mirror.mirror_session(sid)
+    except Exception:
+        logger.warning("gateway session mirror failed for %s", sid, exc_info=True)
+
+
+def _push_title_to_gateway(session) -> None:
+    """Titles are owned by the Gateway; send a rename there."""
+    from api.gateway_chat import webui_gateway_chat_enabled
+
+    if not webui_gateway_chat_enabled(get_config()):
+        return
+    try:
+        from api import gateway_mirror
+
+        gateway_mirror.push_title(session.session_id, session.title)
+    except Exception:
+        logger.warning("gateway title push failed for %s", getattr(session, "session_id", "?"), exc_info=True)
+
+
+def _isolated_legacy_path(handler, label: str) -> bool:
+    """Fail a non-Gateway execution path closed.
+
+    Returns True when the request was refused (a 409 is already sent), False when
+    the path may run.
+
+    These endpoints build their own in-process agent, a second executor beside
+    the Gateway's resident Entity. They stay in the tree, off by default.
+    """
+    from jaeger_ai.contract.legacy_paths import disabled_reason, legacy_paths_enabled
+
+    if legacy_paths_enabled():
+        return False
+    j(
+        handler,
+        {"error": disabled_reason(label), "code": "legacy_path_isolated"},
+        status=409,
+    )
+    return True
+
+
 def _native_table_runtime(profile) -> str | None:
     """Return hermes/openclaw/roundtable when that profile owns native execution."""
     from jaeger_ai.contract.frameworks import UnknownFramework, canonical_runtime
@@ -24226,6 +24304,15 @@ def _start_run(
 
     native_runtime = _native_table_runtime(getattr(s, "profile", None))
     if native_runtime:
+        # Hermes/OpenClaw/Roundtable profiles execute on the :8791 runner, a
+        # second execution path. Isolated unless legacy paths are re-enabled.
+        from jaeger_ai.contract.legacy_paths import disabled_reason, legacy_paths_enabled
+        if not legacy_paths_enabled():
+            return {
+                "error": disabled_reason(f"The {native_runtime} profile runner"),
+                "code": "legacy_path_isolated",
+                "_status": 409,
+            }
         return _start_native_profile_run(
             s,
             msg=msg,

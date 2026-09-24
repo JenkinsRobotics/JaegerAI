@@ -38,7 +38,7 @@ def test_process_runtime_streams_and_returns_summary(tmp_path, monkeypatch) -> N
             capabilities=frozenset({"test"}),
             local=True,
             prompt_on_stdin=True,
-        )
+        ), receipt_root=tmp_path / "receipts",
     )
 
     async def run():
@@ -68,7 +68,7 @@ def test_process_runtime_enforces_timeout(tmp_path) -> None:
             build_args=args,
             capabilities=frozenset(),
             local=True,
-        )
+        ), receipt_root=tmp_path / "receipts",
     )
 
     async def run():
@@ -93,7 +93,7 @@ def test_process_runtime_cancel_reports_cancelled_and_reaps_child(tmp_path) -> N
             build_args=args,
             capabilities=frozenset(),
             local=True,
-        )
+        ), receipt_root=tmp_path / "receipts",
     )
 
     async def run():
@@ -162,3 +162,24 @@ def test_summary_leaves_plain_text_and_single_json_alone() -> None:
     assert _extract_summary("just some text") == "just some text"
     assert _extract_summary('{"result": "hello"}') == "hello"
     assert _extract_summary("   ") == ""
+
+
+def test_new_runtime_reattaches_same_process_and_cannot_duplicate(tmp_path):
+    spec = CommandSpec(runtime_id='recover', executables=(sys.executable,),
+        build_args=lambda *a: ('-c', "from pathlib import Path; import time; p=Path('effects.txt'); p.write_text(p.read_text()+'x' if p.exists() else 'x'); time.sleep(.3); print('actual result')"),
+        capabilities=frozenset(), local=True)
+    async def run():
+        first = SubprocessDelegateRuntime(spec, receipt_root=tmp_path/'receipts')
+        handle = await first.start(_request(tmp_path))
+        # Drop the original client; the wrapper still owns the one child.
+        second = SubprocessDelegateRuntime(spec, receipt_root=tmp_path/'receipts')
+        assert await second.start(_request(tmp_path)) == handle
+        events = [e async for e in second.stream(handle)]
+        result = await second.result(handle)
+        assert result.status == 'completed'
+        assert result.summary == 'actual result'
+        assert events[-1].payload['text'] == 'actual result'
+        assert (tmp_path/'effects.txt').read_text() == 'x'
+        third = SubprocessDelegateRuntime(spec, receipt_root=tmp_path/'receipts')
+        assert (await third.result(handle)).summary == result.summary
+    asyncio.run(run())

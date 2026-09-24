@@ -445,6 +445,14 @@ class JaegerTUI:
         lifetime of the TUI; cleanup runs in :meth:`repl`'s finally."""
         if self._client is not None or self.skip_model:
             return self._client
+        from jaeger_ai.interfaces.bridge import gateway_execution_enabled
+        if gateway_execution_enabled():
+            from jaeger_ai.core.gateway.client import GatewayTurnClient
+            client = GatewayTurnClient()
+            client.probe()
+            client.ensure_session(self.session_id, title="Terminal conversation", source="tui")
+            self._client = client
+            return client
         from jaeger_ai.main import boot_for_tui
 
         with self.console.status(
@@ -513,6 +521,11 @@ class JaegerTUI:
         boots ``name`` via :func:`boot_for_tui`. Wall cost is ~5-10s
         (Gemma reload). Called by ``/instance <name>``; raises on any
         boot error so the slash handler can surface it."""
+        from jaeger_ai.interfaces.bridge import gateway_execution_enabled
+        if gateway_execution_enabled():
+            if name != self.instance_dir.name:
+                raise ValueError('The Gateway owns the active instance. Select its instance at the Gateway; the TUI cannot boot a second owner.')
+            return
         import gc
 
         from jaeger_ai.main import boot_for_tui, unload_local_brain
@@ -576,6 +589,7 @@ class JaegerTUI:
         from jaeger_ai.main import begin_turn_cancel_scope, request_turn_cancel
 
         cancel = begin_turn_cancel_scope()
+        self._gateway_cancel_event = cancel
         # Voice turn: sustained user speech during the turn trips the
         # cancel flag, so the user can talk over a long 'ruminating'.
         # Capture the voice session at arm time — if voice gets toggled
@@ -941,8 +955,7 @@ class JaegerTUI:
             agent_text = expand_references(user_text)
         except Exception:  # noqa: BLE001 — never let expansion break a turn
             agent_text = user_text
-        result = run_for_voice(client, agent_text,
-                               session_key=_DEFAULT_SESSION_KEY)
+        result = self._execute_client_turn(client, agent_text)
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
@@ -953,6 +966,54 @@ class JaegerTUI:
         if (text and not error and not result.get("spoke_via_tool")
                 and _wants_spoken_output(user_text)):
             self._speak_text_turn_fallback(text)
+
+    def _execute_client_turn(self, client, text):
+        from jaeger_ai.core.gateway.client import GatewayTurnClient
+        if not isinstance(client, GatewayTurnClient):
+            from jaeger_ai.main import _DEFAULT_SESSION_KEY, run_for_voice
+            return run_for_voice(client, text, session_key=_DEFAULT_SESSION_KEY)
+        import uuid
+        rid = uuid.uuid4().hex
+        finished = threading.Event()
+        cancel = getattr(self, '_gateway_cancel_event', threading.Event())
+        def watch_cancel():
+            while not finished.wait(0.1):
+                if cancel.is_set():
+                    pending = getattr(self, '_pending_confirm', None)
+                    if pending:
+                        pending['event'].set()
+                    try:
+                        client.cancel(self.session_id, rid)
+                        return
+                    except Exception:
+                        # Admission may still be in transit; keep the same ID.
+                        continue
+        def event(name, data):
+            if name in {'tool.started', 'tool.completed', 'tool.failed'}:
+                self._on_tool_event('start' if name == 'tool.started' else 'done', str(data.get('tool') or 'tool'),
+                                    str(data.get('text') or ''), float(data.get('elapsed_s') or 0))
+            elif name == 'approval.request' and data.get('approval_id'):
+                self.console.print(str(data.get('prompt') or data.get('target') or 'Action requires approval'))
+                self.console.print('Answer y / n at the prompt.')
+                box = {'event':threading.Event(), 'answer':None}
+                self._pending_confirm = box
+                try:
+                    box['event'].wait(timeout=300)
+                finally:
+                    self._pending_confirm = None
+                decision = 'once' if str(box['answer'] or '').lower().startswith('y') else 'deny'
+                client.resolve_approval(str(data['approval_id']), decision)
+        watcher = threading.Thread(target=watch_cancel, name='tui-gateway-cancel', daemon=True)
+        watcher.start()
+        try:
+            result = client.stream_turn(self.session_id, text, request_id=rid, on_event=event)
+            self.model_name = result.model or self.model_name
+            return {'text':result.text, 'error':result.error or (result.status if result.status != 'completed' else None),
+                    'halt_reason':(result.raw.get('result') or {}).get('halt_reason'),
+                    'cancelled':result.status == 'cancelled', 'execution_unknown':result.status == 'execution_unknown'}
+        finally:
+            finished.set()
+            watcher.join(timeout=1)
 
     def _speak_text_turn_fallback(self, text: str) -> None:
         """Speak a typed-turn answer when the model missed the TTS tool.
@@ -993,6 +1054,10 @@ class JaegerTUI:
         config. Falls back to defaults (all on) if it can't be read."""
         from jaeger_ai.core.instance.schemas import VoiceConfig
         try:
+            from jaeger_ai.core.gateway.client import GatewayTurnClient
+            if isinstance(self._client, GatewayTurnClient):
+                from jaeger_ai.core.instance.schemas import Config, load_yaml
+                return load_yaml(self.instance_dir / 'config.yaml', Config).voice
             from jaeger_ai.main import _pipeline
             cfg = _pipeline.get("config")
             return getattr(cfg, "voice", None) or VoiceConfig()
@@ -1138,11 +1203,7 @@ class JaegerTUI:
 
         self._render_turn_header(user_text, source="voice")
         started = time.perf_counter()
-        result = run_for_voice(
-            client,
-            user_text,
-            session_key=_DEFAULT_SESSION_KEY,
-        )
+        result = self._execute_client_turn(client, user_text)
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
@@ -1191,6 +1252,10 @@ class JaegerTUI:
         """After a turn, evaluate the active goal. Returns the prompt
         for the next auto-fired turn, or None when there's no goal /
         the goal is met / the iteration cap is hit."""
+        from jaeger_ai.core.gateway.client import GatewayTurnClient
+        if isinstance(self._client, GatewayTurnClient):
+            return None
+
         from jaeger_ai.main import clear_goal, evaluate_goal, get_goal
 
         goal = get_goal()
@@ -1256,6 +1321,10 @@ class JaegerTUI:
         ``/plan`` run buys one verification step first — see
         :func:`jaeger_ai.core.runtime.continuation.verification_prompt`.
         """
+        from jaeger_ai.core.gateway.client import GatewayTurnClient
+        if isinstance(self._client, GatewayTurnClient):
+            return None
+
         from jaeger_ai.core.runtime import continuation, execution
         from jaeger_ai.core.runtime.autonomous_runner import (
             ledger_open, next_continuation_prompt,
@@ -1323,6 +1392,10 @@ class JaegerTUI:
         by itself reads as the TUI talking to itself unless the reason
         is on screen.
         """
+        from jaeger_ai.core.gateway.client import GatewayTurnClient
+        if isinstance(self._client, GatewayTurnClient):
+            return None
+
         from jaeger_ai.core.runtime.completions import next_completion_turn
 
         layout = self._boot.layout if self._boot is not None else None
@@ -1368,135 +1441,16 @@ class JaegerTUI:
     # ── Deep Think ──────────────────────────────────────────────────
 
     def run_deep_think(self) -> None:
-        """Enter Deep Think mode: swap to the coder model, work the
-        queued skill-development tasks one at a time, swap back to the
-        realtime model when the queue drains or the user hits Ctrl-C.
-
-        See docs/deep_think_design.md. The model swap means only one
-        model is RAM-resident at a time. Ctrl-C is the wake interrupt:
-        the in-progress task is flipped back to ``pending`` so it
-        resumes next time, and the realtime model is reloaded."""
-        from jaeger_ai.main import run_command, switch_model
-        from jaeger_agent.background.deep_think import queue_for_layout
-        from jaeger_ai.core.instance.instance import InstanceLayout
-        from jaeger_ai.core.models.model_resolver import (
-            DEFAULT_CODER_MODEL,
-            DEFAULT_MODEL,
-        )
-        from jaeger_agent.prompts.reflection import reflect_on_task, save_reflection
-
-        # The pipeline must be booted (config/lock/layout) before we can
-        # swap models — _ensure_agent does that on first use.
-        if self._ensure_agent() is None:
-            self.console.print("[yellow]Agent not initialized.[/]")
-            return
-
-        layout = InstanceLayout(root=self.instance_dir)
-        queue = queue_for_layout(layout)
-        if queue.next_pending() is None:
-            self.console.print("[dim]Deep Think queue is empty.[/]")
-            return
-
-        # ── swap in the coder model ──
-        self.console.print(
-            "[bold yellow]◎ entering Deep Think[/] — swapping to the "
-            "coder model. The assistant won't be conversational until it "
-            "swaps back. [dim](Ctrl-C interrupts.)[/]"
-        )
-        self._client = None  # drop ref so the old model frees before reload
+        """Show work owned by the Gateway; keep the interactive model available."""
+        from jaeger_ai.core.tasks.client import tasks
         try:
-            # Plain print, not a Rich status spinner — Deep Think runs on
-            # the turn worker thread, and a Live there fights the
-            # main-thread input line.
-            self.console.print("[yellow]◎ loading coder model…[/]")
-            self._client = switch_model(DEFAULT_CODER_MODEL)
-        except Exception as exc:  # noqa: BLE001
-            self.console.print(
-                f"[red]Couldn't load coder model ({DEFAULT_CODER_MODEL}):[/] "
-                f"{exc}\n[dim]Staying on the realtime model.[/]"
-            )
-            # Make sure we're back on a working realtime client.
-            try:
-                self._client = switch_model(DEFAULT_MODEL)
-            except Exception:
-                pass
-            return
-
-        completed = 0
-        failed = 0
-        try:
-            while True:
-                task = queue.next_pending()
-                if task is None:
-                    break
-                queue.mark_in_progress(task.id)
-                self.console.print(
-                    f"[cyan]◎ deep think ›[/] {task.description}"
-                )
-                outcome = "done"
-                try:
-                    # Framework-injected message — the canonical text
-                    # lives in core/prompts/synthetic.py alongside the
-                    # other auto-prompts (idle board pickup, cron),
-                    # so the full set of "things the framework sends
-                    # as the user" is one read.
-                    from jaeger_agent.prompts import deep_think_directive
-                    directive = deep_think_directive(task.description)
-                    run_command(self._client, directive,
-                                session_key=f"deepthink_{task.id}")
-                    queue.mark_done(task.id, "completed in Deep Think")
-                    completed += 1
-                    self.console.print(f"[green]  ✓ done[/] [{task.id}]")
-                except KeyboardInterrupt:
-                    raise
-                except Exception as exc:  # noqa: BLE001
-                    outcome = f"failed: {exc}"
-                    queue.mark_failed(task.id, str(exc))
-                    failed += 1
-                    self.console.print(f"[red]  ✗ failed[/] [{task.id}]: {exc}")
-                # After-action reflection — extract a durable lesson and
-                # persist it (chronological log + episodic memory).
-                # Best-effort; a reflection failure never breaks the loop.
-                try:
-                    reflection = reflect_on_task(
-                        self._client, task.description, outcome,
-                    )
-                    if reflection:
-                        save_reflection(layout, task.description,
-                                        outcome, reflection)
-                        self.console.print(
-                            f"[dim]  ↳ reflected: {reflection[:100]}[/]"
-                        )
-                except Exception:  # noqa: BLE001
-                    pass
-        except KeyboardInterrupt:
-            n = queue.reset_in_progress()
-            self.console.print(
-                f"\n[yellow]◎ Deep Think interrupted[/] — "
-                f"{n} task(s) flipped back to pending for next time."
-            )
-        finally:
-            # ── swap the realtime model back in ──
-            self.console.print(
-                "[bold yellow]◎ leaving Deep Think[/] — reloading the "
-                "realtime model…"
-            )
-            self._client = None
-            try:
-                self.console.print("[yellow]◎ loading realtime model…[/]")
-                # switch_model rebuilds the agent, which re-runs the
-                # skill loader — so anything Deep Think authored is now
-                # live for the realtime model.
-                self._client = switch_model(DEFAULT_MODEL)
-            except Exception as exc:  # noqa: BLE001
-                self.console.print(
-                    f"[red]Failed to reload realtime model:[/] {exc}"
-                )
-
-        self.console.print(
-            f"[green]◎ Deep Think complete[/] — {completed} done, "
-            f"{failed} failed. New skills (if any) are now available."
-        )
+            rows = tasks()
+            for task in rows:
+                self.console.print(f"[{task['task_id']}] {task['state']}: {task['goal']}")
+            if not rows:
+                self.console.print('No background tasks. /deepthink add <objective> starts one.')
+        except Exception as exc:
+            self.console.print(f'[red]Gateway unavailable:[/] {exc}')
 
     # ── Auto-idle ───────────────────────────────────────────────────
 
@@ -1784,6 +1738,10 @@ class JaegerTUI:
         once the idle window has elapsed, look for autonomous work:
         first the Deep Think queue, then the kanban board. Quietly
         keeps waiting when neither has anything actionable."""
+        from jaeger_ai.core.gateway.client import GatewayTurnClient
+        if isinstance(self._client, GatewayTurnClient):
+            return
+
         if self._turn_running.is_set() or self._idle_fired:
             return
         idle = self._auto_idle_seconds()
@@ -1802,34 +1760,8 @@ class JaegerTUI:
         self._maybe_auto_work_board()
 
     def _maybe_auto_deep_think(self) -> bool:
-        """Try to enter Deep Think for an approved queued task. Returns
-        True when DT was started (so the caller skips the board path).
-        Quietly returns False when nothing approved is pending."""
-        try:
-            from jaeger_agent.background.deep_think import queue_for_layout
-            from jaeger_ai.core.instance.instance import InstanceLayout
-            queue_ = queue_for_layout(InstanceLayout(root=self.instance_dir))
-            if queue_.next_pending() is None:
-                return False  # nothing approved to work
-        except Exception:  # noqa: BLE001
-            return False
-        self._turn_running.set()
-        self._turn_started_at = time.perf_counter()
-        self._current_activity = "deep think"
-        try:
-            from jaeger_ai.main import set_agent_status
-            set_agent_status("deep_think", detail="thinking")
-        except Exception:  # noqa: BLE001 — status indicator must never crash a turn
-            pass
-        try:
-            self.console.print(
-                "[dim]◎ idle — entering Deep Think to work the queue.[/]"
-            )
-            self.run_deep_think()
-        finally:
-            self._turn_running.clear()
-            self._current_activity = ""
-        return True
+        # The resident owner schedules tasks independently of TUI activity.
+        return False
 
     def _maybe_auto_work_board(self) -> bool:
         """Fall-through idle path: if the kanban board has actionable

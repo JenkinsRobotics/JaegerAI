@@ -1,0 +1,10 @@
+{
+  "name": "artifact-template-business-review",
+  "original_name": "artifact-template-business-review",
+  "source": "openai-curated-remote--openai-templates",
+  "origin_path": "plugins/cache/openai-curated-remote/openai-templates/0.1.1/skills/artifact-template-business-review",
+  "plugin_version": "0.1.1",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "27721fc1d67d1b41949caa75ac8f94f81952ff124406878af6524047929e60d2"
+}

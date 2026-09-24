@@ -1,0 +1,10 @@
+{
+  "name": "roadmap-management",
+  "original_name": "roadmap-management",
+  "source": "claude-cowork--product-management",
+  "origin_path": "plugins/cache/claude-cowork/product-management/1.1.0/skills/roadmap-management",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--product-management",
+  "skill_md_sha256": "4f7355b580f77474ccbbc5a543b35a1f8463445a69553d8249b6b559d606c6fe"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "brand-voice-enforcement",
+  "original_name": "brand-voice-enforcement",
+  "source": "claude-cowork--brand-voice",
+  "origin_path": "plugins/cache/claude-cowork/brand-voice/1.0.0/skills/brand-voice-enforcement",
+  "plugin_version": "1.0.0",
+  "license": "MIT",
+  "license_file": "../LICENSE.claude-cowork--brand-voice",
+  "skill_md_sha256": "3da527576a05b77669c0e3826ca909176df22358e262a69a5e4d470e770ab97a"
+}

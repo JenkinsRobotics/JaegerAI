@@ -1,0 +1,10 @@
+{
+  "name": "artifact-template-market-trends-report",
+  "original_name": "artifact-template-market-trends-report",
+  "source": "openai-curated-remote--openai-templates",
+  "origin_path": "plugins/cache/openai-curated-remote/openai-templates/0.1.1/skills/artifact-template-market-trends-report",
+  "plugin_version": "0.1.1",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "d58d019b89cb6f292ac3ab991d561489eef477ff53ce05fb024a0c936f5af26a"
+}

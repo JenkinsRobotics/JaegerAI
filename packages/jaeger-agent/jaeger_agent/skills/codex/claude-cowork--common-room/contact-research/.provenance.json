@@ -1,0 +1,10 @@
+{
+  "name": "contact-research",
+  "original_name": "contact-research",
+  "source": "claude-cowork--common-room",
+  "origin_path": "plugins/cache/claude-cowork/common-room/1.0.0/skills/contact-research",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--common-room",
+  "skill_md_sha256": "3c01f64652446bc82486c984287022a6410e9a1b282734332cb6a215aac0c684"
+}

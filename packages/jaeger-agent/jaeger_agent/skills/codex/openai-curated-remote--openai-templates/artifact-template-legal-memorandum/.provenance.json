@@ -1,0 +1,10 @@
+{
+  "name": "artifact-template-legal-memorandum",
+  "original_name": "artifact-template-legal-memorandum",
+  "source": "openai-curated-remote--openai-templates",
+  "origin_path": "plugins/cache/openai-curated-remote/openai-templates/0.1.1/skills/artifact-template-legal-memorandum",
+  "plugin_version": "0.1.1",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "51fb9d21baf6119c4ccb1903638a6bac0e859210de63460fffa7025d52e997e0"
+}

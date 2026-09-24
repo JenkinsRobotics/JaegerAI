@@ -48,7 +48,9 @@ def test_tool_callbacks_preserve_text_order_and_distinguish_repeated_calls(tmp_p
         "turn.start",
         "turn.delta",
         "turn.reasoning",
+        "turn.progress",
         "tool.started",
+        "turn.progress",
         "tool.started",
         "tool.completed",
         "tool.completed",
@@ -168,8 +170,57 @@ def test_owner_react_path_installs_tool_callbacks_and_flushes_after_tool(monkeyp
     replay = GatewaySessionStore(store.path).replay_events("session")["events"]
     request_events = [event for event in replay if event["data"].get("request_id") == "request"]
     assert [event["event"] for event in request_events] == [
-        "turn.start", "turn.delta", "tool.started", "tool.completed", "turn.delta",
+        "turn.start", "turn.delta", "turn.progress", "tool.started", "tool.completed", "turn.delta",
     ]
     serialized = json.dumps(request_events)
     assert "OWNER_ARG_SECRET" not in serialized
     assert "OWNER_RESULT_SECRET" not in serialized
+
+
+def _events_named(app, session_id, request_id, name):
+    return [e for e in _request_events(app, session_id, request_id) if e.event == name]
+
+
+def test_update_plan_result_is_published_as_a_turn_plan_event(tmp_path):
+    app, _store, _ = _admitted_app(tmp_path)
+    callbacks, flush = app._turn_stream_callbacks("session", "request")
+    plan = {
+        "ok": True, "explanation": "starting",
+        "plan": [{"step": "read", "status": "completed"}, {"step": "fix", "status": "in_progress"}],
+        "summary": {"total": 2, "pending": 0, "in_progress": 1, "completed": 1},
+    }
+    callbacks.on_tool_progress("update_plan", "start", {"plan": "ignored"})
+    callbacks.on_tool_done("update_plan", {}, plan, True, None, 0.01)
+    flush()
+    (event,) = _events_named(app, "session", "request", "turn.plan")
+    assert event.data["plan"] == [
+        {"step": "read", "status": "completed"}, {"step": "fix", "status": "in_progress"},
+    ]
+    assert event.data["explanation"] == "starting"
+    assert event.data["summary"]["in_progress"] == 1
+
+
+def test_only_update_plan_results_are_ever_published(tmp_path):
+    app, _store, _ = _admitted_app(tmp_path)
+    callbacks, flush = app._turn_stream_callbacks("session", "request")
+    leaky = {"ok": True, "plan": [{"step": "SECRET-TOKEN", "status": "pending"}], "summary": {}}
+    callbacks.on_tool_progress("read_file", "start", {"path": "/p"})
+    callbacks.on_tool_done("read_file", {}, leaky, True, None, 0.01)  # not update_plan
+    callbacks.on_tool_progress("update_plan", "start", {})
+    callbacks.on_tool_done("update_plan", {}, {"ok": False, "error": "SECRET-TOKEN"}, True, None, 0.01)
+    callbacks.on_tool_progress("update_plan", "start", {})
+    callbacks.on_tool_done("update_plan", {}, leaky, False, "SECRET-TOKEN", 0.01)  # tool failed
+    flush()
+    assert _events_named(app, "session", "request", "turn.plan") == []
+    assert "SECRET-TOKEN" not in str([e.data for e in _request_events(app, "session", "request")])
+
+
+def test_oversized_plans_are_bounded(tmp_path):
+    app, _store, _ = _admitted_app(tmp_path)
+    callbacks, flush = app._turn_stream_callbacks("session", "request")
+    big = {"ok": True, "plan": [{"step": "x" * 5000, "status": "pending"}] * 200, "summary": {}}
+    callbacks.on_tool_progress("update_plan", "start", {})
+    callbacks.on_tool_done("update_plan", {}, big, True, None, 0.01)
+    flush()
+    (event,) = _events_named(app, "session", "request", "turn.plan")
+    assert len(event.data["plan"]) == 50 and len(event.data["plan"][0]["step"]) == 500

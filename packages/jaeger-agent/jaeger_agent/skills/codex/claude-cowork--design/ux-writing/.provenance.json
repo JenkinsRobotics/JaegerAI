@@ -1,0 +1,10 @@
+{
+  "name": "ux-writing",
+  "original_name": "ux-writing",
+  "source": "claude-cowork--design",
+  "origin_path": "plugins/cache/claude-cowork/design/1.1.0/skills/ux-writing",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "e7feb80fe4d66bdc4debf40afa5afefd694f7e5b3b64b8ce57d3190ee8715012"
+}

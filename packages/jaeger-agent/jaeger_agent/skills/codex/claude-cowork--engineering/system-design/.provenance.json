@@ -1,0 +1,10 @@
+{
+  "name": "system-design",
+  "original_name": "system-design",
+  "source": "claude-cowork--engineering",
+  "origin_path": "plugins/cache/claude-cowork/engineering/1.2.0/skills/system-design",
+  "plugin_version": "1.2.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "8f28eca99f2208872fc2483fcc93326b628f4f73116e91309a95e05da86a0ab5"
+}

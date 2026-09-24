@@ -1,0 +1,10 @@
+{
+  "name": "excel-live-control",
+  "original_name": "excel-live-control",
+  "source": "openai-primary-runtime--spreadsheets",
+  "origin_path": "plugins/cache/openai-primary-runtime/spreadsheets/26.905.11957/skills/excel-live-control",
+  "plugin_version": "26.905.11957",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "cdc929cabe81c31e87a2df032ee5bb2ab1857eb78bcb6eb9e51ced4b1b65a863"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "discover-brand",
+  "original_name": "discover-brand",
+  "source": "claude-cowork--brand-voice",
+  "origin_path": "plugins/cache/claude-cowork/brand-voice/1.0.0/skills/discover-brand",
+  "plugin_version": "1.0.0",
+  "license": "MIT",
+  "license_file": "../LICENSE.claude-cowork--brand-voice",
+  "skill_md_sha256": "4d5d4490a1600c5277dd62cc629c14e3eddb301df63060ab1223d2a840949cb2"
+}

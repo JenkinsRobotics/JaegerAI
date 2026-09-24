@@ -1,0 +1,10 @@
+{
+  "name": "notion-spec-to-implementation",
+  "original_name": "notion-spec-to-implementation",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/notion-spec-to-implementation",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "6e22c4c6df441e849fa6b4b825371b579c9bb4896f97bedca5f8536020427a81"
+}

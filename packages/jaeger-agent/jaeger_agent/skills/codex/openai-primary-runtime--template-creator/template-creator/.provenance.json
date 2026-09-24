@@ -1,0 +1,10 @@
+{
+  "name": "template-creator",
+  "original_name": "template-creator",
+  "source": "openai-primary-runtime--template-creator",
+  "origin_path": "plugins/cache/openai-primary-runtime/template-creator/26.905.11957/skills/template-creator",
+  "plugin_version": "26.905.11957",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "f1d14fd2847a2e879611a8b8f872f5dc4676a0607958d015274d2dc61e812deb"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "canned-responses",
+  "original_name": "canned-responses",
+  "source": "claude-cowork--legal",
+  "origin_path": "plugins/cache/claude-cowork/legal/1.1.0/skills/canned-responses",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--legal",
+  "skill_md_sha256": "e245cfd0612604f4a8c1e060124dc72aa1db829a65250b40e22d119f02570415"
+}

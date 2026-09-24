@@ -1,0 +1,10 @@
+{
+  "name": "speech",
+  "original_name": "speech",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/speech",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "d6120efc03ea0e80204f687801cfaec8efc4519a3430b68e13e4ebd8e1c69b52"
+}

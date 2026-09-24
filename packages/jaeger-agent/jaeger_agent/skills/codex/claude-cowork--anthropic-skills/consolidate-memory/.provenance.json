@@ -1,0 +1,10 @@
+{
+  "name": "consolidate-memory",
+  "original_name": "consolidate-memory",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/consolidate-memory",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "7edd3cadeefc6461dfc487338bf751ae8f905e7c2dbf0b2eab13000d3659d132"
+}

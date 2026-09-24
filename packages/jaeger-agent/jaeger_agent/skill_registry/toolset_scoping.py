@@ -196,6 +196,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # on intent (terminal, ssh, venv, dep install).
         "run_in_venv", "terminal", "remote_terminal",
         "install_package", "list_venv_packages",
+        # Long-running command sessions (start, poll/type, kill).
+        "exec_command", "write_stdin", "kill_command",
     }),
     "containers": frozenset({"container"}),
     "media": frozenset({
@@ -223,6 +225,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # favour of the umbrella ``memory(action=…)`` (in CORE).
         "remember", "recall", "forget", "list_facts", "search_memory",
     }),
+    # Planning primitives (Codex ``update_plan`` / ``wait``): stateless display
+    # of the model's plan and a cancellable bounded pause.
+    "planning": frozenset({"update_plan", "wait"}),
     "sessions": frozenset({"session_search"}),
     "board": frozenset({
         # board_add / board_view are CORE; the rest load on intent.
@@ -259,6 +264,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
         # is in CORE; the lower-level operators load here.
         "reload_skills", "package_skill", "benchmark_skill",
         "propose_deep_think_task", "list_deep_think_queue",
+        "queue_background_task", "background_task_status",
         # Skill self-improvement: usage journal + the review trigger/toggle +
         # the revision log (feeds + records the Deep Think review loop).
         "skill_note", "skill_notes", "request_skill_review", "set_skill_review",
@@ -333,6 +339,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "avatar": "avatar face + animation timelines (BETA — dev mode only)",
     "web": "weather lookups (web_search / web_extract are always-on)",
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
+    "planning": "show and update a step plan (update_plan); wait for a bounded time",
     "sessions": "search and inspect canonical conversation history",
     "board": "board_move / board_update / board_delete (board_add + board_view are CORE)",
     "kanban": "multi-agent worker/orchestrator protocol — claim, heartbeat, "

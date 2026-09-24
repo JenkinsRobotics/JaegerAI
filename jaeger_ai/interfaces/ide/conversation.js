@@ -15,12 +15,12 @@ function boundedText(value, limit = COMPLETED_TIMELINE_TEXT_LIMIT) {
 
 function boundedTimelineRows(value) {
   if (!Array.isArray(value)) return [];
-  return value.filter(row => row && ['tool', 'reasoning'].includes(row.kind))
+  return value.filter(row => row && ['tool', 'reasoning', 'progress', 'checkpoint'].includes(row.kind))
     .slice(-COMPLETED_TIMELINE_ROW_LIMIT)
     .map(row => ({
       key: boundedText(row.key, 256), kind: row.kind,
       requestId: boundedText(row.requestId, 128),
-      ...(row.kind === 'reasoning' ? { text: boundedText(row.text) } : {
+      ...(['reasoning', 'progress', 'checkpoint'].includes(row.kind) ? { text: boundedText(row.text) } : {
         name: boundedText(row.name, 256), detail: boundedText(row.detail),
         phase: boundedText(row.phase, 32), ok: row.ok,
       }),
@@ -44,6 +44,8 @@ class Conversation {
     this.pending = restored.pending || {};
     this.pendingTask = restored.pendingTask || null;
     this.completedTimelines = boundedCompletedTimelines(restored.completedTimelines);
+    this.workBySession = Object.fromEntries(Object.entries(restored.workBySession || {}).slice(-20)
+      .map(([sid, turns]) => [sid, Array.isArray(turns) ? turns.slice(-50) : []]));
     // `staged` are attachments already uploaded to the Gateway but not yet
     // attached to a sent turn — kept out of persisted state; an unsent
     // attachment does not survive a panel reload, matching the composer text.
@@ -53,7 +55,7 @@ class Conversation {
     this.timelineState = createTimelineState();
     this.state = { session: null, sessions: [], text: '', reasoning: '', activity: [], timeline: [],
       approvals: [], models: null, modelsError: null, workers: [], workersError: null,
-      activeTask: null, busy: false,
+      activeTask: null, backgroundTasks: [], busy: false,
       connected: false, status: 'Not connected', error: '', endpoint: gateway.url };
     this.observer = null; this.epoch = 0; this.stagedGen = 0; this.sending = false;
     this.disposed = false;
@@ -61,8 +63,10 @@ class Conversation {
   emit(updateKind = 'control') {
     if (this.disposed) return;
     this.publish({ ...this.state, staged: this.staged,
+      workTurns: this.workBySession[this.state.session?.session_id] || [],
       updateKind,
       canCancel: Boolean(this.pending[this.state.session?.session_id] || this.pendingTask) });
+    delete this.state.changes; // one-shot change event; authoritative refresh may follow
   }
   resetTimeline() {
     this.timelineState = createTimelineState();
@@ -99,7 +103,8 @@ class Conversation {
     }
     for (const old of Object.keys(this.completedTimelines)
       .slice(0, -COMPLETED_TIMELINE_SESSION_LIMIT)) delete this.completedTimelines[old];
-    this.restoreCompletedTimeline(sid);
+    this.timelineState = { ...this.timelineState, rows: this.timelineState.rows.filter(row => row.kind !== 'answer' && row.kind !== 'terminal') };
+    this.syncTimelineProjection();
   }
   applyTimelineEvent(event) {
     this.timelineState = applyEvents(this.timelineState, [event]);
@@ -108,12 +113,14 @@ class Conversation {
   async persist() {
     if (this.disposed) return;
     await this.save({ selected: this.state.session?.session_id, pending: this.pending,
-      pendingTask: this.pendingTask, completedTimelines: this.completedTimelines });
+      pendingTask: this.pendingTask, completedTimelines: this.completedTimelines,
+      workBySession: this.workBySession });
   }
   async refresh(selected = this.state.session?.session_id, explicit = false) {
     if (this.disposed) return;
     if (this.sending) throw new Error('Wait for request admission before reconnecting.');
     const epoch = ++this.epoch;
+    clearTimeout(this.reconnectTimer);
     this.observer?.abort(); this.observer = null;
     this.state.connected = false; this.state.status = 'Connecting…'; this.state.error = ''; this.emit();
     try {
@@ -129,18 +136,84 @@ class Conversation {
       this.stagedGen++; this.staged = [];
       this.state.connected = true;
       this.restoreCompletedTimeline(session?.session_id);
+      if (session && this.gateway.activity) await this.loadHistory(selected, epoch);
+      if (epoch !== this.epoch) return;
       this.state.busy = Boolean(session && (this.pending[selected] || ['running', 'cancelling', 'busy'].includes(session.status)));
       this.state.status = this.state.busy ? 'Work in progress · reconnecting' : 'Connected';
       if (this.state.busy && !this.pending[selected]) this.state.status = 'Work in another client · Refresh for latest history';
       if (explicit) { this.modelsLoaded = false; this.workersLoaded = false; }
-      await this.loadApprovals(epoch); await this.loadModels(epoch); await this.loadWorkers(epoch); await this.persist(); this.emit();
+      await this.loadApprovals(epoch); await this.loadTasks(epoch); await this.loadModels(epoch); await this.loadWorkers(epoch); await this.persist(); this.emit();
       const pending = this.pending[selected];
       if (pending) this.observe(selected, pending.requestId, pending.startCursor || 0, epoch);
+      else if (session && this.gateway.activity) this.watchSession(selected, epoch);
     } catch (error) {
       if (epoch !== this.epoch) return;
       this.state.connected = false; this.state.error = error.message;
-      this.state.status = 'Unavailable · Retry to reconnect'; this.emit();
+      this.state.status = 'Unavailable · reconnecting'; this.emit();
+      this.reconnectTimer = setTimeout(() => {
+        if (!this.disposed && epoch === this.epoch) this.refresh(selected);
+      }, 1000);
     }
+  }
+  async loadHistory(sid, epoch) {
+    let cursor = 0, timeline = createTimelineState();
+    const works = [];
+    let userIndex = -1, active = null;
+    do {
+      const page = await this.gateway.activity(sid, cursor);
+      if (epoch !== this.epoch) return;
+      timeline = applyEvents(timeline, page.events);
+      for (const event of page.events) {
+        const rid = event.data?.request_id;
+        if (event.event === 'turn.start') {
+          userIndex++;
+          active = { requestId: rid, startedAt: event.timestamp * 1000, finishedAt: null, status: 'running', userIndex };
+          works.push(active);
+        } else if (endEvents.has(event.event)) {
+          const work = works.find(w => w.requestId === rid);
+          if (work) { work.finishedAt = event.timestamp * 1000; work.status = event.data.status || event.event.slice(5); }
+          if (active?.requestId === rid) active = null;
+        }
+      }
+      cursor = page.next_cursor;
+      if (!page.has_more) break;
+      this.state.status = `Loading work history… ${timeline.rows.length} activities`; this.emit();
+    } while (epoch === this.epoch);
+    // Final text is rendered from the authoritative message, once. All other
+    // streamed text (including checkpoints) retains its original position.
+    const completed = new Set(works.filter(w => w.finishedAt).map(w => w.requestId));
+    timeline.rows = timeline.rows.filter(row => !(row.kind === 'answer' && completed.has(row.requestId)));
+    this.timelineState = timeline;
+    this.workBySession[sid] = works;
+    if (active) this.pending[sid] = { requestId: active.requestId, startCursor: cursor };
+    this.syncTimelineProjection();
+  }
+  async watchSession(sid, epoch) {
+    if (this.disposed || epoch !== this.epoch) return;
+    const observer = new AbortController(); this.observer?.abort(); this.observer = observer;
+    try {
+      for await (const event of this.gateway.events(sid, this.timelineState.cursor, observer.signal)) {
+        if (epoch !== this.epoch || observer.signal.aborted) return;
+        if (event.event === 'turn.start' || endEvents.has(event.event) || ['message.created', 'task.created', 'task.updated', 'approval.request', 'approval.resolved'].includes(event.event)) {
+          await this.refresh(sid); return;
+        }
+      }
+      throw new Error('Session stream closed');
+    } catch (error) {
+      if (epoch !== this.epoch || observer.signal.aborted) return;
+      this.state.status = 'Connection interrupted · reconnecting'; this.state.error = error.message; this.emit();
+      this.reconnectTimer = setTimeout(() => { if (epoch === this.epoch) this.refresh(sid); }, 1000);
+    }
+  }
+  async loadTasks(epoch = this.epoch) {
+    if (typeof this.gateway.tasks !== 'function') return;
+    const result = await this.gateway.tasks();
+    if (epoch === this.epoch) this.state.backgroundTasks = (result.tasks || [])
+      .filter(task => task.notification_policy?.recipient_session_id === this.state.session?.session_id
+        && !['completed', 'cancelled'].includes(task.state));
+  }
+  async cancelBackgroundTask(id) {
+    await this.gateway.cancelTask(id); await this.loadTasks(); this.emit();
   }
   async loadApprovals(epoch = this.epoch) {
     const result = await this.gateway.approvals();
@@ -185,17 +258,44 @@ class Conversation {
     if (this.disposed || epoch !== this.epoch) return;
     await this.refresh(session.session_id);
   }
-  async send(text, model = '', provider = '') {
+  async send(text, model = '', provider = '', workspace = '', ide = null) {
     text = String(text).trim();
     if (!text || !this.state.connected || this.state.busy || this.sending) return;
-    if (!this.state.session) throw new Error('Create or select a conversation first.');
+    clearTimeout(this.reconnectTimer);
+    this.observer?.abort();
     this.sending = true;
-    const sid = this.state.session.session_id, requestId = randomUUID(), epoch = this.epoch;
+    const epoch = this.epoch;
+    // A blank composer is a new chat, not a blocked state.  Codex lets the
+    // first message establish the conversation; do the same while keeping
+    // the Gateway as the sole session owner.
+    if (!this.state.session) {
+      try {
+        const title = text.replace(/\s+/g, ' ').slice(0, 72) || 'New conversation';
+        const created = await this.gateway.create({
+          session_id: randomUUID(), title, workspace, source: 'ide',
+        });
+        if (this.disposed || epoch !== this.epoch) { this.sending = false; return; }
+        this.state.session = created;
+        this.state.sessions = [created, ...this.state.sessions.filter(item => item.session_id !== created.session_id)];
+        this.restoreCompletedTimeline(created.session_id);
+      } catch (error) {
+        this.sending = false;
+        this.state.error = error.message;
+        this.state.status = 'Could not create chat';
+        this.emit();
+        return;
+      }
+    }
+    const sid = this.state.session.session_id, requestId = randomUUID();
     // Explicit every turn, including the empty list: the Gateway attaches
     // whatever attachment_ids a turn sends, but reuses the SESSION's whole
     // uploaded set when a turn omits the field — an earlier turn's file would
     // silently ride along on every later one otherwise.
     const attachmentIds = this.staged.map(a => a.attachment_id);
+    const work = { requestId, startedAt: Date.now(), finishedAt: null, status: 'running',
+      userIndex: (this.state.session.messages || []).filter(m => m.role === 'user').length };
+    this.workBySession[sid] = [...(this.workBySession[sid] || []), work];
+    for (const old of Object.keys(this.workBySession).filter(key => key !== sid).slice(0, -19)) delete this.workBySession[old];
     this.state.busy = true; this.state.error = ''; this.state.status = 'Submitting…'; this.emit();
     this.pending[sid] = { requestId, startCursor: 0 };
     let admittedSuccessfully = false;
@@ -204,6 +304,10 @@ class Conversation {
       const admitted = await this.gateway.send(sid, {
         text, request_id: requestId, attachment_ids: attachmentIds,
         ...(model ? { model, ...(provider ? { provider } : {}) } : {}),
+        // The open project and what is open in it, so the agent works in the
+        // operator's workspace and can resolve "this file" / "the selection".
+        ...(workspace ? { workspace } : {}),
+        ...(ide ? { options: { ide } } : {}),
       });
       admittedSuccessfully = true;
       this.pending[sid].startCursor = Math.max(0, Number(admitted.start_event_id || 1) - 1);
@@ -212,13 +316,13 @@ class Conversation {
       this.publish({ accepted: true, submittedText: text });
       this.stagedGen++; this.staged = [];
       this.state.session = await this.gateway.session(sid);
-      this.restoreCompletedTimeline(sid);
       this.state.status = 'Working'; this.emit();
       if (terminal.has(admitted.status)) await this.finish(sid, requestId, epoch);
       else this.observe(sid, requestId, this.pending[sid].startCursor, epoch);
     } catch (error) {
       // A definitive rejected request is not an ambiguous transport failure.
       if (!admittedSuccessfully && error.status >= 400 && error.status < 500) {
+        work.finishedAt = Date.now(); work.status = 'failed';
         delete this.pending[sid]; await this.persist(); this.state.busy = false;
       }
       this.state.error = `${error.message}${this.pending[sid] ? ' Delivery is uncertain. Retry connection to check the same request; it will not be resent.' : ''}`;
@@ -228,21 +332,26 @@ class Conversation {
   async finish(sid, rid, epoch) {
     const receipt = await this.gateway.receipt(sid, rid);
     if (!terminal.has(receipt.status)) throw new Error('No durable terminal result yet.');
+    const work = (this.workBySession[sid] || []).find(turn => turn.requestId === rid);
+    if (work && !work.finishedAt) { work.finishedAt = Date.now(); work.status = receipt.status; }
     delete this.pending[sid]; await this.persist();
     if (epoch !== this.epoch) return;
     const session = await this.gateway.session(sid);
     if (epoch !== this.epoch) return;
     this.state.session = session;
-    this.state.busy = false;
     // History is authoritative for user/assistant text after a terminal
     // receipt. Keep only observed reasoning/tool rows: otherwise the final
     // assistant answer is rendered twice, while fast tool calls disappear.
+    if (this.gateway.activity) await this.loadHistory(sid, epoch);
+    if (epoch !== this.epoch) return;
     this.settleCompletedTimeline(sid);
     await this.persist();
     this.state.status = receipt.status;
+    this.state.busy = false;
     this.state.error = receipt.status === 'failed' || receipt.status === 'execution_unknown'
       ? String(receipt.result?.error || receipt.status) : '';
-    await this.loadApprovals(epoch); this.emit();
+    await this.loadApprovals(epoch); await this.loadTasks(epoch); this.emit();
+    if (this.gateway.activity) this.watchSession(sid, epoch);
   }
   async observe(sid, rid, cursor, epoch) {
     const observer = new AbortController(); this.observer?.abort(); this.observer = observer;
@@ -255,8 +364,17 @@ class Conversation {
         if (event.event_id) cursor = event.event_id;
         const data = event.data || {};
         if (event.session_id && event.session_id !== sid && event.session_id !== '*') continue;
+        // Child task notifications belong to the session, not the currently
+        // streaming foreground request. Keep them visible during that turn.
+        if (event.event.startsWith('task.')) { await this.loadTasks(epoch); this.emit(); }
+        if (event.event === 'message.created') {
+          const session = await this.gateway.session(sid);
+          if (epoch !== this.epoch) return;
+          this.state.session = session; this.emit();
+        }
         if (data.request_id !== rid) continue;
         this.applyTimelineEvent(event);
+        if (event.event === 'files.changed') this.state.changes = data;
         if (event.event === 'approval.request' || event.event === 'approval.resolved') await this.loadApprovals(epoch);
         this.state.status = 'Working'; this.emit(isStreamEvent(event) ? 'stream' : 'control');
         if (endEvents.has(event.event)) { await this.finish(sid, rid, epoch); return; }
@@ -267,6 +385,7 @@ class Conversation {
       if (observer.signal.aborted || epoch !== this.epoch) return;
       this.state.status = 'Connection interrupted · Retry'; this.state.error = error.message;
       this.state.busy = true; this.emit();
+      if (this.gateway.activity) this.reconnectTimer = setTimeout(() => { if (epoch === this.epoch) this.refresh(sid); }, 1000);
     } finally { observer.abort(); }
   }
   async cancel() {
@@ -379,7 +498,7 @@ class Conversation {
     if (!this.state.approvals.some(a => a.approval_id === id || a.id === id)) throw new Error('Approval is no longer pending in this conversation.');
     await this.gateway.approve(id, approved); await this.loadApprovals(); this.emit();
   }
-  dispose() { this.disposed = true; ++this.epoch; this.observer?.abort(); }
+  dispose() { clearTimeout(this.reconnectTimer); this.disposed = true; ++this.epoch; this.observer?.abort(); }
 }
 module.exports = {
   Conversation, COMPLETED_TIMELINE_SESSION_LIMIT, COMPLETED_TIMELINE_ROW_LIMIT,

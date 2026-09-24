@@ -1,0 +1,10 @@
+{
+  "name": "common-room:call-prep",
+  "original_name": "call-prep",
+  "source": "claude-cowork--common-room",
+  "origin_path": "plugins/cache/claude-cowork/common-room/1.0.0/skills/call-prep",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--common-room",
+  "skill_md_sha256": "652c42776860edfa9b81c77aac0b545bb7748a708e01c001f356acc11d7e9f58"
+}

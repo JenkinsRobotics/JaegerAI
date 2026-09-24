@@ -1,0 +1,10 @@
+{
+  "name": "org-planning",
+  "original_name": "org-planning",
+  "source": "claude-cowork--human-resources",
+  "origin_path": "plugins/cache/claude-cowork/human-resources/1.1.0/skills/org-planning",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "b3c6e33d251487225485c7fe455586f0cd490b282d7e41054273fa60820891ea"
+}

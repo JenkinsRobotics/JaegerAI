@@ -1,0 +1,10 @@
+{
+  "name": "draft-outreach",
+  "original_name": "draft-outreach",
+  "source": "claude-cowork--sales",
+  "origin_path": "plugins/cache/claude-cowork/sales/1.1.0/skills/draft-outreach",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--sales",
+  "skill_md_sha256": "eeca7158539ae7e6f41025a099a34441e9b9bfaa130af4297e09b8c2253c8828"
+}

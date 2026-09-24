@@ -1,0 +1,10 @@
+{
+  "name": "hatch-pet",
+  "original_name": "hatch-pet",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/hatch-pet",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "7ab0f01e8561085d1b494a6ca74abed766c655da8ec98284fb38a362c19d6871"
+}

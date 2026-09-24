@@ -1,0 +1,10 @@
+{
+  "name": "visualize",
+  "original_name": "visualize",
+  "source": "openai-bundled--visualize",
+  "origin_path": "plugins/cache/openai-bundled/visualize/1.0.37/skills/visualize",
+  "plugin_version": "1.0.37",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "2707d6a30eb31143e49c7be4effeae2889a82f6ee9e064a84345f89838d163b6"
+}

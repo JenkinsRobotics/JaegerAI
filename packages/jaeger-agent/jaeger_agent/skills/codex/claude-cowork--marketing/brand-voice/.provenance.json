@@ -1,0 +1,10 @@
+{
+  "name": "brand-voice",
+  "original_name": "brand-voice",
+  "source": "claude-cowork--marketing",
+  "origin_path": "plugins/cache/claude-cowork/marketing/1.1.0/skills/brand-voice",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--marketing",
+  "skill_md_sha256": "e88cbe7a68826350cde2b3050b4dfd4caa1ce41dd2d80b7ed47d79c39c7e7d35"
+}

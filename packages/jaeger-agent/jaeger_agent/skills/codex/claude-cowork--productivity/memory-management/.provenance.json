@@ -1,0 +1,10 @@
+{
+  "name": "memory-management",
+  "original_name": "memory-management",
+  "source": "claude-cowork--productivity",
+  "origin_path": "plugins/cache/claude-cowork/productivity/1.1.0/skills/memory-management",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--productivity",
+  "skill_md_sha256": "165c4083833a8920a461c8eee76e2164c266184670bb6c11076d4a939ae56db3"
+}

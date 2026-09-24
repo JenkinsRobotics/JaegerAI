@@ -1,0 +1,10 @@
+{
+  "name": "pdf:pdf",
+  "original_name": "pdf",
+  "source": "openai-primary-runtime--pdf",
+  "origin_path": "plugins/cache/openai-primary-runtime/pdf/26.905.11957/skills/pdf",
+  "plugin_version": "26.905.11957",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "afc4472ec4d625f703e9f414fe6814ce3cfa0ec51c7a07887fe587264c8b561e"
+}

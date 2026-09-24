@@ -1,0 +1,10 @@
+{
+  "name": "skill-creator",
+  "original_name": "skill-creator",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/skill-creator",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "42765c880e446a83c85f7852fc77b43ecd46c76ca219d68051799ac7425e6943"
+}

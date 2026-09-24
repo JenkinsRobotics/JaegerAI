@@ -1,0 +1,10 @@
+{
+  "name": "enrich-lead",
+  "original_name": "enrich-lead",
+  "source": "claude-cowork--apollo",
+  "origin_path": "plugins/cache/claude-cowork/apollo/0.1.0/skills/enrich-lead",
+  "plugin_version": "0.1.0",
+  "license": "MIT",
+  "license_file": "../LICENSE.claude-cowork--apollo",
+  "skill_md_sha256": "3966057f0a8faa2e1a49d6769f24beb227ad125141e746ce31c5e73dfae04463"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "gh-fix-ci",
+  "original_name": "gh-fix-ci",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/gh-fix-ci",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "7b326b4a2f0f5f85122144628ec02077e48841e0e0e82efce88b3415bcfb7c26"
+}

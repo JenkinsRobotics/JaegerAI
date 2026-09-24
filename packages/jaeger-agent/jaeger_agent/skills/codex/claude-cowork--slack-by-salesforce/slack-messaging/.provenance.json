@@ -1,0 +1,10 @@
+{
+  "name": "slack-messaging",
+  "original_name": "slack-messaging",
+  "source": "claude-cowork--slack-by-salesforce",
+  "origin_path": "plugins/cache/claude-cowork/slack-by-salesforce/1.0.0/skills/slack-messaging",
+  "plugin_version": "1.0.0",
+  "license": "MIT",
+  "license_file": "../LICENSE.claude-cowork--slack-by-salesforce",
+  "skill_md_sha256": "118ede41cbc4fa5c6be4593619b0d9f58a40d85cadfa295277c74c4b7acf1508"
+}

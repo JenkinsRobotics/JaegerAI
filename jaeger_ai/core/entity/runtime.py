@@ -24,6 +24,8 @@ Implements the single authoritative entity runtime loop:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import logging
 from pathlib import Path
 import threading
@@ -55,6 +57,16 @@ from .verification import (
 )
 
 logger = logging.getLogger("jaeger.entity.runtime")
+
+
+@dataclass(frozen=True)
+class PreparedTurn:
+    """A turn ready for the main loop: ``prompt`` is the request plus fenced memory."""
+
+    prompt: str
+    event: Any
+    user_text: str
+    session_id: str
 
 
 class EntityRuntime:
@@ -219,6 +231,220 @@ class EntityRuntime:
 
         return current_state, decision
 
+    # ── turn context: one definition, used by execute_turn and prepare_turn ──
+
+    def _cross_session_recall(self, session_id: str) -> tuple[str, list[Any]]:
+        """Recent claims and turns from OTHER conversations, labelled for the model.
+
+        Other conversations only, each line labelled with where it came from. This
+        conversation's own turns are already in the model's message history;
+        repeating them here unlabelled, above "Current request", let the model
+        mistake another session's turns (and the request itself) for this
+        conversation's opening: "what did I first ask you?" was answered with a
+        command from an unrelated diagnostic session, and that wrong answer was
+        then recalled into every later turn.
+
+        Returns ``(text, recent_events)``; ``("", [])`` when there is nothing.
+        """
+        try:
+            recall_lines = [
+                "# Recent turns from your OTHER conversations "
+                "(not this one; this conversation's history is the message thread):"
+            ]
+            for claim in self.memory_subsystem.semantic.list_recent(12):
+                recall_lines.append(
+                    f"- claim {claim.get('subject')}.{claim.get('predicate')}={claim.get('value')}"
+                )
+            recent = [
+                ev for ev in self.event_store.query_events(
+                    event_types=[EventType.HUMAN_MESSAGE.value, EventType.AGENT_RESPONSE.value],
+                    since_id=max(0, self.event_store.latest_id() - 400),
+                    limit=400,
+                )
+                if ev.session_id != session_id
+            ][-12:]
+            speaker = {
+                EventType.HUMAN_MESSAGE.value: "user",
+                EventType.AGENT_RESPONSE.value: "you",
+            }
+            for ev in recent:
+                text = str((ev.payload or {}).get("text") or "")[:240]
+                if text:
+                    recall_lines.append(
+                        f"- [conversation {ev.session_id}] {speaker[ev.event_type]}: {text}"
+                    )
+            return ("\n".join(recall_lines) if len(recall_lines) > 1 else ""), recent
+        except Exception:
+            return "", []
+
+    def _runtime_truth(self) -> str:
+        try:
+            from jaeger_ai.core.runtime.truth import capability_prompt_block
+            return str(capability_prompt_block(
+                self.layout.root if getattr(self, "layout", None) else None
+            ) or "")
+        except Exception:
+            return ""
+
+    def _reflexion_refs(self, user_text: str, meta: dict[str, Any], event: Any, session_id: str) -> list[Any]:
+        try:
+            refs = self.reflexion_store.retrieve_applicable(user_text)
+            if refs:
+                meta["reflection_count"] = len(refs)
+                event.payload["reflection_count"] = len(refs)
+                self.event_store.append(
+                    JaegerEvent.typed(
+                        EventType.REFLECTION_RETRIEVED.value,
+                        {"count": len(refs), "ids": [r.reflection_id for r in refs]},
+                        actor="system:reflexion",
+                        source="reflexion_store",
+                        parent_event_id=event.event_id,
+                        session_id=session_id,
+                    )
+                )
+            return list(refs or [])
+        except Exception:
+            return []
+
+    def _skill_matches(self, user_text: str, event: Any, session_id: str) -> tuple[str, list[Any]]:
+        try:
+            pipeline = getattr(self.sleep_time_processor, "skill_pipeline", None)
+            matched = pipeline.matching_skills(user_text) if pipeline is not None else []
+            if not matched:
+                return "", []
+            lines = ["# Learned skills (follow these verified procedures):"]
+            for rec in matched:
+                name = str(rec.get("name") or "skill")
+                desc = str(rec.get("description") or "")
+                lines.append(f"- {name}: {desc}".rstrip(": "))
+                self.event_store.append(
+                    JaegerEvent.typed(
+                        EventType.SKILL_USED.value,
+                        {"skill_name": name, "description": desc},
+                        actor="agent:skill_registry",
+                        source="skills.promotion",
+                        parent_event_id=event.event_id,
+                        session_id=session_id,
+                    )
+                )
+            return "\n".join(lines), list(matched)
+        except Exception:
+            return "", []
+
+    def _document_hits(self, user_text: str, event: Any, session_id: str) -> tuple[str, list[Any]]:
+        try:
+            from .indexing import IndexCoordinator
+            hits = IndexCoordinator(self.state_root, event_store=self.event_store).retrieve(user_text, limit=4)
+            if not hits:
+                return "", []
+            lines = ["# Retrieved documents (not semantic facts; provenance=RETRIEVED_DOCUMENT):"]
+            for hit in hits:
+                src = str(hit.get("source_id") or hit.get("path") or "")
+                lines.append(f"- {src}: {str(hit.get('text') or '')[:400]}")
+            self.event_store.append(
+                JaegerEvent.typed(
+                    EventType.SYSTEM_OBSERVATION.value,
+                    {
+                        "kind": "retrieved_document",
+                        "provenance": "RETRIEVED_DOCUMENT",
+                        "query": user_text[:240],
+                        "hits": [
+                            {"source_id": h.get("source_id"), "provenance": "RETRIEVED_DOCUMENT",
+                             "text": str(h.get("text") or "")[:240]}
+                            for h in hits
+                        ],
+                    },
+                    actor="system:indexer",
+                    source="indexing.retrieve",
+                    parent_event_id=event.event_id,
+                    session_id=session_id,
+                )
+            )
+            return "\n".join(lines), list(hits)
+        except Exception:
+            return "", []
+
+    def prepare_turn(
+        self,
+        user_text: str,
+        *,
+        session_id: str,
+        source: str = "gateway",
+        actor: str = "human:operator",
+        request_id: str | None = None,
+        gateway_session: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        budget_tokens: int = 4096,
+        ide_context: dict[str, Any] | None = None,
+    ) -> "PreparedTurn":
+        """Everything the main loop needs before the model runs: the request with its
+        fenced memory context, and the human-message event recorded.
+
+        This is the whole memory read side of a turn (history, other conversations,
+        learned skills, retrieved documents, reflexion lessons, runtime truth). It
+        never gates the turn: the operator asked, so the agent loop runs.
+        """
+        from .cognition_router import with_background
+
+        meta = dict(metadata or {})
+        prompt_chars = max(
+            0, int(budget_tokens * self.context_compiler.CHARS_PER_TOKEN) - len(user_text)
+        )
+        ctx: dict[str, Any] = {"prompt_context_max_chars": prompt_chars}
+        if isinstance(gateway_session, dict):
+            conversation = self.context_compiler.project_conversation_history(
+                gateway_session.get("messages"),
+                current_user_is_last=True,
+                max_chars=min(12_000, prompt_chars // 2),
+            )
+            if conversation:
+                ctx["conversation_history"] = conversation
+        from .ide_context import format_block as format_ide_context
+
+        ide_text = format_ide_context(ide_context)
+        if ide_text:
+            ctx["ide_context"] = ide_text
+        event = JaegerEvent.human_message(
+            user_text, actor=actor, source=source, session_id=session_id,
+            request_id=request_id, metadata=meta,
+        )
+        self.ingest(event)
+        recall_text, _ = self._cross_session_recall(session_id)
+        if recall_text:
+            ctx["durable_recall"] = recall_text
+        runtime_truth = self._runtime_truth()
+        if runtime_truth:
+            ctx["runtime_truth"] = runtime_truth
+        self._reflexion_refs(user_text, meta, event, session_id)
+        skills_text, _ = self._skill_matches(user_text, event, session_id)
+        if skills_text:
+            ctx["learned_skills_prompt"] = skills_text
+        docs_text, _ = self._document_hits(user_text, event, session_id)
+        if docs_text:
+            ctx["retrieved_documents"] = docs_text
+        lessons = ""
+        try:
+            lessons = self.reflexion_store.to_prompt_context_block(user_text)
+        except Exception as exc:
+            logger.debug("reflexion lessons skipped: %s", exc)
+        return PreparedTurn(
+            prompt=with_background(user_text, ctx, lessons=lessons),
+            event=event, user_text=user_text, session_id=session_id,
+        )
+
+    def finish_turn(self, prepared: "PreparedTurn", response_text: str) -> None:
+        """The memory write side of a turn: the answer becomes an event and an
+        episodic record, so later turns (in any conversation) can recall it."""
+        if not response_text:
+            return
+        self._project_episodic(prepared.user_text, response_text, session_id=prepared.session_id)
+        self.record_agent_response(
+            response_text,
+            session_id=prepared.session_id,
+            parent_event_id=prepared.event.event_id,
+            metadata={"user_text": prepared.user_text, "agent_response": response_text},
+        )
+
     def execute_turn(
         self,
         user_text: str,
@@ -306,52 +532,12 @@ class EntityRuntime:
         if unified_trace.spans:
             unified_trace.spans[-1].finish(extra_data={"salience": getattr(attention, "salience_score", None)})
 
-        try:
-            # Other conversations only, each line labelled with where it
-            # came from. This conversation's own turns are already in the
-            # model's message history; repeating them here unlabelled, above
-            # "Current request", let the model mistake another session's
-            # turns (and the request itself) for this conversation's
-            # opening — "what did I first ask you?" was answered with a
-            # command from an unrelated diagnostic session, and that wrong
-            # answer was then recalled into every later turn.
-            recall_lines = [
-                "# Recent turns from your OTHER conversations "
-                "(not this one; this conversation's history is the message thread):"
-            ]
-            for claim in self.memory_subsystem.semantic.list_recent(12):
-                recall_lines.append(
-                    f"- claim {claim.get('subject')}.{claim.get('predicate')}={claim.get('value')}"
-                )
-            recent = [
-                ev for ev in self.event_store.query_events(
-                    event_types=[EventType.HUMAN_MESSAGE.value, EventType.AGENT_RESPONSE.value],
-                    since_id=max(0, self.event_store.latest_id() - 400),
-                    limit=400,
-                )
-                if ev.session_id != session_id
-            ][-12:]
-            speaker = {
-                EventType.HUMAN_MESSAGE.value: "user",
-                EventType.AGENT_RESPONSE.value: "you",
-            }
-            for ev in recent:
-                text = str((ev.payload or {}).get("text") or "")[:240]
-                if text:
-                    recall_lines.append(
-                        f"- [conversation {ev.session_id}] {speaker[ev.event_type]}: {text}"
-                    )
-            if len(recall_lines) > 1:
-                ctx["durable_recall"] = "\n".join(recall_lines)
-        except Exception:
-            pass
-        try:
-            from jaeger_ai.core.runtime.truth import capability_prompt_block
-            ctx["runtime_truth"] = capability_prompt_block(
-                self.layout.root if getattr(self, "layout", None) else None
-            )
-        except Exception:
-            pass
+        recall_text, recent = self._cross_session_recall(session_id)
+        if recall_text:
+            ctx["durable_recall"] = recall_text
+        runtime_truth = self._runtime_truth()
+        if runtime_truth:
+            ctx["runtime_truth"] = runtime_truth
 
         # Passive gate: if salience indicates no wake
         if not attention.wake_cognition:
@@ -366,48 +552,10 @@ class EntityRuntime:
             }
 
         # 2. Executive Strategy Selection
-        try:
-            refs = self.reflexion_store.retrieve_applicable(user_text)
-            if refs:
-                meta["reflection_count"] = len(refs)
-                event.payload["reflection_count"] = len(refs)
-                self.event_store.append(
-                    JaegerEvent.typed(
-                        EventType.REFLECTION_RETRIEVED.value,
-                        {
-                            "count": len(refs),
-                            "ids": [r.reflection_id for r in refs],
-                        },
-                        actor="system:reflexion",
-                        source="reflexion_store",
-                        parent_event_id=event.event_id,
-                        session_id=session_id,
-                    )
-                )
-        except Exception:
-            pass
-        try:
-            pipeline = getattr(self.sleep_time_processor, "skill_pipeline", None)
-            matched_skills = pipeline.matching_skills(user_text) if pipeline is not None else []
-            if matched_skills:
-                lines = ["# Learned skills (follow these verified procedures):"]
-                for rec in matched_skills:
-                    name = str(rec.get("name") or "skill")
-                    desc = str(rec.get("description") or "")
-                    lines.append(f"- {name}: {desc}".rstrip(": "))
-                    self.event_store.append(
-                        JaegerEvent.typed(
-                            EventType.SKILL_USED.value,
-                            {"skill_name": name, "description": desc},
-                            actor="agent:skill_registry",
-                            source="skills.promotion",
-                            parent_event_id=event.event_id,
-                            session_id=session_id,
-                        )
-                    )
-                ctx["learned_skills_prompt"] = "\n".join(lines)
-        except Exception:
-            pass
+        refs = self._reflexion_refs(user_text, meta, event, session_id)
+        skills_text, matched_skills = self._skill_matches(user_text, event, session_id)
+        if skills_text:
+            ctx["learned_skills_prompt"] = skills_text
         unified_trace.start_span("executive")
         exec_decision = self.executive_selector.select_strategy(event, current_state)
         if unified_trace.spans:
@@ -427,40 +575,9 @@ class EntityRuntime:
             ctx.setdefault("workspace", str(self.layout.workspace_dir))
             ctx.setdefault("instance_root", str(self.layout.root))
             ctx.setdefault("layout", self.layout)
-        try:
-            from .indexing import IndexCoordinator
-            hits = IndexCoordinator(self.state_root, event_store=self.event_store).retrieve(user_text, limit=4)
-            if hits:
-                lines = ["# Retrieved documents (not semantic facts; provenance=RETRIEVED_DOCUMENT):"]
-                for hit in hits:
-                    src = str(hit.get("source_id") or hit.get("path") or "")
-                    snippet = str(hit.get("text") or "")[:400]
-                    lines.append(f"- {src}: {snippet}")
-                ctx["retrieved_documents"] = "\n".join(lines)
-                self.event_store.append(
-                    JaegerEvent.typed(
-                        EventType.SYSTEM_OBSERVATION.value,
-                        {
-                            "kind": "retrieved_document",
-                            "provenance": "RETRIEVED_DOCUMENT",
-                            "query": user_text[:240],
-                            "hits": [
-                                {
-                                    "source_id": h.get("source_id"),
-                                    "provenance": "RETRIEVED_DOCUMENT",
-                                    "text": str(h.get("text") or "")[:240],
-                                }
-                                for h in hits
-                            ],
-                        },
-                        actor="system:indexer",
-                        source="indexing.retrieve",
-                        parent_event_id=event.event_id,
-                        session_id=session_id,
-                    )
-                )
-        except Exception:
-            pass
+        docs_text, hits = self._document_hits(user_text, event, session_id)
+        if docs_text:
+            ctx["retrieved_documents"] = docs_text
         ctx["sleep_processor"] = self.sleep_time_processor
         ctx["reflexion_store"] = self.reflexion_store
         if "cognition_provider" not in ctx and callable(ctx.get("model_runner")):
@@ -478,10 +595,10 @@ class EntityRuntime:
                 self_state=current_state,
                 runtime_truth=ctx.get("runtime_truth"),
                 claims=raw_claims,
-                events=recent if 'recent' in locals() else [],
-                reflections=refs if 'refs' in locals() else [],
-                documents=hits if 'hits' in locals() else [],
-                skills=matched_skills if 'matched_skills' in locals() else [],
+                events=recent,
+                reflections=refs,
+                documents=hits,
+                skills=matched_skills,
                 budget_tokens=ctx.get("budget_tokens") or 4096,
             )
             ctx["compiled_context"] = compiled
@@ -748,6 +865,8 @@ class EntityRuntime:
         on_run: Callable[[str], None] | None = None,
         cancellation: Any = None,
         callbacks: Any = None,
+        continuation_state: dict[str, Any] | None = None,
+        project_root: str | None = None,
     ) -> dict[str, Any]:
         """Execute subordinate ReAct loop inside the EntityRuntime.
 
@@ -814,19 +933,40 @@ class EntityRuntime:
             except Exception:
                 pass
 
-        cfg = load_yaml(layout.config_path, Config)
-        client = ExternalModelClient(cfg.external_model, layout)
-        if model:
-            from jaeger_ai.core.models.router import select_client
-            client = select_client(client, cfg, layout, model, provider)
+        if (continuation_state or {}).get("client") is not None:
+            client = continuation_state["client"]
+            cfg = continuation_state["config"]
+        else:
+            cfg = load_yaml(layout.config_path, Config)
+            client = ExternalModelClient(cfg.external_model, layout)
+            if model:
+                from jaeger_ai.core.models.router import select_client
+                client = select_client(client, cfg, layout, model, provider)
+            # A session override is the admitted configuration for this turn.
+            cfg = cfg.model_copy(deep=True)
+            if getattr(client, "kind", None) == "external":
+                cfg.external_model = client.ext
+            else:
+                cfg.external_model.enabled = False
         if on_model is not None:
             on_model(f"{client.provider}:{client.model_name}")
         if cancellation is not None and cancellation.cancelled:
             return {"text": "(Cancelled before the turn started.)", "halt_reason": "interrupted"}
         # ``callbacks`` (an AgentCallbacks) carries the caller's per-turn
         # observers — the Gateway streams stream_delta/reasoning to clients.
-        agent = build_jaeger_agent(client, max_iterations=max_iterations,
-                                   max_tool_calls=max_tool_calls, callbacks=callbacks)
+        agent = (continuation_state or {}).get("agent")
+        if agent is None:
+            agent = build_jaeger_agent(client, max_iterations=max_iterations,
+                                       max_tool_calls=max_tool_calls, callbacks=callbacks)
+            if continuation_state is not None:
+                continuation_state["agent"] = agent
+                continuation_state["client"] = client
+                continuation_state["config"] = cfg
+        else:
+            # One admitted request retains its full tool-result trajectory.
+            # The owner holds this state locally, never across requests/users.
+            agent.callbacks = callbacks
+            agent._skill_route_query = ""
         if cancellation is not None:
             from jaeger_ai.core.runtime.cancellation import bind_agent
             bind_agent(cancellation, agent)
@@ -835,14 +975,25 @@ class EntityRuntime:
                 agent.bind_run(native_run_id)
             except Exception:
                 pass
+        from jaeger_agent.task_port import current_task_context
+        task_context = current_task_context() or {}
+        durable_task = bool((task_context.get('execution', {}).get('options') or {}).get('task_id'))
+        if durable_task and native_run_id and not getattr(agent, '_durable_restored', False):
+            checkpoint = SqliteRunStore().latest_checkpoint(native_run_id)
+            if checkpoint and checkpoint.cursor.get('messages'):
+                agent.messages = list(checkpoint.cursor['messages'])
+            agent._durable_restored = True
         turn_exec = TurnExecutive(
             agent,
             SqliteRunStore(),
             SqliteCommitmentStore(),
+            durable_task=durable_task,
             provider=str(getattr(client, "provider", None) or cfg.external_model.provider or "ollama"),
         )
         os.environ.setdefault("JAEGER_ACCEPT_HOOKS", "1")
-        with turn_policy:
+        from jaeger_agent.workspace import project_scope
+        from jaeger_ai.core.models.model_resolver import serving_model_scope
+        with turn_policy, project_scope(project_root), serving_model_scope(client, cfg):
             run = turn_exec.ensure_run()
             if on_run is not None:
                 # Before any effect: a crash from here on must be attributable

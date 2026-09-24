@@ -1,4 +1,81 @@
+# End-to-end repair acceptance — 2026-09-23
+
+This section supersedes installation/pending statements in the historical notes below.
+Existing uncommitted changes were preserved. Evidence and scratch files are outside
+source: `~/.jaeger/verification/end-to-end-20260923/`.
+
+| Requirement | Result | Evidence |
+|---|---|---|
+| Backend execution | VERIFIED for tested tasks | Real Antigravity coding request `50f0497c-9c82-4aad-8003-668e3193fb90`: read requirements 1–8, continued with 9–10 without repeated inspection, implemented calculator fix, ran four passing tests. Two checkpoints retained. Subsequent native write/read/Python assertion request `820821d9-70b9-4d95-962a-df8588cca271` succeeded with a recorded +1/−0 file change. |
+| Streaming contract | VERIFIED | Explicit progress/checkpoint/tool events; final output only contains the final response. `live-evidence.json`, adapter and reducer regressions. |
+| Frontend history | VERIFIED | Actual panel collapsed to Worked for 28s above one answer; expansion/reopening retained ordered work, including failures and checkpoints. Durable activity crossed a 500-event page boundary. Tests replay 125 tool rows and archive events after SSE retention eviction. |
+| Connection/recovery | VERIFIED for tested paths | Foreign request `e2e-foreign-cancel-20260923` appeared live without manual refresh, survived session switching, and was stopped in the IDE. Full-window reload during `06296f6b-914d-42d6-a59d-fc845ef9efc3` restored Worked for 30s and one result; durable proof has one admission and one tool execution. An idle Gateway outage displayed Unavailable · reconnecting and automatically recovered. |
+| Product integration | BLOCKED on Mac visible acceptance | IDE and WebUI used actual owner-react, persistent Jaeger identity, memory and tools with `ollama:kimi-k2.7-code:cloud`. Memory written in one conversation was recalled in another and in WebUI. Native project file writes and terminal assertions succeeded. Installed `/Applications/JaegerAI.app` rebuilt, signed, replaced with backup retained, and launched; menu-only app cannot be inspected because CUA times out. Operator asked to open its menu. |
+
+## Latest validation
+
+- `final-tests.log`: 112 targeted Python tests passed, including owned-Gateway IDE integration.
+- `ide-tests.log`: 80 passed, one optional standalone integration test skipped.
+- `owned-node.log`: 38 client cases passed against an isolated real Gateway.
+- `lint-delta.json`: no newly introduced Ruff findings compared with preserved
+  pre-task source; baseline lint debt remains. `git diff --check` passes.
+- `disk-assertions-final.json`: zero in-repository runtime/cache directories.
+  Twenty-four pre-existing bytecode directories, all older than this task, were
+  moved to the external evidence backup. Verification did not recreate them.
+- `acceptance-receipts.json`, `reload-proof.json`, `live-evidence.json`: durable
+  request/tool metadata. Native write contents independently checked on disk.
+- WebUI retrieved `copper-orbit-742` from memory, read the real calculator and
+  native-proof files, and rendered saved tool completion after browser reload.
+- Launchd PATH now includes Jaeger's Python and installed worker locations.
+  Codex, Claude and Gemini CLI version probes succeed through the Gateway.
+  Worker authentication and delegated task execution are not established by those probes.
+- Latest functional VSIX installed through Antigravity's CLI and activated in
+  the external acceptance workspace. The main active coding window was preserved.
+
+## Limits and blocker
+
+Full product acceptance is **not complete**. Open the Jaeger menu-bar menu so its
+connection state and controls can be inspected. The installed process runs, but
+that alone does not establish a working Mac interface. No pixel-identical Codex
+or identical model behavior claim is made. Previously pruned activity predating
+the new durable archive cannot be recovered; future activity is paginated rather
+than silently truncated. The local bounded cache is only a fallback. Cancellation
+is cooperative; the observed sleeping shell command finished before cancellation
+settled. Arbitrary shell edits are not covered by native file-tool Undo.
+
+---
+
 # IDE client verification — 2026-09-23
+
+## Earlier live Antigravity acceptance
+
+The notes below this section describe earlier checkpoints, not the current
+installation status. The extension has now been installed and exercised in the
+actual Antigravity Jaeger panel against the local Gateway and live model.
+
+- Read → patch → read: observed white progress paragraphs alternating with
+  grey `Read files` / `Edited files` disclosures while the elapsed timer ran.
+- Completed turn: automatically collapsed to `Worked for 6s`; opening it showed
+  the same ordered progress and tool history above the final answer.
+- A disposable sandbox file produced an actual `+2 −1` change card. Selecting
+  its row opened an inline diff with old/new line numbers and red/green lines.
+- `Open diff` opened the immutable before/after snapshots in Antigravity's diff
+  editor. Undo required confirmation, restored the test file, and became
+  disabled; the restored contents were also checked on disk.
+- Copy acknowledged the clipboard action. Edit and resend populated the exact
+  original message. A separate read-only turn was stopped through the panel and
+  displayed `Stopped after 6s`.
+- Automated: 77 IDE tests passed, one optional test skipped; 41 targeted
+  Gateway/file-change tests passed, including postimage conflict rejection,
+  request/session isolation, persistence, and protection of pre-existing edits.
+
+Limits: no claim of pixel-identical Codex rendering or identical model behavior.
+Inline diffs color changed lines; full language highlighting is in the IDE diff
+editor. Turn Undo covers the native text file tools documented in README, not
+arbitrary shell/MCP changes. Attachment/model controls and the separate native
+app Offline indicator are not newly verified by this live test.
+
+## Earlier verification notes
 
 This is a first usable client slice, not completion of worker orchestration,
 shared-knowledge policy, mobile deployment or full product acceptance.

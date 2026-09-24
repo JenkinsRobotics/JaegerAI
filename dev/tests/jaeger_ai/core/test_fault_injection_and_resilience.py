@@ -13,7 +13,7 @@ from jaeger_ai.core.resilience import (
     FaultOutcome,
     FaultScenario,
 )
-from jaeger_ai.core.tasks import DurableTaskManager, SqliteDurableTaskStore
+from jaeger_ai.core.tasks import DurableTask, SqliteDurableTaskStore
 
 
 def test_provider_timeout_injection(tmp_path: Path):
@@ -87,31 +87,25 @@ def test_effect_idempotency_mid_crash(tmp_path: Path):
 def test_durable_background_task_recovery(tmp_path: Path):
     db_path = tmp_path / "durable_tasks.sqlite3"
     store = SqliteDurableTaskStore(db_path)
-    manager = DurableTaskManager(store)
 
     # 1. Enqueue task before simulated restart
-    task = manager.submit_task(
-        goal="Perform database compaction in background",
-        owning_agent="test_agent",
-    )
+    task = DurableTask('compaction', 'test_agent', "Perform database compaction in background")
+    store.admit_task(task)
     assert task.state.value == "queued"
 
 
     # 2. Simulate process crash / host restart
-    del manager
     del store
 
     # 3. Re-initialize store and recover
     new_store = SqliteDurableTaskStore(db_path)
-    new_manager = DurableTaskManager(new_store)
 
-    recovered = new_manager.get_task(task.task_id)
+    recovered = new_store.get_task(task.task_id)
     assert recovered is not None
     assert recovered.task_id == task.task_id
     assert recovered.goal == "Perform database compaction in background"
     assert recovered.state.value == "queued"
 
-    new_manager.shutdown(wait=False)
 
 
 

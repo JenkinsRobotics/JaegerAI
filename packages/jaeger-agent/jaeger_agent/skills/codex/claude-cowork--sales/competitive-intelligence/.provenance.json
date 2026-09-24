@@ -1,0 +1,10 @@
+{
+  "name": "competitive-intelligence",
+  "original_name": "competitive-intelligence",
+  "source": "claude-cowork--sales",
+  "origin_path": "plugins/cache/claude-cowork/sales/1.1.0/skills/competitive-intelligence",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--sales",
+  "skill_md_sha256": "1153f80c8fcadc862fbebd23caaf237eb6c81132360ac603b99640fce6c1a052"
+}

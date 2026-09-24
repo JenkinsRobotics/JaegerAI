@@ -1480,24 +1480,12 @@ def _goal(ctx: SlashContext, args: str) -> SlashResult:
         return SlashResult()
 
     if choice == "d":
+        from jaeger_ai.core.tasks.client import submit
         try:
-            task = _deep_think_queue(ctx).add(condition, source="user")
-        except Exception as exc:  # noqa: BLE001
-            ctx.console.print(f"[red]Couldn't queue for Deep Think:[/] {exc}")
-            return SlashResult()
-        ctx.console.print(
-            f"[green]Queued for Deep Think[/] [{task.id}] {task.description}"
-        )
-        try:
-            now = ctx.console.input(
-                "  start Deep Think now? [y/N]: ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            now = ""
-        if now.startswith("y"):
-            return SlashResult(extras={"deep_think_start": True})
-        ctx.console.print(
-            "[dim]Run [bold]/deepthink start[/] when you're ready.[/]"
-        )
+            task = submit(condition)
+            ctx.console.print(f"Queued with Gateway [{task['task_id']}] — {task['status']}")
+        except Exception as exc:
+            ctx.console.print(f"[red]Couldn't queue background work:[/] {exc}")
         return SlashResult()
 
     # choice == "s" (and the fallback) — start the goal loop now.
@@ -1691,120 +1679,30 @@ def _plan(ctx: SlashContext, args: str) -> SlashResult:
 # ── Deep Think ──────────────────────────────────────────────────────
 
 
-def _deep_think_queue(ctx: SlashContext):
-    """Build the DeepThinkQueue for the active instance."""
-    from jaeger_agent.background.deep_think import queue_for_layout
-    from jaeger_ai.core.instance.instance import InstanceLayout
-    import pathlib
-    layout = InstanceLayout(root=pathlib.Path(str(ctx.instance_dir)))
-    return queue_for_layout(layout)
-
-
 def _deepthink(ctx: SlashContext, args: str) -> SlashResult:
-    """``/deepthink``                  show mode + queue status
-       ``/deepthink add <task>``       queue a skill-development job
-       ``/deepthink list``             list every queued task
-       ``/deepthink approve <id>``     approve an agent-proposed task
-       ``/deepthink start``            enter Deep Think now (swap to coder model)
-       ``/deepthink stop``             (only meaningful mid-loop; Ctrl-C also works)
-    """
+    """Read/admit/cancel durable Gateway work; no model swap or extra start gate."""
+    from jaeger_ai.core.tasks import client
     parts = args.strip().split(None, 1)
-    sub = parts[0].lower() if parts else ""
-    rest = parts[1].strip() if len(parts) > 1 else ""
-
+    sub = parts[0].lower() if parts else 'list'
+    rest = parts[1].strip() if len(parts) > 1 else ''
     try:
-        queue = _deep_think_queue(ctx)
-    except Exception as exc:  # noqa: BLE001
-        ctx.console.print(f"[red]Deep Think unavailable:[/] {exc}")
-        return SlashResult()
-
-    # ── add ──
-    if sub == "add":
-        if not rest:
-            ctx.console.print("[yellow]Usage:[/] /deepthink add <task description>")
-            return SlashResult()
-        task = queue.add(rest, source="user")
-        ctx.console.print(
-            f"[green]Queued[/] [{task.id}] {task.description}\n"
-            f"[dim]Run [bold]/deepthink start[/] to work the queue.[/]"
-        )
-        return SlashResult()
-
-    # ── list ──
-    if sub in ("list", "ls"):
-        tasks = queue.all_tasks()
-        if not tasks:
-            ctx.console.print("[dim]Deep Think queue is empty.[/]")
-            return SlashResult()
-        table = Table(show_header=True, header_style="bold cyan")
-        table.add_column("ID")
-        table.add_column("Status")
-        table.add_column("Src")
-        table.add_column("Task")
-        for tk in tasks:
-            status = tk.status
-            if tk.status == "pending" and not tk.approved:
-                status = "needs-approval"
-            table.add_row(tk.id, status, tk.source,
-                          tk.description[:60] + ("…" if len(tk.description) > 60 else ""))
-        ctx.console.print(table)
-        return SlashResult()
-
-    # ── approve ──
-    if sub == "approve":
-        if not rest:
-            ctx.console.print("[yellow]Usage:[/] /deepthink approve <task-id>")
-            return SlashResult()
-        task = queue.approve(rest)
-        if task is None:
-            ctx.console.print(f"[red]No task with id {rest!r}.[/]")
+        if sub == 'add':
+            if not rest:
+                raise ValueError('Usage: /deepthink add <objective>')
+            task = client.submit(rest)
+            ctx.console.print(f"Queued [{task['task_id']}] — {task['status']}")
+        elif sub in {'approve', 'stop', 'cancel'}:
+            if not rest:
+                raise ValueError(f'Usage: /deepthink {sub} <task-id>')
+            result = client.approve(rest) if sub == 'approve' else client.cancel(rest)
+            ctx.console.print(str(result))
         else:
-            ctx.console.print(f"[green]Approved[/] [{task.id}] {task.description}")
-        return SlashResult()
-
-    # ── start ──
-    if sub == "start":
-        nxt = queue.next_pending()
-        if nxt is None:
-            summary = queue.summary()
-            if summary["awaiting_approval"]:
-                ctx.console.print(
-                    f"[yellow]Nothing approved to work.[/] "
-                    f"{summary['awaiting_approval']} task(s) await approval — "
-                    "use [bold]/deepthink approve <id>[/]."
-                )
-            else:
-                ctx.console.print(
-                    "[dim]Deep Think queue is empty. Add a task with "
-                    "[bold]/deepthink add <task>[/] first.[/]"
-                )
-            return SlashResult()
-        # Signal the REPL to enter the Deep Think loop.
-        return SlashResult(extras={"deep_think_start": True})
-
-    if sub == "stop":
-        ctx.console.print(
-            "[dim]Deep Think only runs inside its work loop — press "
-            "Ctrl-C during the loop to interrupt and return to realtime.[/]"
-        )
-        return SlashResult()
-
-    # ── status (no subcommand) ──
-    summary = queue.summary()
-    table = Table(show_header=False, box=None)
-    table.add_column(style="bold cyan")
-    table.add_column()
-    table.add_row("Queue total", str(summary["total"]))
-    table.add_row("Pending (ready)",
-                  str(summary["pending"] - summary["awaiting_approval"]))
-    table.add_row("Awaiting approval", str(summary["awaiting_approval"]))
-    table.add_row("Done", str(summary["done"]))
-    table.add_row("Failed", str(summary["failed"]))
-    ctx.console.print(table)
-    ctx.console.print(
-        "[dim]/deepthink add <task> · /deepthink list · "
-        "/deepthink start · Ctrl-C interrupts the loop[/]"
-    )
+            for task in client.tasks():
+                ctx.console.print(f"[{task['task_id']}] {task['state']}: {task['goal']}")
+            if sub == 'start':
+                ctx.console.print('Authorized tasks run automatically under the Gateway.')
+    except Exception as exc:
+        ctx.console.print(f'[red]Gateway background work:[/] {exc}')
     return SlashResult()
 
 

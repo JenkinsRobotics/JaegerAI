@@ -1,0 +1,10 @@
+{
+  "name": "customer-research",
+  "original_name": "customer-research",
+  "source": "claude-cowork--customer-support",
+  "origin_path": "plugins/cache/claude-cowork/customer-support/1.1.0/skills/customer-research",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--customer-support",
+  "skill_md_sha256": "65b3e82447e8bb649849b8064daf6808a59192afe726713ea40b27ce5187b34e"
+}

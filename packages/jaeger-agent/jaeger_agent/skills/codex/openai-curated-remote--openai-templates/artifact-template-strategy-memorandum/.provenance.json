@@ -1,0 +1,10 @@
+{
+  "name": "artifact-template-strategy-memorandum",
+  "original_name": "artifact-template-strategy-memorandum",
+  "source": "openai-curated-remote--openai-templates",
+  "origin_path": "plugins/cache/openai-curated-remote/openai-templates/0.1.1/skills/artifact-template-strategy-memorandum",
+  "plugin_version": "0.1.1",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "51d7882ac94e8e57b323394825728c33925af878806e37277217c2dc12a912e5"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "explain-usage",
+  "original_name": "explain-usage",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/explain-usage",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "7c3d6ae21e2492641d8aa89164c7912b24a4d2f02cc8ce895c878e3acf40c9e3"
+}

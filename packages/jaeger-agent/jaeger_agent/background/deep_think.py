@@ -120,7 +120,7 @@ class DeepThinkQueue:
         )
 
     def _cards(self) -> list[Any]:
-        return self.board.list(source="deepthink")
+        return [c for c in self.board.list(source="deepthink") if "gateway-owned" not in c.tags]
 
     # ── operations ──────────────────────────────────────────────────
 

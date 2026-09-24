@@ -1,0 +1,10 @@
+{
+  "name": "interactive-dashboard-builder",
+  "original_name": "interactive-dashboard-builder",
+  "source": "claude-cowork--data",
+  "origin_path": "plugins/cache/claude-cowork/data/1.0.0/skills/interactive-dashboard-builder",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--data",
+  "skill_md_sha256": "3756173c5802fd4f60eda76087edc778ceda155dc6404d6a2fa9ca54c0e18d9f"
+}

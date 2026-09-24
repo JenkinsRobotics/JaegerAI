@@ -1,0 +1,10 @@
+{
+  "name": "task-management",
+  "original_name": "task-management",
+  "source": "claude-cowork--productivity",
+  "origin_path": "plugins/cache/claude-cowork/productivity/1.1.0/skills/task-management",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--productivity",
+  "skill_md_sha256": "a21f43ab86af12e60793e0156b034d252ec8b0c758fcc187b7d5e2746882a264"
+}

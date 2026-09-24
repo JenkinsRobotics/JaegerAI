@@ -1,0 +1,87 @@
+/* Motion layer for the Jaeger panel.
+ *
+ * Original Jaeger CSS. The timings and easing curves were chosen from measured
+ * behaviour of a reference chat panel (fast decelerating entrances, a slow
+ * shimmer for in-progress text, a small vertical wave for "working" dots) —
+ * no reference code or assets are copied. Only existing panel classes are
+ * targeted, so this file changes nothing structurally and can be dropped
+ * without breaking layout.
+ */
+:root {
+  --ease-enter: cubic-bezier(.23, 1, .32, 1);
+  --ease-out: cubic-bezier(0, 0, .2, 1);
+  --ease-in-out: cubic-bezier(.4, 0, .2, 1);
+  --dur-fast: 120ms;
+  --dur-basic: 200ms;
+  --dur-enter: 280ms;
+  --dur-shimmer: 2.2s;
+}
+
+@keyframes j-fade-in { from { opacity: 0 } to { opacity: 1 } }
+@keyframes j-rise-in { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: none } }
+@keyframes j-scale-in { from { opacity: 0; transform: scale(.97) } to { opacity: 1; transform: none } }
+/* Attachment chips slide in from the composer and settle with a slight overshoot. */
+@keyframes j-chip-in {
+  0% { opacity: 0; transform: translate(-8px, 4px) scale(.92) }
+  70% { opacity: 1; transform: translate(1px, -1px) scale(1.02) }
+  100% { opacity: 1; transform: none }
+}
+/* Sweeping highlight for text that is still in progress. */
+@keyframes j-shimmer { 0% { background-position: 150% 0 } 40%, 100% { background-position: -50% 0 } }
+/* Three dots that ripple vertically while work is running. */
+@keyframes j-dot-wave {
+  0%, 10%, 100% { transform: translateY(0) }
+  25% { transform: translateY(1.2px) }
+  55% { transform: translateY(-2px) }
+  70% { transform: translateY(0) }
+}
+/* A changed value briefly flashes a soft highlight, then fades out. */
+@keyframes j-changed { 0%, 66% { background-color: color-mix(in srgb, var(--vscode-focusBorder, #75a7e8) 22%, transparent) } 100% { background-color: transparent } }
+@keyframes j-pulse-soft { 0%, 100% { opacity: .68 } 50% { opacity: .9 } }
+
+/* "Working for 12s": the label sweeps a highlight while the turn is live. */
+.work-section.running>summary .work-clock,
+.activity.running>summary .activity-label {
+  background: linear-gradient(90deg, var(--muted) 0%, var(--muted) 35%, var(--vscode-foreground, #ddd) 50%, var(--muted) 65%, var(--muted) 100%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: j-shimmer var(--dur-shimmer) var(--ease-in-out) infinite;
+}
+
+/* Things that appear on demand enter quickly and decelerate. */
+.work-section[open]>.work-body { animation: j-fade-in var(--dur-basic) var(--ease-out) both }
+.work-body>* { animation: j-rise-in var(--dur-enter) var(--ease-enter) both }
+.approval, #changes { animation: j-scale-in var(--dur-enter) var(--ease-enter) both }
+.chip { animation: j-chip-in var(--dur-enter) var(--ease-enter) both }
+#background-tasks .background-task { animation: j-rise-in var(--dur-enter) var(--ease-enter) both }
+.message-actions { animation: j-fade-in var(--dur-basic) var(--ease-out) both }
+.changed { animation: j-changed 1.5s var(--ease-out) both; border-radius: 4px }
+
+/* Working dots — used by any element carrying .working-dots with three spans. */
+.working-dots { display: inline-flex; gap: 3px; align-items: center }
+.working-dots>span { width: 3px; height: 3px; border-radius: 50%; background: currentColor; animation: j-dot-wave 1.1s var(--ease-in-out) infinite }
+.working-dots>span:nth-child(2) { animation-delay: .12s }
+.working-dots>span:nth-child(3) { animation-delay: .24s }
+
+/* Interaction feedback. */
+form { transition: border-color var(--dur-basic) var(--ease-out), box-shadow var(--dur-basic) var(--ease-out) }
+form:focus-within { box-shadow: 0 0 0 1px color-mix(in srgb, var(--vscode-focusBorder, #75a7e8) 55%, transparent), 0 1px 2px #0003 }
+.icon-button, .chat-row, .message-actions button, .activity>summary, .work-section>summary { transition: background-color var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out) }
+.send-button { transition: transform var(--dur-fast) var(--ease-enter), opacity var(--dur-fast) var(--ease-out) }
+.send-button:active:not(:disabled) { transform: scale(.92) }
+.work-section>summary::after, .activity>summary::after { transition: transform var(--dur-basic) var(--ease-enter) }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important }
+  .work-section.running>summary .work-clock, .activity.running>summary .activity-label { background: none; color: inherit; -webkit-background-clip: border-box; background-clip: border-box }
+}
+
+/* The in-progress plan step pulses gently; the plan card enters like other on-demand surfaces. */
+.plan { animation: j-scale-in var(--dur-enter) var(--ease-enter) both }
+.plan-step.in_progress .plan-mark { animation: j-pulse-soft 1.6s var(--ease-in-out) infinite }
+
+/* The command menu and result card enter like other on-demand surfaces. */
+#slash-menu { animation: j-scale-in var(--dur-basic) var(--ease-enter) both; transform-origin: bottom left }
+#info { animation: j-rise-in var(--dur-enter) var(--ease-enter) both }

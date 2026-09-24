@@ -1,0 +1,10 @@
+{
+  "name": "artifact-template-experiment-analysis",
+  "original_name": "artifact-template-experiment-analysis",
+  "source": "openai-curated-remote--openai-templates",
+  "origin_path": "plugins/cache/openai-curated-remote/openai-templates/0.1.1/skills/artifact-template-experiment-analysis",
+  "plugin_version": "0.1.1",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "0b05effc47df0a14f8e0c3e3597e6722224747435546385d38a2cae279bd20b9"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "scvi-tools",
+  "original_name": "scvi-tools",
+  "source": "claude-cowork--bio-research",
+  "origin_path": "plugins/cache/claude-cowork/bio-research/1.0.0/skills/scvi-tools",
+  "plugin_version": "1.0.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--bio-research",
+  "skill_md_sha256": "03a69b32b77db86afe5f87b75db2ae4c92b03b6e9e16e2c5e66cde2d4ad9c5bc"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "recruiting-pipeline",
+  "original_name": "recruiting-pipeline",
+  "source": "claude-cowork--human-resources",
+  "origin_path": "plugins/cache/claude-cowork/human-resources/1.1.0/skills/recruiting-pipeline",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "a00b442f701faa6eb65b8ecc8fcf375d5a33ec827b987ba8b04edaef0e90b92f"
+}

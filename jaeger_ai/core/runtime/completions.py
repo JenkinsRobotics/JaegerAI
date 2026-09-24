@@ -16,10 +16,9 @@ the same conclusion by the same route, and calls the rail a completion
 queue; this is that rail, over the notification queue JaegerAI's
 process manager already had but nobody drained.
 
-Delivery is at-most-once by construction. ``consume_pending`` empties
-what it returns, so a completion that has been shown is gone — a queue
-that redelivered would have the agent re-reacting to the same finished
-job every turn for the rest of the session.
+The resident owner reads a bounded durable outbox and acknowledges only
+after a request receipt exists. Stable batch IDs make a lost acknowledgement
+replay delivery rather than execute the work again.
 
 Nothing here is brain-specific. A subagent that ran on a cloud lane and
 one that ran in-process arrive on the same rail, in the same shape.
@@ -27,60 +26,70 @@ one that ran in-process arrive on the same rail, in the same shape.
 
 from __future__ import annotations
 
-import threading
+import hashlib
+import json
+import sqlite3
 import time
+import uuid
+from contextlib import closing
 from typing import Any
 
-# Async delegations that have finished and not yet been surfaced.
-# Process completions live in the engine's own queue and are merged in
-# by :func:`consume_pending`; this holds only the in-process kind.
-_pending: list[dict[str, Any]] = []
-_lock = threading.Lock()
-
-# How many completions one synthetic turn may carry. Past this the
-# notice stops being something a model can act on and starts being a
-# wall of text — the rest wait for the turn after.
 _MAX_PER_TURN = 5
 
 
-def record_delegation(
-    *,
-    task: str,
-    result: dict[str, Any],
-    delegation_id: str = "",
-    dispatched_at: float = 0.0,
-) -> None:
-    """Queue a finished background delegation for the next idle moment.
+def _connect():
+    # The same durable owner database, not a process-local queue.
+    from jaeger_ai.core.gateway.session_store import default_store_path
+    conn = sqlite3.connect(default_store_path(), timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("""CREATE TABLE IF NOT EXISTS completion_outbox (
+        id TEXT PRIMARY KEY, payload TEXT NOT NULL, created_at REAL NOT NULL,
+        acknowledged_at REAL)""")
+    conn.commit()
+    return conn
 
-    The payload is deliberately SELF-CONTAINED — the original task text
-    travels with the answer. By the time this surfaces, the parent may
-    be several turns into something unrelated and have no memory of why
-    a subagent existed; a bare result would be unattributable. With the
-    task attached the agent can use the answer, or notice the world has
-    moved on and drop it.
-    """
-    with _lock:
-        _pending.append({
-            "kind": "delegation",
-            "id": delegation_id,
-            "task": str(task or ""),
-            "result": result,
-            "dispatched_at": dispatched_at or time.time(),
-            "finished_at": time.time(),
-        })
+
+def _record(event: dict[str, Any]) -> None:
+    event = dict(event)
+    ident = str(event.get('id') or uuid.uuid4().hex)
+    event['id'] = ident
+    with closing(_connect()) as conn, conn:
+        conn.execute("INSERT OR IGNORE INTO completion_outbox VALUES (?, ?, ?, NULL)",
+                     (ident, json.dumps(event), event.get('finished_at') or time.time()))
+
+
+def record_delegation(*, task: str, result: dict[str, Any],
+                      delegation_id: str = '', dispatched_at: float = 0.0,
+                      session_id: str = '') -> None:
+    """Persist a child result before reporting it to any client."""
+    _record({'kind': 'delegation', 'id': delegation_id or uuid.uuid4().hex,
+             'task': str(task or ''), 'result': result, 'session_id': session_id,
+             'dispatched_at': dispatched_at or time.time(), 'finished_at': time.time()})
 
 
 def pending_count() -> int:
-    """How many delegation completions are waiting. Does not consume."""
-    with _lock:
-        return len(_pending)
+    with closing(_connect()) as conn:
+        return conn.execute('SELECT COUNT(*) FROM completion_outbox WHERE acknowledged_at IS NULL').fetchone()[0]
 
 
-def _drain_delegations() -> list[dict[str, Any]]:
-    with _lock:
-        drained = list(_pending)
-        _pending.clear()
-    return drained
+def pending_batch(layout: Any = None) -> list[dict[str, Any]]:
+    """Read a bounded batch. Failed admission must leave it available for retry."""
+    for event in _drain_processes(layout):
+        _record(event)
+    with closing(_connect()) as conn:
+        rows = conn.execute('SELECT payload FROM completion_outbox WHERE acknowledged_at IS NULL '
+                            'ORDER BY created_at, rowid LIMIT ?', (_MAX_PER_TURN,)).fetchall()
+    return [json.loads(row[0]) for row in rows]
+
+
+def batch_id(events: list[dict[str, Any]]) -> str:
+    return 'completion:' + hashlib.sha256(json.dumps([e['id'] for e in events]).encode()).hexdigest()[:32]
+
+
+def acknowledge(events: list[dict[str, Any]]) -> None:
+    with closing(_connect()) as conn, conn:
+        conn.executemany('UPDATE completion_outbox SET acknowledged_at=? WHERE id=?',
+                         [(time.time(), e['id']) for e in events])
 
 
 def _drain_processes(layout: Any) -> list[dict[str, Any]]:
@@ -94,7 +103,14 @@ def _drain_processes(layout: Any) -> list[dict[str, Any]]:
     try:
         from jaeger_agent.background import processes
 
-        events = processes.consume_pending_completions(layout) or []
+        def persist(event):
+            _record({
+                'kind': 'process', 'id': str(event.get('process_id') or ''),
+                'name': str(event.get('name') or ''), 'status': event.get('status'),
+                'exit_code': event.get('exit_code'), 'finished_at': event.get('finished_at'),
+                'raw': event,
+            })
+        events = processes.consume_pending_completions(layout, persist=persist) or []
     except Exception:  # noqa: BLE001
         return []
     out: list[dict[str, Any]] = []
@@ -114,16 +130,19 @@ def _drain_processes(layout: Any) -> list[dict[str, Any]]:
 
 
 def consume_pending(layout: Any = None) -> list[dict[str, Any]]:
-    """Every completion waiting, oldest first. Empties the queues."""
-    events = _drain_delegations() + _drain_processes(layout)
-    events.sort(key=lambda e: float(e.get("finished_at") or 0.0))
+    """Take one bounded batch for synchronous legacy consumers.
+
+    The resident owner uses pending_batch/acknowledge around durable admission.
+    """
+    events = pending_batch(layout)
+    acknowledge(events)
     return events
 
 
 def reset() -> None:
-    """Drop everything queued — for tests and instance switches."""
-    with _lock:
-        _pending.clear()
+    """Explicit test cleanup; instance switching must not erase durable results."""
+    with closing(_connect()) as conn, conn:
+        conn.execute('DELETE FROM completion_outbox')
 
 
 # ── turning completions into a turn ─────────────────────────────────
@@ -167,12 +186,9 @@ def completion_prompt(events: list[dict[str, Any]]) -> str:
     have been overtaken, and an agent that mechanically acts on every
     stale result is worse than one that reads it and moves on.
     """
-    shown = events[:_MAX_PER_TURN]
+    shown = events
     lines = [_describe_delegation(e) if e.get("kind") == "delegation"
              else _describe_process(e) for e in shown]
-    overflow = len(events) - len(shown)
-    if overflow > 0:
-        lines.append(f"- …and {overflow} more, which will follow.")
     return (
         "SYSTEM NOTICE — background work finished while you were busy:\n"
         + "\n".join(lines)
@@ -196,7 +212,7 @@ def next_completion_turn(layout: Any = None) -> str | None:
 
 
 __all__ = [
-    "completion_prompt",
+    "completion_prompt", "pending_batch", "acknowledge", "batch_id",
     "consume_pending",
     "next_completion_turn",
     "pending_count",

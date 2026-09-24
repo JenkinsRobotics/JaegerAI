@@ -5,10 +5,25 @@ run, smoke/benchmark-gated. Opted out → manual + backlog.
 
 import pathlib
 import tempfile
+import pytest
 
 from jaeger_agent.background import skill_review
 from jaeger_agent.skill_improvement import skill_notes
 from jaeger_ai.core.instance.instance import InstanceLayout
+
+
+@pytest.fixture(autouse=True)
+def gateway_task_context(tmp_path):
+    from types import SimpleNamespace
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    from jaeger_ai.core.gateway.event_bus import GatewayEventBus
+    from jaeger_ai.core.tasks.owner import GatewayTaskOwner
+    from jaeger_agent.task_port import task_scope
+    store = GatewaySessionStore(tmp_path/'gateway.sqlite3')
+    store.ensure_session('reviews', profile='jaeger')
+    owner = GatewayTaskOwner(SimpleNamespace(store=store, event_bus=GatewayEventBus(store=store)))
+    with task_scope(owner, session_id='reviews', request_id='review', execution={'workspace':str(tmp_path)}, user_text=''):
+        yield
 
 
 def _layout() -> InstanceLayout:
@@ -50,7 +65,7 @@ def test_propose_dedups_while_open() -> None:
 def test_enabled_by_default_auto_approves() -> None:
     assert skill_review.enabled() is True            # ON by default (opt-out)
     r = skill_review.propose_review(_layout(), "weather", force=True)
-    assert r["proposed"] and r["approved"] is True and r["status"] == "ready"
+    assert r["proposed"] and r["approved"] is True and r["status"] == "queued"
 
 
 def test_opt_out_proposes_to_backlog_and_disables_trigger() -> None:
@@ -58,7 +73,7 @@ def test_opt_out_proposes_to_backlog_and_disables_trigger() -> None:
         skill_review.set_enabled(False)
         # Manual request now lands in the backlog (operator approves).
         r = skill_review.propose_review(_layout(), "weather", force=True)
-        assert r["proposed"] and r["approved"] is False and r["status"] == "backlog"
+        assert r["proposed"] and r["approved"] is False and r["status"] == "paused"
         # And the on-note fast-path is a no-op when opted out (even if flagged).
         layout = _layout()
         flagged = skill_notes.add_note(layout, skill="files", outcome="failed",

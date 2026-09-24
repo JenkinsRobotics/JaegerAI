@@ -1,0 +1,10 @@
+{
+  "name": "close-management",
+  "original_name": "close-management",
+  "source": "claude-cowork--finance",
+  "origin_path": "plugins/cache/claude-cowork/finance/1.1.0/skills/close-management",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--finance",
+  "skill_md_sha256": "7901f839cba33956be8ae121dbad175cb0fa71d1f6d461111991e634438d7c23"
+}

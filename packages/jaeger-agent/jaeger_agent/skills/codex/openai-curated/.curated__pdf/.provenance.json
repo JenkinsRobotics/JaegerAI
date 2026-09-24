@@ -1,0 +1,10 @@
+{
+  "name": "openai-curated:pdf",
+  "original_name": "pdf",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/pdf",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "d108cf2b36355ab37eb5962933f4d09785ec002f3105c506129320209306b9d2"
+}

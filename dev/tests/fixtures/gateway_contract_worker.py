@@ -67,6 +67,25 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
             stream.write(json.dumps({"model": self.model}) + "\n")
         messages = formatted.get("messages", [])
         request = current_request(messages)
+        if 'CONTRACT-DURABLE' in request:
+            # Script only the provider boundary; ledger, file tool, Gateway,
+            # approvals, checkpoints and result delivery are production code.
+            completed_tools = [m.get('name') for m in messages if m.get('role') == 'tool']
+            tool_messages = [m for m in messages if m.get('role') == 'tool']
+            steps = [
+                ('work_ledger', {'action':'create', 'task_name':'Durable report', 'total_items':1,
+                                 'verify':{'kind':'paths_exist', 'paths':['workspace/durable-report.txt']}}),
+                ('write_file', {'path':'workspace/durable-report.txt', 'content':'DURABLE-VERIFIED-CONTENT'}),
+                ('work_ledger', {'action':'update', 'completed_ids':['report'], 'remaining_count':0}),
+                ('complete_task', {}),
+            ]
+            step = len(tool_messages)
+            if step < len(steps):
+                name, args = steps[step]
+                return {'choices':[{'message':{'role':'assistant','content':None,'tool_calls':[
+                    {'id':f'durable-{step}', 'type':'function', 'function':{'name':name,'arguments':json.dumps(args)}}
+                ]},'finish_reason':'tool_calls'}]}
+            return {'choices':[{'message':{'role':'assistant','content':'Durable report verified', 'tool_calls':[]},'finish_reason':'stop'}]}
         if "CONTRACT-ERROR" in request or "SIMULATE-ERROR" in request:
             raise RuntimeError("Deliberate simulated backend provider error")
         if "CONTRACT-LONG" in request or "LONG-CONTENT" in request:

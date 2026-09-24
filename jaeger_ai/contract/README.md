@@ -20,6 +20,7 @@ correct. The code still ran. Only the behaviour was wrong.
 | :--- | :--- |
 | `frameworks.py` | The four backends a turn can run on, and every name each answers to — runtime, WebUI profile, display name, agent id, container. |
 | `ports.py` | The default port for each service. |
+| `legacy_paths.py` | The one switch (`JAEGER_LEGACY_PATHS`) that keeps every non-Gateway execution path isolated, and the message an isolated path returns. |
 | `model_ids.py` | The `@lane:model` picker id grammar, and the bare model name a provider accepts. |
 
 ## The one rule

@@ -1,0 +1,10 @@
+{
+  "name": "audit-support",
+  "original_name": "audit-support",
+  "source": "claude-cowork--finance",
+  "origin_path": "plugins/cache/claude-cowork/finance/1.1.0/skills/audit-support",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--finance",
+  "skill_md_sha256": "4592b5d4153a707e7ac4abdc3485a08b02a6052a8952e748d27c7e7acd962d2e"
+}

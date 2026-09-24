@@ -12,6 +12,8 @@ prompt or runs on its own. Three modes:
             out via ``clarify``.   (the default)
   auto    — fully autonomous: auto-approve tiers 1-4 for an admin session; the
             agent only reaches out (``clarify``) when genuinely blocked.
+            (the default of the saved instance setting the Gateway follows: it is the
+            operator's own assistant on their own machine)
 
 tier-5 DEV_BYPASS still needs an explicit human override in every mode — it
 never routes through this gate. Non-admin sessions are denied upstream, so this
@@ -24,8 +26,15 @@ process-global (one resident agent per instance) and published as part of
 
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Any
+
 AUTONOMY = ("ask", "scoped", "auto")
 DEFAULT = "scoped"
+CONFIG_DEFAULT = "auto"
+"""The saved ``automation.autonomy`` default the Gateway follows: the operator's own
+assistant on their own machine, so no approval prompts. ``DEFAULT`` is only the
+in-process starting mode for the legacy terminal/bridge providers."""
 
 _DESC = {
     "ask": "pause for approval before every outward/hardware/destructive action",
@@ -34,11 +43,30 @@ _DESC = {
     "auto": "fully autonomous; reach out only when genuinely blocked",
 }
 
-_state: dict[str, str] = {"mode": DEFAULT}
+_state: dict[str, Any] = {"mode": DEFAULT, "explicit": False}
 
 
 def current_autonomy() -> str:
     return _state["mode"]
+
+
+def configured_autonomy(config_path: Path | str | None) -> str:
+    """The instance's saved ``automation.autonomy`` (default when absent or invalid)."""
+    try:
+        import yaml
+
+        raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
+        value = str((raw.get("automation") or {}).get("autonomy") or "").strip().lower()
+        return value if value in AUTONOMY else CONFIG_DEFAULT
+    except Exception:  # noqa: BLE001 — no readable config means the default
+        return CONFIG_DEFAULT
+
+
+def effective_autonomy(config_path: Path | str | None = None) -> str:
+    """What governs approvals now: an explicit runtime switch, else the saved setting."""
+    if _state["explicit"]:
+        return _state["mode"]
+    return configured_autonomy(config_path) if config_path else _state["mode"]
 
 
 def list_autonomy() -> list[str]:
@@ -71,5 +99,6 @@ def set_autonomy(name: str) -> dict:
     if target not in AUTONOMY:
         return {"ok": False, "error": f"unknown autonomy {target!r}; choose from {list(AUTONOMY)}"}
     _state["mode"] = target
+    _state["explicit"] = True
     _publish(target)
     return {"ok": True, "mode": target}

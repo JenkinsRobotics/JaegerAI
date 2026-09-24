@@ -1,0 +1,10 @@
+{
+  "name": "aspnet-core",
+  "original_name": "aspnet-core",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/aspnet-core",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "1f487ef3565e5ac1ee6c93cbeb9ac666292b30285877c82ddb0a77c9777fe92f"
+}

@@ -65,7 +65,7 @@ _COUNTED_SCOPE = re.compile(
 )
 _ACTION_VERB = re.compile(
     r"(?i)\b(?:create|modify|edit|change|update|delete|remove|install|build|"
-    r"execute|run|fix|implement|write|move|copy|rename|configure|deploy|"
+    r"execute|run|fix|implement|write|move|copy|rename|configure|deploy|queue|schedule|"
     r"inspect|review|commit|changed)\b"
 )
 _VERIFICATION_REQUEST = re.compile(
@@ -126,7 +126,7 @@ def is_actionable_request(text: str) -> bool:
     if _DECLARATIVE_DISCUSSION.match(body):
         return bool(re.search(r"(?i)\b(?:then|but|and)\b", unquoted)
                     and _ACTION_VERB.search(unquoted))
-    if re.search(r"(?i)\b(?:might|could|would)\s+(?:run|execute|use|change)\b", body):
+    if re.search(r"(?i)\b(?:might|could|would)\s+(?:run|execute|use|change)\b", body) and not re.match(r"(?i)^(?:please\s+)?(?:queue|schedule|run|execute|build|fix)\b", body):
         return False
     if re.search(r"(?i)\bno\s+changes?\b|\bjust\s+a\s+code\s+review\b", body):
         return False
@@ -455,12 +455,14 @@ def run_continued_turn(
     objective: str = "",
     is_cancelled: Callable[[], bool] | None = None,
     max_steps: int | None = None,
+    on_checkpoint: ProgressFn | None = None,
+    durable: bool = False,
 ) -> dict[str, Any]:
     """Re-fire one inner turn until the stall/ledger rule says stop.
 
     This is the owner-side loop the local bridge used to run around
     ``run_for_voice``. One admitted request, several inner steps, one
-    accumulated answer. Continuation prompts are not new user messages
+    final answer with separate intermediate checkpoints. Continuation prompts are not new user messages
     and must not be persisted as such. Cancellation, a loop-breaker
     halt, a turn error, or the step budget ends the run.
     """
@@ -470,10 +472,17 @@ def run_continued_turn(
     goal = objective or prompt
     budget = execution.max_steps() if max_steps is None else max(1, int(max_steps))
     step = 0
-    accumulated: list[str] = []
+    checkpoints: list[dict[str, Any]] = []
     result: dict[str, Any] = {}
+    nxt = None
 
     while True:
+        if durable and last_completion():
+            # A completed durable slice survives an owner restart. Return its
+            # actual receipt to the owner for revalidation; do not ask the model
+            # to perform completed effects again.
+            result = {"text": last_completion().get("summary", ""), "halt_reason": None}
+            break
         if is_cancelled is not None and is_cancelled():
             result = {
                 "text": "",
@@ -483,8 +492,6 @@ def run_continued_turn(
             break
         result = dict(turn_fn(current) or {})
         ans = str(result.get("text") or "").strip()
-        if ans:
-            accumulated.append(ans)
         if result.get("error") or execution.stop_requested():
             break
         if is_cancelled is not None and is_cancelled():
@@ -494,7 +501,9 @@ def run_continued_turn(
         halt = result.get("halt_reason")
         if continuation.is_loop_breaker(halt):
             break
-        if ledger_open() or continuation.hit_inner_cap(halt):
+        if durable and not last_completion():
+            nxt = harness_prompt(objective=goal)
+        elif ledger_open() or continuation.hit_inner_cap(halt):
             nxt = next_continuation_prompt(
                 ans, force_ledger=ledger_open(), halt_reason=halt, objective=goal,
             )
@@ -502,6 +511,10 @@ def run_continued_turn(
             if continuation.classify(ans) == "continue":
                 nxt = continuation.continuation_prompt(goal)
         if nxt and step < budget:
+            checkpoint = {"text": ans, "step": step, "halt_reason": halt}
+            checkpoints.append(checkpoint)
+            if on_checkpoint is not None:
+                on_checkpoint(checkpoint)
             step += 1
             current = nxt
             continue
@@ -509,8 +522,9 @@ def run_continued_turn(
 
     if result.get("error") or continuation.is_loop_breaker(result.get("halt_reason")):
         pause_active_ledger(str(result.get("error") or result.get("halt_reason")))
-    final_text = "\n\n".join(accumulated) if accumulated else str(result.get("text") or "")
-    return {**result, "text": final_text, "continuation_steps": step}
+    if durable and nxt and step >= budget and not last_completion():
+        result = {**result, "halt_reason": "yielded"}
+    return {**result, "checkpoints": checkpoints, "continuation_steps": step}
 
 
 WORKER_PREAMBLE = (

@@ -126,7 +126,7 @@ class DirectResponseHandler(CognitionStrategyHandler):
         }
 
 
-def _with_background(request: str, context: Mapping[str, Any], *, lessons: str = "") -> str:
+def with_background(request: str, context: Mapping[str, Any], *, lessons: str = "") -> str:
     """Put durable context in front of a request without making it one.
 
     Recent messages from every session are recalled so the Entity remembers
@@ -139,7 +139,7 @@ def _with_background(request: str, context: Mapping[str, Any], *, lessons: str =
     conversation = str(context.get("conversation_history") or "").strip()
     blocks = [
         str(context.get(key) or "").strip()
-        for key in ("learned_skills_prompt", "retrieved_documents", "durable_recall", "runtime_truth")
+        for key in ("ide_context", "learned_skills_prompt", "retrieved_documents", "durable_recall", "runtime_truth")
     ]
     blocks = [b for b in blocks if b]
 
@@ -239,7 +239,7 @@ class ReActHandler(CognitionStrategyHandler):
                 lessons = reflexion_store.to_prompt_context_block(original)
             except Exception as exc:
                 logger.debug("ReAct reflexion inject skipped: %s", exc)
-        text = _with_background(original, context, lessons=lessons)
+        text = with_background(original, context, lessons=lessons)
         react_runner = context.get("react_runner")
 
         if callable(react_runner):

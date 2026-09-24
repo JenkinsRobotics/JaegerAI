@@ -277,3 +277,66 @@ def test_runtime_block_is_empty_before_boot(pipeline):
     """No client, no claims — and no empty heading bloating the prompt."""
     pipeline["client"] = None
     assert main._runtime_identity_block() == ""
+
+
+def test_gateway_turn_model_overrides_stale_legacy_state_and_restores(pipeline):
+    from jaeger_ai.core.runtime.modes import mode_info, set_mode
+
+    pipeline['client'] = _client(kind='local', provider='mlx', model='old-local')
+    pipeline['config'] = _cfg(external=False)
+    with model_resolver.serving_model_scope(_client(model='actual-session:cloud'), _cfg(model='actual-session:cloud')):
+        info = mode_info()
+        assert info['model'] == 'actual-session:cloud'
+        assert info['mode'] is None
+        assert info['local_preset_active'] is False
+        assert info['local_preset_model'] is None
+        assert info['voice'] is None
+        assert info['options'] == []
+        assert info['serving']['location'] == 'cloud'
+        assert 'actual-session:cloud' in main._runtime_identity_block()
+        assert 'old-local' not in main._runtime_identity_block()
+        assert set_mode('high')['ok'] is False
+        rows = model_resolver.list_registered_models(include_providers=False)
+        assert rows[0]['model'] == info['model']
+        assert rows[0]['fallback_active'] is False
+    assert model_resolver.serving_model()['model'] == 'old-local'
+
+
+def test_empty_legacy_pipeline_cannot_claim_default_gemma(pipeline):
+    from jaeger_ai.core.runtime.modes import mode_info
+
+    pipeline['client'] = None
+    pipeline['config'] = _cfg(external=False)
+    info = mode_info()
+    assert info['model'] is None
+    assert info['mode'] is None
+    assert info['kind'] == 'unknown'
+
+
+def test_simultaneous_turns_report_their_own_model(pipeline):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    from jaeger_ai.core.runtime.modes import mode_info
+
+    barrier = Barrier(2)
+    def turn(name):
+        with model_resolver.serving_model_scope(_client(model=name), _cfg(model=name)):
+            barrier.wait(timeout=5)
+            return mode_info()['model']
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(turn, name) for name in ('session-a', 'session-b')]
+        assert [future.result() for future in futures] == ['session-a', 'session-b']
+
+
+def test_runtime_status_does_not_report_certification_as_live_provider(pipeline, monkeypatch):
+    from jaeger_ai.core.entity.runtime_status import collect_runtime_status
+    pipeline['client'] = _client(provider='ollama', model='configured:cloud')
+    pipeline['config'] = _cfg(model='configured:cloud')
+    monkeypatch.setenv('JAEGER_CHAT_PROVIDER', 'stale-provider')
+    status = collect_runtime_status(include_network=False)
+    assert status['Provider']['active_chat_provider'] == 'ollama'
+    assert status['Provider']['model'] == 'configured:cloud'
+    assert status['Provider']['location'] == 'cloud'
+    pipeline['client'] = None
+    assert collect_runtime_status(include_network=False)['Provider']['active_chat_provider'] == ''

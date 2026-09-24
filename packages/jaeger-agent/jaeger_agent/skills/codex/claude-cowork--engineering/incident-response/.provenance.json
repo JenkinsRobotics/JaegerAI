@@ -1,0 +1,10 @@
+{
+  "name": "incident-response",
+  "original_name": "incident-response",
+  "source": "claude-cowork--engineering",
+  "origin_path": "plugins/cache/claude-cowork/engineering/1.2.0/skills/incident-response",
+  "plugin_version": "1.2.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "9eaa7a974c90395ac7116e82710f74546f38e69f735d78f684ee13fd79646e9a"
+}

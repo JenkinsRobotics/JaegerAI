@@ -124,12 +124,6 @@ def needs_review(layout: Any, skill: str, threshold: int = DEFAULT_THRESHOLD) ->
     return _bad_since_last_review(layout, skill) >= threshold
 
 
-def _open_review_exists(queue: Any, skill: str) -> bool:
-    marker = f"[{REVIEW_TAG}:{skill}]"
-    return any(marker in t.description and t.status not in ("done", "failed")
-               for t in queue.all_tasks())
-
-
 def _summaries_block(layout: Any, skill: str) -> str:
     """Render a skill's accrued post-use summaries SINCE the last review as the
     trajectory the auditor reads cold (newest last)."""
@@ -205,18 +199,29 @@ def propose_review(layout: Any, skill: str, *, threshold: int = DEFAULT_THRESHOL
         return {"proposed": False, "reason": "no skill given"}
     if not force and not needs_review(layout, skill, threshold):
         return {"proposed": False, "reason": "below threshold"}
-    from jaeger_agent.background.deep_think import queue_for_layout
-    queue = queue_for_layout(layout)
-    if _open_review_exists(queue, skill):
+    from jaeger_agent.task_port import current_task_context, remote
+    context = current_task_context()
+    client = remote()
+    if context is None and client is None:
+        return {"proposed": False, "reason": "no Gateway task owner available"}
+    rows = ([t.to_dict() for t in context['owner'].store.list_tasks()]
+            if context else client.tasks())
+    marker = f"[{REVIEW_TAG}:{skill}]"
+    if any(marker in row['goal'] and row['state'] not in ('completed', 'failed', 'cancelled') for row in rows):
         return {"proposed": False, "reason": "review already queued"}
     approved = enabled()
-    task = queue.add(review_description(layout, skill), source="agent",
-                     approved=approved)
-    # Marker resets the counter so we don't re-propose while this one runs.
+    goal = review_description(layout, skill)
+    if context:
+        inherited = {**context, 'source':'client' if approved else 'background',
+                     'execution': {**context.get('execution', {}), 'workspace': str(layout.root)}}
+        task = context['owner'].submit(goal, context=inherited, proposal=not approved,
+            key=f"review:{layout.root}:{skill}:{len(skill_notes.notes_for(layout, skill))}")
+    else:
+        task = client.submit(goal, session_id='skill-reviews', workspace=str(layout.root), proposal=not approved)
     skill_notes.add_note(layout, skill=skill, outcome="reviewing",
-                         note="deep-think review queued")
-    return {"proposed": True, "task_id": task.id, "skill": skill,
-            "approved": approved, "status": "ready" if approved else "backlog"}
+                         note=f"Gateway review task {task['task_id']} admitted")
+    return {"proposed": True, "task_id": task['task_id'], "skill": skill,
+            "approved": approved, "status": task['status']}
 
 
 def sweep(layout: Any, queue: Any, *, k: int = DEFAULT_K, rng=None) -> list[dict]:

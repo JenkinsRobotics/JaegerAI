@@ -1,0 +1,10 @@
+{
+  "name": "contract-review",
+  "original_name": "contract-review",
+  "source": "claude-cowork--legal",
+  "origin_path": "plugins/cache/claude-cowork/legal/1.1.0/skills/contract-review",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--legal",
+  "skill_md_sha256": "a81446e3dc73c8295fc493fe5e6cb56946c57c2f4eefcaf16efe8ff0c7efca0a"
+}

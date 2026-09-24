@@ -1,0 +1,10 @@
+{
+  "name": "daily-brief",
+  "original_name": "daily-brief",
+  "source": "claude-cowork--daily-brief",
+  "origin_path": "plugins/cache/claude-cowork/daily-brief/0.1.0/skills/daily-brief",
+  "plugin_version": "0.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "36e1c37ae4ec05968802b0428df8bc6aa92ce6b2630a42d6ca6a272df864f154"
+}

@@ -293,3 +293,22 @@ def test_paused_work_does_not_reappear_in_next_conversation_turn(monkeypatch, tm
     assert saved is not None and not saved.completed
     pointer = json.loads(module._session_pointer('dispatcher').read_text())
     assert pointer['paused_task_id'] == identity and pointer['task_id'] is None
+
+
+def test_completed_durable_receipt_survives_owner_scope_restart(monkeypatch, tmp_path):
+    from jaeger_ai.core.runtime import work_ledger as module
+    monkeypatch.setattr(module, '_layout_run_dir', lambda: tmp_path)
+    artifact = tmp_path / 'report.txt'
+    artifact.write_text('verified result')
+    with module.ledger_scope('task:one'):
+        work_ledger(action='create', task_name='report', total_items=1,
+                    completed_ids=['report'], verify={'kind': 'paths_exist', 'paths': [str(artifact)]})
+        receipt = complete_task(evidence='Read and checked the report', summary='Report verified')
+        assert receipt['ok']
+    with module.ledger_scope('task:one', resume_completed=True):
+        assert module.last_completion() == receipt
+        from jaeger_ai.core.runtime.autonomous_runner import run_continued_turn
+        result = run_continued_turn(lambda _: pytest.fail('completed effect must not reexecute'), 'resume', durable=True)
+        assert result['text'] == 'Report verified'
+    with module.ledger_scope('task:one'):
+        assert module.last_completion() is None

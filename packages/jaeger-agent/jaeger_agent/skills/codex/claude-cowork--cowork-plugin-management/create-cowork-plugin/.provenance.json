@@ -1,0 +1,10 @@
+{
+  "name": "create-cowork-plugin",
+  "original_name": "create-cowork-plugin",
+  "source": "claude-cowork--cowork-plugin-management",
+  "origin_path": "plugins/cache/claude-cowork/cowork-plugin-management/0.2.2/skills/create-cowork-plugin",
+  "plugin_version": "0.2.2",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--cowork-plugin-management",
+  "skill_md_sha256": "7d2e20bfda7ed7414835227e44faf218b511cf246fadbbd74102c15a18fdb066"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "slack-search",
+  "original_name": "slack-search",
+  "source": "claude-cowork--slack-by-salesforce",
+  "origin_path": "plugins/cache/claude-cowork/slack-by-salesforce/1.0.0/skills/slack-search",
+  "plugin_version": "1.0.0",
+  "license": "MIT",
+  "license_file": "../LICENSE.claude-cowork--slack-by-salesforce",
+  "skill_md_sha256": "934d1c12a69d013890810a25da9f6c6a89c6b2dbd16f18a8862419e9f41e6879"
+}

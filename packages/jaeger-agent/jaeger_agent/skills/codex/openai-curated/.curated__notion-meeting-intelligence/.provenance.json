@@ -1,0 +1,10 @@
+{
+  "name": "notion-meeting-intelligence",
+  "original_name": "notion-meeting-intelligence",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/notion-meeting-intelligence",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "bad61faccbbe0f2cab53bcfbc4cb22f847ba8593ef14c2e37fea5b9b03346332"
+}

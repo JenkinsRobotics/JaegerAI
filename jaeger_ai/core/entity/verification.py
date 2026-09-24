@@ -542,11 +542,11 @@ class VerificationRegistry:
 
         # Direct registration lookup
         verifier = self._verifiers.get(act_type)
-        if verifier is None and tool_name:
+        if verifier is None and tool_name and not act_type:
             verifier = self._verifiers.get(tool_name)
 
         # Heuristic classification for standard tools when action_type is omitted
-        if verifier is None:
+        if verifier is None and act_type != "unknown":
             if act_type in ("file_write", "write_file") or any(k in tool_name for k in ("write", "create_file", "append")):
                 verifier = self._verifiers.get("file_write")
             elif act_type in ("file_delete", "delete_file") or any(k in tool_name for k in ("delete", "remove", "unlink")):
@@ -790,7 +790,7 @@ def derive_verification_action(
         chosen = with_content[-1] if with_content else writes[-1]
         abs_obj = [p.rstrip(".,;\"'") for p in _ABS_PATH.findall(obj)]
         raw_path = str(chosen["path"])
-        if abs_obj and Path(abs_obj[0]).exists():
+        if abs_obj and Path(abs_obj[0]).is_file():
             path = abs_obj[0]
         elif Path(raw_path).is_absolute():
             path = raw_path
@@ -805,7 +805,7 @@ def derive_verification_action(
                     "tool": "write_file",
                     "verification_error": str(exc),
                 }
-            if abs_obj:
+            if abs_obj and not Path(abs_obj[0]).is_dir():
                 path = abs_obj[0]
         expected = chosen.get("expected_content")
         if not expected:
@@ -828,7 +828,7 @@ def derive_verification_action(
     if strategy == "direct_response" or not records:
         return {"action_type": "unknown", "tool": ""}
 
-    if records and all(r["tool"] in {"work_ledger", "complete_task", "read_file", "list_skill_dir", "memory"} for r in records):
+    if records and all(r["tool"] in {"read_file", "list_skill_dir", "recall", "get_mode", "list_models", "search_files", "grep_files", "list_files"} for r in records):
         return {"action_type": "read_only", "tool": records[-1]["tool"]}
 
     abs_paths = [p.rstrip(".,;\"'") for p in _ABS_PATH.findall(obj)]

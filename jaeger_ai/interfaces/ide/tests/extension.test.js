@@ -18,6 +18,7 @@ const mockVscode = {
   },
   commands: { registerCommand: () => ({ dispose: () => {} }), executeCommand: async () => {} },
   workspace: {
+    registerTextDocumentContentProvider: () => ({ dispose() {} }),
     getConfiguration: () => ({ get: (key) => key === 'model' ? jaegerModelSetting : '' }),
     onDidChangeConfiguration: (fn) => { configChangeListeners.push(fn); return { dispose: () => {} }; },
     workspaceFolders: [],

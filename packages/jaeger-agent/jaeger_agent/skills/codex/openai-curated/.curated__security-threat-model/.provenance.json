@@ -1,0 +1,10 @@
+{
+  "name": "security-threat-model",
+  "original_name": "security-threat-model",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/security-threat-model",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "1283c0dd62a8104d9edda4583569b5d8510b4ddaa45120687c999250fd96bad2"
+}

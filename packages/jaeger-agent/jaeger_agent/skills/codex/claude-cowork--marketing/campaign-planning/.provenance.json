@@ -1,0 +1,10 @@
+{
+  "name": "campaign-planning",
+  "original_name": "campaign-planning",
+  "source": "claude-cowork--marketing",
+  "origin_path": "plugins/cache/claude-cowork/marketing/1.1.0/skills/campaign-planning",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--marketing",
+  "skill_md_sha256": "bd42e411831e2f1ea968d697d3765dcbc538787a7e866fb22337fedc067bc382"
+}

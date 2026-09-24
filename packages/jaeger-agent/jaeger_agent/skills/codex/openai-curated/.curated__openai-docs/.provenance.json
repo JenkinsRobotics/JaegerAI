@@ -1,0 +1,10 @@
+{
+  "name": "openai-docs",
+  "original_name": "openai-docs",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/openai-docs",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "057d24b4f36dab38299857777e4c0ca5bcce65d8cf89d917c174c1a0ae23d9f8"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "sites-hosting",
+  "original_name": "sites-hosting",
+  "source": "openai-bundled--sites",
+  "origin_path": "plugins/cache/openai-bundled/sites/0.1.70/skills/sites-hosting",
+  "plugin_version": "0.1.70",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "0d8ce03a009e434d81215aa0d2f3081e3eb8ce2f71b91e67b712591e7cb8f334"
+}

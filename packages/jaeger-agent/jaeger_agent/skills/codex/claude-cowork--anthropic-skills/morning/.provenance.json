@@ -1,0 +1,10 @@
+{
+  "name": "morning",
+  "original_name": "morning",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/morning",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "a7c4dbcb745799736991b027cceae39aae4880cc00ff43871ae5e87b38023bdd"
+}

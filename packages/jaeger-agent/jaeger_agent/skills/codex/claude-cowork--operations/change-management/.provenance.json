@@ -1,0 +1,10 @@
+{
+  "name": "change-management",
+  "original_name": "change-management",
+  "source": "claude-cowork--operations",
+  "origin_path": "plugins/cache/claude-cowork/operations/1.1.0/skills/change-management",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "544bc14d1559ec17bd5a837c9290712df80e72389cabaf81af0e461362103472"
+}

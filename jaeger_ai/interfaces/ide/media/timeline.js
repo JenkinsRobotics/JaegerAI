@@ -39,6 +39,10 @@
 
   function applyTool(rows, event) {
     const rid = requestId(event);
+    // Text preceding a tool call is commentary, not the final answer.
+    // Preserve its chronological position in the turn's work history.
+    if (event.event === 'tool.started') rows = rows.map(row =>
+      row.requestId === rid && row.kind === 'answer' ? { ...row, kind: 'progress', live: false } : row);
     const identity = event.data?.activity_id || event.data?.call_id || eventId(event);
     const key = `tool:${rid}:${identity}`;
     const index = rows.findIndex(row => row.key === key);
@@ -52,6 +56,22 @@
     return index >= 0 ? replaceAt(rows, index, row) : [...rows, row];
   }
 
+  const PLAN_STATUSES = new Set(['pending', 'in_progress', 'completed']);
+
+  // The latest plan wins: the model resends the whole plan each time it changes,
+  // so one row per request is replaced in place and keeps its chronological spot.
+  function applyPlan(rows, event) {
+    const rid = requestId(event), key = `plan:${rid}`;
+    const plan = (Array.isArray(event.data?.plan) ? event.data.plan : [])
+      .map(item => ({ step: String(item?.step || ''), status: PLAN_STATUSES.has(item?.status) ? item.status : 'pending' }))
+      .filter(item => item.step);
+    if (!plan.length) return rows;
+    const row = { key, kind: 'plan', requestId: rid, plan,
+      explanation: String(event.data?.explanation || ''), live: false };
+    const index = rows.findIndex(existing => existing.key === key);
+    return index >= 0 ? replaceAt(rows, index, row) : [...rows, row];
+  }
+
   function settle(rows, rid) {
     let changed = false;
     const next = rows.map(row => {
@@ -62,6 +82,16 @@
   }
 
   function applyOne(rows, event) {
+    if (event.event === 'turn.progress' || event.event === 'turn.checkpoint') {
+      const rid = requestId(event), kind = event.event === 'turn.checkpoint' ? 'checkpoint' : 'progress';
+      const candidates = rows.filter(row => row.requestId === rid && row.kind === 'answer');
+      const next = rows.map(row => candidates.includes(row) ? { ...row, kind, live: false } : row);
+      if (kind === 'checkpoint' && !candidates.length && event.data?.text) {
+        next.push({ key: `checkpoint:${rid}:${eventId(event)}`, kind, requestId: rid, text: event.data.text, live: false });
+      }
+      return next;
+    }
+    if (event.event === 'turn.plan') return applyPlan(rows, event);
     if (STREAM_EVENTS.has(event.event)) return appendStream(rows, event);
     if (['tool.started', 'tool.completed', 'tool.failed'].includes(event.event)) return applyTool(rows, event);
     if (TERMINAL_EVENTS.has(event.event)) {

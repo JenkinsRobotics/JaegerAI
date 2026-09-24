@@ -1,0 +1,10 @@
+{
+  "name": "design-critique",
+  "original_name": "design-critique",
+  "source": "claude-cowork--design",
+  "origin_path": "plugins/cache/claude-cowork/design/1.1.0/skills/design-critique",
+  "plugin_version": "1.1.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "008156c53a3bba2b8bc5893a4246c558067aa46e9f0d6d641132c64579019cb4"
+}

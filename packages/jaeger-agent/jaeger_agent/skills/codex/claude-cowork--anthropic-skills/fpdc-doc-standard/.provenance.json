@@ -1,0 +1,10 @@
+{
+  "name": "fpdc-doc-standard",
+  "original_name": "fpdc-doc-standard",
+  "source": "claude-cowork--anthropic-skills",
+  "origin_path": "plugins/cache/claude-cowork/anthropic-skills/1.0.0/skills/fpdc-doc-standard",
+  "plugin_version": "1.0.0",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "4e85008d4d754275d2fe024f6570ac76658ebf33c25d76ab8c15470a27001305"
+}

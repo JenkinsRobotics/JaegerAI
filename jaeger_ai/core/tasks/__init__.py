@@ -1,5 +1,5 @@
 """Durable background work and scheduling package."""
-from .manager import DurableTaskManager
+from .owner import GatewayTaskOwner
 from .models import (
     DurableTask,
     NotificationPolicy,
@@ -12,7 +12,7 @@ from .store import SqliteDurableTaskStore
 
 __all__ = [
     "DurableTask",
-    "DurableTaskManager",
+    "GatewayTaskOwner",
     "NotificationPolicy",
     "RetryPolicy",
     "SqliteDurableTaskStore",

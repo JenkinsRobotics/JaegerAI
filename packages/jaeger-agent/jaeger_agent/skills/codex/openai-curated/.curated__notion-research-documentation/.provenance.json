@@ -1,0 +1,10 @@
+{
+  "name": "notion-research-documentation",
+  "original_name": "notion-research-documentation",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/notion-research-documentation",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "e88a46da978cf6f088a788fa92ee736df699a355a72f41f14bdc258bf3ef57e7"
+}

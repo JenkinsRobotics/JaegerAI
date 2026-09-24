@@ -1,0 +1,10 @@
+{
+  "name": "nda-triage",
+  "original_name": "nda-triage",
+  "source": "claude-cowork--legal",
+  "origin_path": "plugins/cache/claude-cowork/legal/1.1.0/skills/nda-triage",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--legal",
+  "skill_md_sha256": "01c4636b30c6f6f0ae06f0a8bdb504a8a7b0a0763836deada48ea705a63e0710"
+}

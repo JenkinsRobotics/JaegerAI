@@ -1,0 +1,10 @@
+{
+  "name": "netlify-deploy",
+  "original_name": "netlify-deploy",
+  "source": "openai-curated",
+  "origin_path": "vendor_imports/skills/skills/.curated/netlify-deploy",
+  "plugin_version": "skills",
+  "license": "none-declared",
+  "license_file": null,
+  "skill_md_sha256": "bb2c29bf599a043cade932f60cc64f632ca100e8767ccdfa2ba1a42c8d43958f"
+}

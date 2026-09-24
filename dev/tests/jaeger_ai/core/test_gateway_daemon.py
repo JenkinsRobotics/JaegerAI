@@ -34,6 +34,12 @@ def isolated_entity_runtime(tmp_path, monkeypatch):
     release_resident()
 
 
+@pytest.fixture
+def native_path_enabled(monkeypatch):
+    """These tests drive the isolated native-MCP-first lead turn on purpose."""
+    monkeypatch.setenv("JAEGER_LEGACY_PATHS", "1")
+
+
 def test_session_store_lifecycle(tmp_path: Path):
     db_file = tmp_path / "test_sessions.sqlite3"
     store = GatewaySessionStore(db_file)
@@ -155,6 +161,7 @@ class TestGatewayServerAPI(AioHTTPTestCase):
 
         self.gateway_app._probe_http = _ok_http  # type: ignore[method-assign]
         self.gateway_app._probe_native_mcp = _chat_500
+        self.gateway_app._probe_owner_runtime = lambda: {"ok": False}
         resp = await self.client.request("GET", "/health")
         assert resp.status == 503
         data = await resp.json()
@@ -307,6 +314,7 @@ async def test_missing_mcp_credential_fails_before_native_ownership(monkeypatch,
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("native_path_enabled")
 async def test_execute_turn_lead_uses_mcp_backend(monkeypatch, tmp_path):
     """Non-specialist turns stamp turn.finish backend from native MCP label."""
     store = GatewaySessionStore(tmp_path / "native_turn.sqlite3")
@@ -405,6 +413,7 @@ async def test_explicit_text_mode_reports_missing_native_capabilities(monkeypatc
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("native_path_enabled")
 async def test_actionable_text_mode_is_promoted_to_native(monkeypatch, tmp_path):
     store = GatewaySessionStore(tmp_path / "action.sqlite3")
     app = JaegerGatewayApp(store=store)
@@ -598,6 +607,25 @@ async def test_backend_health_does_not_require_ui_or_http_adapter(monkeypatch, t
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('owner_ok', [True, False])
+async def test_health_uses_resident_execution_owner_without_mcp(monkeypatch, tmp_path, owner_ok):
+    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / 'owner-health.sqlite3'))
+    async def http(url, **kwargs):
+        return {'ok': url.endswith('/api/tags'), 'url': url}
+    async def native(**kwargs):
+        return {'ok': False, 'agent_ready': False}
+    monkeypatch.setattr(app, '_probe_http', http)
+    monkeypatch.setattr(app, '_probe_native_mcp', native)
+    monkeypatch.setattr(app, '_probe_owner_runtime', lambda: {'ok': owner_ok})
+    response = await app.handle_health(None)
+    body = json.loads(response.body)
+    assert response.status == (200 if owner_ok else 503)
+    assert body['checks']['native_mcp']['required'] is not owner_ok
+    assert body['capabilities']['agent_ready'] is owner_ok
+    assert body['capabilities']['end_to_end_chat_verified'] is False
+
+
+@pytest.mark.asyncio
 async def test_gateway_restart_preserves_transcript_and_marks_unconfirmed_work(tmp_path):
     path = tmp_path / 'restart.sqlite3'
     store = GatewaySessionStore(path)
@@ -612,6 +640,40 @@ async def test_gateway_restart_preserves_transcript_and_marks_unconfirmed_work(t
     assert recovered['messages'][0]['content'] == 'accepted before restart'
     assert len(recovered['messages']) == 1
     assert restarted.store.recover_interrupted_sessions() == 0
+
+
+@pytest.mark.asyncio
+async def test_file_tool_records_review_and_guarded_undo(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    import jaeger_agent.workspace as workspace
+    store = GatewaySessionStore(tmp_path / 'files.sqlite3')
+    app = JaegerGatewayApp(store=store)
+    rid = 'e' * 32
+    store.admit_request('s', 'edit', request_id=rid)
+    target = tmp_path.resolve() / 'example.txt'
+    target.write_text('original\n')
+    monkeypatch.setattr(workspace, '_resolve_write', lambda _: target)
+    callbacks, flush = app._turn_stream_callbacks('s', rid)
+    callbacks.tool_progress('write_file', 'start', {'path': 'example.txt', 'content': 'secret body'})
+    target.write_text('changed\n')
+    callbacks.tool_done('write_file', {}, {}, True, None, 0.1)
+    flush()
+    req = SimpleNamespace(match_info={'id': 's', 'request_id': rid}, method='GET', query={})
+    reply = await app.handle_file_changes(req)
+    body = json.loads(reply.body)
+    assert body['canUndo'] and body['files'][0]['added'] == 1
+    assert 'before' not in body['files'][0]
+    req.method = 'POST'
+    assert (await app.handle_file_changes(req)).status == 409
+    store.complete_request(rid, status='completed', result={}, assistant_text='done')
+    req.match_info['id'] = 'other'
+    assert (await app.handle_file_changes(req)).status == 404
+    req.match_info['id'] = 's'
+    assert (await app.handle_file_changes(req)).status == 200
+    assert target.read_text() == 'original\n'
+    events = app.event_bus.get_replay_events('s', since_event_id=0)
+    assert any(event.event == 'files.changed' for event in events)
+    assert 'secret body' not in str([event.data for event in events])
 
 
 def test_admit_request_is_atomic_and_conflicts_on_fingerprint(tmp_path: Path):
@@ -670,6 +732,7 @@ def test_approval_first_writer_wins_and_deny_is_terminal(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("native_path_enabled")
 async def test_duplicate_turn_submission_executes_once(tmp_path: Path):
     store = GatewaySessionStore(tmp_path / "once.sqlite3")
     app = JaegerGatewayApp(store=store)
@@ -877,6 +940,7 @@ async def test_recursive_delegation_is_rejected(tmp_path: Path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("native_path_enabled")
 async def test_disconnect_does_not_cancel_accepted_work(tmp_path: Path):
     store = GatewaySessionStore(tmp_path / "disc.sqlite3")
     bus = GatewayEventBus(store=store)

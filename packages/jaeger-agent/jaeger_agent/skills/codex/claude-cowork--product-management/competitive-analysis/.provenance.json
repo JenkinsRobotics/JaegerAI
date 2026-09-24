@@ -1,0 +1,10 @@
+{
+  "name": "product-management:competitive-analysis",
+  "original_name": "competitive-analysis",
+  "source": "claude-cowork--product-management",
+  "origin_path": "plugins/cache/claude-cowork/product-management/1.1.0/skills/competitive-analysis",
+  "plugin_version": "1.1.0",
+  "license": "Apache-2.0",
+  "license_file": "../LICENSE.claude-cowork--product-management",
+  "skill_md_sha256": "ac3860cec29139440a9b4e50df430378ecedebfd2f537ce1eaa6d4ce866f73be"
+}

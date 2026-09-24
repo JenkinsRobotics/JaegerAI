@@ -40,6 +40,19 @@ def _write_request():
     )
 
 
+@pytest.fixture(autouse=True)
+def ask_mode():
+    """These tests exercise the approval prompt, which is the operator's opt-in
+    (autonomy "ask"/"scoped"); the default "auto" approves without asking."""
+    from jaeger_ai.core.runtime import autonomy
+
+    before = dict(autonomy._state)
+    autonomy.set_autonomy("ask")
+    yield
+    autonomy._state.clear()
+    autonomy._state.update(before)
+
+
 def test_unanswered_approval_is_expired_when_the_tool_is_refused(running_app, monkeypatch):
     monkeypatch.setattr(gateway_server, "APPROVAL_WAIT_S", 0.3)
     provider = _GatewayToolConfirmationProvider(running_app, "s", "r")

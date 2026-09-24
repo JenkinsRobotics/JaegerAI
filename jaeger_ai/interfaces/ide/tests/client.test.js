@@ -44,6 +44,21 @@ function fixture() {
   const client = new Conversation(gateway, () => {}, async value => { saved = structuredClone(value); });
   return { gateway, client, saved: () => saved };
 }
+test('initial reconnect failure retries without submitting a turn', async () => {
+  const { gateway, client } = fixture();
+  let attempts = 0;
+  gateway.json = async () => {
+    if (++attempts < 3) throw new Error('Gateway restarting');
+    return { component: 'jaeger-gateway' };
+  };
+  try {
+    await client.refresh('one');
+    assert.equal(client.state.connected, false);
+    await waitFor(() => client.state.connected);
+    assert.equal(attempts, 3);
+    assert.equal(gateway.sent, undefined);
+  } finally { client.dispose(); }
+});
 test('EOF cannot mark a running request completed; retry never submits again', async () => {
   const { gateway, client, saved } = fixture();
   await client.refresh('one'); await client.send('hello');
@@ -144,6 +159,59 @@ test('send() always sends attachment_ids, defaulting to an empty array', async (
   await waitFor(() => client.state.status.includes('interrupted'));
   assert.deepEqual(gateway.sent.attachment_ids, []);
   client.dispose();
+});
+
+test('first message creates a Gateway-owned chat and sends without clicking New chat', async () => {
+  const { gateway, client } = fixture();
+  let created;
+  gateway.create = async body => {
+    created = body;
+    return { session_id: body.session_id, title: body.title, status: 'idle', messages: [] };
+  };
+  await client.refresh();
+  await client.send('Start a real conversation');
+  await waitFor(() => client.state.status.includes('interrupted'));
+  assert.equal(created.source, 'ide');
+  assert.equal(gateway.sent.text, 'Start a real conversation');
+  assert.match(created.title, /Start a real conversation/);
+  client.dispose();
+});
+
+test('failed first-chat creation permits another send', async () => {
+  const { gateway, client } = fixture();
+  gateway.create = async () => { throw new Error('create unavailable'); };
+  await client.refresh();
+  await client.send('hello');
+  assert.equal(client.sending, false);
+  assert.equal(client.state.busy, false);
+  gateway.create = async body => ({ ...gateway.row, session_id: body.session_id });
+  await client.send('retry');
+  assert.equal(gateway.sent.text, 'retry');
+  client.dispose();
+});
+
+test('work duration survives completion and reconnect with activity attached to its turn', async () => {
+  const { gateway, client, saved } = fixture();
+  let complete = false;
+  gateway.receipt = async () => ({ status: complete ? 'completed' : 'running' });
+  gateway.events = async function* () {
+    yield { event_id: 2, event: 'turn.reasoning', data: { request_id: this.sent.request_id, text: 'Checking the result.' } };
+    assert.equal(client.workBySession.one[0].finishedAt, null);
+    complete = true;
+    this.row.messages = [{ role: 'user', content: 'hello' }, { role: 'assistant', content: 'done' }];
+    yield { event_id: 3, event: 'turn.finish', data: { request_id: this.sent.request_id } };
+  };
+  await client.refresh('one'); await client.send('hello');
+  await waitFor(() => !client.state.busy);
+  const work = client.workBySession.one[0];
+  assert.equal(work.userIndex, 0);
+  assert.equal(work.status, 'completed');
+  assert.ok(work.finishedAt >= work.startedAt);
+  const restored = new Conversation(gateway, () => {}, async () => {}, saved());
+  await restored.refresh('one');
+  assert.deepEqual(restored.workBySession.one[0], work);
+  assert.equal(restored.state.timeline[0].requestId, work.requestId);
+  client.dispose(); restored.dispose();
 });
 
 test('staged attachments become the sent turn\'s attachment_ids and clear once admitted', async () => {
@@ -340,6 +408,7 @@ test('completed tool rows survive turn.finish and a controller reconnect without
   gateway.receipt = async () => ({ status: finished ? 'completed' : 'running' });
   gateway.events = async function* () {
     const rid = this.sent.request_id;
+    yield { event_id: 19, event: 'turn.delta', data: { request_id: rid, delta: 'I will read the file.' } };
     yield { event_id: 20, event: 'tool.started', data: {
       request_id: rid, activity_id: 'fast-read', tool: 'read_file', status: 'reading',
     } };
@@ -358,14 +427,15 @@ test('completed tool rows survive turn.finish and a controller reconnect without
   await client.refresh('one');
   await client.send('read it');
   await waitFor(() => !client.state.busy);
-  assert.deepEqual(client.state.timeline.map(row => row.kind), ['tool']);
-  assert.equal(client.state.timeline[0].name, 'read_file');
+  assert.deepEqual(client.state.timeline.map(row => row.kind), ['progress', 'tool']);
+  assert.equal(client.state.timeline[0].text, 'I will read the file.');
+  assert.equal(client.state.timeline[1].name, 'read_file');
   assert.equal(client.state.timeline[0].live, false);
   assert.equal(client.state.text, '', 'the authoritative history owns the settled answer');
 
   const restored = new Conversation(gateway, () => {}, async () => {}, saved());
   await restored.refresh('one');
-  assert.deepEqual(restored.state.timeline.map(row => row.kind), ['tool']);
+  assert.deepEqual(restored.state.timeline.map(row => row.kind), ['progress', 'tool']);
   assert.equal(restored.state.timeline[0].key, client.state.timeline[0].key);
   assert.equal(restored.state.session.messages.filter(row => row.role === 'assistant').length, 1);
   restored.dispose(); client.dispose();
@@ -527,4 +597,44 @@ test('cancel during parent task requests orchestration cancellation via gateway'
   await waitFor(() => !client.state.busy);
   await submitPromise;
   client.dispose();
+});
+
+test('durable paged history restores all tools and adopts a foreign live request without sending', async () => {
+  const { gateway, client } = fixture();
+  const events = [{event_id: 1, event: 'turn.start', timestamp: 10, data: {request_id: 'foreign'}}];
+  for (let i = 0; i < 125; i++) events.push({event_id: i + 2, event: 'tool.completed', data: {request_id: 'foreign', activity_id: String(i), tool: 'read_file', ok: true}});
+  gateway.activity = async (sid, after) => {
+    const page = events.filter(e => e.event_id > after).slice(0, 40);
+    return {events: page, next_cursor: page.at(-1)?.event_id || after, has_more: page.at(-1)?.event_id < 126};
+  };
+  gateway.row.status = 'running';
+  gateway.events = async function* (sid, cursor, signal) { await new Promise(resolve => signal.addEventListener('abort', resolve, {once:true})); };
+  await client.refresh('one');
+  assert.equal(client.pending.one.requestId, 'foreign');
+  assert.equal(client.state.timeline.filter(r => r.kind === 'tool').length, 125);
+  assert.equal(client.state.busy, true);
+  assert.equal(gateway.sent, undefined);
+  await client.cancel(); assert.equal(gateway.cancelled, 'foreign');
+  client.dispose();
+});
+
+test('background work appears during a foreground stream and survives session reload', async () => {
+  const { gateway, client } = fixture();
+  let release;
+  const pending = new Promise(resolve => { release = resolve; });
+  gateway.tasks = async () => ({ tasks: [{ task_id: 'child', goal: 'Build report', state: 'running', notification_policy: { recipient_session_id: 'one' } }] });
+  gateway.events = async function* () {
+    yield { event_id: 4, session_id: 'one', event: 'task.updated', data: { task: { task_id: 'child' } } };
+    await pending;
+  };
+  try {
+    await client.refresh('one');
+    client.state.backgroundTasks = [];
+    await client.send('Foreground question');
+    await waitFor(() => client.state.backgroundTasks.length === 1);
+    assert.equal(client.state.busy, true);
+    await client.refresh('one');
+    assert.equal(client.state.backgroundTasks[0].task_id, 'child');
+    assert.ok(gateway.sent.request_id);
+  } finally { client.dispose(); release(); }
 });

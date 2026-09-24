@@ -21,6 +21,7 @@ from aiohttp import ClientSession, ClientTimeout, web
 
 from jaeger_ai import __version__ as JAEGER_VERSION
 from jaeger_ai.contract.frameworks import DEFAULT_AGENT_MODEL
+from jaeger_ai.contract.legacy_paths import legacy_paths_enabled
 from jaeger_ai.contract.model_ids import provider_model_name, split_routed_model_id
 from jaeger_ai.contract.ports import (
     GATEWAY_PORT,
@@ -214,6 +215,17 @@ class _GatewayToolConfirmationProvider:
         except Exception:  # noqa: BLE001 — unreadable grants mean "ask", never "allow"
             pass
         try:
+            # Autonomy "auto" (the default) means no approval prompts: this is the
+            # operator's own assistant. Hardline-blocked commands never reach here
+            # (the guard sits outside the tiers), and every action stays audited.
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            from jaeger_ai.core.runtime.autonomy import effective_autonomy
+            layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+            if effective_autonomy(getattr(layout, "config_path", None)) == "auto":
+                return True
+        except Exception:  # noqa: BLE001 — unreadable settings mean "ask", never "allow"
+            pass
+        try:
             from jaeger_ai.core.instance.commissioning import load_authority_policy
             from jaeger_ai.core.entity.runtime import EntityRuntime
             rt = EntityRuntime.get_singleton()
@@ -318,6 +330,8 @@ class JaegerGatewayApp:
         self._background_task: asyncio.Task | None = None
         self._background_status: dict[str, Any] = {"enabled": background_client is not None}
         self.store = store or GatewaySessionStore()
+        from .file_changes import FileChanges
+        self.file_changes = FileChanges(self.store.path.parent / "turn-file-changes")
         self.event_bus = event_bus or GatewayEventBus(store=self.store)
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
@@ -346,6 +360,10 @@ class JaegerGatewayApp:
             except Exception as exc:
                 logger.debug("Failed to initialize default ide_orchestration: %s", exc)
                 self.orchestration = None
+        if self.orchestration is not None and hasattr(self.orchestration, "bind_store"):
+            self.orchestration.bind_store(self.store.path)
+        from jaeger_ai.core.tasks.owner import GatewayTaskOwner
+        self.task_owner = GatewayTaskOwner(self)
         self.app = web.Application(middlewares=[_reject_browser_cross_site])
         self.app.on_startup.append(self._recover_interrupted)
         self.app.on_cleanup.append(self._bounded_shutdown)
@@ -414,6 +432,15 @@ class JaegerGatewayApp:
                 self._pending_resume = True
         except Exception as exc:
             logger.debug("Gateway EntityRuntime attach skipped: %s", exc)
+        if runtime_for_producers is not None and getattr(runtime_for_producers, "layout", None) is not None:
+            try:
+                self.task_owner.migrate_legacy(runtime_for_producers.layout)
+            except Exception:
+                logger.exception("Legacy task import failed; original queue retained")
+        self.task_owner.start()
+        resume_workers = getattr(self.orchestration, 'resume_pending', None)
+        if callable(resume_workers):
+            resume_workers()
         if self._background_producers is None:
             self._start_background_producers(runtime_for_producers)
         if self._background_client is not None:
@@ -422,6 +449,7 @@ class JaegerGatewayApp:
     async def _bounded_shutdown(self, app: web.Application) -> None:
         if not self._owns_store:
             return
+        await self.task_owner.stop()
         if self._background_task is not None:
             self._background_task.cancel()
             await asyncio.gather(self._background_task, return_exceptions=True)
@@ -697,20 +725,30 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/sessions", self.handle_create_session)
         self.app.router.add_get("/v1/sessions/{id}", self.handle_get_session)
         self.app.router.add_delete("/v1/sessions/{id}", self.handle_delete_session)
+        self.app.router.add_patch("/v1/sessions/{id}", self.handle_rename_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
         self.app.router.add_post("/v1/sessions/{id}/cancel", self.handle_cancel_turn)
         self.app.router.add_post("/v1/sessions/{id}/reconcile", self.handle_reconcile)
         self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}", self.handle_get_request)
+        self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}/changes", self.handle_file_changes)
+        self.app.router.add_post("/v1/sessions/{id}/requests/{request_id}/changes/undo", self.handle_file_changes)
         self.app.router.add_post("/v1/sessions/{id}/handoff", self.handle_session_handoff)
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
+        self.app.router.add_get("/v1/sessions/{id}/activity", self.handle_activity_history)
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
         self.app.router.add_get("/v1/runtime/frameworks", self.handle_runtime_frameworks)
         self.app.router.add_get("/v1/runtime/models", self.handle_runtime_models)
         self.app.router.add_get("/v1/runtime/capabilities", self.handle_runtime_capabilities)
+        self.app.router.add_get("/v1/runtime/skills", self.handle_runtime_skills)
         self.app.router.add_get("/v1/sessions/{id}/attachments", self.handle_list_attachments)
         self.app.router.add_post("/v1/sessions/{id}/attachments", self.handle_add_attachment)
+        self.app.router.add_get("/v1/tasks", self.handle_tasks)
+        self.app.router.add_post("/v1/tasks", self.handle_tasks)
+        self.app.router.add_get("/v1/tasks/{id}", self.handle_task)
+        self.app.router.add_post("/v1/tasks/{id}/cancel", self.handle_task_cancel)
+        self.app.router.add_post("/v1/tasks/{id}/approve", self.handle_task_approve)
         self.app.router.add_get("/v1/orchestration/workers", self.handle_list_orchestration_workers)
         self.app.router.add_post("/v1/orchestration/tasks", self.handle_create_orchestration_task)
         self.app.router.add_get("/v1/orchestration/tasks/{id}", self.handle_get_orchestration_task)
@@ -901,6 +939,7 @@ class JaegerGatewayApp:
 
     async def handle_health(self, request: web.Request) -> web.Response:
         """Backend readiness is independent of optional HTTP adapters and UIs."""
+        owner = self._probe_owner_runtime()
         bridge, ollama, webui_chat, native_mcp = await asyncio.gather(
             self._probe_http(LOCKED_BRIDGE_HEALTH_URL),
             self._probe_http(f"{LOCKED_OLLAMA_URL}/api/tags"),
@@ -915,10 +954,12 @@ class JaegerGatewayApp:
             "ollama": {**ollama, "required": True},
             "webui": {**webui_chat, "required": False, "chat_execution_verified": False},
             "native_mcp": native_mcp,
+            "owner_runtime": owner,
         }
+        native_mcp["required"] = not owner["ok"]
         required_ok = (
             bool(ollama.get("ok"))
-            and bool(native_mcp.get("ok"))
+            and (owner["ok"] or bool(native_mcp.get("ok")))
         )
         all_green = required_ok
         status = "ok" if all_green else "unhealthy"
@@ -942,9 +983,9 @@ class JaegerGatewayApp:
                             "process_lease": self.store.process_lease(),
                             **self._entity_diagnostics()},
             "capabilities": {
-                "native_agent": bool(native_mcp.get("ok")),
+                "native_agent": owner["ok"] or bool(native_mcp.get("ok")),
                 "transport_ready": bool(native_mcp.get("transport_ready") or native_mcp.get("chat_tool_available")),
-                "agent_ready": bool(native_mcp.get("agent_ready")),
+                "agent_ready": owner["ok"] or bool(native_mcp.get("agent_ready")),
                 "execution_verified": bool(native_mcp.get("execution_verified")),
                 "end_to_end_chat_verified": False,
             },
@@ -955,6 +996,22 @@ class JaegerGatewayApp:
             },
         }
         return web.json_response(payload, status=200 if all_green else 503)
+
+    @staticmethod
+    def _probe_owner_runtime() -> dict[str, Any]:
+        """Check the same resident OWNER used by turn execution, without a turn."""
+        from jaeger_ai.core.entity.ownership import EntityRuntimeMode
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+
+        try:
+            runtime = EntityRuntime.get_singleton()
+            resident = bool(getattr(runtime, "is_resident", False))
+            owner = runtime.mode == EntityRuntimeMode.OWNER
+            runtime.event_store.count()
+            return {"ok": owner and resident, "resident": resident, "owner": owner,
+                    "execution_verified": False}
+        except Exception as exc:
+            return {"ok": False, "error": type(exc).__name__, "execution_verified": False}
 
     async def handle_runtime_status(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.entity.runtime_status import collect_runtime_status
@@ -1211,6 +1268,32 @@ class JaegerGatewayApp:
         # after handoff so the UI can render the active agent identity.
         return web.json_response(self._enrich_session_agent(session))
 
+    async def handle_activity_history(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        if not self.store.get_session(session_id):
+            return web.json_response({"error": "Session not found"}, status=404)
+        try:
+            after = max(0, int(request.query.get("after", "0")))
+        except ValueError:
+            return web.json_response({"error": "Invalid cursor"}, status=400)
+        return web.json_response(self.store.activity_history(session_id, after))
+
+    async def handle_rename_session(self, request: web.Request) -> web.Response:
+        """PATCH /v1/sessions/{id} ``{"title": "..."}`` — the one place titles change."""
+        session_id = request.match_info["id"]
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        title = body.get("title") if isinstance(body, dict) else None
+        if not isinstance(title, str) or not title.strip():
+            return web.json_response({"error": "title must be a non-empty string"}, status=400)
+        session = self.store.rename_session(session_id, title.strip()[:200])
+        if session is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        self.event_bus.publish(session_id, "session.updated", {"session": session})
+        return web.json_response(session)
+
     async def handle_delete_session(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
         deleted = self.store.delete_session(session_id)
@@ -1295,6 +1378,19 @@ class JaegerGatewayApp:
             request_id = str(request_id).strip() or None
 
         requested = {key: body.get(key) for key in EXECUTION_INPUT_KEYS if body.get(key) is not None}
+        options = requested.get("options")
+        if isinstance(options, dict) and "ide" in options:
+            # The IDE's view of what is open. Only the allow-listed, size-capped
+            # fields survive; nothing else can ride in through this key.
+            from jaeger_ai.core.entity.ide_context import clean as clean_ide_context
+            options = {**options}
+            cleaned = clean_ide_context(options.pop("ide"))
+            if cleaned:
+                options["ide"] = cleaned
+            if options:
+                requested["options"] = options
+            else:
+                requested.pop("options")
         if requested.get("model") and not requested.get("provider"):
             # A routed id ("ollama-cloud/glm") names its provider lane.
             lane, _ = split_routed_model_id(str(requested["model"]))
@@ -1843,6 +1939,7 @@ class JaegerGatewayApp:
         # raw catalog name pairs them without publishing either the args or the
         # raw name. UUIDs remain stable because the event payload is durable.
         active_tools: dict[str, list[str]] = {}
+        file_snapshots: dict[str, list[dict]] = {}
 
         def flush() -> None:
             with lock:
@@ -1850,7 +1947,7 @@ class JaegerGatewayApp:
                 pending.clear()
                 last[0] = time.monotonic()
             if text:
-                self.event_bus.publish(session_id, "turn.delta", {**ids, "delta": text})
+                self.event_bus.publish(session_id, "turn.delta", {**ids, "delta": text, "channel": "provisional"})
 
         def on_delta(piece: str) -> None:
             with lock:
@@ -1871,12 +1968,19 @@ class JaegerGatewayApp:
             # create two terminal rows for one call.
             if phase != "start":
                 return
-            del data
             flush()
             raw_name = str(name or "")
+            self.event_bus.publish(session_id, "turn.progress", {**ids, "channel": "progress"})
             activity_id = f"tool_{uuid.uuid4().hex}"
             with lock:
                 active_tools.setdefault(raw_name, []).append(activity_id)
+            if raw_name in {"write_file", "append_file", "patch", "delete_file", "move_file", "copy_file"} and isinstance(data, dict):
+                try:
+                    from jaeger_agent.workspace import _resolve_write
+                    keys = ["src", "dst"] if raw_name == "move_file" else ["dst"] if raw_name == "copy_file" else ["path"]
+                    file_snapshots[activity_id] = [self.file_changes.begin(_resolve_write(str(data[key]))) for key in keys]
+                except Exception:
+                    logger.debug("File change checkpoint unavailable for %s", raw_name)
             self.event_bus.publish(session_id, "tool.started", {
                 **ids,
                 "session_id": session_id,
@@ -1897,8 +2001,22 @@ class JaegerGatewayApp:
             error: str | None,
             elapsed_s: float,
         ) -> None:
-            # Arguments, result and error are intentionally unused. They can
-            # contain credentials, file contents, prompts, or command output.
+            # Arguments, result and error are intentionally not published. They
+            # can contain credentials, file contents, prompts, or command output.
+            # The one exception is ``update_plan``: its result is the plan the
+            # model chose to show the operator, and only that validated payload
+            # (steps, statuses, an optional note) leaves this callback.
+            plan_payload = None
+            if str(name or "") == "update_plan" and ok and isinstance(result, dict) and result.get("ok"):
+                plan_payload = {
+                    "plan": [
+                        {"step": str(item.get("step", ""))[:500], "status": str(item.get("status", ""))}
+                        for item in (result.get("plan") or []) if isinstance(item, dict)
+                    ][:50],
+                    "summary": dict(result.get("summary") or {}),
+                }
+                if isinstance(result.get("explanation"), str):
+                    plan_payload["explanation"] = result["explanation"][:500]
             del args, result, error
             flush()
             raw_name = str(name or "")
@@ -1908,6 +2026,15 @@ class JaegerGatewayApp:
                 if queued == []:
                     active_tools.pop(raw_name, None)
             succeeded = bool(ok)
+            snapshots = file_snapshots.pop(activity_id, [])
+            if snapshots:
+                try:
+                    for snapshot in snapshots:
+                        self.file_changes.finish(session_id, request_id, snapshot)
+                    self.event_bus.publish(session_id, "files.changed", {
+                        **ids, **self.file_changes.describe(session_id, request_id)})
+                except (OSError, ValueError, UnicodeError):
+                    logger.warning("File change checkpoint could not settle for %s", raw_name)
             duration = _safe_tool_duration(elapsed_s)
             phase = "completed" if succeeded else "failed"
             detail = (
@@ -1927,6 +2054,8 @@ class JaegerGatewayApp:
                 "elapsed_s": duration,
                 "text": detail,
             })
+            if plan_payload is not None:
+                self.event_bus.publish(session_id, "turn.plan", {**ids, **plan_payload})
 
         return AgentCallbacks(
             stream_delta=on_delta,
@@ -1939,6 +2068,7 @@ class JaegerGatewayApp:
         self, prompt: str, *, session_key: str, request_id: str,
         on_model: Callable[[str], None] | None = None,
         execution: dict[str, Any] | None = None,
+        continuation_state: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Run one inner ReAct step in the EntityRuntime OWNER process."""
         from jaeger_ai.core.entity.runtime import EntityRuntime
@@ -1966,12 +2096,20 @@ class JaegerGatewayApp:
         try:
             # The admitted tool grant scopes the agent built for this turn
             # ([] = no tools; absent = the owner's normal catalog).
-            with tool_allowlist(list(grant) if grant is not None else None):
+            from jaeger_agent.task_port import task_scope
+            request_row = self.store.get_request(request_id) or {}
+            options = selection.get("options") or {}
+            source = "background" if options.get("background") else "user"
+            with task_scope(self.task_owner, session_id=session_key, request_id=request_id,
+                            execution=selection, user_text=request_row.get("input_text", prompt), source=source), \
+                    tool_allowlist(list(grant) if grant is not None else None):
                 return runtime.run_subordinate_react(
                     prompt,
                     session_key=session_key,
                     request_id=request_id,
                     callbacks=callbacks,
+                    continuation_state=continuation_state,
+                    project_root=str(selection.get("workspace") or "") or None,
                     confirmation_provider=_GatewayToolConfirmationProvider(self, session_key, request_id),
                     native_run_id=native,
                     model=selected_model or None,
@@ -1996,21 +2134,32 @@ class JaegerGatewayApp:
         """One admitted request: inner ReAct plus owner-side continuation."""
         from jaeger_ai.core.runtime.autonomous_runner import run_continued_turn
 
+        continuation_state: dict[str, Any] = {}
+
         def step(inner_prompt: str) -> dict[str, Any]:
             out = self._owner_react_turn(
                 inner_prompt, session_key=session_key, request_id=request_id,
                 on_model=on_model, execution=execution,
+                continuation_state=continuation_state,
             )
             return {
+                **out,
                 "text": out.get("text") or "",
                 "halt_reason": out.get("halt_reason"),
                 "status": "completed",
             }
 
-        return run_continued_turn(
-            step, prompt, objective=objective or prompt,
-            is_cancelled=lambda: self._cancellations.is_cancelled(request_id),
-        )
+        from jaeger_ai.core.runtime.work_ledger import ledger_scope, last_completion
+        with ledger_scope(session_key, resume_completed=bool(((execution or {}).get("options") or {}).get("task_id")) and not bool(((execution or {}).get("options") or {}).get("verification_error"))):
+            result = run_continued_turn(
+                step, prompt, objective=objective or prompt,
+                durable=bool(((execution or {}).get("options") or {}).get("task_id")),
+                max_steps=8 if ((execution or {}).get("options") or {}).get("task_id") else None,
+                is_cancelled=lambda: self._cancellations.is_cancelled(request_id),
+                on_checkpoint=lambda checkpoint: self.event_bus.publish(
+                    session_key, "turn.checkpoint", {**checkpoint, "request_id": request_id}),
+            )
+            return {**result, "task_completion": last_completion()}
 
     async def _execute_turn(
         self,
@@ -2154,7 +2303,10 @@ class JaegerGatewayApp:
                         owner_first = True
                 except Exception:
                     pass
-                if not owner_first:
+                # The native-MCP-first lead turn is an isolated second path: the
+                # resident Entity is the one executor. It runs only when the
+                # operator re-enabled legacy paths, never as a silent fallback.
+                if not owner_first and legacy_paths_enabled():
                     try:
                         native_res = asyncio.run_coroutine_threadsafe(_run_native_coro(prompt), loop).result()
                         if native_res is not None:
@@ -2183,30 +2335,14 @@ class JaegerGatewayApp:
                 req_model = provider_model_name(session_meta.get("model") or (session or {}).get("model") or "")
             active_model = req_model or DEFAULT_OLLAMA_MODEL
 
-            def _sync_model(prompt: str) -> str:
-                nonlocal backend, model
-                backend = LOCKED_OLLAMA_URL
-                model = active_model
-                current = self.store.get_session(session_id) or {}
-                chat_fut = asyncio.run_coroutine_threadsafe(
-                    self._ollama_chat(
-                        prompt,
-                        model=active_model,
-                        system_prompt=system_prompt,
-                        history=self._history_before_admitted_user(
-                            current, admitted_request,
-                        ),
-                        attachments=self._turn_attachments(session_id, execution),
-                    ),
-                    loop,
-                )
-                # No terminal write here. The planner, critic and self-refine
-                # call this runner for intermediate thoughts; persisting from
-                # inside it published candidate plans as the user's answer
-                # and hid the real outcome (audit Task A, 2026-09-21).
-                return chat_fut.result()
+            def _model_only_lane(prompt: str) -> dict[str, Any]:
+                """A plain model answer with no tools: text-only chats and specialist agents.
 
-            def _sync_delegate(specialist_name: str, prompt: str, session_key: str = session_id) -> dict[str, Any]:
+                These are session-level choices made by the operator (a text-only
+                conversation, an agent registered as a specialist), so they are an
+                explicit lane at the Gateway boundary, next to the image lane. They
+                do not pass through the agent loop and therefore never call tools.
+                """
                 nonlocal backend, model
                 backend = LOCKED_OLLAMA_URL
                 model = active_model
@@ -2216,15 +2352,12 @@ class JaegerGatewayApp:
                         prompt,
                         model=active_model,
                         system_prompt=system_prompt,
-                        history=self._history_before_admitted_user(
-                            current, admitted_request,
-                        ),
+                        history=self._history_before_admitted_user(current, admitted_request),
                         attachments=self._turn_attachments(session_id, execution),
                     ),
                     loop,
                 )
-                txt = chat_fut.result()
-                return {"text": txt, "specialist": specialist_name, "status": "completed"}
+                return {"text": chat_fut.result(), "status": "completed"}
 
             from jaeger_ai.core.entity.runtime import EntityRuntime
             runtime = EntityRuntime.get_singleton()
@@ -2237,42 +2370,33 @@ class JaegerGatewayApp:
                 "specialist": agent_fields.get("agent_id") if role_s == "specialist" else None,
             }
 
-            context = {
-                "react_runner": _sync_react,
-                "model_runner": _sync_model,
-                "delegate_runner": _sync_delegate,
-                "gateway_session": session,
-                "agent_fields": agent_fields,
-                "metadata": turn_meta,
-            }
-
-            if execution and execution.get("is_subordinate"):
-                # Match local run_for_voice(is_subordinate=True): skip the
-                # EntityRuntime salience/strategy wrap and run owner ReAct
-                # (with continuation) as the worker itself.
-                def selected_model(name: str) -> None:
-                    nonlocal model
-                    model = name
-                turn_result = await asyncio.to_thread(
-                    self._continued_owner_react,
-                    text,
-                    session_key=session_id,
-                    request_id=rid,
-                    on_model=selected_model,
-                    execution=execution,
-                    objective=request_text,
-                )
-                backend = "owner-react"
-            else:
-                turn_result = await asyncio.to_thread(
-                    runtime.execute_turn,
+            # One turn shape. The main loop is the agent loop: build the request with
+            # its fenced memory, run it, record the answer. Chat turns and durable
+            # child tasks take exactly this path; nothing gates it.
+            try:
+                prepared = await asyncio.to_thread(
+                    runtime.prepare_turn,
                     text,
                     session_id=session_id,
                     source="gateway",
                     request_id=rid,
-                    context=context,
+                    gateway_session=session,
                     metadata=turn_meta,
+                    ide_context=((execution or {}).get("options") or {}).get("ide"),
                 )
+                prompt = prepared.prompt
+            except Exception:
+                # Memory is an enrichment: if reading it fails the operator's
+                # request must still reach the agent, unadorned.
+                logger.warning("turn context unavailable for %s; running the bare request", rid, exc_info=True)
+                prepared, prompt = None, text
+            model_only = (text_only and not actionable) or role_s == "specialist"
+            turn_result = await asyncio.to_thread(_model_only_lane if model_only else _sync_react, prompt)
+            if prepared is not None and not turn_result.get("error"):
+                try:
+                    await asyncio.to_thread(runtime.finish_turn, prepared, str(turn_result.get("text") or ""))
+                except Exception:
+                    logger.warning("could not record the answer for %s", rid, exc_info=True)
 
             if self._cancellations.is_cancelled(rid):
                 if self._settle_cancelled(session_id, turn_id, rid, agent_fields):
@@ -2309,6 +2433,8 @@ class JaegerGatewayApp:
                     "native_memory": agent_lane,
                 },
                 "verification": turn_result.get("verification"),
+                "task_completion": turn_result.get("task_completion"),
+                "halt_reason": turn_result.get("halt_reason"),
                 "trace_id": turn_result.get("trace_id"),
                 **agent_fields,
             }
@@ -2470,6 +2596,26 @@ class JaegerGatewayApp:
             **agent_fields,
         }
         self._persist_terminal(request_id, session_id, "cancelled", result)
+
+    async def handle_file_changes(self, request: web.Request) -> web.Response:
+        sid, rid = request.match_info["id"], request.match_info["request_id"]
+        row = self.store.get_request(rid)
+        if not row or row.get("session_id") != sid:
+            return web.json_response({"error": "Request not found"}, status=404)
+        if request.method == "POST" and row.get("status") not in {"completed", "failed", "cancelled"}:
+            return web.json_response({"error": "Wait for the turn to settle before undoing"}, status=409)
+        if request.method == "POST" and any(not task.done() for task in self._running_tasks.values()):
+            return web.json_response({"error": "Wait for active Gateway turns to finish before undoing"}, status=409)
+        try:
+            if request.method == "POST":
+                data = await asyncio.to_thread(self.file_changes.undo, sid, rid)
+                self.event_bus.publish(sid, "files.changed", {"request_id": rid, **data})
+            else:
+                data = await asyncio.to_thread(self.file_changes.describe, sid, rid,
+                                               contents=request.query.get("contents") == "1")
+            return web.json_response(data)
+        except (ValueError, OSError) as exc:
+            return web.json_response({"error": str(exc)}, status=409)
 
     async def handle_get_request(self, request: web.Request) -> web.Response:
         row = self.store.get_request(request.match_info["request_id"])
@@ -2698,6 +2844,23 @@ class JaegerGatewayApp:
         from jaeger_ai.core.runtime.truth import capability_snapshot
         return web.json_response(capability_snapshot())
 
+    async def handle_runtime_skills(self, request: web.Request) -> web.Response:
+        """GET /v1/runtime/skills[?q=text] — the skills a client can offer, one row each.
+
+        Read-only. Rows carry name, category, description and lifecycle, never the
+        skill body or its path, so a client menu can list them safely.
+        """
+        from jaeger_agent.skill_registry.playbook_skills import discover_playbooks
+
+        query = str(request.query.get("q") or "").strip().lower()
+        rows = [
+            {"name": s.name, "category": s.category, "description": s.description[:300],
+             "lifecycle": s.lifecycle}
+            for s in discover_playbooks()
+            if not query or query in s.name.lower() or query in s.description.lower()
+        ]
+        return web.json_response({"skills": rows, "count": len(rows)})
+
     async def handle_list_attachments(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
         if self.store.get_session(session_id) is None:
@@ -2764,6 +2927,8 @@ class JaegerGatewayApp:
             future.set_result(approved)
 
         handoff_row = None
+        if resolved is not None and (resolved.get("metadata") or {}).get("task_id"):
+            self.task_owner.resolve(resolved["metadata"]["task_id"], approved)
         if resolved is not None:
             hid = (resolved.get("metadata") or {}).get("handoff_id")
             if hid:
@@ -2891,6 +3056,45 @@ class JaegerGatewayApp:
         if native is None:
             raise RuntimeError("Specialist native execution returned no confirmed result")
         return native
+
+    async def handle_tasks(self, request: web.Request) -> web.Response:
+        if request.method == 'GET':
+            return web.json_response({'tasks': [t.to_dict() for t in self.task_owner.store.list_tasks()]})
+        body = await request.json()
+        parent = self.store.get_session(str(body.get('session_id') or ''))
+        if parent is None:
+            return web.json_response({'error': 'Existing session_id required'}, status=400)
+        execution = dict(body.get('execution') or {})
+        execution.setdefault('workspace', parent.get('workspace') or '')
+        try:
+            result = self.task_owner.submit(str(body.get('goal') or ''),
+                context={'session_id': parent['session_id'], 'source': 'client', 'execution': execution,
+                         'request_id': body.get('request_id')},
+                artifacts=body.get('artifacts'), proposal=bool(body.get('proposal')))
+        except ValueError as exc:
+            return web.json_response({'error': str(exc)}, status=400)
+        return web.json_response(result, status=200 if result['replayed'] else 201)
+
+    async def handle_task(self, request: web.Request) -> web.Response:
+        task = self.task_owner.store.get_task(request.match_info['id'])
+        return web.json_response(task.to_dict() if task else {'error': 'Task not found'}, status=200 if task else 404)
+
+    async def handle_task_approve(self, request: web.Request) -> web.Response:
+        task_id = request.match_info['id']
+        task = self.task_owner.store.get_task(task_id)
+        if task is None:
+            return web.json_response({'error': 'Task not found'}, status=404)
+        if task.provenance.get('authorized'):
+            return web.json_response({'task_id': task_id, 'status': task.state.value})
+        self.task_owner.resolve(task_id, True)
+        for approval in self.store.list_pending_approvals():
+            if (approval.get('metadata') or {}).get('task_id') == task_id:
+                self.store.resolve_approval(approval['approval_id'], approved=True, decision='once')
+        return web.json_response({'task_id': task_id, 'status': 'queued'})
+
+    async def handle_task_cancel(self, request: web.Request) -> web.Response:
+        cancelled = await self.task_owner.cancel(request.match_info['id'])
+        return web.json_response({'cancelled': cancelled}, status=200 if cancelled else 404)
 
     async def handle_list_orchestration_workers(self, request: web.Request) -> web.Response:
         """List registered IDE orchestration workers and their availability."""
