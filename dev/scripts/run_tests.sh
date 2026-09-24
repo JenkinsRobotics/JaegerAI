@@ -120,7 +120,7 @@ PYTEST=("$PYTHON" -m pytest)
 # exposes CI-vs-local differences (test ordering, fixture races).
 # ``JaegerAI_TEST_WORKERS`` pins the count for reproducibility; export
 # it = 1 to debug a flake.
-if "${PYTEST[@]}" --help 2>/dev/null | grep -q -- '-n NUMPROCESSES'; then
+if "${PYTEST[@]}" --help 2>/dev/null | grep -- '-n NUMPROCESSES' >/dev/null; then
     XDIST_ARGS=(-n "${JaegerAI_TEST_WORKERS:-4}")
 else
     XDIST_ARGS=()
@@ -152,6 +152,8 @@ printf '[run_tests] %s\n' "${CMD[*]}" >&2
 PACKAGE_SUITES=(
     "packages/jaeger-agent/tests"
     "packages/jaeger-os/dev/tests"
+    "packages/jaeger-kokoro-tts/jaeger_kokoro_tts/tests"
+    "packages/jaeger-whisper-stt/jaeger_whisper_stt/tests"
 )
 
 # `|| STATUS=$?` not a bare call: `set -e` is on, so an unguarded non-zero
@@ -163,7 +165,7 @@ STATUS=0
 for suite in "${PACKAGE_SUITES[@]}"; do
     [ -d "$suite" ] || continue
     printf '[run_tests] %s\n' "$suite" >&2
-    "$PYTEST" -q ${XDIST_ARGS[@]+"${XDIST_ARGS[@]}"} "$suite" || STATUS=$?
+    "${PYTEST[@]}" -q ${XDIST_ARGS[@]+"${XDIST_ARGS[@]}"} "$suite" || STATUS=$?
 done
 
 exit "$STATUS"

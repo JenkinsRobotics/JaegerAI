@@ -17,6 +17,12 @@ import pytest
 from jaeger_ai.cli.verbs import update_verb as U
 
 
+@pytest.fixture(autouse=True)
+def isolated_environment_selection(monkeypatch):
+    # Individual cases opt into a configured environment explicitly.
+    monkeypatch.delenv("JAEGER_VENV", raising=False)
+
+
 # ── helpers ────────────────────────────────────────────────────────
 
 

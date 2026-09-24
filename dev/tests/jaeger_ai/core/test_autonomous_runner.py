@@ -127,6 +127,46 @@ def test_controller_step_cannot_spawn_nested_top_level_controller(monkeypatch):
         main._actionable_controller_depth.reset(token)
 
 
+def test_actionable_multimodal_request_keeps_media_and_output_policy(monkeypatch):
+    """The completion controller must not drop a camera input or voice policy."""
+    import jaeger_ai.main as main
+    from jaeger_ai.core.runtime import agent_controller
+
+    media = [{"type": "image_url", "image_url": {"url": "data:image/png;base64,test"}}]
+    calls = []
+
+    def run(client, prompt, **kwargs):
+        calls.append((prompt, kwargs))
+        assert main._actionable_controller_depth.get() == 1
+        return {"text": "done", "error": None}
+
+    class Controller:
+        def __init__(self, client, *, turn_fn, **kwargs):
+            self.turn = turn_fn
+
+        def run_to_completion(self, text, session, **kwargs):
+            self.turn(None, "Inspect the supplied diagram", session_key=session)
+            result = self.turn(None, "Verify the summary", session_key=session)
+            return {"status": "COMPLETED", "reason": "verified", "output": result}
+
+    monkeypatch.setattr(agent_controller, "JaegerAgentController", Controller)
+    monkeypatch.setattr(main, "_run_turn_via_jaeger_agent", run)
+    result = main._run_turn(
+        None, "Create a summary document from this diagram and verify it exists.",
+        session_key="media-task", allow_persona=False, content=media,
+        system_prompt_addon="Use spoken output.",
+    )
+    assert result["actionable"] and result["controller_state"] == "COMPLETED"
+    assert calls[0][1]["content"] == media + [
+        {"type": "text", "text": "Inspect the supplied diagram"}
+    ]
+    assert "content" not in calls[1][1]
+    assert all(kwargs["system_prompt_addon"] == "Use spoken output."
+               for _, kwargs in calls)
+    assert len(media) == 1
+    assert main._actionable_controller_depth.get() == 0
+
+
 def test_durable_request_opens_counted_ledger_automatically():
     ledger = ensure_autonomous_ledger("process these 436 records")
     assert ledger is not None

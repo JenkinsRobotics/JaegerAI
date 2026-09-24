@@ -259,7 +259,7 @@ def test_configure_preserves_models_keys_and_rollback(monkeypatch, tmp_path):
     for path in configs:
         result = yaml.safe_load(path.read_text())
         assert result["model"] == {"provider": "ollama", "default": "keep-this-model"}
-        assert result["mcp_servers"]["jaeger-host"]["url"] == "http://192.168.64.1:8811/mcp"
+        assert result["mcp_servers"]["jaeger-host"]["url"] == "http://127.0.0.1:8792/mcp"
     assert yaml.safe_load(gateway.read_text())["mcp"]["policies"] == {"existing": "preserved"}
     installer.restore_configuration(backup)
     assert (home / ".hermes/SOUL.md").read_text() == "USER SOUL"

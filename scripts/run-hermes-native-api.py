@@ -22,10 +22,6 @@ ROOT = Path(__file__).resolve().parents[1]
 HERMES_AGENT_SRC = Path(
     os.environ.get("JAEGER_HERMES_AGENT_SRC", str(Path.home() / "GitHub/hermes-agent"))
 ).expanduser()
-if not (HERMES_AGENT_SRC / "gateway").is_dir():
-    raise RuntimeError(f"Hermes Agent checkout is missing: {HERMES_AGENT_SRC}")
-sys.path.insert(0, str(HERMES_AGENT_SRC))
-sys.path.insert(0, str(ROOT / "integrations/hermes_agent"))
 
 
 def provision_key(path: Path) -> None:
@@ -55,6 +51,10 @@ def api_options(key_file: Path, host: str, port: int) -> dict:
 
 
 async def serve(options: dict) -> int:
+    if not (HERMES_AGENT_SRC / "gateway").is_dir():
+        raise RuntimeError(f"Hermes Agent checkout is missing: {HERMES_AGENT_SRC}")
+    sys.path.insert(0, str(HERMES_AGENT_SRC))
+    sys.path.insert(0, str(ROOT / "integrations/hermes_agent"))
     from gateway.config import PlatformConfig
     from gateway.platforms.api_server import APIServerAdapter
 

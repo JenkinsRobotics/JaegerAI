@@ -502,7 +502,6 @@ class JaegerAgent:
             appends a ``[turn failed: …]`` assistant note, then
             re-raises for the caller to surface.
         """
-        self._bind_turn_run()
         # Hermes-style focus profile: widen this agent's visible surface for
         # obvious intent before the first model call. The set only grows for
         # the session, preserving prompt-prefix/KV stability.
