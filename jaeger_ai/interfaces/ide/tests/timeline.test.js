@@ -138,3 +138,12 @@ test('replayed plan events are applied once', () => {
   const once = applyEvents(createTimelineState(), [event]);
   assert.equal(applyEvents(once, [event]), once);
 });
+
+test('a tool row keeps its command and output across started and completed events', () => {
+  const state = applyEvents(createTimelineState(), [
+    { event_id: 1, event: 'tool.started', data: { request_id: 'r', activity_id: 'a', tool: 'exec_command', input: 'ls -la' } },
+    { event_id: 2, event: 'tool.completed', data: { request_id: 'r', activity_id: 'a', tool: 'exec_command', output: 'total 8' } },
+  ]);
+  assert.equal(state.rows[0].input, 'ls -la');
+  assert.equal(state.rows[0].output, 'total 8');
+});

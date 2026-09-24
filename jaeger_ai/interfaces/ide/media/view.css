@@ -80,3 +80,6 @@ form,.composer-bar{min-width:0}.bar-left{flex:0 0 auto}.bar-right{min-width:0;fl
 .model-pill{min-width:0;flex:0 1 auto}.model-pill #model{min-width:0;width:100%;max-width:170px}.pill.toggle{flex:0 0 auto}
 @media(max-width:470px){.pill.toggle span{display:none}.pill.toggle{padding:0 8px}}
 @media(max-width:340px){.model-pill #model{max-width:90px}}
+
+.io-block{display:flex;gap:10px;margin:4px 0 8px 32px;font-size:12px}.io-tag{flex:0 0 28px;color:var(--muted);font-size:10px;letter-spacing:.06em;padding-top:2px}
+.io-block pre{margin:0;flex:1;min-width:0;padding:7px 10px;border-radius:7px;background:var(--vscode-textCodeBlock-background,#222);color:var(--vscode-foreground,#ddd);font-family:var(--vscode-editor-font-family,monospace);white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}

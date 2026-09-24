@@ -52,6 +52,7 @@
     const row = { key, kind: 'tool', requestId: rid,
       name: String(event.data?.tool || old?.name || 'tool'),
       detail: String(event.data?.text || event.data?.status || old?.detail || ''),
+      input: String(event.data?.input || old?.input || ''), output: String(event.data?.output || old?.output || ''),
       phase, ok: phase === 'failed' ? false : event.data?.ok, live: phase === 'running' };
     return index >= 0 ? replaceAt(rows, index, row) : [...rows, row];
   }
