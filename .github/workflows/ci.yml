@@ -69,7 +69,14 @@ jobs:
           # though it is only a build dependency of Jaeger.
           python -m pip install --upgrade pip "setuptools>=83"
           case "${{ matrix.suite }}" in
-            root) python scripts/install-packages.py packages/jaeger-os 'packages/jaeger-agent[multimodal-duplex]' packages/jaeger-kokoro-tts packages/jaeger-whisper-stt '.[test]' ;;
+            root)
+              # Honor the app's binding version while installing its packages,
+              # instead of compiling a newer binding and then replacing it.
+              sed -n '/^llama-cpp-python==/p' requirements.txt > "$RUNNER_TEMP/jaeger-ci-constraints.txt"
+              export PIP_CONSTRAINT="$RUNNER_TEMP/jaeger-ci-constraints.txt"
+              python scripts/install-packages.py packages/jaeger-os 'packages/jaeger-agent[multimodal-duplex]' packages/jaeger-kokoro-tts packages/jaeger-whisper-stt '.[test]'
+              python -m pip install pytest-timeout
+              ;;
             agent) python scripts/install-packages.py packages/jaeger-os packages/jaeger-agent; python -m pip install pytest onnxruntime ;;
             os) python scripts/install-packages.py packages/jaeger-os; python -m pip install pytest ;;
             kokoro) python scripts/install-packages.py packages/jaeger-os packages/jaeger-kokoro-tts; python -m pip install pytest ;;
@@ -78,7 +85,7 @@ jobs:
       - name: Test suite
         run: |
           case "${{ matrix.suite }}" in
-            root) python -m pytest dev/tests -q ;;
+            root) python -m pytest dev/tests -vv --timeout=120 --timeout-method=thread --durations=20 ;;
             agent) python -m pytest packages/jaeger-agent/tests -q ;;
             os) cd packages/jaeger-os && python -m pytest dev/tests -q ;;
             kokoro) cd packages/jaeger-kokoro-tts && python -m pytest -q ;;
