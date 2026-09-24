@@ -3734,9 +3734,10 @@ def _run_actionable_turn(
         nonlocal first_step
         options = {}
         if first_step and content is not None:
-            # The controller's task framing accompanies the original media.
+            # The UI display text may summarize a richer model payload.
+            # Keep its full instructions alongside the controller framing.
             options["content"] = (content + [{"type": "text", "text": prompt}]
-                                  if isinstance(content, list) else prompt)
+                                  if isinstance(content, list) else f"{content}\n\n{prompt}")
         if system_prompt_addon:
             options["system_prompt_addon"] = system_prompt_addon
         first_step = False

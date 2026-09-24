@@ -19,11 +19,8 @@ from jaeger_agent.core import selfcheck
 
 
 @pytest.fixture(autouse=True)
-def _live_surface():
-    """Every check here reads the real registry — see tests/conftest.py."""
-    from tests.conftest import _register_tool_surface
-
-    _register_tool_surface()
+def _live_surface(live_tools):
+    """Request the registry fixture without importing a conftest module."""
     yield
 
 

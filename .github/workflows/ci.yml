@@ -46,11 +46,11 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-      - name: Install Linux sandbox backend
+      - name: Install Linux sandbox and desktop runtimes
         if: matrix.suite == 'root'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes bubblewrap
+          sudo apt-get install --yes bubblewrap libegl1 libgl1 libopengl0 libxkbcommon0 libportaudio2 libsndfile1
           # Ubuntu 24.04's hosted-runner AppArmor policy blocks the user and
           # network namespaces that Bubblewrap needs. This VM is disposable;
           # production hosts should use a targeted AppArmor profile instead.

@@ -24,6 +24,7 @@ REQUIRED_SUFFIXES = {
     "jaeger_agent-": (
         "jaeger_agent/assets/silero/silero_vad_16k_op15.onnx",
         "jaeger_agent/assets/silero/LICENSE.txt",
+        "jaeger_agent/background/thinking_runner.yaml",
     ),
 }
 

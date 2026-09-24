@@ -127,12 +127,15 @@ def test_controller_step_cannot_spawn_nested_top_level_controller(monkeypatch):
         main._actionable_controller_depth.reset(token)
 
 
-def test_actionable_multimodal_request_keeps_media_and_output_policy(monkeypatch):
+@pytest.mark.parametrize("media", [
+    [{"type": "image_url", "image_url": {"url": "data:image/png;base64,test"}}],
+    "Use write_file to create workspace/report.txt containing READY; read it back.",
+])
+def test_actionable_multimodal_request_keeps_media_and_output_policy(monkeypatch, media):
     """The completion controller must not drop a camera input or voice policy."""
     import jaeger_ai.main as main
     from jaeger_ai.core.runtime import agent_controller
 
-    media = [{"type": "image_url", "image_url": {"url": "data:image/png;base64,test"}}]
     calls = []
 
     def run(client, prompt, **kwargs):
@@ -157,13 +160,14 @@ def test_actionable_multimodal_request_keeps_media_and_output_policy(monkeypatch
         system_prompt_addon="Use spoken output.",
     )
     assert result["actionable"] and result["controller_state"] == "COMPLETED"
-    assert calls[0][1]["content"] == media + [
-        {"type": "text", "text": "Inspect the supplied diagram"}
-    ]
+    expected = (media + [{"type": "text", "text": "Inspect the supplied diagram"}]
+                if isinstance(media, list) else f"{media}\n\nInspect the supplied diagram")
+    assert calls[0][1]["content"] == expected
     assert "content" not in calls[1][1]
     assert all(kwargs["system_prompt_addon"] == "Use spoken output."
                for _, kwargs in calls)
-    assert len(media) == 1
+    if isinstance(media, list):
+        assert len(media) == 1
     assert main._actionable_controller_depth.get() == 0
 
 
