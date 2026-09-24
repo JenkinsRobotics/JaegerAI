@@ -14832,6 +14832,10 @@ def handle_get(handler, parsed) -> bool:
         try:
             diag.stage("list_profiles_api") if diag else None
             profiles_payload = profiles_api.list_profiles_api()
+            from jaeger_ai.contract.legacy_paths import VISIBLE_WEBUI_PROFILES, legacy_paths_enabled
+            if not legacy_paths_enabled():
+                # Legacy runtimes (hermes / openclaw / roundtable / other) are isolated.
+                profiles_payload = [p for p in profiles_payload if p.get("name") in VISIBLE_WEBUI_PROFILES]
             diag.stage("active_profile_lookup") if diag else None
             active = profiles_api.get_active_profile_name()
             diag.stage("isolated_mode_check") if diag else None

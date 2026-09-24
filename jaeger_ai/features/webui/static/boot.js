@@ -584,6 +584,16 @@ function expandSidebar(){
     if(typeof _applyTabVisibility==='function'&&typeof _getHiddenTabs==='function'){
       _applyTabVisibility(_getHiddenTabs());
     }
+    // The server decides which tabs exist (tabs backed by legacy Hermes systems are
+    // hidden unless legacy paths are on); localStorage is only a first-paint cache,
+    // so a browser that has never synced settings still hides them.
+    if(typeof api==='function'){
+      Promise.resolve(api('/api/settings')).then(function(s){
+        if(!s||!Array.isArray(s.hidden_tabs))return;
+        if(typeof _setHiddenTabs==='function')_setHiddenTabs(s.hidden_tabs);
+        if(typeof _applyTabVisibility==='function')_applyTabVisibility(s.hidden_tabs);
+      }).catch(function(){});
+    }
     var active=document.querySelector('.rail .rail-btn.nav-tab.active[data-panel]')
                ||document.querySelector('.sidebar-nav .nav-tab.active[data-panel]');
     if(active&&active.classList.contains('nav-tab-hidden')){

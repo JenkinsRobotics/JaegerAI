@@ -9829,8 +9829,8 @@ _SETTINGS_DEFAULTS = {
     "virtualize_transcript_optin": False,  # #4343 migration marker: True only once the user explicitly enables virtualize_transcript AFTER the default-off flip. A stored virtualize_transcript=True WITHOUT this marker is a stale pre-flip value and is reset to False on load (force-off-for-everyone migration).
     "show_tps": False,  # show tokens-per-second chip in assistant message headers
     "fade_text_effect": False,  # animate newly streamed words with a lightweight fade-in effect
-    "show_cli_sessions": True,  # merge CLI/TUI/messaging sessions from state.db into the sidebar by default (#3988); established installs are grandfathered OFF by the load_settings backfill
-    "show_claude_code_sessions": True,  # allow filtering Claude Code rows without hiding other imported sources
+    "show_cli_sessions": False,  # Jaeger: imported Claude Code / Codex / CLI history is not the operator's Jaeger chats; opt in from Settings (was True upstream, #3988)
+    "show_claude_code_sessions": False,  # Jaeger: off by default, see show_cli_sessions
     "show_cron_sessions": False,  # surface cron sessions in the sidebar (subordinate to show_cli_sessions)
     "show_webhook_sessions": False,  # surface webhook sessions in the sidebar (subordinate to show_cli_sessions)
     "show_kanban_sessions": False,  # surface kanban worker sessions in the sidebar (subordinate to show_cli_sessions)
@@ -10129,6 +10129,11 @@ def load_settings() -> dict:
             settings["default_model_provider"] = str(model_cfg.get("provider"))
     except Exception:
         logger.debug("Failed to resolve default model provider for settings")
+    from jaeger_ai.contract.legacy_paths import HIDDEN_WEBUI_TABS, legacy_paths_enabled
+
+    if not legacy_paths_enabled():
+        saved = settings.get("hidden_tabs") if isinstance(settings.get("hidden_tabs"), list) else []
+        settings["hidden_tabs"] = sorted({str(t) for t in saved} | HIDDEN_WEBUI_TABS)
     return settings
 
 

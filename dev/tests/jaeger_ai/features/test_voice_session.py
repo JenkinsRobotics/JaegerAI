@@ -152,10 +152,22 @@ def test_gateway_client_round_trip_against_the_real_gateway(tmp_path, monkeypatc
     from jaeger_ai.core.gateway.server import JaegerGatewayApp
     from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
+    from types import SimpleNamespace
+
+    from jaeger_ai.core.entity.runtime import PreparedTurn
+
     class _Entity:
-        def execute_turn(self, text, **_):
-            return {"text": f"heard: {text}", "error": None,
-                    "verification": {"status": "objective_unverified"}}
+        """The three calls a Gateway turn makes on the entity: build the request,
+        run the agent loop, record the answer."""
+
+        def prepare_turn(self, text, *, session_id, **_):
+            return PreparedTurn(prompt=text, event=SimpleNamespace(event_id="e"), user_text=text, session_id=session_id)
+
+        def run_subordinate_react(self, prompt, **_):
+            return {"text": f"heard: {prompt}", "halt_reason": None}
+
+        def finish_turn(self, prepared, response_text):
+            pass
 
     monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: _Entity()))
     gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "voice.sqlite3"))
@@ -182,7 +194,8 @@ def test_gateway_client_round_trip_against_the_real_gateway(tmp_path, monkeypatc
 
     assert result.ok
     assert result.text == "heard: what is my token"
-    assert result.verification == {"status": "objective_unverified"}
+    # The verification pass is off the turn path (see docs/architecture/MAIN_LOOP.md).
+    assert result.verification is None
 
 
 def test_runtime_audio_truth_is_the_measured_voice_status(monkeypatch):
