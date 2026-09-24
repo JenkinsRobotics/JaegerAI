@@ -376,6 +376,10 @@ class JaegerGatewayApp:
         from jaeger_agent import task_port
         task_port.install_ide_requester(self._ide_request)
         self._running_tasks: dict[str | tuple[str, str], asyncio.Future[Any]] = {}
+        # Request-scoped live ReAct agents. The Gateway does not own the agent;
+        # EntityRuntime supplies it while an admitted request is executing so
+        # steering can be forwarded to the active JaegerAgent.
+        self._active_agents: dict[str, Any] = {}
         # Request-scoped cancellation (R03): registered at admission, bound
         # to the executing agent, released when the worker returns.
         self._cancellations = CancellationRegistry()
@@ -767,6 +771,7 @@ class JaegerGatewayApp:
         self.app.router.add_patch("/v1/sessions/{id}", self.handle_rename_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
         self.app.router.add_post("/v1/sessions/{id}/cancel", self.handle_cancel_turn)
+        self.app.router.add_post("/v1/sessions/{id}/requests/{request_id}/steer", self.handle_steer_request)
         self.app.router.add_post("/v1/sessions/{id}/reconcile", self.handle_reconcile)
         self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}", self.handle_get_request)
         self.app.router.add_get("/v1/sessions/{id}/requests/{request_id}/changes", self.handle_file_changes)
@@ -2188,6 +2193,7 @@ class JaegerGatewayApp:
                     model=selected_model or None,
                     provider=str(selection.get("provider") or lane or "") or None,
                     on_model=on_model,
+                    on_agent=lambda agent: self._active_agents.__setitem__(request_id, agent),
                     cancellation=self._cancellations.get(request_id),
                     on_run=lambda run_id: self.store.bind_native(
                         request_id,
@@ -2224,15 +2230,18 @@ class JaegerGatewayApp:
 
         from jaeger_ai.core.runtime.work_ledger import ledger_scope, last_completion
         with ledger_scope(session_key, resume_completed=bool(((execution or {}).get("options") or {}).get("task_id")) and not bool(((execution or {}).get("options") or {}).get("verification_error"))):
-            result = run_continued_turn(
-                step, prompt, objective=objective or prompt,
-                durable=bool(((execution or {}).get("options") or {}).get("task_id")),
-                max_steps=8 if ((execution or {}).get("options") or {}).get("task_id") else None,
-                is_cancelled=lambda: self._cancellations.is_cancelled(request_id),
-                on_checkpoint=lambda checkpoint: self.event_bus.publish(
-                    session_key, "turn.checkpoint", {**checkpoint, "request_id": request_id}),
-            )
-            return {**result, "task_completion": last_completion()}
+            try:
+                result = run_continued_turn(
+                    step, prompt, objective=objective or prompt,
+                    durable=bool(((execution or {}).get("options") or {}).get("task_id")),
+                    max_steps=8 if ((execution or {}).get("options") or {}).get("task_id") else None,
+                    is_cancelled=lambda: self._cancellations.is_cancelled(request_id),
+                    on_checkpoint=lambda checkpoint: self.event_bus.publish(
+                        session_key, "turn.checkpoint", {**checkpoint, "request_id": request_id}),
+                )
+                return {**result, "task_completion": last_completion()}
+            finally:
+                self._active_agents.pop(request_id, None)
 
     async def _execute_turn(
         self,
@@ -2799,6 +2808,55 @@ class JaegerGatewayApp:
         except Exception as exc:  # noqa: BLE001 — cancel request is best-effort
             logger.warning("native cancel request failed: %s", exc)
             return False
+
+    async def handle_steer_request(self, request: web.Request) -> web.Response:
+        """Inject guidance into the active admitted ReAct request.
+
+        This is live steering, not a second turn. The agent owns a per-turn
+        queue and drains it before its next model step. If no ReAct agent is
+        active (for example a text-only lane), the Gateway returns an honest
+        409 so the client can decide whether to queue a follow-up turn.
+        """
+        session_id = request.match_info["id"]
+        request_id = request.match_info["request_id"]
+        body = await request.json() if request.can_read_body else {}
+        text = str(body.get("text") or "").strip()
+        if not text:
+            return web.json_response({"error": "Steering text is required"}, status=400)
+        row = self.store.get_request(request_id)
+        if row is None or row.get("session_id") != session_id:
+            return web.json_response({"error": "Request not found"}, status=404)
+        if row.get("status") in {"completed", "failed", "cancelled", "execution_unknown"}:
+            return web.json_response(
+                {"error": "Request is already terminal", "request_id": request_id},
+                status=409,
+            )
+        agent = self._active_agents.get(request_id)
+        if agent is None:
+            return web.json_response(
+                {
+                    "error": "This request has no active ReAct agent to steer",
+                    "request_id": request_id,
+                    "status": row.get("status"),
+                },
+                status=409,
+            )
+        accepted = bool(agent.steer(text))
+        if not accepted:
+            return web.json_response(
+                {"error": "Agent did not accept steering", "request_id": request_id},
+                status=409,
+            )
+        self.event_bus.publish(session_id, "turn.steer", {
+            "request_id": request_id,
+            "text": text,
+            "queued": True,
+        })
+        return web.json_response({
+            "request_id": request_id,
+            "steered": True,
+            "queued": True,
+        })
 
     async def handle_reconcile(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]

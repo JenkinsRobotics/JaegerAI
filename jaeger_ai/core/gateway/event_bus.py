@@ -34,7 +34,7 @@ class ReplayGap(RuntimeError):
 EVENT_TYPES = frozenset({
     # Turn lifecycle (IDE + WebUI + CLI render these identically).
     "turn.start", "turn.delta", "turn.reasoning", "turn.progress",
-    "turn.plan", "turn.finish", "turn.failed", "turn.cancelled",
+    "turn.plan", "turn.steer", "turn.finish", "turn.failed", "turn.cancelled",
     "turn.unknown", "turn.cancel",
     # Tools and files.
     "tool.started", "tool.done", "tool.error", "files.changed",

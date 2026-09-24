@@ -867,6 +867,7 @@ class EntityRuntime:
         callbacks: Any = None,
         continuation_state: dict[str, Any] | None = None,
         project_root: str | None = None,
+        on_agent: Callable[[Any], None] | None = None,
     ) -> dict[str, Any]:
         """Execute subordinate ReAct loop inside the EntityRuntime.
 
@@ -967,6 +968,8 @@ class EntityRuntime:
             # The owner holds this state locally, never across requests/users.
             agent.callbacks = callbacks
             agent._skill_route_query = ""
+        if on_agent is not None:
+            on_agent(agent)
         if cancellation is not None:
             from jaeger_ai.core.runtime.cancellation import bind_agent
             bind_agent(cancellation, agent)

@@ -417,19 +417,26 @@ class Conversation {
     this.state.status = 'Cancellation requested · waiting for owner'; this.emit();
     if (!this.observer || this.observer.signal.aborted) await this.refresh(sid);
   }
-  // Mid-turn steering. The Gateway HTTP layer exposes no live-injection
-  // endpoint (a search of core/gateway for 'steer' finds none), so a message
-  // sent while a turn runs is queued here and auto-sent as a normal turn the
-  // moment the running one settles (finish → flushSteers). Returns false when
-  // nothing was queued so the composer can restore the draft.
-  steer(text) {
+  // Mid-turn steering. The Gateway owns live injection into the active
+  // JaegerAgent. If it honestly reports that this request has no ReAct agent,
+  // queue locally and send as a normal follow-up once the owner settles.
+  async steer(text) {
     text = String(text).trim();
     const sid = this.state.session?.session_id;
-    if (!text || !this.state.connected || !this.state.busy || this.sending || !sid) return false;
-    this.steers.push({ id: randomUUID(), sessionId: sid, text, queuedAt: Date.now() });
-    this.state.status = 'Steering queued · sends when this turn finishes';
-    this.emit();
-    return true;
+    const rid = this.pending[sid]?.requestId;
+    if (!text || !this.state.connected || !this.state.busy || this.sending || !sid || !rid) return false;
+    try {
+      const result = await this.gateway.steer(sid, rid, text);
+      this.state.status = 'Steering accepted · next model step';
+      this.emit();
+      return Boolean(result.steered);
+    } catch (error) {
+      if (error.status !== 409) throw error;
+      this.steers.push({ id: randomUUID(), sessionId: sid, text, queuedAt: Date.now() });
+      this.state.status = 'Steering queued · sends when this turn finishes';
+      this.emit();
+      return true;
+    }
   }
   async flushSteers(sid) {
     const queued = this.steers.filter(item => item.sessionId === sid);
