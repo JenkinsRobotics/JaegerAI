@@ -49,7 +49,7 @@ The model is replaceable cognition. The client is not the entity. A tool returni
 | Explicit image-question and text-only/specialist lanes exist at the Gateway boundary | `server.py::_execute_turn`; `test_gateway_single_terminal.py` | Source and unit tests; they are not silent fallbacks |
 | Recent Chromium qualification exists for multi-turn, long output, cancellation, reload, and narrow viewport | `test_gateway_owned_process_contract.py::test_owned_browser_multiturn_render_cancel_and_reload` | Owned-process Chromium with a scripted provider; not live-provider or physical-phone proof |
 | Swift/macOS source, external build path, and test suite exist | `interfaces/swift/Package.swift`; `Scripts/build-app.sh`; `Tests/JaegerAITests`; `test_external_swift_build.py` | Source and Swift tests; installed-app/GUI remains unqualified |
-| Mid-turn steering exists in the agent and clients queue it until the Gateway exposes live injection | `jaeger_agent.py::steer`; `interfaces/ide/conversation.js`; `interfaces/swift/.../AgentBridge.swift`; `test_hermes_adoption.py`; `interfaces/test_bridge.py` | Source/unit tests; not yet a live IDE-worker steering acceptance |
+| Gateway-owned live steering exists and the IDE uses it before falling back to a local follow-up queue | `/v1/sessions/{id}/requests/{request_id}/steer`; `core/entity/runtime.py::run_subordinate_react(on_agent=...)`; `interfaces/ide/gateway.js::steer`; `interfaces/ide/conversation.js::steer`; `test_gateway_live_steering.py`; `interfaces/ide/tests/steering.test.js` | Unit tests; still needs live-provider and real IDE-worker acceptance |
 | Large iOS client tree exists | `apps/ios` (451 tracked files) with chat, SSE, auth, attachments, voice notes, live activity, watch, and share extension | Donor/current tree only: it is Hermes-branded, targets Hermes `/api/chat/*`, and contains no Jaeger references |
 | Runtime capability reporting is grounded in configured/reachable state, not marketing labels | `core/runtime/truth.py`; `core/entity/model_capabilities.py`; `/v1/runtime/models`, `/v1/runtime/capabilities`; `test_runtime_truth.py`; `test_cognition_profiles.py` | Source and unit tests; configured live-provider check remains open |
 | Bridge clients default to Gateway execution and fail closed when the Gateway is unavailable | `interfaces/bridge.py::gateway_execution_enabled`, `_attach_gateway`, `_gateway_turn`; `interfaces/test_bridge.py` | Source and bridge protocol tests |
@@ -128,9 +128,9 @@ No live-provider, physical-device, or final installed-artifact qualification is 
 
 ### P1-6 — Real existing IDE-worker conversation steering
 
-- **Problem:** The IDE can queue steering, but the Gateway exposes no live-injection endpoint and `GatewayRuntime.steer` is a no-op. No existing IDE-worker conversation has been steered end to end.
-- **Current evidence:** `jaeger_agent.py::steer`; `interfaces/ide/conversation.js::steer`; `core/runtime/gateway_runtime.py`.
-- **Affected files/owners:** `core/gateway/server.py`; `core/entity/runtime.py`; `features/ide_orchestration`; `packages/jaeger-agent` delegate runtime; IDE client.
+- **Problem:** Gateway live steering is implemented for the resident ReAct agent, but no real existing IDE-worker conversation has been steered end to end. The separate `GatewayRuntime.steer` adapter remains a no-op and must not be treated as the qualified path.
+- **Current evidence:** `test_gateway_live_steering.py`; `interfaces/ide/tests/steering.test.js`; `core/runtime/gateway_runtime.py`.
+- **Affected files/owners:** `features/ide_orchestration`; worker adapters; Gateway orchestration records; IDE client.
 - **Acceptance test:** Select an existing IDE worker conversation, send a bounded task, observe its actual reply, steer it with a relevant follow-up in the same conversation, independently verify the result, and retain parent progress through reconnect/restart.
 - **Priority:** P1.
 - **Type:** integration.
@@ -254,7 +254,8 @@ Audit findings:
 - The WebUI’s in-process runner, native profile runner, and the Gateway native-MCP-first lane are isolated behind `JAEGER_LEGACY_PATHS`.
 - The bridge defaults to Gateway execution and fails closed if the Gateway is unavailable; `JAEGER_BRIDGE_EXECUTION=local` is an explicit diagnostic mode.
 - Image-question and text-only/specialist lanes are explicit at the Gateway boundary, not hidden model-only fallbacks.
-- `mind_runtime.create_runtime` and `GatewayRuntime` still need the P0-4 fail-closed/approval/steering correction before they are part of the qualified product path.
+- Gateway live steering forwards text to the active resident ReAct agent and returns 409 for a text-only or unbound request; the IDE queues locally only on that honest 409.
+- `mind_runtime.create_runtime` and `GatewayRuntime` still need the P0-4 fail-closed/approval correction before they are part of the qualified product path.
 - The Swift app has both a bridge client and direct Gateway client code; both must remain clients of one owner and one session projection.
 - The iOS tree is donor/current source, not a Jaeger client yet.
 
@@ -325,6 +326,8 @@ swift test --disable-sandbox --scratch-path "$HOME/.cache/jaeger/swift-tests"
 Results:
 
 - **Python:** 101 passed, 1 deselected, exit 0. A final documentation-focused rerun of the contributor/architecture tests passed 5/5.
+- **Gateway live steering:** 7 passed, 0 failed; covers active-agent delivery, `turn.steer` publication, no-agent 409, agent refusal, terminal-request 409, empty-text 400, and wrong-session 404.
+- **IDE live steering:** 3 Node tests passed, 0 failed; covers the request-scoped route, local fallback only on the honest no-ReAct-agent 409, and transport-error propagation.
 - **IDE Node:** 106 passed, 0 failed, 1 intentional isolated-Gateway fixture skip, exit 0.
   The first run exposed two markdown-helper test failures. `enhanceCodeBlocks` now no-ops
   when its optional DOM query API is absent, and the Node fixture models nested

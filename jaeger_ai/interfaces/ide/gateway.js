@@ -63,6 +63,7 @@ class Gateway {
   send(id, body) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/turns`, body); }
   receipt(id, rid) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/requests/${encodeURIComponent(rid)}`); }
   cancel(id, rid) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/cancel`, { request_id: rid }); }
+  steer(id, rid, text) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/requests/${encodeURIComponent(rid)}/steer`, { text }); }
   approvals() { return this.json('/v1/approvals'); }
   approve(id, approved) { return this.json(`/v1/approvals/${encodeURIComponent(id)}`, { approved }); }
   attachments(id) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/attachments`); }
