@@ -30,6 +30,19 @@ def legacy_paths_enabled(environ: dict[str, str] | None = None) -> bool:
     return str(source.get(LEGACY_PATHS_ENV, "")).strip().lower() in _TRUE
 
 
+HIDDEN_WEBUI_TABS: Final = frozenset({
+    "tasks", "kanban", "skills", "memory", "profiles", "todos", "insights", "logs",
+})
+"""WebUI tabs that read the legacy Hermes systems, not Jaeger's, and so show empty or wrong
+data (Hermes cron, its own kanban, memory files, skills index, todo list, usage analytics,
+log files). Hidden unless the operator re-enabled the legacy paths: the WebUI counterpart
+of the Mac app hiding its unfinished windows. ``chat``, ``workspaces`` and ``settings`` work."""
+
+VISIBLE_WEBUI_PROFILES: Final = frozenset({"jaeger"})
+"""The only agent profile a Gateway-only WebUI offers; hermes/openclaw/roundtable are
+legacy runtimes (see :data:`LEGACY_PATHS_ENV`)."""
+
+
 def disabled_reason(path: str) -> str:
     """The message an isolated entry point returns instead of running."""
     return (
