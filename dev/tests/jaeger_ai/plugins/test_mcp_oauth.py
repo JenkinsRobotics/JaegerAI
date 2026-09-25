@@ -23,7 +23,7 @@ def layout(tmp_path, monkeypatch):
 
     lay = InstanceLayout(root=tmp_path)
     lay.credentials_dir.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr("jaeger_agent.workspace.get_layout", lambda: lay)
+    monkeypatch.setattr("jaeger_agent.core.workspace.get_layout", lambda: lay)
     oauth.reset_manager()
     yield lay
     oauth.reset_manager()

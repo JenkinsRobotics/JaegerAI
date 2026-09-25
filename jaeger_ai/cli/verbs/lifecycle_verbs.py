@@ -19,6 +19,8 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+from jaeger_ai.core.native_app import swift_app_bundle
 from typing import Any, Sequence
 from urllib.parse import urlsplit
 
@@ -128,15 +130,18 @@ def _find_app_bundle() -> Path | None:
     by design (JAEGER_SWIFT_BUILD / ~/.jaeger/apps/swift-build).
     """
     from jaeger_ai.cli._common import swift_app_bundle
+    from jaeger_ai.core.instance.instance import install_root
     candidates: list[Path] = []
     try:
-        candidates.append(swift_app_bundle(REPO_ROOT))
+        candidates.append(swift_app_bundle(install_root()))
     except ValueError as exc:
         print(f"Invalid Swift build configuration: {exc}", file=sys.stderr)
         return None
     candidates += [
         Path.home() / "Applications" / "JaegerAI.app",
         Path("/Applications/JaegerAI.app"),
+        Path("/Applications/Jaeger AI.app"),
+        Path.home() / "Applications" / "Jaeger AI.app",
     ]
     for c in candidates:
         if c.exists():
@@ -272,7 +277,10 @@ def _cmd_stop_argv(argv: Sequence[str]) -> int:
     if failures:
         print("  Shutdown incomplete; dependent containers and gateway preserved.")
         return 1
-    if names:
+    if names and args.dry_run:
+        for name in names:
+            print(f"  [dry-run] Would stop container {name}")
+    elif names:
         cli = _get_container_cli()
         if cli is None:
             failures.append("container CLI unavailable")

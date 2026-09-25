@@ -54,9 +54,9 @@ final class OnboardingFlowTests: XCTestCase {
     }
 
     func testLaunchEnvironmentUsesGatewayUnlessOverridden() {
-        XCTAssertEqual(BridgeProcess.launchEnvironment([:])["JAEGER_BRIDGE_EXECUTION"], "gateway")
+        XCTAssertEqual(BridgeProcess.launchEnvironment(base: [:])["JAEGER_BRIDGE_EXECUTION"], "gateway")
         XCTAssertEqual(
-            BridgeProcess.launchEnvironment(["JAEGER_BRIDGE_EXECUTION": "local"])["JAEGER_BRIDGE_EXECUTION"],
+            BridgeProcess.launchEnvironment(base: ["JAEGER_BRIDGE_EXECUTION": "local"])["JAEGER_BRIDGE_EXECUTION"],
             "local"
         )
     }

@@ -49,7 +49,7 @@ DISCOVERY_PACKAGE = "jaeger_ai"
 RUNTIME_FACTORY = "jaeger_ai.core.mind_runtime:create_runtime"
 
 #: Topics a surface watches to follow a turn. These are owned by
-#: jaeger_agent.messages rather than jaeger_os.topics — the mind's
+#: jaeger_agent.core.messages rather than jaeger_os.topics — the mind's
 #: contract ships with the mind.
 WATCH = (
     "/act/chat",           # what was asked
@@ -143,7 +143,7 @@ def ask(bus: Any, text: str, *, session: str = "") -> None:
     text = (text or "").strip()
     if not text:
         return
-    from jaeger_agent.messages import ChatMessage
+    from jaeger_agent.core.messages import ChatMessage
 
     bus.publish(ChatMessage(text=text, source="app", session=session))
 

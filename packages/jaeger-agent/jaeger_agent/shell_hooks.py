@@ -124,7 +124,7 @@ class HookDecision:
 # ---------------------------------------------------------------------------
 
 def _layout() -> Any:
-    from jaeger_agent.workspace import get_layout
+    from jaeger_agent.core.workspace import get_layout
 
     return get_layout()
 
@@ -274,7 +274,7 @@ def _payload(
     tool_input: Any,
     extra: dict[str, Any] | None,
 ) -> str:
-    from jaeger_agent.workspace import get_current_session, get_project_root
+    from jaeger_agent.core.workspace import get_current_session, get_project_root
 
     try:
         session = get_current_session()

@@ -29,7 +29,8 @@ while [ -L "$SELF" ]; do
 done
 REPO_ROOT="$(cd "$(dirname "$SELF")" && pwd)"
 # The environment lives outside the checkout (AGENTS.md §1), wherever
-# install.sh put it: $JAEGER_VENV, else ~/.jaeger/venv.
+# install.sh put it: $JAEGER_VENV, else ~/.jaeger/venv. A repository .venv is
+# never a fallback: an in-checkout environment masks a missing install.
 VENV_PY="${JAEGER_VENV:-${HOME}/.jaeger/venv}/bin/python"
 
 if [ ! -x "$VENV_PY" ]; then
@@ -40,6 +41,7 @@ fi
 # Keep repo completely clean of __pycache__ junk (mirroring OpenClaw standard)
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
+export JAEGER_INSTALL_ROOT="$REPO_ROOT"
 
 # Accessory/menu-bar Process() often inherits a closed stdin. CPython 3.12
 # then fatals in init_sys_streams (EBADF) before any Python code runs.

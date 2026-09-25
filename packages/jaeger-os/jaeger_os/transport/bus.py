@@ -16,7 +16,7 @@ The interface is intentionally small.  Three operations:
     ``correlation_id``.  This is the contract behind the operator's
     "tools = networking, nodes = execution" framing: a tool
     publishes a request topic (e.g. ``/act/speech``) and waits
-    for the matching ack topic (``/sense/spoken``).
+    for the matching ack topic (``/act/speech/spoken``).
 """
 
 from __future__ import annotations

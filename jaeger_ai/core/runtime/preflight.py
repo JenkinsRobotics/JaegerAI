@@ -607,8 +607,8 @@ def install_missing(checks: list[Check]) -> list[Check]:
 
 
 def format_report(checks: list[Check]) -> str:
-    """A grouped, human-readable report for ``jaeger-os --doctor``."""
-    lines = ["", "  Jaeger-OS — environment check", ""]
+    """A grouped, human-readable report for ``jaeger doctor``."""
+    lines = ["", "  Jaeger AI — environment check", ""]
     for category in ("instance", "daemon", "runtime", "memory", "plugins", "skills",
                      "voice", "vision", "external", "messaging", "system"):
         group = [c for c in checks if c.category == category]
@@ -645,7 +645,7 @@ def boot_warning(checks: list[Check]) -> str:
         return ""
     names = ", ".join(c.name for c in bad)
     out = [f"[jaeger] ⚠ {len(bad)} optional dependency issue(s): {names}",
-           "[jaeger]   run `jaeger-os --doctor` to install them"]
+           "[jaeger]   run `jaeger doctor` to install them"]
     return "\n".join(out)
 
 

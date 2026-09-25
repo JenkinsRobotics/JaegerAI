@@ -19,9 +19,11 @@ import re
 from pathlib import Path
 
 import pytest
+import jaeger_agent
 
 REPO = Path(__file__).resolve().parents[4]
-SKILLS_DIR = REPO / "jaeger_ai" / "agent" / "skills"
+AGENT_SOURCE_ROOT = Path(jaeger_agent.__file__).resolve().parent
+SKILLS_DIR = AGENT_SOURCE_ROOT / "skills"
 
 # Registration happens in three layers: module import (agent/tools/*),
 # agent-build time (main.py closures), and skill/plugin load time. Scanning

@@ -1,8 +1,8 @@
 module: media
 slot: media
-version: 1.0.0
-consumes: [/act/media]
-produces: [/sense/media_frame, /sense/media_state]
+version: 0.12.0
+consumes: [/act/display/play]
+produces: [/act/display/frame, /act/display/state]
 tools: []
 factory: jaeger_ai.nodes.media:make_media_node
 # No `config:` key — MediaNode has no settings-catalog config; its own

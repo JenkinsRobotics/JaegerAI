@@ -1,6 +1,6 @@
 """Agent-facing Insta360 Link/Link 2 tools."""
 
-from jaeger_agent.workspace import (
+from jaeger_agent.core.workspace import (
     SandboxError,
     _resolve_under,
     get_effective_workspace_dir,

@@ -36,7 +36,7 @@ from typing import Callable, Literal
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # annotations only — no runtime dependency on a host
-    from jaeger_ai.core.instance.instance import InstanceLayout
+    from jaeger_agent.core.instance import Layout as InstanceLayout
 
 from .context_blocks import (
     build_board_block,
@@ -108,7 +108,7 @@ class PromptFragment:
 def _three_laws(_ctx: FragmentContext) -> str:
     # Imported lazily so a prompt build never hard-depends on the safety
     # module at import time.
-    from jaeger_agent.safety import THREE_LAWS_PROMPT_BLOCK
+    from jaeger_agent.core.safety import THREE_LAWS_PROMPT_BLOCK
 
     return THREE_LAWS_PROMPT_BLOCK
 
@@ -149,8 +149,8 @@ def _identity_name(ctx: FragmentContext) -> str:
     the 2026-07-05 free_text_story A/B), which is simply the behaviour
     everywhere now."""
     try:
-        from jaeger_ai.core.instance.schemas import Identity, load_yaml
-        name = (load_yaml(ctx.layout.identity_path, Identity).name or "").strip()
+        from jaeger_agent.core.instance import identity_name
+        name = identity_name(ctx.layout)
     except Exception:  # noqa: BLE001 — a broken identity never breaks the prompt
         name = ""
     return f"Your name is {name}." if name else ""

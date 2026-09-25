@@ -11,7 +11,7 @@ class _EchoNode(Node):
     (the illustrative example from the Node docstring)."""
 
     def setup(self) -> None:
-        self.bus.subscribe(topics.SENSE_TRANSCRIPT, self._on)
+        self.bus.subscribe(topics.SENSE_STT_TRANSCRIPT, self._on)
 
     def _on(self, msg) -> None:
         self.bus.publish(topics.SpeechCommand(
@@ -22,7 +22,7 @@ def test_harness_boots_drives_and_captures():
     h = NodeHarness(lambda bus: _EchoNode(
         bus=bus, name="echo", install_signal_handlers=False))
     with h:
-        out = h.capture(topics.ACT_SPEECH)
+        out = h.capture(topics.ACT_SPEECH_SAY)
         h.publish(topics.Transcript(text="hello", correlation_id="c1"))
         assert h.wait(lambda: len(out) >= 1, timeout_s=2.0), "no echo captured"
     assert out[0].text == "echo: hello", out[0]

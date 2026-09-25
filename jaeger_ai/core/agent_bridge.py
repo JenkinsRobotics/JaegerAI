@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from jaeger_agent import AgentBridge as _ReusableAgentBridge
-from jaeger_agent.messages import AgentActivity, ToolEvent
+from jaeger_agent.core.messages import AgentActivity, ToolEvent
 
 TurnFn = Callable[..., dict[str, Any]]
 

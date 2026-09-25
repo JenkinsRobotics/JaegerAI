@@ -236,6 +236,9 @@ def remember(key: str, value: str, category: str | None = None,
     current view (``facts``) is upserted; every call also appends to
     ``fact_log`` so the value can be traced over time."""
     from jaeger_agent.memory import sqlite_store
+    from jaeger_agent.memory.fact_policy import validate_fact
+
+    validate_fact(key, value, category=category, subject=subject, tags=tags, note=note)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     cat = _norm_category(category)
     src = (source or _memory_source or "user").strip().lower() or "user"

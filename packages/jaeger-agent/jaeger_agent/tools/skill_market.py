@@ -15,7 +15,7 @@ from __future__ import annotations
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.workspace import _require_layout
+from jaeger_agent.core.workspace import _require_layout
 from jaeger_agent.skill_registry.skill_benchmark import benchmark_skill as _benchmark_skill
 from jaeger_agent.skill_registry.skill_package import package_skill as _package_skill
 

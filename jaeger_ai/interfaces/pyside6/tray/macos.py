@@ -265,7 +265,7 @@ class MacosTray:
                     self._app.icon = None
                     self._app.title = glyph_for(self.model.state)
 
-        # Wire "Quit Jaeger OS" to a full teardown: stop the daemon,
+        # Wire "Quit Jaeger AI" to a full teardown: stop the daemon,
         # sweep any stray trays, then quit this rumps app. The user
         # expects Quit to kill EVERYTHING related to the product —
         # the previous "just close the icon" behaviour left the
@@ -298,9 +298,9 @@ class MacosTray:
             _ver = "unknown"
         object.__setattr__(self.actions, "about",
                            lambda: rumps.alert(
-                               title="Jaeger OS",
+                               title="Jaeger AI",
                                message=(
-                                   f"Jaeger OS — v{_ver}\n"
+                                   f"Jaeger AI — v{_ver}\n"
                                    "Local-first agentic assistant.\n\n"
                                    "Menu-bar tray: lifecycle controls\n"
                                    "for the Jaeger daemon."

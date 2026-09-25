@@ -215,6 +215,14 @@ actor BridgeProcess {
     static func jaegerPath() -> String {
         let env = ProcessInfo.processInfo.environment
         if let cmd = env["JAEGER_BRIDGE_CMD"], !cmd.isEmpty { return cmd }
+        if let venv = env["JAEGER_VENV"], !venv.isEmpty {
+            let command = URL(fileURLWithPath: venv).appendingPathComponent("bin/jaeger").path
+            if FileManager.default.isExecutableFile(atPath: command) { return command }
+        }
+        if let command = Bundle.main.object(forInfoDictionaryKey: "JaegerLauncher") as? String,
+           FileManager.default.isExecutableFile(atPath: command) {
+            return command
+        }
         var dir = URL(fileURLWithPath: Bundle.main.bundlePath)
             .deletingLastPathComponent()
         for _ in 0..<8 {
@@ -232,19 +240,26 @@ actor BridgeProcess {
 
     /// Product chats go through the resident Gateway. An explicit
     /// ``JAEGER_BRIDGE_EXECUTION`` in the parent environment is kept.
-    static func launchEnvironment(_ base: [String: String] = ProcessInfo.processInfo.environment) -> [String: String] {
-        var environment = base
-        if (environment["JAEGER_BRIDGE_EXECUTION"] ?? "").isEmpty {
-            environment["JAEGER_BRIDGE_EXECUTION"] = "gateway"
-        }
-        return environment
-    }
-
     static func launchArguments(instance: String?, setupOnly: Bool) -> [String] {
         var args = ["bridge"]
         if let instance { args.append(instance) }
         args.append(setupOnly ? "--setup" : "--attach")
         return args
+    }
+
+    static func launchEnvironment(base: [String: String], bundle: Bundle = .main) -> [String: String] {
+        var environment = base
+        for (variable, key) in [("JAEGER_INSTALL_ROOT", "JaegerInstallRoot"),
+                                ("JAEGER_VENV", "JaegerVenv")] {
+            if environment[variable]?.isEmpty != false,
+               let value = bundle.object(forInfoDictionaryKey: key) as? String, !value.isEmpty {
+                environment[variable] = value
+            }
+        }
+        if (environment["JAEGER_BRIDGE_EXECUTION"] ?? "").isEmpty {
+            environment["JAEGER_BRIDGE_EXECUTION"] = "gateway"
+        }
+        return environment
     }
 
     static let systemModelFilename = "Qwen_Qwen3-1.7B-Q4_K_M.gguf"
@@ -288,7 +303,7 @@ actor BridgeProcess {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: path)
         proc.arguments = Self.launchArguments(instance: instance, setupOnly: setupOnly)
-        var environment = Self.launchEnvironment(ProcessInfo.processInfo.environment)
+        var environment = Self.launchEnvironment(base: ProcessInfo.processInfo.environment)
         if let systemModel = Self.bundledSystemModelPath() {
             environment["JAEGER_SYSTEM_MODEL"] = systemModel
         }
@@ -344,13 +359,23 @@ actor BridgeProcess {
 
     /// Send one turn and await the agent's reply. ``session`` keeps each
     /// window/conversation isolated on the Python side (sessions.db).
-    func runTurn(_ text: String, session: String = "desktop-app")
+    func runTurn(
+        _ text: String,
+        session: String = "desktop-app",
+        agenticTools: Bool = true,
+        imageDataURI: String? = nil,
+        imageDataURIs: [String] = [],
+        speakReplies: Bool = false
+    )
         async -> TurnResult
     {
         guard process != nil else {
             return TurnResult(text: "", error: "agent bridge not running")
         }
-        write(["op": "send", "text": text, "session": session, "source": "app"])
+        let request = Self.chatRequest(text: text, session: session,
+                                       agenticTools: agenticTools,
+                                       images: imageDataURIs + (imageDataURI.map { [$0] } ?? []),
+                                       speakReplies: speakReplies)
         let timeout = Task {
             try? await Task.sleep(for: Self.turnTimeout)
             await self.expireTurn()
@@ -358,7 +383,23 @@ actor BridgeProcess {
         defer { timeout.cancel() }
         return await withCheckedContinuation { cont in
             self.replyCont = cont
+            write(request)
         }
+    }
+
+    nonisolated static func chatRequest(text: String, session: String,
+                                       agenticTools: Bool, images: [String],
+                                       speakReplies: Bool) -> [String: Any] {
+        var request: [String: Any] = ["op": "send", "text": text, "session": session,
+                                     "source": "app", "agentic_tools": agenticTools,
+                                     "client_owned_speech": true,
+                                     "output_mode": speakReplies ? "speech" : "text"]
+        if !images.isEmpty {
+            request["content"] = [["type": "text", "text": text]] + images.map {
+                ["type": "image_url", "image_url": ["url": $0]] as [String: Any]
+            }
+        }
+        return request
     }
 
     /// Fire-and-forget ``cancel`` — the stdin thread on the Python side

@@ -23,7 +23,7 @@ from pathlib import Path
 
 import pytest
 
-from jaeger_agent import workspace as ws
+from jaeger_agent.core import workspace as ws
 
 
 @pytest.fixture

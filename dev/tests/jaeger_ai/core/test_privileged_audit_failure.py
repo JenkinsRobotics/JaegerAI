@@ -17,7 +17,7 @@ def _allow_privileged():
 
 def test_run_shell_fails_closed_before_process_launch(bindable_instance_root) -> None:
     from jaeger_agent.tools.code import run_shell
-    from jaeger_agent.workspace import DefaultWorkspace, bind
+    from jaeger_agent.core.workspace import DefaultWorkspace, bind
 
     bind(DefaultWorkspace(bindable_instance_root).create())
 
@@ -35,7 +35,7 @@ def test_run_shell_fails_closed_before_process_launch(bindable_instance_root) ->
 
 def test_ssh_exec_fails_closed_before_process_launch(bindable_instance_root) -> None:
     from jaeger_agent.tools.remote import ssh_exec
-    from jaeger_agent.workspace import DefaultWorkspace, bind
+    from jaeger_agent.core.workspace import DefaultWorkspace, bind
 
     bind(DefaultWorkspace(bindable_instance_root).create())
 

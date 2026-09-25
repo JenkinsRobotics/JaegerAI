@@ -1,7 +1,7 @@
 """Resolve the per-user state directory for standalone skill scripts.
 
 These scripts may run outside the Jaeger process (system Python, a nix
-env, CI), so they cannot import :func:`jaeger_agent.workspace.get_layout`
+env, CI), so they cannot import :func:`jaeger_agent.core.workspace.get_layout`
 to reach the instance layout. This module gives them the same answer
 using only the stdlib.
 

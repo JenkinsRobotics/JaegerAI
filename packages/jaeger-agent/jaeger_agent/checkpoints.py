@@ -100,7 +100,7 @@ def _project_hash(working_dir: Any) -> str:
 
 
 def _root() -> Path:
-    from jaeger_agent.workspace import get_layout
+    from jaeger_agent.core.workspace import get_layout
 
     return Path(get_layout().root) / "checkpoints"
 

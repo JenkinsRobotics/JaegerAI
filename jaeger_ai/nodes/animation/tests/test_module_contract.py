@@ -42,11 +42,11 @@ def test_module_yaml_validates() -> None:
     doc = yaml.safe_load((_MODULE_DIR / "module.yaml").read_text())
     assert doc["module"] == "animation"
     assert doc["slot"] == "animation"
-    assert doc["version"] == "1.0.0"
+    assert doc["version"] == "0.12.0"
     assert doc["consumes"] == [
-        "/act/animation", "/act/animation_stop", "/sense/tts_chunk",
+        "/act/display/play", "/act/display/stop", "/act/speech/chunk",
     ]
-    assert doc["produces"] == ["/sense/animation_state"]
+    assert doc["produces"] == ["/act/display/state"]
     assert doc["tools"] == ["set_avatar_state", "play_timeline", "warm_avatar"]
     assert doc["factory"] == "jaeger_ai.nodes.animation:make_animation_node"
     assert doc["config"] == "avatar"
@@ -120,13 +120,13 @@ def test_command_state_round_trip_with_a_fake_adapter() -> None:
         done = threading.Event()
 
         def _on_state(msg: topics.TopicMessage) -> None:
-            assert isinstance(msg, topics.AnimationState)
+            assert isinstance(msg, topics.DisplayState)
             states.append(msg.state)
             if msg.state == "idle":
                 done.set()
 
-        bus.subscribe(topics.SENSE_ANIMATION_STATE, _on_state)
-        bus.publish(topics.AnimationCommand(
+        bus.subscribe(topics.ACT_DISPLAY_STATE, _on_state)
+        bus.publish(topics.DisplayCommand(
             adapter="fake", asset_path="", duration_ms=0, node_id="test",
         ))
         assert done.wait(timeout=2.0), "no terminal idle AnimationState"

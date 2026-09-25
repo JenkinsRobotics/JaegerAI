@@ -150,7 +150,7 @@ def test_node_health_heartbeats_publish(jp01):
     jp01's own per-controller messages, not every message on the topic."""
     rt, bus = jp01
     seen: list = []
-    bus.subscribe(topics.SENSE_NODE_HEALTH, seen.append)
+    bus.subscribe(topics.SYS_NODE_HEALTH, seen.append)
     deadline = time.monotonic() + 3.0
     while time.monotonic() < deadline:
         if {m.node for m in seen} >= {"jp01-mc01", "jp01-avc01",

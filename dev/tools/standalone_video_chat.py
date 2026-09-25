@@ -614,7 +614,7 @@ class StandaloneVideoChatWindow(QMainWindow):
             print(f"[VoiceChat] Whisper load error: {e}", flush=True)
 
         try:
-            from jaeger_kokoro_tts.nodes.kokoro_tts.engine import KokoroTTS
+            from jaeger_kokoro_tts.engine import KokoroTTS
             self.kokoro_tts = KokoroTTS()
             self.kokoro_tts.warm()
             print("[VoiceChat] Kokoro TTS engine ready.", flush=True)

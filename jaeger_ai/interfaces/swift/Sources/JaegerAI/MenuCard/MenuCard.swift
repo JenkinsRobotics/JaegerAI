@@ -4,8 +4,9 @@
 //
 //  The rich menu-bar dropdown — the Swift twin of the PySide6
 //  ``tray/menu.py`` card. Header: the AGENT's avatar + name (identity.yaml,
-//  not the character) over a live status line (● + words). Then an action bar: chat · agent, with
-//  quick-input on the right. Settings + power live in the header.
+//  not the character) over a live status line (● + words). Then an action bar:
+//  chat · avatar chat · multimodal, with quick-input on the right. Settings +
+//  power live in the header.
 //
 
 import AppKit
@@ -13,7 +14,6 @@ import SwiftUI
 
 struct MenuCard: View {
     @ObservedObject var agent: AgentBridge
-    @ObservedObject var tts: TTSManager
     @ObservedObject private var settings = SettingsStore.shared
 
     /// Display name = who the agent answers to right now (the selected
@@ -128,11 +128,6 @@ struct MenuCard: View {
 
     private var powerMenu: some View {
         Menu {
-            if agent.isConnected {
-                Button("Stop Agent") { Task { await agent.disconnect() } }
-            } else {
-                Button("Start Agent") { Task { await agent.tryConnect() } }
-            }
             Button("Restart") { relaunch() }
             Divider()
             Button("Quit JaegerAI", role: .destructive) { NSApplication.shared.terminate(nil) }
@@ -142,7 +137,7 @@ struct MenuCard: View {
         .menuStyle(.borderlessButton).fixedSize().help("Agent · restart · quit")
     }
 
-    // MARK: - action bar (chat · agent · quick-input)
+    // MARK: - action bar (chat · avatar chat · multimodal · quick-input)
 
     private var actionBar: some View {
         HStack(spacing: 8) {
@@ -151,6 +146,9 @@ struct MenuCard: View {
             }
             iconButton("person.crop.circle", "Agent — avatar + chat") {
                 AvatarChatWindowController.show(agent: agent)
+            }
+            iconButton("camera.viewfinder", "Multimodal — camera + microphone + text") {
+                MultimodalWindowController.show(agent: agent)
             }
             Spacer()
             iconButton("bolt.fill", "Quick input") {

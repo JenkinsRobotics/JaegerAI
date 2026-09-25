@@ -28,7 +28,7 @@ import time
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.workspace import _audit, _require_layout
+from jaeger_agent.core.workspace import _audit, _require_layout
 from jaeger_os.core.safety.command_guard import hardline_guard
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_agent.util.tool_interrupt import ToolInterrupted, run_interruptible

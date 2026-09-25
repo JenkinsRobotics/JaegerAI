@@ -34,6 +34,15 @@ JP01_VCC01_TELEMETRY_PORT = 5555              # ZMQ PUB telemetry
 JP01_VCC01_VISION_TELEMETRY_PORT = 5558       # ZMQ PUB vision telemetry
 JP01_VCC01_VIDEO_UDP_PORTS = (5001, 5003)     # UDP video stream (2 ports)
 
+# Real measured values, added 4.0 P1 (JP01_Firmware branch 4.0 survey):
+# confirmed against VCC01 core/network_zmq.py (CommsServer.__init__
+# defaults) and core/audio_manager.py (AUDIO_MIC_PORT/AUDIO_SPK_PORT env
+# defaults). These are the "5560/557x" ports this repo's contract/README.md
+# previously flagged as grepped-for-but-not-found.
+JP01_VCC01_VISION_REP_PORT = 5560             # ZMQ REP vision-stream commands
+JP01_VCC01_AUDIO_MIC_UDP_PORT = 5570          # raw UDP: Jetson mic  -> Mac
+JP01_VCC01_AUDIO_SPK_UDP_PORT = 5571          # raw UDP: Mac -> Jetson speaker
+
 __all__ = [
     "ANIMATION_BRIDGE_HOST",
     "ANIMATION_BRIDGE_DEFAULT_PORT",
@@ -41,4 +50,7 @@ __all__ = [
     "JP01_VCC01_TELEMETRY_PORT",
     "JP01_VCC01_VISION_TELEMETRY_PORT",
     "JP01_VCC01_VIDEO_UDP_PORTS",
+    "JP01_VCC01_VISION_REP_PORT",
+    "JP01_VCC01_AUDIO_MIC_UDP_PORT",
+    "JP01_VCC01_AUDIO_SPK_UDP_PORT",
 ]

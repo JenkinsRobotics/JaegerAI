@@ -30,7 +30,7 @@ _MAX_CHARS = 20_000
 
 
 def _default_read_file(path: str) -> str:
-    from jaeger_agent.workspace import _resolve_read
+    from jaeger_agent.core.workspace import _resolve_read
 
     p = _resolve_read(path)
     if not p.exists() or not p.is_file():

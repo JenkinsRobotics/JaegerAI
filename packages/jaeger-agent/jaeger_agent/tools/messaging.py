@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.workspace import get_current_session, get_layout
+from jaeger_agent.core.workspace import get_current_session, get_layout
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 
@@ -87,7 +87,7 @@ def certify_admin(channel: str, identifier: str) -> dict:
         return {"ok": False, "error": "identifier required (the account id / handle)"}
     layout = get_layout()
     cred = f"{ch.upper()}_ADMIN_IDS"
-    from jaeger_agent import credentials as creds
+    from jaeger_agent.core import credentials as creds
     try:
         existing = creds.get_credential(layout, cred)
     except Exception:  # noqa: BLE001 — not set yet

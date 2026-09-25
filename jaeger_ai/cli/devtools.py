@@ -9,10 +9,8 @@ utility verbs.
 
 Surfaces (CLI/TUI -> windowed-app migration, 2026-06-14):
 
-   ./launch          Windowed app — the Swift app if available, otherwise
-                     the PySide6 shell.
-   ./launch --tui    CLI/TUI — the in-process TUI agent (this terminal
-                     becomes the TUI).
+   jaeger dev          Windowed Jaeger AI app.
+   jaeger dev --tui    Jaeger AI TUI (this terminal becomes the TUI).
 
 The in-process TUI loads the plugin stack directly:
 
@@ -54,8 +52,8 @@ from __future__ import annotations
 import os as _os
 import sys as _sys
 from pathlib import Path as _Path
-_REPO_ROOT = _Path(__file__).resolve().parents[2]
-_VENV_DIR = _Path.home() / ".jaeger" / "venv"
+_REPO_ROOT = _Path(_os.environ.get("JAEGER_INSTALL_ROOT") or _Path(__file__).resolve().parents[2])
+_VENV_DIR = _Path(_os.environ.get("JAEGER_VENV") or _Path.home() / ".jaeger" / "venv")
 if not _VENV_DIR.exists():
     _VENV_DIR = _REPO_ROOT / ".venv"
 _VENV_PY = _VENV_DIR / "bin" / "python"
@@ -71,9 +69,11 @@ import subprocess
 import sys
 from pathlib import Path
 
+from jaeger_ai.core.native_app import swift_app_bundle
+
 from jaeger_ai.core.instance.instance import operator_state_root
 
-REPO = Path(__file__).resolve().parents[2]
+REPO = _REPO_ROOT
 DEV_INSTANCE = operator_state_root() / "instances" / "jaeger-dev"
 VENV_PY = _VENV_PY
 INSTANCE_NAME = "jaeger-dev"
@@ -116,7 +116,7 @@ def _load_tui_banner() -> str:
         from jaeger_ai.interfaces.tui.banner import JAEGER_ASCII, TAGLINE
         from jaeger_ai import __version__ as JAEGER_VERSION
     except Exception:  # noqa: BLE001
-        return "\n\033[36m\033[1mJAEGER-OS\033[0m\n\n"
+        return "\n\033[36m\033[1mJAEGER AI\033[0m\n\n"
 
     banner_lines = JAEGER_ASCII.splitlines()
     banner_w = max(len(ln) for ln in banner_lines)
@@ -236,7 +236,7 @@ def _check_avaudio_bridge() -> tuple[bool, str]:
 def _check_whisper_assets() -> tuple[bool, str]:
     """Real check: both Whisper GGML model files exist on disk and
     pywhispercpp's Model class imports.  These are what
-    ``jaeger_whisper_stt.nodes.whisper_stt.engine.two_pass`` loads at TUI boot."""
+    ``jaeger_whisper_stt.engine.two_pass`` loads at TUI boot."""
     try:
         from pywhispercpp.constants import MODELS_DIR
         from pywhispercpp.model import Model  # noqa: F401
@@ -270,7 +270,7 @@ def _check_kokoro_package() -> tuple[bool, str]:
     try:
         if str(REPO) not in sys.path:
             sys.path.insert(0, str(REPO))
-        from jaeger_kokoro_tts.nodes.kokoro_tts.persistent_player import (
+        from jaeger_kokoro_tts.persistent_player import (
             PersistentKokoroPlayer,
         )
         _ = PersistentKokoroPlayer  # avoid F401
@@ -795,9 +795,11 @@ def cmd_update() -> int:
     after = hashlib.sha1(req.read_bytes()).hexdigest() if req.exists() else ""
     if before != after or any(f in ("pyproject.toml",) for f in changed):
         say("dependencies changed — reinstalling…", prefix="update")
-        subprocess.run([str(VENV_PY), "-m", "pip", "install", "-q",
-                        "-r", str(req), "-e", str(REPO)], cwd=str(REPO))
-        ok("deps reinstalled")
+        from jaeger_ai.cli.verbs.update_verb import _reinstall_deps
+        if _reinstall_deps(REPO):
+            fail("package refresh failed — rerun ./install.sh")
+            return 1
+        ok("packages refreshed")
     # Staleness beats "what did THIS pull change": the bundle's build-commit
     # stamp catches pulls done by hand outside this command and rebuilds that
     # failed last time — a diff-keyed check misses both.
@@ -836,7 +838,7 @@ def main() -> int:
                         help="git pull + reinstall deps + rebuild the dev app as needed")
     parser.add_argument("--dev", action="store_true",
                         help="rebuild the Swift app before launching it "
-                             "(a bare ./launch runs the existing build)")
+                             "(a bare `jaeger dev` runs the existing build)")
     # Housekeeping
     parser.add_argument("--reset-audio", action="store_true",
                         help="sudo killall coreaudiod — unwedge CoreAudio")

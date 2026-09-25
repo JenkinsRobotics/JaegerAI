@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "jaeger_agent_node",
+  "runtime": "llm_gemma",
+  "id": "llm-gemma",
+  "slot": "brain",
+  "enabled_by_default": false,
+  "consumes": [
+    "gemma_chat_content",
+    "system_prompt"
+  ],
+  "produces": [
+    "reply_text"
+  ],
+  "status": "verified_2026-09-02",
+  "implementation": "runtime.py:build",
+  "lineage": "gemma_multimodal-decomposition",
+  "notes": "Optional non-agentic baseline only. Normal operation injects AgentRuntime, whose tools, skills, prompt assembly, and memory replace this rolling 8-exchange log."
+}

@@ -140,7 +140,7 @@ def test_successful_speech_publishes_ack_with_correlation_id(bus):
         received.append(msg)
         event.set()
 
-    bus.subscribe(topics.SENSE_SPOKEN, on_ack)
+    bus.subscribe(topics.ACT_SPEECH_SPOKEN, on_ack)
     try:
         bus.publish(topics.SpeechCommand(text="hi", correlation_id=cid))
         assert event.wait(timeout=2.0), "no SpokenAck published"
@@ -169,7 +169,7 @@ def test_failure_propagates_reason_to_ack(bus):
         received.append(msg)
         event.set()
 
-    bus.subscribe(topics.SENSE_SPOKEN, on_ack)
+    bus.subscribe(topics.ACT_SPEECH_SPOKEN, on_ack)
     try:
         bus.publish(topics.SpeechCommand(text="fail me"))
         assert event.wait(timeout=2.0)
@@ -193,7 +193,7 @@ def test_synthesizer_exception_becomes_failure_ack(bus):
         received.append(msg)
         event.set()
 
-    bus.subscribe(topics.SENSE_SPOKEN, on_ack)
+    bus.subscribe(topics.ACT_SPEECH_SPOKEN, on_ack)
     try:
         bus.publish(topics.SpeechCommand(text="crash test"))
         assert event.wait(timeout=2.0)
@@ -225,7 +225,7 @@ def test_full_queue_immediate_fail_ack(bus):
         if any(not a.ok for a in received_acks):
             received_event.set()
 
-    bus.subscribe(topics.SENSE_SPOKEN, on_ack)
+    bus.subscribe(topics.ACT_SPEECH_SPOKEN, on_ack)
     try:
         # Burst more than queue_maxsize + 1 messages so at least one
         # has to be rejected.  First two get accepted (one drains
@@ -318,7 +318,7 @@ def test_speech_stop_interrupts_in_flight_speak(bus):
             received.append(msg)
             ack_event.set()
 
-    bus.subscribe(topics.SENSE_SPOKEN, on_ack)
+    bus.subscribe(topics.ACT_SPEECH_SPOKEN, on_ack)
     try:
         bus.publish(topics.SpeechCommand(text="hello", correlation_id=cid))
         # Let the synth's blocking speak() start.

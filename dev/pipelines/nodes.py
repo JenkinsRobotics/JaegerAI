@@ -21,7 +21,7 @@ def main() -> int:
 
     class Echo(Node):
         def setup(self) -> None:
-            self.bus.subscribe(topics.SENSE_TRANSCRIPT, self._on)
+            self.bus.subscribe(topics.SENSE_STT_TRANSCRIPT, self._on)
 
         def _on(self, msg) -> None:
             self.bus.publish(topics.SpeechCommand(
@@ -30,7 +30,7 @@ def main() -> int:
     h = NodeHarness(lambda bus: Echo(bus=bus, name="echo",
                                      install_signal_handlers=False))
     with h:
-        out = h.capture(topics.ACT_SPEECH)
+        out = h.capture(topics.ACT_SPEECH_SAY)
         h.publish(topics.Transcript(text="hello pipeline", correlation_id="c1"))
         got = h.wait(lambda: len(out) >= 1, timeout_s=2.0)
     print("echo node booted on a private bus.")

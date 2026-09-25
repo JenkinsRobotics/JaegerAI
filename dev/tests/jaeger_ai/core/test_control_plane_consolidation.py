@@ -73,7 +73,7 @@ def test_entity_runtime_owns_subordinate_react(isolated_entity_runtime):
          patch("jaeger_agent.cognition.sqlite_runs.SqliteRunStore"), \
          patch("jaeger_agent.cognition.sqlite_commitments.SqliteCommitmentStore"), \
          patch("jaeger_agent.memory.sqlite_store.bind"), \
-         patch("jaeger_agent.workspace.bind"):
+         patch("jaeger_agent.core.workspace.bind"):
 
         cfg_mock = MagicMock()
         cfg_mock.external_model.provider = "ollama"

@@ -53,7 +53,7 @@ class UISpeech:
         try:
             ack = bus.request(
                 command,
-                ack_topic=topics.SENSE_SPOKEN,
+                ack_topic=topics.ACT_SPEECH_SPOKEN,
                 timeout_s=self.timeout_s,
             )
         finally:

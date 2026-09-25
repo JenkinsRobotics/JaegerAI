@@ -28,7 +28,7 @@ def _workspace() -> Any:
     no instance is bound (bench / tests), rather than refusing to run.
     """
     try:
-        from jaeger_agent.workspace import _require_layout
+        from jaeger_agent.core.workspace import _require_layout
 
         workdir = _require_layout().skills_dir
         workdir.mkdir(parents=True, exist_ok=True)

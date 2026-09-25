@@ -1,4 +1,4 @@
-"""Jaeger-OS TUI app — REPL loop with hermes-agent-inspired chrome.
+"""Jaeger AI TUI app — REPL loop with hermes-agent-inspired chrome.
 
 Parallel implementation to
 :mod:`jaeger_os.instance.lilith.interfaces.tui.app`. Same
@@ -334,7 +334,7 @@ class _TuiConfirmationProvider:
 
 
 class JaegerTUI:
-    """The interactive TUI driver for Jaeger-OS.
+    """The interactive TUI driver for Jaeger AI.
 
     Owns the Rich Console, the agent (lazy-built on first turn so
     `--banner-only` is cheap), the slash-command context, and the
@@ -575,9 +575,9 @@ class JaegerTUI:
         """Run one user turn — interruptibly.
 
         A turn no longer locks up the TUI: **Ctrl-C aborts the turn**
-        (and returns to the prompt instead of quitting), and in a voice
-        turn **speaking aborts it too** — the agent loop checks a cancel
-        flag between steps and halts gracefully. ``source`` is "text"
+        (and returns to the prompt instead of quitting). In an explicit
+        echo-controlled barge-in session, speaking aborts a voice turn too;
+        the default half-duplex path stays sequential. ``source`` is "text"
         or "voice"."""
         client = self._ensure_agent()
         if client is None:
@@ -590,8 +590,8 @@ class JaegerTUI:
 
         cancel = begin_turn_cancel_scope()
         self._gateway_cancel_event = cancel
-        # Voice turn: sustained user speech during the turn trips the
-        # cancel flag, so the user can talk over a long 'ruminating'.
+        # A full-duplex voice turn lets sustained speech trip the cancel flag
+        # (talk over a long 'ruminating'); sequential half-duplex does not.
         # Capture the voice session at arm time — if voice gets toggled
         # off mid-turn (operator typed /voice off, audio session crashed,
         # etc.) we still need to disarm the SAME object we armed.
@@ -603,7 +603,9 @@ class JaegerTUI:
             ) else None
         )
         if armed_voice is not None:
-            armed_voice.arm_interrupt(cancel)
+            armed_voice.begin_turn()
+            if armed_voice.barge_in_live:
+                armed_voice.arm_interrupt(cancel)
         try:
             if source == "voice":
                 self._run_voice_turn(client, user_text)
@@ -623,6 +625,8 @@ class JaegerTUI:
                     # Voice session can be torn down mid-turn (operator
                     # toggle / audio crash); disarm is best-effort.
                     pass
+                finally:
+                    armed_voice.end_turn()
 
     # ── Turn chrome (hermes-style) ──────────────────────────────────
 
@@ -724,7 +728,7 @@ class JaegerTUI:
         if is_err:
             # Recognise common model-server failures and surface a clear,
             # actionable hint instead of the raw HTTP body.
-            from jaeger_agent.errors import friendly_error_text
+            from jaeger_agent.core.errors import friendly_error_text
             body = friendly_error_text(body, model_name=self.model_name)
         else:
             self._last_answer = body   # for /copy
@@ -955,7 +959,7 @@ class JaegerTUI:
             agent_text = expand_references(user_text)
         except Exception:  # noqa: BLE001 — never let expansion break a turn
             agent_text = user_text
-        result = self._execute_client_turn(client, agent_text)
+        result = self._execute_client_turn(client, agent_text, output_mode="dynamic")
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
@@ -963,15 +967,23 @@ class JaegerTUI:
         error = result.get("error")
         self._last_halt_reason = str(result.get("halt_reason") or "")
         self._render_answer(text, error=error)
-        if (text and not error and not result.get("spoke_via_tool")
-                and _wants_spoken_output(user_text)):
-            self._speak_text_turn_fallback(text)
+        speech_text = result.get("speech_text") or ""
+        if speech_text and not error:
+            if self._voice is not None and self._voice.running:
+                self._voice.speak(speech_text)
+            else:
+                self._speak_text_turn_fallback(speech_text)
 
-    def _execute_client_turn(self, client, text):
+    def _execute_client_turn(self, client, text, *, input_modality: str = "text",
+                             output_mode: str | None = None):
+        """Gateway-first turn execution: stream through the Gateway when the
+        session client is a GatewayTurnClient; otherwise fall back to the
+        in-process voice runner with the caller's output policy."""
         from jaeger_ai.core.gateway.client import GatewayTurnClient
         if not isinstance(client, GatewayTurnClient):
             from jaeger_ai.main import _DEFAULT_SESSION_KEY, run_for_voice
-            return run_for_voice(client, text, session_key=_DEFAULT_SESSION_KEY)
+            return run_for_voice(client, text, session_key=_DEFAULT_SESSION_KEY,
+                                 input_modality=input_modality, output_mode=output_mode)
         import uuid
         rid = uuid.uuid4().hex
         finished = threading.Event()
@@ -1016,24 +1028,18 @@ class JaegerTUI:
             watcher.join(timeout=1)
 
     def _speak_text_turn_fallback(self, text: str) -> None:
-        """Speak a typed-turn answer when the model missed the TTS tool.
-
-        ``text_to_speech`` remains the canonical agent action. This fallback
-        covers routing misses such as "speak me a joke" where the model
-        answers in text only, leaving the user with silence.
-        """
+        """Play the agent-selected speech channel when the mic is inactive."""
         try:
-            from jaeger_agent.tools.speak import speak
-            result = speak(text=text)
+            from jaeger_ai.main import speak_conversation
+            spoken = speak_conversation(text)
         except Exception as exc:  # noqa: BLE001
             self.console.print(
                 f"[dim](couldn't speak the answer: {exc})[/]"
             )
             return
-        if not result.get("spoken"):
-            reason = result.get("reason") or "unknown TTS error"
+        if not spoken:
             self.console.print(
-                f"[dim](couldn't speak the answer: {reason})[/]"
+                "[dim](speech interrupted or no audio produced)[/]"
             )
 
     # ── Voice conversation ──────────────────────────────────────────
@@ -1079,6 +1085,8 @@ class JaegerTUI:
             follow_up=vc.follow_up,
             barge_in=vc.barge_in,
             follow_up_seconds=vc.follow_up_seconds,
+            self_speech_filter=vc.self_speech_filter,
+            self_speech_threshold=vc.self_speech_threshold,
             wake_name=self._resolve_instance_name(),
             pending_turn_max_age_s=getattr(
                 vc, "pending_turn_max_age_s", 3.0,
@@ -1115,8 +1123,8 @@ class JaegerTUI:
             msg = ("[bold green]🎙  voice on[/] — always listening, no wake "
                    "word. Talk or type at any time.")
         if v.barge_in and not v.barge_in_live:
-            msg += ("\n[dim](barge-in wanted but speexdsp is missing — the "
-                    "mic pauses while I speak.)[/]")
+            msg += ("\n[dim](barge-in wanted but echo control is unavailable "
+                    "— using sequential half-duplex.)[/]")
         self.console.print(msg)
 
     def stop_voice(self) -> None:
@@ -1203,7 +1211,9 @@ class JaegerTUI:
 
         self._render_turn_header(user_text, source="voice")
         started = time.perf_counter()
-        result = self._execute_client_turn(client, user_text)
+        result = self._execute_client_turn(
+            client, user_text, input_modality="speech", output_mode="dynamic",
+        )
         self._last_turn_s = time.perf_counter() - started
         self._turn_count += 1
         self._refresh_context_estimate()
@@ -1214,12 +1224,25 @@ class JaegerTUI:
                 f"[dim]🤫 suppressed non-speech voice reply: {text!r}[/]",
                 kind="gate_ignore",
             )
+            v = self._voice
+            if v is not None and v.running and hasattr(v, "drain_pending"):
+                v.drain_pending()
             return
         self._render_answer(text, error=result.get("error"))
         v = self._voice
         if v is not None and v.running:
-            if text and not result.get("spoke_via_tool"):
-                v.speak(text)
+            speech_text = result.get("speech_text") or ""
+            if speech_text:
+                interrupted = v.speak(speech_text)
+                if interrupted or not getattr(
+                    v, "last_speech_succeeded", True,
+                ):
+                    return
+            else:
+                # A speech tool can emit audio during the agent turn. Clean
+                # the input boundary before advertising a follow-up window.
+                if hasattr(v, "drain_pending"):
+                    v.drain_pending()
             v.chime("followup")
             v.open_followup()
 
@@ -1728,6 +1751,13 @@ class JaegerTUI:
             except Exception as exc:  # noqa: BLE001
                 self.console.print(f"[red]turn failed:[/] {exc}")
             finally:
+                if source == "voice":
+                    # The poller claims half-duplex input before enqueueing.
+                    # Release it even if boot/turn setup failed before
+                    # run_turn() reached its own cleanup.
+                    active_voice = self._voice
+                    if active_voice is not None:
+                        active_voice.end_turn()
                 self._turn_running.clear()
                 self._current_activity = ""
             if nxt:
@@ -1905,6 +1935,8 @@ class JaegerTUI:
                 phrase = None
             if not phrase:
                 continue
+            if not v.accepting_input:
+                continue
             from jaeger_os.core.voice import is_non_speech_marker
             if is_non_speech_marker(phrase):
                 self._log_voice(
@@ -1920,6 +1952,10 @@ class JaegerTUI:
                 self._voice = None
                 break
             v.chime("wake")
+            # Claim the sequential pipeline before enqueueing, closing the
+            # small poller→worker race where a second phrase could otherwise
+            # be admitted before run_turn() begins.
+            v.begin_turn()
             self._submit_turn("voice", phrase)
 
     # ── Busy-input mode ─────────────────────────────────────────────

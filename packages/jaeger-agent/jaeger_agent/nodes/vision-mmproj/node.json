@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "kind": "jaeger_agent_node",
+  "runtime": "vision_mmproj",
+  "id": "vision-mmproj",
+  "slot": "vision",
+  "enabled_by_default": true,
+  "consumes": [
+    "image_data_uri",
+    "user_text"
+  ],
+  "produces": [
+    "gemma_chat_content"
+  ],
+  "status": "verified_2026-09-02",
+  "implementation": "runtime.py:build",
+  "lineage": "gemma_multimodal-decomposition",
+  "notes": "mmproj projector; probe-verified (red square). Images ride their turn only \u2014 visual memory is a stated gap."
+}

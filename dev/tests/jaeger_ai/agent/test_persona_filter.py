@@ -136,3 +136,21 @@ def test_rewrite_dropping_half_the_facts_returns_original():
     gutted = "I looked into it and there are some details you should know."
     c = _Client(gutted)
     assert apply_persona_voice(c, original, BLOCK) == original
+
+
+def test_restyle_cannot_drop_counts_or_change_identifiers():
+    from jaeger_agent.prompts.persona_filter import _preserves_content
+
+    assert not _preserves_content("There are three blue circles.", "The shapes are blue circles.")
+    assert not _preserves_content("Build R731 has 4 failures.", "Build R732 has 4 failures.")
+    assert _preserves_content("There are 3 blue circles.", "Indeed, three blue circles are visible.")
+    original = "There are three blue circles."
+    assert apply_persona_voice(_Client("The shapes are circles, and they are blue."), original, BLOCK) == original
+
+
+def test_restyle_cannot_keep_only_a_caveat_and_drop_the_answer():
+    original = "The sky is typically blue, but its color can change depending on the time of day, weather, and atmospheric conditions."
+    caveat = "The sky's color is not fixed. It shifts based on the time of day, prevailing weather, and atmospheric conditions."
+    assert apply_persona_voice(_Client(caveat), original, BLOCK) == original
+    from jaeger_agent.prompts.persona_filter import _preserves_content
+    assert _preserves_content(original, "The sky is blue, sir, though weather and atmospheric conditions can change its color depending on the time of day.")

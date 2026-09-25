@@ -15,7 +15,7 @@
 
 [app]
 name = "jaeger-windowed"
-version = "0.5.0"
+version = "0.12.0"
 requires_framework = ">=0.1"
 mode = "fused"
 event_loop = "qt"             # the chassis _run_qt() owns the main loop
@@ -114,6 +114,10 @@ factory = "jaeger_ai.interfaces.pyside6.rich_tui.window:make_surface"
 [[surface]]
 id = "tray"
 factory = "jaeger_ai.interfaces.pyside6.tray.qt:make_surface"
+
+[[surface]]
+id = "multimodal"
+factory = "jaeger_ai.interfaces.pyside6.multimodal.window:make_surface"
 
 
 # ── settings ─────────────────────────────────────────────────────

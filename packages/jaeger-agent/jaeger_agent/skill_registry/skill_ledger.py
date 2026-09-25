@@ -37,7 +37,7 @@ reason the thing is worth having:
 
 ADAPTATIONS for Jaeger:
 
-  - ``get_hermes_home()`` → :func:`jaeger_agent.workspace.get_layout`. Paths
+  - ``get_hermes_home()`` → :func:`jaeger_agent.core.workspace.get_layout`. Paths
     are per-instance rather than per-user, so two Jaeger instances keep
     independent ledgers, matching how the rest of instance state is scoped.
   - The donor's ``skills.ledger`` config key has no Jaeger counterpart, so
@@ -108,13 +108,13 @@ def _root() -> Path:
     """The instance root. Raises if the workspace is unbound — callers in
     this module are all wrapped, so an unbound workspace degrades to a
     disabled ledger rather than an exception reaching a mutation site."""
-    from jaeger_agent.workspace import get_layout
+    from jaeger_agent.core.workspace import get_layout
 
     return get_layout().root
 
 
 def ledger_path() -> Path:
-    from jaeger_agent.workspace import get_layout
+    from jaeger_agent.core.workspace import get_layout
 
     return get_layout().skills_dir / ".curator_ledger.jsonl"
 

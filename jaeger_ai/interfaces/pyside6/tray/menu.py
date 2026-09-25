@@ -52,6 +52,9 @@ _ICON_SVG = {
     "chat": '<path d="M20 14a2 2 0 0 1-2 2H8l-4 4V6a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2z"/>',
     "avatar": ('<circle cx="12" cy="8" r="3.4"/>'
                '<path d="M5 20c0-3.5 3-5.6 7-5.6s7 2.1 7 5.6"/>'),
+    "multimodal": ('<rect x="3" y="6" width="13" height="12" rx="2"/>'
+                   '<path d="m16 10 5-3v10l-5-3z"/>'
+                   '<path d="M7 3h5"/>'),
     "settings": (
         '<circle cx="12" cy="12" r="3"/>'
         '<path d="M19.4 13a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0'
@@ -106,10 +109,12 @@ class TrayMenu(QWidget):
                  on_quit: Callable[[], None],
                  on_restart: Callable[[], None] | None = None,
                  on_open_companion: Callable[[], None] | None = None,
+                 on_open_multimodal: Callable[[], None] | None = None,
                  on_settings: Callable[[], None] | None = None) -> None:
         super().__init__()
         self._on_open_chat = on_open_chat
         self._on_open_companion = on_open_companion
+        self._on_open_multimodal = on_open_multimodal
         self._on_quick_input = on_quick_input
         self._on_settings = on_settings
         self._on_quit = on_quit
@@ -198,6 +203,11 @@ class TrayMenu(QWidget):
         if self._on_open_companion is not None:
             h.addWidget(self._icon_btn("avatar", "Agent — avatar + chat",
                                        self._open_companion))
+        if self._on_open_multimodal is not None:
+            h.addWidget(self._icon_btn(
+                "multimodal", "Multimodal — camera + microphone + text",
+                self._open_multimodal,
+            ))
         h.addStretch(1)
         h.addWidget(self._icon_btn("input", "Quick input", self._quick_input))
         return frame
@@ -231,6 +241,11 @@ class TrayMenu(QWidget):
         self.hide()
         if self._on_open_companion is not None:
             self._on_open_companion()
+
+    def _open_multimodal(self) -> None:
+        self.hide()
+        if self._on_open_multimodal is not None:
+            self._on_open_multimodal()
 
     def _power(self) -> None:
         """Power icon → restart or quit the agent/app."""

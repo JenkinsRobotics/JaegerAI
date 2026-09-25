@@ -646,7 +646,7 @@ async def test_gateway_restart_preserves_transcript_and_marks_unconfirmed_work(t
 @pytest.mark.asyncio
 async def test_file_tool_records_review_and_guarded_undo(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    import jaeger_agent.workspace as workspace
+    import jaeger_agent.core.workspace as workspace
     store = GatewaySessionStore(tmp_path / 'files.sqlite3')
     app = JaegerGatewayApp(store=store)
     rid = 'e' * 32

@@ -92,11 +92,11 @@ def test_mastery_publishes_skill_mastered(bus) -> None:
     mastered: list[str] = []
     unlocked: list[str] = []
     bus.subscribe(
-        topics.SENSE_SKILL_MASTERED,
+        topics.SYS_SKILL_MASTERED,
         lambda msg: mastered.append(msg.skill_id),
     )
     bus.subscribe(
-        topics.SENSE_SKILL_UNLOCKED,
+        topics.SYS_SKILL_UNLOCKED,
         lambda msg: unlocked.append(msg.skill_id),
     )
     emitter = XpEmitter(bus=bus, registry=registry)
@@ -126,7 +126,7 @@ def test_level_up_publishes_skill_level_up(bus) -> None:
     ))
     level_ups: list[int] = []
     bus.subscribe(
-        topics.SENSE_SKILL_LEVEL_UP,
+        topics.SYS_SKILL_LEVEL_UP,
         lambda msg: level_ups.append(msg.new_level),
     )
     emitter = XpEmitter(bus=bus, registry=registry)

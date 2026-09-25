@@ -1,4 +1,4 @@
-"""L2 system e-stop — the latched ``/act/estop`` topic.
+"""L2 system e-stop — the latched ``/act/estop/trigger`` topic.
 
 Three-layer contract (plan §2.8): L0 is a firmware watchdog (the only
 layer with a hard latency bound — absent from MC01 today, REQUIRED
@@ -27,7 +27,7 @@ class EStopLatch:
     """Process-local view of the system e-stop state.
 
     Wire one per process that hosts hardware nodes or capability
-    tools. It subscribes to ``/act/estop``; any publisher anywhere on
+    tools. It subscribes to ``/act/estop/trigger``; any publisher anywhere on
     the bus latches it. Node-local stop callbacks registered via
     :meth:`register_stop` run on engage — each callback must be the
     node's L1 path (queue-bypassing immediate write), and a callback
@@ -47,7 +47,7 @@ class EStopLatch:
         self._since: float | None = None
         self._stops: list[tuple[str, Callable[[], None]]] = []
         if bus is not None:
-            bus.subscribe(topics.ACT_ESTOP, self._on_estop)
+            bus.subscribe(topics.ACT_ESTOP_TRIGGER, self._on_estop)
 
     # ── state ───────────────────────────────────────────────────────
 

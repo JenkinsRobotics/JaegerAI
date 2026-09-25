@@ -57,6 +57,48 @@ from jaeger_os.transport.codec import decode, encode
 DEFAULT_ENDPOINT = "ipc:///tmp/jros-bus.sock"
 
 
+
+def term_context(ctx: "zmq.Context", what: str = "zmq",
+                 timeout_s: float = 2.0) -> bool:
+    """Terminate a ZMQ context without the risk of hanging forever.
+
+    ``zmq_ctx_term`` blocks until every socket in the context is
+    closed. No timeout, no way to interrupt it. Miss one socket — or
+    leave one in use by another thread — and the process wedges at
+    exit inside ``poll()``: unkillable by Ctrl-C, invisible in any
+    Python traceback, and indistinguishable from a busy app. Two
+    processes sat in this machine's table for two days that way, which
+    is how this got written.
+
+    ``destroy(linger=0)`` closes the context's own sockets first,
+    removing the usual cause. The deadline covers the rest: the worker
+    is a daemon, so if term never returns the interpreter still exits
+    and the OS reclaims everything.
+
+    Returns True if it terminated, False if it timed out — the caller
+    is shutting down either way, so this is for logging, not control.
+    """
+    done = threading.Event()
+
+    def run() -> None:
+        try:
+            ctx.destroy(linger=0)
+        except Exception:  # noqa: BLE001
+            pass
+        finally:
+            done.set()
+
+    threading.Thread(target=run, daemon=True, name=f"zmq-term-{what}").start()
+    if not done.wait(timeout_s):
+        import sys
+        print(f"[zmq-{what}] context did not terminate in {timeout_s:.0f}s "
+              f"— abandoning it (a socket is still open somewhere). The "
+              f"process can still exit; nothing is leaked past it.",
+              file=sys.stderr, flush=True)
+        return False
+    return True
+
+
 class ZMQBus(Bus):
     """ZMQ pub/sub Bus.
 
@@ -91,7 +133,14 @@ class ZMQBus(Bus):
         recv_timeout_ms: int = 200,
     ) -> None:
         self._endpoint = endpoint
-        self._ctx_owned = ctx is None
+        # NEVER claim ownership of the shared context. The fallback is
+        # zmq.Context.instance() — the PROCESS-WIDE singleton — and
+        # term() blocks until every socket in a context is closed. A bus
+        # terminating "its" context while a broker still holds XSUB/XPUB
+        # in the same one deadlocks, which is exactly what happened the
+        # first time a zmq-backed app tried to shut down. pyzmq cleans
+        # the singleton up at exit; nothing here should.
+        self._ctx_owned = False
         self._ctx = ctx or zmq.Context.instance()
         self._hwm = hwm
         self._recv_timeout_ms = recv_timeout_ms
@@ -207,10 +256,7 @@ class ZMQBus(Bus):
         except Exception:  # noqa: BLE001
             pass
         if self._ctx_owned:
-            try:
-                self._ctx.term()
-            except Exception:  # noqa: BLE001
-                pass
+            term_context(self._ctx, "bus")
 
     # ── delivery loop ────────────────────────────────────────────
 

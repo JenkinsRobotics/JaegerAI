@@ -158,7 +158,7 @@ from jaeger_os.core.safety.permissions import (  # noqa: E402
 
 @pytest.fixture
 def guarded(tmp_path, monkeypatch):
-    from jaeger_agent.workspace import DefaultWorkspace, bind
+    from jaeger_agent.core.workspace import DefaultWorkspace, bind
 
     bind(DefaultWorkspace(tmp_path / "agent").create())
     manager = PtyManager()

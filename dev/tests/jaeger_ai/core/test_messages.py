@@ -22,7 +22,7 @@ def test_topics_follow_act_sense_convention() -> None:
     # are class-level descriptors, not the default value — check an
     # instance, same as ``topics.SENSE_STT_TRANSCRIPT``.)
     assert (
-        topics.Transcript().topic == "/sense/transcript"
+        topics.Transcript().topic == "/sense/stt/transcript"
     )
 
 

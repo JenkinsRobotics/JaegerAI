@@ -7,7 +7,7 @@ a subscriber on the bus + a worker thread that drains a queue of
 play commands.  Each accepted command:
 
   1. Closes the current adapter (if any).
-  2. Opens the adapter named in the :class:`AnimationCommand`.
+  2. Opens the adapter named in the :class:`DisplayCommand`.
   3. Streams frames until the clip ends OR a stop event arrives.
   4. Awards XP to the adapter's skill via the registry.
   5. Publishes :class:`AnimationState` updates on the bus so the
@@ -67,7 +67,7 @@ class AnimationNode(Node):
         self._active_asset: str = ""
         self._active_started_at: float = 0.0
         self._stop_event = threading.Event()
-        self._pending: "queue.Queue[topics.AnimationCommand]" = queue.Queue(
+        self._pending: "queue.Queue[topics.DisplayCommand]" = queue.Queue(
             maxsize=queue_maxsize,
         )
         self._skill_registry = skill_registry
@@ -77,7 +77,7 @@ class AnimationNode(Node):
 
     def register_adapter(self, key: str, adapter: AnimationAdapter) -> None:
         """Register an adapter under a string key (e.g. "gif",
-        "image", "sprite").  The :class:`AnimationCommand` names the
+        "image", "sprite").  The :class:`DisplayCommand` names the
         adapter by this key."""
         self._adapters[key] = adapter
 
@@ -87,16 +87,16 @@ class AnimationNode(Node):
     # ── lifecycle ─────────────────────────────────────────────────
 
     def setup(self) -> None:
-        self.bus.subscribe(topics.ACT_ANIMATION, self._on_command)
-        self.bus.subscribe(topics.ACT_ANIMATION_STOP, self._on_stop)
+        self.bus.subscribe(topics.ACT_DISPLAY_PLAY, self._on_command)
+        self.bus.subscribe(topics.ACT_DISPLAY_STOP, self._on_stop)
         # 0.5 lip-sync: forward /sense/tts_chunk amplitudes to the
         # active adapter (MathScripts read amplitude_param at
         # render time).
-        self.bus.subscribe(topics.SENSE_TTS_CHUNK, self._on_tts_chunk)
+        self.bus.subscribe(topics.ACT_SPEECH_CHUNK, self._on_tts_chunk)
         self._log(
-            f"subscribed to {topics.ACT_ANIMATION} + "
-            f"{topics.ACT_ANIMATION_STOP} + "
-            f"{topics.SENSE_TTS_CHUNK}"
+            f"subscribed to {topics.ACT_DISPLAY_PLAY} + "
+            f"{topics.ACT_DISPLAY_STOP} + "
+            f"{topics.ACT_SPEECH_CHUNK}"
         )
 
     def tick(self) -> None:
@@ -112,15 +112,15 @@ class AnimationNode(Node):
 
     def teardown(self) -> None:
         try:
-            self.bus.unsubscribe(topics.ACT_ANIMATION, self._on_command)
+            self.bus.unsubscribe(topics.ACT_DISPLAY_PLAY, self._on_command)
         except Exception:  # noqa: BLE001
             pass
         try:
-            self.bus.unsubscribe(topics.ACT_ANIMATION_STOP, self._on_stop)
+            self.bus.unsubscribe(topics.ACT_DISPLAY_STOP, self._on_stop)
         except Exception:  # noqa: BLE001
             pass
         try:
-            self.bus.unsubscribe(topics.SENSE_TTS_CHUNK, self._on_tts_chunk)
+            self.bus.unsubscribe(topics.ACT_SPEECH_CHUNK, self._on_tts_chunk)
         except Exception:  # noqa: BLE001
             pass
         if self._active is not None:
@@ -135,7 +135,7 @@ class AnimationNode(Node):
     # ── bus handlers ──────────────────────────────────────────────
 
     def _on_command(self, msg: topics.TopicMessage) -> None:
-        assert isinstance(msg, topics.AnimationCommand)
+        assert isinstance(msg, topics.DisplayCommand)
         try:
             self._pending.put_nowait(msg)
         except queue.Full:
@@ -162,12 +162,12 @@ class AnimationNode(Node):
             pass
 
     def _on_stop(self, msg: topics.TopicMessage) -> None:
-        assert isinstance(msg, topics.AnimationStop)
+        assert isinstance(msg, topics.DisplayStop)
         self._stop_event.set()
 
     # ── playback ──────────────────────────────────────────────────
 
-    def _play(self, cmd: topics.AnimationCommand) -> None:
+    def _play(self, cmd: topics.DisplayCommand) -> None:
         adapter = self._adapters.get(cmd.adapter)
         if adapter is None:
             self._log(
@@ -271,7 +271,7 @@ class AnimationNode(Node):
     def _publish_state(self, state: str, *, progress: float,
                        elapsed_ms: int) -> None:
         try:
-            self.bus.publish(topics.AnimationState(
+            self.bus.publish(topics.DisplayState(
                 adapter=self._active_name,
                 asset_path=self._active_asset,
                 state=state,
