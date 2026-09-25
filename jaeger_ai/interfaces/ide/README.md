@@ -56,6 +56,10 @@ deployment, not exposing the unauthenticated Gateway.
 - Session tabs support multiple open conversations. Closing a tab only closes
   the client view; the Gateway session remains in the chat list and can be reopened.
   Tab order is client state, not a second session database.
+- `/archive` and `/unarchive` move a conversation between the active and archived
+  sections. Archive state is Gateway-owned session metadata, not a client-side flag.
+- `/archive` and `/unarchive` move a conversation between the active and archived
+  sections. Archive state is Gateway-owned session metadata, not a client-side flag.
 - The workspace button and `/workspace` command choose which open folder Jaeger
   uses. The selection is persisted per Gateway endpoint and sent through the
   Gateway admission `workspace` field for new chats, immediate turns, and queued work.

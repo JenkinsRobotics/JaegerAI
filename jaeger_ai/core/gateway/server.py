@@ -785,7 +785,7 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/sessions", self.handle_create_session)
         self.app.router.add_get("/v1/sessions/{id}", self.handle_get_session)
         self.app.router.add_delete("/v1/sessions/{id}", self.handle_delete_session)
-        self.app.router.add_patch("/v1/sessions/{id}", self.handle_rename_session)
+        self.app.router.add_patch("/v1/sessions/{id}", self.handle_patch_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
         self.app.router.add_get("/v1/sessions/{id}/queue", self.handle_get_queue)
         self.app.router.add_post("/v1/sessions/{id}/queue", self.handle_add_queue)
@@ -1360,19 +1360,30 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Invalid cursor"}, status=400)
         return web.json_response(self.store.activity_history(session_id, after))
 
-    async def handle_rename_session(self, request: web.Request) -> web.Response:
-        """PATCH /v1/sessions/{id} ``{"title": "..."}`` — the one place titles change."""
+    async def handle_patch_session(self, request: web.Request) -> web.Response:
+        """PATCH /v1/sessions/{id} — the one place title and archive state change."""
         session_id = request.match_info["id"]
         try:
             body = await request.json()
         except Exception:
             return web.json_response({"error": "Body must be JSON"}, status=400)
-        title = body.get("title") if isinstance(body, dict) else None
-        if not isinstance(title, str) or not title.strip():
+        if not isinstance(body, dict) or not body:
+            return web.json_response({"error": "Nothing to update"}, status=400)
+
+        title = body.get("title")
+        if "title" in body and (not isinstance(title, str) or not title.strip()):
             return web.json_response({"error": "title must be a non-empty string"}, status=400)
-        session = self.store.rename_session(session_id, title.strip()[:200])
+        archived = body.get("archived")
+        if "archived" in body and not isinstance(archived, bool):
+            return web.json_response({"error": "archived must be a boolean"}, status=400)
+
+        session = self.store.get_session(session_id)
         if session is None:
             return web.json_response({"error": "Session not found"}, status=404)
+        if "title" in body:
+            session = self.store.rename_session(session_id, title.strip()[:200])
+        if "archived" in body:
+            session = self.store.set_session_archived(session_id, archived)
         self.event_bus.publish(session_id, "session.updated", {"session": session})
         return web.json_response(session)
 

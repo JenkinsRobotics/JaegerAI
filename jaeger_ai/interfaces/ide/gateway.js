@@ -51,6 +51,7 @@ class Gateway {
   }
   tasks() { return this.json('/v1/tasks'); }
   rename(id, title) { return this.json(`/v1/sessions/${encodeURIComponent(id)}`, { title }, 'PATCH'); }
+  archive(id, archived) { return this.json(`/v1/sessions/${encodeURIComponent(id)}`, { archived }, 'PATCH'); }
   ideResult(id, ideRequestId, body) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/ide/${encodeURIComponent(ideRequestId)}`, body); }
   autonomy() { return this.json('/v1/runtime/autonomy'); }
   setAutonomy(autonomy) { return this.json('/v1/runtime/autonomy', { autonomy }); }

@@ -625,6 +625,16 @@ class Conversation {
     this.staged = this.staged.filter(a => a.attachment_id !== attachmentId);
     this.emit();
   }
+  async setArchived(sessionId, archived) {
+    const sid = sessionId || this.state.session?.session_id;
+    if (!sid) throw new Error('Open a conversation first.');
+    const updated = await this.gateway.archive(sid, archived);
+    this.state.sessions = (this.state.sessions || []).map(session =>
+      session.session_id === sid ? updated : session);
+    if (this.state.session?.session_id === sid) this.state.session = updated;
+    await this.persist();
+    this.emit();
+  }
   async approve(id, approved) {
     if (!this.state.approvals.some(a => a.approval_id === id || a.id === id)) throw new Error('Approval is no longer pending in this conversation.');
     await this.gateway.approve(id, approved); await this.loadApprovals(); this.emit();

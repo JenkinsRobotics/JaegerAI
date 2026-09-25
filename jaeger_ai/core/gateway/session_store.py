@@ -540,6 +540,28 @@ class GatewaySessionStore:
                 return None
         return self.get_session(session_id)
 
+    def set_session_archived(self, session_id: str, archived: bool) -> dict[str, Any] | None:
+        """Set the Gateway-owned archive flag in session metadata.
+
+        Archive state is session organization, not conversation activity, so it
+        does not touch ``updated_at`` or reorder the sidebar.
+        """
+        with self._immediate() as conn:
+            row = conn.execute(
+                "SELECT metadata_json FROM sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            metadata = _row_meta(row["metadata_json"])
+            metadata["archived"] = bool(archived)
+            conn.execute(
+                "UPDATE sessions SET metadata_json = ? WHERE session_id = ?",
+                (json.dumps(metadata), session_id),
+            )
+        return self.get_session(session_id)
+
+
     def update_status(self, session_id: str, status: str) -> None:
         now = time.time()
         with self._get_conn() as conn:

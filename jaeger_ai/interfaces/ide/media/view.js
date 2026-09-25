@@ -465,29 +465,44 @@ function chatAge(session) {
   return `${Math.floor(hours / 24)}d`;
 }
 
+function chatRow(session, selected) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = `chat-row${session.session_id === selected ? ' active' : ''}`;
+  button.setAttribute('aria-label', `Open chat ${session.title || 'Untitled'}`);
+  const title = document.createElement('span'); title.className = 'chat-title';
+  title.textContent = session.title || 'Untitled';
+  const time = document.createElement('span'); time.className = 'chat-time';
+  time.textContent = chatAge(session);
+  button.append(title, time);
+  button.onclick = () => post('select', { id: session.session_id });
+  return button;
+}
+
+function archiveHeading() {
+  const heading = document.createElement('div');
+  heading.className = 'chat-archive-label';
+  heading.textContent = 'Archived';
+  return heading;
+}
+
 function renderChats() {
   const container = $('chat-list');
   const sessions = state.sessions || [];
   const selected = state.session?.session_id || '';
-  const visible = showAllChats ? sessions : sessions.slice(0, 3);
-  const nodes = visible.map(session => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `chat-row${session.session_id === selected ? ' active' : ''}`;
-    button.setAttribute('aria-label', `Open chat ${session.title || 'Untitled'}`);
-    const title = document.createElement('span'); title.className = 'chat-title';
-    title.textContent = session.title || 'Untitled';
-    const time = document.createElement('span'); time.className = 'chat-time';
-    time.textContent = chatAge(session);
-    button.append(title, time);
-    button.onclick = () => post('select', { id: session.session_id });
-    return button;
-  });
-  if (sessions.length > 3) {
+  const active = sessions.filter(session => !session.metadata?.archived);
+  const archived = sessions.filter(session => Boolean(session.metadata?.archived));
+  const visibleActive = showAllChats ? active : active.slice(0, 3);
+  const nodes = visibleActive.map(session => chatRow(session, selected));
+  if (active.length > 3) {
     const more = document.createElement('button'); more.type = 'button'; more.className = 'chat-more';
-    more.textContent = showAllChats ? 'Show less' : `View all (${sessions.length})`;
+    more.textContent = showAllChats ? 'Show less' : `View all (${active.length})`;
     more.onclick = () => { showAllChats = !showAllChats; renderChats(); };
     nodes.push(more);
+  }
+  if (archived.length) {
+    nodes.push(archiveHeading());
+    nodes.push(...archived.map(session => chatRow(session, selected)));
   }
   container.replaceChildren(...nodes);
   const hasConversation = Boolean((state.session?.messages || []).length || state.busy);
@@ -754,6 +769,8 @@ function runSlash(command, args) {
     case 'stop': return post('cancel');
     case 'copy': announceCopied(); return post('copy', { text: context.lastAnswer });
     case 'export': return post('exportChat');
+    case 'archive': return post('archive');
+    case 'unarchive': return post('unarchive');
     case 'model': return $('model').focus();
     case 'workspace': return post('selectWorkspace');
     case 'worktree': return post('selectWorktree');
