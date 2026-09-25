@@ -20,7 +20,7 @@ import sys
 import time
 from pathlib import Path
 
-from jaeger_ai.core.native_app import swift_app_bundle
+from jaeger_ai.cli._common import swift_app_bundle
 from typing import Any, Sequence
 from urllib.parse import urlsplit
 
@@ -130,10 +130,9 @@ def _find_app_bundle() -> Path | None:
     by design (JAEGER_SWIFT_BUILD / ~/.jaeger/apps/swift-build).
     """
     from jaeger_ai.cli._common import swift_app_bundle
-    from jaeger_ai.core.instance.instance import install_root
     candidates: list[Path] = []
     try:
-        candidates.append(swift_app_bundle(install_root()))
+        candidates.append(swift_app_bundle(REPO_ROOT))
     except ValueError as exc:
         print(f"Invalid Swift build configuration: {exc}", file=sys.stderr)
         return None

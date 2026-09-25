@@ -34,6 +34,38 @@ def wait_done(broker, run_id):
 
 
 @pytest.fixture
+def fake_gateway(broker, monkeypatch):
+    """Admit turns and answer run-status polls without a live Gateway.
+
+    The jaeger shim creates nothing locally; the run id IS the Gateway's
+    request_id. These helpers freeze that contract."""
+    import jaeger_ai.features.webui.adapter.server as server_mod
+    forwarded = []
+
+    def fake(method, path, *, body=None, timeout=8.0):
+        forwarded.append({'method': method, 'path': path, 'body': dict(body or {})})
+        if method == 'POST' and path.endswith('/turns'):
+            run_id = 'gw' + 'a' * 30
+            return 200, {'request_id': run_id, 'status': 'running', 'start_event_id': 1}
+        if method == 'GET' and '/v1/requests/' in path:
+            run_id = path.rsplit('/', 1)[-1]
+            return 200, {'session_id': 'gw-session', 'status': 'completed',
+                         'output': 'gateway answer',
+                         'result': {'output': 'gateway answer'}}
+        return 404, {'error': 'not found'}
+
+    monkeypatch.setattr(server_mod, 'gateway_request', fake)
+
+    def wait_done(run_id, want='completed'):
+        for _ in range(300):
+            state = broker.run_status(run_id)
+            if state['terminal_state'] == want:
+                return state
+            time.sleep(.01)
+        pytest.fail(f'run did not finish as {want}')
+    return forwarded, wait_done
+
+@pytest.fixture
 def broker(tmp_path):
     bridge = Bridge()
     broker = RunnerBroker(bridge, ApprovalBroker(), RunStore(tmp_path))
@@ -187,14 +219,27 @@ def test_roundtable_admission_is_durable_before_native_dispatch(broker):
     assert broker.bridge.calls == []
 
 
-def test_jaeger_halt_is_not_reported_as_success(broker):
-    broker.bridge.turn = lambda *a, **k: {'text': '', 'halt_reason': 'thinking_exhausted'}
+def test_jaeger_halt_is_not_reported_as_success(broker, fake_gateway, monkeypatch):
+    forwarded, wait_done = fake_gateway
+    def halted(method, path, *, body=None, timeout=8.0):
+        if method == 'POST' and path.endswith('/turns'):
+            return 200, {'request_id': 'gw' + 'h' * 30, 'status': 'running', 'start_event_id': 1}
+        run_id = path.rsplit('/', 1)[-1]
+        return 200, {'session_id': 'halt', 'status': 'failed',
+                     'result': {'halt_reason': 'thinking_exhausted'}}
+    import jaeger_ai.features.webui.adapter.server as server_mod
+    monkeypatch.setattr(server_mod, 'gateway_request',
+                        lambda method, path, *, body=None, timeout=8.0: halted(method, path, body=body))
     accepted = broker.start({'profile': 'jaeger', 'session_id': 'halt', 'message': 'hi'})
-    assert wait_done(broker, accepted['run_id'])['status'] == 'failed'
-    assert broker.store.events_after(accepted['run_id'], None)['events'][-1]['event'] == 'apperror'
+    state = wait_done(accepted['run_id'], want='failed')
+    assert state['gateway']['result']['halt_reason'] == 'thinking_exhausted'
+    # The shim created no local events row for a gateway-owned run.
+    with pytest.raises(KeyError):
+        broker.store.status(accepted['run_id'])
 
 
-def test_jaeger_inlines_pasted_markdown_attachment(broker, tmp_path, monkeypatch):
+def test_jaeger_inlines_pasted_markdown_attachment(broker, tmp_path, monkeypatch, fake_gateway):
+    forwarded, wait_done = fake_gateway
     monkeypatch.setenv("HERMES_WEBUI_ATTACHMENT_DIR", str(tmp_path))
     path = tmp_path / "pasted-text-2026-09-15_12-00-00-000.md"
     path.write_text("# Spec\n\nPlease implement this design.\n", encoding="utf-8")
@@ -209,10 +254,11 @@ def test_jaeger_inlines_pasted_markdown_attachment(broker, tmp_path, monkeypatch
             'size': path.stat().st_size,
         }],
     })
-    assert wait_done(broker, accepted['run_id'])['status'] == 'completed'
-    assert broker.bridge.texts
-    assert "Please implement this design." in broker.bridge.texts[0]
-    assert path.name in broker.bridge.texts[0]
+    wait_done(accepted['run_id'])
+    body = forwarded[0]['body']
+    assert "Please implement this design." in body['text']
+    assert path.name in body['text']
+    assert broker.bridge.calls == []
 
 
 def test_adapter_restart_unblocks_stale_jaeger_session(tmp_path):
@@ -223,28 +269,31 @@ def test_adapter_restart_unblocks_stale_jaeger_session(tmp_path):
     assert store.status('abcdabcdabcdabcdabcdabcdabcdabcd')['terminal_state'] == 'interrupted'
 
 
-def test_stale_jaeger_run_does_not_block_the_next_send(broker):
+def test_stale_jaeger_run_does_not_block_the_next_send(broker, fake_gateway):
+    forwarded, wait_done = fake_gateway
     sid = 'stuck-jaeger'
     broker.store.create(run_id='deadbeefdeadbeefdeadbeefdeadbeef', session_id=sid, prompt='old')
     broker.store.set_state('deadbeefdeadbeefdeadbeefdeadbeef', profile='jaeger')
     accepted = broker.start({'profile': 'jaeger', 'session_id': sid, 'message': 'hello again'})
-    assert wait_done(broker, accepted['run_id'])['status'] == 'completed'
-    assert broker.bridge.texts[-1] == 'hello again'
+    wait_done(accepted['run_id'])
+    assert forwarded[0]['body']['text'] == 'hello again'
     assert broker.store.status('deadbeefdeadbeefdeadbeefdeadbeef')['terminal_state'] == 'interrupted'
 
 
-def test_jaeger_forwards_selected_workspace_to_native_bridge(broker, tmp_path):
+def test_jaeger_forwards_selected_workspace_to_the_gateway(broker, tmp_path, fake_gateway):
+    forwarded, wait_done = fake_gateway
     accepted = broker.start({
         'profile': 'jaeger',
         'session_id': 'workspace',
         'message': 'read the fixture',
         'workspace': str(tmp_path),
     })
-    assert wait_done(broker, accepted['run_id'])['status'] == 'completed'
-    assert broker.bridge.kwargs[-1]['workspace'] == str(tmp_path)
+    wait_done(accepted['run_id'])
+    assert forwarded[0]['body']['workspace'] == str(tmp_path)
 
 
-def test_jaeger_sends_attachment_only_markdown_paste(broker, tmp_path, monkeypatch):
+def test_jaeger_sends_attachment_only_markdown_paste(broker, tmp_path, monkeypatch, fake_gateway):
+    forwarded, wait_done = fake_gateway
     monkeypatch.setenv("HERMES_WEBUI_ATTACHMENT_DIR", str(tmp_path))
     path = tmp_path / "pasted-text-only.md"
     path.write_text("attachment-only body\n", encoding="utf-8")
@@ -254,8 +303,8 @@ def test_jaeger_sends_attachment_only_markdown_paste(broker, tmp_path, monkeypat
         'message': '',
         'attachments': [{'name': path.name, 'path': str(path), 'mime': 'text/markdown'}],
     })
-    assert wait_done(broker, accepted['run_id'])['status'] == 'completed'
-    assert "attachment-only body" in broker.bridge.texts[0]
+    wait_done(accepted['run_id'])
+    assert "attachment-only body" in forwarded[0]['body']['text']
 
 
 def test_default_profile_identity_survives_native_dispatch(broker):

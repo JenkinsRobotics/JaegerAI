@@ -169,7 +169,7 @@ def test_project_write_scope_is_explicit_contained_and_request_local(tmp_path, m
     from types import SimpleNamespace
 
     import pytest
-    from jaeger_agent import workspace
+    from jaeger_agent.core import workspace
 
     project = tmp_path / 'project'
     project.mkdir()

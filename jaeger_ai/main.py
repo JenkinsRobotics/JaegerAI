@@ -5757,7 +5757,7 @@ def _swift_app_binary() -> "Path | None":
     pinned to jaeger-dev via its environment. Running the inner binary
     (not ``open``) keeps stdout attached for terminal users."""
     from pathlib import Path as _P
-    from jaeger_ai.core.native_app import swift_app_bundle
+    from jaeger_ai.cli._common import swift_app_bundle
     from jaeger_ai.core.instance.instance import install_root
     built = swift_app_bundle(install_root())
     candidates = [

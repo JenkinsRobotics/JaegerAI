@@ -32,7 +32,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from jaeger_ai.core.native_app import swift_app_bundle
+from jaeger_ai.cli._common import swift_app_bundle
 from typing import Any
 
 

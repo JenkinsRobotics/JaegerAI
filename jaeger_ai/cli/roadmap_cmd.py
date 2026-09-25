@@ -37,6 +37,16 @@ def run_roadmap(args: Any) -> int:
         return 1
 
     target = _pick_roadmap(dev_docs, args.version)
+    if target is None and args.version is None:
+        # Versioned roadmap ledgers were retired (evidence, not status);
+        # the single execution entry point is the continuation doc.
+        continuation = repo / "docs/CONTINUE_FROM_HERE.md"
+        if continuation.exists():
+            print()
+            print(f"  {c.bold('Continuation entry point')}  {c.dim('docs/CONTINUE_FROM_HERE.md')}")
+            print()
+            _render_markdown(continuation.read_text(encoding="utf-8", errors="replace"))
+            return 0
     if target is None:
         print(c.red(
             f"no ROADMAP file found for version {args.version!r}"

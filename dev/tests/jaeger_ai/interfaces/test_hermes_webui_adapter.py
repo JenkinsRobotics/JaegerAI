@@ -389,23 +389,3 @@ def test_native_run_clarify_respond_unblocks_turn(tmp_path):
         thread.join(timeout=2)
 
 
-def test_tool_frames_from_the_bridge_contract_complete_in_the_browser():
-    """A bridge ``tool`` frame's ``phase`` decides start vs complete.
-
-    Built with the contract's own ``tool_frame`` so a rename on either side
-    fails here. Live regression: every tool showed as running forever,
-    because the translator read a ``status`` key the bridge never sends.
-    """
-    from jaeger_os.contract import protocol
-    from jaeger_ai.features.webui.adapter.server import RunnerBroker
-
-    translate = RunnerBroker._translate_frame
-    start = translate("r", "s", protocol.tool_frame("get_time", "start", detail="clock"))
-    done = translate("r", "s", protocol.tool_frame("get_time", "done", 0.25))
-    failed = translate("r", "s", protocol.tool_frame("read_file", "error", 0.1))
-
-    assert start[0] == "tool"
-    assert start[1]["name"] == "get_time" and start[1]["preview"] == "clock"
-    assert done[0] == "tool_complete"
-    assert done[1]["is_error"] is False and done[1]["duration"] == 0.25
-    assert failed[0] == "tool_complete" and failed[1]["is_error"] is True

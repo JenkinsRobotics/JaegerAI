@@ -19,7 +19,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from jaeger_ai.core.native_app import swift_app_bundle
+from jaeger_ai.cli._common import swift_app_bundle
 
 _APP_NAME = "Jaeger AI.app"
 _LEGACY_APP_NAMES = ("Jaeger.app",)

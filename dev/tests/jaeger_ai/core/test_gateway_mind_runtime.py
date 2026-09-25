@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from jaeger_agent.messages import AgentRequest, AgentResponse
+from jaeger_agent.core.messages import AgentRequest, AgentResponse
 
 from jaeger_ai.core.gateway.client import GatewayTurnClient, TurnResult
 from jaeger_ai.core.mind_runtime import create_runtime
