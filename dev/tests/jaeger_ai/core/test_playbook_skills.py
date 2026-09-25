@@ -84,7 +84,7 @@ def test_skill_list() -> None:
 
 
 def test_optional_skill_is_explicitly_resolvable_but_not_auto_listed() -> None:
-    prompt_visible = {s.name for s in pb.prompt_playbooks()}
+    prompt_visible = {s.name for s in pb.available_playbooks()}
     assert "comfyui" not in prompt_visible
     assert "comfyui" in {s.name for s in pb.callable_playbooks()}
     skill = pb.find_playbook("comfyui")
@@ -93,7 +93,7 @@ def test_optional_skill_is_explicitly_resolvable_but_not_auto_listed() -> None:
 
 
 def test_loader_level_alias_does_not_create_second_candidate() -> None:
-    prompt_visible = {s.name for s in pb.prompt_playbooks()}
+    prompt_visible = {s.name for s in pb.available_playbooks()}
     assert "skill-builder" in prompt_visible
     assert "hermes-agent-skill-authoring" not in prompt_visible
     assert pb.find_playbook("hermes-agent-skill-authoring").name == "skill-builder"
