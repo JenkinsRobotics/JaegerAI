@@ -1304,12 +1304,12 @@ class JaegerGatewayApp:
 
     async def handle_create_session(self, request: web.Request) -> web.Response:
         body = await request.json() if request.can_read_body else {}
-        # The Gateway mints and owns session IDs. A client-supplied id is a
-        # hint at most: it is never trusted as the stored identity, because a
-        # second writer of the namespace is how three session stores happened.
-        # Clients adopt the id the Gateway returns (cross-client continuation
-        # works because every client reads the same row).
-        session_id = uuid.uuid4().hex
+        # The Gateway owns the session namespace, but an explicitly supplied
+        # id is honored: durable contracts (task replay, cross-client
+        # continuation, restart recovery) address the SAME session row after
+        # a Gateway restart, and `ensure_session` is idempotent, so a stable
+        # client-supplied id is one row, never a second store.
+        session_id = str(body.get("session_id") or "").strip() or uuid.uuid4().hex
         title = str(body.get("title") or "New Conversation")
         workspace = str(body.get("workspace") or "")
         metadata = dict(body.get("metadata") or {})
@@ -3266,8 +3266,14 @@ class JaegerGatewayApp:
         body = await request.json() if request.can_read_body else {}
         path = Path(str(body.get("safe_path") or body.get("path") or ""))
         try:
-            from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
-            root = InstanceLayout(root=resolve_instance_dir()).workspace_dir.resolve()
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            from jaeger_ai.core.instance.instance import InstanceLayout
+            rt_layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+            if rt_layout is not None:
+                root = rt_layout.workspace_dir.resolve()
+            else:
+                from jaeger_ai.core.instance.instance import resolve_instance_dir
+                root = InstanceLayout(root=resolve_instance_dir()).workspace_dir.resolve()
             resolved = path.resolve()
             if not resolved.is_relative_to(root):
                 return web.json_response({"error": "attachment path escapes workspace"}, status=400)
