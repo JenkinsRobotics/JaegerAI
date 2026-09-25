@@ -14,6 +14,7 @@ const mockVscode = {
   window: {
     createOutputChannel: () => ({ appendLine: () => {}, show: () => {}, dispose: () => {} }),
     showInputBox: async () => 'Test',
+    showWorkspaceFolderPick: async () => ({ uri: { fsPath: '/workspace/two' } }),
     registerWebviewViewProvider: () => ({ dispose: () => {} }),
   },
   commands: { registerCommand: () => ({ dispose: () => {} }), executeCommand: async () => {} },
@@ -21,7 +22,10 @@ const mockVscode = {
     registerTextDocumentContentProvider: () => ({ dispose() {} }),
     getConfiguration: () => ({ get: (key) => key === 'model' ? jaegerModelSetting : '' }),
     onDidChangeConfiguration: (fn) => { configChangeListeners.push(fn); return { dispose: () => {} }; },
-    workspaceFolders: [],
+    workspaceFolders: [
+      { uri: { fsPath: '/workspace/one' } },
+      { uri: { fsPath: '/workspace/two' } },
+    ],
   },
   Uri: { joinPath: (base, ...parts) => ({ toString: () => [base?.toString(), ...parts].join('/') }) },
   env: { clipboard: { writeText: async () => {} } },
@@ -116,6 +120,22 @@ test('disposing a view releases its message listener', () => {
   assert.equal(wired.messageDisposed(), false);
   wired.dispose();
   assert.equal(wired.messageDisposed(), true);
+});
+
+test('explicit workspace selection reaches the Gateway admission body', async () => {
+  const { send, gateway, posted } = wireExtension();
+  send({ type: 'ready' });
+  await waitFor(() => gateway.instance !== undefined);
+  gateway.instance.sessions = async () => ({ sessions: [{ session_id: 'ws', title: 'T', status: 'idle', messages: [] }] });
+  gateway.instance.session = async id => ({ session_id: id, title: 'T', status: 'idle', messages: [] });
+  send({ type: 'select', id: 'ws' });
+  await new Promise(r => setTimeout(r, 50));
+
+  send({ type: 'selectWorkspace' });
+  await waitFor(() => posted.some(message => message.selectedWorkspace === '/workspace/two'));
+  send({ type: 'send', text: 'hello', model: '' });
+  await waitFor(() => gateway.sent !== null);
+  assert.equal(gateway.sent.workspace, '/workspace/two', 'selected workspace must be frozen into admission');
 });
 
 test('model "config" → jaeger.model setting reaches admission body', async () => {

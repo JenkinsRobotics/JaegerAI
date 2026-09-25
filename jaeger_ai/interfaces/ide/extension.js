@@ -115,6 +115,23 @@ function activate(context) {
   const endpoint = () => vscode.workspace.getConfiguration('jaeger').get('gatewayUrl') || contract.gatewayUrl;
   const settings = () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:jenkins-robotics.jaeger-ide');
   const configuredModel = () => vscode.workspace.getConfiguration('jaeger').get('model') || '';
+  const workspaceStorageKey = () => `workspace:${endpoint()}`;
+  let selectedWorkspace = '';
+  const restoreWorkspace = () => {
+    selectedWorkspace = context.workspaceState.get(workspaceStorageKey(), '')
+      || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+      || '';
+    return selectedWorkspace;
+  };
+  const selectWorkspace = async () => {
+    const picked = await vscode.window.showWorkspaceFolderPick({
+      placeHolder: 'Choose the workspace Jaeger should use',
+    });
+    if (!picked) return;
+    selectedWorkspace = picked.uri.fsPath;
+    await context.workspaceState.update(workspaceStorageKey(), selectedWorkspace);
+    view?.webview.postMessage({ selectedWorkspace });
+  };
   const selectedModel = value => {
     if (value === 'config') return { model: configuredModel(), provider: '' };
     if (typeof value === 'string' && value) return parseProviderModel(value);
@@ -125,7 +142,7 @@ function activate(context) {
     controller = undefined;
     view?.webview.postMessage({ connected: false, busy: false, session: null, sessions: [], text: '',
       reasoning: '', activity: [], approvals: [], staged: [], models: null, modelsError: null,
-      status: 'Connecting…', error: '', queue: [], openSessionIds: [], configuredModel: configuredModel() });
+      status: 'Connecting…', error: '', queue: [], openSessionIds: [], selectedWorkspace: restoreWorkspace(), configuredModel: configuredModel() });
     const key = storageKey(), restored = context.workspaceState.get(key, {});
     controller = new Conversation(new Gateway(endpoint()), state => {
       if (state.changes) changes = state.changes;
@@ -224,6 +241,7 @@ function activate(context) {
           if (controller.sending) throw new Error('Wait for request admission before switching.');
           return controller.refresh(message.id);
         }
+        if (message.type === 'selectWorkspace') return selectWorkspace();
         if (message.type === 'closeSession' && typeof message.id === 'string') {
           if (controller.sending && controller.state.session?.session_id === message.id) {
             throw new Error('Wait for request admission before closing this tab.');
@@ -231,19 +249,19 @@ function activate(context) {
           return controller.closeSession(message.id);
         }
         if (message.type === 'new') {
-          await controller.newSession('New conversation', vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '');
+          await controller.newSession('New conversation', selectedWorkspace);
         }
         if (message.type === 'send' && typeof message.text === 'string') {
           const { model, provider } = selectedModel(message.model);
           const allowedTools = message.planOnly ? ['update_plan'] : null;
-          const sent = controller.send(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext(), allowedTools);
+          const sent = controller.send(message.text, model, provider, selectedWorkspace, message.ideContext === false ? null : ideContext(), allowedTools);
           postContext();
           return sent;
         }
         if (message.type === 'queue' && typeof message.text === 'string') {
           const { model, provider } = selectedModel(message.model);
           const allowedTools = message.planOnly ? ['update_plan'] : null;
-          const queued = controller.queue(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext(), allowedTools);
+          const queued = controller.queue(message.text, model, provider, selectedWorkspace, message.ideContext === false ? null : ideContext(), allowedTools);
           postContext();
           return queued;
         }
