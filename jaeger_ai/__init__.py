@@ -27,4 +27,4 @@ _os.environ.setdefault("PYTHONPYCACHEPREFIX", _os.path.expanduser("~/.cache/jaeg
 if _os.uname().sysname == "Darwin":
     _os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
-__version__ = "0.11.0"
+__version__ = "0.13.0"
