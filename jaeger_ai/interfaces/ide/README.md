@@ -53,6 +53,9 @@ deployment, not exposing the unauthenticated Gateway.
   and workspace problem count. `/diagnostics` opens a bounded Problems card.
   The chips are projections of the existing `ideContext()` and diagnostics APIs;
   they do not create a second context owner.
+- Session tabs support multiple open conversations. Closing a tab only closes
+  the client view; the Gateway session remains in the chat list and can be reopened.
+  Tab order is client state, not a second session database.
 - Pending request IDs persist in IDE workspace storage keyed by Gateway URL;
   drafts stay in webview state. State is outside the source tree. Failed admission
   never triggers blind automatic resend. An ambiguous missing receipt needs

@@ -381,6 +381,30 @@ function renderModels() {
   select.disabled = rows.length === 0 && !state.configuredModel;
 }
 
+function renderSessionTabs() {
+  const container = $('session-tabs');
+  const openIds = state.openSessionIds || [];
+  container.replaceChildren(); container.hidden = !openIds.length;
+  for (const id of openIds) {
+    const session = (state.sessions || []).find(item => item.session_id === id);
+    const title = session?.title || 'Untitled';
+    const row = document.createElement('div');
+    row.className = 'session-tab' + (state.session?.session_id === id ? ' active' : '');
+    row.setAttribute('role', 'tab');
+    row.setAttribute('aria-selected', String(state.session?.session_id === id));
+    const select = document.createElement('button');
+    select.type = 'button'; select.className = 'session-tab-select';
+    select.title = title; select.textContent = title;
+    select.onclick = () => post('select', { id });
+    const close = document.createElement('button');
+    close.type = 'button'; close.className = 'session-tab-close';
+    close.title = 'Close tab'; close.setAttribute('aria-label', `Close ${title}`);
+    close.textContent = '×';
+    close.onclick = () => post('closeSession', { id });
+    row.append(select, close); container.append(row);
+  }
+}
+
 function renderContextChips() {
   const container = $('context-chips');
   const context = state.ideContext || {};
@@ -504,7 +528,7 @@ function render() {
   $('context').textContent = state.session?.workspace ? state.session.workspace.split('/').filter(Boolean).at(-1) : 'Work locally';
   $('stop').hidden = !state.busy || !state.canCancel; eligibility(); renderComposerBar();
   $('attach').disabled = !state.connected || state.busy;
-  renderModels(); renderStaged(); renderContextChips();
+  renderSessionTabs(); renderModels(); renderStaged(); renderContextChips();
 
   timelineRenderer.reconcile(transcriptRows());
   renderChanges();

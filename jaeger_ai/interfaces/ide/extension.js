@@ -125,7 +125,7 @@ function activate(context) {
     controller = undefined;
     view?.webview.postMessage({ connected: false, busy: false, session: null, sessions: [], text: '',
       reasoning: '', activity: [], approvals: [], staged: [], models: null, modelsError: null,
-      status: 'Connecting…', error: '', queue: [], configuredModel: configuredModel() });
+      status: 'Connecting…', error: '', queue: [], openSessionIds: [], configuredModel: configuredModel() });
     const key = storageKey(), restored = context.workspaceState.get(key, {});
     controller = new Conversation(new Gateway(endpoint()), state => {
       if (state.changes) changes = state.changes;
@@ -223,6 +223,12 @@ function activate(context) {
         if (message.type === 'select' && typeof message.id === 'string') {
           if (controller.sending) throw new Error('Wait for request admission before switching.');
           return controller.refresh(message.id);
+        }
+        if (message.type === 'closeSession' && typeof message.id === 'string') {
+          if (controller.sending && controller.state.session?.session_id === message.id) {
+            throw new Error('Wait for request admission before closing this tab.');
+          }
+          return controller.closeSession(message.id);
         }
         if (message.type === 'new') {
           await controller.newSession('New conversation', vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '');
