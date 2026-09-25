@@ -698,6 +698,7 @@ $('access').onclick = () => ($('access-menu').hidden ? openAccessMenu() : closeA
 $('access').onblur = () => closeAccessMenu();
 $('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); };
 $('workspace').onclick = () => post('selectWorkspace');
+$('worktree').onclick = () => post('selectWorktree');
 $('plan-mode').onclick = () => { planModeOn = !planModeOn; persistView(); renderComposerBar(); };
 $('queue-next').onclick = () => {
   const text = $('prompt').value;
@@ -755,6 +756,7 @@ function runSlash(command, args) {
     case 'export': return post('exportChat');
     case 'model': return $('model').focus();
     case 'workspace': return post('selectWorkspace');
+    case 'worktree': return post('selectWorktree');
     case 'plan': return args.trim() ? post('send', { text: args, model: $('model').value, ideContext: ideContextOn, planOnly: true }) : undefined;
     case 'diagnostics': return post('info', { what: 'diagnostics' });
     case 'diff': return post('reviewChanges');

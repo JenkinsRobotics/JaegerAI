@@ -18,6 +18,7 @@ const COMMANDS = [
   { name: 'export', group: 'Chat', description: 'Save this conversation as Markdown', needs: ['session'] },
   { name: 'model', group: 'Settings', description: 'Choose the model', needs: [] },
   { name: 'workspace', group: 'Settings', description: 'Choose the workspace Jaeger uses', needs: [] },
+  { name: 'worktree', group: 'Code', description: 'Select an existing git worktree', needs: [] },
   { name: 'plan', group: 'Code', description: 'Plan this request without executing changes', args: '<request>', takesArgs: true, needs: [] },
   { name: 'diagnostics', group: 'Code', description: 'Show workspace problems', needs: [] },
   { name: 'diff', group: 'Code', description: 'Review the files this turn changed', needs: ['changes'] },

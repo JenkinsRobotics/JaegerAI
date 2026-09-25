@@ -61,6 +61,9 @@ deployment, not exposing the unauthenticated Gateway.
   Gateway admission `workspace` field for new chats, immediate turns, and queued work.
 - The `@` control picks a workspace file, stages it through the Gateway
   attachment contract, and inserts the mention into the composer for the next turn.
+- `/worktree` and the Worktree control select an existing git worktree reported
+  by `git worktree list`. The chosen path becomes the Gateway admission workspace.
+  This slice does not create, merge, or prune worktrees.
 - Pending request IDs persist in IDE workspace storage keyed by Gateway URL;
   drafts stay in webview state. State is outside the source tree. Failed admission
   never triggers blind automatic resend. An ambiguous missing receipt needs

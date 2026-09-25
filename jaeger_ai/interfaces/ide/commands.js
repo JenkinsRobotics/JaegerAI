@@ -57,6 +57,29 @@ function diagnosticsLines(snapshot = {}) {
   return lines;
 }
 
+function parseWorktrees(porcelain = '') {
+  const blocks = String(porcelain || '').trim().split(/\n\s*\n/).filter(Boolean);
+  return blocks.map(block => {
+    const fields = Object.fromEntries(block.split('\n').map(line => {
+      const index = line.indexOf(' ');
+      return index === -1 ? [line, ''] : [line.slice(0, index), line.slice(index + 1)];
+    }));
+    return {
+      path: fields.worktree || '',
+      head: fields.HEAD || '',
+      branch: fields.branch ? fields.branch.replace(/^refs\/heads\//, '') : '',
+      bare: fields.bare === '',
+      detached: fields.detached === '',
+    };
+  }).filter(row => row.path && !row.bare);
+}
+
+function worktreeLines(rows) {
+  const trees = Array.isArray(rows) ? rows : [];
+  if (!trees.length) return ['No git worktrees found for the selected workspace.'];
+  return trees.map(row => `${row.branch || row.head.slice(0, 12) || 'detached'} · ${row.path}`);
+}
+
 function taskLines(payload) {
   const tasks = Array.isArray(payload) ? payload : payload?.tasks || [];
   if (!tasks.length) return ['No background agents or tasks.'];
@@ -113,4 +136,4 @@ function buildIdeContext({ folders = [], active = null, openPaths = [] } = {}) {
   return Object.keys(context).length ? context : null;
 }
 
-module.exports = { statusLines, skillLines, taskLines, diagnosticsLines, exportMarkdown, slug, clip, buildIdeContext, IDE_LIMITS };
+module.exports = { statusLines, skillLines, taskLines, diagnosticsLines, exportMarkdown, slug, clip, buildIdeContext, parseWorktrees, worktreeLines, IDE_LIMITS };
