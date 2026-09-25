@@ -29,6 +29,9 @@ def test_runtime_sources_have_no_machine_specific_or_retired_state_defaults():
                 continue
             source = path.read_text(encoding="utf-8").lower()
             for literal in forbidden:
+                # Bootstrap migration reads the old name; writes use the external state root.
+                if relative == Path("scripts/install.sh") and literal == ".jaeger_os":
+                    continue
                 if literal in source:
                     findings.append(f"{relative}: {literal}")
     assert findings == [], "machine/retired state defaults must stay behind migration boundaries:\n" + "\n".join(findings)

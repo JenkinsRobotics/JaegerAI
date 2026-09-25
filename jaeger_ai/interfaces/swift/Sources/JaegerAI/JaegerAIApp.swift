@@ -18,12 +18,10 @@
 import AppKit
 import SwiftUI
 
-@main
 struct JaegerAIApp: App {
     /// AppDelegate runs ``applicationDidFinishLaunching`` before any
-    /// scenes are activated. Use it to mark the app as a menu-bar
-    /// accessory so it stays alive without a Dock icon — necessary
-    /// for SwiftPM-built apps that ship without a real Info.plist.
+    /// scenes are activated. The native app owns the one desktop/Dock
+    /// identity; closing a face leaves the menu-bar application running.
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     /// The Unix-socket agent client (Week 1).  Owns the connection,
@@ -32,10 +30,6 @@ struct JaegerAIApp: App {
     /// Backed by ``AgentBridge.shared`` so the AppDelegate's launch hook
     /// and SwiftUI's view tree are looking at the same instance.
     @StateObject private var agent = AgentBridge.shared
-
-    /// Shared TTS manager — the menu surfaces an auto-speak toggle
-    /// and a "Stop Speaking" item when audio is active.
-    @StateObject private var tts = TTSManager.shared
 
     /// Backs the menu-bar "update available" dot (0.8) — the same store
     /// the Settings HUD's Updates row reads, so one background poll
@@ -61,7 +55,7 @@ struct JaegerAIApp: App {
             // The rich dropdown card (avatar · name · live status ·
             // actions · gear→Settings) — the Swift twin of the PySide6
             // ``tray/menu.py`` card.
-            MenuCard(agent: agent, tts: tts)
+            MenuCard(agent: agent)
         } label: {
             // Two-state icon: colored J when the agent is up, greyed
             // J when it's down or unreachable. Same UX the 0.2.x tray

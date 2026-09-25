@@ -35,8 +35,10 @@ def _restore_installed_policy():
     restore it so a test that installs a policy can't leak into the
     next test."""
     saved = _perm._installed_policy
+    saved_context = _perm._current_policy.get()
     yield
     _perm._installed_policy = saved
+    _perm._current_policy.set(saved_context)
 
 
 def _req(skill: str = "packages", operation: str = "run_in_venv") -> PermissionRequest:

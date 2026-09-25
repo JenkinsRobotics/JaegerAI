@@ -78,7 +78,7 @@ plus the `verified` flag from Gap 2. Package boot performs the handshake:
    and cross-check controller presence;
 3. mismatch → refuse to register capabilities (loud), matching fail-closed
    everywhere else.
-The unit_id then tags telemetry/health (`/sense/node_health` already carries
+The unit_id then tags telemetry/health (`/sys/node/health` already carries
 node names; hardware nodes prefix with unit_id) — the seam that later allows
 TWO bodies on one bus without collision.
 

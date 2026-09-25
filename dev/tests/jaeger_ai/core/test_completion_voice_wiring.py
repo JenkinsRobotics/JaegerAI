@@ -1,7 +1,7 @@
 from unittest.mock import Mock
 
-from jaeger_kokoro_tts.nodes.kokoro_tts.engine import KokoroTTS
-from jaeger_whisper_stt.nodes.whisper_stt.engine.local_agreement.pipeline import WhisperSTTLocalAgreement
+from jaeger_kokoro_tts.engine import KokoroTTS
+from jaeger_whisper_stt.engine.local_agreement.pipeline import WhisperSTTLocalAgreement
 
 
 def test_kokoro_receives_config_and_environment_override(monkeypatch):
@@ -11,27 +11,33 @@ def test_kokoro_receives_config_and_environment_override(monkeypatch):
     assert KokoroTTS(audio_backend='avaudio')._resolve_backend() == 'sounddevice'
 
 
-def test_local_agreement_waits_for_two_decodes_and_resets():
+def test_local_agreement_waits_for_two_decodes_and_keeps_a_cursor():
+    """The shared streaming engine commits only agreed words, once."""
+    from collections import deque
     engine = WhisperSTTLocalAgreement.__new__(WhisperSTTLocalAgreement)
-    engine._reset_agreement()
-    engine._in_speech = True
-    engine._current_phrase_audio = Mock(return_value=object())
-    engine._transcribe = Mock(side_effect=['hello world', 'hello there', 'hello there friend'])
-    captions = []
-    engine.set_on_partial(captions.append)
-    engine._rolling_transcribe()
-    assert captions == []
-    engine._rolling_transcribe()
-    assert captions == ['hello']
-    engine._rolling_transcribe()
-    assert captions == ['hello', 'hello there']
-    engine._reset_agreement()
-    assert engine._stable_text == engine._previous_hypothesis == ''
+    engine.commit = "agreement"
+    engine._committed_words = deque(maxlen=200)
+    engine._prev_tail = []
+    engine._no_anchor = 0
+    engine._resync_after_passes = 4
+    engine.min_overlap_words = 1
+    engine.min_commit_words = 1
+    engine.max_commit_words = 28
+    engine._emit_partial = Mock()
+    engine._commit = Mock()
+    engine._commit_from("hello world", 1.0)
+    engine._commit.assert_not_called()
+    engine._commit_from("hello there", 2.0)
+    engine._commit.assert_called_once_with("hello", 2.0)
+    engine._commit_from("hello there friend", 3.0)
+    assert [call.args[0] for call in engine._commit.call_args_list] == ["hello", "there"]
+    assert list(engine._committed_words) == ["hello", "there"]
+
 
 
 def test_playback_amplitude_tracks_pcm_and_underrun():
     import numpy as np
-    from jaeger_kokoro_tts.nodes.kokoro_tts.persistent_player import PersistentKokoroPlayer
+    from jaeger_kokoro_tts.persistent_player import PersistentKokoroPlayer
 
     player = PersistentKokoroPlayer()
     player.enqueue(np.full(4, 0.5, dtype=np.float32))

@@ -77,7 +77,7 @@ def _safe_name(server: str) -> str:
 
 def token_dir(layout: Any = None) -> Path:
     if layout is None:
-        from jaeger_agent.workspace import get_layout
+        from jaeger_agent.core.workspace import get_layout
         layout = get_layout()
     return Path(layout.credentials_dir) / "mcp-oauth"
 

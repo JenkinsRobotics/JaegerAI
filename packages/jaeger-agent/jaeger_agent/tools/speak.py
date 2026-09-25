@@ -25,7 +25,7 @@ import uuid
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.workspace import SandboxError, _require_layout, _resolve_under
+from jaeger_agent.core.workspace import SandboxError, _require_layout, _resolve_under
 
 # Re-export the module's constants so existing imports keep working.
 try:
@@ -123,6 +123,23 @@ def speak(text: str = "", path: str = "", voice: str = "") -> dict[str, Any]:
     pre-0.4 shape (``spoken``, ``elapsed_s``, ``reason``,
     ``from_file``) so callers don't see the rewire.
     """
+    # A model should never reach this branch—the active face removes speech
+    # tools from its schema—but keep execution fail-closed if it hallucinates
+    # the historical tool name. Final audio must stay inside the engine.
+    try:
+        from jaeger_agent.core.outputs import multimodal_output_active
+
+        if multimodal_output_active():
+            return {
+                "spoken": False,
+                "reason": (
+                    "multimodal final output is engine-owned; use an "
+                    "[OUTPUT:SPEECH] or [OUTPUT:BOTH] final response"
+                ),
+            }
+    except Exception:  # noqa: BLE001 — guard import must not break normal TTS
+        pass
+
     file_path = (path or "").strip()
     if file_path:
         layout = _require_layout()
@@ -149,18 +166,20 @@ def _tts_module_present() -> bool:
 
     0.8 M2a: lets :func:`_speak_via_bus` return immediately instead of
     spinning up the runtime and blocking on ``bus.request`` for
-    ``_SPEAK_TIMEOUT_S`` (180 s) when kokoro_tts has been removed from
-    the deployment. Prefers the availability gate's own module-
-    readiness check (the same one that hides ``text_to_speech`` from
+    ``_SPEAK_TIMEOUT_S`` (180 s) when no tts module is installed in
+    the deployment. Prefers the availability gate's own slot-readiness
+    check (the same one that hides ``text_to_speech`` from
     the agent) since it's already authoritative for this tool; falls
     back to a raw slot-discovery check if that import ever fails for
     an unrelated reason, so a broken availability module doesn't turn
     into a false "module missing"."""
     try:
-        from jaeger_agent.availability import _module_ready
-        ready = _module_ready("text_to_speech")
+        from jaeger_agent.core.availability import _slot_ready, _slot_ready_for_tool
+
+        ready = _slot_ready_for_tool("text_to_speech")
         if ready is not None:
             return ready
+        return _slot_ready("tts")
     except Exception:  # noqa: BLE001 — gate import must never block speak
         pass
     try:
@@ -215,7 +234,7 @@ def _speak_via_bus(text: str, voice: str = "") -> dict[str, Any]:
     )
     ack = bus.request(
         request,
-        ack_topic=topics.SENSE_SPOKEN,
+        ack_topic=topics.ACT_SPEECH_SPOKEN,
         timeout_s=_SPEAK_TIMEOUT_S,
     )
     if ack is None:
@@ -236,11 +255,10 @@ def _speak_via_bus(text: str, voice: str = "") -> dict[str, Any]:
 
 @register_tool_from_function(name="text_to_speech")
 def _t_text_to_speech(text: str = "", path: str = "") -> dict:
-    """Speak text aloud through the default audio output via Kokoro
-    TTS. Use ONLY when the user explicitly asks to HEAR something
-    ("say…", "out loud", "narrate/read X aloud", "speak"). This is
-    NOT your reply channel — ordinary questions ("tell me a joke",
-    "what's the weather") are answered in text, not spoken.
+    """Speak text aloud through the configured TTS module. Use this only for
+    explicit narration actions ("read this file aloud", "say this through the
+    speaker"). It is not a final-response channel for a multimodal face; that
+    pipeline selects and renders its output internally.
     Pass `text` for literal text, or `path` to narrate a file from
     <instance>/skills/ ("read X out loud", "narrate X" with a named
     file). `path` is sandbox-resolved and wins over `text` when both

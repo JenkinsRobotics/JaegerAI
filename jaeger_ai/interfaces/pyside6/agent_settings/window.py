@@ -281,6 +281,9 @@ class AgentSettingsWindow(QWidget):
 
     def __init__(self, ctx: Any = None) -> None:
         super().__init__()
+        from ..branding import apply_app_identity
+
+        apply_app_identity(self)
         self.ctx = ctx
         self._lay: Any = None
         self.character = resolve_character(ctx)
@@ -975,14 +978,22 @@ class AgentSettingsWindow(QWidget):
         btn_mac.clicked.connect(_open_mac)
         btn_row.addWidget(btn_mac)
 
-        btn_sync = QPushButton("🔄 Sync Models & Directives")
+        btn_sync = QPushButton("🔄 Refresh ARES Connection")
         btn_sync.setStyleSheet("background: transparent; color: #B8B3D0; border: 1px solid #3889FD; border-radius: 9px; padding: 8px 14px; font-weight: 600;")
         btn_sync.setCursor(Qt.CursorShape.PointingHandCursor)
         def _sync_ares():
+            import urllib.request
             try:
-                self._toast(sub, "✓ Models & Directives synced with ARES")
-            except Exception as e:
-                self._toast(sub, f"Sync error: {e}", error=True)
+                with urllib.request.urlopen("http://127.0.0.1:8791/health", timeout=1.0) as response:
+                    result = {"online": response.status == 200}
+            except Exception as exc:
+                result = {"online": False, "error": str(exc)}
+            self._toast(
+                sub,
+                "✓ ARES connection online" if result.get("online")
+                else f"ARES offline: {result.get('error', 'health check failed')}",
+                error=not bool(result.get("online")),
+            )
         btn_sync.clicked.connect(_sync_ares)
         btn_row.addWidget(btn_sync)
 

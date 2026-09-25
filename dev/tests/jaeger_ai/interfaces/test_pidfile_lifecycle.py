@@ -102,8 +102,9 @@ def importlib_reload():
 def _drive_main(monkeypatch, root, observer):
     """Run ``bridge.main`` with a faked boot that reports pid-file state.
 
-    Empty stdin means main falls straight through to teardown, and teardown
-    waits on ``ctx.booted`` — so the observer always runs first.
+    Explicit quit requests teardown even when the attach socket is listening.
+    Stdin EOF alone keeps a socket-backed bridge alive. Teardown waits on
+    ``ctx.booted`` — so the observer always runs first.
     """
     import io
     import types
@@ -127,7 +128,7 @@ def _drive_main(monkeypatch, root, observer):
     monkeypatch.setattr("jaeger_ai.main.run_for_voice",
                         lambda *a, **k: {"text": "", "error": None}, raising=False)
     monkeypatch.setattr("sys.stdout", io.StringIO())
-    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    monkeypatch.setattr("sys.stdin", io.StringIO('{"op":"quit"}\n'))
     return bridge.main(argv=[])
 
 

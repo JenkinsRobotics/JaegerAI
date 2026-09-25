@@ -51,7 +51,7 @@ def test_ui_speech_uses_framework_voice_rate_and_matching_stop(monkeypatch):
     assert bus.command.voice == "am_adam"
     assert bus.command.rate == 0.95
     assert bus.command.node_id == "jaeger-ai-interface"
-    assert bus.ack_topic == topics.SENSE_SPOKEN
+    assert bus.ack_topic == topics.ACT_SPEECH_SPOKEN
     assert bus.timeout_s == 7
     assert result["spoken"] is True
     assert stopped["active"] is True

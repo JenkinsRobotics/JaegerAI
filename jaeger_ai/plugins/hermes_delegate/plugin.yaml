@@ -1,0 +1,11 @@
+name: hermes_delegate
+version: 1
+description: |
+  Optional one-shot Hermes CLI worker for delegated Jaeger tasks. It is an
+  application integration, not an alternate JaegerAgent pipeline, and is only
+  active when JAEGER_DELEGATE_WORKER=hermes is selected by the operator.
+requires:
+  env_optional: [JAEGER_DELEGATE_WORKER, JAEGER_HERMES_COMMAND, JAEGER_HERMES_TIMEOUT_SECONDS]
+  notes: Hermes must be installed as a local executable when enabled.
+provides:
+  bridges: [hermes-oneshot-stdio]

@@ -1,12 +1,33 @@
 module: jaeger_agent
 slot: mind
-version: 1.0.0
+version: 1.2.0
 
 consumes: [/act/chat, /sense/transcript, /act/response]
 produces: [/sense/chat, /sense/agent_state, /sense/tool, /sense/activity, /sense/request]
 
 tools: []
 
+# The multimodal capability registry is internal to this one mind module:
+# jaeger_agent/nodes/{audio-duplex-io,stt-streaming,stt-whisper,
+# tts-kokoro,vision-mmproj,llm-gemma}. These are composable agent internals,
+# not additional JaegerOS slot providers, so they are package data rather than
+# extra module manifests. llm-gemma remains the marked non-agentic baseline.
 factory: jaeger_agent:make_mind_node
-config: agent
+config: agent             # its group/key in the settings catalog —
+                          # see jaeger_agent/core/config.py (AgentConfig)
+
+# llama_cpp only, because it is the only provider this module can
+# promise. `agent.provider` defaults to llama_cpp and llama-cpp-python
+# is a BASE dependency, so the availability gate probing it answers the
+# real question: can this install think at all, on its own, with no
+# server and no account?
+#
+# The remote backends are deliberately absent. They ship as optional
+# extras (`jaeger-agent[anthropic]`), so listing `anthropic` here would
+# report the mind unavailable to every deployment using a different
+# provider — and to an application injecting its own adapter, which
+# needs none of them.
+# Audio/vision implementations import their heavy libraries only from load()
+# paths. In particular pyaec remains gated by [multimodal-duplex], so the mind
+# module's availability probe stays scoped to its one unconditional backend.
 requires_libraries: [llama_cpp]

@@ -77,7 +77,7 @@ def test_agent_core_round_trips_through_jaeger_agent(monkeypatch) -> None:
     monkeypatch.setattr(
         main,
         "run_for_voice",
-        lambda _client, text, session_key="gui": {
+        lambda _client, text, session_key="gui", output_mode="dynamic": {
             "text": f"external: {text}",
             "error": None,
         },

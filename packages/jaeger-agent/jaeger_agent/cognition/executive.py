@@ -31,7 +31,7 @@ class Loop(Protocol):
 
     def bind_run(self, run_id: str | None) -> None: ...
 
-    def run_turn(self, text: str) -> str: ...
+    def run_turn(self, text: str, *, content: Any = None) -> str: ...
 
 
 class TurnExecutive:
@@ -118,7 +118,7 @@ class TurnExecutive:
         except Exception:
             return []
 
-    def run_turn(self, text: str) -> str:
+    def run_turn(self, text: str, *, content: Any = None) -> str:
         run = self.ensure_run()
         if run.state == "blocked":
             if run.reason == "turn_failed":
@@ -141,6 +141,10 @@ class TurnExecutive:
             if self.prepare_world_context:
                 if context:
                     text = context + "\n\n" + text
+                    if isinstance(content, list):
+                        content = [{"type": "text", "text": context}, *content]
+                    elif isinstance(content, str):
+                        content = context + "\n\n" + content
         elif self.claims is not None:
             asserted = extract_told_propositions(text)
             record_told(self.claims, text, source_id=run.id)
@@ -160,7 +164,8 @@ class TurnExecutive:
             self.runs.checkpoint(run.id, {"halt": "needs_evidence", "iterations": 0})
             return result
         try:
-            result = self.agent.run_turn(text)
+            result = (self.agent.run_turn(text) if content is None
+                      else self.agent.run_turn(text, content=content))
         except Exception:
             self.runs.transition(run.id, "blocked", reason="turn_failed")
             raise

@@ -177,7 +177,7 @@ from the three apps just because it exists:
 | Service management (split-mode core) | macOS `launchd` LaunchAgent — the platform's own service manager, not a custom daemonizer (`jaeger_os/daemon/_child_entry.py`'s spawn-not-fork lesson stays) |
 | Restart policy | systemd semantics: `Restart=never/on-failure/always`, exponential backoff, burst limit (`StartLimitBurst` analog) |
 | Node lifecycle | ROS 2 managed-node lifecycle — §2.4 maps `NodeState` onto it; keeps a future `ros2_bridge` (hardware plan §6 Q3) mechanical |
-| Health vocabulary | Kubernetes-style split: *liveness* (heartbeat on `/sense/node_health`) vs *readiness* (`check_fn` availability — already shipped in `jaeger_os/hardware/capabilities.py`) |
+| Health vocabulary | Kubernetes-style split: *liveness* (heartbeat on `/sys/node/health`) vs *readiness* (`check_fn` availability — already shipped in `jaeger_os/hardware/capabilities.py`) |
 | Manifest | `pyproject.toml` conventions: TOML, static, declarative, versioned `requires_framework` |
 | Service + shell topology | Ollama (`ollama serve` + menu-bar app), Docker Desktop (daemon + GUI) |
 | Single instance + attach | The LSP/daemon-client pattern: socket + PID file, second client attaches |
@@ -650,7 +650,7 @@ places this family in the chassis directory (`app/bus/`; JROS:
   (`jaeger_os/topics.py`, `TOPIC_TO_CLASS` registry) is the shape; CC01
   already adopted it. Mochi's dotted `node.<id>.health` / `sys.*` / `ext.*`
   (`Mochi/transport/topics.py`) maps onto it at migration
-  (`node.<id>.health` → `/sense/node_health`, which exists:
+  (`node.<id>.health` → `/sys/node/health`, which exists:
   `jaeger_os/topics.py: NodeHealth`). The framework's chassis-owned
   topics are exactly the health/lifecycle/log set (§2.8); app domain
   topics stay app-owned.
@@ -660,7 +660,7 @@ places this family in the chassis directory (`app/bus/`; JROS:
   layer `(planned)` rather than reinvented per app.
 - **Frames and other big payloads** ride the bus where they already do
   (Mochi publishes rendered frames through the broker; CC01 publishes
-  H.264 bytes on `/sense/video`) — with the codec layer
+  H.264 bytes on `/sense/camera/video`) — with the codec layer
   (`jaeger_os/transport/codec.py`: JSON for text topics, MessagePack for
   binary) promoted alongside. Anything faster than that (UDP video) stays
   off-bus, per the hardware plan's existing position.
@@ -741,17 +741,17 @@ Today: JROS prints `[node:<name>]`-tagged lines to stderr
 rotation (`jaeger_os/core/runtime/log_rotation.py`); Mochi nodes publish
 structured health (`mochi.node.health.v1` payloads,
 `transport/node_base.py: _build_health_payload`) cached by `HostMonitor`
-for REP queries; CC01 publishes `Log` messages on `/sense/log` rendered
+for REP queries; CC01 publishes `Log` messages on `/sys/log/line` rendered
 into per-tab log boxes (`core/topics.py`, `tabs/tab_widgets.py: LogBox`).
 
 The framework keeps all three habits and names them once `(planned)`:
 
 - **Log stream:** one line shape — `ts level [app.node] message` — to
-  stderr and a per-app rotating file; a `/sense/log` topic mirrors
+  stderr and a per-app rotating file; a `/sys/log/line` topic mirrors
   operator-relevant lines onto the bus so any surface can render them
   (CC01's pattern, generalized). No new logging framework; stdlib +
   the existing rotation.
-- **Telemetry:** `NodeHealth` on `/sense/node_health` (already in
+- **Telemetry:** `NodeHealth` on `/sys/node/health` (already in
   `jaeger_os/topics.py`, already published at 1 Hz by
   `jaeger_os/hardware/packages/jp01/boot.py` and consumed nowhere yet —
   the framework's health cache becomes its first consumer) carries
@@ -829,7 +829,7 @@ when the manifest takes over node declaration.
 | `core/plugin_registry.py: PluginSpec/PluginProcess` | the supervisor's subprocess backend | Promoted, not reinvented — this code is the reference implementation |
 | `transport/broker.py` (XPUB/XSUB) | Mochi's copy of `app/bus/zmq.py` (JROS's `transport/broker.py` is already the same pattern — the reference copy reconciles both before Mochi copies it) | One broker implementation per app, same code lineage |
 | `transport/node_base.py: MochiNodeBase` | `FrameNode(Node)` (§2.3); `_update_tick/_render_tick` map to the split hook; health details → `health()` | `nodes/animation/node.py: AnimationNode(MochiNodeBase)` migrates mechanically |
-| `transport/topics.py` dotted topics | `/sense /act` typed topics; `node.<id>.health` → `/sense/node_health` | Mochi's ctrl PULL socket (`node_base._control_loop`) → supervisor verbs |
+| `transport/topics.py` dotted topics | `/sense /act` typed topics; `node.<id>.health` → `/sys/node/health` | Mochi's ctrl PULL socket (`node_base._control_loop`) → supervisor verbs |
 | `core/host_monitor.py: HostMonitor` | Mochi's copy of `app/health.py` | Same REP query idea, same code lineage |
 | `gui/mochi_companion.py` (+ in-process `build_mini_window`) | THE shell (`mode = "fused"` first; `split` later if the renderer should outlive the window); mini-window = a WindowManager kind | Mochi's own commit history chose in-process windows; framework canonizes it. Operator: "Mochi seems a bit better" — because one supervisor owns and reaps every child |
 

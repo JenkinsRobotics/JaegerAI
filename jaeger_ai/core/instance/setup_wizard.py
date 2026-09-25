@@ -14,6 +14,8 @@ never destroys prior work.
 
 from __future__ import annotations
 
+import json
+
 import os
 import subprocess
 import sys
@@ -158,7 +160,7 @@ def _ask_choice(prompt: str, options: list[tuple[str, str]], default: int = 0) -
 
 def _pick_character():
     """Pick the CHARACTER this instance plays — characters ARE the persona
-    now (jaeger_os/personality/characters/).  Returns ``(id, shim)`` where the
+    now (jaeger_ai/features/personality/characters/).  Returns ``(id, shim)`` where the
     shim mirrors the persona-identity fields Step 1 prefills from, so the
     instance's identity.yaml + active_character both reflect the character.
     The operator picks a character instead of authoring a prompt by hand.
@@ -454,7 +456,7 @@ def run_wizard(
     name = instance_name
     layout = InstanceLayout(root=resolve_instance_dir(name)) if name else None
 
-    _banner("Welcome to Jaeger-OS")
+    _banner("Welcome to Jaeger AI")
     print()
     # Show the install destination LOUDLY before anything else — the path was
     # set by the install, never asked here. An operator who didn't mean to

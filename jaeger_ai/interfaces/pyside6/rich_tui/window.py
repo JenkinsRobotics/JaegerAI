@@ -75,6 +75,9 @@ class ChatWindow(QWidget):
 
     def __init__(self, ctx: Any) -> None:
         super().__init__()
+        from ..branding import apply_app_identity
+
+        apply_app_identity(self)
         self.ctx = ctx
         # Display name = the AGENT's own identity (never the character —
         # see ``window.agent_name``'s fallback chain), so the title / banner

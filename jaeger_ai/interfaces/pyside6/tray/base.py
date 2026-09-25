@@ -144,10 +144,10 @@ SEPARATOR = MenuItem(label="-", action=None, enabled=False)
 
 def _status_label(state: TrayState) -> MenuItem:
     text = {
-        TrayState.STOPPED:  "Jaeger OS: stopped",
-        TrayState.STARTING: "Jaeger OS: starting…",
-        TrayState.RUNNING:  "Jaeger OS: running",
-        TrayState.ERROR:    "Jaeger OS: error — restart needed",
+        TrayState.STOPPED:  "Jaeger AI: stopped",
+        TrayState.STARTING: "Jaeger AI: starting…",
+        TrayState.RUNNING:  "Jaeger AI: running",
+        TrayState.ERROR:    "Jaeger AI: error — restart needed",
     }[state]
     return MenuItem(label=text, action=None, enabled=False)
 
@@ -160,9 +160,9 @@ def menu_items_for(state: TrayState) -> list[MenuItem]:
     return [
         _status_label(state),
         SEPARATOR,
-        MenuItem(label="Start Jaeger OS",   action="start",   enabled=stopped),
-        MenuItem(label="Stop Jaeger OS",    action="stop",    enabled=running),
-        MenuItem(label="Restart Jaeger OS", action="restart", enabled=running),
+        MenuItem(label="Start Jaeger AI",   action="start",   enabled=stopped),
+        MenuItem(label="Stop Jaeger AI",    action="stop",    enabled=running),
+        MenuItem(label="Restart Jaeger AI", action="restart", enabled=running),
         SEPARATOR,
         # 0.2.6: every client launcher lives in this group. Each one
         # is a separate process; the action handler in ``macos.py``
@@ -189,13 +189,13 @@ def menu_items_for(state: TrayState) -> list[MenuItem]:
         # Checks GitHub on click (not on every menu open — that would block
         # the menu on the network); the handler shows the result.
         MenuItem(label="Check for Updates…", action="check_update"),
-        MenuItem(label="About Jaeger OS",  action="about"),
-        # "Quit Jaeger OS" tears EVERYTHING down — daemon, every
+        MenuItem(label="About Jaeger AI",  action="about"),
+        # "Quit Jaeger AI" tears EVERYTHING down — daemon, every
         # running tray, and the rumps event loop itself. Users
         # expect that picking Quit from the menu kills the whole
         # product, not just the icon. The action handler in
         # ``macos.py`` ties the steps together.
-        MenuItem(label="Quit Jaeger OS",     action="quit_tray"),
+        MenuItem(label="Quit Jaeger AI",     action="quit_tray"),
     ]
 
 

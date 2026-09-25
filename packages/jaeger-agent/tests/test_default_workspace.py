@@ -11,18 +11,20 @@ import pathlib
 
 import pytest
 
-from jaeger_agent import workspace
+from jaeger_agent.core import workspace
 
 
-def test_default_workspace_lands_in_the_project_not_the_home_dir(tmp_path, monkeypatch) -> None:
-    """State belongs beside the code that owns it. A brain that scatters
-    into ~ or /tmp is one you cannot inspect, commit, or delete with the
-    project."""
-    monkeypatch.chdir(tmp_path)
+def test_default_workspace_uses_external_operator_state(tmp_path, monkeypatch) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    state = tmp_path / "state"
+    monkeypatch.chdir(source)
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(state))
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "legacy-override"))
     ws = workspace.DefaultWorkspace().create()
-    assert ws.root == (tmp_path / ".jaeger_agent").resolve()
+    assert ws.root == (state / "agent").resolve()
     assert ws.root.is_dir() and ws.workspace_dir.is_dir()
-    assert pathlib.Path.home() not in ws.root.parents
+    assert not list(source.iterdir())
 
 
 def test_the_seven_paths_are_the_whole_contract(tmp_path) -> None:
@@ -94,11 +96,16 @@ def test_write_to_a_real_out_of_sandbox_path_raises_instead_of_phantom_404(
 
 
 def test_ensure_bound_does_not_steal_a_hosts_layout(tmp_path, monkeypatch) -> None:
-    """An app that bound its own instance keeps it."""
+    """A host layout owns workspace and memory; fallback state stays unused."""
+    from jaeger_agent.memory import sqlite_store
+
     monkeypatch.chdir(tmp_path)
     host = workspace.DefaultWorkspace(tmp_path / "host_owned").create()
     workspace.bind(host)
     try:
         assert workspace.ensure_bound().root == host.root
+        assert sqlite_store.db_path() == host.memory_dir / "state.db"
+        assert not (tmp_path / ".jaeger_agent").exists()
     finally:
+        sqlite_store.close()
         workspace._layout = None

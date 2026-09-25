@@ -21,7 +21,7 @@ import threading
 import uuid
 from typing import Any
 
-from jaeger_agent.messages import AgentRequest, AgentResponse
+from jaeger_agent.core.messages import AgentRequest, AgentResponse
 
 _ALLOW = {"allow", "always", "yes", "y", "approve"}
 _DEFAULT_TIMEOUT_S = 300.0

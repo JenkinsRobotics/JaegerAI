@@ -99,7 +99,7 @@ def model_location(action: str, path: str = "") -> dict[str, Any]:
 
     from jaeger_ai.core.instance.schemas import dump_yaml
 
-    from jaeger_agent.workspace import _require_layout
+    from jaeger_agent.core.workspace import _require_layout
 
     act = (action or "").strip().lower()
     try:

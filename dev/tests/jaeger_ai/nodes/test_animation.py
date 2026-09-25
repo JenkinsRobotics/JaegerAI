@@ -98,7 +98,7 @@ def test_command_routes_to_named_adapter(bus):
     )
     node.register_adapter("fake", adapter)
     try:
-        bus.publish(topics.AnimationCommand(
+        bus.publish(topics.DisplayCommand(
             adapter="fake", asset_path="/tmp/whatever.png",
             params={"width": 4, "height": 4},
         ))
@@ -123,7 +123,7 @@ def test_unknown_adapter_is_logged_not_raised(bus):
         frame_callback=lambda f: captured.append(f),
     )
     try:
-        bus.publish(topics.AnimationCommand(
+        bus.publish(topics.DisplayCommand(
             adapter="nonexistent", asset_path="/tmp/x.png",
         ))
         time.sleep(0.3)
@@ -140,7 +140,7 @@ def test_successful_play_awards_xp_to_adapter_skill(bus):
     node, thread = _start_node(bus, skill_registry=reg)
     node.register_adapter("fake", adapter)
     try:
-        bus.publish(topics.AnimationCommand(
+        bus.publish(topics.DisplayCommand(
             adapter="fake", asset_path="/tmp/whatever.png",
             params={"width": 4, "height": 4},
         ))
@@ -164,12 +164,12 @@ def test_animation_stop_interrupts_streaming(bus):
     )
     node.register_adapter("fake", adapter)
     try:
-        bus.publish(topics.AnimationCommand(
+        bus.publish(topics.DisplayCommand(
             adapter="fake", asset_path="/tmp/x.png",
             params={"width": 4, "height": 4},
         ))
         time.sleep(0.05)
-        bus.publish(topics.AnimationStop())
+        bus.publish(topics.DisplayStop())
         for _ in range(20):
             if adapter.closes > 0:
                 break
@@ -187,13 +187,13 @@ def test_animation_state_published_for_play_then_idle(bus):
     adapter = _FakeAdapter(frames_per_play=2)
     captured_state: list[topics.TopicMessage] = []
     bus.subscribe(
-        topics.SENSE_ANIMATION_STATE,
+        topics.ACT_DISPLAY_STATE,
         lambda msg: captured_state.append(msg),
     )
     node, thread = _start_node(bus)
     node.register_adapter("fake", adapter)
     try:
-        bus.publish(topics.AnimationCommand(
+        bus.publish(topics.DisplayCommand(
             adapter="fake", asset_path="/tmp/x.png",
             params={"width": 4, "height": 4},
         ))

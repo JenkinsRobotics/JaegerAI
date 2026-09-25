@@ -632,6 +632,38 @@ class LocalLlamaAdapter(OpenAIAdapter):
         )
         return self._client
 
+    def warmup(
+        self,
+        *,
+        system_prompt: str = "",
+        tools: list[ToolDef] | None = None,
+    ) -> bool:
+        """Warm the exact stable prompt prefix without mutating agent history."""
+        formatted = self.format_messages(
+            [{"role": "user", "content": "ready"}],
+            list(tools or ()),
+            system_prompt,
+        )
+        self.call(
+            formatted,
+            threading.Event(),
+            stale_timeout=None,
+            max_tokens=1,
+            temperature=0.0,
+        )
+        return True
+
+    def close(self) -> None:
+        """Release llama.cpp explicitly instead of relying on exit ordering."""
+        llama, self._llama = self._llama, None
+        self._client = None
+        self._tools_prose_cache.clear()
+        self._chat_template_cache = None
+        if llama is not None:
+            close = getattr(llama, "close", None)
+            if callable(close):
+                close()
+
     # ── in-process call (override the inherited HTTP version) ───────
 
     def call(
@@ -877,6 +909,8 @@ class LocalLlamaAdapter(OpenAIAdapter):
         # llama-cpp's chat handlers vary per-model on parallel tool
         # calling; the drift parser handles the multi-call case from
         # text either way. Report only what the wire format guarantees.
+        if feature == "vision":
+            return "chat_handler" in self.llama_kwargs
         return False
 
     def health_check(self) -> dict[str, Any]:

@@ -1,0 +1,147 @@
+{
+  "schema": "multimodal-agent-result-v1",
+  "benchmark": "gemma-multimodal-comparison-v1",
+  "engine": "jaeger-ai-attached-bridge",
+  "suite": "selected",
+  "created_at": "2026-09-13T11:14:42-0700",
+  "load_ms": 39458.38,
+  "cases": [
+    {
+      "id": "text_math",
+      "modality": "text",
+      "response": "The result is 45. Is that the entirety of the data you intended to convey, or is there a context I am missing regarding this single integer?",
+      "transcript": null,
+      "total_ms": 2651.59,
+      "first_audio_ms": null,
+      "audio_samples": 0,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text"
+      ],
+      "output_source": "model-text-fallback",
+      "error": null
+    },
+    {
+      "id": "vision_red_square",
+      "modality": "vision",
+      "response": "The central shape is a square, and its color is red. Is that the entirety of the data you are presenting?",
+      "transcript": null,
+      "total_ms": 1744.92,
+      "first_audio_ms": null,
+      "audio_samples": 0,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text"
+      ],
+      "output_source": "model-output-directive",
+      "error": null
+    },
+    {
+      "id": "vision_three_blue_circles",
+      "modality": "vision",
+      "response": "The observation is simple: three shapes are present. They are circles, and their color is blue. Is the identification of the shape type and color sufficient, or is there a pattern in their arrangement or relation to each other that warrants further analysis?",
+      "transcript": null,
+      "total_ms": 2092.87,
+      "first_audio_ms": null,
+      "audio_samples": 0,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text"
+      ],
+      "output_source": "model-output-directive",
+      "error": null
+    },
+    {
+      "id": "spoken_q00",
+      "modality": "spoken",
+      "response": "The arithmetic operation yields 4. Is the underlying assumption of the operation itself the point of interest, or merely the result?",
+      "transcript": "What is 2 plus 2?",
+      "total_ms": 1709.21,
+      "first_audio_ms": null,
+      "audio_samples": 0,
+      "audio_rate": 24000,
+      "output_channels": [
+        "text"
+      ],
+      "output_source": "model-output-directive",
+      "error": null
+    },
+    {
+      "id": "spoken_q01",
+      "modality": "spoken",
+      "response": "The sky is typically blue during the day, but its color can change depending on the time of day or weather conditions.",
+      "transcript": "What color is the sky?",
+      "total_ms": 3513.4,
+      "first_audio_ms": 3513.35,
+      "audio_samples": 176400,
+      "audio_rate": 24000,
+      "output_channels": [
+        "speech"
+      ],
+      "output_source": "model-output-directive",
+      "error": null
+    }
+  ],
+  "configuration": {
+    "model": "jaeger_ai/models/gemma-4-E4B-it-Q4_K_M.gguf",
+    "model_precision": "Q4_K_M",
+    "audio_mode": "plain",
+    "play": false,
+    "temperature": 0.0,
+    "max_tokens": 4096,
+    "ctx": 32768,
+    "agentic_tools": true,
+    "toolset_scoping": true,
+    "selected_ids": [
+      "spoken_q00",
+      "spoken_q01",
+      "text_math",
+      "vision_red_square",
+      "vision_three_blue_circles"
+    ],
+    "visible_tools": null,
+    "available_tools": null,
+    "memory_owner": "AgentRuntime",
+    "audio_output": "synthesized Kokoro af_heart PCM at 24000 Hz",
+    "instance_config": {
+      "backend": "llama_cpp_python",
+      "model_path": "/Users/jonathanjenkins/.lmstudio/models/lmstudio-community/gemma-4-E4B-it-GGUF/gemma-4-E4B-it-Q4_K_M.gguf",
+      "ctx": 32768,
+      "aux_ctx": 4096,
+      "gpu_layers": -1,
+      "n_batch": 512,
+      "n_ubatch": 512,
+      "flash_attn": true,
+      "threads": null,
+      "max_tokens": 4096,
+      "extra_gguf_dirs": [],
+      "stall_timeout_s": null
+    },
+    "isolated_instance": "/var/folders/sw/9gk79bcn0r30dr3vk76whpxc0000gn/T/jaeger_scenario_gt38oqn1/instance",
+    "benchmark_boundary": "completed endpoint; no live devices"
+  },
+  "environment": {
+    "jaeger_agent": "1.2.0",
+    "python": "3.11.9",
+    "platform": "macOS-26.6.2-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "engine_load_ms": 11047.17,
+  "bridge_boot_and_vision_ms": 28411.21,
+  "native_dictation_probe": {
+    "type": "result",
+    "id": "native-stt-probe",
+    "ok": true,
+    "data": {
+      "model": "large-v3-turbo",
+      "text": "What is 2 plus 2?"
+    },
+    "error": null,
+    "elapsed_ms": 550.27
+  },
+  "lifecycle": {
+    "exit_code": 0,
+    "bye_received": true,
+    "isolated_instance": "/var/folders/sw/9gk79bcn0r30dr3vk76whpxc0000gn/T/jaeger_scenario_gt38oqn1/instance"
+  }
+}

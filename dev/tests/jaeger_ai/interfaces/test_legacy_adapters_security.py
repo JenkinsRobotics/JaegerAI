@@ -1,5 +1,6 @@
 """Legacy fallbacks must not bypass native-route authentication or invent Stop."""
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
+from http.client import HTTPConnection
 from http.server import ThreadingHTTPServer
 import json
 import threading
@@ -33,7 +34,18 @@ def server_for(module, monkeypatch):
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=.01), daemon=True)
     thread.start()
-    def request(path, *, method='POST', headers=None, body=None):
+    def request(path, *, method='POST', headers=None, body=None, headers_only=False):
+        if headers_only:
+            # Unsupported framing must be rejected before any upload. Waiting
+            # for the response after headers avoids racing an intentional
+            # server close against urllib's final chunk write.
+            with closing(HTTPConnection('127.0.0.1', server.server_port, timeout=2)) as connection:
+                connection.putrequest(method, path)
+                for name, value in {'Content-Type': 'application/json', **(headers or {})}.items():
+                    connection.putheader(name, value)
+                connection.endheaders()
+                with connection.getresponse() as response:
+                    return response.status, json.load(response)
         req = Request(f'http://127.0.0.1:{server.server_port}' + path,
             method=method, data=None if method == 'GET' else json.dumps({} if body is None else body).encode(),
             headers={'Content-Type': 'application/json', **(headers or {})})
@@ -91,7 +103,8 @@ def test_legacy_cancel_does_not_invent_native_abort(module, monkeypatch):
 def test_legacy_rejects_invalid_body_before_dispatch(module, headers, body, monkeypatch):
     with server_for(module, monkeypatch) as (request, calls):
         status, _ = request('/v1/chat/completions', body=body,
-            headers={'Authorization': 'Bearer test-credential', **headers})
+            headers={'Authorization': 'Bearer test-credential', **headers},
+            headers_only='Transfer-Encoding' in headers)
         assert status == 400
         assert not calls
 

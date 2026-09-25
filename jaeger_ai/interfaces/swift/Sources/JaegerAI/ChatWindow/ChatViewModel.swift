@@ -179,12 +179,20 @@ final class ChatViewModel: ObservableObject {
     /// cleared the composer and dropped the text — see ``send``'s old
     /// ``guard !isSending else { return }``) without touching the
     /// bridge's concurrency model. ``count`` lets a view show "queued".
-    @Published private(set) var pendingSends: [String] = []
+    struct PendingSend {
+        let prompt: String
+        let display: String
+        let images: [String]
+        let agenticTools: Bool
+    }
+    @Published private(set) var pendingSends: [PendingSend] = []
 
     /// Composer text — bound to the chat window's TextField.  Owned
     /// by the view-model so transcription results (from STT) can
     /// drop straight into it without needing a callback up to the
     /// view.  The view does ``$chat.composerText`` for the binding.
+    @Published var agenticTools: Bool = true
+
     @Published var composerText: String = ""
 
     /// True while a STT pass is running.  Disables the send button,
@@ -618,7 +626,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     /// Send a user turn through the agent's ``chat.send`` verb.
-    func send(_ text: String) async {
+    func send(_ text: String, imageDataURIs: [String] = []) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
@@ -649,30 +657,25 @@ final class ChatViewModel: ObservableObject {
             appendSystem(notice)
             return
         case .chat(let prompt, let display):
-            await enqueueOrRun(prompt, display: display)
+            await enqueueOrRun(prompt, display: display, images: imageDataURIs)
         case .passThrough:
-            await enqueueOrRun(trimmed, display: trimmed)
+            await enqueueOrRun(trimmed, display: trimmed, images: imageDataURIs)
         }
     }
 
     /// Queue behind an in-flight turn, or run immediately.
-    private func enqueueOrRun(_ prompt: String, display: String) async {
-        if isSending && sessionKey == "dispatcher" {
-            if composerText.isEmpty { composerText = display }
-            dispatcherStatus = "Dispatcher is working — wait or use Stop; your draft is retained"
-            return
-        }
+    private func enqueueOrRun(_ prompt: String, display: String, images: [String]) async {
         if isSending {
-            pendingSends.append(prompt)
+            pendingSends.append(PendingSend(prompt: prompt, display: display, images: images, agenticTools: agenticTools))
             messages.append(ChatMessage(
                 author: .user, timestamp: Date(), text: display))
             return
         }
-        let succeeded = await runTurn(prompt, appendUserBubble: true, displayText: display)
+        let succeeded = await runTurn(prompt, appendUserBubble: true, displayText: display, images: images, useTools: agenticTools)
         if sessionKey == "dispatcher" && !succeeded { pendingSends.removeAll(); return }
         while !pendingSends.isEmpty {
             let next = pendingSends.removeFirst()
-            _ = await runTurn(next, appendUserBubble: false)
+            _ = await runTurn(next.prompt, appendUserBubble: false, displayText: next.display, images: next.images, useTools: next.agenticTools)
         }
     }
 
@@ -693,9 +696,11 @@ final class ChatViewModel: ObservableObject {
 
     /// Runs ONE turn over the bridge.
     private func runTurn(_ trimmed: String, appendUserBubble: Bool,
-                         displayText: String? = nil) async -> Bool {
+                         displayText: String? = nil, images: [String] = [],
+                         useTools: Bool? = nil) async -> Bool {
+        let toolsEnabled = useTools ?? agenticTools
         if !displayConfigLoaded { await loadDisplayConfig() }
-        if sessionKey == "dispatcher" {
+        if sessionKey == "dispatcher" && images.isEmpty && toolsEnabled {
             let handled = await sendDispatcher(trimmed)
             if handled { return true }
             NSLog("[ChatViewModel] Dispatcher gateway unavailable; continuing with native agent turn for session \(sessionKey)")
@@ -728,7 +733,10 @@ final class ChatViewModel: ObservableObject {
 
         do {
             let reply = try await agent.sendChat(text: trimmed,
-                                                 session: sessionKey)
+                                                 session: sessionKey,
+                                                 agenticTools: toolsEnabled,
+                                                 imageDataURIs: images,
+                                                 speakReplies: TTSManager.shared.autoSpeakEnabled)
             let replyText = reply.text
 
             if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {

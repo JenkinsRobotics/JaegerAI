@@ -1,4 +1,4 @@
-# core/ — framework infrastructure
+# core/ — Jaeger AI application services
 
 > **Modification tier: C — Framework core.** This is the instance
 > machinery, the schema definitions, the prompt assembly, the tool
@@ -8,22 +8,27 @@
 > `<instance>/audit/self_modification.jsonl`. Full policy:
 > [`/docs/SELF_MODIFICATION_BOUNDARIES.md`](../../../docs/SELF_MODIFICATION_BOUNDARIES.md).
 
-## What's in here
+## Navigation
 
-| File / dir | Purpose |
+| Area | Responsibility |
 |---|---|
-| [`prompts.py`](prompts.py) | The system-prompt builder. `JAEGER_OS_CONTEXT` + `MANDATORY_TOOL_RULES` + `SELF_MODIFICATION_BOUNDARIES` + `OPERATING_DISCIPLINE` + the runtime tail. |
-| [`instance.py`](instance.py) | `InstanceLayout` dataclass + `InstanceLock` (fcntl-based exclusive lock) + manifest version checks. |
-| [`schemas.py`](schemas.py) | Pydantic models for `identity.yaml`, `config.yaml`, `manifest.json`. The trust boundary for instance config. |
-| [`tools/`](tools/) | Tool implementations — files, memory, web, code, packages, background processes, board, browser, computer-use, etc. Each tool is a function the agent's tool registry wraps. |
-| [`memory.py`](memory.py) | `facts.json` reader/writer + episodic-log appender + semantic search over episodic history. |
-| [`permissions.py`](permissions.py) | The `@requires_tier(...)` decorator + tier model + confirmation routing. |
-| [`skill_loader.py`](skill_loader.py) | Discovers skills under `<instance>/skills/` and `src/jaeger_os/agent/skills/`, runs smoke tests, registers passers. |
-| [`skills_guard.py`](skills_guard.py) | Static scan for prompt-injection / exfiltration / destructive patterns in skill source. Used before activation. |
-| [`self_modification_audit.py`](self_modification_audit.py) | Phase-10 path classifier + JSONL audit writer (`audit_write` / `audit_unsandboxed_call`). |
-| [`migrations.py`](migrations.py) | Per-release schema-migration runner. Reads modules from `src/jaeger_os/migrations/` and applies them in order. |
-| [`external_model.py`](external_model.py) | `ExternalModelClient` — bounded `chat()` for fast-finalize against cloud providers. Adapter selection lives in `agent/runtime_bridge.py`. |
-| [`llm_client.py`](llm_client.py) / [`mlx_client.py`](mlx_client.py) | Local-model clients (in-process llama-cpp / MLX). Used by `make_client` in `main.py`. |
-| [`credentials.py`](credentials.py) | Encrypted-at-rest credential store under `<instance>/credentials/`. Off-limits to agent reads of the raw file. |
-| [`cloud_errors.py`](cloud_errors.py) | Provider-specific exception classification + `retry_call` helper for transient failures. |
-| [`playbook_skills.py`](playbook_skills.py) | The compact skill-index embedded in the system prompt. |
+| [mind_runtime.py](mind_runtime.py) | Construct and bind the hosted JaegerAgent runtime to the application instance |
+| [mind_node.py](mind_node.py), [agent_core.py](agent_core.py) | JaegerOS node/core integration for the application's launch configurations |
+| [agent_bridge.py](agent_bridge.py), [agent_observability.py](agent_observability.py) | Application bridge adapter and agent activity reporting |
+| [instance/](instance/) | Instance layout, schemas, identity, migrations, and setup |
+| [settings/](settings/) | Application settings catalog and shared settings access |
+| [models/](models/) | Application model discovery, selection, and provider adapters |
+| [runtime/](runtime/) | Application lifecycle helpers, readiness, usage, and process services |
+| [diagnostics/](diagnostics/) | Doctor checks, environment probes, and macOS permission checks |
+| [safety/](safety/) | Application-side skill safety scanning |
+| [bench/](bench/) | Benchmark runners used by application commands |
+| [sessions.py](sessions.py), [people.py](people.py) | Application session and people services |
+| [messages.py](messages.py), [windowed.py](windowed.py), [version_check.py](version_check.py) | App messages, windowed composition, and update checks |
+
+[context.py](context.py) is an intentional compatibility alias to
+`jaeger_agent.core.workspace`. It preserves the same module object and bound
+instance state; replacing it with copied globals would create divergent state.
+
+Keep new app-owned services in the existing responsibility folders where they
+fit. Do not move reusable agent mechanisms back into this package. See the
+[package layout](../README.md) and [agent documentation ownership](../../dev/docs/MOVED_TO_JAEGER_AGENT.md).

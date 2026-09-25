@@ -299,9 +299,22 @@ final class AgentBridge: ObservableObject {
     /// ``session`` isolates this conversation on the Python side
     /// (sessions.db) so multiple windows / saved chats never collapse
     /// into one history.
-    func sendChat(text: String, session: String = "desktop-app") async throws -> TurnResult {
+    func sendChat(
+        text: String,
+        session: String = "desktop-app",
+        agenticTools: Bool = true,
+        imageDataURI: String? = nil,
+        imageDataURIs: [String] = [],
+        speakReplies: Bool = false
+    ) async throws -> TurnResult {
         guard let bridge else { throw BridgeError.notRunning }
-        let result = await bridge.runTurn(text, session: session)
+        let result = await bridge.runTurn(
+            text,
+            session: session,
+            agenticTools: agenticTools,
+            imageDataURI: imageDataURI,
+            imageDataURIs: imageDataURIs, speakReplies: speakReplies
+        )
         if let error = result.error, !error.isEmpty {
             // A stall/timeout is a recoverable turn failure, not a
             // dead bridge. Surface it in the transcript so the

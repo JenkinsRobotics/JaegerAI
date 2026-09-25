@@ -6,6 +6,7 @@ env:
   JAEGER_NO_ATTACH: "1"
   JAEGER_TEST_HEADLESS: "1"
   PYTHONHASHSEED: "0"
+  PYTHONDONTWRITEBYTECODE: "1"
 jobs:
   webui-assembly:
     name: First-party Jaeger WebUI
@@ -45,11 +46,11 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-      - name: Install Linux sandbox backend
+      - name: Install Linux sandbox and desktop runtimes
         if: matrix.suite == 'root'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes bubblewrap
+          sudo apt-get install --yes bubblewrap libegl1 libgl1 libopengl0 libxkbcommon0 libportaudio2 libpulse0 libsndfile1
           # Ubuntu 24.04's hosted-runner AppArmor policy blocks the user and
           # network namespaces that Bubblewrap needs. This VM is disposable;
           # production hosts should use a targeted AppArmor profile instead.
@@ -68,11 +69,18 @@ jobs:
           # though it is only a build dependency of Jaeger.
           python -m pip install --upgrade pip "setuptools>=83"
           case "${{ matrix.suite }}" in
-            root) python -m pip install -e packages/jaeger-os -e packages/jaeger-agent -e packages/jaeger-kokoro-tts -e packages/jaeger-whisper-stt -e '.[test]' ;;
-            agent) python -m pip install -e packages/jaeger-os -e packages/jaeger-agent pytest ;;
-            os) python -m pip install -e packages/jaeger-os pytest ;;
-            kokoro) python -m pip install -e packages/jaeger-os -e packages/jaeger-kokoro-tts pytest ;;
-            whisper) python -m pip install -e packages/jaeger-os -e packages/jaeger-whisper-stt pytest ;;
+            root)
+              # Honor the app's binding version while installing its packages,
+              # instead of compiling a newer binding and then replacing it.
+              sed -n '/^llama-cpp-python==/p' requirements.txt > "$RUNNER_TEMP/jaeger-ci-constraints.txt"
+              export PIP_CONSTRAINT="$RUNNER_TEMP/jaeger-ci-constraints.txt"
+              python scripts/install-packages.py packages/jaeger-os 'packages/jaeger-agent[multimodal-duplex]' packages/jaeger-kokoro-tts packages/jaeger-whisper-stt '.[test]'
+              python -m pip install pytest-timeout
+              ;;
+            agent) python scripts/install-packages.py packages/jaeger-os packages/jaeger-agent; python -m pip install pytest onnxruntime ;;
+            os) python scripts/install-packages.py packages/jaeger-os; python -m pip install pytest ;;
+            kokoro) python scripts/install-packages.py packages/jaeger-os packages/jaeger-kokoro-tts; python -m pip install pytest ;;
+            whisper) python scripts/install-packages.py packages/jaeger-os packages/jaeger-whisper-stt; python -m pip install pytest ;;
           esac
       - name: Test suite
         # Same runner as local development: pinned env, isolated state root,
@@ -80,13 +88,15 @@ jobs:
         run: |
           case "${{ matrix.suite }}" in
             root)
-              dev/scripts/run_tests.sh --unit
-              dev/scripts/run_tests.sh --integration -- \
+              # pytest-timeout (installed above) keeps a stalled test from
+              # hanging the job; run_tests.sh passes EXTRA_ARGS through.
+              dev/scripts/run_tests.sh --unit -- -p timeout --timeout=120 --timeout-method=thread
+              dev/scripts/run_tests.sh --integration -- -p timeout --timeout=120 --timeout-method=thread \
                 dev/tests/jaeger_ai/core/test_gateway_daemon.py \
                 dev/tests/jaeger_ai/core/test_gateway_process_recovery.py \
                 dev/tests/jaeger_ai/core/test_gateway_owned_process_contract.py
               ;;
-            *) dev/scripts/run_tests.sh --package "${{ matrix.suite }}" ;;
+            *) dev/scripts/run_tests.sh --package "${{ matrix.suite }}" -- -p timeout --timeout=120 --timeout-method=thread ;;
           esac
       - name: No runtime junk in the checkout
         run: |
@@ -127,11 +137,9 @@ jobs:
       - run: python -m pip install build
       - name: Build distributions from clean checkout
         run: |
-          mkdir -p "$RUNNER_TEMP/dist"
-          for project in packages/jaeger-os packages/jaeger-agent packages/jaeger-kokoro-tts packages/jaeger-whisper-stt .; do
-            python -m build "$project" --outdir "$RUNNER_TEMP/dist"
-          done
+          python scripts/install-packages.py --no-install --sdist --wheel-dir "$RUNNER_TEMP/jaeger-dist" \
+            packages/jaeger-os packages/jaeger-agent packages/jaeger-kokoro-tts packages/jaeger-whisper-stt .
       - name: Reject unsafe artifact contents
-        run: python dev/scripts/inspect_release_artifacts.py "$RUNNER_TEMP/dist"
+        run: python dev/scripts/inspect_release_artifacts.py "$RUNNER_TEMP/jaeger-dist"
       - name: Installer and test-runner syntax
         run: bash -n install.sh scripts/*.sh dev/scripts/*.sh

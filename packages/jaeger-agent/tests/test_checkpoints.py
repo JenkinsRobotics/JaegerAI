@@ -22,7 +22,7 @@ def instance(tmp_path, monkeypatch):
 
     layout = InstanceLayout(root=tmp_path / "inst")
     layout.root.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr("jaeger_agent.workspace.get_layout", lambda: layout)
+    monkeypatch.setattr("jaeger_agent.core.workspace.get_layout", lambda: layout)
     monkeypatch.setenv("JAEGER_CHECKPOINTS", "1")
     cp.reset_manager()
     yield layout

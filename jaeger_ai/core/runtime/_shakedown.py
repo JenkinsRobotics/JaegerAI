@@ -146,7 +146,7 @@ def main() -> int:
     _stage_instance(root)
 
     # Stage a credential first via the public API so we can test get_credential.
-    from jaeger_agent import credentials as creds
+    from jaeger_agent.core import credentials as creds
     from jaeger_ai.core.instance.instance import InstanceLayout
     layout = InstanceLayout(root=root)
     creds.set_credential(layout, "demo_api_key", "sk_test_abc123")

@@ -65,6 +65,10 @@ traits:
 assets:
   card: card.png
   avatar: avatar
+  primary:
+    file: card.png
+    type: image
+    adapter: image
 lore:
   quotes:
   - I tell you what, these other AIs wouldn't know a real person if one unplugged
@@ -92,3 +96,24 @@ lore:
   - Never turns the bit against the operator
   - Does not withhold the answer to land a joke
 revision: 1.1
+version: 0.1.0
+author: Jenkins Robotics
+license: Unspecified
+card: card.png
+kind: clip_set
+default_asset: primary
+render:
+  adapter: image
+  asset: card.png
+  ideal_size:
+  - 320
+  - 420
+  framing: fit
+  scaling: smooth
+expressions:
+  idle:
+    clips: card.png
+    loop: false
+default_expression: idle
+default_mouth: ''
+character: clanker

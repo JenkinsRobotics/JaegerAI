@@ -11,7 +11,7 @@ It is idempotent per process and returns a :class:`Jp01Runtime`:
   * with a bus: the stock ``MotorNode``/``LightNode`` run on daemon
     threads (the same node formation CC01 mirrors), and a 1 s
     heartbeat thread publishes ``NodeHealth`` on
-    ``/sense/node_health``;
+    ``/sys/node/health``;
   * capability umbrella tools (motion / lights / robot_vision /
     telemetry) register beta-gated.
 

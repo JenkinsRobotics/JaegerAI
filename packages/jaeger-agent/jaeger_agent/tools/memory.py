@@ -34,7 +34,12 @@ def remember(key: str, value: str, category: str = "", subject: str = "",
     add context (the 5W1H). Re-remembering the same key keeps the history."""
     cat = (category or "").strip().lower() or None
     subj = (subject or "").strip() or None
-    mem.remember(key, value, category=cat, subject=subj, tags=tags, note=note)
+    from jaeger_agent.memory.fact_policy import UnsafeMemoryFact
+
+    try:
+        mem.remember(key, value, category=cat, subject=subj, tags=tags, note=note)
+    except UnsafeMemoryFact as exc:
+        return {"ok": False, "remembered": False, "error": str(exc)}
     return {"remembered": True, "key": key, "value": value,
             "subject": subj or "user", "category": cat or "general"}
 
@@ -107,7 +112,7 @@ def search_memory(query: str, k: int = 5) -> dict[str, Any]:
         return {"found": 0, "results": [], "error": "search_memory not available in this build"}
     # Unlabelled hits let a model answer "what did I first ask you in this
     # conversation?" with another session's turn (live WebUI, 2026-09-22).
-    from jaeger_agent.workspace import get_current_session
+    from jaeger_agent.core.workspace import get_current_session
     current = get_current_session()
     for hit in hits:
         hit["this_conversation"] = bool(current) and hit.get("session") == current

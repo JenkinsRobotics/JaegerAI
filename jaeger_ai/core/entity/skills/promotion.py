@@ -259,7 +259,7 @@ class SkillPromotionPipeline:
         except Exception as exc:
             try:
                 from jaeger_agent.skill_registry.skill_loader import load_and_register
-                from jaeger_agent.workspace import get_layout
+                from jaeger_agent.core.workspace import get_layout
                 layout = get_layout()
                 if layout is not None:
                     load_and_register(None, layout)

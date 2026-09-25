@@ -1,7 +1,7 @@
 """MC01 — ESP32 motion controller adapter.
 
 Implements the generic ``MotorAdapter`` Protocol (so the stock
-``MotorNode`` drives it from ``/act/motion``) plus the JP01 verbs the
+``MotorNode`` drives it from ``/act/motor/command``) plus the JP01 verbs the
 ``motion(action=…)`` capability handlers call directly.
 
 Firmware truth (survey 2026-06-12):

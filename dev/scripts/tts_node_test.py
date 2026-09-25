@@ -41,7 +41,7 @@ def _build_synth():
     config dependency — it uses module-level defaults for voice + lang
     and resolves its audio backend lazily.  Returns the synth so the
     caller can tear it down."""
-    from jaeger_kokoro_tts.nodes.kokoro_tts.engine import KokoroTTS
+    from jaeger_kokoro_tts.engine import KokoroTTS
     return KokoroTTS()
 
 
@@ -76,15 +76,15 @@ def boot_only() -> int:
     # subscriber list.  This catches "setup() returned but didn't
     # actually subscribe" without producing audio.
     with bus._subs_lock:
-        subscribers = bus._subscribers.get(topics.ACT_SPEECH, [])
+        subscribers = bus._subscribers.get(topics.ACT_SPEECH_SAY, [])
     if len(subscribers) != 1:
-        print(f"  ✗ expected 1 subscriber on {topics.ACT_SPEECH}, "
+        print(f"  ✗ expected 1 subscriber on {topics.ACT_SPEECH_SAY}, "
               f"got {len(subscribers)}", file=_sys.stderr)
         node.stop()
         thread.join(timeout=2.0)
         bus.close()
         return 1
-    print(f"  ✓ {topics.ACT_SPEECH} has 1 subscriber (the TTS node)")
+    print(f"  ✓ {topics.ACT_SPEECH_SAY} has 1 subscriber (the TTS node)")
     print(f"  ✓ node state = {node.state.value}")
 
     print("Shutting down...")
@@ -130,7 +130,7 @@ def speak_test(text: str = "TTS node test. Track B.1 verification.") -> int:
     t_pub = time.perf_counter()
     ack = bus.request(
         topics.SpeechCommand(text=text, correlation_id=cid),
-        ack_topic=topics.SENSE_SPOKEN,
+        ack_topic=topics.ACT_SPEECH_SPOKEN,
         timeout_s=30.0,
     )
     t_done = time.perf_counter() - t_pub

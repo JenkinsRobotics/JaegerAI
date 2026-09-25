@@ -85,7 +85,7 @@ def test_animation_node_forwards_tts_chunk_to_adapter(
     node_thread.start()
     try:
         time.sleep(0.1)  # let setup() fire
-        bus.publish(topics.AnimationCommand(
+        bus.publish(topics.DisplayCommand(
             adapter="math",
             asset_path=str(script_path),
             duration_ms=500,
@@ -151,6 +151,6 @@ def test_tts_chunk_topic_msgspec_encodes() -> None:
         node_id="tts",
         correlation_id="abc",
     )
-    assert msg.topic == "/sense/tts_chunk"
+    assert msg.topic == "/act/speech/chunk"
     assert msg.amplitude == 0.42
     assert not msg.is_final

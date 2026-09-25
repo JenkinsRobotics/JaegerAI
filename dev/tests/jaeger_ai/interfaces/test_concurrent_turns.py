@@ -211,9 +211,8 @@ def test_spoken_output_detector_matches_explicit_tts_requests() -> None:
     assert not _wants_spoken_output("tell me a joke")
 
 
-def test_text_turn_speaks_answer_when_model_misses_tts_tool(monkeypatch):
-    """If the model ignores an explicit typed speak request, the TUI
-    speaks the rendered answer as a deterministic fallback."""
+def test_text_turn_plays_the_selected_agent_speech_channel(monkeypatch):
+    """The TUI delivers model-selected speech through the shared runtime."""
     tui = _tui()
     tui._render_turn_header = lambda *_a, **_k: None
     tui._refresh_context_estimate = lambda: None
@@ -222,7 +221,6 @@ def test_text_turn_speaks_answer_when_model_misses_tts_tool(monkeypatch):
     tui._render_answer = lambda text, **_k: rendered.append(text)
 
     import jaeger_ai.main as main
-    speak_mod = importlib.import_module("jaeger_agent.tools.speak")
 
     monkeypatch.setattr(
         main,
@@ -234,15 +232,13 @@ def test_text_turn_speaks_answer_when_model_misses_tts_tool(monkeypatch):
             ),
             "error": None,
             "spoke_via_tool": False,
+            "speech_text": "Why don't scientists trust atoms? Because they make up everything.",
         },
     )
     monkeypatch.setattr(
-        speak_mod,
-        "speak",
-        lambda text="", path="": spoken.append(text) or {
-            "spoken": True,
-            "reason": "",
-        },
+        main,
+        "speak_conversation",
+        lambda text: spoken.append(text) or True,
     )
 
     tui._run_text_turn(object(), "speak me a joke")
@@ -293,7 +289,9 @@ def test_tui_voice_turn_treats_input_as_confirmed_user_message(
 
     calls: list[tuple[str, str | None]] = []
 
-    def _fake_run_for_voice(_client, text, session_key=None):
+    def _fake_run_for_voice(_client, text, session_key=None, *, input_modality, output_mode):
+        assert input_modality == "speech"
+        assert output_mode == "dynamic"
         calls.append((text, session_key))
         return {
             "text": "It is 2:28 PM.",

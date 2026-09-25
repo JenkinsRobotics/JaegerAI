@@ -1,6 +1,9 @@
 schema: character/v1
-id: simon
+character: simon
 name: Simon
+version: 0.1.0
+author: Jenkins Robotics
+license: Unspecified
 description: ''
 identity:
   role: the digger who grew from a timid boy into the man who pierced the heavens
@@ -56,9 +59,27 @@ traits:
     technology: 0.6
     nature: 0.5
     psychology: 0.6
+card: card.png
+kind: clip_set
 assets:
-  card: card.png
-  avatar: avatar
+  primary:
+    file: card.png
+    type: image
+    adapter: image
+  avatar:
+    root: avatar
+    type: avatar
+default_asset: primary
+render:
+  adapter: image
+  asset: card.png
+  ideal_size: [320, 420]
+  framing: fit
+  scaling: smooth
+expressions:
+  idle: {clips: card.png, loop: false}
+default_expression: idle
+default_mouth: ""
 lore:
   quotes:
   - My drill is the drill that creates the heavens!

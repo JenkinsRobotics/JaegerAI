@@ -189,7 +189,7 @@ def test_finalize_on_vanished_path_reports_pruned():
 # ---------------------------------------------------------------------------
 
 def test_isolated_child_swaps_and_restores_project_root(repo, monkeypatch):
-    from jaeger_agent import workspace as ws
+    from jaeger_agent.core import workspace as ws
 
     ws.set_project_root(repo)
     assert ws.get_project_root() == repo.resolve()
@@ -207,7 +207,7 @@ def test_isolated_child_swaps_and_restores_project_root(repo, monkeypatch):
 
 
 def test_isolated_child_restores_root_even_when_body_raises(repo):
-    from jaeger_agent import workspace as ws
+    from jaeger_agent.core import workspace as ws
 
     ws.set_project_root(repo)
     with pytest.raises(RuntimeError):
@@ -217,7 +217,7 @@ def test_isolated_child_restores_root_even_when_body_raises(repo):
 
 
 def test_isolated_child_is_a_noop_when_disabled(repo, monkeypatch):
-    from jaeger_agent import workspace as ws
+    from jaeger_agent.core import workspace as ws
 
     monkeypatch.delenv("JAEGER_SUBAGENT_WORKTREE", raising=False)
     ws.set_project_root(repo)
@@ -228,7 +228,7 @@ def test_isolated_child_is_a_noop_when_disabled(repo, monkeypatch):
 
 
 def test_isolated_child_noop_outside_a_git_repo(tmp_path):
-    from jaeger_agent import workspace as ws
+    from jaeger_agent.core import workspace as ws
 
     plain = tmp_path / "plain"
     plain.mkdir()

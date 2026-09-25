@@ -30,9 +30,9 @@ len(get_tools())                  # 96
 | Type | `module` |
 | JaegerOS slot / kind | `mind` / `mind` |
 
-JaegerAgent sits beside optional modules such as JaegerKokoroTTS and
-JaegerWhisperSTT. Its slot provides the agent runtime rather than a particular
-interface or speech engine.
+JaegerAgent still occupies the `mind` slot, but as of 1.2 it also ships the
+verified audio/vision transport needed to reach that brain. The individual
+STT, TTS, streaming, duplex, and vision nodes remain portable components.
 
 ## What belongs here
 
@@ -51,17 +51,19 @@ the loop — roughly 43,000 lines across 178 modules:
 - Tool validation, dispatch, parallel reads, and the context guard
 - The headless runtime contract (`AgentRuntime`), turn bridge, session
   routing, bus messages, and a JaegerOS `slot: mind` node
+- The multimodal engine: four verified audio pipelines, structured turn
+  context, barge-in, streaming ASR, Kokoro speech, and image turns
 
 What remains in JaegerAI:
 
-- Windowed, TUI, tray, voice, and installer experiences
+- Windowed, TUI, tray, and installer experiences
 - Characters, personas and the personality system
 - Desktop/personal-assistant tools that need a Mac rather than an agent
 - Instance management, model catalogue, plugins, and product policy
 - Its own `AgentRuntime` implementation over that pipeline
 
 A short list of seams still reaching back into the host — a memory backend,
-a credential store, a venv manager — is tracked in `jaeger_agent/host.py`.
+a credential store, a venv manager — is tracked in `jaeger_agent/core/host.py`.
 Each is bound lazily, so the package imports and runs without JaegerAI
 installed; only the individual tool that needs the missing piece fails, and
 it says so. That file is a ledger meant to shrink to nothing.
@@ -104,24 +106,113 @@ agent = JaegerAgent(
 print(agent.run_turn("Inspect the available tools and report system health."))
 ```
 
+### Runtime state ownership
+
+When an application such as JaegerAI, Mochi, or JP01 hosts JaegerAgent, the
+application injects its `InstanceLayout` with `workspace.bind(layout)`. Memory,
+tool files, logs, and artifacts then resolve under that one application-owned
+instance. For JaegerAI that canonical location is
+`~/.jaeger/instances/<name>/` (or `$JAEGER_STATE_DIR/instances/<name>/`).
+
+A standalone agent defaults to `<state root>/agent/`, where state root resolves
+`JAEGER_STATE_DIR`, then `JAEGER_HOME`, then `~/.jaeger`. Source checkouts remain
+free of runtime state. An explicit `DefaultWorkspace(root)` overrides that default.
+
 `llama-cpp-python` is a BASE dependency, not an extra, because
 `provider = "llama_cpp"` is the default — an application that installs this
 gets an agent that runs on its host with no server and no account:
 
 ```python
-from jaeger_agent.runtime import create_runtime
+from jaeger_agent.core.runtime import create_runtime
 
 runtime = create_runtime(config={
     "model_path": "~/models/gemma-4-E4B-it-Q4_K_M.gguf",
     "ctx": 8192,
+    "tools_enabled": True,  # default: full agentic tool loop
 })
 runtime.run_turn("what tools do you have?", session_key="s")
 ```
 
+For the low-latency chatbot lane, set `tools_enabled` to `False`. The same
+AgentRuntime still owns per-session conversation history and accepts image/text
+content, but it gives the model an explicit empty tool list. Turning it back on
+restores the existing agentic pipeline; the default remains on.
+
 Extras are only for the other backends: `.[openai]` (which is a client for
 the OpenAI-compatible *wire format* — LM Studio, Ollama, llama.cpp's server
 and vLLM all speak it, so it covers local servers too), `.[anthropic]`, or
-`.[mlx]`.
+`.[mlx]`. Install `.[multimodal]` (or the compatible `.[audio]` alias) for
+plain/structured audio. Quasi/full audio modes use `.[multimodal-duplex]`,
+which adds Speex acoustic echo cancellation. A bare install remains a clean,
+text-agent install and does not import or install the neural audio stack.
+
+## Use the multimodal engine
+
+Multimodal behavior is part of JaegerAgent itself: runtime plumbing, engine,
+policy, context, and Events live under `jaeger_agent/core/`, following the
+same anatomy as Jaeger Agent Omni. The six capability nodes remain visible
+beside `skills/`, `tools/`, and `memory/` under `jaeger_agent/nodes/`. The
+engine is headless and event-driven. Typed,
+spoken, and image turns share one injected runtime and therefore one
+conversation memory:
+
+```text
+jaeger_agent/
+├── core/       runtime, bridge, policy, context, lifecycle, configuration
+├── nodes/      neural/audio/vision capability manifests and runtimes
+├── tools/      symbolic actions
+├── skills/     reusable procedures
+├── memory/     persistent agent state
+├── loop/       agent iteration and tool-dispatch mechanics
+├── __main__.py single command-line entry
+└── module.yaml JaegerOS mind-slot manifest
+```
+
+The package root contains no implementation facades. Import implementation
+modules through `jaeger_agent.core.*`; stable public classes and functions
+remain exported directly from `jaeger_agent`.
+
+```python
+from jaeger_agent import MultimodalAgent
+
+engine = MultimodalAgent(
+    runtime=my_agent_runtime,
+    audio_mode="structured",  # plain | structured | quasi | full
+    output_mode="dynamic",    # dynamic | speech | text | mirror
+    want_vision=True,
+)
+engine.load()
+engine.attach_image("data:image/png;base64,...")
+engine.send_text("What is in this image?")
+```
+
+Run the model-free contract checks or the microphone CLI with:
+
+```bash
+python tests/test_multimodal_selftest.py
+python -m jaeger_agent --audio structured --vision
+python -m jaeger_agent --audio plain --vision --no-agentic-tools
+python -m jaeger_agent --audio plain --output-mode speech  # Gemma benchmark parity
+python -m jaeger_agent selfcheck
+```
+
+`dynamic` is the agentic default. The model selects its final channel with a
+typed `[OUTPUT:TEXT]`, `[OUTPUT:SPEECH]`, `[OUTPUT:BOTH]`, or
+`[OUTPUT:SILENT]` directive. JaegerAgent removes the directive and routes the
+content through its own output nodes; final speech never dispatches the
+external `text_to_speech` tool. The decision is made inside JaegerAgent,
+so every host observes the same event metadata (`display`, `channels`, and
+`source`). `speech` is the reference-compatible mode: every non-empty reply is
+passed to the already-warmed Kokoro node exactly as in the imported VoiceLLM
+Gemma pipeline. `text` disables post-turn TTS, while `mirror` speaks responses
+to spoken input and keeps typed-input responses textual.
+
+`engine.load()` returns only after the local Gemma adapter, Whisper, Kokoro,
+vision projector, and VAD have loaded and performed their component warmups.
+The warmup calls the adapter directly, so no synthetic `ready` exchange enters
+AgentRuntime conversation memory. Local llama.cpp weights are also closed
+explicitly during engine shutdown rather than being left to interpreter-exit
+ordering.
 
 ## Embed a runtime node
 

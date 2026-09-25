@@ -56,7 +56,7 @@ from typing import Any, Callable, Iterable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # annotations only — no runtime dependency on a host
-    from jaeger_ai.core.instance.instance import InstanceLayout
+    from jaeger_agent.core.instance import Layout as InstanceLayout
 from jaeger_agent.skill_registry.manifest_v3 import (
     Manifest,
     ManifestError,

@@ -25,10 +25,14 @@ class _FakeLlama:
     def __init__(self, response: Any) -> None:
         self._response = response
         self.last_kwargs: dict[str, Any] | None = None
+        self.closed = False
 
     def create_chat_completion(self, **kwargs: Any) -> Any:
         self.last_kwargs = kwargs
         return self._response
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def _mk_response(
@@ -105,6 +109,34 @@ def test_explicit_llama_skips_load_entirely():
     client = a._ensure_client()
     # The facade is built from the injected Llama, not from disk.
     assert client._llama is fake
+
+
+def test_warmup_compiles_one_token_without_mutating_agent_history():
+    fake = _FakeLlama(_mk_response("ok"))
+    adapter = LocalLlamaAdapter(llama=fake)
+
+    adapter.warmup(system_prompt="voice", tools=[])
+
+    assert fake.last_kwargs is not None
+    assert fake.last_kwargs["max_tokens"] == 1
+    assert fake.last_kwargs["temperature"] == 0.0
+    assert fake.last_kwargs["messages"][-1] == {
+        "role": "user",
+        "content": "ready",
+    }
+
+
+def test_close_releases_the_native_llama_explicitly_and_is_idempotent():
+    fake = _FakeLlama(_mk_response("ok"))
+    adapter = LocalLlamaAdapter(llama=fake)
+    adapter._ensure_client()
+
+    adapter.close()
+    adapter.close()
+
+    assert fake.closed is True
+    assert adapter._llama is None
+    assert adapter._client is None
 
 
 def test_describe_uses_filename_when_path_given():

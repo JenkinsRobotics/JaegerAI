@@ -22,7 +22,7 @@ from __future__ import annotations
 import importlib
 import time
 
-from jaeger_agent import availability as _avail_mod
+from jaeger_agent.core import availability as _avail_mod
 
 # ``jaeger_os.agent.tools``'s __init__ does ``from .speak import speak``,
 # which rebinds the package attribute ``tools.speak`` to the FUNCTION —

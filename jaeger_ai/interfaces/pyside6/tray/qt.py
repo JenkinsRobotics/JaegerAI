@@ -19,26 +19,14 @@ from typing import Any
 from PySide6.QtGui import QColor, QIcon, QPixmap
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
-from .base import TrayState, asset_path, icon_path_for
+from .base import TrayState, icon_path_for
 
 
 def apply_app_icon() -> None:
-    """Set the windowed app's icon (every window + the macOS Dock) to the
-    ``jaeger_app_icon`` asset. Qt's ``setWindowIcon`` covers windows; the
-    Dock for a non-bundled process needs AppKit. Both are best-effort."""
-    path = asset_path("jaeger_app_icon.png")
-    if not path:
-        return
-    app = QApplication.instance()
-    if app is not None:
-        app.setWindowIcon(QIcon(path))
-    try:
-        from AppKit import NSApplication, NSImage
-        img = NSImage.alloc().initByReferencingFile_(path)
-        if img is not None:
-            NSApplication.sharedApplication().setApplicationIconImage_(img)
-    except Exception:  # noqa: BLE001 — non-macOS / pyobjc missing
-        pass
+    """Compatibility entry point for the shared desktop identity."""
+    from ..branding import apply_app_identity
+
+    apply_app_identity()
 
 
 def _agent_name(ctx: Any) -> str:
@@ -63,6 +51,7 @@ class QtTray:
         self._menu: Any = None
         self._settings: Any = None
         self._companion: Any = None
+        self._multimodal: Any = None
         self._state = "idle"
 
         # Brand the app — window + macOS Dock icon (the tray is the
@@ -123,6 +112,7 @@ class QtTray:
                 on_quick_input=self._show_pill,
                 on_open_chat=self._open_chat,
                 on_open_companion=self._open_companion,
+                on_open_multimodal=self._open_multimodal,
                 on_quit=self._quit,
                 on_restart=self._restart,
                 on_settings=self._open_settings,
@@ -211,11 +201,31 @@ class QtTray:
         try:
             from jaeger_ai.interfaces.avatar_chat.window import make_surface
             self._companion = make_surface(self.ctx)
-            self._companion.show(); self._companion.raise_(); self._companion.activateWindow()
+            self._companion.show()
+            self._companion.raise_()
+            self._companion.activateWindow()
             return self._companion
         except Exception as exc:  # noqa: BLE001
             self._warn("Avatar + chat", exc)
             return None
+
+    def _open_multimodal(self) -> Any:
+        """Show the chassis-owned multimodal surface without building a second one."""
+        self._multimodal = self._find_multimodal_window()
+        if self._multimodal is None:
+            self._warn("Multimodal", RuntimeError("multimodal surface is unavailable"))
+            return None
+        self._multimodal.show()
+        self._multimodal.raise_()
+        self._multimodal.activateWindow()
+        return self._multimodal
+
+    @staticmethod
+    def _find_multimodal_window() -> Any:
+        for widget in QApplication.topLevelWidgets():
+            if hasattr(widget, "current_audio_mode") and hasattr(widget, "start_session"):
+                return widget
+        return None
 
     def _restart(self) -> None:
         """Restart the agent/app by re-execing the process."""
@@ -257,7 +267,13 @@ class QtTray:
         os._exit(0)
 
     def close(self) -> None:
-        for widget in (self._pill, self._menu, self._settings, self._companion):
+        for widget in (
+            self._pill,
+            self._menu,
+            self._settings,
+            self._companion,
+            self._multimodal,
+        ):
             if widget is not None:
                 try:
                     widget.close()

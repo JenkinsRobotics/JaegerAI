@@ -124,7 +124,7 @@ class SubprocessDelegateRuntime:
             raise ValueError(f"handle belongs to {handle.runtime_id}, not {self.runtime_id}")
         root = self.receipt_root
         if root is None:
-            from jaeger_agent.workspace import _require_layout
+            from jaeger_agent.core.workspace import _require_layout
             root = _require_layout().run_dir / 'delegates'
         identity = hashlib.sha256(json.dumps([self.runtime_id, handle.task_id]).encode()).hexdigest()
         return Path(root) / identity

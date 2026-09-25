@@ -74,7 +74,7 @@ def test_ask_mode_still_refuses_without_a_way_to_prompt(tmp_path, monkeypatch):
 
 def test_hardline_commands_are_refused_even_at_full_access(tmp_path):
     from jaeger_agent.tools.code import run_shell
-    from jaeger_agent.workspace import DefaultWorkspace, bind
+    from jaeger_agent.core.workspace import DefaultWorkspace, bind
     from jaeger_os.core.safety.permissions import AllowAllProvider, PermissionPolicy, use_policy
 
     bind(DefaultWorkspace(tmp_path / "agent").create())

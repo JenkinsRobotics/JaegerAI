@@ -19,6 +19,30 @@ from pathlib import Path
 import pytest
 
 from jaeger_ai.core.instance import instance as instance_module
+
+
+def test_installed_wheel_keeps_checkout_separate_from_state(tmp_path, monkeypatch):
+    checkout = tmp_path / "source"
+    checkout.mkdir()
+    (checkout / ".git").write_text("gitdir: /external/worktree\n")
+    monkeypatch.setenv("JAEGER_INSTALL_ROOT", str(checkout))
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "legacy-state"))
+    monkeypatch.setattr(instance_module, "PACKAGE_ROOT",
+                        tmp_path / "venv/lib/python3.11/site-packages/jaeger_ai")
+    assert instance_module.is_pip_installed()
+    assert instance_module.install_root() == checkout
+    assert instance_module.detect_install_method() == "dev-checkout"
+    assert instance_module.operator_state_root() == tmp_path / "state"
+    (checkout / ".jaeger-product-install").touch()
+    assert instance_module.detect_install_method() == "product-checkout"
+
+
+def test_state_override_cannot_become_update_destination(tmp_path, monkeypatch):
+    monkeypatch.delenv("JAEGER_INSTALL_ROOT", raising=False)
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(instance_module, "PACKAGE_ROOT", tmp_path / "source/jaeger_ai")
+    assert instance_module.install_root() == tmp_path / "source"
 from jaeger_ai.core.instance import legacy_state
 
 
@@ -354,3 +378,27 @@ def test_jaeger_home_outside_any_checkout_keeps_historical_behavior(monkeypatch,
     monkeypatch.setenv("JAEGER_HOME", str(home))
 
     assert instance_module.operator_state_root() == home.resolve() / ".jaeger_ai"
+@pytest.mark.parametrize('leaked', [
+    'jaeger_ai/core/__pycache__/runtime.cpython-311.pyc',
+    'jaeger_ai/models/local.gguf',
+    'jaeger_agent/nodes/model.safetensors',
+    'jaeger_ai/interfaces/swift/.build/release/JaegerOS',
+    'jaeger_ai/.env',
+    'jaeger_ai/.env.production',
+    'jaeger_ai/.jaeger_os/instances/dev/config.yaml',
+    '../outside.txt',
+])
+def test_check_wheel_rejects_runtime_state_from_every_package(tmp_path, check_wheel_module, leaked):
+    wheel = tmp_path / 'dirty.whl'
+    _build_fake_wheel(wheel, {leaked: b'private'})
+    assert check_wheel_module.check_wheel(wheel) == [leaked]
+
+
+def test_wheel_requires_the_reference_vad_not_arbitrary_weights(tmp_path, check_wheel_module):
+    wheel = tmp_path / 'agent.whl'
+    _build_fake_wheel(wheel, {'jaeger_agent/core/assets.py': b'asset loader'})
+    assert check_wheel_module.check_wheel(wheel)
+    _build_fake_wheel(wheel, {check_wheel_module.VAD_ASSET: b'wrong weights'})
+    assert 'checksum' in check_wheel_module.check_wheel(wheel)[0]
+    _build_fake_wheel(wheel, {'jaeger_ai/models/private.onnx': b'private model'})
+    assert check_wheel_module.check_wheel(wheel) == ['jaeger_ai/models/private.onnx']

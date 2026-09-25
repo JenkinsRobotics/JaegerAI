@@ -429,7 +429,7 @@ class JaegerGatewayApp:
             from jaeger_ai.core.entity.sensors.supervisor import SensorSupervisor
             try:
                 from jaeger_agent.memory import sqlite_store
-                from jaeger_agent.workspace import bind as bind_workspace
+                from jaeger_agent.core.workspace import bind as bind_workspace
                 from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
                 inst = os.environ.get("JAEGER_INSTANCE_DIR")
                 layout = InstanceLayout(root=Path(inst) if inst else resolve_instance_dir())
@@ -2205,7 +2205,7 @@ class JaegerGatewayApp:
                 active_tools.setdefault(raw_name, []).append(activity_id)
             if raw_name in {"write_file", "append_file", "patch", "delete_file", "move_file", "copy_file"} and isinstance(data, dict):
                 try:
-                    from jaeger_agent.workspace import _resolve_write
+                    from jaeger_agent.core.workspace import _resolve_write
                     keys = ["src", "dst"] if raw_name == "move_file" else ["dst"] if raw_name == "copy_file" else ["path"]
                     file_snapshots[activity_id] = [self.file_changes.begin(_resolve_write(str(data[key]))) for key in keys]
                 except Exception:

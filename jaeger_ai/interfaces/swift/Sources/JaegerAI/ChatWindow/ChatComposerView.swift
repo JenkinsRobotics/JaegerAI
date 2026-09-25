@@ -16,6 +16,7 @@ struct ChatComposerView: View {
     let isTranscribing: Bool
     let level: Float
     let queuedMessages: [String]
+    var agenticTools: Binding<Bool>? = nil
     let onSend: () -> Void
     let onStop: () -> Void
     let onAttach: () -> Void
@@ -26,6 +27,12 @@ struct ChatComposerView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let agentic = agenticTools {
+                Toggle("Agent tools", isOn: agentic)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help("Turn off for a conversation without tool execution")
+            }
             if let next = queuedMessages.first {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "text.bubble")

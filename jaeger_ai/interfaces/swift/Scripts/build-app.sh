@@ -37,14 +37,23 @@ set -euo pipefail
 CONFIG="debug"
 INSTALL=0
 PRINT_BUILD_DIR=0
+DISTRIBUTION=0
 for arg in "$@"; do
     case "$arg" in
         --release) CONFIG="release" ;;
         --install) INSTALL=1; CONFIG="release" ;;   # installs are always release
         --dev)     ;;   # accepted for compat — debug config (the default)
         --print-build-dir) PRINT_BUILD_DIR=1 ;;
+        --distribution) DISTRIBUTION=1; CONFIG="release" ;;
+        *) echo "Unknown build argument: $arg" >&2; exit 2 ;;
     esac
 done
+
+SIGN_IDENTITY="${JAEGER_SIGN_IDENTITY:--}"
+if [[ "$DISTRIBUTION" == "1" && "$SIGN_IDENTITY" != "Developer ID Application:"* ]]; then
+    echo "Distribution requires JAEGER_SIGN_IDENTITY with a Developer ID Application certificate." >&2
+    exit 2
+fi
 
 # ONE app (operator call 2026-07-14, ending the 2026-07-05 two-app
 # split): dev is a launch STATE, not a separate bundle. `jaeger dev`
@@ -74,6 +83,11 @@ if [[ ! -f "$REPO_ROOT/jaeger_ai/__init__.py" ]]; then
   echo "[build-app] cannot locate the JaegerAI checkout above $APP_ROOT" >&2
   exit 1
 fi
+export PYTHONDONTWRITEBYTECODE=1
+export PYTHONPYCACHEPREFIX="${PYTHONPYCACHEPREFIX:-$HOME/.cache/jaeger/pycache}"
+# Used by the --install step; the build-dir resolver below runs on whatever
+# python3 is on PATH because it needs only the standard library.
+BUILD_PYTHON="${JAEGER_VENV:-${HOME}/.jaeger/venv}/bin/python"
 ASSETS_DIR="$REPO_ROOT/jaeger_ai/assets"
 
 # ── External build root — resolved via the canonical Python resolver ────────
@@ -126,12 +140,12 @@ PYEOF
 # Step 1 — Swift build.
 echo "[build-app] swift build -c $CONFIG"
 cd "$APP_ROOT"
-swift build -c "$CONFIG" --build-path "$BUILD_DIR"
+swift build -c "$CONFIG" --scratch-path "$BUILD_DIR"
 
 # Locate the built executable.  SwiftPM puts it under
 # <build-path>/<triple>/<config>/<name>; on Apple Silicon the triple is
 # arm64-apple-macosx.
-SWIFT_BIN="$(swift build -c "$CONFIG" --build-path "$BUILD_DIR" --show-bin-path)/JaegerAI"
+SWIFT_BIN="$(swift build -c "$CONFIG" --scratch-path "$BUILD_DIR" --show-bin-path)/JaegerAI"
 if [[ ! -x "$SWIFT_BIN" ]]; then
     echo "[build-app] ERROR — built executable not found at $SWIFT_BIN" >&2
     exit 1
@@ -145,6 +159,7 @@ ICNS_PATH="$BUILD_DIR/AppIcon.icns"
 
 icon_needs_rebuild() {
     [[ ! -f "$ICNS_PATH" ]] && return 0
+    [[ "$ASSETS_DIR/jaeger_app_icon.png" -nt "$ICNS_PATH" ]] && return 0
     for size in 16 32 64 128 256 512; do
         local src="$ASSETS_DIR/jaeger_app_icon_${size}.png"
         if [[ -f "$src" && "$src" -nt "$ICNS_PATH" ]]; then
@@ -204,6 +219,21 @@ rm -rf "$BUILD_DIR/JaegerAI-dev.app"
 # Executable.
 cp "$SWIFT_BIN" "$APP_BUNDLE/Contents/MacOS/JaegerAI"
 chmod +x "$APP_BUNDLE/Contents/MacOS/JaegerAI"
+
+# The Qt face must execute inside THIS app bundle. Launching an external Python
+# leaves NSBundle.main without privacy strings, so Qt refuses camera consent.
+# Reuse the development environment's interpreter and site packages; this is
+# still a repo-backed development app, not a self-contained Python distribution.
+cp -L "$BUILD_PYTHON" "$APP_BUNDLE/Contents/MacOS/JaegerMultimodal"
+chmod +x "$APP_BUNDLE/Contents/MacOS/JaegerMultimodal"
+JAEGER_PYTHON_BASE="$("$BUILD_PYTHON" -c 'import sys; print(sys.base_prefix)')"
+JAEGER_PYTHON_SITE="$("$BUILD_PYTHON" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
+/usr/libexec/PlistBuddy -c "Add :JaegerPythonHome string $JAEGER_PYTHON_BASE" \
+    -c "Add :JaegerPythonSite string $JAEGER_PYTHON_SITE" \
+    -c "Add :JaegerLauncher string $(dirname "$BUILD_PYTHON")/jaeger" \
+    -c "Add :JaegerInstallRoot string $REPO_ROOT" \
+    -c "Add :JaegerVenv string $(dirname "$(dirname "$BUILD_PYTHON")")" \
+    "$APP_BUNDLE/Contents/Info.plist"
 
 # Icon.
 cp "$ICNS_PATH" "$APP_BUNDLE/Contents/Resources/AppIcon.icns"
@@ -310,15 +340,30 @@ fi
 SIGN_IDENTITY="${JAEGER_SIGN_IDENTITY:--}"
 echo "[build-app] codesign (identity: ${SIGN_IDENTITY})"
 codesign --force --sign "$SIGN_IDENTITY" "$DEST_BUNDLE"
+if [[ -d "$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME" ]]; then
+    codesign --force --sign "$SIGN_IDENTITY" \
+        "$APP_BUNDLE/Contents/MacOS/$SPM_BUNDLE_NAME"
+fi
+codesign --force --options runtime --entitlements \
+    "$APP_ROOT/Resources/JaegerMultimodal.entitlements" \
+    --sign "$SIGN_IDENTITY" "$APP_BUNDLE/Contents/MacOS/JaegerMultimodal"
 codesign --force --options runtime --entitlements \
     "$APP_ROOT/Resources/JaegerAI.entitlements" \
     --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
 codesign --verify --deep --strict "$APP_BUNDLE"
 
+
 if [[ "$INSTALL" == "1" ]]; then
-    echo "[build-app] installing -> /Applications/$APP_NAME.app"
-    rm -rf "/Applications/$APP_NAME.app"
-    ditto "$APP_BUNDLE" "/Applications/$APP_NAME.app"
+    echo "[build-app] installing -> /Applications/Jaeger AI.app"
+    "$BUILD_PYTHON" - "$REPO_ROOT" "$APP_BUNDLE" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from jaeger_ai.cli.verbs.launcher_verb import _install_native_bundle
+from jaeger_ai.core.instance.instance import operator_state_root
+_install_native_bundle(Path(sys.argv[2]), Path("/Applications/Jaeger AI.app"),
+                       operator_state_root() / "launcher-backups")
+PY
 fi
 
 echo "$APP_BUNDLE"

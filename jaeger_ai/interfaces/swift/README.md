@@ -21,11 +21,18 @@ in the repo is left untouched; it is not used by the build script.
 
 ```bash
 cd jaeger_ai/interfaces/swift
+<<<<<<< HEAD
 swift test --scratch-path "$HOME/.cache/jaeger/swift-tests" # external test build
 Scripts/build-app.sh         # debug  → ~/.jaeger/apps/swift-build/JaegerAI.app
 Scripts/build-app.sh --release  # release build (same path)
 JAEGER_SWIFT_BUILD=/path/to/dir Scripts/build-app.sh  # custom root
 open --env "JAEGER_REPO=$(git rev-parse --show-toplevel)" ~/.jaeger/apps/swift-build/JaegerAI.app
+=======
+swift build            # debug build
+swift test             # ProtocolFixtureTests — the wire contract
+Scripts/build-app.sh --dev   # .build/JaegerAI-dev.app (pins the jaeger-dev instance)
+Scripts/build-app.sh         # .build/JaegerAI.app (product)
+>>>>>>> origin/master
 ```
 
 `xed Package.swift` opens the package in Xcode.

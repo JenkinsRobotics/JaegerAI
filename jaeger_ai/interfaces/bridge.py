@@ -32,15 +32,18 @@ Phase-1 hardening (SWIFT_APP_ARCHITECTURE_PLAN.md, approved 2026-07-04):
 stdout carries ONLY protocol JSON — model-boot logs, llama.cpp chatter,
 and any stray ``print`` are forced to stderr so they can't corrupt the
 stream.  Run via ``jaeger bridge`` (the shim picks the .venv interpreter)
-or ``python -m jaeger_os.interfaces.bridge [instance_name]``.
+or ``python -m jaeger_ai.interfaces.bridge [instance_name]``.
 """
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import errno
 import json
 import os
 import queue as _queue
+import socket
 import sys
 import threading
 import time
@@ -71,13 +74,50 @@ def _emit(out: TextIO, obj: dict[str, Any]) -> None:
             raise
 
 
+def attached_face_socket_path(instance_root: str | Path) -> Path:
+    """Return a deterministic AF_UNIX path, respecting macOS's 104-byte cap."""
+    preferred = Path(instance_root) / "run" / "multimodal.sock"
+    if len(os.fsencode(preferred)) <= 96:
+        return preferred
+    digest = hashlib.sha256(str(Path(instance_root).resolve()).encode()).hexdigest()[
+        :16
+    ]
+    return Path("/tmp") / f"jaeger-ai-{os.getuid()}-{digest}.sock"
+
+
+
 def _emit_state(out: TextIO, ctx: _Ctx, busy: bool, session: str = "") -> None:
     """Emit a ``state`` frame AND flip ``ctx.busy`` — the single place a
     turn (chat/slash/cron) marks itself in flight, so ``run_update``'s
     guard and the wire frame never drift apart."""
     ctx.busy = busy
     from jaeger_os.contract import protocol
-    _emit(out, protocol.state_frame(busy, session))
+
+    _broadcast(ctx, protocol.state_frame(busy, session), fallback=out)
+
+
+def _broadcast(
+    ctx: "_Ctx", obj: dict[str, Any], *, fallback: TextIO | None = None
+) -> None:
+    """Send shared state/tool events to every attached application surface."""
+    outputs = list(ctx.outputs)
+    if not outputs and fallback is not None:
+        outputs = [fallback]
+    for output in outputs:
+        try:
+            _emit(output, obj)
+        except (BrokenPipeError, OSError, ValueError):
+            ctx.outputs.discard(output)
+
+
+def _reply_frame(
+    protocol: Any, req: dict[str, Any], *args: Any, **kwargs: Any
+) -> dict[str, Any]:
+    """Build a reply and echo an optional request id for attached faces."""
+    frame = protocol.reply_frame(*args, **kwargs)
+    if req.get("id") is not None:
+        frame["id"] = req["id"]
+    return frame
 
 
 def _model_name(boot: Any) -> str | None:
@@ -112,6 +152,7 @@ def _active_character(boot: Any) -> tuple[str | None, str | None]:
     a miss is cosmetic."""
     try:
         from jaeger_ai.features.personality.character import active_character
+
         root = getattr(getattr(boot, "layout", None), "root", None)
         if root is not None:
             c = active_character(root)
@@ -128,8 +169,10 @@ def _effective_icon(boot: Any, character: Any) -> str | None:
     its own face once the operator sets one, while a fresh instance still shows
     the character card as a default (which follows a persona switch)."""
     from pathlib import Path
+
     try:
         from jaeger_ai.core.instance.schemas import Identity, load_yaml
+
         lay = getattr(boot, "layout", None)
         avatar = (load_yaml(lay.identity_path, Identity).avatar or "").strip()
         if avatar:
@@ -549,6 +592,7 @@ def _agent_name(boot: Any) -> str | None:
     named), NEVER the character. Every branded surface leads with this."""
     try:
         from jaeger_ai.core.instance.schemas import Identity, load_yaml
+
         lay = getattr(boot, "layout", None)
         return (load_yaml(lay.identity_path, Identity).name or "").strip() or None
     except Exception:  # noqa: BLE001 — cosmetic; surfaces fall back to character
@@ -629,6 +673,7 @@ def _char_summary(c: Any, active_id: Any, bound_id: Any) -> dict[str, Any]:
 
 def _char_detail(c: Any) -> dict[str, Any]:
     from jaeger_ai.features.personality.character import layer_items
+
     traits: dict[str, dict[str, float]] = {}
     for layer in _LAYERS:
         sub = getattr(c.personality, layer, None)
@@ -730,6 +775,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         bound_character_id,
         list_characters,
     )
+
     root = _instance_root(boot)
     lay = getattr(boot, "layout", None)
     if what == "contract":
@@ -852,6 +898,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         avatar = None
         try:
             from jaeger_ai.core.instance.schemas import Identity, load_yaml
+
             avatar = load_yaml(lay.identity_path, Identity).avatar
         except Exception:  # noqa: BLE001
             avatar = None
@@ -936,6 +983,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         return list_jobs()
     if what == "config":
         from jaeger_ai.core.instance.schemas import Config, Identity, load_yaml
+
         cfg = load_yaml(lay.config_path, Config)
         ident = load_yaml(lay.identity_path, Identity)
         # v1 additive: ``avatar`` = the raw custom profile picture (None → the
@@ -1121,8 +1169,10 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
 
         from jaeger_ai.core.instance.schemas import Config, load_yaml
         cfg = load_yaml(lay.config_path, Config)
-        return {"mode": cfg.permissions.mode,
-                "granted": sorted(PermissionGrants.load(root).persistent)}
+        return {
+            "mode": cfg.permissions.mode,
+            "granted": sorted(PermissionGrants.load(root).persistent),
+        }
     if what == "instance_exists":
         # v1 additive: first-run probe — does the resolved instance
         # exist on disk? Works pre-boot (fast-ready) and pre-instance.
@@ -1148,6 +1198,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # v1 additive: host tier + recommended models + voices for the
         # native onboarding — the same data the CLI wizard prints.
         from jaeger_ai.core.instance.setup_wizard import setup_defaults
+
         return setup_defaults()
     if what == "onboarding_model_matrix":
         from jaeger_ai.core.instance.setup_wizard import onboarding_model_matrix
@@ -1158,6 +1209,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # first. Works pre-boot (the store is layout-keyed, not agent-
         # keyed) so History can populate while the model is still warming.
         from jaeger_ai.core.sessions import get_store
+
         store = get_store(lay)
         limit = int(args.get("limit") or 50)
         rows = store.list_sessions(limit=limit) if store is not None else []
@@ -1205,6 +1257,7 @@ def _query(what: str, args: dict[str, Any], boot: Any) -> Any:
         # tray polling doesn't hammer the GitHub API. Works pre-boot
         # (layout-keyed cache, no client needed).
         from jaeger_ai.core.version_check import cached_update_status
+
         return cached_update_status(lay)
     if what == "list_runs":
         return _runtime_query_runs(args)
@@ -1403,7 +1456,7 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
                 def _prewarm() -> None:
                     try:
                         from jaeger_ai.main import prewarm_session
-                        prewarm_session(boot.client, session_key="desktop-app")
+                        prewarm_session(boot.client, session_key="desktop-app", conversational=True)
                     except Exception as exc:  # noqa: BLE001 — non-fatal
                         print(f"[bridge] post-onboarding prewarm failed: {exc}",
                               file=sys.stderr, flush=True)
@@ -1422,16 +1475,22 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
         if cmd == "save_profile":
             c = ch.active_character(root)
             ch.save_character_profile(
-                c.root, role=args.get("role"), voice_tone=args.get("voice_tone"),
-                voice_id=args.get("voice_id"), soul=args.get("soul"),
+                c.root,
+                role=args.get("role"),
+                voice_tone=args.get("voice_tone"),
+                voice_id=args.get("voice_id"),
+                soul=args.get("soul"),
                 backstory=args.get("backstory"),
-                custom_instructions=args.get("custom_instructions"))
+                custom_instructions=args.get("custom_instructions"),
+            )
             return True, None
         if cmd == "save_traits":
             c = ch.active_character(root)
-            ch.save_character_traits(c.root, args.get("traits") or {}); return True, None
+            ch.save_character_traits(c.root, args.get("traits") or {})
+            return True, None
         if cmd == "save_config":
             from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
+
             cfg = load_yaml(lay.config_path, Config)
             _apply_config(cfg, args)
             dump_yaml(lay.config_path, Config.model_validate(cfg.model_dump()))
@@ -1445,6 +1504,7 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
             from pathlib import Path
 
             from jaeger_ai.core.instance.schemas import Identity, dump_yaml, load_yaml
+
             data = load_yaml(lay.identity_path, Identity).model_dump()
             name = str(args.get("name") or "").strip()
             if name:
@@ -1455,9 +1515,9 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
                 if srcp is not None and srcp.is_file():
                     dst = Path(lay.root) / f"avatar{srcp.suffix.lower() or '.png'}"
                     shutil.copy2(srcp, dst)
-                    data["avatar"] = dst.name          # relative to the instance
+                    data["avatar"] = dst.name  # relative to the instance
                 else:
-                    data["avatar"] = None              # cleared → character card
+                    data["avatar"] = None  # cleared → character card
             dump_yaml(lay.identity_path, Identity.model_validate(data))
             return True, None
         if cmd == "revoke_permission":
@@ -1513,8 +1573,10 @@ def _command(cmd: str, args: dict[str, Any], boot: Any) -> tuple[bool, str | Non
 
 def _apply_config(cfg: Any, m: dict[str, Any]) -> None:
     fields = {
-        "default_mode": ("interaction", "default_mode"), "ui": ("interaction", "ui"),
-        "voice_enabled": ("voice", "enabled"), "speak_replies": ("voice", "speak_replies"),
+        "default_mode": ("interaction", "default_mode"),
+        "ui": ("interaction", "ui"),
+        "voice_enabled": ("voice", "enabled"),
+        "speak_replies": ("voice", "speak_replies"),
         "speech_engine": ("voice", "speech_engine"),
         "show_latency": ("display", "show_latency"),
         "show_tool_activity": ("display", "show_tool_activity"),
@@ -1542,6 +1604,14 @@ class _Ctx:
     def __init__(self) -> None:
         self.layout: Any = None
         self.boot: Any = None
+        self.runtime: Any = None
+        self.speech: Any = None
+        self.vision_node: Any = None
+        self.vision_lock = threading.Lock()
+        self.turn_lock = threading.RLock()
+        self.outputs: set[TextIO] = set()
+        self.sidecar: Any = None
+        self.tts_render_lock = threading.Lock()
         self.client: Any = None
         self.cron: Any = None                 # CronRunner — fires scheduled prompts
         self.producers: Any = None            # lease-gated BackgroundProducers
@@ -1570,6 +1640,7 @@ class _Ctx:
         self.turn_controls: dict[str, str] = {}
         self.queued_requests: dict[str, dict[str, Any]] = {}
         self.turn_control_lock = threading.RLock()
+        self.pending_outputs: dict[str, Any] = {}
         self.tool_output: Any = None
         self.tool_session: str | None = None
         self.boot_error: str | None = None
@@ -1687,6 +1758,7 @@ class BridgeConfirmationProvider:
         self._proto = proto
         self._ctx = ctx
         from jaeger_os.core.safety.permissions import PermissionGrants
+
         root = getattr(getattr(ctx, "layout", None), "root", None)
         self._grants = PermissionGrants.load(root)
 
@@ -1712,6 +1784,7 @@ class BridgeConfirmationProvider:
         evt: threading.Event = threading.Event()
         slot: list[str] = []
         self._ctx.pending[rid] = (evt, slot)
+        self._ctx.pending_outputs[rid] = getattr(self._proto, "out", self._proto)
         early = self._ctx.early.pop(rid, None)
         if early is not None:
             slot.append(early)
@@ -1720,11 +1793,17 @@ class BridgeConfirmationProvider:
             rid, kind, prompt, options=options,
             session=str(getattr(self, "current_session", "") or "")))
         try:
-            if not evt.wait(self.TIMEOUT_S):
-                return ""
+            from jaeger_agent.core.cancellation import current_cancellation
+            cancelled = current_cancellation()
+            deadline = time.monotonic() + self.TIMEOUT_S
+            while not evt.wait(min(0.1, max(0.0, deadline - time.monotonic()))):
+                if (time.monotonic() >= deadline or self._ctx.exit_requested.is_set()
+                        or (cancelled is not None and cancelled.is_set())):
+                    return ""
             return (slot[0] if slot else "").strip()
         finally:
             self._ctx.pending.pop(rid, None)
+            self._ctx.pending_outputs.pop(rid, None)
 
     def confirm(self, request: object) -> bool:
         skill = getattr(request, "skill", "") or ""
@@ -1943,8 +2022,10 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
     """Background boot: load the model, wire tool/permission forwarding,
     then stream the ``agent_state`` transition. Never raises."""
     from jaeger_os.contract import protocol
+
     try:
         from jaeger_ai.main import boot_for_tui
+
         # prewarm_model=False: the generic two-pass prewarm primes a
         # DIFFERENT prefix (bare boot prompt + unfiltered registry
         # schemas) than the one the app's first turn actually sends, so
@@ -1952,7 +2033,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
         # measured on gemma-4-E4B). prewarm_session below primes the
         # EXACT first-turn prefix instead — same warm-boot cost, zero
         # first-message delay.
-        boot = boot_for_tui(instance_name=instance, prewarm_model=False)
+        boot = boot_for_tui(instance_name=instance, prewarm_model=False, warmup=False)
         if ctx.verify_selection:
             verify = getattr(boot.client, "verify_inference", None)
             if callable(verify):
@@ -2002,12 +2083,19 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
         ctx.booted.set()
         return
 
+    from jaeger_ai.core.mind_runtime import JaegerAIRuntime
+    from jaeger_ai.main import conversation_speech_runtime
+
+    ctx.runtime = JaegerAIRuntime.from_boot(boot)
+    ctx.speech = conversation_speech_runtime()
+
     # First boot on this machine: trigger every TCC prompt now (macOS
     # can't grant in install.sh — grants attach to THIS app identity),
     # so tools don't hit permission walls mid-task. Marker-guarded,
     # never re-prompts, never blocks boot.
     try:
         from jaeger_ai.core.diagnostics.tcc_permissions import first_boot_preflight
+
         first_boot_preflight()
     except Exception:  # noqa: BLE001
         pass
@@ -2029,6 +2117,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
 
     try:
         from jaeger_ai.main import _pipeline
+
         _pipeline["event_bus"] = _ToolEmitter()
     except Exception:  # noqa: BLE001
         pass
@@ -2060,7 +2149,7 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
         # tool/session prompt here both caches the wrong identity and blocks
         # the setup conversation behind an expensive, unnecessary inference.
         if is_complete(ctx.layout):
-            prewarm_session(boot.client, session_key="desktop-app")
+            prewarm_session(boot.client, session_key="desktop-app", conversational=True)
     except Exception:  # noqa: BLE001 — an optimization, never a boot failure
         pass
 
@@ -2081,9 +2170,16 @@ def _boot_agent(proto: TextIO, ctx: _Ctx, instance: str) -> None:
               file=sys.stderr, flush=True)
 
     name, icon = _active_character(boot)
-    _emit(proto, protocol.agent_state_frame(
-        "ready", model=_model_name(boot), character=name, icon=icon,
-        agent_name=_agent_name(boot)))
+    _emit(
+        proto,
+        protocol.agent_state_frame(
+            "ready",
+            model=_model_name(boot),
+            character=name,
+            icon=icon,
+            agent_name=_agent_name(boot),
+        ),
+    )
     ctx.booted.set()
 
 
@@ -2186,8 +2282,14 @@ def _run_slash(text: str, ctx: _Ctx) -> str:
                 + "  /model")
     # Capture the handler's Rich output as plain text (no ANSI, no markup).
     import io as _io
-    console = Console(file=_io.StringIO(), record=True, width=88,
-                      force_terminal=False, highlight=False)
+
+    console = Console(
+        file=_io.StringIO(),
+        record=True,
+        width=88,
+        force_terminal=False,
+        highlight=False,
+    )
     root = getattr(ctx.layout, "root", None)
     sctx = sc.SlashContext(console=console, instance_dir=root)
     result = sc.dispatch(text, sctx)
@@ -2489,150 +2591,401 @@ def _cancel_queued_turn(ctx: _Ctx, turn_id: str) -> bool:
         return True
 
 
-def _turn_worker(proto: TextIO, ctx: _Ctx,
-                 turns: _queue.Queue[dict[str, Any] | None]) -> None:
+class _DetachedReplyWriter:
+    """A disappearing UI must not terminate the process-wide turn worker."""
+
+    def __init__(self, out: TextIO) -> None:
+        self.out = out
+        self.disconnected = False
+
+    def write(self, data: str) -> int:
+        if not self.disconnected:
+            try:
+                return self.out.write(data)
+            except (OSError, ValueError):
+                self.disconnected = True
+        return len(data)
+
+    def flush(self) -> None:
+        if not self.disconnected:
+            try:
+                self.out.flush()
+            except (OSError, ValueError):
+                self.disconnected = True
+
+
+
+def _turn_worker(
+    proto: TextIO,
+    ctx: _Ctx,
+    turns: "_queue.Queue[dict[str, Any] | tuple[dict[str, Any], TextIO] | None]",
+) -> None:
     """Runs chat turns off the stdin thread. Blocks each turn on boot
     completion — old clients that chat right after ``ready`` just wait,
     exactly as they did when ``ready`` meant model-loaded."""
-    from jaeger_os.contract import protocol
     while True:
-        req = turns.get()
-        if req is None:
+        queued = turns.get()
+        if queued is None:
             return
-        with ctx.turn_control_lock:
-            if req.get("_cancelled_before_execution"):
-                continue
-            acquired_id = str(req.get("turn_id") or "")
-            ctx.queued_requests.pop(acquired_id, None)
-            if acquired_id:
-                ctx.turn_controls[acquired_id] = "active"
-        out = req.pop("_out", None) or proto
-        text, prompt_error = _request_text(req)
-        from jaeger_ai.features.dispatcher.router import normalize_session_key
-        session = normalize_session_key(
-            req.get("session"), default="desktop-app",
-        )
-        def reply(frame):
-            turn_id = str(req.get('turn_id') or '')
-            if turn_id and req.get('_native_accepted'):
-                from jaeger_ai.core.runtime.native_turns import NativeTurns
-                try:
-                    NativeTurns(ctx.layout.run_dir).finish(turn_id, session, frame)
-                except Exception:
-                    # Native work returned, but the durable attestation failed.
-                    # Do not authorize automatic recovery based on a lost receipt.
-                    frame = {**frame, 'execution_unknown': True,
-                             'error': 'Native turn ended but its durable receipt could not be stored'}
-                with ctx.turn_control_lock:
-                    ctx.turn_controls.pop(turn_id, None)
-            _emit(out, frame)
-        from jaeger_ai.core.runtime.work_ledger import bind_session
-        bind_session(session)
-        if prompt_error:
-            reply(protocol.reply_frame("", prompt_error, session))
-            continue
-        if session not in _SYNTHETIC_SESSIONS:
-            ctx.last_user_at = time.monotonic()
-            ctx.last_user_session = session
-        # This request is no longer "waiting" — it's about to run. Mirrors
-        # the increment in ``main``'s stdin loop (item 9's queued-ack
-        # counter); covers both the slash and chat branches below since
-        # either can have been queued mid-turn.
-        pending = ctx.session_pending.get(session)
-        if pending:
-            ctx.session_pending[session] = max(0, pending - 1)
-        # Slash pre-dispatch — same contract as the TUI REPL: a leading
-        # ``/`` is a command, never a prompt for the model. Runs before
-        # the boot wait so ``/help`` answers even while the model loads.
-        # Exception: ``/goal <job>`` is rewritten into a real turn so the
-        # windowed palette actually starts the autonomous loop.
-        goal_text = _goal_turn_text(text)
-        if text.startswith("/") and goal_text is None:
-            _emit_state(out, ctx, True, session)
+        req = queued[0] if isinstance(queued, tuple) else queued
+        from jaeger_agent.core.cancellation import turn_cancellation
+
+        try:
+            cancelled = req.get("_cancel_event")
+            if cancelled is not None and not isinstance(cancelled, threading.Event):
+                raise ValueError("invalid internal cancellation token")
+            with ctx.turn_lock, turn_cancellation(cancelled):
+                _execute_turn(proto, ctx, queued)
+        except Exception as exc:  # noqa: BLE001 — malformed input cannot kill the shared worker
+            from jaeger_os.contract import protocol
+
+            out = _DetachedReplyWriter(queued[1]) if isinstance(queued, tuple) else proto
+            _emit(out, _reply_frame(protocol, req, "", str(exc), str(req.get("session") or "desktop-app")))
+        finally:
+            complete = req.get("_on_complete")
+            if callable(complete):
+                complete()
+
+
+
+def _execute_turn(proto: TextIO, ctx: _Ctx, queued: Any) -> None:
+    req = queued[0] if isinstance(queued, tuple) else queued
+    if (isinstance(queued, tuple) or req.get("op") == "turn"
+            or req.get("engine_owned_output", False)):
+        _execute_attached_turn(proto, ctx, queued)
+    else:
+        _execute_native_turn(proto, ctx, req)
+
+
+def _execute_native_turn(proto: TextIO, ctx: _Ctx, req: dict[str, Any]) -> None:
+    """Execute a native/gateway request, including its durable receipt."""
+    from jaeger_os.contract import protocol
+    with ctx.turn_control_lock:
+        if req.get("_cancelled_before_execution"):
+            return
+        acquired_id = str(req.get("turn_id") or "")
+        ctx.queued_requests.pop(acquired_id, None)
+        if acquired_id:
+            ctx.turn_controls[acquired_id] = "active"
+    out = req.pop("_out", None) or proto
+    text, prompt_error = _request_text(req)
+    from jaeger_ai.features.dispatcher.router import normalize_session_key
+    session = normalize_session_key(
+        req.get("session"), default="desktop-app",
+    )
+    def reply(frame):
+        if req.get("id") is not None:
+            frame = {**frame, "id": req["id"]}
+        turn_id = str(req.get('turn_id') or '')
+        if turn_id and req.get('_native_accepted'):
+            from jaeger_ai.core.runtime.native_turns import NativeTurns
             try:
-                slash_reply = _windowed_control_slash(text) or _run_slash(text, ctx)
-                reply(protocol.reply_frame(slash_reply, None, session))
-            except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
-                reply(protocol.reply_frame("", str(exc), session))
-            finally:
-                _emit_state(out, ctx, False, session)
-            continue
-        if goal_text is not None:
-            text = goal_text
-        ctx.booted.wait()
-        if ctx.gateway is not None:
-            turn_id = str(req.get("turn_id") or "")
+                NativeTurns(ctx.layout.run_dir).finish(turn_id, session, frame)
+            except Exception:
+                # Native work returned, but the durable attestation failed.
+                # Do not authorize automatic recovery based on a lost receipt.
+                frame = {**frame, 'execution_unknown': True,
+                         'error': 'Native turn ended but its durable receipt could not be stored'}
             with ctx.turn_control_lock:
-                if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
-                    ctx.turn_controls.pop(turn_id, None)
-                    reply({**protocol.reply_frame("", "Cancelled before execution", session),
-                           "cancelled": True})
-                    continue
-                if turn_id:
-                    ctx.turn_controls[turn_id] = "active"
-            _emit_state(out, ctx, True, session)
-            try:
-                result = _gateway_turn(out, ctx, req, text, session, turn_id)
-                if session.startswith("focus:") and turn_id:
-                    # Same report the local path files for Dispatcher focus
-                    # threads, before this bridge's reply.
-                    from jaeger_ai.features.dispatcher.store import DispatcherStore
-                    DispatcherStore(ctx.layout).report(
-                        turn_id, session, result.get("text") or "", result.get("error"),
-                        cancelled=result.get("halt_reason") == "interrupted")
-                frame = protocol.reply_frame(result.get("text") or "", result.get("error"),
-                                             session, halt_reason=result.get("halt_reason"))
-                extra = {"cancelled": result.get("halt_reason") == "interrupted"} if turn_id else {}
-                if result.get("execution_unknown"):
-                    extra["execution_unknown"] = True
-                reply({**frame, **extra})
-            except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
-                reply(protocol.reply_frame("", str(exc), session))
-            finally:
-                with ctx.turn_control_lock:
-                    ctx.turn_controls.pop(turn_id, None)
-                _emit_state(out, ctx, False, session)
-            continue
-        if ctx.client is None:
-            reply(protocol.reply_frame(
-                "", ctx.boot_error or "agent failed to boot", session))
-            continue
+                ctx.turn_controls.pop(turn_id, None)
+        _emit(out, frame)
+    from jaeger_ai.core.runtime.work_ledger import bind_session
+    bind_session(session)
+    cancelled_event = req.get("_cancel_event")
+    if cancelled_event is not None and cancelled_event.is_set():
+        reply({**protocol.reply_frame("", "turn cancelled", session), "cancelled": True})
+        return
+    if prompt_error:
+        reply(protocol.reply_frame("", prompt_error, session))
+        return
+    if session not in _SYNTHETIC_SESSIONS:
+        ctx.last_user_at = time.monotonic()
+        ctx.last_user_session = session
+    # This request is no longer "waiting" — it's about to run. Mirrors
+    # the increment in ``main``'s stdin loop (item 9's queued-ack
+    # counter); covers both the slash and chat branches below since
+    # either can have been queued mid-turn.
+    pending = ctx.session_pending.get(session)
+    if pending:
+        ctx.session_pending[session] = max(0, pending - 1)
+    # Slash pre-dispatch — same contract as the TUI REPL: a leading
+    # ``/`` is a command, never a prompt for the model. Runs before
+    # the boot wait so ``/help`` answers even while the model loads.
+    # Exception: ``/goal <job>`` is rewritten into a real turn so the
+    # windowed palette actually starts the autonomous loop.
+    goal_text = _goal_turn_text(text)
+    if text.startswith("/") and goal_text is None:
+        _emit_state(out, ctx, True, session)
+        try:
+            slash_reply = _windowed_control_slash(text) or _run_slash(text, ctx)
+            reply(protocol.reply_frame(slash_reply, None, session))
+        except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
+            reply(protocol.reply_frame("", str(exc), session))
+        finally:
+            _emit_state(out, ctx, False, session)
+        return
+    if goal_text is not None:
+        text = goal_text
+    ctx.booted.wait()
+    if ctx.gateway is not None:
+        # Gateway-first: the bridge is a client of the one Gateway-owned
+        # execution path. Local execution below is the legacy fallback.
         turn_id = str(req.get("turn_id") or "")
         with ctx.turn_control_lock:
             if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
                 ctx.turn_controls.pop(turn_id, None)
                 reply({**protocol.reply_frame("", "Cancelled before execution", session),
-                            "cancelled": True})
-                continue
+                       "cancelled": True})
+                return
             if turn_id:
                 ctx.turn_controls[turn_id] = "active"
-            ctx.tool_output = out
-            ctx.tool_session = session
-        # Approval requests must return on the same transport that originated
-        # this turn.  The provider is installed during boot on owner stdio,
-        # while ``out`` may be an attached Unix-socket client.
+        _emit_state(out, ctx, True, session)
         try:
-            from jaeger_os.core.safety.permissions import current_policy
+            result = _gateway_turn(out, ctx, req, text, session, turn_id)
+            if session.startswith("focus:") and turn_id:
+                # Same report the local path files for Dispatcher focus
+                # threads, before this bridge's reply.
+                from jaeger_ai.features.dispatcher.store import DispatcherStore
+                DispatcherStore(ctx.layout).report(
+                    turn_id, session, result.get("text") or "", result.get("error"),
+                    cancelled=result.get("halt_reason") == "interrupted")
+            frame = protocol.reply_frame(result.get("text") or "", result.get("error"),
+                                         session, halt_reason=result.get("halt_reason"))
+            extra = {"cancelled": result.get("halt_reason") == "interrupted"} if turn_id else {}
+            if result.get("execution_unknown"):
+                extra["execution_unknown"] = True
+            reply({**frame, **extra})
+        except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
+            reply(protocol.reply_frame("", str(exc), session))
+        finally:
+            with ctx.turn_control_lock:
+                ctx.turn_controls.pop(turn_id, None)
+            _emit_state(out, ctx, False, session)
+        return
+    if ctx.client is None:
+        reply(protocol.reply_frame(
+            "", ctx.boot_error or "agent failed to boot", session))
+        return
+    turn_id = str(req.get("turn_id") or "")
+    with ctx.turn_control_lock:
+        if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
+            ctx.turn_controls.pop(turn_id, None)
+            reply({**protocol.reply_frame("", "Cancelled before execution", session),
+                        "cancelled": True})
+            return
+        if turn_id:
+            ctx.turn_controls[turn_id] = "active"
+        ctx.tool_output = out
+        ctx.tool_session = session
+    # Approval requests must return on the same transport that originated
+    # this turn.  The provider is installed during boot on owner stdio,
+    # while ``out`` may be an attached Unix-socket client.
+    try:
+        from jaeger_os.core.safety.permissions import current_policy
 
-            confirmation = current_policy().confirmation
-            if isinstance(confirmation, BridgeConfirmationProvider):
-                confirmation.bind_output(out)
-                confirmation.current_session = session
-        except Exception:  # noqa: BLE001 — routing must not block a turn
-            pass
+        confirmation = current_policy().confirmation
+        if isinstance(confirmation, BridgeConfirmationProvider):
+            confirmation.bind_output(out)
+            confirmation.current_session = session
+    except Exception:  # noqa: BLE001 — routing must not block a turn
+        pass
+    try:
+        from jaeger_ai.core.sessions import get_store
+
+        store = get_store(ctx.layout)
+        if store is not None:
+            store.create(
+                session,
+                origin=req.get("source") or req.get("origin"),
+            )
+            store.set_execution_state(session, "running")
+    except Exception:  # noqa: BLE001 — state telemetry cannot fail a turn
+        pass
+    _emit_state(out, ctx, True, session)
+    try:
+        from jaeger_ai.core.runtime import continuation, execution
+        from jaeger_ai.core.runtime.autonomous_runner import (
+            ledger_open,
+            next_continuation_prompt,
+        )
+        from jaeger_ai.main import (
+            interaction_request_sink,
+            run_for_voice,
+            stream_delta_sink,
+            stream_reasoning_sink,
+        )
+
+        current_prompt = text
+        max_continuations = execution.max_steps()
+        step = 0
+        accumulated_text: list[str] = []
+        result: dict[str, Any] = {}
+
+        while True:
+            with ctx.turn_control_lock:
+                if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
+                    result = {"text": "", "error": "Cancelled before execution",
+                              "halt_reason": "interrupted"}
+                    break
+            deltas = _DeltaStream(out, session)
+            with _turn_workspace(ctx, req.get("workspace")):
+                display_text = req.get("display_text") if step == 0 else None
+                voice_kwargs: dict[str, Any] = {"session_key": session, "output_mode": req.get("output_mode", "dynamic"),
+                                                         "input_modality": req.get("input_modality", "text")}
+                if step == 0 and req.get("content") is not None:
+                    voice_kwargs["content"] = req["content"]
+                    if not isinstance(req["content"], str):
+                        _configure_attached_vision(ctx, True)
+                for field in ("model", "provider"):
+                    if req.get(field):
+                        voice_kwargs[field] = req[field]
+                if display_text is not None:
+                    voice_kwargs["display_text"] = str(display_text)
+                def _emit_reasoning(chunk: str, _session: str = session) -> None:
+                    # Deliberation is emitted as its own frame, not folded
+                    # into the delta stream: it is NOT part of the answer,
+                    # and a client appending it to the visible text would
+                    # render the model's internal monologue as the reply.
+                    deltas.flush()
+                    _emit(out, _reasoning_frame(chunk, _session))
+
+                def _request_interaction(
+                    kind: str, prompt: str, options: tuple[str, ...],
+                ) -> str:
+                    from jaeger_os.core.safety.permissions import current_policy
+
+                    provider = current_policy().confirmation
+                    if isinstance(provider, BridgeConfirmationProvider):
+                        return provider.request(kind, prompt, options)
+                    return ""
+
+                from jaeger_agent.tool_executor import tool_allowlist
+                with (
+                    tool_allowlist(req.get("allowed_tools")),
+                    stream_delta_sink(deltas.feed),
+                    stream_reasoning_sink(_emit_reasoning),
+                    interaction_request_sink(_request_interaction),
+                ):
+                    from jaeger_ai.core.runtime.native_turns import NativeTurns
+                    NativeTurns(ctx.layout.run_dir).bind_tool_grant(session, req.get("allowed_tools"))
+                    if req.get("agentic_tools", True):
+                        from contextlib import nullcontext
+                        conversation = getattr(ctx.runtime, "agentic_conversation", None)
+                        with (conversation(session) if callable(conversation) else nullcontext()):
+                            result = run_for_voice(ctx.client, current_prompt, **voice_kwargs)
+                    else:
+                        result = ctx.runtime.run_chatbot_multimodal_turn(
+                            voice_kwargs.get("content", current_prompt),
+                            text=current_prompt, session_key=session,
+                            output_mode=voice_kwargs["output_mode"],
+                            input_modality=voice_kwargs["input_modality"],
+                            display_text=display_text,
+                            model=req.get("model"), provider=req.get("provider"),
+                        )
+            deltas.flush()
+
+            ans = (result.get("text") or "").strip()
+            if ans:
+                accumulated_text.append(ans)
+
+            if (not req.get("agentic_tools", True)
+                    or result.get("error") or execution.stop_requested()):
+                break
+
+            # Inner-cap halt is "start the next step", not "stop".
+            # Loop-breaker halt (identical/timeout spam) IS a stop.
+            nxt_prompt = None
+            halt = result.get("halt_reason")
+            if continuation.is_loop_breaker(halt):
+                break
+            if ledger_open() or continuation.hit_inner_cap(halt):
+                nxt_prompt = next_continuation_prompt(
+                    ans, force_ledger=ledger_open(),
+                    halt_reason=halt,
+                    objective=text,
+                )
+            elif continuation.enabled() and step < max_continuations:
+                verdict = continuation.classify(ans)
+                if verdict == "continue":
+                    nxt_prompt = continuation.continuation_prompt(text)
+
+            if nxt_prompt and step < max_continuations:
+                step += 1
+                current_prompt = nxt_prompt
+                continue
+            else:
+                break
+
+        if result.get("error") or continuation.is_loop_breaker(result.get("halt_reason")):
+            from jaeger_ai.core.runtime.work_ledger import pause_active_ledger
+            pause_active_ledger(str(result.get("error") or result.get("halt_reason")))
+        final_text = "\n\n".join(accumulated_text) if accumulated_text else (result.get("text") or "")
+        used, mx = _ctx_usage(session) if req.get("agentic_tools", True) else (None, None)
+        # A delivered cancel request may lose the race with completion.
+        # Only the native loop's halt result (or skipped dispatch above)
+        # confirms interruption; the control flag alone is merely intent.
+        cancelled = result.get("halt_reason") == "interrupted"
+        if session.startswith('focus:') and turn_id:
+            from jaeger_ai.features.dispatcher.store import DispatcherStore
+            # Publish from the native runtime before its terminal receipt,
+            # not from a WebUI observer that may disconnect or restart.
+            DispatcherStore(ctx.layout).report(
+                turn_id, session, final_text, result.get('error'), cancelled=cancelled)
+        reply({**protocol.reply_frame(
+            final_text, result.get("error"), session,
+            elapsed_s=result.get("elapsed_s"),
+            ctx_used=used, ctx_max=mx,
+            halt_reason=result.get("halt_reason")), **({"cancelled": cancelled} if turn_id else {})})
+        if (not req.get("client_owned_speech", False) and not cancelled
+                and result.get("speech_text") and not result.get("error")):
+            try:
+                ctx.speech.speak(result["speech_text"], cancel_event=cancelled_event)
+            except Exception as exc:
+                _emit(out, protocol.agent_state_frame(
+                    "ready", error=f"Speech playback failed: {exc}"))
+    except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
+        reply(protocol.reply_frame("", str(exc), session))
+    finally:
+        with ctx.turn_control_lock:
+            ctx.turn_controls.pop(turn_id, None)
+            ctx.tool_output = None
+            ctx.tool_session = None
         try:
             from jaeger_ai.core.sessions import get_store
 
             store = get_store(ctx.layout)
             if store is not None:
-                store.create(
-                    session,
-                    origin=req.get("source") or req.get("origin"),
-                )
-                store.set_execution_state(session, "running")
-        except Exception:  # noqa: BLE001 — state telemetry cannot fail a turn
+                store.set_execution_state(session, "idle")
+        except Exception:  # noqa: BLE001 — state telemetry is best-effort
             pass
-        _emit_state(out, ctx, True, session)
+        _emit_state(out, ctx, False, session)
+
+
+def _execute_attached_turn(proto: TextIO, ctx: _Ctx, queued: Any) -> None:
+    """Execute one request through the shared, cancellation-scoped worker."""
+    from jaeger_os.contract import protocol
+
+    req, reply_out = queued if isinstance(queued, tuple) else (queued, proto)
+    if isinstance(queued, tuple):
+        reply_out = _DetachedReplyWriter(reply_out)
+    text = (req.get("text") or "").strip()
+    session = req.get("session") or "desktop-app"
+    cancelled = req.get("_cancel_event")
+    # This request is no longer "waiting" — it's about to run. Mirrors
+    # the increment in ``main``'s stdin loop (item 9's queued-ack
+    # counter); covers both the slash and chat branches below since
+    # either can have been queued mid-turn.
+    pending = ctx.session_pending.get(session)
+    if pending:
+        ctx.session_pending[session] = max(0, pending - 1)
+    if cancelled is not None and cancelled.is_set():
+        _emit(reply_out, _reply_frame(protocol, req, "", "turn cancelled", session))
+        return
+    # Slash pre-dispatch — same contract as the TUI REPL: a leading
+    # ``/`` is a command, never a prompt for the model. Runs before
+    # the boot wait so ``/help`` answers even while the model loads.
+    if text.startswith("/"):
+        _emit_state(reply_out, ctx, True, session)
         try:
             from jaeger_ai.core.runtime import continuation, execution
             from jaeger_ai.core.runtime.autonomous_runner import (
@@ -2818,19 +3171,499 @@ def _turn_worker(proto: TextIO, ctx: _Ctx,
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
             reply(protocol.reply_frame("", str(exc), session))
         finally:
-            with ctx.turn_control_lock:
-                ctx.turn_controls.pop(turn_id, None)
-                ctx.tool_output = None
-                ctx.tool_session = None
-            try:
-                from jaeger_ai.core.sessions import get_store
+            _emit_state(reply_out, ctx, False, session)
+        return
+    while not ctx.booted.wait(timeout=0.1):
+        if cancelled is not None and cancelled.is_set():
+            _emit(reply_out, _reply_frame(protocol, req, "", "turn cancelled", session))
+            return
+    if cancelled is not None and cancelled.is_set():
+        _emit(reply_out, _reply_frame(protocol, req, "", "turn cancelled", session))
+        return
+    if ctx.client is None or ctx.boot_error:
+        _emit(
+            reply_out,
+            _reply_frame(
+                protocol, req, "", ctx.boot_error or "agent failed to boot", session
+            ),
+        )
+        return
+    with ctx.turn_control_lock:
+        ctx.tool_output = reply_out
+        ctx.tool_session = session
+    from jaeger_os.core.safety.permissions import current_policy
+    confirmation = current_policy().confirmation
+    if isinstance(confirmation, BridgeConfirmationProvider):
+        confirmation.bind_output(reply_out)
+        confirmation.current_session = session
+    _emit_state(reply_out, ctx, True, session)
+    try:
+        content = req.get("content", text)
+        system_prompt = str(req.get("system_prompt") or "")
+        if not isinstance(content, str):
+            # Image attachments from Chat/Avatar use the same projector
+            # and shared Llama as the Multimodal face.
+            _configure_attached_vision(ctx, True)
+        from contextlib import nullcontext
 
-                store = get_store(ctx.layout)
-                if store is not None:
-                    store.set_execution_state(session, "idle")
-            except Exception:  # noqa: BLE001 — state telemetry is best-effort
+        from jaeger_agent.core.outputs import multimodal_output_scope
+
+        # ContextVars do not cross the face socket or worker-thread boundary.
+        # Restore ownership where schemas are built and tools actually run.
+        with (
+            multimodal_output_scope()
+            if req.get("engine_owned_output", False)
+            else nullcontext()
+        ):
+            if req.get("agentic_tools", True):
+                if content != text or system_prompt:
+                    result = ctx.runtime.run_multimodal_turn(
+                        content,
+                        text=text,
+                        system_prompt=system_prompt,
+                        session_key=session,
+                    )
+                else:
+                    result = ctx.runtime.run_turn(text, session_key=session)
+            else:
+                result = ctx.runtime.run_chatbot_multimodal_turn(
+                    content,
+                    text=text,
+                    system_prompt=system_prompt,
+                    session_key=session,
+                )
+        # The legacy context snapshot belongs to the agentic adapter. Never
+        # label it as the tool-free adapter's current token usage after a switch.
+        used, mx = _ctx_usage(session) if req.get("agentic_tools", True) else (None, None)
+        if cancelled is not None and cancelled.is_set():
+            result = {"text": "", "error": None}
+        _emit(
+            reply_out,
+            _reply_frame(
+                protocol,
+                req,
+                result.get("text") or "",
+                result.get("error"),
+                session,
+                elapsed_s=result.get("elapsed_s"),
+                ctx_used=used,
+                ctx_max=mx,
+            ),
+        )
+        if (not req.get("engine_owned_output", False)
+                and result.get("speech_text") and not result.get("error")
+                and (cancelled is None or not cancelled.is_set())):
+            try:
+                ctx.speech.speak(result["speech_text"], cancel_event=cancelled)
+            except Exception as exc:  # reply has already been delivered
+                _emit(reply_out, protocol.agent_state_frame(
+                    "ready", error=f"Speech playback failed: {exc}"))
+    except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
+        _emit(reply_out, _reply_frame(protocol, req, "", str(exc), session))
+    finally:
+        with ctx.turn_control_lock:
+            ctx.tool_output = None
+            ctx.tool_session = None
+        _emit_state(reply_out, ctx, False, session)
+
+
+
+def _configure_attached_vision(ctx: _Ctx, enabled: bool) -> dict[str, Any]:
+    """Configure mmproj in the bridge process that owns the shared Llama."""
+    ctx.booted.wait()
+    from contextlib import nullcontext
+
+    from jaeger_ai.main import _pipeline
+
+    # The projector and chat handler must not be swapped while a native,
+    # attached or scheduled turn is inside the shared Llama context.
+    with ctx.vision_lock, (_pipeline.get("llm_lock") or nullcontext()):
+        return _configure_attached_vision_locked(ctx, enabled)
+
+
+
+def _configure_attached_vision_locked(ctx: _Ctx, enabled: bool) -> dict[str, Any]:
+    if ctx.runtime is None or ctx.boot_error:
+        raise RuntimeError(ctx.boot_error or "agent failed to boot")
+    if not enabled:
+        ctx.runtime.configure_vision(None)
+        if ctx.vision_node is not None:
+            ctx.vision_node.close()
+            ctx.vision_node = None
+        return {"enabled": False, "ready": False}
+    if ctx.vision_node is None:
+        from jaeger_agent.core.config import MultimodalConfig
+        from jaeger_agent.core.engine import vis_mod
+
+        node = vis_mod.build()
+        handler = node.load(
+            True,
+            lambda message: print(f"[bridge] {message}", file=sys.stderr, flush=True),
+            model_path=getattr(ctx.speech, "config", MultimodalConfig()).vision_mmproj_path,
+        )
+        if handler is None or not node.ready:
+            node.close()
+            raise RuntimeError("JaegerAgent vision projector is unavailable; install the configured mmproj model")
+        ctx.vision_node = node
+        ctx.runtime.configure_vision(handler)
+    return {
+        "enabled": True,
+        "ready": bool(getattr(ctx.vision_node, "ready", False)),
+    }
+
+
+
+class _AttachedFaceServer:
+    """Private local IPC for UI faces borrowing the bridge-owned brain."""
+
+    def __init__(self, ctx: _Ctx, turns: Any) -> None:
+        self.ctx = ctx
+        self.turns = turns
+        self.path = attached_face_socket_path(ctx.layout.root)
+        self._stop = threading.Event()
+        self._socket: socket.socket | None = None
+        self._thread: threading.Thread | None = None
+        self._connections: set[socket.socket] = set()
+        self._connections_lock = threading.Lock()
+        self._audio_slots = threading.BoundedSemaphore(8)
+        self._bound_identity: tuple[int, int] | None = None
+
+    def start(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        if self.path.exists() or self.path.is_symlink():
+            import stat
+
+            info = self.path.lstat()
+            if not stat.S_ISSOCK(info.st_mode) or info.st_uid != os.getuid():
+                raise RuntimeError(f"refusing to replace non-owned socket path: {self.path}")
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+                try:
+                    probe.connect(str(self.path))
+                except ConnectionRefusedError:
+                    self.path.unlink()
+                else:
+                    raise RuntimeError("this instance already has an attached-face server")
+        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        server.bind(str(self.path))
+        info = self.path.stat()
+        self._bound_identity = (info.st_dev, info.st_ino)
+        os.chmod(self.path, 0o600)
+        server.listen(2)
+        server.settimeout(0.1)
+        self._socket = server
+        self._thread = threading.Thread(
+            target=self._accept_loop, name="bridge-attached-faces", daemon=True
+        )
+        self._thread.start()
+
+    def _accept_loop(self) -> None:
+        assert self._socket is not None
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._socket.accept()
+            except TimeoutError:
+                continue
+            except OSError:
+                return
+            with self._connections_lock:
+                self._connections.add(conn)
+            threading.Thread(
+                target=self._serve, args=(conn,), name="bridge-face", daemon=True
+            ).start()
+
+    def _serve(self, conn: socket.socket) -> None:
+        reader = conn.makefile("r", encoding="utf-8")
+        writer = conn.makefile("w", encoding="utf-8")
+        self.ctx.outputs.add(writer)
+        cancellations: dict[str, threading.Event] = {}
+        cancellations_lock = threading.Lock()
+        try:
+            _emit(
+                writer,
+                {
+                    "type": "attached",
+                    "ok": True,
+                    "agent": "ready"
+                    if self.ctx.booted.is_set() and self.ctx.client
+                    else "booting",
+                },
+            )
+            for raw in reader:
+                try:
+                    req = json.loads(raw)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(req, dict):
+                    continue
+                op = req.get("op")
+                if op == "close":
+                    return
+                if op == "cancel":
+                    with cancellations_lock:
+                        cancelled = cancellations.get(str(req.get("target") or ""))
+                    if cancelled is not None:
+                        cancelled.set()
+                    continue
+                if op == "respond":
+                    rid = str(req.get("id") or "")
+                    if self.ctx.pending_outputs.get(rid) is writer:
+                        pending = self.ctx.pending.get(rid)
+                        if pending is not None:
+                            evt, slot = pending
+                            slot.append(str(req.get("answer") or ""))
+                            evt.set()
+                    continue
+                if op == "turn":
+                    request_id = str(req.get("id") or "")
+                    with cancellations_lock:
+                        accepted = bool(request_id) and request_id not in cancellations
+                        if accepted:
+                            cancelled = threading.Event()
+                            cancellations[request_id] = cancelled
+                    if not accepted:
+                        _emit(writer, {"type": "result", "id": request_id, "ok": False,
+                                       "error": "missing or duplicate request id"})
+                        continue
+
+                    def complete(key=request_id):
+                        with cancellations_lock:
+                            cancellations.pop(key, None)
+
+                    req["_cancel_event"] = cancelled
+                    req["_on_complete"] = complete
+                    self.turns.put((req, writer))
+                    continue
+                if op in {"stt", "tts"}:
+                    request_id = str(req.get("id") or "")
+                    with cancellations_lock:
+                        accepted = request_id not in cancellations and self._audio_slots.acquire(blocking=False)
+                        if accepted:
+                            cancelled = threading.Event()
+                            cancellations[request_id] = cancelled
+                    if not accepted:
+                        _emit(writer, {"type": "result", "id": request_id, "ok": False,
+                                       "error": "neural audio busy or duplicate request"})
+                        continue
+                    threading.Thread(
+                        target=self._audio_job,
+                        args=(writer, req, cancelled, cancellations, cancellations_lock),
+                        name=f"bridge-face-{op}",
+                        daemon=True,
+                    ).start()
+                    continue
+                try:
+                    if op == "health":
+                        self.ctx.booted.wait()
+                        if self.ctx.boot_error:
+                            raise RuntimeError(self.ctx.boot_error)
+                        data = self.ctx.runtime.health() if self.ctx.runtime else {}
+                        config = getattr(self.ctx.speech, "config", None)
+                        if config is not None and hasattr(config, "model_dump"):
+                            data["multimodal_config"] = config.model_dump(mode="json")
+                    elif op == "vision":
+                        data = _configure_attached_vision(
+                            self.ctx, bool(req.get("enabled", True))
+                        )
+                    elif op == "warmup":
+                        from jaeger_agent.core.outputs import multimodal_output_scope
+
+                        self.ctx.booted.wait()
+                        if self.ctx.boot_error:
+                            raise RuntimeError(self.ctx.boot_error)
+                        name = "warmup" if req.get("agentic_tools", True) else "warmup_chatbot"
+                        method = getattr(self.ctx.runtime, name)
+                        with multimodal_output_scope():
+                            warmed = method(session_key=str(req.get("session") or "multimodal"),
+                                            system_prompt=str(req.get("system_prompt") or ""))
+                        data = {"warmed": bool(warmed)}
+                    elif op == "clear":
+                        self.ctx.booted.wait()
+                        session = str(req.get("session") or "multimodal")
+                        if bool(req.get("agentic_tools", True)):
+                            self.ctx.runtime.clear_session(session)
+                        else:
+                            self.ctx.runtime.clear_chatbot_session(session)
+                        data = {"session": session}
+                    else:
+                        raise ValueError(f"unsupported attached-face operation: {op!r}")
+                    _emit(
+                        writer,
+                        {
+                            "type": "result",
+                            "id": req.get("id"),
+                            "ok": True,
+                            "data": data,
+                            "error": None,
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001 — one bad request cannot kill bridge
+                    _emit(
+                        writer,
+                        {
+                            "type": "result",
+                            "id": req.get("id"),
+                            "ok": False,
+                            "data": None,
+                            "error": str(exc),
+                        },
+                    )
+        except (BrokenPipeError, ConnectionError, OSError, ValueError):
+            pass
+        finally:
+            for rid, owner in list(self.ctx.pending_outputs.items()):
+                if owner is writer and rid in self.ctx.pending:
+                    evt, slot = self.ctx.pending[rid]
+                    slot.append("")
+                    evt.set()
+            with cancellations_lock:
+                for cancelled in cancellations.values():
+                    cancelled.set()
+            with self._connections_lock:
+                self._connections.discard(conn)
+            self.ctx.outputs.discard(writer)
+            try:
+                reader.close()
+                writer.close()
+                conn.close()
+            except OSError:
                 pass
-            _emit_state(out, ctx, False, session)
+
+    def _audio_job(self, writer, req, cancelled, cancellations, lock) -> None:
+        try:
+            self._serve_neural_audio(writer, req, cancelled)
+        finally:
+            with lock:
+                cancellations.pop(str(req.get("id") or ""), None)
+            self._audio_slots.release()
+
+    def _serve_neural_audio(
+        self, writer: TextIO, req: dict[str, Any], cancelled: threading.Event
+    ) -> None:
+        """Run shared Whisper/Kokoro without blocking the face socket reader."""
+        try:
+            while not self.ctx.booted.wait(timeout=0.1):
+                if cancelled.is_set() or self._stop.is_set():
+                    return
+            if cancelled.is_set() or self._stop.is_set():
+                return
+            if self.ctx.runtime is None or self.ctx.boot_error:
+                raise RuntimeError(self.ctx.boot_error or "agent failed to boot")
+            if self.ctx.speech is None:
+                raise RuntimeError("JaegerAgent speech runtime is unavailable")
+            op = req.get("op")
+            if op == "stt":
+                import numpy as np
+
+                raw = base64.b64decode(str(req.get("pcm") or ""), validate=True)
+                audio = np.frombuffer(raw, dtype="<f4")
+                sample_rate = req.get("sample_rate", 16000)
+                if not isinstance(sample_rate, int) or not 8000 <= sample_rate <= 192000:
+                    raise ValueError("invalid PCM sample rate")
+                if audio.size > sample_rate * 120 or not np.isfinite(audio).all():
+                    raise ValueError("STT input must be finite mono PCM, at most 120 seconds")
+                model = req.get("model")
+                if model and model != self.ctx.speech.config.stt_model:
+                    raise ValueError("requested Whisper model differs from the prewarmed agent model")
+                data = {
+                    "model": self.ctx.speech.config.stt_model,
+                }
+                if req.get("segments"):
+                    if sample_rate != 16000:
+                        raise ValueError("incremental STT requires 16000 Hz PCM")
+                    options = req.get("options") or {}
+                    if not isinstance(options, dict) or set(options) - {"language", "initial_prompt"}:
+                        raise ValueError("unsupported Whisper decode options")
+                    segments = self.ctx.speech.transcribe_segments(
+                        audio, **options, abort_callback=lambda *_: cancelled.is_set() or self._stop.is_set(),
+                    )
+                    data.update(segments=segments, text=" ".join(s["text"] for s in segments).strip())
+                else:
+                    data["text"] = (
+                        self.ctx.speech.transcribe(audio)
+                        if sample_rate == 16000
+                        else self.ctx.speech.transcribe(audio, sample_rate=sample_rate)
+                    )
+            elif op == "tts":
+                import numpy as np
+
+                text = str(req.get("text") or "").strip()
+                if len(text) > 32000:
+                    raise ValueError("TTS input exceeds 32000 characters")
+                with self.ctx.tts_render_lock:
+                    if cancelled.is_set() or self._stop.is_set():
+                        return
+                    if req.get("stream"):
+                        chunks = self.ctx.speech.synthesize_stream(text)
+                        try:
+                            for audio in chunks:
+                                if cancelled.is_set() or self._stop.is_set():
+                                    return
+                                pcm = np.asarray(audio, dtype="<f4").reshape(-1)
+                                _emit(writer, {"type": "audio_chunk", "id": req.get("id"),
+                                               "pcm": base64.b64encode(pcm.tobytes()).decode("ascii"),
+                                               "sample_rate": 24000})
+                        finally:
+                            chunks.close()
+                        data = {"sample_rate": 24000}
+                    else:
+                        audio = self.ctx.speech.synthesize(text)
+                        pcm = np.asarray(audio, dtype="<f4").reshape(-1)
+                        data = {
+                            "pcm": base64.b64encode(pcm.tobytes()).decode("ascii"),
+                            "sample_rate": 24000,
+                        }
+            else:  # defensive: caller dispatches only these two operations
+                raise ValueError(f"unsupported neural-audio operation: {op!r}")
+            _emit(
+                writer,
+                {
+                    "type": "result",
+                    "id": req.get("id"),
+                    "ok": True,
+                    "data": data,
+                    "error": None,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — keep the bridge alive
+            try:
+                _emit(
+                    writer,
+                    {
+                        "type": "result",
+                        "id": req.get("id"),
+                        "ok": False,
+                        "data": None,
+                        "error": str(exc),
+                    },
+                )
+            except (BrokenPipeError, OSError, ValueError):
+                pass
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._socket is not None:
+            try:
+                self._socket.close()
+            except OSError:
+                pass
+        if self._thread is not None:
+            self._thread.join(timeout=2)
+        with self._connections_lock:
+            for conn in self._connections:
+                try:
+                    conn.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+        identity, self._bound_identity = self._bound_identity, None
+        if identity is not None:
+            try:
+                info = self.path.lstat()
+                if (info.st_dev, info.st_ino) == identity:
+                    self.path.unlink()
+            except FileNotFoundError:
+                pass
+
+
 
 
 def _start_webhooks(ctx: _Ctx) -> None:
@@ -3041,6 +3874,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
     instance = (argv[0] if argv else None) or default_instance_name()
 
     ctx = _Ctx()
+    ctx.outputs.add(proto)
     # Cheap layout resolve — queries/commands work from here, no model needed.
     try:
         ctx.layout = InstanceLayout(resolve_instance_dir(instance))
@@ -3119,9 +3953,12 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                "first-run setup required")
         ctx.boot_error = msg
         _emit(proto, protocol.agent_state_frame("failed", error=msg))
-        _emit(proto, protocol.fatal_frame(
-            msg, kind="no_instance",
-            suggested_name=_suggested_name(instance)))
+        _emit(
+            proto,
+            protocol.fatal_frame(
+                msg, kind="no_instance", suggested_name=_suggested_name(instance)
+            ),
+        )
         ctx.booted.set()
     elif gateway_execution_enabled():
         # No local agent, no instance lock: the Gateway owns execution.
@@ -3129,15 +3966,29 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
     else:
         _emit(proto, protocol.agent_state_frame("booting"))
         booter = threading.Thread(
-            target=_boot_agent, args=(proto, ctx, instance),
-            name="bridge-boot", daemon=True)
+            target=_boot_agent,
+            args=(proto, ctx, instance),
+            name="bridge-boot",
+            daemon=True,
+        )
         booter.start()
 
     turns: _queue.Queue[dict[str, Any] | None] = _queue.Queue()
     worker = threading.Thread(
-        target=_turn_worker, args=(proto, ctx, turns),
-        name="bridge-turns", daemon=True)
+        target=_turn_worker, args=(proto, ctx, turns), name="bridge-turns", daemon=True
+    )
     worker.start()
+    if ctx.layout is not None and ctx.layout.exists():
+        try:
+            ctx.sidecar = _AttachedFaceServer(ctx, turns)
+            ctx.sidecar.start()
+        except Exception as exc:  # noqa: BLE001 — native chat remains usable
+            ctx.sidecar = None
+            print(
+                f"[bridge] attached-face endpoint unavailable: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     # Queries need a layout-shaped object; before boot completes we hand
     # them a stub carrying just the layout (that's all _query reads).
@@ -3166,6 +4017,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
         fresh instance so ``agent_state`` streams booting → ready as the
         client's live "creating your Jaeger" progress."""
         from jaeger_ai.core.instance.setup_wizard import create_instance
+
         cid = str(args.get("character_id") or "").strip()
         if not cid:
             return False, None, "character_id is required"
@@ -3524,8 +4376,10 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                               "path": res["path"], "value": res["value"]},
                         ok=True))
                 except Exception as exc:  # noqa: BLE001 — reported, never crashes
-                    _emit(proto, protocol.result_frame(
-                        req.get("id"), ok=False, error=str(exc)))
+                    _emit(
+                        proto,
+                        protocol.result_frame(req.get("id"), ok=False, error=str(exc)),
+                    )
                 continue
             if op == "command" and (req.get("cmd") or "") == "run_update":
                 # In-app updates (0.8): shells out to `jaeger update`
@@ -3537,23 +4391,38 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 # is in flight (ctx.busy) — an update mid-turn would race
                 # the turn's file/model reads against the product swap.
                 if ctx.busy:
-                    _emit(proto, protocol.result_frame(
-                        req.get("id"), ok=False,
-                        error="a turn is in flight — try again once it finishes"))
+                    _emit(
+                        proto,
+                        protocol.result_frame(
+                            req.get("id"),
+                            ok=False,
+                            error="a turn is in flight — try again once it finishes",
+                        ),
+                    )
                     continue
                 a = req.get("args") or {}
                 try:
                     from jaeger_ai.cli.verbs.update_verb import run_update_subprocess
+
                     res = run_update_subprocess(ref=(a.get("ref") or None))
-                    _emit(proto, protocol.result_frame(
-                        req.get("id"),
-                        data={"restart_required": res["restart_required"],
-                              "returncode": res["returncode"],
-                              "output": res["output"]},
-                        ok=res["ok"], error=res.get("error")))
+                    _emit(
+                        proto,
+                        protocol.result_frame(
+                            req.get("id"),
+                            data={
+                                "restart_required": res["restart_required"],
+                                "returncode": res["returncode"],
+                                "output": res["output"],
+                            },
+                            ok=res["ok"],
+                            error=res.get("error"),
+                        ),
+                    )
                 except Exception as exc:  # noqa: BLE001 — reported, never crashes
-                    _emit(proto, protocol.result_frame(
-                        req.get("id"), ok=False, error=str(exc)))
+                    _emit(
+                        proto,
+                        protocol.result_frame(req.get("id"), ok=False, error=str(exc)),
+                    )
                 continue
             if op == "command" and (req.get("cmd") or "") == "new_session":
                 # Runway item 4: the native "New Chat" button. Handled
@@ -3568,6 +4437,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 import uuid
 
                 from jaeger_ai.main import evict_session
+
                 a = req.get("args") or {}
                 old_id = str(a.get("old_id") or "").strip()
                 if old_id:
@@ -3677,20 +4547,62 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 # result goes out FIRST so the client sees ok before the
                 # agent_state booting → ready progress starts streaming.
                 ok, data, err = _create_instance(req.get("args") or {})
-                _emit(proto, protocol.result_frame(
-                    req.get("id"), data=data, ok=ok, error=err))
+                _emit(
+                    proto,
+                    protocol.result_frame(req.get("id"), data=data, ok=ok, error=err),
+                )
                 if ok:
                     _start_boot(data["instance"])
                 continue
             if op in ("query", "command"):
+                if (op == "command" and req.get("cmd") == "transcribe_audio"
+                        and "pcm_f32le" in (req.get("args") or {})):
+                    def run_ui_transcription(request=req, output=proto):
+                        values = request.get("args") or {}
+                        try:
+                            from jaeger_ai.core.ui_transcription import transcribe_pcm
+                            data = transcribe_pcm(
+                                str(values.get("pcm_f32le") or ""),
+                                sample_rate=float(values.get("sample_rate") or 0),
+                                model=str(values.get("model") or "medium.en"),
+                            )
+                            ok, error = True, None
+                        except Exception as exc:
+                            data, ok, error = None, False, str(exc)
+                        _emit(output, protocol.result_frame(
+                            request.get("id"), data=data, ok=ok, error=error))
+                    threading.Thread(target=run_ui_transcription,
+                                     name="bridge-ui-transcription", daemon=True).start()
+                    continue
+                if op == "command" and req.get("cmd") == "transcribe_audio":
+                    # Native Chat/Avatar are capture surfaces, not STT hosts.
+                    # Decode through the same prewarmed agent node as the
+                    # attached face; never fall back silently to Apple Speech.
+                    if ctx.sidecar is None or not ctx.sidecar._audio_slots.acquire(blocking=False):
+                        _emit(proto, protocol.result_frame(req.get("id"), ok=False,
+                                                          error="agent audio unavailable or busy"))
+                    else:
+                        audio_req = {**(req.get("args") or {}), "op": "stt", "id": req.get("id")}
+                        threading.Thread(
+                            target=ctx.sidecar._audio_job,
+                            args=(proto, audio_req, threading.Event(), {}, threading.Lock()),
+                            name="bridge-native-stt", daemon=True,
+                        ).start()
+                    continue
                 target = ctx.boot if ctx.boot is not None else _LayoutOnly(ctx.layout)
                 if op == "query":
                     try:
-                        data = _query(req.get("what") or "", req.get("args") or {}, target)
+                        data = _query(
+                            req.get("what") or "", req.get("args") or {}, target
+                        )
                         _emit(proto, protocol.result_frame(req.get("id"), data=data))
                     except Exception as exc:  # noqa: BLE001
-                        _emit(proto, protocol.result_frame(
-                            req.get("id"), ok=False, error=str(exc)))
+                        _emit(
+                            proto,
+                            protocol.result_frame(
+                                req.get("id"), ok=False, error=str(exc)
+                            ),
+                        )
                 else:
                     cmd = req.get("cmd") or ""
                     if cmd == "transcribe_audio":
@@ -3847,6 +4759,8 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
         # clean, then leave through os._exit if the Metal runtime is
         # loaded (its C++ static destructors abort — F1).
         ctx.booted.wait(timeout=180)
+        if ctx.sidecar is not None:
+            ctx.sidecar.stop()
         # Stop the scheduled-prompt thread before tearing down the agent
         # it fires turns against.
         if ctx.producers is not None:
@@ -3857,7 +4771,7 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
             ctx.producers = None
         if ctx.cron is not None:
             try:
-                ctx.cron.shutdown(wait=False)
+                ctx.cron.shutdown(wait=True)
             except Exception:  # noqa: BLE001 — best-effort teardown
                 pass
         if ctx.supervisor_stop is not None:
@@ -3877,11 +4791,32 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                 pass
         turns.put(None)
         worker.join(timeout=30)
+        # Never free native contexts while a timed-out turn still owns them.
+        # A process exit releases them safely; an embedded caller receives a
+        # failure and retains ownership until its worker settles.
+        cron_alive = bool(ctx.cron is not None
+                          and callable(getattr(ctx.cron, "is_alive", None))
+                          and ctx.cron.is_alive())
+        settled = ctx.booted.is_set() and not worker.is_alive() and not cron_alive
+        if not settled:
+            rc = 1
+        if settled and ctx.runtime is not None:
+            # The runtime is a borrowing adapter; detach its handler without
+            # calling close(), which would tear down bridge-owned ``boot``.
+            try:
+                ctx.runtime.configure_vision(None)
+            except Exception:  # noqa: BLE001 — best-effort teardown
+                pass
+        if settled and ctx.vision_node is not None:
+            try:
+                ctx.vision_node.close()
+            except Exception:  # noqa: BLE001 — best-effort teardown
+                pass
         if ctx.boot_error:
             rc = 1
         boot = ctx.boot
         cleanup = getattr(boot, "cleanup", None) if boot is not None else None
-        if callable(cleanup):
+        if settled and callable(cleanup):
             try:
                 cleanup()
             except Exception:  # noqa: BLE001 — best-effort teardown

@@ -12,6 +12,9 @@
 
 ---
 
+> **Jaeger ecosystem identity**
+> ID: `org.jenkinsrobotics.framework.jaeger-os` · Type: **framework**
+
 ## What it is
 
 JaegerOS is the **framework** tier of the Jaeger ecosystem — the way ROS
@@ -77,6 +80,10 @@ function; `discover_modules()` finds it (in-tree, or out-of-tree via the
 ```bash
 mkdir -p my_module/nodes/my_module
 cat > my_module/nodes/my_module/module.yaml <<'YAML'
+id: org.example.my_slot.my_module
+name: My Module
+type: module
+implementation: my_module
 module: my_module
 slot: my_slot
 version: 0.1.0

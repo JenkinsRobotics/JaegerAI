@@ -60,7 +60,7 @@ def _secret_ref(value: Any) -> str | None:
 
 def _migrate_inline_secrets(layout: Any, data: dict[str, Any]) -> bool:
     """Move inline environment and HTTP-header secrets to the credential store."""
-    from jaeger_agent import credentials
+    from jaeger_agent.core import credentials
 
     changed = False
     for server in data.get("servers", []):
@@ -92,7 +92,7 @@ def migrate_inline_secrets(layout: Any) -> bool:
 
 def _resolve_values(layout: Any, server: dict[str, Any], field: str) -> dict[str, str]:
     """Resolve one config mapping only at the transport boundary."""
-    from jaeger_agent import credentials
+    from jaeger_agent.core import credentials
 
     values = server.get(field) if isinstance(server.get(field), dict) else {}
     resolved: dict[str, str] = {}
@@ -152,7 +152,7 @@ def _owned_secret_refs(server: dict[str, Any]) -> set[str]:
 
 
 def _delete_credentials(layout: Any, refs: set[str]) -> None:
-    from jaeger_agent import credentials
+    from jaeger_agent.core import credentials
 
     for ref in refs:
         credentials.delete_credential(layout, ref)

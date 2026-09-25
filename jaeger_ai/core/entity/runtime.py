@@ -900,7 +900,7 @@ class EntityRuntime:
             raise RuntimeError("OWNER layout missing; cannot run in-process ReAct")
         sqlite_store.bind(layout)
         try:
-            from jaeger_agent.workspace import bind as bind_workspace
+            from jaeger_agent.core.workspace import bind as bind_workspace
             bind_workspace(layout)
         except Exception:
             pass
@@ -994,7 +994,7 @@ class EntityRuntime:
             provider=str(getattr(client, "provider", None) or cfg.external_model.provider or "ollama"),
         )
         os.environ.setdefault("JAEGER_ACCEPT_HOOKS", "1")
-        from jaeger_agent.workspace import project_scope
+        from jaeger_agent.core.workspace import project_scope
         from jaeger_ai.core.models.model_resolver import serving_model_scope
         with turn_policy, project_scope(project_root), serving_model_scope(client, cfg):
             run = turn_exec.ensure_run()

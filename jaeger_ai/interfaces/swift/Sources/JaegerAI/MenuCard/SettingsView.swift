@@ -25,29 +25,7 @@ struct SettingsView: View {
     }
 }
 
-private struct GeneralSettings: View {
-    @ObservedObject private var tts = TTSManager.shared
-    @ObservedObject private var launch = LaunchAtLogin.shared
-
-    var body: some View {
-        Form {
-            Section("Startup") {
-                Toggle("Start Jaeger at login", isOn: $launch.isEnabled)
-                Text("Launch Jaeger menu-bar app automatically when logging in.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            Section("Voice") {
-                Toggle("Auto-speak replies", isOn: $tts.autoSpeakEnabled)
-                Text("Speak the agent's reply aloud after each turn.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .padding()
-    }
-}
-
-private struct AgentSettingsInfo: View {
+ttingsInfo: View {
     @ObservedObject private var agent = AgentBridge.shared
 
     var body: some View {
@@ -76,7 +54,7 @@ private struct AboutSettings: View {
         VStack(spacing: 12) {
             JaegerMechIcon(size: 56)
             Text("JaegerAI").font(.title2).bold()
-            Text("Real-world local agentic agent framework")
+            Text("Local multimodal agent application — powered by JaegerAgent on JaegerOS")
                 .font(.callout).foregroundStyle(.secondary)
             Link("github.com/JenkinsRobotics/JaegerAI",
                  destination: URL(string: "https://github.com/JenkinsRobotics/JaegerAI")!)

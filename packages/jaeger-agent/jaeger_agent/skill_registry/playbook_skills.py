@@ -211,11 +211,10 @@ def _disabled_playbook_names() -> set[str]:
     """Playbook names disabled via ``skills.disabled_playbooks`` in the bound
     instance config. Empty when no instance is bound."""
     try:
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
-        from jaeger_agent.workspace import get_layout
+        from jaeger_agent.core.instance import disabled_playbooks
+        from jaeger_agent.core.workspace import get_layout
 
-        cfg = load_yaml(get_layout().config_path, Config)
-        return {str(n) for n in cfg.skills.disabled_playbooks}
+        return disabled_playbooks(get_layout())
     except Exception:  # noqa: BLE001 — no instance / no config is fine
         return set()
 
@@ -225,7 +224,7 @@ def _instance_skills_dir() -> Path | None:
     playbooks live (the agent's writes are sandboxed to it). ``None``
     when no instance is bound, or when it is the bundled dir itself."""
     try:
-        from jaeger_agent.workspace import get_layout
+        from jaeger_agent.core.workspace import get_layout
 
         d = get_layout().skills_dir.resolve()
         return d if d != _SKILLS_DIR.resolve() else None

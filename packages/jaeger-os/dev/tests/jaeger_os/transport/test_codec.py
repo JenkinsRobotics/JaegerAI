@@ -19,17 +19,17 @@ def test_payload_heavy_topics_are_binary():
     """Audio frames AND camera frames ride MessagePack — both carry
     raw payload bytes that benefit from MessagePack's native bytes
     encoding (no base64 hop)."""
-    assert codec.is_binary_topic(topics.SENSE_AUDIO_IN) is True
-    assert codec.is_binary_topic(topics.ACT_AUDIO_OUT) is True
-    assert codec.is_binary_topic(topics.SENSE_CAMERA_FRAME) is True
+    assert codec.is_binary_topic(topics.SENSE_MIC_PCM) is True
+    assert codec.is_binary_topic(topics.ACT_SPEAKER_PCM) is True
+    assert codec.is_binary_topic(topics.SENSE_CAMERA_IMAGE_RAW) is True
 
 
 def test_text_topics_are_not_binary():
     """Every non-payload-heavy topic rides JSON for debug-ability."""
     binary = {
-        topics.SENSE_AUDIO_IN,
-        topics.ACT_AUDIO_OUT,
-        topics.SENSE_CAMERA_FRAME,
+        topics.SENSE_MIC_PCM,
+        topics.ACT_SPEAKER_PCM,
+        topics.SENSE_CAMERA_IMAGE_RAW,
     }
     for name in topics.ALL_TOPICS:
         if name in binary:
@@ -62,7 +62,7 @@ def test_text_topic_round_trips_via_json():
     # JSON is human-debuggable — the wire form should be ASCII
     # and start with '{' so curl/wireshark show it readable.
     assert wire.startswith(b"{")
-    parsed = codec.decode(wire, topics.SENSE_TRANSCRIPT)
+    parsed = codec.decode(wire, topics.SENSE_STT_TRANSCRIPT)
     assert isinstance(parsed, topics.Transcript)
     assert parsed.text == "hello world"
     assert parsed.confidence == 0.92
@@ -78,7 +78,7 @@ def test_binary_topic_round_trips_via_msgpack():
     # MessagePack is binary — the wire form should NOT be ASCII
     # printable.  Tightest detector: it must NOT start with '{'.
     assert not wire.startswith(b"{")
-    parsed = codec.decode(wire, topics.SENSE_AUDIO_IN)
+    parsed = codec.decode(wire, topics.SENSE_MIC_PCM)
     assert isinstance(parsed, topics.AudioInFrame)
     assert parsed.samples == raw
     assert parsed.sample_rate == 16000
@@ -108,19 +108,19 @@ def test_decode_unknown_topic_raises_keyerror():
 
 def test_decode_corrupt_payload_raises_validation_error():
     """A payload that doesn't match the topic's class fails decode."""
-    bad = b'{"topic": "/sense/transcript", "text": 123}'  # text=int
+    bad = b'{"topic": "/sense/stt/transcript", "text": 123}'  # text=int
     with pytest.raises(msgspec.ValidationError):
-        codec.decode(bad, topics.SENSE_TRANSCRIPT)
+        codec.decode(bad, topics.SENSE_STT_TRANSCRIPT)
 
 
 def test_decode_wrong_topic_literal_raises():
     """The Literal pin catches a payload claiming a different topic
     than the requested class."""
-    # Encode as SpeechCommand but pass SENSE_TRANSCRIPT to decode.
+    # Encode as SpeechCommand but pass SENSE_STT_TRANSCRIPT to decode.
     msg = topics.SpeechCommand(text="hi")
     wire = codec.encode(msg)
     with pytest.raises(msgspec.ValidationError):
-        codec.decode(wire, topics.SENSE_TRANSCRIPT)
+        codec.decode(wire, topics.SENSE_STT_TRANSCRIPT)
 
 
 # ── decode_with_topic_sniff (debug helper) ────────────────────────

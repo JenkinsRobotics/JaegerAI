@@ -53,6 +53,25 @@ class NodeSpec:
     restart: str = "on_failure"
     config_key: str = ""
     enabled: bool = True
+    #: A slot-bound node whose module may legitimately be absent.
+    #: Missing = logged and skipped, instead of refusing to boot.
+    #:
+    #: The distinction is capability, not taste: Mochi without its
+    #: animation module has nothing to show and should fail loudly,
+    #: while Mochi without a voice is a character that does not speak
+    #: — which is exactly v5.0. Fail-closed stays the DEFAULT so a
+    #: typo'd slot name is still a boot error.
+    optional: bool = False
+    #: The package that WOULD fill this slot, if you want it. A HINT,
+    #: never a binding — the slot still takes whichever installed
+    #: module claims it, and naming a package here does not privilege
+    #: that one.
+    #:
+    #: It exists so tooling can answer "how do I get a voice?" without
+    #: a registry. An empty optional slot is otherwise a dead end: the
+    #: app knows it wants a `tts` and has no way to say what provides
+    #: one.
+    package: str = ""
     args: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
@@ -67,6 +86,10 @@ class SurfaceSpec:
 @dataclasses.dataclass
 class AppSpec:
     name: str
+    #: Globally stable reverse-domain-style identity. ``name`` remains the
+    #: operator-facing/runtime name and may differ between launch variants.
+    id: str = ""
+    type: str = "application"
     version: str = "0.0.0"
     requires_framework: str = ""
     mode: str = "fused"
@@ -76,6 +99,18 @@ class AppSpec:
     autostart: bool = False
     shell_quits_core: bool = True
     config: str = "config.yaml"
+    #: Settings written INLINE as [config.<key>] tables. A small app is
+    #: then one file: topology and knobs in the same place, in the same
+    #: format, with real types. Mutually exclusive with a config file —
+    #: see load_manifest.
+    inline_config: dict[str, Any] = dataclasses.field(default_factory=dict)
+    # The control plane: an ipc socket letting a CLI/GUI in ANOTHER
+    # process inspect and command this app. On by default because a
+    # node-based app you cannot inspect from outside is the thing Mochi
+    # 3.0's host monitor existed to fix. The socket lives under the
+    # user's runtime dir with owner-only permissions; set false for a
+    # locked-down deployment.
+    control: bool = True
     bus: BusSpec = dataclasses.field(default_factory=BusSpec)
     core: CoreSpec = dataclasses.field(default_factory=CoreSpec)
     nodes: list[NodeSpec] = dataclasses.field(default_factory=list)
@@ -109,16 +144,34 @@ def load_manifest(path: str | pathlib.Path) -> AppSpec:
         raise FileNotFoundError(f"no manifest at {p}")
     raw = tomllib.loads(p.read_text(encoding="utf-8"))
 
-    _check_keys(raw, {"app", "bus", "core", "node", "surface"}, "top level")
+    _check_keys(raw, {"app", "bus", "core", "node", "surface", "config"},
+                "top level")
     app_raw = raw.get("app") or {}
+
+    # Settings written inline as [config.<key>] tables, so a small app
+    # is ONE file. Refused alongside a config file rather than merged:
+    # "which file is my setting in" is a question nobody should have to
+    # ask, and a silent precedence rule is how you debug the wrong copy.
+    inline_config = raw.get("config") or {}
+    if inline_config and not isinstance(inline_config, dict):
+        raise ValueError(f"{p}: [config] must be a table of tables")
+    if inline_config and (p.parent / str(app_raw.get("config",
+                                                     "config.yaml"))).is_file():
+        raise ValueError(
+            f"{p}: settings are in BOTH [config.*] here and "
+            f"{app_raw.get('config', 'config.yaml')}. Pick one — delete the "
+            f"file, or set config = \"\" in [app] to use the inline tables.")
     _check_keys(app_raw, {
-        "name", "version", "requires_framework", "mode", "event_loop",
+        "id", "name", "type", "version", "requires_framework", "mode", "event_loop",
         "ui", "single_instance", "autostart", "shell_quits_core", "config",
+        "control",
     }, "[app]")
     _refuse(bool(app_raw.get("name")), "[app] name is required")
 
     spec = AppSpec(
         name=str(app_raw["name"]),
+        id=str(app_raw.get("id", "")),
+        type=str(app_raw.get("type", "application")),
         version=str(app_raw.get("version", "0.0.0")),
         requires_framework=str(app_raw.get("requires_framework", "")),
         mode=str(app_raw.get("mode", "fused")),
@@ -128,7 +181,11 @@ def load_manifest(path: str | pathlib.Path) -> AppSpec:
         autostart=bool(app_raw.get("autostart", False)),
         shell_quits_core=bool(app_raw.get("shell_quits_core", True)),
         config=str(app_raw.get("config", "config.yaml")),
+        inline_config=inline_config,
+        control=bool(app_raw.get("control", True)),
     )
+    _refuse(spec.type == "application",
+            f"[app] type {spec.type!r} must be 'application'")
     _refuse(spec.mode in _MODES, f"[app] mode {spec.mode!r} not in {_MODES}")
     _refuse(spec.event_loop in _EVENT_LOOPS,
             f"[app] event_loop {spec.event_loop!r} not in {_EVENT_LOOPS}")
@@ -171,7 +228,7 @@ def load_manifest(path: str | pathlib.Path) -> AppSpec:
     for n_raw in raw.get("node") or []:
         _check_keys(n_raw, {
             "id", "tier", "backend", "factory", "slot", "module", "restart",
-            "config_key", "enabled", "args",
+            "config_key", "enabled", "optional", "package", "args",
         }, "[[node]]")
         node = NodeSpec(
             id=str(n_raw.get("id", "")),
@@ -183,6 +240,8 @@ def load_manifest(path: str | pathlib.Path) -> AppSpec:
             restart=str(n_raw.get("restart", "on_failure")),
             config_key=str(n_raw.get("config_key", "")),
             enabled=bool(n_raw.get("enabled", True)),
+            optional=bool(n_raw.get("optional", False)),
+            package=str(n_raw.get("package", "")),
             args=dict(n_raw.get("args") or {}),
         )
         _refuse(bool(node.id), "[[node]] id is required")

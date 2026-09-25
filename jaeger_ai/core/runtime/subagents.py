@@ -138,7 +138,7 @@ def _delegate_external(
         }
 
     try:
-        from jaeger_agent import workspace
+        from jaeger_agent.core import workspace
 
         root = workspace.get_project_root()
         workspace_path = Path(root).resolve() if root else None

@@ -57,7 +57,7 @@ def run_swe_benchmark_task(
     prior_project_root = None
     try:
         if turn_fn is None:
-            from jaeger_agent.workspace import get_project_root, set_project_root
+            from jaeger_agent.core.workspace import get_project_root, set_project_root
             from jaeger_ai.main import _run_turn, boot_for_tui
 
             boot = boot_for_tui(instance_name=None, with_memory=True, warmup=False)
@@ -101,7 +101,7 @@ def run_swe_benchmark_task(
     finally:
         if prior_project_root is not None or boot is not None:
             with contextlib.suppress(Exception):
-                from jaeger_agent.workspace import set_project_root
+                from jaeger_agent.core.workspace import set_project_root
 
                 set_project_root(prior_project_root)
         if boot is not None:

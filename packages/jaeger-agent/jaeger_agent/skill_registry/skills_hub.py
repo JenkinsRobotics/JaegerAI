@@ -79,7 +79,7 @@ TRUST_LOCAL = "local"
 # ---------------------------------------------------------------------------
 
 def _layout() -> Any:
-    from jaeger_agent.workspace import get_layout
+    from jaeger_agent.core.workspace import get_layout
 
     return get_layout()
 

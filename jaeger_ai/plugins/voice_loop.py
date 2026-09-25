@@ -14,9 +14,10 @@ because it shared the model with tool-calling and suppressed it).
 
       Override with ``--wake-word`` or ``--no-wake-word``.
 
-  Mic-pause during TTS by default
-      Stable first-run behavior: the mic pauses while the agent speaks
-      unless the operator explicitly enables AEC barge-in.
+  Sequential half-duplex by default
+      One committed utterance runs STT → one complete agent turn → TTS.
+      The mic pauses from the acknowledgement chime through reply playback,
+      then buffered audio is drained before the follow-up window opens.
 
       Override with ``--barge-in`` or ``--no-barge-in``.
 
@@ -35,12 +36,12 @@ STT modes:
 
 Run:
 
-    python -m jaeger_os.plugins.voice_loop
-    python -m jaeger_os.plugins.voice_loop --instance work
-    python -m jaeger_os.plugins.voice_loop --wake-word
-    python -m jaeger_os.plugins.voice_loop --barge-in
-    python -m jaeger_os.plugins.voice_loop --no-wake-word
-    python -m jaeger_os.plugins.voice_loop --no-barge-in
+    python -m jaeger_ai.plugins.voice_loop
+    python -m jaeger_ai.plugins.voice_loop --instance work
+    python -m jaeger_ai.plugins.voice_loop --wake-word
+    python -m jaeger_ai.plugins.voice_loop --barge-in
+    python -m jaeger_ai.plugins.voice_loop --no-wake-word
+    python -m jaeger_ai.plugins.voice_loop --no-barge-in
 
 Or, when ``config.interaction.default_mode`` is set to ``voice``
 (via the wizard's Step 4), a bare ``./run.sh --instance NAME``
@@ -286,42 +287,25 @@ def main() -> int:
         )
 
     # ── AEC + reference buffer ───────────────────────────────────────
-    # 0.2.6: barge-in is request-by-default; we attempt to enable AEC,
-    # and only commit to barge-in when AEC is actually available. AEC
-    # is the only safe way to barge-in without self-triggering on the
-    # agent's own voice — without it we fall back to mic-pause so the
-    # operator gets a stable experience instead of a chatty agent that
-    # keeps interrupting itself.
-    aec = None
-    reference_buffer = None
-    if barge_in_requested:
-        from jaeger_os.core.audio import AECWrapper, ReferenceBuffer, aec_available
-        if aec_available():
-            aec = AECWrapper(sample_rate=16000, frame_ms=10, enabled=True)
-            reference_buffer = ReferenceBuffer(sample_rate=16000,
-                                               capacity_seconds=2.0)
-            barge_in_active = True
-            print(f"[voice] AEC barge-in enabled ({aec.backend}) — "
-                  f"interrupt the agent any time", flush=True)
-        elif stt_audio_backend == "avaudio" or sys.platform == "darwin":
-            barge_in_active = True
-            print("[voice] Apple-native voice processing AEC barge-in enabled — "
-                  "interrupt the agent any time", flush=True)
-        else:
-            barge_in_active = False
-            print("[voice] speexdsp not installed (pip install speexdsp) — "
-                  "falling back to mic-pause during TTS. You won't be able "
-                  "to interrupt the agent mid-speech.", flush=True)
-    else:
-        print("[voice] --no-barge-in: mic-pause during TTS", flush=True)
+    # Current JaegerOS owns mic, speaker, and AEC in one audio driver.
+    # STT and TTS exchange PCM with that driver over the shared bus.
+    import queue as _queue
+    from jaeger_os.transport import topics as _topics
+    from jaeger_os.core.audio import AudioSessionConfig, ChimePlayer
+    from jaeger_ai.core.voice.sentence_buffer import StreamingSentenceAggregator
+    from jaeger_os.core.voice import clean_voice_reply, is_non_speech_marker
+    from jaeger_os.nodes import runtime as _runtime
+
+    _bus = _runtime.get_bus()
+    _audio_io_node = _runtime.ensure_audio_io_node(
+        config={"audio_backend": stt_audio_backend, "input_device": stt_input_device},
+    )
+    llm_lock = _pipeline["llm_lock"]
 
     # ── Chimes (wake + follow-up earcons) ────────────────────────────
-    from jaeger_os.core.audio import ChimePlayer
     chimes = ChimePlayer(
         enabled=not args.no_chimes,
-        # Push chime audio into the AEC reference buffer when barge-in is on,
-        # so the mic doesn't hear the chime as user speech.
-        reference_buffer=reference_buffer,
+        bus=_bus,
     )
 
     # ── Warm TTS (and wire the reference buffer if barge-in is on) ───
@@ -339,8 +323,6 @@ def main() -> int:
             "no module is filling the 'tts' slot — install one "
             "(e.g. jaeger-kokoro-tts) or disable the voice loop"
         )
-    if reference_buffer is not None:
-        tts.reference_buffer = reference_buffer
     # 0.3.0: tell the TTS pipeline which audio backend BEFORE warm() —
     # warm() opens the PersistentKokoroPlayer against ``audio_backend``,
     # so setting it later would open the persistent stream against the
@@ -355,42 +337,26 @@ def main() -> int:
     print("[voice] warming Kokoro TTS...", flush=True)
     warm_result = tts.warm()
     if warm_result.get("warmed"):
-        print(f"[voice] Kokoro ready ({warm_result.get('seconds')}s)", flush=True)
+        print(f"[voice] TTS ready ({warm_result.get('seconds')}s)", flush=True)
     else:
-        print(f"[voice] Kokoro warm failed: {warm_result.get('reason')} "
+        print(f"[voice] TTS warm failed: {warm_result.get('reason')} "
               f"— continuing; first speak() will pay the cost", flush=True)
 
     # ── Build STT in the requested mode ──────────────────────────────
-    # 0.2.6: followup_window_s=10.0 to match the reference
-    # voice_assistant.py canonical UX. Previously the STT default
-    # (15s) gave a generous "keep talking" window; 10s feels snappier
-    # and matches Google-Home muscle memory.
-    # 0.3.0: thread the audio backend choice down to the mic.  Both
-    # STT classes accept ``audio_backend`` which they pass through
-    # to ``_MicStream`` — when 'avaudio' the mic comes up via
-    # AVAudioEngine (PyObjC), otherwise it comes up via sounddevice
-    # exactly as in 0.2.x.
-    if args.stt_mode == "continuous":
-        from jaeger_whisper_stt.nodes.whisper_stt.engine import WhisperSTTContinuous
-        stt = WhisperSTTContinuous(
-            model_name=args.fast_model,
-            require_wake_word=require_wake_word,
-            followup_window_s=10.0,
-            aec=aec, far_end_buffer=reference_buffer,
-            audio_backend=stt_audio_backend,
-            input_device=stt_input_device,
-        )
-    else:
-        from jaeger_whisper_stt.nodes.whisper_stt.engine import WhisperSTTTwoPass
-        stt = WhisperSTTTwoPass(
-            fast_model_name=args.fast_model,
-            accurate_model_name=args.accurate_model,
-            require_wake_word=require_wake_word,
-            followup_window_s=10.0,
-            aec=aec, far_end_buffer=reference_buffer,
-            audio_backend=stt_audio_backend,
-            input_device=stt_input_device,
-        )
+    # Match the sequential demo's post-reply window and build through the
+    # runtime factory, which resolves whichever module fills the STT slot.
+    followup_window_s = float(config.voice.follow_up_seconds)
+    _audio_config = AudioSessionConfig(
+        stt_mode=args.stt_mode,
+        fast_model_name=args.fast_model,
+        accurate_model_name=args.accurate_model,
+        require_wake_word=require_wake_word,
+        followup_window_s=followup_window_s,
+        barge_in=barge_in_requested,
+        audio_backend=stt_audio_backend,
+        self_speech_filter=self_speech_filter_active,
+        self_speech_threshold=self_speech_threshold,
+    )
 
     # 0.4 Track B.3.2.a — STT phrase consumption migrates to the bus.
     # The AudioSessionNode wraps the existing Whisper engine and
@@ -402,22 +368,6 @@ def main() -> int:
     # — they're voice-loop-internal coordination and would need
     # /control/* topics that aren't designed yet.  Track B.3.2.b
     # handles those when the TTS path migrates.
-    import queue as _queue
-    from jaeger_os.transport import topics as _topics
-    from jaeger_os.core.voice import clean_voice_reply, is_non_speech_marker
-    from jaeger_ai.core.voice.sentence_buffer import StreamingSentenceAggregator
-    from jaeger_os.core.audio import AudioSession as _AudioSession
-    from jaeger_os.nodes import AudioSessionNode as _AudioSessionNode
-    from jaeger_os.nodes import runtime as _runtime
-    _bus = _runtime.get_bus()
-    _audio_session = _AudioSession(
-        adapter=stt,
-        aec=aec,
-        reference_buffer=reference_buffer,
-        barge_in_live=barge_in_active,
-        self_speech_filter=self_speech_filter_active,
-        self_speech_threshold=self_speech_threshold,
-    )
     _phrase_queue: "_queue.Queue[tuple[str, float]]" = _queue.Queue(maxsize=4)
     _gate_log_path = layout.logs_dir / "voice_gate_eval.jsonl"
 
@@ -482,31 +432,44 @@ def main() -> int:
         }))
         _log_gate_event("transcript", text, decision="queued")
 
-    _bus.subscribe(_topics.SENSE_TRANSCRIPT, _on_transcript)
-    _stt_node = _AudioSessionNode(
-        bus=_bus,
-        session=_audio_session,
-        name="audio_session",
-        install_signal_handlers=False,
+    _bus.subscribe(_topics.SENSE_STT_TRANSCRIPT, _on_transcript)
+    _stt_node = _runtime.ensure_audio_session_node(config=_audio_config)
+    _audio_session = _runtime.get_audio_session()
+    if _audio_session is None:
+        raise RuntimeError("audio session did not initialize")
+    stt = _audio_session
+    audio_health = _audio_io_node.health()
+    echo_control_live = bool(
+        audio_health.get("aec")
+        or audio_health.get("input_backend") == "avaudio"
     )
-    _stt_thread = threading.Thread(
-        target=_stt_node.run, name="voice-stt-node", daemon=True,
-    )
-    _stt_thread.start()
-    # The STT node's setup() calls stt.start() (opens the mic +
-    # spawns the Whisper background loop).  Give it a moment so the
-    # subscription is live + the mic is hot before we enter the
-    # phrase-pull loop.
-    time.sleep(0.2)
+    barge_in_active = bool(barge_in_requested and echo_control_live)
+    _audio_session.barge_in_live = barge_in_active
+    if barge_in_active:
+        print("[voice] echo-controlled barge-in active — interrupt any time",
+              flush=True)
+    elif barge_in_requested:
+        print("[voice] barge-in requested but echo control is unavailable; "
+              "using sequential half-duplex", flush=True)
+    else:
+        print("[voice] sequential half-duplex — mic paused during reply",
+              flush=True)
+
+    def _drain_inputs() -> None:
+        """Clear both STT and bus-side queues at a playback boundary."""
+        stt.drain_pending()
+        while True:
+            try:
+                _phrase_queue.get_nowait()
+            except _queue.Empty:
+                break
 
     # ── Cron runner (optional) ───────────────────────────────────────
-    llm_lock = threading.Lock()
-    _pipeline["llm_lock"] = llm_lock
     cron_runner: CronRunner | None = None
     if not args.no_cron:
         def _cron_callback(prompt: str, session_key: str | None = None) -> None:
             run_for_voice(client, prompt, session_key=session_key)
-        cron_runner = CronRunner(_cron_callback, llm_lock=llm_lock)
+        cron_runner = CronRunner(_cron_callback, llm_lock=None)
         cron_runner.start()
         print("[voice] cron runner started", flush=True)
 
@@ -584,22 +547,13 @@ def main() -> int:
 
             print(f"[voice] user: {phrase!r}", flush=True)
 
-            # Wake chime — brief tone tells the user "heard you, processing".
-            # Pause mic during chime so it doesn't get picked up as a phrase
-            # (skipped when AEC is on; the reference buffer handles it).
-            if chimes.enabled("wake"):
-                if reference_buffer is None:
-                    stt.set_paused(True)
-                chimes.play("wake")
-                if reference_buffer is None:
-                    stt.set_paused(False)
-
-            # In non-barge-in mode, keep the mic paused continuously
-            # from agent decode through bus-routed TTS playback. With
-            # barge-in, the mic stays open so the AEC + sustained-voice
-            # callback can detect interruption mid-TTS.
+            # Sequential mode owns the whole acknowledgement → think →
+            # speak interval. The shared audio driver handles AEC only for the
+            # explicit barge-in path.
             if not barge_in_active:
                 stt.set_paused(True)
+            if chimes.enabled("wake"):
+                chimes.play("wake")
 
             try:
                 # turn_runner = run_for_voice (local LLM).
@@ -617,6 +571,7 @@ def main() -> int:
                         reply=text,
                         reason="non_speech_marker_reply",
                     )
+                    _drain_inputs()
                     stt.open_followup()
                     continue
 
@@ -634,7 +589,15 @@ def main() -> int:
                     if spoke_via_tool:
                         print("[voice] agent vocalized via tool — skipping "
                               "post-turn speak", flush=True)
+                        _drain_inputs()
+                        if require_wake_word and chimes.enabled("followup"):
+                            chimes.play("followup")
+                        stt.open_followup()
+                        if text:
+                            _last_reply_text = text
+                            _audio_session.remember_reply(text)
                     else:
+                        _drain_inputs()
                         stt.open_followup()
                     # NB: the ``finally`` below will unpause the mic
                     # before we continue around the loop.
@@ -680,7 +643,7 @@ def main() -> int:
                             and not _first_audio_at["value"]):
                         _first_audio_at["value"] = time.perf_counter()
 
-                _bus.subscribe(_topics.SENSE_TTS_CHUNK, _on_tts_chunk)
+                _bus.subscribe(_topics.ACT_SPEECH_CHUNK, _on_tts_chunk)
 
                 _agg = StreamingSentenceAggregator()
                 _sentences = _agg.feed(text) + _agg.flush()
@@ -719,7 +682,7 @@ def main() -> int:
                                         node_id="voice_loop",
                                         correlation_id=_speech_cid,
                                     ),
-                                    ack_topic=_topics.SENSE_SPOKEN,
+                                    ack_topic=_topics.ACT_SPEECH_SPOKEN,
                                     timeout_s=180.0,
                                 )
                                 if ack is not None:
@@ -738,7 +701,7 @@ def main() -> int:
                                     node_id="voice_loop",
                                     correlation_id=_speech_cid,
                                 ),
-                                ack_topic=_topics.SENSE_SPOKEN,
+                                ack_topic=_topics.ACT_SPEECH_SPOKEN,
                                 timeout_s=180.0,
                             )
                             if ack is not None:
@@ -746,7 +709,7 @@ def main() -> int:
                             if ack is None or not ack.ok:
                                 break
                 finally:
-                    _bus.unsubscribe(_topics.SENSE_TTS_CHUNK, _on_tts_chunk)
+                    _bus.unsubscribe(_topics.ACT_SPEECH_CHUNK, _on_tts_chunk)
 
                 if _speech_end:
                     _first_audio = _first_audio_at["value"]
@@ -783,6 +746,8 @@ def main() -> int:
                         reason = ack.reason or "unknown"
                         print(f"[voice] follow-up skipped — TTS produced "
                               f"no audio ({reason})", flush=True)
+                    if not interrupted["flag"]:
+                        _drain_inputs()
                     continue
 
                 # Drop any phrases that VAD finalized during playback —
@@ -810,12 +775,7 @@ def main() -> int:
                     # playback would still come through the bus
                     # subscription after engine.drain_pending()
                     # already cleared them on its side.
-                    stt.drain_pending()
-                    while not _phrase_queue.empty():
-                        try:
-                            _phrase_queue.get_nowait()
-                        except _queue.Empty:
-                            break
+                    _drain_inputs()
 
                 # Follow-up chime — rising two-note tone tells the user
                 # "still listening, no wake word needed for the next
@@ -829,16 +789,12 @@ def main() -> int:
                 # at someone mid-sentence is the opposite of what
                 # "still listening" should feel like.
                 if (
-                    stt.require_wake_word
+                    require_wake_word
                     and chimes.enabled("followup")
                     and not barge_in_fired
                     and not _farewell_close
                 ):
-                    if barge_in_active:
-                        if reference_buffer is not None:
-                            chimes.play("followup")
-                    else:
-                        chimes.play("followup")
+                    chimes.play("followup")
 
                 # Farewell exchange (VoiceLLM port): when the user said
                 # goodbye AND the reply acknowledged it, don't re-open
@@ -874,12 +830,7 @@ def main() -> int:
         # subscription too so a re-entrant voice_loop in the same
         # interpreter doesn't accumulate stale subscribers.
         try:
-            _bus.unsubscribe(_topics.SENSE_TRANSCRIPT, _on_transcript)
-        except Exception:
-            pass
-        try:
-            _stt_node.stop()
-            _stt_thread.join(timeout=3.0)
+            _bus.unsubscribe(_topics.SENSE_STT_TRANSCRIPT, _on_transcript)
         except Exception:
             pass
         try:

@@ -1,0 +1,46 @@
+id: org.jenkinsrobotics.stt.whisper
+name: JaegerWhisperSTT
+type: module
+implementation: whisper
+module: whisper_stt
+slot: stt
+version: 2.0.0
+
+# The OWNERSHIP axis (TAXONOMY.md "Module KINDS") — orthogonal to
+# `slot`. `engine` is the kind that fills a capability slot; swapping
+# in Vosk or a cloud STT means swapping this module.
+#
+# This module NO LONGER OPENS THE MICROPHONE, which is what makes the
+# `engine` kind honest: jaeger_os.nodes.audio_io owns the device and
+# publishes echo-cancelled frames, and this subscribes like anything
+# else. That is what lets a wake-word detector or a level meter have
+# the same mic at the same time — previously this module held the
+# input stream and nothing else could get it.
+kind: engine
+
+# Topics follow the hierarchy: /<category>/<class>/<message>.
+#
+# `consumes` was an empty list until the audio driver existed, which
+# was a lie by omission: this module consumed audio constantly, just
+# not from a topic, so the manifest could not see it. Now it can.
+consumes: [/sense/mic/pcm]
+# Both outputs are derived readings — they flow toward the brain, so
+# they are /sense/ regardless of having come out of a model rather
+# than off a wire.
+produces: [/sense/stt/transcript, /sense/stt/speech_start, /sys/gate/decision]
+tools: [listen]
+factory: jaeger_whisper_stt:make_audio_session_node
+config: whisper_stt        # its group/key in the settings catalog
+# Carried over from the old plugin.yaml's `requires.libraries` block
+# (pre-0.8 M2b, jaeger_os/plugins/whisper_stt/plugin.yaml) — the
+# libraries the engine actually imports at runtime. The availability
+# gate (jaeger_os/agent/availability.py) probes these with
+# importlib.util.find_spec before reporting `listen` available.
+# Model weights are prepared with `jaeger-whisper-stt models --prepare`.
+# Weights and `hardware: [microphone]` aren't libraries importlib can probe, so
+# they're skipped here — same call M1 made for kokoro_tts.
+# Microphone hardware is owned by JaegerOS AudioIONode. This engine consumes
+# bus frames and therefore must not be gated on a hardware backend library.
+# Device enumeration may use PortAudio in an isolated CLI child process, but
+# the STT node itself does not import a hardware backend.
+requires_libraries: [pywhispercpp, webrtcvad, numpy]

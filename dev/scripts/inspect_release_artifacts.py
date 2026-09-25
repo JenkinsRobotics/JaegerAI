@@ -14,12 +14,19 @@ FORBIDDEN = re.compile(
     r"|\.(?:py[co]|db|sqlite(?:3)?|log)$|(^|/)\.DS_Store$"
 )
 
-JAEGER_AI_REQUIRED_SUFFIXES = (
+REQUIRED_SUFFIXES = {
+    "jaeger_ai-": (
     "jaeger_ai/core/instance/schemas.py",
     "jaeger_ai/core/settings/catalog.py",
     "jaeger_ai/core/runtime/agent_controller.py",
     "jaeger_ai/features/webui/service/service.py",
-)
+    ),
+    "jaeger_agent-": (
+        "jaeger_agent/assets/silero/silero_vad_16k_op15.onnx",
+        "jaeger_agent/assets/silero/LICENSE.txt",
+        "jaeger_agent/background/thinking_runner.yaml",
+    ),
+}
 
 
 def members(path: Path) -> list[str]:
@@ -50,9 +57,11 @@ def main() -> int:
                 print(f"  {name}")
         else:
             print(f"{artifact}: clean")
-        if artifact.name.startswith("jaeger_ai-"):
+        for prefix, required in REQUIRED_SUFFIXES.items():
+            if not artifact.name.startswith(prefix):
+                continue
             missing = [
-                suffix for suffix in JAEGER_AI_REQUIRED_SUFFIXES
+                suffix for suffix in required
                 if not any(name.endswith(suffix) for name in names)
             ]
             if missing:

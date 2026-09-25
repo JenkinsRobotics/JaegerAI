@@ -1,6 +1,6 @@
 """Person index — profiles of the people the agent INTERACTS with.
 
-Distinct from CHARACTERS (``personality/characters/`` — personalities the agent
+Distinct from CHARACTERS (``characters/`` — personalities the agent
 *plays*): a *person* is someone the agent *knows* — the owner, a guest on a
 channel — with their name, channel handles, access level, likes, and learned
 facts. The agent builds + expands these over time the way it grows skills.

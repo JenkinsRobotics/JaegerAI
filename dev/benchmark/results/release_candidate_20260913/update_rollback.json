@@ -1,0 +1,33 @@
+{
+  "passed": true,
+  "baseline_ref": "0.9.6",
+  "swapped": [
+    "jaeger_ai",
+    "install.sh",
+    "run.sh",
+    "jaeger",
+    "requirements.txt",
+    "pyproject.toml",
+    "jaeger.toml",
+    "jaeger.windowed.toml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "restored": [
+    "jaeger_ai",
+    "install.sh",
+    "run.sh",
+    "jaeger",
+    "requirements.txt",
+    "pyproject.toml",
+    "jaeger.toml",
+    "jaeger.windowed.toml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "state_preserved": true,
+  "environment_preserved": true,
+  "boundary": "actual product artifact swap and rollback; dependency and native rebuild verified separately"
+}

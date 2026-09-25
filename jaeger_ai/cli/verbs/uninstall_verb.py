@@ -53,8 +53,8 @@ def _cmd_uninstall_argv(argv: list[str]) -> int:
         )
         return 0
 
-    from jaeger_ai.core.instance.instance import PACKAGE_ROOT
-    home = PACKAGE_ROOT.parent
+    from jaeger_ai.core.instance.instance import install_root
+    home = install_root()
     if (home / ".git").exists():
         print(f"[jaeger uninstall] {home} is a dev clone (.git present) — "
               "uninstall is for deployed installs; remove the clone by hand if "

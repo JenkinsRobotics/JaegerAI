@@ -15,7 +15,7 @@ Two operations
   during boot prewarm.
 * :func:`ensure_audio_session_node` starts the one mic/AEC/STT owner
   for monolithic voice mode, so TUI and other consumers read
-  ``/sense/transcript`` instead of opening their own mic.
+  ``/sense/stt/transcript`` instead of opening their own mic.
 
 Track A.7 (the ZMQ broker) will add a multi-process variant: the
 runtime asks the operator's ``--mode`` choice and either returns
@@ -33,6 +33,7 @@ the 0.3.0 PortAudio segfault class).
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 import time
 from typing import Any, Callable, Optional
@@ -40,7 +41,7 @@ from typing import Any, Callable, Optional
 from jaeger_os.contract.ports import ANIMATION_BRIDGE_DEFAULT_PORT
 from jaeger_os.core.audio import AudioSession, AudioSessionConfig
 from jaeger_os.core.modules import resolve_slot_symbols as _resolve_slot_symbols
-from jaeger_os.core.modules import resolve_mind_module as _resolve_mind_module
+from jaeger_os.core.modules import resolve_application_module as _resolve_application_module
 from jaeger_os.nodes.base import NodeState
 
 # 0.9 step 4 split: animation/kokoro_tts/whisper_stt are no longer
@@ -91,7 +92,7 @@ def _default_bus_factory() -> Bus:
     return InProcBus()
 
 
-def _default_synth_factory() -> Synthesizer:
+def _default_synth_factory(bus: Bus | None = None) -> Synthesizer:
     # Late import — speak.py imports from this module, so a module-level
     # import would be circular. 0.9 step 4 split: KokoroTTS/
     # KokoroTTSConfig no longer live at a hardcoded jaeger_os.nodes.
@@ -116,7 +117,7 @@ def _default_synth_factory() -> Synthesizer:
     # Mind's own package (jaeger_ai today) — resolved via
     # resolve_mind_module instead of a hardcoded dotted import, same
     # discovery mechanism as the tts/stt engine guards above.
-    context_mod = _resolve_mind_module("core.context")
+    context_mod = _resolve_application_module("core.context")
 
     # 0.8 M1: lang comes from Config.kokoro_tts instead of a hardcoded
     # constant — the settings-catalog "kokoro_tts" group is only real
@@ -127,13 +128,13 @@ def _default_synth_factory() -> Synthesizer:
     audio_backend = "sounddevice"
     try:
         layout = context_mod._require_layout()
-        schemas_mod = _resolve_mind_module("core.instance.schemas")
+        schemas_mod = _resolve_application_module("core.instance.schemas")
         cfg = schemas_mod.load_yaml(layout.config_path, schemas_mod.Config)
         lang = cfg.kokoro_tts.lang
         audio_backend = cfg.voice.audio_backend
     except Exception:  # noqa: BLE001 — fresh/unconfigured instance, or no Mind installed
         pass
-    return KokoroTTS(voice=_resolve_voice(), lang=lang, audio_backend=audio_backend)
+    return KokoroTTS(voice=_resolve_voice(), lang=lang, audio_backend=audio_backend, bus=bus)
 
 
 def _default_tts_node_factory(
@@ -166,50 +167,19 @@ def _default_thread_factory(node: TTSNode) -> threading.Thread:
     )
 
 
-def _resolve_far_end_provider() -> Any:
-    """Return a :class:`~jaeger_os.core.audio.FarEndReference` for AEC,
-    IF a tts-slot module is actually installed — else ``None``.
-
-    This is the seam that replaces the old hard dependency ("building
-    an audio session always requires a TTS node"). AEC decoupling
-    (0.9): an STT engine's construction must never require a TTS
-    engine — STT and TTS are peers filling their own slots. Whether a
-    far-end reference is available is a runtime FACT (is a tts-slot
-    module installed right now?), never a hardcoded import — same
-    ``discover_modules()`` primitive the tts/stt engine-symbol guards
-    at the top of this file already use.
-
-    Only called when the caller actually wants AEC (``config.barge_in``
-    — see :func:`_default_audio_session_factory`), so a barge-in-off
-    session never touches TTS at all, and a body with no TTS-slot
-    module installed never even attempts ``ensure_tts_node()`` (which
-    would otherwise hard-fail — no module means no factory to build
-    one from).
-
-    Ensures the TTS node is actually running (so it starts producing
-    playback audio) and that its synth carries a shared
-    ``ReferenceBuffer``, creating + attaching one if this is the first
-    time AEC has been wired for this synth instance — the synth itself
-    (``KokoroTTS`` today) only ever writes to ``self.reference_buffer``
-    when something has set it; it never assumes one exists.
-    """
-    from jaeger_os.core.modules import discover_modules
-    if not discover_modules().get("tts"):
-        return None
-    ensure_tts_node()
-    synth = get_synth()
-    if synth is None:
-        return None
-    buf = getattr(synth, "reference_buffer", None)
-    if buf is None:
-        from jaeger_os.core.audio import ReferenceBuffer
-        buf = ReferenceBuffer(sample_rate=16000, capacity_seconds=2.0)
-        try:
-            synth.reference_buffer = buf
-        except Exception:  # noqa: BLE001 — synth doesn't accept the attr
-            return None
-    return buf
-
+# _resolve_far_end_provider() lived here until the audio driver existed.
+#
+# Its whole job was negotiating between two modules that each owned half
+# of one device pair: find the tts-slot module, start its node, reach
+# into its synth, attach a shared ReferenceBuffer, and hand that back so
+# the STT engine's mic callback could cancel the TTS's echo. Five layers
+# of plumbing to move one buffer between two modules that should never
+# have needed to know about each other.
+#
+# jaeger_os.nodes.audio_io owns the mic, the speaker and the canceller
+# together, so the reference never leaves the node that has both
+# signals. STT no longer needs TTS to be installed, running, or even to
+# exist — which is what "AEC decoupling" was reaching for.
 
 def _default_audio_session_factory(
     config: AudioSessionConfig,
@@ -221,17 +191,16 @@ def _default_audio_session_factory(
     # degrades to deterministic filters and accepts unknown phrases.
     # 0.9 step 4 split: main.py moved to the Mind's own package
     # (jaeger_ai today) — resolved via resolve_mind_module.
-    main_mod = _resolve_mind_module("main")
+    main_mod = _resolve_application_module("main")
     _pipeline = getattr(main_mod, "_pipeline", {})
     llm_client = _pipeline.get("client")
     llm_lock = _pipeline.get("llm_lock")
-    # AEC decoupling (0.9): only resolve (and possibly start) a TTS
-    # node when this session actually wants barge-in — never as an
-    # unconditional side effect of building an audio session.
-    far_end = _resolve_far_end_provider() if config.barge_in else None
+    # Mic frames arrive on the bus from the audio driver. Building a
+    # voice session no longer resolves, starts, or even checks for a
+    # TTS module: echo cancellation happens upstream of both of them.
     return AudioSession.build(
         config,
-        far_end=far_end,
+        bus=get_bus(),
         llm_client=llm_client,
         llm_lock=llm_lock,
     )
@@ -263,7 +232,7 @@ def _default_audio_thread_factory(node: AudioSessionNode) -> threading.Thread:
 
 
 _bus_factory: Callable[[], Bus] = _default_bus_factory
-_synth_factory: Callable[[], Synthesizer] = _default_synth_factory
+_synth_factory: Callable[..., Synthesizer] = _default_synth_factory
 _tts_node_factory: Callable[..., TTSNode] = _default_tts_node_factory
 _thread_factory: Callable[[TTSNode], threading.Thread] = _default_thread_factory
 _audio_session_factory: Callable[[AudioSessionConfig], AudioSession] = (
@@ -373,6 +342,39 @@ def set_supervisor(sup: Any | None) -> None:
         bridge_instance.stop()
 
 
+def _overlay_synth_config(synth: Any, config: dict[str, Any] | None) -> None:
+    """Apply a manifest ``[config.<key>]`` table to a freshly built
+    synthesizer.
+
+    ``_default_synth_factory`` resolves ``voice`` and ``lang`` from the
+    Mind's instance settings, which is right for a full JaegerAI
+    install and wrong everywhere else: an app that writes
+
+        [config.tts]
+        voice = "bm_george"
+
+    got the default voice and no error. Worse, the settings path it
+    reads lives in the Mind package, so an app WITHOUT a Mind installed
+    (a plain TTS app, JP01's non-AI console) had no way to choose a
+    voice at all.
+
+    Applied BEFORE ``warm()`` on purpose — the voice is baked into the
+    pipeline the warm builds, so setting it afterwards would load the
+    weights twice or silently keep the old voice.
+
+    Manifest wins because a manifest is explicit composition: the app
+    author naming a voice in the file that defines the app should not
+    be overridden by an instance settings file they may not have.
+    Mirrors ``_overlay_audio_session_config`` on the STT side.
+    """
+    if not config:
+        return
+    for field in ("voice", "lang"):
+        value = config.get(field)
+        if value:
+            setattr(synth, field, value)
+
+
 def _build_tts_node(bus: Bus, config: dict[str, Any]) -> TTSNode:
     """Construct a :class:`TTSNode` directly on ``bus`` — the shape
     ``make_tts_node`` (the manifest's chassis-contract factory) hands
@@ -391,7 +393,10 @@ def _build_tts_node(bus: Bus, config: dict[str, Any]) -> TTSNode:
     the SAME objects the supervisor is running.
     """
     global _synth, _tts_node
-    synth = _synth_factory()
+    if _synth_factory is _default_synth_factory:
+        ensure_audio_io_node(config={"capture": False})
+    synth = _synth_factory(bus)
+    _overlay_synth_config(synth, config)
     node = _tts_node_factory(bus=bus, synthesizer=synth)
     if bool(config.get("warm", False)):
         try:
@@ -419,6 +424,8 @@ def ensure_tts_node(*, warm: bool = False) -> TTSNode:
     weight-load tax.
     """
     global _tts_node, _tts_thread, _synth
+    if _synth_factory is _default_synth_factory:
+        ensure_audio_io_node(config={"capture": False})
     sup = _supervisor
     if sup is not None and sup.has("tts") and sup.enabled("tts"):
         if not sup.is_running("tts"):
@@ -445,7 +452,7 @@ def ensure_tts_node(*, warm: bool = False) -> TTSNode:
     synth_to_warm: Any = None
     with _lock:
         if _tts_node is None:
-            _synth = _synth_factory()
+            _synth = _synth_factory(bus)
             _tts_node = _tts_node_factory(bus=bus, synthesizer=_synth)
             _tts_thread = _thread_factory(_tts_node)
             _tts_thread.start()
@@ -496,16 +503,23 @@ def _load_audio_session_config() -> AudioSessionConfig:
     resolve_mind_module instead of a hardcoded dotted import.
     """
     try:
-        context_mod = _resolve_mind_module("core.context")
-        schemas_mod = _resolve_mind_module("core.instance.schemas")
+        context_mod = _resolve_application_module("core.context")
+        schemas_mod = _resolve_application_module("core.instance.schemas")
         layout = context_mod._require_layout()
         cfg = schemas_mod.load_yaml(layout.config_path, schemas_mod.Config)
     except Exception:  # noqa: BLE001 — fresh/unconfigured instance
         return AudioSessionConfig()
+    # Copy every engine-owned field the installed module's config model knows
+    # about.  Keeping an explicit four-field list here previously made a real
+    # engine setting look configurable in the catalog while silently reverting
+    # to its constructor default at runtime.
+    engine_values = {
+        field.name: getattr(cfg.whisper_stt, field.name)
+        for field in dataclasses.fields(AudioSessionConfig)
+        if hasattr(cfg.whisper_stt, field.name)
+    }
     return AudioSessionConfig(
-        stt_mode=cfg.whisper_stt.stt_mode,
-        fast_model_name=cfg.whisper_stt.fast_model_name,
-        accurate_model_name=cfg.whisper_stt.accurate_model_name,
+        **engine_values,
         require_wake_word=cfg.voice.wake_word,
         followup_window_s=cfg.voice.follow_up_seconds,
         barge_in=cfg.voice.barge_in,
@@ -513,6 +527,30 @@ def _load_audio_session_config() -> AudioSessionConfig:
         self_speech_filter=cfg.voice.self_speech_filter,
         self_speech_threshold=cfg.voice.self_speech_threshold,
     )
+
+
+def _overlay_audio_session_config(
+    base: AudioSessionConfig, config: dict[str, Any] | None,
+) -> AudioSessionConfig:
+    """Apply a manifest ``[config.<key>]`` table on top of ``base``.
+
+    Only keys that are real ``AudioSessionConfig`` fields are applied;
+    anything else is ignored rather than raising, because a node's
+    config table is also where an app puts knobs meant for other layers.
+
+    ``wake_phrases`` is normalised to a tuple — TOML gives a list, and
+    the dataclass is frozen with tuple defaults that the engine's
+    matcher iterates repeatedly.
+    """
+    if not config:
+        return base
+    fields = {f.name for f in dataclasses.fields(AudioSessionConfig)}
+    updates = {k: v for k, v in config.items() if k in fields}
+    if not updates:
+        return base
+    if "wake_phrases" in updates:
+        updates["wake_phrases"] = tuple(updates["wake_phrases"] or ())
+    return dataclasses.replace(base, **updates)
 
 
 def _build_audio_session_node(
@@ -524,23 +562,34 @@ def _build_audio_session_node(
     call :func:`ensure_audio_session_node` (recursion into
     ``supervisor.start("audio_session")`` mid-``start()``).
 
-    0.8 M2b Task B: ``AudioSessionConfig`` is now built from real
-    settings via :func:`_load_audio_session_config` instead of
-    construction defaults — the manifest ``config`` dict param stays
-    unused here (mirrors ``_build_tts_node``'s ``warm`` flag being the
-    only manifest-config field it reads; audio_session's manifest node
-    config carries no comparable per-boot flag today).
+    0.8 M2b Task B: ``AudioSessionConfig`` is built from real settings
+    via :func:`_load_audio_session_config` instead of construction
+    defaults.
 
-    AEC decoupling (0.9): does NOT call :func:`ensure_tts_node`
-    unconditionally anymore — an STT-slot module's construction must
-    never require a TTS-slot module to be installed. See
-    :func:`_default_audio_session_factory` /
-    :func:`_resolve_far_end_provider`: TTS only gets ensured when the
-    real config asks for barge-in AND a tts-slot module is actually
-    installed.
+    The manifest's ``[config.<key>]`` table then OVERLAYS that. It used
+    to be accepted and ignored, which made an app that wrote
+
+        [config.stt]
+        stt_mode = "local_agreement"
+
+    boot silently in two_pass — the setting was read, validated, handed
+    over, and dropped. Worse, the settings path it fell back to lives in
+    the Mind package, so any app WITHOUT a Mind installed (a plain STT
+    app, JP01's non-AI console) had no way to configure the engine at
+    all and always got the dataclass defaults.
+
+    Manifest wins because a manifest is explicit composition — the app
+    author naming a mode in the file that defines the app should not be
+    overridden by an instance settings file they may not even have.
+
+    Never touches TTS at all: mic frames come from the audio driver,
+    and echo cancellation happens there, so an STT-slot module's
+    construction has no reason to know whether a TTS-slot module
+    exists.
     """
     global _audio_session, _audio_session_node
-    session = _audio_session_factory(_load_audio_session_config())
+    session = _audio_session_factory(
+        _overlay_audio_session_config(_load_audio_session_config(), config))
     node = _audio_session_node_factory(bus=bus, session=session)
     with _lock:
         _audio_session = session
@@ -548,21 +597,67 @@ def _build_audio_session_node(
     return node
 
 
+_audio_io_node: Any = None
+_audio_io_thread: Any = None
+_audio_io_start_lock = threading.Lock()
+
+
+def ensure_audio_io_node(*, config: dict[str, Any] | None = None) -> Any:
+    """Make sure the audio driver is running.
+
+    Nothing else opens an audio device, so nothing else HEARS or SPEAKS
+    without this. An STT engine with no driver subscribes successfully
+    and receives silence forever; a TTS engine publishes into a topic
+    nobody consumes. Both warn (see whisper's `_MicStream` liveness
+    check and kokoro's `BusPlayer.wait_until_drained`), but the fix is
+    here: start the driver.
+
+    Idempotent, and started lazily by whoever needs audio first, the
+    same shape as :func:`ensure_tts_node`.
+    """
+    global _audio_io_node, _audio_io_thread
+    # Startup is serialized separately from the state lock: node setup and
+    # callbacks can consult runtime state while the hardware opens.
+    with _audio_io_start_lock:
+        with _lock:
+            existing = _audio_io_node
+        if existing is not None:
+            if (config or {}).get("capture", True):
+                existing.enable_capture()
+            return existing
+        from jaeger_os.nodes.audio_io import make_audio_io_node
+        node = make_audio_io_node(get_bus(), config or {})
+        thread = _thread_factory(node)
+        thread.start()
+        try:
+            _wait_for_node_running(node, timeout_s=10.0)
+        except Exception:
+            node.stop()
+            thread.join(timeout=3.0)
+            raise
+        with _lock:
+            _audio_io_node = node
+            _audio_io_thread = thread
+        return node
+
+
 def ensure_audio_session_node(
     *,
     config: AudioSessionConfig,
 ) -> AudioSessionNode:
-    """Make sure exactly one audio session node owns the mic.
+    """Make sure exactly one audio session node is listening.
 
-    AEC decoupling (0.9): does NOT call :func:`ensure_tts_node`
-    unconditionally — building/starting the mic session must never
-    require a TTS-slot module to be installed. If ``config.barge_in``
-    is set AND a tts-slot module is actually installed,
-    :func:`_default_audio_session_factory` resolves (and, as a side
-    effect, starts) TTS to share its ``reference_buffer`` as the AEC
-    far-end reference; otherwise this session simply runs without one
-    (falls back to mic-pause during playback, same as always).
+    Starts the audio driver first: this session consumes
+    ``/sense/mic/pcm``, and without a producer it would subscribe
+    successfully and then hear nothing, forever, reporting healthy the
+    whole time.
+
+    It does NOT ensure TTS. Echo cancellation happens in the driver, so
+    listening no longer requires a TTS-slot module to be installed —
+    which is what the 0.9 AEC-decoupling work was reaching for and only
+    half achieved while the two engines each owned half a device pair.
     """
+    ensure_audio_io_node()
     global _audio_session_node, _audio_session_thread, _audio_session
     sup = _supervisor
     if sup is not None and sup.has("audio_session") and sup.enabled("audio_session"):
@@ -655,8 +750,8 @@ def _construct_animation_components(
     # today) — resolved via resolve_mind_module.
     skill_registry: Any | None = None
     try:
-        skill_tree_mod = _resolve_mind_module("skill_tree")
-        instance_mod = _resolve_mind_module("core.instance.instance")
+        skill_tree_mod = _resolve_application_module("skill_tree")
+        instance_mod = _resolve_application_module("core.instance.instance")
         layout = instance_mod.InstanceLayout(
             root=instance_mod.resolve_instance_dir(
                 instance_mod.default_instance_name()),
@@ -881,8 +976,11 @@ def shutdown() -> None:
     global _audio_session_node, _audio_session_thread, _audio_session
     global _animation_node, _animation_thread, _animation_bridge
     global _avatar_auto_driver, _supervisor
+    global _audio_io_node, _audio_io_thread
     with _lock:
         _supervisor = None
+        driver, driver_thread = _audio_io_node, _audio_io_thread
+        _audio_io_node = _audio_io_thread = None
         audio_node = _audio_session_node
         audio_thread = _audio_session_thread
         anim_node = _animation_node
@@ -921,5 +1019,9 @@ def shutdown() -> None:
         node.stop()
         if thread is not None:
             thread.join(timeout=3.0)
+    if driver is not None:
+        driver.stop()
+        if driver_thread is not None:
+            driver_thread.join(timeout=3.0)
     if bus is not None and bus_owned:
         bus.close()

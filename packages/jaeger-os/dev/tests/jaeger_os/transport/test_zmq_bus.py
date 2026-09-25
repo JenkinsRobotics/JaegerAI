@@ -40,7 +40,7 @@ def test_single_subscriber_receives_message(bus):
         received.append(msg)
         event.set()
 
-    bus.subscribe(topics.SENSE_TRANSCRIPT, cb)
+    bus.subscribe(topics.SENSE_STT_TRANSCRIPT, cb)
     time.sleep(0.05)  # let ZMQ register the subscription
     bus.publish(topics.Transcript(text="hello"))
 
@@ -61,8 +61,8 @@ def test_subscribers_only_get_their_topic(bus):
     def speech_cb(msg):
         speeches_event.set()
 
-    bus.subscribe(topics.SENSE_TRANSCRIPT, transcript_cb)
-    bus.subscribe(topics.ACT_SPEECH, speech_cb)
+    bus.subscribe(topics.SENSE_STT_TRANSCRIPT, transcript_cb)
+    bus.subscribe(topics.ACT_SPEECH_SAY, speech_cb)
     time.sleep(0.05)
     bus.publish(topics.Transcript(text="for transcript"))
     bus.publish(topics.SpeechCommand(text="for speech"))
@@ -81,7 +81,7 @@ def test_binary_topic_round_trips_through_zmq(bus):
         received.append(msg)
         event.set()
 
-    bus.subscribe(topics.SENSE_AUDIO_IN, cb)
+    bus.subscribe(topics.SENSE_MIC_PCM, cb)
     time.sleep(0.05)
     raw = b"\x00\x01\x02\xff\xfe\xfd" * 32
     bus.publish(topics.AudioInFrame(samples=raw, sample_rate=16000))
@@ -103,11 +103,11 @@ def test_unsubscribed_callback_stops_receiving(bus):
         else:
             received_before.set()
 
-    bus.subscribe(topics.SENSE_TRANSCRIPT, cb)
+    bus.subscribe(topics.SENSE_STT_TRANSCRIPT, cb)
     time.sleep(0.05)
     bus.publish(topics.Transcript(text="first"))
     assert received_before.wait(timeout=2.0)
-    bus.unsubscribe(topics.SENSE_TRANSCRIPT, cb)
+    bus.unsubscribe(topics.SENSE_STT_TRANSCRIPT, cb)
     time.sleep(0.05)  # let ZMQ drop the wire-level filter
     bus.publish(topics.Transcript(text="second"))
     time.sleep(0.2)  # delivery thread chance
@@ -125,11 +125,11 @@ def test_request_returns_matching_ack(bus):
             correlation_id=msg.correlation_id,
         ))
 
-    bus.subscribe(topics.ACT_SPEECH, fake_tts)
+    bus.subscribe(topics.ACT_SPEECH_SAY, fake_tts)
     time.sleep(0.05)
     ack = bus.request(
         topics.SpeechCommand(text="hi", correlation_id=cid),
-        ack_topic=topics.SENSE_SPOKEN,
+        ack_topic=topics.ACT_SPEECH_SPOKEN,
         timeout_s=2.0,
     )
     assert ack is not None
@@ -142,7 +142,7 @@ def test_request_times_out_on_no_ack(bus):
     cid = uuid.uuid4().hex
     ack = bus.request(
         topics.SpeechCommand(text="will fail", correlation_id=cid),
-        ack_topic=topics.SENSE_SPOKEN,
+        ack_topic=topics.ACT_SPEECH_SPOKEN,
         timeout_s=0.5,
     )
     assert ack is None
@@ -159,8 +159,8 @@ def test_buggy_subscriber_doesnt_kill_bus(bus, capsys):
     def good(msg):
         fired.set()
 
-    bus.subscribe(topics.SENSE_TRANSCRIPT, bad)
-    bus.subscribe(topics.SENSE_TRANSCRIPT, good)
+    bus.subscribe(topics.SENSE_STT_TRANSCRIPT, bad)
+    bus.subscribe(topics.SENSE_STT_TRANSCRIPT, good)
     time.sleep(0.05)
     bus.publish(topics.Transcript(text="ping"))
 
@@ -211,7 +211,7 @@ def test_two_buses_on_same_inproc_endpoint_share_context():
         received.append(msg)
         event.set()
 
-    consumer.subscribe(topics.SENSE_TRANSCRIPT, cb)
+    consumer.subscribe(topics.SENSE_STT_TRANSCRIPT, cb)
     time.sleep(0.1)  # let the SUB filter register before publish
     producer.publish(topics.Transcript(text="cross-bus"))
 

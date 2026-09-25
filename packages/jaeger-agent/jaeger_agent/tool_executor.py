@@ -332,7 +332,7 @@ class CheckpointingToolExecutor:
         if tool.name in MUTATING_TOOLS:
             try:
                 from jaeger_agent import checkpoints
-                from jaeger_agent.workspace import get_project_root
+                from jaeger_agent.core.workspace import get_project_root
 
                 root = get_project_root()
                 if root is not None:

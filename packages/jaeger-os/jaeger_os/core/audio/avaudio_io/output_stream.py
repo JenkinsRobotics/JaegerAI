@@ -5,28 +5,26 @@ frames, time_info, status)`` is invoked on a worker thread, the
 resulting samples are wrapped into ``AVAudioPCMBuffer`` and
 scheduled on an ``AVAudioPlayerNode``.
 
-Why a worker thread instead of the player's built-in completion
-handler:
+Why a worker thread plus the player's completion handler:
 
 PyObjC's bridging of ``scheduleBuffer:atTime:options:completionHandler:``
 trips signature-inference issues — passing a Python callable as the
-``completionHandler`` block crashes the audio thread on macOS 26.
-The simpler ``scheduleBuffer:completionHandler:`` variant with
-``None`` for the handler works fine, so we use that and drive the
-pacing ourselves: a worker thread pre-schedules ``queue_depth_blocks``
-of audio to prime the player, then schedules one block per loop
-iteration with a sleep of half the block duration in between.
-There is no explicit queue-full check — the constant playback rate
-plus the half-block sleep keep the player roughly N blocks ahead
-of the playback cursor without polling AVAudioEngine's internal
-queue depth.
+``completionHandler`` block crashes the audio thread on macOS 26. The
+shorter ``scheduleBuffer:completionCallbackType:completionHandler:`` selector
+is correctly annotated by PyObjC, however, and lets AVAudioEngine report when
+each buffer has been rendered. A worker pre-schedules
+``queue_depth_blocks`` and then schedules exactly one replacement for each
+``DataRendered`` completion. The hardware clock therefore owns pacing: no
+Python sleep jitter, no underruns under GUI load, and no unbounded silence
+queue. ``DataPlayedBack`` must not be used as the refill signal because it
+includes downstream processing and device latency; feeding that latency back
+into every small block makes playback slower than real time.
 """
 
 from __future__ import annotations
 
 import sys
 import threading
-import time
 from typing import Any, Callable, Optional
 
 import numpy as np
@@ -86,6 +84,11 @@ class OutputStream:
         self._format: Any = None
         self._running = False
         self._stop_event = threading.Event()
+        self._rendered = threading.Semaphore(0)
+        self._queued_lock = threading.Lock()
+        self._queued_blocks = 0
+        self._all_rendered = threading.Event()
+        self._all_rendered.set()
         self._worker: Optional[threading.Thread] = None
         self._block_duration = float(blocksize) / float(samplerate)
         # Reused fill buffer — callback writes into this in place.
@@ -123,6 +126,10 @@ class OutputStream:
         self._player = player
         self._format = fmt
         self._stop_event.clear()
+        self._rendered = threading.Semaphore(0)
+        with self._queued_lock:
+            self._queued_blocks = 0
+        self._all_rendered.set()
         self._running = True
 
         player.play()
@@ -195,27 +202,27 @@ class OutputStream:
     # ── internals ─────────────────────────────────────────────────
 
     def _worker_loop(self) -> None:
-        """Background driver: keep the player's queue fed.
+        """Keep a fixed number of buffers ahead of the playback cursor.
 
-        Loop pacing: each iteration schedules one block (~20 ms of
-        audio at typical rates).  ``time.sleep`` for half the block
-        duration so we stay roughly ``queue_depth_blocks`` ahead of
-        the playback cursor.  Actual queue depth is implicit — we
-        don't poll it; the playback rate is constant and the
-        callback rate is bounded by our sleep."""
+        AVAudioEngine's ``DataRendered`` callback is the pacing clock. Once
+        the pre-roll is scheduled, every completion permits exactly one new
+        buffer. This stays bounded without guessing at the device rate from a
+        Python thread."""
         # Pre-warm the queue by scheduling N blocks back to back.
         for _ in range(self._queue_depth_blocks):
             if self._stop_event.is_set() or not self._fill_one_block():
                 self._signal_finish()
                 return
 
-        # Then pace.
-        sleep_dt = self._block_duration * 0.5
+        # Thereafter the render thread releases one permit per buffer.
         while not self._stop_event.is_set():
+            if not self._rendered.acquire(timeout=0.1):
+                continue
+            if self._stop_event.is_set():
+                return
             if not self._fill_one_block():
                 self._signal_finish()
                 return
-            time.sleep(sleep_dt)
 
     def _fill_one_block(self) -> bool:
         """Call the user callback, build a PCMBuffer, schedule it.
@@ -253,22 +260,42 @@ class OutputStream:
                   file=sys.stderr)
             return False
 
-        # 2-arg scheduleBuffer:completionHandler: with None.  The
-        # 4-arg variant with a block trips PyObjC signature inference
-        # and crashes the audio thread on macOS 26.
+        # Increment before scheduling: a very short buffer may complete on the
+        # render thread immediately after the selector returns.
+        with self._queued_lock:
+            self._queued_blocks += 1
+            self._all_rendered.clear()
         try:
-            self._player.scheduleBuffer_completionHandler_(pcm_buf, None)
+            self._player.scheduleBuffer_completionCallbackType_completionHandler_(
+                pcm_buf,
+                self._av.AVAudioPlayerNodeCompletionDataRendered,
+                self._on_buffer_rendered,
+            )
         except Exception as exc:  # noqa: BLE001
+            with self._queued_lock:
+                self._queued_blocks = max(0, self._queued_blocks - 1)
+                if self._queued_blocks == 0:
+                    self._all_rendered.set()
             print(f"[avaudio] scheduleBuffer failed: {exc}", file=sys.stderr)
             return False
 
         return True
+
+    def _on_buffer_rendered(self, _callback_type: Any) -> None:
+        """AVAudio render-thread callback. Counters and a semaphore only."""
+        with self._queued_lock:
+            self._queued_blocks = max(0, self._queued_blocks - 1)
+            if self._queued_blocks == 0:
+                self._all_rendered.set()
+        self._rendered.release()
 
     def _signal_finish(self) -> None:
         """End-of-stream tidy-up — wait briefly for the player's
         already-queued buffers to drain, then tear down.  Runs on
         the worker thread; we call ``_teardown`` directly to avoid
         the self-join in ``stop()``."""
-        drain_wait = self._block_duration * self._queue_depth_blocks
-        time.sleep(min(drain_wait, 2.0))
+        with self._queued_lock:
+            queued = self._queued_blocks
+        self._all_rendered.wait(timeout=min(
+            max(0.1, queued * self._block_duration + 0.5), 5.0))
         self._teardown()

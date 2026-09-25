@@ -22,7 +22,7 @@ import time
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
-from jaeger_agent.workspace import _audit, _require_layout
+from jaeger_agent.core.workspace import _audit, _require_layout
 from jaeger_os.core.safety.command_guard import hardline_guard
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 from jaeger_agent.util.tool_interrupt import ToolInterrupted, run_interruptible
@@ -91,6 +91,44 @@ def _sandbox_literal(path: str) -> str:
     return json.dumps(os.path.realpath(path))
 
 
+@functools.lru_cache(maxsize=1)
+def _macos_python_libraries() -> tuple[str, ...]:
+    """The interpreter's linked libraries, including Homebrew dependencies.
+
+    Enumerate trusted interpreter binaries, never user code. Seatbelt grants
+    reads to these exact files, not all of Homebrew or the operator's home.
+    """
+    import sysconfig
+    from pathlib import Path
+
+    shared = sysconfig.get_config_var("DESTSHARED")
+    pending = [os.path.realpath(sys.executable)]
+    if shared:
+        pending.extend(str(p) for p in Path(shared).glob("*.so"))
+    visited: set[str] = set()
+    libraries: set[str] = set()
+    while pending:
+        binary = pending.pop()
+        if binary in visited:
+            continue
+        visited.add(binary)
+        try:
+            result = subprocess.run(["/usr/bin/otool", "-L", binary],
+                                    capture_output=True, text=True, timeout=5,
+                                    check=False)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        for line in result.stdout.splitlines()[1:]:
+            path = line.strip().split(" (", 1)[0]
+            if not path.startswith("/") or not os.path.isfile(path):
+                continue
+            resolved = os.path.realpath(path)
+            libraries.update((path, resolved))
+            if not resolved.startswith(("/System/", "/usr/lib/")):
+                pending.append(resolved)
+    return tuple(sorted(libraries))
+
+
 def _sandboxed_python_command(
     script: str,
     *,
@@ -130,6 +168,9 @@ def _sandboxed_python_command(
             f"(subpath {_sandbox_literal(path)})" for path in sorted(read_roots)
             if os.path.exists(path)
         )
+        library_reads = " ".join(
+            f"(literal {json.dumps(path)})" for path in _macos_python_libraries()
+        )
         rules = [
             "(version 1)",
             "(deny default)",
@@ -140,7 +181,7 @@ def _sandboxed_python_command(
             "(allow sysctl-read)",
             "(allow mach-lookup)",
             "(allow file-read-metadata)",
-            f"(allow file-read* {readable} "
+            f"(allow file-read* {readable} {library_reads} "
             '(literal "/dev/null") (literal "/dev/urandom"))',
             f"(allow file-write* (subpath {_sandbox_literal(workspace)}) "
             f"(subpath {_sandbox_literal(scratch)}) (literal \"/dev/null\"))",
@@ -228,7 +269,7 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
     # execution uses instance skills or an external scratch directory.
     workdir = None
     try:
-        from jaeger_agent.workspace import _require_layout, get_project_root
+        from jaeger_agent.core.workspace import _require_layout, get_project_root
         workdir = get_project_root() or _require_layout().skills_dir
         workdir.mkdir(parents=True, exist_ok=True)
     except Exception:
@@ -341,7 +382,7 @@ def run_shell(command: str, timeout_s: float = 60.0) -> dict[str, Any]:
     # is the tamper-evident record of what the agent was permitted to do.
     try:
         layout = _require_layout()
-        from jaeger_agent.workspace import get_project_root as _audit_project_root
+        from jaeger_agent.core.workspace import get_project_root as _audit_project_root
 
         _audit_cwd = _audit_project_root()
         _audit("run_shell", {
@@ -360,7 +401,7 @@ def run_shell(command: str, timeout_s: float = 60.0) -> dict[str, Any]:
     timed_out = False
     interrupted = False
     with tempfile.TemporaryDirectory(prefix="jaeger_shell_") as scratch:
-        from jaeger_agent.workspace import get_project_root
+        from jaeger_agent.core.workspace import get_project_root
 
         project = get_project_root()
         run_cwd = str(project) if project is not None else scratch
