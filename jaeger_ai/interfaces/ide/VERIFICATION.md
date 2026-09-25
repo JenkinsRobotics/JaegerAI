@@ -18,6 +18,7 @@ operator approves a controlled restart.
 - IDE existing-worktree contract: 4 Node tests passed, 0 failed.
 - IDE chat-search contract: 3 focused Node tests passed, 0 failed.
 - IDE worker-catalog contract: 1 Node test passed, 0 failed.
+- Codex read-only orchestration contract: 43 focused tests passed (39 unit plus 4 integration), 0 failed.
 - Full IDE Node suite: 145 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
 - The focused Plan-mode and workspace-selection files are included in that suite.
 - `git diff --check` passed.
@@ -49,6 +50,9 @@ and active-versus-archived result grouping in the actual Antigravity/VS Code hos
 Worker catalog still needs installed-host acceptance to confirm slash-menu discovery,
 probe output, and error surfacing in the actual Antigravity/VS Code host. The catalog does
 not claim worker task execution or live IDE-panel conversation steering.
+Codex read-only orchestration still needs a live-provider and installed-host acceptance. The
+CLI sandbox is not independent effect verification, and the current orchestration service is
+still not restart-durable release orchestration.
 
 ---
 

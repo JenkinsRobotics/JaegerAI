@@ -555,7 +555,70 @@ async def test_unavailable_worker_leaves_honest_record(reason):
 
 
 @pytest.mark.asyncio
-async def test_cli_cannot_claim_existing_panel_or_read_only():
+async def test_cli_adapter_allows_read_only_when_runtime_enforces_it():
+    from jaeger_agent.delegates.contracts import RuntimeStatus
+
+    from jaeger_ai.features.ide_orchestration.adapters import DelegateRuntimeAdapter
+
+    class Runtime:
+        runtime_id = "cli-readonly"
+        starts: list[object] = []
+
+        async def probe(self):
+            return RuntimeStatus(
+                True,
+                capabilities=frozenset({"code", "read_only_enforced"}),
+            )
+
+        async def start(self, request):
+            self.starts.append(request)
+            return "worker-handle"
+
+    runtime = Runtime()
+    adapter = DelegateRuntimeAdapter(runtime)
+    probe = await adapter.probe()
+    assert probe["transport"] == "cli"
+    assert probe["capabilities"] == ["code", "read_only_enforced"]
+    task = ParentTask(
+        "readonly",
+        "Read the repository and report findings",
+        "cli-readonly",
+        "readonly-key",
+        read_only=True,
+    )
+    handle = await adapter.submit(task)
+    assert handle == "cli-readonly:readonly:readonly-key"
+    assert len(runtime.starts) == 1
+    assert runtime.starts[0].prompt == task.goal
+
+
+@pytest.mark.asyncio
+async def test_cli_adapter_rejects_read_only_without_enforcement():
+    from jaeger_agent.delegates.contracts import RuntimeStatus
+
+    from jaeger_ai.features.ide_orchestration.adapters import DelegateRuntimeAdapter
+
+    class Runtime:
+        runtime_id = "cli"
+        starts = 0
+
+        async def probe(self):
+            return RuntimeStatus(True, capabilities=frozenset({"code"}))
+
+        async def start(self, request):
+            self.starts += 1
+            raise AssertionError("Must not start without read-only enforcement")
+
+    runtime = Runtime()
+    adapter = DelegateRuntimeAdapter(runtime)
+    task = ParentTask("readonly", "Read", "cli", "readonly")
+    with pytest.raises(ValueError, match="read_only"):
+        await adapter.submit(task)
+    assert runtime.starts == 0
+
+
+@pytest.mark.asyncio
+async def test_cli_adapter_still_rejects_unsupported_existing_conversation():
     from dataclasses import replace
 
     from jaeger_agent.delegates.contracts import RuntimeStatus
@@ -574,6 +637,7 @@ async def test_cli_cannot_claim_existing_panel_or_read_only():
                         "code",
                         "existing_conversation",
                         "follow_up",
+                        "reconcile",
                         "read_only_enforced",
                     }
                 ),
@@ -586,13 +650,8 @@ async def test_cli_cannot_claim_existing_panel_or_read_only():
     runtime = Runtime()
     adapter = DelegateRuntimeAdapter(runtime)
     probe = await adapter.probe()
-    assert probe["transport"] == "cli"
-    assert probe["capabilities"] == ["code"]
+    assert probe["capabilities"] == ["code", "read_only_enforced"]
     task = ParentTask("readonly", "Read", "cli", "readonly")
-    service = IDEOrchestrationService({"cli": adapter})
-    assert (await service.execute_parent_task(task)).state == "blocked"
-    with pytest.raises(ValueError, match="read_only"):
-        await adapter.submit(task)
     with pytest.raises(ValueError, match="required capabilities"):
         await adapter.submit(
             replace(
@@ -602,6 +661,50 @@ async def test_cli_cannot_claim_existing_panel_or_read_only():
             )
         )
     assert runtime.starts == 0
+
+
+
+@pytest.mark.asyncio
+async def test_default_service_registers_codex_read_only_worker(monkeypatch):
+    from jaeger_ai.features.ide_orchestration import adapters as orchestration_adapters
+    from jaeger_ai.features.ide_orchestration import service as orchestration_service
+    from jaeger_agent.delegates.claude import runtime as claude_runtime
+    from jaeger_agent.delegates.codex import runtime as codex_runtime
+    from jaeger_agent.delegates.gemini import runtime as gemini_runtime
+
+    class FakeRuntime:
+        runtime_id = "codex"
+
+        async def probe(self):
+            return {"available": True, "capabilities": ["code", "read_only_enforced"]}
+
+        async def start(self, request):
+            return "worker-handle"
+
+        async def cancel(self, handle):
+            return True
+
+    class SpyAdapter:
+        def __init__(self, runtime):
+            self.worker_id = runtime.runtime_id
+
+        async def probe(self):
+            return {
+                "worker_id": self.worker_id,
+                "available": True,
+                "capabilities": ["code", "read_only_enforced"],
+            }
+
+    monkeypatch.setattr(codex_runtime, "create_read_only_runtime", lambda: FakeRuntime())
+    monkeypatch.setattr(orchestration_adapters, "DelegateRuntimeAdapter", SpyAdapter)
+    monkeypatch.setattr(claude_runtime, "create_runtime", lambda: (_ for _ in ()).throw(RuntimeError("skip")))
+    monkeypatch.setattr(gemini_runtime, "create_runtime", lambda: (_ for _ in ()).throw(RuntimeError("skip")))
+
+    service = orchestration_service.create_default_orchestration_service()
+    workers = await service.list_workers()
+
+    assert [worker["worker_id"] for worker in workers] == ["codex"]
+    assert workers[0]["capabilities"] == ["code", "read_only_enforced"]
 
 
 @pytest.mark.asyncio

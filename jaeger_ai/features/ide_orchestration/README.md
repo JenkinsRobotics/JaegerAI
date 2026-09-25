@@ -24,8 +24,11 @@ The deterministic fake adapter is a test fixture, not live product proof.
   must cooperate with asyncio cancellation; synchronous blocking code cannot be
   forcibly stopped by this service.
 - CLI probes explicitly identify their transport and cannot claim existing-panel,
-  follow-up, reconciliation or read-only enforcement. Current CLI launchers do
-  not enforce `read_only`, so those requests are rejected before launch.
+  follow-up, or reconciliation. The default Codex orchestration worker now
+  advertises `read_only_enforced` and launches `codex exec --sandbox read-only`.
+  Claude and Gemini still cannot enforce `read_only`, so they reject such tasks
+  before launch. This is CLI sandbox enforcement, not independent effect
+  verification and not a live-provider or installed-host qualification.
 - Availability/auth/quota failures remain visible in current task records.
   Progress events have monotonically increasing task-local sequence numbers.
 
@@ -36,12 +39,14 @@ when a concrete adapter supplies that contract. `max_turns` and `max_cost_usd`
 are request metadata, not enforced usage accounting; no pause operation exists.
 Do not label this a finished orchestration or restart-safe release.
 
-The public Gateway route currently rejects `read_only=false` with 403, while the
-built-in CLI adapters cannot enforce `read_only=true`. Public CLI delegation is
-therefore deliberately unusable until a server-owned authorization/verification
-plan and a genuinely read-only adapter exist. Arbitrary client metadata is not an
-authority or verifier. Direct in-process service callers remain available to
-trusted composition/tests. This state cannot satisfy the RC7 live-worker gate.
+The public Gateway route rejects `read_only=false` with 403. The default Codex
+worker can now enforce `read_only=true` through the Codex CLI read-only sandbox;
+Claude and Gemini still cannot. This is a real transport guard, not independent
+effect verification and not a live-provider or installed-host qualification.
+Arbitrary client metadata is not an authority or verifier. Writable public
+delegation remains deliberately unusable until a server-owned authorization,
+approval, effect-record, and independent-verification plan exists. This state
+still cannot satisfy the RC7 live-worker gate.
 
 ## Existing surface
 
@@ -64,17 +69,18 @@ These HTTP guarantees are tested with isolated deterministic workers; restart
 persistence and real IDE-panel transport are still unqualified.
 
 The next slice must reuse Gateway admission/events, owner run persistence and
-the existing delegate lifecycle. It must prove one actual existing IDE worker
-conversation: bounded task, observed reply, same-conversation follow-up and an
-independent file/test/UI result check. Reconcile uncertain delivery after owner
-restart, integrate scoped UI ownership/Stop/yield, and preserve target identity.
-Do not create another database, runtime, or fake worker transcript.
+the existing delegate lifecycle. It must prove one real worker task from the IDE
+through this read-only Codex transport, then advance to one actual existing IDE
+worker conversation: bounded task, observed reply, same-conversation follow-up
+and an independent file/test/UI result check. Reconcile uncertain delivery after
+owner restart, integrate scoped UI ownership/Stop/yield, and preserve target
+identity. Do not create another database, runtime, or fake worker transcript.
 
 ## Verification
 
 ```bash
-dev/scripts/run_tests.sh --unit dev/tests/jaeger_ai/features/test_ide_orchestration.py
-dev/scripts/run_tests.sh --integration dev/tests/jaeger_ai/features/test_ide_orchestration.py
+dev/scripts/run_tests.sh --unit dev/tests/jaeger_ai/features/test_ide_orchestration.py packages/jaeger-agent/tests/delegates/test_codex_runtime.py
+dev/scripts/run_tests.sh --integration dev/tests/jaeger_ai/features/test_ide_orchestration.py packages/jaeger-agent/tests/delegates/test_codex_runtime.py
 ```
 
 The socket-based Gateway fixture is marked integration. Unit tests exercise
