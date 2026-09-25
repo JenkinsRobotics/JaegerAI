@@ -8,7 +8,10 @@ operator approves a controlled restart.
 
 - Gateway queue contract: 9 tests passed, 0 failed.
 - IDE queue contract: 6 Node tests passed, 0 failed.
-- Full IDE Node suite: 116 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
+- IDE Plan-mode contract: 4 Node tests passed, 0 failed.
+- Full IDE Node suite: 120 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
+- The IDE Plan-mode test file is included in that suite; the focused file itself passes 4/4.
+- The IDE Plan-mode test file is included in that suite; the focused file itself passes 4/4.
 - `git diff --check` passed.
 
 ## Limits
@@ -18,6 +21,9 @@ execution, an installed Antigravity host pass, physical-device qualification, or
 Gateway restart. Live acceptance still needs a controlled Gateway restart, a real
 configured-provider turn, queueing while a tool or stream is active, Stop/cancel, and an
 immediate next-turn admission check.
+Plan mode also still needs a live-provider turn to prove the model actually calls
+`update_plan` and that the restricted tool set is visible in the model catalog and
+execution receipt.
 
 ---
 

@@ -109,6 +109,28 @@ def test_attachment_uploaded_after_admission_is_not_in_the_snapshot(store):
     assert admitted["execution"]["attachments"][0]["sha256"] == "aa"
 
 
+def test_plan_only_grant_is_frozen_and_replayable(store):
+    admitted = store.admit_request(
+        "s", "plan the login repair", request_id="plan-1",
+        requested={"allowed_tools": ["update_plan"]},
+    )
+    assert admitted["accepted"] is True
+    assert admitted["execution"]["allowed_tools"] == ["update_plan"]
+
+    replay = store.admit_request(
+        "s", "plan the login repair", request_id="plan-1",
+        requested={"allowed_tools": ["update_plan"]},
+    )
+    assert replay["replayed"] is True
+    assert replay["execution"]["allowed_tools"] == ["update_plan"]
+
+    with pytest.raises(RequestConflict):
+        store.admit_request(
+            "s", "plan the login repair", request_id="plan-1",
+            requested={"allowed_tools": ["update_plan", "read_file"]},
+        )
+
+
 def test_unknown_explicit_attachment_is_rejected(store):
     store.ensure_session("s")
     with pytest.raises(ValueError, match="Unknown attachment"):

@@ -48,6 +48,7 @@ Two session-level choices bypass the tool loop on purpose, at the Gateway bounda
 |---|---|---|
 | image question | attached image and a question about it | goes straight to a vision model |
 | model-only | text-only conversation, or an agent registered as a specialist | a plain answer, no tools |
+| plan-only | IDE Plan toggle or `/plan <request>` | Gateway `allowed_tools=["update_plan"]`; file, shell, and browser tools are not granted |
 
 ## Extension points (how everything else connects)
 

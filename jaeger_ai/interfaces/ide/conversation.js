@@ -259,7 +259,7 @@ class Conversation {
     if (this.disposed || epoch !== this.epoch) return;
     await this.refresh(session.session_id);
   }
-  async send(text, model = '', provider = '', workspace = '', ide = null) {
+  async send(text, model = '', provider = '', workspace = '', ide = null, allowedTools = null) {
     text = String(text).trim();
     if (!text || !this.state.connected || this.state.busy || this.sending) return;
     clearTimeout(this.reconnectTimer);
@@ -304,6 +304,7 @@ class Conversation {
       await this.persist(); // Persist identity before admission; never automatically re-send text.
       const admitted = await this.gateway.send(sid, {
         text, request_id: requestId, attachment_ids: attachmentIds,
+        ...(Array.isArray(allowedTools) ? { allowed_tools: allowedTools } : {}),
         ...(model ? { model, ...(provider ? { provider } : {}) } : {}),
         // The open project and what is open in it, so the agent works in the
         // operator's workspace and can resolve "this file" / "the selection".
@@ -447,7 +448,7 @@ class Conversation {
     if (epoch !== this.epoch || this.disposed) return;
     this.state.queue = Array.isArray(result.items) ? result.items : [];
   }
-  async queue(text, model = '', provider = '', workspace = '', ide = null) {
+  async queue(text, model = '', provider = '', workspace = '', ide = null, allowedTools = null) {
     text = String(text).trim();
     const sid = this.state.session?.session_id;
     if (!text || !this.state.connected || !sid) return false;
@@ -459,6 +460,7 @@ class Conversation {
     try {
       response = await this.gateway.queueAdd(sid, {
         text, request_id: requestId, attachment_ids: attachmentIds,
+        ...(Array.isArray(allowedTools) ? { allowed_tools: allowedTools } : {}),
         ...(model ? { model, ...(provider ? { provider } : {}) } : {}),
         ...(workspace ? { workspace } : {}),
         ...(ide ? { options: { ide } } : {}),

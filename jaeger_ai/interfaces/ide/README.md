@@ -46,6 +46,9 @@ deployment, not exposing the unauthenticated Gateway.
   **Queue next** adds a durable Gateway-owned follow-up request; queue cards
   support edit, pause/resume, reorder, and delete. The IDE does not keep a
   second client-side follow-up queue.
+- **Plan** and `/plan <request>` send a plan-only turn by setting the
+  Gateway-enforced grant to `update_plan`. File, shell, and browser tools are
+  not admitted for that turn; the model must produce a plan, not execute it.
 - Pending request IDs persist in IDE workspace storage keyed by Gateway URL;
   drafts stay in webview state. State is outside the source tree. Failed admission
   never triggers blind automatic resend. An ambiguous missing receipt needs
