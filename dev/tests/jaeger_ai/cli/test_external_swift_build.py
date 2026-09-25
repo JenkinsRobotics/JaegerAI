@@ -346,7 +346,7 @@ def test_real_build_invocation_uses_external_scratch_without_running_swift(tmp_p
     result = subprocess.run(["bash", str(_SCRIPT), "--dev"], env=env,
                             capture_output=True, text=True, timeout=15, check=False)
     assert result.returncode == 91, result.stderr
-    assert ["--build-path", str(output.resolve())] == result.stdout.splitlines()[-2:]
+    assert ["--scratch-path", str(output.resolve())] == result.stdout.splitlines()[-2:]
     assert output.is_dir()
     assert not (output / "JaegerAI.app").exists()
     after = {str(p): p.stat().st_mtime_ns for directory in caches

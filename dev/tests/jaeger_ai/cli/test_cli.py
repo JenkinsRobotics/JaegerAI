@@ -161,11 +161,11 @@ def test_status_renders_active_instance(sandbox) -> None:
 # ── roadmap ───────────────────────────────────────────────────────
 
 def test_roadmap_renders_active_version() -> None:
-    """Doesn't need a sandbox — reads from dev/docs/ in the repo."""
+    """Without a versioned ROADMAP ledger, `jaeger roadmap` renders the
+    single execution entry point (docs/CONTINUE_FROM_HERE.md)."""
     code, out = _run("roadmap")
     assert code == 0
-    assert "Roadmap" in out
-    assert "0.9.3" in out
+    assert "Continuation entry point" in out
 
 
 def test_roadmap_unknown_version_errors() -> None:

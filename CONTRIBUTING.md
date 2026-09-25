@@ -8,8 +8,8 @@ Current continuation state: [`docs/CONTINUE_FROM_HERE.md`](docs/CONTINUE_FROM_HE
 
 ## Branch policy
 
-- Work on `pinocchio` (or a topic branch based on it).
-- Do not merge `pinocchio` into `master` unless the operator asks.
+- Work on `0.13-dev` (or a topic branch based on it).
+- Do not merge `0.13-dev` into `master` unless the operator asks.
 - Do not rewrite published git history.
 - Do not write runtime state into the repository tree. State belongs in
   `~/.jaeger` or `$JAEGER_STATE_DIR`.

@@ -69,7 +69,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from jaeger_ai.core.native_app import swift_app_bundle
+from jaeger_ai.cli._common import swift_app_bundle
 
 from jaeger_ai.core.instance.instance import operator_state_root
 

@@ -265,7 +265,7 @@ def test_search_tool_marks_which_hits_are_this_conversation(bound, monkeypatch):
     a command from an unrelated diagnostic session.
     """
     import numpy as np
-    from jaeger_agent import workspace
+    from jaeger_agent.core import workspace
     import importlib
     # ``jaeger_agent.tools.memory`` the attribute is the ``memory()`` tool
     # function; the module has to be imported by its full name.

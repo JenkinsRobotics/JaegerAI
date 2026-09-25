@@ -2511,6 +2511,7 @@ def _start_local_producers(proto: TextIO, ctx: _Ctx) -> None:
                     else:
                         result = run_for_voice(
                             ctx.client, prompt, session_key=session,
+                            output_mode="dynamic",
                         )
                 text = result.get("text") or ""
                 _emit(proto, protocol.reply_frame(

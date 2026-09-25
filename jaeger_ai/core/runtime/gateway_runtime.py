@@ -29,7 +29,7 @@ class _GatewayApprovalBridge:
         self._pending: dict[str, dict[str, Any]] = {}
         self.last_status = "No approval requested"
         if bus is not None:
-            from jaeger_agent.messages import AgentResponse
+            from jaeger_agent.core.messages import AgentResponse
             bus.subscribe(AgentResponse.topic, self._on_response)
 
     def handle(self, data: dict[str, Any]) -> None:
@@ -41,7 +41,7 @@ class _GatewayApprovalBridge:
             self._client.resolve_approval(approval_id, "deny")
             return
 
-        from jaeger_agent.messages import AgentRequest
+        from jaeger_agent.core.messages import AgentRequest
 
         event = threading.Event()
         slot: dict[str, Any] = {"answer": None}

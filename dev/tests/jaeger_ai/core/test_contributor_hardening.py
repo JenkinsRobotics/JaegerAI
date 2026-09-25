@@ -23,9 +23,9 @@ def test_public_review_files_exist():
         assert Path(rel).is_file(), f"missing public-review file: {rel}"
 
 
-def test_contributing_points_at_test_tiers_and_pinocchio():
+def test_contributing_points_at_test_tiers_and_the_release_branch():
     text = Path("CONTRIBUTING.md").read_text(encoding="utf-8")
-    assert "pinocchio" in text
+    assert "0.13-dev" in text
     assert "dev/scripts/run_tests.sh" in text
     assert "JAEGER_STATE_DIR" in text
     assert "do not merge" in text.lower() or "Do not merge" in text
@@ -41,7 +41,7 @@ def test_extension_guide_forbids_core_edits_for_skills():
 def test_continuation_entry_point_is_indexed_and_supersedes_stale_plans():
     continuation = Path("docs/CONTINUE_FROM_HERE.md").read_text(encoding="utf-8")
     docs_index = Path("docs/README.md").read_text(encoding="utf-8")
-    assert "Branch:** `pinocchio`" in continuation
+    assert "Branch:** `0.13-dev`" in continuation
     assert "4124422b15e7f0ca28941774992000b24a151719" in continuation
     assert "P0 — reliable live conversation/execution path" in continuation
     assert "Not yet qualified" in continuation

@@ -283,7 +283,6 @@ if [ -z "$PYTEST" ]; then
     echo "[run_tests] no pytest: set JAEGER_VENV or install pytest on PATH" >&2
     exit 2
 fi
-PYTEST=("$PYTHON" -m pytest)
 
 # pytest-xdist parallel workers if installed — falls back to serial.
 # ``-n auto`` uses every core; that's noisy on a dev laptop and
