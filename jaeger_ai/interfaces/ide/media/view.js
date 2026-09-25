@@ -1,7 +1,7 @@
 (function bootJaegerView() {
 'use strict';
 const { groupActivity, activityTitle, activitySummary, activityIcon, groupWorkRows, diffLines, toolName, failureCount, groupTurns, selectableModels,
-  providerModelValue }
+  providerModelValue, filterChats }
   = window.JaegerPresentation;
 const { renderMarkdownOnce } = window.JaegerMarkdown;
 const { createFrameQueue } = window.JaegerFrameQueue;
@@ -15,13 +15,14 @@ let revision = '', modelRevision = '', draftSession = '';
 let submittedDraftSession = null;
 let editingQueueId = null;
 let showAllChats = false;
+let chatSearch = api.getState()?.chatSearch || '';
 const drafts = api.getState()?.drafts || {};
 const post = (type, extra = {}) => api.postMessage({ type, ...extra });
 window.JaegerPostMessage = post;
 
 let ideContextOn = api.getState()?.ideContext !== false;
 let planModeOn = api.getState()?.planMode === true;
-const persistView = () => api.setState({ drafts, ideContext: ideContextOn, planMode: planModeOn });
+const persistView = () => api.setState({ drafts, ideContext: ideContextOn, planMode: planModeOn, chatSearch });
 function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
 // While the agent is busy, Enter steers the live turn. “Queue next” writes a
 // durable Gateway request instead; this client never owns a second queue.
@@ -488,17 +489,24 @@ function archiveHeading() {
 
 function renderChats() {
   const container = $('chat-list');
-  const sessions = state.sessions || [];
+  const searching = Boolean(chatSearch.trim());
+  const sessions = filterChats(state.sessions || [], chatSearch);
   const selected = state.session?.session_id || '';
   const active = sessions.filter(session => !session.metadata?.archived);
   const archived = sessions.filter(session => Boolean(session.metadata?.archived));
-  const visibleActive = showAllChats ? active : active.slice(0, 3);
+  const visibleActive = searching ? active : showAllChats ? active : active.slice(0, 3);
   const nodes = visibleActive.map(session => chatRow(session, selected));
-  if (active.length > 3) {
+  if (!searching && active.length > 3) {
     const more = document.createElement('button'); more.type = 'button'; more.className = 'chat-more';
     more.textContent = showAllChats ? 'Show less' : `View all (${active.length})`;
     more.onclick = () => { showAllChats = !showAllChats; renderChats(); };
     nodes.push(more);
+  }
+  if (searching && !nodes.length) {
+    const empty = document.createElement('div');
+    empty.className = 'chat-empty';
+    empty.textContent = 'No chats match this search.';
+    nodes.push(empty);
   }
   if (archived.length) {
     nodes.push(archiveHeading());
@@ -836,6 +844,12 @@ $('prompt').onblur = () => { slashDismissed = true; renderSlashMenu(); };
 $('attach').onclick = () => post('attach');
 $('mention').onclick = () => post('mentionFile');
 for (const [id, type] of [['new', 'new'], ['refresh', 'refresh'], ['settings', 'settings'], ['stop', 'cancel']]) $(id).onclick = () => post(type);
+$('chat-search').oninput = event => {
+  chatSearch = event.target.value;
+  persistView();
+  renderChats();
+};
+$('chat-search').value = chatSearch;
 $('back').onclick = () => post('home');
 post('ready');
 })();

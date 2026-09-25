@@ -172,9 +172,23 @@ function selectableModels(catalog) {
   return rows;
 }
 
+// Filter the Gateway-owned session projection by title, workspace, or ID.
+// Search is a client-side list filter, not a new search service.
+function filterChats(sessions, query) {
+  const value = String(query || '').trim().toLowerCase();
+  const rows = Array.isArray(sessions) ? sessions : [];
+  if (!value) return rows;
+  return rows.filter(session => {
+    const title = String(session?.title || '').toLowerCase();
+    const workspace = String(session?.workspace || '').toLowerCase();
+    const id = String(session?.session_id || '').toLowerCase();
+    return title.includes(value) || workspace.includes(value) || id.includes(value);
+  });
+}
+
 const exportsObject = {
   modelLabel, toolName, activityTitle, activitySummary, activityIcon, groupWorkRows, diffLines, groupActivity, failureCount, statusLabel,
-  groupTurns, selectableModels, providerModelValue, parseProviderModel,
+  groupTurns, selectableModels, providerModelValue, parseProviderModel, filterChats,
 };
 if (typeof module !== 'undefined') module.exports = exportsObject;
 if (root) root.JaegerPresentation = exportsObject;

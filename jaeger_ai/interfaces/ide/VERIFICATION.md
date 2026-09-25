@@ -1,4 +1,4 @@
-# Gateway-owned session queue — 2026-09-24
+# Gateway-owned IDE continuation — 2026-09-25
 
 ## Scope
 
@@ -16,7 +16,8 @@ operator approves a controlled restart.
 - IDE workspace-selection contract: 3 Node tests passed, 0 failed.
 - IDE file-mention contract: 2 Node tests passed, 0 failed.
 - IDE existing-worktree contract: 4 Node tests passed, 0 failed.
-- Full IDE Node suite: 141 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
+- IDE chat-search contract: 3 focused Node tests passed, 0 failed.
+- Full IDE Node suite: 144 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
 - The focused Plan-mode and workspace-selection files are included in that suite.
 - `git diff --check` passed.
 
@@ -36,14 +37,14 @@ Session tabs still need installed-host acceptance to confirm tab focus, overflow
 and close behavior in the actual Antigravity/VS Code host.
 Session archive still needs installed-host acceptance to confirm the archived section,
 command visibility, and restart persistence in the actual Antigravity/VS Code host.
-Session archive still needs installed-host acceptance to confirm the archived section,
-command visibility, and restart persistence in the actual Antigravity/VS Code host.
 Workspace selection still needs installed-host acceptance to confirm folder picking,
 per-endpoint persistence, and multi-folder behavior in the actual Antigravity/VS Code host.
 File mentions still need installed-host acceptance to confirm the VS Code quick-pick,
 workspace filtering, and attachment rejection boundary in the actual Antigravity/VS Code host.
 Existing-worktree selection still needs installed-host acceptance against a real Git
 repository to confirm `git worktree list`, quick-pick ordering, and non-repository behavior.
+Chat search still needs installed-host acceptance to confirm input focus, persistence,
+and active-versus-archived result grouping in the actual Antigravity/VS Code host.
 
 ---
 
