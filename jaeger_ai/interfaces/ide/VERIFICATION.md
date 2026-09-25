@@ -11,8 +11,9 @@ operator approves a controlled restart.
 - IDE Plan-mode contract: 4 Node tests passed, 0 failed.
 - IDE context-chip contract: 3 Node tests passed, 0 failed.
 - IDE session-tab contract: 4 Node tests passed, 0 failed.
-- Full IDE Node suite: 127 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
-- The IDE Plan-mode test file is included in that suite; the focused file itself passes 4/4.
+- IDE workspace-selection contract: 2 Node tests passed, 0 failed.
+- Full IDE Node suite: 130 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
+- The focused Plan-mode and workspace-selection files are included in that suite.
 - `git diff --check` passed.
 
 ## Limits
@@ -29,6 +30,8 @@ Context chips still need installed-host acceptance to confirm they refresh on ed
 selection, tab, and diagnostics changes in the actual Antigravity/VS Code host.
 Session tabs still need installed-host acceptance to confirm tab focus, overflow,
 and close behavior in the actual Antigravity/VS Code host.
+Workspace selection still needs installed-host acceptance to confirm folder picking,
+per-endpoint persistence, and multi-folder behavior in the actual Antigravity/VS Code host.
 
 ---
 

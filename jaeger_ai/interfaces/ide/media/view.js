@@ -10,7 +10,7 @@ const { match: matchSlash, parse: parseSlash } = window.JaegerSlash;
 
 const api = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
-let state = { connected: false, busy: false, staged: [], queue: [], activity: [], reasoning: '', models: null, configuredModel: '', ideContext: null, diagnostics: 0 };
+let state = { connected: false, busy: false, staged: [], queue: [], activity: [], reasoning: '', models: null, configuredModel: '', ideContext: null, diagnostics: 0, selectedWorkspace: '' };
 let revision = '', modelRevision = '', draftSession = '';
 let submittedDraftSession = null;
 let editingQueueId = null;
@@ -655,6 +655,9 @@ function renderComposerBar() {
   $('send').title = editingQueueId ? 'Save queued request'
     : state.busy ? 'Steer current turn' : 'Send message';
   $('send').setAttribute('aria-label', $('send').title);
+  const workspaceLabel = state.selectedWorkspace ? state.selectedWorkspace.split('/').filter(Boolean).at(-1) : 'Workspace';
+  $('workspace-label').textContent = workspaceLabel;
+  $('workspace').title = state.selectedWorkspace || 'Choose the workspace Jaeger should use';
   const mode = state.autonomy?.mode;
   const pill = $('access');
   pill.hidden = !ACCESS[mode];
@@ -688,6 +691,7 @@ function openAccessMenu() {
 $('access').onclick = () => ($('access-menu').hidden ? openAccessMenu() : closeAccessMenu());
 $('access').onblur = () => closeAccessMenu();
 $('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); };
+$('workspace').onclick = () => post('selectWorkspace');
 $('plan-mode').onclick = () => { planModeOn = !planModeOn; persistView(); renderComposerBar(); };
 $('queue-next').onclick = () => {
   const text = $('prompt').value;
