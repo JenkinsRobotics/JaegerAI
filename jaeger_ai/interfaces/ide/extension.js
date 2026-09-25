@@ -224,11 +224,13 @@ function activate(context) {
         }
         if (message.type === 'send' && typeof message.text === 'string') {
           const { model, provider } = selectedModel(message.model);
-          return controller.send(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext());
+          const allowedTools = message.planOnly ? ['update_plan'] : null;
+          return controller.send(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext(), allowedTools);
         }
         if (message.type === 'queue' && typeof message.text === 'string') {
           const { model, provider } = selectedModel(message.model);
-          return controller.queue(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext());
+          const allowedTools = message.planOnly ? ['update_plan'] : null;
+          return controller.queue(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext(), allowedTools);
         }
         if (message.type === 'queueUpdate' && typeof message.id === 'string') {
           const patch = {};

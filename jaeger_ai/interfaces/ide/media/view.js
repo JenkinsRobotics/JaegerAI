@@ -20,7 +20,8 @@ const post = (type, extra = {}) => api.postMessage({ type, ...extra });
 window.JaegerPostMessage = post;
 
 let ideContextOn = api.getState()?.ideContext !== false;
-const persistView = () => api.setState({ drafts, ideContext: ideContextOn });
+let planModeOn = api.getState()?.planMode === true;
+const persistView = () => api.setState({ drafts, ideContext: ideContextOn, planMode: planModeOn });
 function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
 // While the agent is busy, Enter steers the live turn. “Queue next” writes a
 // durable Gateway request instead; this client never owns a second queue.
@@ -604,6 +605,7 @@ function renderComposerBar() {
     pill.classList.toggle('full', mode === 'auto');
   }
   $('ide-context').setAttribute('aria-pressed', String(ideContextOn));
+  $('plan-mode').setAttribute('aria-pressed', String(planModeOn));
 }
 
 function closeAccessMenu() {
@@ -628,10 +630,11 @@ function openAccessMenu() {
 $('access').onclick = () => ($('access-menu').hidden ? openAccessMenu() : closeAccessMenu());
 $('access').onblur = () => closeAccessMenu();
 $('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); };
+$('plan-mode').onclick = () => { planModeOn = !planModeOn; persistView(); renderComposerBar(); };
 $('queue-next').onclick = () => {
   const text = $('prompt').value;
   if (!text.trim() || $('queue-next').hidden) return;
-  post('queue', { text, model: $('model').value, ideContext: ideContextOn });
+  post('queue', { text, model: $('model').value, ideContext: ideContextOn, planOnly: planModeOn });
   $('prompt').value = ''; saveDraft(); eligibility(); slashDismissed = false; renderSlashMenu();
 };
 
@@ -683,6 +686,7 @@ function runSlash(command, args) {
     case 'copy': announceCopied(); return post('copy', { text: context.lastAnswer });
     case 'export': return post('exportChat');
     case 'model': return $('model').focus();
+    case 'plan': return args.trim() ? post('send', { text: args, model: $('model').value, ideContext: ideContextOn, planOnly: true }) : undefined;
     case 'diff': return post('reviewChanges');
     case 'status': return post('info', { what: 'status' });
     case 'skills': return post('info', { what: 'skills', query: args });
@@ -716,7 +720,7 @@ $('composer').onsubmit = event => {
     }
     if (state.busy) { post('steer', { text }); $('prompt').value = ''; saveDraft(); eligibility(); return; }
     submittedDraftSession = draftSession;
-    post('send', { text, model: $('model').value, ideContext: ideContextOn });
+    post('send', { text, model: $('model').value, ideContext: ideContextOn, planOnly: planModeOn });
   }
 };
 $('prompt').oninput = () => { saveDraft(); eligibility(); slashDismissed = false; slashIndex = 0; renderSlashMenu(); };
