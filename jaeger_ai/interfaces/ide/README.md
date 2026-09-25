@@ -49,6 +49,10 @@ deployment, not exposing the unauthenticated Gateway.
 - **Plan** and `/plan <request>` send a plan-only turn by setting the
   Gateway-enforced grant to `update_plan`. File, shell, and browser tools are
   not admitted for that turn; the model must produce a plan, not execute it.
+- Context chips above the composer show the active file, selection, open files,
+  and workspace problem count. `/diagnostics` opens a bounded Problems card.
+  The chips are projections of the existing `ideContext()` and diagnostics APIs;
+  they do not create a second context owner.
 - Pending request IDs persist in IDE workspace storage keyed by Gateway URL;
   drafts stay in webview state. State is outside the source tree. Failed admission
   never triggers blind automatic resend. An ambiguous missing receipt needs

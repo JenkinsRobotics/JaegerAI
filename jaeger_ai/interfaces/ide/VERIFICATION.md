@@ -9,8 +9,8 @@ operator approves a controlled restart.
 - Gateway queue contract: 9 tests passed, 0 failed.
 - IDE queue contract: 6 Node tests passed, 0 failed.
 - IDE Plan-mode contract: 4 Node tests passed, 0 failed.
-- Full IDE Node suite: 120 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
-- The IDE Plan-mode test file is included in that suite; the focused file itself passes 4/4.
+- IDE context-chip contract: 3 Node tests passed, 0 failed.
+- Full IDE Node suite: 123 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
 - The IDE Plan-mode test file is included in that suite; the focused file itself passes 4/4.
 - `git diff --check` passed.
 
@@ -24,6 +24,8 @@ immediate next-turn admission check.
 Plan mode also still needs a live-provider turn to prove the model actually calls
 `update_plan` and that the restricted tool set is visible in the model catalog and
 execution receipt.
+Context chips still need installed-host acceptance to confirm they refresh on editor
+selection, tab, and diagnostics changes in the actual Antigravity/VS Code host.
 
 ---
 

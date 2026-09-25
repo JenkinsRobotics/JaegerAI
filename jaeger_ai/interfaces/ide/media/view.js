@@ -10,7 +10,7 @@ const { match: matchSlash, parse: parseSlash } = window.JaegerSlash;
 
 const api = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
-let state = { connected: false, busy: false, staged: [], queue: [], activity: [], reasoning: '', models: null, configuredModel: '' };
+let state = { connected: false, busy: false, staged: [], queue: [], activity: [], reasoning: '', models: null, configuredModel: '', ideContext: null, diagnostics: 0 };
 let revision = '', modelRevision = '', draftSession = '';
 let submittedDraftSession = null;
 let editingQueueId = null;
@@ -381,6 +381,40 @@ function renderModels() {
   select.disabled = rows.length === 0 && !state.configuredModel;
 }
 
+function renderContextChips() {
+  const container = $('context-chips');
+  const context = state.ideContext || {};
+  const diagnostics = Number(state.diagnostics || 0);
+  const chips = [];
+  const chip = (label, title, severity = '') => {
+    const node = document.createElement('span');
+    node.className = 'context-chip';
+    if (severity) node.dataset.severity = severity;
+    node.title = title; node.textContent = label;
+    return node;
+  };
+  if (context.active_file) chips.push(chip(context.active_file, `Active file: ${context.active_file}`));
+  if (context.selection) {
+    const start = context.selection.start_line || context.selection.end_line || 1;
+    const end = context.selection.end_line || start;
+    chips.push(chip(start === end ? `Line ${start}` : `Lines ${start}–${end}`, 'Selection included in IDE context'));
+  }
+  if (context.open_files?.length) chips.push(chip(`${context.open_files.length} open files`, context.open_files.join(', ')));
+  if (diagnostics) {
+    const problems = document.createElement('button');
+    problems.type = 'button';
+    problems.className = 'context-chip';
+    problems.dataset.severity = diagnostics >= 10 ? 'error' : 'warning';
+    problems.title = 'Show workspace problems';
+    problems.setAttribute('aria-label', 'Show workspace problems');
+    problems.textContent = `${diagnostics} problem${diagnostics === 1 ? '' : 's'}`;
+    problems.onclick = () => post('info', { what: 'diagnostics' });
+    chips.push(problems);
+  }
+  container.replaceChildren(...chips);
+  container.hidden = !chips.length;
+}
+
 function renderStaged() {
   const container = $('staged');
   container.replaceChildren();
@@ -470,7 +504,7 @@ function render() {
   $('context').textContent = state.session?.workspace ? state.session.workspace.split('/').filter(Boolean).at(-1) : 'Work locally';
   $('stop').hidden = !state.busy || !state.canCancel; eligibility(); renderComposerBar();
   $('attach').disabled = !state.connected || state.busy;
-  renderModels(); renderStaged();
+  renderModels(); renderStaged(); renderContextChips();
 
   timelineRenderer.reconcile(transcriptRows());
   renderChanges();
@@ -687,6 +721,7 @@ function runSlash(command, args) {
     case 'export': return post('exportChat');
     case 'model': return $('model').focus();
     case 'plan': return args.trim() ? post('send', { text: args, model: $('model').value, ideContext: ideContextOn, planOnly: true }) : undefined;
+    case 'diagnostics': return post('info', { what: 'diagnostics' });
     case 'diff': return post('reviewChanges');
     case 'status': return post('info', { what: 'status' });
     case 'skills': return post('info', { what: 'skills', query: args });

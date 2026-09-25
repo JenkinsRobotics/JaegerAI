@@ -41,6 +41,22 @@ function skillLines(skills, query = '') {
   return lines;
 }
 
+function diagnosticsLines(snapshot = {}) {
+  const rows = Array.isArray(snapshot.diagnostics) ? snapshot.diagnostics : [];
+  const count = Number(snapshot.count ?? rows.length);
+  if (!count) return ['No workspace problems reported.'];
+  const errors = rows.filter(row => row.severity === 'error').length;
+  const warnings = rows.filter(row => row.severity === 'warning').length;
+  const infos = rows.filter(row => ['info', 'hint'].includes(row.severity)).length;
+  const lines = [`${count} problem${count === 1 ? '' : 's'} · ${errors} errors, ${warnings} warnings, ${infos} info/hints`];
+  for (const row of rows.slice(0, 12)) {
+    lines.push(`${row.severity || 'info'} · ${clip(row.path || '', 80)}:${row.line || 1} ${clip(row.message || '', 140)}`);
+  }
+  if (count > rows.slice(0, 12).length) lines.push(`…and ${count - rows.slice(0, 12).length} more`);
+  if (snapshot.truncated) lines.push('Output is bounded to 60 diagnostics.');
+  return lines;
+}
+
 function taskLines(payload) {
   const tasks = Array.isArray(payload) ? payload : payload?.tasks || [];
   if (!tasks.length) return ['No background agents or tasks.'];
@@ -97,4 +113,4 @@ function buildIdeContext({ folders = [], active = null, openPaths = [] } = {}) {
   return Object.keys(context).length ? context : null;
 }
 
-module.exports = { statusLines, skillLines, taskLines, exportMarkdown, slug, clip, buildIdeContext, IDE_LIMITS };
+module.exports = { statusLines, skillLines, taskLines, diagnosticsLines, exportMarkdown, slug, clip, buildIdeContext, IDE_LIMITS };

@@ -55,18 +55,20 @@ function activate(context) {
       }
       return { opened: shown(file), line: line >= 0 ? line + 1 : null };
     }
-    if (kind === 'diagnostics') {
-      const only = args.path ? absolute(String(args.path)) : '';
-      const levels = ['error', 'warning', 'info', 'hint'], found = [];
-      for (const [uri, list] of vscode.languages.getDiagnostics()) {
-        if (uri.scheme !== 'file' || (only && uri.fsPath !== only)) continue;
-        for (const item of list) found.push({ path: shown(uri.fsPath), severity: levels[item.severity] || 'info',
-          line: item.range.start.line + 1, message: String(item.message).slice(0, 300), source: item.source || '' });
-      }
-      found.sort((a, b) => levels.indexOf(a.severity) - levels.indexOf(b.severity));
-      return { count: found.length, diagnostics: found.slice(0, 60), truncated: found.length > 60 };
-    }
+    if (kind === 'diagnostics') return diagnosticsSnapshot(args.path ? absolute(String(args.path)) : '');
     throw new Error(`Unsupported IDE request: ${kind}`);
+  };
+  const diagnosticsSnapshot = (only = '') => {
+    const levels = ['error', 'warning', 'info', 'hint'];
+    const found = [];
+    for (const [uri, list] of vscode.languages.getDiagnostics()) {
+      if (uri.scheme !== 'file' || (only && uri.fsPath !== only)) continue;
+      const shownPath = (() => { const root = roots.find(r => uri.fsPath.startsWith(r + path.sep)); return root ? uri.fsPath.slice(root.length + 1) : uri.fsPath; })();
+      for (const item of list) found.push({ path: shownPath, severity: levels[item.severity] || 'info',
+        line: item.range.start.line + 1, message: String(item.message).slice(0, 300), source: item.source || '' });
+    }
+    found.sort((a, b) => levels.indexOf(a.severity) - levels.indexOf(b.severity));
+    return { count: found.length, diagnostics: found.slice(0, 60), truncated: found.length > 60 };
   };
   const ideContext = () => {
     const editor = vscode.window.activeTextEditor;
@@ -84,6 +86,9 @@ function activate(context) {
       openPaths: fileTabs,
     });
   };
+  const postContext = () => view?.webview.postMessage({
+    ideContext: ideContext(), diagnostics: diagnosticsSnapshot().count,
+  });
   let changes = { files: [] }, wasBusy = false, changeKey = '', changeGeneration = 0, selectedChangeRequest = '';
   const diffDocuments = new Map();
   const changesUrl = () => {
@@ -170,7 +175,7 @@ function activate(context) {
           if (answer === 'Replace draft') view?.webview.postMessage({ editDraft: message.text });
           return;
         }
-        if (message.type === 'ready') { selected = createController(); controller.ideHandler = ideCall; void refreshChanges(); void sendAutonomy(); return controller.refresh(selected); }
+        if (message.type === 'ready') { selected = createController(); controller.ideHandler = ideCall; void refreshChanges(); void sendAutonomy(); postContext(); return controller.refresh(selected); }
         if (message.type === 'turnChanges' && !controller?.state.busy) {
           const turns = controller?.workBySession[controller?.state.session?.session_id] || [];
           if (!turns.some(turn => turn.requestId === message.requestId)) return;
@@ -225,12 +230,16 @@ function activate(context) {
         if (message.type === 'send' && typeof message.text === 'string') {
           const { model, provider } = selectedModel(message.model);
           const allowedTools = message.planOnly ? ['update_plan'] : null;
-          return controller.send(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext(), allowedTools);
+          const sent = controller.send(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext(), allowedTools);
+          postContext();
+          return sent;
         }
         if (message.type === 'queue' && typeof message.text === 'string') {
           const { model, provider } = selectedModel(message.model);
           const allowedTools = message.planOnly ? ['update_plan'] : null;
-          return controller.queue(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext(), allowedTools);
+          const queued = controller.queue(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext(), allowedTools);
+          postContext();
+          return queued;
         }
         if (message.type === 'queueUpdate' && typeof message.id === 'string') {
           const patch = {};
@@ -265,7 +274,7 @@ function activate(context) {
           view?.webview.postMessage({ info: { title: 'Exported', lines: [target.fsPath] } });
           return;
         }
-        if (message.type === 'info' && ['status', 'skills', 'agent'].includes(message.what)) {
+        if (message.type === 'info' && ['status', 'skills', 'agent', 'diagnostics'].includes(message.what)) {
           let title, lines;
           if (message.what === 'status') {
             const version = await controller.gateway.json('/version');
@@ -276,6 +285,8 @@ function activate(context) {
             const query = String(message.query || '').trim().slice(0, 60);
             const found = await controller.gateway.skills(query);
             title = 'Skills'; lines = commands.skillLines(found.skills, query);
+          } else if (message.what === 'diagnostics') {
+            title = 'Problems'; lines = commands.diagnosticsLines(await ideCall('diagnostics', {}));
           } else {
             title = 'Agents and tasks'; lines = commands.taskLines(await controller.gateway.tasks());
           }
