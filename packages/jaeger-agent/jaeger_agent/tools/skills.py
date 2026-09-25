@@ -389,7 +389,7 @@ def _t_record_skill_revision(skill: str, version: str, summary: str = "",
 def _register_use_skill() -> None:
     import typing
     from jaeger_os.core.tools.tool_registry import register_tool_from_function
-    skills = _pb.prompt_playbooks()
+    skills = _pb.available_playbooks()
     names = [s.name for s in skills]
     if not names:
         return

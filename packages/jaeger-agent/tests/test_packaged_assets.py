@@ -71,7 +71,7 @@ def test_package_root_contains_only_public_entry_surfaces() -> None:
         # Incoming runtime services remain public module entry points.
         "tool_executor.py", "subagent_worktree.py", "tirith.py",
         "checkpoints.py", "delegation_context.py", "instance_config.py",
-        "shell_hooks.py",
+        "shell_hooks.py", "task_port.py",
     }
 
 
