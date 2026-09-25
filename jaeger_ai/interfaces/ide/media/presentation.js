@@ -173,6 +173,26 @@ function selectableModels(catalog) {
 }
 
 // Filter the Gateway-owned session projection by title, workspace, or ID.
+// Group selectable catalog rows by provider. Preserves the Gateway's catalog
+// order: providers appear in first-appearance order, models in catalog order.
+function groupSelectableModels(rows) {
+  const groups = new Map();
+  for (const row of rows || []) {
+    const key = row.provider || 'Other';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  return groups;
+}
+
+// The pill label for a picker selection. '' is the Gateway/session default,
+// 'config' is the settings-configured model, anything else is `provider::model`.
+function modelSelectionLabel(choice, { configuredModel, sessionModel } = {}) {
+  if (choice === 'config') return configuredModel || 'From settings';
+  if (choice) return parseProviderModel(choice).model || choice;
+  return sessionModel || 'Gateway default';
+}
+
 // Search is a client-side list filter, not a new search service.
 function filterChats(sessions, query) {
   const value = String(query || '').trim().toLowerCase();
@@ -189,6 +209,7 @@ function filterChats(sessions, query) {
 const exportsObject = {
   modelLabel, toolName, activityTitle, activitySummary, activityIcon, groupWorkRows, diffLines, groupActivity, failureCount, statusLabel,
   groupTurns, selectableModels, providerModelValue, parseProviderModel, filterChats,
+  groupSelectableModels, modelSelectionLabel,
 };
 if (typeof module !== 'undefined') module.exports = exportsObject;
 if (root) root.JaegerPresentation = exportsObject;

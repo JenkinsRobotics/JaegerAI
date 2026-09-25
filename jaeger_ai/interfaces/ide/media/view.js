@@ -1,7 +1,7 @@
 (function bootJaegerView() {
 'use strict';
 const { groupActivity, activityTitle, activitySummary, activityIcon, groupWorkRows, diffLines, toolName, failureCount, groupTurns, selectableModels,
-  providerModelValue, filterChats }
+  providerModelValue, filterChats, groupSelectableModels, modelSelectionLabel }
   = window.JaegerPresentation;
 const { renderMarkdownOnce } = window.JaegerMarkdown;
 const { createFrameQueue } = window.JaegerFrameQueue;
@@ -364,22 +364,78 @@ setInterval(() => {
   for (const clock of document.querySelectorAll('.work-clock[data-live="true"]')) updateWorkClock(clock);
 }, 1000);
 
+// The selected admission value: '' is the Gateway/session default, 'config' is
+// the settings-configured model, anything else is a `provider::model` choice.
+let modelChoice = '';
+
+function renderModelItems() {
+  const list = $('model-list');
+  const rows = selectableModels(state.models);
+  const groups = groupSelectableModels(rows);
+  const items = [];
+  const addItem = (value, label) => {
+    const item = document.createElement('div');
+    item.className = 'model-item';
+    item.setAttribute('role', 'option');
+    item.dataset.value = value;
+    item.dataset.label = label.toLowerCase();
+    item.textContent = label;
+    if (value === modelChoice) item.classList.add('selected');
+    item.onclick = () => {
+      modelChoice = value;
+      $('model-display').textContent = modelSelectionLabel(modelChoice, { configuredModel: state.configuredModel, sessionModel: state.session?.model });
+      $('model-trigger').title = modelSelectionLabel(modelChoice, { configuredModel: state.configuredModel, sessionModel: state.session?.model });
+      list.querySelectorAll('.model-item').forEach(el => el.classList.toggle('selected', el === item));
+      if (typeof $('model-menu')?.close === 'function') $('model-menu').close();
+    };
+    items.push(item);
+  };
+  addItem('', state.session?.model || 'Gateway default');
+  if (state.configuredModel) addItem('config', `From settings · ${state.configuredModel}`);
+  for (const [provider, models] of groups) {
+    const heading = document.createElement('div');
+    heading.className = 'model-group-label';
+    heading.textContent = provider;
+    items.push(heading);
+    for (const row of models) addItem(providerModelValue(row.provider, row.id), `${row.provider} · ${row.id}`);
+  }
+  list.replaceChildren(...items);
+  $('model-display').textContent = modelSelectionLabel(modelChoice, { configuredModel: state.configuredModel, sessionModel: state.session?.model });
+  $('model-trigger').title = state.modelsError ? `Couldn't load the model list: ${state.modelsError}` : modelSelectionLabel(modelChoice, { configuredModel: state.configuredModel, sessionModel: state.session?.model });
+}
+
 function renderModels() {
-  const select = $('model');
   const rows = selectableModels(state.models);
   const signature = JSON.stringify(rows) + (state.modelsError || '') + (state.configuredModel || '') + (state.session?.model || '');
   if (signature === modelRevision) return;
   modelRevision = signature;
-  const previous = select.value;
-  select.replaceChildren(new Option(state.session?.model || 'Default model', ''));
-  if (state.configuredModel) select.add(new Option(`From settings · ${state.configuredModel}`, 'config'));
-  for (const row of rows) select.add(new Option(`${row.provider} · ${row.id}`, providerModelValue(row.provider, row.id)));
-  // Restore an explicit prior selection when it is still valid; otherwise default
-  // to the configured-model option so the display matches what will actually be sent.
+  // Restore an explicit prior selection when it is still valid; otherwise fall
+  // back to the configured model so the display matches what will be sent.
   const valid = new Set(['', ...(state.configuredModel ? ['config'] : []), ...rows.map(r => providerModelValue(r.provider, r.id))]);
-  select.value = valid.has(previous) ? previous : (state.configuredModel ? 'config' : '');
-  select.title = state.modelsError ? `Couldn't load the model list: ${state.modelsError}` : 'Model';
-  select.disabled = rows.length === 0 && !state.configuredModel;
+  if (!valid.has(modelChoice)) modelChoice = state.configuredModel ? 'config' : '';
+  renderModelItems();
+}
+
+function openModelMenu() {
+  if (typeof $('model-menu')?.showModal !== 'function') return;
+  renderModels();
+  $('model-search').value = '';
+  $('model-list').querySelectorAll('.model-item').forEach(el => { el.hidden = false; });
+  $('model-menu').showModal();
+}
+
+// Dialog bindings. The boot-test harness auto-vivifies element stubs, so the
+// guard also keeps the classic-script boot test from depending on real DOM.
+if ($('model-trigger')) {
+  $('model-trigger').onclick = openModelMenu;
+  $('model-menu-close').onclick = () => $('model-menu').close();
+  $('model-menu').onclick = event => { if (event.target === $('model-menu')) $('model-menu').close(); };
+  $('model-search').oninput = () => {
+    const query = $('model-search').value.trim().toLowerCase();
+    $('model-list').querySelectorAll('.model-item').forEach(el => {
+      el.hidden = Boolean(query) && !String(el.dataset.label || '').includes(query);
+    });
+  };
 }
 
 function renderSessionTabs() {
@@ -726,7 +782,7 @@ $('plan-mode').onclick = () => { planModeOn = !planModeOn; persistView(); render
 $('queue-next').onclick = () => {
   const text = $('prompt').value;
   if (!text.trim() || $('queue-next').hidden) return;
-  post('queue', { text, model: $('model').value, ideContext: ideContextOn, planOnly: planModeOn });
+  post('queue', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn });
   $('prompt').value = ''; saveDraft(); eligibility(); slashDismissed = false; renderSlashMenu();
 };
 
@@ -779,10 +835,10 @@ function runSlash(command, args) {
     case 'export': return post('exportChat');
     case 'archive': return post('archive');
     case 'unarchive': return post('unarchive');
-    case 'model': return $('model').focus();
+    case 'model': return openModelMenu();
     case 'workspace': return post('selectWorkspace');
     case 'worktree': return post('selectWorktree');
-    case 'plan': return args.trim() ? post('send', { text: args, model: $('model').value, ideContext: ideContextOn, planOnly: true }) : undefined;
+    case 'plan': return args.trim() ? post('send', { text: args, model: modelChoice, ideContext: ideContextOn, planOnly: true }) : undefined;
     case 'diagnostics': return post('info', { what: 'diagnostics' });
     case 'diff': return post('reviewChanges');
     case 'status': return post('info', { what: 'status' });
@@ -818,7 +874,7 @@ $('composer').onsubmit = event => {
     }
     if (state.busy) { post('steer', { text }); $('prompt').value = ''; saveDraft(); eligibility(); return; }
     submittedDraftSession = draftSession;
-    post('send', { text, model: $('model').value, ideContext: ideContextOn, planOnly: planModeOn });
+    post('send', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn });
   }
 };
 $('prompt').oninput = () => { saveDraft(); eligibility(); slashDismissed = false; slashIndex = 0; renderSlashMenu(); };
