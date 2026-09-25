@@ -11,8 +11,8 @@ operator approves a controlled restart.
 - IDE Plan-mode contract: 4 Node tests passed, 0 failed.
 - IDE context-chip contract: 3 Node tests passed, 0 failed.
 - IDE session-tab contract: 4 Node tests passed, 0 failed.
-- IDE workspace-selection contract: 2 Node tests passed, 0 failed.
-- Full IDE Node suite: 130 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
+- IDE workspace-selection contract: 3 Node tests passed, 0 failed.
+- Full IDE Node suite: 131 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
 - The focused Plan-mode and workspace-selection files are included in that suite.
 - `git diff --check` passed.
 

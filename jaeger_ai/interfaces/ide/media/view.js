@@ -748,6 +748,7 @@ function runSlash(command, args) {
     case 'copy': announceCopied(); return post('copy', { text: context.lastAnswer });
     case 'export': return post('exportChat');
     case 'model': return $('model').focus();
+    case 'workspace': return post('selectWorkspace');
     case 'plan': return args.trim() ? post('send', { text: args, model: $('model').value, ideContext: ideContextOn, planOnly: true }) : undefined;
     case 'diagnostics': return post('info', { what: 'diagnostics' });
     case 'diff': return post('reviewChanges');
