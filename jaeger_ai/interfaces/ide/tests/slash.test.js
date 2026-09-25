@@ -9,7 +9,7 @@ const names = list => list.map(command => command.name);
 
 test('typing "/" offers only commands usable right now', () => {
   assert.deepEqual(names(slash.match('/', idle)).sort(),
-    ['agent', 'archive', 'copy', 'diagnostics', 'export', 'model', 'new', 'plan', 'rename', 'resume', 'skills', 'status', 'unarchive', 'workspace', 'worktree'].sort());
+    ['agent', 'archive', 'copy', 'diagnostics', 'export', 'model', 'new', 'plan', 'rename', 'resume', 'skills', 'status', 'unarchive', 'workers', 'workspace', 'worktree'].sort());
   assert.ok(!names(slash.match('/', idle)).includes('stop'), 'stop needs a running turn');
   assert.ok(!names(slash.match('/', idle)).includes('diff'), 'diff needs recorded changes');
   const busy = slash.match('/', { ...idle, busy: true, changes: true });
@@ -86,6 +86,18 @@ test('task lines are bounded and tolerate either payload shape', () => {
     ({ task_id: `task_${i}abcdefghijklmnop`, status: 'running', objective: 'x'.repeat(500) })));
   assert.equal(lines.length, 15);
   assert.ok(lines[0].length < 140);
+});
+
+test('worker lines summarize orchestration worker availability and capabilities', () => {
+  assert.deepEqual(commands.workerLines([]), ['No orchestration workers are registered.']);
+  const lines = commands.workerLines({ workers: [
+    { worker_id: 'codex', available: true, capabilities: ['code', 'filesystem'] },
+    { worker_id: 'claude', available: false, detail: 'executable not found: claude' },
+  ]});
+  assert.equal(lines[0], '2 orchestration workers');
+  assert.equal(lines[1], 'codex · available · code, filesystem');
+  assert.equal(lines[2], 'claude · unavailable · executable not found: claude');
+  assert.equal(slash.parse('/workers', idle).command.name, 'workers');
 });
 
 test('export writes a Markdown transcript of user and assistant turns only', () => {

@@ -89,6 +89,24 @@ function taskLines(payload) {
   });
 }
 
+function workerLines(payload = {}) {
+  const rows = Array.isArray(payload) ? payload : payload?.workers || [];
+  if (!rows.length) return ['No orchestration workers are registered.'];
+  const lines = [`${rows.length} orchestration worker${rows.length === 1 ? '' : 's'}`];
+  for (const worker of rows.slice(0, 15)) {
+    const id = clip(worker.worker_id || worker.id || 'unknown', 32);
+    const state = worker.available ? 'available' : 'unavailable';
+    const capabilities = Array.isArray(worker.capabilities) ? worker.capabilities.join(', ') : '';
+    const detail = worker.available ? '' : clip(worker.detail || worker.error || '', 80);
+    let line = `${id} · ${state}`;
+    if (capabilities) line += ` · ${capabilities}`;
+    if (detail) line += ` · ${detail}`;
+    lines.push(line);
+  }
+  if (rows.length > 15) lines.push(`…and ${rows.length - 15} more`);
+  return lines;
+}
+
 function slug(text) {
   return String(text || 'conversation').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || 'conversation';
 }
@@ -136,4 +154,4 @@ function buildIdeContext({ folders = [], active = null, openPaths = [] } = {}) {
   return Object.keys(context).length ? context : null;
 }
 
-module.exports = { statusLines, skillLines, taskLines, diagnosticsLines, exportMarkdown, slug, clip, buildIdeContext, parseWorktrees, worktreeLines, IDE_LIMITS };
+module.exports = { statusLines, skillLines, taskLines, diagnosticsLines, workerLines, exportMarkdown, slug, clip, buildIdeContext, parseWorktrees, worktreeLines, IDE_LIMITS };

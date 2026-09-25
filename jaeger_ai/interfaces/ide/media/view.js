@@ -788,6 +788,7 @@ function runSlash(command, args) {
     case 'status': return post('info', { what: 'status' });
     case 'skills': return post('info', { what: 'skills', query: args });
     case 'agent': return post('info', { what: 'agent' });
+    case 'workers': return post('info', { what: 'workers' });
     default: return undefined;
   }
 }
