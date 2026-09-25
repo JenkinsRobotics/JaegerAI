@@ -12,7 +12,8 @@ operator approves a controlled restart.
 - IDE context-chip contract: 3 Node tests passed, 0 failed.
 - IDE session-tab contract: 4 Node tests passed, 0 failed.
 - IDE workspace-selection contract: 3 Node tests passed, 0 failed.
-- Full IDE Node suite: 131 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
+- IDE file-mention contract: 2 Node tests passed, 0 failed.
+- Full IDE Node suite: 134 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
 - The focused Plan-mode and workspace-selection files are included in that suite.
 - `git diff --check` passed.
 
@@ -32,6 +33,8 @@ Session tabs still need installed-host acceptance to confirm tab focus, overflow
 and close behavior in the actual Antigravity/VS Code host.
 Workspace selection still needs installed-host acceptance to confirm folder picking,
 per-endpoint persistence, and multi-folder behavior in the actual Antigravity/VS Code host.
+File mentions still need installed-host acceptance to confirm the VS Code quick-pick,
+workspace filtering, and attachment rejection boundary in the actual Antigravity/VS Code host.
 
 ---
 

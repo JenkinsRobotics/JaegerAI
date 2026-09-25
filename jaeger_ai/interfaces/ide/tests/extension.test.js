@@ -15,6 +15,7 @@ const mockVscode = {
     createOutputChannel: () => ({ appendLine: () => {}, show: () => {}, dispose: () => {} }),
     showInputBox: async () => 'Test',
     showWorkspaceFolderPick: async () => ({ uri: { fsPath: '/workspace/two' } }),
+    showQuickPick: async items => items[0],
     registerWebviewViewProvider: () => ({ dispose: () => {} }),
   },
   commands: { registerCommand: () => ({ dispose: () => {} }), executeCommand: async () => {} },
@@ -22,6 +23,10 @@ const mockVscode = {
     registerTextDocumentContentProvider: () => ({ dispose() {} }),
     getConfiguration: () => ({ get: (key) => key === 'model' ? jaegerModelSetting : '' }),
     onDidChangeConfiguration: (fn) => { configChangeListeners.push(fn); return { dispose: () => {} }; },
+    findFiles: async () => [
+      { fsPath: '/workspace/one/src/main.py' },
+      { fsPath: '/workspace/one/docs/readme.md' },
+    ],
     workspaceFolders: [
       { uri: { fsPath: '/workspace/one' } },
       { uri: { fsPath: '/workspace/two' } },
@@ -56,6 +61,7 @@ class GatewayStub {
   async approvals() { return { approvals: [] }; }
   async models() { return { providers: [] }; }
   async send(sid, body) { stubGateway.sent = body; return { start_event_id: 1, status: 'running' }; }
+  async addAttachment() { return { attachment_id: 'mention-attachment', original_filename: 'main.py' }; }
   async receipt() { return { status: 'running' }; }
   async *events() {}
   async cancel() { return {}; }
@@ -136,6 +142,30 @@ test('explicit workspace selection reaches the Gateway admission body', async ()
   send({ type: 'send', text: 'hello', model: '' });
   await waitFor(() => gateway.sent !== null);
   assert.equal(gateway.sent.workspace, '/workspace/two', 'selected workspace must be frozen into admission');
+});
+
+test('@ mention stages the picked workspace file through the Gateway attachment contract', async () => {
+  const { send, gateway, posted } = wireExtension();
+  send({ type: 'ready' });
+  await waitFor(() => gateway.instance !== undefined);
+  gateway.instance.sessions = async () => ({ sessions: [{ session_id: 'mention', title: 'T', status: 'idle', messages: [] }] });
+  gateway.instance.session = async id => ({ session_id: id, title: 'T', status: 'idle', messages: [] });
+  const attachments = [];
+  gateway.instance.addAttachment = async (_sid, body) => {
+    attachments.push(body);
+    return { attachment_id: 'mention-attachment', original_filename: body.filename };
+  };
+  send({ type: 'select', id: 'mention' });
+  await new Promise(r => setTimeout(r, 50));
+
+  send({ type: 'mentionFile' });
+  await waitFor(() => posted.some(message => message.mention === '@src/main.py'));
+  assert.deepEqual(attachments, [{
+    path: '/workspace/one/src/main.py',
+    filename: 'main.py',
+    mime: 'text/x-python',
+    size: 0,
+  }]);
 });
 
 test('model "config" → jaeger.model setting reaches admission body', async () => {

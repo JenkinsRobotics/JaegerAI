@@ -59,6 +59,8 @@ deployment, not exposing the unauthenticated Gateway.
 - The workspace button and `/workspace` command choose which open folder Jaeger
   uses. The selection is persisted per Gateway endpoint and sent through the
   Gateway admission `workspace` field for new chats, immediate turns, and queued work.
+- The `@` control picks a workspace file, stages it through the Gateway
+  attachment contract, and inserts the mention into the composer for the next turn.
 - Pending request IDs persist in IDE workspace storage keyed by Gateway URL;
   drafts stay in webview state. State is outside the source tree. Failed admission
   never triggers blind automatic resend. An ambiguous missing receipt needs

@@ -614,6 +614,12 @@ const stateQueue = createFrameQueue(batch => {
   const data = batch.at(-1);
   if (data.editDraft !== undefined) { $('prompt').value = data.editDraft; saveDraft(); eligibility(); $('prompt').focus(); return; }
   if (data.steerRejected !== undefined) { $('prompt').value = data.steerRejected; saveDraft(); eligibility(); $('prompt').focus(); return; }
+  if (data.mention !== undefined) {
+    const prompt = $('prompt');
+    prompt.value = `${prompt.value}${prompt.value ? ' ' : ''}${data.mention} `;
+    saveDraft(); eligibility(); prompt.focus();
+    return;
+  }
   if (data.accepted) {
     if (submittedDraftSession !== null && String(drafts[submittedDraftSession] || '').trim() === data.submittedText) {
       drafts[submittedDraftSession] = '';
@@ -809,6 +815,7 @@ $('prompt').onkeydown = event => {
 };
 $('prompt').onblur = () => { slashDismissed = true; renderSlashMenu(); };
 $('attach').onclick = () => post('attach');
+$('mention').onclick = () => post('mentionFile');
 for (const [id, type] of [['new', 'new'], ['refresh', 'refresh'], ['settings', 'settings'], ['stop', 'cancel']]) $(id).onclick = () => post(type);
 $('back').onclick = () => post('home');
 post('ready');
