@@ -1,10 +1,10 @@
 # Continue from here — current Jaeger continuation state
 
 **Classification:** CURRENT AUTHORITATIVE
-**Branch:** `pinocchio`
+**Branch:** `0.13-dev`
 **Baseline at audit start:** `4124422b15e7f0ca28941774992000b24a151719`
 **Date:** 2026-09-25
-**Branch rule:** work on `pinocchio`; do not modify or merge `master` unless the operator explicitly asks.
+**Branch rule:** work on `0.13-dev`; do not modify or merge `master` unless the operator explicitly asks.
 
 This is the single execution entry point for humans and coding agents. Old branch audits, five-day plans, and phase trackers are evidence, not status. Re-read the current source before acting.
 
