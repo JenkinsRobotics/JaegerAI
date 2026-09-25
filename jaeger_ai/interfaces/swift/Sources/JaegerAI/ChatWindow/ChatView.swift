@@ -954,7 +954,7 @@ struct ChatView: View {
             mode: chat.operatingMode, connected: agent.isConnected,
             canSend: canSend, isSending: chat.isSending,
             isRecording: voice.isRecording, isTranscribing: chat.isTranscribing,
-            level: voice.levelMeter, queuedMessages: chat.pendingSends,
+            level: voice.levelMeter, queuedMessages: chat.pendingSends.map(\.display),
             agenticTools: $chat.agenticTools,
             onSend: sendCurrent,
             onStop: { Task { await chat.send("/stop") } },
