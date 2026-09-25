@@ -57,6 +57,7 @@ The model is replaceable cognition. The client is not the entity. A tool returni
 | Large iOS client tree exists | `apps/ios` (451 tracked files) with chat, SSE, auth, attachments, voice notes, live activity, watch, and share extension | Donor/current tree only: it is Hermes-branded, targets Hermes `/api/chat/*`, and contains no Jaeger references |
 | Runtime capability reporting is grounded in configured/reachable state, not marketing labels | `core/runtime/truth.py`; `core/entity/model_capabilities.py`; `/v1/runtime/models`, `/v1/runtime/capabilities`; `test_runtime_truth.py`; `test_cognition_profiles.py` | Source and unit tests; configured live-provider check remains open |
 | Bridge clients default to Gateway execution and fail closed when the Gateway is unavailable | `interfaces/bridge.py::gateway_execution_enabled`, `_attach_gateway`, `_gateway_turn`; `interfaces/test_bridge.py` | Source and bridge protocol tests |
+| Product runtime adapters now fail closed when no owner is available; `GatewayRuntime` routes real bus approvals and calls the request-scoped Gateway steering route | `core/mind_runtime.py::create_runtime`; `core/runtime/gateway_runtime.py`; `core/gateway/client.py::steer`; `test_gateway_mind_runtime.py` | Source and unit tests; live-provider and installed-host acceptance remains open |
 
 ## Not yet qualified
 
@@ -112,14 +113,14 @@ No live-provider, physical-device, or final installed-artifact qualification is 
 - **Priority:** P0.
 - **Type:** integration.
 
-### P0-4 — Product-path adapter completeness and fail-closed ownership
+### P0-4 — Product-path runtime live qualification
 
-- **Problem:** `mind_runtime.create_runtime` prefers Gateway but can fall back to an attached/local runtime when Gateway is unavailable; `GatewayRuntime` auto-denies approvals and returns `False` from `steer`.
-- **Current evidence:** `core/mind_runtime.py`; `core/runtime/gateway_runtime.py`; `test_gateway_mind_runtime.py`; `test_gateway_owned_process_contract.py::test_create_runtime_submits_to_the_owned_gateway`.
-- **Affected files/owners:** `core/mind_runtime.py`; `core/runtime/gateway_runtime.py`; `core/agent_core.py`; client approval/steer transports.
-- **Acceptance test:** On enabled product paths, an unavailable Gateway must fail closed or produce an explicit diagnostic, never silently boot another agent; an approval must reach the actual client or be reported unsupported, not auto-denied; steering must either reach the active agent or return an explicit unsupported state.
+- **Problem:** The unit-level adapter defects are repaired, but the repaired path still needs live-provider and installed-client acceptance.
+- **Current evidence:** `create_runtime` now raises an explicit diagnostic when no Gateway or bridge owner is available; `GatewayRuntime` routes approvals through the real bus, reports unsupported approvals instead of hiding a deny, and calls the request-scoped Gateway steering route. `test_gateway_mind_runtime.py` passes 9 focused tests.
+- **Affected files/owners:** `core/mind_runtime.py`; `core/runtime/gateway_runtime.py`; `core/gateway/client.py`; client bus/approval surfaces.
+- **Acceptance test:** Start an isolated Gateway with a configured provider, request a gated effect, approve it through a real client surface, independently verify the effect, then steer a live tool/streaming turn through the same route and immediately admit the next turn after Stop.
 - **Priority:** P0.
-- **Type:** code + integration.
+- **Type:** integration.
 
 ### P1-5 — IDE and WebUI same-session continuity
 
@@ -132,7 +133,7 @@ No live-provider, physical-device, or final installed-artifact qualification is 
 
 ### P1-6 — Real existing IDE-worker conversation steering
 
-- **Problem:** Gateway live steering is implemented for the resident ReAct agent, but no real existing IDE-worker conversation has been steered end to end. The separate `GatewayRuntime.steer` adapter remains a no-op and must not be treated as the qualified path.
+- **Problem:** Gateway live steering is implemented for the resident ReAct agent and `GatewayRuntime` now calls the request-scoped owner route, but no real existing IDE-worker conversation has been steered end to end.
 - **Current evidence:** `test_gateway_live_steering.py`; `interfaces/ide/tests/steering.test.js`; `core/runtime/gateway_runtime.py`.
 - **Affected files/owners:** `features/ide_orchestration`; worker adapters; Gateway orchestration records; IDE client.
 - **Acceptance test:** Select an existing IDE worker conversation, send a bounded task, observe its actual reply, steer it with a relevant follow-up in the same conversation, independently verify the result, and retain parent progress through reconnect/restart.
@@ -259,7 +260,7 @@ Audit findings:
 - The bridge defaults to Gateway execution and fails closed if the Gateway is unavailable; `JAEGER_BRIDGE_EXECUTION=local` is an explicit diagnostic mode.
 - Image-question and text-only/specialist lanes are explicit at the Gateway boundary, not hidden model-only fallbacks.
 - Gateway live steering forwards text to the active resident ReAct agent and returns 409 for a text-only or unbound request. The IDE reports “Queue next”; queued work is a durable Gateway `client_request`, never a client-owned queue.
-- `mind_runtime.create_runtime` and `GatewayRuntime` still need the P0-4 fail-closed/approval correction before they are part of the qualified product path.
+- The product runtime adapter now fails closed when no owner is available, routes Gateway approvals through the real bus, and steers the active Gateway request; live-provider and installed-client qualification remain open.
 - The Swift app has both a bridge client and direct Gateway client code; both must remain clients of one owner and one session projection.
 - The iOS tree is donor/current source, not a Jaeger client yet.
 
@@ -331,6 +332,7 @@ Results:
 
 - **Python:** 101 passed, 1 deselected, exit 0. A final documentation-focused rerun of the contributor/architecture tests passed 5/5.
 - **Gateway live steering:** 7 passed, 0 failed; covers active-agent delivery, `turn.steer` publication, no-agent 409, agent refusal, terminal-request 409, empty-text 400, and wrong-session 404.
+- **Gateway product runtime:** 9 passed, 0 failed; covers Gateway-first runtime selection, no-attach isolation, bus-routed approvals, explicit unsupported approvals/steering, request-scoped steering, the explicit bridge diagnostic, and fail-closed ownership when no owner is available.
 - **Gateway session queue:** 9 passed, 0 failed; covers schema durability, request identity, edit/pause behavior, queue ordering, idle and busy admission, durable `queue.updated` events, reorder rejection, and terminal-only drain.
 - **IDE queue:** 6 Node tests passed, 0 failed; covers the queue REST routes, Gateway-owned follow-up queueing, immediate follow-through when an idle queue item starts, honest no-ReAct-agent 409, edit/reorder/delete, and explicit webview controls with no client-owned steering queue.
 - **IDE Plan mode:** 4 Node tests passed, 0 failed; covers `/plan` parsing, the `update_plan`-only admission grant, queued plan work, and the webview/extension contract. The Gateway admission test freezes and replays the same grant.

@@ -150,6 +150,12 @@ class GatewayTurnClient:
     def cancel(self, session_id: str, request_id: str) -> dict[str, Any]:
         return self._call("POST", f"/v1/sessions/{session_id}/cancel", {"request_id": request_id})
 
+    def steer(self, session_id: str, request_id: str, text: str) -> dict[str, Any]:
+        """Inject guidance into the active admitted ReAct request."""
+        return self._call("POST",
+                          f"/v1/sessions/{session_id}/requests/{request_id}/steer",
+                          {"text": text})
+
     def resolve_approval(self, approval_id: str, decision: str) -> dict[str, Any]:
         """Answer one approval: ``once`` / ``always`` / ``deny``."""
         return self._call("POST", f"/v1/approvals/{approval_id}",
