@@ -339,9 +339,9 @@ Results:
 - **IDE Plan mode:** 4 Node tests passed, 0 failed; covers `/plan` parsing, the `update_plan`-only admission grant, queued plan work, and the webview/extension contract. The Gateway admission test freezes and replays the same grant.
 - **IDE context chips:** 3 Node tests passed, 0 failed; covers `/diagnostics` parsing, bounded problem summaries, and the webview/extension chip projection from the existing IDE context contract.
 - **IDE session tabs:** 4 Node tests passed, 0 failed; covers deduplicated open order, close-active/close-other behavior, return to chat home when the last tab closes, and closeable webview tabs.
-- **IDE workspace selection:** 2 Node tests passed, 0 failed; covers the real picker control, per-endpoint persistence, and queued-turn use. The extension suite also proves the selected workspace reaches the Gateway admission body.
+- **IDE workspace selection:** 3 Node tests passed, 0 failed; covers the real picker control, `/workspace`, per-endpoint persistence, and queued-turn use. The extension suite also proves the selected workspace reaches the Gateway admission body.
 - **IDE live steering:** 4 Node tests passed, 0 failed; covers the request-scoped route, active-agent steering, the honest no-ReAct-agent 409 without a client queue, and transport-error propagation.
-- **IDE Node:** 130 passed, 0 failed, 1 intentional isolated-Gateway fixture skip, exit 0.
+- **IDE Node:** 131 passed, 0 failed, 1 intentional isolated-Gateway fixture skip, exit 0.
   The first run exposed two markdown-helper test failures. `enhanceCodeBlocks` now no-ops
   when its optional DOM query API is absent, and the Node fixture models nested
   `textContent`; the final suite passes.
