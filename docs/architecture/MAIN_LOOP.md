@@ -8,9 +8,11 @@ One path runs every Jaeger turn. Everything else plugs into it; nothing else exe
 ```
 client (IDE / WebUI / TUI / Mac app)
    │  POST /v1/sessions/{id}/turns          (workspace, model, options.ide)
+   │  POST /v1/sessions/{id}/queue          (durable follow-up work)
    ▼
 Gateway  jaeger_ai/core/gateway/server.py
-   │  admit_request        → immutable execution snapshot, idempotent by request_id
+   │  admit_request / promote_next_queue_item
+   │                       → immutable execution snapshot, idempotent by request_id
    │  _execute_turn
    │     1. runtime.prepare_turn      memory READ: history, other conversations,
    │                                  learned skills, retrieved docs, reflexion,
@@ -23,8 +25,9 @@ agent loop  packages/jaeger-agent/jaeger_agent/loop/jaeger_agent.py
    model call → tool calls → tool results → … → answer      (streams to the client)
 ```
 
-Chat turns and durable background tasks take exactly this path. There is no second turn
-shape.
+Chat turns, queued follow-ups, and durable background tasks take exactly this path. A queued
+item is a Gateway `client_request`, not a client-side list; the Gateway promotes it only after
+the active session turn is terminal. There is no second turn shape.
 
 ## What a turn is
 

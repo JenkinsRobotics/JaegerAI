@@ -18,9 +18,11 @@ from pathlib import Path
 from typing import Any, Iterator
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 9
 MAX_RETAINED_EVENTS = 5000
 REQUEST_ID_MAX = 128
+MAX_QUEUE_PER_SESSION = 100
+QUEUE_STATUSES = frozenset({'queued', 'paused'})
 
 
 class RequestConflict(ValueError):
@@ -329,6 +331,19 @@ class GatewaySessionStore:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_activity_session ON activity_history(session_id, event_id)")
             conn.execute("INSERT OR IGNORE INTO activity_history SELECT * FROM events WHERE session_id != '*' ")
             current = 7
+        if current < 8:
+            # Gateway-owned session queue. A queued item is still a
+            # client_request: one durable identity, one execution snapshot,
+            # and one terminal receipt. No client owns a second queue.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(client_requests)")}
+            if "queue_position" not in columns:
+                conn.execute("ALTER TABLE client_requests ADD COLUMN queue_position INTEGER NOT NULL DEFAULT 0")
+            current = 8
+        if current < 9:
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(client_requests)")}
+            if "requested_json" not in columns:
+                conn.execute("ALTER TABLE client_requests ADD COLUMN requested_json TEXT NOT NULL DEFAULT '{}'")
+            current = 9
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -617,6 +632,7 @@ class GatewaySessionStore:
             "updated_at": row["updated_at"],
             "execution": _row_meta(row["execution_json"]) if "execution_json" in row.keys() else {},
             "digest_version": row["digest_version"] if "digest_version" in row.keys() else 1,
+            "queue_position": row["queue_position"] if "queue_position" in row.keys() else 0,
         }
 
     def list_requests(self, *, status: str | None = None) -> list[dict[str, Any]]:
@@ -645,6 +661,248 @@ class GatewaySessionStore:
                 "SELECT * FROM client_requests WHERE turn_id=?", (turn_id,)
             ).fetchone()
             return self._request_row(row) if row else None
+
+    def sessions_with_queue(self) -> list[str]:
+        """Sessions that still own queued or paused follow-up work."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT session_id FROM client_requests "
+                "WHERE status IN ('queued', 'paused') ORDER BY session_id"
+            ).fetchall()
+            return [r["session_id"] for r in rows]
+
+    def list_queue(self, session_id: str) -> list[dict[str, Any]]:
+        """Gateway-owned follow-up queue, ordered by explicit position."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM client_requests WHERE session_id=? AND status IN ('queued', 'paused') "
+                "ORDER BY queue_position, created_at, request_id",
+                (session_id,),
+            ).fetchall()
+            return [self._request_row(r) for r in rows]
+
+    def enqueue_request(
+        self,
+        session_id: str,
+        text: str,
+        *,
+        request_id: str | None = None,
+        requested: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically add a durable follow-up request without starting it.
+
+        A queued item is a real client_request with a frozen execution snapshot.
+        It is not transcript-visible until promotion, because the operator may
+        edit or remove it before it runs. The session's one-active-turn
+        invariant is unchanged.
+        """
+        if not str(text or "").strip():
+            raise ValueError("Missing queue text")
+        text = str(text).strip()
+        rid = str(request_id or uuid.uuid4().hex)
+        if not rid or len(rid) > REQUEST_ID_MAX:
+            raise ValueError("Invalid request_id")
+        choices = _normalize_requested(requested)
+        digest = request_fingerprint(text, choices)
+        now = time.time()
+        pid = os.getpid()
+        with self._immediate() as conn:
+            conn.execute(
+                """
+                INSERT INTO sessions (session_id, title, profile, workspace, created_at, updated_at, status, metadata_json)
+                VALUES (?, 'New Conversation', 'jaeger', '', ?, ?, 'idle', '{}')
+                ON CONFLICT(session_id) DO NOTHING
+                """,
+                (session_id, now, now),
+            )
+            existing = conn.execute(
+                "SELECT * FROM client_requests WHERE request_id=?", (rid,)
+            ).fetchone()
+            if existing:
+                if existing["digest_version"] == 1:
+                    same = existing["digest"] == input_fingerprint(text)
+                else:
+                    same = existing["digest"] == digest
+                if not same:
+                    raise RequestConflict("Request identity was already used for different input")
+                payload = self._request_row(existing)
+                payload["replayed"] = True
+                payload["accepted"] = False
+                return payload
+            count = conn.execute(
+                "SELECT COUNT(*) AS n FROM client_requests WHERE session_id=? AND status IN ('queued', 'paused')",
+                (session_id,),
+            ).fetchone()["n"]
+            if count >= MAX_QUEUE_PER_SESSION:
+                raise RequestBusy("Session queue is full")
+            session = conn.execute(
+                "SELECT workspace, metadata_json FROM sessions WHERE session_id=?",
+                (session_id,),
+            ).fetchone()
+            meta = _row_meta(session["metadata_json"] if session else "{}")
+            execution = self._resolve_execution(conn, session_id, choices, meta,
+                                                session["workspace"] if session else "")
+            position = conn.execute(
+                "SELECT COALESCE(MAX(queue_position), 0) + 1 AS p FROM client_requests "
+                "WHERE session_id=? AND status IN ('queued', 'paused')",
+                (session_id,),
+            ).fetchone()["p"]
+            turn_id = uuid.uuid4().hex
+            conn.execute(
+                """
+                INSERT INTO client_requests (
+                    request_id, session_id, digest, turn_id, native_run_id, native_session,
+                    status, input_text, result_json, owner_pid, created_at, updated_at,
+                    execution_json, digest_version, queue_position, requested_json
+                ) VALUES (?, ?, ?, ?, NULL, NULL, 'queued', ?, '{}', ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (rid, session_id, digest, turn_id, text, pid, now, now,
+                 json.dumps(execution, sort_keys=True), REQUEST_FINGERPRINT_VERSION, int(position),
+                 json.dumps(choices, sort_keys=True)),
+            )
+            row = conn.execute(
+                "SELECT * FROM client_requests WHERE request_id=?", (rid,)
+            ).fetchone()
+            payload = self._request_row(row)
+            payload.update({
+                "replayed": False,
+                "accepted": True,
+                "queued": True,
+            })
+            return payload
+
+    def update_queue_item(
+        self,
+        session_id: str,
+        request_id: str,
+        *,
+        text: str | None = None,
+        status: str | None = None,
+        position: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Edit only a still-queued item; running work is immutable."""
+        if status is not None and status not in QUEUE_STATUSES:
+            raise ValueError("Queue status must be queued or paused")
+        now = time.time()
+        with self._immediate() as conn:
+            row = conn.execute(
+                "SELECT * FROM client_requests WHERE request_id=? AND session_id=?",
+                (request_id, session_id),
+            ).fetchone()
+            if row is None or row["status"] not in QUEUE_STATUSES:
+                return None
+            if text is not None:
+                clean = str(text).strip()
+                if not clean:
+                    raise ValueError("Queue text cannot be empty")
+                requested = _row_meta(row["requested_json"]) if "requested_json" in row.keys() else {}
+                digest = request_fingerprint(clean, requested)
+                conn.execute(
+                    "UPDATE client_requests SET input_text=?, digest=?, updated_at=? WHERE request_id=?",
+                    (clean, digest, now, request_id),
+                )
+            if status is not None:
+                conn.execute(
+                    "UPDATE client_requests SET status=?, updated_at=? WHERE request_id=?",
+                    (status, now, request_id),
+                )
+            if position is not None:
+                clean_pos = max(1, int(position))
+                conn.execute(
+                    "UPDATE client_requests SET queue_position=?, updated_at=? WHERE request_id=?",
+                    (clean_pos, now, request_id),
+                )
+            updated = conn.execute(
+                "SELECT * FROM client_requests WHERE request_id=?", (request_id,)
+            ).fetchone()
+            return self._request_row(updated) if updated else None
+
+    def reorder_queue(self, session_id: str, ordered_ids: list[str]) -> list[dict[str, Any]]:
+        """Assign explicit positions to every queued/paused item in one transaction."""
+        ids = [str(v).strip() for v in ordered_ids if str(v).strip()]
+        with self._immediate() as conn:
+            rows = conn.execute(
+                "SELECT request_id FROM client_requests WHERE session_id=? AND status IN ('queued', 'paused')",
+                (session_id,),
+            ).fetchall()
+            existing = {r["request_id"] for r in rows}
+            if len(ids) != len(existing) or set(ids) != existing:
+                raise ValueError("Queue order must name every queued item exactly once")
+            for position, rid in enumerate(ids, 1):
+                conn.execute(
+                    "UPDATE client_requests SET queue_position=?, updated_at=? WHERE request_id=? AND session_id=?",
+                    (position, time.time(), rid, session_id),
+                )
+        return self.list_queue(session_id)
+
+    def delete_queue_item(self, session_id: str, request_id: str) -> bool:
+        with self._immediate() as conn:
+            changed = conn.execute(
+                "DELETE FROM client_requests WHERE request_id=? AND session_id=? AND status IN ('queued', 'paused')",
+                (request_id, session_id),
+            )
+            return changed.rowcount > 0
+
+    def promote_next_queue_item(self, session_id: str) -> dict[str, Any] | None:
+        """Promote one queued request only when the session is idle.
+
+        This is the queue drain point. Paused items are skipped, and a busy
+        or unreconciled session cannot start new work.
+        """
+        now = time.time()
+        with self._immediate() as conn:
+            session = conn.execute(
+                "SELECT status, workspace, metadata_json FROM sessions WHERE session_id=?",
+                (session_id,),
+            ).fetchone()
+            if session is None or session["status"] in {"running", "execution_unknown", "cancelling"}:
+                return None
+            row = conn.execute(
+                "SELECT * FROM client_requests WHERE session_id=? AND status='queued' "
+                "ORDER BY queue_position, created_at, request_id LIMIT 1",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return None
+            execution = _row_meta(row["execution_json"])
+            visible = execution.get("display_text") or row["input_text"]
+            msg_id = self.append_message(session_id, "user", visible, timestamp=now, conn=conn)
+            meta = _row_meta(session["metadata_json"])
+            if execution.get("model"):
+                meta["model"] = execution["model"]
+            if execution.get("provider"):
+                meta["provider"] = execution["provider"]
+            conn.execute(
+                "UPDATE client_requests SET status='admitted', updated_at=? WHERE request_id=?",
+                (now, row["request_id"]),
+            )
+            conn.execute(
+                "UPDATE sessions SET status='running', metadata_json=?, updated_at=? WHERE session_id=?",
+                (json.dumps(meta), now, session_id),
+            )
+            event = self._insert_event(
+                conn,
+                session_id,
+                "turn.start",
+                {
+                    "turn_id": row["turn_id"],
+                    "request_id": row["request_id"],
+                    "message_id": msg_id,
+                    "text": visible,
+                },
+                now,
+            )
+            updated = conn.execute(
+                "SELECT * FROM client_requests WHERE request_id=?", (row["request_id"],)
+            ).fetchone()
+            payload = self._request_row(updated)
+            payload.update({
+                "event": event,
+                "message_id": msg_id,
+                "accepted": True,
+                "replayed": False,
+            })
+            return payload
 
     def admit_request(
         self,

@@ -49,7 +49,8 @@ The model is replaceable cognition. The client is not the entity. A tool returni
 | Explicit image-question and text-only/specialist lanes exist at the Gateway boundary | `server.py::_execute_turn`; `test_gateway_single_terminal.py` | Source and unit tests; they are not silent fallbacks |
 | Recent Chromium qualification exists for multi-turn, long output, cancellation, reload, and narrow viewport | `test_gateway_owned_process_contract.py::test_owned_browser_multiturn_render_cancel_and_reload` | Owned-process Chromium with a scripted provider; not live-provider or physical-phone proof |
 | Swift/macOS source, external build path, and test suite exist | `interfaces/swift/Package.swift`; `Scripts/build-app.sh`; `Tests/JaegerAITests`; `test_external_swift_build.py` | Source and Swift tests; installed-app/GUI remains unqualified |
-| Gateway-owned live steering exists and the IDE uses it before falling back to a local follow-up queue | `/v1/sessions/{id}/requests/{request_id}/steer`; `core/entity/runtime.py::run_subordinate_react(on_agent=...)`; `interfaces/ide/gateway.js::steer`; `interfaces/ide/conversation.js::steer`; `test_gateway_live_steering.py`; `interfaces/ide/tests/steering.test.js` | Unit tests; still needs live-provider and real IDE-worker acceptance |
+| Gateway-owned live steering exists and the IDE uses it for the active ReAct request; an honest no-agent 409 returns `false` instead of creating a local queue | `/v1/sessions/{id}/requests/{request_id}/steer`; `core/entity/runtime.py::run_subordinate_react(on_agent=...)`; `interfaces/ide/gateway.js::steer`; `interfaces/ide/conversation.js::steer`; `test_gateway_live_steering.py`; `interfaces/ide/tests/steering.test.js` | Unit tests; still needs live-provider and real IDE-worker acceptance |
+| Gateway owns the durable session queue; the IDE exposes `Queue next`, edit, reorder, pause/resume, and delete without owning a second task store | `/v1/sessions/{id}/queue*`; `core/gateway/session_store.py::enqueue_request/promote_next_queue_item`; `interfaces/ide/gateway.js`; `interfaces/ide/media/view.js`; `test_gateway_session_queue.py`; `interfaces/ide/tests/queue.test.js` | Source and unit tests; not live-provider or installed-host qualified |
 | Large iOS client tree exists | `apps/ios` (451 tracked files) with chat, SSE, auth, attachments, voice notes, live activity, watch, and share extension | Donor/current tree only: it is Hermes-branded, targets Hermes `/api/chat/*`, and contains no Jaeger references |
 | Runtime capability reporting is grounded in configured/reachable state, not marketing labels | `core/runtime/truth.py`; `core/entity/model_capabilities.py`; `/v1/runtime/models`, `/v1/runtime/capabilities`; `test_runtime_truth.py`; `test_cognition_profiles.py` | Source and unit tests; configured live-provider check remains open |
 | Bridge clients default to Gateway execution and fail closed when the Gateway is unavailable | `interfaces/bridge.py::gateway_execution_enabled`, `_attach_gateway`, `_gateway_turn`; `interfaces/test_bridge.py` | Source and bridge protocol tests |
@@ -235,8 +236,8 @@ Preserve useful source and evidence for deferred work, but do not treat a deferr
 ```text
 IDE / WebUI / Mac / TUI
     → Gateway REST + SSE (:8810)
-    → JaegerGatewayApp.handle_send_turn
-    → GatewaySessionStore.admit_request
+    → JaegerGatewayApp.handle_send_turn / handle_add_queue
+    → GatewaySessionStore.admit_request / promote_next_queue_item
     → Gateway._execute_turn
     → EntityRuntime.prepare_turn
     → EntityRuntime.run_subordinate_react
@@ -254,7 +255,7 @@ Audit findings:
 - The WebUI’s in-process runner, native profile runner, and the Gateway native-MCP-first lane are isolated behind `JAEGER_LEGACY_PATHS`.
 - The bridge defaults to Gateway execution and fails closed if the Gateway is unavailable; `JAEGER_BRIDGE_EXECUTION=local` is an explicit diagnostic mode.
 - Image-question and text-only/specialist lanes are explicit at the Gateway boundary, not hidden model-only fallbacks.
-- Gateway live steering forwards text to the active resident ReAct agent and returns 409 for a text-only or unbound request; the IDE queues locally only on that honest 409.
+- Gateway live steering forwards text to the active resident ReAct agent and returns 409 for a text-only or unbound request. The IDE reports “Queue next”; queued work is a durable Gateway `client_request`, never a client-owned queue.
 - `mind_runtime.create_runtime` and `GatewayRuntime` still need the P0-4 fail-closed/approval correction before they are part of the qualified product path.
 - The Swift app has both a bridge client and direct Gateway client code; both must remain clients of one owner and one session projection.
 - The iOS tree is donor/current source, not a Jaeger client yet.
@@ -327,8 +328,10 @@ Results:
 
 - **Python:** 101 passed, 1 deselected, exit 0. A final documentation-focused rerun of the contributor/architecture tests passed 5/5.
 - **Gateway live steering:** 7 passed, 0 failed; covers active-agent delivery, `turn.steer` publication, no-agent 409, agent refusal, terminal-request 409, empty-text 400, and wrong-session 404.
-- **IDE live steering:** 3 Node tests passed, 0 failed; covers the request-scoped route, local fallback only on the honest no-ReAct-agent 409, and transport-error propagation.
-- **IDE Node:** 106 passed, 0 failed, 1 intentional isolated-Gateway fixture skip, exit 0.
+- **Gateway session queue:** 9 passed, 0 failed; covers schema durability, request identity, edit/pause behavior, queue ordering, idle and busy admission, durable `queue.updated` events, reorder rejection, and terminal-only drain.
+- **IDE queue:** 6 Node tests passed, 0 failed; covers the queue REST routes, Gateway-owned follow-up queueing, immediate follow-through when an idle queue item starts, honest no-ReAct-agent 409, edit/reorder/delete, and explicit webview controls with no client-owned steering queue.
+- **IDE live steering:** 4 Node tests passed, 0 failed; covers the request-scoped route, active-agent steering, the honest no-ReAct-agent 409 without a client queue, and transport-error propagation.
+- **IDE Node:** 116 passed, 0 failed, 1 intentional isolated-Gateway fixture skip, exit 0.
   The first run exposed two markdown-helper test failures. `enhanceCodeBlocks` now no-ops
   when its optional DOM query API is absent, and the Node fixture models nested
   `textContent`; the final suite passes.

@@ -33,7 +33,7 @@ class ReplayGap(RuntimeError):
 #: contract for a new card/interaction; removing one is a breaking change.
 EVENT_TYPES = frozenset({
     # Turn lifecycle (IDE + WebUI + CLI render these identically).
-    "turn.start", "turn.delta", "turn.reasoning", "turn.progress",
+    "turn.start", "turn.delta", "turn.reasoning", "turn.progress", "queue.updated",
     "turn.plan", "turn.steer", "turn.finish", "turn.failed", "turn.cancelled",
     "turn.unknown", "turn.cancel",
     # Tools and files.

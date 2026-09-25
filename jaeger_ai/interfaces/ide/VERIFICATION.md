@@ -1,3 +1,26 @@
+# Gateway-owned session queue — 2026-09-24
+
+## Scope
+
+Implemented the Gateway queue and IDE controls without restarting the operator's live
+Gateway/Ollama. The running daemon therefore does **not** expose the new routes until the
+operator approves a controlled restart.
+
+- Gateway queue contract: 9 tests passed, 0 failed.
+- IDE queue contract: 6 Node tests passed, 0 failed.
+- Full IDE Node suite: 116 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
+- `git diff --check` passed.
+
+## Limits
+
+This is source and unit/owned-process evidence only. It does **not** claim live-provider
+execution, an installed Antigravity host pass, physical-device qualification, or a live
+Gateway restart. Live acceptance still needs a controlled Gateway restart, a real
+configured-provider turn, queueing while a tool or stream is active, Stop/cancel, and an
+immediate next-turn admission check.
+
+---
+
 # End-to-end repair acceptance — 2026-09-23
 
 This section supersedes installation/pending statements in the historical notes below.
