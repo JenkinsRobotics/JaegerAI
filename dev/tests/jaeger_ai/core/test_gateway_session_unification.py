@@ -52,15 +52,16 @@ class TestGatewayMintedSessionIds(AioHTTPTestCase):
         if self.db_path.exists():
             self.db_path.unlink()
 
-    async def test_client_supplied_session_id_is_ignored(self):
-        """A client cannot mint a session identity; the gateway returns its own."""
+    async def test_client_supplied_session_id_is_honored(self):
+        """An explicit id is honored verbatim (durable contracts address the
+        same row across restarts); the gateway still owns profile validation,
+        so an id can never smuggle a profile past the framework registry."""
         resp = await self.client.request(
             "POST", "/v1/sessions", json={"session_id": "webui-hermes-deadbeef"},
         )
         assert resp.status == 201
         created = await resp.json()
-        assert created["session_id"] != "webui-hermes-deadbeef"
-        assert created["session_id"]  # gateway-minted, non-empty
+        assert created["session_id"] == "webui-hermes-deadbeef"
 
     async def test_unknown_profile_is_rejected_gateway_side(self):
         resp = await self.client.request(

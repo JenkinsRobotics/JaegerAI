@@ -7,7 +7,7 @@ from jaeger_agent.skill_registry.skill_audit import audit_catalog
 def test_distribution_catalog_is_lean_and_complete() -> None:
     discovered = pb.discover_playbooks()
     callable_skills = pb.callable_playbooks()
-    prompt_visible = pb.prompt_playbooks()
+    prompt_visible = pb.available_playbooks()
     assert len(discovered) >= 100
     assert len(callable_skills) >= 100
     assert 25 <= len(prompt_visible) <= 45
@@ -18,7 +18,7 @@ def test_distribution_catalog_is_lean_and_complete() -> None:
 
 def test_every_core_skill_meets_the_first_class_entrypoint_contract() -> None:
     """Keep the small-model routing surface concise as the catalog evolves."""
-    for skill in pb.prompt_playbooks():
+    for skill in pb.available_playbooks():
         lines = len(skill.path.read_text(encoding="utf-8").splitlines())
         assert skill.skill_class == "first-class", skill.name
         assert lines <= 130, (skill.name, lines)
@@ -41,7 +41,7 @@ def test_migrated_large_entrypoints_are_concise() -> None:
     # Red-team material is explicit-only: preserved and callable, but never
     # part of the automatic prompt-routing surface.
     assert pb.find_playbook("godmode") is not None
-    assert "godmode" not in {skill.name for skill in pb.prompt_playbooks()}
+    assert "godmode" not in {skill.name for skill in pb.available_playbooks()}
 
 
 def test_audit_reports_catalog_shape() -> None:
