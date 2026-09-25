@@ -37,6 +37,24 @@ class OwnedGateway:
         ready = self.root / "listener.json"
         ready.unlink(missing_ok=True)
         self.log = (self.root / "gateway.log").open("a", encoding="utf-8")
+        # This suite is the approval contract: prompts, grants, denials.
+        # Pin the saved autonomy to "ask" before the worker boots so no
+        # test inherits the product-wide "auto" default.
+        instance = self.root / "instances" / "contract"
+        instance.mkdir(parents=True, exist_ok=True)
+        from jaeger_ai.core.instance.schemas import (
+            Config, ExternalModelConfig, ModelConfig, dump_yaml)
+        # Same external_model surface the worker would write, so the
+        # model-override contracts keep their scripted provider, plus the
+        # pinned autonomy for the approval contracts.
+        cfg = Config(instance_name="contract",
+                     model=ModelConfig(model_path="/dev/null"),
+                     external_model=ExternalModelConfig(
+                         enabled=True, provider="openai", model="contract-model",
+                         base_url="http://127.0.0.1:9/v1",
+                         api_key_env="JAEGER_CONTRACT_API_KEY"),
+                     automation={"autonomy": "ask"})
+        dump_yaml(instance / "config.yaml", cfg)
         environment = {
             **os.environ, "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPATH": os.pathsep.join([
@@ -782,8 +800,15 @@ class OwnedBridge:
         self.process.stdin.flush()
 
     def until(self, predicate, timeout=20):
+        # readline() itself must not block past the deadline: a bridge that
+        # goes silent would otherwise wedge the whole suite. select() bounds
+        # every wait; EOF still ends the loop immediately.
+        import select as _select
         deadline = time.monotonic() + timeout
+        fd = self.process.stdout
         while time.monotonic() < deadline:
+            if not _select.select([fd], [], [], 0.25)[0]:
+                continue
             line = self.process.stdout.readline()
             if not line:
                 break
@@ -791,7 +816,7 @@ class OwnedBridge:
             self.frames.append(frame)
             if predicate(frame):
                 return frame
-        raise AssertionError(f"no matching frame; saw {self.frames}\n"
+        raise AssertionError(f"no matching frame within {timeout}s; saw {self.frames}\n"
                              + (self.state / "bridge.log").read_text())
 
     def stop(self):
@@ -803,13 +828,28 @@ class OwnedBridge:
 def _complete_instance(instance):
     """identity.yaml + manifest.json beside the worker's config.yaml, so the
     bridge treats the instance as set up (it never boots an agent here)."""
-    from jaeger_ai.core.instance.schemas import Identity, Manifest, dump_json, dump_yaml
+    from jaeger_ai.core.instance.schemas import (
+        Config, Identity, Manifest, dump_json, dump_yaml)
 
     if not (instance / "identity.yaml").exists():
         dump_yaml(instance / "identity.yaml", Identity(
             name="Contract", role="contract test entity", personality="terse"))
     if not (instance / "manifest.json").exists():
         dump_json(instance / "manifest.json", Manifest(instance_name="contract"))
+    # These contracts assert approval prompts and per-skill grants; they pin
+    # the saved autonomy instead of inheriting the product-wide default.
+    # Overwrite unconditionally: the gateway worker has usually already
+    # created a default config by the time the bridge fixture runs.
+    config_path = instance / "config.yaml"
+    if config_path.exists():
+        from jaeger_ai.core.instance.schemas import load_yaml
+        cfg = load_yaml(config_path, Config)
+        cfg.automation.autonomy = "ask"
+        dump_yaml(config_path, cfg)
+    else:
+        dump_yaml(config_path,
+                  Config(instance_name="contract",
+                         automation={"autonomy": "ask"}))
 
 
 @pytest.fixture

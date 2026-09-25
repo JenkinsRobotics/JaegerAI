@@ -175,7 +175,9 @@ class TestGatewayServerAPI(AioHTTPTestCase):
         def owner(text, **kwargs):
             return {"text": "Audit response", "halt_reason": None}
         self.gateway_app._owner_react_turn = owner
-        # 1. Create session — the Gateway mints the id; the client adopts it.
+        # 1. Create session — an explicitly supplied id is honored (durable
+        # contracts address the same row across restarts); only a missing
+        # id is minted.
         resp = await self.client.request(
             "POST",
             "/v1/sessions",
@@ -184,7 +186,7 @@ class TestGatewayServerAPI(AioHTTPTestCase):
         assert resp.status == 201
         data = await resp.json()
         sid = data["session_id"]
-        assert sid and sid != "test-uuid"
+        assert sid == "test-uuid"
         assert data["profile"] == "roundtable"
 
         # 2. List sessions
