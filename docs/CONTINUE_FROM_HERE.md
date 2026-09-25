@@ -311,7 +311,33 @@ Audit findings:
 | `dev/docs/roadmap/0.9.3_EVERYDAY_AGENCY_PLAN.md` | DELETE FROM ACTIVE TREE | Superseded 0.9.3 sprint |
 | `apps/ios/README.md` | HISTORICAL | Donor documentation for the Hermes-branded iOS client |
 
-## Verification snapshot — 2026-09-24
+## Verification snapshot — 2026-09-25
+
+**Baseline:** merged 0.12.0 (origin/master) into `0.13-dev`; version 0.13.0.
+
+| Suite | Result |
+| --- | --- |
+| Python unit tier (`run_tests.sh --unit`) | 5009 passed, 1 skipped, 0 failed |
+| Integration tier (gateway daemon, process recovery, owned-process contract) | 69 passed, 0 failed |
+| IDE Node (`node --test jaeger_ai/interfaces/ide/tests/*.test.js`) | 148 passed, 1 skipped, 0 failed |
+| Swift (`swift test`, DispatcherLiveTests skipped) | 173 executed, 1 skipped, 0 failures |
+| jaeger-agent package | 1044 passed |
+| jaeger-os package | 574 passed |
+| jaeger-kokoro-tts package | 37 passed, 1 skipped |
+| jaeger-whisper-stt package | 61 passed, 1 skipped |
+
+Merge-time repairs (all root-caused in this snapshot): dual-sink tool
+telemetry, `available_playbooks` rename, the gateway-first branch restored
+in the bridge's factored turn executor, `.pill[hidden]` fix, the searchable
+provider-grouped model picker, attachment staging resolving the runtime
+layout (not the ambient default instance), explicit session ids honored
+for durable contracts, and the approval-contract fixture pinning
+`automation.autonomy=ask`.
+
+No live-provider, physical-device, installed-app, or final-artifact
+acceptance was run.
+
+## Prior snapshot — 2026-09-24
 
 Focused verification run for this cleanup:
 
