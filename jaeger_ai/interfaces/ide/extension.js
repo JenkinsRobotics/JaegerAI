@@ -357,6 +357,16 @@ function activate(context) {
           await controller.gateway.rename(id, title.slice(0, 200));
           return controller.refresh(id, true);
         }
+        if (message.type === 'archive') {
+          const id = controller.state.session?.session_id;
+          if (!id) throw new Error('Open a conversation first.');
+          return controller.setArchived(id, true);
+        }
+        if (message.type === 'unarchive') {
+          const id = controller.state.session?.session_id;
+          if (!id) throw new Error('Open a conversation first.');
+          return controller.setArchived(id, false);
+        }
         if (message.type === 'exportChat') {
           const session = controller.state.session;
           if (!session?.messages?.length) throw new Error('Nothing to export yet.');

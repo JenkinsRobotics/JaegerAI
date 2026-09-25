@@ -3,7 +3,7 @@
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `pinocchio`
 **Baseline at audit start:** `4124422b15e7f0ca28941774992000b24a151719`
-**Date:** 2026-09-24
+**Date:** 2026-09-25
 **Branch rule:** work on `pinocchio`; do not modify or merge `master` unless the operator explicitly asks.
 
 This is the single execution entry point for humans and coding agents. Old branch audits, five-day plans, and phase trackers are evidence, not status. Re-read the current source before acting.
@@ -54,6 +54,7 @@ The model is replaceable cognition. The client is not the entity. A tool returni
 | Gateway-enforced plan-only turns exist: the IDE Plan toggle and `/plan` command grant only `update_plan`, so file, shell, and browser tools are not admitted | `allowed_tools=["update_plan"]`; `packages/jaeger-agent/jaeger_agent/tools/plan.py`; `interfaces/ide/media/view.js`; `interfaces/ide/extension.js`; `test_gateway_admission_snapshot.py::test_plan_only_grant_is_frozen_and_replayable`; `interfaces/ide/tests/plan.test.js` | Source and unit tests; still needs live-provider and installed-host acceptance |
 | IDE context chips and `/diagnostics` project the active file, selection, open files, and bounded workspace problems without creating a second context owner | `interfaces/ide/commands.js::buildIdeContext`; `extension.js::ideContext/diagnosticsSnapshot`; `media/view.js::renderContextChips`; `media/slash-commands.js`; `interfaces/ide/tests/context.test.js` | Source and unit tests; installed-host/live-provider acceptance remains open |
 | IDE session tabs support close, reopen, and durable client-side ordering while the Gateway remains the session owner | `interfaces/ide/conversation.js::openSessionIds/closeSession`; `media/view.js::renderSessionTabs`; `interfaces/ide/tests/sessions.test.js` | Source and unit tests; installed-host/live-provider acceptance remains open |
+| Gateway-owned session archive state exists in session metadata; `/archive` and `/unarchive` update the same durable sessions and the IDE groups active and archived chats | `core/gateway/session_store.py::set_session_archived`; `server.py::handle_patch_session`; `interfaces/ide/conversation.js::setArchived`; `media/view.js::renderChats`; `test_gateway_session_archive.py`; `interfaces/ide/tests/session-archive.test.js` | Source and unit tests; installed-host/live-provider acceptance remains open |
 | IDE workspace selection is explicit, persisted per Gateway endpoint, and sent through the Gateway admission `workspace` field for new chats, immediate turns, and queued turns | `interfaces/ide/extension.js::restoreWorkspace/selectWorkspace`; `media/view.js`; `interfaces/ide/tests/extension.test.js::test_explicit_workspace_selection_reaches_the_Gateway_admission_body`; `interfaces/ide/tests/workspace.test.js` | Source and unit tests; installed-host/live-provider acceptance remains open |
 | IDE `@` file mentions pick a workspace file and stage it through the existing Gateway attachment contract before the next turn | `interfaces/ide/extension.js::mentionFile`; `interfaces/ide/conversation.js::addAttachment`; `media/view.js`; `interfaces/ide/tests/mention.test.js`; `interfaces/ide/tests/extension.test.js::test_@_mention_stages_the_picked_workspace_file_through_the_Gateway_attachment_contract` | Source and unit tests; installed-host/live-provider acceptance remains open |
 | IDE can select an existing git worktree via `/worktree` or the Worktree control and send it through the Gateway admission `workspace` field; creation, merge, and pruning remain outside this slice | `interfaces/ide/commands.js::parseWorktrees/worktreeLines`; `extension.js::listWorktrees/selectWorktree`; `media/view.js`; `interfaces/ide/tests/worktree.test.js` | Source and unit tests; installed-host/git-repository acceptance remains open |
@@ -341,11 +342,13 @@ Results:
 - **IDE Plan mode:** 4 Node tests passed, 0 failed; covers `/plan` parsing, the `update_plan`-only admission grant, queued plan work, and the webview/extension contract. The Gateway admission test freezes and replays the same grant.
 - **IDE context chips:** 3 Node tests passed, 0 failed; covers `/diagnostics` parsing, bounded problem summaries, and the webview/extension chip projection from the existing IDE context contract.
 - **IDE session tabs:** 4 Node tests passed, 0 failed; covers deduplicated open order, close-active/close-other behavior, return to chat home when the last tab closes, and closeable webview tabs.
+- **Gateway session archive:** 5 tests passed, 0 failed; covers metadata durability without sidebar reordering, unknown-session handling, atomic PATCH validation, persistence, and `session.updated` publication.
+- **IDE session archive:** 3 Node tests passed, 0 failed; covers `/archive` and `/unarchive`, controller projection, and active-versus-archived chat grouping.
 - **IDE workspace selection:** 3 Node tests passed, 0 failed; covers the real picker control, `/workspace`, per-endpoint persistence, and queued-turn use. The extension suite also proves the selected workspace reaches the Gateway admission body.
 - **IDE file mentions:** 2 Node tests passed, 0 failed; covers the real `@` picker and Gateway attachment staging. The extension suite also proves the selected workspace file reaches `addAttachment`.
 - **IDE existing-worktree selection:** 4 Node tests passed, 0 failed; covers Git porcelain parsing, bounded worktree display, the real `/worktree` command, and the composer picker contract.
 - **IDE live steering:** 4 Node tests passed, 0 failed; covers the request-scoped route, active-agent steering, the honest no-ReAct-agent 409 without a client queue, and transport-error propagation.
-- **IDE Node:** 138 passed, 0 failed, 1 intentional isolated-Gateway fixture skip, exit 0.
+- **IDE Node:** 141 passed, 0 failed, 1 intentional isolated-Gateway fixture skip, exit 0.
   The first run exposed two markdown-helper test failures. `enhanceCodeBlocks` now no-ops
   when its optional DOM query API is absent, and the Node fixture models nested
   `textContent`; the final suite passes.

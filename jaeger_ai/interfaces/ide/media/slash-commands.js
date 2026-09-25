@@ -16,6 +16,8 @@ const COMMANDS = [
   { name: 'stop', group: 'Chat', description: 'Stop the current turn', needs: ['busy'] },
   { name: 'copy', group: 'Chat', description: 'Copy the last answer', needs: ['answer'] },
   { name: 'export', group: 'Chat', description: 'Save this conversation as Markdown', needs: ['session'] },
+  { name: 'archive', group: 'Chat', description: 'Archive this conversation', needs: ['session'] },
+  { name: 'unarchive', group: 'Chat', description: 'Move this conversation back to the active list', needs: ['session'] },
   { name: 'model', group: 'Settings', description: 'Choose the model', needs: [] },
   { name: 'workspace', group: 'Settings', description: 'Choose the workspace Jaeger uses', needs: [] },
   { name: 'worktree', group: 'Code', description: 'Select an existing git worktree', needs: [] },
