@@ -17,7 +17,8 @@ operator approves a controlled restart.
 - IDE file-mention contract: 2 Node tests passed, 0 failed.
 - IDE existing-worktree contract: 4 Node tests passed, 0 failed.
 - IDE chat-search contract: 3 focused Node tests passed, 0 failed.
-- Full IDE Node suite: 144 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
+- IDE worker-catalog contract: 1 Node test passed, 0 failed.
+- Full IDE Node suite: 145 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
 - The focused Plan-mode and workspace-selection files are included in that suite.
 - `git diff --check` passed.
 
@@ -45,6 +46,9 @@ Existing-worktree selection still needs installed-host acceptance against a real
 repository to confirm `git worktree list`, quick-pick ordering, and non-repository behavior.
 Chat search still needs installed-host acceptance to confirm input focus, persistence,
 and active-versus-archived result grouping in the actual Antigravity/VS Code host.
+Worker catalog still needs installed-host acceptance to confirm slash-menu discovery,
+probe output, and error surfacing in the actual Antigravity/VS Code host. The catalog does
+not claim worker task execution or live IDE-panel conversation steering.
 
 ---
 

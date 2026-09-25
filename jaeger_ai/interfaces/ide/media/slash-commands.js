@@ -27,6 +27,7 @@ const COMMANDS = [
   { name: 'status', group: 'Info', description: 'Show connection, model and conversation status', needs: [] },
   { name: 'skills', group: 'Info', description: 'Browse available skills', args: '[filter]', takesArgs: true, needs: [] },
   { name: 'agent', group: 'Info', description: 'Show background agents and tasks', aliases: ['ps'], needs: [] },
+  { name: 'workers', group: 'Info', description: 'List orchestration worker agents', needs: [] },
 ];
 
 const byName = new Map();

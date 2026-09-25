@@ -380,7 +380,7 @@ function activate(context) {
           view?.webview.postMessage({ info: { title: 'Exported', lines: [target.fsPath] } });
           return;
         }
-        if (message.type === 'info' && ['status', 'skills', 'agent', 'diagnostics'].includes(message.what)) {
+        if (message.type === 'info' && ['status', 'skills', 'agent', 'workers', 'diagnostics'].includes(message.what)) {
           let title, lines;
           if (message.what === 'status') {
             const version = await controller.gateway.json('/version');
@@ -393,6 +393,11 @@ function activate(context) {
             title = 'Skills'; lines = commands.skillLines(found.skills, query);
           } else if (message.what === 'diagnostics') {
             title = 'Problems'; lines = commands.diagnosticsLines(await ideCall('diagnostics', {}));
+          } else if (message.what === 'workers') {
+            title = 'Workers';
+            lines = controller.state.workersError
+              ? [`Workers unavailable: ${controller.state.workersError}`]
+              : commands.workerLines(controller.state.workers || []);
           } else {
             title = 'Agents and tasks'; lines = commands.taskLines(await controller.gateway.tasks());
           }

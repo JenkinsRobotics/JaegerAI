@@ -49,6 +49,9 @@ deployment, not exposing the unauthenticated Gateway.
 - **Plan** and `/plan <request>` send a plan-only turn by setting the
   Gateway-enforced grant to `update_plan`. File, shell, and browser tools are
   not admitted for that turn; the model must produce a plan, not execute it.
+- `/workers` lists the Gateway’s orchestration worker catalog with availability,
+  capabilities, and probe failures. It is a truthful catalog, not a claim that
+  worker task execution or IDE-panel steering is already qualified.
 - Context chips above the composer show the active file, selection, open files,
   and workspace problem count. `/diagnostics` opens a bounded Problems card.
   The chips are projections of the existing `ideContext()` and diagnostics APIs;
