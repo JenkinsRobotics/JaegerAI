@@ -25,7 +25,7 @@ struct SettingsView: View {
     }
 }
 
-ttingsInfo: View {
+private struct AgentSettingsInfo: View {
     @ObservedObject private var agent = AgentBridge.shared
 
     var body: some View {
