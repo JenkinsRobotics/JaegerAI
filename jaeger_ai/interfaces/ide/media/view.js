@@ -10,9 +10,10 @@ const { match: matchSlash, parse: parseSlash } = window.JaegerSlash;
 
 const api = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
-let state = { connected: false, busy: false, staged: [], activity: [], reasoning: '', models: null, configuredModel: '' };
+let state = { connected: false, busy: false, staged: [], queue: [], activity: [], reasoning: '', models: null, configuredModel: '' };
 let revision = '', modelRevision = '', draftSession = '';
 let submittedDraftSession = null;
+let editingQueueId = null;
 let showAllChats = false;
 const drafts = api.getState()?.drafts || {};
 const post = (type, extra = {}) => api.postMessage({ type, ...extra });
@@ -21,8 +22,8 @@ window.JaegerPostMessage = post;
 let ideContextOn = api.getState()?.ideContext !== false;
 const persistView = () => api.setState({ drafts, ideContext: ideContextOn });
 function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
-// While the agent is busy the send button becomes a steering send: the text
-// is queued client-side and auto-sent when the running turn settles.
+// While the agent is busy, Enter steers the live turn. “Queue next” writes a
+// durable Gateway request instead; this client never owns a second queue.
 function eligibility() { $('send').disabled = !state.connected || !$('prompt').value.trim(); }
 
 function announceCopied() {
@@ -140,14 +141,59 @@ function reasoningSection(text, live = false) {
   return details;
 }
 
-// A queued mid-turn steering note: visually distinct from a sent message so
-// the operator can see it has not reached the agent yet.
-function steerNote(text) {
-  const node = document.createElement('div'); node.className = 'steer-note';
-  const label = document.createElement('span'); label.className = 'steer-label'; label.textContent = 'Steering · queued';
-  const body = document.createElement('div'); body.className = 'steer-text'; body.textContent = text;
-  node.append(label, body);
-  return node;
+// Gateway-owned queued work. These rows are editable before promotion, so
+// the composer becomes the edit surface rather than a second state owner.
+function queueButton(label, action, title = label) {
+  const button = document.createElement('button');
+  button.type = 'button'; button.textContent = label; button.title = title;
+  button.setAttribute('aria-label', title);
+  button.onclick = action;
+  return button;
+}
+
+function renderQueue() {
+  const container = $('queue');
+  const items = state.queue || [];
+  container.replaceChildren(); container.hidden = !items.length;
+  if (!items.length) return;
+  const heading = document.createElement('div'); heading.className = 'queue-heading';
+  const title = document.createElement('span'); title.textContent = 'Queued work';
+  const count = document.createElement('span');
+  count.textContent = `${items.filter(item => item.status === 'queued').length} ready · ${items.filter(item => item.status === 'paused').length} paused`;
+  heading.append(title, count);
+  const list = document.createElement('div'); list.className = 'queue-list';
+  items.forEach((item, index) => {
+    const row = document.createElement('div');
+    row.className = 'queue-row' + (editingQueueId === item.request_id ? ' editing' : '');
+    const position = document.createElement('span'); position.className = 'queue-index'; position.textContent = String(index + 1);
+    const text = document.createElement('span'); text.className = 'queue-text'; text.textContent = item.input_text || '';
+    const status = document.createElement('span'); status.className = 'queue-status'; status.textContent = item.status || 'queued';
+    const actions = document.createElement('div'); actions.className = 'queue-actions';
+    const editing = editingQueueId === item.request_id;
+    if (editing) {
+      actions.append(queueButton('Cancel', () => {
+        editingQueueId = null; $('prompt').value = drafts[draftSession] || ''; eligibility(); renderQueue(); renderComposerBar();
+      }, 'Cancel editing queued request'));
+    } else {
+      actions.append(queueButton('Edit', () => {
+        editingQueueId = item.request_id; $('prompt').value = item.input_text || ''; saveDraft(); eligibility(); renderQueue(); renderComposerBar(); $('prompt').focus();
+      }, 'Edit queued request'));
+    }
+    actions.append(queueButton(item.status === 'paused' ? 'Resume' : 'Pause', () => {
+      post('queueUpdate', { id: item.request_id, status: item.status === 'paused' ? 'queued' : 'paused' });
+    }, item.status === 'paused' ? 'Resume queued request' : 'Pause queued request'));
+    if (index > 0) actions.append(queueButton('↑', () => {
+      const order = items.map(row => row.request_id); [order[index - 1], order[index]] = [order[index], order[index - 1]];
+      post('queueReorder', { order });
+    }, 'Move queued request up'));
+    if (index < items.length - 1) actions.append(queueButton('↓', () => {
+      const order = items.map(row => row.request_id); [order[index], order[index + 1]] = [order[index + 1], order[index]];
+      post('queueReorder', { order });
+    }, 'Move queued request down'));
+    actions.append(queueButton('Delete', () => post('queueDelete', { id: item.request_id }), 'Delete queued request'));
+    row.append(position, text, status, actions); list.append(row);
+  });
+  container.append(heading, list);
 }
 
 function renderTurn(turn) {
@@ -200,9 +246,6 @@ function transcriptRows() {
     if (placed.has(row.requestId) && (state.busy || row.kind !== 'answer')) continue;
     if (legacyActivity.includes(row) || row.kind === 'control' || row.kind === 'terminal') continue;
     rows.push({ ...row, key: `live:${row.key}` });
-  }
-  for (const steer of state.steers || []) if (state.session && steer.sessionId === state.session.session_id) {
-    rows.push({ key: `steer:${steer.id}`, kind: 'steer', text: steer.text, live: true });
   }
   if (state.preview) rows.push({ key: `diff:${state.preview.requestId}:${state.preview.path}`, kind: 'diff', file: state.preview });
   if (!rows.length) rows.push({ key: 'empty', kind: 'empty', live: false });
@@ -287,8 +330,6 @@ function updateTimelineRow(node, row) {
     content = activitySection(row.items, row.live);
   } else if (row.kind === 'diff') {
     content = renderDiff(row.file);
-  } else if (row.kind === 'steer') {
-    content = steerNote(row.text || '');
   } else if (row.kind === 'empty') {
     content = document.createElement('section'); content.className = 'empty';
     const logo = document.createElement('img'); logo.src = $('logo-source').src || '';
@@ -433,6 +474,7 @@ function render() {
   timelineRenderer.reconcile(transcriptRows());
   renderChanges();
   renderBackgroundTasks();
+  renderQueue();
 
   $('approvals').replaceChildren();
   for (const approval of state.approvals || []) {
@@ -550,6 +592,10 @@ const ACCESS = {
 };
 
 function renderComposerBar() {
+  $('queue-next').hidden = !state.busy || !state.session || Boolean(editingQueueId);
+  $('send').title = editingQueueId ? 'Save queued request'
+    : state.busy ? 'Steer current turn' : 'Send message';
+  $('send').setAttribute('aria-label', $('send').title);
   const mode = state.autonomy?.mode;
   const pill = $('access');
   pill.hidden = !ACCESS[mode];
@@ -582,6 +628,12 @@ function openAccessMenu() {
 $('access').onclick = () => ($('access-menu').hidden ? openAccessMenu() : closeAccessMenu());
 $('access').onblur = () => closeAccessMenu();
 $('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); };
+$('queue-next').onclick = () => {
+  const text = $('prompt').value;
+  if (!text.trim() || $('queue-next').hidden) return;
+  post('queue', { text, model: $('model').value, ideContext: ideContextOn });
+  $('prompt').value = ''; saveDraft(); eligibility(); slashDismissed = false; renderSlashMenu();
+};
 
 // ── slash commands ─────────────────────────────────────────────────────────
 let slashItems = [], slashIndex = 0, slashDismissed = false;
@@ -656,6 +708,12 @@ $('composer').onsubmit = event => {
   // an explicit catalog choice — the display matches the behaviour.
   if (!$('send').disabled) {
     const text = $('prompt').value;
+    if (editingQueueId) {
+      const id = editingQueueId; editingQueueId = null;
+      post('queueUpdate', { id, text });
+      $('prompt').value = ''; saveDraft(); eligibility(); renderQueue(); renderComposerBar();
+      return;
+    }
     if (state.busy) { post('steer', { text }); $('prompt').value = ''; saveDraft(); eligibility(); return; }
     submittedDraftSession = draftSession;
     post('send', { text, model: $('model').value, ideContext: ideContextOn });
@@ -673,6 +731,11 @@ $('prompt').onkeydown = event => {
       event.preventDefault(); return acceptSlash(slashIndex);
     }
     if (event.key === 'Escape') { event.preventDefault(); slashDismissed = true; return renderSlashMenu(); }
+  }
+  if (event.key === 'Escape' && editingQueueId) {
+    event.preventDefault(); editingQueueId = null;
+    $('prompt').value = drafts[draftSession] || ''; saveDraft(); eligibility(); renderQueue(); renderComposerBar();
+    return;
   }
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('composer').requestSubmit(); }
 };

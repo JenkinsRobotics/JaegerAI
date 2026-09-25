@@ -55,20 +55,19 @@ test('conversation uses Gateway live steering and does not create a follow-up qu
   assert.deepEqual(gateway.steered, {
     sid: 'one', rid: gateway.sent.request_id, text: 'use metric units',
   });
-  assert.deepEqual(client.steers, []);
+  assert.equal('steers' in client, false);
   assert.equal(client.state.status, 'Steering accepted · next model step');
   client.dispose();
 });
 
-test('conversation queues locally only when the Gateway honestly reports no ReAct agent', async () => {
+test('a no-ReAct-agent 409 is honest and never creates a client queue', async () => {
   const { gateway, client } = fixture();
   await client.refresh('one');
   await client.send('hello');
   gateway.steer = async () => { throw new GatewayError('no active ReAct agent', 409); };
-  assert.equal(await client.steer('queue this'), true);
-  assert.equal(client.steers.length, 1);
-  assert.equal(client.steers[0].text, 'queue this');
-  assert.equal(client.state.status, 'Steering queued · sends when this turn finishes');
+  assert.equal(await client.steer('queue this'), false);
+  assert.equal('steers' in client, false);
+  assert.equal(client.state.status, 'No live agent to steer · use Queue next');
   client.dispose();
 });
 
@@ -78,6 +77,7 @@ test('conversation propagates transport errors instead of silently queueing', as
   await client.send('hello');
   gateway.steer = async () => { throw new GatewayError('connection failed', 0); };
   await assert.rejects(() => client.steer('queue this'), /connection failed/);
-  assert.deepEqual(client.steers, []);
+  assert.equal('steers' in client, false);
+  assert.deepEqual(client.state.queue, []);
   client.dispose();
 });

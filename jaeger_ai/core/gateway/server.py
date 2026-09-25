@@ -481,6 +481,7 @@ class JaegerGatewayApp:
             except Exception:
                 logger.exception("Legacy task import failed; original queue retained")
         self.task_owner.start()
+        self._drain_all_queues()
         resume_workers = getattr(self.orchestration, 'resume_pending', None)
         if callable(resume_workers):
             resume_workers()
@@ -683,6 +684,22 @@ class JaegerGatewayApp:
             "execution_unknown": row.get("status") == "execution_unknown",
         }
 
+    def _drain_session_queue(self, session_id: str) -> None:
+        """Promote exactly one queued item after a definite terminal outcome."""
+        promoted = self.store.promote_next_queue_item(session_id)
+        if promoted is None:
+            return
+        items = self.store.list_queue(session_id)
+        self.event_bus.publish(session_id, "queue.updated", {"items": items})
+        self._start_admitted_turn(
+            promoted, session_id, str(promoted.get("input_text") or ""),
+        )
+
+    def _drain_all_queues(self) -> None:
+        """Restart-safe drain: one queued item per idle session."""
+        for session_id in self.store.sessions_with_queue():
+            self._drain_session_queue(session_id)
+
     def _start_admitted_turn(
         self, admitted: dict[str, Any], session_id: str, text: str,
     ) -> None:
@@ -770,6 +787,11 @@ class JaegerGatewayApp:
         self.app.router.add_delete("/v1/sessions/{id}", self.handle_delete_session)
         self.app.router.add_patch("/v1/sessions/{id}", self.handle_rename_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
+        self.app.router.add_get("/v1/sessions/{id}/queue", self.handle_get_queue)
+        self.app.router.add_post("/v1/sessions/{id}/queue", self.handle_add_queue)
+        self.app.router.add_post("/v1/sessions/{id}/queue/reorder", self.handle_reorder_queue)
+        self.app.router.add_patch("/v1/sessions/{id}/queue/{request_id}", self.handle_update_queue)
+        self.app.router.add_delete("/v1/sessions/{id}/queue/{request_id}", self.handle_delete_queue)
         self.app.router.add_post("/v1/sessions/{id}/cancel", self.handle_cancel_turn)
         self.app.router.add_post("/v1/sessions/{id}/requests/{request_id}/steer", self.handle_steer_request)
         self.app.router.add_post("/v1/sessions/{id}/reconcile", self.handle_reconcile)
@@ -1427,6 +1449,26 @@ class JaegerGatewayApp:
             }
         )
 
+    def _requested_from_body(self, body: dict[str, Any]) -> dict[str, Any]:
+        """One place normalizes client execution choices before admission."""
+        requested = {key: body.get(key) for key in EXECUTION_INPUT_KEYS if body.get(key) is not None}
+        options = requested.get("options")
+        if isinstance(options, dict) and "ide" in options:
+            from jaeger_ai.core.entity.ide_context import clean as clean_ide_context
+            options = {**options}
+            cleaned = clean_ide_context(options.pop("ide"))
+            if cleaned:
+                options["ide"] = cleaned
+            if options:
+                requested["options"] = options
+            else:
+                requested.pop("options")
+        if requested.get("model") and not requested.get("provider"):
+            lane, _ = split_routed_model_id(str(requested["model"]))
+            if lane:
+                requested["provider"] = lane
+        return requested
+
     async def handle_send_turn(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
         body = await request.json() if request.can_read_body else {}
@@ -1452,25 +1494,7 @@ class JaegerGatewayApp:
         if request_id is not None:
             request_id = str(request_id).strip() or None
 
-        requested = {key: body.get(key) for key in EXECUTION_INPUT_KEYS if body.get(key) is not None}
-        options = requested.get("options")
-        if isinstance(options, dict) and "ide" in options:
-            # The IDE's view of what is open. Only the allow-listed, size-capped
-            # fields survive; nothing else can ride in through this key.
-            from jaeger_ai.core.entity.ide_context import clean as clean_ide_context
-            options = {**options}
-            cleaned = clean_ide_context(options.pop("ide"))
-            if cleaned:
-                options["ide"] = cleaned
-            if options:
-                requested["options"] = options
-            else:
-                requested.pop("options")
-        if requested.get("model") and not requested.get("provider"):
-            # A routed id ("ollama-cloud/glm") names its provider lane.
-            lane, _ = split_routed_model_id(str(requested["model"]))
-            if lane:
-                requested["provider"] = lane
+        requested = self._requested_from_body(body)
         try:
             admitted = self.store.admit_request(
                 session_id, text, request_id=request_id, requested=requested,
@@ -1514,6 +1538,125 @@ class JaegerGatewayApp:
             # ``?last_event_id=<start_event_id - 1>`` to follow just this turn.
             payload["start_event_id"] = admitted["event"]["event_id"]
         return web.json_response(payload)
+
+    def _queue_updated(self, session_id: str) -> dict[str, Any]:
+        items = self.store.list_queue(session_id)
+        payload = {"session_id": session_id, "items": items}
+        self.event_bus.publish(session_id, "queue.updated", payload)
+        return payload
+
+    async def handle_get_queue(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        items = self.store.list_queue(session_id)
+        return web.json_response({"session_id": session_id, "items": items})
+
+    async def handle_add_queue(self, request: web.Request) -> web.Response:
+        """Add Gateway-owned follow-up work for a session."""
+        session_id = request.match_info["id"]
+        body = await request.json() if request.can_read_body else {}
+        text = str(body.get("text") or "").strip()
+        if not text:
+            return web.json_response({"error": "Missing queue text"}, status=400)
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        requested_profile = str(body.get("profile") or "").strip()
+        if requested_profile:
+            session = self.store.get_session(session_id) or {}
+            bound = str(session.get("profile") or "").strip().lower()
+            if bound and bound != requested_profile.strip().lower():
+                return web.json_response(
+                    {"error": f"This conversation belongs to {bound}; start a new chat to talk to {requested_profile}"},
+                    status=409,
+                )
+        request_id = body.get("request_id")
+        if request_id is not None:
+            request_id = str(request_id).strip() or None
+        requested = self._requested_from_body(body)
+        try:
+            item = self.store.enqueue_request(
+                session_id, text, request_id=request_id, requested=requested,
+            )
+        except RequestConflict as exc:
+            return web.json_response({"error": str(exc), "session_id": session_id}, status=409)
+        except RequestBusy as exc:
+            return web.json_response({"error": str(exc), "session_id": session_id}, status=409)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+
+        promoted = self.store.promote_next_queue_item(session_id)
+        self._queue_updated(session_id)
+        if promoted is not None:
+            self._start_admitted_turn(
+                promoted, session_id, str(promoted.get("input_text") or ""),
+            )
+        payload = {
+            "session_id": session_id,
+            "request_id": item["request_id"],
+            "turn_id": promoted.get("turn_id") if promoted else item.get("turn_id"),
+            "status": "running" if promoted else item["status"],
+            "queued": promoted is None,
+            "replayed": bool(item.get("replayed")),
+        }
+        if promoted and promoted.get("event"):
+            payload["start_event_id"] = promoted["event"]["event_id"]
+        return web.json_response(payload, status=202)
+
+    async def handle_update_queue(self, request: web.Request) -> web.Response:
+        """Edit text, position, or pause/resume a still-queued item."""
+        session_id = request.match_info["id"]
+        request_id = request.match_info["request_id"]
+        body = await request.json() if request.can_read_body else {}
+        fields = {key: body.get(key) for key in ("text", "status", "position") if key in body}
+        if not fields:
+            return web.json_response({"error": "Nothing to update"}, status=400)
+        try:
+            updated = self.store.update_queue_item(
+                session_id,
+                request_id,
+                text=fields.get("text"),
+                status=fields.get("status"),
+                position=fields.get("position"),
+            )
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        if updated is None:
+            return web.json_response({"error": "Queued request not found"}, status=404)
+        promoted = None
+        if fields.get("status") == "queued":
+            promoted = self.store.promote_next_queue_item(session_id)
+        self._queue_updated(session_id)
+        if promoted is not None:
+            self._start_admitted_turn(
+                promoted, session_id, str(promoted.get("input_text") or ""),
+            )
+        return web.json_response({
+            "session_id": session_id,
+            "item": promoted or updated,
+            "promoted": promoted is not None,
+        })
+
+    async def handle_reorder_queue(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        body = await request.json() if request.can_read_body else {}
+        order = body.get("order")
+        if not isinstance(order, list) or not all(isinstance(v, str) for v in order):
+            return web.json_response({"error": "order must be a list of request ids"}, status=400)
+        try:
+            items = self.store.reorder_queue(session_id, order)
+        except ValueError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        self._queue_updated(session_id)
+        return web.json_response({"session_id": session_id, "items": items})
+
+    async def handle_delete_queue(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        request_id = request.match_info["request_id"]
+        if not self.store.delete_queue_item(session_id, request_id):
+            return web.json_response({"error": "Queued request not found"}, status=404)
+        self._queue_updated(session_id)
+        return web.json_response({"session_id": session_id, "deleted": True})
 
     def _session_agent_id(self, session: dict[str, Any] | None) -> str | None:
         """Resolve session agent_id from top-level or metadata (handoff patch)."""
@@ -2634,6 +2777,8 @@ class JaegerGatewayApp:
             )
             if persisted.get("event"):
                 self.event_bus.fanout(persisted["event"])
+            if status in {"completed", "failed", "cancelled"}:
+                self._drain_session_queue(session_id)
             if status == "completed" and not persisted.get("replayed"):
                 try:
                     from jaeger_ai.core.entity.runtime import EntityRuntime

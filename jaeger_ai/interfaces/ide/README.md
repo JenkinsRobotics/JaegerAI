@@ -42,6 +42,10 @@ deployment, not exposing the unauthenticated Gateway.
   request cancellation, reload history and reconnect. Enter sends; Shift+Enter
   inserts a newline; IME composition does not submit. Long content wraps; code
   scrolls horizontally. Colors and focus rings follow the IDE theme.
+- During a live turn, Enter steers the active ReAct request through the Gateway.
+  **Queue next** adds a durable Gateway-owned follow-up request; queue cards
+  support edit, pause/resume, reorder, and delete. The IDE does not keep a
+  second client-side follow-up queue.
 - Pending request IDs persist in IDE workspace storage keyed by Gateway URL;
   drafts stay in webview state. State is outside the source tree. Failed admission
   never triggers blind automatic resend. An ambiguous missing receipt needs
@@ -63,7 +67,7 @@ deployment, not exposing the unauthenticated Gateway.
 ## Verification
 
 ```sh
-node --test jaeger_ai/interfaces/ide/tests/client.test.js
+node --test jaeger_ai/interfaces/ide/tests/*.test.js
 dev/scripts/run_tests.sh --integration dev/tests/jaeger_ai/core/test_ide_gateway_client.py
 ```
 

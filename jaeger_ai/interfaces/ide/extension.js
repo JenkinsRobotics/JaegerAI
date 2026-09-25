@@ -110,12 +110,17 @@ function activate(context) {
   const endpoint = () => vscode.workspace.getConfiguration('jaeger').get('gatewayUrl') || contract.gatewayUrl;
   const settings = () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:jenkins-robotics.jaeger-ide');
   const configuredModel = () => vscode.workspace.getConfiguration('jaeger').get('model') || '';
+  const selectedModel = value => {
+    if (value === 'config') return { model: configuredModel(), provider: '' };
+    if (typeof value === 'string' && value) return parseProviderModel(value);
+    return { model: '', provider: '' };
+  };
   function createController() {
     controller?.dispose();
     controller = undefined;
     view?.webview.postMessage({ connected: false, busy: false, session: null, sessions: [], text: '',
       reasoning: '', activity: [], approvals: [], staged: [], models: null, modelsError: null,
-      status: 'Connecting…', error: '', configuredModel: configuredModel() });
+      status: 'Connecting…', error: '', queue: [], configuredModel: configuredModel() });
     const key = storageKey(), restored = context.workspaceState.get(key, {});
     controller = new Conversation(new Gateway(endpoint()), state => {
       if (state.changes) changes = state.changes;
@@ -218,17 +223,22 @@ function activate(context) {
           await controller.newSession('New conversation', vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '');
         }
         if (message.type === 'send' && typeof message.text === 'string') {
-          // '' = keep session/Gateway selection (no model field in admission).
-          // 'config' = use the static jaeger.model setting (shown honestly in picker).
-          // 'provider::model' = explicit catalog choice; parsed via shared helper.
-          let model = '', provider = '';
-          if (message.model === 'config') {
-            model = configuredModel();
-          } else if (typeof message.model === 'string' && message.model) {
-            ({ model, provider } = parseProviderModel(message.model));
-          }
+          const { model, provider } = selectedModel(message.model);
           return controller.send(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext());
         }
+        if (message.type === 'queue' && typeof message.text === 'string') {
+          const { model, provider } = selectedModel(message.model);
+          return controller.queue(message.text, model, provider, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '', message.ideContext === false ? null : ideContext());
+        }
+        if (message.type === 'queueUpdate' && typeof message.id === 'string') {
+          const patch = {};
+          if (typeof message.text === 'string') patch.text = message.text;
+          if (message.status === 'queued' || message.status === 'paused') patch.status = message.status;
+          if (!Object.keys(patch).length) throw new Error('Nothing to update in the queued request.');
+          return controller.queueUpdate(message.id, patch);
+        }
+        if (message.type === 'queueDelete' && typeof message.id === 'string') return controller.queueDelete(message.id);
+        if (message.type === 'queueReorder' && Array.isArray(message.order)) return controller.queueReorder(message.order);
         // Slash commands that need the Gateway or a file dialog. Each maps to a real
         // capability; the panel never lists one whose backend is missing.
         if (message.type === 'setAutonomy' && typeof message.mode === 'string') return sendAutonomy(message.mode);

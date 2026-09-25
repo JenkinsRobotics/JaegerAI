@@ -61,6 +61,11 @@ class Gateway {
   activity(id, after = 0) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/activity?after=${after}`); }
   create(body) { return this.json('/v1/sessions', body); }
   send(id, body) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/turns`, body); }
+  queue(id) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`); }
+  queueAdd(id, body) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`, body); }
+  queueReorder(id, order) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/queue/reorder`, { order }); }
+  queueUpdate(id, rid, body) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/queue/${encodeURIComponent(rid)}`, body, 'PATCH'); }
+  queueDelete(id, rid) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/queue/${encodeURIComponent(rid)}`, undefined, 'DELETE'); }
   receipt(id, rid) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/requests/${encodeURIComponent(rid)}`); }
   cancel(id, rid) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/cancel`, { request_id: rid }); }
   steer(id, rid, text) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/requests/${encodeURIComponent(rid)}/steer`, { text }); }

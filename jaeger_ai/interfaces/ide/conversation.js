@@ -50,22 +50,19 @@ class Conversation {
     // attached to a sent turn — kept out of persisted state; an unsent
     // attachment does not survive a panel reload, matching the composer text.
     this.staged = [];
-    // Mid-turn steering queue: messages typed while a turn is running.
-    // Small, persisted, and flushed as normal turns when the run settles.
-    this.steers = Array.isArray(restored.steers) ? restored.steers.slice(-20) : [];
     this.modelsLoaded = false;
     this.workersLoaded = false;
     this.timelineState = createTimelineState();
     this.state = { session: null, sessions: [], text: '', reasoning: '', activity: [], timeline: [],
       approvals: [], models: null, modelsError: null, workers: [], workersError: null,
-      activeTask: null, backgroundTasks: [], busy: false, steers: [],
+      activeTask: null, backgroundTasks: [], busy: false, queue: [],
       connected: false, status: 'Not connected', error: '', endpoint: gateway.url };
     this.observer = null; this.epoch = 0; this.stagedGen = 0; this.sending = false;
     this.disposed = false;
   }
   emit(updateKind = 'control') {
     if (this.disposed) return;
-    this.publish({ ...this.state, staged: this.staged, steers: this.steers,
+    this.publish({ ...this.state, staged: this.staged,
       workTurns: this.workBySession[this.state.session?.session_id] || [],
       updateKind,
       canCancel: Boolean(this.pending[this.state.session?.session_id] || this.pendingTask) });
@@ -117,7 +114,7 @@ class Conversation {
     if (this.disposed) return;
     await this.save({ selected: this.state.session?.session_id, pending: this.pending,
       pendingTask: this.pendingTask, completedTimelines: this.completedTimelines,
-      workBySession: this.workBySession, steers: this.steers });
+      workBySession: this.workBySession });
   }
   async refresh(selected = this.state.session?.session_id, explicit = false) {
     if (this.disposed) return;
@@ -140,6 +137,7 @@ class Conversation {
       this.state.connected = true;
       this.restoreCompletedTimeline(session?.session_id);
       if (session && this.gateway.activity) await this.loadHistory(selected, epoch);
+      if (session) await this.loadQueue(selected, epoch);
       if (epoch !== this.epoch) return;
       this.state.busy = Boolean(session && (this.pending[selected] || ['running', 'cancelling', 'busy'].includes(session.status)));
       this.state.status = this.state.busy ? 'Work in progress · reconnecting' : 'Connected';
@@ -349,14 +347,17 @@ class Conversation {
     if (epoch !== this.epoch) return;
     this.settleCompletedTimeline(sid);
     await this.persist();
-    this.state.status = receipt.status;
-    this.state.busy = false;
-    this.state.error = receipt.status === 'failed' || receipt.status === 'execution_unknown'
+    const stillBusy = Boolean(this.pending[sid] || ['running', 'cancelling', 'busy'].includes(session.status));
+    this.state.status = stillBusy ? 'Working' : receipt.status;
+    this.state.busy = stillBusy;
+    this.state.error = !stillBusy && (receipt.status === 'failed' || receipt.status === 'execution_unknown')
       ? String(receipt.result?.error || receipt.status) : '';
-    await this.loadApprovals(epoch); await this.loadTasks(epoch); this.emit();
-    if (this.gateway.activity) this.watchSession(sid, epoch);
-    // A queued steer rides out as its own turn only after this one settled.
-    await this.flushSteers(sid);
+    await this.loadApprovals(epoch); await this.loadTasks(epoch);
+    await this.loadQueue(sid, epoch);
+    this.emit();
+    const active = this.pending[sid];
+    if (active) this.observe(sid, active.requestId, active.startCursor || 0, epoch);
+    else if (this.gateway.activity) this.watchSession(sid, epoch);
   }
   async observe(sid, rid, cursor, epoch) {
     const observer = new AbortController(); this.observer?.abort(); this.observer = observer;
@@ -374,6 +375,9 @@ class Conversation {
         if (event.event.startsWith('task.')) { await this.loadTasks(epoch); this.emit(); }
         // The agent asking the editor to do something (open a file, list Problems).
         if (event.event === 'ide.request') { void this.answerIde(sid, data); continue; }
+        if (event.event === 'queue.updated') {
+          await this.loadQueue(sid, epoch); this.emit(); continue;
+        }
         if (event.event === 'message.created') {
           const session = await this.gateway.session(sid);
           if (epoch !== this.epoch) return;
@@ -418,8 +422,8 @@ class Conversation {
     if (!this.observer || this.observer.signal.aborted) await this.refresh(sid);
   }
   // Mid-turn steering. The Gateway owns live injection into the active
-  // JaegerAgent. If it honestly reports that this request has no ReAct agent,
-  // queue locally and send as a normal follow-up once the owner settles.
+  // JaegerAgent. If it honestly reports that no agent is steerable, the IDE
+  // does not invent a second client-owned queue; the operator uses Queue next.
   async steer(text) {
     text = String(text).trim();
     const sid = this.state.session?.session_id;
@@ -432,18 +436,82 @@ class Conversation {
       return Boolean(result.steered);
     } catch (error) {
       if (error.status !== 409) throw error;
-      this.steers.push({ id: randomUUID(), sessionId: sid, text, queuedAt: Date.now() });
-      this.state.status = 'Steering queued · sends when this turn finishes';
+      this.state.status = 'No live agent to steer · use Queue next';
       this.emit();
-      return true;
+      return false;
     }
   }
-  async flushSteers(sid) {
-    const queued = this.steers.filter(item => item.sessionId === sid);
-    if (!queued.length || this.disposed) return;
-    this.steers = this.steers.filter(item => item.sessionId !== sid);
+  async loadQueue(sid, epoch = this.epoch) {
+    if (!sid || !this.gateway.queue) return;
+    const result = await this.gateway.queue(sid);
+    if (epoch !== this.epoch || this.disposed) return;
+    this.state.queue = Array.isArray(result.items) ? result.items : [];
+  }
+  async queue(text, model = '', provider = '', workspace = '', ide = null) {
+    text = String(text).trim();
+    const sid = this.state.session?.session_id;
+    if (!text || !this.state.connected || !sid) return false;
+    const epoch = this.epoch;
+    const requestId = randomUUID();
+    const attachmentIds = this.staged.map(a => a.attachment_id);
+    let response;
+    this.state.status = 'Queuing…'; this.emit();
+    try {
+      response = await this.gateway.queueAdd(sid, {
+        text, request_id: requestId, attachment_ids: attachmentIds,
+        ...(model ? { model, ...(provider ? { provider } : {}) } : {}),
+        ...(workspace ? { workspace } : {}),
+        ...(ide ? { options: { ide } } : {}),
+      });
+    } catch (error) {
+      this.state.error = error.message;
+      this.state.status = 'Queue not accepted';
+      this.emit();
+      return false;
+    }
+    if (epoch !== this.epoch || this.disposed) return false;
+    await this.loadQueue(sid, epoch);
+    this.state.error = '';
+    this.publish({ accepted: true, submittedText: text });
+    this.stagedGen++; this.staged = [];
+    if (response.status === 'running' && response.request_id) {
+      const rid = response.request_id;
+      const startCursor = Math.max(0, Number(response.start_event_id || 1) - 1);
+      this.pending[sid] = { requestId: rid, startCursor };
+      const work = { requestId: rid, startedAt: Date.now(), finishedAt: null, status: 'running',
+        userIndex: (this.state.session?.messages || []).filter(m => m.role === 'user').length };
+      this.workBySession[sid] = [...(this.workBySession[sid] || []), work];
+      this.state.busy = true;
+      this.state.session = await this.gateway.session(sid);
+      this.state.status = 'Working';
+      await this.persist();
+      this.emit();
+      this.observe(sid, rid, startCursor, epoch);
+    } else {
+      this.state.status = 'Queued · waiting for the current turn';
+      await this.persist();
+      this.emit();
+    }
+    return true;
+  }
+  async queueUpdate(id, patch = {}) {
+    const sid = this.state.session?.session_id;
+    if (!sid) throw new Error('Open a conversation first.');
+    await this.gateway.queueUpdate(sid, id, patch);
+    await this.loadQueue(sid); this.emit();
+  }
+  async queueDelete(id) {
+    const sid = this.state.session?.session_id;
+    if (!sid) throw new Error('Open a conversation first.');
+    await this.gateway.queueDelete(sid, id);
+    await this.loadQueue(sid); this.emit();
+  }
+  async queueReorder(order) {
+    const sid = this.state.session?.session_id;
+    if (!sid) throw new Error('Open a conversation first.');
+    const result = await this.gateway.queueReorder(sid, order);
+    this.state.queue = Array.isArray(result.items) ? result.items : [];
     this.emit();
-    for (const item of queued) await this.send(item.text);
   }
   async submitParentTask({ goal, worker, taskId, idempotencyKey, readOnly = true }) {
     goal = String(goal || '').trim();
