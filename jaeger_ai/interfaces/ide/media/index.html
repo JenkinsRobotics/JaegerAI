@@ -44,7 +44,7 @@
         <button id="access" class="pill access" type="button" aria-haspopup="listbox" aria-expanded="false" title="What Jaeger may do without asking" hidden><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 5 6v5c0 4.2 2.8 7.7 7 9 4.2-1.3 7-4.8 7-9V6l-7-3Z"/><path d="M12 8.5v4M12 15.5v.01"/></svg><span id="access-label">Full access</span></button>
       </div>
       <div class="bar-right">
-        <label class="pill model-pill" title="Choose model"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg><span class="sr-only">Model</span><select id="model" aria-label="Model"><option value="">Gateway default</option></select><svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></label>
+        <button id="model-trigger" class="pill model-pill" type="button" aria-haspopup="dialog" title="Choose model"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg><span class="sr-only">Model</span><span id="model-display">Gateway default</span><svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
         <button id="ide-context" class="pill toggle" type="button" aria-pressed="true" title="Include your open file, selection and tabs with each message"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 7-6 2-2 6-6-15Z"/></svg><span>IDE context</span></button>
         <button id="workspace" class="pill workspace" type="button" title="Choose the workspace Jaeger should use"><span id="workspace-label">Workspace</span></button>
         <button id="worktree" class="pill worktree" type="button" title="Select an existing git worktree"><span>Worktree</span></button>
@@ -57,6 +57,13 @@
     <div id="access-menu" role="listbox" aria-label="Permissions" hidden></div>
   </form>
   <div class="workspace" title="Current workspace"><span class="workspace-icon">▱</span><span id="context">Work locally</span><span>⌄</span></div>
+  <dialog id="model-menu" aria-label="Choose model">
+    <div class="model-menu-header">
+      <input type="search" id="model-search" placeholder="Search models…" aria-label="Search models">
+      <button type="button" id="model-menu-close" aria-label="Close"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+    </div>
+    <div class="model-list" id="model-list" role="listbox" aria-label="Models"></div>
+  </dialog>
 </footer>
 <script type="module" nonce="{{NONCE}}">
   try { window.smd = await import('{{SMD}}'); }

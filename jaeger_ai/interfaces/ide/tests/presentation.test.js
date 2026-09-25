@@ -27,6 +27,7 @@ test('inline diffs keep old/new line numbers and render source as text', () => {
 const {
   modelLabel, toolName, activityTitle, groupActivity, failureCount,
   statusLabel, groupTurns, selectableModels, providerModelValue, parseProviderModel, filterChats,
+  groupSelectableModels, modelSelectionLabel,
 } = require('../media/presentation');
 
 test('modelLabel falls back to a prompt, never blank', () => {
@@ -176,4 +177,31 @@ test('filterChats searches title, workspace, and session id without inventing ro
   assert.deepEqual(filterChats(sessions, 'no-match'), []);
   assert.deepEqual(filterChats(sessions, ''), sessions);
   assert.deepEqual(filterChats(undefined, 'one'), []);
+});
+
+test('groupSelectableModels groups by provider and preserves catalog order', () => {
+  const groups = groupSelectableModels([
+    { provider: 'openai', id: 'gpt-4' },
+    { provider: 'anthropic', id: 'claude' },
+    { provider: 'openai', id: 'gpt-3.5' },
+  ]);
+  assert.deepEqual([...groups.keys()], ['openai', 'anthropic']);
+  assert.deepEqual(groups.get('openai'), [{ provider: 'openai', id: 'gpt-4' }, { provider: 'openai', id: 'gpt-3.5' }]);
+  assert.deepEqual(groupSelectableModels(null), new Map());
+  assert.deepEqual(groupSelectableModels([]), new Map());
+});
+
+test('modelSelectionLabel matches the picker contract for every selection kind', () => {
+  const ctx = { configuredModel: 'gpt-4o', sessionModel: 'kimi-k2.7' };
+  assert.equal(modelSelectionLabel('', ctx), 'kimi-k2.7', "'' shows the session model");
+  assert.equal(modelSelectionLabel('', { configuredModel: 'gpt-4o' }), 'Gateway default', "'' without a session model says Gateway default");
+  assert.equal(modelSelectionLabel('config', ctx), 'gpt-4o', "'config' shows the configured model id");
+  assert.equal(modelSelectionLabel('openai::gpt-4', ctx), 'gpt-4', 'a provider choice shows the model id');
+  assert.equal(modelSelectionLabel('openai::gpt-4', { configuredModel: '' }), 'gpt-4');
+  assert.equal(modelSelectionLabel('', {}), 'Gateway default');
+});
+
+test('modelSelectionLabel degrades honestly when state is missing', () => {
+  assert.equal(modelSelectionLabel('config', { configuredModel: '' }), 'From settings');
+  assert.equal(modelSelectionLabel('openai::', {}), 'openai::', 'malformed value is echoed, never invented');
 });
