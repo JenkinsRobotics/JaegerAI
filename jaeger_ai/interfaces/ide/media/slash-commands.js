@@ -18,6 +18,7 @@ const COMMANDS = [
   { name: 'export', group: 'Chat', description: 'Save this conversation as Markdown', needs: ['session'] },
   { name: 'model', group: 'Settings', description: 'Choose the model', needs: [] },
   { name: 'plan', group: 'Code', description: 'Plan this request without executing changes', args: '<request>', takesArgs: true, needs: [] },
+  { name: 'diagnostics', group: 'Code', description: 'Show workspace problems', needs: [] },
   { name: 'diff', group: 'Code', description: 'Review the files this turn changed', needs: ['changes'] },
   { name: 'status', group: 'Info', description: 'Show connection, model and conversation status', needs: [] },
   { name: 'skills', group: 'Info', description: 'Browse available skills', args: '[filter]', takesArgs: true, needs: [] },

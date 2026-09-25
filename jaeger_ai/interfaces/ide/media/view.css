@@ -58,6 +58,13 @@ footer{position:relative}
 .slash-name{flex:0 0 auto;font-family:var(--vscode-editor-font-family,monospace);font-size:12px}.slash-description{color:var(--muted);font-size:12px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #info{margin:0 16px 8px;padding:9px 12px;border:1px solid var(--line);border-radius:11px;background:var(--vscode-editorWidget-background,#242424);font-size:12px;max-height:34vh;overflow:auto}
 
+#context-chips{display:flex;flex-wrap:wrap;gap:6px;margin:0 5px 7px;padding:0}
+.context-chip{display:inline-flex;align-items:center;gap:6px;max-width:250px;padding:3px 8px;border:1px solid var(--line);border-radius:999px;background:var(--panel);color:var(--muted);font-size:11px}
+.context-chip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.context-chip[data-severity="error"]{border-color:#cf573680;color:var(--error,#ef8787)}
+.context-chip[data-severity="warning"]{border-color:#d9b24a80;color:var(--accent-text,#d9b24a)}
+.context-chip[aria-pressed="true"]{color:var(--vscode-foreground,#ddd)}
+
 #queue{margin:0 16px 8px;border:1px solid var(--line);border-radius:11px;background:var(--vscode-editorWidget-background,#242424);font-size:12px}
 .queue-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 11px;color:var(--muted);letter-spacing:.04em}
 .queue-list{display:flex;flex-direction:column;min-width:0}
