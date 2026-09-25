@@ -1,12 +1,16 @@
 'use strict';
 const vscode = require('vscode');
 const { randomBytes } = require('node:crypto');
+const { execFile } = require('node:child_process');
+const util = require('node:util');
 const fs = require('node:fs');
 const path = require('node:path');
 const { Gateway } = require('./gateway');
 const { Conversation } = require('./conversation');
 const { parseProviderModel } = require('./media/presentation');
 const commands = require('./commands');
+const execFileAsync = util.promisify(execFile);
+
 let contract = { gatewayUrl: 'http://127.0.0.1:8810' };
 try { contract = require('./contract.json'); } catch (_) {}
 
@@ -133,6 +137,42 @@ function activate(context) {
     await context.workspaceState.update(workspaceStorageKey(), selectedWorkspace);
     view?.webview.postMessage({ selectedWorkspace });
   };
+  const listWorktrees = async () => {
+    const root = selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    if (!root) return [];
+    try {
+      const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
+        cwd: root,
+        timeout: 5000,
+        maxBuffer: 1024 * 1024,
+      });
+      return commands.parseWorktrees(stdout);
+    } catch {
+      return [];
+    }
+  };
+
+  const selectWorktree = async () => {
+    const worktrees = await listWorktrees();
+    if (!worktrees.length) {
+      view?.webview.postMessage({ error: 'No git worktrees found for the selected workspace.' });
+      return;
+    }
+    const items = worktrees.map(row => ({
+      label: row.branch || row.head.slice(0, 12) || 'detached',
+      description: row.path,
+      row,
+    }));
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Select an existing git worktree',
+      matchOnDescription: true,
+    });
+    if (!picked) return;
+    selectedWorkspace = picked.row.path;
+    await context.workspaceState.update(workspaceStorageKey(), selectedWorkspace);
+    view?.webview.postMessage({ selectedWorkspace });
+  };
+
   const mentionFile = async () => {
     const root = selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
     if (!root) {
@@ -273,6 +313,7 @@ function activate(context) {
           return controller.refresh(message.id);
         }
         if (message.type === 'selectWorkspace') return selectWorkspace();
+        if (message.type === 'selectWorktree') return selectWorktree();
         if (message.type === 'closeSession' && typeof message.id === 'string') {
           if (controller.sending && controller.state.session?.session_id === message.id) {
             throw new Error('Wait for request admission before closing this tab.');

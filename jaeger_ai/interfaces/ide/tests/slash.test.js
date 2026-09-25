@@ -9,7 +9,7 @@ const names = list => list.map(command => command.name);
 
 test('typing "/" offers only commands usable right now', () => {
   assert.deepEqual(names(slash.match('/', idle)).sort(),
-    ['agent', 'copy', 'diagnostics', 'export', 'model', 'new', 'plan', 'rename', 'resume', 'skills', 'status', 'workspace'].sort());
+    ['agent', 'copy', 'diagnostics', 'export', 'model', 'new', 'plan', 'rename', 'resume', 'skills', 'status', 'workspace', 'worktree'].sort());
   assert.ok(!names(slash.match('/', idle)).includes('stop'), 'stop needs a running turn');
   assert.ok(!names(slash.match('/', idle)).includes('diff'), 'diff needs recorded changes');
   const busy = slash.match('/', { ...idle, busy: true, changes: true });
