@@ -43,6 +43,7 @@ class Conversation {
     this.gateway = gateway; this.publish = publish; this.save = save;
     this.pending = restored.pending || {};
     this.pendingTask = restored.pendingTask || null;
+    this.openSessionIds = Array.isArray(restored.openSessionIds) ? [...new Set(restored.openSessionIds)] : [];
     this.completedTimelines = boundedCompletedTimelines(restored.completedTimelines);
     this.workBySession = Object.fromEntries(Object.entries(restored.workBySession || {}).slice(-20)
       .map(([sid, turns]) => [sid, Array.isArray(turns) ? turns.slice(-50) : []]));
@@ -55,14 +56,14 @@ class Conversation {
     this.timelineState = createTimelineState();
     this.state = { session: null, sessions: [], text: '', reasoning: '', activity: [], timeline: [],
       approvals: [], models: null, modelsError: null, workers: [], workersError: null,
-      activeTask: null, backgroundTasks: [], busy: false, queue: [],
+      activeTask: null, backgroundTasks: [], busy: false, queue: [], openSessionIds: this.openSessionIds,
       connected: false, status: 'Not connected', error: '', endpoint: gateway.url };
     this.observer = null; this.epoch = 0; this.stagedGen = 0; this.sending = false;
     this.disposed = false;
   }
   emit(updateKind = 'control') {
     if (this.disposed) return;
-    this.publish({ ...this.state, staged: this.staged,
+    this.publish({ ...this.state, openSessionIds: this.openSessionIds, staged: this.staged,
       workTurns: this.workBySession[this.state.session?.session_id] || [],
       updateKind,
       canCancel: Boolean(this.pending[this.state.session?.session_id] || this.pendingTask) });
@@ -114,7 +115,7 @@ class Conversation {
     if (this.disposed) return;
     await this.save({ selected: this.state.session?.session_id, pending: this.pending,
       pendingTask: this.pendingTask, completedTimelines: this.completedTimelines,
-      workBySession: this.workBySession });
+      workBySession: this.workBySession, openSessionIds: this.openSessionIds });
   }
   async refresh(selected = this.state.session?.session_id, explicit = false) {
     if (this.disposed) return;
@@ -131,6 +132,9 @@ class Conversation {
       const session = selected ? await this.gateway.session(selected) : null;
       if (epoch !== this.epoch) return;
       this.state.sessions = listed.sessions || []; this.state.session = session;
+      if (session && !this.openSessionIds.includes(session.session_id)) {
+        this.openSessionIds = [...this.openSessionIds, session.session_id];
+      }
       // A conversation switch drops this client's staged (unsent) attachments —
       // they were picked for the previous conversation, not this one.
       this.stagedGen++; this.staged = [];
@@ -252,6 +256,18 @@ class Conversation {
       this.state.modelsError = error.message;
     }
   }
+  async closeSession(sessionId) {
+    sessionId = String(sessionId || '');
+    if (!sessionId || !this.openSessionIds.includes(sessionId)) return;
+    this.openSessionIds = this.openSessionIds.filter(id => id !== sessionId);
+    if (this.state.session?.session_id === sessionId) {
+      const next = this.openSessionIds.at(-1) || null;
+      await this.refresh(next, true);
+      return;
+    }
+    await this.persist();
+    this.emit();
+  }
   async newSession(title, workspace = '') {
     if (this.sending) throw new Error('Wait for request admission before switching.');
     const epoch = this.epoch;
@@ -278,6 +294,7 @@ class Conversation {
         if (this.disposed || epoch !== this.epoch) { this.sending = false; return; }
         this.state.session = created;
         this.state.sessions = [created, ...this.state.sessions.filter(item => item.session_id !== created.session_id)];
+        this.openSessionIds = [...new Set([...this.openSessionIds, created.session_id])];
         this.restoreCompletedTimeline(created.session_id);
       } catch (error) {
         this.sending = false;

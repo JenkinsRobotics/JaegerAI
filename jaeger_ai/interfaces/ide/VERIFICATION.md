@@ -10,7 +10,8 @@ operator approves a controlled restart.
 - IDE queue contract: 6 Node tests passed, 0 failed.
 - IDE Plan-mode contract: 4 Node tests passed, 0 failed.
 - IDE context-chip contract: 3 Node tests passed, 0 failed.
-- Full IDE Node suite: 123 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
+- IDE session-tab contract: 4 Node tests passed, 0 failed.
+- Full IDE Node suite: 127 passed, 1 intentional isolated-Gateway fixture skip, 0 failed.
 - The IDE Plan-mode test file is included in that suite; the focused file itself passes 4/4.
 - `git diff --check` passed.
 
@@ -26,6 +27,8 @@ Plan mode also still needs a live-provider turn to prove the model actually call
 execution receipt.
 Context chips still need installed-host acceptance to confirm they refresh on editor
 selection, tab, and diagnostics changes in the actual Antigravity/VS Code host.
+Session tabs still need installed-host acceptance to confirm tab focus, overflow,
+and close behavior in the actual Antigravity/VS Code host.
 
 ---
 
