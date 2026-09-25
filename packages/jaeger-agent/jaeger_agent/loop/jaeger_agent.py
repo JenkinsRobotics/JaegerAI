@@ -2249,7 +2249,15 @@ class JaegerAgent:
         # the single point every dispatched tool passes through with its
         # outcome and duration already resolved, so count it here rather
         # than at each call site. Best-effort: telemetry never breaks a turn.
+        # Two sinks, each counted once: the agent-local usage registry
+        # (sidecar ``/usage``, skills curation) and the product-injected
+        # stats via the callbacks dependency inversion.
         self.callbacks.on_record_tool(name, ok=_ok, elapsed=elapsed)
+        try:
+            from jaeger_agent.core.usage import record_tool
+            record_tool(name, ok=_ok, elapsed=elapsed)
+        except Exception:  # noqa: BLE001
+            pass
 
         # File-mutation verifier bookkeeping: remember failures per
         # (tool, path); a later SUCCESS on the same target supersedes.

@@ -297,6 +297,11 @@ def _run(monkeypatch, stdin_text, *, run_reply=None, boot_exc=None,
             return f"agent-whisper:{audio.size}:{sample_rate}"
 
     monkeypatch.setattr("jaeger_agent.SpeechRuntime", _FakeSpeechRuntime)
+    # The bridge caches its speech runtime on the module-level _pipeline; a
+    # stale runtime from another test would bypass this fake, so drop the
+    # cache for the duration of the run.
+    import jaeger_ai.main as _main
+    monkeypatch.setitem(_main._pipeline, "speech_runtime", None)
     # Protocol unit tests must not ask macOS for camera/mic/accessibility
     # permissions. Concurrent xdist workers invoking the real first-boot TCC
     # probe can terminate a worker inside native frameworks.

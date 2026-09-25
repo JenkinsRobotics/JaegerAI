@@ -385,10 +385,14 @@ def _select_available(
     return out
 
 
-def prompt_playbooks(
+def available_playbooks(
     available_tools: set[str] | None = None,
 ) -> list[PlaybookSkill]:
-    """The deliberately scoped set eligible for automatic model routing."""
+    """Playbook skills the agent should actually see: every discovered skill
+    minus those for another platform, those disabled in the instance config,
+    and (when ``available_tools`` is given) those whose required tools are
+    absent. The `skill` tool and the prompt index use this; the raw
+    :func:`discover_playbooks` is kept for internal callers (e.g. curation)."""
     return _select_available(discover_playbooks(), _disabled_playbook_names(),
                              available_tools)
 
@@ -443,7 +447,7 @@ def match_playbook(
     if not clean or not qtokens:
         return None, 0.0, "empty"
     scored: list[tuple[float, PlaybookSkill, str]] = []
-    for skill in prompt_playbooks(available_tools):
+    for skill in available_playbooks(available_tools):
         if skill.origin == "marketplace":
             continue
         # Planning-only recipes require an actual request for a plan. A
@@ -491,7 +495,7 @@ def build_skill_index(available_tools: set[str] | None = None) -> str:
     space), so the old ~1.9k-token prose menu is gone — this just reminds the
     model the capability exists and which tool loads a skill. ``skill(list)``
     still gives the full enriched catalog on demand."""
-    skills = prompt_playbooks(available_tools)
+    skills = available_playbooks(available_tools)
     if not skills:
         return ""
     return (
