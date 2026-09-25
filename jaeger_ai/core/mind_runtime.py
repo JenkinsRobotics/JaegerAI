@@ -142,17 +142,20 @@ def create_runtime(*, bus: Any, config: Mapping[str, Any] | None = None) -> Any:
         attached = try_attach_runtime(instance_name=cfg.get("instance_name"))
         if attached is not None:
             return attached
+        raise RuntimeError(
+            "Jaeger Gateway is unavailable and no live bridge socket answered; "
+            "refusing to boot a second local agent. Start `jaeger gateway daemon`, "
+            "connect the bridge, or set JAEGER_NO_ATTACH=1 for isolated local testing."
+        )
     try:
         return JaegerAIRuntime(bus=bus, config=cfg)
     except RuntimeError as exc:
         if "locked by pid" not in str(exc):
             raise
-        if attach_policy.attach_disabled():
-            raise
-        attached = try_attach_runtime(instance_name=cfg.get("instance_name"))
-        if attached is not None:
-            return attached
-        raise
+        raise RuntimeError(
+            "Local runtime is locked by another process and attach mode is disabled; "
+            "start the Jaeger Gateway or unset JAEGER_NO_ATTACH to attach to a live owner."
+        ) from exc
 
 
 __all__ = ["JaegerAIRuntime", "create_runtime"]
