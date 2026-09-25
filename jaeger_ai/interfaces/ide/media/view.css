@@ -85,6 +85,7 @@ footer{position:relative}
 .queue-actions button:hover{background:var(--hover);color:var(--vscode-foreground,#ddd)}
 .pill.queue-action{height:28px;padding:0 9px}
 .pill.workspace{max-width:190px}.pill.workspace span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#mention{font-size:16px;line-height:1}
 .pill.queue-action[hidden]{display:none}
 .info-heading{display:flex;align-items:center;justify-content:space-between;gap:8px;color:var(--muted);font-size:11px;letter-spacing:.04em;margin-bottom:5px}.info-heading .icon-button{width:22px;height:22px;font-size:16px}
 .info-lines>div{line-height:1.6;overflow-wrap:anywhere}

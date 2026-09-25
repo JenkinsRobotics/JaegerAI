@@ -118,7 +118,8 @@ function activate(context) {
   const workspaceStorageKey = () => `workspace:${endpoint()}`;
   let selectedWorkspace = '';
   const restoreWorkspace = () => {
-    selectedWorkspace = context.workspaceState.get(workspaceStorageKey(), '')
+    const stored = context.workspaceState.get(workspaceStorageKey(), '');
+    selectedWorkspace = (typeof stored === 'string' && stored)
       || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
       || '';
     return selectedWorkspace;
@@ -131,6 +132,36 @@ function activate(context) {
     selectedWorkspace = picked.uri.fsPath;
     await context.workspaceState.update(workspaceStorageKey(), selectedWorkspace);
     view?.webview.postMessage({ selectedWorkspace });
+  };
+  const mentionFile = async () => {
+    const root = selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    if (!root) {
+      view?.webview.postMessage({ error: 'Open a workspace folder before mentioning a file.' });
+      return;
+    }
+    const files = await vscode.workspace.findFiles('**/*', '**/node_modules/**', 200);
+    const items = files.map(uri => {
+      const filePath = uri.fsPath;
+      const relative = path.relative(root, filePath);
+      return { label: path.basename(filePath), description: relative, uri };
+    }).filter(item => item.description && !item.description.startsWith('..'));
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Mention a file from the selected workspace',
+      matchOnDescription: true,
+    });
+    if (!picked) return;
+    if (!controller.state.session) await controller.newSession('New conversation', selectedWorkspace);
+    const filePath = picked.uri.fsPath;
+    const ext = path.extname(filePath).toLowerCase();
+    let size = 0;
+    try { size = fs.statSync(filePath).size; } catch { /* let the Gateway report the real boundary */ }
+    await controller.addAttachment({
+      path: filePath,
+      name: path.basename(filePath),
+      mime: MIME_BY_EXTENSION[ext] || 'application/octet-stream',
+      size,
+    });
+    view?.webview.postMessage({ mention: `@${picked.description}` });
   };
   const selectedModel = value => {
     if (value === 'config') return { model: configuredModel(), provider: '' };
@@ -327,6 +358,7 @@ function activate(context) {
           if (!accepted) view?.webview.postMessage({ steerRejected: message.text });
           return;
         }
+        if (message.type === 'mentionFile') return mentionFile();
         if (message.type === 'attach') {
           const picked = await vscode.window.showOpenDialog({
             canSelectMany: true, openLabel: 'Attach to conversation',
