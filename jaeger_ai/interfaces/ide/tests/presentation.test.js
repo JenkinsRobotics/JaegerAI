@@ -26,7 +26,7 @@ test('inline diffs keep old/new line numbers and render source as text', () => {
 });
 const {
   modelLabel, toolName, activityTitle, groupActivity, failureCount,
-  statusLabel, groupTurns, selectableModels, providerModelValue, parseProviderModel,
+  statusLabel, groupTurns, selectableModels, providerModelValue, parseProviderModel, filterChats,
 } = require('../media/presentation');
 
 test('modelLabel falls back to a prompt, never blank', () => {
@@ -162,4 +162,18 @@ test('activity icons describe tools and use a cursor for mixed or integration wo
   assert.equal(icon('read_file', 'apply_patch', 'exec_command'), 'integration');
   assert.equal(icon('get_mode'), 'integration');
   assert.equal(icon(), 'integration');
+});
+
+
+test('filterChats searches title, workspace, and session id without inventing rows', () => {
+  const sessions = [
+    { session_id: 'one', title: 'Fix the login loop', workspace: '/repo/web' },
+    { session_id: 'two', title: 'Plan the release', workspace: '/repo/mobile' },
+  ];
+  assert.deepEqual(filterChats(sessions, 'login').map(row => row.session_id), ['one']);
+  assert.deepEqual(filterChats(sessions, 'mobile').map(row => row.session_id), ['two']);
+  assert.deepEqual(filterChats(sessions, 'TWO').map(row => row.session_id), ['two']);
+  assert.deepEqual(filterChats(sessions, 'no-match'), []);
+  assert.deepEqual(filterChats(sessions, ''), sessions);
+  assert.deepEqual(filterChats(undefined, 'one'), []);
 });

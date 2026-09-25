@@ -58,8 +58,8 @@ deployment, not exposing the unauthenticated Gateway.
   Tab order is client state, not a second session database.
 - `/archive` and `/unarchive` move a conversation between the active and archived
   sections. Archive state is Gateway-owned session metadata, not a client-side flag.
-- `/archive` and `/unarchive` move a conversation between the active and archived
-  sections. Archive state is Gateway-owned session metadata, not a client-side flag.
+- Chat search filters the Gateway-owned chat projection by title, workspace, or
+  session ID. The search is a client-side list filter, not a second search service.
 - The workspace button and `/workspace` command choose which open folder Jaeger
   uses. The selection is persisted per Gateway endpoint and sent through the
   Gateway admission `workspace` field for new chats, immediate turns, and queued work.
