@@ -163,7 +163,6 @@ class DelegateRuntimeAdapter:
                         "existing_conversation",
                         "follow_up",
                         "reconcile",
-                        "read_only_enforced",
                     }
                 ),
                 "transport": "cli",
@@ -182,11 +181,11 @@ class DelegateRuntimeAdapter:
     async def submit(self, task: ParentTask) -> str:
         from jaeger_agent.delegates.contracts import DelegateRequest
 
-        # Current built-in CLI launchers do not accept/enforce a read-only mode.
-        # In particular, Codex currently launches with workspace-write.
-        if task.read_only:
-            raise ValueError("CLI adapter cannot enforce read_only")
         status = await self.probe()
+        # A CLI worker may advertise `read_only_enforced`; otherwise it cannot
+        # accept a read-only task. The Gateway also rejects writable tasks.
+        if task.read_only and "read_only_enforced" not in status.get("capabilities", ()):
+            raise ValueError("CLI adapter cannot enforce read_only")
         missing = task.required_capabilities - set(status.get("capabilities", ()))
         if missing:
             raise ValueError(

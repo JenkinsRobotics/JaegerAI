@@ -488,7 +488,7 @@ def create_default_orchestration_service() -> IDEOrchestrationService:
     service = IDEOrchestrationService()
 
     try:
-        from jaeger_agent.delegates.codex.runtime import create_runtime as create_codex
+        from jaeger_agent.delegates.codex.runtime import create_read_only_runtime as create_codex
 
         service.register_adapter(DelegateRuntimeAdapter(create_codex()))
     except Exception as exc:  # noqa: BLE001 — optional runtime registration
