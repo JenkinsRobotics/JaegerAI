@@ -128,4 +128,87 @@ def test_webui_launcher_does_not_adopt_a_sibling_hermes_checkout():
     launcher = (REPO_ROOT / "scripts/run-jaeger-webui.sh").read_text(encoding="utf-8")
     assert 'JAEGER_HERMES_AGENT_SRC:-${HOME}/GitHub/hermes-agent' not in launcher
     assert 'hermes_agent_src="${JAEGER_HERMES_AGENT_SRC:-}"' in launcher
-    assert (REPO_ROOT / "jaeger_ai/vendor/hermes_agent/run_agent.py").is_file()
+    # H03 (updated): the vendor tree has been removed (2026-09-26 cleanup).
+    # The product is self-contained via jaeger_ai/core + packages/jaeger-agent.
+    # The webui bootstrap discovers an external agent dir at runtime; it no
+    # longer depends on an in-tree vendor copy.
+    assert not (REPO_ROOT / "jaeger_ai/vendor").exists()
+
+
+ALLOWED_ROOT_ITEMS = {
+    ".agents",
+    ".git",
+    ".gitattributes",
+    ".github",
+    ".gitignore",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "CLAUDE.md",
+    "COMMANDS.md",
+    "CONTRIBUTING.md",
+    "LICENSE",
+    "MANIFEST.in",
+    "README.md",
+    "SECURITY.md",
+    "STRUCTURE.md",
+    "apps",
+    "clients",
+    "conftest.py",
+    "dev",
+    "docs",
+    "install.sh",
+    "integrations",
+    "jaeger",
+    "jaeger.multimodal.toml",
+    "jaeger.toml",
+    "jaeger.windowed.toml",
+    "jaeger_ai",
+    "packages",
+    "pyproject.toml",
+    "requirements.txt",
+    "run.sh",
+    "scripts",
+    "uv.lock",
+}
+
+
+def test_repo_root_strict_allowlist():
+    """Fail if an unapproved file or directory appears in the repository root."""
+    actual_items = {p.name for p in REPO_ROOT.iterdir()}
+    unexpected = actual_items - ALLOWED_ROOT_ITEMS
+    assert not unexpected, (
+        f"Tripwire triggered: unapproved files/directories found in repository root: {sorted(unexpected)}. "
+        "Every file in root must be in the approved ALLOWED_ROOT_ITEMS list. "
+        "Do not leave scratch scripts, compat shims, or runtime artifacts in repo root."
+    )
+
+
+def test_no_compat_shims_or_vendor_paths():
+    """Ensure dead compat shims and vendor directories never reappear."""
+    forbidden_paths = [
+        REPO_ROOT / "jaeger_ai" / "vendor",
+        REPO_ROOT / "hermes_state.py",
+        REPO_ROOT / "jaeger_ai" / "hermes_state.py",
+        REPO_ROOT / "packages" / "jaeger-agent" / "hermes_state.py",
+    ]
+    reappeared = [str(p.relative_to(REPO_ROOT)) for p in forbidden_paths if p.exists()]
+    assert not reappeared, (
+        f"Tripwire triggered: forbidden vendor or compat shim path reappeared: {reappeared}. "
+        "Per AGENTS.md §5, compat shims are strictly forbidden."
+    )
+
+
+def test_every_feature_has_a_readme():
+    """Per AGENTS.md §5, every folder in jaeger_ai/features/ must have a README.md."""
+    features_dir = REPO_ROOT / "jaeger_ai" / "features"
+    missing: list[str] = []
+    for item in sorted(features_dir.iterdir()):
+        if item.is_dir() and not item.name.startswith((".", "_")):
+            readme = item / "README.md"
+            if not readme.is_file():
+                missing.append(item.name)
+    assert not missing, (
+        f"Tripwire triggered: feature directories missing README.md: {missing}. "
+        "Every feature in jaeger_ai/features/ must have a README.md explaining its purpose and touchpoints."
+    )
+

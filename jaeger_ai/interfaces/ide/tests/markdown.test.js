@@ -12,9 +12,10 @@ test('isSafeMarkdownUrl: links allow http/https/mailto, block everything else', 
   }
 });
 
-test('isSafeMarkdownUrl: images require https, mailto/http/data are rejected', () => {
+test('isSafeMarkdownUrl: images allow https and image data URIs, mailto/http/dangerous data are rejected', () => {
   assert.equal(isSafeMarkdownUrl('https://example.org/pic.png', { image: true }), true);
-  for (const url of ['http://example.org/pic.png', 'mailto:a@example.org', 'data:image/png;base64,AA==']) {
+  assert.equal(isSafeMarkdownUrl('data:image/png;base64,AA==', { image: true }), true);
+  for (const url of ['http://example.org/pic.png', 'mailto:a@example.org', 'data:text/html,<script>']) {
     assert.equal(isSafeMarkdownUrl(url, { image: true }), false, url);
   }
 });

@@ -74,25 +74,36 @@ exercised; none are aspirational.
 |---|---|---|
 | `jaeger_ai/interfaces/swift` (= `apps/macos`) | SwiftUI, `MenuBarExtra`, `LSUIElement` | REST+SSE `:8810`, AF_UNIX bridge |
 | `jaeger_ai/features/webui` (= `apps/web`) | vendored Python + vanilla JS overlays | server-side proxy → `:8810` |
+| `jaeger_ai/interfaces/ide` | VS Code extension sidebar | REST+SSE `:8810`, native daemon lifecycle |
 | `jaeger_ai/interfaces/tui` | `prompt_toolkit` | AF_UNIX bridge |
 | `jaeger_ai/interfaces/pyside6` | Qt + tray | AF_UNIX bridge |
 
 There is no React, Electron, Next.js or TypeScript anywhere, and no JS
 build system. The type-safe client layer is Swift `Decodable`.
 
-### Run locally
+### Canonical vs. Legacy Reference Table
+
+| Canonical (Authoritative) | Legacy / Shadow / Alias (Do NOT Edit) | Distinction & Invariant |
+|---|---|---|
+| `jaeger gateway daemon` (`:8810`) | `jaeger gateway` (`:8811`, `:8812`) | `daemon` owns Jaeger sessions & SSE; bare `gateway` is external proxy. |
+| `packages/jaeger-agent/` | `jaeger_ai/vendor/` | `jaeger-agent` is live uv workspace; `vendor/` is deleted and forbidden. |
+| `jaeger_ai/interfaces/swift` | `apps/macos` | `apps/macos` is a symlink alias; authoritative code is in `jaeger_ai/`. |
+| `jaeger_ai/features/webui` | `apps/web` | `apps/web` is a symlink alias; authoritative code is in `jaeger_ai/`. |
+| `~/.jaeger/` (`operator_state_root`) | `<repo>/.jaeger_*`, root shims | Zero in-repo state; databases belong strictly in operator home. |
+| `./scripts/verify.sh` | Manual ad-hoc test invocations | Single-command deterministic test pipeline before turn completion. |
+
+### Run locally & verify
 
 ```bash
 jaeger gateway daemon                       # :8810 — start first
 ./scripts/run-jaeger-webui.sh               # :8790
 open JaegerAI.app                           # shortcut to the external native build cache
-
-jaeger onboarding status --json             # OS 1 first-boot state
-jaeger onboarding reset                     # replay the welcome (narrow)
+./scripts/verify.sh                         # deterministic test & hygiene verification pipeline
 ```
 
 Isolate a scratch instance with `JAEGER_STATE_DIR=/tmp/gw-iso` — it isolates
 the session store, so a test run cannot touch the operator's live database.
+
 
 ---
 
