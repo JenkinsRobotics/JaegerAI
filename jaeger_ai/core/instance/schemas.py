@@ -1078,7 +1078,7 @@ except ImportError:
     # parses cleanly under ``extra="forbid"``; the values are inert
     # since nothing can synthesize speech without the module present.
     class KokoroTTSConfig(BaseModel):  # type: ignore[no-redef]
-        model_config = ConfigDict(extra="forbid")
+        model_config = ConfigDict(extra="ignore")
         voice: str = "af_heart"
         lang: str = "a"
         sample_rate: int = 24000
