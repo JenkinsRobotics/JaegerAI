@@ -628,8 +628,8 @@ function render() {
   if (draftSession !== sid) { saveDraft(); draftSession = sid; $('prompt').value = drafts[sid] || ''; state.preview = null; state.changes = null; }
   const sessionOptions = JSON.stringify(state.sessions || []) + sid
     + Boolean((state.session?.messages || []).length || state.busy);
-  if (revision !== sessionOptions) { revision = sessionOptions; renderChats(); }
-  $('context').textContent = state.session?.workspace ? state.session.workspace.split('/').filter(Boolean).at(-1) : 'Work locally';
+  const ctx = $('context');
+  if (ctx) ctx.textContent = state.session?.workspace ? state.session.workspace.split('/').filter(Boolean).at(-1) : 'Work locally';
   $('stop').hidden = !state.busy || !state.canCancel; eligibility(); renderComposerBar();
   $('attach').disabled = !state.connected || state.busy;
   renderSessionTabs(); renderModels(); renderStaged(); renderContextChips();
@@ -785,8 +785,12 @@ function renderComposerBar() {
     : state.busy ? 'Steer current turn' : 'Send message';
   $('send').setAttribute('aria-label', $('send').title);
   const workspaceLabel = state.selectedWorkspace ? state.selectedWorkspace.split('/').filter(Boolean).at(-1) : 'Workspace';
-  $('workspace-label').textContent = workspaceLabel;
-  $('workspace').title = state.selectedWorkspace || 'Choose the workspace Jaeger should use';
+  if ($('workspace-label')) $('workspace-label').textContent = workspaceLabel;
+  if ($('workspace')) {
+    $('workspace').hidden = true;
+    $('workspace').title = state.selectedWorkspace || 'Choose the workspace Jaeger should use';
+  }
+  if ($('worktree')) $('worktree').hidden = true;
   const selected = selectedMode();
   for (const option of MODE_OPTIONS) {
     const node = $(option.id);
