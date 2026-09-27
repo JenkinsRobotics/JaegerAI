@@ -37,6 +37,7 @@ This single command deterministically verifies:
 - **P0-1 — Live configured-provider conversation: QUALIFIED** on an isolated Gateway + Ollama `glm-5.3-flash:cloud`, with `/v1/runtime/models` truth, a completed terminal receipt, and restart continuity. This is single-provider/model evidence and does not qualify the tool-effect, Stop/cancel, or installed-client chains.
 - **P0-2 — Live streaming Stop/cancel + immediate next turn: QUALIFIED** on an isolated Gateway + Ollama `glm-5.3-flash:cloud`; Stop during streaming produced one terminal `cancelled` receipt, no pending approvals, immediate next-turn admission, and restart continuity. This is not yet a tool-effect or installed-client cancellation proof.
 - **P0-3 — Live tool approval + independently verified effect + denial: QUALIFIED** on an isolated Gateway + Ollama `kimi-k2.7-code:cloud`; approved `write_file` produced an independently verified file effect and denial produced no file mutation. This is a single tool/effect-class proof, not a full tool-class matrix.
+- **P0-4 — Product-path runtime live qualification: QUALIFIED** on an isolated Gateway + Ollama `kimi-k2.7-code:cloud` through the live WebUI client surface; gated tool effect was independently verified, live steering was accepted, and the immediate next turn completed. This is one client-surface/tool-class proof, not the full client/tool matrix.
 
 ---
 
@@ -102,10 +103,11 @@ The model is replaceable cognition. The client is not the entity. A tool returni
 | One live-provider conversation has been qualified through the owner ReAct path, with runtime-model truth, a terminal receipt, and controlled-restart continuity | isolated Gateway `:18810` + Ollama `:11434`; `/v1/runtime/models` active = `ollama/glm-5.3-flash:cloud`; turn result model = `ollama:glm-5.3-flash:cloud`; session `p0-1-live`, request `p0-1-live-turn-2`; controlled restart returned the same session/request without duplicate execution | Live-provider integration; single provider/model only |
 | One live streaming turn was stopped during the model phase and produced exactly one terminal `cancelled` receipt, then the next turn was admitted immediately and completed; after a controlled restart the session and both receipts survived | isolated Gateway `:18820` + Ollama `:11434`; session `p0-2-cancel`; request `p0-2-cancel-1` `cancelled` with `turn.cancelled` event; request `p0-2-cancel-next` completed; no pending approvals; controlled restart returned both receipts without duplicate execution | Live-provider integration; streaming/cancel only, no tool-effect chain |
 | One live provider/tool chain gated a bounded `write_file` effect, independently verified the resulting file, then denied the same write and proved no effect; both receipts and the effect survived a controlled restart | isolated Gateway `:18830` + Ollama `:11434`; session `p0-3-approval`; request `p0-3-approval-1` approved `files.write_file` and `files.changed`/`/changes` showed `/private/tmp/gw-p0-3/instances/p0-1/workspace/p0-3-approved.txt`; file content was independently `P0-3-APPROVED-CONTENT`; request `p0-3-deny-1` was denied with empty `files.changed` and no file mutation | Live-provider integration; single tool/effect chain, not every tool class |
+| One WebUI client-surface journey completed a live provider turn, gated `write_file` approval, independently verified the file effect, accepted live steering, and immediately admitted/completed the next turn; after controlled restarts of Gateway and WebUI the session, effect, and both receipts survived | isolated Gateway `:18840` + Ollama `:11434`, WebUI `:8791`; session `p0-4-webui`; request `p0-4-webui-approval-1` approved `files.write_file` and file content was independently `P0-4-WEBUI-APPROVED`; request `p0-4-webui-steer-2` accepted Gateway steering (`turn.steer`) and completed; request `p0-4-webui-steer-next-2` completed exactly `P0-4-WEBUI-STEER-NEXT-OK`; restart retained session/effect/receipts | Live-provider integration; single client surface and tool class, not every client/tool matrix |
 
 ## Not yet qualified
 
-One live-provider conversation and one streaming Stop/cancel are qualified above; no physical-device or final installed-artifact qualification is claimed.
+One live-provider conversation, streaming Stop/cancel, tool approval/effect, and WebUI client-surface runtime qualification are above; no physical-device or final installed-artifact qualification is claimed.
 
 1. **Full live-provider matrix across providers/models/clients.**
 2. **IDE and WebUI same-session continuity.**
@@ -146,14 +148,11 @@ One live-provider conversation and one streaming Stop/cancel are qualified above
 - **Evidence:** isolated Gateway `:18830` + Ollama `:11434`, model `kimi-k2.7-code:cloud`; session `p0-3-approval`; request `p0-3-approval-1` produced `tool.started`, a pending `files.write_file` approval, an approved `files.changed` event, and an independently verified file containing `P0-3-APPROVED-CONTENT`; request `p0-3-deny-1` was denied and `files.changed` was empty while the file stayed unchanged; controlled restart retained the effect and both receipts.
 - **Remaining:** all tool classes beyond the local file write and installed-client surfaces.
 
-### P0-4 — Product-path runtime live qualification
+### P0-4 — Product-path runtime live qualification (qualified 2026-09-27)
 
-- **Problem:** The unit-level adapter defects are repaired, but the repaired path still needs live-provider and installed-client acceptance.
-- **Current evidence:** `create_runtime` now raises an explicit diagnostic when no Gateway or bridge owner is available; `GatewayRuntime` routes approvals through the real bus, reports unsupported approvals instead of hiding a deny, and calls the request-scoped Gateway steering route. `test_gateway_mind_runtime.py` passes 9 focused tests.
-- **Affected files/owners:** `core/mind_runtime.py`; `core/runtime/gateway_runtime.py`; `core/gateway/client.py`; client bus/approval surfaces.
-- **Acceptance test:** Start an isolated Gateway with a configured provider, request a gated effect, approve it through a real client surface, independently verify the effect, then steer a live tool/streaming turn through the same route and immediately admit the next turn after Stop.
-- **Priority:** P0.
-- **Type:** integration.
+- **Status:** Qualified on a controlled Ollama/tool chain through the live WebUI client surface.
+- **Evidence:** isolated Gateway `:18840` + Ollama `:11434`, model `kimi-k2.7-code:cloud`; WebUI `:8791`; session `p0-4-webui`; request `p0-4-webui-approval-1` was sent through the WebUI, gated, approved through the WebUI approval route, and the resulting file was independently verified as `P0-4-WEBUI-APPROVED`; request `p0-4-webui-steer-2` was live-steered through the request-scoped route (`turn.steer` accepted); request `p0-4-webui-steer-next-2` was admitted immediately and completed exactly `P0-4-WEBUI-STEER-NEXT-OK`; controlled restarts retained session/effect/receipts.
+- **Remaining:** IDE/Mac/phone client surfaces and the broader provider/tool/client matrix.
 
 ### P1-5 — IDE and WebUI same-session continuity
 
