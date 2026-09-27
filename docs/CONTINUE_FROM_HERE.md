@@ -2,7 +2,7 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `0.13-dev`
-**Current commit:** `71726fc0`
+**Current commit:** `bbedb7b3`
 **Date:** 2026-09-27
 **Branch rule:** work on `0.13-dev`; do not modify or merge `master` unless the operator explicitly asks.
 
@@ -41,6 +41,13 @@ This single command deterministically verifies:
 - **P1-5 — IDE/WebUI same-session continuity: QUALIFIED** on an isolated Gateway + Ollama `kimi-k2.7-code:cloud`; one IDE-started session survived WebUI continuation, return to IDE, and controlled restarts of both clients with identical messages, ordered receipts, and provider/model truth.
 
 ---
+
+## 0.13.0 Release Packaging (2026-09-27)
+
+- **P0-1 through P0-4 and P1-5: QUALIFIED.** The release record is [docs/RELEASE_0.13.md](RELEASE_0.13.md).
+- **P1-6 and later gates: DEFERRED** to `0.14`; do not fold them into `0.13.0` claims.
+- **Packaging: BUILT AND AUDITED.** External `0.13.0` wheel/sdist set, `JaegerAI.app`, and the IDE VSIX were produced from a clean checkout and audited with `dev/scripts/inspect_release_artifacts.py`; no unsafe archive members or repository runtime state were found.
+- Canonical verification passed before and after packaging.
 
 ## Read first
 

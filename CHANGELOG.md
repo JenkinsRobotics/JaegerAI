@@ -3,6 +3,13 @@
 JaegerAI follows pragmatic semver — major.minor.patch — with the
 understanding that pre-1.0 minor bumps may carry breaking changes.
 
+## 0.13.0 — 2026-09-27 — the one execution path is proven
+
+- Qualified P0-1 through P0-4 against a live configured provider: resident ReAct turn execution and restart continuity; live streaming Stop/cancel with a terminal receipt; gated `write_file` approval with an independently verified file effect and a denial path proving no mutation; and the WebUI client-surface runtime path with approval, steering, and immediate next-turn admission.
+- Qualified P1-5 IDE/WebUI same-session continuity: one IDE-started session was continued through WebUI, returned to IDE, and survived controlled restarts of both clients and the Gateway with identical messages, ordered receipts, and provider/model truth.
+- Repaired runtime liveness with advisory claim locking, kept open work ledgers alive through mid-work checkpoints, tightened capability verification, and completed post-vendor cleanup after removing the vendored agent tree.
+- Built external packaging artifacts for `0.13.0` and audited them clean. This release does **not** claim P1-6 (real IDE-worker conversation steering), durable memory, persona continuity, physical voice/presence, phone/field client, proactive workflow, or final installed-artifact acceptance.
+
 ## Unreleased — one assistant, one private web surface
 
 - Repositioned JaegerAI consistently as a general local-first assistant
