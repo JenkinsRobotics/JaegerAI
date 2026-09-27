@@ -38,6 +38,7 @@ This single command deterministically verifies:
 - **P0-2 — Live streaming Stop/cancel + immediate next turn: QUALIFIED** on an isolated Gateway + Ollama `glm-5.3-flash:cloud`; Stop during streaming produced one terminal `cancelled` receipt, no pending approvals, immediate next-turn admission, and restart continuity. This is not yet a tool-effect or installed-client cancellation proof.
 - **P0-3 — Live tool approval + independently verified effect + denial: QUALIFIED** on an isolated Gateway + Ollama `kimi-k2.7-code:cloud`; approved `write_file` produced an independently verified file effect and denial produced no file mutation. This is a single tool/effect-class proof, not a full tool-class matrix.
 - **P0-4 — Product-path runtime live qualification: QUALIFIED** on an isolated Gateway + Ollama `kimi-k2.7-code:cloud` through the live WebUI client surface; gated tool effect was independently verified, live steering was accepted, and the immediate next turn completed. This is one client-surface/tool-class proof, not the full client/tool matrix.
+- **P1-5 — IDE/WebUI same-session continuity: QUALIFIED** on an isolated Gateway + Ollama `kimi-k2.7-code:cloud`; one IDE-started session survived WebUI continuation, return to IDE, and controlled restarts of both clients with identical messages, ordered receipts, and provider/model truth.
 
 ---
 
@@ -104,21 +105,21 @@ The model is replaceable cognition. The client is not the entity. A tool returni
 | One live streaming turn was stopped during the model phase and produced exactly one terminal `cancelled` receipt, then the next turn was admitted immediately and completed; after a controlled restart the session and both receipts survived | isolated Gateway `:18820` + Ollama `:11434`; session `p0-2-cancel`; request `p0-2-cancel-1` `cancelled` with `turn.cancelled` event; request `p0-2-cancel-next` completed; no pending approvals; controlled restart returned both receipts without duplicate execution | Live-provider integration; streaming/cancel only, no tool-effect chain |
 | One live provider/tool chain gated a bounded `write_file` effect, independently verified the resulting file, then denied the same write and proved no effect; both receipts and the effect survived a controlled restart | isolated Gateway `:18830` + Ollama `:11434`; session `p0-3-approval`; request `p0-3-approval-1` approved `files.write_file` and `files.changed`/`/changes` showed `/private/tmp/gw-p0-3/instances/p0-1/workspace/p0-3-approved.txt`; file content was independently `P0-3-APPROVED-CONTENT`; request `p0-3-deny-1` was denied with empty `files.changed` and no file mutation | Live-provider integration; single tool/effect chain, not every tool class |
 | One WebUI client-surface journey completed a live provider turn, gated `write_file` approval, independently verified the file effect, accepted live steering, and immediately admitted/completed the next turn; after controlled restarts of Gateway and WebUI the session, effect, and both receipts survived | isolated Gateway `:18840` + Ollama `:11434`, WebUI `:8791`; session `p0-4-webui`; request `p0-4-webui-approval-1` approved `files.write_file` and file content was independently `P0-4-WEBUI-APPROVED`; request `p0-4-webui-steer-2` accepted Gateway steering (`turn.steer`) and completed; request `p0-4-webui-steer-next-2` completed exactly `P0-4-WEBUI-STEER-NEXT-OK`; restart retained session/effect/receipts | Live-provider integration; single client surface and tool class, not every client/tool matrix |
+| One session started through the IDE transport, continued through WebUI, returned to IDE, and survived controlled restarts of both clients and the Gateway with identical messages, ordered receipts, and the same provider/model | isolated Gateway `:18850` + Ollama `:11434`, WebUI `:8794`; session `p1-5-cross-client`; IDE requests `p1-5-ide-1`/`p1-5-ide-2` and WebUI requests `p1-5-webui-1`/`p1-5-webui-2` all completed on `ollama:kimi-k2.7-code:cloud`; Gateway and WebUI session projections had 8 identical messages after restart; events 2/35/80/132 began each turn in order and each ended with `turn.finish` | Live-provider cross-client integration; single provider/model/client pair |
 
 ## Not yet qualified
 
-One live-provider conversation, streaming Stop/cancel, tool approval/effect, and WebUI client-surface runtime qualification are above; no physical-device or final installed-artifact qualification is claimed.
+One live-provider conversation, streaming Stop/cancel, tool approval/effect, WebUI client-surface runtime, and IDE/WebUI same-session continuity are above; no physical-device or final installed-artifact qualification is claimed.
 
 1. **Full live-provider matrix across providers/models/clients.**
-2. **IDE and WebUI same-session continuity.**
-3. **Real existing IDE-worker conversation steering.**
-4. **Durable memory add/recall/correct/forget.**
-5. **Persona continuity across provider/model changes.**
-6. **Physical microphone/speaker voice qualification.**
-7. **Truthful runtime presence states.**
-8. **One real proactive workflow with dedupe, quiet hours, and persistence.**
-9. **Phone/off-LAN field client using the same Jaeger identity and sessions.**
-10. **Final installable artifact qualification.**
+2. **Real existing IDE-worker conversation steering.**
+3. **Durable memory add/recall/correct/forget.**
+4. **Persona continuity across provider/model changes.**
+5. **Physical microphone/speaker voice qualification.**
+6. **Truthful runtime presence states.**
+7. **One real proactive workflow with dedupe, quiet hours, and persistence.**
+8. **Phone/off-LAN field client using the same Jaeger identity and sessions.**
+9. **Final installable artifact qualification.**
 
 ## Priority order
 
@@ -154,14 +155,11 @@ One live-provider conversation, streaming Stop/cancel, tool approval/effect, and
 - **Evidence:** isolated Gateway `:18840` + Ollama `:11434`, model `kimi-k2.7-code:cloud`; WebUI `:8791`; session `p0-4-webui`; request `p0-4-webui-approval-1` was sent through the WebUI, gated, approved through the WebUI approval route, and the resulting file was independently verified as `P0-4-WEBUI-APPROVED`; request `p0-4-webui-steer-2` was live-steered through the request-scoped route (`turn.steer` accepted); request `p0-4-webui-steer-next-2` was admitted immediately and completed exactly `P0-4-WEBUI-STEER-NEXT-OK`; controlled restarts retained session/effect/receipts.
 - **Remaining:** IDE/Mac/phone client surfaces and the broader provider/tool/client matrix.
 
-### P1-5 — IDE and WebUI same-session continuity
+### P1-5 — IDE and WebUI same-session continuity (qualified 2026-09-27)
 
-- **Problem:** Mirror and client contracts exist, but a live cross-client journey has not been qualified on the current baseline.
-- **Current evidence:** `features/webui/api/gateway_mirror.py`; `interfaces/ide/conversation.js`; `test_gateway_mirror.py`; `test_ide_gateway_client.py`.
-- **Affected files/owners:** Gateway session/event store; WebUI mirror; IDE client; Swift Gateway client.
-- **Acceptance test:** Create one session in the IDE, send a turn, reopen it in WebUI, continue it there, return to the IDE, restart both clients and the Gateway, and verify identical accepted messages, outcomes, event order, and selected provider/model.
-- **Priority:** P1.
-- **Type:** integration.
+- **Status:** Qualified on a controlled Ollama journey across the IDE transport and WebUI proxy.
+- **Evidence:** isolated Gateway `:18850` + Ollama `:11434`, model `kimi-k2.7-code:cloud`; WebUI `:8794`; session `p1-5-cross-client`; requests `p1-5-ide-1`, `p1-5-webui-1`, `p1-5-ide-2`, and `p1-5-webui-2` all completed with the same provider/model. Controlled restarts returned 8 identical messages from both clients, ordered event IDs 2/35/80/132, and each turn ended in `turn.finish`.
+- **Remaining:** Mac/phone clients, cross-client approval/steering, and broader provider/model matrix.
 
 ### P1-6 — Real existing IDE-worker conversation steering
 
