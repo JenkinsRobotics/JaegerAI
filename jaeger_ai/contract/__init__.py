@@ -30,6 +30,6 @@ copy one into the other.
 """
 from __future__ import annotations
 
-from . import frameworks, model_ids, ports, schemas, sessions
+from . import frameworks, model_ids, modes, ports, schemas, sessions
 
-__all__ = ["frameworks", "model_ids", "ports", "schemas", "sessions"]
+__all__ = ["frameworks", "model_ids", "modes", "ports", "schemas", "sessions"]

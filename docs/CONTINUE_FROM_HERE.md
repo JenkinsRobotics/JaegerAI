@@ -2,7 +2,7 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `0.13-dev`
-**Current commit:** `74ef67be`
+**Current commit:** `2d8f1795`
 **Date:** 2026-09-27
 **Branch rule:** work on `0.13-dev`; do not modify or merge `master` unless the operator explicitly asks.
 
@@ -20,7 +20,7 @@ This single command deterministically verifies:
 1. Git repository tracking invariants (zero vendor code, zero bytecode or pytest caches).
 2. CI hygiene tripwires (strict root allowlist, feature READMEs, zero in-repo state).
 3. IDE extension and webview interface tests (152 passed).
-4. Core Gateway client and skill catalog audit tests.
+4. Core Gateway client, skill catalog audit, and Tier contract tests (9 passed).
 
 ---
 
@@ -29,6 +29,7 @@ This single command deterministically verifies:
 - **84% Clutter Reduction:** Disk footprint dropped from 33,412 to 5,333 files. Vendored external copies (`jaeger_ai/vendor`) and broken shims removed.
 - **Safety Archiving:** 2,562 non-core files (iOS client, Swabble, Codex prompts, sample extensions, benchmark logs) safely preserved at `~/Desktop/JaegerAI_Archive`.
 - **Multimodal IDE & Feature Parity:** 3-way mode switcher (`[Plan | Auto | Manual]`), slash commands (`/clear`, `/review`, `/test`, `/compact`), collapsible reasoning disclosure, quick action suggestion chips, CSP updated for clipboard screenshots (`data:`, `blob:`), and drag-and-drop image attachments.
+- **3-Tier Agency Contract (`Chat | Agent | Jaeger`):** Added canonical `jaeger_ai/contract/modes.py` and schema integration under `AutomationConfig.interaction_tier` with single-source catalog derivation and Gateway routes (`/v1/runtime/tier`). Decouples interaction initiative from execution blast radius (`autonomy`).
 - **Auto-Daemon Management:** The IDE extension auto-probes `127.0.0.1:8810/health` and launches the Gateway daemon on-demand if not already running.
 - **Operational Tripwires & Deny Rules:** Added [`.agents/rules/deny-rules.md`](../.agents/rules/deny-rules.md) forbidding `pkill -f`, `killall`, and blanket `git add .`.
 

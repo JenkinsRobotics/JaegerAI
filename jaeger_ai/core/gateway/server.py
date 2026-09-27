@@ -823,6 +823,8 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/sessions/{id}/ide/{ide_request_id}", self.handle_ide_result)
         self.app.router.add_get("/v1/runtime/autonomy", self.handle_get_autonomy)
         self.app.router.add_post("/v1/runtime/autonomy", self.handle_set_autonomy)
+        self.app.router.add_get("/v1/runtime/tier", self.handle_get_tier)
+        self.app.router.add_post("/v1/runtime/tier", self.handle_set_tier)
         self.app.router.add_get("/v1/sessions/{id}/attachments", self.handle_list_attachments)
         self.app.router.add_post("/v1/sessions/{id}/attachments", self.handle_add_attachment)
         self.app.router.add_get("/v1/tasks", self.handle_tasks)
@@ -3246,6 +3248,45 @@ class JaegerGatewayApp:
         config.automation.autonomy = mode
         dump_yaml(Path(path), config)
         return web.json_response({"autonomy": mode, "options": list(AUTONOMY)})
+
+    async def handle_get_tier(self, request: web.Request) -> web.Response:
+        """GET /v1/runtime/tier: active agency tier ('chat' | 'agent' | 'jaeger')."""
+        from jaeger_ai.contract.modes import INTERACTION_TIERS, TIER_DESCRIPTIONS
+        from jaeger_ai.core.instance.schemas import Config, load_yaml
+
+        path = self._config_path()
+        tier = "agent"
+        if path is not None and Path(path).is_file():
+            try:
+                cfg = load_yaml(Path(path), Config)
+                tier = getattr(cfg.automation, "interaction_tier", "agent")
+            except Exception:
+                pass
+        return web.json_response({
+            "tier": tier,
+            "options": list(INTERACTION_TIERS),
+            "descriptions": dict(TIER_DESCRIPTIONS),
+        })
+
+    async def handle_set_tier(self, request: web.Request) -> web.Response:
+        """POST /v1/runtime/tier ``{"tier": "chat"|"agent"|"jaeger"}``: save agency tier."""
+        from jaeger_ai.contract.modes import INTERACTION_TIERS
+        from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        tier = str((body or {}).get("tier") or "").strip().lower() if isinstance(body, dict) else ""
+        if tier not in INTERACTION_TIERS:
+            return web.json_response({"error": f"tier must be one of {list(INTERACTION_TIERS)}"}, status=400)
+        path = self._config_path()
+        if path is None or not Path(path).is_file():
+            return web.json_response({"error": "No instance config to save to"}, status=409)
+        config = load_yaml(Path(path), Config)
+        config.automation.interaction_tier = tier
+        dump_yaml(Path(path), config)
+        return web.json_response({"tier": tier, "options": list(INTERACTION_TIERS)})
 
     async def handle_runtime_skills(self, request: web.Request) -> web.Response:
         """GET /v1/runtime/skills[?q=text] — the skills a client can offer, one row each.
