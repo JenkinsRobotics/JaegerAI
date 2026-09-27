@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import fcntl
 import os
 import platform
 import signal
@@ -93,6 +94,37 @@ def _save(layout: Any, claims: dict[str, dict[str, Any]]) -> bool:
     return True
 
 
+def _modify_claims(layout: Any, mutate) -> dict[str, dict[str, Any]]:
+    """Read-modify-write claims under an exclusive advisory lock.
+
+    The lock file persists alongside the claims JSON; every writer
+    takes the same lock, so two processes on THIS host cannot
+    interleave a read and a write. Cross-host claims still rely on
+    staleness detection, which is the existing contract.
+    """
+    path = _store_path(layout)
+    if path is None:
+        mutate({})
+        return {}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(".lock")
+    with open(lock_path, "a") as lock_fd:
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        except OSError:
+            pass
+        try:
+            claims = _load(layout)
+            mutate(claims)
+            _save(layout, claims)
+            return claims
+        finally:
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+            except OSError:
+                pass
+
+
 def _pid_alive(pid: int) -> bool:
     """Whether ``pid`` names a live process on THIS host."""
     if pid <= 0:
@@ -135,9 +167,9 @@ def claim(
         "max_runtime_s": float(max_runtime_s),
         "detail": str(detail or ""),
     }
-    claims = _load(layout)
-    claims[str(task_id)] = record
-    _save(layout, claims)
+    def _set(claims: dict[str, dict[str, Any]]) -> None:
+        claims[str(task_id)] = record
+    _modify_claims(layout, _set)
     return record
 
 
@@ -148,26 +180,29 @@ def heartbeat(layout: Any, task_id: str, *, detail: str = "") -> bool:
     something else already reclaimed this task, and the caller should
     stop rather than keep working on a task the queue has handed on.
     """
-    claims = _load(layout)
-    record = claims.get(str(task_id))
-    if not record:
-        return False
-    record["heartbeat_at"] = time.time()
-    if detail:
-        record["detail"] = str(detail)
-    claims[str(task_id)] = record
-    _save(layout, claims)
-    return True
+    def _beat(claims: dict[str, dict[str, Any]]) -> None:
+        record = claims.get(str(task_id))
+        if not record:
+            return
+        record["heartbeat_at"] = time.time()
+        if detail:
+            record["detail"] = str(detail)
+        claims[str(task_id)] = record
+    _modify_claims(layout, _beat)
+    return _load(layout).get(str(task_id)) is not None
 
 
 def release(layout: Any, task_id: str) -> bool:
     """Drop the claim on ``task_id`` — finished, failed, or handed back."""
-    claims = _load(layout)
-    if str(task_id) not in claims:
-        return False
-    claims.pop(str(task_id), None)
-    _save(layout, claims)
-    return True
+    existed = []
+
+    def _drop(claims: dict[str, dict[str, Any]]) -> None:
+        if str(task_id) not in claims:
+            return
+        existed.append(True)
+        claims.pop(str(task_id), None)
+    _modify_claims(layout, _drop)
+    return bool(existed)
 
 
 def active_claims(layout: Any) -> list[dict[str, Any]]:
@@ -327,7 +362,10 @@ def reclaim_stale(
             "detail": record.get("detail", ""),
         })
     if reclaimed:
-        _save(layout, kept)
+        def _replace(claims: dict[str, dict[str, Any]]) -> None:
+            claims.clear()
+            claims.update(kept)
+        _modify_claims(layout, _replace)
     return reclaimed
 
 

@@ -158,6 +158,11 @@ class JaegerAgentController:
         if continuation.hit_inner_cap(last.get("halt_reason")):
             return False
         verdict = continuation.classify(last.get("text") or "")
+        # An open ledger means the accepted objective is not finished:
+        # a mid-work question is a checkpoint, not a stop.
+        ledger = active_ledger()
+        if verdict == "question" and ledger is not None and not ledger.completed:
+            return False
         return verdict in {"question", "blocked"}
 
     def _terminal_state(self, last: dict[str, Any]) -> AgentState:
@@ -176,6 +181,12 @@ class JaegerAgentController:
             self.reason = "complete_task"
             return AgentState.COMPLETED
         verdict = continuation.classify(last.get("text") or "")
+        # An open ledger means the accepted objective is not finished:
+        # a mid-work question is a checkpoint, not a new permission gate.
+        ledger = active_ledger()
+        if verdict == "question" and ledger is not None and not ledger.completed:
+            self.reason = "settled"
+            return AgentState.COMPLETED
         if verdict in {"question", "blocked"}:
             self.reason = verdict
             return AgentState.AWAITING_APPROVAL

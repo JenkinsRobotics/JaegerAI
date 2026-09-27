@@ -19,7 +19,7 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_AGENT_SRC = ROOT / "jaeger_ai/vendor/hermes_agent"
+_DEFAULT_AGENT_SRC = Path.home() / "GitHub/hermes-agent"
 HERMES_AGENT_SRC = Path(
     os.environ.get("JAEGER_HERMES_AGENT_SRC", str(_DEFAULT_AGENT_SRC if _DEFAULT_AGENT_SRC.is_dir() else Path.home() / "GitHub/hermes-agent"))
 ).expanduser()

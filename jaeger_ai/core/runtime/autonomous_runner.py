@@ -321,7 +321,12 @@ def _worker_next(
     if continuation.is_loop_breaker(halt_reason):
         return None
     verdict = continuation.classify(answer)
-    if verdict in {"question", "blocked"}:
+    # An open ledger means the accepted objective is not finished. A
+    # trailing "Want me to start?" is a mid-work checkpoint the model
+    # added for tone, not a new permission gate on accepted work.
+    if verdict in {"question", "blocked"} and not ledger_open():
+        return None
+    if verdict == "blocked":
         return None
     if ledger_open() or batch or continuation.hit_inner_cap(halt_reason):
         return harness_prompt(objective=objective)

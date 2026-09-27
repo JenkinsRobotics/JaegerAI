@@ -148,7 +148,7 @@ class CapabilityRegistry:
             raise CapabilityError(f"Capability {capability_id} is not installed")
 
         if not manifest.verification_entrypoint:
-            return True, "No custom verification entrypoint defined; default ok"
+            return False, "No verification entrypoint defined; outcome is unverified"
 
         func = self._load_entrypoint(capability_id, manifest.verification_entrypoint)
         try:

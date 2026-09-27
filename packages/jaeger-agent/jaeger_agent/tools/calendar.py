@@ -17,13 +17,14 @@ from __future__ import annotations
 import platform
 import shutil
 import subprocess
+import time
 from datetime import datetime, timedelta
 from typing import Any
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
-_TIMEOUT_S = 15
+_TIMEOUT_S = 60
 _FIELD_SEP = "␟"   # unlikely to appear in real event text
 _RECORD_SEP = "␞"
 
@@ -108,10 +109,13 @@ def get_events(
         "return output\n"
         "end tell"
     )
+    t0 = time.monotonic()
     try:
         out = _run_osascript(script)
     except subprocess.TimeoutExpired:
-        return {"listed": False, "error": f"Calendar query timed out after {_TIMEOUT_S}s"}
+        return {"listed": False,
+                "error": f"Calendar query timed out after {_TIMEOUT_S}s",
+                "elapsed_s": round(time.monotonic() - t0, 2)}
     except Exception as exc:  # noqa: BLE001
         return {"listed": False, "error": f"{type(exc).__name__}: {exc}"}
     if out.returncode != 0:
@@ -132,7 +136,8 @@ def get_events(
                 "end": fields[2], "calendar": fields[3],
             })
     return {"listed": True, "range_start": start_lit, "range_end": end_lit,
-             "count": len(events), "events": events}
+             "count": len(events), "events": events,
+             "elapsed_s": round(time.monotonic() - t0, 2)}
 
 
 def create_event(
@@ -166,16 +171,20 @@ def create_event(
         "end tell\n"
         "end tell"
     )
+    t0 = time.monotonic()
     try:
         out = _run_osascript(script)
     except subprocess.TimeoutExpired:
-        return {"created": False, "error": f"Calendar create timed out after {_TIMEOUT_S}s"}
+        return {"created": False,
+                "error": f"Calendar create timed out after {_TIMEOUT_S}s",
+                "elapsed_s": round(time.monotonic() - t0, 2)}
     except Exception as exc:  # noqa: BLE001
         return {"created": False, "error": f"{type(exc).__name__}: {exc}"}
     if out.returncode != 0:
         return {"created": False,
                  "error": (out.stderr or out.stdout or "osascript failed").strip()}
-    return {"created": True, "title": title_clean, "start": start_lit, "end": end_lit}
+    return {"created": True, "title": title_clean, "start": start_lit, "end": end_lit,
+            "elapsed_s": round(time.monotonic() - t0, 2)}
 
 
 # ── Agent-facing tool wrappers ────────────────────────────────────────
