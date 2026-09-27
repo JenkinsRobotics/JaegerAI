@@ -205,3 +205,10 @@ test('modelSelectionLabel degrades honestly when state is missing', () => {
   assert.equal(modelSelectionLabel('config', { configuredModel: '' }), 'From settings');
   assert.equal(modelSelectionLabel('openai::', {}), 'openai::', 'malformed value is echoed, never invented');
 });
+
+test('reasoning stays a collapsible disclosure, never part of the answer', () => {
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'media', 'view.js'), 'utf8');
+  assert.match(html, /function reasoningSection\(text, live = false\)/);
+  assert.match(html, /details\.className = 'reasoning'/);
+  assert.match(html, /content\.textContent = text/);
+});

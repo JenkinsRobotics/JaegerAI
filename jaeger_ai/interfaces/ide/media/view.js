@@ -21,8 +21,9 @@ const post = (type, extra = {}) => api.postMessage({ type, ...extra });
 window.JaegerPostMessage = post;
 
 let ideContextOn = api.getState()?.ideContext !== false;
-let planModeOn = api.getState()?.planMode === true;
-const persistView = () => api.setState({ drafts, ideContext: ideContextOn, planMode: planModeOn, chatSearch });
+let mode = api.getState()?.mode || 'manual';
+let planModeOn = mode === 'plan';
+const persistView = () => api.setState({ drafts, ideContext: ideContextOn, mode, planMode: planModeOn, chatSearch });
 function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
 // While the agent is busy, Enter steers the live turn. “Queue next” writes a
 // durable Gateway request instead; this client never owns a second queue.
@@ -467,6 +468,22 @@ function renderContextChips() {
   const context = state.ideContext || {};
   const diagnostics = Number(state.diagnostics || 0);
   const chips = [];
+  if (!state.busy) {
+    const actionChip = (label, title, onclick) => {
+      const node = document.createElement('button');
+      node.type = 'button'; node.className = 'context-chip suggestion-chip';
+      node.title = title; node.setAttribute('aria-label', title);
+      node.textContent = label; node.onclick = onclick;
+      return node;
+    };
+    chips.push(actionChip('Review Git Diff', 'Review the uncommitted changes in this workspace', () => post('reviewChanges')));
+    chips.push(actionChip('Run Test Suite', 'Run the canonical verification suite', () => post('runTestSuite')));
+    chips.push(actionChip('Explain Selected Code', 'Explain the selected code in this editor', () => {
+      const prompt = $('prompt');
+      prompt.value = 'Explain the selected code in the active editor.';
+      saveDraft(); eligibility(); prompt.focus();
+    }));
+  }
   const chip = (label, title, severity = '') => {
     const node = document.createElement('span');
     node.className = 'context-chip';
@@ -697,6 +714,19 @@ function renderDiff(file) {
   card.append(header, lines); details.append(card); return details;
 }
 
+function clearTimeline() {
+  // View-local clear only. The Gateway remains the session owner; this hides
+  // the rendered transcript and live work history without deleting anything.
+  state = {
+    ...state,
+    session: state.session ? { ...state.session, messages: [] } : state.session,
+    workTurns: [], timeline: [], activity: [], text: '', reasoning: '',
+    changes: null, preview: null,
+  };
+  changesRevision = '';
+  render();
+}
+
 const stateQueue = createFrameQueue(batch => {
   const data = batch.at(-1);
   if (data.editDraft !== undefined) { $('prompt').value = data.editDraft; saveDraft(); eligibility(); $('prompt').focus(); return; }
@@ -737,11 +767,17 @@ function showInfo(info) {
 window.addEventListener('message', ({ data }) => { if (data?.info) showInfo(data.info); else stateQueue.push(data); });
 
 // ── composer bar: permission pill + IDE-context toggle ─────────────────────
-const ACCESS = {
-  auto: { label: 'Full access', hint: 'No approval prompts. Catastrophic commands are still blocked.' },
-  scoped: { label: 'Ask once', hint: 'Ask the first time for each kind of action.' },
-  ask: { label: 'Ask each time', hint: 'Ask before every action that changes something.' },
-};
+const MODE_OPTIONS = [
+  { id: 'mode-plan', value: 'plan', autonomy: null, label: 'Plan', hint: 'Plan this turn; read files and generate a blueprint only' },
+  { id: 'mode-auto', value: 'auto', autonomy: 'auto', label: 'Auto', hint: 'Full autonomy; tool calls and edits run without prompts' },
+  { id: 'mode-manual', value: 'manual', autonomy: 'ask', label: 'Manual', hint: 'Gated safety mode; approve each file or shell action' },
+];
+
+function selectedMode() {
+  if (planModeOn) return 'plan';
+  const autonomy = state.autonomy?.mode;
+  return autonomy === 'auto' ? 'auto' : 'manual';
+}
 
 function renderComposerBar() {
   $('queue-next').hidden = !state.busy || !state.session || Boolean(editingQueueId);
@@ -751,42 +787,33 @@ function renderComposerBar() {
   const workspaceLabel = state.selectedWorkspace ? state.selectedWorkspace.split('/').filter(Boolean).at(-1) : 'Workspace';
   $('workspace-label').textContent = workspaceLabel;
   $('workspace').title = state.selectedWorkspace || 'Choose the workspace Jaeger should use';
-  const mode = state.autonomy?.mode;
-  const pill = $('access');
-  pill.hidden = !ACCESS[mode];
-  if (ACCESS[mode]) {
-    $('access-label').textContent = ACCESS[mode].label;
-    pill.classList.toggle('full', mode === 'auto');
+  const selected = selectedMode();
+  for (const option of MODE_OPTIONS) {
+    const node = $(option.id);
+    node.setAttribute('aria-checked', String(option.value === selected));
+    node.title = option.hint;
   }
   $('ide-context').setAttribute('aria-pressed', String(ideContextOn));
-  $('plan-mode').setAttribute('aria-pressed', String(planModeOn));
 }
 
-function closeAccessMenu() {
-  $('access-menu').hidden = true; $('access').setAttribute('aria-expanded', 'false');
+function setMode(value) {
+  if (value === 'plan') {
+    planModeOn = true; mode = 'plan';
+  } else {
+    planModeOn = false;
+    mode = value;
+    const target = MODE_OPTIONS.find(item => item.value === value);
+    if (target?.autonomy) post('setAutonomy', { mode: target.autonomy });
+  }
+  persistView(); renderComposerBar();
 }
 
-function openAccessMenu() {
-  const menu = $('access-menu');
-  menu.replaceChildren(...Object.keys(ACCESS).filter(name => (state.autonomy?.options || []).includes(name)).map(name => {
-    const row = document.createElement('div');
-    row.className = 'slash-item'; row.setAttribute('role', 'option');
-    row.setAttribute('aria-selected', String(name === state.autonomy.mode));
-    const label = document.createElement('span'); label.className = 'access-name'; label.textContent = ACCESS[name].label;
-    const hint = document.createElement('span'); hint.className = 'slash-description'; hint.textContent = ACCESS[name].hint;
-    row.append(label, hint);
-    row.onmousedown = event => { event.preventDefault(); closeAccessMenu(); if (name !== state.autonomy.mode) post('setAutonomy', { mode: name }); };
-    return row;
-  }));
-  menu.hidden = false; $('access').setAttribute('aria-expanded', 'true');
-}
-
-$('access').onclick = () => ($('access-menu').hidden ? openAccessMenu() : closeAccessMenu());
-$('access').onblur = () => closeAccessMenu();
 $('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); };
 $('workspace').onclick = () => post('selectWorkspace');
 $('worktree').onclick = () => post('selectWorktree');
-$('plan-mode').onclick = () => { planModeOn = !planModeOn; persistView(); renderComposerBar(); };
+$('mode-plan').onclick = () => setMode('plan');
+$('mode-auto').onclick = () => setMode('auto');
+$('mode-manual').onclick = () => setMode('manual');
 $('queue-next').onclick = () => {
   const text = $('prompt').value;
   if (!text.trim() || $('queue-next').hidden) return;
@@ -842,6 +869,7 @@ function runSlash(command, args) {
     case 'copy': announceCopied(); return post('copy', { text: context.lastAnswer });
     case 'export': return post('exportChat');
     case 'archive': return post('archive');
+    case 'clear': return clearTimeline();
     case 'unarchive': return post('unarchive');
     case 'model': return openModelMenu();
     case 'workspace': return post('selectWorkspace');
@@ -849,10 +877,13 @@ function runSlash(command, args) {
     case 'plan': return args.trim() ? post('send', { text: args, model: modelChoice, ideContext: ideContextOn, planOnly: true }) : undefined;
     case 'diagnostics': return post('info', { what: 'diagnostics' });
     case 'diff': return post('reviewChanges');
+    case 'review': return post('reviewChanges');
+    case 'test': return post('runTestSuite');
     case 'status': return post('info', { what: 'status' });
     case 'skills': return post('info', { what: 'skills', query: args });
     case 'agent': return post('info', { what: 'agent' });
     case 'workers': return post('info', { what: 'workers' });
+    case 'compact': return post('compactSession', { focus: args });
     default: return undefined;
   }
 }
