@@ -2,8 +2,8 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `0.13-dev`
-**Current commit:** `80951560`
-**Date:** 2026-09-26
+**Current commit:** `71726fc0`
+**Date:** 2026-09-27
 **Branch rule:** work on `0.13-dev`; do not modify or merge `master` unless the operator explicitly asks.
 
 This is the single execution entry point for humans and coding agents. Re-read the current source before acting.
