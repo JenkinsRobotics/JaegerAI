@@ -29,7 +29,7 @@ from jaeger_os.core.instance.setting_meta import _setting
 class KokoroTTSConfig(BaseModel):
     """Validated defaults shown in the ``kokoro_tts`` settings group."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     voice: str = Field(
         "af_heart",
@@ -46,6 +46,10 @@ class KokoroTTSConfig(BaseModel):
         json_schema_extra=_setting("kokoro_tts"),
         description="Kokoro KPipeline language code ('a' = American "
                     "English — see the kokoro library for the full set).",
+    )
+    sample_rate: int = Field(
+        24000,
+        description="Kokoro mono audio sample rate (fixed at 24000 Hz). Preserved for backwards compatibility.",
     )
     warm: bool = Field(
         True,
