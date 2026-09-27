@@ -41,9 +41,9 @@ IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1)
 PASSED_COUNT=$(echo "${IDE_OUTPUT}" | grep -E '^(ℹ|#) pass ' | awk '{print $3}')
 echo "[+] IDE interface tests passed (${PASSED_COUNT} passed)."
 
-echo "[4/4] Running core Gateway client & Skill Catalog audit..."
-"${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ide_gateway_client.py dev/tests/jaeger_ai/core/test_skill_catalog_audit.py -q --no-header
-echo "[+] Core Gateway client & Skill Catalog audit passed."
+echo "[4/4] Running core Gateway client, Skill Catalog audit & Tier contract..."
+"${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ide_gateway_client.py dev/tests/jaeger_ai/core/test_skill_catalog_audit.py dev/tests/jaeger_ai/core/test_interaction_tiers.py -q --no-header
+echo "[+] Core Gateway client, Skill Catalog audit & Tier contract passed."
 
 echo "=================================================="
 echo "  [SUCCESS] All verification invariants passed!"

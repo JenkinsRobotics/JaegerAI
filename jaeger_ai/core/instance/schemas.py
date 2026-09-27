@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from jaeger_agent.core.config import MultimodalConfig
+from jaeger_ai.contract.modes import InteractionTier
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -460,6 +461,15 @@ class AutomationConfig(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+    interaction_tier: InteractionTier = Field(
+        "agent",
+        json_schema_extra=_setting("autonomy"),
+        description=(
+            "Agency tier: 'chat' (conversational only, no tools), "
+            "'agent' (task worker, tools allowed under autonomy policy), "
+            "'jaeger' (continuous resident entity, sensors, durable proactive tasks)."
+        ),
+    )
     autonomy: Literal["ask", "scoped", "auto"] = Field(
         "auto",
         json_schema_extra=_setting("autonomy"),
