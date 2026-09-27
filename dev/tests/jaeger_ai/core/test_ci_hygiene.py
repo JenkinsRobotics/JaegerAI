@@ -141,6 +141,7 @@ ALLOWED_ROOT_ITEMS = {
     ".gitattributes",
     ".github",
     ".gitignore",
+    ".kilo",
     "AGENTS.md",
     "CHANGELOG.md",
     "CLAUDE.md",
