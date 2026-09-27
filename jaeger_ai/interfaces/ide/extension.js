@@ -1,10 +1,11 @@
 'use strict';
 const vscode = require('vscode');
 const { randomBytes } = require('node:crypto');
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const util = require('node:util');
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
 const { Gateway } = require('./gateway');
 const { Conversation } = require('./conversation');
 const { parseProviderModel } = require('./media/presentation');
@@ -208,6 +209,83 @@ function activate(context) {
     if (typeof value === 'string' && value) return parseProviderModel(value);
     return { model: '', provider: '' };
   };
+  let daemonProcess = null;
+
+  function findJaegerExecutable(workspaceRoots) {
+    const venvRoot = process.env.JAEGER_VENV || path.join(os.homedir(), '.jaeger', 'venv');
+    const venvPython = path.join(venvRoot, 'bin', 'python');
+    if (fs.existsSync(venvPython)) {
+      return { cmd: venvPython, args: ['-m', 'jaeger_ai.core.gateway.server'] };
+    }
+    for (const root of workspaceRoots || []) {
+      const jaegerScript = path.join(root, 'jaeger');
+      if (fs.existsSync(jaegerScript)) {
+        return { cmd: jaegerScript, args: ['gateway', 'daemon'] };
+      }
+    }
+    return { cmd: 'jaeger', args: ['gateway', 'daemon'] };
+  }
+
+  async function checkGatewayHealth(gw) {
+    try {
+      const res = await gw.json('/health');
+      return Boolean(res);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  async function ensureGatewayDaemon(gw) {
+    if (await checkGatewayHealth(gw)) return null;
+    try {
+      const u = new URL(gw.url);
+      if (!['127.0.0.1', 'localhost', '::1'].includes(u.hostname)) return null;
+    } catch (_) {
+      return null;
+    }
+    if (daemonProcess && !daemonProcess.killed) {
+      const start = Date.now();
+      while (Date.now() - start < 8000) {
+        await new Promise(r => setTimeout(r, 200));
+        if (await checkGatewayHealth(gw)) return daemonProcess;
+      }
+      return daemonProcess;
+    }
+    const workspaceRoots = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
+    output.appendLine(`[jaeger] Gateway at ${gw.url} not responding. Auto-starting gateway daemon...`);
+    const exec = findJaegerExecutable(workspaceRoots);
+    try {
+      daemonProcess = spawn(exec.cmd, exec.args, {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          PYTHONDONTWRITEBYTECODE: '1',
+          PYTHONPYCACHEPREFIX: path.join(os.homedir(), '.cache', 'jaeger', 'pycache'),
+        },
+      });
+      daemonProcess.stdout?.on('data', chunk => output.appendLine(`[gateway] ${chunk.toString().trim()}`));
+      daemonProcess.stderr?.on('data', chunk => output.appendLine(`[gateway:err] ${chunk.toString().trim()}`));
+      daemonProcess.on('exit', code => {
+        output.appendLine(`[gateway] Process exited with code ${code}`);
+        daemonProcess = null;
+      });
+    } catch (err) {
+      output.appendLine(`[jaeger] Failed to spawn gateway daemon: ${err.message}`);
+      return null;
+    }
+
+    const start = Date.now();
+    while (Date.now() - start < 10000) {
+      await new Promise(r => setTimeout(r, 250));
+      if (await checkGatewayHealth(gw)) {
+        output.appendLine(`[jaeger] Gateway daemon started and healthy.`);
+        return daemonProcess;
+      }
+    }
+    output.appendLine(`[jaeger] Gateway daemon did not become healthy in time.`);
+    return daemonProcess;
+  }
+
   function createController() {
     controller?.dispose();
     controller = undefined;
@@ -215,7 +293,9 @@ function activate(context) {
       reasoning: '', activity: [], approvals: [], staged: [], models: null, modelsError: null,
       status: 'Connecting…', error: '', queue: [], openSessionIds: [], selectedWorkspace: restoreWorkspace(), configuredModel: configuredModel() });
     const key = storageKey(), restored = context.workspaceState.get(key, {});
-    controller = new Conversation(new Gateway(endpoint()), state => {
+    const gw = new Gateway(endpoint());
+    void ensureGatewayDaemon(gw);
+    controller = new Conversation(gw, state => {
       if (state.changes) changes = state.changes;
       view?.webview.postMessage(state);
       const key = `${state.session?.session_id || ''}:${state.workTurns?.at(-1)?.requestId || ''}`;
@@ -263,7 +343,15 @@ function activate(context) {
           if (answer === 'Replace draft') view?.webview.postMessage({ editDraft: message.text });
           return;
         }
-        if (message.type === 'ready') { selected = createController(); controller.ideHandler = ideCall; void refreshChanges(); void sendAutonomy(); postContext(); return controller.refresh(selected); }
+        if (message.type === 'ready') {
+          selected = createController();
+          controller.ideHandler = ideCall;
+          void refreshChanges();
+          void sendAutonomy();
+          postContext();
+          await ensureGatewayDaemon(controller.gateway);
+          return controller.refresh(selected);
+        }
         if (message.type === 'turnChanges' && !controller?.state.busy) {
           const turns = controller?.workBySession[controller?.state.session?.session_id] || [];
           if (!turns.some(turn => turn.requestId === message.requestId)) return;
@@ -433,6 +521,42 @@ function activate(context) {
           }
           return;
         }
+        if (message.type === 'pasteAttachment' && typeof message.data === 'string') {
+          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+          if (!controller.state.session) await controller.newSession('New conversation', workspaceRoot);
+          const mime = String(message.mime || 'image/png');
+          const ext = mime.includes('/') ? mime.split('/')[1] : 'png';
+          const filename = message.name || `image-${Date.now()}.${ext}`;
+          const match = message.data.match(/^data:[^;]+;base64,(.+)$/);
+          const buffer = match ? Buffer.from(match[1], 'base64') : Buffer.from(message.data);
+
+          let targetDir = workspaceRoot ? path.join(workspaceRoot, '.jaeger', 'attachments') : null;
+          let targetPath = null;
+          if (targetDir) {
+            try {
+              fs.mkdirSync(targetDir, { recursive: true });
+              targetPath = path.join(targetDir, filename);
+              fs.writeFileSync(targetPath, buffer);
+            } catch (_) {
+              targetPath = null;
+            }
+          }
+          if (!targetPath) {
+            targetDir = path.join(os.tmpdir(), 'jaeger', 'attachments');
+            fs.mkdirSync(targetDir, { recursive: true });
+            targetPath = path.join(targetDir, filename);
+            fs.writeFileSync(targetPath, buffer);
+          }
+
+          await controller.addAttachment({
+            path: targetPath,
+            name: filename,
+            mime,
+            size: buffer.length,
+            data_url: message.data,
+          });
+          return;
+        }
         if (message.type === 'removeAttachment' && typeof message.id === 'string') {
           return controller.removeStagedAttachment(message.id);
         }
@@ -464,7 +588,13 @@ function activate(context) {
         view.webview.postMessage({ configuredModel: configuredModel() });
       }
     }),
-    { dispose: () => controller?.dispose() },
+    { dispose: () => {
+      controller?.dispose();
+      if (daemonProcess) {
+        try { daemonProcess.kill('SIGTERM'); } catch (_) {}
+        daemonProcess = null;
+      }
+    } },
   );
 }
 module.exports = { activate };

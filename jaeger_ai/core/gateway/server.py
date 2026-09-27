@@ -51,6 +51,16 @@ LOCKED_WEBUI_URL = os.environ.get(
     "JAEGER_WEBUI_URL", f"http://{LOOPBACK}:{WEBUI_PORT}"
 ).rstrip("/")
 DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", "kimi-k2.7-code:cloud")
+
+
+def _model_has_vision(model: str) -> bool:
+    """True when this model has a VISION certification (or an explicit override)."""
+    try:
+        from jaeger_ai.core.entity.model_capabilities import capabilities_for
+        return str(capabilities_for(model).get("vision") or "").lower() == "pass"
+    except Exception:
+        pass
+    return False
 # Agent turns require native MCP. Reduced text mode must be explicitly selected.
 NATIVE_LEAD_MCP_TIMEOUT_S = float(os.environ.get("JAEGER_GATEWAY_MCP_TIMEOUT_S", "300"))
 
@@ -2062,9 +2072,10 @@ class JaegerGatewayApp:
 
         if image_b64s and messages:
             messages[-1]["images"] = image_b64s
-            # If target model lacks vision, switch to known-good vision model kimi-k2.7-code:cloud
-            if target_model not in {"kimi-k2.7-code:cloud", "qwen3.5:397b-cloud", "minicpm-v:latest"}:
-                target_model = "kimi-k2.7-code:cloud"
+            # Respect a model the operator or certification says has VISION.
+            # Fall back only when the selected model is not vision-certified.
+            if not _model_has_vision(target_model):
+                target_model = DEFAULT_OLLAMA_MODEL
 
         payload = {
             "model": target_model,
@@ -3261,7 +3272,8 @@ class JaegerGatewayApp:
 
     async def handle_add_attachment(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
-        if self.store.get_session(session_id) is None:
+        session = self.store.get_session(session_id)
+        if session is None:
             return web.json_response({"error": "Session not found"}, status=404)
         body = await request.json() if request.can_read_body else {}
         path = Path(str(body.get("safe_path") or body.get("path") or ""))
@@ -3275,7 +3287,9 @@ class JaegerGatewayApp:
                 from jaeger_ai.core.instance.instance import resolve_instance_dir
                 root = InstanceLayout(root=resolve_instance_dir()).workspace_dir.resolve()
             resolved = path.resolve()
-            if not resolved.is_relative_to(root):
+            session_ws = Path(session["workspace"]).resolve() if session.get("workspace") else None
+            valid = resolved.is_relative_to(root) or (session_ws and resolved.is_relative_to(session_ws))
+            if not valid:
                 return web.json_response({"error": "attachment path escapes workspace"}, status=400)
         except Exception as exc:
             return web.json_response({"error": str(exc)}, status=400)

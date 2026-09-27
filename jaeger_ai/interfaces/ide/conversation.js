@@ -618,7 +618,7 @@ class Conversation {
     // does not increment stagedGen, so removing a different attachment correctly
     // keeps this upload's completion live.
     if (this.epoch !== epoch || this.stagedGen !== stagedGen) return;
-    this.staged.push(row);
+    this.staged.push(file.data_url ? { ...row, data_url: file.data_url } : row);
     this.emit();
   }
   removeStagedAttachment(attachmentId) {

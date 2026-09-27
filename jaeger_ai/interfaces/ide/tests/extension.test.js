@@ -168,6 +168,32 @@ test('@ mention stages the picked workspace file through the Gateway attachment 
   }]);
 });
 
+test('pasteAttachment writes data to attachment scratch and stages it through Gateway', async () => {
+  const { send, gateway } = wireExtension();
+  send({ type: 'ready' });
+  await waitFor(() => gateway.instance !== undefined);
+  gateway.instance.sessions = async () => ({ sessions: [{ session_id: 'paste-session', title: 'T', status: 'idle', messages: [] }] });
+  gateway.instance.session = async id => ({ session_id: id, title: 'T', status: 'idle', messages: [] });
+  const attachments = [];
+  gateway.instance.addAttachment = async (_sid, body) => {
+    attachments.push(body);
+    return { attachment_id: 'pasted-attachment', original_filename: body.filename };
+  };
+  send({ type: 'select', id: 'paste-session' });
+  await new Promise(r => setTimeout(r, 50));
+
+  send({
+    type: 'pasteAttachment',
+    name: 'clipboard.png',
+    mime: 'image/png',
+    data: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  });
+  await waitFor(() => attachments.length > 0);
+  assert.equal(attachments[0].filename, 'clipboard.png');
+  assert.equal(attachments[0].mime, 'image/png');
+  assert.match(attachments[0].path, /clipboard\.png$/);
+});
+
 test('model "config" → jaeger.model setting reaches admission body', async () => {
   jaegerModelSetting = 'my-static-model';
   const { send, gateway } = wireExtension();

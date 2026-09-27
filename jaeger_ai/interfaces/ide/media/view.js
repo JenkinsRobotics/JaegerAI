@@ -501,6 +501,14 @@ function renderStaged() {
   container.replaceChildren();
   for (const attachment of state.staged || []) {
     const chip = document.createElement('span'); chip.className = 'chip';
+    if (attachment.data_url) {
+      chip.classList.add('image-chip');
+      const thumb = document.createElement('img');
+      thumb.src = attachment.data_url;
+      thumb.alt = '';
+      thumb.className = 'attachment-thumbnail';
+      chip.append(thumb);
+    }
     const name = document.createElement('span'); name.className = 'name';
     name.textContent = attachment.original_filename || attachment.stored_filename || attachment.attachment_id;
     const remove = document.createElement('button'); remove.type = 'button'; remove.textContent = '✕';
@@ -898,6 +906,48 @@ $('prompt').onkeydown = event => {
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('composer').requestSubmit(); }
 };
 $('prompt').onblur = () => { slashDismissed = true; renderSlashMenu(); };
+$('prompt').onpaste = event => {
+  const items = event.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      event.preventDefault();
+      const file = item.getAsFile();
+      if (!file) continue;
+      const reader = new FileReader();
+      reader.onload = () => {
+        post('pasteAttachment', {
+          data: reader.result,
+          mime: file.type,
+          name: file.name || `pasted-image-${Date.now()}.${file.type.split('/')[1] || 'png'}`
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+};
+$('composer').ondragover = event => {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'copy';
+};
+$('composer').ondrop = event => {
+  const files = event.dataTransfer?.files;
+  if (!files || !files.length) return;
+  for (const file of files) {
+    if (file.type.startsWith('image/')) {
+      event.preventDefault();
+      const reader = new FileReader();
+      reader.onload = () => {
+        post('pasteAttachment', {
+          data: reader.result,
+          mime: file.type,
+          name: file.name || `image-${Date.now()}.${file.type.split('/')[1] || 'png'}`
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+};
 $('attach').onclick = () => post('attach');
 $('mention').onclick = () => post('mentionFile');
 for (const [id, type] of [['new', 'new'], ['refresh', 'refresh'], ['settings', 'settings'], ['stop', 'cancel']]) $(id).onclick = () => post(type);

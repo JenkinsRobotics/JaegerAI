@@ -20,7 +20,7 @@ const SAFE_LINK_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
 // and there is no local-file image path — a picked attachment renders as a
 // named chip, never a preview, since showing one would mean widening
 // localResourceRoots beyond media/ to an arbitrary picked directory.
-const SAFE_IMAGE_SCHEMES = new Set(['https:']);
+const SAFE_IMAGE_SCHEMES = new Set(['https:', 'blob:', 'vscode-webview:', 'vscode-webview-resource:']);
 
 function parseUrl(value) {
   try { return new URL(String(value || '')); } catch { return null; }
@@ -29,7 +29,13 @@ function parseUrl(value) {
 function isSafeMarkdownUrl(value, { image = false } = {}) {
   const url = parseUrl(value);
   if (!url) return false;
-  return (image ? SAFE_IMAGE_SCHEMES : SAFE_LINK_SCHEMES).has(url.protocol);
+  if (image) {
+    if (url.protocol === 'data:') {
+      return url.pathname.startsWith('image/');
+    }
+    return SAFE_IMAGE_SCHEMES.has(url.protocol);
+  }
+  return SAFE_LINK_SCHEMES.has(url.protocol);
 }
 
 // Splits raw text on fenced code blocks (```lang\n…\n```), same contract the
