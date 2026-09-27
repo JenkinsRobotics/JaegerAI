@@ -658,6 +658,15 @@ class JaegerGatewayApp:
         request_id: str,
         source: str,
     ) -> dict[str, Any]:
+        tier = self._current_tier()
+        if tier != "jaeger":
+            return {
+                "text": "",
+                "error": f"Proactive background turns are disabled in '{tier}' mode (requires 'jaeger' mode)",
+                "status": "disabled",
+                "replayed": False,
+                "halt_reason": "tier_disabled",
+            }
         requested = {"options": {"source": source, "background": True}}
         try:
             admitted = self.store.admit_request(
@@ -1099,6 +1108,7 @@ class JaegerGatewayApp:
     async def handle_runtime_status(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.entity.runtime_status import collect_runtime_status
         payload = collect_runtime_status(include_network=True)
+        payload["interaction_tier"] = self._current_tier()
         return web.json_response(payload, status=200 if payload.get("ready") else 503)
 
     def _entity_diagnostics(self) -> dict[str, Any]:
@@ -1490,6 +1500,8 @@ class JaegerGatewayApp:
             lane, _ = split_routed_model_id(str(requested["model"]))
             if lane:
                 requested["provider"] = lane
+        if "interaction_tier" not in requested:
+            requested["interaction_tier"] = self._current_tier()
         return requested
 
     async def handle_send_turn(self, request: web.Request) -> web.Response:
@@ -2611,9 +2623,11 @@ class JaegerGatewayApp:
             from jaeger_ai.core.entity.runtime import EntityRuntime
             runtime = EntityRuntime.get_singleton()
 
+            tier = (execution or {}).get("interaction_tier") or self._current_tier()
             turn_meta = {
-                "execution_mode": "text_only" if text_only else "agent",
-                "actionable": actionable,
+                "execution_mode": "text_only" if (text_only or tier == "chat") else "agent",
+                "interaction_tier": tier,
+                "actionable": False if tier == "chat" else actionable,
                 "role": role_s,
                 "agent_id": agent_fields.get("agent_id"),
                 "specialist": agent_fields.get("agent_id") if role_s == "specialist" else None,
@@ -2639,7 +2653,10 @@ class JaegerGatewayApp:
                 # request must still reach the agent, unadorned.
                 logger.warning("turn context unavailable for %s; running the bare request", rid, exc_info=True)
                 prepared, prompt = None, text
-            model_only = (text_only and not actionable) or role_s == "specialist"
+            if tier == "chat":
+                model_only = True
+            else:
+                model_only = (text_only and not actionable) or role_s == "specialist"
             turn_result = await asyncio.to_thread(_model_only_lane if model_only else _sync_react, prompt)
             if prepared is not None and not turn_result.get("error"):
                 try:
@@ -3249,19 +3266,27 @@ class JaegerGatewayApp:
         dump_yaml(Path(path), config)
         return web.json_response({"autonomy": mode, "options": list(AUTONOMY)})
 
+    def _current_tier(self) -> str:
+        """Return the active interaction tier ('chat', 'agent', 'jaeger')."""
+        path = self._config_path()
+        if path is not None and Path(path).is_file():
+            try:
+                from jaeger_ai.contract.modes import INTERACTION_TIERS
+                from jaeger_ai.core.instance.schemas import Config, load_yaml
+
+                cfg = load_yaml(Path(path), Config)
+                tier = getattr(cfg.automation, "interaction_tier", "agent")
+                if tier in INTERACTION_TIERS:
+                    return tier
+            except Exception:
+                pass
+        return "agent"
+
     async def handle_get_tier(self, request: web.Request) -> web.Response:
         """GET /v1/runtime/tier: active agency tier ('chat' | 'agent' | 'jaeger')."""
         from jaeger_ai.contract.modes import INTERACTION_TIERS, TIER_DESCRIPTIONS
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
 
-        path = self._config_path()
-        tier = "agent"
-        if path is not None and Path(path).is_file():
-            try:
-                cfg = load_yaml(Path(path), Config)
-                tier = getattr(cfg.automation, "interaction_tier", "agent")
-            except Exception:
-                pass
+        tier = self._current_tier()
         return web.json_response({
             "tier": tier,
             "options": list(INTERACTION_TIERS),
@@ -3286,6 +3311,7 @@ class JaegerGatewayApp:
         config = load_yaml(Path(path), Config)
         config.automation.interaction_tier = tier
         dump_yaml(Path(path), config)
+        self.event_bus.publish("*", "runtime.tier.changed", {"tier": tier})
         return web.json_response({"tier": tier, "options": list(INTERACTION_TIERS)})
 
     async def handle_runtime_skills(self, request: web.Request) -> web.Response:
@@ -3513,6 +3539,9 @@ class JaegerGatewayApp:
     async def handle_tasks(self, request: web.Request) -> web.Response:
         if request.method == 'GET':
             return web.json_response({'tasks': [t.to_dict() for t in self.task_owner.store.list_tasks()]})
+        tier = self._current_tier()
+        if tier == "chat":
+            return web.json_response({'error': 'Task submission is disabled in Chat mode'}, status=403)
         body = await request.json()
         parent = self.store.get_session(str(body.get('session_id') or ''))
         if parent is None:
@@ -3558,6 +3587,9 @@ class JaegerGatewayApp:
 
     async def handle_create_orchestration_task(self, request: web.Request) -> web.Response:
         """Validate and reserve a worker request before acknowledging admission."""
+        tier = self._current_tier()
+        if tier == "chat":
+            return web.json_response({"error": "Orchestration tasks are disabled in Chat mode"}, status=403)
         if self.orchestration is None:
             return web.json_response({"error": "IDE orchestration service unavailable"}, status=503)
 
