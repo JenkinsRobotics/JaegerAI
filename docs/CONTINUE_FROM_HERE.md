@@ -35,6 +35,7 @@ This single command deterministically verifies:
 ## 0.13 Release Qualification (2026-09-27)
 
 - **P0-1 — Live configured-provider conversation: QUALIFIED** on an isolated Gateway + Ollama `glm-5.3-flash:cloud`, with `/v1/runtime/models` truth, a completed terminal receipt, and restart continuity. This is single-provider/model evidence and does not qualify the tool-effect, Stop/cancel, or installed-client chains.
+- **P0-2 — Live streaming Stop/cancel + immediate next turn: QUALIFIED** on an isolated Gateway + Ollama `glm-5.3-flash:cloud`; Stop during streaming produced one terminal `cancelled` receipt, no pending approvals, immediate next-turn admission, and restart continuity. This is not yet a tool-effect or installed-client cancellation proof.
 
 ---
 
@@ -98,6 +99,7 @@ The model is replaceable cognition. The client is not the entity. A tool returni
 | Product runtime adapters now fail closed when no owner is available; `GatewayRuntime` routes real bus approvals and calls the request-scoped Gateway steering route | `core/mind_runtime.py::create_runtime`; `core/runtime/gateway_runtime.py`; `core/gateway/client.py::steer`; `test_gateway_mind_runtime.py` | Source and unit tests; live-provider and installed-host acceptance remains open |
 
 | One live-provider conversation has been qualified through the owner ReAct path, with runtime-model truth, a terminal receipt, and controlled-restart continuity | isolated Gateway `:18810` + Ollama `:11434`; `/v1/runtime/models` active = `ollama/glm-5.3-flash:cloud`; turn result model = `ollama:glm-5.3-flash:cloud`; session `p0-1-live`, request `p0-1-live-turn-2`; controlled restart returned the same session/request without duplicate execution | Live-provider integration; single provider/model only |
+| One live streaming turn was stopped during the model phase and produced exactly one terminal `cancelled` receipt, then the next turn was admitted immediately and completed; after a controlled restart the session and both receipts survived | isolated Gateway `:18820` + Ollama `:11434`; session `p0-2-cancel`; request `p0-2-cancel-1` `cancelled` with `turn.cancelled` event; request `p0-2-cancel-next` completed; no pending approvals; controlled restart returned both receipts without duplicate execution | Live-provider integration; streaming/cancel only, no tool-effect chain |
 
 ## Not yet qualified
 
@@ -105,16 +107,15 @@ One live-provider conversation is qualified above; no physical-device, tool-effe
 
 1. **Full live-provider matrix across providers/models/clients.**
 2. **End-to-end tool + approval + effect + independent verification.**
-3. **Stop/cancel during a live tool/streaming phase, then immediate next-turn admission, reconnect, and restart.**
-4. **IDE and WebUI same-session continuity.**
-5. **Real existing IDE-worker conversation steering.**
-6. **Durable memory add/recall/correct/forget.**
-7. **Persona continuity across provider/model changes.**
-8. **Physical microphone/speaker voice qualification.**
-9. **Truthful runtime presence states.**
-10. **One real proactive workflow with dedupe, quiet hours, and persistence.**
-11. **Phone/off-LAN field client using the same Jaeger identity and sessions.**
-12. **Final installable artifact qualification.**
+3. **IDE and WebUI same-session continuity.**
+4. **Real existing IDE-worker conversation steering.**
+5. **Durable memory add/recall/correct/forget.**
+6. **Persona continuity across provider/model changes.**
+7. **Physical microphone/speaker voice qualification.**
+8. **Truthful runtime presence states.**
+9. **One real proactive workflow with dedupe, quiet hours, and persistence.**
+10. **Phone/off-LAN field client using the same Jaeger identity and sessions.**
+11. **Final installable artifact qualification.**
 
 ## Priority order
 
@@ -132,14 +133,11 @@ One live-provider conversation is qualified above; no physical-device, tool-effe
 - **Evidence:** isolated Gateway `:18810` + Ollama `:11434`, model `glm-5.3-flash:cloud`; `/v1/runtime/models` active = `{provider: ollama, model: glm-5.3-flash:cloud}`; turn result model = `ollama:glm-5.3-flash:cloud`; session `p0-1-live`, request `p0-1-live-turn-2` completed with one terminal receipt; controlled restart retained the same session/request without duplicate execution.
 - **Remaining:** the broader provider/model/client matrix and the P0-2/P0-3/P0-4 chains below.
 
-### P0-2 — Stop/cancel and immediate next turn
+### P0-2 — Stop/cancel and immediate next turn (qualified 2026-09-27)
 
-- **Problem:** Cancellation is tested with scripted/owned-process providers, but not during a real provider/tool phase with live streaming and immediate next-turn admission.
-- **Current evidence:** `test_request_cancellation.py`; `test_gateway_owned_process_contract.py::test_owner_cancellation_interrupts_inflight_provider`; `test_gateway_cancel_confirmation.py`.
-- **Affected files/owners:** `core/runtime/cancellation.py`; `core/gateway/server.py`; `jaeger_agent/loop/jaeger_agent.py`; `interfaces/ide/conversation.js`; `features/webui/static/messages.js`; `interfaces/swift/.../AmbientLoop.swift`.
-- **Acceptance test:** Run a real configured-provider turn, issue Stop during a tool or streaming phase, verify exactly one terminal `cancelled` outcome, confirm no pending approval remains, immediately admit the next turn without hidden 409/retry, then reconnect and restart the Gateway.
-- **Priority:** P0.
-- **Type:** integration.
+- **Status:** Qualified on a controlled Ollama streaming turn and next-turn admission.
+- **Evidence:** isolated Gateway `:18820` + Ollama `:11434`, model `glm-5.3-flash:cloud`; session `p0-2-cancel`; request `p0-2-cancel-1` was stopped during streaming and became terminal `cancelled` with exactly one `turn.cancelled` event; `/v1/approvals` returned no pending approvals; request `p0-2-cancel-next` was admitted immediately and completed; controlled restart retained both receipts without duplicate execution.
+- **Remaining:** cancellation during a real gated tool/effect chain and across all client surfaces.
 
 ### P0-3 — Tool, approval, effect, and verification chain
 
