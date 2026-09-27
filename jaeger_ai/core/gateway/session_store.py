@@ -64,7 +64,7 @@ def input_fingerprint(text: str, *, extra: dict[str, Any] | None = None) -> str:
 #: same request_id are a conflict, never a silent re-selection.
 EXECUTION_INPUT_KEYS = (
     "model", "provider", "attachment_ids", "workspace", "options",
-    "allowed_tools", "display_text", "is_subordinate",
+    "allowed_tools", "display_text", "is_subordinate", "interaction_tier",
 )
 #: Version 1 digests covered text only (pre-2026-09-22 receipts). Version 2
 #: covers text plus every explicit ``EXECUTION_INPUT_KEYS`` value.
@@ -114,6 +114,12 @@ def _normalize_requested(requested: dict[str, Any] | None) -> dict[str, Any]:
                 raise ValueError("options must be an object")
             if value:
                 out[key] = value
+        elif key == "interaction_tier":
+            tier_val = str(value).strip().lower()
+            if tier_val in ("chat", "agent", "jaeger"):
+                out[key] = tier_val
+            elif tier_val:
+                raise ValueError(f"interaction_tier must be one of ['chat', 'agent', 'jaeger'], got '{tier_val}'")
         else:
             text = str(value).strip()
             if text:
@@ -1107,6 +1113,7 @@ class GatewaySessionStore:
             "allowed_tools": choices.get("allowed_tools"),
             "display_text": choices["display_text"] if "display_text" in choices else None,
             "is_subordinate": bool(choices.get("is_subordinate")),
+            "interaction_tier": choices.get("interaction_tier") or meta.get("interaction_tier"),
         }
 
     def bind_native(
