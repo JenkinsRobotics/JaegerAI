@@ -2,7 +2,7 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `0.13-dev`
-**Current commit:** `bbedb7b3`
+**Current commit:** `2d809472`
 **Date:** 2026-09-27
 **Branch rule:** work on `0.13-dev`; do not modify or merge `master` unless the operator explicitly asks.
 
