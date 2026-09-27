@@ -36,6 +36,7 @@ This single command deterministically verifies:
 
 - **P0-1 — Live configured-provider conversation: QUALIFIED** on an isolated Gateway + Ollama `glm-5.3-flash:cloud`, with `/v1/runtime/models` truth, a completed terminal receipt, and restart continuity. This is single-provider/model evidence and does not qualify the tool-effect, Stop/cancel, or installed-client chains.
 - **P0-2 — Live streaming Stop/cancel + immediate next turn: QUALIFIED** on an isolated Gateway + Ollama `glm-5.3-flash:cloud`; Stop during streaming produced one terminal `cancelled` receipt, no pending approvals, immediate next-turn admission, and restart continuity. This is not yet a tool-effect or installed-client cancellation proof.
+- **P0-3 — Live tool approval + independently verified effect + denial: QUALIFIED** on an isolated Gateway + Ollama `kimi-k2.7-code:cloud`; approved `write_file` produced an independently verified file effect and denial produced no file mutation. This is a single tool/effect-class proof, not a full tool-class matrix.
 
 ---
 
@@ -100,22 +101,22 @@ The model is replaceable cognition. The client is not the entity. A tool returni
 
 | One live-provider conversation has been qualified through the owner ReAct path, with runtime-model truth, a terminal receipt, and controlled-restart continuity | isolated Gateway `:18810` + Ollama `:11434`; `/v1/runtime/models` active = `ollama/glm-5.3-flash:cloud`; turn result model = `ollama:glm-5.3-flash:cloud`; session `p0-1-live`, request `p0-1-live-turn-2`; controlled restart returned the same session/request without duplicate execution | Live-provider integration; single provider/model only |
 | One live streaming turn was stopped during the model phase and produced exactly one terminal `cancelled` receipt, then the next turn was admitted immediately and completed; after a controlled restart the session and both receipts survived | isolated Gateway `:18820` + Ollama `:11434`; session `p0-2-cancel`; request `p0-2-cancel-1` `cancelled` with `turn.cancelled` event; request `p0-2-cancel-next` completed; no pending approvals; controlled restart returned both receipts without duplicate execution | Live-provider integration; streaming/cancel only, no tool-effect chain |
+| One live provider/tool chain gated a bounded `write_file` effect, independently verified the resulting file, then denied the same write and proved no effect; both receipts and the effect survived a controlled restart | isolated Gateway `:18830` + Ollama `:11434`; session `p0-3-approval`; request `p0-3-approval-1` approved `files.write_file` and `files.changed`/`/changes` showed `/private/tmp/gw-p0-3/instances/p0-1/workspace/p0-3-approved.txt`; file content was independently `P0-3-APPROVED-CONTENT`; request `p0-3-deny-1` was denied with empty `files.changed` and no file mutation | Live-provider integration; single tool/effect chain, not every tool class |
 
 ## Not yet qualified
 
-One live-provider conversation is qualified above; no physical-device, tool-effect, or final installed-artifact qualification is claimed.
+One live-provider conversation and one streaming Stop/cancel are qualified above; no physical-device or final installed-artifact qualification is claimed.
 
 1. **Full live-provider matrix across providers/models/clients.**
-2. **End-to-end tool + approval + effect + independent verification.**
-3. **IDE and WebUI same-session continuity.**
-4. **Real existing IDE-worker conversation steering.**
-5. **Durable memory add/recall/correct/forget.**
-6. **Persona continuity across provider/model changes.**
-7. **Physical microphone/speaker voice qualification.**
-8. **Truthful runtime presence states.**
-9. **One real proactive workflow with dedupe, quiet hours, and persistence.**
-10. **Phone/off-LAN field client using the same Jaeger identity and sessions.**
-11. **Final installable artifact qualification.**
+2. **IDE and WebUI same-session continuity.**
+3. **Real existing IDE-worker conversation steering.**
+4. **Durable memory add/recall/correct/forget.**
+5. **Persona continuity across provider/model changes.**
+6. **Physical microphone/speaker voice qualification.**
+7. **Truthful runtime presence states.**
+8. **One real proactive workflow with dedupe, quiet hours, and persistence.**
+9. **Phone/off-LAN field client using the same Jaeger identity and sessions.**
+10. **Final installable artifact qualification.**
 
 ## Priority order
 
@@ -139,14 +140,11 @@ One live-provider conversation is qualified above; no physical-device, tool-effe
 - **Evidence:** isolated Gateway `:18820` + Ollama `:11434`, model `glm-5.3-flash:cloud`; session `p0-2-cancel`; request `p0-2-cancel-1` was stopped during streaming and became terminal `cancelled` with exactly one `turn.cancelled` event; `/v1/approvals` returned no pending approvals; request `p0-2-cancel-next` was admitted immediately and completed; controlled restart retained both receipts without duplicate execution.
 - **Remaining:** cancellation during a real gated tool/effect chain and across all client surfaces.
 
-### P0-3 — Tool, approval, effect, and verification chain
+### P0-3 — Tool, approval, effect, and verification chain (qualified 2026-09-27)
 
-- **Problem:** Tool execution and approval contracts exist, but a live provider/tool chain with an independently verified effect is not yet qualified.
-- **Current evidence:** `test_gateway_owned_process_contract.py::test_real_tool_write_requires_gateway_approval`; `test_gateway_tool_events.py`; `core/effects`; `PolicyKernel`.
-- **Affected files/owners:** `core/gateway/server.py::_GatewayToolConfirmationProvider`; `packages/jaeger-agent/jaeger_agent/tool_executor.py`; `core/authority`; `core/effects`; verification probes.
-- **Acceptance test:** Through a live provider, request a bounded file/process effect, require approval, approve it, verify the changed state independently of the tool result, record the effect and verification chain, then deny the same request in another run and verify no effect occurred.
-- **Priority:** P0.
-- **Type:** integration.
+- **Status:** Qualified on a controlled Ollama/tool `write_file` chain with a bounded local file effect.
+- **Evidence:** isolated Gateway `:18830` + Ollama `:11434`, model `kimi-k2.7-code:cloud`; session `p0-3-approval`; request `p0-3-approval-1` produced `tool.started`, a pending `files.write_file` approval, an approved `files.changed` event, and an independently verified file containing `P0-3-APPROVED-CONTENT`; request `p0-3-deny-1` was denied and `files.changed` was empty while the file stayed unchanged; controlled restart retained the effect and both receipts.
+- **Remaining:** all tool classes beyond the local file write and installed-client surfaces.
 
 ### P0-4 — Product-path runtime live qualification
 
