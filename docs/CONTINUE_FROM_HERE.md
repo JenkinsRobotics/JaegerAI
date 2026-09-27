@@ -2,7 +2,7 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `0.13-dev`
-**Current commit:** `499bb180`
+**Current commit:** `94b92744`
 **Date:** 2026-09-27
 **Branch rule:** work on `0.13-dev`; do not modify or merge `master` unless the operator explicitly asks.
 
@@ -19,7 +19,7 @@ Before starting or concluding any task, always execute the canonical verificatio
 This single command deterministically verifies:
 1. Git repository tracking invariants (zero vendor code, zero bytecode or pytest caches).
 2. CI hygiene tripwires (strict root allowlist, feature READMEs, zero in-repo state).
-3. IDE extension and webview interface tests (149 passed).
+3. IDE extension and webview interface tests (152 passed).
 4. Core Gateway client and skill catalog audit tests.
 
 ---
@@ -28,7 +28,7 @@ This single command deterministically verifies:
 
 - **84% Clutter Reduction:** Disk footprint dropped from 33,412 to 5,333 files. Vendored external copies (`jaeger_ai/vendor`) and broken shims removed.
 - **Safety Archiving:** 2,562 non-core files (iOS client, Swabble, Codex prompts, sample extensions, benchmark logs) safely preserved at `~/Desktop/JaegerAI_Archive`.
-- **Multimodal IDE:** CSP updated to permit `data:` and `blob:`; users can paste clipboard screenshots and drag-and-drop images directly into the chat composer.
+- **Multimodal IDE & Feature Parity:** 3-way mode switcher (`[Plan | Auto | Manual]`), slash commands (`/clear`, `/review`, `/test`, `/compact`), collapsible reasoning disclosure, quick action suggestion chips, CSP updated for clipboard screenshots (`data:`, `blob:`), and drag-and-drop image attachments.
 - **Auto-Daemon Management:** The IDE extension auto-probes `127.0.0.1:8810/health` and launches the Gateway daemon on-demand if not already running.
 - **Operational Tripwires & Deny Rules:** Added [`.agents/rules/deny-rules.md`](../.agents/rules/deny-rules.md) forbidding `pkill -f`, `killall`, and blanket `git add .`.
 
