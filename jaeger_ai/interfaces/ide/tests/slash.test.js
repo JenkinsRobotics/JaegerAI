@@ -9,7 +9,7 @@ const names = list => list.map(command => command.name);
 
 test('typing "/" offers only commands usable right now', () => {
   assert.deepEqual(names(slash.match('/', idle)).sort(),
-    ['agent', 'archive', 'copy', 'diagnostics', 'export', 'model', 'new', 'plan', 'rename', 'resume', 'skills', 'status', 'unarchive', 'workers', 'workspace', 'worktree'].sort());
+    ['agent', 'archive', 'clear', 'compact', 'copy', 'diagnostics', 'export', 'model', 'new', 'plan', 'rename', 'resume', 'skills', 'status', 'test', 'unarchive', 'workers', 'workspace', 'worktree'].sort());
   assert.ok(!names(slash.match('/', idle)).includes('stop'), 'stop needs a running turn');
   assert.ok(!names(slash.match('/', idle)).includes('diff'), 'diff needs recorded changes');
   const busy = slash.match('/', { ...idle, busy: true, changes: true });
@@ -50,6 +50,18 @@ test('anything that is not exactly a usable command is an ordinary message', () 
   assert.equal(slash.parse('/stop', idle), null, 'not usable while idle');
   assert.equal(slash.parse('hello', idle), null);
   assert.equal(slash.parse('/rename', { ...idle, session: false }), null);
+});
+
+test('the expanded command library exposes local and extension-backed actions', () => {
+  const available = names(slash.match('/', idle));
+  for (const name of ['clear', 'test']) assert.ok(available.includes(name), name);
+  assert.equal(slash.parse('/clear', idle).command.name, 'clear');
+  assert.equal(slash.parse('/review', { ...idle, changes: true }).command.name, 'review');
+  assert.equal(slash.parse('/test', idle).command.name, 'test');
+  const compact = slash.parse('/compact security review', idle);
+  assert.equal(compact.command.name, 'compact');
+  assert.equal(compact.args, 'security review');
+  assert.equal(slash.parse('/compact', idle).command.takesArgs, true);
 });
 
 test('every command names a group and a description, and names are unique', () => {

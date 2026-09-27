@@ -42,6 +42,21 @@ function activate(context) {
       view?.webview.postMessage({ autonomy: { mode: result.autonomy, options: result.options } });
     } catch (error) { if (mode) throw error; /* reading is best-effort: the pill just stays unknown */ }
   };
+  const runTestSuite = async () => {
+    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!root) throw new Error('Open a workspace folder first.');
+    if (!fs.existsSync(path.join(root, 'scripts', 'verify.sh'))) {
+      throw new Error('No scripts/verify.sh found in this workspace.');
+    }
+    const { stdout, stderr } = await execFileAsync('bash', ['scripts/verify.sh'], {
+      cwd: root, timeout: 120000, maxBuffer: 1024 * 1024 * 5,
+      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1',
+        PYTHONPYCACHEPREFIX: path.join(os.tmpdir(), 'jaeger', 'pycache') },
+    });
+    const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
+    const lines = text ? text.split(/\r?\n/).filter(Boolean).slice(-30) : ['Verification suite completed with no output.'];
+    view?.webview.postMessage({ info: { title: 'Verification suite', lines } });
+  };
   // What the agent's ide_* tools can ask of the editor. Reads are bounded; opening a
   // file only changes what the operator is looking at.
   const ideCall = async (kind, args) => {
@@ -437,6 +452,18 @@ function activate(context) {
         // Slash commands that need the Gateway or a file dialog. Each maps to a real
         // capability; the panel never lists one whose backend is missing.
         if (message.type === 'setAutonomy' && typeof message.mode === 'string') return sendAutonomy(message.mode);
+        if (message.type === 'runTestSuite') return runTestSuite();
+        if (message.type === 'compactSession') {
+          if (controller.state.busy) throw new Error('Wait for the current turn to finish before compacting.');
+          const focus = String(message.focus || '').trim();
+          const text = [
+            'Summarize the prior conversation into a compact digest and use that as context going forward.',
+            focus ? `Focus: ${focus}` : '',
+          ].filter(Boolean).join(' ');
+          const sent = controller.send(text);
+          if (!sent) throw new Error('Jaeger could not accept the compaction request.');
+          return sent;
+        }
         if (message.type === 'rename' && typeof message.title === 'string') {
           const id = controller.state.session?.session_id;
           if (!id) throw new Error('Open a conversation first.');

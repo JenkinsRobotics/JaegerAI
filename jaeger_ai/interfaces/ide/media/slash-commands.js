@@ -17,6 +17,7 @@ const COMMANDS = [
   { name: 'copy', group: 'Chat', description: 'Copy the last answer', needs: ['answer'] },
   { name: 'export', group: 'Chat', description: 'Save this conversation as Markdown', needs: ['session'] },
   { name: 'archive', group: 'Chat', description: 'Archive this conversation', needs: ['session'] },
+  { name: 'clear', group: 'Chat', description: 'Clear this view without deleting the conversation', needs: ['session'] },
   { name: 'unarchive', group: 'Chat', description: 'Move this conversation back to the active list', needs: ['session'] },
   { name: 'model', group: 'Settings', description: 'Choose the model', needs: [] },
   { name: 'workspace', group: 'Settings', description: 'Choose the workspace Jaeger uses', needs: [] },
@@ -24,10 +25,13 @@ const COMMANDS = [
   { name: 'plan', group: 'Code', description: 'Plan this request without executing changes', args: '<request>', takesArgs: true, needs: [] },
   { name: 'diagnostics', group: 'Code', description: 'Show workspace problems', needs: [] },
   { name: 'diff', group: 'Code', description: 'Review the files this turn changed', needs: ['changes'] },
+  { name: 'review', group: 'Code', description: 'Review uncommitted changes', needs: ['changes'] },
+  { name: 'test', group: 'Code', description: 'Run the verification suite', needs: [] },
   { name: 'status', group: 'Info', description: 'Show connection, model and conversation status', needs: [] },
   { name: 'skills', group: 'Info', description: 'Browse available skills', args: '[filter]', takesArgs: true, needs: [] },
   { name: 'agent', group: 'Info', description: 'Show background agents and tasks', aliases: ['ps'], needs: [] },
   { name: 'workers', group: 'Info', description: 'List orchestration worker agents', needs: [] },
+  { name: 'compact', group: 'Chat', description: 'Request a compact digest of prior turns', args: '[focus]', takesArgs: true, needs: ['session'] },
 ];
 
 const byName = new Map();

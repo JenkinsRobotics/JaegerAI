@@ -54,9 +54,21 @@ test('the webview and extension expose the real Plan mode contract', () => {
   const html = readMedia('index.html');
   const view = readMedia('view.js');
   const extension = readMedia('../extension.js');
-  assert.match(html, /id="plan-mode"/);
+  assert.match(html, /id="mode-switch"/);
   assert.match(view, /planModeOn/);
   assert.match(view, /planOnly: planModeOn/);
   assert.match(extension, /message\.planOnly \? \['update_plan'\] : null/);
   assert.doesNotMatch(view, /plan-only prompt only/);
+});
+
+test('the composer exposes the three-way mode switcher', () => {
+  const html = readMedia('index.html');
+  const view = readMedia('view.js');
+  assert.match(html, /id="mode-switch"/);
+  assert.match(html, /data-mode="plan"/);
+  assert.match(html, /data-mode="auto"/);
+  assert.match(html, /data-mode="manual"/);
+  assert.match(view, /function setMode\(value\)/);
+  assert.match(view, /post\('setAutonomy', \{ mode: target\.autonomy \}\)/);
+  assert.match(view, /planOnly: planModeOn/);
 });
