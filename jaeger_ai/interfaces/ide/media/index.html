@@ -50,15 +50,14 @@
       <div class="bar-right">
         <button id="model-trigger" class="pill model-pill" type="button" aria-haspopup="dialog" title="Choose model"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg><span class="sr-only">Model</span><span id="model-display">Gateway default</span><svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
         <button id="ide-context" class="pill toggle" type="button" aria-pressed="true" title="Include your open file, selection and tabs with each message"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 7-6 2-2 6-6-15Z"/></svg><span>IDE context</span></button>
-        <button id="workspace" class="pill workspace" type="button" title="Choose the workspace Jaeger should use"><span id="workspace-label">Workspace</span></button>
-        <button id="worktree" class="pill worktree" type="button" title="Select an existing git worktree"><span>Worktree</span></button>
+        <button id="workspace" class="pill workspace" type="button" hidden title="Choose the workspace Jaeger should use"><span id="workspace-label">Workspace</span></button>
+        <button id="worktree" class="pill worktree" type="button" hidden title="Select an existing git worktree"><span>Worktree</span></button>
         <button id="queue-next" class="pill queue-action" type="button" hidden title="Queue this message after the current turn"><span>Queue next</span></button>
         <button id="stop" type="button" hidden>Stop</button>
         <button id="send" class="send-button" type="submit" disabled aria-label="Send message" title="Send message"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
       </div>
     </div>
   </form>
-  <div class="workspace" title="Current workspace"><span class="workspace-icon">▱</span><span id="context">Work locally</span><span>⌄</span></div>
   <dialog id="model-menu" aria-label="Choose model">
     <div class="model-menu-header">
       <input type="search" id="model-search" placeholder="Search models…" aria-label="Search models">
