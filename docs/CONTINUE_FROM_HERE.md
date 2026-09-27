@@ -2,7 +2,7 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `0.13-dev`
-**Current commit:** `7c2c3be2`
+**Current commit:** `80951560`
 **Date:** 2026-09-26
 **Branch rule:** work on `0.13-dev`; do not modify or merge `master` unless the operator explicitly asks.
 
@@ -31,6 +31,10 @@ This single command deterministically verifies:
 - **Multimodal IDE:** CSP updated to permit `data:` and `blob:`; users can paste clipboard screenshots and drag-and-drop images directly into the chat composer.
 - **Auto-Daemon Management:** The IDE extension auto-probes `127.0.0.1:8810/health` and launches the Gateway daemon on-demand if not already running.
 - **Operational Tripwires & Deny Rules:** Added [`.agents/rules/deny-rules.md`](../.agents/rules/deny-rules.md) forbidding `pkill -f`, `killall`, and blanket `git add .`.
+
+## 0.13 Release Qualification (2026-09-27)
+
+- **P0-1 — Live configured-provider conversation: QUALIFIED** on an isolated Gateway + Ollama `glm-5.3-flash:cloud`, with `/v1/runtime/models` truth, a completed terminal receipt, and restart continuity. This is single-provider/model evidence and does not qualify the tool-effect, Stop/cancel, or installed-client chains.
 
 ---
 
@@ -93,11 +97,13 @@ The model is replaceable cognition. The client is not the entity. A tool returni
 | Bridge clients default to Gateway execution and fail closed when the Gateway is unavailable | `interfaces/bridge.py::gateway_execution_enabled`, `_attach_gateway`, `_gateway_turn`; `interfaces/test_bridge.py` | Source and bridge protocol tests |
 | Product runtime adapters now fail closed when no owner is available; `GatewayRuntime` routes real bus approvals and calls the request-scoped Gateway steering route | `core/mind_runtime.py::create_runtime`; `core/runtime/gateway_runtime.py`; `core/gateway/client.py::steer`; `test_gateway_mind_runtime.py` | Source and unit tests; live-provider and installed-host acceptance remains open |
 
+| One live-provider conversation has been qualified through the owner ReAct path, with runtime-model truth, a terminal receipt, and controlled-restart continuity | isolated Gateway `:18810` + Ollama `:11434`; `/v1/runtime/models` active = `ollama/glm-5.3-flash:cloud`; turn result model = `ollama:glm-5.3-flash:cloud`; session `p0-1-live`, request `p0-1-live-turn-2`; controlled restart returned the same session/request without duplicate execution | Live-provider integration; single provider/model only |
+
 ## Not yet qualified
 
-No live-provider, physical-device, or final installed-artifact qualification is claimed in this audit.
+One live-provider conversation is qualified above; no physical-device, tool-effect, or final installed-artifact qualification is claimed.
 
-1. **Live configured-provider conversation.**
+1. **Full live-provider matrix across providers/models/clients.**
 2. **End-to-end tool + approval + effect + independent verification.**
 3. **Stop/cancel during a live tool/streaming phase, then immediate next-turn admission, reconnect, and restart.**
 4. **IDE and WebUI same-session continuity.**
@@ -120,14 +126,11 @@ No live-provider, physical-device, or final installed-artifact qualification is 
 
 ## Prioritized remaining work
 
-### P0-1 — Live configured-provider conversation
+### P0-1 — Live configured-provider conversation (qualified 2026-09-27)
 
-- **Problem:** No current turn has been qualified through the enabled owner with a real configured provider. Scripted tests prove transport and routing, not live provider behavior.
-- **Current evidence:** `test_gateway_owned_process_contract.py` uses a scripted provider; `test_runtime_truth.py` proves capability reporting but not a live provider call.
-- **Affected files/owners:** `core/gateway/server.py`; `core/entity/runtime.py`; `core/models/external_model.py`; `core/models/router.py`; provider adapters under `packages/jaeger-agent/jaeger_agent/adapters/`; WebUI/IDE clients.
-- **Acceptance test:** Start an isolated Gateway with a real configured provider, send a human turn, verify the provider/model reported by `/v1/runtime/models` is the provider/model that executed, stream the answer, persist one terminal receipt, reload the session from another client, and restart the owner without duplicate execution.
-- **Priority:** P0.
-- **Type:** integration.
+- **Status:** Qualified on a controlled Ollama provider and model.
+- **Evidence:** isolated Gateway `:18810` + Ollama `:11434`, model `glm-5.3-flash:cloud`; `/v1/runtime/models` active = `{provider: ollama, model: glm-5.3-flash:cloud}`; turn result model = `ollama:glm-5.3-flash:cloud`; session `p0-1-live`, request `p0-1-live-turn-2` completed with one terminal receipt; controlled restart retained the same session/request without duplicate execution.
+- **Remaining:** the broader provider/model/client matrix and the P0-2/P0-3/P0-4 chains below.
 
 ### P0-2 — Stop/cancel and immediate next turn
 
