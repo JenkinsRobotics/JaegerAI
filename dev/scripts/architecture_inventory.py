@@ -129,7 +129,7 @@ def inventory(root: Path) -> dict:
             record = {"kind": "missing", "tracked": relative in tracked}
         else:
             record["bytes"] = path.stat().st_size
-            record["vendor"] = relative.startswith("jaeger_ai/vendor/")
+            record["vendor"] = False  # vendor tree removed 2026-09-26
             if path.suffix == ".py":
                 try:
                     source = path.read_text(encoding="utf-8-sig")

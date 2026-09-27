@@ -57,9 +57,6 @@ def test_executable_sources_contain_no_absolute_macos_home_paths() -> None:
                 continue
             text = path.read_text(encoding="utf-8")
             concrete = _concrete_homes(text, python=path.suffix == ".py")
-            if relative.as_posix() == "jaeger_ai/vendor/hermes_agent/tools/environments/daytona.py":
-                # Remote sandbox image's account, not an operator home on this host.
-                concrete.discard("daytona")
             if concrete:
                 findings.append(str(relative))
 

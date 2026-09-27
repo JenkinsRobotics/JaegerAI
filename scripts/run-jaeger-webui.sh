@@ -52,8 +52,8 @@ export HERMES_WEBUI_EXTENSION_DIR="$repo_root/jaeger_ai/assets"
 export HERMES_WEBUI_EXTENSION_SCRIPT_URLS=/extensions/jaeger_webui_branding.js
 export HERMES_WEBUI_FOREGROUND=1
 
-# Profile listing/switching imports hermes_cli + agent.* from the vendored
-# Hermes agent (jaeger_ai/vendor/hermes_agent), which the WebUI discovers on
+# Profile listing/switching imports hermes_cli + agent.* from the external
+# Hermes agent (external checkout via JAEGER_HERMES_AGENT_SRC), which the WebUI discovers on
 # its own. A separate Hermes checkout is used only when named explicitly —
 # never picked up just because ~/GitHub/hermes-agent happens to exist, which
 # made the WebUI's behaviour depend on the machine it ran on.
@@ -66,7 +66,7 @@ else
 fi
 
 
-# Shared Hermes profiles + current-schema state.db for the :8790 vendor home.
+# Shared Hermes profiles + current-schema state.db for the :8790 webui home.
 # Leftover real profile dirs are renamed aside and replaced with a symlink.
 PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" "$python_exe" -c \
   "import os; from pathlib import Path; from jaeger_ai.features.webui.service.profile_layout import prepare_webui_home; prepare_webui_home(Path(os.environ['HERMES_HOME']))"

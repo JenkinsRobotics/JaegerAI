@@ -2,8 +2,8 @@
 
 The gateway used to leave every chat session at the placeholder title
 "New Conversation" (only ``task:`` sessions got real names from the
-dispatcher). This module ports the provenance contract of the vendored
-Hermes titler (``vendor/hermes_agent/agent/title_generator.py``) to the
+dispatcher). This module ports the provenance contract of the external
+Hermes titler (``the external Hermes Agent title_generator.py``) to the
 gateway store, in two stages, both off the critical path:
 
 * **Stage 1 — instant derived title** (deterministic, cannot fail):
@@ -42,7 +42,7 @@ PLACEHOLDER_TITLES = frozenset({"new conversation", "new chat", "new_conversatio
 _PROV_RANK = {"derived": 0, "llm": 1, "user": 2}
 
 # Stage-1 cap: a raw fragment reads worse the longer it runs (mirrors the
-# vendored titler's MAX_DERIVED_TITLE_CHARS).
+# external titler's MAX_DERIVED_TITLE_CHARS).
 MAX_DERIVED_TITLE_CHARS = 48
 # Stage-2 input budget (Claude Code / OpenClaw converged on 1000).
 MAX_TITLE_INPUT_CHARS = 1000
@@ -53,7 +53,7 @@ _MAX_TITLE_WORDS = 12
 _TITLE_TIMEOUT_S = 25.0
 
 # Control-tag wrappers around machine-authored content inside a nominal
-# "user" message (kept in sync with the vendored titler's list).
+# "user" message (kept in sync with the external titler's list).
 _CONTROL_WRAPPER_RE = re.compile(
     r"<(?:command-message|command-name|command-args|local-command-caveat|"
     r"local-command-stderr|local-command-stdout|task-notification|"
