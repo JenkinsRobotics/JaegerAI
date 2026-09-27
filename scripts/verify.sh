@@ -37,8 +37,9 @@ echo "[2/4] Running CI hygiene tripwires (root allowlist, features READMEs, zero
 echo "[+] CI hygiene tripwires passed."
 
 echo "[3/4] Running IDE interface unit tests..."
-node --test jaeger_ai/interfaces/ide/tests/*.test.js > /dev/null
-echo "[+] IDE interface tests passed (149 passed)."
+IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1)
+PASSED_COUNT=$(echo "${IDE_OUTPUT}" | grep -E '^(ℹ|#) pass ' | awk '{print $3}')
+echo "[+] IDE interface tests passed (${PASSED_COUNT} passed)."
 
 echo "[4/4] Running core Gateway client & Skill Catalog audit..."
 "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ide_gateway_client.py dev/tests/jaeger_ai/core/test_skill_catalog_audit.py -q --no-header
