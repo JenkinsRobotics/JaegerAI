@@ -35,6 +35,7 @@ from jaeger_ai.contract.sessions import normalise_surface
 
 from .event_bus import GatewayEventBus, ReplayGap
 from jaeger_ai.core.runtime.cancellation import CancellationRegistry
+from jaeger_ai.core.runtime.salience import SalienceLevel
 
 from .session_store import EXECUTION_INPUT_KEYS, GatewaySessionStore, RequestBusy, RequestConflict
 
@@ -180,6 +181,16 @@ def _admitted_execution(request_row: dict[str, Any]) -> dict[str, Any] | None:
         return None
     execution = request_row.get("execution")
     return execution if isinstance(execution, dict) else None
+
+
+def _normalize_salience(value: str | int | None) -> str:
+    """One wire spelling for proactive salience; invalid is a quiet digest."""
+    try:
+        if isinstance(value, int):
+            return SalienceLevel(value).name.lower()
+        return SalienceLevel[str(value or "digest").strip().upper()].name.lower()
+    except (KeyError, ValueError):
+        return "digest"
 
 
 def _asks_about_the_image(request: str) -> bool:
@@ -356,6 +367,42 @@ class _GatewayToolConfirmationProvider:
             return False
         row = self.app.store.get_approval(aid) or {}
         return row.get("decision") not in {None, "deny", "expired"}
+
+
+def _proactive_notification_payload(
+    session_id: str, request_id: str, status: str, result: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Build one Tier 3 wire payload, or None for quiet/proactive-unaware turns."""
+    raw = result.get("proactive_salience")
+    try:
+        level = (
+            SalienceLevel(int(raw)) if isinstance(raw, int)
+            else SalienceLevel[str(raw).upper()]
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    if level not in {SalienceLevel.IMMEDIATE, SalienceLevel.DIGEST}:
+        return None
+    if status not in {"completed", "failed", "cancelled", "execution_unknown"}:
+        return None
+    if status == "completed":
+        title = "Jaeger proactive update"
+        body = str(result.get("output") or "").strip() or "Proactive task completed."
+        audio_cue = "chime"
+    else:
+        title = "Jaeger proactive task failed"
+        body = f"Proactive task {status}: {str(result.get('error') or status)}"
+        audio_cue = "alert"
+    return {
+        "title": title,
+        "body": body,
+        "session_id": session_id,
+        "salience": level.name.lower(),
+        "speak": level is SalienceLevel.IMMEDIATE,
+        "audio_cue": audio_cue,
+        "request_id": request_id,
+        "source": result.get("proactive_source") or "sensor",
+    }
 
 
 class JaegerGatewayApp:
@@ -610,6 +657,9 @@ class JaegerGatewayApp:
         app = self
 
         class _Sink:
+            def current_tier(self) -> str:
+                return app._current_tier()
+
             def is_busy(self) -> bool:
                 return bool(app._running_tasks)
 
@@ -619,9 +669,13 @@ class JaegerGatewayApp:
             def last_user_session(self) -> str:
                 return app._last_human_session or "desktop-app"
 
-            def submit_turn(self, prompt: str, *, session: str, request_id: str, source: str) -> dict[str, Any]:
+            def submit_turn(
+                self, prompt: str, *, session: str, request_id: str, source: str,
+                salience: str | None = None,
+            ) -> dict[str, Any]:
                 return app.submit_background_turn(
                     prompt, session_id=session, request_id=request_id, source=source,
+                    salience=salience,
                 )
 
         return _Sink()
@@ -633,6 +687,7 @@ class JaegerGatewayApp:
         session_id: str,
         request_id: str,
         source: str,
+        salience: str | int | None = None,
     ) -> dict[str, Any]:
         """Admit and run a background turn on the Gateway event loop.
 
@@ -645,6 +700,7 @@ class JaegerGatewayApp:
         future = asyncio.run_coroutine_threadsafe(
             self._run_background_turn(
                 prompt, session_id=session_id, request_id=request_id, source=source,
+                salience=salience,
             ),
             loop,
         )
@@ -657,6 +713,7 @@ class JaegerGatewayApp:
         session_id: str,
         request_id: str,
         source: str,
+        salience: str | int | None = None,
     ) -> dict[str, Any]:
         tier = self._current_tier()
         if tier != "jaeger":
@@ -667,7 +724,10 @@ class JaegerGatewayApp:
                 "replayed": False,
                 "halt_reason": "tier_disabled",
             }
-        requested = {"options": {"source": source, "background": True}}
+        options = {"source": source, "background": True}
+        if salience is not None:
+            options["proactive_salience"] = _normalize_salience(salience)
+        requested = {"options": options}
         try:
             admitted = self.store.admit_request(
                 session_id, prompt, request_id=request_id, requested=requested,
@@ -2687,6 +2747,14 @@ class JaegerGatewayApp:
             })
 
             agent_lane = str(backend).startswith("mcp") or backend == "owner-react"
+            options = ((execution or {}).get("options") or {})
+            proactive_fields = {}
+            if str(options.get("source") or "") == "sensor" and options.get("proactive_salience"):
+                proactive_fields = {
+                    "proactive": True,
+                    "proactive_source": "sensor",
+                    "proactive_salience": _normalize_salience(options["proactive_salience"]),
+                }
             result = {
                 "output": response_text,
                 "status": "completed",
@@ -2703,6 +2771,7 @@ class JaegerGatewayApp:
                 "halt_reason": turn_result.get("halt_reason"),
                 "trace_id": turn_result.get("trace_id"),
                 **agent_fields,
+                **proactive_fields,
             }
             self._persist_terminal(rid, session_id, "completed", result, assistant_text=response_text, record_entity_event=False)
         except Exception as exc:
@@ -2728,7 +2797,15 @@ class JaegerGatewayApp:
             reply = reply if isinstance(reply, dict) else {}
             if receipt and receipt.get("execution_unknown") is False and receipt.get("status") in {"completed", "failed", "cancelled"}:
                 status = receipt["status"]
-            result = {"error": str(exc), "turn_id": turn_id, "status": status, **agent_fields}
+            options = (((execution or {}).get("options") or {}) if execution is not None else {})
+            proactive_fields = {}
+            if str(options.get("source") or "") == "sensor" and options.get("proactive_salience"):
+                proactive_fields = {
+                    "proactive": True,
+                    "proactive_source": "sensor",
+                    "proactive_salience": _normalize_salience(options["proactive_salience"]),
+                }
+            result = {"error": str(exc), "turn_id": turn_id, "status": status, **agent_fields, **proactive_fields}
             if status == "completed":
                 result = {
                     "output": str(reply.get("text") or ""),
@@ -2736,6 +2813,7 @@ class JaegerGatewayApp:
                     "turn_id": turn_id,
                     "backend": "native_receipt",
                     **agent_fields,
+                    **proactive_fields,
                 }
             if receipt:
                 result["native_receipt"] = receipt
@@ -2796,6 +2874,10 @@ class JaegerGatewayApp:
         record_entity_event: bool = True,
     ) -> None:
         session_status = "idle" if status in {"completed", "cancelled"} else status
+        if assistant_text is None and status != "completed":
+            notification = _proactive_notification_payload(session_id, request_id, status, result)
+            if notification is not None:
+                assistant_text = notification["body"]
         if assistant_text and status == "completed" and record_entity_event:
             try:
                 from jaeger_ai.core.entity.runtime import EntityRuntime
@@ -2818,6 +2900,10 @@ class JaegerGatewayApp:
             )
             if persisted.get("event"):
                 self.event_bus.fanout(persisted["event"])
+            if not persisted.get("replayed"):
+                self._publish_proactive_notification(
+                    request_id, session_id, status, result,
+                )
             if status in {"completed", "failed", "cancelled"}:
                 self._drain_session_queue(session_id)
             if status == "completed" and not persisted.get("replayed"):
@@ -2847,6 +2933,20 @@ class JaegerGatewayApp:
                 "completed": "turn.finish", "failed": "turn.failed",
                 "cancelled": "turn.cancelled", "execution_unknown": "turn.unknown",
             }[status], {**result, "request_id": request_id})
+
+    def _publish_proactive_notification(
+        self,
+        request_id: str,
+        session_id: str,
+        status: str,
+        result: dict[str, Any],
+    ) -> bool:
+        """Emit one SSE notification for a completed Tier 3 proactive result."""
+        payload = _proactive_notification_payload(session_id, request_id, status, result)
+        if payload is None:
+            return False
+        self.event_bus.publish(session_id, "notification.proactive", payload)
+        return True
 
     def _finish_cancelled(
         self,

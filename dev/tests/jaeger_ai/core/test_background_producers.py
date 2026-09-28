@@ -257,6 +257,7 @@ def test_background_conflict_does_not_replay_old_output(tmp_path):
                      ('{"output":"OLD"}',))
         conn.execute("UPDATE sessions SET status='idle'")
     app = JaegerGatewayApp(store=store)
+    app._current_tier = lambda: "jaeger"  # conflict checks run after Tier 3 admission
 
     async def go():
         return await app._run_background_turn(

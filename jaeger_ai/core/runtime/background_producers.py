@@ -33,8 +33,12 @@ class BackgroundTurnSink(Protocol):
         session: str,
         request_id: str,
         source: str,
+        salience: str | None = None,
     ) -> dict[str, Any]:
         """Run one background turn and return text/error/halt_reason."""
+
+    def current_tier(self) -> str:
+        """Current interaction tier; sensors are Tier 3 only."""
 
     def is_busy(self) -> bool:
         ...
@@ -132,6 +136,7 @@ class BackgroundProducers:
         self.stop_event: threading.Event | None = None
         self._lock_file: Any = None
         self._idle_thread: threading.Thread | None = None
+        self.sensor_bus: Any = None
         self._accepting = False
         self.held = False
         self.webhook_port: int | None = None
@@ -196,6 +201,12 @@ class BackgroundProducers:
             except Exception:  # noqa: BLE001
                 pass
             self.cron = None
+        if self.sensor_bus is not None:
+            try:
+                self.sensor_bus.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            self.sensor_bus = None
         if self.stop_event is not None:
             self.stop_event.set()
             thread = self._idle_thread
@@ -309,6 +320,10 @@ class BackgroundProducers:
         from jaeger_ai.core.runtime.idle_supervisor import Action, decide, window_elapsed
         from jaeger_ai.core.runtime.task_liveness import reclaim_stale
 
+        try:
+            self._sensor_action(cfg)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[background] sensor bus: {exc}", flush=True)
         layout = self.layout
         try:
             reclaim_stale(layout)
@@ -390,6 +405,65 @@ class BackgroundProducers:
                 or result.get("execution_unknown")
             )
             hb.mark_beat(layout, silent=silent or failed)
+
+    def _current_tier(self, cfg: Any) -> str:
+        tier = getattr(self.sink, "current_tier", None)
+        if callable(tier):
+            return str(tier() or "agent")
+        try:
+            return str(cfg.automation.interaction_tier)
+        except Exception:  # noqa: BLE001
+            return "agent"
+
+    def _ensure_sensor_bus(self, cfg: Any) -> None:
+        from jaeger_ai.core.runtime.sensor_bus import SensorBus
+
+        if self.sensor_bus is None:
+            pcfg = getattr(getattr(cfg, "sensors", None), "proactive", None)
+            enabled = True if pcfg is None else bool(pcfg.enabled)
+            if not enabled:
+                return
+            interval = _float_env(
+                "JAEGER_SENSOR_POLL_S",
+                float(getattr(pcfg, "interval_seconds", 5.0) or 5.0),
+            )
+            debounce = _float_env(
+                "JAEGER_SENSOR_DEBOUNCE_S",
+                float(getattr(pcfg, "debounce_seconds", 8.0) or 8.0),
+            )
+            workspace = getattr(getattr(cfg, "workspace", None), "location", None)
+            if not workspace:
+                workspace = getattr(self.layout, "workspace_dir", None)
+            self.sensor_bus = SensorBus(
+                workspace, interval_s=interval, debounce_s=debounce,
+                awake_model=str(os.environ.get("JAEGER_AWAKE_MODEL") or "gemma4"),
+            )
+        if not self.sensor_bus.started:
+            self.sensor_bus.start()
+
+    def _sensor_action(self, cfg: Any) -> None:
+        if self._current_tier(cfg) != "jaeger":
+            if self.sensor_bus is not None:
+                self.sensor_bus.stop()
+                self.sensor_bus = None
+            return
+        self._ensure_sensor_bus(cfg)
+        if self.sensor_bus is None or self.sink.is_busy():
+            return
+        quiet = self.sink.last_user_quiet_s()
+        self.sensor_bus.poll_once()
+        candidate = self.sensor_bus.next_action(user_active=quiet < 90.0)
+        if candidate is None:
+            return
+        from jaeger_ai.core.runtime.sensor_bus import sensor_prompt
+
+        event = candidate.event
+        request_id = f"sensor:{event.source}:{event.kind}:{event.identity}"
+        self.sink.submit_turn(
+            sensor_prompt(event), session=self.sink.last_user_session(),
+            request_id=request_id, source="sensor",
+            salience=candidate.level.name.lower(),
+        )
 
     def _start_webhooks(self, cfg: Any) -> None:
         from jaeger_ai.core.runtime import webhooks as hooks

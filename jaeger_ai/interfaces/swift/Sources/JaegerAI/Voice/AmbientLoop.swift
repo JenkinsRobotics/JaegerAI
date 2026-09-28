@@ -231,6 +231,13 @@ final class AmbientLoop: ObservableObject {
         case "turn.cancelled":
             state = .idle
 
+        case "notification.proactive":
+            guard let notification = event.proactiveNotification else { return }
+            transcriptTail = String((transcriptTail + notification.body).suffix(400))
+            if notification.speak {
+                speak(notification.body)
+            }
+
         default:
             break
         }

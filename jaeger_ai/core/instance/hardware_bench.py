@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
+import subprocess
 import threading
 import time
 import uuid
@@ -22,8 +24,39 @@ from jaeger_ai.core.models.host_recommendation import (
     recommend_for_tier,
 )
 
+DISK_LOW_GB = 20.0
+
 _LOCK = threading.Lock()
 _JOBS: dict[str, "BenchJob"] = {}
+
+
+def snapshot() -> dict[str, Any]:
+    """Return the lightweight host readings shared by proactive sensors."""
+    reading: dict[str, Any] = {}
+    try:
+        reading["disk_free_gb"] = shutil.disk_usage(os.path.expanduser("~")).free / (1024 ** 3)
+    except OSError:
+        reading["disk_free_gb"] = 1000.0
+    try:
+        raw = subprocess.run(
+            ["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+            capture_output=True, text=True, timeout=1.5, check=True,
+        ).stdout.strip()
+        reading["memory_pressure_level"] = int(raw)
+    except Exception:  # noqa: BLE001
+        reading["memory_pressure_level"] = 1
+    try:
+        raw = subprocess.run(
+            ["pmset", "-g", "batt"], capture_output=True, text=True,
+            timeout=1.5, check=True,
+        ).stdout
+        match = re.search(r"(\d+)%", raw)
+        if match:
+            reading["battery_level"] = float(match.group(1))
+    except Exception:  # noqa: BLE001
+        pass
+    return reading
+
 
 
 @dataclass
@@ -132,7 +165,7 @@ def _run(job_id: str) -> None:
                     usage = shutil.disk_usage(os.path.expanduser("~"))
                     free_gb = usage.free / (1024 ** 3)
                     value = f"{free_gb:.0f} GB free"
-                    ok = free_gb >= 20
+                    ok = free_gb >= DISK_LOW_GB
                 elif name == "ollama":
                     ok, value = _probe_ollama()
                 elif name == "tier":

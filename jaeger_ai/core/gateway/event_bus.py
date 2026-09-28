@@ -52,6 +52,9 @@ EVENT_TYPES = frozenset({
     # Dispatcher board — kanban card moves surface here so a phone watching
     # the board sees the same updates the IDE does.
     "board.updated",
+    # Tier 3 proactive delivery. Clients speak when ``speak`` is true;
+    # DIGEST entries are visual/staged and never ring.
+    "notification.proactive",
     # IDE bridge + attachments + agent lifecycle.
     "ide.request", "attachment.added",
     "agent.created", "agent.activated", "agent.handoff", "agent.handoff.finished",
