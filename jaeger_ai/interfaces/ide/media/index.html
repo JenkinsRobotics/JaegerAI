@@ -41,10 +41,15 @@
       <div class="bar-left">
         <button id="attach" class="bar-icon" type="button" title="Add files" aria-label="Add files"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
         <button id="mention" class="bar-icon" type="button" title="Mention a file" aria-label="Mention a file">@</button>
-        <div id="mode-switch" role="radiogroup" aria-label="Mode">
-          <button id="mode-plan" class="mode-option" data-mode="plan" role="radio" aria-checked="false" title="Plan this turn; read files and generate a blueprint only"><span>Plan</span></button>
-          <button id="mode-auto" class="mode-option" data-mode="auto" role="radio" aria-checked="false" title="Full autonomy; tool calls and edits run without prompts"><span>Auto</span></button>
-          <button id="mode-manual" class="mode-option" data-mode="manual" role="radio" aria-checked="false" title="Gated safety mode; approve each file or shell action"><span>Manual</span></button>
+        <div id="mode-switch" role="radiogroup" aria-label="Agency Tier">
+          <button id="tier-chat" class="mode-option" data-tier="chat" role="radio" aria-checked="false" title="Chat (Tier 1): Pure conversational intelligence. Zero tool calls, commands, or file edits."><span>Chat</span></button>
+          <button id="tier-agent" class="mode-option" data-tier="agent" role="radio" aria-checked="true" title="Agent (Tier 2): Interactive task worker with tools upon your request."><span>Agent</span></button>
+          <button id="tier-jaeger" class="mode-option" data-tier="jaeger" role="radio" aria-checked="false" title="Jaeger (Tier 3): Autonomous companion with continuous background awareness & durable tasks."><span>Jaeger</span></button>
+        </div>
+        <div id="autonomy-subswitch" class="submode-switch" role="radiogroup" aria-label="Agent Approval" title="Approval mode">
+          <button id="mode-auto" class="mode-option submode-option" data-mode="auto" role="radio" aria-checked="true" title="Auto: tool calls run without prompts"><span>Auto</span></button>
+          <button id="mode-manual" class="mode-option submode-option" data-mode="manual" role="radio" aria-checked="false" title="Manual: prompt to approve file edits & shell actions"><span>Manual</span></button>
+          <button id="mode-plan" class="mode-option submode-option" data-mode="plan" role="radio" aria-checked="false" title="Plan: read-only blueprint turn; no edits"><span>Plan</span></button>
         </div>
       </div>
       <div class="bar-right">

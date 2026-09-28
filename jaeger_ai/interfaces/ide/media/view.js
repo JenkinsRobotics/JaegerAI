@@ -767,11 +767,21 @@ function showInfo(info) {
 window.addEventListener('message', ({ data }) => { if (data?.info) showInfo(data.info); else stateQueue.push(data); });
 
 // ── composer bar: permission pill + IDE-context toggle ─────────────────────
+const TIER_OPTIONS = [
+  { id: 'tier-chat', value: 'chat', label: 'Chat', hint: 'Chat (Tier 1): Pure conversational intelligence. Zero tool calls, commands, or file edits.' },
+  { id: 'tier-agent', value: 'agent', label: 'Agent', hint: 'Agent (Tier 2): Interactive task worker with tools upon your request.' },
+  { id: 'tier-jaeger', value: 'jaeger', label: 'Jaeger', hint: 'Jaeger (Tier 3): Autonomous companion with continuous background awareness & durable tasks.' },
+];
+
 const MODE_OPTIONS = [
   { id: 'mode-plan', value: 'plan', autonomy: null, label: 'Plan', hint: 'Plan this turn; read files and generate a blueprint only' },
   { id: 'mode-auto', value: 'auto', autonomy: 'auto', label: 'Auto', hint: 'Full autonomy; tool calls and edits run without prompts' },
   { id: 'mode-manual', value: 'manual', autonomy: 'ask', label: 'Manual', hint: 'Gated safety mode; approve each file or shell action' },
 ];
+
+function selectedTier() {
+  return state.tier?.current || 'agent';
+}
 
 function selectedMode() {
   if (planModeOn) return 'plan';
@@ -791,13 +801,38 @@ function renderComposerBar() {
     $('workspace').title = state.selectedWorkspace || 'Choose the workspace Jaeger should use';
   }
   if ($('worktree')) $('worktree').hidden = true;
+
+  // Render Agency Tiers
+  const currentTier = selectedTier();
+  for (const option of TIER_OPTIONS) {
+    const node = $(option.id);
+    if (node) {
+      node.setAttribute('aria-checked', String(option.value === currentTier));
+      node.title = option.hint;
+    }
+  }
+
+  // Render Autonomy Sub-switch (visible in agent tier; hidden in chat/jaeger)
+  const subswitch = $('autonomy-subswitch');
+  if (subswitch) {
+    subswitch.hidden = (currentTier !== 'agent');
+  }
+
   const selected = selectedMode();
   for (const option of MODE_OPTIONS) {
     const node = $(option.id);
-    node.setAttribute('aria-checked', String(option.value === selected));
-    node.title = option.hint;
+    if (node) {
+      node.setAttribute('aria-checked', String(option.value === selected));
+      node.title = option.hint;
+    }
   }
   $('ide-context').setAttribute('aria-pressed', String(ideContextOn));
+}
+
+function setTier(tier) {
+  state.tier = { ...(state.tier || {}), current: tier };
+  post('setTier', { tier });
+  persistView(); renderComposerBar();
 }
 
 function setMode(value) {
@@ -815,6 +850,9 @@ function setMode(value) {
 $('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); };
 $('workspace').onclick = () => post('selectWorkspace');
 $('worktree').onclick = () => post('selectWorktree');
+if ($('tier-chat')) $('tier-chat').onclick = () => setTier('chat');
+if ($('tier-agent')) $('tier-agent').onclick = () => setTier('agent');
+if ($('tier-jaeger')) $('tier-jaeger').onclick = () => setTier('jaeger');
 $('mode-plan').onclick = () => setMode('plan');
 $('mode-auto').onclick = () => setMode('auto');
 $('mode-manual').onclick = () => setMode('manual');

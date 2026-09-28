@@ -42,6 +42,13 @@ function activate(context) {
       view?.webview.postMessage({ autonomy: { mode: result.autonomy, options: result.options } });
     } catch (error) { if (mode) throw error; /* reading is best-effort: the pill just stays unknown */ }
   };
+  const sendTier = async tier => {
+    try {
+      const gw = controller?.gateway || new Gateway(endpoint());
+      const result = tier ? await gw.setTier(tier) : await gw.tier();
+      view?.webview.postMessage({ tier: { current: result.tier, options: result.options } });
+    } catch (error) { if (tier) throw error; /* reading is best-effort */ }
+  };
   const runTestSuite = async () => {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) throw new Error('Open a workspace folder first.');
@@ -363,6 +370,7 @@ function activate(context) {
           controller.ideHandler = ideCall;
           void refreshChanges();
           void sendAutonomy();
+          void sendTier();
           postContext();
           await ensureGatewayDaemon(controller.gateway);
           return controller.refresh(selected);
@@ -452,6 +460,7 @@ function activate(context) {
         // Slash commands that need the Gateway or a file dialog. Each maps to a real
         // capability; the panel never lists one whose backend is missing.
         if (message.type === 'setAutonomy' && typeof message.mode === 'string') return sendAutonomy(message.mode);
+        if (message.type === 'setTier' && typeof message.tier === 'string') return sendTier(message.tier);
         if (message.type === 'runTestSuite') return runTestSuite();
         if (message.type === 'compactSession') {
           if (controller.state.busy) throw new Error('Wait for the current turn to finish before compacting.');
