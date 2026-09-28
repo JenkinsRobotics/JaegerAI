@@ -437,14 +437,16 @@ function activate(context) {
         if (message.type === 'send' && typeof message.text === 'string') {
           const { model, provider } = selectedModel(message.model);
           const allowedTools = message.planOnly ? ['update_plan'] : null;
-          const sent = controller.send(message.text, model, provider, selectedWorkspace, message.ideContext === false ? null : ideContext(), allowedTools);
+          const options = message.deepThink ? { deep_think: true, reasoning_effort: 'high' } : null;
+          const sent = controller.send(message.text, model, provider, selectedWorkspace, message.ideContext === false ? null : ideContext(), allowedTools, options);
           postContext();
           return sent;
         }
         if (message.type === 'queue' && typeof message.text === 'string') {
           const { model, provider } = selectedModel(message.model);
           const allowedTools = message.planOnly ? ['update_plan'] : null;
-          const queued = controller.queue(message.text, model, provider, selectedWorkspace, message.ideContext === false ? null : ideContext(), allowedTools);
+          const options = message.deepThink ? { deep_think: true, reasoning_effort: 'high' } : null;
+          const queued = controller.queue(message.text, model, provider, selectedWorkspace, message.ideContext === false ? null : ideContext(), allowedTools, options);
           postContext();
           return queued;
         }

@@ -275,7 +275,7 @@ class Conversation {
     if (this.disposed || epoch !== this.epoch) return;
     await this.refresh(session.session_id);
   }
-  async send(text, model = '', provider = '', workspace = '', ide = null, allowedTools = null) {
+  async send(text, model = '', provider = '', workspace = '', ide = null, allowedTools = null, options = null) {
     text = String(text).trim();
     if (!text || !this.state.connected || this.state.busy || this.sending) return;
     clearTimeout(this.reconnectTimer);
@@ -326,7 +326,7 @@ class Conversation {
         // The open project and what is open in it, so the agent works in the
         // operator's workspace and can resolve "this file" / "the selection".
         ...(workspace ? { workspace } : {}),
-        ...(ide ? { options: { ide } } : {}),
+        ...(ide || options ? { options: { ...(ide ? { ide } : {}), ...(options || {}) } } : {}),
       });
       admittedSuccessfully = true;
       this.pending[sid].startCursor = Math.max(0, Number(admitted.start_event_id || 1) - 1);
@@ -465,7 +465,7 @@ class Conversation {
     if (epoch !== this.epoch || this.disposed) return;
     this.state.queue = Array.isArray(result.items) ? result.items : [];
   }
-  async queue(text, model = '', provider = '', workspace = '', ide = null, allowedTools = null) {
+  async queue(text, model = '', provider = '', workspace = '', ide = null, allowedTools = null, options = null) {
     text = String(text).trim();
     const sid = this.state.session?.session_id;
     if (!text || !this.state.connected || !sid) return false;
@@ -480,7 +480,7 @@ class Conversation {
         ...(Array.isArray(allowedTools) ? { allowed_tools: allowedTools } : {}),
         ...(model ? { model, ...(provider ? { provider } : {}) } : {}),
         ...(workspace ? { workspace } : {}),
-        ...(ide ? { options: { ide } } : {}),
+        ...(ide || options ? { options: { ...(ide ? { ide } : {}), ...(options || {}) } } : {}),
       });
     } catch (error) {
       this.state.error = error.message;

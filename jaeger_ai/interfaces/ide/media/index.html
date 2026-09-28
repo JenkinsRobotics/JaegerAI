@@ -46,10 +46,15 @@
           <button id="tier-agent" class="mode-option" data-tier="agent" role="radio" aria-checked="true" title="Agent (Tier 2): Interactive task worker with tools upon your request."><span>Agent</span></button>
           <button id="tier-jaeger" class="mode-option" data-tier="jaeger" role="radio" aria-checked="false" title="Jaeger (Tier 3): Autonomous companion with continuous background awareness & durable tasks."><span>Jaeger</span></button>
         </div>
-        <div id="autonomy-subswitch" class="submode-switch" role="radiogroup" aria-label="Agent Approval" title="Approval mode">
+        <div id="autonomy-subswitch" class="submode-switch" role="radiogroup" aria-label="Agent Controls" title="Agent controls">
           <button id="mode-auto" class="mode-option submode-option" data-mode="auto" role="radio" aria-checked="true" title="Auto: tool calls run without prompts"><span>Auto</span></button>
           <button id="mode-manual" class="mode-option submode-option" data-mode="manual" role="radio" aria-checked="false" title="Manual: prompt to approve file edits & shell actions"><span>Manual</span></button>
+          <button id="mode-deep-think" class="mode-option submode-option deep-think-option" data-mode="deep-think" type="button" role="button" aria-pressed="false" title="Deep Think: Extended multi-step reasoning with thinking models (DeepSeek R1 / o1 / 26B)"><span>🧠 Deep Think</span></button>
           <button id="mode-plan" class="mode-option submode-option" data-mode="plan" role="radio" aria-checked="false" title="Plan: read-only blueprint turn; no edits"><span>Plan</span></button>
+        </div>
+        <div id="jaeger-autonomous-indicator" class="submode-switch jaeger-indicator" hidden title="Jaeger Autonomous Mode: Auto-routes local & cloud intelligence dynamically">
+          <span class="jaeger-badge-dot"></span>
+          <span>⚡ Auto Cognitive Routing</span>
         </div>
       </div>
       <div class="bar-right">

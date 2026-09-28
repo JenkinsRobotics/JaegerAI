@@ -23,7 +23,8 @@ window.JaegerPostMessage = post;
 let ideContextOn = api.getState()?.ideContext !== false;
 let mode = api.getState()?.mode || 'manual';
 let planModeOn = mode === 'plan';
-const persistView = () => api.setState({ drafts, ideContext: ideContextOn, mode, planMode: planModeOn, chatSearch });
+let deepThinkOn = Boolean(api.getState()?.deepThink);
+const persistView = () => api.setState({ drafts, ideContext: ideContextOn, mode, planMode: planModeOn, deepThink: deepThinkOn, chatSearch });
 function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
 // While the agent is busy, Enter steers the live turn. “Queue next” writes a
 // durable Gateway request instead; this client never owns a second queue.
@@ -818,6 +819,18 @@ function renderComposerBar() {
     subswitch.hidden = (currentTier !== 'agent');
   }
 
+  // Render Jaeger Autonomous Indicator (visible in jaeger tier; hidden in chat/agent)
+  const jaegerIndicator = $('jaeger-autonomous-indicator');
+  if (jaegerIndicator) {
+    jaegerIndicator.hidden = (currentTier !== 'jaeger');
+  }
+
+  // Render Deep Think toggle state
+  const dtBtn = $('mode-deep-think');
+  if (dtBtn) {
+    dtBtn.setAttribute('aria-pressed', String(deepThinkOn));
+  }
+
   const selected = selectedMode();
   for (const option of MODE_OPTIONS) {
     const node = $(option.id);
@@ -853,13 +866,20 @@ $('worktree').onclick = () => post('selectWorktree');
 if ($('tier-chat')) $('tier-chat').onclick = () => setTier('chat');
 if ($('tier-agent')) $('tier-agent').onclick = () => setTier('agent');
 if ($('tier-jaeger')) $('tier-jaeger').onclick = () => setTier('jaeger');
+if ($('mode-deep-think')) {
+  $('mode-deep-think').onclick = () => {
+    deepThinkOn = !deepThinkOn;
+    $('mode-deep-think').setAttribute('aria-pressed', String(deepThinkOn));
+    persistView(); renderComposerBar();
+  };
+}
 $('mode-plan').onclick = () => setMode('plan');
 $('mode-auto').onclick = () => setMode('auto');
 $('mode-manual').onclick = () => setMode('manual');
 $('queue-next').onclick = () => {
   const text = $('prompt').value;
   if (!text.trim() || $('queue-next').hidden) return;
-  post('queue', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn });
+  post('queue', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn, deepThink: deepThinkOn });
   $('prompt').value = ''; saveDraft(); eligibility(); slashDismissed = false; renderSlashMenu();
 };
 
@@ -955,7 +975,7 @@ $('composer').onsubmit = event => {
     }
     if (state.busy) { post('steer', { text }); $('prompt').value = ''; saveDraft(); eligibility(); return; }
     submittedDraftSession = draftSession;
-    post('send', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn });
+    post('send', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn, deepThink: deepThinkOn });
   }
 };
 $('prompt').oninput = () => { saveDraft(); eligibility(); slashDismissed = false; slashIndex = 0; renderSlashMenu(); };
