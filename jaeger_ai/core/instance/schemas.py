@@ -344,9 +344,31 @@ class DesktopSensorConfig(BaseModel):
     )
 
 
+class ProactiveSensorsConfig(BaseModel):
+    """Tier 3 workspace/host perception. Starts only in Jaeger mode."""
+
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = Field(
+        True,
+        json_schema_extra=_setting("autonomy"),
+        description="Observe workspace and safe host vitals in Jaeger tier.",
+    )
+    interval_seconds: float = Field(
+        5.0, ge=1.0, le=3600.0,
+        json_schema_extra=_setting("autonomy", advanced=True),
+        description="Seconds between proactive sensor polls.",
+    )
+    debounce_seconds: float = Field(
+        8.0, ge=1.0, le=3600.0,
+        json_schema_extra=_setting("autonomy", advanced=True),
+        description="Cooldown for repeated workspace observations.",
+    )
+
+
 class SensorsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     desktop: DesktopSensorConfig = Field(default_factory=DesktopSensorConfig)
+    proactive: ProactiveSensorsConfig = Field(default_factory=ProactiveSensorsConfig)
 
 
 class TirithConfig(BaseModel):

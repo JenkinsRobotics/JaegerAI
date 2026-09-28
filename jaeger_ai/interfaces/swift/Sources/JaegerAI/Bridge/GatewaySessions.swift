@@ -75,6 +75,31 @@ extension GatewayClient {
         var isTerminal: Bool {
             ["turn.finish", "turn.failed", "turn.cancelled"].contains(event)
         }
+
+        struct ProactiveNotification: Sendable {
+            let title: String
+            let body: String
+            let sessionID: String
+            let salience: String
+            let speak: Bool
+            let audioCue: String
+        }
+
+        var proactiveNotification: ProactiveNotification? {
+            guard event == "notification.proactive",
+                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return nil }
+            let body = object["body"] as? String ?? ""
+            guard !body.isEmpty else { return nil }
+            return ProactiveNotification(
+                title: object["title"] as? String ?? "Jaeger",
+                body: body,
+                sessionID: object["session_id"] as? String ?? sessionID,
+                salience: object["salience"] as? String ?? "digest",
+                speak: object["speak"] as? Bool == true,
+                audioCue: object["audio_cue"] as? String ?? "chime"
+            )
+        }
     }
 
     // MARK: - Session CRUD
