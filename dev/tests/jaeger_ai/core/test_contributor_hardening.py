@@ -1,6 +1,7 @@
 """Workstream 25 — contributor and public-review files exist and stay honest."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 REQUIRED = (
@@ -42,7 +43,7 @@ def test_continuation_entry_point_is_indexed_and_supersedes_stale_plans():
     continuation = Path("docs/CONTINUE_FROM_HERE.md").read_text(encoding="utf-8")
     docs_index = Path("docs/README.md").read_text(encoding="utf-8")
     assert "Branch:** `0.13-dev`" in continuation
-    assert "4124422b15e7f0ca28941774992000b24a151719" in continuation
+    assert re.search(r"\*\*Current commit:\*\*.*`[0-9a-f]{7,40}`", continuation)
     assert "P0 — reliable live conversation/execution path" in continuation
     assert "Not yet qualified" in continuation
     assert "CURRENT AUTHORITATIVE" in docs_index

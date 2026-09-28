@@ -2,8 +2,8 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `0.13-dev`
-**Current commit:** `2d8f1795`
-**Date:** 2026-09-27
+**Current commit:** tag `0.13.0` (source head `6a3c33b1`)
+**Date:** 2026-09-28
 **Branch rule:** work on `0.13-dev`; do not modify or merge `master` unless the operator explicitly asks.
 
 This is the single execution entry point for humans and coding agents. Re-read the current source before acting.
@@ -20,7 +20,7 @@ This single command deterministically verifies:
 1. Git repository tracking invariants (zero vendor code, zero bytecode or pytest caches).
 2. CI hygiene tripwires (strict root allowlist, feature READMEs, zero in-repo state).
 3. IDE extension and webview interface tests (152 passed).
-4. Core Gateway client, skill catalog audit, and Tier contract tests (9 passed).
+4. Core Gateway client, skill catalog audit, and Tier contract tests (12 passed).
 
 ---
 
@@ -49,6 +49,15 @@ This single command deterministically verifies:
 - **P1-6 and later gates: DEFERRED** to `0.14`; do not fold them into `0.13.0` claims.
 - **Packaging: BUILT AND AUDITED.** External `0.13.0` wheel/sdist set, `JaegerAI.app`, and the IDE VSIX were produced from a clean checkout and audited with `dev/scripts/inspect_release_artifacts.py`; no unsafe archive members or repository runtime state were found.
 - Canonical verification passed before and after packaging.
+- **Refreshed 2026-09-28 at `6a3c33b1`:** Tier 3 committed; wheel/sdist set, release `JaegerAI.app`, and VSIX rebuilt externally and re-audited clean. Tagged `0.13.0`.
+- **Unit tier is not fully green:** 9 pre-existing failures from the 09-26 cleanup and the 09-27 kokoro change are listed in [RELEASE_0.13.md](RELEASE_0.13.md). Fix or retire them first in `0.13.1`.
+
+## Tier 3 proactive perception (2026-09-28) — SOURCE-COMPLETE, not P4-12
+
+- `core/runtime/sensor_bus.py` watches workspace churn, git branch, pytest `lastfailed` and test logs, plus host vitals (disk, memory pressure, battery). It debounces changes and alerts only on transitions.
+- `core/runtime/salience.py` classifies each event as NOISE, JOURNAL, DIGEST or IMMEDIATE using rules first, with the local awake model only for ambiguous kinds.
+- An IMMEDIATE event, or a DIGEST while the operator is active, submits one idempotent Jaeger-tier background turn. The Gateway publishes one `notification.proactive` SSE event on the terminal receipt. Swift `AmbientLoop` speaks it only when `speak` is true.
+- Verified by `dev/tests/jaeger_ai/core/test_proactive_tier3.py` (14) and `test_background_producers.py` (11). No live acceptance run.
 
 ## Read first
 
@@ -226,8 +235,9 @@ One live-provider conversation, streaming Stop/cancel, tool approval/effect, Web
 ### P4-12 — One real proactive workflow
 
 - **Problem:** Background producers, heartbeat, task ownership, and notification code exist, but no real observation → decision → durable work → notification journey is qualified.
-- **Current evidence:** `core/runtime/background_producers.py`; `core/entity/sensors`; `GatewayTaskOwner`; `core/runtime/background_delivery.py`; `docs/gateway-task-ownership.md`.
+- **Current evidence:** `core/runtime/sensor_bus.py` + `salience.py` (Tier 3 observation → salience → background turn → `notification.proactive`, unit/integration only); `core/runtime/background_producers.py`; `core/entity/sensors`; `GatewayTaskOwner`; `core/runtime/background_delivery.py`; `docs/gateway-task-ownership.md`.
 - **Affected files/owners:** EntityRuntime cognition handler registration; SensorSupervisor; GatewayTaskOwner; notification/delivery tools; quiet-hours settings.
+- **Known gaps:** no quiet hours; sensor fingerprints are in-memory and re-seed on restart; the idle tick calls `poll_once()` every `JAEGER_IDLE_POLL_S` (2 s) as well as the bus thread, so `sensors.proactive.interval_seconds` does not bound polling.
 - **Acceptance test:** Select one real observation source, prove a relevant change creates one durable task and one useful notification, an irrelevant change stays quiet, a duplicate stays deduplicated, quiet hours suppress it, and the responsibility/task/result survive restart.
 - **Priority:** P4.
 - **Type:** integration.
