@@ -55,6 +55,8 @@ class Gateway {
   ideResult(id, ideRequestId, body) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/ide/${encodeURIComponent(ideRequestId)}`, body); }
   autonomy() { return this.json('/v1/runtime/autonomy'); }
   setAutonomy(autonomy) { return this.json('/v1/runtime/autonomy', { autonomy }); }
+  tier() { return this.json('/v1/runtime/tier'); }
+  setTier(tier) { return this.json('/v1/runtime/tier', { tier }); }
   skills(query = '') { return this.json(`/v1/runtime/skills${query ? `?q=${encodeURIComponent(query)}` : ''}`); }
   cancelTask(id) { return this.json(`/v1/tasks/${encodeURIComponent(id)}/cancel`, {}); }
   sessions() { return this.json('/v1/sessions'); }
