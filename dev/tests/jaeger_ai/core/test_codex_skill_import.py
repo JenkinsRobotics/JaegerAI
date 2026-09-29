@@ -7,7 +7,13 @@ from collections import Counter
 from jaeger_agent.skill_registry import playbook_skills
 from jaeger_agent.skill_registry.playbook_skills import discover_playbooks
 
+import pytest
+
 CODEX_ROOT = playbook_skills._SKILLS_DIR / "codex"
+pytestmark = pytest.mark.skipif(
+    not CODEX_ROOT.is_dir(),
+    reason="Codex skills archived to ~/Desktop/JaegerAI_Archive in 7c2c3be2",
+)
 
 
 def _codex_skills():

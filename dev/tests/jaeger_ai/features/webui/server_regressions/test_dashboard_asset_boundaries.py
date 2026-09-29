@@ -5,10 +5,16 @@ from pathlib import Path
 
 import pytest
 
+EXTENSIONS_DIR = Path(__file__).resolve().parents[6] / "extensions"
+pytestmark = pytest.mark.skipif(
+    not EXTENSIONS_DIR.is_dir(),
+    reason="extensions archived to ~/Desktop/JaegerAI_Archive in 7c2c3be2",
+)
+
 
 @pytest.mark.parametrize("extension", ["ares-finance", "ares-creator", "ares-minecraft", "ares-worldview"])
 def test_dashboard_assets_belong_to_their_own_document(extension):
-    root = Path(__file__).resolve().parents[6] / "extensions" / extension
+    root = EXTENSIONS_DIR / extension
     manifest = json.loads((root / "manifest.json").read_text())
     # These keys explicitly mean scripts/styles injected into the HOST page.
     assert manifest.get("scripts", []) == []

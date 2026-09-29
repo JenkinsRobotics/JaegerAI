@@ -55,7 +55,14 @@ def bind(layout: Any) -> None:
     need to know where to look.
     """
     from jaeger_agent.memory import sqlite_store
-    mem = layout.memory_dir
+    mem = getattr(layout, "memory_dir", None)
+    if mem is None:
+        root = getattr(layout, "root", None)
+        if root is not None:
+            from pathlib import Path
+            mem = Path(root) / "memory"
+        else:
+            return
     mem.mkdir(parents=True, exist_ok=True)
     _state["facts_path"] = mem / "facts.json"
     _state["episodic_path"] = mem / "episodic.jsonl"
