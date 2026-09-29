@@ -2,7 +2,7 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `0.13-dev`
-**Current commit:** tag `0.13.0` (source head `6a3c33b1`)
+**Current commit:** tag `0.13.0` (source head `9b361d68`)
 **Date:** 2026-09-28
 **Branch rule:** work on `0.13-dev`; do not modify or merge `master` unless the operator explicitly asks.
 

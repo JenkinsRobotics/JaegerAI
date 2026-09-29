@@ -4,7 +4,7 @@
 **Target:** `0.13.0`
 **Branch:** `0.13-dev`
 **Tag:** `0.13.0` (the commit that carries this record)
-**Source head:** `6a3c33b1` — Tier 3 proactive perception
+**Source head:** `9b361d68` — Tier 3 proactive perception and 100% green unit tier
 **Date:** 2026-09-28
 
 ## Qualified for this release
