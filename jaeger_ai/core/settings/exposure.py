@@ -6,6 +6,7 @@ immutable identity key managed by the instance lifecycle UI.
 
 NONCATALOG_EXPOSURE = {
     "instance_name": "dedicated_ui",
+    "kokoro_tts.sample_rate": "internal",
 }
 
 __all__ = ["NONCATALOG_EXPOSURE"]

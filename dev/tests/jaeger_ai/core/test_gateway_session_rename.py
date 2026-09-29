@@ -74,12 +74,12 @@ class TestSkillsRoute(AioHTTPTestCase):
         data = await resp.json()
         assert resp.status == 200 and data["count"] == len(data["skills"]) > 100
         assert {"name", "category", "description", "lifecycle"} == set(data["skills"][0])
-        # The imported Codex skills are offered like any other.
-        assert any(s["category"] == "codex" for s in data["skills"])
+        # The playbooks catalog offers skills across domains.
+        assert any(s["category"] == "apple" for s in data["skills"])
 
     async def test_filters_by_name_or_description(self):
-        resp = await self.client.request("GET", "/v1/runtime/skills?q=contract")
+        resp = await self.client.request("GET", "/v1/runtime/skills?q=notes")
         names = [s["name"] for s in (await resp.json())["skills"]]
-        assert "contract-review" in names or any("contract" in n for n in names)
-        assert all("contract" in (s["name"] + s["description"]).lower()
-                   for s in (await (await self.client.request("GET", "/v1/runtime/skills?q=contract")).json())["skills"])
+        assert "apple-notes" in names
+        assert all("notes" in (s["name"] + s["description"]).lower()
+                   for s in (await (await self.client.request("GET", "/v1/runtime/skills?q=notes")).json())["skills"])

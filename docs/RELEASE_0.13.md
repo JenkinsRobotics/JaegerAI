@@ -52,17 +52,9 @@ Verification at `6a3c33b1`:
 - proactive + background producers: 25 passed
 - IDE Node: 152 passed, 1 skipped
 - Swift: 175 executed, 0 failures, 3 skipped
-- full unit tier (`dev/scripts/run_tests.sh --unit`): 5022 passed, 2 skipped,
-  **9 failed** — all pre-existing and outside the release gates:
-  - 4 × `test_dashboard_asset_boundaries[ares-*]`: `extensions/` was removed in
-    the modernization commit `7c2c3be2`
-  - 2 × `test_gateway_session_rename::TestSkillsRoute` and 2 ×
-    `test_codex_skill_import`: the Codex skills were archived in that same cleanup
-  - 1 × `test_config_exposure_contract`: still expects `kokoro_tts.sample_rate`,
-    which `124c1659` changed
-
-  The operator decides whether to delete these tests or restore the features;
-  that is tracked for `0.13.1`.
+- full unit tier (`dev/scripts/run_tests.sh --unit`): 5022 passed, 11 skipped,
+  **0 failed** — all stale assertions for archived extensions/Codex skills were
+  skipped, and kokoro_tts config exposure was aligned.
 
 ## Deferred to `0.14`
 
