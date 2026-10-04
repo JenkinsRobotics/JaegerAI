@@ -124,9 +124,11 @@ def test_http_tool_list_includes_bridge_tools():
         "capability_inventory_tool",
         "bridge_health",
         "bridge_query",
-        "bridge_command",
         "list_delegates",
     } <= names
+    # bridge_command writes authoritative state outside the Gateway/PolicyKernel
+    # path; it must never be exposed to MCP callers (Phase 1, workstream 1).
+    assert "bridge_command" not in names
     paths = [getattr(route, "path", None) for route in server.streamable_http_app().routes]
     assert "/mcp" in paths
 
