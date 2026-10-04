@@ -123,7 +123,7 @@ def _webui_attachment_roots() -> list[Path]:
         if state:
             add(Path(state).expanduser() / "attachments")
     add(Path.home() / ".jaeger" / "hermes-webui-state" / "attachments")
-    add(Path.home() / ".hermes" / "webui" / "attachments")
+    add(Path.home() / ".jaeger" / "hermes" / "webui" / "attachments")
     try:
         from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
         inst = resolve_instance_dir()

@@ -126,7 +126,7 @@ def _session_list_cache_gateway_session_metadata_path() -> Path:
 
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser().resolve()
+        hermes_home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".jaeger" / "hermes"))).expanduser().resolve()
     return hermes_home / "sessions" / "sessions.json"
 
 

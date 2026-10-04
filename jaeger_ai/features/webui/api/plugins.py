@@ -38,7 +38,7 @@ _PLUGIN_STATIC_ROOTS: dict[str, Path] = {}
 
 
 def _get_plugin_base() -> Path:
-    return Path(os.environ.get("HERMES_WEBUI_PLUGINS_DIR", str(Path.home() / ".hermes" / "plugins")))
+    return Path(os.environ.get("HERMES_WEBUI_PLUGINS_DIR", str(Path.home() / ".jaeger" / "hermes" / "plugins")))
 
 
 def load_plugins() -> None:

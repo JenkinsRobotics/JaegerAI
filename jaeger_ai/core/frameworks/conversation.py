@@ -14,7 +14,7 @@ def local_connection(layout):
         expected = jaeger_bridge().layout
     except Exception:
         expected = None
-    config_file = Path.home() / '.hermes/profiles/jaeger/config.yaml'
+    config_file = Path.home() / '.jaeger/hermes/profiles/jaeger/config.yaml'
     if not config_file.exists():
         raise ValueError('Configure the Jaeger profile gateway first')
     config = yaml.safe_load(config_file.read_text()) or {}

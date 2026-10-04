@@ -2154,7 +2154,7 @@ def _get_profile_home(profile) -> Path:
         from api.profiles import get_hermes_home_for_profile
         return Path(get_hermes_home_for_profile(profile))
     except ImportError:
-        return Path(os.environ.get('HERMES_HOME') or '~/.hermes').expanduser()
+        return Path(os.environ.get('HERMES_HOME') or '~/.jaeger/hermes').expanduser()
 
 
 _INTERRUPTED_RECOVERED_WORDING = (
@@ -5763,7 +5763,7 @@ def _active_state_db_path() -> Path:
         from api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('HERMES_HOME', str(HOME / '.hermes'))).expanduser().resolve()
+        hermes_home = Path(os.getenv('HERMES_HOME', str(HOME / '.jaeger' / 'hermes'))).expanduser().resolve()
     return hermes_home / 'state.db'
 
 
@@ -7462,7 +7462,7 @@ def _resolve_cli_sessions_context(source_filter=None, include_claude_code: bool 
         from api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('HERMES_HOME', str(HOME / '.hermes'))).expanduser().resolve()
+        hermes_home = Path(os.getenv('HERMES_HOME', str(HOME / '.jaeger' / 'hermes'))).expanduser().resolve()
 
     try:
         from api.profiles import get_active_profile_name
@@ -10885,7 +10885,7 @@ def count_conversation_rounds(sid: str, since: float | None = None) -> int:
         from api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('HERMES_HOME', str(HOME / '.hermes'))).expanduser().resolve()
+        hermes_home = Path(os.getenv('HERMES_HOME', str(HOME / '.jaeger' / 'hermes'))).expanduser().resolve()
     db_path = hermes_home / 'state.db'
     if not db_path.exists():
         return 0

@@ -320,4 +320,4 @@ def _platform_default_hermes_home() -> Path:
             ):
                 return legacy_home
             return new_home
-    return HOME / ".hermes"
+    return HOME / ".jaeger" / "hermes"

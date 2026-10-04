@@ -19,7 +19,7 @@ def configure(home=None, profiles=("jaeger", "openclaw")):
     for profile in profiles:
         if profile not in {'jaeger', 'openclaw', 'roundtable'}:
             raise ValueError('Unsupported profile')
-        path = home / ".hermes/profiles" / profile / "config.yaml"
+        path = home / ".jaeger/hermes/profiles" / profile / "config.yaml"
         text = path.read_text()
         config = yaml.safe_load(text) or {}
         if config.get("webui_gateway_api_key"):

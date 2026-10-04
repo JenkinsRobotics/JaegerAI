@@ -92,7 +92,7 @@ def _write_display_name(profile_home: Path, *, display_name: str) -> None:
 
 def ensure_webui_profile_layout(hermes_home: Path | None = None) -> dict[str, Any]:
     """Ensure named-profile display names; leave other profiles visible."""
-    home = (hermes_home or (Path.home() / ".hermes")).expanduser()
+    home = (hermes_home or (Path.home() / ".jaeger" / "hermes")).expanduser()
     profiles = home / "profiles"
     profiles.mkdir(parents=True, exist_ok=True)
     _write_display_name(home, display_name=PROFILE_DISPLAY_NAMES["default"])
@@ -207,7 +207,7 @@ def ensure_webui_config_yaml(agent_home: Path) -> dict[str, Any]:
     dst = agent_home / "config.yaml"
     home = Path.home()
     candidates = [
-        home / ".hermes" / "config.yaml",
+        home / ".jaeger" / "hermes" / "config.yaml",
         home / ".jaeger_ai" / "hermes-webui-agent" / "config.yaml",
     ]
     raw = dst.read_text(encoding="utf-8") if dst.exists() else ""
@@ -317,7 +317,7 @@ def prepare_webui_home(
     spawns empty second UIs / 0-byte profile state.dbs.
     """
     home = Path.home()
-    hermes = (hermes_home or (home / ".hermes")).expanduser()
+    hermes = (hermes_home or (home / ".jaeger" / "hermes")).expanduser()
     agent = (agent_home or (home / ".jaeger" / "hermes-webui-agent")).expanduser()
     layout = ensure_webui_profile_layout(hermes)
     linked = link_shared_profiles(shared=hermes / "profiles", agent_home=agent)

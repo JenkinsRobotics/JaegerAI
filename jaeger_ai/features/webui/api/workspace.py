@@ -263,7 +263,7 @@ def _clean_workspace_list(workspaces: list) -> list:
       confusion with the 'default' profile name).
     Returns the cleaned list (may be empty).
     """
-    hermes_profiles = (_home_path() / '.hermes' / 'profiles').resolve()
+    hermes_profiles = (_home_path() / '.jaeger' / 'hermes' / 'profiles').resolve()
     result = []
     for w in workspaces:
         path = w.get('path', '')

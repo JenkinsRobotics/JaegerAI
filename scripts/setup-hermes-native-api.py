@@ -36,7 +36,7 @@ def install():
     if path.exists():
         raise RuntimeError("Service already configured; inspect before changing or restarting it")
     module = runpy.run_path(str(ROOT/"scripts/run-hermes-native-api.py"))
-    module['provision_key'](Path.home()/".hermes/jaeger-native-api.key")
+    module['provision_key'](Path.home()/".jaeger/hermes/jaeger-native-api.key")
     config = configuration()
     Path(config['StandardOutPath']).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     path.parent.mkdir(parents=True, exist_ok=True)

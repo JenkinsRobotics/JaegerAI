@@ -121,8 +121,8 @@ def _allowed_roots_for_capture() -> list[Path]:
     """Roots capture is permitted in — same shape as ``/api/media``'s list."""
     roots: list[Path] = []
     home = Path(os.path.expanduser("~"))
-    hermes_home = Path(os.getenv("HERMES_HOME", str(home / ".hermes"))).expanduser()
-    for candidate in (hermes_home, Path("/tmp"), home / ".hermes"):
+    hermes_home = Path(os.getenv("HERMES_HOME", str(home / ".jaeger" / "hermes"))).expanduser()
+    for candidate in (hermes_home, Path("/tmp"), home / ".jaeger" / "hermes"):
         try:
             resolved = candidate.resolve()
         except OSError:

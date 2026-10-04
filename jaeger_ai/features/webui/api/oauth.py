@@ -25,7 +25,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Compatibility for older helper tests and self-heal code that import these.
-AUTH_JSON_PATH = Path.home() / ".hermes" / "auth.json"
+AUTH_JSON_PATH = Path.home() / ".jaeger" / "hermes" / "auth.json"
 
 CODEX_ISSUER = "https://auth.openai.com"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -158,7 +158,7 @@ def _get_active_hermes_home() -> Path:
             "active-profile resolution failed: %s",
             exc,
         )
-        return Path.home() / ".hermes"
+        return Path.home() / ".jaeger" / "hermes"
 
 
 # ── legacy auth.json helpers ────────────────────────────────────────────────

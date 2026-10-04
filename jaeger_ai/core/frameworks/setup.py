@@ -114,11 +114,11 @@ def _configure_webui_workspaces(home: Path | None = None) -> list[Path]:
     """Publish the shared container paths in every profile's workspace tab."""
     home = (home or Path.home()).expanduser().resolve()
     written: list[Path] = []
-    profile_homes = [home / ".hermes"] + [home / ".hermes" / "profiles" / profile for profile in SERVICES]
+    profile_homes = [home / ".jaeger" / "hermes"] + [home / ".jaeger" / "hermes" / "profiles" / profile for profile in SERVICES]
     for profile_home in profile_homes:
         # This deployment sets HERMES_WEBUI_STATE_DIR to the default home.
         # Only named profiles use a webui_state subdirectory.
-        state_dir = profile_home if profile_home == home / ".hermes" else profile_home / "webui_state"
+        state_dir = profile_home if profile_home == home / ".jaeger" / "hermes" else profile_home / "webui_state"
         path = state_dir / "workspaces.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
@@ -142,7 +142,7 @@ def _configure_webui_workspaces(home: Path | None = None) -> list[Path]:
 
 
 def _profile_config(profile: str) -> Path:
-    return Path.home() / ".hermes" / "profiles" / profile / "config.yaml"
+    return Path.home() / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml"
 
 
 def _set_yaml_section_value(path: Path, section: str, key: str, value: str) -> None:
@@ -313,8 +313,8 @@ def _configure_agent_connectivity(home: Path | None = None) -> list[Path]:
     """Publish Jaeger's MCP/A2A endpoints to every supported local runtime."""
     home = (home or Path.home()).expanduser().resolve()
     written: list[Path] = []
-    profile_homes = [home / ".hermes"] + [
-        home / ".hermes" / "profiles" / profile for profile in SERVICES
+    profile_homes = [home / ".jaeger" / "hermes"] + [
+        home / ".jaeger" / "hermes" / "profiles" / profile for profile in SERVICES
     ]
     block = [
         "  jaeger-host:",
@@ -379,9 +379,9 @@ def _configure_honcho(home: Path | None = None) -> list[Path]:
     written: list[Path] = []
     for profile, ai_peer in identities.items():
         profile_home = (
-            home / ".hermes"
+            home / ".jaeger" / "hermes"
             if profile == "hermes"
-            else home / ".hermes" / "profiles" / profile
+            else home / ".jaeger" / "hermes" / "profiles" / profile
         )
         host_key = "hermes" if profile == "hermes" else f"hermes.{profile}"
         document = {
@@ -427,7 +427,7 @@ def _configure_agent_models(
         profile_ollama_url = resolve_ollama_base_url(openai_compat=True)
         container_ollama_url = f"http://{CONTAINER_HOST}:11434/v1"
         openclaw_host = CONTAINER_HOST
-    profile_homes = [home / ".hermes"] + [home / ".hermes" / "profiles" / name for name in SERVICES]
+    profile_homes = [home / ".jaeger" / "hermes"] + [home / ".jaeger" / "hermes" / "profiles" / name for name in SERVICES]
     for profile_home in profile_homes:
         path = profile_home / "config.yaml"
         _set_yaml_section_value(path, "model", "provider", "ollama")
@@ -443,11 +443,11 @@ def _configure_agent_models(
             path.write_text(text, encoding="utf-8")
     for profile in SERVICES:
         _set_yaml_section_value(
-            home / ".hermes" / "profiles" / profile / "config.yaml",
+            home / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml",
             "model", "default", DEFAULT_AGENT_MODEL,
         )
     _set_yaml_section_value(
-        home / ".hermes" / "config.yaml",
+        home / ".jaeger" / "hermes" / "config.yaml",
         "model", "default", DEFAULT_AGENT_MODEL,
     )
     _set_yaml_section_value(

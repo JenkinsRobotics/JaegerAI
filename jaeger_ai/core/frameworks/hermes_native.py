@@ -12,7 +12,7 @@ def connection():
     base = os.environ.get('HERMES_NATIVE_API_URL', 'http://127.0.0.1:8645').rstrip('/')
     if base != 'http://127.0.0.1:8645':
         raise ClassifiedError('permission_denied', 'Hermes Agent native API must use loopback')
-    path = Path.home() / '.hermes/jaeger-native-api.key'
+    path = Path.home() / '.jaeger/hermes/jaeger-native-api.key'
     try:
         mode = path.stat().st_mode
     except OSError as exc:

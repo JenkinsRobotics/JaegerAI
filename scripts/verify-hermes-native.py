@@ -51,6 +51,6 @@ def check(base, key):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8645")
-    parser.add_argument("--key-file", type=Path, default=Path.home()/".hermes/jaeger-native-api.key")
+    parser.add_argument("--key-file", type=Path, default=Path.home()/".jaeger/hermes/jaeger-native-api.key")
     args = parser.parse_args()
     check(args.url.rstrip("/"), args.key_file.read_text().strip())

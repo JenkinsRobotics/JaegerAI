@@ -208,12 +208,12 @@ def _agent_dir_from_python(python_exe: str) -> Path | None:
 
 
 def discover_agent_dir() -> Path | None:
-    home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+    home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".jaeger" / "hermes"))).expanduser()
     candidates = [
         os.getenv("HERMES_WEBUI_AGENT_DIR", ""),
         str(home / "hermes-agent"),
         str(REPO_ROOT.parent / "hermes-agent"),
-        str(Path.home() / ".hermes" / "hermes-agent"),
+        str(Path.home() / ".jaeger" / "hermes" / "hermes-agent"),
         str(Path.home() / "hermes-agent"),
         # Root-on-Linux FHS layout: the installer puts agent code under
         # /usr/local/lib and links the CLI into /usr/local/bin (matches
@@ -573,7 +573,7 @@ def main() -> int:
     python_exe = ensure_python_has_webui_deps(discover_launcher_python(agent_dir), agent_dir)
     state_dir = Path(
         os.getenv("HERMES_WEBUI_STATE_DIR")
-        or Path(os.getenv("HERMES_HOME") or (Path.home() / ".hermes")) / "webui"
+        or Path(os.getenv("HERMES_HOME") or (Path.home() / ".jaeger" / "hermes")) / "webui"
     ).expanduser()
     state_dir.mkdir(parents=True, exist_ok=True)
 

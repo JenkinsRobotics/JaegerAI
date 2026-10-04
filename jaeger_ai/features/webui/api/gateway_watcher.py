@@ -138,7 +138,7 @@ def _get_state_db_path(hermes_home: Path | None = None) -> Path:
         from api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv('HERMES_HOME', str(HOME / '.hermes'))).expanduser().resolve()
+        hermes_home = Path(os.getenv('HERMES_HOME', str(HOME / '.jaeger' / 'hermes'))).expanduser().resolve()
     return hermes_home / 'state.db'
 
 

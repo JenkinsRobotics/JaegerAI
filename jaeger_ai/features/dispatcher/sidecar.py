@@ -15,14 +15,14 @@ def token_file():
     override = os.environ.get('HERMES_EXT_SIDECAR_TOKEN_FILE')
     if override:
         return Path(override)
-    home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.hermes')))
+    home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.jaeger' / 'hermes')))
     state = Path(os.environ.get('HERMES_WEBUI_STATE_DIR', str(home / 'webui')))
     return state / 'sidecar-auth' / (EXTENSION_ID + '.token')
 
 
 def backend():
     import yaml
-    home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.hermes')))
+    home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.jaeger' / 'hermes')))
     config = yaml.safe_load((home / 'profiles/jaeger/config.yaml').read_text()) or {}
     url = str(config.get('webui_gateway_base_url') or '').rstrip('/')
     key = str(config.get('webui_gateway_api_key') or '')

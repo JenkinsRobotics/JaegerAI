@@ -128,8 +128,8 @@ def deploy():
     atomic_write(backup/'containers.json',json.dumps(configs))
     home = Path.home()
     native_config = aw.REPO_ROOT/'.jaeger_ai/instances/jaeger/config.yaml'
-    paths = [aw.STATE_PATH,native_config,home/'.hermes/workspaces.json']
-    paths += [home/f'.hermes/profiles/{name}/webui_state/workspaces.json' for name in ('jaeger','openclaw','roundtable')]
+    paths = [aw.STATE_PATH,native_config,home/'.jaeger/hermes/workspaces.json']
+    paths += [home/f'.jaeger/hermes/profiles/{name}/webui_state/workspaces.json' for name in ('jaeger','openclaw','roundtable')]
     saved = []
     for index,path in enumerate(paths):
         if path.is_symlink(): raise RuntimeError('Refusing to replace a symlinked configuration during expansion')

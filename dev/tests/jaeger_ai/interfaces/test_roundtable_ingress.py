@@ -84,7 +84,7 @@ def test_provision_roundtable_preserves_model_comments_and_existing_key(tmp_path
     import runpy
     import yaml
     setup = runpy.run_path(str(Path(__file__).resolve().parents[4] / 'scripts/setup-native-runs.py'))
-    config = tmp_path / '.hermes/profiles/roundtable/config.yaml'
+    config = tmp_path / '.jaeger/hermes/profiles/roundtable/config.yaml'
     config.parent.mkdir(parents=True)
     original = '# Keep my settings\nmodel:\n  provider: ollama\n  default: glm-5.3-flash:cloud\n'
     config.write_text(original)

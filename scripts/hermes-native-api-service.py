@@ -8,7 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PYTHON = Path.home() / ".jaeger/venv/bin/python"
-KEY_FILE = Path.home() / ".hermes/jaeger-native-api.key"
+KEY_FILE = Path.home() / ".jaeger/hermes/jaeger-native-api.key"
 
 
 def command():

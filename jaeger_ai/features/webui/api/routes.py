@@ -711,7 +711,7 @@ def _active_skills_dir() -> Path:
 
             return Path(SKILLS_DIR)
         except Exception:
-            return Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser() / "skills"
+            return Path(os.getenv("HERMES_HOME", str(Path.home() / ".jaeger" / "hermes"))).expanduser() / "skills"
 
 
 def _skill_path_within(base_dir: Path, candidate: Path) -> bool:
@@ -1173,7 +1173,7 @@ def _gateway_session_metadata_path():
         from api.profiles import get_active_hermes_home
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser().resolve()
+        hermes_home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".jaeger" / "hermes"))).expanduser().resolve()
     return hermes_home / "sessions" / "sessions.json"
 
 
@@ -11278,7 +11278,7 @@ def _handle_logs(handler, parsed) -> bool:
 
         hermes_home = Path(get_active_hermes_home()).expanduser()
     except Exception:
-        hermes_home = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")).expanduser()
+        hermes_home = Path(os.environ.get("HERMES_HOME") or (Path.home() / ".jaeger" / "hermes")).expanduser()
 
     log_dir = hermes_home / "logs"
     log_path = log_dir / filename
@@ -11330,7 +11330,7 @@ def _llm_wiki_active_hermes_home() -> Path:
         from api.profiles import get_active_hermes_home
         return Path(get_active_hermes_home()).expanduser()
     except Exception:
-        return Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser()
+        return Path(os.getenv("HERMES_HOME", str(Path.home() / ".jaeger" / "hermes"))).expanduser()
 
 
 def _llm_wiki_env_file_path(hermes_home: Path) -> str | None:
@@ -12984,7 +12984,7 @@ def _saved_prompts_path() -> "Path":
         from api.profiles import get_active_hermes_home
         return Path(get_active_hermes_home()).expanduser() / "webui" / "saved_prompts.json"
     except Exception:
-        return Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser() / "webui" / "saved_prompts.json"
+        return Path(os.getenv("HERMES_HOME", str(Path.home() / ".jaeger" / "hermes"))).expanduser() / "webui" / "saved_prompts.json"
 
 
 def _load_saved_prompts() -> list:
@@ -20966,7 +20966,7 @@ def _media_deny_reason(target: Path) -> str | None:
     import os as _os
 
     _HOME = Path(_os.path.expanduser("~"))
-    _HERMES_HOME = Path(_os.getenv("HERMES_HOME", str(_HOME / ".hermes"))).expanduser()
+    _HERMES_HOME = Path(_os.getenv("HERMES_HOME", str(_HOME / ".jaeger" / "hermes"))).expanduser()
 
     _DENY_FILENAMES = {
         "settings.json", "state.db", "state.db-wal", "state.db-shm",
@@ -21004,7 +21004,7 @@ def _media_deny_reason(target: Path) -> str | None:
     _hermes_roots = []
     for _r in (
         _HERMES_HOME.resolve(),
-        (_HOME / ".hermes").resolve(),
+        (_HOME / ".jaeger" / "hermes").resolve(),
         _base_hermes_home,
         _state_dir,
     ):
@@ -21155,7 +21155,7 @@ def _handle_media(handler, parsed):
     import os as _os
     from api.auth import is_auth_enabled, parse_cookie, verify_session
     _HOME = Path(_os.path.expanduser("~"))
-    _HERMES_HOME = Path(_os.getenv("HERMES_HOME", str(_HOME / ".hermes"))).expanduser()
+    _HERMES_HOME = Path(_os.getenv("HERMES_HOME", str(_HOME / ".jaeger" / "hermes"))).expanduser()
 
     # Auth check
     if is_auth_enabled():
@@ -21186,7 +21186,7 @@ def _handle_media(handler, parsed):
     allowed_roots = [
         _HERMES_HOME.resolve(),
         Path("/tmp").resolve(),
-        (_HOME / ".hermes").resolve(),
+        (_HOME / ".jaeger" / "hermes").resolve(),
     ]
     # Also allow the active workspace directory (where screenshots land)
     try:
@@ -22991,7 +22991,7 @@ def _handle_memory_read(handler, parsed=None):
         home = get_active_hermes_home()
         mem_dir = home / "memories"
     except ImportError:
-        home = Path.home() / ".hermes"
+        home = Path.home() / ".jaeger" / "hermes"
         mem_dir = home / "memories"
 
     # Respect memory_enabled and user_profile_enabled config flags (#6406)
@@ -28543,7 +28543,7 @@ def _persist_handoff_summary_to_state_db(sid: str, message: dict) -> bool:
 
         hermes_home = Path(get_active_hermes_home()).expanduser().resolve()
     except Exception:
-        hermes_home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".hermes"))).expanduser().resolve()
+        hermes_home = Path(os.getenv("HERMES_HOME", str(Path.home() / ".jaeger" / "hermes"))).expanduser().resolve()
 
     db_path = hermes_home / "state.db"
     if not db_path.exists():
@@ -29230,7 +29230,7 @@ def _handle_memory_write(handler, body):
         home = get_active_hermes_home()
         mem_dir = home / "memories"
     except ImportError:
-        home = Path.home() / ".hermes"
+        home = Path.home() / ".jaeger" / "hermes"
         mem_dir = home / "memories"
     mem_dir.mkdir(parents=True, exist_ok=True)
     if section == "memory":
