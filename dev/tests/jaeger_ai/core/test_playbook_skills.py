@@ -48,6 +48,16 @@ def test_a_skill_can_be_both_module_and_recipe() -> None:
 
 
 @macos_only
+def test_macos_computer_playbook_routes_agent_messages_to_delegation() -> None:
+    skill = pb.find_playbook("macos-computer-use")
+    assert skill is not None
+    text = skill.path.read_text(encoding="utf-8")
+    assert 'delegate_task(goal="...", runtime="codex|claude|gemini")' in text
+    assert "Do not click into an agent chat box" in text
+    assert "existing_conversation" in text
+
+
+@macos_only
 def test_macos_mail_organizer_is_a_playbook() -> None:
     s = pb.find_playbook("macos-mail-organizer")
     assert s is not None

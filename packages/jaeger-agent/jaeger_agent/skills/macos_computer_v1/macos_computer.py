@@ -116,22 +116,36 @@ def computer_look(app: str = "", include_screenshot: bool = False) -> dict:
     click/type — much cheaper than a screenshot, and usually
     carries the exact value the agent wants to confirm."""
     out: dict[str, Any] = {"ok": True}
+    errors: dict[str, str] = {}
 
     # Running apps — quick inventory.
     apps_result = planner.run(Action(kind="list_apps", args={}, target=""))
     out["apps"] = apps_result.get("result") if apps_result.get("ok") else None
+    if not apps_result.get("ok"):
+        errors["apps"] = str(apps_result.get("error") or "app inventory unavailable")
 
     # Focused window + shallow children — the cheap verification path.
     focus_result = planner.run(Action(
         kind="focused_window", args={}, target=app,
     ))
     out["focused"] = focus_result.get("result") if focus_result.get("ok") else None
+    if not focus_result.get("ok"):
+        errors["focused"] = str(focus_result.get("error") or "focused window unavailable")
 
     if include_screenshot:
         shot = planner.run(Action(
             kind="screenshot", args={}, target="",
         ))
         out["screenshot"] = shot.get("result", {}) if shot.get("ok") else None
+        if not shot.get("ok"):
+            errors["screenshot"] = str(shot.get("error") or "screenshot unavailable")
+    # A look request is successful when at least one semantic observation is
+    # available, and a specifically requested screenshot must also succeed.
+    semantic_ok = bool(apps_result.get("ok") or focus_result.get("ok"))
+    screenshot_ok = not include_screenshot or "screenshot" not in errors
+    out["ok"] = semantic_ok and screenshot_ok
+    if errors:
+        out["errors"] = errors
     return out
 
 

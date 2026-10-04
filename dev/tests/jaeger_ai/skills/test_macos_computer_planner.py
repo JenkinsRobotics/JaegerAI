@@ -114,6 +114,18 @@ def test_select_returns_none_when_no_engines_available():
     assert chosen is None
 
 
+def test_run_surfaces_why_a_matching_engine_is_unavailable():
+    dead = _FakeEngine("ax", priority=10, confidence=0.95, available=False)
+
+    result = planner.run(
+        Action(kind="focused_window", args={}, target="Calculator"),
+        engines=[dead],
+    )
+
+    assert result["ok"] is False
+    assert result["unavailable"] == [{"engine": "ax", "reason": "not ready"}]
+
+
 # ── run() — dispatch + fall-through ────────────────────────────────
 
 
@@ -293,3 +305,29 @@ def test_vision_engine_callable_contract_delegates_to_computer_use(monkeypatch):
     r_shot = engine.execute(Action(kind="screenshot", args={"path": "test.png"}, target=""))
     assert r_shot.ok is True
     assert r_shot.result.get("path") == "test.png"
+
+    r_default_shot = engine.execute(Action(kind="screenshot", args={}, target=""))
+    assert r_default_shot.ok is True
+    assert r_default_shot.result.get("path") == "screen.png"
+
+
+def test_computer_look_reports_failed_observations(monkeypatch):
+    from jaeger_agent.skills.macos_computer_v1 import macos_computer as computer
+
+    monkeypatch.setattr(
+        computer.planner,
+        "run",
+        lambda action: {"ok": False, "error": f"{action.kind} unavailable"},
+    )
+
+    result = computer.computer_look(include_screenshot=True)
+
+    assert result["ok"] is False
+    assert result["apps"] is None
+    assert result["focused"] is None
+    assert result["screenshot"] is None
+    assert result["errors"] == {
+        "apps": "list_apps unavailable",
+        "focused": "focused_window unavailable",
+        "screenshot": "screenshot unavailable",
+    }
