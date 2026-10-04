@@ -101,7 +101,7 @@ class VisionEngine:
                 result = _v1.computer_press_key(key=str(args.get("key", "")))
             elif kind == "screenshot":
                 result = _v1.computer_screenshot(
-                    path=str(args.get("path", "")),
+                    path=str(args.get("path") or "screen.png"),
                 )
             elif kind in ("read_screen", "read"):
                 result = _v1.computer_read_screen()

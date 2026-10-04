@@ -58,6 +58,28 @@ Read `references/legacy-guide.md` only for detailed ladder/tool examples.
 3. Execute one bounded action, then inspect the resulting state.
 4. Stop after two equivalent failures; do not vary raw AppleScript guesses.
 
+## IDE AGENTS AND MESSAGING
+
+Treat IDE UI control and agent delegation as different transports:
+
+1. Use `computer_look(app="<IDE name>")` to inspect an IDE panel and
+   `computer_do(goal="...")` for a bounded native UI action.
+2. Do not click into an agent chat box and type a prompt when Jaeger's
+   structured delegation transport can carry the message.
+3. Send a fresh message to an extension-agent runtime with
+   `delegate_task(goal="...", runtime="codex|claude|gemini")`. Use
+   `list_delegates` first when availability is uncertain.
+4. Preserve the returned `task_id`, runtime, status, and reply as delegation
+   evidence. A successful call returns the worker's reply in `summary`.
+5. CLI delegates are currently one-shot. Do not claim that a reply came from
+   an already-open IDE-panel conversation, or that a follow-up reused that
+   conversation, unless the selected transport advertises
+   `existing_conversation` and `follow_up`.
+
+Use GUI interaction only when the user's intended result is itself a visible
+IDE state change, or when no structured agent transport exists. After a GUI
+action, inspect the target again before reporting success.
+
 ## ERROR HATCH
 
 Missing permission or ambiguous screen target: report it and stop. Do not click

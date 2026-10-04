@@ -104,11 +104,14 @@ def run(
     # Build the candidate list (every available engine that clears
     # the floor), sorted by confidence desc, priority asc.
     candidates: list[tuple[float, Engine]] = []
+    unavailable: list[dict[str, str]] = []
     for eng in engines:
-        ready, _detail = eng.is_available()
-        if not ready:
-            continue
         conf = eng.can_handle(action)
+        ready, detail = eng.is_available()
+        if not ready:
+            if conf >= _CONFIDENCE_FLOOR:
+                unavailable.append({"engine": eng.name, "reason": detail})
+            continue
         if conf >= _CONFIDENCE_FLOOR:
             candidates.append((conf, eng))
     candidates.sort(
@@ -144,6 +147,7 @@ def run(
             "error": (f"no available engine claimed action "
                       f"kind={action.kind!r} target={action.target!r}"),
             "attempts": attempts,
+            "unavailable": unavailable,
             "wall_ms": round((time.perf_counter() - started) * 1000.0, 1),
         }
     return {
