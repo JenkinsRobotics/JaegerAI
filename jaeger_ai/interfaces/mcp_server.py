@@ -183,6 +183,25 @@ def capability_inventory(bridge: Any | None = None) -> dict[str, Any]:
     return result
 
 
+# Bridge queries an MCP caller may run. Explicit allowlist, so a new query is
+# denied over MCP until someone decides it is safe (fail closed). Excluded on
+# purpose:
+#   - side effects: hardware_bench / hardware_bench_start (start a host bench),
+#     system_utility (loads a local model), check_update (network fetch),
+#     first_boot (onboarding state machine)
+#   - private context, until the context passport is enforced at this boundary
+#     (Constitution invariant 17): config, permissions, list_credentials,
+#     list_sessions / load_session / search_sessions, dispatcher_*,
+#     background_messages, onboarding_* and setup data
+MCP_READ_ONLY_BRIDGE_QUERIES = frozenset({
+    "contract", "identity", "characters", "character", "character_card",
+    "serving_model", "settings_catalog", "instance_exists", "session_contract",
+    "model_catalog", "list_skills", "get_skill", "skill_usage", "list_mcp_servers",
+    "list_tools", "board", "heartbeat", "cron", "list_schedules", "turn_status",
+    "reasoning_status", "system_utility_status", "hardware_bench_status",
+})
+
+
 def build_server(client: Any, instance: str, model: str | None,
                  run_turn: TurnFn | None = None, bridge: Any | None = None,
                  gateway: Any | None = None,
@@ -330,14 +349,25 @@ def build_server(client: Any, instance: str, model: str | None,
         @mcp.tool()
         @_off_event_loop
         def bridge_query(what: str, args_json: str = "{}") -> Any:
-            """Run a bridge query against the live instance (list/config/identity/...)."""
-            return bridge.query(what, _json_args(args_json))
+            """Run a read-only bridge query (contract/identity/tools/skills/schedules/...).
 
-        @mcp.tool()
-        @_off_event_loop
-        def bridge_command(command: str, args_json: str = "{}") -> Any:
-            """Run a bridge command against the live instance."""
-            return bridge.command(command, _json_args(args_json))
+            Only queries in ``MCP_READ_ONLY_BRIDGE_QUERIES`` are served; anything
+            that starts work, loads a model, or exposes private context is refused.
+            """
+            name = str(what or "").strip()
+            if name not in MCP_READ_ONLY_BRIDGE_QUERIES:
+                raise PermissionError(
+                    f"bridge query {name!r} is not available over MCP "
+                    "(read-only allowlist; see MCP_READ_ONLY_BRIDGE_QUERIES)"
+                )
+            return bridge.query(name, _json_args(args_json))
+
+        # bridge_command is intentionally NOT exposed. BRIDGE_COMMANDS write
+        # authoritative state (config, identity, credentials, skills, MCP
+        # servers, schedules, updates) directly, bypassing the Gateway task
+        # path and PolicyKernel (Constitution I0 / invariant 1). An MCP caller
+        # is an outside helper; it must not hold that authority. Re-expose only
+        # through a Gateway-owned, policy-checked command API.
 
         @mcp.tool()
         @_off_event_loop
