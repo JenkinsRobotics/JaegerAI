@@ -237,7 +237,7 @@ def test_sync_jaeger_sessions_to_hermes_webui(tmp_path: Path, monkeypatch) -> No
     assert res["sessions"] == 1
     assert res["messages"] == 2
 
-    dest_db = fake_home / ".hermes" / "profiles" / "jaeger" / "state.db"
+    dest_db = fake_home / ".jaeger" / "hermes" / "profiles" / "jaeger" / "state.db"
     assert dest_db.exists()
     conn = sqlite3.connect(dest_db)
     s_row = conn.execute("SELECT id, source, title, message_count FROM sessions").fetchone()

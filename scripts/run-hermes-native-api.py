@@ -120,7 +120,7 @@ def main():
     # Native runtime discovery uses the already selected Hermes home. Never
     # substitute another profile or embed credentials into command arguments.
     from dotenv import load_dotenv
-    home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".hermes")))
+    home = Path(os.environ.get("HERMES_HOME", str(Path.home() / ".jaeger" / "hermes")))
     load_dotenv(home / ".env", override=False)
 
     try:

@@ -995,7 +995,7 @@ def _get_hermes_home() -> Path:
         from api.profiles import get_active_hermes_home
         return get_active_hermes_home()
     except ImportError:
-        return Path.home() / ".hermes"
+        return Path.home() / ".jaeger" / "hermes"
 
 
 def _providers_file_mtime_ns(path: Path) -> int:

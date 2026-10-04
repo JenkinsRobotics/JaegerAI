@@ -112,7 +112,7 @@ def _state_root() -> Path:
 def endpoints() -> list[Endpoint]:
     """Every store this machine might hold conversations in."""
     root = _state_root()
-    hermes_home = Path(os.environ.get("HERMES_HOME", "").strip() or Path.home() / ".hermes")
+    hermes_home = Path(os.environ.get("HERMES_HOME", "").strip() or Path.home() / ".jaeger" / "hermes")
     return [
         Endpoint("gateway", root / "gateway_sessions.sqlite3",
                  profile_col="profile", title_col="title",

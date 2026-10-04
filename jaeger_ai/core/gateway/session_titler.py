@@ -155,7 +155,7 @@ def _title_model_config() -> tuple[str, str]:
     falling back to the local Ollama defaults this deployment uses.
     """
     default_model, default_base = "glm-5.3-flash:cloud", "http://127.0.0.1:11434/v1"
-    path = Path.home() / ".hermes" / "config.yaml"
+    path = Path.home() / ".jaeger" / "hermes" / "config.yaml"
     try:
         text = path.read_text(encoding="utf-8")
     except OSError:

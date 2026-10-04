@@ -240,22 +240,22 @@ def test_configure_preserves_models_keys_and_rollback(monkeypatch, tmp_path):
     home, repo, backup = tmp_path / "home", tmp_path / "repo", tmp_path / "backup"
     monkeypatch.setattr(Path, "home", lambda: home)
     monkeypatch.setattr(aw, "REPO_ROOT", repo)
-    configs = [home / ".hermes/config.yaml"] + [home / f".hermes/profiles/{role}/config.yaml" for role in ("jaeger", "roundtable", "openclaw")]
+    configs = [home / ".jaeger/hermes/config.yaml"] + [home / f".jaeger/hermes/profiles/{role}/config.yaml" for role in ("jaeger", "roundtable", "openclaw")]
     for path in configs:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("model:\n  provider: ollama\n  default: keep-this-model\nmcp_servers:\n  jaeger-host:\n    url: http://old-host:8811/mcp\n")
     gateway = home / ".jaeger/gateway/config.yaml"
     gateway.parent.mkdir(parents=True)
     gateway.write_text(yaml.safe_dump({"mcp": {"policies": {"existing": "preserved"}, "targets": [{"name": "host-openclaw", "stdio": {"env": {"ARES_CAPABILITY_IDENTITY": "hermes"}}}]}}))
-    for path, content in [(home / ".hermes/SOUL.md", "USER SOUL"),
+    for path, content in [(home / ".jaeger/hermes/SOUL.md", "USER SOUL"),
                           (home / ".jaeger/openclaw/workspace/TOOLS.md", "USER TOOLS"),
                           (repo / "integrations/agent_workspaces/AGENT_CONTEXT.md", "<!-- JAEGER-MAC-CONNECTION-BEGIN -->\nCURRENT\n<!-- JAEGER-MAC-CONNECTION-END -->"),
                           ]:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content)
     installer.configure(backup)
-    assert (home / ".hermes/workspaces.json").exists()
-    assert not (home / ".hermes/webui_state/workspaces.json").exists()
+    assert (home / ".jaeger/hermes/workspaces.json").exists()
+    assert not (home / ".jaeger/hermes/webui_state/workspaces.json").exists()
     from jaeger_ai.contract.ports import MCP_HTTP_URL
     for path in configs:
         result = yaml.safe_load(path.read_text())
@@ -263,5 +263,5 @@ def test_configure_preserves_models_keys_and_rollback(monkeypatch, tmp_path):
         assert result["mcp_servers"]["jaeger-host"]["url"] == MCP_HTTP_URL
     assert yaml.safe_load(gateway.read_text())["mcp"]["policies"] == {"existing": "preserved"}
     installer.restore_configuration(backup)
-    assert (home / ".hermes/SOUL.md").read_text() == "USER SOUL"
+    assert (home / ".jaeger/hermes/SOUL.md").read_text() == "USER SOUL"
     assert len(yaml.safe_load(gateway.read_text())["mcp"]["targets"]) == 1

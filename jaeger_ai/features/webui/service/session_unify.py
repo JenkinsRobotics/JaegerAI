@@ -431,7 +431,7 @@ def close_reconciled_webui_session(session_id: str) -> None:
     home = Path.home()
     for path in (
         home / ".jaeger_ai" / "hermes-webui-agent" / "state.db",
-        home / ".hermes" / "state.db",
+        home / ".jaeger" / "hermes" / "state.db",
     ):
         try:
             stamp_ended_at(path, session_id)
@@ -470,7 +470,7 @@ def sync_jaeger_sessions_to_hermes_webui(
     from jaeger_ai.core.instance.instance import operator_state_root, read_active_instance
 
     root = operator_home if operator_home is not None else operator_state_root()
-    hermes_jaeger_dir = Path.home() / ".hermes" / "profiles" / "jaeger"
+    hermes_jaeger_dir = Path.home() / ".jaeger" / "hermes" / "profiles" / "jaeger"
     hermes_jaeger_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     dest_db = hermes_jaeger_dir / "state.db"
 
@@ -600,7 +600,7 @@ def sync_single_session_to_hermes_webui(
     if not sid or sid.startswith("focus:"):
         return False
     try:
-        hermes_jaeger_dir = Path.home() / ".hermes" / "profiles" / "jaeger"
+        hermes_jaeger_dir = Path.home() / ".jaeger" / "hermes" / "profiles" / "jaeger"
         if not hermes_jaeger_dir.exists():
             return False
         dest_db = hermes_jaeger_dir / "state.db"

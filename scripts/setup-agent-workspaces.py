@@ -78,16 +78,16 @@ def configure(backup):
         index.append(entry)
         atomic_write(index_path, json.dumps(index, indent=2))
 
-    profile_homes = [home / ".hermes"] + [home / ".hermes/profiles" / name for name in ("jaeger", "roundtable", "openclaw")]
+    profile_homes = [home / ".jaeger" / "hermes"] + [home / ".jaeger/hermes/profiles" / name for name in ("jaeger", "roundtable", "openclaw")]
     for profile_home in profile_homes:
         save(profile_home / "config.yaml")
-        state_dir = profile_home if profile_home == home / ".hermes" else profile_home / "webui_state"
+        state_dir = profile_home if profile_home == home / ".jaeger" / "hermes" else profile_home / "webui_state"
         save(state_dir / "workspaces.json")
     _configure_agent_connectivity(home)
     _configure_webui_workspaces(home)
 
     block = (aw.REPO_ROOT / "integrations/agent_workspaces/AGENT_CONTEXT.md").read_text()
-    for path in (home / ".hermes/SOUL.md", home / ".jaeger/openclaw/workspace/TOOLS.md"):
+    for path in (home / ".jaeger/hermes/SOUL.md", home / ".jaeger/openclaw/workspace/TOOLS.md"):
         save(path)
         atomic_write(path, managed_context(path.read_text() if path.exists() else "", block))
 

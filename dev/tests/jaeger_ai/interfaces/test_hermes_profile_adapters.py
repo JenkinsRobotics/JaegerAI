@@ -370,10 +370,10 @@ def test_setup_publishes_same_workspace_tab_catalog_for_every_profile(tmp_path):
 
 def test_setup_configures_native_and_profile_model_defaults(tmp_path):
     for profile in setup.SERVICES:
-        path = tmp_path / ".hermes" / "profiles" / profile / "config.yaml"
+        path = tmp_path / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("model:\n  default: old:cloud\n  provider: ollama\n")
-    hermes_default = tmp_path / ".hermes" / "config.yaml"
+    hermes_default = tmp_path / ".jaeger" / "hermes" / "config.yaml"
     hermes_default.write_text("model:\n  default: old:cloud\n  provider: ollama\n")
     jaeger = tmp_path / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml"
     jaeger.parent.mkdir(parents=True)
@@ -394,7 +394,7 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
 
     for profile in setup.SERVICES:
         profile_text = (
-            tmp_path / ".hermes" / "profiles" / profile / "config.yaml"
+            tmp_path / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml"
         ).read_text()
         assert f"default: {setup.DEFAULT_AGENT_MODEL}" in profile_text
         assert "base_url: http://192.168.64.1:11434/v1" in profile_text
@@ -421,8 +421,8 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
 
 
 def test_setup_connects_every_profile_and_openclaw_to_jaeger_mcp(tmp_path):
-    for profile_home in [tmp_path / ".hermes"] + [
-        tmp_path / ".hermes" / "profiles" / profile for profile in setup.SERVICES
+    for profile_home in [tmp_path / ".jaeger" / "hermes"] + [
+        tmp_path / ".jaeger" / "hermes" / "profiles" / profile for profile in setup.SERVICES
     ]:
         profile_home.mkdir(parents=True, exist_ok=True)
         profile_home.joinpath("config.yaml").write_text("model:\n  default: test\n")
@@ -445,8 +445,8 @@ def test_setup_connects_every_profile_and_openclaw_to_jaeger_mcp(tmp_path):
 
     written = setup._configure_agent_connectivity(tmp_path)
 
-    for profile_home in [tmp_path / ".hermes"] + [
-        tmp_path / ".hermes" / "profiles" / profile for profile in setup.SERVICES
+    for profile_home in [tmp_path / ".jaeger" / "hermes"] + [
+        tmp_path / ".jaeger" / "hermes" / "profiles" / profile for profile in setup.SERVICES
     ]:
         config = profile_home.joinpath("config.yaml").read_text()
         assert "jaeger-host:" in config
@@ -495,8 +495,8 @@ def test_setup_removes_openclaw_ares_system_8813_default(tmp_path):
         }
     }))
     # Minimal hermes homes so connectivity walks profiles safely
-    for profile_home in [tmp_path / ".hermes"] + [
-        tmp_path / ".hermes" / "profiles" / profile for profile in setup.SERVICES
+    for profile_home in [tmp_path / ".jaeger" / "hermes"] + [
+        tmp_path / ".jaeger" / "hermes" / "profiles" / profile for profile in setup.SERVICES
     ]:
         profile_home.mkdir(parents=True, exist_ok=True)
         profile_home.joinpath("config.yaml").write_text("model:\n  default: test\n")

@@ -33,7 +33,7 @@ def _profile_secret(name: str) -> str:
     direct = os.environ.get(name, "").strip()
     if direct:
         return direct
-    env_path = Path.home() / ".hermes" / "profiles" / "jaeger" / ".env"
+    env_path = Path.home() / ".jaeger" / "hermes" / "profiles" / "jaeger" / ".env"
     try:
         for line in env_path.read_text(encoding="utf-8").splitlines():
             key, sep, value = line.partition("=")
