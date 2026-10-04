@@ -29,6 +29,11 @@ The deterministic fake adapter is a test fixture, not live product proof.
   Claude and Gemini still cannot enforce `read_only`, so they reject such tasks
   before launch. This is CLI sandbox enforcement, not independent effect
   verification and not a live-provider or installed-host qualification.
+- A resumable adapter may continue a completed task through the Gateway's
+  `/v1/orchestration/tasks/{id}/follow-up` route. The follow-up reuses the
+  persisted worker handle and is rejected before admission when the selected
+  worker is one-shot. The built-in CLI adapters remain one-shot until their
+  runtime implements a real conversation resume transport.
 - Availability/auth/quota failures remain visible in current task records.
   Progress events have monotonically increasing task-local sequence numbers.
 
@@ -57,7 +62,8 @@ still cannot satisfy the RC7 live-worker gate.
 | `adapters.py` | CLI DelegateRuntime wrapper and deterministic fixture |
 | `__init__.py` | Exports |
 
-Gateway routes exist for GET workers, POST tasks, GET task and POST task/cancel
+Gateway routes exist for GET workers, POST tasks, GET task, POST task/follow-up,
+and POST task/cancel
 under `/v1/orchestration`. Create now validates and reserves the complete service
 snapshot before acknowledging: exact replay returns 200, new admission 201,
 conflicting reuse 409, unknown worker 404, invalid input 400. Workspace, metadata,

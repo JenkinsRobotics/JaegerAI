@@ -85,6 +85,26 @@ async def test_idempotency_reconciliation_prevents_duplicate_submission():
 
 
 @pytest.mark.asyncio
+async def test_follow_up_reuses_existing_worker_conversation():
+    """A follow-up resumes the accepted worker handle instead of re-submitting."""
+    adapter = DeterministicFakeWorkerAdapter(worker_id="codex", outcome_text="follow-up answer")
+    service = IDEOrchestrationService({"codex": adapter})
+    parent = ParentTask(
+        task_id="task_parent", goal="Inspect the failing test", assigned_worker="codex",
+        idempotency_key="idem_parent",
+    )
+    await service.execute_parent_task(parent)
+    child = ParentTask(
+        task_id="task_follow_up", goal="Now explain the root cause", assigned_worker="codex",
+        idempotency_key="idem_follow_up",
+    )
+    result = await service.admit_follow_up("task_parent", child)[0]
+    assert result.output == "follow-up answer"
+    assert len(adapter.submissions) == 2
+    assert adapter.submissions[0][1] == adapter.submissions[1][1]
+
+
+@pytest.mark.asyncio
 async def test_duplicate_submission_different_task_id_raises_conflict():
     """Verify that reusing an idempotency key with a new task ID raises conflict."""
     adapter = DeterministicFakeWorkerAdapter(worker_id="gemini")
