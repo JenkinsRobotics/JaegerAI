@@ -276,13 +276,14 @@ def openclaw_turn(run, workspace=None):
                 inventory = gateway.request("sessions.list", {"limit": 1000})
                 current = next((row for row in inventory.get("sessions", []) if row.get("key") == session_key), inventory.get("defaults", {}))
                 if (current.get("modelProvider"), current.get("model")) != (chosen["provider"], chosen["id"]):
-                    try:
-                        with NativeGateway(OPENCLAW_BASE_URL, OPENCLAW_TOKEN_FILE,
-                                           scopes=[*SCOPES, "operator.admin"]) as settings:
-                            settings.request("sessions.patch", {"key": session_key,
-                                "model": chosen["provider"] + "/" + chosen["id"]})
-                    except Exception:
-                        pass
+                    # A helper adapter never elevates its own scope (Constitution
+                    # I0 / invariant 1). This used to reopen the OpenClaw
+                    # connection with ``operator.admin`` to patch the session
+                    # model. Model changes for OpenClaw are an owner/setup action;
+                    # at run time we keep OpenClaw's configured model and say so.
+                    run.emit('native.state', state='running',
+                             message='OpenClaw kept its configured model; switching it needs owner setup '
+                                     '(Jaeger no longer requests operator.admin at run time)')
             else:
                 run.emit('native.state', state='running',
                          message='OpenClaw kept its configured model; the WebUI picker id is not in its catalog')
