@@ -28,11 +28,76 @@ from dataclasses import dataclass, field
 from enum import Enum
 import logging
 from pathlib import Path
+import re
 import time
 from typing import Any, Callable, Mapping, Sequence
 import uuid
 
 logger = logging.getLogger("jaeger.core.authority.kernel")
+
+
+# ── Canonical tool identity ──────────────────────────────────────────────────
+#: Policy rules are written against canonical ids so an aliased or renamed tool
+#: cannot slip past a rule written for another name. Phase 0 found the live
+#: shell tool is ``terminal`` while every shell rule matched only
+#: run_shell/exec/bash/run_command, so no shell rule ever fired.
+TOOL_ALIASES: Mapping[str, str] = {
+    # local shell
+    "shell": "shell", "terminal": "shell", "run_shell": "shell", "exec": "shell",
+    "bash": "shell", "sh": "shell", "zsh": "shell", "run_command": "shell",
+    "shell_exec": "shell", "execute_command": "shell", "run_terminal_command": "shell",
+    # remote shell
+    "remote_terminal": "remote_shell", "remote_shell": "remote_shell", "ssh": "remote_shell",
+    # arbitrary code execution
+    "execute_code": "code_exec", "run_python": "code_exec", "run_in_venv": "code_exec",
+    # git / files
+    "git_push": "git_push", "push": "git_push",
+    "write_file": "write_file", "edit_file": "write_file", "append_file": "write_file",
+    "patch": "write_file", "delete_file": "delete_file",
+}
+SHELL_TOOL_IDS = frozenset({"shell", "remote_shell"})
+#: Canonical tools an untrusted/external caller may never run.
+PRIVILEGED_TOOL_IDS = frozenset({"shell", "remote_shell", "code_exec", "deploy", "git_push"})
+#: Actors (exact, or ``<prefix>:<name>``) that are outside callers, not the owner.
+UNTRUSTED_ACTOR_PREFIXES = ("guest", "untrusted", "external_agent", "helper", "mcp", "a2a")
+KNOWN_TIERS = frozenset({"read_only", "write_local", "external_effect", "hardware", "privileged"})
+KNOWN_ACTION_TYPES = frozenset({"tool_call"})
+
+
+def canonical_tool_id(name: Any) -> str:
+    """Normalize a tool name to its canonical policy id ("" if unusable).
+
+    Case, surrounding whitespace and ``-``/``_`` differences are ignored, and a
+    namespaced name (``mcp__jaeger__terminal``, ``functions.bash``,
+    ``code:run_shell``) resolves through its last segment when that segment is
+    a known alias.
+    """
+    raw = str(name or "").strip().lower().replace("-", "_")
+    if not raw:
+        return ""
+    if raw in TOOL_ALIASES:
+        return TOOL_ALIASES[raw]
+    for sep in ("__", ".", ":", "/"):
+        if sep in raw:
+            tail = raw.rsplit(sep, 1)[-1]
+            if tail in TOOL_ALIASES:
+                return TOOL_ALIASES[tail]
+    return raw
+
+
+def is_untrusted_actor(actor: str) -> bool:
+    a = (actor or "").strip().lower()
+    return any(a == p or a.startswith(p + ":") for p in UNTRUSTED_ACTOR_PREFIXES)
+
+
+def _deny(proposal: "ProposedAction", reason: str, policy_name: str) -> "AuthorityDecision":
+    return AuthorityDecision(
+        decision=AuthorityDecisionType.DENY,
+        reason=reason,
+        policy_name=policy_name,
+        granted_by="fail_closed",
+        proposal_id=proposal.proposal_id,
+    )
 
 
 class AuthorityDecisionType(str, Enum):
@@ -154,6 +219,11 @@ class PolicyKernel:
         current_args = dict(proposal.arguments)
 
         try:
+            # ── 0. Structural validity: unknown tool/action/tier → DENY ─────
+            structural = self._check_structure(proposal)
+            if structural is not None:
+                return structural
+
             # ── 1. Security Policy & Safety Mode ─────────────────────────────
             sec_decision = self._check_security_mode(proposal)
             if sec_decision is not None:
@@ -223,6 +293,21 @@ class PolicyKernel:
             )
 
     # ── Check Implementations ────────────────────────────────────────────────
+    #
+    # Every sub-check fails CLOSED: an exception inside a check is a DENY, never
+    # "no objection" (Constitution invariant 11). Phase 0 found four sub-checks
+    # that logged at debug level and returned None on error.
+
+    def _check_structure(self, proposal: ProposedAction) -> AuthorityDecision | None:
+        if not canonical_tool_id(proposal.tool_name):
+            return _deny(proposal, "Unknown tool: empty or unusable tool name", "unknown_tool")
+        if str(proposal.action_type or "") not in KNOWN_ACTION_TYPES:
+            return _deny(proposal, f"Unknown action type {proposal.action_type!r}", "unknown_action")
+        if str(proposal.tier or "") not in KNOWN_TIERS:
+            return _deny(proposal, f"Unknown or non-grantable tier {proposal.tier!r}", "unknown_tier")
+        if not isinstance(proposal.arguments, Mapping):
+            return _deny(proposal, "Tool arguments must be a mapping", "malformed_arguments")
+        return None
 
     def _check_security_mode(self, proposal: ProposedAction) -> AuthorityDecision | None:
         try:
@@ -247,14 +332,16 @@ class PolicyKernel:
                         proposal_id=proposal.proposal_id,
                     )
         except Exception as exc:
-            logger.debug("Safety policy mode check skipped: %s", exc)
+            logger.error("Safety policy mode check failed for %r: %s (fail-closed)", proposal.tool_name, exc)
+            return _deny(proposal, f"Safety mode check failed: {exc} (fail-closed)", "safety_mode")
         return None
 
     def _check_identity_trust(self, proposal: ProposedAction) -> AuthorityDecision | None:
-        actor = proposal.actor or ""
-        if actor in ("guest", "untrusted", "external_agent"):
-            privileged_tools = {"run_command", "run_shell", "bash", "exec", "deploy", "git_push"}
-            if proposal.tool_name in privileged_tools:
+        actor = (proposal.actor or "").strip()
+        if not actor:
+            return _deny(proposal, "Missing caller identity (actor) on proposed action", "identity_required")
+        if is_untrusted_actor(actor):
+            if canonical_tool_id(proposal.tool_name) in PRIVILEGED_TOOL_IDS:
                 return AuthorityDecision(
                     decision=AuthorityDecisionType.DENY,
                     reason=f"Actor {actor!r} is untrusted and forbidden from executing privileged tool {proposal.tool_name!r}",
@@ -277,7 +364,8 @@ class PolicyKernel:
                     proposal_id=proposal.proposal_id,
                 )
         except Exception as exc:
-            logger.debug("Allowlist grant check skipped: %s", exc)
+            logger.error("Allowlist grant check failed for %r: %s (fail-closed)", proposal.tool_name, exc)
+            return _deny(proposal, f"Capability grant check failed: {exc} (fail-closed)", "tool_allowlist")
         return None
 
     def _check_protected_targets(self, proposal: ProposedAction) -> AuthorityDecision | None:
@@ -292,8 +380,12 @@ class PolicyKernel:
                     granted_by="policy_kernel",
                     proposal_id=proposal.proposal_id,
                 )
-        # Check git branch push protection
-        if proposal.tool_name in ("git_push", "push") or "push" in str(proposal.arguments.get("CommandLine", "")):
+        # Check git branch push protection (canonical: git_push tool, or a
+        # shell-family tool whose command line runs ``git push``)
+        cid = canonical_tool_id(proposal.tool_name)
+        command_line = str(proposal.arguments.get("CommandLine") or proposal.arguments.get("command") or "")
+        shell_push = cid in SHELL_TOOL_IDS and re.search(r"\bgit\b[^;&|]*\bpush\b", command_line)
+        if cid == "git_push" or shell_push or "push" in str(proposal.arguments.get("CommandLine", "")):
             args_str = str(proposal.arguments)
             if "master" in args_str or "main" in args_str:
                 return AuthorityDecision(
@@ -328,7 +420,8 @@ class PolicyKernel:
             if getattr(decision, "modified_input", None) is not None:
                 return None, dict(decision.modified_input)
         except Exception as exc:
-            logger.debug("Shell hooks check skipped: %s", exc)
+            logger.error("Shell hooks check failed for %r: %s (fail-closed)", proposal.tool_name, exc)
+            return _deny(proposal, f"Operator hook check failed: {exc} (fail-closed)", "shell_hooks"), None
         return None, None
 
     def _check_commissioning_policy(
@@ -337,19 +430,24 @@ class PolicyKernel:
         args: dict[str, Any],
     ) -> AuthorityDecision | None:
         try:
-            from jaeger_ai.core.instance.commissioning import load_authority_policy
+            from jaeger_ai.core.instance.commissioning import load_authority_policy_checked
 
             root = _resolve_instance_root(proposal)
             if root is None:
+                # No instance bound (embedders, unit tests). Not an error; the
+                # tool body's tier gate still applies.
                 return None
-            policy = load_authority_policy(root)
+            # A missing file is "never commissioned" (established instances keep
+            # the tier-gate posture); an unreadable or malformed file RAISES and
+            # is denied below. It used to read as {} = no objection.
+            policy = load_authority_policy_checked(root)
             if not policy:
                 return None
 
-            tool = proposal.tool_name
+            tool = canonical_tool_id(proposal.tool_name)
             shell_cfg = policy.get("shell") or {}
             shell_mode = str(shell_cfg.get("risk_mode") or "confirm")
-            if tool in {"run_shell", "exec", "bash", "run_command"}:
+            if tool in SHELL_TOOL_IDS:
                 if shell_mode == "deny":
                     return AuthorityDecision(
                         decision=AuthorityDecisionType.DENY,
@@ -368,7 +466,7 @@ class PolicyKernel:
                     )
 
             files = policy.get("filesystem") or {}
-            if tool in {"write_file", "edit_file", "delete_file"}:
+            if tool in {"write_file", "delete_file"}:
                 if not files.get("write"):
                     return AuthorityDecision(
                         decision=AuthorityDecisionType.DENY,
@@ -407,7 +505,9 @@ class PolicyKernel:
                 )
 
         except Exception as exc:
-            logger.debug("Commissioning policy check skipped: %s", exc)
+            logger.error("Commissioning policy check failed for %r: %s (fail-closed)", proposal.tool_name, exc)
+            return _deny(proposal, f"Commissioning policy unreadable or invalid: {exc} (fail-closed)",
+                         "commissioning_authority")
         return None
 
     def _check_tier_approval(self, proposal: ProposedAction) -> AuthorityDecision | None:

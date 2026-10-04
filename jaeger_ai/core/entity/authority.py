@@ -84,7 +84,9 @@ def default_shell_hooks_policy(proposal: ProposedAction) -> AuthorityDecision:
                 policy_name="shell_hooks",
             )
     except Exception as exc:
-        logger.debug("Shell hooks policy check skipped: %s", exc)
+        logger.error("Shell hooks policy check failed: %s (fail-closed)", exc)
+        return AuthorityDecision(status=AuthorizationStatus.DENIED, policy_name="shell_hooks",
+                                 reason=f"Operator hook check failed: {exc} (fail-closed)")
     return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="shell_hooks")
 
 
@@ -101,7 +103,9 @@ def default_allowlist_policy(proposal: ProposedAction) -> AuthorityDecision:
                 policy_name="tool_allowlist",
             )
     except Exception as exc:
-        logger.debug("Allowlist policy check skipped: %s", exc)
+        logger.error("Allowlist policy check failed: %s (fail-closed)", exc)
+        return AuthorityDecision(status=AuthorizationStatus.DENIED, policy_name="tool_allowlist",
+                                 reason=f"Capability grant check failed: {exc} (fail-closed)")
     return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="tool_allowlist")
 
 
@@ -118,7 +122,9 @@ def default_permissions_policy(proposal: ProposedAction) -> AuthorityDecision:
                 policy_name="permission_mode",
             )
     except Exception as exc:
-        logger.debug("Permission policy check skipped: %s", exc)
+        logger.error("Permission mode check failed: %s (fail-closed)", exc)
+        return AuthorityDecision(status=AuthorizationStatus.DENIED, policy_name="permission_mode",
+                                 reason=f"Safety mode check failed: {exc} (fail-closed)")
     return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="permission_mode")
 
 
@@ -152,12 +158,15 @@ def _authority_instance_root(proposal: ProposedAction) -> Any:
 def commissioning_authority_policy(proposal: ProposedAction) -> AuthorityDecision:
     """Capability-scoped policy written during commissioning.
 
-    Human answers become this document. Missing policy fails open to the
-    existing confirm/allow posture so established instances keep working.
+    Human answers become this document. A MISSING policy keeps the existing
+    tier-gate posture so established instances keep working; an unreadable or
+    malformed policy, or any error here, DENIES (fail closed). Tool names are
+    matched by canonical id, so ``terminal`` is governed by the shell rules.
     The policy is always the instance bound to this runtime/proposal.
     """
     try:
-        from jaeger_ai.core.instance.commissioning import load_authority_policy
+        from jaeger_ai.core.authority.kernel import SHELL_TOOL_IDS, canonical_tool_id
+        from jaeger_ai.core.instance.commissioning import load_authority_policy_checked
 
         root = _authority_instance_root(proposal)
         if root is None:
@@ -166,19 +175,19 @@ def commissioning_authority_policy(proposal: ProposedAction) -> AuthorityDecisio
                 policy_name="commissioning_authority",
                 reason="no instance bound; policy not applied",
             )
-        policy = load_authority_policy(root)
+        policy = load_authority_policy_checked(root)
         if not policy:
             return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="commissioning_authority")
-        tool = proposal.tool_name
+        tool = canonical_tool_id(proposal.tool_name)
         shell_mode = str((policy.get("shell") or {}).get("risk_mode") or "confirm")
-        if tool in {"run_shell", "exec", "bash", "run_command"} and shell_mode == "deny":
+        if tool in SHELL_TOOL_IDS and shell_mode == "deny":
             return AuthorityDecision(
                 status=AuthorizationStatus.DENIED,
                 reason="Shell use was not authorized during setup",
                 policy_name="commissioning_authority",
             )
         files = policy.get("filesystem") or {}
-        if tool in {"write_file", "edit_file", "delete_file"} and not files.get("write"):
+        if tool in {"write_file", "delete_file"} and not files.get("write"):
             return AuthorityDecision(
                 status=AuthorizationStatus.DENIED,
                 reason="File writes were not authorized during setup",
@@ -204,7 +213,9 @@ def commissioning_authority_policy(proposal: ProposedAction) -> AuthorityDecisio
                 policy_name="commissioning_authority",
             )
     except Exception as exc:
-        logger.debug("Commissioning authority policy skipped: %s", exc)
+        logger.error("Commissioning authority policy failed: %s (fail-closed)", exc)
+        return AuthorityDecision(status=AuthorizationStatus.DENIED, policy_name="commissioning_authority",
+                                 reason=f"Commissioning policy unreadable or invalid: {exc} (fail-closed)")
     return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="commissioning_authority")
 
 

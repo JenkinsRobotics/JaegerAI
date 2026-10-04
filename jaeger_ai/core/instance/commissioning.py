@@ -121,6 +121,32 @@ def load_authority_policy(instance_root: Path | Any) -> dict[str, Any]:
         return {}
 
 
+class AuthorityPolicyError(RuntimeError):
+    """The commissioning authority policy exists but cannot be trusted."""
+
+
+def load_authority_policy_checked(instance_root: Path | Any) -> dict[str, Any]:
+    """Like :func:`load_authority_policy`, but for the permission judge.
+
+    Missing file → ``{}`` (never commissioned). A file that exists but cannot
+    be read or parsed, or is not a mapping, RAISES ``AuthorityPolicyError`` so
+    PolicyKernel denies instead of treating a broken policy as "no objection".
+    """
+    from jaeger_ai.core.instance.first_boot import instance_dir
+    path = instance_dir(instance_root) / AUTHORITY_FILENAME
+    if not path.exists():
+        return {}
+    try:
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        raise AuthorityPolicyError(f"{AUTHORITY_FILENAME} unreadable: {type(exc).__name__}") from exc
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise AuthorityPolicyError(f"{AUTHORITY_FILENAME} is not a mapping")
+    return data
+
+
 def translate_human_permission(policy: dict[str, Any], question: str, yes: bool, instance_root: Path | Any) -> dict[str, Any]:
     """Map a human yes/no onto Authority policy. Never silently widens grants."""
     from jaeger_ai.core.instance.first_boot import instance_dir

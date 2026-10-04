@@ -139,6 +139,8 @@ class PermissionRequest:
         arguments: The arguments of this particular call. ``summary``
             describes the operation; these say what it will touch, which
             is what a human is actually being asked to approve.
+        force_prompt: An explicit human decision is required; standing
+            grants and autonomy shortcuts do not apply.
     """
 
     tier: PermissionTier
@@ -146,6 +148,10 @@ class PermissionRequest:
     operation: str
     summary: str = ""
     arguments: dict[str, Any] = field(default_factory=dict, compare=False, hash=False)
+    #: Set when the authority judge (PolicyKernel REQUIRE_APPROVAL) demands an
+    #: explicit human decision for THIS call. Providers must not satisfy it
+    #: from standing grants or an autonomy shortcut.
+    force_prompt: bool = field(default=False, compare=False, hash=False)
 
 
 @runtime_checkable

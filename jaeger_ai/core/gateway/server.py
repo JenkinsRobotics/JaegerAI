@@ -265,15 +265,22 @@ class _GatewayToolConfirmationProvider:
     def confirm(self, request: Any) -> bool:
         from jaeger_os.core.safety.permissions import PermissionTier
         skill_name = str(getattr(request, "skill", "") or "")
+        # PolicyKernel REQUIRE_APPROVAL: only an explicit owner decision on an
+        # approval card answers it; grants and autonomy shortcuts do not.
+        if getattr(request, "force_prompt", False) is True:
+            return self._prompt(request)
         try:
             if self._grants().is_granted(skill_name):
                 return True
         except Exception:  # noqa: BLE001 — unreadable grants mean "ask", never "allow"
             pass
         try:
-            # Autonomy "auto" (the default) means no approval prompts: this is the
-            # operator's own assistant. Hardline-blocked commands never reach here
-            # (the guard sits outside the tiers), and every action stays audited.
+            # Autonomy "auto" means no approval prompts for tiers 1-4. It is
+            # honored only when the instance config explicitly says so; the
+            # code default is "scoped" and an unreadable config reads as
+            # "ask" (core/runtime/autonomy.py). Hardline-blocked commands never
+            # reach here (the guard sits outside the tiers), and every action
+            # stays audited.
             from jaeger_ai.core.entity.runtime import EntityRuntime
             from jaeger_ai.core.runtime.autonomy import effective_autonomy
             layout = getattr(EntityRuntime.get_singleton(), "layout", None)
@@ -293,6 +300,10 @@ class _GatewayToolConfirmationProvider:
                 return True
         except Exception:
             pass
+        return self._prompt(request)
+
+    def _prompt(self, request: Any) -> bool:
+        """Park an approval card and wait for the owner's decision."""
         loop = getattr(self.app, "_loop", None)
         if loop is None or not loop.is_running():
             return False
