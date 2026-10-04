@@ -36,7 +36,7 @@ def test_automation_config_interaction_tier_schema() -> None:
     """AutomationConfig defaults to 'agent' and validates allowable tiers."""
     cfg = AutomationConfig()
     assert cfg.interaction_tier == "agent"
-    assert cfg.autonomy == "auto"
+    assert cfg.autonomy == "scoped"  # Constitution invariant 11: scoped, not auto
 
     cfg_chat = AutomationConfig(interaction_tier="chat")
     assert cfg_chat.interaction_tier == "chat"

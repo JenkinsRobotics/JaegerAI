@@ -31,6 +31,62 @@ AUTHORITATIVE_SIDE_EFFECTS = frozenset({"external"})
 
 _allowed_tools: ContextVar[frozenset[str] | None] = ContextVar("allowed_tools", default=None)
 
+#: Who this tool call is acting for. Set by the host (Gateway/MCP/A2A ingress)
+#: from an AUTHENTICATED caller, never from model output. ``None`` means the
+#: in-process entity acting for its owner ("agent:jaeger").
+_caller_identity: ContextVar[str | None] = ContextVar("caller_identity", default=None)
+DEFAULT_ACTOR = "agent:jaeger"
+
+
+def active_caller_identity() -> str:
+    return _caller_identity.get() or DEFAULT_ACTOR
+
+
+@contextmanager
+def caller_identity(actor: str | None):
+    """Bind the authenticated caller for tool calls in this context."""
+    if actor is not None and (not isinstance(actor, str) or not actor.strip()):
+        raise ValueError("caller identity must be a nonempty string")
+    token = _caller_identity.set(actor.strip() if actor else None)
+    try:
+        yield
+    finally:
+        _caller_identity.reset(token)
+
+
+def _jaeger_ai_installed() -> bool:
+    import importlib.util
+    try:
+        return importlib.util.find_spec("jaeger_ai") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _owner_approves(tool_name: str, args: Mapping[str, Any], reason: str) -> bool:
+    """Ask the owner through the live confirmation provider (approval card).
+
+    PolicyKernel REQUIRE_APPROVAL is an authority state, not a soft hint: it is
+    answered only by an explicit human decision. ``force_prompt`` tells the
+    provider to skip standing grants and autonomy shortcuts. Any failure, or a
+    provider that cannot ask (DenyAllProvider, no running loop), refuses.
+    """
+    try:
+        from jaeger_os.core.safety.permissions import (
+            PermissionRequest, PermissionTier, current_policy,
+        )
+        request = PermissionRequest(
+            tier=PermissionTier.PRIVILEGED,
+            skill=f"policy:{tool_name}",
+            operation=tool_name,
+            summary=reason or f"PolicyKernel requires approval for {tool_name}",
+            arguments=dict(args),
+            force_prompt=True,
+        )
+        return bool(current_policy().confirmation.confirm(request))
+    except Exception as exc:  # noqa: BLE001 — cannot ask means no
+        logger.warning("approval for %r could not be requested: %s (refused)", tool_name, exc)
+        return False
+
 
 def active_tool_allowlist() -> frozenset[str] | None:
     return _allowed_tools.get()
@@ -145,77 +201,103 @@ class HookedToolExecutor:
         runtime = None
         authority_evaluated = False
         try:
-            from jaeger_ai.core.entity.authority import AuthorityLayer, ProposedAction
+            from jaeger_ai.core.entity.authority import (
+                AuthorityLayer, AuthorizationStatus, ProposedAction,
+            )
             from jaeger_ai.core.entity.events import JaegerEvent
             from jaeger_ai.core.entity.runtime import EntityRuntime
-
-            try:
-                runtime = EntityRuntime.get_singleton()
-            except Exception:
-                pass
-
-            authority = self._authority_layer
-            if authority is None and runtime is not None:
-                authority = runtime.authority_layer
-            if authority is None:
-                authority = AuthorityLayer()
-
-            ctx: dict[str, Any] = {}
-            if runtime is not None and getattr(runtime, "layout", None) is not None:
-                ctx["instance_root"] = str(runtime.layout.root)
-                ctx["layout"] = runtime.layout
-                ctx["workspace"] = str(runtime.layout.workspace_dir)
-            proposal = ProposedAction(
-                tool_name=tool.name,
-                arguments=args,
-                context=ctx,
-            )
-
-            if runtime is not None:
-                try:
-                    runtime.event_store.append(
-                        JaegerEvent.tool_proposed(tool.name, args, parent_event_id="")
-                    )
-                except Exception:
-                    pass
-
-            # Evaluate through canonical authority boundary
-            auth_decision = authority.authorize(proposal)
-            authority_evaluated = True
-
-            if runtime is not None:
-                try:
-                    runtime.event_store.append(
-                        JaegerEvent.authority_decision(
-                            tool.name,
-                            auth_decision.is_authorized,
-                            auth_decision.reason,
-                            parent_event_id="",
-                        )
-                    )
-                except Exception:
-                    pass
-
-            if not auth_decision.is_authorized:
-                logger.info(
-                    "tool %r blocked by authority layer (%s): %s",
-                    tool.name,
-                    auth_decision.policy_name,
-                    auth_decision.reason,
-                )
+        except ImportError:
+            if _jaeger_ai_installed():
+                # The product is installed but its authority boundary will not
+                # import: refuse rather than run unjudged (fail closed).
+                logger.error("tool %r refused: authority layer failed to import", tool.name)
                 return {
-                    "ok": False,
-                    "success": False,
-                    "error": auth_decision.reason or "blocked by authority policy",
-                    "error_type": "blocked_by_authority",
-                    "retryable": False,
+                    "ok": False, "success": False,
+                    "error": "authority layer unavailable (fail-closed)",
+                    "error_type": "blocked_by_authority", "retryable": False,
                 }
+            AuthorityLayer = None  # standalone jaeger-agent package: hooks only
+        if AuthorityLayer is not None:
+            try:
+                try:
+                    runtime = EntityRuntime.get_singleton()
+                except Exception:
+                    pass
 
-            # Honor authorized or modified arguments
-            if auth_decision.authorized_arguments is not None:
-                args = dict(auth_decision.authorized_arguments)
-        except (ImportError, AttributeError):
-            runtime = None
+                authority = self._authority_layer
+                if authority is None and runtime is not None:
+                    authority = getattr(runtime, "authority_layer", None)
+                if authority is None:
+                    authority = AuthorityLayer()
+
+                ctx: dict[str, Any] = {}
+                if runtime is not None and getattr(runtime, "layout", None) is not None:
+                    ctx["instance_root"] = str(runtime.layout.root)
+                    ctx["layout"] = runtime.layout
+                    ctx["workspace"] = str(runtime.layout.workspace_dir)
+                # Context and actor come from the host, never from the
+                # model-supplied ``args`` (I0: model output cannot grant).
+                proposal = ProposedAction(
+                    tool_name=tool.name,
+                    arguments=args,
+                    actor=active_caller_identity(),
+                    context=ctx,
+                )
+
+                if runtime is not None:
+                    try:
+                        runtime.event_store.append(
+                            JaegerEvent.tool_proposed(tool.name, args, parent_event_id="")
+                        )
+                    except Exception:
+                        pass
+
+                # Evaluate through canonical authority boundary
+                auth_decision = authority.authorize(proposal)
+                authority_evaluated = True
+
+                if runtime is not None:
+                    try:
+                        runtime.event_store.append(
+                            JaegerEvent.authority_decision(
+                                tool.name,
+                                auth_decision.is_authorized,
+                                auth_decision.reason,
+                                parent_event_id="",
+                            )
+                        )
+                    except Exception:
+                        pass
+
+                if (not auth_decision.is_authorized
+                        and auth_decision.status == AuthorizationStatus.REQUIRES_CONFIRMATION
+                        and _owner_approves(tool.name, args, auth_decision.reason)):
+                    logger.info("tool %r approved by owner after PolicyKernel REQUIRE_APPROVAL", tool.name)
+                elif not auth_decision.is_authorized:
+                    logger.info(
+                        "tool %r blocked by authority layer (%s): %s",
+                        tool.name,
+                        auth_decision.policy_name,
+                        auth_decision.reason,
+                    )
+                    return {
+                        "ok": False,
+                        "success": False,
+                        "error": auth_decision.reason or "blocked by authority policy",
+                        "error_type": "blocked_by_authority",
+                        "retryable": False,
+                    }
+
+                # Honor authorized or modified arguments
+                if auth_decision.authorized_arguments is not None:
+                    args = dict(auth_decision.authorized_arguments)
+            except Exception as exc:  # noqa: BLE001 — unjudged means refused
+                logger.error("tool %r refused: authority evaluation failed: %s", tool.name, exc)
+                return {
+                    "ok": False, "success": False,
+                    "error": f"authority evaluation failed: {exc} (fail-closed)",
+                    "error_type": "blocked_by_authority", "retryable": False,
+                }
 
         if not authority_evaluated:
             hook_decision = shell_hooks.fire(
@@ -450,6 +532,8 @@ __all__ = [
     "CheckpointingToolExecutor",
     "DirectToolExecutor",
     "HookedToolExecutor",
+    "caller_identity",
+    "active_caller_identity",
     "LedgerToolExecutor",
     "ToolExecutor",
     "suppress_post_tool_call_hook",

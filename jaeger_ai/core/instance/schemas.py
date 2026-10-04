@@ -493,13 +493,14 @@ class AutomationConfig(BaseModel):
         ),
     )
     autonomy: Literal["ask", "scoped", "auto"] = Field(
-        "auto",
+        "scoped",
         json_schema_extra=_setting("autonomy"),
         description=(
             "Whether the agent pauses for approval before tier-gated actions. "
-            "'auto' (default): none: it is your assistant on your machine; only "
-            "catastrophic commands are still blocked, and every action is audited. "
-            "'scoped': prompt once per new kind of action. 'ask': prompt every time."
+            "'scoped' (default): prompt once per new kind of action; an 'always' "
+            "answer extends the scope. 'ask': prompt every time. 'auto': no prompts "
+            "for tiers 1-4; only catastrophic commands are still blocked, and every "
+            "action is audited."
         ),
     )
     inner_max_iterations: int = Field(
