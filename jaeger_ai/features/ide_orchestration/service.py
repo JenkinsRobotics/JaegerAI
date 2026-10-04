@@ -245,6 +245,7 @@ class IDEOrchestrationService:
         task: ParentTask,
         *,
         verifier: Callable[[str, dict[str, Any]], VerificationResult] | None = None,
+        resume_from: str | None = None,
     ) -> tuple[asyncio.Future[OrchestrationResult], bool]:
         """Synchronously reserve an immutable request before HTTP acknowledges it.
 
@@ -295,6 +296,7 @@ class IDEOrchestrationService:
             "handle": None,
             "submit_started": False,
             "operation": None,
+            "resume_from": resume_from,
         }
         self._snapshots[task.task_id] = snapshot
         self._persist(task.task_id)
@@ -309,6 +311,39 @@ class IDEOrchestrationService:
         }
         operation.add_done_callback(lambda done: self._record_early_cancel(task, done))
         return operation, False
+
+    def admit_follow_up(
+        self,
+        parent_task_id: str,
+        task: ParentTask,
+        *,
+        verifier: Callable[[str, dict[str, Any]], VerificationResult] | None = None,
+    ) -> tuple[asyncio.Future[OrchestrationResult], bool]:
+        """Admit a follow-up on the same worker conversation.
+
+        This is deliberately a separate admission path: a follow-up must name a
+        completed parent with a durable worker handle, and must use an adapter
+        that explicitly implements ``resume``. One-shot CLI adapters therefore
+        fail closed instead of pretending a new task is the same conversation.
+        """
+        parent = self._tasks.get(parent_task_id)
+        if parent is None or parent.get("result") is None:
+            raise WorkerUnavailableError("Parent worker task has no terminal receipt")
+        if parent.get("state") != "completed":
+            raise WorkerUnavailableError("Only a completed worker conversation can be continued")
+        if task.assigned_worker != parent.get("worker"):
+            raise DuplicateSubmissionConflict("Follow-up must use the parent worker")
+        handle = parent.get("handle") or (parent.get("result") or {}).get("evidence", {}).get("handle")
+        adapter = self._adapters.get(task.assigned_worker)
+        if (
+            not handle
+            or adapter is None
+            or not getattr(adapter, "supports_follow_up", True)
+            or not callable(getattr(adapter, "resume", None))
+        ):
+            raise WorkerUnavailableError("Worker does not support existing conversations")
+        task = replace(task, metadata={**task.metadata, "parent_task_id": parent_task_id})
+        return self.admit_parent_task(task, verifier=verifier, resume_from=handle)
 
     def _record_early_cancel(self, task: ParentTask, operation: asyncio.Task) -> None:
         """Owner shutdown may cancel a task before its coroutine can run."""
@@ -385,7 +420,12 @@ class IDEOrchestrationService:
                             execution["submit_started"] = True
                             self._tasks[task.task_id]["submit_started"] = True
                             self._persist(task.task_id)
-                            execution["handle"] = await adapter.submit(task)
+                            if execution.get("resume_from"):
+                                execution["handle"] = await adapter.resume(
+                                    execution["resume_from"], task.goal
+                                )
+                            else:
+                                execution["handle"] = await adapter.submit(task)
                             self._tasks[task.task_id]["handle"] = execution["handle"]
                             self._persist(task.task_id)
                             async for progress in adapter.observe(

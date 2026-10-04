@@ -904,6 +904,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/orchestration/workers", self.handle_list_orchestration_workers)
         self.app.router.add_post("/v1/orchestration/tasks", self.handle_create_orchestration_task)
         self.app.router.add_get("/v1/orchestration/tasks/{id}", self.handle_get_orchestration_task)
+        self.app.router.add_post("/v1/orchestration/tasks/{id}/follow-up", self.handle_follow_up_orchestration_task)
         self.app.router.add_post("/v1/orchestration/tasks/{id}/cancel", self.handle_cancel_orchestration_task)
 
     async def handle_version(self, request: web.Request) -> web.Response:
@@ -3804,6 +3805,57 @@ class JaegerGatewayApp:
         task_id = request.match_info["id"]
         cancelled = await self.orchestration.cancel_task(task_id)
         return web.json_response({"cancelled": cancelled, "task_id": task_id})
+
+    async def handle_follow_up_orchestration_task(self, request: web.Request) -> web.Response:
+        """Continue a completed worker task in its existing conversation."""
+        if self.orchestration is None:
+            return web.json_response({"error": "IDE orchestration service unavailable"}, status=503)
+        from jaeger_ai.features.ide_orchestration.contracts import ParentTask, TaskBudget
+        from jaeger_ai.features.ide_orchestration.service import (
+            DuplicateSubmissionConflict,
+            WorkerUnavailableError,
+        )
+        parent_id = request.match_info["id"]
+        parent = self.orchestration.get_task(parent_id)
+        if parent is None:
+            return web.json_response({"error": f"Task {parent_id} not found"}, status=404)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or not isinstance(body.get("task_id"), str):
+                raise ValueError("task_id must be a nonempty string")
+            goal = body.get("goal")
+            if not isinstance(goal, str) or not goal.strip():
+                raise ValueError("goal must be a nonempty string")
+            task_id = body["task_id"].strip()
+            key = body.get("idempotency_key", task_id)
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("idempotency_key must be a nonempty string")
+            task = ParentTask(
+                task_id=task_id,
+                goal=goal.strip(),
+                assigned_worker=str(parent["worker"]),
+                idempotency_key=key.strip(),
+                read_only=bool(parent.get("read_only", True)),
+                budget=TaskBudget(max_seconds=float(body.get("max_seconds", 300.0))),
+                metadata={"parent_task_id": parent_id},
+            )
+            operation, replayed = self.orchestration.admit_follow_up(parent_id, task)
+        except DuplicateSubmissionConflict as exc:
+            return web.json_response({"error": str(exc)}, status=409)
+        except WorkerUnavailableError as exc:
+            return web.json_response({"error": str(exc)}, status=409)
+        except (ValueError, TypeError, OverflowError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        if not replayed:
+            operation_key = ("orchestration", task_id)
+            self._running_tasks[operation_key] = operation
+            operation.add_done_callback(
+                lambda done: self._running_tasks.pop(operation_key, None)
+                if self._running_tasks.get(operation_key) is done else None
+            )
+        return web.json_response(
+            self.orchestration.get_task(task_id), status=200 if replayed else 201
+        )
 
 
 def create_gateway_server(

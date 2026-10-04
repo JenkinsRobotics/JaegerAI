@@ -38,6 +38,10 @@ class IDEWorkerAdapter(Protocol):
         """Retrieve raw worker outcome prior to independent Jaeger verification."""
         ...
 
+    async def resume(self, handle: str, message: str) -> str:
+        """Continue an existing worker conversation and return its new handle."""
+        ...
+
 
 class DeterministicFakeWorkerAdapter:
     """Configurable deterministic fake adapter for unit testing and safe proof."""
@@ -126,6 +130,18 @@ class DeterministicFakeWorkerAdapter:
             return "failed", "Execution cancelled", {"cancelled": True}
         return self.outcome_state, self.outcome_text, {"handle": handle}
 
+    async def resume(self, handle: str, message: str) -> str:
+        if handle in self.cancelled_handles:
+            raise RuntimeError("worker conversation is cancelled")
+        self.submissions.append((
+            ParentTask(
+                task_id=f"follow-up:{handle}", goal=message, assigned_worker=self.worker_id,
+                idempotency_key=f"follow-up:{handle}:{len(self.submissions)}",
+            ),
+            handle,
+        ))
+        return handle
+
 
 class DelegateRuntimeAdapter:
     """Wraps an existing jaeger_agent.delegates.DelegateRuntime as an IDEWorkerAdapter."""
@@ -133,6 +149,7 @@ class DelegateRuntimeAdapter:
     def __init__(self, runtime: Any) -> None:
         self.runtime = runtime
         self.worker_id = str(getattr(runtime, "runtime_id", "unknown"))
+        self.supports_follow_up = bool(getattr(runtime, "supports_follow_up", False))
         self._handles: dict[str, Any] = {}
 
     def bind_store(self, path):
@@ -153,18 +170,19 @@ class DelegateRuntimeAdapter:
     async def probe(self) -> dict[str, Any]:
         try:
             status = await self.runtime.probe()
+            capabilities = set(status.capabilities) - {
+                "existing_conversation",
+                "follow_up",
+                "reconcile",
+            }
+            if self.supports_follow_up:
+                capabilities.add("existing_conversation")
+                capabilities.add("follow_up")
             return {
                 "worker_id": self.worker_id,
                 "available": bool(status.available),
                 "detail": str(status.detail),
-                "capabilities": sorted(
-                    set(status.capabilities)
-                    - {
-                        "existing_conversation",
-                        "follow_up",
-                        "reconcile",
-                    }
-                ),
+                "capabilities": sorted(capabilities),
                 "transport": "cli",
                 "local": bool(status.local),
             }
@@ -298,3 +316,17 @@ class DelegateRuntimeAdapter:
             return state, output, evidence
         except Exception as exc:  # noqa: BLE001 — external runtime result boundary
             return "failed", f"Failed to retrieve delegate result: {exc}", {}
+
+    async def resume(self, handle: str, message: str) -> str:
+        delegate_handle = self._handles.get(handle)
+        if delegate_handle is None:
+            raise RuntimeError("Unknown worker conversation handle")
+        if not self.supports_follow_up:
+            raise RuntimeError(f"{self.worker_id} does not support existing conversations")
+        resume = getattr(self.runtime, "resume", None)
+        if not callable(resume):
+            raise RuntimeError(f"{self.worker_id} does not support existing conversations")
+        next_handle = await resume(delegate_handle, message)
+        next_key = f"{self.worker_id}:{next_handle.task_id}:{handle}"
+        self._handles[next_key] = next_handle
+        return next_key
