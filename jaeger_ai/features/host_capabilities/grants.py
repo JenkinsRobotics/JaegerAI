@@ -61,8 +61,11 @@ def _require(capability: str) -> dict[str, Any]:
     grant = _grant()
     identity = get_current_identity()
     capabilities = set(grant.get("capabilities") or [])
-    # Admin has all capabilities; others must match explicit grant
-    if identity != "admin" and capability not in capabilities:
+    # Every identity, "admin" included, must match an explicit grant. The
+    # identity is self-declared through ARES_CAPABILITY_IDENTITY, so an "admin"
+    # wildcard let any process that can set an env var claim every capability
+    # (Constitution I0: a caller cannot grant itself authority).
+    if capability not in capabilities:
         raise PermissionError(f"{identity} is not granted capability: {capability}")
     return grant
 
