@@ -231,7 +231,11 @@ def _format_tool_result_as_answer(name: str, result: Any) -> str:
         return f"Couldn't open: {result.get('error', 'unknown')}"
     if name == "delegate_task":
         if result.get("delegated"):
-            return str(result.get("answer") or "")
+            # In-process children return ``answer``; external DelegateRuntime
+            # workers return the canonical DelegateResult field ``summary``.
+            # Rendering only ``answer`` made a successful Codex/Claude/Gemini
+            # handoff look like an empty response.
+            return str(result.get("answer") or result.get("summary") or "")
         return f"Delegation failed: {result.get('error', 'unknown')}"
     if name == "send_message":
         if result.get("sent"):
