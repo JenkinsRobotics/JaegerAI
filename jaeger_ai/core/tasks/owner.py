@@ -45,6 +45,12 @@ TURN_CARD_GUIDANCE = (
 UNVERIFIABLE = 'No objective verification receipt; continue execution and verify the result'
 
 
+def _asserts_success(result: dict) -> bool:
+    """The worker claimed completion (complete_task, or state/verification fields)."""
+    return bool(result.get('task_completion')) or any(
+        k in result for k in ('state', 'task_state', 'verification'))
+
+
 def has_file_receipt(completion: dict | None) -> bool:
     """True when a completion carries a receipt for a file the owner can re-check."""
     receipts = (completion or {}).get('verification_receipts') or []
@@ -295,9 +301,10 @@ class GatewayTaskOwner:
                 verified, evidence = self.verify(task, result)
                 if verified:
                     state, error = TaskState.COMPLETED_VERIFIED, None
-                elif evidence == UNVERIFIABLE:
+                elif evidence == UNVERIFIABLE and not _asserts_success(result):
                     # Nothing the owner can check (an answer, not an artifact). That is
                     # the owner's call, not a failure and never a verified completion.
+                    # A worker that asserted success it cannot show still fails.
                     state, error = TaskState.NEEDS_OWNER, UNVERIFIABLE
                     evidence = {'unverified_answer': str(result.get('text') or '')[:2000]}
                 else:
