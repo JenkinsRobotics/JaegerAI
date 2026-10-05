@@ -477,10 +477,9 @@ class WebUIService:
                 pass
         if not WEBUI_SCRIPT.is_file():
             return {"ok": False, "error": f"WebUI launcher is missing: {WEBUI_SCRIPT}"}
-        agent_home = Path(
-            os.environ.get("JAEGER_WEBUI_AGENT_STATE")
-            or (Path.home() / ".jaeger" / "hermes-webui-agent")
-        ).expanduser()
+        from jaeger_ai.core.runtime.profile_paths import webui_agent_home
+
+        agent_home = webui_agent_home()
         _ensure_shared_profiles(agent_home)
         log_path = _webui_log_path(self.layout)
         pid_path = _webui_pid_path(self.layout)

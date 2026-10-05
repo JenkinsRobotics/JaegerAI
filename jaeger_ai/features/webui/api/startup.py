@@ -33,7 +33,9 @@ def fix_credential_permissions() -> None:
         except ValueError:
             pass
 
-    hermes_home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.jaeger' / 'hermes')))
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+    hermes_home = hermes_profile_root()
     if not hermes_home.is_dir():
         return
     for name in _SENSITIVE_FILES:
@@ -56,7 +58,9 @@ def fix_credential_permissions() -> None:
 
 
 def _agent_dir() -> Path | None:
-    hermes_home = Path(os.environ.get('HERMES_HOME', str(Path.home() / '.jaeger' / 'hermes')))
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+    hermes_home = hermes_profile_root()
     for raw in [os.environ.get('HERMES_WEBUI_AGENT_DIR', '').strip(), str(hermes_home / 'hermes-agent')]:
         if not raw:
             continue

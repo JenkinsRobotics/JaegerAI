@@ -27,7 +27,9 @@ def _profile_config_path(profile):
     OpenClaw/Roundtable may be moved under ~/.hermes/profiles/.archive/ so they
     stay out of the WebUI picker while adapters can still authenticate.
     """
-    root = Path.home() / ".jaeger" / "hermes" / "profiles"
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+    root = hermes_profile_root() / "profiles"
     for candidate in (root / profile / "config.yaml", root / ".archive" / profile / "config.yaml"):
         if candidate.is_file():
             return candidate

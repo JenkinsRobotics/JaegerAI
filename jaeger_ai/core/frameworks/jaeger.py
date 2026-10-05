@@ -33,7 +33,9 @@ def _profile_secret(name: str) -> str:
     direct = os.environ.get(name, "").strip()
     if direct:
         return direct
-    env_path = Path.home() / ".jaeger" / "hermes" / "profiles" / "jaeger" / ".env"
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+    env_path = hermes_profile_root() / "profiles" / "jaeger" / ".env"
     try:
         for line in env_path.read_text(encoding="utf-8").splitlines():
             key, sep, value = line.partition("=")
