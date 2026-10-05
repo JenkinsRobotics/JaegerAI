@@ -219,7 +219,7 @@ class PolicyKernel:
         current_args = dict(proposal.arguments)
 
         try:
-            # ── 0. Control plane: Global Stop ──────────
+            # ── 0. Control plane: Stop, lifecycle owner ──────────
             control = self._check_control_plane(proposal)
             if control is not None:
                 return control
@@ -304,7 +304,7 @@ class PolicyKernel:
     # that logged at debug level and returned None on error.
 
     def _check_control_plane(self, proposal: ProposedAction) -> AuthorityDecision | None:
-        """Global Stop fails closed."""
+        """Stop and a missing owner fail closed."""
         try:
             from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
             try:
@@ -323,6 +323,23 @@ class PolicyKernel:
                 decision=AuthorityDecisionType.DENY,
                 reason="global stop unavailable",
                 policy_name="global_stop",
+                proposal_id=proposal.proposal_id,
+            )
+        try:
+            from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease
+            decision = LifecycleLease.load().decide()
+        except Exception:
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason="lifecycle lease unavailable",
+                policy_name="lifecycle_lease",
+                proposal_id=proposal.proposal_id,
+            )
+        if not decision.privileged_work_allowed:
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason=decision.reason,
+                policy_name="lifecycle_lease",
                 proposal_id=proposal.proposal_id,
             )
         return None
