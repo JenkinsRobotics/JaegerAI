@@ -971,9 +971,10 @@ class EntityRuntime:
         # observers — the Gateway streams stream_delta/reasoning to clients.
         agent = (continuation_state or {}).get("agent")
         if agent is None:
-            from jaeger_ai.core.entity.owner_agent import owner_agent_options
+            from jaeger_ai.core.entity.owner_agent import observe_tool_calls, owner_agent_options
             agent = build_jaeger_agent(client, max_iterations=max_iterations,
-                                       max_tool_calls=max_tool_calls, callbacks=callbacks,
+                                       max_tool_calls=max_tool_calls,
+                                       callbacks=observe_tool_calls(callbacks, session_key),
                                        **owner_agent_options(layout, cfg, client))
             if continuation_state is not None:
                 continuation_state["agent"] = agent
@@ -982,7 +983,8 @@ class EntityRuntime:
         else:
             # One admitted request retains its full tool-result trajectory.
             # The owner holds this state locally, never across requests/users.
-            agent.callbacks = callbacks
+            from jaeger_ai.core.entity.owner_agent import observe_tool_calls
+            agent.callbacks = observe_tool_calls(callbacks, session_key)
             agent._skill_route_query = ""
         if on_agent is not None:
             on_agent(agent)
@@ -1018,7 +1020,10 @@ class EntityRuntime:
                 # Before any effect: a crash from here on must be attributable
                 # to this run, or recovery cannot tell done work from undone.
                 on_run(run.id)
-            out = turn_exec.run_turn(prompt)
+            from jaeger_ai.core.entity.owner_agent import traced_turn
+            with traced_turn(layout, session_key, prompt) as traced:
+                out = turn_exec.run_turn(prompt)
+                traced.answer = str(out or "")
         out = (out or "").strip()
         return {
             "text": out if out else "(No response text returned)",

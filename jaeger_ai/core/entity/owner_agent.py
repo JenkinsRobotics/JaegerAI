@@ -113,3 +113,68 @@ def _reset_for_tests() -> None:
         _registered_for = None
         _owns_pipeline = None
         _prompt_cache.clear()
+
+
+# ── observability: tool_calls rows + trace.jsonl on the OWNER turn path ──
+# Both writers lived only on the CLI path (main's session-agent callbacks and
+# boot), so after Gateway turns took over (2026-09-23) neither state.db
+# ``tool_calls`` nor ``logs/trace.jsonl`` received a row.
+
+def observe_tool_calls(callbacks: Any, session_key: str) -> Any:
+    """Return ``callbacks`` with a ``tool_done`` that also persists a
+    ``tool_calls`` row and a trace step, then calls the original observer."""
+    from jaeger_agent import AgentCallbacks
+
+    cb = callbacks if callbacks is not None else AgentCallbacks()
+    original = getattr(cb, "tool_done", None)
+    if getattr(original, "_owner_observed", False):
+        return cb
+
+    def tool_done(name: str, args: dict[str, Any], result: Any, ok: bool,
+                  error: str | None, elapsed_s: float) -> None:
+        try:
+            from jaeger_agent.memory import memory as mem
+            mem.record_tool_call(session_key=session_key, tool_name=name, args=args,
+                                 result=result, ok=ok, error=error, elapsed_s=elapsed_s)
+        except Exception:  # noqa: BLE001 — an observer never breaks a turn
+            pass
+        try:
+            from jaeger_agent.core import trace as _trace
+            _trace.trace_step("tool", name, dur_s=elapsed_s, ok=ok,
+                              detail=f"{args} => {error if not ok else result}")
+        except Exception:  # noqa: BLE001
+            pass
+        if original is not None:
+            original(name, args, result, ok, error, elapsed_s)
+
+    tool_done._owner_observed = True  # type: ignore[attr-defined]
+    cb.tool_done = tool_done
+    return cb
+
+
+class traced_turn:
+    """Context manager: one ``trace.jsonl`` turn (input → steps → answer)."""
+
+    def __init__(self, layout: Any, session_key: str, user_text: str) -> None:
+        self.layout, self.session_key, self.user_text = layout, session_key, user_text
+        self.answer = ""
+        self._t0 = 0.0
+
+    def __enter__(self) -> "traced_turn":
+        import time
+        try:
+            from jaeger_agent.core import trace as _trace
+            _trace.start_trace_recorder(self.layout)
+            _trace.trace_begin(self.session_key, self.user_text)
+        except Exception:  # noqa: BLE001
+            pass
+        self._t0 = time.perf_counter()
+        return self
+
+    def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        import time
+        try:
+            from jaeger_agent.core import trace as _trace
+            _trace.trace_end(self.answer, time.perf_counter() - self._t0, ok=exc_type is None)
+        except Exception:  # noqa: BLE001
+            pass
