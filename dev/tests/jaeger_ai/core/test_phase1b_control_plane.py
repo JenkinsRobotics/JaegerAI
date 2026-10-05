@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from jaeger_ai.core.embodiment.gate import EmbodimentDisabled, minecraft_action
 from jaeger_ai.core.gateway import caller_auth
 from jaeger_ai.core.gateway.caller_auth import CALLERS
 from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError, release_allowed
@@ -119,6 +120,33 @@ def test_workers_do_not_resurrect_jaeger_without_the_owner(tmp_path: Path, monke
     assert repairs_allowed() is True
     LifecycleLease(lease, grace_seconds=10).beat("menubar", now=1)
     assert repairs_allowed() is False
+
+
+def test_embodiment_actions_are_refused():
+    with pytest.raises(EmbodimentDisabled):
+        minecraft_action("build_house")
+    from jaeger_agent.tools.minecraft import mc_status
+    refused = mc_status()
+    assert refused["ok"] is False and refused["disabled"] is True
+
+
+def test_policy_kernel_denies_stop_and_minecraft(tmp_path: Path, monkeypatch):
+    from jaeger_ai.core.authority.kernel import AuthorityDecisionType, PolicyKernel, ProposedAction
+
+    stop = tmp_path / "stop.json"
+    monkeypatch.setenv("JAEGER_GLOBAL_STOP_PATH", str(stop))
+    monkeypatch.setenv("JAEGER_LIFECYCLE_LEASE", str(tmp_path / "lease.json"))
+    denied = PolicyKernel().evaluate(ProposedAction(
+        tool_name="mc_chat", arguments={"message": "hi"}, tier="read_only",
+    ))
+    assert denied.decision == AuthorityDecisionType.DENY
+    assert denied.policy_name == "embodiment_gate"
+    GlobalStop(stop).engage("menubar", reason="stop")
+    stopped = PolicyKernel().evaluate(ProposedAction(
+        tool_name="read_file", arguments={}, tier="read_only",
+    ))
+    assert stopped.decision == AuthorityDecisionType.DENY
+    assert stopped.policy_name == "global_stop"
 
 
 def test_live_gateway_stop_is_owner_only(tmp_path: Path, monkeypatch):
