@@ -340,6 +340,12 @@ def test_ollama_bridge_refuses_unrestricted_paths():
             raise AssertionError("unrestricted model path was forwarded")
         except HTTPError as exc:
             assert exc.code == 403
+        deleted = Request(f"http://127.0.0.1:{port}/api/delete", method="DELETE")
+        try:
+            urlopen(deleted, timeout=2)
+            raise AssertionError("DELETE was not refused")
+        except HTTPError as exc:
+            assert exc.code == 403
         assert "0.0.0.0" not in bridge.proxy_bind_hosts("192.168.64.1")
         assert bridge.daemon_listen() == "127.0.0.1:11434"
     finally:
@@ -396,6 +402,54 @@ def test_stale_lease_suspends_and_expired_lease_shuts_the_gateway_down(tmp_path:
     )
     assert _repair_jaeger() is False
     assert kicked == []
+
+
+def test_attached_slash_is_a_command_not_a_model_turn(monkeypatch):
+    import io
+
+    from jaeger_ai.interfaces import bridge
+
+    calls = []
+
+    def boom(*_args, **_kwargs):
+        calls.append("model")
+        raise AssertionError("slash command entered the model loop")
+
+    monkeypatch.setattr(bridge, "_run_slash", lambda text, ctx: f"ran {text}")
+    monkeypatch.setattr(bridge, "_windowed_control_slash", lambda text: None)
+    monkeypatch.setattr(bridge, "_goal_turn_text", lambda text: None)
+    out = io.StringIO()
+
+    class Ctx:
+        session_pending: dict = {}
+        busy = False
+        outputs: set = set()
+
+    bridge._execute_attached_turn(out, Ctx(), {"text": "/help", "session": "desktop-app", "id": "s1"})
+    assert calls == []
+    assert "ran /help" in out.getvalue()
+    assert "noqa: F821" not in Path("jaeger_ai/interfaces/bridge.py").read_text(encoding="utf-8")
+
+
+def test_state_dir_isolates_webui_profile_writes(tmp_path: Path, monkeypatch):
+    live = tmp_path / "live-home"
+    state = tmp_path / "state"
+    monkeypatch.setattr(Path, "home", lambda: live)
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(state))
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.delenv("JAEGER_WEBUI_AGENT_STATE", raising=False)
+    monkeypatch.delenv("JAEGER_HOME", raising=False)
+
+    from jaeger_ai.features.webui.service.profile_layout import prepare_webui_home
+
+    result = prepare_webui_home()
+    agent = Path(result["agent_home"]).resolve()
+    hermes = Path(result["layout"]["hermes_home"]).resolve()
+    assert agent.is_relative_to(state.resolve())
+    assert hermes.is_relative_to(state.resolve())
+    assert (agent / "profile.yaml").is_file()
+    assert not (live / ".jaeger").exists()
+
 
 
 def test_corrupt_stop_latch_stays_engaged_on_the_live_gateway(tmp_path: Path, monkeypatch):

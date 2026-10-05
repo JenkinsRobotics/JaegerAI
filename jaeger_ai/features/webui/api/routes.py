@@ -23000,7 +23000,9 @@ def _handle_memory_read(handler, parsed=None):
         home = get_active_hermes_home()
         mem_dir = home / "memories"
     except ImportError:
-        home = Path.home() / ".jaeger" / "hermes"
+        from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+        home = hermes_profile_root()
         mem_dir = home / "memories"
 
     # Respect memory_enabled and user_profile_enabled config flags (#6406)
@@ -29239,7 +29241,9 @@ def _handle_memory_write(handler, body):
         home = get_active_hermes_home()
         mem_dir = home / "memories"
     except ImportError:
-        home = Path.home() / ".jaeger" / "hermes"
+        from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+        home = hermes_profile_root()
         mem_dir = home / "memories"
     mem_dir.mkdir(parents=True, exist_ok=True)
     if section == "memory":
