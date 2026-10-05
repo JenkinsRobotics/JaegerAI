@@ -140,4 +140,7 @@ def _webui_url(argv: list[str]) -> int:
     base, _rest = _parse_instance(argv)
     svc = WebUIService(base.instance)
     print(svc.browser_url())
+    serve = svc.serve_url()
+    if serve:
+        print(f"remote (Tailscale Serve): {serve}")
     return 0
