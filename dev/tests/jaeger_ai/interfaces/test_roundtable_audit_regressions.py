@@ -61,7 +61,8 @@ def test_a2a_cancel_owns_native_turn_and_preserves_other_task():
     releases = {name: threading.Event() for name in ('A', 'B')}
     turn_ids, controls = {}, []
     class Bridge:
-        def turn(self, text, session, *, on_event, turn_id):
+        def turn(self, text, session, *, on_event, turn_id, gateway_caller):
+            assert gateway_caller == 'a2a' and session.startswith('a2a:')
             turn_ids[text] = turn_id
             on_event({'type': 'queued'})
             entered[text].set()
