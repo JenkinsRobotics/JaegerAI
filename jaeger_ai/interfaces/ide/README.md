@@ -26,12 +26,15 @@ all VS Code APIs or other agents' private APIs are available there.
 development host. Do not run npm install, package caches or build outputs here.
 Canonical default Gateway port is generated from `jaeger_ai/contract/ports.py`.
 
-The Gateway must already be running (`jaeger gateway daemon`). The extension
-does not launch or restart it. **Jaeger: Connection Settings** selects the local
-Gateway URL; an optional model setting applies to new requests only. Empty model
-means the Gateway/session chooses. Never put credentials in the URL. This initial
-client rejects non-loopback URLs; remote access requires a separate authenticated
-deployment, not exposing the unauthenticated Gateway.
+The IDE is independently launchable: when the configured loopback Gateway is
+unavailable, the extension starts the managed headless Jaeger runtime with
+`jaeger stack up`. This brings up the Gateway,
+bridge, and native MCP services without requiring `JaegerAI.app`. **Jaeger:
+Connection Settings** selects the local Gateway URL; an optional model setting
+applies to new requests only. Empty model means the Gateway/session chooses.
+Never put credentials in the URL. This initial client rejects non-loopback URLs;
+remote access requires a separate authenticated deployment, not exposing the
+unauthenticated Gateway.
 
 ## Behavior and boundaries
 
@@ -61,8 +64,9 @@ deployment, not exposing the unauthenticated Gateway.
   Tab order is client state, not a second session database.
 - `/archive` and `/unarchive` move a conversation between the active and archived
   sections. Archive state is Gateway-owned session metadata, not a client-side flag.
-- Chat search filters the Gateway-owned chat projection by title, workspace, or
-  session ID. The search is a client-side list filter, not a second search service.
+- Chat search queries the Gateway-owned session projection by title, workspace,
+  session ID, or transcript content. Results remain Gateway-owned; the client
+  only projects the returned list.
 - The workspace button and `/workspace` command choose which open folder Jaeger
   uses. The selection is persisted per Gateway endpoint and sent through the
   Gateway admission `workspace` field for new chats, immediate turns, and queued work.
@@ -122,6 +126,8 @@ Change tracking covers the native `write_file`, `append_file`, `patch`,
 `delete_file`, `move_file`, and `copy_file` tools for regular UTF-8 files up to
 2 MiB. Arbitrary shell/MCP edits and binaries are not claimed as reversible.
 Private snapshots live beside the Gateway database, outside the source tree.
+Message actions include copy, edit-and-resend on a Gateway branch, retry,
+positive/negative feedback with durable readback, and fork-at-message.
 Edit-message deliberately means **edit and resend**, not history rewriting.
 
 Design references: the operator's Codex screenshots; OpenAI's

@@ -43,6 +43,7 @@ class Conversation {
     this.gateway = gateway; this.publish = publish; this.save = save;
     this.pending = restored.pending || {};
     this.pendingTask = restored.pendingTask || null;
+    this.searchRevision = 0;
     this.openSessionIds = Array.isArray(restored.openSessionIds) ? [...new Set(restored.openSessionIds)] : [];
     this.completedTimelines = boundedCompletedTimelines(restored.completedTimelines);
     this.workBySession = Object.fromEntries(Object.entries(restored.workBySession || {}).slice(-20)
@@ -57,7 +58,7 @@ class Conversation {
     this.state = { session: null, sessions: [], text: '', reasoning: '', activity: [], timeline: [],
       approvals: [], models: null, modelsError: null, workers: [], workersError: null,
       activeTask: null, backgroundTasks: [], busy: false, queue: [], openSessionIds: this.openSessionIds,
-      connected: false, status: 'Not connected', error: '', endpoint: gateway.url };
+      feedback: {}, connected: false, status: 'Not connected', error: '', endpoint: gateway.url };
     this.observer = null; this.epoch = 0; this.stagedGen = 0; this.sending = false;
     this.disposed = false;
   }
@@ -142,6 +143,7 @@ class Conversation {
       this.restoreCompletedTimeline(session?.session_id);
       if (session && this.gateway.activity) await this.loadHistory(selected, epoch);
       if (session) await this.loadQueue(selected, epoch);
+      if (session && this.gateway.feedbacks) await this.loadFeedback(selected, epoch);
       if (epoch !== this.epoch) return;
       this.state.busy = Boolean(session && (this.pending[selected] || ['running', 'cancelling', 'busy'].includes(session.status)));
       this.state.status = this.state.busy ? 'Work in progress · reconnecting' : 'Connected';
@@ -159,6 +161,10 @@ class Conversation {
         if (!this.disposed && epoch === this.epoch) this.refresh(selected);
       }, 1000);
     }
+  }
+  async loadFeedback(sid, epoch = this.epoch) {
+    const result = await this.gateway.feedbacks(sid);
+    if (epoch === this.epoch && !this.disposed) this.state.feedback = result.feedback || {};
   }
   async loadHistory(sid, epoch) {
     let cursor = 0, timeline = createTimelineState();
@@ -275,6 +281,13 @@ class Conversation {
     if (this.disposed || epoch !== this.epoch) return;
     await this.refresh(session.session_id);
   }
+  async searchSessions(query = '') {
+    const revision = ++this.searchRevision;
+    const listed = await this.gateway.sessions(String(query || '').trim());
+    if (revision !== this.searchRevision || this.disposed) return;
+    this.state.sessions = listed.sessions || [];
+    this.emit();
+  }
   async send(text, model = '', provider = '', workspace = '', ide = null, allowedTools = null, options = null) {
     text = String(text).trim();
     if (!text || !this.state.connected || this.state.busy || this.sending) return;
@@ -346,6 +359,31 @@ class Conversation {
       }
       this.state.error = `${error.message}${this.pending[sid] ? ' Delivery is uncertain. Retry connection to check the same request; it will not be resent.' : ''}`;
       this.state.status = 'Request not confirmed'; this.emit();
+    } finally { this.sending = false; }
+  }
+  async retry() {
+    const sid = this.state.session?.session_id;
+    if (!sid || !this.state.connected || this.state.busy || this.sending) return false;
+    const epoch = this.epoch;
+    this.sending = true;
+    this.state.busy = true; this.state.error = ''; this.state.status = 'Retrying…'; this.emit();
+    try {
+      const admitted = await this.gateway.retry(sid);
+      const rid = admitted.request_id;
+      const startCursor = Math.max(0, Number(admitted.start_event_id || 1) - 1);
+      this.pending[sid] = { requestId: rid, startCursor };
+      this.workBySession[sid] = [...(this.workBySession[sid] || []), {
+        requestId: rid, startedAt: Date.now(), finishedAt: null, status: 'running',
+        userIndex: (this.state.session.messages || []).filter(m => m.role === 'user').length,
+      }];
+      await this.persist();
+      this.state.session = await this.gateway.session(sid);
+      this.state.status = 'Working'; this.emit();
+      this.observe(sid, rid, startCursor, epoch);
+      return true;
+    } catch (error) {
+      this.state.busy = false; this.state.error = error.message; this.state.status = 'Retry not accepted';
+      this.emit(); return false;
     } finally { this.sending = false; }
   }
   async finish(sid, rid, epoch) {
@@ -565,6 +603,31 @@ class Conversation {
       }
       this.state.error = `${error.message}${this.pendingTask ? ' Delivery is uncertain. Retry connection to check the same task.' : ''}`;
       this.state.status = 'Request not confirmed'; this.emit();
+    } finally { this.sending = false; }
+  }
+  async submitWorkerFollowUp({ parentTaskId, goal, taskId, idempotencyKey }) {
+    goal = String(goal || '').trim();
+    parentTaskId = String(parentTaskId || '').trim();
+    if (!goal || !parentTaskId || !this.state.connected || this.state.busy || this.sending) return;
+    this.sending = true;
+    const tid = taskId || randomUUID();
+    const idemKey = idempotencyKey || tid;
+    const epoch = this.epoch;
+    this.state.busy = true; this.state.error = ''; this.state.status = 'Continuing worker conversation…'; this.emit();
+    try {
+      const task = await this.gateway.orchestrationFollowUp(parentTaskId, {
+        task_id: tid, goal, idempotency_key: idemKey,
+      });
+      if (epoch !== this.epoch) return;
+      this.state.activeTask = task;
+      this.publish({ accepted: true, submittedText: goal });
+      this.state.status = task.state || 'submitted'; this.emit();
+      if (taskTerminal.has(task.state)) await this.finishTask(tid, epoch);
+      else await this.observeTask(tid, epoch);
+    } catch (error) {
+      this.state.busy = false;
+      this.state.error = error.message;
+      this.state.status = 'Worker follow-up not accepted'; this.emit();
     } finally { this.sending = false; }
   }
   async observeTask(taskId, epoch, intervalMs = 100) {
