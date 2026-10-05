@@ -44,7 +44,12 @@ def resolve_root() -> tuple[Path, str, bool]:
                     source = "WIKI_PATH"
                     break
     if not raw:
-        config = get_config()
+        try:
+            from jaeger_ai.features.webui.api.config import get_config
+        except ImportError:
+            config = {}
+        else:
+            config = get_config()
         raw = _nested(config, "skills.config.wiki.path") or _nested(config, "wiki.path")
         if raw:
             source = "skills.config.wiki.path"

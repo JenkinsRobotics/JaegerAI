@@ -16,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import logging
 import time
-from typing import Any, Sequence
+from typing import Any, Callable, Sequence
 
 from .reflection import StructuredReflection
 
