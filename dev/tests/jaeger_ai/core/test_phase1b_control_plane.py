@@ -18,6 +18,7 @@ from jaeger_ai.core.models.ollama_bridge import (
     daemon_listen,
     proxy_bind_hosts,
 )
+from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease, repairs_allowed
 from jaeger_ai.core.runtime.webui_bind import webui_bind_host
 from jaeger_ai.core.tasks.completion import CompletionError, authoritative_transition
 from jaeger_ai.core.tasks.models import DurableTask, TaskState
@@ -88,6 +89,36 @@ def test_completed_verified_requires_evidence():
     assert task.state == TaskState.NEEDS_OWNER
     authoritative_transition(task, TaskState.BLOCKED, error="waiting")
     assert task.state == TaskState.BLOCKED
+
+
+def test_stale_lifecycle_lease_suspends_privileged_work(tmp_path: Path):
+    lease = LifecycleLease(tmp_path / "lease.json", grace_seconds=10)
+    assert lease.decide(now=100).privileged_work_allowed is True
+    lease.beat("menubar", now=100)
+    assert lease.decide(now=105).privileged_work_allowed is True
+    assert lease.decide(now=111).reason == "lifecycle owner disappeared"
+    assert lease.decide(now=111).shutdown is True
+    lease.path.write_text("{", encoding="utf-8")
+    assert lease.decide().privileged_work_allowed is False
+    assert lease.decide().shutdown is True
+
+
+def test_missed_heartbeat_suspends_before_shutdown(tmp_path: Path):
+    lease = LifecycleLease(tmp_path / "lease.json", grace_seconds=15, suspend_after=5)
+    lease.beat("menubar", now=100)
+    missed = lease.decide(now=106)
+    assert missed.privileged_work_allowed is False
+    assert missed.shutdown is False
+    assert lease.decide(now=116).shutdown is True
+
+
+def test_workers_do_not_resurrect_jaeger_without_the_owner(tmp_path: Path, monkeypatch):
+    lease = tmp_path / "lease.json"
+    monkeypatch.setenv("JAEGER_LIFECYCLE_LEASE", str(lease))
+    monkeypatch.setenv("JAEGER_GLOBAL_STOP_PATH", str(tmp_path / "stop.json"))
+    assert repairs_allowed() is True
+    LifecycleLease(lease, grace_seconds=10).beat("menubar", now=1)
+    assert repairs_allowed() is False
 
 
 def test_live_gateway_stop_is_owner_only(tmp_path: Path, monkeypatch):

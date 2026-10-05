@@ -100,3 +100,61 @@ final class StackManager: Sendable {
         }.value
     }
 }
+
+/// The menu-bar process is the only lifecycle owner. It rewrites the lease
+/// the Gateway and fabric supervisor already read. Workers must not call this.
+enum LifecycleLeaseBeat {
+    private static let queue = DispatchQueue(label: "ai.jaeger.lifecycle-lease")
+    private static var timer: DispatchSourceTimer?
+    private static let interval: TimeInterval = 5
+
+    static func start() {
+        queue.sync {
+            guard timer == nil else { return }
+            write()
+            let source = DispatchSource.makeTimerSource(queue: queue)
+            source.schedule(deadline: .now() + interval, repeating: interval)
+            source.setEventHandler { write() }
+            source.resume()
+            timer = source
+        }
+    }
+
+    static func stop() {
+        queue.sync {
+            timer?.setEventHandler {}
+            timer?.cancel()
+            timer = nil
+        }
+    }
+
+    private static func leaseURL() -> URL {
+        let env = ProcessInfo.processInfo.environment
+        if let raw = env["JAEGER_LIFECYCLE_LEASE"], !raw.trimmingCharacters(in: .whitespaces).isEmpty {
+            return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
+        }
+        let root: URL
+        if let state = env["JAEGER_STATE_DIR"], !state.trimmingCharacters(in: .whitespaces).isEmpty {
+            root = URL(fileURLWithPath: (state as NSString).expandingTildeInPath)
+        } else if let home = env["JAEGER_HOME"], !home.trimmingCharacters(in: .whitespaces).isEmpty {
+            root = URL(fileURLWithPath: (home as NSString).expandingTildeInPath).appendingPathComponent(".jaeger_ai")
+        } else {
+            root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".jaeger")
+        }
+        return root.appendingPathComponent("control").appendingPathComponent("lifecycle-lease.json")
+    }
+
+    private static func write() {
+        let url = leaseURL()
+        let directory = url.deletingLastPathComponent()
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let stamp = Date().timeIntervalSince1970
+            let body = String(format: "{\"beat_at\": %.6f, \"owner\": \"menubar\"}\n", stamp)
+            try Data(body.utf8).write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } catch {
+            NSLog("[JaegerAI] lifecycle lease beat failed: \(error.localizedDescription)")
+        }
+    }
+}

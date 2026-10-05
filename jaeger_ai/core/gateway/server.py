@@ -273,8 +273,9 @@ def _route_template(request: web.Request) -> str | None:
 
 
 def _control_plane_block() -> str | None:
-    """In-process producers bypass HTTP middleware. They still honor Stop."""
+    """In-process producers bypass HTTP middleware. They still honor Stop and the lease."""
     from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
+    from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease
     try:
         if GlobalStop.load().engaged():
             return "global stop"
@@ -282,6 +283,12 @@ def _control_plane_block() -> str | None:
         return "global stop"
     except Exception:
         return "global stop unavailable"
+    try:
+        decision = LifecycleLease.load().decide()
+    except Exception:
+        return "lifecycle lease unavailable"
+    if not decision.privileged_work_allowed:
+        return decision.reason
     return None
 
 
@@ -328,6 +335,7 @@ async def _authenticate_caller(request: web.Request, handler: Any) -> web.Stream
                 status=403,
             )
     from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError, allowed_while_stopped
+    from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease
     try:
         stopped = GlobalStop.load().engaged()
     except GlobalStopError:
@@ -337,6 +345,14 @@ async def _authenticate_caller(request: web.Request, handler: Any) -> web.Stream
         return web.json_response({"error": "global stop unavailable"}, status=503)
     if stopped and not allowed_while_stopped(request.method, route, spec):
         return web.json_response({"error": "global stop", "state": "stopped"}, status=423)
+    try:
+        decision = LifecycleLease.load().decide()
+    except Exception:
+        logger.error("Lifecycle lease path unavailable", exc_info=True)
+        return web.json_response({"error": "lifecycle lease unavailable"}, status=503)
+    if not decision.privileged_work_allowed and not allowed_while_stopped(
+            request.method, route, spec):
+        return web.json_response({"error": decision.reason, "state": "offline"}, status=423)
     actor = spec.actor
     if spec.name == "jaegerd":
         claimed = (request.headers.get("X-Jaeger-Actor") or "").strip()
@@ -572,6 +588,7 @@ class JaegerGatewayApp:
         self._owner_task: asyncio.Task | None = None
         self._pending_resume = False
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._lifecycle_shutdown = asyncio.Event()
         self._background_producers: Any = None
         self._last_human_at = time.monotonic()
         self._last_human_session = "desktop-app"
@@ -735,14 +752,28 @@ class JaegerGatewayApp:
         return len(rows)
 
     async def _owner_maintenance_loop(self, runtime: Any) -> None:
-        """Heartbeat, sleep-time, and indexing owned by the resident Gateway."""
+        """Heartbeat, sleep-time, and indexing owned by the resident Gateway.
+
+        The owner tick stays on its existing cadence. The lifecycle lease is
+        polled faster so a missed menu-bar heartbeat shuts the stack down
+        soon after the grace period, not a full tick later.
+        """
         interval = float(os.environ.get("JAEGER_HEARTBEAT_INTERVAL_S") or 0) or 30.0
-        while True:
+        lease_every = float(os.environ.get("JAEGER_LIFECYCLE_POLL_S") or 2.0)
+        elapsed = 0.0
+        while not self._lifecycle_shutdown.is_set():
+            if elapsed <= 0:
+                try:
+                    await asyncio.to_thread(self._owner_tick, runtime)
+                except Exception as exc:
+                    logger.warning("Owner maintenance tick failed: %s", exc)
+                elapsed = interval
+            self._note_lifecycle()
+            step = max(0.5, min(lease_every, elapsed))
             try:
-                await asyncio.to_thread(self._owner_tick, runtime)
-            except Exception as exc:
-                logger.warning("Owner maintenance tick failed: %s", exc)
-            await asyncio.sleep(max(1.0, interval))
+                await asyncio.wait_for(self._lifecycle_shutdown.wait(), timeout=step)
+            except asyncio.TimeoutError:
+                elapsed -= step
 
     def _owner_tick(self, runtime: Any) -> None:
         """Sleep-time consolidation. Heartbeat/board/cron live on the producer lease."""
@@ -1225,6 +1256,19 @@ class JaegerGatewayApp:
             }
         finally:
             await terminate_session()
+
+    def _note_lifecycle(self) -> None:
+        """Suspend is immediate. Once the grace inside the lease has elapsed, shut down."""
+        from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease
+        try:
+            decision = LifecycleLease.load().decide()
+        except Exception:
+            logger.error("Lifecycle lease unreadable; shutting down", exc_info=True)
+            self._lifecycle_shutdown.set()
+            return
+        if decision.shutdown:
+            logger.warning("Lifecycle owner disappeared; controlled shutdown (%s)", decision.reason)
+            self._lifecycle_shutdown.set()
 
     async def _halt_for_stop(self) -> list[str]:
         """Cancel in-flight helpers. Names that do not confirm are returned."""
@@ -4230,8 +4274,18 @@ async def run_gateway_forever(
             logger.debug("post-listen resume skipped", exc_info=True)
         gateway._pending_resume = False
     try:
-        while True:
-            await asyncio.sleep(3600)
+        while not gateway._lifecycle_shutdown.is_set():
+            try:
+                await asyncio.wait_for(gateway._lifecycle_shutdown.wait(), timeout=3600)
+            except asyncio.TimeoutError:
+                continue
+        logger.warning("Gateway leaving after lifecycle shutdown")
+        try:
+            from jaeger_ai.core.runtime.stack import stack_down
+            stack_down(wait_timeout=2.0)
+        except Exception:
+            logger.error("lifecycle stack shutdown failed", exc_info=True)
+        await gateway._bounded_shutdown(gateway.app)
     finally:
         await runner.cleanup()
 
