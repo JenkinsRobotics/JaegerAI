@@ -80,10 +80,27 @@ class BridgeClient:
              *, turn_id: str | None = None, workspace: str | None = None,
              model: str | None = None, provider: str | None = None,
              allowed_tools: list[str] | None = None,
-             is_subordinate: bool = False) -> dict[str, Any]:
+             is_subordinate: bool = False,
+             gateway_caller: str | None = None,
+             gateway_token: str | None = None) -> dict[str, Any]:
+        """``gateway_caller`` (``mcp``/``a2a``) makes the Gateway run this turn
+        as that caller: its token travels with the request over the local
+        socket so the bridge relays it instead of lending its own identity.
+        ``gateway_token`` relays a caller token this process was presented
+        (the MCP server relaying its authenticated HTTP caller)."""
+        relay: dict[str, Any] = {}
+        if gateway_token:
+            relay["gateway_token"] = gateway_token
+        elif gateway_caller:
+            from jaeger_ai.core.gateway.caller_auth import client_token
+            token = client_token(gateway_caller)
+            if not token:
+                raise HermesWebUIAdapterBridgeError(
+                    f"No Gateway caller token for {gateway_caller!r}; run `jaeger auth init`")
+            relay["gateway_token"] = token
         with self._connection() as (_sock, rx):
             self._ready(rx)
-            self._write(rx, {"op": "send", "text": text, "session": session,
+            self._write(rx, {"op": "send", "text": text, "session": session, **relay,
                              **({"allowed_tools": allowed_tools} if allowed_tools is not None else {}),
                              **({"turn_id": turn_id} if turn_id else {}),
                              **({"workspace": workspace} if workspace else {}),

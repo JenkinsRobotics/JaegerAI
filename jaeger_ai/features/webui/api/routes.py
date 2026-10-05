@@ -8094,7 +8094,8 @@ def _gateway_delete_session(session_id: str) -> dict:
     import json as _json
 
     url = f"{_gateway_base_url()}/v1/sessions/{quote(sid, safe='')}"
-    req = Request(url, method="DELETE")
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    req = Request(url, method="DELETE", headers=client_headers("webui"))
     try:
         with build_opener().open(req, timeout=5) as resp:
             body = resp.read().decode("utf-8") or "{}"
@@ -8123,7 +8124,8 @@ def _gateway_list_sessions(profile: str | None = None) -> dict:
     url = f"{_gateway_base_url()}/v1/sessions"
     if profile:
         url += f"?profile={quote(profile, safe='')}"
-    req = Request(url, headers={"Accept": "application/json"})
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    req = Request(url, headers={"Accept": "application/json", **client_headers("webui")})
     try:
         with build_opener().open(req, timeout=5) as resp:
             payload = _json.loads(resp.read().decode("utf-8") or "{}")
@@ -8140,7 +8142,8 @@ def _gateway_get_session(session_id: str) -> dict:
     if not sid:
         return {}
     url = f"{_gateway_base_url()}/v1/sessions/{quote(sid, safe='')}"
-    req = Request(url, headers={"Accept": "application/json"})
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    req = Request(url, headers={"Accept": "application/json", **client_headers("webui")})
     try:
         with build_opener().open(req, timeout=5) as resp:
             payload = _json.loads(resp.read().decode("utf-8") or "{}")
@@ -13085,7 +13088,8 @@ def _proxy_jaeger_gateway(handler, method: str, path: str, body: bytes | None = 
         port = parsed_base.port or (443 if parsed_base.scheme == "https" else 80)
         try:
             conn = http.client.HTTPConnection(host, port, timeout=3)
-            headers = {"Accept": "application/json"}
+            from jaeger_ai.core.gateway.caller_auth import client_headers
+            headers = {"Accept": "application/json", **client_headers("webui")}
             if body is not None:
                 headers["Content-Type"] = "application/json"
             conn.request(method.upper(), path, body=body, headers=headers)
@@ -21658,6 +21662,11 @@ def _runner_local_pending(sid: str) -> dict | None:
     }
 
 
+def _webui_gateway_auth() -> dict:
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    return client_headers("webui")
+
+
 def _gateway_store_pending(sid: str) -> dict | None:
     """Map a Gateway session-store approval onto the stock WebUI card."""
     from urllib.request import urlopen
@@ -21667,7 +21676,7 @@ def _gateway_store_pending(sid: str) -> dict | None:
     try:
         req = Request(
             gateway_base() + "/v1/approvals",
-            headers={"Accept": "application/json"},
+            headers={"Accept": "application/json", **_webui_gateway_auth()},
             method="GET",
         )
         with urlopen(req, timeout=4) as resp:

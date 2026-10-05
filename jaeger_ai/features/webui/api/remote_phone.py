@@ -90,7 +90,9 @@ def _phone_status(handler):
     try:
         from api.jaeger_sessions import gateway_base
         from urllib.request import Request, urlopen
-        req = Request(gateway_base() + "/v1/runtime/status", headers={"Accept": "application/json"})
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        req = Request(gateway_base() + "/v1/runtime/status",
+                      headers={"Accept": "application/json", **client_headers("webui")})
         with urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         agent = data.get("Agent") or {}

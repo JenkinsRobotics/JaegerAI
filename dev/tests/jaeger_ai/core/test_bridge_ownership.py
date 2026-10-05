@@ -241,7 +241,7 @@ def test_gateway_owner_initial_failure_exits_without_publishing_socket(instance_
     # Patch the constructor used by _attach_gateway, not the probe contract.
     import jaeger_ai.core.gateway.client as gateway_client
     original = gateway_client.GatewayTurnClient
-    gateway_client.GatewayTurnClient = lambda: ctx.gateway
+    gateway_client.GatewayTurnClient = lambda **kwargs: ctx.gateway
     try:
         B._attach_gateway(sink, ctx)
     finally:

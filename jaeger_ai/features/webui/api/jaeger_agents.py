@@ -41,6 +41,9 @@ def _proxy(handler, method: str, path: str, body: bytes | None = None,
     data = body if method.upper() in {"POST", "PUT", "PATCH"} else None
     req = Request(url, data=data, method=method.upper())
     req.add_header("Accept", "application/json")
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    for key, value in client_headers("webui").items():
+        req.add_header(key, value)
     if data is not None:
         req.add_header("Content-Type", "application/json")
     try:

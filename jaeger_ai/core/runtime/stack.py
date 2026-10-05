@@ -620,12 +620,14 @@ def run_gateway_test_turn(timeout_s: float = 60.0) -> dict[str, Any]:
     are genuinely answering queries.
     """
     base_url = f"http://{LOOPBACK}:{GATEWAY_PORT}"
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    auth = client_headers("cli")
 
     # 1. Create session
     req = urllib.request.Request(
         f"{base_url}/v1/sessions",
         data=json.dumps({"title": "stack-verify-probe"}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **auth},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=10) as resp:
@@ -636,7 +638,7 @@ def run_gateway_test_turn(timeout_s: float = 60.0) -> dict[str, Any]:
     req = urllib.request.Request(
         f"{base_url}/v1/sessions/{session_id}/turns",
         data=json.dumps({"text": "ping"}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", **auth},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=10) as resp:
@@ -649,7 +651,8 @@ def run_gateway_test_turn(timeout_s: float = 60.0) -> dict[str, Any]:
     result: dict[str, Any] | None = None
 
     while time.time() < deadline:
-        req = urllib.request.Request(f"{base_url}/v1/sessions/{session_id}/requests/{request_id}")
+        req = urllib.request.Request(f"{base_url}/v1/sessions/{session_id}/requests/{request_id}",
+                                     headers=auth)
         try:
             with urllib.request.urlopen(req, timeout=5) as resp:
                 poll_resp = json.loads(resp.read().decode("utf-8"))

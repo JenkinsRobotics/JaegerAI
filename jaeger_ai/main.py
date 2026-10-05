@@ -3983,9 +3983,11 @@ def _forward_oneshot_to_gateway(
         "profile": "jaeger",
         "source": "cli",
     }).encode("utf-8")
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    auth = client_headers("cli")
     req = urllib.request.Request(
         f"{base}/v1/sessions", data=payload, method="POST",
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={"Content-Type": "application/json", "Accept": "application/json", **auth},
     )
     try:
         urllib.request.urlopen(req, timeout=8).read()
@@ -4003,7 +4005,7 @@ def _forward_oneshot_to_gateway(
     turn_req = urllib.request.Request(
         f"{base}/v1/sessions/{session_id}/turns",
         data=turn_body, method="POST",
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={"Content-Type": "application/json", "Accept": "application/json", **auth},
     )
     try:
         with urllib.request.urlopen(turn_req, timeout=30) as resp:
@@ -4019,7 +4021,8 @@ def _forward_oneshot_to_gateway(
     last = admitted
     while time.time() < deadline:
         try:
-            with urllib.request.urlopen(status_url, timeout=8) as resp:
+            with urllib.request.urlopen(
+                    urllib.request.Request(status_url, headers=auth), timeout=8) as resp:
                 last = json.loads(resp.read().decode("utf-8") or "{}")
         except Exception:
             time.sleep(1.0)

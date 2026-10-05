@@ -53,6 +53,13 @@ def gateway_base() -> str:
 # ── unary proxy ──────────────────────────────────────────────────────
 
 
+def _add_caller_auth(req) -> None:
+    """The WebUI authenticates to the Gateway as the ``webui`` caller."""
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    for key, value in client_headers("webui").items():
+        req.add_header(key, value)
+
+
 def _proxy(handler, method: str, path: str, body: bytes | None = None) -> bool:
     """Forward one request and relay the gateway's status verbatim."""
     from api.helpers import bad, j
@@ -61,6 +68,7 @@ def _proxy(handler, method: str, path: str, body: bytes | None = None) -> bool:
     data = body if method.upper() in {"POST", "PUT", "PATCH", "DELETE"} else None
     req = Request(url, data=data, method=method.upper())
     req.add_header("Accept", "application/json")
+    _add_caller_auth(req)
     if data is not None:
         req.add_header("Content-Type", "application/json")
     try:
@@ -122,6 +130,7 @@ def _proxy_stream(handler, session_id: str, query: str) -> bool:
     url = f"{gateway_base()}/v1/sessions/{session_id}/stream{query}"
     req = Request(url, method="GET")
     req.add_header("Accept", "text/event-stream")
+    _add_caller_auth(req)
     req.add_header("Cache-Control", "no-cache")
 
     try:
