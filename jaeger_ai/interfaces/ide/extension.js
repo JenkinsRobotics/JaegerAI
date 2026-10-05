@@ -52,10 +52,9 @@ function activate(context) {
   const runTestSuite = async () => {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
     if (!root) throw new Error('Open a workspace folder first.');
-    if (!fs.existsSync(path.join(root, 'scripts', 'verify.sh'))) {
-      throw new Error('No scripts/verify.sh found in this workspace.');
-    }
-    const { stdout, stderr } = await execFileAsync('bash', ['scripts/verify.sh'], {
+    const detected = detectTestRunner(root);
+    if (!detected) throw new Error('No supported test runner found in this workspace.');
+    const { stdout, stderr } = await execFileAsync(detected.executable, detected.args, {
       cwd: root, timeout: 120000, maxBuffer: 1024 * 1024 * 5,
       env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1',
         PYTHONPYCACHEPREFIX: path.join(os.tmpdir(), 'jaeger', 'pycache') },
@@ -64,6 +63,25 @@ function activate(context) {
     const lines = text ? text.split(/\r?\n/).filter(Boolean).slice(-30) : ['Verification suite completed with no output.'];
     view?.webview.postMessage({ info: { title: 'Verification suite', lines } });
   };
+  function detectTestRunner(root) {
+    const configured = vscode.workspace.getConfiguration('jaeger').get('testCommand');
+    if (typeof configured === 'string' && configured.trim()) {
+      const command = configured.trim();
+      return { name: 'configured', command, executable: 'bash', args: ['-lc', command] };
+    }
+    const candidates = [
+      ['scripts/verify.sh', 'verify', 'bash', ['scripts/verify.sh']],
+      ['package.json', 'npm test', 'npm', ['test']],
+      ['pyproject.toml', 'pytest', 'pytest', []],
+      ['pytest.ini', 'pytest', 'pytest', []],
+      ['Cargo.toml', 'cargo test', 'cargo', ['test']],
+      ['go.mod', 'go test', 'go', ['test', './...']],
+    ];
+    const found = candidates.find(([relative]) => fs.existsSync(path.join(root, relative)));
+    return found
+      ? { name: found[1], command: `${found[2]} ${found[3].join(' ')}`.trim(), executable: found[2], args: found[3] }
+      : null;
+  }
   // What the agent's ide_* tools can ask of the editor. Reads are bounded; opening a
   // file only changes what the operator is looking at.
   const ideCall = async (kind, args) => {
@@ -86,6 +104,7 @@ function activate(context) {
     throw new Error(`Unsupported IDE request: ${kind}`);
   };
   const diagnosticsSnapshot = (only = '') => {
+    const roots = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
     const levels = ['error', 'warning', 'info', 'hint'];
     const found = [];
     for (const [uri, list] of vscode.languages.getDiagnostics()) {
@@ -113,9 +132,170 @@ function activate(context) {
       openPaths: fileTabs,
     });
   };
-  const postContext = () => view?.webview.postMessage({
-    ideContext: ideContext(), diagnostics: diagnosticsSnapshot().count,
-  });
+  const computeDynamicSuggestions = async () => {
+    const root = selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+    const editor = vscode.window.activeTextEditor;
+    const chosen = editor && !editor.selection.isEmpty ? editor.selection : null;
+    const activeDoc = editor?.document;
+    const isRealFile = activeDoc && activeDoc.uri?.scheme === 'file';
+    const suggestions = [];
+
+    // 1. Diagnostics context
+    const diagSnapshot = diagnosticsSnapshot();
+    const activeRelPath = isRealFile && root ? path.relative(root, activeDoc.uri.fsPath) : '';
+    const activeDiags = isRealFile
+      ? diagSnapshot.diagnostics.filter(d => d.path === activeRelPath || d.path === path.basename(activeDoc.uri.fsPath))
+      : [];
+
+    if (activeDiags.length > 0) {
+      const errorCount = activeDiags.filter(d => d.severity === 'error').length;
+      const baseName = path.basename(activeDoc.uri.fsPath);
+      const label = errorCount > 0
+        ? `Fix ${errorCount} error${errorCount === 1 ? '' : 's'} in ${baseName}`
+        : `Fix ${activeDiags.length} warning${activeDiags.length === 1 ? '' : 's'} in ${baseName}`;
+      const errorList = activeDiags.slice(0, 3).map(d => `- Line ${d.line}: ${d.message}`).join('\n');
+      suggestions.push({
+        id: 'fix-active-diag',
+        label,
+        title: `Fix diagnostics in ${baseName}`,
+        icon: 'warning',
+        kind: 'prompt',
+        prompt: `Fix the following issue${activeDiags.length === 1 ? '' : 's'} in ${activeRelPath || baseName}:\n${errorList}\n\nPlease analyze the root cause and provide the fix.`,
+      });
+    } else if (diagSnapshot.count > 0 && diagSnapshot.diagnostics.length > 0) {
+      const topDiag = diagSnapshot.diagnostics[0];
+      suggestions.push({
+        id: 'fix-workspace-diag',
+        label: `Fix ${diagSnapshot.count} workspace problem${diagSnapshot.count === 1 ? '' : 's'}`,
+        title: 'Analyze and resolve workspace diagnostics',
+        icon: 'warning',
+        kind: 'prompt',
+        prompt: `Diagnose and fix the ${diagSnapshot.count} problem${diagSnapshot.count === 1 ? '' : 's'} reported in the workspace, beginning with ${topDiag.path}:${topDiag.line} (${topDiag.message}).`,
+      });
+    }
+
+    // 2. Editor Selection Context
+    if (isRealFile && chosen && !chosen.isEmpty) {
+      const selectedText = activeDoc.getText(chosen).trim();
+      const startLine = chosen.start.line + 1;
+      const endLine = chosen.end.line + 1;
+      const lineSpan = startLine === endLine ? `Line ${startLine}` : `Lines ${startLine}–${endLine}`;
+      const baseName = path.basename(activeDoc.uri.fsPath);
+
+      suggestions.push({
+        id: 'explain-selection',
+        label: `Explain selection (${lineSpan})`,
+        title: `Explain selected lines in ${baseName}`,
+        icon: 'sparkle',
+        kind: 'prompt',
+        prompt: `Explain the selected logic in ${baseName} (${lineSpan}):\n\`\`\`${activeDoc.languageId}\n${selectedText.slice(0, 2000)}\n\`\`\`\nHighlight edge cases, dependencies, and assumptions.`,
+      });
+
+      suggestions.push({
+        id: 'refactor-selection',
+        label: `Refactor selection (${lineSpan})`,
+        title: `Refactor selected code in ${baseName}`,
+        icon: 'tool',
+        kind: 'prompt',
+        prompt: `Refactor the selected code in ${baseName} (${lineSpan}) for improved clarity, maintainability, and error handling:\n\`\`\`${activeDoc.languageId}\n${selectedText.slice(0, 2000)}\n\`\`\``,
+      });
+
+      suggestions.push({
+        id: 'test-selection',
+        label: 'Write tests for selection',
+        title: `Generate unit tests for selected code in ${baseName}`,
+        icon: 'beaker',
+        kind: 'prompt',
+        prompt: `Write unit tests covering the selected code in ${baseName} (${lineSpan}):\n\`\`\`${activeDoc.languageId}\n${selectedText.slice(0, 2000)}\n\`\`\``,
+      });
+    } else if (isRealFile) {
+      // 3. Active File Context (no selection)
+      const baseName = path.basename(activeDoc.uri.fsPath);
+      suggestions.push({
+        id: 'review-active-file',
+        label: `Review ${baseName}`,
+        title: `Review ${baseName} for bugs and optimization`,
+        icon: 'search',
+        kind: 'prompt',
+        prompt: `Review ${activeRelPath || baseName} in detail. Check for potential logic bugs, edge cases, security considerations, and performance bottlenecks.`,
+      });
+
+      suggestions.push({
+        id: 'generate-tests',
+        label: `Generate tests for ${baseName}`,
+        title: `Generate unit tests for ${baseName}`,
+        icon: 'beaker',
+        kind: 'prompt',
+        prompt: `Generate a unit test suite for ${activeRelPath || baseName} covering primary execution paths and failure modes.`,
+      });
+    }
+
+    // 4. Git diff / uncommitted changes (only if real .git dir exists)
+    if (root && fs.existsSync(path.join(root, '.git'))) {
+      try {
+        const { stdout: gitStatus } = await execFileAsync('git', ['status', '--porcelain'], { cwd: root, timeout: 3000 });
+        const changedFiles = gitStatus.split('\n').filter(Boolean);
+        if (changedFiles.length > 0) {
+          suggestions.push({
+            id: 'review-git-diff',
+            label: `Review Git Diff (${changedFiles.length} file${changedFiles.length === 1 ? '' : 's'})`,
+            title: `Review uncommitted changes in ${changedFiles.length} file${changedFiles.length === 1 ? '' : 's'}`,
+            icon: 'diff',
+            kind: 'action',
+            action: 'reviewChanges',
+          });
+          suggestions.push({
+            id: 'generate-commit-msg',
+            label: 'Draft Commit Message',
+            title: 'Generate a conventional commit message from diff',
+            icon: 'git',
+            kind: 'prompt',
+            prompt: 'Inspect the uncommitted git diff across this workspace and draft a concise, conventional git commit message.',
+          });
+        }
+      } catch (_) {}
+    }
+
+    // 5. Test Suite Action
+    const detected = detectTestRunner(root);
+    if (detected) {
+      suggestions.push({
+        id: 'run-test-suite',
+        label: `Run Tests (${detected.name})`,
+        title: `Run ${detected.command}`,
+        icon: 'play',
+        kind: 'action',
+        action: 'runTestSuite',
+      });
+    }
+
+    // Fallback if needed
+    if (suggestions.length < 3) {
+      suggestions.push({
+        id: 'plan-architecture',
+        label: 'Plan Next Milestone',
+        title: 'Generate technical plan for next steps',
+        icon: 'plan',
+        kind: 'prompt',
+        prompt: 'Analyze this workspace and generate a structured blueprint with prioritized implementation steps.',
+      });
+    }
+
+    return suggestions.slice(0, 4);
+  };
+  let contextDebounce = null;
+  const postContext = () => {
+    view?.webview.postMessage({
+      ideContext: ideContext(), diagnostics: diagnosticsSnapshot().count,
+    });
+    void computeDynamicSuggestions().then(suggestions => {
+      if (suggestions && suggestions.length) view?.webview.postMessage({ suggestions });
+    }).catch(() => {});
+  };
+  const debouncedPostContext = () => {
+    if (contextDebounce) clearTimeout(contextDebounce);
+    contextDebounce = setTimeout(() => { postContext(); }, 200);
+  };
   let changes = { files: [] }, wasBusy = false, changeKey = '', changeGeneration = 0, selectedChangeRequest = '';
   const diffDocuments = new Map();
   const changesUrl = () => {
@@ -232,8 +412,12 @@ function activate(context) {
     return { model: '', provider: '' };
   };
   let daemonProcess = null;
+  let runtimeStartPromise = null;
 
-  function findJaegerExecutable(workspaceRoots) {
+  function findGatewayDaemonExecutable(workspaceRoots) {
+    // The Gateway daemon owns sessions and SSE. `stack up` bootstraps launchd
+    // services but intentionally does not start this daemon.
+    const daemonArgs = ['gateway', 'daemon'];
     const venvRoot = process.env.JAEGER_VENV || path.join(os.homedir(), '.jaeger', 'venv');
     const venvPython = path.join(venvRoot, 'bin', 'python');
     if (fs.existsSync(venvPython)) {
@@ -241,11 +425,9 @@ function activate(context) {
     }
     for (const root of workspaceRoots || []) {
       const jaegerScript = path.join(root, 'jaeger');
-      if (fs.existsSync(jaegerScript)) {
-        return { cmd: jaegerScript, args: ['gateway', 'daemon'] };
-      }
+      if (fs.existsSync(jaegerScript)) return { cmd: jaegerScript, args: daemonArgs };
     }
-    return { cmd: 'jaeger', args: ['gateway', 'daemon'] };
+    return { cmd: 'jaeger', args: daemonArgs };
   }
 
   async function checkGatewayHealth(gw) {
@@ -265,6 +447,10 @@ function activate(context) {
     } catch (_) {
       return null;
     }
+    if (runtimeStartPromise) {
+      await runtimeStartPromise;
+      return daemonProcess;
+    }
     if (daemonProcess && !daemonProcess.killed) {
       const start = Date.now();
       while (Date.now() - start < 8000) {
@@ -274,37 +460,50 @@ function activate(context) {
       return daemonProcess;
     }
     const workspaceRoots = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
-    output.appendLine(`[jaeger] Gateway at ${gw.url} not responding. Auto-starting gateway daemon...`);
-    const exec = findJaegerExecutable(workspaceRoots);
-    try {
-      daemonProcess = spawn(exec.cmd, exec.args, {
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: {
-          ...process.env,
-          PYTHONDONTWRITEBYTECODE: '1',
-          PYTHONPYCACHEPREFIX: path.join(os.homedir(), '.cache', 'jaeger', 'pycache'),
-        },
-      });
-      daemonProcess.stdout?.on('data', chunk => output.appendLine(`[gateway] ${chunk.toString().trim()}`));
-      daemonProcess.stderr?.on('data', chunk => output.appendLine(`[gateway:err] ${chunk.toString().trim()}`));
-      daemonProcess.on('exit', code => {
-        output.appendLine(`[gateway] Process exited with code ${code}`);
-        daemonProcess = null;
-      });
-    } catch (err) {
-      output.appendLine(`[jaeger] Failed to spawn gateway daemon: ${err.message}`);
-      return null;
-    }
-
-    const start = Date.now();
-    while (Date.now() - start < 10000) {
-      await new Promise(r => setTimeout(r, 250));
-      if (await checkGatewayHealth(gw)) {
-        output.appendLine(`[jaeger] Gateway daemon started and healthy.`);
-        return daemonProcess;
+    output.appendLine(`[jaeger] Gateway at ${gw.url} is unavailable. Starting the Jaeger Gateway daemon (without the macOS app)...`);
+    const exec = findGatewayDaemonExecutable(workspaceRoots);
+    runtimeStartPromise = new Promise(resolve => {
+      let starter;
+      try {
+        starter = spawn(exec.cmd, exec.args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: {
+            ...process.env,
+            PYTHONDONTWRITEBYTECODE: '1',
+            PYTHONPYCACHEPREFIX: path.join(os.homedir(), '.cache', 'jaeger', 'pycache'),
+          },
+        });
+        starter.stdout?.on('data', chunk => output.appendLine(`[runtime] ${chunk.toString().trim()}`));
+        starter.stderr?.on('data', chunk => output.appendLine(`[runtime:err] ${chunk.toString().trim()}`));
+        starter.on('error', err => {
+          output.appendLine(`[jaeger] Failed to start headless runtime: ${err.message}`);
+          resolve();
+        });
+        daemonProcess = starter;
+        starter.on('exit', code => {
+          output.appendLine(`[runtime] Gateway daemon exited with code ${code}`);
+          if (daemonProcess === starter) daemonProcess = null;
+        });
+      } catch (err) {
+        output.appendLine(`[jaeger] Failed to start headless runtime: ${err.message}`);
+        resolve();
       }
-    }
-    output.appendLine(`[jaeger] Gateway daemon did not become healthy in time.`);
+      const start = Date.now();
+      const wait = async () => {
+        while (Date.now() - start < 15000) {
+          if (await checkGatewayHealth(gw)) {
+            output.appendLine('[jaeger] Headless Jaeger runtime is healthy.');
+            resolve();
+            return;
+          }
+          await new Promise(r => setTimeout(r, 250));
+        }
+        output.appendLine('[jaeger] Headless Jaeger runtime did not become healthy in time.');
+        resolve();
+      };
+      void wait();
+    }).finally(() => { runtimeStartPromise = null; });
+    await runtimeStartPromise;
     return daemonProcess;
   }
 
@@ -316,7 +515,6 @@ function activate(context) {
       status: 'Connecting…', error: '', queue: [], openSessionIds: [], selectedWorkspace: restoreWorkspace(), configuredModel: configuredModel() });
     const key = storageKey(), restored = context.workspaceState.get(key, {});
     const gw = new Gateway(endpoint());
-    void ensureGatewayDaemon(gw);
     controller = new Conversation(gw, state => {
       if (state.changes) changes = state.changes;
       view?.webview.postMessage(state);
@@ -363,6 +561,22 @@ function activate(context) {
         if (message.type === 'editDraft' && typeof message.text === 'string') {
           const answer = await vscode.window.showWarningMessage('Replace your current draft with this message?', { modal: true }, 'Replace draft');
           if (answer === 'Replace draft') view?.webview.postMessage({ editDraft: message.text });
+          return;
+        }
+        if (message.type === 'editMessage' && typeof message.text === 'string') {
+          const id = controller?.state.session?.session_id;
+          if (!id) throw new Error('Open a conversation first.');
+          if (controller.state.busy || controller.sending) throw new Error('Wait for the current turn to finish before editing.');
+          const text = message.text.trim();
+          if (!text || message.messageId == null) throw new Error('That message cannot be edited.');
+          const branch = await controller.gateway.branch(id, { message_id: message.messageId });
+          if (!branch?.session_id) throw new Error('Jaeger could not create an edit branch.');
+          await controller.refresh(branch.session_id);
+          await controller.send(text);
+          if (controller.state.error && !controller.state.busy) throw new Error(controller.state.error);
+          view?.webview.postMessage({ info: {
+            title: 'Edited message sent', lines: ['A new conversation branch was created; the original thread is unchanged.'],
+          } });
           return;
         }
         if (message.type === 'ready') {
@@ -419,6 +633,7 @@ function activate(context) {
         if (!controller) return;
         if (message.type === 'home') return controller.refresh(null);
         if (message.type === 'refresh') { void refreshChanges(); return controller.refresh(undefined, true); }
+        if (message.type === 'searchChats' && typeof message.query === 'string') return controller.searchSessions(message.query);
         if (message.type === 'select' && typeof message.id === 'string') {
           if (controller.sending) throw new Error('Wait for request admission before switching.');
           return controller.refresh(message.id);
@@ -488,6 +703,41 @@ function activate(context) {
           if (!id) throw new Error('Open a conversation first.');
           return controller.setArchived(id, true);
         }
+        if (message.type === 'messageFeedback') {
+          const id = controller.state.session?.session_id;
+          if (!id || !['positive', 'negative'].includes(message.rating)) return;
+          await controller.gateway.feedback(id, {
+            message_id: message.messageId ?? null,
+            rating: message.rating,
+          });
+          view?.webview.postMessage({ feedback: {
+            messageId: message.messageId ?? null, rating: message.rating,
+          } });
+          view?.webview.postMessage({ info: {
+            title: 'Feedback saved', lines: ['Thanks — Jaeger recorded your response feedback.'],
+          } });
+          return;
+        }
+        if (message.type === 'branchSession') {
+          const id = controller.state.session?.session_id;
+          if (!id) throw new Error('Open a conversation first.');
+          const branch = await controller.gateway.branch(id, {
+            ...(message.messageId != null ? { message_id: message.messageId } : {}),
+          });
+          if (branch?.session_id) {
+            await controller.refresh(branch.session_id);
+            view?.webview.postMessage({ info: {
+              title: 'Conversation forked', lines: ['A new conversation was created from this thread.'],
+            } });
+          }
+          return;
+        }
+        if (message.type === 'retrySession') {
+          if (!controller.state.session?.session_id) throw new Error('Open a conversation first.');
+          const retried = await controller.retry();
+          if (!retried) throw new Error(controller.state.error || 'Jaeger could not retry the response.');
+          return;
+        }
         if (message.type === 'unarchive') {
           const id = controller.state.session?.session_id;
           if (!id) throw new Error('Open a conversation first.');
@@ -506,7 +756,7 @@ function activate(context) {
           view?.webview.postMessage({ info: { title: 'Exported', lines: [target.fsPath] } });
           return;
         }
-        if (message.type === 'info' && ['status', 'skills', 'agent', 'workers', 'diagnostics'].includes(message.what)) {
+        if (message.type === 'info' && ['status', 'skills', 'agent', 'workers', 'diagnostics', 'cognitiveRouting'].includes(message.what)) {
           let title, lines;
           if (message.what === 'status') {
             const version = await controller.gateway.json('/version');
@@ -524,6 +774,17 @@ function activate(context) {
             lines = controller.state.workersError
               ? [`Workers unavailable: ${controller.state.workersError}`]
               : commands.workerLines(controller.state.workers || []);
+          } else if (message.what === 'cognitiveRouting') {
+            const [tier, autonomy, models] = await Promise.all([
+              controller.gateway.tier(), controller.gateway.autonomy(), controller.gateway.models(),
+            ]);
+            title = 'Cognitive routing';
+            lines = [
+              `Agency tier: ${tier.tier}`,
+              `Autonomy: ${autonomy.autonomy}`,
+              `Configured model: ${configuredModel() || 'Gateway default'}`,
+              `Available models: ${Array.isArray(models?.models) ? models.models.length : 'unknown'}`,
+            ];
           } else {
             title = 'Agents and tasks'; lines = commands.taskLines(await controller.gateway.tasks());
           }
@@ -564,11 +825,16 @@ function activate(context) {
           if (!controller.state.session) await controller.newSession('New conversation', workspaceRoot);
           const mime = String(message.mime || 'image/png');
           const ext = mime.includes('/') ? mime.split('/')[1] : 'png';
-          const filename = message.name || `image-${Date.now()}.${ext}`;
+          // Clipboard data is runtime state. Keep it outside the workspace so
+          // a paste cannot pollute the repository or accidentally become a
+          // tracked project file. Also reduce the name to a safe leaf.
+          const requestedName = path.basename(String(message.name || ''));
+          const filename = requestedName.replace(/[^a-zA-Z0-9._-]/g, '_') || `image-${Date.now()}.${ext}`;
           const match = message.data.match(/^data:[^;]+;base64,(.+)$/);
           const buffer = match ? Buffer.from(match[1], 'base64') : Buffer.from(message.data);
 
-          let targetDir = workspaceRoot ? path.join(workspaceRoot, '.jaeger', 'attachments') : null;
+          let targetDir = context.globalStorageUri?.fsPath
+            ? path.join(context.globalStorageUri.fsPath, 'attachments') : null;
           let targetPath = null;
           if (targetDir) {
             try {
@@ -618,6 +884,10 @@ function activate(context) {
       output.appendLine(JSON.stringify({ endpoint: gw.url, version, selected: controller?.state.session?.session_id || null }, null, 2));
       output.show(true);
     })),
+    ...(typeof vscode.window?.onDidChangeActiveTextEditor === 'function' ? [vscode.window.onDidChangeActiveTextEditor(() => debouncedPostContext())] : []),
+    ...(typeof vscode.window?.onDidChangeTextEditorSelection === 'function' ? [vscode.window.onDidChangeTextEditorSelection(() => debouncedPostContext())] : []),
+    ...(typeof vscode.languages?.onDidChangeDiagnostics === 'function' ? [vscode.languages.onDidChangeDiagnostics(() => debouncedPostContext())] : []),
+    ...(typeof vscode.workspace?.onDidSaveTextDocument === 'function' ? [vscode.workspace.onDidSaveTextDocument(() => debouncedPostContext())] : []),
     vscode.workspace.onDidChangeConfiguration(event => {
       if (event.affectsConfiguration('jaeger.gatewayUrl') && view) report(async () => {
         const selected = createController(); await controller.refresh(selected);

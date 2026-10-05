@@ -58,6 +58,14 @@ TOOL_ALIASES: Mapping[str, str] = {
 SHELL_TOOL_IDS = frozenset({"shell", "remote_shell"})
 #: Canonical tools an untrusted/external caller may never run.
 PRIVILEGED_TOOL_IDS = frozenset({"shell", "remote_shell", "code_exec", "deploy", "git_push"})
+#: Tools that change who Jaeger is (name, soul, character). Only an owner-class actor
+#: (an authenticated ``owner:<client>`` turn) may run them: not an outside caller, and
+#: not a background turn the entity started for itself (``agent:jaeger``).
+IDENTITY_TOOL_IDS = frozenset({"set_name", "update_soul", "adjust_trait"})
+#: Tools that write durable memory. The resident Entity is the one memory writer; an
+#: outside caller's turn (mcp, a2a, helper) may read memory but not write it.
+MEMORY_WRITE_TOOL_IDS = frozenset({"remember", "forget", "memory", "remember_person"})
+OWNER_ACTOR_PREFIXES = ("owner", "human")
 #: Actors (exact, or ``<prefix>:<name>``) that are outside callers, not the owner.
 UNTRUSTED_ACTOR_PREFIXES = ("guest", "untrusted", "external_agent", "helper", "mcp", "a2a")
 KNOWN_TIERS = frozenset({"read_only", "write_local", "external_effect", "hardware", "privileged"})
@@ -83,6 +91,11 @@ def canonical_tool_id(name: Any) -> str:
             if tail in TOOL_ALIASES:
                 return TOOL_ALIASES[tail]
     return raw
+
+
+def is_owner_actor(actor: str) -> bool:
+    a = (actor or "").strip().lower()
+    return any(a == p or a.startswith(p + ":") for p in OWNER_ACTOR_PREFIXES)
 
 
 def is_untrusted_actor(actor: str) -> bool:
@@ -219,6 +232,11 @@ class PolicyKernel:
         current_args = dict(proposal.arguments)
 
         try:
+            # ── 0. Control plane: Stop, lifecycle owner, embodiment ──────────
+            control = self._check_control_plane(proposal)
+            if control is not None:
+                return control
+
             # ── 0. Structural validity: unknown tool/action/tier → DENY ─────
             structural = self._check_structure(proposal)
             if structural is not None:
@@ -298,6 +316,63 @@ class PolicyKernel:
     # "no objection" (Constitution invariant 11). Phase 0 found four sub-checks
     # that logged at debug level and returned None on error.
 
+    def _check_control_plane(self, proposal: ProposedAction) -> AuthorityDecision | None:
+        """Stop and a missing owner fail closed. Embodiment stays off."""
+        name = str(proposal.tool_name or "").strip().lower()
+        if name.startswith("mc_") or "minecraft" in name:
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason="Embodiment is disabled until the control-plane release gate passes.",
+                policy_name="embodiment_gate",
+                proposal_id=proposal.proposal_id,
+            )
+        try:
+            from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
+            try:
+                stopped = GlobalStop.load().engaged()
+            except GlobalStopError:
+                stopped = True
+            if stopped:
+                return AuthorityDecision(
+                    decision=AuthorityDecisionType.DENY,
+                    reason="global stop",
+                    policy_name="global_stop",
+                    proposal_id=proposal.proposal_id,
+                )
+        except Exception:
+            logger.exception(
+                "Global stop check failed for %r (fail-closed)",
+                proposal.tool_name,
+            )
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason="global stop unavailable",
+                policy_name="global_stop",
+                proposal_id=proposal.proposal_id,
+            )
+        try:
+            from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease
+            decision = LifecycleLease.load().decide()
+        except Exception:
+            logger.exception(
+                "Lifecycle lease check failed for %r (fail-closed)",
+                proposal.tool_name,
+            )
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason="lifecycle lease unavailable",
+                policy_name="lifecycle_lease",
+                proposal_id=proposal.proposal_id,
+            )
+        if not decision.privileged_work_allowed:
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason=decision.reason,
+                policy_name="lifecycle_lease",
+                proposal_id=proposal.proposal_id,
+            )
+        return None
+
     def _check_structure(self, proposal: ProposedAction) -> AuthorityDecision | None:
         if not canonical_tool_id(proposal.tool_name):
             return _deny(proposal, "Unknown tool: empty or unusable tool name", "unknown_tool")
@@ -340,6 +415,22 @@ class PolicyKernel:
         actor = (proposal.actor or "").strip()
         if not actor:
             return _deny(proposal, "Missing caller identity (actor) on proposed action", "identity_required")
+        if canonical_tool_id(proposal.tool_name) in IDENTITY_TOOL_IDS and not is_owner_actor(actor):
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason=f"Actor {actor!r} may not change Jaeger's identity ({proposal.tool_name!r} is owner-only)",
+                policy_name="identity_authority",
+                granted_by="policy_kernel",
+                proposal_id=proposal.proposal_id,
+            )
+        if is_untrusted_actor(actor) and canonical_tool_id(proposal.tool_name) in MEMORY_WRITE_TOOL_IDS:
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason=f"Actor {actor!r} is an outside caller and may not write durable memory ({proposal.tool_name!r})",
+                policy_name="memory_authority",
+                granted_by="policy_kernel",
+                proposal_id=proposal.proposal_id,
+            )
         if is_untrusted_actor(actor):
             if canonical_tool_id(proposal.tool_name) in PRIVILEGED_TOOL_IDS:
                 return AuthorityDecision(

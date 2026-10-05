@@ -1852,7 +1852,15 @@ BRIDGE_EXECUTION_ENV = "JAEGER_BRIDGE_EXECUTION"
 
 
 def gateway_execution_enabled() -> bool:
-    return os.environ.get(BRIDGE_EXECUTION_ENV, "gateway").strip().lower() != "local"
+    """True unless the operator asked for local execution AND re-enabled legacy paths.
+
+    ``JAEGER_BRIDGE_EXECUTION=local`` alone no longer boots a second agent in this
+    process: a local executor is an isolated legacy path (contract/legacy_paths.py).
+    """
+    if os.environ.get(BRIDGE_EXECUTION_ENV, "gateway").strip().lower() != "local":
+        return True
+    from jaeger_ai.contract.legacy_paths import legacy_paths_enabled
+    return not legacy_paths_enabled()
 
 
 def _merge_gateway_history(local: list[dict[str, Any]], session_id: str) -> list[dict[str, Any]]:
@@ -2993,204 +3001,59 @@ def _execute_attached_turn(proto: TextIO, ctx: _Ctx, queued: Any) -> None:
     if cancelled is not None and cancelled.is_set():
         _emit(reply_out, _reply_frame(protocol, req, "", "turn cancelled", session))
         return
-    # Slash pre-dispatch — same contract as the TUI REPL: a leading
+    # Slash pre-dispatch — same contract as the native path: a leading
     # ``/`` is a command, never a prompt for the model. Runs before
     # the boot wait so ``/help`` answers even while the model loads.
-    if text.startswith("/"):
+    # ``/goal <job>`` stays a real turn.
+    goal_text = _goal_turn_text(text)
+    if text.startswith("/") and goal_text is None:
         _emit_state(reply_out, ctx, True, session)
         try:
-            from jaeger_ai.core.runtime import continuation, execution
-            from jaeger_ai.core.runtime.autonomous_runner import (
-                ledger_open,
-                next_continuation_prompt,
-            )
-            from jaeger_ai.main import (
-                interaction_request_sink,
-                run_for_voice,
-                stream_delta_sink,
-                stream_reasoning_sink,
-            )
-
-            current_prompt = text
-            max_continuations = execution.max_steps()
-            step = 0
-            accumulated_text: list[str] = []
-            result: dict[str, Any] = {}
-
-            while True:
-                with ctx.turn_control_lock:
-                    if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
-                        result = {"text": "", "error": "Cancelled before execution",
-                                  "halt_reason": "interrupted"}
-                        break
-                deltas = _DeltaStream(out, session)
-                with _turn_workspace(ctx, req.get("workspace")):
-                    display_text = req.get("display_text") if step == 0 else None
-                    voice_kwargs: dict[str, Any] = {"session_key": session}
-                    for field in ("model", "provider"):
-                        if req.get(field):
-                            voice_kwargs[field] = req[field]
-                    if req.get("is_subordinate"):
-                        voice_kwargs["is_subordinate"] = True
-                    if req.get("turn_id"):
-                        voice_kwargs["request_id"] = str(req.get("turn_id"))
-                    if display_text is not None:
-                        voice_kwargs["display_text"] = str(display_text)
-                    def _emit_reasoning(chunk: str, _session: str = session) -> None:
-                        # Deliberation is emitted as its own frame, not folded
-                        # into the delta stream: it is NOT part of the answer,
-                        # and a client appending it to the visible text would
-                        # render the model's internal monologue as the reply.
-                        deltas.flush()
-                        _emit(out, _reasoning_frame(chunk, _session))
-
-                    def _request_interaction(
-                        kind: str, prompt: str, options: tuple[str, ...],
-                    ) -> str:
-                        from jaeger_os.core.safety.permissions import current_policy
-
-                        provider = current_policy().confirmation
-                        if isinstance(provider, BridgeConfirmationProvider):
-                            return provider.request(kind, prompt, options)
-                        return ""
-
-                    from jaeger_agent.tool_executor import tool_allowlist
-                    last_activity_time = time.monotonic()
-
-                    def _on_delta_activity(chunk):
-                        nonlocal last_activity_time
-                        last_activity_time = time.monotonic()
-                        deltas.feed(chunk)
-
-                    def _on_reasoning_activity(chunk: str, _session: str = session) -> None:
-                        nonlocal last_activity_time
-                        last_activity_time = time.monotonic()
-                        _emit_reasoning(chunk, _session)
-
-                    with (
-                        tool_allowlist(req.get("allowed_tools")),
-                        stream_delta_sink(_on_delta_activity),
-                        stream_reasoning_sink(_on_reasoning_activity),
-                        interaction_request_sink(_request_interaction),
-                    ):
-                        from jaeger_ai.core.runtime.native_turns import NativeTurns
-                        NativeTurns(ctx.layout.run_dir).bind_tool_grant(session, req.get("allowed_tools"))
-                        import concurrent.futures
-                        import contextvars
-
-                        env_timeout = os.environ.get("JAEGER_TURN_TIMEOUT")
-                        turn_timeout_s = float(env_timeout) if env_timeout else 300.0
-                        idle_timeout_s = 120.0
-                        try:
-                            from jaeger_ai.core.instance.schemas import Config, load_yaml
-                            cfg = load_yaml(ctx.layout.config_path, Config)
-                            if cfg and getattr(cfg, "external_model", None):
-                                cfg_timeout = float(getattr(cfg.external_model, "timeout_s", 60.0))
-                                turn_timeout_s = max(cfg_timeout * 5, 300.0)
-                                idle_timeout_s = max(cfg_timeout * 2, 120.0)
-                        except Exception:
-                            pass
-
-                        exec_context = contextvars.copy_context()
-                        pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                        fut = pool.submit(exec_context.run, run_for_voice, ctx.client, current_prompt, **voice_kwargs)
-                        started_turn = time.monotonic()
-                        result = None
-                        while not fut.done():
-                            now = time.monotonic()
-                            if now - started_turn > turn_timeout_s:
-                                fut.cancel()
-                                pool.shutdown(wait=False, cancel_futures=True)
-                                result = {
-                                    "text": "",
-                                    "error": f"Turn execution timed out after {turn_timeout_s:.0f}s",
-                                    "halt_reason": "timeout",
-                                }
-                                break
-                            if now - last_activity_time > idle_timeout_s:
-                                fut.cancel()
-                                pool.shutdown(wait=False, cancel_futures=True)
-                                result = {
-                                    "text": "",
-                                    "error": f"Turn stalled (no activity for {idle_timeout_s:.0f}s)",
-                                    "halt_reason": "stalled",
-                                }
-                                break
-                            try:
-                                result = fut.result(timeout=0.25)
-                                pool.shutdown(wait=False)
-                                break
-                            except concurrent.futures.TimeoutError:
-                                continue
-                        if result is None:
-                            try:
-                                result = fut.result(timeout=0.1)
-                            except Exception as exc:
-                                result = {"text": "", "error": str(exc), "halt_reason": "error"}
-                deltas.flush()
-
-                ans = (result.get("text") or "").strip()
-                if ans:
-                    accumulated_text.append(ans)
-
-                if result.get("error") or execution.stop_requested():
-                    break
-
-                # Inner-cap halt is "start the next step", not "stop".
-                # Loop-breaker halt (identical/timeout spam) IS a stop.
-                nxt_prompt = None
-                halt = result.get("halt_reason")
-                if continuation.is_loop_breaker(halt):
-                    break
-                if ledger_open() or continuation.hit_inner_cap(halt):
-                    nxt_prompt = next_continuation_prompt(
-                        ans, force_ledger=ledger_open(),
-                        halt_reason=halt,
-                        objective=text,
-                    )
-                elif continuation.enabled() and step < max_continuations:
-                    verdict = continuation.classify(ans)
-                    if verdict == "continue":
-                        nxt_prompt = continuation.continuation_prompt(text)
-
-                if nxt_prompt and step < max_continuations:
-                    step += 1
-                    current_prompt = nxt_prompt
-                    continue
-                else:
-                    break
-
-            if result.get("error") or continuation.is_loop_breaker(result.get("halt_reason")):
-                from jaeger_ai.core.runtime.work_ledger import pause_active_ledger
-                pause_active_ledger(str(result.get("error") or result.get("halt_reason")))
-            final_text = "\n\n".join(accumulated_text) if accumulated_text else (result.get("text") or "")
-            used, mx = _ctx_usage(session)
-            # A delivered cancel request may lose the race with completion.
-            # Only the native loop's halt result (or skipped dispatch above)
-            # confirms interruption; the control flag alone is merely intent.
-            cancelled = result.get("halt_reason") == "interrupted"
-            if session.startswith('focus:') and turn_id:
-                from jaeger_ai.features.dispatcher.store import DispatcherStore
-                # Publish from the native runtime before its terminal receipt,
-                # not from a WebUI observer that may disconnect or restart.
-                DispatcherStore(ctx.layout).report(
-                    turn_id, session, final_text, result.get('error'), cancelled=cancelled)
-            reply({**protocol.reply_frame(
-                final_text, result.get("error"), session,
-                elapsed_s=result.get("elapsed_s"),
-                ctx_used=used, ctx_max=mx,
-                halt_reason=result.get("halt_reason")), **({"cancelled": cancelled} if turn_id else {})})
-        except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
-            reply(protocol.reply_frame("", str(exc), session))
+            slash_reply = _windowed_control_slash(text) or _run_slash(text, ctx)
+            _emit(reply_out, _reply_frame(protocol, req, slash_reply, None, session))
+        except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
+            _emit(reply_out, _reply_frame(protocol, req, "", str(exc), session))
         finally:
             _emit_state(reply_out, ctx, False, session)
         return
+    if goal_text is not None:
+        text = goal_text
     while not ctx.booted.wait(timeout=0.1):
         if cancelled is not None and cancelled.is_set():
             _emit(reply_out, _reply_frame(protocol, req, "", "turn cancelled", session))
             return
     if cancelled is not None and cancelled.is_set():
         _emit(reply_out, _reply_frame(protocol, req, "", "turn cancelled", session))
+        return
+    if ctx.gateway is not None:
+        # Gateway-first: an attached face (TUI, Swift, PySide6) is a client of the one
+        # Gateway-owned execution path. The local executor below is legacy-only.
+        import uuid as _uuid
+
+        rid = str(req.get("id") or "") or _uuid.uuid4().hex
+        finished = threading.Event()
+
+        def _relay_cancel() -> None:
+            while not finished.wait(0.1):
+                if cancelled is not None and cancelled.is_set():
+                    try:
+                        ctx.gateway.cancel(session, rid)
+                    except Exception:  # noqa: BLE001 — the Gateway's own cancel stands
+                        pass
+                    return
+
+        threading.Thread(target=_relay_cancel, name="bridge-attached-cancel", daemon=True).start()
+        _emit_state(reply_out, ctx, True, session)
+        try:
+            result = _gateway_turn(reply_out, ctx, req, text, session, rid)
+            _emit(reply_out, _reply_frame(
+                protocol, req, result.get("text") or "", result.get("error"), session,
+            ))
+        except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
+            _emit(reply_out, _reply_frame(protocol, req, "", str(exc), session))
+        finally:
+            finished.set()
+            _emit_state(reply_out, ctx, False, session)
         return
     if ctx.client is None or ctx.boot_error:
         _emit(

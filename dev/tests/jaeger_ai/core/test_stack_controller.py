@@ -111,7 +111,6 @@ def test_stack_down_terminates_services(monkeypatch: pytest.MonkeyPatch):
         return res
 
     monkeypatch.setattr("jaeger_ai.core.runtime.stack._launchctl", mock_launchctl)
-    monkeypatch.setattr("jaeger_ai.core.runtime.stack._find_straggler_pids", lambda: set())
     monkeypatch.setattr("jaeger_ai.core.runtime.stack.stack_status", lambda services=None: [])
 
     res = stack_down(wait_timeout=0.1)
@@ -119,3 +118,9 @@ def test_stack_down_terminates_services(monkeypatch: pytest.MonkeyPatch):
     # Verify bootout was called for each service
     bootout_cmds = [c for c in cmds if c and c[0] == "bootout"]
     assert len(bootout_cmds) == len(STACK_SERVICES)
+    labels = {command[1].rsplit("/", 1)[-1] for command in bootout_cmds}
+    assert "com.jenkinsrobotics.jaeger-gateway" in labels
+    assert "com.jenkinsrobotics.jaeger-ollama-bridge" in labels
+    source = Path("jaeger_ai/core/runtime/stack.py").read_text(encoding="utf-8")
+    assert "pgrep" not in source
+    assert "lsof" not in source

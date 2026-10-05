@@ -216,11 +216,16 @@ class SubprocessDelegateRuntime:
             summary = f"delegate timed out after {row['timeout']} seconds"
         elif row['status'] == 'cancelled':
             summary = 'delegate execution cancelled'
+        elif row.get('cancellation_unconfirmed'):
+            summary = 'delegate cancellation unconfirmed; owned descendants still running'
         else:
             summary = _extract_summary(row.get('stdout') or '') if row['status'] == 'completed' else _extract_summary(row.get('stderr') or row.get('stdout') or '')
         return DelegateResult(status=row['status'], summary=summary or 'delegate completed without text output',
             metadata={'exit_code':row.get('exit_code'), 'stderr':row.get('stderr','')[-8000:],
-                      'output_truncated':row.get('output_truncated',False)})
+                      'output_truncated':row.get('output_truncated',False),
+                      'cancellation_unconfirmed': bool(row.get('cancellation_unconfirmed')),
+                      'surviving_pids': list(row.get('surviving_pids') or []),
+                      'execution_unknown': row['status'] == 'unknown' or bool(row.get('cancellation_unconfirmed'))})
 
     async def cancel(self, handle: DelegateHandle) -> None:
         root = self._directory(handle)
@@ -228,7 +233,7 @@ class SubprocessDelegateRuntime:
             raise KeyError('Unknown delegate handle')
         (root/'cancel').touch()
         result = await self.result(handle)
-        if result.metadata.get('execution_unknown'):
+        if result.metadata.get('execution_unknown') or result.metadata.get('cancellation_unconfirmed') or result.metadata.get('surviving_pids'):
             raise RuntimeError(result.summary)
 
     async def resume(self, handle: DelegateHandle, message: str) -> DelegateHandle:

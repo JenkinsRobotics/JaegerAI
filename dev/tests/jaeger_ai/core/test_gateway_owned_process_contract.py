@@ -64,7 +64,11 @@ class OwnedGateway:
         environment = {
             **os.environ, "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPATH": os.pathsep.join([
-                str(REPO), str(REPO / "packages/jaeger-agent"), str(REPO / "packages/jaeger-os"),
+                str(REPO),
+                str(REPO / "packages/jaeger-agent"),
+                str(REPO / "packages/jaeger-os"),
+                str(REPO / "packages/jaeger-kokoro-tts"),
+                str(REPO / "packages/jaeger-whisper-stt"),
             ]),
             "JAEGER_STATE_DIR": str(self.root),
             "JAEGER_HOME": str(self.root),
@@ -713,7 +717,17 @@ def test_owned_browser_multiturn_render_cancel_and_reload(tmp_path):
                 # Reload may intentionally render a bounded tail; the most
                 # recent turns must remain visible without a fake new session.
                 playwright.expect(page.locator("#messages")).to_contain_text("BROWSER-TURN-20")
-                for extension in ("ares-finance", "ares-creator", "ares-minecraft", "ares-worldview"):
+                # These dashboards were archived out of the checkout (7c2c3be2).
+                # A clean CI tree must not require them. If they are restored,
+                # the owned WebUI still has to serve each document.
+                shipped = [
+                    extension
+                    for extension in (
+                        "ares-finance", "ares-creator", "ares-minecraft", "ares-worldview",
+                    )
+                    if (REPO / "extensions" / extension / "dashboard" / "index.html").is_file()
+                ]
+                for extension in shipped:
                     dashboard = context.request.get(f"{stack.webui_url}/extensions/{extension}/dashboard/index.html")
                     assert dashboard.ok, extension
                     assert 'src="app.js"' in dashboard.text()
@@ -786,7 +800,11 @@ class OwnedBridge:
         environment = {
             **os.environ, "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPATH": os.pathsep.join([
-                str(REPO), str(REPO / "packages/jaeger-agent"), str(REPO / "packages/jaeger-os"),
+                str(REPO),
+                str(REPO / "packages/jaeger-agent"),
+                str(REPO / "packages/jaeger-os"),
+                str(REPO / "packages/jaeger-kokoro-tts"),
+                str(REPO / "packages/jaeger-whisper-stt"),
             ]),
             "JAEGER_STATE_DIR": str(state), "JAEGER_HOME": str(state),
             "JAEGER_INSTANCE_DIR": str(instance),
@@ -1160,6 +1178,7 @@ def test_gateway_cron_fire_is_one_durable_turn(gateway):
     from jaeger_agent.memory import memory as mem
     from jaeger_agent.memory import sqlite_store
 
+    gateway.request("/v1/runtime/tier", {"tier": "jaeger"})
     layout = _contract_layout(gateway)
     sqlite_store.bind(layout)
     try:
@@ -1185,6 +1204,7 @@ def test_gateway_cron_fire_is_one_durable_turn(gateway):
 
 
 def test_gateway_webhook_turn_replays_duplicate_delivery(gateway):
+    gateway.request("/v1/runtime/tier", {"tier": "jaeger"})
     layout = _contract_layout(gateway)
     deadline = time.monotonic() + 10
     status_path = layout.run_dir / "background_producers.json"
@@ -1272,10 +1292,10 @@ def test_durable_task_uses_real_owner_tools_and_delivers_after_restart(gateway):
             gateway.request('/v1/approvals/' + approval['approval_id'], {'approved':True, 'decision':'once'})
         _, row = gateway.request('/v1/tasks/' + tid)
         task = row.get('task', row)
-        if task['state'] in {'completed','failed','cancelled'}:
+        if task['state'] in {'completed_verified', 'failed', 'cancelled', 'needs_owner', 'blocked'}:
             break
         time.sleep(0.05)
-    assert task['state'] == 'completed', (task, (gateway.root/'gateway.log').read_text()[-15000:])
+    assert task['state'] == 'completed_verified', (task, (gateway.root/'gateway.log').read_text()[-15000:])
     assert (workspace/'workspace/durable-report.txt').read_text() == 'DURABLE-VERIFIED-CONTENT'
     before = (gateway.root/'provider-calls.jsonl').read_text()
     gateway.stop()

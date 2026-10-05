@@ -3871,15 +3871,18 @@ def _run_turn(
     content: Any = None,
     system_prompt_addon: str = "",
 ) -> dict[str, Any]:
-    """The unified agent turn — the one path every entry point shares.
+    """The in-process agent turn. ISOLATED: production turns are admitted by the Gateway.
 
-    Executes through the sovereign UPAA EntityRuntime:
+    This is the legacy local executor; it runs only when ``JAEGER_LEGACY_PATHS`` is
+    set (see ``jaeger_ai/contract/legacy_paths.py``). Executes through the UPAA EntityRuntime:
     EVENT -> EVENT FABRIC -> PERSIST -> REDUCTION -> SALIENCE ->
     EXECUTIVE STRATEGY -> COGNITION ROUTER -> AUTHORITY & VERIFICATION ->
     LEARNING -> RESPONSE.
 
     JaegerAgent is subordinate as one cognition engine used by the runtime
     for ReAct-style execution."""
+    from jaeger_ai.contract.legacy_paths import require_legacy_path
+    require_legacy_path("In-process agent turn (_run_turn)")
     if is_subordinate:
         return _run_subordinate_react(
             client, user_text, session_key=session_key, allow_persona=False,
@@ -4383,6 +4386,10 @@ def run_for_voice(
     output_mode: str | None = None,
 ) -> dict[str, Any]:
     """Run a turn and return a structured dict instead of printing.
+
+    ISOLATED: an in-process turn is not the production path. Production turns are
+    admitted by the Gateway; this runs only when ``JAEGER_LEGACY_PATHS`` is set.
+
     Thin output adapter over :func:`_run_turn` — used by the TUI voice
     path and the messaging bridges (which pass channel-specific
     session_keys like "telegram:12345" so each chat keeps its context).
@@ -4390,6 +4397,8 @@ def run_for_voice(
     The brain is transport-agnostic — a spoken turn is the same agent
     turn as a typed one; the dict just carries the text + tool activity
     for the voice consumer to speak."""
+    from jaeger_ai.contract.legacy_paths import require_legacy_path
+    require_legacy_path("In-process agent turn (run_for_voice)")
     session = session_key or "voice"
     from jaeger_ai.core.models.session_selection import select_client
     # The standalone voice daemon owns a local client and promises that no
@@ -5946,8 +5955,13 @@ def _main_dispatch() -> int:
     # after --voice flows through unchanged.
     if "--voice" in sys.argv[1:]:
         sys.argv.remove("--voice")
-        from .plugins.voice_loop import main as voice_main
-        return voice_main()
+        from .contract.legacy_paths import legacy_paths_enabled as _legacy_on
+        if _legacy_on():
+            from .plugins.voice_loop import main as voice_main
+            return voice_main()
+        # Canonical voice attaches to the resident Gateway (``jaeger voice``).
+        from .features.voice.__main__ import main as voice_main
+        return voice_main(sys.argv[1:])
     # --tui launches the rich TUI. Peel it off and delegate to the TUI
     # entry point (which handles --instance / --banner-only) — same
     # pattern as --voice. This is what `jaeger-os --tui` resolves to.
@@ -6097,7 +6111,15 @@ def _main_dispatch() -> int:
         except Exception:  # noqa: BLE001 — config could be partial / missing
             pass
         if _voice_dispatch:
-            from .plugins.voice_loop import main as voice_main
+            from .contract.legacy_paths import legacy_paths_enabled as _legacy_on
+            if _legacy_on():
+                from .plugins.voice_loop import main as voice_main
+            else:
+                # Canonical voice attaches to the resident Gateway.
+                from .features.voice.__main__ import main as _gateway_voice
+
+                def voice_main() -> int:  # noqa: E306 — adapt the argv-reading entry
+                    return _gateway_voice(sys.argv[1:])
             # voice_loop's argparse honours --instance NAME the same way
             # the TUI's does. Pre-build argv so the launched process
             # targets the right operator-state dir.
@@ -6125,9 +6147,11 @@ def _main_dispatch() -> int:
                      else _swift_app_binary())
         if swift_app is not None:
             return _launch_swift_app(swift_app, instance_name)
-        # PySide6 fallback (no built Swift app). ``--tui`` (handled above)
-        # opts into the terminal explicitly.
-        if _windowed_available():
+        # PySide6 fallback (no built Swift app). It boots its own in-process brain, so
+        # it is an isolated legacy path; otherwise bare ``jaeger`` falls through to the
+        # TUI, which attaches to the Gateway. ``--tui`` (above) opts in explicitly.
+        from jaeger_ai.contract.legacy_paths import legacy_paths_enabled as _legacy_gui
+        if _legacy_gui() and _windowed_available():
             if args.instance:
                 os.environ["JAEGER_INSTANCE_NAME"] = args.instance
             from .core.windowed import main as windowed_main
@@ -6137,6 +6161,19 @@ def _main_dispatch() -> int:
         if args.instance:
             tui_argv = ["--instance", args.instance]
         return tui_main(tui_argv)
+
+    # One Jaeger: a one-shot prompt is a turn like any other, so the Gateway admits it.
+    # The in-process runtime below (model load, cron, interactive loop) is the isolated
+    # legacy executor and runs only when JAEGER_LEGACY_PATHS is set.
+    from jaeger_ai.contract.legacy_paths import disabled_reason, legacy_paths_enabled
+    if not legacy_paths_enabled():
+        oneshot = " ".join(args.prompt).strip()
+        if oneshot:
+            return _forward_oneshot_to_gateway(oneshot, instance_name=instance_name)
+        print(f"[jaeger] {disabled_reason('The in-process agent runtime')} "
+              "Use `jaeger` (app), `jaeger --tui`, or `jaeger voice`; they attach to the Gateway.",
+              file=sys.stderr, flush=True)
+        return 2
 
     # Lock
     lock = InstanceLock(layout)

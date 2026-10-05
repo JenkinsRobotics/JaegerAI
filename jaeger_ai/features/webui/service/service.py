@@ -21,6 +21,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from jaeger_ai.core.runtime.webui_bind import webui_bind_host
 from urllib.parse import unquote
 
 DEFAULT_ADAPTER_PORT = 8791
@@ -306,11 +307,8 @@ class WebUIService:
     def browser_url(self) -> str:
         """Canonical chat URL: host Jaeger WebUI on :8790, never :8787.
 
-        Tailscale IPv4 is preferred when available; otherwise loopback.
+        Tailscale Serve is the remote path. The raw port stays on loopback.
         """
-        ts = _tailscale_ipv4()
-        if ts:
-            return f"http://{ts}:{self.webui_port}/"
         return self.urls().web_ui
 
     def status(self) -> dict[str, Any]:
@@ -479,10 +477,9 @@ class WebUIService:
                 pass
         if not WEBUI_SCRIPT.is_file():
             return {"ok": False, "error": f"WebUI launcher is missing: {WEBUI_SCRIPT}"}
-        agent_home = Path(
-            os.environ.get("JAEGER_WEBUI_AGENT_STATE")
-            or (Path.home() / ".jaeger" / "hermes-webui-agent")
-        ).expanduser()
+        from jaeger_ai.core.runtime.profile_paths import webui_agent_home
+
+        agent_home = webui_agent_home()
         _ensure_shared_profiles(agent_home)
         log_path = _webui_log_path(self.layout)
         pid_path = _webui_pid_path(self.layout)
@@ -492,7 +489,7 @@ class WebUIService:
             os.environ.get("JAEGER_GATEWAY_URL") or "http://127.0.0.1:8810"
         ).rstrip("/")
         env["JAEGER_WEBUI_PORT"] = str(self.webui_port)
-        env["JAEGER_WEBUI_HOST"] = os.environ.get("JAEGER_WEBUI_HOST", "0.0.0.0")
+        env["JAEGER_WEBUI_HOST"] = webui_bind_host(env)
         hermes_agent_src = Path(
             os.environ.get("JAEGER_HERMES_AGENT_SRC")
             or (Path.home() / "GitHub" / "hermes-agent")

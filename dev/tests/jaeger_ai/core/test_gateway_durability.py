@@ -151,7 +151,7 @@ async def test_confirmed_native_halt_is_failed_not_unknown(tmp_path, monkeypatch
         "reply": {"halt_reason": "repeated_tool_failure"}})
     await app._execute_turn("s", row["turn_id"], "research", request_id="halt")
     assert store.get_request("halt")["status"] == "failed"
-    assert [e.event for e in app.event_bus.get_replay_events("s")] == ["turn.start", "turn.failed"]
+    assert [e.event for e in app.event_bus.get_replay_events("s") if e.event != "jaeger.state"] == ["turn.start", "turn.failed"]
 
 
 def test_handoff_terminal_result_is_immutable(tmp_path):

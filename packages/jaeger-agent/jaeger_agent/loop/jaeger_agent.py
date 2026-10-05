@@ -2123,7 +2123,12 @@ class JaegerAgent:
                     "retryable": False,
                 }
             else:
-                content = self._tool_executor.execute(tool_def, args)
+                # A started tool must see THIS turn's interrupt, not only the loop between
+                # nodes: bind the turn's own event for the call so a cancel or Global Stop
+                # reaches a running command (tool_interrupt.is_interrupted reads it).
+                from jaeger_agent.core.cancellation import turn_cancellation
+                with turn_cancellation(self._interrupt_event):
+                    content = self._tool_executor.execute(tool_def, args)
         except Exception as exc:  # noqa: BLE001 — surfaced to the model
             # Tag safety/permission failures distinctly so the model
             # (and the latency log) can tell "retry with different

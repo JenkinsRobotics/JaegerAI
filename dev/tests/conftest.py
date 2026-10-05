@@ -453,3 +453,13 @@ def allow_bridge_attach(bindable_instance_root):
             os.environ.pop("JAEGER_GATEWAY_URL", None)
         else:
             os.environ["JAEGER_GATEWAY_URL"] = previous_url
+
+
+@pytest.fixture
+def legacy_local_runtime(monkeypatch):
+    """Tests of the in-process agent turn say so: it is an isolated legacy path.
+
+    Production turns are admitted by the Gateway; ``run_for_voice`` / ``_run_turn``
+    refuse to run unless ``JAEGER_LEGACY_PATHS`` is set (contract/legacy_paths.py).
+    """
+    monkeypatch.setenv("JAEGER_LEGACY_PATHS", "1")

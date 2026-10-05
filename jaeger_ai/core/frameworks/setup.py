@@ -112,13 +112,21 @@ def _configure_workspace_roots(home: Path | None = None) -> Path:
 
 def _configure_webui_workspaces(home: Path | None = None) -> list[Path]:
     """Publish the shared container paths in every profile's workspace tab."""
-    home = (home or Path.home()).expanduser().resolve()
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+    if home is None and os.environ.get("JAEGER_STATE_DIR", "").strip():
+        base = hermes_profile_root()
+        profile_homes = [base] + [base / "profiles" / profile for profile in SERVICES]
+        state_root = base
+    else:
+        home = (home or Path.home()).expanduser().resolve()
+        state_root = home / ".jaeger" / "hermes"
+        profile_homes = [state_root] + [state_root / "profiles" / profile for profile in SERVICES]
     written: list[Path] = []
-    profile_homes = [home / ".jaeger" / "hermes"] + [home / ".jaeger" / "hermes" / "profiles" / profile for profile in SERVICES]
     for profile_home in profile_homes:
         # This deployment sets HERMES_WEBUI_STATE_DIR to the default home.
         # Only named profiles use a webui_state subdirectory.
-        state_dir = profile_home if profile_home == home / ".jaeger" / "hermes" else profile_home / "webui_state"
+        state_dir = profile_home if profile_home == state_root else profile_home / "webui_state"
         path = state_dir / "workspaces.json"
         path.parent.mkdir(parents=True, exist_ok=True)
         existing = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
@@ -142,6 +150,11 @@ def _configure_webui_workspaces(home: Path | None = None) -> list[Path]:
 
 
 def _profile_config(profile: str) -> Path:
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+    state = os.environ.get("JAEGER_STATE_DIR", "").strip()
+    if state:
+        return hermes_profile_root() / "profiles" / profile / "config.yaml"
     return Path.home() / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml"
 
 
@@ -417,17 +430,24 @@ def _configure_agent_models(
     home: Path | None = None, *, container_host: str | None = None
 ) -> None:
     """Apply the cloud default to WebUI profiles and native agent runtimes."""
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
     home = (home or Path.home()).expanduser().resolve()
+    if home == Path.home().resolve() and os.environ.get("JAEGER_STATE_DIR", "").strip():
+        hermes = hermes_profile_root()
+    else:
+        hermes = home / ".jaeger" / "hermes"
+    from jaeger_ai.core.models.ollama_bridge import PROXY_PORT
     from jaeger_ai.core.models.router import resolve_ollama_base_url
     if container_host is not None:
-        profile_ollama_url = f"http://{container_host}:11434/v1"
-        container_ollama_url = f"http://{container_host}:11434/v1"
+        profile_ollama_url = f"http://{container_host}:{PROXY_PORT}/v1"
+        container_ollama_url = f"http://{container_host}:{PROXY_PORT}/v1"
         openclaw_host = container_host
     else:
         profile_ollama_url = resolve_ollama_base_url(openai_compat=True)
-        container_ollama_url = f"http://{CONTAINER_HOST}:11434/v1"
+        container_ollama_url = f"http://{CONTAINER_HOST}:{PROXY_PORT}/v1"
         openclaw_host = CONTAINER_HOST
-    profile_homes = [home / ".jaeger" / "hermes"] + [home / ".jaeger" / "hermes" / "profiles" / name for name in SERVICES]
+    profile_homes = [hermes] + [hermes / "profiles" / name for name in SERVICES]
     for profile_home in profile_homes:
         path = profile_home / "config.yaml"
         _set_yaml_section_value(path, "model", "provider", "ollama")
@@ -443,11 +463,11 @@ def _configure_agent_models(
             path.write_text(text, encoding="utf-8")
     for profile in SERVICES:
         _set_yaml_section_value(
-            home / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml",
+            hermes / "profiles" / profile / "config.yaml",
             "model", "default", DEFAULT_AGENT_MODEL,
         )
     _set_yaml_section_value(
-        home / ".jaeger" / "hermes" / "config.yaml",
+        hermes / "config.yaml",
         "model", "default", DEFAULT_AGENT_MODEL,
     )
     _set_yaml_section_value(
@@ -470,6 +490,13 @@ def _configure_agent_models(
         provider = document.setdefault("models", {}).setdefault("providers", {}).setdefault(provider_name, {})
         container_ollama = container_ollama_url.removesuffix("/v1")
         provider["baseUrl"] = container_ollama
+        try:
+            from jaeger_ai.core.gateway.caller_auth import client_token
+            bridge_token = client_token("mcp")
+        except Exception:
+            bridge_token = None
+        if bridge_token:
+            provider["apiKey"] = bridge_token
         local = document.setdefault("models", {}).setdefault("providers", {}).setdefault("ollama-local", {})
         if isinstance(local, dict):
             local["baseUrl"] = container_ollama
@@ -502,10 +529,18 @@ def _configure_agent_models(
         document.pop("memory", None)
         defaults = document.setdefault("agents", {}).setdefault("defaults", {})
         memory_search = defaults.setdefault("memorySearch", {})
+        # Stay on agents.defaults.memorySearch. OpenClaw 2026.7.1 rejects the
+        # newer top-level ``memory`` block. remote.apiKey and Authorization
+        # are the fields that runtime sends to this baseUrl, so embeddings
+        # hit the authenticated bridge instead of an open Ollama port.
+        remote = {"baseUrl": container_ollama_url.removesuffix("/v1")}
+        if bridge_token:
+            remote["apiKey"] = bridge_token
+            remote["headers"] = {"Authorization": f"Bearer {bridge_token}"}
         memory_search.update({
             "provider": "ollama",
             "model": OPENCLAW_EMBEDDING_MODEL,
-            "remote": {"baseUrl": container_ollama_url.removesuffix("/v1")},
+            "remote": remote,
         })
         defaults.setdefault("model", {})["primary"] = (
             f"{provider_name}/{DEFAULT_AGENT_MODEL}"

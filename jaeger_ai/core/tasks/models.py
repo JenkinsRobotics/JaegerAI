@@ -17,6 +17,9 @@ class TaskState(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
+    COMPLETED_VERIFIED = "completed_verified"
+    NEEDS_OWNER = "needs_owner"
+    BLOCKED = "blocked"
     FAILED = "failed"
     CANCELLED = "cancelled"
     PAUSED = "paused"
@@ -79,7 +82,14 @@ class DurableTask:
 
     @property
     def is_terminal(self) -> bool:
-        return self.state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED)
+        return self.state in (
+            TaskState.COMPLETED,
+            TaskState.COMPLETED_VERIFIED,
+            TaskState.NEEDS_OWNER,
+            TaskState.BLOCKED,
+            TaskState.FAILED,
+            TaskState.CANCELLED,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -142,3 +152,88 @@ class DurableTask:
             created_at=data.get("created_at", time.time()),
             updated_at=data.get("updated_at", time.time()),
         )
+
+
+@dataclass
+class Goal:
+    """What the owner asked for. It lives on the durable task, not in its own store."""
+    goal_id: str
+    owner: str
+    objective: str
+    session_id: str
+    privacy: str = "private"
+    interruption: str = "continue"
+    invented: bool = False
+    created_at: float = field(default_factory=time.time)
+
+    @classmethod
+    def from_owner(cls, *, owner: str, objective: str, session_id: str, **kwargs: Any) -> Goal:
+        return cls(goal_id=f"goal_{uuid.uuid4().hex[:12]}", owner=owner, objective=objective,
+                   session_id=session_id, **kwargs)
+
+
+@dataclass
+class TaskCard:
+    """The fields a turn-owned task carries in ``DurableTask.payload['turn_card']``.
+
+    The card never sets task state. ``GatewayTaskOwner`` is the only writer, and
+    only through ``authoritative_transition``.
+    """
+    task_id: str
+    goal_id: str
+    goal: str
+    owner: str
+    session_id: str
+    request_id: str = ""
+    strategy: str = ""
+    privacy: str = "private"
+    allowed_capabilities: tuple[str, ...] = ()
+    prohibited_capabilities: tuple[str, ...] = ("minecraft", "mc_status", "desktop_control")
+    success_criteria: str = ""
+    verification_criteria: str = "real evidence, not a bare success flag"
+    interruption: str = "continue"
+
+    def to_payload(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["allowed_capabilities"] = list(self.allowed_capabilities)
+        data["prohibited_capabilities"] = list(self.prohibited_capabilities)
+        return data
+
+    @classmethod
+    def open(cls, goal: Goal, *, strategy: str = "", request_id: str = "", task_id: str = "",
+             allowed: tuple[str, ...] = ()) -> TaskCard:
+        return cls(
+            task_id=task_id or f"task_{uuid.uuid4().hex[:12]}",
+            goal_id=goal.goal_id,
+            goal=goal.objective,
+            owner=goal.owner,
+            session_id=goal.session_id,
+            request_id=request_id,
+            strategy=strategy,
+            privacy=goal.privacy,
+            allowed_capabilities=allowed,
+            interruption=goal.interruption,
+            success_criteria=goal.objective,
+        )
+
+
+@dataclass(frozen=True)
+class Receipt:
+    """What came back to the conversation for one task: facts, not a status flag."""
+    receipt_id: str
+    task_id: str
+    session_id: str
+    goal: str
+    state: str
+    verification: str
+    evidence: Any
+    strategy: str = ""
+    models: tuple[str, ...] = ()
+    entity_id: str = ""
+    identity_name: str = ""
+    created_at: float = field(default_factory=time.time)
+
+    def to_dict(self) -> dict[str, Any]:
+        data = asdict(self)
+        data["models"] = list(self.models)
+        return data

@@ -272,6 +272,26 @@ def _route_template(request: web.Request) -> str | None:
     return getattr(resource, "canonical", None) if resource is not None else None
 
 
+def _control_plane_block() -> str | None:
+    """In-process producers bypass HTTP middleware. They still honor Stop and the lease."""
+    from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
+    from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease
+    try:
+        if GlobalStop.load().engaged():
+            return "global stop"
+    except GlobalStopError:
+        return "global stop"
+    except Exception:
+        return "global stop unavailable"
+    try:
+        decision = LifecycleLease.load().decide()
+    except Exception:
+        return "lifecycle lease unavailable"
+    if not decision.privileged_work_allowed:
+        return decision.reason
+    return None
+
+
 @web.middleware
 async def _authenticate_caller(request: web.Request, handler: Any) -> web.StreamResponse:
     """Every non-public route needs a per-caller bearer token (fail closed).
@@ -314,6 +334,25 @@ async def _authenticate_caller(request: web.Request, handler: Any) -> web.Stream
                 {"error": f"Caller {spec.name!r} may only use sessions starting {spec.session_prefix!r}"},
                 status=403,
             )
+    from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError, allowed_while_stopped
+    from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease
+    try:
+        stopped = GlobalStop.load().engaged()
+    except GlobalStopError:
+        stopped = True
+    except Exception:
+        logger.error("Global stop path unavailable", exc_info=True)
+        return web.json_response({"error": "global stop unavailable"}, status=503)
+    if stopped and not allowed_while_stopped(request.method, route, spec):
+        return web.json_response({"error": "global stop", "state": "stopped"}, status=423)
+    try:
+        decision = LifecycleLease.load().decide()
+    except Exception:
+        logger.error("Lifecycle lease path unavailable", exc_info=True)
+        return web.json_response({"error": "lifecycle lease unavailable"}, status=503)
+    if not decision.privileged_work_allowed and not allowed_while_stopped(
+            request.method, route, spec):
+        return web.json_response({"error": decision.reason, "state": "offline"}, status=423)
     actor = spec.actor
     if spec.name == "jaegerd":
         claimed = (request.headers.get("X-Jaeger-Actor") or "").strip()
@@ -358,7 +397,7 @@ class _GatewayToolConfirmationProvider:
         # PolicyKernel REQUIRE_APPROVAL: only an explicit owner decision on an
         # approval card answers it; grants and autonomy shortcuts do not.
         if getattr(request, "force_prompt", False) is True:
-            return self._prompt(request)
+            return self._decided(self._prompt(request))
         try:
             if self._grants().is_granted(skill_name):
                 return True
@@ -390,7 +429,12 @@ class _GatewayToolConfirmationProvider:
                 return True
         except Exception:
             pass
-        return self._prompt(request)
+        return self._decided(self._prompt(request))
+
+    def _decided(self, approved: bool) -> bool:
+        if not approved and self.request_id not in self.app._owner_unanswered:
+            self.app._owner_declined.add(self.request_id)
+        return approved
 
     def _prompt(self, request: Any) -> bool:
         """Park an approval card and wait for the owner's decision."""
@@ -465,6 +509,7 @@ class _GatewayToolConfirmationProvider:
         # if the operator's answer won the race, honour it instead.
         self.app.pending_approvals.pop(aid, None)
         if self.app.store.resolve_approval(aid, approved=False, decision="expired") is not None:
+            self.app._owner_unanswered.add(self.request_id)     # nobody answered: needs the owner
             return False
         row = self.app.store.get_approval(aid) or {}
         return row.get("decision") not in {None, "deny", "expired"}
@@ -534,6 +579,10 @@ class JaegerGatewayApp:
         from jaeger_agent import task_port
         task_port.install_ide_requester(self._ide_request)
         self._running_tasks: dict[str | tuple[str, str], asyncio.Future[Any]] = {}
+        # Requests whose owner declined an approval. A turn-owned card ends there (blocked).
+        self._owner_declined: set[str] = set()
+        # Requests whose approval the owner never answered. That is needs_owner, not blocked.
+        self._owner_unanswered: set[str] = set()
         # Request-scoped live ReAct agents. The Gateway does not own the agent;
         # EntityRuntime supplies it while an admitted request is executing so
         # steering can be forwarded to the active JaegerAgent.
@@ -549,6 +598,7 @@ class JaegerGatewayApp:
         self._owner_task: asyncio.Task | None = None
         self._pending_resume = False
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._lifecycle_shutdown = asyncio.Event()
         self._background_producers: Any = None
         self._last_human_at = time.monotonic()
         self._last_human_session = "desktop-app"
@@ -712,14 +762,28 @@ class JaegerGatewayApp:
         return len(rows)
 
     async def _owner_maintenance_loop(self, runtime: Any) -> None:
-        """Heartbeat, sleep-time, and indexing owned by the resident Gateway."""
+        """Heartbeat, sleep-time, and indexing owned by the resident Gateway.
+
+        The owner tick stays on its existing cadence. The lifecycle lease is
+        polled faster so a missed menu-bar heartbeat shuts the stack down
+        soon after the grace period, not a full tick later.
+        """
         interval = float(os.environ.get("JAEGER_HEARTBEAT_INTERVAL_S") or 0) or 30.0
-        while True:
+        lease_every = float(os.environ.get("JAEGER_LIFECYCLE_POLL_S") or 2.0)
+        elapsed = 0.0
+        while not self._lifecycle_shutdown.is_set():
+            if elapsed <= 0:
+                try:
+                    await asyncio.to_thread(self._owner_tick, runtime)
+                except Exception as exc:
+                    logger.warning("Owner maintenance tick failed: %s", exc)
+                elapsed = interval
+            self._note_lifecycle()
+            step = max(0.5, min(lease_every, elapsed))
             try:
-                await asyncio.to_thread(self._owner_tick, runtime)
-            except Exception as exc:
-                logger.warning("Owner maintenance tick failed: %s", exc)
-            await asyncio.sleep(max(1.0, interval))
+                await asyncio.wait_for(self._lifecycle_shutdown.wait(), timeout=step)
+            except asyncio.TimeoutError:
+                elapsed -= step
 
     def _owner_tick(self, runtime: Any) -> None:
         """Sleep-time consolidation. Heartbeat/board/cron live on the producer lease."""
@@ -800,6 +864,9 @@ class JaegerGatewayApp:
         loop = self._loop
         if loop is None or not loop.is_running():
             return {"text": "", "error": "gateway loop is not running", "halt_reason": "error"}
+        blocked = _control_plane_block()
+        if blocked:
+            return {"text": "", "error": blocked, "halt_reason": "stopped", "skipped": True, "replayed": False}
         future = asyncio.run_coroutine_threadsafe(
             self._run_background_turn(
                 prompt, session_id=session_id, request_id=request_id, source=source,
@@ -954,6 +1021,9 @@ class JaegerGatewayApp:
 
     def _setup_routes(self) -> None:
         self.app.router.add_get("/health", self.handle_health)
+        self.app.router.add_get("/v1/stop", self.handle_stop_status)
+        self.app.router.add_post("/v1/stop", self.handle_engage_stop)
+        self.app.router.add_post("/v1/stop/release", self.handle_release_stop)
         self.app.router.add_get("/v1/runtime/status", self.handle_runtime_status)
         self.app.router.add_get("/version", self.handle_version)
         # Agent catalog — persistence spine for Mac app + WebUI clients.
@@ -968,6 +1038,10 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/sessions/{id}", self.handle_get_session)
         self.app.router.add_delete("/v1/sessions/{id}", self.handle_delete_session)
         self.app.router.add_patch("/v1/sessions/{id}", self.handle_patch_session)
+        self.app.router.add_post("/v1/sessions/{id}/branch", self.handle_branch_session)
+        self.app.router.add_post("/v1/sessions/{id}/feedback", self.handle_message_feedback)
+        self.app.router.add_get("/v1/sessions/{id}/feedback", self.handle_message_feedback)
+        self.app.router.add_post("/v1/sessions/{id}/retry", self.handle_retry_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
         self.app.router.add_get("/v1/sessions/{id}/queue", self.handle_get_queue)
         self.app.router.add_post("/v1/sessions/{id}/queue", self.handle_add_queue)
@@ -1192,6 +1266,123 @@ class JaegerGatewayApp:
             }
         finally:
             await terminate_session()
+
+    def _note_lifecycle(self) -> None:
+        """Suspend is immediate. Once the grace inside the lease has elapsed, shut down."""
+        from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease
+        try:
+            decision = LifecycleLease.load().decide()
+        except Exception:
+            logger.error("Lifecycle lease unreadable; shutting down", exc_info=True)
+            self._lifecycle_shutdown.set()
+            return
+        if decision.shutdown:
+            logger.warning("Lifecycle owner disappeared; controlled shutdown (%s)", decision.reason)
+            self._lifecycle_shutdown.set()
+
+    async def _halt_for_stop(self) -> list[str]:
+        """Cancel in-flight helpers. Names that do not confirm are returned."""
+        from jaeger_ai.core.devices.registry import block_device_commands
+        block_device_commands()
+        unconfirmed: list[str] = []
+        scopes = getattr(self._cancellations, "_scopes", {})
+        for request_id in list(scopes):
+            try:
+                self._cancellations.cancel(str(request_id))
+            except Exception:
+                unconfirmed.append(str(request_id))
+        cancel_all = getattr(self.orchestration, "cancel_all", None)
+        if callable(cancel_all):
+            try:
+                pending = cancel_all(timeout_seconds=1.5)
+                if asyncio.iscoroutine(pending):
+                    pending = await pending
+                if pending:
+                    unconfirmed.extend(str(item) for item in pending)
+            except Exception:
+                unconfirmed.append("orchestration")
+        cancelled_tasks = []
+        for key, task in list(self._running_tasks.items()):
+            if not task.done():
+                task.cancel()
+                cancelled_tasks.append((key, task))
+        # Commands the owner's workers started are not stopped by cancelling the task that
+        # awaits them: terminate them, and report anything that survives.
+        unconfirmed.extend(await asyncio.to_thread(self._stop_owned_processes))
+        if cancelled_tasks:
+            _done, still = await asyncio.wait([t for _, t in cancelled_tasks], timeout=2.0)
+            unconfirmed.extend(str(k) for k, t in cancelled_tasks if t in still)
+        return unconfirmed
+
+    @staticmethod
+    def _stop_owned_processes() -> list[str]:
+        """Terminate command sessions and background processes this owner started."""
+        survivors: list[str] = []
+        try:
+            from jaeger_agent.tools.pty_exec import kill_all_sessions
+            survivors += [f"command-session:{pid}" for pid in kill_all_sessions()["survivors"]]
+        except Exception:
+            logger.warning("could not stop command sessions", exc_info=True)
+            survivors.append("command-sessions")
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+            if layout is not None:
+                from jaeger_agent.background.processes import stop_all_background
+                survivors += [f"background:{pid}" for pid in stop_all_background(layout)["survivors"]]
+        except Exception:
+            logger.warning("could not stop background processes", exc_info=True)
+            survivors.append("background-processes")
+        return survivors
+
+    async def handle_stop_status(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
+        latch = GlobalStop.load()
+        try:
+            state = latch.read()
+        except GlobalStopError:
+            return web.json_response({
+                "engaged": True, "reason": "unreadable latch", "engaged_by": "", "unconfirmed": [],
+            })
+        return web.json_response({
+            "engaged": state.engaged,
+            "reason": state.reason,
+            "engaged_by": state.engaged_by,
+            "unconfirmed": list(state.unconfirmed),
+            "cancellation_confirmed": not state.unconfirmed,
+        })
+
+    async def handle_engage_stop(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.gateway.global_stop import GlobalStop
+        spec = request["caller"]
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        reason = str(body.get("reason") or "stop")
+        state = GlobalStop.load().engage(
+            spec.name, reason=reason, unconfirmed=await self._halt_for_stop(),
+        )
+        return web.json_response({
+            "engaged": state.engaged,
+            "reason": state.reason,
+            "engaged_by": state.engaged_by,
+            "unconfirmed": list(state.unconfirmed),
+            "cancellation_confirmed": not state.unconfirmed,
+        })
+
+    async def handle_release_stop(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.devices.registry import allow_device_commands
+        from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
+        spec = request["caller"]
+        try:
+            state = GlobalStop.load().release(spec)
+        except GlobalStopError as exc:
+            return web.json_response({"error": str(exc)}, status=403)
+        allow_device_commands()
+        return web.json_response({"engaged": state.engaged, "released_by": spec.name})
 
     async def handle_health(self, request: web.Request) -> web.Response:
         """Backend readiness is independent of optional HTTP adapters and UIs."""
@@ -1485,7 +1676,7 @@ class JaegerGatewayApp:
 
     async def handle_list_sessions(self, request: web.Request) -> web.Response:
         profile = request.query.get("profile")
-        sessions = self.store.list_sessions(profile=profile)
+        sessions = self.store.list_sessions(profile=profile, query=request.query.get("q"))
         return web.json_response({"sessions": sessions})
 
     async def handle_create_session(self, request: web.Request) -> web.Response:
@@ -1543,6 +1734,101 @@ class JaegerGatewayApp:
         # Surfaces chrome polls GET without SSE — stamp role/display_name
         # after handoff so the UI can render the active agent identity.
         return web.json_response(self._enrich_session_agent(session))
+
+    async def handle_branch_session(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        body = await request.json() if request.can_read_body else {}
+        keep_count = body.get("keep_count")
+        if keep_count is None and body.get("message_id") is not None:
+            source = self.store.get_session(session_id)
+            try:
+                wanted = int(body["message_id"])
+                match = next((i for i, row in enumerate(source.get("messages", []))
+                              if int(row.get("id", -1)) == wanted), None) if source else None
+                if match is not None:
+                    keep_count = match + 1
+            except (TypeError, ValueError):
+                return web.json_response({"error": "message_id must be an integer"}, status=400)
+        if keep_count is not None:
+            try:
+                keep_count = int(keep_count)
+            except (TypeError, ValueError):
+                return web.json_response({"error": "keep_count must be an integer"}, status=400)
+            if keep_count < 0:
+                return web.json_response({"error": "keep_count must be non-negative"}, status=400)
+        branch = self.store.branch_session(
+            session_id,
+            title=str(body.get("title") or "").strip() or None,
+            keep_count=keep_count,
+        )
+        if branch is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        self.event_bus.publish(session_id, "session.branched", {
+            "session_id": branch["session_id"], "parent_session_id": session_id,
+        })
+        return web.json_response(branch, status=201)
+
+    async def handle_message_feedback(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        if request.method == "GET":
+            return web.json_response({"feedback": self.store.message_feedback(session_id)})
+        body = await request.json() if request.can_read_body else {}
+        rating = str(body.get("rating") or "").strip().lower()
+        if rating not in {"positive", "negative"}:
+            return web.json_response({"error": "rating must be positive or negative"}, status=400)
+        message_id = body.get("message_id")
+        event = self.store.append_event(session_id, "message.feedback", {
+            "message_id": message_id, "rating": rating,
+            "comment": str(body.get("comment") or "")[:1000],
+        })
+        self.event_bus.publish(session_id, "message.feedback", event)
+        return web.json_response({"ok": True, "feedback": event})
+
+    async def handle_retry_session(self, request: web.Request) -> web.Response:
+        """Replay the last completed request with a new durable identity."""
+        session_id = request.match_info["id"]
+        previous = self.store.latest_request(session_id)
+        if previous is None:
+            return web.json_response({"error": "No previous request to retry"}, status=404)
+        if previous.get("status") in {"running", "admitted", "cancelling"}:
+            return web.json_response({"error": "The previous request is still running"}, status=409)
+        body = {
+            "text": previous.get("input_text") or "",
+            "request_id": uuid.uuid4().hex,
+        }
+        execution = previous.get("execution") or {}
+        for key in ("model", "provider", "workspace", "options", "allowed_tools",
+                    "interaction_tier"):
+            if key in execution:
+                body[key] = execution[key]
+        attachments = execution.get("attachments") or []
+        if isinstance(attachments, list):
+            body["attachment_ids"] = [item.get("attachment_id") for item in attachments
+                                       if isinstance(item, dict) and item.get("attachment_id")]
+        # Reuse the normal admission and execution path so retry has the same
+        # receipts, locking, approvals, and SSE behavior as a new turn.
+        # Invoke the shared admission path through a tiny internal dispatch
+        # payload instead of duplicating the normal turn handler.
+        return await self._admit_and_start_retry(session_id, body)
+
+    async def _admit_and_start_retry(self, session_id: str, body: dict[str, Any]) -> web.Response:
+        text = str(body.get("text") or "").strip()
+        requested = self._requested_from_body(body)
+        try:
+            admitted = self.store.admit_request(
+                session_id, text, request_id=body["request_id"], requested=requested,
+            )
+        except (RequestConflict, RequestBusy, ValueError) as exc:
+            return web.json_response({"error": str(exc)}, status=409 if isinstance(exc, RequestBusy) else 400)
+        self._start_admitted_turn(admitted, session_id, text)
+        return web.json_response({
+            "session_id": session_id, "turn_id": admitted["turn_id"],
+            "request_id": admitted["request_id"], "status": "running",
+            "replayed": False,
+            "start_event_id": (admitted.get("event") or {}).get("event_id"),
+        }, status=202)
 
     async def handle_activity_history(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
@@ -2586,16 +2872,43 @@ class JaegerGatewayApp:
             }
 
         from jaeger_ai.core.runtime.work_ledger import ledger_scope, last_completion
-        with ledger_scope(session_key, resume_completed=bool(((execution or {}).get("options") or {}).get("task_id")) and not bool(((execution or {}).get("options") or {}).get("verification_error"))):
+        _options = ((execution or {}).get("options") or {})
+        # A turn-owned card runs in the chat's own session, so it must start from a
+        # fresh ledger: resuming would hand it an earlier request's completion.
+        turn_owned = bool(_options.get("turn_owned"))
+
+        def stop_requested() -> bool:
+            if self._cancellations.is_cancelled(request_id):
+                return True
+            # An owner decline is an answer, and an unanswered approval needs the owner:
+            # neither is a stall to push the model through.
+            return turn_owned and (request_id in self._owner_declined or request_id in self._owner_unanswered)
+
+        with ledger_scope(session_key, resume_completed=bool(_options.get("task_id")) and not bool(_options.get("verification_error")) and not turn_owned):
             try:
                 result = run_continued_turn(
                     step, prompt, objective=objective or prompt,
-                    durable=bool(((execution or {}).get("options") or {}).get("task_id")),
-                    max_steps=8 if ((execution or {}).get("options") or {}).get("task_id") else None,
-                    is_cancelled=lambda: self._cancellations.is_cancelled(request_id),
+                    durable=bool(_options.get("task_id")),
+                    max_steps=(4 if turn_owned else 8) if _options.get("task_id") else None,
+                    is_cancelled=stop_requested,
                     on_checkpoint=lambda checkpoint: self.event_bus.publish(
                         session_key, "turn.checkpoint", {**checkpoint, "request_id": request_id}),
                 )
+                if turn_owned and request_id in self._owner_unanswered and not self._cancellations.is_cancelled(request_id):
+                    result = {**result, "halt_reason": "needs_owner", "error": None,
+                              "evidence": {"approval_unanswered": True}}
+                elif turn_owned and request_id in self._owner_declined and not self._cancellations.is_cancelled(request_id):
+                    result = {**result, "halt_reason": "blocked", "error": None,
+                              "evidence": {"declined_by_owner": True}}
+                elif turn_owned and not result.get("error") and not stop_requested():
+                    # One bounded correction, as a durable task gets: a completion with no
+                    # file receipt is not something the owner can verify.
+                    from jaeger_ai.core.tasks.owner import EVIDENCE_CONTRACT, has_file_receipt
+                    if not has_file_receipt(last_completion()):
+                        fix = step(
+                            "Owner verification requires correction: your completion carried no receipt for a "
+                            "file the owner can check. Finish the work if it is not done, then " + EVIDENCE_CONTRACT)
+                        result = {**result, **fix, "text": fix.get("text") or result.get("text")}
                 return {**result, "task_completion": last_completion()}
             finally:
                 self._active_agents.pop(request_id, None)
@@ -2662,6 +2975,9 @@ class JaegerGatewayApp:
         role_s = str(agent_fields.get("role") or "")
         rid = request_id or turn_id
         admitted_request = self.store.get_request(rid)
+        # One Goal/TaskCard per operational turn (see _open_turn_card). None for conversation.
+        card_task_id: str | None = None
+        self._present(session_id, "listening", intent="turn")
         # What the operator wrote, before attachment notes are inlined. Lane
         # decisions read this: an inlined "inspect it with the vision_analyze
         # tool" note made a plain question about an image look actionable.
@@ -2728,7 +3044,7 @@ class JaegerGatewayApp:
                 # with no tools, and recorded as completed.
                 if has_image and not actionable and _asks_about_the_image(request_text):
                     backend = LOCKED_OLLAMA_URL
-                    model = "kimi-k2.7-code:cloud"
+                    model = self._lane_model(request_text, None)
                     current = self.store.get_session(session_id) or {}
                     chat_fut = asyncio.run_coroutine_threadsafe(
                         self._ollama_chat(
@@ -2809,12 +3125,12 @@ class JaegerGatewayApp:
                 """
                 nonlocal backend, model
                 backend = LOCKED_OLLAMA_URL
-                model = active_model
+                model = self._lane_model(request_text, active_model)
                 current = self.store.get_session(session_id) or {}
                 chat_fut = asyncio.run_coroutine_threadsafe(
                     self._ollama_chat(
                         prompt,
-                        model=active_model,
+                        model=model,
                         system_prompt=system_prompt,
                         history=self._history_before_admitted_user(current, admitted_request),
                         attachments=self._turn_attachments(session_id, execution),
@@ -2856,6 +3172,17 @@ class JaegerGatewayApp:
                 # request must still reach the agent, unadorned.
                 logger.warning("turn context unavailable for %s; running the bare request", rid, exc_info=True)
                 prepared, prompt = None, text
+            self._present(session_id, "thinking", intent="turn")
+            card_task_id, execution = self._open_turn_card(
+                runtime, prepared, session=session, session_id=session_id, rid=rid,
+                request_text=request_text, actionable=actionable, tier=tier, role_s=role_s,
+                execution=execution,
+            )
+            if card_task_id:
+                # The worker must know what the owner will accept as evidence.
+                from jaeger_ai.core.tasks.owner import EVIDENCE_CONTRACT
+                prompt = (f"This request is owned by a task card. When the work is done: {EVIDENCE_CONTRACT}\n\n"
+                          + prompt)
             if tier == "chat":
                 model_only = True
             else:
@@ -2868,6 +3195,7 @@ class JaegerGatewayApp:
                     logger.warning("could not record the answer for %s", rid, exc_info=True)
 
             if self._cancellations.is_cancelled(rid):
+                self._close_turn_card(card_task_id, {"error": "cancelled"}, "cancelled", session_id=session_id)
                 if self._settle_cancelled(session_id, turn_id, rid, agent_fields):
                     return
                 raise RuntimeError(
@@ -2879,6 +3207,12 @@ class JaegerGatewayApp:
                 raise RuntimeError(str(turn_result["error"]))
 
             response_text = str(turn_result.get("text") or "")
+            card_fields = self._close_turn_card(
+                card_task_id, turn_result, "completed", session_id=session_id,
+                models=(model, backend),
+            )
+            if not card_task_id:
+                self._present(session_id, "done", intent="conversation", status="completed")
 
             self.event_bus.publish(session_id, "turn.delta", {
                 "turn_id": turn_id,
@@ -2913,10 +3247,21 @@ class JaegerGatewayApp:
                 "task_completion": turn_result.get("task_completion"),
                 "halt_reason": turn_result.get("halt_reason"),
                 "trace_id": turn_result.get("trace_id"),
+                **card_fields,
                 **agent_fields,
                 **proactive_fields,
             }
             self._persist_terminal(rid, session_id, "completed", result, assistant_text=response_text, record_entity_event=False)
+        except asyncio.CancelledError:
+            # Global Stop cancels this task. Persist how the request ended (cancelled, or
+            # execution_unknown when an effect is pending) so it is never left 'running'.
+            try:
+                self._close_turn_card(card_task_id, {"error": "cancelled"}, "cancelled", session_id=session_id)
+                if not self._settle_cancelled(session_id, turn_id, rid, agent_fields):
+                    self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled by Global Stop")
+            except Exception:
+                logger.exception("could not persist the cancelled outcome of %s", rid)
+            raise
         except Exception as exc:
             if self._cancellations.is_cancelled(rid) and self._settle_cancelled(
                 session_id, turn_id, rid, agent_fields,
@@ -2960,6 +3305,9 @@ class JaegerGatewayApp:
                 }
             if receipt:
                 result["native_receipt"] = receipt
+            result.update(self._close_turn_card(card_task_id, result, status, session_id=session_id))
+            if not card_task_id:
+                self._present(session_id, "stopped" if status == "cancelled" else "failed", status=status)
             self._persist_terminal(
                 rid,
                 session_id,
@@ -2968,8 +3316,149 @@ class JaegerGatewayApp:
                 assistant_text=str(reply.get("text") or "") or None if status == "completed" else None,
             )
         finally:
+            # Global Stop cancels this asyncio task (CancelledError skips the except
+            # above). A card still open here is settled, never left running.
+            self._close_turn_card(
+                card_task_id, {"error": "the turn ended before the task was settled"},
+                "cancelled", session_id=session_id,
+            )
+            self._owner_declined.discard(rid)
+            self._owner_unanswered.discard(rid)
             self._running_tasks.pop(rid, None)
             self._cancellations.release(rid)
+
+    @staticmethod
+    def _lane_model(request_text: str, requested: str | None) -> str:
+        """The Gateway's one routing decision for a direct model lane.
+
+        It is the existing router's sensitivity decision (``core/models/router.py``):
+        private text stays on the local model, public text uses the requested one.
+        Judged on what the operator wrote, not on the prompt with recalled memory.
+        """
+        from jaeger_ai.core.models.router import apply_sensitivity_routing
+
+        model, _provider, _decision = apply_sensitivity_routing(request_text, model=requested or None)
+        return provider_model_name(model or requested or DEFAULT_OLLAMA_MODEL)
+
+    def _present(self, session_id: str, state: str, **fields: Any) -> None:
+        """Publish ``jaeger.state``. Presence reports a turn; it never decides whether one runs."""
+        try:
+            self.event_bus.publish_state(session_id, state, **fields)
+        except Exception:
+            logger.debug("presence publish skipped", exc_info=True)
+
+    def _open_turn_card(
+        self, runtime: Any, prepared: Any, *, session: Any, session_id: str, rid: str,
+        request_text: str, actionable: bool, tier: str, role_s: str,
+        execution: dict[str, Any] | None,
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        """Conversation stays a conversation. Work becomes one Goal/TaskCard on GatewayTaskOwner.
+
+        The existing ExecutiveStrategySelector judges the prepared turn; the existing
+        owner ReAct is the worker, run in durable mode so it must return evidence.
+        """
+        if prepared is None or execution is None or not actionable or tier == "chat" or role_s == "specialist":
+            return None, execution
+        from jaeger_ai.core.entity.executive import CognitiveStrategy
+
+        try:
+            decision = runtime.executive_selector.select_strategy(prepared.event, runtime.current_state)
+        except Exception:
+            logger.debug("executive strategy unavailable for %s", rid, exc_info=True)
+            decision = None
+        strategy = decision.strategy if decision is not None else CognitiveStrategy.REACT_LOOP
+        if strategy in {
+            CognitiveStrategy.DIRECT_RESPONSE, CognitiveStrategy.PASSIVE_OBSERVE,
+            CognitiveStrategy.SLEEP_TIME_CONSOLIDATION,
+        }:
+            return None, execution
+        workspace = str(
+            execution.get("workspace") or (session or {}).get("workspace")
+            or getattr(getattr(runtime, "layout", None), "workspace_dir", "") or ""
+        )
+        try:
+            task = self.task_owner.open_turn(
+                session_id=session_id, request_id=rid, text=request_text, strategy=strategy.value,
+                owner=str(execution.get("caller") or "owner"), workspace=workspace,
+            )
+        except Exception:
+            logger.warning("could not open a task card for %s; running as a plain turn", rid, exc_info=True)
+            return None, execution
+        self._present(
+            session_id, "planning", task_id=task.task_id, intent="work", status=strategy.value,
+            strategy=strategy.value,
+            complexity=float(getattr(decision, "complexity_score", 0.0) or 0.0),
+            requires_work_ledger=bool(getattr(decision, "requires_work_ledger", False)),
+        )
+        options = {**(execution.get("options") or {}), "task_id": task.task_id, "turn_owned": True}
+        self._world_claim(runtime, task.task_id, "planned_strategy", strategy.value, "planned")
+        self._present(session_id, "working", task_id=task.task_id, intent="work", worker="owner-react")
+        return task.task_id, {**execution, "options": options}
+
+    def _settle_dispatch(self, orchestration_id: str, done: Any) -> None:
+        """Settle the owner's card for a worker dispatch once the worker has returned."""
+        card_id = f"orch:{orchestration_id}"
+        try:
+            from jaeger_ai.contract.presence import ACTIVITY_FOR_TASK_STATE
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+
+            record = self.orchestration.get_task(orchestration_id) if self.orchestration else None
+            task, receipt = self.task_owner.close_dispatch(
+                card_id, record, cancelled=bool(done.cancelled()),
+                identity=EntityRuntime.get_singleton().identity,
+            )
+            session = task.notification_policy.recipient_session_id or "orchestration"
+            self._present(
+                session, ACTIVITY_FOR_TASK_STATE.get(task.state.value, "failed"), task_id=task.task_id,
+                intent="work", status=task.state.value, worker=str((record or {}).get("worker") or ""),
+                receipt_id=receipt.receipt_id,
+            )
+        except Exception:
+            logger.exception("could not settle the card for orchestration task %s", orchestration_id)
+
+    @staticmethod
+    def _world_claim(runtime: Any, subject: str, predicate: str, value: str, provenance: str) -> None:
+        """Ask the resident Entity to record a world claim. A claim never gates a turn."""
+        record = getattr(runtime, "record_world_claim", None)
+        if record is None:
+            return
+        try:
+            record(subject, predicate, value, provenance=provenance, source_id="gateway")
+        except Exception:
+            logger.debug("world claim skipped: %s %s", subject, predicate, exc_info=True)
+
+    def _close_turn_card(
+        self, card_task_id: str | None, turn_result: dict[str, Any], status: str, *,
+        session_id: str, models: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        """Verify and settle a turn's card through the task owner, then report it. Idempotent."""
+        if not card_task_id:
+            return {}
+        try:
+            existing = self.task_owner.store.get_task(card_task_id)
+            if existing is not None and existing.is_terminal:
+                return {}  # already settled and reported once
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            from jaeger_ai.contract.presence import ACTIVITY_FOR_TASK_STATE
+
+            if status == "completed" and not turn_result.get("error"):
+                self._present(session_id, "verifying", task_id=card_task_id, intent="work")
+            task, receipt = self.task_owner.close_turn(
+                card_task_id, turn_result, status=status,
+                identity=EntityRuntime.get_singleton().identity, models=models,
+            )
+            runtime = EntityRuntime.get_singleton()
+            if task.state.value == "completed_verified":
+                self._world_claim(runtime, task.task_id, "worker_evidence", str(receipt.evidence)[:300], "observed")
+                self._world_claim(runtime, task.task_id, "completed_verified", task.goal, "verified")
+            self._present(
+                session_id, ACTIVITY_FOR_TASK_STATE.get(task.state.value, "failed"), task_id=task.task_id,
+                intent="work", status=task.state.value, receipt_id=receipt.receipt_id,
+            )
+            return {"task_id": task.task_id, "task_state": task.state.value, "receipt": receipt.to_dict()}
+        except Exception:
+            logger.exception("could not settle turn card %s", card_task_id)
+            return {}
 
     def _settle_cancelled(
         self,
@@ -3905,6 +4394,12 @@ class JaegerGatewayApp:
                 metadata=metadata,
                 required_capabilities=frozenset(capabilities),
             )
+            raw_artifacts = body.get("artifacts") or []
+            if not isinstance(raw_artifacts, list) or any(not isinstance(a, str) or not a.strip() for a in raw_artifacts):
+                raise TypeError("artifacts must be a list of nonempty strings")
+            # Declared deliverables are what the task owner can verify. Resolve them
+            # first so a bad path never leaves a dispatched worker without a card.
+            self.task_owner.artifact_paths(str(workspace or ""), raw_artifacts)
             operation, replayed = self.orchestration.admit_parent_task(parent_task)
         except DuplicateSubmissionConflict as exc:
             return web.json_response({"error": str(exc)}, status=409)
@@ -3926,6 +4421,17 @@ class JaegerGatewayApp:
                     logger.error("Orchestration task %s failed: %s", task_id, done.exception())
 
             operation.add_done_callback(completed)
+            # The worker's own "completed" is a transport status. The task owner holds
+            # the card and settles it from evidence it can check.
+            try:
+                self.task_owner.open_dispatch(
+                    orchestration_id=task_id, goal=body["goal"].strip(), worker=body["worker"].strip(),
+                    workspace=str(workspace or ""), artifacts=raw_artifacts,
+                    session_id=str(body.get("session_id") or ""),
+                )
+                operation.add_done_callback(lambda done, oid=task_id: self._settle_dispatch(oid, done))
+            except Exception:
+                logger.exception("could not open a task card for orchestration task %s", task_id)
         return web.json_response(
             self.orchestration.get_task(task_id), status=200 if replayed else 201,
         )
@@ -3938,7 +4444,10 @@ class JaegerGatewayApp:
         task = self.orchestration.get_task(task_id)
         if task is None:
             return web.json_response({"error": f"Task {task_id} not found"}, status=404)
-        return web.json_response(task)
+        card = self.task_owner.store.get_task(f"orch:{task_id}")
+        # ``state`` is the worker's own status. ``task_state`` is the owner's verdict.
+        return web.json_response({**task, "task_state": card.state.value if card else None,
+                                  "task_id_owner": card.task_id if card else None})
 
     async def handle_cancel_orchestration_task(self, request: web.Request) -> web.Response:
         """Cancel an in-flight orchestration task."""
@@ -3995,6 +4504,14 @@ class JaegerGatewayApp:
                 lambda done: self._running_tasks.pop(operation_key, None)
                 if self._running_tasks.get(operation_key) is done else None
             )
+            try:
+                self.task_owner.open_dispatch(
+                    orchestration_id=task_id, goal=goal.strip(), worker=str(parent["worker"]),
+                    session_id=str(body.get("session_id") or ""),
+                )
+                operation.add_done_callback(lambda done, oid=task_id: self._settle_dispatch(oid, done))
+            except Exception:
+                logger.exception("could not open a task card for follow-up task %s", task_id)
         return web.json_response(
             self.orchestration.get_task(task_id), status=200 if replayed else 201
         )
@@ -4028,10 +4545,30 @@ async def run_gateway_forever(
             logger.debug("post-listen resume skipped", exc_info=True)
         gateway._pending_resume = False
     try:
-        while True:
-            await asyncio.sleep(3600)
+        while not gateway._lifecycle_shutdown.is_set():
+            try:
+                await asyncio.wait_for(gateway._lifecycle_shutdown.wait(), timeout=3600)
+            except asyncio.TimeoutError:
+                continue
+        logger.warning("Gateway leaving after lifecycle shutdown")
+        await leave_after_lifecycle_shutdown(gateway)
     finally:
         await runner.cleanup()
+
+
+async def leave_after_lifecycle_shutdown(gateway: JaegerGatewayApp) -> None:
+    """Boot the launchd jobs out, then stop this process.
+
+    KeepAlive is still set on the plists. bootout is what stops launchd from
+    starting a privileged gateway again. The menu bar has already retired the
+    lease, so a race that loses the bootout still fails closed.
+    """
+    try:
+        from jaeger_ai.core.runtime.stack import stack_down
+        stack_down(wait_timeout=2.0)
+    except Exception:
+        logger.error("lifecycle stack shutdown failed", exc_info=True)
+    await gateway._bounded_shutdown(gateway.app)
 
 
 def main(argv: list[str] | None = None) -> int:

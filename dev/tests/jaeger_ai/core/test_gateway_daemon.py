@@ -400,7 +400,8 @@ async def test_owner_failure_does_not_silently_complete_with_text(monkeypatch, t
     monkeypatch.setattr(app, "_ollama_chat", forbidden)
     await app._execute_turn("s", "t", "Remember this")
     assert store.get_session("s")["status"] == "failed"
-    events = app.event_bus.get_replay_events("s", since_event_id=0)
+    # ``jaeger.state`` is the presence projection of the same stream, not a turn event.
+    events = [e for e in app.event_bus.get_replay_events("s", since_event_id=0) if e.event != "jaeger.state"]
     assert [e.event for e in events] == ["turn.failed"]
     assert "subordinate unavailable" in events[0].data["error"]
 

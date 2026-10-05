@@ -92,7 +92,9 @@ def _write_display_name(profile_home: Path, *, display_name: str) -> None:
 
 def ensure_webui_profile_layout(hermes_home: Path | None = None) -> dict[str, Any]:
     """Ensure named-profile display names; leave other profiles visible."""
-    home = (hermes_home or (Path.home() / ".jaeger" / "hermes")).expanduser()
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+    home = (hermes_home or hermes_profile_root()).expanduser()
     profiles = home / "profiles"
     profiles.mkdir(parents=True, exist_ok=True)
     _write_display_name(home, display_name=PROFILE_DISPLAY_NAMES["default"])
@@ -226,7 +228,7 @@ def ensure_webui_config_yaml(agent_home: Path) -> dict[str, Any]:
 providers:
   only_configured: false
 webui:
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 8790
   session_save_mode: eager
 """
@@ -242,7 +244,7 @@ webui:
     if "webui:" not in raw:
         raw += """
 webui:
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 8790
   session_save_mode: eager
 """
@@ -316,9 +318,10 @@ def prepare_webui_home(
     ``~/.hermes/profiles`` tree (symlinked in) so the single-library model never
     spawns empty second UIs / 0-byte profile state.dbs.
     """
-    home = Path.home()
-    hermes = (hermes_home or (home / ".jaeger" / "hermes")).expanduser()
-    agent = (agent_home or (home / ".jaeger" / "hermes-webui-agent")).expanduser()
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root, webui_agent_home
+
+    hermes = (hermes_home or hermes_profile_root()).expanduser()
+    agent = (agent_home or webui_agent_home()).expanduser()
     layout = ensure_webui_profile_layout(hermes)
     linked = link_shared_profiles(shared=hermes / "profiles", agent_home=agent)
     # The WebUI HERMES_HOME itself is the default/root profile for :8790.
