@@ -9,8 +9,14 @@ from pathlib import Path
 
 import pytest
 
+from jaeger_ai.core.runtime.webui_bind import webui_bind_host
 from jaeger_ai.core.tasks.completion import CompletionError, authoritative_transition
 from jaeger_ai.core.tasks.models import DurableTask, TaskState
+
+
+def test_webui_bind_stays_on_loopback_even_if_host_is_wildcard():
+    assert webui_bind_host({"JAEGER_WEBUI_HOST": "0.0.0.0"}) == "127.0.0.1"
+    assert webui_bind_host({"JAEGER_WEBUI_ALLOW_LAN": "1", "JAEGER_WEBUI_HOST": "0.0.0.0"}) == "0.0.0.0"
 
 
 def test_completed_verified_requires_evidence():
