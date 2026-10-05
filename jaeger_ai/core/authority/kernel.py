@@ -219,6 +219,11 @@ class PolicyKernel:
         current_args = dict(proposal.arguments)
 
         try:
+            # ── 0. Control plane: Global Stop ──────────
+            control = self._check_control_plane(proposal)
+            if control is not None:
+                return control
+
             # ── 0. Structural validity: unknown tool/action/tier → DENY ─────
             structural = self._check_structure(proposal)
             if structural is not None:
@@ -297,6 +302,30 @@ class PolicyKernel:
     # Every sub-check fails CLOSED: an exception inside a check is a DENY, never
     # "no objection" (Constitution invariant 11). Phase 0 found four sub-checks
     # that logged at debug level and returned None on error.
+
+    def _check_control_plane(self, proposal: ProposedAction) -> AuthorityDecision | None:
+        """Global Stop fails closed."""
+        try:
+            from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
+            try:
+                stopped = GlobalStop.load().engaged()
+            except GlobalStopError:
+                stopped = True
+            if stopped:
+                return AuthorityDecision(
+                    decision=AuthorityDecisionType.DENY,
+                    reason="global stop",
+                    policy_name="global_stop",
+                    proposal_id=proposal.proposal_id,
+                )
+        except Exception:
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason="global stop unavailable",
+                policy_name="global_stop",
+                proposal_id=proposal.proposal_id,
+            )
+        return None
 
     def _check_structure(self, proposal: ProposedAction) -> AuthorityDecision | None:
         if not canonical_tool_id(proposal.tool_name):
