@@ -23,7 +23,7 @@ def test_build_plist_structure(tmp_path: Path):
     data = plistlib.loads(plist_xml.encode("utf-8"))
     assert data["Label"] == "com.jenkinsrobotics.jaeger-gateway"
     assert "jaeger_ai.core.gateway.server" in " ".join(data["ProgramArguments"])
-    assert data["KeepAlive"] is True
+    assert data["KeepAlive"] == {"SuccessfulExit": False}  # crash-only restart
     assert data["RunAtLoad"] is False
     assert data["EnvironmentVariables"]["JAEGER_GIT_COMMIT"] == "abcdef1234567890"
     assert "StandardOutPath" in data
@@ -188,3 +188,20 @@ def test_instance_stack_env_section_drives_plists(tmp_path: Path, monkeypatch: p
     assert o_env["HF_HUB_OFFLINE"] == "1"
     assert g_env["HF_HUB_OFFLINE"] == "1"
     assert g_env["JAEGER_GATEWAY_HOST"] == "127.0.0.1"
+
+
+def test_every_stack_plist_restarts_only_after_a_crash():
+    for service in STACK_SERVICES:
+        data = plistlib.loads(build_plist(service, commit_sha="abc").encode())
+        assert data["KeepAlive"] == {"SuccessfulExit": False}, service.id
+
+
+def test_gateway_lease_shutdown_exits_zero(monkeypatch):
+    """A clean lease shutdown returns 0, so SuccessfulExit=false keeps it down."""
+    import jaeger_ai.core.gateway.server as gateway_server
+
+    async def leave(host, port):
+        return None
+
+    monkeypatch.setattr(gateway_server, "run_gateway_forever", leave)
+    assert gateway_server.main(["--port", "0"]) == 0

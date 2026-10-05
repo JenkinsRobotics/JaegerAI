@@ -415,7 +415,12 @@ def build_plist(service: ServiceDef, commit_sha: str | None = None) -> str:
         '  <dict>\n'
         f'{env_lines}'
         '  </dict>\n'
-        '  <key>KeepAlive</key><true/>\n'
+        # Restart after a crash only. A clean exit (lease shutdown, quit)
+        # stays down, so quit means quit even if bootout loses a race.
+        '  <key>KeepAlive</key>\n'
+        '  <dict>\n'
+        '    <key>SuccessfulExit</key><false/>\n'
+        '  </dict>\n'
         '  <key>RunAtLoad</key><false/>\n'
         '  <key>ThrottleInterval</key><integer>2</integer>\n'
         f'  <key>WorkingDirectory</key><string>{_xml_text(str(REPO_ROOT))}</string>\n'
