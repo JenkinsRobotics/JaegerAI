@@ -135,7 +135,8 @@ def result_frame(req_id: Any, data: Any = None, ok: bool = True,
 
 
 def tool_frame(name: str, phase: str, elapsed_s: float = 0.0,
-               session: str = "", *, detail: str = "") -> dict[str, Any]:
+               session: str = "", *, detail: str = "",
+               args: dict[str, Any] | None = None) -> dict[str, Any]:
     """``detail`` (v1 ADDITIVE, omitted when empty — clients must decode
     frames without it): short human context for the activity chip. Today
     only ``skill`` calls set it ("view scheduling"), so surfaces can show
@@ -144,6 +145,10 @@ def tool_frame(name: str, phase: str, elapsed_s: float = 0.0,
                              "elapsed_s": float(elapsed_s), "session": session}
     if detail:
         frame["detail"] = detail
+    if args:
+        # v1 ADDITIVE, omitted when empty: the call's arguments as the Gateway
+        # published them (already redacted and size-bounded there).
+        frame["args"] = dict(args)
     return frame
 
 

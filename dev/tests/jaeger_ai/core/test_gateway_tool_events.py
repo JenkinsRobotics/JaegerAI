@@ -176,7 +176,10 @@ def test_owner_react_path_installs_tool_callbacks_and_flushes_after_tool(monkeyp
         "turn.start", "turn.delta", "turn.progress", "tool.started", "tool.completed", "turn.delta",
     ]
     serialized = json.dumps(request_events)
-    assert "OWNER_ARG_SECRET" not in serialized
+    # 2026-10-09: the start event carries the call's (redacted, bounded) args so
+    # observers can see what a tool was asked to do; results never cross.
+    started = next(e for e in request_events if e["event"] == "tool.started")
+    assert started["data"]["args"] == {"path": "OWNER_ARG_SECRET"}
     assert "OWNER_RESULT_SECRET" not in serialized
 
 
