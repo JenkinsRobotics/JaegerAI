@@ -18,6 +18,11 @@ DEFAULT_SIDECAR_URL = "http://127.0.0.1:3847"
 
 
 def _http_request(endpoint: str, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    from jaeger_ai.core.embodiment.gate import EmbodimentDisabled, assert_embodiment_allowed
+    try:
+        assert_embodiment_allowed()
+    except EmbodimentDisabled as exc:
+        return {"ok": False, "error": str(exc), "disabled": True}
     url = f"{DEFAULT_SIDECAR_URL}{endpoint}"
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     headers = {"Content-Type": "application/json"} if data is not None else {}

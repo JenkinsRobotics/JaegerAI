@@ -20,7 +20,7 @@ def test_container_prefers_bridge(monkeypatch):
 
     monkeypatch.setattr(ep, "_reachable", lambda host, port=11434: host == "192.168.64.1")
     monkeypatch.setattr(ep, "_container_bridge_host", lambda: "192.168.64.1")
-    assert ep.resolve_ollama_base_url() == "http://192.168.64.1:11434/v1"
+    assert ep.resolve_ollama_base_url() == "http://192.168.64.1:11435/v1"
 
 
 def test_host_prefers_loopback_when_reachable(monkeypatch):
