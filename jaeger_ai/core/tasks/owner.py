@@ -27,6 +27,19 @@ EVIDENCE_CONTRACT = (
 )
 
 
+#: What a turn-owned worker is told. It describes the checks the owner really
+#: runs (close_turn/verify), so the model works toward evidence instead of a ritual.
+TURN_CARD_GUIDANCE = (
+    'This request is owned by a task card. After you reply, the owner checks your result '
+    'independently: every file the request names is re-read and hashed, and an answer it '
+    'cannot check is recorded as unverified for the owner to review. So work in small steps '
+    'and check each result with a tool before relying on it (read the file back, run the '
+    'test, list the directory). If a tool fails, read the error, fix the cause and retry. '
+    'Take more steps rather than guess. Report only what you checked, and say plainly what '
+    'you could not do. For multi-item work you may also: ' + EVIDENCE_CONTRACT
+)
+
+
 #: The owner found nothing it can check deterministically (no declared artifact,
 #: no file receipt, no named file). Turn cards with only this go to needs_owner.
 UNVERIFIABLE = 'No objective verification receipt; continue execution and verify the result'
