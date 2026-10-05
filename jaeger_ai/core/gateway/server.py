@@ -1311,6 +1311,7 @@ class JaegerGatewayApp:
             "reason": state.reason,
             "engaged_by": state.engaged_by,
             "unconfirmed": list(state.unconfirmed),
+            "cancellation_confirmed": not state.unconfirmed,
         })
 
     async def handle_engage_stop(self, request: web.Request) -> web.Response:
@@ -1331,6 +1332,7 @@ class JaegerGatewayApp:
             "reason": state.reason,
             "engaged_by": state.engaged_by,
             "unconfirmed": list(state.unconfirmed),
+            "cancellation_confirmed": not state.unconfirmed,
         })
 
     async def handle_release_stop(self, request: web.Request) -> web.Response:
