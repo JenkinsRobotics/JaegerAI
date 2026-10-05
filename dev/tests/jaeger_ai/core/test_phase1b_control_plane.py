@@ -516,3 +516,33 @@ def test_scratch_gateway_lease_shutdown_never_boots_out_the_stack(tmp_path: Path
 
     asyncio.run(scenario())
     assert calls == ["bounded"]
+
+
+def test_owner_changes_task_state_only_through_the_completion_step():
+    import ast
+    source = Path("jaeger_ai/core/tasks/owner.py").read_text(encoding="utf-8")
+    direct = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(t, ast.Attribute) and t.attr == "state" for t in targets):
+                direct.append(node.lineno)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == "setattr" and len(node.args) > 1
+                and isinstance(node.args[1], ast.Constant) and node.args[1].value == "state"):
+            direct.append(node.lineno)
+    assert direct == [], f"owner.py writes task.state directly at lines {direct}"
+
+
+def test_plain_state_moves_keep_recorded_verification():
+    task = DurableTask(task_id="t", owning_agent="jaeger", goal="g")
+    task.payload = {"verification": [{"path": "/tmp/a", "sha256": "abc"}]}
+    task.error = "earlier"
+    authoritative_transition(task, TaskState.PAUSED)
+    assert task.payload["verification"] == [{"path": "/tmp/a", "sha256": "abc"}]
+    assert task.error == "earlier"
+    authoritative_transition(task, TaskState.QUEUED, error=None)
+    assert task.error is None
+    with pytest.raises(CompletionError):
+        authoritative_transition(task, TaskState.COMPLETED_VERIFIED)  # no evidence given
+    assert task.state == TaskState.QUEUED

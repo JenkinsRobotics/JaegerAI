@@ -108,8 +108,9 @@ class GatewayTaskOwner:
                 # Approval is admission, never permission to replay uncertain effects.
                 return
             task.provenance['authorized'] = approved
-            task.state = TaskState.QUEUED if approved else TaskState.CANCELLED
-            task.error = None
+            authoritative_transition(
+                task, TaskState.QUEUED if approved else TaskState.CANCELLED, error=None,
+            )
         task = self.store.update_task(task_id, update)
         self.gateway.event_bus.publish(task.notification_policy.recipient_session_id, 'task.updated', {'task': task.to_dict()})
 
@@ -449,7 +450,8 @@ class GatewayTaskOwner:
             prompt += '\nPrevious checkpoint (continue from verified work):\n' + str(task.result)
         row = self.gateway.store.get_request(rid)
         if task.cancellation and row is None:
-            task = self.store.update_task(task_id, lambda t: setattr(t, 'state', TaskState.CANCELLED))
+            task = self.store.update_task(
+                task_id, lambda t: authoritative_transition(t, TaskState.CANCELLED))
             self._deliver(task)
             return
         if row is None:
@@ -462,7 +464,7 @@ class GatewayTaskOwner:
             # A persisted admission without dispatch is safe. Unknown effects are
             # recovered separately by the Gateway; never create a fresh run here.
             self.gateway._start_admitted_turn({**row, 'accepted': True}, sid, prompt)
-        self.store.update_task(task_id, lambda t: setattr(t, 'state', TaskState.RUNNING)
+        self.store.update_task(task_id, lambda t: authoritative_transition(t, TaskState.RUNNING)
                                if t.state == TaskState.QUEUED else None)
         operation = self.gateway._running_tasks.get(rid)
         if operation is not None:
@@ -481,23 +483,24 @@ class GatewayTaskOwner:
                 current.payload['native_run_id'] = row['native_run_id']
             current.payload['verification'] = evidence
             if current.cancellation and status != 'execution_unknown':
-                current.state = TaskState.CANCELLED
+                authoritative_transition(current, TaskState.CANCELLED)
             elif verified:
                 try:
                     authoritative_transition(
                         current, TaskState.COMPLETED_VERIFIED, evidence=evidence,
                     )
                 except CompletionError as exc:
-                    current.state = TaskState.FAILED
-                    current.error = str(exc)
+                    authoritative_transition(current, TaskState.FAILED, error=str(exc))
             elif status == 'cancelled':
-                current.state = TaskState.CANCELLED
+                authoritative_transition(current, TaskState.CANCELLED)
             elif status == 'execution_unknown':
-                current.state = TaskState.PAUSED
-                current.error = 'Execution outcome unknown; reconcile effects before retry'
+                authoritative_transition(
+                    current, TaskState.PAUSED,
+                    error='Execution outcome unknown; reconcile effects before retry',
+                )
             elif result.get('halt_reason') == 'yielded':
                 current.payload['attempt'] = attempt + 1
-                current.state = TaskState.QUEUED
+                authoritative_transition(current, TaskState.QUEUED)
                 current.next_execution = time.time() + 1
             elif str(result.get('halt_reason') or '') in {'needs_owner', 'blocked'}:
                 target = (TaskState.NEEDS_OWNER if result.get('halt_reason') == 'needs_owner'
@@ -509,17 +512,20 @@ class GatewayTaskOwner:
                         error=str(result.get('error') or target.value),
                     )
                 except CompletionError as exc:
-                    current.state = TaskState.FAILED
-                    current.error = str(exc)
+                    authoritative_transition(current, TaskState.FAILED, error=str(exc))
             elif current.retry_policy.can_retry():
                 current.retry_policy.current_retries += 1
                 current.payload['attempt'] = attempt + 1
-                current.state = TaskState.QUEUED
+                authoritative_transition(
+                    current, TaskState.QUEUED,
+                    error=str(result.get('error') or evidence or 'Outcome not verified'),
+                )
                 current.next_execution = time.time() + current.retry_policy.backoff_seconds
-                current.error = str(result.get('error') or evidence or 'Outcome not verified')
             else:
-                current.state = TaskState.FAILED
-                current.error = str(result.get('error') or evidence or 'Outcome not verified after retries')
+                authoritative_transition(
+                    current, TaskState.FAILED,
+                    error=str(result.get('error') or evidence or 'Outcome not verified after retries'),
+                )
         task = self.store.update_task(task_id, settle)
         self.gateway.event_bus.publish(task.notification_policy.recipient_session_id or sid,
                                        'task.updated', {'task': task.to_dict()})
@@ -590,7 +596,7 @@ class GatewayTaskOwner:
         receipt = self.gateway.store.get_request(rid)
         in_flight = rid in self.gateway._running_tasks or (receipt or {}).get('status') in {'running', 'admitted', 'execution_unknown'}
         def cancel(t):
-            t.state = TaskState.PAUSED if in_flight else TaskState.CANCELLED
+            authoritative_transition(t, TaskState.PAUSED if in_flight else TaskState.CANCELLED)
             t.cancellation = 'Cancelled by user'
             if in_flight:
                 t.error = 'Cancellation requested; waiting for execution/effect receipt'
