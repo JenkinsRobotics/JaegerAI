@@ -128,15 +128,34 @@ enum LifecycleLeaseBeat {
         }
     }
 
+    /// Quit path. A missing file means "no lease issued" and would allow
+    /// privileged work, so the last beat is an already-expired menu-bar lease.
+    /// Launchd KeepAlive cannot treat that as a live owner.
+    static func retire() {
+        queue.sync {
+            timer?.setEventHandler {}
+            timer?.cancel()
+            timer = nil
+            write(beatAt: 0)
+        }
+    }
+
+    private static func environmentValue(_ key: String) -> String? {
+        // ProcessInfo.environment is a launch snapshot. getenv sees JAEGER_*
+        // set by the test harness and by anything that updates the process.
+        guard let pointer = getenv(key) else { return nil }
+        let value = String(cString: pointer).trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : value
+    }
+
     private static func leaseURL() -> URL {
-        let env = ProcessInfo.processInfo.environment
-        if let raw = env["JAEGER_LIFECYCLE_LEASE"], !raw.trimmingCharacters(in: .whitespaces).isEmpty {
+        if let raw = environmentValue("JAEGER_LIFECYCLE_LEASE") {
             return URL(fileURLWithPath: (raw as NSString).expandingTildeInPath)
         }
         let root: URL
-        if let state = env["JAEGER_STATE_DIR"], !state.trimmingCharacters(in: .whitespaces).isEmpty {
+        if let state = environmentValue("JAEGER_STATE_DIR") {
             root = URL(fileURLWithPath: (state as NSString).expandingTildeInPath)
-        } else if let home = env["JAEGER_HOME"], !home.trimmingCharacters(in: .whitespaces).isEmpty {
+        } else if let home = environmentValue("JAEGER_HOME") {
             root = URL(fileURLWithPath: (home as NSString).expandingTildeInPath).appendingPathComponent(".jaeger_ai")
         } else {
             root = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".jaeger")
@@ -144,12 +163,12 @@ enum LifecycleLeaseBeat {
         return root.appendingPathComponent("control").appendingPathComponent("lifecycle-lease.json")
     }
 
-    private static func write() {
+    static func write(beatAt: TimeInterval? = nil) {
         let url = leaseURL()
         let directory = url.deletingLastPathComponent()
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let stamp = Date().timeIntervalSince1970
+            let stamp = beatAt ?? Date().timeIntervalSince1970
             let body = String(format: "{\"beat_at\": %.6f, \"owner\": \"menubar\"}\n", stamp)
             try Data(body.utf8).write(to: url, options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)

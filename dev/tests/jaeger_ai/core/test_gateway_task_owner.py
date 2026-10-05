@@ -74,7 +74,9 @@ def test_verified_receipt_recovered_and_delivered_once(owner):
     owner.gateway._start_admitted_turn=lambda *a:pytest.fail('duplicate execution')
     restored=GatewayTaskOwner(owner.gateway)
     asyncio.run(restored._execute(tid))
-    assert restored.store.get_task(tid).state == TaskState.COMPLETED
+    finished = restored.store.get_task(tid)
+    assert finished.state == TaskState.COMPLETED_VERIFIED
+    assert finished.payload["verification"][0]["sha256"]
     restored._deliver(restored.store.get_task(tid))
     messages=owner.gateway.store.get_session('parent')['messages']
     assert [m['content'] for m in messages] == ['Verified proof written']
@@ -143,7 +145,7 @@ def test_budget_yield_continues_then_delivers_one_verified_answer(owner):
         restored = GatewayTaskOwner(owner.gateway)
         await restored._execute(tid)
         await restored.tick()
-        assert restored.store.get_task(tid).state == TaskState.COMPLETED
+        assert restored.store.get_task(tid).state == TaskState.COMPLETED_VERIFIED
     asyncio.run(run())
     assert launches == [f'{tid}:0', f'{tid}:1']
     assert [m['content'] for m in owner.gateway.store.get_session('parent')['messages']] == ['Report built and checked']
@@ -188,3 +190,70 @@ def test_legacy_board_moves_do_not_count_as_worker_execution(owner, tmp_path):
     assert tasks[0].provenance['authorized']
     assert 'gateway-owned' in board.get(card.id).tags
     assert owner.migrate_legacy(layout) == 0
+
+
+def _finish_worker(owner, tid, result, *, status='completed', exhaust=False):
+    """Record a worker Result and run the real owner settle path."""
+    if exhaust:
+        owner.store.update_task(
+            tid,
+            lambda task: setattr(task.retry_policy, 'current_retries', task.retry_policy.max_retries),
+        )
+    sid = f'task:{tid}'
+    rid = f'{tid}:0'
+    owner.gateway.store.ensure_session(sid)
+    owner.gateway.store.admit_request(sid, 'worker', request_id=rid)
+    owner.gateway.store.complete_request(rid, status=status, result=result)
+    owner.gateway._start_admitted_turn = lambda *args: pytest.fail('worker ran again')
+    asyncio.run(owner._execute(tid))
+    return owner.store.get_task(tid)
+
+
+def test_worker_evidence_is_the_only_completed_verified_path(owner):
+    """task -> worker Result -> verifier -> authoritative_transition."""
+    bare = (
+        {},
+        {'output': ''},
+        {'output': 'success'},
+        {'output': 'ok'},
+        {'output': 'done'},
+        {'ok': True, 'success': True, 'status': 'done'},
+    )
+    for result in bare:
+        tid = owner.submit(f'Finish {result}', context=context(owner))['task_id']
+        finished = _finish_worker(owner, tid, result, exhaust=True)
+        assert finished.state == TaskState.FAILED
+        assert finished.state != TaskState.COMPLETED_VERIFIED
+
+    tid = owner.submit('Write the proof', context=context(owner), artifacts=['missing.txt'])['task_id']
+    failed_check = _finish_worker(owner, tid, {'output': 'success'}, exhaust=True)
+    assert failed_check.state == TaskState.FAILED
+
+    needs = _finish_worker(
+        owner,
+        owner.submit('Ask first', context=context(owner))['task_id'],
+        {'halt_reason': 'needs_owner', 'error': 'which file?', 'evidence': {'question': 'which file?'}},
+        status='failed',
+    )
+    blocked = _finish_worker(
+        owner,
+        owner.submit('Wait', context=context(owner))['task_id'],
+        {'halt_reason': 'blocked', 'error': 'approval missing', 'evidence': {'waiting_on': 'approval'}},
+        status='failed',
+    )
+    failed = _finish_worker(
+        owner,
+        owner.submit('Crash', context=context(owner))['task_id'],
+        {'error': 'tool crashed', 'output': 'success'},
+        status='failed',
+        exhaust=True,
+    )
+    cancelled = _finish_worker(
+        owner,
+        owner.submit('Stop', context=context(owner))['task_id'],
+        {'error': 'operator cancelled'},
+        status='cancelled',
+    )
+    assert [needs.state, blocked.state, failed.state, cancelled.state] == [
+        TaskState.NEEDS_OWNER, TaskState.BLOCKED, TaskState.FAILED, TaskState.CANCELLED,
+    ]
