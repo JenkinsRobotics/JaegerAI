@@ -272,6 +272,19 @@ def _route_template(request: web.Request) -> str | None:
     return getattr(resource, "canonical", None) if resource is not None else None
 
 
+def _control_plane_block() -> str | None:
+    """In-process producers bypass HTTP middleware. They still honor Stop."""
+    from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
+    try:
+        if GlobalStop.load().engaged():
+            return "global stop"
+    except GlobalStopError:
+        return "global stop"
+    except Exception:
+        return "global stop unavailable"
+    return None
+
+
 @web.middleware
 async def _authenticate_caller(request: web.Request, handler: Any) -> web.StreamResponse:
     """Every non-public route needs a per-caller bearer token (fail closed).
@@ -314,6 +327,16 @@ async def _authenticate_caller(request: web.Request, handler: Any) -> web.Stream
                 {"error": f"Caller {spec.name!r} may only use sessions starting {spec.session_prefix!r}"},
                 status=403,
             )
+    from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError, allowed_while_stopped
+    try:
+        stopped = GlobalStop.load().engaged()
+    except GlobalStopError:
+        stopped = True
+    except Exception:
+        logger.error("Global stop path unavailable", exc_info=True)
+        return web.json_response({"error": "global stop unavailable"}, status=503)
+    if stopped and not allowed_while_stopped(request.method, route, spec):
+        return web.json_response({"error": "global stop", "state": "stopped"}, status=423)
     actor = spec.actor
     if spec.name == "jaegerd":
         claimed = (request.headers.get("X-Jaeger-Actor") or "").strip()
@@ -800,6 +823,9 @@ class JaegerGatewayApp:
         loop = self._loop
         if loop is None or not loop.is_running():
             return {"text": "", "error": "gateway loop is not running", "halt_reason": "error"}
+        blocked = _control_plane_block()
+        if blocked:
+            return {"text": "", "error": blocked, "halt_reason": "stopped", "skipped": True, "replayed": False}
         future = asyncio.run_coroutine_threadsafe(
             self._run_background_turn(
                 prompt, session_id=session_id, request_id=request_id, source=source,
@@ -954,6 +980,9 @@ class JaegerGatewayApp:
 
     def _setup_routes(self) -> None:
         self.app.router.add_get("/health", self.handle_health)
+        self.app.router.add_get("/v1/stop", self.handle_stop_status)
+        self.app.router.add_post("/v1/stop", self.handle_engage_stop)
+        self.app.router.add_post("/v1/stop/release", self.handle_release_stop)
         self.app.router.add_get("/v1/runtime/status", self.handle_runtime_status)
         self.app.router.add_get("/version", self.handle_version)
         # Agent catalog — persistence spine for Mac app + WebUI clients.
@@ -1196,6 +1225,80 @@ class JaegerGatewayApp:
             }
         finally:
             await terminate_session()
+
+    async def _halt_for_stop(self) -> list[str]:
+        """Cancel in-flight helpers. Names that do not confirm are returned."""
+        from jaeger_ai.core.devices.registry import block_device_commands
+        block_device_commands()
+        unconfirmed: list[str] = []
+        scopes = getattr(self._cancellations, "_scopes", {})
+        for request_id in list(scopes):
+            try:
+                self._cancellations.cancel(str(request_id))
+            except Exception:
+                unconfirmed.append(str(request_id))
+        cancel_all = getattr(self.orchestration, "cancel_all", None)
+        if callable(cancel_all):
+            try:
+                pending = cancel_all(timeout_seconds=1.5)
+                if asyncio.iscoroutine(pending):
+                    pending = await pending
+                if pending:
+                    unconfirmed.extend(str(item) for item in pending)
+            except Exception:
+                unconfirmed.append("orchestration")
+        for key, task in list(self._running_tasks.items()):
+            if not task.done():
+                task.cancel()
+                unconfirmed.append(str(key))
+        return unconfirmed
+
+    async def handle_stop_status(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
+        latch = GlobalStop.load()
+        try:
+            state = latch.read()
+        except GlobalStopError:
+            return web.json_response({
+                "engaged": True, "reason": "unreadable latch", "engaged_by": "", "unconfirmed": [],
+            })
+        return web.json_response({
+            "engaged": state.engaged,
+            "reason": state.reason,
+            "engaged_by": state.engaged_by,
+            "unconfirmed": list(state.unconfirmed),
+        })
+
+    async def handle_engage_stop(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.gateway.global_stop import GlobalStop
+        spec = request["caller"]
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        if not isinstance(body, dict):
+            body = {}
+        reason = str(body.get("reason") or "stop")
+        state = GlobalStop.load().engage(
+            spec.name, reason=reason, unconfirmed=await self._halt_for_stop(),
+        )
+        return web.json_response({
+            "engaged": state.engaged,
+            "reason": state.reason,
+            "engaged_by": state.engaged_by,
+            "unconfirmed": list(state.unconfirmed),
+        })
+
+    async def handle_release_stop(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.devices.registry import allow_device_commands
+        from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
+        spec = request["caller"]
+        try:
+            state = GlobalStop.load().release(spec)
+        except GlobalStopError as exc:
+            return web.json_response({"error": str(exc)}, status=403)
+        allow_device_commands()
+        return web.json_response({"engaged": state.engaged, "released_by": spec.name})
 
     async def handle_health(self, request: web.Request) -> web.Response:
         """Backend readiness is independent of optional HTTP adapters and UIs."""

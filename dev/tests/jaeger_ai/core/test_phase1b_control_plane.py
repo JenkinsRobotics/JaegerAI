@@ -10,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from jaeger_ai.core.gateway import caller_auth
+from jaeger_ai.core.gateway.caller_auth import CALLERS
+from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError, release_allowed
 from jaeger_ai.core.models.ollama_bridge import (
     bridge_authorized,
     bridge_request_allowed,
@@ -24,6 +26,34 @@ from jaeger_ai.core.tasks.models import DurableTask, TaskState
 def test_webui_bind_stays_on_loopback_even_if_host_is_wildcard():
     assert webui_bind_host({"JAEGER_WEBUI_HOST": "0.0.0.0"}) == "127.0.0.1"
     assert webui_bind_host({"JAEGER_WEBUI_ALLOW_LAN": "1", "JAEGER_WEBUI_HOST": "0.0.0.0"}) == "0.0.0.0"
+
+
+def test_callers_cannot_self_declare_owner():
+    assert "admin" not in CALLERS["mcp"].scopes
+    assert "admin" not in CALLERS["a2a"].scopes
+    assert "admin" not in CALLERS["jaegerd"].scopes
+    assert release_allowed(CALLERS["mcp"]) is False
+    assert release_allowed(CALLERS["a2a"]) is False
+    assert release_allowed(CALLERS["cli"]) is True
+
+
+def test_global_stop_survives_reload_and_rejects_non_owner_release(tmp_path: Path):
+    latch = GlobalStop(tmp_path / "global-stop.json")
+    latch.engage("menubar", reason="operator pressed stop", unconfirmed=["helper-7"])
+    reloaded = GlobalStop(tmp_path / "global-stop.json")
+    assert reloaded.engaged() is True
+    assert reloaded.read().unconfirmed == ("helper-7",)
+    with pytest.raises(GlobalStopError):
+        reloaded.release(CALLERS["mcp"])
+    with pytest.raises(GlobalStopError):
+        reloaded.release(CALLERS["a2a"])
+    assert reloaded.release(CALLERS["cli"]).engaged is False
+
+
+def test_corrupt_stop_latch_fails_engaged(tmp_path: Path):
+    path = tmp_path / "global-stop.json"
+    path.write_text("nope", encoding="utf-8")
+    assert GlobalStop(path).engaged() is True
 
 
 def test_ollama_daemon_is_loopback_and_proxy_rejects_lan():
@@ -58,3 +88,43 @@ def test_completed_verified_requires_evidence():
     assert task.state == TaskState.NEEDS_OWNER
     authoritative_transition(task, TaskState.BLOCKED, error="waiting")
     assert task.state == TaskState.BLOCKED
+
+
+def test_live_gateway_stop_is_owner_only(tmp_path: Path, monkeypatch):
+    import aiohttp.test_utils as aio_test
+
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+
+    monkeypatch.setenv("JAEGER_GLOBAL_STOP_PATH", str(tmp_path / "stop.json"))
+    monkeypatch.setenv("JAEGER_LIFECYCLE_LEASE", str(tmp_path / "missing-lease.json"))
+
+    async def scenario():
+        gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "gw.sqlite3"))
+        gateway.app.on_startup.clear()
+        async with aio_test.TestClient(aio_test.TestServer(gateway.app)) as client:
+            health = await client.get("/health")
+            assert health.status != 401
+            missing = await client.post("/v1/stop", json={"reason": "no"})
+            assert missing.status == 401
+            forged = await client.post("/v1/stop/release", headers={
+                **caller_auth.client_headers("mcp"),
+                "X-Jaeger-Role": "owner",
+            })
+            assert forged.status == 403
+            engaged = await client.post("/v1/stop", json={"reason": "operator"}, headers=caller_auth.client_headers("menubar"))
+            assert engaged.status == 200
+            assert (await engaged.json())["engaged"] is True
+            blocked = await client.post("/v1/sessions", json={"session_id": "x"}, headers=caller_auth.client_headers("cli"))
+            assert blocked.status == 423
+            outsider = await client.post("/v1/stop/release", headers=caller_auth.client_headers("mcp"))
+            assert outsider.status == 403
+            still = await client.get("/v1/stop", headers=caller_auth.client_headers("cli"))
+            assert (await still.json())["engaged"] is True
+            released = await client.post("/v1/stop/release", headers=caller_auth.client_headers("cli"))
+            assert released.status == 200
+            assert (await released.json())["engaged"] is False
+            again = await client.get("/v1/sessions", headers=caller_auth.client_headers("cli"))
+            assert again.status != 423
+
+    asyncio.run(scenario())
