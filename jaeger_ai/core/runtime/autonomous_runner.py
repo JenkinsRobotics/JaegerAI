@@ -25,6 +25,8 @@ that still loop locally (the TUI worker) call
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import os
 import re
 from typing import Any, Callable
@@ -87,7 +89,7 @@ _DECLARATIVE_DISCUSSION = re.compile(
     r"this\s+is\s+an\s+example|i\s+meant)\b"
 )
 _PATH_TOKEN = re.compile(
-    r"(?<!https:)(?<!http:)(?:`([^`]+)`|\b([\w./~-]+\.(?:md|txt|json|jsonl|csv|py|html|xlsx|pdf)))"
+    r"(?<!https:)(?<!http:)(?:`([^`]+)`|(?<![\w./~-])([\w./~-]+\.(?:md|txt|json|jsonl|csv|py|html|xlsx|pdf))\b)"
 )
 
 ACCEPTANCE_GUIDANCE = """[Acceptance Contract]
@@ -453,6 +455,74 @@ def next_continuation_prompt(
     return continuation.continuation_prompt(execution.run_progress()["objective"])
 
 
+def missing_named_paths(text: str) -> list[str]:
+    """Paths named in ``text`` that do not exist where the tools would look.
+
+    Relative paths resolve the way the file and shell tools resolve them:
+    the bound project, the instance root (``workspace/...``) and the
+    effective workspace. Used only to decide whether a follow-up is
+    warranted, never to fail a turn.
+    """
+    names = _required_paths(text)
+    if not names:
+        return []
+    bases: list[Path] = []
+    try:
+        from jaeger_agent.core import workspace as _ws
+        project = _ws.get_project_root()
+        if project is not None:
+            bases.append(Path(project))
+        layout = _ws._require_layout()
+        bases.extend([Path(layout.root), Path(_ws.get_effective_workspace_dir())])
+    except Exception:  # noqa: BLE001 — no instance bound: only absolute paths count
+        pass
+    missing = []
+    for name in names:
+        candidate = Path(name).expanduser()
+        if candidate.is_absolute():
+            found = candidate.exists()
+        else:
+            found = any((base / candidate).exists() for base in bases)
+        if not found:
+            missing.append(name)
+    return missing
+
+
+MISSING_PATHS_NOTE = (
+    "Check before you finish: these paths named in the request do not exist "
+    "yet: {paths}. If the request asked you to produce them, finish that and "
+    "confirm they exist with a tool. If they were supposed to exist already, "
+    "say so plainly instead of creating them."
+)
+
+
+def interactive_followup(answer: str, objective: str, halt_reason: str | None,
+                         *, paths_checked: bool) -> str | None:
+    """Next prompt for an operator's turn-owned request, or ``None`` to reply.
+
+    A durable background task keeps the strict ledger contract (``harness_prompt``
+    until ``complete_task``). An interactive request whose answer IS the
+    deliverable (a hash, a count, a summary) cannot produce a file receipt, so
+    re-prompting it "do not stop until all items are finished" only burned
+    model calls (2026-10-09 probe: five extra calls after a correct answer).
+    Continue only on evidence of unfinished work: the inner budget tripped,
+    the model said it is not done, or files named in the request are missing
+    (one neutral check; never an instruction to invent them).
+    """
+    if continuation.hit_inner_cap(halt_reason):
+        return continuation.continuation_prompt(objective)
+    verdict = continuation.classify(answer)
+    if verdict in {"question", "blocked"}:
+        return None
+    if verdict in {"continue", "empty"}:
+        return continuation.continuation_prompt(objective)
+    if not paths_checked:
+        missing = missing_named_paths(objective)
+        if missing:
+            return MISSING_PATHS_NOTE.format(paths=", ".join(missing[:8]))
+    return None
+
+
 def run_continued_turn(
     turn_fn: TurnFn,
     prompt: str,
@@ -462,6 +532,7 @@ def run_continued_turn(
     max_steps: int | None = None,
     on_checkpoint: ProgressFn | None = None,
     durable: bool = False,
+    interactive: bool = False,
 ) -> dict[str, Any]:
     """Re-fire one inner turn until the stall/ledger rule says stop.
 
@@ -480,6 +551,7 @@ def run_continued_turn(
     checkpoints: list[dict[str, Any]] = []
     result: dict[str, Any] = {}
     nxt = None
+    paths_checked = False
 
     while True:
         if durable and last_completion():
@@ -506,7 +578,11 @@ def run_continued_turn(
         halt = result.get("halt_reason")
         if continuation.is_loop_breaker(halt):
             break
-        if durable and not last_completion():
+        if durable and not last_completion() and interactive and not ledger_open():
+            nxt = interactive_followup(ans, goal, halt, paths_checked=paths_checked)
+            if nxt and nxt.startswith(MISSING_PATHS_NOTE[:30]):
+                paths_checked = True
+        elif durable and not last_completion():
             nxt = harness_prompt(objective=goal)
         elif ledger_open() or continuation.hit_inner_cap(halt):
             nxt = next_continuation_prompt(
