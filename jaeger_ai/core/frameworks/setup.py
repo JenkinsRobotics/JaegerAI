@@ -418,14 +418,15 @@ def _configure_agent_models(
 ) -> None:
     """Apply the cloud default to WebUI profiles and native agent runtimes."""
     home = (home or Path.home()).expanduser().resolve()
+    from jaeger_ai.core.models.ollama_bridge import PROXY_PORT
     from jaeger_ai.core.models.router import resolve_ollama_base_url
     if container_host is not None:
-        profile_ollama_url = f"http://{container_host}:11434/v1"
-        container_ollama_url = f"http://{container_host}:11434/v1"
+        profile_ollama_url = f"http://{container_host}:{PROXY_PORT}/v1"
+        container_ollama_url = f"http://{container_host}:{PROXY_PORT}/v1"
         openclaw_host = container_host
     else:
         profile_ollama_url = resolve_ollama_base_url(openai_compat=True)
-        container_ollama_url = f"http://{CONTAINER_HOST}:11434/v1"
+        container_ollama_url = f"http://{CONTAINER_HOST}:{PROXY_PORT}/v1"
         openclaw_host = CONTAINER_HOST
     profile_homes = [home / ".jaeger" / "hermes"] + [home / ".jaeger" / "hermes" / "profiles" / name for name in SERVICES]
     for profile_home in profile_homes:
@@ -470,6 +471,13 @@ def _configure_agent_models(
         provider = document.setdefault("models", {}).setdefault("providers", {}).setdefault(provider_name, {})
         container_ollama = container_ollama_url.removesuffix("/v1")
         provider["baseUrl"] = container_ollama
+        try:
+            from jaeger_ai.core.gateway.caller_auth import client_token
+            bridge_token = client_token("mcp")
+        except Exception:
+            bridge_token = None
+        if bridge_token:
+            provider["apiKey"] = bridge_token
         local = document.setdefault("models", {}).setdefault("providers", {}).setdefault("ollama-local", {})
         if isinstance(local, dict):
             local["baseUrl"] = container_ollama

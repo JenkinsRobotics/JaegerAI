@@ -226,7 +226,7 @@ def ensure_webui_config_yaml(agent_home: Path) -> dict[str, Any]:
 providers:
   only_configured: false
 webui:
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 8790
   session_save_mode: eager
 """
@@ -242,7 +242,7 @@ webui:
     if "webui:" not in raw:
         raw += """
 webui:
-  host: 0.0.0.0
+  host: 127.0.0.1
   port: 8790
   session_save_mode: eager
 """

@@ -219,6 +219,11 @@ class PolicyKernel:
         current_args = dict(proposal.arguments)
 
         try:
+            # ── 0. Control plane: Stop, lifecycle owner, embodiment ──────────
+            control = self._check_control_plane(proposal)
+            if control is not None:
+                return control
+
             # ── 0. Structural validity: unknown tool/action/tier → DENY ─────
             structural = self._check_structure(proposal)
             if structural is not None:
@@ -297,6 +302,55 @@ class PolicyKernel:
     # Every sub-check fails CLOSED: an exception inside a check is a DENY, never
     # "no objection" (Constitution invariant 11). Phase 0 found four sub-checks
     # that logged at debug level and returned None on error.
+
+    def _check_control_plane(self, proposal: ProposedAction) -> AuthorityDecision | None:
+        """Stop and a missing owner fail closed. Embodiment stays off."""
+        name = str(proposal.tool_name or "").strip().lower()
+        if name.startswith("mc_") or "minecraft" in name:
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason="Embodiment is disabled until the control-plane release gate passes.",
+                policy_name="embodiment_gate",
+                proposal_id=proposal.proposal_id,
+            )
+        try:
+            from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
+            try:
+                stopped = GlobalStop.load().engaged()
+            except GlobalStopError:
+                stopped = True
+            if stopped:
+                return AuthorityDecision(
+                    decision=AuthorityDecisionType.DENY,
+                    reason="global stop",
+                    policy_name="global_stop",
+                    proposal_id=proposal.proposal_id,
+                )
+        except Exception:
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason="global stop unavailable",
+                policy_name="global_stop",
+                proposal_id=proposal.proposal_id,
+            )
+        try:
+            from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease
+            decision = LifecycleLease.load().decide()
+        except Exception:
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason="lifecycle lease unavailable",
+                policy_name="lifecycle_lease",
+                proposal_id=proposal.proposal_id,
+            )
+        if not decision.privileged_work_allowed:
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason=decision.reason,
+                policy_name="lifecycle_lease",
+                proposal_id=proposal.proposal_id,
+            )
+        return None
 
     def _check_structure(self, proposal: ProposedAction) -> AuthorityDecision | None:
         if not canonical_tool_id(proposal.tool_name):

@@ -21,10 +21,10 @@ def test_browser_url_uses_configured_webui_port(monkeypatch):
     assert make_service(monkeypatch).browser_url() == "http://127.0.0.1:9790/"
 
 
-def test_browser_url_prefers_tailscale_webui_port(monkeypatch):
+def test_browser_url_stays_on_loopback_when_tailscale_is_up(monkeypatch):
     ui = make_service(monkeypatch)
     monkeypatch.setattr(service, "_tailscale_ipv4", lambda: "100.74.2.15")
-    assert ui.browser_url() == "http://100.74.2.15:9790/"
+    assert ui.browser_url() == "http://127.0.0.1:9790/"
 
 
 def test_urls_expose_only_adapter_and_webui(monkeypatch):

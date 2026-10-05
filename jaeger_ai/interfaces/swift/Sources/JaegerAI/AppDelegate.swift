@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // would close.
         NSApp.setActivationPolicy(.accessory)
         NSLog("[JaegerAI] app launched, activation policy = .accessory")
+        LifecycleLeaseBeat.start()
 
         SplashWindowController.shared.show()
 
@@ -246,6 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> NSApplication.TerminateReply {
         if shutdownStarted { return .terminateNow }
         shutdownStarted = true
+        LifecycleLeaseBeat.stop()
         MultimodalWindowController.shared.stopForApplicationQuit()
         Task { @MainActor in
             await AgentBridge.shared.shutdownForQuit()

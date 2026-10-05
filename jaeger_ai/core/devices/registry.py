@@ -21,6 +21,29 @@ from .models import DeviceCapability, DevicePairingSecret, DeviceTelemetry, Devi
 logger = logging.getLogger("jaeger.core.devices.registry")
 
 
+_COMMANDS_BLOCKED = False
+
+
+def block_device_commands() -> None:
+    global _COMMANDS_BLOCKED
+    _COMMANDS_BLOCKED = True
+
+
+def allow_device_commands() -> None:
+    global _COMMANDS_BLOCKED
+    _COMMANDS_BLOCKED = False
+
+
+def device_commands_allowed() -> bool:
+    if _COMMANDS_BLOCKED:
+        return False
+    try:
+        from jaeger_ai.core.gateway.global_stop import GlobalStop
+        return not GlobalStop.load().engaged()
+    except Exception:
+        return False
+
+
 class DeviceError(RuntimeError):
     pass
 
@@ -148,6 +171,8 @@ class DeviceRegistry:
         requested_capabilities: list[str],
     ) -> list[str]:
         """Negotiate and return intersection of requested vs supported device capabilities."""
+        if not device_commands_allowed():
+            raise DeviceError("device commands are blocked")
         with self._lock:
             dev = self._devices.get(device_id)
             if not dev:
