@@ -157,7 +157,9 @@ def test_jaeger_host_adapter_uses_native_mcp_by_default(monkeypatch):
 
     assert client.base_url == "http://127.0.0.1:8792/mcp"
     assert client.host_header == "127.0.0.1:8792"
-    assert "Authorization" not in client._headers()
+    # Jaeger's MCP server requires a caller token; jaegerd presents its own.
+    from jaeger_ai.core.gateway.caller_auth import read_token
+    assert client._headers()["Authorization"] == f"Bearer {read_token('jaegerd')}"
 
 
 def test_jaeger_nonstream_completion_returns_openai_json(monkeypatch):

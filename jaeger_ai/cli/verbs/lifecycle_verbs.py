@@ -516,7 +516,9 @@ def _wait_runtime_ready(*, timeout_s: float = 45.0) -> bool:
             time.sleep(0.4)
             continue
         try:
-            with urllib.request.urlopen(url, timeout=2) as resp:
+            from jaeger_ai.core.gateway.caller_auth import client_headers
+            req = urllib.request.Request(url, headers=client_headers("cli"))
+            with urllib.request.urlopen(req, timeout=2) as resp:
                 payload = json.loads(resp.read().decode("utf-8") or "{}")
             last = str(payload.get("Agent", {}).get("entity_id") or "")
             if payload.get("ready") and last:

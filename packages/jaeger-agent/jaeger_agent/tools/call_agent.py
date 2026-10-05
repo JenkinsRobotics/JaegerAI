@@ -11,7 +11,7 @@ import json
 import os
 import time
 import uuid
-from typing import Any
+from typing import Any, Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -22,11 +22,40 @@ def _gateway_base() -> str:
     return (os.environ.get("JAEGER_GATEWAY_URL") or "http://127.0.0.1:8810").rstrip("/")
 
 
+#: Supplies jaegerd's Gateway caller credential. The Gateway registers it at
+#: startup (``set_gateway_auth``); jaeger-agent never imports product code or
+#: reads a token store itself. Unregistered = no credential = 401 (fail closed).
+_GATEWAY_AUTH: Callable[[], dict[str, str]] | None = None
+
+
+def set_gateway_auth(provider: Callable[[], dict[str, str]] | None) -> None:
+    global _GATEWAY_AUTH
+    _GATEWAY_AUTH = provider
+
+
+def _caller_headers() -> dict[str, str]:
+    """jaegerd's credential plus the actor of the turn this tool runs in, so a
+    handoff started inside an MCP/A2A turn stays attributed to that caller."""
+    if _GATEWAY_AUTH is None:
+        return {}
+    headers = dict(_GATEWAY_AUTH())
+    try:
+        from jaeger_agent.tool_executor import active_caller_identity
+        actor = str(active_caller_identity() or "").strip()
+    except Exception:  # noqa: BLE001 - no bound identity: jaegerd's own actor
+        actor = ""
+    if actor and headers:
+        headers["X-Jaeger-Actor"] = actor
+    return headers
+
+
 def _request_json(method: str, path: str, body: dict[str, Any] | None = None, timeout: float = 10) -> tuple[int, dict[str, Any]]:
     url = f"{_gateway_base()}{path}"
     raw = json.dumps(body or {}).encode("utf-8") if body is not None else None
     req = Request(url, data=raw, method=method)
     req.add_header("Accept", "application/json")
+    for key, value in _caller_headers().items():
+        req.add_header(key, value)
     if raw is not None:
         req.add_header("Content-Type", "application/json")
     try:

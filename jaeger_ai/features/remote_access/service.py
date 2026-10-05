@@ -453,7 +453,9 @@ def doctor() -> dict[str, Any]:
     public_exposure = bool(webui.get("all_interfaces")) or bool(serve.get("funnel"))
     entity_id = ""
     try:
-        gw_status = _http_ok("http://127.0.0.1:8810/v1/runtime/status")
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        gw_status = _http_ok("http://127.0.0.1:8810/v1/runtime/status",
+                             headers={"User-Agent": "jaeger-remote-doctor", **client_headers("cli")})
         payload = json.loads((gw_status.get("body") or b"{}").decode("utf-8", "replace"))
         entity_id = str(((payload.get("Agent") or {}).get("entity_id")) or "")
     except Exception:

@@ -483,7 +483,11 @@ def _jaeger_gateway_turn(run, session_id: str) -> dict | None:
     import urllib.request
 
     gw = (os.environ.get("JAEGER_GATEWAY_URL") or f"http://127.0.0.1:{os.environ.get('JAEGER_GATEWAY_PORT', '8810')}").rstrip("/")
-    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    # Native framework runs are Jaeger's own relayed work: the least-privileged
+    # ``jaegerd`` caller (read/turn; it cannot approve or administer).
+    headers = {"Content-Type": "application/json", "Accept": "application/json",
+               **client_headers("jaegerd")}
 
     def _call(method: str, path: str, payload: dict | None = None, timeout: float = 15):
         data = None if payload is None else json.dumps(payload).encode("utf-8")

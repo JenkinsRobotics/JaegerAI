@@ -47,10 +47,12 @@ def _base() -> str:
 
 
 def _request(method: str, path: str, body: dict | None = None) -> Any | None:
+    from jaeger_ai.core.gateway.caller_auth import client_headers
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         f"{_base()}{path}", data=data, method=method,
-        headers={"Accept": "application/json", "Content-Type": "application/json"},
+        headers={"Accept": "application/json", "Content-Type": "application/json",
+                 **client_headers("webui")},
     )
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT_S) as resp:

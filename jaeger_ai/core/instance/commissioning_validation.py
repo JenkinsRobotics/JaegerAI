@@ -124,10 +124,19 @@ def _gateway_port() -> int:
     return int(os.environ.get("JAEGER_GATEWAY_PORT") or 8810)
 
 
+def _gateway_auth(url: str) -> dict[str, str]:
+    """The CLI caller token, sent only to this instance's Gateway."""
+    if not url.startswith(f"http://127.0.0.1:{_gateway_port()}/"):
+        return {}
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    return client_headers("cli")
+
+
 def _gateway_status(port: int) -> dict[str, Any] | None:
     url = f"http://127.0.0.1:{port}/v1/runtime/status"
     try:
-        with urlopen(url, timeout=2.0) as resp:
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        with urlopen(Request(url, headers=client_headers("cli")), timeout=2.0) as resp:
             return json.loads(resp.read().decode("utf-8") or "{}")
     except Exception:
         return None
@@ -135,7 +144,8 @@ def _gateway_status(port: int) -> dict[str, Any] | None:
 
 def _http_json(method: str, url: str, body: dict[str, Any] | None = None, timeout: float = 10.0) -> dict[str, Any]:
     data = None if body is None else json.dumps(body).encode("utf-8")
-    req = Request(url, data=data, method=method, headers={"Content-Type": "application/json"})
+    req = Request(url, data=data, method=method,
+                  headers={"Content-Type": "application/json", **_gateway_auth(url)})
     try:
         with urlopen(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8") or "{}"

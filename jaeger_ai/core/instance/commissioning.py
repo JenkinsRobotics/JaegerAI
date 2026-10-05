@@ -712,8 +712,10 @@ class CommissioningCoordinator:
         if ready:
             try:
                 import json
-                from urllib.request import urlopen
-                with urlopen(f"http://127.0.0.1:{port}/v1/runtime/status", timeout=2) as resp:
+                from urllib.request import Request, urlopen
+                from jaeger_ai.core.gateway.caller_auth import client_headers
+                with urlopen(Request(f"http://127.0.0.1:{port}/v1/runtime/status",
+                                     headers=client_headers("cli")), timeout=2) as resp:
                     payload = json.loads(resp.read().decode("utf-8") or "{}")
                 entity_id = str((payload.get("Agent") or {}).get("entity_id") or "")
             except Exception:
@@ -771,9 +773,11 @@ def _wait_gateway_ready(port: int, *, timeout_s: float) -> bool:
     from urllib.request import urlopen
     deadline = time.time() + timeout_s
     url = f"http://127.0.0.1:{port}/v1/runtime/status"
+    from urllib.request import Request
+    from jaeger_ai.core.gateway.caller_auth import client_headers
     while time.time() < deadline:
         try:
-            with urlopen(url, timeout=1.5) as resp:
+            with urlopen(Request(url, headers=client_headers("cli")), timeout=1.5) as resp:
                 payload = json.loads(resp.read().decode("utf-8") or "{}")
             if payload.get("ready"):
                 return True

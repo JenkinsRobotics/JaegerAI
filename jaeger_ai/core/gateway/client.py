@@ -61,15 +61,30 @@ def gateway_base_url() -> str:
 class GatewayTurnClient:
     """Submit turns to the resident Entity and wait for their terminal result."""
 
-    def __init__(self, base_url: str | None = None, *, request_timeout_s: float = 15.0) -> None:
+    def __init__(self, base_url: str | None = None, *, request_timeout_s: float = 15.0,
+                 caller: str | None = None, token: str | None = None) -> None:
+        """``caller`` names this process to the Gateway (default
+        ``JAEGER_GATEWAY_CALLER`` or ``cli``); its token comes from the
+        Keychain. ``token`` is a caller token handed over by a client that
+        proved it (the bridge relaying an MCP/A2A turn) and wins over
+        ``caller``. Values are never logged."""
+        from .caller_auth import default_caller
+
         self.base_url = (base_url or gateway_base_url()).rstrip("/")
         self.request_timeout_s = request_timeout_s
+        self.caller = caller or default_caller("cli")
+        self._token = token
+
+    def _auth(self) -> dict[str, str]:
+        from .caller_auth import bearer, client_token
+
+        return bearer(self._token or client_token(self.caller))
 
     def _call(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
         data = json.dumps(body).encode("utf-8") if body is not None else None
         req = urllib.request.Request(
             self.base_url + path, data=data, method=method,
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers={"Content-Type": "application/json", "Accept": "application/json", **self._auth()},
         )
         try:
             with urllib.request.urlopen(req, timeout=self.request_timeout_s) as resp:
@@ -205,7 +220,7 @@ class GatewayTurnClient:
         """Yield ``(event_id, event, data)`` from the session's SSE stream."""
         req = urllib.request.Request(
             f"{self.base_url}/v1/sessions/{session_id}/stream?last_event_id={since}",
-            headers={"Accept": "text/event-stream"},
+            headers={"Accept": "text/event-stream", **self._auth()},
         )
         try:
             stream = urllib.request.urlopen(req, timeout=STREAM_READ_TIMEOUT_S)

@@ -17,11 +17,16 @@ import urllib.request
 import uuid
 
 
+def _auth():
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    return client_headers("cli")
+
+
 def call(base, method, path, body=None, timeout=30):
     req = urllib.request.Request(
         base + path, method=method,
         data=None if body is None else json.dumps(body).encode(),
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        headers={"Content-Type": "application/json", "Accept": "application/json", **_auth()},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read() or b"null")
@@ -29,7 +34,7 @@ def call(base, method, path, body=None, timeout=30):
 
 def stream(base, session_id, deadline):
     req = urllib.request.Request(f"{base}/v1/sessions/{session_id}/stream?last_event_id=0",
-                                 headers={"Accept": "text/event-stream"})
+                                 headers={"Accept": "text/event-stream", **_auth()})
     with urllib.request.urlopen(req, timeout=max(5, deadline - time.time())) as resp:
         name, data = "message", []
         for raw in resp:

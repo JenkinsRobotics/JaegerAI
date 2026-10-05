@@ -180,7 +180,9 @@ def _gateway_session(session_id: str) -> dict | None:
     try:
         from api.jaeger_sessions import gateway_base
         from urllib.request import Request, urlopen
-        req = Request(gateway_base() + "/v1/sessions/" + sid, headers={"Accept": "application/json"})
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        req = Request(gateway_base() + "/v1/sessions/" + sid,
+                      headers={"Accept": "application/json", **client_headers("webui")})
         with urlopen(req, timeout=4) as resp:
             data = json.loads(resp.read().decode("utf-8") or "{}")
         if isinstance(data, dict) and not data.get("error") and data.get("session_id"):
@@ -203,6 +205,7 @@ def _record_gateway_upload(session_id: str, dest: Path, mime: str) -> None:
         import hashlib
         from urllib.request import Request, urlopen
         from api.jaeger_sessions import gateway_base
+        from jaeger_ai.core.gateway.caller_auth import client_headers
         digest = hashlib.sha256(dest.read_bytes()).hexdigest()
         payload = json.dumps({
             "original_filename": dest.name.split("_", 1)[-1] if "_" in dest.name else dest.name,
@@ -217,7 +220,8 @@ def _record_gateway_upload(session_id: str, dest: Path, mime: str) -> None:
             gateway_base() + "/v1/sessions/" + session_id + "/attachments",
             data=payload,
             method="POST",
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            headers={"Content-Type": "application/json", "Accept": "application/json",
+                     **client_headers("webui")},
         )
         with urlopen(req, timeout=8) as resp:
             resp.read()

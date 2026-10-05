@@ -314,6 +314,15 @@ def _is_jaeger_gateway(base_url: str) -> bool:
     return False
 
 
+def _jaeger_gateway_token(api_key: str = "") -> str:
+    """The WebUI's own Gateway caller token (Keychain), unless an explicit key
+    was configured. Never logged."""
+    if api_key:
+        return api_key
+    from jaeger_ai.core.gateway.caller_auth import client_token
+    return client_token("webui") or ""
+
+
 def _gateway_api_key(environ: dict[str, str] | None = None) -> str:
     source = os.environ if environ is None else environ
     return str(
@@ -824,6 +833,7 @@ def stop_gateway_run(run_id: str) -> bool:
     if _is_jaeger_gateway(base_url) and owner_sid:
         cancel_url = f"{base_url.rstrip('/')}/v1/sessions/{urllib.parse.quote(owner_sid, safe='')}/cancel"
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        api_key = _jaeger_gateway_token(api_key)
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         req = urllib.request.Request(
@@ -1011,6 +1021,7 @@ def _run_jaeger_gateway_streaming(
     session: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Bridge WebUI turn through the canonical Jaeger Gateway on /v1/sessions."""
+    api_key = _jaeger_gateway_token(api_key)
     if session is None:
         put_gateway_event("apperror", {
             "label": "WebUI session unavailable",

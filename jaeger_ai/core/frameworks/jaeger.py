@@ -45,9 +45,16 @@ def _profile_secret(name: str) -> str:
 
 
 def mcp_api_key() -> str:
-    """Resolve an optional MCP credential for every connection attempt."""
+    """Credential for Jaeger's own MCP HTTP server (resolved per attempt).
+
+    MCP HTTP requires a caller token; jaegerd presents its own ``jaegerd``
+    Gateway caller token (Keychain) so the relayed turn is attributed to
+    jaegerd, not to an outside MCP agent."""
     key = os.environ.get("JAEGERS_MCP_API_KEY", "").strip() or _profile_secret("MCP_ARES_HOST_API_KEY")
-    return key
+    if key:
+        return key
+    from jaeger_ai.core.gateway.caller_auth import client_token
+    return client_token("jaegerd") or ""
 
 
 MCP_URL = MCP_HTTP_URL

@@ -55,6 +55,7 @@ from jaeger_ai.features.passkeys import (
 )
 from jaeger_ai.features.remote_access import RemoteAccessPolicy
 
+from jaeger_ai.core.gateway.caller_auth import client_headers
 from .bridge_client import BridgeClient, HermesWebUIAdapterBridgeError
 
 MAX_BODY = 1_000_000
@@ -96,6 +97,8 @@ def gateway_request(
     if body is not None:
         req.add_header("Content-Type", "application/json")
     req.add_header("Accept", "application/json")
+    for key, value in client_headers("webui").items():
+        req.add_header(key, value)
     try:
         with build_opener().open(req, timeout=timeout) as resp:
             raw = resp.read().decode("utf-8") or "{}"
@@ -562,7 +565,7 @@ class RunnerBroker:
         try:
             from urllib.request import Request, urlopen
             url = f"http://127.0.0.1:8810/v1/sessions/{sid}/attachments"
-            req = Request(url, headers={"Accept": "application/json"})
+            req = Request(url, headers={"Accept": "application/json", **client_headers("webui")})
             with urlopen(req, timeout=4) as resp:
                 data = json.loads(resp.read().decode("utf-8") or "{}")
             rows = data.get("attachments") if isinstance(data, dict) else None

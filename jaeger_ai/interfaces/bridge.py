@@ -1862,7 +1862,7 @@ def _merge_gateway_history(local: list[dict[str, Any]], session_id: str) -> list
     from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
 
     try:
-        owned = GatewayTurnClient().get_session(session_id).get("messages") or []
+        owned = GatewayTurnClient(caller="bridge").get_session(session_id).get("messages") or []
     except GatewayUnavailable:
         return local
     rows = list(local) + [
@@ -1879,7 +1879,7 @@ def _merge_gateway_sessions(local: list[dict[str, Any]], limit: int) -> list[dic
     from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
 
     try:
-        owned = GatewayTurnClient().list_sessions()
+        owned = GatewayTurnClient(caller="bridge").list_sessions()
     except GatewayUnavailable:
         return local
     merged = {row["id"]: dict(row) for row in local}
@@ -1908,7 +1908,7 @@ def _attach_gateway(proto: TextIO, ctx: _Ctx) -> None:
 
     from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
 
-    ctx.gateway = GatewayTurnClient()
+    ctx.gateway = GatewayTurnClient(caller="bridge")
     if _probe_attached_gateway(ctx):
         _emit(proto, protocol.agent_state_frame("ready", agent_name=_agent_name(ctx)))
     else:
@@ -1958,9 +1958,16 @@ def _gateway_turn(out: TextIO, ctx: _Ctx, req: dict[str, Any], text: str,
     result shape the local executor produced."""
     import uuid
 
-    from jaeger_ai.core.gateway.client import GatewayUnavailable
+    from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
 
     rid = turn_id or uuid.uuid4().hex
+    # A socket client that is its own Gateway caller (MCP, A2A) hands over
+    # its caller token; the turn, its stream and any approval answer then go
+    # to the Gateway as THAT caller, so the bridge never lends its own
+    # identity to an outside agent. The token is dropped from ``req`` here.
+    relayed = req.pop("gateway_token", None)
+    gateway = (GatewayTurnClient(ctx.gateway.base_url, caller="bridge", token=relayed)
+               if isinstance(relayed, str) and relayed.strip() else ctx.gateway)
     deltas = _DeltaStream(out, session)
     asker = BridgeConfirmationProvider(out, ctx)
     asker.current_session = session
@@ -1969,7 +1976,7 @@ def _gateway_turn(out: TextIO, ctx: _Ctx, req: dict[str, Any], text: str,
         answer = asker.request("approval", prompt, ("once", "always", "deny")).lower()
         decision = answer if answer in {"once", "always"} else "deny"
         try:
-            ctx.gateway.resolve_approval(approval_id, decision)
+            gateway.resolve_approval(approval_id, decision)
         except GatewayUnavailable:
             pass  # already closed (cancelled/expired) — the Gateway's answer stands
 
@@ -1981,6 +1988,10 @@ def _gateway_turn(out: TextIO, ctx: _Ctx, req: dict[str, Any], text: str,
             _emit(out, _reasoning_frame(str(data.get("text") or ""), session))
         elif name == "approval.request" and data.get("approval_id"):
             deltas.flush()
+            if gateway is not ctx.gateway:
+                # An outside caller's turn: only the owner answers its
+                # approvals, on the Gateway's own card (menu bar / WebUI).
+                return
             prompt = f"Allow {data.get('tool') or 'this action'}?"
             if data.get("target"):
                 prompt = f"{prompt} {data['target']}"
@@ -2000,8 +2011,8 @@ def _gateway_turn(out: TextIO, ctx: _Ctx, req: dict[str, Any], text: str,
     with ctx.turn_control_lock:
         ctx.gateway_active[rid] = session
     try:
-        result = ctx.gateway.stream_turn(session, text, on_event=on_event,
-                                         request_id=rid, **choices)
+        result = gateway.stream_turn(session, text, on_event=on_event,
+                                     request_id=rid, **choices)
     except GatewayUnavailable as exc:
         return {"text": "", "error": _gateway_unavailable_message(ctx, exc),
                 "halt_reason": "error"}
