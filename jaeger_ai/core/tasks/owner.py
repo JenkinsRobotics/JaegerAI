@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from .completion import CompletionError, authoritative_transition
 from .models import DurableTask, NotificationPolicy, TaskKind, TaskState
 from .store import SqliteDurableTaskStore
 
@@ -290,8 +291,13 @@ class GatewayTaskOwner:
             if current.cancellation and status != 'execution_unknown':
                 current.state = TaskState.CANCELLED
             elif verified:
-                current.state = TaskState.COMPLETED
-                current.error = None
+                try:
+                    authoritative_transition(
+                        current, TaskState.COMPLETED_VERIFIED, evidence=evidence,
+                    )
+                except CompletionError as exc:
+                    current.state = TaskState.FAILED
+                    current.error = str(exc)
             elif status == 'cancelled':
                 current.state = TaskState.CANCELLED
             elif status == 'execution_unknown':
@@ -301,6 +307,18 @@ class GatewayTaskOwner:
                 current.payload['attempt'] = attempt + 1
                 current.state = TaskState.QUEUED
                 current.next_execution = time.time() + 1
+            elif str(result.get('halt_reason') or '') in {'needs_owner', 'blocked'}:
+                target = (TaskState.NEEDS_OWNER if result.get('halt_reason') == 'needs_owner'
+                          else TaskState.BLOCKED)
+                try:
+                    authoritative_transition(
+                        current, target,
+                        evidence=result.get('evidence') or result.get('output') or result,
+                        error=str(result.get('error') or target.value),
+                    )
+                except CompletionError as exc:
+                    current.state = TaskState.FAILED
+                    current.error = str(exc)
             elif current.retry_policy.can_retry():
                 current.retry_policy.current_retries += 1
                 current.payload['attempt'] = attempt + 1
@@ -326,7 +344,7 @@ class GatewayTaskOwner:
         runs = SqliteRunStore()
         run = runs.get(run_id)
         if run and run.state not in {'completed', 'cancelled'}:
-            state = 'completed' if task.state == TaskState.COMPLETED else 'cancelled' if task.state == TaskState.CANCELLED else 'failed'
+            state = 'completed' if task.state in {TaskState.COMPLETED, TaskState.COMPLETED_VERIFIED} else 'cancelled' if task.state == TaskState.CANCELLED else 'failed'
             runs.transition(run_id, state, reason=task.error)
 
     @staticmethod
@@ -364,7 +382,7 @@ class GatewayTaskOwner:
         if task.payload.get('delivered'):
             return
         text = str(task.result or task.error or task.state.value)
-        if task.state != TaskState.COMPLETED:
+        if task.state not in {TaskState.COMPLETED, TaskState.COMPLETED_VERIFIED}:
             text = f'Background task {task.state.value}: {task.goal}\n{task.error or ""}\n\n{text}'
         receipt = self.gateway.store.deliver_task_result(task.task_id,
             task.notification_policy.recipient_session_id, text, task.state.value)

@@ -17,6 +17,9 @@ class TaskState(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
+    COMPLETED_VERIFIED = "completed_verified"
+    NEEDS_OWNER = "needs_owner"
+    BLOCKED = "blocked"
     FAILED = "failed"
     CANCELLED = "cancelled"
     PAUSED = "paused"
@@ -79,7 +82,14 @@ class DurableTask:
 
     @property
     def is_terminal(self) -> bool:
-        return self.state in (TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED)
+        return self.state in (
+            TaskState.COMPLETED,
+            TaskState.COMPLETED_VERIFIED,
+            TaskState.NEEDS_OWNER,
+            TaskState.BLOCKED,
+            TaskState.FAILED,
+            TaskState.CANCELLED,
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
