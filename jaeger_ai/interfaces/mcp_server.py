@@ -16,6 +16,7 @@ import argparse
 import contextlib
 import hmac
 import json
+import time
 import os
 import sys
 import functools
@@ -74,21 +75,42 @@ def _run_chat(
     return out.get("text") or ""
 
 
-def _gateway_approval_wait(frame: dict[str, Any], request_id: str) -> str:
-    """Block native tool execution until the gateway records a decision."""
-    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+def _gateway_approval_wait(frame: dict[str, Any], request_id: str,
+                           gateway_token: str | None = None,
+                           *, timeout_s: float = 120.0, poll_s: float = 0.5) -> str:
+    """Wait for the owner's decision on the Gateway approval behind ``frame``.
 
-    store = GatewaySessionStore()
-    approval = store.create_approval(
-        kind=str(frame.get("kind") or "tool"),
-        prompt=str(frame.get("prompt") or "Approve native tool?"),
-        options=list(frame.get("options") or ["once", "deny"]),
-        request_id=request_id or None,
-        fingerprint=str(frame.get("id") or ""),
-        metadata={"native_id": frame.get("id"), "session": frame.get("session")},
-    )
-    waited = store.wait_for_approval(approval["approval_id"])
-    return str(waited.get("decision") or "deny")
+    The MCP server never decides or records approvals itself. The Gateway
+    created the approval; the owner resolves it through the Gateway API
+    (approve scope); this only reads its status as the MCP caller. A frame
+    without an approval id, an unreadable status, or a timeout is ``deny``.
+    """
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    from jaeger_ai.core.gateway import caller_auth
+    from jaeger_ai.core.gateway.client import gateway_base_url
+
+    approval_id = str(frame.get("approval_id") or "").strip()
+    if not approval_id:
+        return "deny"
+    headers = (caller_auth.bearer(gateway_token) if gateway_token
+               else caller_auth.client_headers("mcp"))
+    url = f"{gateway_base_url()}/v1/approvals/{urllib.parse.quote(approval_id, safe='')}"
+    deadline = time.monotonic() + timeout_s
+    while True:
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json", **headers})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                row = json.loads(resp.read().decode("utf-8") or "{}")
+        except (urllib.error.URLError, OSError, ValueError):
+            return "deny"
+        if row.get("status") == "resolved":
+            return str(row.get("decision") or "deny")
+        if row.get("status") not in {None, "pending"} or time.monotonic() >= deadline:
+            return "deny"
+        time.sleep(poll_s)
 
 
 #: Gateway sessions the MCP caller may use start with this (caller_auth).
@@ -150,7 +172,7 @@ def _bridge_chat(bridge: Any, message: str, session: str = "mcp", request_id: st
         kwargs["allowed_tools"] = allowed_tools
     if request_id:
         kwargs["turn_id"] = request_id
-        kwargs["on_request"] = lambda frame: _gateway_approval_wait(frame, request_id)
+        kwargs["on_request"] = lambda frame: _gateway_approval_wait(frame, request_id, gateway_token)
     if is_subordinate:
         kwargs["is_subordinate"] = True
     # The Gateway runs this turn as the authenticated MCP caller (``mcp`` is an

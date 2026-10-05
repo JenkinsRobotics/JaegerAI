@@ -301,3 +301,69 @@ def test_build_server_routes_chat_through_gateway():
     chat_fn = server._tool_manager.get_tool("chat").fn
     out = asyncio.run(chat_fn("hello gateway", session_id="test_session"))
     assert out == "reply from gateway"
+
+
+def test_mcp_server_never_writes_gateway_approvals_directly():
+    import ast
+    from pathlib import Path as _P
+    import jaeger_ai.interfaces.mcp_server as mcp_mod
+    tree = ast.parse(_P(mcp_mod.__file__).read_text(encoding="utf-8"))
+    names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    names |= {a.name for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) for a in n.names}
+    assert "GatewaySessionStore" not in names
+    calls = {n.func.attr for n in ast.walk(tree)
+             if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+    assert not {"create_approval", "resolve_approval", "wait_for_approval"} & calls
+
+
+def test_approval_wait_follows_the_gateway_decision_over_http(tmp_path, monkeypatch):
+    """A real Gateway on an ephemeral loopback port: the MCP side only reads."""
+    import asyncio
+    import socket
+    import threading
+
+    from aiohttp import web
+    from jaeger_ai.core.gateway import caller_auth
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    import jaeger_ai.interfaces.mcp_server as mcp_mod
+
+    store = GatewaySessionStore(tmp_path / "gw.sqlite3")
+    gateway = JaegerGatewayApp(store=store)
+    gateway.app.on_startup.clear()
+    sock = socket.socket(); sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]; sock.close()
+    loop = asyncio.new_event_loop()
+    runner = web.AppRunner(gateway.app)
+    loop.run_until_complete(runner.setup())
+    loop.run_until_complete(web.TCPSite(runner, "127.0.0.1", port).start())
+    thread = threading.Thread(target=loop.run_forever, daemon=True); thread.start()
+    monkeypatch.setenv("JAEGER_GATEWAY_URL", f"http://127.0.0.1:{port}")
+    try:
+        approval = store.create_approval(kind="tool", prompt="run?", options=["once", "deny"],
+                                         session_id="mcp:s", request_id="r")
+        before = len(store.list_pending_approvals())
+        token = caller_auth.client_token("mcp")
+        threading.Timer(0.3, lambda: store.resolve_approval(
+            approval["approval_id"], approved=True, decision="once")).start()
+        decision = mcp_mod._gateway_approval_wait(
+            {"approval_id": approval["approval_id"]}, "r", token, timeout_s=5, poll_s=0.05)
+        assert decision == "once"
+        assert before == 1  # the wait created no second approval
+        assert mcp_mod._gateway_approval_wait({}, "r", token) == "deny"  # no id: fail closed
+        other = store.create_approval(kind="tool", prompt="x", options=["once"], session_id="owner")
+        assert mcp_mod._gateway_approval_wait(
+            {"approval_id": other["approval_id"]}, "r", token, timeout_s=1) == "deny"  # 404
+        pending = store.create_approval(kind="tool", prompt="y", options=["once"], session_id="mcp:s")
+        assert mcp_mod._gateway_approval_wait(
+            {"approval_id": pending["approval_id"]}, "r", token, timeout_s=0.3, poll_s=0.05) == "deny"
+    finally:
+        asyncio.run_coroutine_threadsafe(runner.cleanup(), loop).result(10)
+        loop.call_soon_threadsafe(loop.stop); thread.join(5)
+
+
+def test_bridge_request_frame_carries_the_gateway_approval_id():
+    from jaeger_os.contract import protocol
+    frame = protocol.request_frame("perm1", "approval", "run?", ("once", "deny"),
+                                   session="mcp:s", approval_id="approval_abc")
+    assert frame["approval_id"] == "approval_abc"
+    assert "approval_id" not in protocol.request_frame("perm2", "approval", "run?")

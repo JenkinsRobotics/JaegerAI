@@ -1775,7 +1775,7 @@ class BridgeConfirmationProvider:
         self._proto = proto
 
     def request(self, kind: str, prompt: str,
-                options: tuple[str, ...] = ()) -> str:
+                options: tuple[str, ...] = (), approval_id: str = "") -> str:
         """Emit one interactive request and block for its matching answer."""
         from jaeger_os.contract import protocol
 
@@ -1791,7 +1791,8 @@ class BridgeConfirmationProvider:
             evt.set()
         _emit(self._proto, protocol.request_frame(
             rid, kind, prompt, options=options,
-            session=str(getattr(self, "current_session", "") or "")))
+            session=str(getattr(self, "current_session", "") or ""),
+            approval_id=approval_id))
         try:
             from jaeger_agent.core.cancellation import current_cancellation
             cancelled = current_cancellation()
@@ -1981,7 +1982,8 @@ def _gateway_turn(out: TextIO, ctx: _Ctx, req: dict[str, Any], text: str,
     asker.current_session = session
 
     def answer_approval(approval_id: str, prompt: str) -> None:
-        answer = asker.request("approval", prompt, ("once", "always", "deny")).lower()
+        answer = asker.request("approval", prompt, ("once", "always", "deny"),
+                               approval_id=approval_id).lower()
         decision = answer if answer in {"once", "always"} else "deny"
         try:
             gateway.resolve_approval(approval_id, decision)

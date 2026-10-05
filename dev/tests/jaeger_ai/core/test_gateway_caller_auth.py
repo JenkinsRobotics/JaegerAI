@@ -241,3 +241,29 @@ def test_scopes_are_fixed_and_outside_callers_never_get_owner_scopes():
     assert caller_auth.required_scope("POST", "/v1/runtime/autonomy") == "admin"
     assert caller_auth.required_scope("POST", "/v1/some/new/route") == "admin"
     assert caller_auth.required_scope("GET", "/health") is None
+
+
+@pytest.mark.asyncio
+async def test_approval_status_is_readable_only_within_the_callers_sessions(gw):
+    store = gw.gateway.store
+    mine = store.create_approval(kind="tool", prompt="run?", options=["once", "deny"],
+                                 session_id="mcp:s1", request_id="r1")
+    owners = store.create_approval(kind="tool", prompt="owner?", options=["once", "deny"],
+                                   session_id="owner-session", request_id="r2")
+    resp = await gw.get(f"/v1/approvals/{mine['approval_id']}", headers=H("mcp"))
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["status"] == "pending" and body["session_id"] == "mcp:s1"
+    assert "metadata" not in body and "fingerprint" not in body
+    # Another caller's approval looks absent, never forbidden-but-present.
+    assert (await gw.get(f"/v1/approvals/{owners['approval_id']}", headers=H("mcp"))).status == 404
+    assert (await gw.get(f"/v1/approvals/{mine['approval_id']}", headers=H("a2a"))).status == 404
+    assert (await gw.get(f"/v1/approvals/{owners['approval_id']}", headers=H("menubar"))).status == 200
+    # Reading is not deciding: MCP still cannot resolve, the owner can.
+    assert (await gw.post(f"/v1/approvals/{mine['approval_id']}", json={"decision": "once"},
+                          headers=H("mcp"))).status == 403
+    assert (await gw.post(f"/v1/approvals/{mine['approval_id']}", json={"decision": "deny"},
+                          headers=H("menubar"))).status == 200
+    body = await (await gw.get(f"/v1/approvals/{mine['approval_id']}", headers=H("mcp"))).json()
+    assert body["status"] == "resolved" and body["decision"] == "deny"
+    assert (await gw.get("/v1/approvals/nope", headers={})).status == 401

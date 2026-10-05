@@ -236,9 +236,15 @@ def classify_halt_reason(reason: str | None) -> str | None:
 
 def request_frame(id: str, kind: str, prompt: str,
                    options: tuple[str, ...] | list[str] = (),
-                   session: str = "") -> dict[str, Any]:
-    return {"type": "request", "id": id, "kind": kind, "prompt": prompt,
-            "options": list(options), "session": session}
+                   session: str = "", approval_id: str = "") -> dict[str, Any]:
+    """``approval_id`` (v1 ADDITIVE, omitted when empty): the Gateway approval
+    this request mirrors, so a socket client can follow its decision through
+    the Gateway API instead of answering it itself."""
+    frame = {"type": "request", "id": id, "kind": kind, "prompt": prompt,
+             "options": list(options), "session": session}
+    if approval_id:
+        frame["approval_id"] = approval_id
+    return frame
 
 
 def fatal_frame(error: str, kind: str = "boot",
