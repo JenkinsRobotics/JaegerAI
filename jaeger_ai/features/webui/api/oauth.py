@@ -24,8 +24,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-# Compatibility for older helper tests and self-heal code that import these.
-AUTH_JSON_PATH = Path.home() / ".jaeger" / "hermes" / "auth.json"
+def auth_json_path() -> Path:
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+    return hermes_profile_root() / "auth.json"
 
 CODEX_ISSUER = "https://auth.openai.com"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
@@ -158,14 +160,16 @@ def _get_active_hermes_home() -> Path:
             "active-profile resolution failed: %s",
             exc,
         )
-        return Path.home() / ".jaeger" / "hermes"
+        from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+        return hermes_profile_root()
 
 
 # ── legacy auth.json helpers ────────────────────────────────────────────────
 
 def _read_auth_json(auth_path: Path | None = None) -> dict[str, Any]:
     """Read auth.json and return parsed dict, or an empty compatible store."""
-    path = auth_path or AUTH_JSON_PATH
+    path = auth_path or auth_json_path()
     if path.exists():
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
@@ -187,7 +191,7 @@ def _write_auth_json(data: dict[str, Any], auth_path: Path | None = None) -> Pat
     OAuth access/refresh tokens live in this file. The temp file is chmod 0600
     before rename so the final path never inherits a permissive process umask.
     """
-    path = auth_path or AUTH_JSON_PATH
+    path = auth_path or auth_json_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f"{path.name}.tmp.{os.getpid()}.{uuid.uuid4().hex}")
     try:
