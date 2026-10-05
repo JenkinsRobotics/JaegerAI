@@ -3185,10 +3185,9 @@ class JaegerGatewayApp:
                 execution=execution,
             )
             if card_task_id:
-                # The worker must know what the owner will accept as evidence.
-                from jaeger_ai.core.tasks.owner import EVIDENCE_CONTRACT
-                prompt = (f"This request is owned by a task card. When the work is done: {EVIDENCE_CONTRACT}\n\n"
-                          + prompt)
+                # The worker must know how the owner will check its result.
+                from jaeger_ai.core.tasks.owner import TURN_CARD_GUIDANCE
+                prompt = f"{TURN_CARD_GUIDANCE}\n\n" + prompt
             if tier == "chat":
                 model_only = True
             else:

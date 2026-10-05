@@ -77,3 +77,10 @@ def test_path_outside_workspace_is_unverifiable(owner, tmp_path):
 def test_verify_message_is_stable():
     t = SimpleNamespace(goal="hello", payload={"execution": {"workspace": ""}, "artifacts": []}, created_at=0)
     assert GatewayTaskOwner.verify(t, {}) == (False, UNVERIFIABLE)
+
+
+def test_turn_card_guidance_matches_the_checks_the_owner_runs():
+    from jaeger_ai.core.tasks.owner import EVIDENCE_CONTRACT, TURN_CARD_GUIDANCE
+    assert "hashed" in TURN_CARD_GUIDANCE and "unverified" in TURN_CARD_GUIDANCE
+    assert "rather than guess" in TURN_CARD_GUIDANCE
+    assert EVIDENCE_CONTRACT in TURN_CARD_GUIDANCE  # the ledger route still counts
