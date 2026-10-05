@@ -64,7 +64,11 @@ class OwnedGateway:
         environment = {
             **os.environ, "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPATH": os.pathsep.join([
-                str(REPO), str(REPO / "packages/jaeger-agent"), str(REPO / "packages/jaeger-os"),
+                str(REPO),
+                str(REPO / "packages/jaeger-agent"),
+                str(REPO / "packages/jaeger-os"),
+                str(REPO / "packages/jaeger-kokoro-tts"),
+                str(REPO / "packages/jaeger-whisper-stt"),
             ]),
             "JAEGER_STATE_DIR": str(self.root),
             "JAEGER_HOME": str(self.root),
@@ -786,7 +790,11 @@ class OwnedBridge:
         environment = {
             **os.environ, "PYTHONDONTWRITEBYTECODE": "1",
             "PYTHONPATH": os.pathsep.join([
-                str(REPO), str(REPO / "packages/jaeger-agent"), str(REPO / "packages/jaeger-os"),
+                str(REPO),
+                str(REPO / "packages/jaeger-agent"),
+                str(REPO / "packages/jaeger-os"),
+                str(REPO / "packages/jaeger-kokoro-tts"),
+                str(REPO / "packages/jaeger-whisper-stt"),
             ]),
             "JAEGER_STATE_DIR": str(state), "JAEGER_HOME": str(state),
             "JAEGER_INSTANCE_DIR": str(instance),
@@ -1160,6 +1168,7 @@ def test_gateway_cron_fire_is_one_durable_turn(gateway):
     from jaeger_agent.memory import memory as mem
     from jaeger_agent.memory import sqlite_store
 
+    gateway.request("/v1/runtime/tier", {"tier": "jaeger"})
     layout = _contract_layout(gateway)
     sqlite_store.bind(layout)
     try:
@@ -1185,6 +1194,7 @@ def test_gateway_cron_fire_is_one_durable_turn(gateway):
 
 
 def test_gateway_webhook_turn_replays_duplicate_delivery(gateway):
+    gateway.request("/v1/runtime/tier", {"tier": "jaeger"})
     layout = _contract_layout(gateway)
     deadline = time.monotonic() + 10
     status_path = layout.run_dir / "background_producers.json"
