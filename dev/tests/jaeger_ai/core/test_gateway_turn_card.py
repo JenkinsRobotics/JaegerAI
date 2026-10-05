@@ -391,6 +391,13 @@ def test_a_completion_that_already_has_a_file_receipt_is_not_asked_again(env, mo
     assert len(calls) == 1 and result["task_completion"] == FILE_RECEIPT
 
 
+def test_answer_only_turn_gets_no_receipt_correction(env, monkeypatch):
+    calls = _scripted_worker(env, monkeypatch, [None, None])
+    env.app._continued_owner_react("what is 17 * 23?", session_key="s", request_id="r",
+                                   execution=_turn_owned(env), objective="what is 17 * 23?")
+    assert len(calls) == 1
+
+
 def test_a_declined_approval_gets_no_correction_and_no_further_push(env, monkeypatch):
     calls = _scripted_worker(env, monkeypatch, [None, None, None], decline_in_step=1)
     result = env.app._continued_owner_react("write the report", session_key="s", request_id="r",
