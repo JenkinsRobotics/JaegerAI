@@ -399,9 +399,9 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
             tmp_path / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml"
         ).read_text()
         assert f"default: {setup.DEFAULT_AGENT_MODEL}" in profile_text
-        assert "base_url: http://192.168.64.1:11434/v1" in profile_text
+        assert "base_url: http://192.168.64.1:11435/v1" in profile_text
     assert f"default: {setup.DEFAULT_AGENT_MODEL}" in hermes_default.read_text()
-    assert "base_url: http://192.168.64.1:11434/v1" in hermes_default.read_text()
+    assert "base_url: http://192.168.64.1:11435/v1" in hermes_default.read_text()
     assert f"model: {setup.DEFAULT_AGENT_MODEL}" in jaeger.read_text()
     assert f"base_url: {setup.OLLAMA_OPENAI_URL}" in jaeger.read_text()
     config = json.loads(openclaw.read_text())
@@ -411,12 +411,15 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
         model["id"] == "glm-5.3:cloud"
         for model in config["models"]["providers"]["ollama-cloud-via-host"]["models"]
     )
+    from jaeger_ai.core.gateway.caller_auth import client_token
+    bridge_token = client_token("mcp")
     assert config["agents"]["defaults"]["memorySearch"] == {
         "provider": "ollama",
         "model": setup.OPENCLAW_EMBEDDING_MODEL,
-        "remote": {"baseUrl": "http://192.168.64.1:11434"},
+        "remote": {"baseUrl": "http://192.168.64.1:11435"},
     }
-    assert config["models"]["providers"]["ollama-cloud-via-host"]["baseUrl"] == "http://192.168.64.1:11434"
+    assert config["models"]["providers"]["ollama-cloud-via-host"]["baseUrl"] == "http://192.168.64.1:11435"
+    assert config["models"]["providers"]["ollama-cloud-via-host"]["apiKey"] == bridge_token
     assert config["gateway"]["tailscale"]["resetOnExit"] is False
     assert config["meta"]["lastTouchedAt"] == "old"
     assert config["meta"]["lastTouchedVersion"] == "2026.7"

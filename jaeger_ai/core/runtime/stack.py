@@ -95,6 +95,14 @@ def _ollama_command() -> list[str]:
     return [exe, "serve"]
 
 
+def _ollama_bridge_command() -> list[str]:
+    return [_default_python(), "-u", "-B", "-m", "jaeger_ai.core.models.ollama_bridge"]
+
+
+def _ollama_bridge_env() -> dict[str, str]:
+    return _common_env()
+
+
 def _gateway_command() -> list[str]:
     return [_default_python(), "-u", "-B", "-m", "jaeger_ai.core.gateway.server"]
 
@@ -195,11 +203,14 @@ def _gateway_env() -> dict[str, str]:
 
 def _ollama_env() -> dict[str, str]:
     env = _common_env()
-    env["OLLAMA_HOST"] = "0.0.0.0:11434"
+    from jaeger_ai.core.models.ollama_bridge import daemon_listen
+    env["OLLAMA_HOST"] = daemon_listen()
     return env
 
 
 # Authoritative service registry in boot order
+from jaeger_ai.core.models.ollama_bridge import PROXY_PORT as _OLLAMA_PROXY_PORT
+
 STACK_SERVICES: list[ServiceDef] = [
     ServiceDef(
         id="ollama",
@@ -209,6 +220,15 @@ STACK_SERVICES: list[ServiceDef] = [
         health_path="/api/tags",
         command_builder=_ollama_command,
         env_builder=_ollama_env,
+    ),
+    ServiceDef(
+        id="ollama-bridge",
+        name="Ollama bridge",
+        label="com.jenkinsrobotics.jaeger-ollama-bridge",
+        port=_OLLAMA_PROXY_PORT,
+        health_path="/api/tags",
+        command_builder=_ollama_bridge_command,
+        env_builder=_ollama_bridge_env,
     ),
     ServiceDef(
         id="gateway",
