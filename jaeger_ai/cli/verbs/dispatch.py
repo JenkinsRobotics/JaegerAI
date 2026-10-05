@@ -39,7 +39,7 @@ SUBCOMMANDS: frozenset[str] = frozenset({
     "backup", "restore", "update", "reinstall", "uninstall",
     "autostart", "launcher",
     "skill", "settings", "memory", "kill",
-    "container", "webui", "delegate", "remote",
+    "container", "webui", "delegate", "remote", "auth",
     "capability", "provider", "device", "voice",
 })
 
@@ -130,6 +130,9 @@ def dispatch(argv: Sequence[str]) -> int:
     if argv[0] == "remote":
         from jaeger_ai.cli.verbs.remote_verb import _cmd_remote_argv
         return _cmd_remote_argv(list(argv[1:]))
+    if argv[0] == "auth":
+        from jaeger_ai.cli.verbs.auth_verb import _cmd_auth_argv
+        return _cmd_auth_argv(list(argv[1:]))
     if argv[0] == "capability":
         from jaeger_ai.cli.verbs.platform_api import _cmd_capability_argv
         return _cmd_capability_argv(list(argv[1:]))
@@ -225,7 +228,7 @@ def _repo_root() -> Path:
 def _print_usage() -> None:
     print(
         "Usage: jaeger {start|stop|restart|status|bench|agent|migrate|backup|restore|update|"
-        "reinstall|uninstall|autostart|launcher|skill|settings|memory|kill|container|webui|delegate|remote|"
+        "reinstall|uninstall|autostart|launcher|skill|settings|memory|kill|container|webui|delegate|remote|auth|"
         "capability|provider|device|voice} [args]\n"
         "\n"
         "  start    Cold boot the full Jaeger AI multi-agent stack (services, containers, app).\n"
@@ -242,6 +245,7 @@ def _print_usage() -> None:
         "  reinstall Clean reinstall of Jaeger AI, keeping all agents.\n"
         "  uninstall Remove Jaeger AI; keep agents unless --purge.\n"
         "  autostart Run the unit's agent at boot/login — enable|disable|status.\n"
+        "  auth     Per-caller Gateway tokens in the Keychain — init | status.\n"
         "  launcher  macOS: create a clickable Jaeger AI.app — install|remove.\n"
         "  skill    Manage skills — list / clone a bundled skill.\n"
         "  settings View + change agent settings — list | groups | get | set.\n"

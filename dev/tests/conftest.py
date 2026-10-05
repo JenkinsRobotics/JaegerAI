@@ -54,6 +54,17 @@ os.environ.setdefault("JAEGER_NO_ATTACH", "1")
 # tests may still monkeypatch JAEGER_HOME to their own tmp_path; when their
 # patch unwinds it returns here, never to the operator's live instance.
 _TEST_STATE_HOME = Path(tempfile.mkdtemp(prefix="jaeger-tests-", dir="/tmp"))
+# Gateway caller tokens (jaeger_ai.core.gateway.caller_auth): tests never read
+# or write the owner's Keychain. Every caller gets a throwaway 0600 token here,
+# so in-repo clients under test authenticate the way they do in production.
+_CALLER_TOKEN_DIR = _TEST_STATE_HOME / "caller-tokens"
+_CALLER_TOKEN_DIR.mkdir(mode=0o700)
+for _caller in ("menubar", "cli", "webui", "ide", "bridge", "jaegerd", "mcp", "a2a"):
+    import secrets as _secrets
+    _fd = os.open(_CALLER_TOKEN_DIR / f"{_caller}.token", os.O_WRONLY | os.O_CREAT, 0o600)
+    os.write(_fd, _secrets.token_urlsafe(32).encode("ascii"))
+    os.close(_fd)
+os.environ["JAEGER_CALLER_TOKEN_DIR"] = str(_CALLER_TOKEN_DIR)
 if os.environ.get("JAEGER_ACCEPTANCE") != "1":
     # Direct pytest invocation must be as safe as the shell runner. These
     # higher-priority overrides otherwise bypass every JAEGER_HOME fixture.
