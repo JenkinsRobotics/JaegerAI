@@ -6,40 +6,24 @@ with the Minecraft game world via the local Mineflayer sidecar HTTP API.
 
 from __future__ import annotations
 
-import json
 import logging
-import urllib.error
-import urllib.request
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SIDECAR_URL = "http://127.0.0.1:3847"
-
 
 def _http_request(endpoint: str, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
-    from jaeger_ai.core.embodiment.gate import EmbodimentDisabled, assert_embodiment_allowed
-    try:
-        assert_embodiment_allowed()
-    except EmbodimentDisabled as exc:
-        return {"ok": False, "error": str(exc), "disabled": True}
-    url = f"{DEFAULT_SIDECAR_URL}{endpoint}"
-    data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    headers = {"Content-Type": "application/json"} if data is not None else {}
-    
-    req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            raw = resp.read().decode("utf-8")
-            return json.loads(raw) if raw else {"ok": True}
-    except urllib.error.URLError as exc:
-        return {
-            "ok": False,
-            "error": f"Minecraft sidecar unreachable at {url}: {exc}",
-            "hint": "Ensure the ARES Minecraft extension sidecar is running (port 3847).",
-        }
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)}
+    """Embodiment stays off until the control-plane release gate passes.
+
+    Refused here, inside the tool package, so this module does not import the
+    product tree. No sidecar socket is opened.
+    """
+    del endpoint, method, payload
+    return {
+        "ok": False,
+        "disabled": True,
+        "error": "Embodiment is disabled. The control-plane release gate has not passed.",
+    }
 
 
 def mc_status() -> dict[str, Any]:

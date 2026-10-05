@@ -247,7 +247,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> NSApplication.TerminateReply {
         if shutdownStarted { return .terminateNow }
         shutdownStarted = true
-        LifecycleLeaseBeat.stop()
+        LifecycleLeaseBeat.retire()
         MultimodalWindowController.shared.stopForApplicationQuit()
         Task { @MainActor in
             await AgentBridge.shared.shutdownForQuit()

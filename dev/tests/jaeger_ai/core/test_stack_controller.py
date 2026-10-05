@@ -119,3 +119,6 @@ def test_stack_down_terminates_services(monkeypatch: pytest.MonkeyPatch):
     # Verify bootout was called for each service
     bootout_cmds = [c for c in cmds if c and c[0] == "bootout"]
     assert len(bootout_cmds) == len(STACK_SERVICES)
+    labels = {command[1].rsplit("/", 1)[-1] for command in bootout_cmds}
+    assert "com.jenkinsrobotics.jaeger-gateway" in labels
+    assert "com.jenkinsrobotics.jaeger-ollama-bridge" in labels

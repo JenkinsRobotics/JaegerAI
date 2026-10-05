@@ -510,10 +510,18 @@ def _configure_agent_models(
         document.pop("memory", None)
         defaults = document.setdefault("agents", {}).setdefault("defaults", {})
         memory_search = defaults.setdefault("memorySearch", {})
+        # Stay on agents.defaults.memorySearch. OpenClaw 2026.7.1 rejects the
+        # newer top-level ``memory`` block. remote.apiKey and Authorization
+        # are the fields that runtime sends to this baseUrl, so embeddings
+        # hit the authenticated bridge instead of an open Ollama port.
+        remote = {"baseUrl": container_ollama_url.removesuffix("/v1")}
+        if bridge_token:
+            remote["apiKey"] = bridge_token
+            remote["headers"] = {"Authorization": f"Bearer {bridge_token}"}
         memory_search.update({
             "provider": "ollama",
             "model": OPENCLAW_EMBEDDING_MODEL,
-            "remote": {"baseUrl": container_ollama_url.removesuffix("/v1")},
+            "remote": remote,
         })
         defaults.setdefault("model", {})["primary"] = (
             f"{provider_name}/{DEFAULT_AGENT_MODEL}"
