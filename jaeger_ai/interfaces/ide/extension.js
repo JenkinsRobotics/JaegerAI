@@ -63,8 +63,15 @@ function activate(context) {
     const lines = text ? text.split(/\r?\n/).filter(Boolean).slice(-30) : ['Verification suite completed with no output.'];
     view?.webview.postMessage({ info: { title: 'Verification suite', lines } });
   };
+  // Settings that run commands or start processes are read from user (global)
+  // scope only, even on hosts that would let a workspace override them.
+  function userSetting(key) {
+    const info = vscode.workspace.getConfiguration('jaeger').inspect(key);
+    if (!info) return undefined;
+    return info.globalValue !== undefined ? info.globalValue : info.defaultValue;
+  }
   function detectTestRunner(root) {
-    const configured = vscode.workspace.getConfiguration('jaeger').get('testCommand');
+    const configured = userSetting('testCommand');
     if (typeof configured === 'string' && configured.trim()) {
       const command = configured.trim();
       return { name: 'configured', command, executable: 'bash', args: ['-lc', command] };
@@ -586,7 +593,7 @@ function activate(context) {
           void sendAutonomy();
           void sendTier();
           postContext();
-          await ensureGatewayDaemon(controller.gateway);
+          if (userSetting('autoStartGateway') === true) await ensureGatewayDaemon(controller.gateway);
           return controller.refresh(selected);
         }
         if (message.type === 'turnChanges' && !controller?.state.busy) {
