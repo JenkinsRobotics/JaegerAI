@@ -4559,9 +4559,11 @@ async def run_gateway_forever(
 async def leave_after_lifecycle_shutdown(gateway: JaegerGatewayApp) -> None:
     """Boot the launchd jobs out, then stop this process.
 
-    KeepAlive is still set on the plists. bootout is what stops launchd from
-    starting a privileged gateway again. The menu bar has already retired the
-    lease, so a race that loses the bootout still fails closed.
+    The plists restart a job only after a crash (KeepAlive SuccessfulExit
+    false), and this path exits 0. bootout also unloads the jobs, so neither
+    launchd nor a stale load can start a privileged gateway again. The menu
+    bar has already retired the lease, so a race that loses the bootout still
+    fails closed.
     """
     try:
         from jaeger_ai.core.runtime.stack import stack_down
