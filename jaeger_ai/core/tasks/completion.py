@@ -26,21 +26,35 @@ class CompletionError(ValueError):
     pass
 
 
+#: Omitted ``evidence``/``error`` keep the task's current values.
+_KEEP: Any = object()
+
+
 def authoritative_transition(
     task: DurableTask,
     state: TaskState,
     *,
-    evidence: Any = None,
-    error: str | None = None,
+    evidence: Any = _KEEP,
+    error: Any = _KEEP,
 ) -> DurableTask:
+    """Move ``task`` to ``state``; every owner state change goes through here.
+
+    Passing ``evidence`` records it as the verification (``None`` clears it);
+    passing ``error`` sets it. Omitting either keeps the current value, so a
+    plain move (queue, pause, cancel) never erases recorded verification.
+    """
     if state not in AUTHORITATIVE:
         raise CompletionError(f"not an authoritative state: {state!r}")
-    if state == TaskState.COMPLETED_VERIFIED and not _evidence_ok(evidence):
+    if state == TaskState.COMPLETED_VERIFIED and (
+        evidence is _KEEP or not _evidence_ok(evidence)
+    ):
         raise CompletionError("completed_verified requires evidence")
     task.state = state
-    task.error = error
-    task.payload = dict(task.payload)
-    task.payload["verification"] = evidence if evidence is not None else ""
+    if error is not _KEEP:
+        task.error = error
+    if evidence is not _KEEP:
+        task.payload = dict(task.payload)
+        task.payload["verification"] = evidence if evidence is not None else ""
     return task
 
 
