@@ -287,6 +287,8 @@ def test_lifecycle_shutdown_bootouts_so_launchd_cannot_resurrect(tmp_path: Path,
         "jaeger_ai.core.runtime.stack.stack_down",
         lambda wait_timeout=5.0: calls.append(("bootout", wait_timeout)) or {"ok": True},
     )
+    monkeypatch.setenv("XPC_SERVICE_NAME", "com.jenkinsrobotics.jaeger-gateway")
+    monkeypatch.setattr(gateway_server.os, "getppid", lambda: 1)
 
     async def scenario():
         gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "gw.sqlite3"))
@@ -479,3 +481,38 @@ def test_corrupt_stop_latch_stays_engaged_on_the_live_gateway(tmp_path: Path, mo
             assert (await released.json())["engaged"] is False
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("xpc,ppid", [
+    (None, 1),                                         # shell/foreground gateway
+    ("com.jenkinsrobotics.jaeger-gateway", 4242),      # inherited label, not launchd's child
+    ("application.com.apple.Terminal.123", 1),         # some other launchd job
+])
+def test_scratch_gateway_lease_shutdown_never_boots_out_the_stack(tmp_path: Path, monkeypatch, xpc, ppid):
+    import jaeger_ai.core.gateway.server as gateway_server
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+
+    calls: list[object] = []
+    monkeypatch.setattr(
+        "jaeger_ai.core.runtime.stack.stack_down",
+        lambda wait_timeout=5.0: calls.append("bootout") or {"ok": True},
+    )
+    if xpc is None:
+        monkeypatch.delenv("XPC_SERVICE_NAME", raising=False)
+    else:
+        monkeypatch.setenv("XPC_SERVICE_NAME", xpc)
+    monkeypatch.setattr(gateway_server.os, "getppid", lambda: ppid)
+
+    async def scenario():
+        gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "gw.sqlite3"))
+        gateway.app.on_startup.clear()
+
+        async def bounded(_app):
+            calls.append("bounded")
+
+        gateway._bounded_shutdown = bounded
+        await gateway_server.leave_after_lifecycle_shutdown(gateway)
+
+    asyncio.run(scenario())
+    assert calls == ["bounded"]
