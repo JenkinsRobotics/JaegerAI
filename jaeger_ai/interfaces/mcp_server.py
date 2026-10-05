@@ -22,6 +22,11 @@ import functools
 import anyio
 from typing import Any, Callable
 
+try:  # module scope: FastMCP resolves the ``chat`` tool's ``ctx`` annotation here
+    from mcp.server.fastmcp import Context
+except ImportError:  # pragma: no cover - mcp is a hard dependency of serving
+    Context = Any  # type: ignore[misc,assignment]
+
 from jaeger_ai.contract.ports import (
     A2A_URL,
     LOOPBACK,
@@ -86,8 +91,60 @@ def _gateway_approval_wait(frame: dict[str, Any], request_id: str) -> str:
     return str(waited.get("decision") or "deny")
 
 
+#: Gateway sessions the MCP caller may use start with this (caller_auth).
+MCP_SESSION_PREFIX = "mcp:"
+
+
+def _mcp_session(session_id: str = "") -> str:
+    """Namespace an MCP-chosen session id under ``mcp:``; the Gateway refuses
+    the MCP caller any other session, so an outside agent cannot read or
+    continue the owner's conversations."""
+    raw = (session_id or "").strip() or "default"
+    return raw if raw.startswith(MCP_SESSION_PREFIX) else MCP_SESSION_PREFIX + raw
+
+
+#: Gateway caller tokens the MCP HTTP server accepts inbound. ``mcp`` is
+#: what outside agents present (via agentgateway's backendAuth); ``jaegerd``
+#: is jaegerd's own native-lead/specialist client. Values stay in the Keychain.
+MCP_INBOUND_CALLERS = ("mcp", "jaegerd")
+
+
+def resolve_inbound_tokens() -> dict[str, str]:
+    """``{caller: token}`` accepted on MCP HTTP. Never prints values."""
+    from jaeger_ai.core.gateway.caller_auth import TokenStoreError, read_token
+
+    out: dict[str, str] = {}
+    for name in MCP_INBOUND_CALLERS:
+        try:
+            value = read_token(name)
+        except TokenStoreError:
+            value = None
+        if value:
+            out[name] = value
+    return out
+
+
+def _presented_caller(ctx: Any) -> tuple[str | None, str | None]:
+    """(caller, token) of the HTTP request behind this tool call, matched in
+    constant time against the accepted tokens; (None, None) for stdio."""
+    try:
+        request = ctx.request_context.request
+        header = request.headers.get("authorization") if request is not None else None
+    except Exception:  # noqa: BLE001 - no HTTP request (stdio) or no context
+        return None, None
+    if not header or not header.lower().startswith("bearer "):
+        return None, None
+    presented = header[7:].strip().encode("utf-8")
+    found: tuple[str | None, str | None] = (None, None)
+    for name, token in resolve_inbound_tokens().items():
+        if _tokens_match(presented, token.encode("utf-8")) and found[0] is None:
+            found = (name, token)
+    return found
+
+
 def _bridge_chat(bridge: Any, message: str, session: str = "mcp", request_id: str = "",
-                 allowed_tools: list[str] | None = None, is_subordinate: bool = False) -> str:
+                 allowed_tools: list[str] | None = None, is_subordinate: bool = False,
+                 gateway_token: str | None = None, relay_caller: str | None = None) -> str:
     kwargs: dict[str, Any] = {}
     if allowed_tools is not None:
         kwargs["allowed_tools"] = allowed_tools
@@ -96,7 +153,15 @@ def _bridge_chat(bridge: Any, message: str, session: str = "mcp", request_id: st
         kwargs["on_request"] = lambda frame: _gateway_approval_wait(frame, request_id)
     if is_subordinate:
         kwargs["is_subordinate"] = True
-    out = bridge.turn(message, session=session or "mcp", **kwargs)
+    # The Gateway runs this turn as the authenticated MCP caller (``mcp`` is an
+    # untrusted actor), never as the bridge. jaegerd's own client keeps its
+    # session ids; outside agents are namespaced under ``mcp:``.
+    if relay_caller == "jaegerd" and gateway_token:
+        out = bridge.turn(message, session=session or "mcp", gateway_token=gateway_token, **kwargs)
+    elif gateway_token:
+        out = bridge.turn(message, session=_mcp_session(session), gateway_token=gateway_token, **kwargs)
+    else:
+        out = bridge.turn(message, session=_mcp_session(session), gateway_caller="mcp", **kwargs)
     if isinstance(out, dict) and (out.get("error") or out.get("halt_reason") or out.get("execution_unknown")):
         raise RuntimeError(f"Native agent has no confirmed result: {out.get('error') or out.get('halt_reason') or 'execution unknown'}")
     if isinstance(out, dict):
@@ -245,7 +310,8 @@ def build_server(client: Any, instance: str, model: str | None,
     @mcp.tool()
     @_off_event_loop
     def chat(message: str, session_id: str = "", request_id: str = "",
-             allowed_tools: list[str] | None = None, is_subordinate: bool = False) -> str:
+             allowed_tools: list[str] | None = None, is_subordinate: bool = False,
+             ctx: Context | None = None) -> str:
         """Send a message to the local JaegerAI agent and return its reply.
 
         The agent has its own tools, memory, and skills; this drives a full
@@ -257,11 +323,13 @@ def build_server(client: Any, instance: str, model: str | None,
         omitted preserves the normal lead policy. Child sessions keep their
         initial grant and cannot expand it on a later request.
         """
-        session = (session_id or "").strip() or "mcp"
+        relay_caller, relay_token = _presented_caller(ctx)
+        session = (session_id or "").strip() if relay_caller == "jaegerd" else _mcp_session(session_id)
         if bridge is not None:
             return _bridge_chat(
                 bridge, message, session=session, request_id=request_id,
                 allowed_tools=allowed_tools, is_subordinate=is_subordinate,
+                gateway_token=relay_token, relay_caller=relay_caller,
             )
         if gateway is not None:
             res = gateway.turn(session, message)
@@ -285,7 +353,7 @@ def build_server(client: Any, instance: str, model: str | None,
         def cancel_turn(session_id: str = "", request_id: str = "") -> dict:
             """Request native cancellation. Does not claim the native effect stopped."""
             try:
-                bridge.control("cancel", turn_id=request_id, session=session_id)
+                bridge.control("cancel", turn_id=request_id, session=_mcp_session(session_id))
                 return {"ok": True, "requested": True, "confirmed": False, "request_id": request_id}
             except Exception as exc:  # noqa: BLE001
                 return {"ok": False, "requested": False, "confirmed": False, "error": str(exc)}
@@ -295,7 +363,7 @@ def build_server(client: Any, instance: str, model: str | None,
         def cancel_turn(session_id: str = "", request_id: str = "") -> dict:
             """Request Gateway turn cancellation."""
             try:
-                gateway.cancel(session_id or "mcp", request_id)
+                gateway.cancel(_mcp_session(session_id), request_id)
                 return {"ok": True, "requested": True, "confirmed": False, "request_id": request_id}
             except Exception as exc:  # noqa: BLE001
                 return {"ok": False, "requested": False, "confirmed": False, "error": str(exc)}
@@ -438,11 +506,17 @@ def _tokens_match(got: bytes, expected: bytes) -> bool:
 
 
 class RequireBearer:
-    """ASGI wrapper: reject HTTP requests missing the configured bearer token."""
+    """ASGI wrapper: reject HTTP requests without an accepted bearer token.
 
-    def __init__(self, app: Any, token: str) -> None:
+    ``tokens`` is one token or ``{caller: token}``; every accepted token is
+    compared in constant time."""
+
+    def __init__(self, app: Any, tokens: Any) -> None:
         self.app = app
-        self.token = token.encode("utf-8")
+        values = list(tokens.values()) if isinstance(tokens, dict) else [tokens]
+        self.tokens = [str(v).encode("utf-8") for v in values if v]
+        if not self.tokens:
+            raise ValueError("RequireBearer needs at least one token")
 
     async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
         if scope.get("type") != "http":
@@ -453,8 +527,10 @@ class RequireBearer:
             for key, value in scope.get("headers") or []
         }
         auth = headers.get("authorization", b"")
-        expected = b"Bearer " + self.token
-        if not _tokens_match(auth, expected):
+        ok = False
+        for token in self.tokens:
+            ok = _tokens_match(auth, b"Bearer " + token) or ok
+        if not ok:
             body = b'{"error":"unauthorized"}'
             await send({
                 "type": "http.response.start",
@@ -470,12 +546,14 @@ class RequireBearer:
         await self.app(scope, receive, send)
 
 
-def http_app(server: Any, token: str | None = None) -> Any:
-    """Starlette streamable-HTTP app, optionally wrapped with bearer auth."""
-    app = server.streamable_http_app()
-    if token:
-        return RequireBearer(app, token)
-    return app
+def http_app(server: Any, tokens: Any) -> Any:
+    """Starlette streamable-HTTP app behind mandatory bearer auth.
+
+    There is no unauthenticated mode: MCP HTTP runs full Jaeger turns, so a
+    missing token store is a startup error, not an open server."""
+    if not tokens:
+        raise RuntimeError("MCP HTTP requires a caller token (run `jaeger auth init`)")
+    return RequireBearer(server.streamable_http_app(), tokens)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -515,23 +593,31 @@ def main(argv: list[str] | None = None) -> int:
             except Exception:  # noqa: BLE001
                 model = None
             server = build_server(None, instance, model, bridge=bridge, host=args.host, port=args.port)
-            token = resolve_mcp_token()
+            tokens = resolve_inbound_tokens()
+            if not tokens:
+                print("[jaeger-mcp] No MCP caller token in the Keychain; run `jaeger auth init`. "
+                      "Refusing to serve MCP HTTP without authentication.", file=sys.stderr)
+                return 1
             import uvicorn
 
-            uvicorn.run(http_app(server, token), host=args.host, port=args.port)
+            uvicorn.run(http_app(server, tokens), host=args.host, port=args.port)
             return 0
 
         # Gateway fallback for HTTP
         from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
-        gw = GatewayTurnClient()
+        gw = GatewayTurnClient(caller="mcp")
         try:
             gw_probe = gw.probe()
             if gw_probe.get("service") == "jaeger-gateway" or gw_probe.get("component") == "jaeger-gateway":
                 server = build_server(None, instance, "gateway", gateway=gw, host=args.host, port=args.port)
-                token = resolve_mcp_token()
+                tokens = resolve_inbound_tokens()
+                if not tokens:
+                    print("[jaeger-mcp] No MCP caller token in the Keychain; run `jaeger auth init`. "
+                          "Refusing to serve MCP HTTP without authentication.", file=sys.stderr)
+                    return 1
                 import uvicorn
 
-                uvicorn.run(http_app(server, token), host=args.host, port=args.port)
+                uvicorn.run(http_app(server, tokens), host=args.host, port=args.port)
                 return 0
         except (GatewayUnavailable, Exception):
             pass
@@ -563,7 +649,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Gateway fallback for stdio
     from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
-    gw = GatewayTurnClient()
+    gw = GatewayTurnClient(caller="mcp")
     try:
         gw_probe = gw.probe()
         if gw_probe.get("service") == "jaeger-gateway" or gw_probe.get("component") == "jaeger-gateway":

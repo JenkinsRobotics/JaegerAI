@@ -17,7 +17,7 @@ def test_mcp_sync_chat_does_not_starve_other_requests():
     entered, release = threading.Event(), threading.Event()
 
     class Bridge:
-        def turn(self, message, session):
+        def turn(self, message, session, **kwargs):
             entered.set()
             release.wait(2)
             return {"text": "READY"}
@@ -50,7 +50,7 @@ def test_mcp_http_initialize_during_long_tool_call():
 
     entered, release = threading.Event(), threading.Event()
     class Bridge:
-        def turn(self, message, session):
+        def turn(self, message, session, **kwargs):
             entered.set()
             release.wait(3)
             return {"text": "READY"}
