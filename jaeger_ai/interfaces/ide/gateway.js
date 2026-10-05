@@ -52,6 +52,10 @@ class Gateway {
   tasks() { return this.json('/v1/tasks'); }
   rename(id, title) { return this.json(`/v1/sessions/${encodeURIComponent(id)}`, { title }, 'PATCH'); }
   archive(id, archived) { return this.json(`/v1/sessions/${encodeURIComponent(id)}`, { archived }, 'PATCH'); }
+  branch(id, body = {}) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/branch`, body); }
+  feedback(id, body) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/feedback`, body); }
+  feedbacks(id) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/feedback`); }
+  retry(id) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/retry`, {}); }
   ideResult(id, ideRequestId, body) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/ide/${encodeURIComponent(ideRequestId)}`, body); }
   autonomy() { return this.json('/v1/runtime/autonomy'); }
   setAutonomy(autonomy) { return this.json('/v1/runtime/autonomy', { autonomy }); }
@@ -59,7 +63,7 @@ class Gateway {
   setTier(tier) { return this.json('/v1/runtime/tier', { tier }); }
   skills(query = '') { return this.json(`/v1/runtime/skills${query ? `?q=${encodeURIComponent(query)}` : ''}`); }
   cancelTask(id) { return this.json(`/v1/tasks/${encodeURIComponent(id)}/cancel`, {}); }
-  sessions() { return this.json('/v1/sessions'); }
+  sessions(query = '') { return this.json(`/v1/sessions${query ? `?q=${encodeURIComponent(query)}` : ''}`); }
   session(id) { return this.json(`/v1/sessions/${encodeURIComponent(id)}`); }
   activity(id, after = 0) { return this.json(`/v1/sessions/${encodeURIComponent(id)}/activity?after=${after}`); }
   create(body) { return this.json('/v1/sessions', body); }
@@ -81,6 +85,7 @@ class Gateway {
   orchestrationWorkers() { return this.json('/v1/orchestration/workers'); }
   orchestrationSubmit(body) { return this.json('/v1/orchestration/tasks', body); }
   orchestrationTask(id) { return this.json(`/v1/orchestration/tasks/${encodeURIComponent(id)}`); }
+  orchestrationFollowUp(id, body) { return this.json(`/v1/orchestration/tasks/${encodeURIComponent(id)}/follow-up`, body); }
   orchestrationCancel(id) { return this.json(`/v1/orchestration/tasks/${encodeURIComponent(id)}/cancel`, {}); }
 
   async *events(id, cursor, signal) {
