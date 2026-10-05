@@ -2907,10 +2907,13 @@ class JaegerGatewayApp:
                     # file receipt is not something the owner can verify.
                     from jaeger_ai.core.runtime.autonomous_runner import missing_named_paths
                     from jaeger_ai.core.tasks.owner import EVIDENCE_CONTRACT, has_file_receipt
-                    # Only when the request names files that still do not exist:
-                    # an answer-only request has no file to receipt, and asking
-                    # for one invites the model to invent an artifact.
-                    if not has_file_receipt(last_completion()) and missing_named_paths(objective or prompt):
+                    # Only when the worker claimed completion without a file receipt, or
+                    # the request names files that still do not exist. An answer-only
+                    # request has no file to receipt; asking for one invites the model
+                    # to invent an artifact.
+                    completion = last_completion()
+                    if not has_file_receipt(completion) and (
+                            completion is not None or missing_named_paths(objective or prompt)):
                         fix = step(
                             "Owner verification requires correction: your completion carried no receipt for a "
                             "file the owner can check. Finish the work if it is not done, then " + EVIDENCE_CONTRACT)

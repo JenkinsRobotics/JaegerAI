@@ -84,3 +84,4 @@ def test_missing_named_paths_resolves_relative_to_instance(monkeypatch, tmp_path
 def test_required_paths_keeps_absolute_paths():
     assert ar._required_paths("Write a report to /tmp/x/report.md now.") == ["/tmp/x/report.md"]
     assert ar._required_paths("see ~/notes/a.txt and b.json") == ["~/notes/a.txt", "b.json"]
+
