@@ -75,12 +75,13 @@ class _FakeBridge:
     def command(self, command, args=None):
         return {"command": command, "args": args or {}}
 
-    def turn(self, text, session):
+    def turn(self, text, session, **kwargs):
+        assert kwargs.get("gateway_caller") == "mcp"
         return {"text": f"bridge:{text}:{session}", "error": None}
 
 
 def test_bridge_chat_uses_session():
-    assert _bridge_chat(_FakeBridge(), "hi", session="table-1") == "bridge:hi:table-1"
+    assert _bridge_chat(_FakeBridge(), "hi", session="table-1") == "bridge:hi:mcp:table-1"
 
 
 def test_bridge_chat_does_not_report_halted_turn_as_success():
@@ -156,10 +157,30 @@ def test_http_rejects_without_token_when_required():
 
 def test_http_app_wraps_fastmcp_with_bearer():
     server = build_server(None, "jaeger-dev", "gemma", bridge=_FakeBridge())
-    app = http_app(server, token="secret-token")
+    app = http_app(server, "secret-token")
     client = TestClient(app)
     denied = client.post("/mcp")
     assert denied.status_code == 401
+
+
+def test_http_app_refuses_to_serve_without_a_token():
+    """MCP HTTP auth is mandatory: no token store means no server."""
+    server = build_server(None, "jaeger-dev", "gemma", bridge=_FakeBridge())
+    for empty in (None, "", {}):
+        with pytest.raises(RuntimeError, match="caller token"):
+            http_app(server, empty)
+
+
+def test_require_bearer_accepts_each_inbound_caller_token():
+    async def dummy(scope, receive, send):
+        await send({"type": "http.response.start", "status": 200, "headers": []})
+        await send({"type": "http.response.body", "body": b"ok"})
+
+    client = TestClient(RequireBearer(dummy, {"mcp": "mcp-token", "jaegerd": "jaegerd-token"}))
+    assert client.post("/mcp").status_code == 401
+    assert client.post("/mcp", headers={"Authorization": "Bearer other"}).status_code == 401
+    assert client.post("/mcp", headers={"Authorization": "Bearer mcp-token"}).status_code == 200
+    assert client.post("/mcp", headers={"Authorization": "Bearer jaegerd-token"}).status_code == 200
 
 
 def test_parse_args_http_flag():
@@ -175,7 +196,10 @@ def test_parse_args_http_flag():
 def test_mcp_passes_explicit_tool_grant_to_bridge():
     class Bridge:
         def turn(self, message, session, **kwargs):
-            assert session == 'specialist:test'
+            # Outside MCP callers are confined to ``mcp:`` sessions and run
+            # as the Gateway ``mcp`` caller (never the bridge's owner identity).
+            assert session == 'mcp:specialist:test'
+            assert kwargs['gateway_caller'] == 'mcp'
             assert kwargs['allowed_tools'] == []
             assert kwargs['turn_id'] == 'identity'
             return {'text': 'done'}
@@ -224,12 +248,15 @@ def test_main_stdio_attaches_to_gateway_when_bridge_unavailable(monkeypatch):
             ran.append("gw_run")
 
     monkeypatch.setattr("jaeger_ai.features.webui.adapter.bridge_client.BridgeClient", lambda instance: DeadBridge())
-    monkeypatch.setattr("jaeger_ai.core.gateway.client.GatewayTurnClient", lambda: LiveGateway())
+    callers = []
+    monkeypatch.setattr("jaeger_ai.core.gateway.client.GatewayTurnClient",
+                        lambda **kw: callers.append(kw.get("caller")) or LiveGateway())
     monkeypatch.setattr(mcp_server, "build_server", lambda client, inst, model, gateway: DummyServer())
 
     ret = mcp_server.main(["jaeger-test"])
     assert ret == 0
     assert ran == ["gw_run"]
+    assert callers == ["mcp"]
 
 
 def test_main_stdio_truthful_error_when_gateway_unavailable(monkeypatch, capsys):
@@ -244,7 +271,7 @@ def test_main_stdio_truthful_error_when_gateway_unavailable(monkeypatch, capsys)
             raise RuntimeError("no gateway")
 
     monkeypatch.setattr("jaeger_ai.features.webui.adapter.bridge_client.BridgeClient", lambda instance: DeadBridge())
-    monkeypatch.setattr("jaeger_ai.core.gateway.client.GatewayTurnClient", lambda: DeadGateway())
+    monkeypatch.setattr("jaeger_ai.core.gateway.client.GatewayTurnClient", lambda **kw: DeadGateway())
 
     ret = mcp_server.main(["jaeger-test"])
     assert ret == 1
@@ -261,7 +288,7 @@ def test_build_server_routes_chat_through_gateway():
     class DummyGW:
         base_url = "http://127.0.0.1:8810"
         def turn(self, session, message):
-            assert session == "test_session"
+            assert session == "mcp:test_session"
             assert message == "hello gateway"
             return TurnResult(request_id="rid_1", status="completed", text="reply from gateway")
 

@@ -193,12 +193,14 @@ function modelSelectionLabel(choice, { configuredModel, sessionModel } = {}) {
   return sessionModel || 'Gateway default';
 }
 
-// Search is a client-side list filter, not a new search service.
+// The Gateway provides transcript-aware search; this remains a client-side
+// filter as an immediate projection while the async result arrives.
 function filterChats(sessions, query) {
   const value = String(query || '').trim().toLowerCase();
   const rows = Array.isArray(sessions) ? sessions : [];
   if (!value) return rows;
   return rows.filter(session => {
+    if (session?.search_match) return true;
     const title = String(session?.title || '').toLowerCase();
     const workspace = String(session?.workspace || '').toLowerCase();
     const id = String(session?.session_id || '').toLowerCase();

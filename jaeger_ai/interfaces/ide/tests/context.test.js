@@ -14,6 +14,21 @@ test('/diagnostics maps to a real extension-host command', () => {
   assert.equal(parsed.command.needs.length, 0);
 });
 
+test('diagnostics snapshot resolves workspace roots inside its own scope', () => {
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const start = extension.indexOf('const diagnosticsSnapshot =');
+  const body = extension.slice(start, extension.indexOf('const ideContext =', start));
+  assert.match(body, /const roots = \(vscode\.workspace\.workspaceFolders/);
+});
+
+test('IDE startup targets the canonical Gateway daemon, not stack bootstrap or the macOS app', () => {
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  assert.match(extension, /const daemonArgs = \['gateway', 'daemon'\]/);
+  assert.match(extension, /jaeger_ai\.core\.gateway\.server/);
+  assert.doesNotMatch(extension, /stack', 'up/);
+  assert.match(extension, /await ensureGatewayDaemon\(controller\.gateway\)/);
+});
+
 test('diagnosticsLines summarize and bound workspace problems', () => {
   const snapshot = {
     count: 3,

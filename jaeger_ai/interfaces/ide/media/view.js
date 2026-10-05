@@ -15,6 +15,7 @@ let revision = '', modelRevision = '', draftSession = '';
 let submittedDraftSession = null;
 let editingQueueId = null;
 let showAllChats = false;
+let composerExpanded = false;
 let chatSearch = api.getState()?.chatSearch || '';
 const drafts = api.getState()?.drafts || {};
 const post = (type, extra = {}) => api.postMessage({ type, ...extra });
@@ -26,6 +27,12 @@ let planModeOn = mode === 'plan';
 let deepThinkOn = Boolean(api.getState()?.deepThink);
 const persistView = () => api.setState({ drafts, ideContext: ideContextOn, mode, planMode: planModeOn, deepThink: deepThinkOn, chatSearch });
 function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
+function resizePrompt() {
+  const prompt = $('prompt');
+  if (!prompt?.style) return;
+  prompt.style.height = 'auto';
+  prompt.style.height = `${Math.min(prompt.scrollHeight || 44, 200)}px`;
+}
 // While the agent is busy, Enter steers the live turn. “Queue next” writes a
 // durable Gateway request instead; this client never owns a second queue.
 function eligibility() { $('send').disabled = !state.connected || !$('prompt').value.trim(); }
@@ -39,9 +46,13 @@ function announceCopied() {
 function icon(name) {
   const paths = { copy: 'M9 8V5a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-3M5 9h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2Z',
     edit: 'm15 4 5 5M4 20l5-1L21 7a2 2 0 0 0-5-5L4 14Z',
+    up: 'M7 10v10m0-10 3-7 4 1-2 6h6a2 2 0 0 1 2 2l-1 6a2 2 0 0 1-2 2H7M7 10H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2',
+    down: 'M7 14V4m0 10-3 7 4-1 2-6h6a2 2 0 0 0 2-2l-1-6a2 2 0 0 0-2-2H7m0 10H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h2',
+    branch: 'M6 3v12a5 5 0 0 0 5 5h7M18 16l3 4-3 4M18 4h-7a5 5 0 0 0-5 5',
     read: 'M12 5v16M12 5C8 2 4 2 2 4v15c3-2 6-1 10 2 4-3 7-4 10-2V4c-2-2-6-2-10 1Z',
     integration: 'm9 9 4 12 3-5 5-3-12-4ZM4 3l2 2M2 10h3M10 2v3M16 4l-2 2M4 16l2-2',
     tool: 'M8 7l4 5-4 5m6 0h4M5 2h14a3 3 0 0 1 3 3v14a3 3 0 0 1-3 3H5a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z',
+    retry: 'M4 12a8 8 0 1 0 2.3-5.7M4 5v7h7',
     file: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8ZM14 2v6h6M8 14h8m-4-4v8' };
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   for (const [key, value] of Object.entries({ viewBox: '0 0 24 24', width: '18', height: '18', fill: 'none', stroke: 'currentColor', 'stroke-width': '1.5', 'stroke-linecap': 'round', 'stroke-linejoin': 'round', 'aria-hidden': 'true' })) svg.setAttribute(key, value);
@@ -62,19 +73,22 @@ function copyButton(text) {
   return button;
 }
 
+function messageAction(iconName, title, action) {
+  const button = document.createElement('button'); button.type = 'button'; button.append(icon(iconName));
+  button.title = title; button.setAttribute('aria-label', title); button.onclick = action;
+  return button;
+}
+
 // One message bubble. `content` is rendered as Markdown when it settles
 // (an assistant message already in history); `liveText`/`streaming` render
 // the in-flight reply, re-parsed on every call as more of it arrives (see
 // markdown.js's renderMarkdownOnce doc comment for why that's the safe,
 // simple choice here rather than an incremental parser).
-function message(role, text) {
+function message(role, text, meta = {}) {
   const node = document.createElement('article'); node.className = role === 'user' ? 'user message' : 'assistant message';
   const label = document.createElement('div'); label.className = 'speaker';
-  const avatar = document.createElement('div'); avatar.className = 'avatar';
-  avatar.textContent = role === 'user' ? 'U' : 'J';
   const name = document.createElement('span'); name.className = 'role-name'; name.textContent = role === 'user' ? 'You' : 'Jaeger';
-  label.append(avatar, name);
-  if (role === 'assistant' && text) label.append(copyButton(text));
+  label.append(name);
   const content = document.createElement('div'); content.className = 'content';
   if (role === 'user') content.textContent = text;
   else renderMarkdownOnce(window.smd, content, text);
@@ -83,11 +97,23 @@ function message(role, text) {
     const actions = document.createElement('div'); actions.className = 'message-actions';
     const edit = document.createElement('button'); edit.type = 'button'; edit.append(icon('edit'));
     edit.title = 'Edit and resend'; edit.setAttribute('aria-label', 'Edit and resend message');
-    edit.onclick = () => {
-      if ($('prompt').value.trim() && $('prompt').value !== text) { post('editDraft', { text }); return; }
-      $('prompt').value = text; saveDraft(); eligibility(); $('prompt').focus();
-    };
+    edit.onclick = () => post('editMessage', { messageId: meta.id, text });
     actions.append(copyButton(text), edit); node.append(actions);
+  } else if (text) {
+    const actions = document.createElement('div'); actions.className = 'message-actions assistant-actions';
+    const feedback = meta.feedback || '';
+    const positive = messageAction('up', 'Good response', () => post('messageFeedback', { messageId: meta.id, rating: 'positive' }));
+    const negative = messageAction('down', 'Needs improvement', () => post('messageFeedback', { messageId: meta.id, rating: 'negative' }));
+    positive.classList.toggle('selected', feedback === 'positive');
+    negative.classList.toggle('selected', feedback === 'negative');
+    actions.append(
+      copyButton(text),
+      positive,
+      negative,
+      messageAction('retry', 'Retry response', () => post('retrySession')),
+      messageAction('branch', 'Fork conversation here', () => post('branchSession', { messageId: meta.id })),
+    );
+    node.append(actions);
   }
   return node;
 }
@@ -176,11 +202,11 @@ function renderQueue() {
     const editing = editingQueueId === item.request_id;
     if (editing) {
       actions.append(queueButton('Cancel', () => {
-        editingQueueId = null; $('prompt').value = drafts[draftSession] || ''; eligibility(); renderQueue(); renderComposerBar();
+        editingQueueId = null; $('prompt').value = drafts[draftSession] || ''; resizePrompt(); eligibility(); renderQueue(); renderComposerBar();
       }, 'Cancel editing queued request'));
     } else {
       actions.append(queueButton('Edit', () => {
-        editingQueueId = item.request_id; $('prompt').value = item.input_text || ''; saveDraft(); eligibility(); renderQueue(); renderComposerBar(); $('prompt').focus();
+        editingQueueId = item.request_id; $('prompt').value = item.input_text || ''; resizePrompt(); saveDraft(); eligibility(); renderQueue(); renderComposerBar(); $('prompt').focus();
       }, 'Edit queued request'));
     }
     actions.append(queueButton(item.status === 'paused' ? 'Resume' : 'Pause', () => {
@@ -203,7 +229,7 @@ function renderQueue() {
 function renderTurn(turn) {
   const node = document.createElement('div'); node.className = 'turn';
   if (turn.user) node.append(message('user', turn.user.content));
-  for (const assistant of turn.assistants) node.append(message('assistant', assistant.content));
+  for (const assistant of turn.assistants) node.append(message('assistant', assistant.content, assistant));
   return node;
 }
 
@@ -227,7 +253,8 @@ function transcriptRows() {
   history.filter(item => item.role === 'user' || item.role === 'assistant').forEach((item, index) => {
     rows.push({
       key: `history:${item.message_id || item.id || index}:${item.role}`,
-      kind: item.role, text: String(item.content || ''), live: false,
+      kind: item.role, text: String(item.content || ''), messageId: item.id,
+      feedback: state.feedback?.[String(item.id)] || '', live: false,
     });
     if (item.role === 'user') {
       userIndex++;
@@ -323,7 +350,7 @@ function updateTimelineRow(node, row) {
   node.className = `timeline-row ${row.kind}`;
   let content;
   if (row.kind === 'user' || row.kind === 'assistant' || row.kind === 'answer' || row.kind === 'progress' || row.kind === 'checkpoint') {
-    content = message(row.kind === 'user' ? 'user' : 'assistant', row.text || '');
+    content = message(row.kind === 'user' ? 'user' : 'assistant', row.text || '', { id: row.messageId, feedback: row.feedback });
   } else if (row.kind === 'reasoning') {
     content = reasoningSection(row.text || '', row.live);
   } else if (row.kind === 'plan') {
@@ -338,8 +365,9 @@ function updateTimelineRow(node, row) {
     content = document.createElement('section'); content.className = 'empty';
     const logo = document.createElement('img'); logo.src = $('logo-source').src || '';
     logo.alt = '';
-    const name = document.createElement('span'); name.textContent = 'Jaeger';
-    content.append(logo, name);
+    const name = document.createElement('h2'); name.textContent = 'Build with Jaeger';
+    const hint = document.createElement('p'); hint.textContent = 'Ask about the workspace, plan a change, or delegate a task.';
+    content.append(logo, name, hint);
   } else {
     content = document.createElement('div'); content.className = 'subtle';
     content.textContent = row.detail || row.status || '';
@@ -470,20 +498,49 @@ function renderContextChips() {
   const diagnostics = Number(state.diagnostics || 0);
   const chips = [];
   if (!state.busy) {
-    const actionChip = (label, title, onclick) => {
+    const actionChip = (label, title, onclick, iconSymbol = '') => {
       const node = document.createElement('button');
-      node.type = 'button'; node.className = 'context-chip suggestion-chip';
+      node.type = 'button'; node.className = 'context-chip suggestion-chip dynamic-chip';
       node.title = title; node.setAttribute('aria-label', title);
-      node.textContent = label; node.onclick = onclick;
+      if (iconSymbol) {
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'chip-icon';
+        iconSpan.textContent = iconSymbol;
+        node.append(iconSpan);
+      }
+      const labelSpan = document.createElement('span');
+      labelSpan.textContent = label;
+      node.append(labelSpan);
+      node.onclick = onclick;
       return node;
     };
-    chips.push(actionChip('Review Git Diff', 'Review the uncommitted changes in this workspace', () => post('reviewChanges')));
-    chips.push(actionChip('Run Test Suite', 'Run the canonical verification suite', () => post('runTestSuite')));
-    chips.push(actionChip('Explain Selected Code', 'Explain the selected code in this editor', () => {
-      const prompt = $('prompt');
-      prompt.value = 'Explain the selected code in the active editor.';
-      saveDraft(); eligibility(); prompt.focus();
-    }));
+    const suggestions = state.suggestions || [];
+    if (suggestions.length > 0) {
+      const iconMap = {
+        warning: '⚠', sparkle: '✨', tool: '⚡', beaker: '🧪',
+        search: '🔍', diff: '📝', git: '⎇', play: '▶', plan: '📋',
+      };
+      for (const item of suggestions) {
+        const symbol = iconMap[item.icon] || '✨';
+        if (item.kind === 'action') {
+          chips.push(actionChip(item.label, item.title, () => post(item.action), symbol));
+        } else {
+          chips.push(actionChip(item.label, item.title, () => {
+            const prompt = $('prompt');
+            prompt.value = item.prompt;
+            resizePrompt(); saveDraft(); eligibility(); prompt.focus();
+          }, symbol));
+        }
+      }
+    } else {
+      chips.push(actionChip('Review Git Diff', 'Review the uncommitted changes in this workspace', () => post('reviewChanges'), '📝'));
+      chips.push(actionChip('Run Test Suite', 'Run the canonical verification suite', () => post('runTestSuite'), '▶'));
+      chips.push(actionChip('Explain Selected Code', 'Explain the selected code in this editor', () => {
+        const prompt = $('prompt');
+        prompt.value = 'Explain the selected code in the active editor.';
+        resizePrompt(); saveDraft(); eligibility(); prompt.focus();
+      }, '✨'));
+    }
   }
   const chip = (label, title, severity = '') => {
     const node = document.createElement('span');
@@ -626,7 +683,7 @@ function render() {
   $('prompt').placeholder = inChat ? 'Ask for follow-up changes' : 'Ask Jaeger anything';
   $('error').hidden = !state.error; $('error').textContent = state.error || '';
   const sid = state.session?.session_id || '';
-  if (draftSession !== sid) { saveDraft(); draftSession = sid; $('prompt').value = drafts[sid] || ''; state.preview = null; state.changes = null; }
+  if (draftSession !== sid) { saveDraft(); draftSession = sid; $('prompt').value = drafts[sid] || ''; resizePrompt(); state.preview = null; state.changes = null; }
   const sessionOptions = JSON.stringify(state.sessions || []) + sid
     + Boolean((state.session?.messages || []).length || state.busy);
   const ctx = $('context');
@@ -730,12 +787,18 @@ function clearTimeline() {
 
 const stateQueue = createFrameQueue(batch => {
   const data = batch.at(-1);
-  if (data.editDraft !== undefined) { $('prompt').value = data.editDraft; saveDraft(); eligibility(); $('prompt').focus(); return; }
-  if (data.steerRejected !== undefined) { $('prompt').value = data.steerRejected; saveDraft(); eligibility(); $('prompt').focus(); return; }
+  if (data.editDraft !== undefined) { $('prompt').value = data.editDraft; resizePrompt(); saveDraft(); eligibility(); $('prompt').focus(); return; }
+  if (data.steerRejected !== undefined) { $('prompt').value = data.steerRejected; resizePrompt(); saveDraft(); eligibility(); $('prompt').focus(); return; }
   if (data.mention !== undefined) {
     const prompt = $('prompt');
     prompt.value = `${prompt.value}${prompt.value ? ' ' : ''}${data.mention} `;
-    saveDraft(); eligibility(); prompt.focus();
+    resizePrompt(); saveDraft(); eligibility(); prompt.focus();
+    return;
+  }
+  if (data.feedback) {
+    const messageId = data.feedback.messageId;
+    state.feedback = { ...(state.feedback || {}), [String(messageId)]: data.feedback.rating };
+    render();
     return;
   }
   if (data.accepted) {
@@ -744,7 +807,7 @@ const stateQueue = createFrameQueue(batch => {
     }
     submittedDraftSession = null;
     if ($('prompt').value.trim() === data.submittedText) $('prompt').value = '';
-    saveDraft(); eligibility(); return;
+    resizePrompt(); saveDraft(); eligibility(); return;
   }
   if (data.changes && data.changes.requestId !== state.preview?.requestId) state.preview = null;
   state = { ...state, ...data }; render();
@@ -795,13 +858,13 @@ function renderComposerBar() {
   $('send').title = editingQueueId ? 'Save queued request'
     : state.busy ? 'Steer current turn' : 'Send message';
   $('send').setAttribute('aria-label', $('send').title);
-  const workspaceLabel = state.selectedWorkspace ? state.selectedWorkspace.split('/').filter(Boolean).at(-1) : 'Workspace';
+  const workspaceLabel = state.selectedWorkspace ? state.selectedWorkspace.split('/').filter(Boolean).at(-1) : 'Work locally';
   if ($('workspace-label')) $('workspace-label').textContent = workspaceLabel;
   if ($('workspace')) {
-    $('workspace').hidden = true;
+    $('workspace').hidden = false;
     $('workspace').title = state.selectedWorkspace || 'Choose the workspace Jaeger should use';
   }
-  if ($('worktree')) $('worktree').hidden = true;
+  if ($('worktree')) $('worktree').hidden = false;
 
   // Render Agency Tiers
   const currentTier = selectedTier();
@@ -824,6 +887,16 @@ function renderComposerBar() {
   if (jaegerIndicator) {
     jaegerIndicator.hidden = (currentTier !== 'jaeger');
   }
+  // Visual steering feedback
+  const prompt = $('prompt');
+  const sendBtn = $('send');
+  if (state.busy) {
+    prompt.placeholder = 'Steer active turn (type instruction & press Enter)…';
+    sendBtn.classList.add('steering');
+  } else {
+    prompt.placeholder = 'Ask Jaeger anything, or type / for commands';
+    sendBtn.classList.remove('steering');
+  }
 
   // Render Deep Think toggle state
   const dtBtn = $('mode-deep-think');
@@ -840,6 +913,35 @@ function renderComposerBar() {
     }
   }
   $('ide-context').setAttribute('aria-pressed', String(ideContextOn));
+  const summary = document.querySelector('.control-summary');
+  if (summary) summary.textContent = `${selectedTier()[0].toUpperCase()}${selectedTier().slice(1)} · ${selectedMode() === 'plan' ? 'Plan' : selectedMode() === 'auto' ? 'Auto' : 'Manual'}${ideContextOn ? ' · IDE' : ''}`;
+}
+
+function setComposerExpanded(open) {
+  composerExpanded = Boolean(open);
+  const form = $('composer');
+  const options = $('composer-options');
+  const flow = options?.querySelector('.options-flow');
+  const barLeft = document.querySelector('.bar-left');
+  const barRight = document.querySelector('.bar-right');
+  const execution = document.querySelector('.execution-row');
+  if (!form || !options || !flow || !barLeft || !barRight || !execution) return;
+  const ids = ['mode-switch', 'autonomy-subswitch', 'jaeger-autonomous-indicator', 'model-trigger', 'ide-context', 'queue-next'];
+  const locations = ['workspace', 'worktree'];
+  if (composerExpanded) {
+    for (const id of [...ids, ...locations]) { const node = $(id); if (node) flow.append(node); }
+    options.hidden = false;
+  } else {
+    for (const id of ids.slice(0, 3)) { const node = $(id); if (node) barLeft.append(node); }
+    for (const id of ids.slice(3)) { const node = $(id); if (node) barRight.insertBefore(node, $('stop')); }
+    for (const id of locations) { const node = $(id); if (node) execution.insertBefore(node, execution.querySelector('.send-hint')); }
+    options.hidden = true;
+  }
+  form.classList.toggle('composer-expanded', composerExpanded);
+  document.querySelector('footer')?.classList.toggle('composer-expanded', composerExpanded);
+  $('composer-controls-toggle').setAttribute('aria-expanded', String(composerExpanded));
+  $('composer-controls-toggle').querySelector('.control-chevron').textContent = composerExpanded ? '⌃' : '⌄';
+  renderComposerBar();
 }
 
 function setTier(tier) {
@@ -861,8 +963,10 @@ function setMode(value) {
 }
 
 $('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); };
+$('composer-controls-toggle').onclick = () => setComposerExpanded(!composerExpanded);
 $('workspace').onclick = () => post('selectWorkspace');
 $('worktree').onclick = () => post('selectWorktree');
+if ($('jaeger-autonomous-indicator')) $('jaeger-autonomous-indicator').onclick = () => post('info', { what: 'cognitiveRouting' });
 if ($('tier-chat')) $('tier-chat').onclick = () => setTier('chat');
 if ($('tier-agent')) $('tier-agent').onclick = () => setTier('agent');
 if ($('tier-jaeger')) $('tier-jaeger').onclick = () => setTier('jaeger');
@@ -880,7 +984,7 @@ $('queue-next').onclick = () => {
   const text = $('prompt').value;
   if (!text.trim() || $('queue-next').hidden) return;
   post('queue', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn, deepThink: deepThinkOn });
-  $('prompt').value = ''; saveDraft(); eligibility(); slashDismissed = false; renderSlashMenu();
+  $('prompt').value = ''; resizePrompt(); saveDraft(); eligibility(); slashDismissed = false; renderSlashMenu();
 };
 
 // ── slash commands ─────────────────────────────────────────────────────────
@@ -917,7 +1021,7 @@ function renderSlashMenu() {
 }
 
 function clearComposer() {
-  $('prompt').value = ''; saveDraft(); eligibility(); slashDismissed = false; renderSlashMenu();
+  $('prompt').value = ''; resizePrompt(); saveDraft(); eligibility(); slashDismissed = false; renderSlashMenu();
 }
 
 function runSlash(command, args) {
@@ -955,7 +1059,7 @@ function acceptSlash(index) {
   const command = slashItems[index];
   if (!command) return;
   if (command.takesArgs) {
-    $('prompt').value = `/${command.name} `; saveDraft(); eligibility(); renderSlashMenu(); $('prompt').focus();
+    $('prompt').value = `/${command.name} `; resizePrompt(); saveDraft(); eligibility(); renderSlashMenu(); $('prompt').focus();
   } else runSlash(command, '');
 }
 $('composer').onsubmit = event => {
@@ -970,15 +1074,15 @@ $('composer').onsubmit = event => {
     if (editingQueueId) {
       const id = editingQueueId; editingQueueId = null;
       post('queueUpdate', { id, text });
-      $('prompt').value = ''; saveDraft(); eligibility(); renderQueue(); renderComposerBar();
+      $('prompt').value = ''; resizePrompt(); saveDraft(); eligibility(); renderQueue(); renderComposerBar();
       return;
     }
-    if (state.busy) { post('steer', { text }); $('prompt').value = ''; saveDraft(); eligibility(); return; }
+    if (state.busy) { post('steer', { text }); $('prompt').value = ''; resizePrompt(); saveDraft(); eligibility(); return; }
     submittedDraftSession = draftSession;
     post('send', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn, deepThink: deepThinkOn });
   }
 };
-$('prompt').oninput = () => { saveDraft(); eligibility(); slashDismissed = false; slashIndex = 0; renderSlashMenu(); };
+$('prompt').oninput = () => { resizePrompt(); saveDraft(); eligibility(); slashDismissed = false; slashIndex = 0; renderSlashMenu(); };
 $('prompt').onkeydown = event => {
   if (!$('slash-menu').hidden) {
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -993,7 +1097,7 @@ $('prompt').onkeydown = event => {
   }
   if (event.key === 'Escape' && editingQueueId) {
     event.preventDefault(); editingQueueId = null;
-    $('prompt').value = drafts[draftSession] || ''; saveDraft(); eligibility(); renderQueue(); renderComposerBar();
+    $('prompt').value = drafts[draftSession] || ''; resizePrompt(); saveDraft(); eligibility(); renderQueue(); renderComposerBar();
     return;
   }
   if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); $('composer').requestSubmit(); }
@@ -1047,9 +1151,11 @@ for (const [id, type] of [['new', 'new'], ['refresh', 'refresh'], ['settings', '
 $('chat-search').oninput = event => {
   chatSearch = event.target.value;
   persistView();
+  post('searchChats', { query: chatSearch });
   renderChats();
 };
 $('chat-search').value = chatSearch;
 $('back').onclick = () => post('home');
+resizePrompt();
 post('ready');
 })();

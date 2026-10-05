@@ -1,5 +1,49 @@
 import Foundation
 
+/// The menu-bar app's Gateway caller token (`menubar`).
+///
+/// Stored in the login Keychain (service `ai.jaeger.gateway.caller`) by
+/// `jaeger auth init`. Read through `/usr/bin/security` — the tool that wrote
+/// the item and is on its access list — so the app never triggers a Keychain
+/// prompt and never stores the value anywhere else. Cached for 30 s.
+enum GatewayCallerToken {
+    static let service = "ai.jaeger.gateway.caller"
+    static let caller = "menubar"
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var cached: (value: String, at: Date)?
+
+    static func current() -> String? {
+        lock.lock(); defer { lock.unlock() }
+        if let cached, Date().timeIntervalSince(cached.at) < 30 { return cached.value }
+        let value = read()
+        cached = value.map { ($0, Date()) }
+        return value
+    }
+
+    private static func read() -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
+        process.arguments = ["find-generic-password", "-s", service, "-a", caller, "-w"]
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        do { try process.run() } catch { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        let token = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        return token.isEmpty ? nil : token
+    }
+
+    /// Adds `Authorization: Bearer …` when a token exists. Without one the
+    /// Gateway answers 401, which surfaces as a normal request failure.
+    static func authorize(_ request: inout URLRequest) {
+        if let token = current() {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
+    }
+}
+
 /// Persistence-spine client for Jaeger Gateway (`:8810`).
 ///
 /// Lists / activates agents and session handoffs via `GET|POST /v1/*`
@@ -131,6 +175,7 @@ struct GatewayClient: Sendable {
         request.httpMethod = method
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        GatewayCallerToken.authorize(&request)
         if let jsonBody {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: jsonBody)

@@ -108,6 +108,28 @@ def _is_gateway_process(pid: int) -> bool:
     return "agentgateway" in out
 
 
+def backend_token_env() -> dict[str, str]:
+    """Caller tokens agentgateway presents to Jaeger's MCP / A2A servers.
+
+    Read from the Keychain at launch and handed over only in the child's
+    environment (never written to config or logs). Missing tokens are a
+    startup error: an unauthenticated proxy would just collect 401s."""
+    from jaeger_ai.core.gateway.caller_auth import TokenStoreError, read_token
+
+    from .config import A2A_BACKEND_TOKEN_ENV, MCP_BACKEND_TOKEN_ENV
+
+    out: dict[str, str] = {}
+    for env_name, caller in ((MCP_BACKEND_TOKEN_ENV, "mcp"), (A2A_BACKEND_TOKEN_ENV, "a2a")):
+        try:
+            value = read_token(caller)
+        except TokenStoreError as exc:
+            raise GatewayError(f"Cannot read the {caller!r} caller token: {exc}") from exc
+        if not value:
+            raise GatewayError(f"No {caller!r} caller token; run `jaeger auth init`.")
+        out[env_name] = value
+    return out
+
+
 def start(root: Path | None = None) -> dict[str, Any]:
     binary = locate_binary(root)
     if binary is None:
@@ -127,6 +149,7 @@ def start(root: Path | None = None) -> dict[str, Any]:
     env = os.environ.copy()
     env["STATS_ADDR"] = STATS_ADDR
     env["READINESS_ADDR"] = READINESS_ADDR
+    env.update(backend_token_env())
     log_path = cfg.parent / "agentgateway.log"
     handle = log_path.open("ab")
     proc = subprocess.Popen(  # noqa: S603

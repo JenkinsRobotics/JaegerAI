@@ -4,11 +4,11 @@
 <link rel="stylesheet" href="{{CSS}}"><link rel="stylesheet" href="{{MOTION}}"><title>Jaeger</title></head>
 <body>
 <header class="app-header">
-  <button id="back" class="icon-button" title="Back to chats" aria-label="Back to chats">←</button>
+  <button id="back" class="icon-button" title="Back to chats" aria-label="Back to chats"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg></button>
   <span id="chat-heading" class="app-name">Chats</span>
   <div class="header-actions">
-    <button id="refresh" class="icon-button" title="Reload chats" aria-label="Reload chats">↻</button>
-    <button id="settings" class="icon-button" title="Settings" aria-label="Settings">⚙</button>
+    <button id="refresh" class="icon-button" title="Reload chats" aria-label="Reload chats"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg></button>
+    <button id="settings" class="icon-button" title="Chat actions and settings" aria-label="Chat actions and settings"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
     <button id="new" class="icon-button compose-button" title="New chat" aria-label="New chat"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 4H5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-7M16 3l5 5M10 14l-1 4 4-1L22 8a2 2 0 0 0-5-5Z"/></svg></button>
   </div>
 </header>
@@ -23,7 +23,7 @@
 <div id="copied" role="status" class="sr-only" aria-live="polite"></div>
 <img id="logo-source" class="sr-only" src="{{LOGO}}" alt="">
 <main id="timeline" aria-label="Conversation timeline">
-  <section class="empty" aria-label="Start a chat"><img src="{{LOGO}}" alt=""><span>Jaeger</span></section>
+  <section class="empty" aria-label="Start a chat"><img src="{{LOGO}}" alt=""><h2>Build with Jaeger</h2><p>Ask about the workspace, plan a change, or delegate a task.</p></section>
 </main>
 <section id="background-tasks" aria-label="Background work" hidden></section>
 <section id="changes" aria-label="Workspace changes" hidden></section>
@@ -41,6 +41,7 @@
       <div class="bar-left">
         <button id="attach" class="bar-icon" type="button" title="Add files" aria-label="Add files"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
         <button id="mention" class="bar-icon" type="button" title="Mention a file" aria-label="Mention a file">@</button>
+        <button id="composer-controls-toggle" class="composer-control-toggle" type="button" aria-expanded="false" aria-controls="composer-options" title="Show modes and advanced controls"><span class="control-summary">Agent · Auto</span><span class="control-chevron">⌄</span></button>
         <div id="mode-switch" role="radiogroup" aria-label="Agency Tier">
           <button id="tier-chat" class="mode-option" data-tier="chat" role="radio" aria-checked="false" title="Chat (Tier 1): Pure conversational intelligence. Zero tool calls, commands, or file edits."><span>Chat</span></button>
           <button id="tier-agent" class="mode-option" data-tier="agent" role="radio" aria-checked="true" title="Agent (Tier 2): Interactive task worker with tools upon your request."><span>Agent</span></button>
@@ -52,22 +53,30 @@
           <button id="mode-deep-think" class="mode-option submode-option deep-think-option" data-mode="deep-think" type="button" role="button" aria-pressed="false" title="Deep Think: Extended multi-step reasoning with thinking models (DeepSeek R1 / o1 / 26B)"><span>🧠 Deep Think</span></button>
           <button id="mode-plan" class="mode-option submode-option" data-mode="plan" role="radio" aria-checked="false" title="Plan: read-only blueprint turn; no edits"><span>Plan</span></button>
         </div>
-        <div id="jaeger-autonomous-indicator" class="submode-switch jaeger-indicator" hidden title="Jaeger Autonomous Mode: Auto-routes local & cloud intelligence dynamically">
+        <button type="button" id="jaeger-autonomous-indicator" class="submode-switch jaeger-indicator interactive-badge" hidden title="Jaeger Autonomous Mode: Auto-routes local & cloud intelligence. Click to inspect routing status.">
           <span class="jaeger-badge-dot"></span>
           <span>⚡ Auto Cognitive Routing</span>
-        </div>
+          <span class="routing-inspect">ⓘ</span>
+        </button>
       </div>
       <div class="bar-right">
         <button id="model-trigger" class="pill model-pill" type="button" aria-haspopup="dialog" title="Choose model"><svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor"><path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z"/></svg><span class="sr-only">Model</span><span id="model-display">Gateway default</span><svg class="chev" viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></button>
         <button id="ide-context" class="pill toggle" type="button" aria-pressed="true" title="Include your open file, selection and tabs with each message"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 3l14 7-6 2-2 6-6-15Z"/></svg><span>IDE context</span></button>
-        <button id="workspace" class="pill workspace" type="button" hidden title="Choose the workspace Jaeger should use"><span id="workspace-label">Workspace</span></button>
-        <button id="worktree" class="pill worktree" type="button" hidden title="Select an existing git worktree"><span>Worktree</span></button>
         <button id="queue-next" class="pill queue-action" type="button" hidden title="Queue this message after the current turn"><span>Queue next</span></button>
         <button id="stop" type="button" hidden>Stop</button>
         <button id="send" class="send-button" type="submit" disabled aria-label="Send message" title="Send message"><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button>
       </div>
     </div>
+    <div id="composer-options" class="composer-options" hidden aria-label="Advanced composer controls">
+      <div class="options-label">Modes and execution controls</div>
+      <div class="options-flow"></div>
+    </div>
   </form>
+  <div class="execution-row" aria-label="Execution location">
+    <button id="workspace" class="execution-location" type="button" title="Choose the workspace Jaeger should use"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 8h10M7 12h5"/></svg><span id="workspace-label">Work locally</span><span class="location-chev">⌄</span></button>
+    <button id="worktree" class="execution-location" type="button" title="Select an existing git worktree"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 6h4a6 6 0 0 1 6 6v-3"/></svg><span>Worktree</span></button>
+    <span class="send-hint">Enter to send · Shift+Enter for newline</span>
+  </div>
   <dialog id="model-menu" aria-label="Choose model">
     <div class="model-menu-header">
       <input type="search" id="model-search" placeholder="Search models…" aria-label="Search models">

@@ -49,6 +49,18 @@ def _api_key_policy(root: Path | None = None) -> dict[str, Any]:
 
 
 
+#: Env vars agentgateway expands into ``backendAuth`` (verified on v1.5.0: the
+#: value is sent as ``Authorization: Bearer …`` to that backend only, and the
+#: inbound client key is not forwarded). ``service.start`` fills them from the
+#: Keychain caller tokens ``mcp`` and ``a2a``; the values never touch disk.
+MCP_BACKEND_TOKEN_ENV = "JAEGER_MCP_BACKEND_TOKEN"
+A2A_BACKEND_TOKEN_ENV = "JAEGER_A2A_BACKEND_TOKEN"
+
+
+def _backend_auth(env_name: str) -> dict[str, Any]:
+    return {"backendAuth": {"key": f"${env_name}"}}
+
+
 def default_config(root: Path | None = None) -> dict[str, Any]:
     """Authenticated Agentgateway config targeting loopback Jaeger backends.
 
@@ -60,6 +72,8 @@ def default_config(root: Path | None = None) -> dict[str, Any]:
     mcp_url = f"http://{MCP_HTTP_HOST}:{MCP_HTTP_PORT}{MCP_HTTP_PATH}"
     a2a_backend = f"{A2A_BACKEND_HOST}:{A2A_BACKEND_PORT}"
     api_key = _api_key_policy(root)
+    # Jaeger's A2A server requires the ``a2a`` caller token for JSON-RPC.
+    a2a_target = {"host": a2a_backend, "policies": _backend_auth(A2A_BACKEND_TOKEN_ENV)}
     return {
         "config": {
             "database": {"url": f"sqlite://{state / 'data.db'}"},
@@ -85,6 +99,8 @@ def default_config(root: Path | None = None) -> dict[str, Any]:
                 {
                     "name": "jaeger",
                     "mcp": {"host": mcp_url},
+                    # Jaeger's MCP server requires the ``mcp`` caller token.
+                    "policies": _backend_auth(MCP_BACKEND_TOKEN_ENV),
                 }
             ],
         },
@@ -99,7 +115,7 @@ def default_config(root: Path | None = None) -> dict[str, Any]:
                                     {"path": {"exact": "/.well-known/agent-card.json"}}
                                 ],
                                 "policies": {"a2a": {}, "apiKey": api_key},
-                                "backends": [{"host": a2a_backend}],
+                                "backends": [a2a_target],
                             },
                             {
                                 # Compatibility for older clients. The A2A
@@ -108,7 +124,7 @@ def default_config(root: Path | None = None) -> dict[str, Any]:
                                     {"path": {"exact": "/.well-known/agent.json"}}
                                 ],
                                 "policies": {"a2a": {}, "apiKey": api_key},
-                                "backends": [{"host": a2a_backend}],
+                                "backends": [a2a_target],
                             },
                             {
                                 "policies": {
@@ -123,7 +139,7 @@ def default_config(root: Path | None = None) -> dict[str, Any]:
                                     "a2a": {},
                                     "apiKey": api_key,
                                 },
-                                "backends": [{"host": a2a_backend}],
+                                "backends": [a2a_target],
                             },
                         ]
                     }
@@ -148,6 +164,10 @@ def config_is_stale(path: Path) -> bool:
     if f"{A2A_BACKEND_HOST}:{A2A_BACKEND_PORT}" not in text:
         return True
     if "apiKey:" not in text or "keyHash:" not in text:
+        return True
+    # Pre-caller-auth configs reach Jaeger's MCP/A2A servers without a token.
+    if ("backendAuth:" not in text or f"${MCP_BACKEND_TOKEN_ENV}" not in text
+            or f"${A2A_BACKEND_TOKEN_ENV}" not in text):
         return True
     return False
 

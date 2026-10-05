@@ -373,15 +373,23 @@ class GatewaySessionStore:
             conn.execute("VACUUM INTO ?", (str(dest_path),))
         return dest_path
 
-    def list_sessions(self, profile: str | None = None) -> list[dict[str, Any]]:
+    def list_sessions(self, profile: str | None = None, query: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
-            query = "SELECT s.*, COUNT(m.id) as message_count FROM sessions s LEFT JOIN messages m ON s.session_id = m.session_id"
+            sql = "SELECT s.*, COUNT(m.id) as message_count FROM sessions s LEFT JOIN messages m ON s.session_id = m.session_id"
             params: list[Any] = []
+            clauses = []
             if profile:
-                query += " WHERE s.profile = ?"
+                clauses.append("s.profile = ?")
                 params.append(profile)
-            query += " GROUP BY s.session_id ORDER BY s.updated_at DESC"
-            rows = conn.execute(query, params).fetchall()
+            term = str(query or "").strip()
+            if term:
+                like = f"%{term}%"
+                clauses.append("(s.title LIKE ? OR s.workspace LIKE ? OR s.session_id LIKE ? OR EXISTS (SELECT 1 FROM messages sm WHERE sm.session_id = s.session_id AND sm.content LIKE ?))")
+                params.extend([like, like, like, like])
+            if clauses:
+                sql += " WHERE " + " AND ".join(clauses)
+            sql += " GROUP BY s.session_id ORDER BY s.updated_at DESC"
+            rows = conn.execute(sql, params).fetchall()
             out = []
             for r in rows:
                 meta = _row_meta(r["metadata_json"])
@@ -397,6 +405,8 @@ class GatewaySessionStore:
                     "metadata": meta,
                     "agent_id": meta.get("agent_id"),
                 }
+                if term:
+                    row["search_match"] = True
                 out.append(row)
             return out
 
@@ -531,6 +541,34 @@ class GatewaySessionStore:
                 (session_id, title, profile, workspace, now, now, meta_str),
             )
         return self.get_session(session_id) or {}
+
+    def branch_session(self, session_id: str, *, title: str | None = None,
+                       keep_count: int | None = None) -> dict[str, Any] | None:
+        """Create an independent Gateway-owned copy of a conversation."""
+        source = self.get_session(session_id)
+        if source is None:
+            return None
+        messages = list(source.get("messages") or [])
+        if keep_count is not None:
+            messages = messages[:max(0, int(keep_count))]
+        branch_id = uuid.uuid4().hex
+        metadata = dict(source.get("metadata") or {})
+        metadata.update({"source": "fork", "parent_session_id": session_id})
+        branch = self.ensure_session(
+            branch_id,
+            title=(title or f"{source.get('title') or 'Conversation'} (fork)")[:200],
+            profile=source.get("profile") or "jaeger",
+            workspace=source.get("workspace") or "",
+            metadata=metadata,
+        )
+        for message in messages:
+            self.append_message(
+                branch_id, str(message.get("role") or "user"),
+                str(message.get("content") or ""),
+                tool_calls=message.get("tool_calls") or [],
+                timestamp=message.get("timestamp"),
+            )
+        return self.get_session(branch_id) or branch
 
     def rename_session(self, session_id: str, title: str) -> dict[str, Any] | None:
         """Set a session's title. The Gateway owns titles; clients project them.
@@ -689,6 +727,16 @@ class GatewaySessionStore:
         with self._get_conn() as conn:
             row = conn.execute(
                 "SELECT * FROM client_requests WHERE turn_id=?", (turn_id,)
+            ).fetchone()
+            return self._request_row(row) if row else None
+
+    def latest_request(self, session_id: str) -> dict[str, Any] | None:
+        """Return the most recent admitted request for a session."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM client_requests WHERE session_id=? "
+                "AND status NOT IN ('queued', 'paused') "
+                "ORDER BY created_at DESC LIMIT 1", (session_id,),
             ).fetchone()
             return self._request_row(row) if row else None
 
@@ -1298,6 +1346,21 @@ class GatewaySessionStore:
     def append_event(self, session_id: str, event: str, data: dict[str, Any]) -> dict[str, Any]:
         with self._immediate() as conn:
             return self._insert_event(conn, session_id, event, data)
+
+    def message_feedback(self, session_id: str) -> dict[str, str]:
+        """Return the latest durable rating for each message in a session."""
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT data_json FROM activity_history WHERE session_id=? AND event='message.feedback' ORDER BY event_id",
+                (session_id,),
+            ).fetchall()
+        result: dict[str, str] = {}
+        for row in rows:
+            data = _row_meta(row["data_json"])
+            message_id, rating = data.get("message_id"), data.get("rating")
+            if message_id is not None and rating in {"positive", "negative"}:
+                result[str(message_id)] = rating
+        return result
 
     def activity_history(self, session_id: str, after: int = 0, limit: int = 500) -> dict[str, Any]:
         """Paged durable work history; independent of the bounded SSE replay window."""

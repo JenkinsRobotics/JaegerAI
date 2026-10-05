@@ -9,6 +9,7 @@ const Module = require('node:module');
 
 // ---- vscode mock ---------------------------------------------------------
 let jaegerModelSetting = 'settings-model';
+let copiedText = null;
 const configChangeListeners = [];
 const mockVscode = {
   window: {
@@ -33,7 +34,7 @@ const mockVscode = {
     ],
   },
   Uri: { joinPath: (base, ...parts) => ({ toString: () => [base?.toString(), ...parts].join('/') }) },
-  env: { clipboard: { writeText: async () => {} } },
+  env: { clipboard: { writeText: async text => { copiedText = text; } } },
 };
 
 // Patch before any require so extension.js picks up the mocks.
@@ -85,6 +86,7 @@ function makeContext() {
     subscriptions: { push: () => {} },
     extensionUri: { toString: () => 'ext' },
     extensionPath: path.join(__dirname, '..'),
+    globalStorageUri: { fsPath: '/tmp/jaeger-extension-global-storage-test' },
     workspaceState: { get: () => ({}), update: async () => {} },
   };
 }
@@ -192,6 +194,18 @@ test('pasteAttachment writes data to attachment scratch and stages it through Ga
   assert.equal(attachments[0].filename, 'clipboard.png');
   assert.equal(attachments[0].mime, 'image/png');
   assert.match(attachments[0].path, /clipboard\.png$/);
+  assert.match(attachments[0].path, /^\/tmp\/jaeger-extension-global-storage-test\/attachments\//);
+  assert.doesNotMatch(attachments[0].path, /\/workspace\/one\/\.jaeger\//);
+});
+
+test('copy message action reaches the native IDE clipboard', async () => {
+  copiedText = null;
+  const { send, gateway } = wireExtension();
+  send({ type: 'ready' });
+  await waitFor(() => gateway.instance !== undefined);
+  send({ type: 'copy', text: 'copied from Jaeger' });
+  await waitFor(() => copiedText === 'copied from Jaeger');
+  assert.equal(copiedText, 'copied from Jaeger');
 });
 
 test('model "config" → jaeger.model setting reaches admission body', async () => {

@@ -968,6 +968,10 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/sessions/{id}", self.handle_get_session)
         self.app.router.add_delete("/v1/sessions/{id}", self.handle_delete_session)
         self.app.router.add_patch("/v1/sessions/{id}", self.handle_patch_session)
+        self.app.router.add_post("/v1/sessions/{id}/branch", self.handle_branch_session)
+        self.app.router.add_post("/v1/sessions/{id}/feedback", self.handle_message_feedback)
+        self.app.router.add_get("/v1/sessions/{id}/feedback", self.handle_message_feedback)
+        self.app.router.add_post("/v1/sessions/{id}/retry", self.handle_retry_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
         self.app.router.add_get("/v1/sessions/{id}/queue", self.handle_get_queue)
         self.app.router.add_post("/v1/sessions/{id}/queue", self.handle_add_queue)
@@ -1485,7 +1489,7 @@ class JaegerGatewayApp:
 
     async def handle_list_sessions(self, request: web.Request) -> web.Response:
         profile = request.query.get("profile")
-        sessions = self.store.list_sessions(profile=profile)
+        sessions = self.store.list_sessions(profile=profile, query=request.query.get("q"))
         return web.json_response({"sessions": sessions})
 
     async def handle_create_session(self, request: web.Request) -> web.Response:
@@ -1543,6 +1547,101 @@ class JaegerGatewayApp:
         # Surfaces chrome polls GET without SSE — stamp role/display_name
         # after handoff so the UI can render the active agent identity.
         return web.json_response(self._enrich_session_agent(session))
+
+    async def handle_branch_session(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        body = await request.json() if request.can_read_body else {}
+        keep_count = body.get("keep_count")
+        if keep_count is None and body.get("message_id") is not None:
+            source = self.store.get_session(session_id)
+            try:
+                wanted = int(body["message_id"])
+                match = next((i for i, row in enumerate(source.get("messages", []))
+                              if int(row.get("id", -1)) == wanted), None) if source else None
+                if match is not None:
+                    keep_count = match + 1
+            except (TypeError, ValueError):
+                return web.json_response({"error": "message_id must be an integer"}, status=400)
+        if keep_count is not None:
+            try:
+                keep_count = int(keep_count)
+            except (TypeError, ValueError):
+                return web.json_response({"error": "keep_count must be an integer"}, status=400)
+            if keep_count < 0:
+                return web.json_response({"error": "keep_count must be non-negative"}, status=400)
+        branch = self.store.branch_session(
+            session_id,
+            title=str(body.get("title") or "").strip() or None,
+            keep_count=keep_count,
+        )
+        if branch is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        self.event_bus.publish(session_id, "session.branched", {
+            "session_id": branch["session_id"], "parent_session_id": session_id,
+        })
+        return web.json_response(branch, status=201)
+
+    async def handle_message_feedback(self, request: web.Request) -> web.Response:
+        session_id = request.match_info["id"]
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        if request.method == "GET":
+            return web.json_response({"feedback": self.store.message_feedback(session_id)})
+        body = await request.json() if request.can_read_body else {}
+        rating = str(body.get("rating") or "").strip().lower()
+        if rating not in {"positive", "negative"}:
+            return web.json_response({"error": "rating must be positive or negative"}, status=400)
+        message_id = body.get("message_id")
+        event = self.store.append_event(session_id, "message.feedback", {
+            "message_id": message_id, "rating": rating,
+            "comment": str(body.get("comment") or "")[:1000],
+        })
+        self.event_bus.publish(session_id, "message.feedback", event)
+        return web.json_response({"ok": True, "feedback": event})
+
+    async def handle_retry_session(self, request: web.Request) -> web.Response:
+        """Replay the last completed request with a new durable identity."""
+        session_id = request.match_info["id"]
+        previous = self.store.latest_request(session_id)
+        if previous is None:
+            return web.json_response({"error": "No previous request to retry"}, status=404)
+        if previous.get("status") in {"running", "admitted", "cancelling"}:
+            return web.json_response({"error": "The previous request is still running"}, status=409)
+        body = {
+            "text": previous.get("input_text") or "",
+            "request_id": uuid.uuid4().hex,
+        }
+        execution = previous.get("execution") or {}
+        for key in ("model", "provider", "workspace", "options", "allowed_tools",
+                    "interaction_tier"):
+            if key in execution:
+                body[key] = execution[key]
+        attachments = execution.get("attachments") or []
+        if isinstance(attachments, list):
+            body["attachment_ids"] = [item.get("attachment_id") for item in attachments
+                                       if isinstance(item, dict) and item.get("attachment_id")]
+        # Reuse the normal admission and execution path so retry has the same
+        # receipts, locking, approvals, and SSE behavior as a new turn.
+        # Invoke the shared admission path through a tiny internal dispatch
+        # payload instead of duplicating the normal turn handler.
+        return await self._admit_and_start_retry(session_id, body)
+
+    async def _admit_and_start_retry(self, session_id: str, body: dict[str, Any]) -> web.Response:
+        text = str(body.get("text") or "").strip()
+        requested = self._requested_from_body(body)
+        try:
+            admitted = self.store.admit_request(
+                session_id, text, request_id=body["request_id"], requested=requested,
+            )
+        except (RequestConflict, RequestBusy, ValueError) as exc:
+            return web.json_response({"error": str(exc)}, status=409 if isinstance(exc, RequestBusy) else 400)
+        self._start_admitted_turn(admitted, session_id, text)
+        return web.json_response({
+            "session_id": session_id, "turn_id": admitted["turn_id"],
+            "request_id": admitted["request_id"], "status": "running",
+            "replayed": False,
+            "start_event_id": (admitted.get("event") or {}).get("event_id"),
+        }, status=202)
 
     async def handle_activity_history(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
