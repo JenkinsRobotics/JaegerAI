@@ -76,12 +76,14 @@ jobs:
               export PIP_CONSTRAINT="$RUNNER_TEMP/jaeger-ci-constraints.txt"
               python scripts/install-packages.py packages/jaeger-os 'packages/jaeger-agent[multimodal-duplex]' packages/jaeger-kokoro-tts packages/jaeger-whisper-stt '.[test]'
               python -m pip install pytest-timeout
+              python -m playwright install --with-deps chromium
               ;;
             agent) python scripts/install-packages.py packages/jaeger-os packages/jaeger-agent; python -m pip install pytest onnxruntime ;;
             os) python scripts/install-packages.py packages/jaeger-os; python -m pip install pytest ;;
             kokoro) python scripts/install-packages.py packages/jaeger-os packages/jaeger-kokoro-tts; python -m pip install pytest ;;
             whisper) python scripts/install-packages.py packages/jaeger-os packages/jaeger-whisper-stt; python -m pip install pytest ;;
           esac
+          python -m pip install pytest-timeout
       - name: Test suite
         # Same runner as local development: pinned env, isolated state root,
         # no bytecode in the tree, live acceptance excluded, exact tiers.
