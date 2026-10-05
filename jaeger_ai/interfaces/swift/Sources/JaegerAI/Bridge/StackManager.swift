@@ -105,7 +105,9 @@ final class StackManager: Sendable {
 /// the Gateway and fabric supervisor already read. Workers must not call this.
 enum LifecycleLeaseBeat {
     private static let queue = DispatchQueue(label: "ai.jaeger.lifecycle-lease")
-    private static var timer: DispatchSourceTimer?
+    // Touched only inside queue.sync. Swift 6 still treats a nonisolated
+    // static as shared mutable state unless this is stated explicitly.
+    nonisolated(unsafe) private static var timer: DispatchSourceTimer?
     private static let interval: TimeInterval = 5
 
     static func start() {
