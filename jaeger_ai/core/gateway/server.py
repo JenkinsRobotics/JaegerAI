@@ -4565,12 +4565,31 @@ async def leave_after_lifecycle_shutdown(gateway: JaegerGatewayApp) -> None:
     bar has already retired the lease, so a race that loses the bootout still
     fails closed.
     """
-    try:
-        from jaeger_ai.core.runtime.stack import stack_down
-        stack_down(wait_timeout=2.0)
-    except Exception:
-        logger.error("lifecycle stack shutdown failed", exc_info=True)
+    if _is_launchd_stack_gateway():
+        try:
+            from jaeger_ai.core.runtime.stack import stack_down
+            stack_down(wait_timeout=2.0)
+        except Exception:
+            logger.error("lifecycle stack shutdown failed", exc_info=True)
+    else:
+        # A foreground, test-port or scratch Gateway owns only itself. It
+        # must never boot out the operator's launchd stack.
+        logger.warning("Not the launchd stack Gateway; leaving without stack down")
     await gateway._bounded_shutdown(gateway.app)
+
+
+def _is_launchd_stack_gateway() -> bool:
+    """True only for the Gateway job launchd started from the stack plist.
+
+    launchd sets XPC_SERVICE_NAME to the job label and is the job's parent.
+    Requiring both keeps a child process or a shell-launched Gateway that
+    inherited the variable from taking the stack down.
+    """
+    from jaeger_ai.core.runtime.stack import SERVICE_BY_ID
+    return (
+        os.environ.get("XPC_SERVICE_NAME") == SERVICE_BY_ID["gateway"].label
+        and os.getppid() == 1
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
