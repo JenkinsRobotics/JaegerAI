@@ -327,6 +327,10 @@ class PolicyKernel:
                     proposal_id=proposal.proposal_id,
                 )
         except Exception:
+            logger.exception(
+                "Global stop check failed for %r (fail-closed)",
+                proposal.tool_name,
+            )
             return AuthorityDecision(
                 decision=AuthorityDecisionType.DENY,
                 reason="global stop unavailable",
@@ -337,6 +341,10 @@ class PolicyKernel:
             from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease
             decision = LifecycleLease.load().decide()
         except Exception:
+            logger.exception(
+                "Lifecycle lease check failed for %r (fail-closed)",
+                proposal.tool_name,
+            )
             return AuthorityDecision(
                 decision=AuthorityDecisionType.DENY,
                 reason="lifecycle lease unavailable",
