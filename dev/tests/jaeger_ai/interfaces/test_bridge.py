@@ -2753,3 +2753,32 @@ def test_native_multimodal_keeps_tool_grants_receipts_and_speech_owner(
         receipts.bind_tool_grant("chat-media", ["write_file"])
     if not tools_enabled:
         assert "ctx_used" not in reply
+
+
+def test_gateway_turn_relays_every_tool_event_as_a_tool_frame():
+    """Capability run 2026-10-09: socket clients saw tool events only when a
+    tool line happened to appear in the delta text. Every Gateway tool event
+    now becomes a ``tool`` frame — name, phase, duration only."""
+    import json
+
+    class FakeGateway:
+        def stream_turn(self, session, text, *, on_event, request_id=None, **choices):
+            on_event("tool.started", {"tool": "terminal", "input": "secret cmd"})
+            on_event("tool.completed", {"tool": "terminal", "elapsed_s": 1.5, "output": "secret out"})
+            on_event("tool.started", {"tool": "write_file"})
+            on_event("tool.failed", {"tool": "write_file", "elapsed_s": 0.1})
+            from jaeger_ai.core.gateway.client import TurnResult
+            return TurnResult(request_id or "r", "completed", "ok")
+
+        def resolve_approval(self, *a, **k):
+            return {}
+
+    ctx = bridge._Ctx()
+    ctx.gateway = FakeGateway()
+    out = io.StringIO()
+    bridge._gateway_turn(out, ctx, {}, "hi", "sess", "rid-3")
+    frames = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    tools = [(f["name"], f["phase"], f["elapsed_s"], f["session"]) for f in frames if f.get("type") == "tool"]
+    assert tools == [("terminal", "start", 0.0, "sess"), ("terminal", "done", 1.5, "sess"),
+                     ("write_file", "start", 0.0, "sess"), ("write_file", "error", 0.1, "sess")]
+    assert "secret" not in out.getvalue()

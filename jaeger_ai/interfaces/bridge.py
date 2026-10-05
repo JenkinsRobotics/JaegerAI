@@ -1958,6 +1958,9 @@ def _gateway_unavailable_message(ctx: _Ctx, exc: Exception) -> str:
             "turns on its own.")
 
 
+_GATEWAY_TOOL_PHASES = {"tool.started": "start", "tool.completed": "done", "tool.failed": "error"}
+
+
 def _gateway_turn(out: TextIO, ctx: _Ctx, req: dict[str, Any], text: str,
                   session: str, turn_id: str) -> dict[str, Any]:
     """Run one chat turn through the Gateway, translating its durable events
@@ -1968,6 +1971,7 @@ def _gateway_turn(out: TextIO, ctx: _Ctx, req: dict[str, Any], text: str,
     import uuid
 
     from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
+    from jaeger_os.contract import protocol
 
     rid = turn_id or uuid.uuid4().hex
     # A socket client that is its own Gateway caller (MCP, A2A) hands over
@@ -1996,6 +2000,15 @@ def _gateway_turn(out: TextIO, ctx: _Ctx, req: dict[str, Any], text: str,
         elif name == "turn.reasoning":
             deltas.flush()
             _emit(out, _reasoning_frame(str(data.get("text") or ""), session))
+        elif name in _GATEWAY_TOOL_PHASES:
+            # Every tool call reaches socket clients as a ``tool`` frame, as it
+            # did when this bridge executed turns itself. Only the catalog name,
+            # phase and duration cross: the Gateway already withholds args and
+            # results from its events, and this frame adds nothing back.
+            deltas.flush()
+            _emit(out, protocol.tool_frame(
+                str(data.get("tool") or "tool"), _GATEWAY_TOOL_PHASES[name],
+                float(data.get("elapsed_s") or 0.0), session))
         elif name == "approval.request" and data.get("approval_id"):
             deltas.flush()
             if gateway is not ctx.gateway:
