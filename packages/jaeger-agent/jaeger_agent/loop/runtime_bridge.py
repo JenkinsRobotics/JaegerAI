@@ -193,6 +193,7 @@ def _adapter_for_client(
             num_ctx=getattr(client, "num_ctx", None),
             timeout_s=timeout_s,
             max_tokens=max_tokens,
+            reasoning_effort=reasoning_effort_for(provider, model, getattr(ext, "reasoning_effort", None)),
         )
 
     # Unknown client shape — caller should have caught this; raise here
@@ -201,6 +202,31 @@ def _adapter_for_client(
         f"runtime_bridge cannot select an adapter for client "
         f"{type(client).__name__}; expected ``.llm`` or ``.ext``."
     )
+
+
+_LOCAL_REASONING_PROVIDERS = frozenset({"ollama", "lmstudio"})
+
+
+def reasoning_effort_for(provider: str, model: str, configured: Any) -> str | None:
+    """The ``reasoning_effort`` to send, or None for the provider default.
+
+    ``auto`` (or unset) caps a local Ollama/LM Studio model at ``low``:
+    gemma-4-26b at ~8 tok/s spent 200-1,200 reasoning chunks per step in the
+    2026-10-09 capability run, and on a 300-token budget answered nothing at
+    the default but answered correctly at ``low`` (6.8 s) and ``none`` (3.5 s).
+    Cloud models keep their provider default.
+    """
+    value = str(configured or "auto").strip().lower()
+    if value == "provider":
+        return None
+    if value in {"none", "low", "medium", "high"}:
+        return value
+    model_l = str(model or "").lower()
+    if str(provider or "").lower() in _LOCAL_REASONING_PROVIDERS and not (
+        model_l.endswith(":cloud") or model_l.endswith("-cloud")
+    ):
+        return "low"
+    return None
 
 
 def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:

@@ -816,6 +816,18 @@ class ExternalModelConfig(BaseModel):
                     "ARES writes this when it syncs a model; it can also "
                     "be set by hand.",
     )
+    reasoning_effort: Literal["auto", "provider", "none", "low", "medium", "high"] = Field(
+        "auto",
+        json_schema_extra=_setting("model", restart=True, advanced=True),
+        description="Reasoning cap sent as ``reasoning_effort`` on "
+                    "OpenAI-compatible servers. ``auto`` = ``low`` for a "
+                    "local Ollama model (a thinking model otherwise spends "
+                    "hundreds of tokens per step at single-digit tok/s) and "
+                    "the provider default elsewhere; ``provider`` never "
+                    "sends the field. A step that ends with its whole "
+                    "budget spent thinking is retried once with reasoning "
+                    "off.",
+    )
     fallback: list[FallbackModel] = Field(
         default_factory=list,
         json_schema_extra=_setting("model", restart=True, advanced=True),
