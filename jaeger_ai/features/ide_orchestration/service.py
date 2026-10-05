@@ -192,36 +192,39 @@ class IDEOrchestrationService:
         )
         unresolved: list[str] = []
         for task_id, execution, operation in active:
-            if operation not in pending:
+            if operation in pending:
+                unresolved.append(task_id)
+                result = OrchestrationResult(
+                    task_id,
+                    self._tasks[task_id]["worker"],
+                    "unknown",
+                    "Shutdown timed out while confirming worker cancellation",
+                    VerificationResult(False, "Worker cancellation was not confirmed"),
+                    0.0,
+                    {
+                        "cancelled": True,
+                        "shutdown_timeout": True,
+                        "worker_cancel_confirmed": False,
+                    },
+                )
+                execution["forced_result"] = result
+                self._tasks[task_id]["result"] = {
+                    "task_id": result.task_id,
+                    "worker_id": result.worker_id,
+                    "state": result.state,
+                    "output": result.output,
+                    "verified": False,
+                    "reason": result.verification.reason,
+                    "checked_artifacts": [],
+                    "budget_used_seconds": 0.0,
+                    "evidence": result.evidence,
+                }
+                self._notify_progress(WorkerProgress(task_id, "unknown", 0, result.output))
+                operation.cancel()
                 continue
-            unresolved.append(task_id)
-            result = OrchestrationResult(
-                task_id,
-                self._tasks[task_id]["worker"],
-                "unknown",
-                "Shutdown timed out while confirming worker cancellation",
-                VerificationResult(False, "Worker cancellation was not confirmed"),
-                0.0,
-                {
-                    "cancelled": True,
-                    "shutdown_timeout": True,
-                    "worker_cancel_confirmed": False,
-                },
-            )
-            execution["forced_result"] = result
-            self._tasks[task_id]["result"] = {
-                "task_id": result.task_id,
-                "worker_id": result.worker_id,
-                "state": result.state,
-                "output": result.output,
-                "verified": False,
-                "reason": result.verification.reason,
-                "checked_artifacts": [],
-                "budget_used_seconds": 0.0,
-                "evidence": result.evidence,
-            }
-            self._notify_progress(WorkerProgress(task_id, "unknown", 0, result.output))
-            operation.cancel()
+            evidence = ((self._tasks.get(task_id) or {}).get("result") or {}).get("evidence") or {}
+            if evidence.get("worker_cancel_confirmed") is False or evidence.get("surviving_pids"):
+                unresolved.append(task_id)
         return tuple(unresolved)
 
     @staticmethod

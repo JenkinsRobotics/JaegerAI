@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 
@@ -79,6 +80,96 @@ def test_process_runtime_enforces_timeout(tmp_path) -> None:
     result = asyncio.run(run())
     assert result.status == "failed"
     assert "timed out" in result.summary
+
+
+def test_process_runtime_cancel_reaps_a_detached_descendant(tmp_path) -> None:
+    pidfile = tmp_path / "grand.pid"
+    code = (
+        "import os, signal, time\n"
+        "pid = os.fork()\n"
+        "if pid == 0:\n"
+        "    os.setsid()\n"
+        "    signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+        f"    open({str(pidfile)!r}, 'w').write(str(os.getpid()))\n"
+        "    time.sleep(60)\n"
+        "    os._exit(0)\n"
+        "print('started', flush=True)\n"
+        "time.sleep(60)\n"
+    )
+
+    def args(request, executable):
+        del request, executable
+        return ("-c", code)
+
+    runtime = SubprocessDelegateRuntime(
+        CommandSpec(
+            runtime_id="test-descendant",
+            executables=(sys.executable,),
+            build_args=args,
+            capabilities=frozenset(),
+            local=True,
+        ), receipt_root=tmp_path / "receipts",
+    )
+
+    async def run():
+        handle = await runtime.start(_request(tmp_path, timeout=60))
+        for _ in range(50):
+            if pidfile.exists():
+                break
+            await asyncio.sleep(0.05)
+        grandchild = int(pidfile.read_text())
+        await runtime.cancel(handle)
+        return grandchild, await runtime.result(handle)
+
+    grandchild, result = asyncio.run(run())
+    assert result.status == "cancelled"
+    assert result.metadata["cancellation_unconfirmed"] is False
+    try:
+        os.kill(grandchild, 0)
+    except ProcessLookupError:
+        dead = True
+    else:
+        dead = False
+        os.kill(grandchild, 9)
+    assert dead
+
+
+def test_unconfirmed_descendant_is_not_a_successful_cancel(tmp_path) -> None:
+    import json
+
+    from jaeger_agent.delegates.contracts import DelegateHandle
+
+    runtime = SubprocessDelegateRuntime(
+        CommandSpec(
+            runtime_id="test-unconfirmed",
+            executables=(sys.executable,),
+            build_args=lambda *_a: ("-c", "print(1)"),
+            capabilities=frozenset(),
+            local=True,
+        ), receipt_root=tmp_path / "receipts",
+    )
+    handle = DelegateHandle("run-1", runtime.runtime_id)
+    root = runtime._directory(handle)
+    root.mkdir(parents=True)
+    (root / "admission.json").write_text('{"fingerprint":"x","created_at":1}')
+    (root / "result.json").write_text(json.dumps({
+        "status": "unknown",
+        "stdout": "",
+        "stderr": "still running",
+        "timeout": 5,
+        "cancellation_unconfirmed": True,
+        "surviving_pids": [424242],
+    }))
+
+    async def run():
+        await runtime.cancel(handle)
+
+    try:
+        asyncio.run(run())
+    except RuntimeError as exc:
+        assert "unconfirmed" in str(exc)
+    else:
+        raise AssertionError("surviving descendant was reported as a successful cancel")
 
 
 def test_process_runtime_cancel_reports_cancelled_and_reaps_child(tmp_path) -> None:
