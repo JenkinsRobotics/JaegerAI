@@ -95,11 +95,13 @@ def test_run_shell_sees_project_files(project, allow_shell):
     assert "PROJECT_MARKER" in result["stdout"]
 
 
-def test_run_shell_still_uses_a_scratch_dir_when_unbound(project, allow_shell):
-    """The pre-existing behaviour must survive for surfaces with no project.
+def test_run_shell_uses_the_instance_root_when_unbound(project, allow_shell, tmp_path):
+    """No project selected: the shell starts in the instance root.
 
-    A surface that never selects one has to behave exactly as it did before
-    this concept existed, or the change is a regression dressed as a feature.
+    File tools take ``workspace/...`` relative to the instance root, so the
+    shell must start there for the same relative path to mean the same file
+    (capability run 2026-10-09: ``python3 workspace/x/report.py`` failed from
+    the old scratch tempdir). Never the project, since none is bound.
     """
     from jaeger_agent.tools.code import run_shell
 
@@ -108,7 +110,7 @@ def test_run_shell_still_uses_a_scratch_dir_when_unbound(project, allow_shell):
     assert result["ok"] is True, result
     where = Path(result["stdout"].strip()).resolve()
     assert where != project.resolve()
-    assert "jaeger_shell_" in str(where)
+    assert where == (tmp_path / "agent").resolve()
 
 
 def test_relative_reads_resolve_against_the_project(project, monkeypatch, tmp_path):

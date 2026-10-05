@@ -339,6 +339,25 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
     }
 
 
+def _shell_home(scratch: str | None) -> "Path | str | None":
+    """cwd for run_shell when no project is bound: the instance root.
+
+    File tools take ``workspace/...`` relative to the instance root, so the
+    shell starts there and the same relative path means the same file in
+    both (capability run 2026-10-09: ``python3 workspace/x/report.py`` failed
+    from a scratch tempdir). Falls back to ``scratch`` with no bound instance.
+    """
+    from pathlib import Path as _P
+    try:
+        from jaeger_agent.core.workspace import _require_layout
+        root = _P(_require_layout().root).resolve()
+        if root.is_dir():
+            return root
+    except Exception:  # noqa: BLE001
+        pass
+    return scratch
+
+
 @hardline_guard("command")
 @requires_tier(
     PermissionTier.PRIVILEGED,
@@ -363,13 +382,12 @@ def run_shell(command: str, timeout_s: float = 60.0) -> dict[str, Any]:
     NOT filesystem-confined the way file_write is. Use it deliberately;
     prefer install_package / run_in_venv / run_python when they can do the job.
 
-    cwd is the bound PROJECT ROOT when a surface has selected one, and a fresh
-    tempdir otherwise. That distinction is the whole point of the project-root
+    cwd is the bound PROJECT ROOT when a surface has selected one, otherwise
+    the INSTANCE ROOT, so ``workspace/...`` means the same file here as in the
+    file tools (a scratch tempdir only when no instance is bound). That distinction is the whole point of the project-root
     binding: a coding agent asked to run ``git status`` or ``npm test`` means
     the project it was pointed at, and running those in an empty tempdir
-    produced confidently wrong answers rather than errors. The tempdir default
-    is retained for the unbound case so nothing changes for a surface that
-    never selects a project.
+    produced confidently wrong answers rather than errors.
 
     Returns ``{ok, exit_code, stdout, stderr, elapsed_s, timed_out}``.
     """
@@ -384,7 +402,7 @@ def run_shell(command: str, timeout_s: float = 60.0) -> dict[str, Any]:
         layout = _require_layout()
         from jaeger_agent.core.workspace import get_project_root as _audit_project_root
 
-        _audit_cwd = _audit_project_root()
+        _audit_cwd = _audit_project_root() or _shell_home(None)
         _audit("run_shell", {
             "command": cleaned[:500],
             "timeout_s": timeout,
@@ -404,7 +422,7 @@ def run_shell(command: str, timeout_s: float = 60.0) -> dict[str, Any]:
         from jaeger_agent.core.workspace import get_project_root
 
         project = get_project_root()
-        run_cwd = str(project) if project is not None else scratch
+        run_cwd = str(project) if project is not None else str(_shell_home(scratch))
         try:
             proc = run_interruptible(
                 ["/bin/sh", "-c", cleaned],
