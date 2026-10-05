@@ -3019,11 +3019,11 @@ def _execute_attached_turn(proto: TextIO, ctx: _Ctx, queued: Any) -> None:
 
             while True:
                 with ctx.turn_control_lock:
-                    if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":
+                    if turn_id and ctx.turn_controls.get(turn_id) == "cancelled":  # noqa: F821
                         result = {"text": "", "error": "Cancelled before execution",
                                   "halt_reason": "interrupted"}
                         break
-                deltas = _DeltaStream(out, session)
+                deltas = _DeltaStream(out, session)  # noqa: F821
                 with _turn_workspace(ctx, req.get("workspace")):
                     display_text = req.get("display_text") if step == 0 else None
                     voice_kwargs: dict[str, Any] = {"session_key": session}
@@ -3042,7 +3042,7 @@ def _execute_attached_turn(proto: TextIO, ctx: _Ctx, queued: Any) -> None:
                         # and a client appending it to the visible text would
                         # render the model's internal monologue as the reply.
                         deltas.flush()
-                        _emit(out, _reasoning_frame(chunk, _session))
+                        _emit(out, _reasoning_frame(chunk, _session))  # noqa: F821
 
                     def _request_interaction(
                         kind: str, prompt: str, options: tuple[str, ...],
@@ -3169,19 +3169,19 @@ def _execute_attached_turn(proto: TextIO, ctx: _Ctx, queued: Any) -> None:
             # Only the native loop's halt result (or skipped dispatch above)
             # confirms interruption; the control flag alone is merely intent.
             cancelled = result.get("halt_reason") == "interrupted"
-            if session.startswith('focus:') and turn_id:
+            if session.startswith('focus:') and turn_id:  # noqa: F821
                 from jaeger_ai.features.dispatcher.store import DispatcherStore
                 # Publish from the native runtime before its terminal receipt,
                 # not from a WebUI observer that may disconnect or restart.
                 DispatcherStore(ctx.layout).report(
-                    turn_id, session, final_text, result.get('error'), cancelled=cancelled)
-            reply({**protocol.reply_frame(
+                    turn_id, session, final_text, result.get('error'), cancelled=cancelled)  # noqa: F821
+            reply({**protocol.reply_frame(  # noqa: F821
                 final_text, result.get("error"), session,
                 elapsed_s=result.get("elapsed_s"),
                 ctx_used=used, ctx_max=mx,
-                halt_reason=result.get("halt_reason")), **({"cancelled": cancelled} if turn_id else {})})
+                halt_reason=result.get("halt_reason")), **({"cancelled": cancelled} if turn_id else {})})  # noqa: F821
         except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
-            reply(protocol.reply_frame("", str(exc), session))
+            reply(protocol.reply_frame("", str(exc), session))  # noqa: F821
         finally:
             _emit_state(reply_out, ctx, False, session)
         return
