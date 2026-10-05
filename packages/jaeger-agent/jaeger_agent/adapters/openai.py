@@ -182,6 +182,27 @@ def _from_openai_tool_calls(raw_calls: Any) -> list[ToolCall]:
     return out
 
 
+def _thinking_exhausted(raw: Any) -> bool:
+    """True when a completion hit its length cap inside reasoning: no
+    content, no tool calls, some reasoning."""
+    try:
+        choices = getattr(raw, "choices", None) or (raw.get("choices") if isinstance(raw, dict) else None) or []
+        if not choices:
+            return False
+        choice = choices[0]
+        finish = getattr(choice, "finish_reason", None) or (choice.get("finish_reason") if isinstance(choice, dict) else None)
+        message = getattr(choice, "message", None) or (choice.get("message") if isinstance(choice, dict) else {}) or {}
+        def field(name: str) -> Any:
+            value = getattr(message, name, None)
+            if value is None and isinstance(message, dict):
+                value = message.get(name)
+            return value
+        reasoning = field("reasoning") or field("reasoning_content")
+        return finish == "length" and bool(reasoning) and not (field("content") or "").strip() and not field("tool_calls")
+    except Exception:  # noqa: BLE001 — a probe, never a failure
+        return False
+
+
 class OpenAIAdapter(ProviderAdapter):
     """Concrete adapter for ``openai.OpenAI`` and every chat-completions
     compatible server. One class, five backends — selected by the
@@ -230,6 +251,7 @@ class OpenAIAdapter(ProviderAdapter):
         timeout_s: float = 60.0,
         stream_transport: bool = True,
         client: Any = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.provider = provider
         self.model = model
@@ -239,6 +261,8 @@ class OpenAIAdapter(ProviderAdapter):
         self.temperature = float(temperature)
         self.top_p = float(top_p)
         self.num_ctx = int(num_ctx) if num_ctx is not None else None
+        # ``reasoning_effort``: none|low|medium|high, or None to send nothing.
+        self.reasoning_effort = (str(reasoning_effort).strip().lower() or None) if reasoning_effort else None
         self.timeout_s = float(timeout_s)
         self.stream_transport = bool(stream_transport)
         self._client = client
@@ -345,11 +369,31 @@ class OpenAIAdapter(ProviderAdapter):
             and ":cloud" not in self.model.lower()
         ):
             kwargs["extra_body"] = {"options": {"num_ctx": self.num_ctx}}
+        if self.reasoning_effort:
+            kwargs["reasoning_effort"] = self.reasoning_effort
         return kwargs
 
     # ── call + parse ────────────────────────────────────────────────
 
-    def call(
+    def call(self, formatted: Any, interrupt_event: threading.Event, **kwargs: Any) -> Any:
+        """One request; when the model spent the whole output budget
+        thinking and produced no answer or tool call, retry it once with
+        reasoning off (``reasoning_effort="none"``) instead of failing the
+        step. Only when this adapter is the one capping reasoning."""
+        raw = self._call_once(formatted, interrupt_event, **kwargs)
+        effort = (kwargs.get("reasoning_effort") or (formatted or {}).get("reasoning_effort")
+                  if isinstance(formatted, dict) else None)
+        if (
+            effort and effort != "none" and not interrupt_event.is_set()
+            and _thinking_exhausted(raw)
+        ):
+            retry = {**formatted, "reasoning_effort": "none"}
+            self.last_reasoning_retry = True
+            return self._call_once(retry, interrupt_event, **{k: v for k, v in kwargs.items() if k != "reasoning_effort"})
+        self.last_reasoning_retry = False
+        return raw
+
+    def _call_once(
         self,
         formatted: Any,
         interrupt_event: threading.Event,
