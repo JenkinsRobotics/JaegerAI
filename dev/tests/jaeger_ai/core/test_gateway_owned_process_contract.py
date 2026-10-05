@@ -717,7 +717,17 @@ def test_owned_browser_multiturn_render_cancel_and_reload(tmp_path):
                 # Reload may intentionally render a bounded tail; the most
                 # recent turns must remain visible without a fake new session.
                 playwright.expect(page.locator("#messages")).to_contain_text("BROWSER-TURN-20")
-                for extension in ("ares-finance", "ares-creator", "ares-minecraft", "ares-worldview"):
+                # These dashboards were archived out of the checkout (7c2c3be2).
+                # A clean CI tree must not require them. If they are restored,
+                # the owned WebUI still has to serve each document.
+                shipped = [
+                    extension
+                    for extension in (
+                        "ares-finance", "ares-creator", "ares-minecraft", "ares-worldview",
+                    )
+                    if (REPO / "extensions" / extension / "dashboard" / "index.html").is_file()
+                ]
+                for extension in shipped:
                     dashboard = context.request.get(f"{stack.webui_url}/extensions/{extension}/dashboard/index.html")
                     assert dashboard.ok, extension
                     assert 'src="app.js"' in dashboard.text()

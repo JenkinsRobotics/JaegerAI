@@ -130,6 +130,57 @@ def test_embodiment_actions_are_refused():
     assert refused["ok"] is False and refused["disabled"] is True
 
 
+def test_policy_kernel_reads_stop_without_the_gateway_server(tmp_path: Path):
+    """The agent suite does not install aiohttp. Stop must still be readable."""
+    import os
+    import subprocess
+    import sys
+    import textwrap
+
+    env = os.environ.copy()
+    root = Path(__file__).resolve().parents[4]
+    env["PYTHONPATH"] = os.pathsep.join([
+        str(root),
+        str(root / "packages" / "jaeger-os"),
+        str(root / "packages" / "jaeger-agent"),
+        str(root / "packages" / "jaeger-kokoro-tts"),
+        str(root / "packages" / "jaeger-whisper-stt"),
+    ])
+    env["JAEGER_STATE_DIR"] = str(tmp_path)
+    env["JAEGER_NO_ATTACH"] = "1"
+    env.pop("JAEGER_GLOBAL_STOP_PATH", None)
+    env.pop("JAEGER_LIFECYCLE_LEASE", None)
+    env.pop("JAEGER_HOME", None)
+    script = textwrap.dedent(
+        """
+        import sys
+        class _Block:
+            def find_spec(self, name, path, target=None):
+                if name == "aiohttp" or name.startswith("aiohttp."):
+                    raise ModuleNotFoundError(name)
+                return None
+        sys.meta_path.insert(0, _Block())
+        from jaeger_ai.core.authority.kernel import PolicyKernel, ProposedAction
+        decision = PolicyKernel()._check_control_plane(ProposedAction(
+            tool_name="get_time", arguments={}, tier="read_only",
+        ))
+        assert decision is None, (
+            getattr(decision, "policy_name", None),
+            getattr(decision, "reason", None),
+        )
+        assert "jaeger_ai.core.gateway.server" not in sys.modules
+        engaged = PolicyKernel()._check_control_plane(ProposedAction(
+            tool_name="mc_status", arguments={}, tier="read_only",
+        ))
+        assert engaged.policy_name == "embodiment_gate"
+        """
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script], env=env, capture_output=True, text=True,
+    )
+    assert completed.returncode == 0, completed.stderr + completed.stdout
+
+
 def test_policy_kernel_denies_stop_and_minecraft(tmp_path: Path, monkeypatch):
     from jaeger_ai.core.authority.kernel import AuthorityDecisionType, PolicyKernel, ProposedAction
 

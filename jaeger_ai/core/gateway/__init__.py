@@ -12,13 +12,6 @@ from .session_store import (
     default_store_path,
 )
 from .event_bus import GatewayEventBus, GatewayEvent
-from .server import (
-    JaegerGatewayApp,
-    DEFAULT_GATEWAY_HOST,
-    DEFAULT_GATEWAY_PORT,
-    create_gateway_server,
-    run_gateway_forever,
-)
 
 __all__ = [
     "GatewaySessionStore",
@@ -33,3 +26,25 @@ __all__ = [
     "create_gateway_server",
     "run_gateway_forever",
 ]
+
+# The daemon imports aiohttp. PolicyKernel and the agent suite read the stop
+# latch without starting a Gateway, so these names load only when asked.
+_SERVER_EXPORTS = {
+    "JaegerGatewayApp": "JaegerGatewayApp",
+    "DEFAULT_GATEWAY_HOST": "DEFAULT_GATEWAY_HOST",
+    "DEFAULT_GATEWAY_PORT": "DEFAULT_GATEWAY_PORT",
+    "create_gateway_server": "create_gateway_server",
+    "run_gateway_forever": "run_gateway_forever",
+}
+
+
+def __getattr__(name: str):
+    export = _SERVER_EXPORTS.get(name)
+    if export is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    from . import server
+
+    value = getattr(server, export)
+    globals()[name] = value
+    return value
+
