@@ -53,6 +53,11 @@ if _parseltongue_path.exists():
 if _race_path.exists():
     exec(compile(open(_race_path).read(), str(_race_path), 'exec'), _caller_globals)
 
+# parseltongue.py / godmode_race.py bind these by exec into this module.
+# Name them here so a static check can see the injection.
+score_response = _caller_globals.get("score_response")
+escalate_encoding = _caller_globals.get("escalate_encoding")
+
 # ═══════════════════════════════════════════════════════════════════
 # Hermes config paths
 # ═══════════════════════════════════════════════════════════════════
