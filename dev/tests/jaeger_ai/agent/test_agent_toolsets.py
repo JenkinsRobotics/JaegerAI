@@ -286,3 +286,31 @@ def test_filtering_drops_schema_size_dramatically():
     # get_time was registered with an essentials-matching name).
     assert len(essentials_only.tools) == 1
     assert essentials_only.tools[0].name == "get_time"
+
+
+def test_list_tools_finds_delegation_by_toolset_and_description():
+    """Capability run 2026-10-09: list_tools("delegate") returned nothing, so a
+    local model spent its budget guessing between call_agent and
+    delegate_task. A query matches the toolset name and full description."""
+    from types import SimpleNamespace
+
+    import jaeger_os.core.tools.tool_registry as registry
+    from jaeger_agent.tools.meta import list_tools
+
+    fake = [SimpleNamespace(name="call_agent", description="Hand a bounded task to a standing specialist."),
+            SimpleNamespace(name="get_time", description="Current time.")]
+    original = registry.get_tools
+    registry.get_tools = lambda: fake
+    try:
+        rows = list_tools("delegate")["tools"]
+    finally:
+        registry.get_tools = original
+    assert [r["tool"] for r in rows] == ["call_agent"] and rows[0]["toolset"] == "delegates"
+
+
+def test_list_tools_with_no_match_returns_the_toolset_catalog():
+    from jaeger_agent.tools.meta import list_tools
+
+    out = list_tools("zzqqxx-no-such-capability")
+    assert out["count"] == 0
+    assert out["toolsets"] and "load_tools" in out["note"]
