@@ -186,6 +186,7 @@ extension GatewayClient {
                 var urlRequest = URLRequest(url: url)
                 urlRequest.setValue("text/event-stream", forHTTPHeaderField: "Accept")
                 urlRequest.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+                GatewayCallerToken.authorize(&urlRequest)
                 urlRequest.timeoutInterval = .infinity   // long-lived by design
 
                 do {
