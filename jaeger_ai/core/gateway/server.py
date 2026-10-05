@@ -1062,6 +1062,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
+        self.app.router.add_get("/v1/approvals/{id}", self.handle_get_approval)
         self.app.router.add_get("/v1/runtime/frameworks", self.handle_runtime_frameworks)
         self.app.router.add_get("/v1/runtime/models", self.handle_runtime_models)
         self.app.router.add_get("/v1/runtime/capabilities", self.handle_runtime_capabilities)
@@ -3908,6 +3909,23 @@ class JaegerGatewayApp:
     async def handle_list_approvals(self, request: web.Request) -> web.Response:
         pending = self.store.list_pending_approvals()
         return web.json_response({"approvals": pending})
+
+    async def handle_get_approval(self, request: web.Request) -> web.Response:
+        """Status of one approval. Read-only: deciding needs the approve scope.
+
+        An outside caller (MCP, A2A) sees only approvals in its own sessions;
+        any other id answers 404 so it cannot probe the owner's approvals.
+        """
+        approval = self.store.get_approval(request.match_info["id"])
+        caller = request.get("caller")
+        prefix = getattr(caller, "session_prefix", None)
+        if approval is None or (prefix and not str(approval.get("session_id") or "").startswith(prefix)):
+            return web.json_response({"error": "Approval not found"}, status=404)
+        return web.json_response({
+            key: approval.get(key)
+            for key in ("approval_id", "session_id", "request_id", "kind", "prompt",
+                        "options", "status", "decision", "created_at", "resolved_at")
+        })
 
     async def handle_runtime_frameworks(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.runtime.truth import framework_inventory
