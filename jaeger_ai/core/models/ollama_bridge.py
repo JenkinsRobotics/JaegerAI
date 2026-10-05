@@ -30,6 +30,15 @@ ALLOWED_PATHS = frozenset({
     "/v1/embeddings",
     "/v1/models",
 })
+DESTRUCTIVE_METHODS = frozenset({"DELETE", "PUT", "PATCH"})
+DESTRUCTIVE_PATHS = frozenset({
+    "/api/delete",
+    "/api/create",
+    "/api/copy",
+    "/api/push",
+    "/api/pull",
+    "/api/blobs",
+})
 
 
 def daemon_listen() -> str:
@@ -45,11 +54,14 @@ def proxy_bind_hosts(bridge_host: str | None = None) -> tuple[str, ...]:
 
 
 def bridge_request_allowed(*, method: str, path: str, peer_host: str) -> bool:
-    if method.upper() not in {"GET", "POST"}:
-        return False
+    method_name = method.upper()
     clean = path.split("?", 1)[0]
     if len(clean) > 1:
         clean = clean.rstrip("/")
+    if method_name in DESTRUCTIVE_METHODS or clean in DESTRUCTIVE_PATHS:
+        return False
+    if method_name not in {"GET", "POST"}:
+        return False
     if clean not in {item.rstrip("/") for item in ALLOWED_PATHS}:
         return False
     if peer_host in _LOOPBACKS:
@@ -99,8 +111,20 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802
         self._proxy()
 
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._refuse_destructive()
+
+    def do_PUT(self) -> None:  # noqa: N802
+        self._refuse_destructive()
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        self._refuse_destructive()
+
     def log_message(self, fmt: str, *args: object) -> None:
         return
+
+    def _refuse_destructive(self) -> None:
+        self._send(403, b'{"error":"destructive model endpoint refused"}')
 
     def _proxy(self) -> None:
         peer = self.client_address[0]
