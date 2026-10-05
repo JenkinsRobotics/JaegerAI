@@ -72,7 +72,14 @@
 				"jaeger.testCommand": {
 					"type": "string",
 					"default": "",
-					"description": "Optional custom command to run for the verification test suite (e.g. 'npm test', 'pytest', 'cargo test')."
+					"scope": "application",
+					"description": "Optional custom command to run for the verification test suite (e.g. 'npm test', 'pytest', 'cargo test'). User settings only: a workspace cannot choose a shell command."
+				},
+				"jaeger.autoStartGateway": {
+					"type": "boolean",
+					"default": false,
+					"scope": "application",
+					"description": "Start a local Jaeger Gateway daemon when the panel opens and none is answering. Off by default; the macOS app normally owns the Gateway. User settings only."
 				},
 				"jaeger.gatewayUrl": {
 					"type": "string",

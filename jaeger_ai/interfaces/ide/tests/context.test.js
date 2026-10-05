@@ -29,6 +29,29 @@ test('IDE startup targets the canonical Gateway daemon, not stack bootstrap or t
   assert.match(extension, /await ensureGatewayDaemon\(controller\.gateway\)/);
 });
 
+test('Gateway auto-start is an opt-in user setting, off by default', () => {
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  const setting = pkg.contributes.configuration.properties['jaeger.autoStartGateway'];
+  assert.equal(setting.default, false);
+  assert.equal(setting.scope, 'application');
+  const calls = extension.match(/ensureGatewayDaemon\(controller\.gateway\)/g) || [];
+  assert.equal(calls.length, 1);
+  assert.match(extension, /if \(userSetting\('autoStartGateway'\) === true\) await ensureGatewayDaemon\(controller\.gateway\)/);
+});
+
+test('testCommand is user-scoped so a workspace cannot choose a shell command', () => {
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+  assert.equal(pkg.contributes.configuration.properties['jaeger.testCommand'].scope, 'application');
+  assert.match(extension, /const configured = userSetting\('testCommand'\)/);
+  assert.doesNotMatch(extension, /getConfiguration\('jaeger'\)\.get\('testCommand'\)/);
+  const body = extension.slice(extension.indexOf('function userSetting('), extension.indexOf('function detectTestRunner('));
+  assert.match(body, /\.inspect\(key\)/);
+  assert.match(body, /info\.globalValue/);
+  assert.doesNotMatch(body, /workspaceValue|workspaceFolderValue/);
+});
+
 test('diagnosticsLines summarize and bound workspace problems', () => {
   const snapshot = {
     count: 3,
