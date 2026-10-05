@@ -14,6 +14,7 @@ import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
 
+from jaeger_ai.core.gateway.caller_auth import client_headers
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
@@ -22,7 +23,8 @@ from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 async def client(tmp_path):
     gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "xsite.sqlite3"))
     gateway.app.on_startup.clear()
-    async with TestClient(TestServer(gateway.app)) as c:
+    # Real clients authenticate; the browser defences below run before auth.
+    async with TestClient(TestServer(gateway.app), headers=client_headers("cli")) as c:
         yield c
 
 

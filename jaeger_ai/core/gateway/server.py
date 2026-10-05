@@ -15,6 +15,7 @@ import os
 import re
 import threading
 import uuid
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Callable
 
@@ -33,6 +34,7 @@ from jaeger_ai.contract.ports import (
 )
 from jaeger_ai.contract.sessions import normalise_surface
 
+from . import caller_auth
 from .event_bus import GatewayEventBus, ReplayGap
 from jaeger_ai.core.runtime.cancellation import CancellationRegistry
 from jaeger_ai.core.runtime.salience import SalienceLevel
@@ -238,6 +240,94 @@ async def _reject_browser_cross_site(request: web.Request, handler: Any) -> web.
     if request.headers.get("Sec-Fetch-Site") == "cross-site":
         return web.json_response({"error": "Cross-site requests are refused"}, status=403)
     return await handler(request)
+
+
+#: aiohttp app key: ``{"auth": CallerAuthenticator | None}``, built lazily on first use.
+CALLER_AUTH_KEY = "jaeger.caller_auth"
+#: (caller name, actor) of the authenticated HTTP request being handled.
+_REQUEST_CALLER: ContextVar[tuple[str, str] | None] = ContextVar("gateway_request_caller", default=None)
+#: Actors jaegerd's own tools may act for when calling back in (X-Jaeger-Actor).
+_DELEGABLE_ACTORS = frozenset({spec.actor for spec in caller_auth.CALLERS.values()})
+
+
+def _register_tool_gateway_auth() -> None:
+    """Give jaeger-agent's ``call_agent`` jaegerd's Gateway credential."""
+    import importlib
+
+    try:  # the module, not the same-named tool function re-exported by the package
+        module = importlib.import_module("jaeger_agent.tools.call_agent")
+    except ImportError:
+        return
+    module.set_gateway_auth(lambda: caller_auth.client_headers("jaegerd"))
+
+
+def current_request_actor() -> str | None:
+    """Actor of the authenticated request in this context (``None`` = internal)."""
+    bound = _REQUEST_CALLER.get()
+    return bound[1] if bound else None
+
+
+def _route_template(request: web.Request) -> str | None:
+    resource = getattr(getattr(request.match_info, "route", None), "resource", None)
+    return getattr(resource, "canonical", None) if resource is not None else None
+
+
+@web.middleware
+async def _authenticate_caller(request: web.Request, handler: Any) -> web.StreamResponse:
+    """Every non-public route needs a per-caller bearer token (fail closed).
+
+    The token picks a caller from ``caller_auth.CALLERS``; its fixed scopes
+    decide the route, outside callers (MCP, A2A) are held to their own
+    session prefix, and the caller's actor is bound for the handler so an
+    admitted turn carries it into PolicyKernel. No header, body field, model
+    output or tool result can name a different caller.
+    """
+    route = _route_template(request)
+    scope = caller_auth.required_scope(request.method, route)
+    if scope is None:
+        return await handler(request)
+    holder = request.app.get(CALLER_AUTH_KEY)
+    if not isinstance(holder, dict):
+        return web.json_response({"error": "Caller authentication unavailable"}, status=503)
+    auth = holder.get("auth")
+    if auth is None:
+        try:
+            auth = caller_auth.CallerAuthenticator()
+        except Exception as exc:  # noqa: BLE001 - fail closed, never echo values
+            logger.error("Caller authentication unavailable: %s", type(exc).__name__)
+            return web.json_response({"error": "Caller authentication unavailable"}, status=503)
+        holder["auth"] = auth
+    spec = auth.authenticate(request.headers.get("Authorization"))
+    if spec is None:
+        return web.json_response(
+            {"error": "Unauthorized: a Jaeger caller token is required"}, status=401,
+            headers={"WWW-Authenticate": 'Bearer realm="jaeger-gateway"'},
+        )
+    if scope not in spec.scopes:
+        return web.json_response({"error": f"Caller {spec.name!r} lacks scope {scope!r}"}, status=403)
+    if spec.session_prefix is not None:
+        if not caller_auth.prefixed_route_allowed(request.method, route):
+            return web.json_response({"error": f"Caller {spec.name!r} may not use this route"}, status=403)
+        if (route or "").startswith("/v1/sessions/{id}") and not caller_auth.session_allowed(
+                spec, request.match_info.get("id")):
+            return web.json_response(
+                {"error": f"Caller {spec.name!r} may only use sessions starting {spec.session_prefix!r}"},
+                status=403,
+            )
+    actor = spec.actor
+    if spec.name == "jaegerd":
+        claimed = (request.headers.get("X-Jaeger-Actor") or "").strip()
+        if claimed:
+            if claimed not in _DELEGABLE_ACTORS:
+                return web.json_response({"error": "Unknown delegated actor"}, status=403)
+            actor = claimed
+    request["caller"] = spec
+    request["caller_actor"] = actor
+    bound = _REQUEST_CALLER.set((spec.name, actor))
+    try:
+        return await handler(request)
+    finally:
+        _REQUEST_CALLER.reset(bound)
 
 
 class _GatewayToolConfirmationProvider:
@@ -475,7 +565,9 @@ class JaegerGatewayApp:
             self.orchestration.bind_store(self.store.path)
         from jaeger_ai.core.tasks.owner import GatewayTaskOwner
         self.task_owner = GatewayTaskOwner(self)
-        self.app = web.Application(middlewares=[_reject_browser_cross_site])
+        self.app = web.Application(middlewares=[_reject_browser_cross_site, _authenticate_caller])
+        self.app[CALLER_AUTH_KEY] = {"auth": None}
+        _register_tool_gateway_auth()
         self.app.on_startup.append(self._recover_interrupted)
         self.app.on_cleanup.append(self._bounded_shutdown)
         self._setup_routes()
@@ -1404,6 +1496,14 @@ class JaegerGatewayApp:
         # a Gateway restart, and `ensure_session` is idempotent, so a stable
         # client-supplied id is one row, never a second store.
         session_id = str(body.get("session_id") or "").strip() or uuid.uuid4().hex
+        caller = request.get("caller")
+        prefix = getattr(caller, "session_prefix", None)
+        if prefix and not body.get("session_id"):
+            session_id = prefix + session_id
+        if prefix and not session_id.startswith(prefix):
+            return web.json_response(
+                {"error": f"Caller {caller.name!r} may only create sessions starting {prefix!r}"}, status=403,
+            )
         title = str(body.get("title") or "New Conversation")
         workspace = str(body.get("workspace") or "")
         metadata = dict(body.get("metadata") or {})
@@ -1574,6 +1674,12 @@ class JaegerGatewayApp:
                 requested["provider"] = lane
         if "interaction_tier" not in requested:
             requested["interaction_tier"] = self._current_tier()
+        # The acting caller is assigned here from the authenticated request,
+        # never taken from the body.
+        requested.pop("caller", None)
+        actor = current_request_actor()
+        if actor:
+            requested["caller"] = actor
         return requested
 
     async def handle_send_turn(self, request: web.Request) -> web.Response:
@@ -2495,6 +2601,31 @@ class JaegerGatewayApp:
                 self._active_agents.pop(request_id, None)
 
     async def _execute_turn(
+        self,
+        session_id: str,
+        turn_id: str,
+        text: str,
+        *,
+        request_id: str | None = None,
+        execution: dict[str, Any] | None = None,
+    ) -> None:
+        """Run an admitted turn as the caller that admitted it.
+
+        The actor frozen in the execution snapshot at admission (from the
+        authenticated request) is bound for every tool call, so PolicyKernel
+        judges an MCP/A2A turn as that outside caller. Turns jaegerd starts
+        itself (tasks, background work, pre-auth requests) carry no caller and
+        run as the entity, ``agent:jaeger``.
+        """
+        from jaeger_agent.tool_executor import caller_identity
+
+        actor = (execution or {}).get("caller")
+        with caller_identity(actor if isinstance(actor, str) and actor.strip() else None):
+            await self._execute_turn_inner(
+                session_id, turn_id, text, request_id=request_id, execution=execution,
+            )
+
+    async def _execute_turn_inner(
         self,
         session_id: str,
         turn_id: str,

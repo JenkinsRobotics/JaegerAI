@@ -20,6 +20,15 @@ from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 from jaeger_ai.features.webui.service.profile_layout import library_model
 
 
+class _CallerAuthedTestCase(AioHTTPTestCase):
+    """Route tests run as the owner CLI caller (the Gateway requires a token)."""
+
+    async def get_client(self, server):
+        from aiohttp.test_utils import TestClient
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        return TestClient(server, headers=client_headers("cli"))
+
+
 def test_create_list_native_and_third_party(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
     registry = AgentRegistry(tmp_path)
@@ -100,7 +109,7 @@ def test_library_model_includes_support_model(tmp_path: Path, monkeypatch: pytes
 
 
 @pytest.mark.integration
-class TestGatewayAgentsAPI(AioHTTPTestCase):
+class TestGatewayAgentsAPI(_CallerAuthedTestCase):
     async def get_application(self):
         import tempfile
 
@@ -196,7 +205,7 @@ def test_standing_specialists_seeded(tmp_path: Path, monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.integration
-class TestGatewayHandoffAPI(AioHTTPTestCase):
+class TestGatewayHandoffAPI(_CallerAuthedTestCase):
     async def get_application(self):
         import os
         import tempfile
@@ -342,7 +351,7 @@ def test_role_defaults_and_catalog_lead(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 @pytest.mark.integration
-class TestGatewaySessionHandoff(AioHTTPTestCase):
+class TestGatewaySessionHandoff(_CallerAuthedTestCase):
     async def get_application(self):
         import os
         import tempfile
@@ -776,7 +785,7 @@ def test_si_soul_prompt_uses_instance_layout(monkeypatch: pytest.MonkeyPatch, tm
 
 
 @pytest.mark.integration
-class TestGatewayTurnUsesSessionAgent(AioHTTPTestCase):
+class TestGatewayTurnUsesSessionAgent(_CallerAuthedTestCase):
     """Live-turn path must resolve session agent_id into turn.finish fields."""
 
     async def get_application(self):

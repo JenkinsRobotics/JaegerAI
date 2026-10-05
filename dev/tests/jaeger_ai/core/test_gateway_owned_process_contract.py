@@ -17,6 +17,12 @@ from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import HTTPCookieProcessor, Request, build_opener, urlopen
 
+
+def _auth(caller="cli"):
+    """The test drives the owned Gateway as the owner CLI caller by default."""
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    return client_headers(caller)
+
 import pytest
 
 pytestmark = [pytest.mark.integration, pytest.mark.subprocess]
@@ -99,10 +105,10 @@ class OwnedGateway:
         if self.log is not None:
             self.log.close()
 
-    def request(self, path, body=None):
+    def request(self, path, body=None, caller="cli"):
         request = Request(
             self.url + path, data=None if body is None else json.dumps(body).encode(),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", **_auth(caller)},
         )
         with urlopen(request, timeout=5) as response:
             return response.status, json.load(response)
@@ -134,7 +140,7 @@ def _terminal_events(gateway, session, request_id):
     """Every durable terminal event for ``request_id``, replayed from the
     session stream up to the first terminal event of the *next* request."""
     found = []
-    with urlopen(gateway.url + f"/v1/sessions/{session}/stream", timeout=5) as stream:
+    with urlopen(Request(gateway.url + f"/v1/sessions/{session}/stream", headers=_auth()), timeout=5) as stream:
         for line in stream:
             if not line.startswith(b"data: "):
                 continue
@@ -151,7 +157,7 @@ def _terminal_events(gateway, session, request_id):
 def _request_events(gateway, session, request_id):
     """Replay the session stream up to this request's terminal event."""
     seen = []
-    with urlopen(gateway.url + f"/v1/sessions/{session}/stream", timeout=5) as stream:
+    with urlopen(Request(gateway.url + f"/v1/sessions/{session}/stream", headers=_auth()), timeout=5) as stream:
         for line in stream:
             if not line.startswith(b"data: "):
                 continue
@@ -319,7 +325,7 @@ def test_real_owner_turn_survives_process_restart_and_sse_replay(gateway):
     assert replay["output"] == "CONTRACT-ANSWER"
     assert (gateway.root / "provider-calls.jsonl").read_text().splitlines() == provider_calls
     events = []
-    with urlopen(gateway.url + "/v1/sessions/contract/stream", timeout=5) as stream:
+    with urlopen(Request(gateway.url + "/v1/sessions/contract/stream", headers=_auth()), timeout=5) as stream:
         assert stream.headers["Content-Type"] == "text/event-stream"
         for line in stream:
             if line.startswith(b"data: "):
@@ -1011,9 +1017,16 @@ def test_bridge_is_subordinate_is_snapshotted_and_replays(gateway, bridge):
             "text": "Say CONTRACT-ANSWER", "request_id": "sub-1",
         })
     assert conflict.value.code == 409
+    # The caller is part of the request identity: only the bridge (which
+    # submitted sub-1) replays it; the same body from another caller conflicts.
+    with pytest.raises(HTTPError) as other_caller:
+        gateway.request("/v1/sessions/sub/turns", {
+            "text": "Say CONTRACT-ANSWER", "request_id": "sub-1", "is_subordinate": True,
+        })
+    assert other_caller.value.code == 409
     _, replay = gateway.request("/v1/sessions/sub/turns", {
         "text": "Say CONTRACT-ANSWER", "request_id": "sub-1", "is_subordinate": True,
-    })
+    }, caller="bridge")
     assert replay.get("replayed") is True
 
 

@@ -11,6 +11,15 @@ from jaeger_ai.core.gateway.event_bus import GatewayEventBus
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
 
 
+class _CallerAuthedTestCase(AioHTTPTestCase):
+    """Route tests run as the owner CLI caller (the Gateway requires a token)."""
+
+    async def get_client(self, server):
+        from aiohttp.test_utils import TestClient
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        return TestClient(server, headers=client_headers("cli"))
+
+
 @pytest.fixture(autouse=True)
 def isolated_entity_runtime(tmp_path, monkeypatch):
     """HTTP startup creates an OWNER; it must not leak into another test."""
@@ -99,7 +108,7 @@ def test_event_bus_pub_sub_and_replay():
     assert replay[0].event == "turn.delta"
 
 
-class TestGatewayServerAPI(AioHTTPTestCase):
+class TestGatewayServerAPI(_CallerAuthedTestCase):
     async def get_application(self):
         import tempfile
         self.db_path = Path(tempfile.mktemp(suffix=".sqlite3"))

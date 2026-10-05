@@ -323,6 +323,7 @@ async def test_delegate_runtime_adapter_flow():
 async def test_gateway_orchestration_endpoints(tmp_path):
     """Verify Gateway exposes orchestration endpoints cleanly with isolated state."""
     from aiohttp.test_utils import TestClient, TestServer
+    from jaeger_ai.core.gateway.caller_auth import client_headers
 
     from jaeger_ai.core.gateway.server import JaegerGatewayApp
     from jaeger_ai.core.gateway.session_store import GatewaySessionStore
@@ -337,7 +338,7 @@ async def test_gateway_orchestration_endpoints(tmp_path):
     store = GatewaySessionStore(tmp_path / "gw_orch.sqlite3")
     gateway_app = JaegerGatewayApp(store=store, orchestration=service)
 
-    client = TestClient(TestServer(gateway_app.app))
+    client = TestClient(TestServer(gateway_app.app), headers=client_headers("ide"))
     await client.start_server()
     try:
         # 1. GET /v1/orchestration/workers
@@ -762,6 +763,7 @@ async def test_http_admission_snapshots_concurrency_and_failure_records(tmp_path
     import asyncio
 
     from aiohttp.test_utils import TestClient, TestServer
+    from jaeger_ai.core.gateway.caller_auth import client_headers
 
     from jaeger_ai.core.gateway.server import JaegerGatewayApp
     from jaeger_ai.core.gateway.session_store import GatewaySessionStore
@@ -778,7 +780,7 @@ async def test_http_admission_snapshots_concurrency_and_failure_records(tmp_path
     gateway = JaegerGatewayApp(
         store=GatewaySessionStore(tmp_path / "gateway.sqlite3"), orchestration=service
     )
-    client = TestClient(TestServer(gateway.app))
+    client = TestClient(TestServer(gateway.app), headers=client_headers("ide"))
     await client.start_server()
     endpoint = "/v1/orchestration/tasks"
 
@@ -987,6 +989,7 @@ async def test_gateway_shutdown_cancels_worker_before_store_release(tmp_path, mo
 @pytest.mark.integration
 async def test_http_rejects_writable_orchestration_before_submit(tmp_path):
     from aiohttp.test_utils import TestClient, TestServer
+    from jaeger_ai.core.gateway.caller_auth import client_headers
 
     from jaeger_ai.core.gateway.server import JaegerGatewayApp
     from jaeger_ai.core.gateway.session_store import GatewaySessionStore
@@ -996,7 +999,7 @@ async def test_http_rejects_writable_orchestration_before_submit(tmp_path):
     gateway = JaegerGatewayApp(
         store=GatewaySessionStore(tmp_path / "writable.sqlite3"), orchestration=service
     )
-    client = TestClient(TestServer(gateway.app))
+    client = TestClient(TestServer(gateway.app), headers=client_headers("ide"))
     await client.start_server()
     try:
         response = await client.post(

@@ -19,6 +19,15 @@ from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
 # ── Event registry: the one stream contract ─────────────────────────────────
 
+class _CallerAuthedTestCase(AioHTTPTestCase):
+    """Route tests run as the owner CLI caller (the Gateway requires a token)."""
+
+    async def get_client(self, server):
+        from aiohttp.test_utils import TestClient
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        return TestClient(server, headers=client_headers("cli"))
+
+
 def test_event_registry_contains_webui_card_events():
     """Clarify/approval cards and board updates are first-class gateway events."""
     assert {"clarify.request", "clarify.resolved", "board.updated"} <= EVENT_TYPES
@@ -41,7 +50,7 @@ def test_registry_covers_turn_and_session_lifecycle():
 
 # ── Session-ID namespace: the gateway mints and owns ids ────────────────────
 
-class TestGatewayMintedSessionIds(AioHTTPTestCase):
+class TestGatewayMintedSessionIds(_CallerAuthedTestCase):
     async def get_application(self):
         import tempfile
         self.db_path = Path(tempfile.mktemp(suffix=".sqlite3"))
@@ -84,7 +93,7 @@ class TestGatewayMintedSessionIds(AioHTTPTestCase):
 
 # ── Deletion: the gateway delete API is the one delete that counts ──────────
 
-class TestSessionDeleteAPI(AioHTTPTestCase):
+class TestSessionDeleteAPI(_CallerAuthedTestCase):
     async def get_application(self):
         import tempfile
         self.db_path = Path(tempfile.mktemp(suffix=".sqlite3"))
@@ -125,7 +134,7 @@ class TestSessionDeleteAPI(AioHTTPTestCase):
 
 # ── Request lookup + JSON replay window (the shim's transport) ──────────────
 
-class TestRequestLookupAndReplay(AioHTTPTestCase):
+class TestRequestLookupAndReplay(_CallerAuthedTestCase):
     async def get_application(self):
         import tempfile
         self.db_path = Path(tempfile.mktemp(suffix=".sqlite3"))
