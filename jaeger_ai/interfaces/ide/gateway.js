@@ -1,6 +1,30 @@
 'use strict';
 
 // Transport only. Never starts a runtime or opens an application database.
+const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+// The IDE is the Gateway's `ide` caller. Its token lives in the macOS Keychain
+// (service ai.jaeger.gateway.caller, account ide) and is read with the system
+// `security` tool, so it never sits in settings or the extension bundle.
+// JAEGER_CALLER_TOKEN_DIR (0600 files) is the test / throwaway-instance store.
+const KEYCHAIN_SERVICE = 'ai.jaeger.gateway.caller';
+let cachedToken = null;
+function callerToken(caller = 'ide') {
+  if (cachedToken && Date.now() - cachedToken.at < 30000) return cachedToken.value;
+  let value = '';
+  try {
+    const dir = process.env.JAEGER_CALLER_TOKEN_DIR;
+    value = dir
+      ? fs.readFileSync(path.join(dir, `${caller}.token`), 'utf8').trim()
+      : execFileSync('/usr/bin/security', ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-a', caller, '-w'],
+        { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000 }).trim();
+  } catch (_) { value = ''; }
+  cachedToken = value ? { value, at: Date.now() } : null;
+  return value;
+}
+
 class GatewayError extends Error {
   constructor(message, status = 0) { super(message); this.status = status; }
 }
@@ -37,11 +61,15 @@ async function* decodeSSE(body) {
 }
 
 class Gateway {
-  constructor(url) { this.url = localEndpoint(url); }
+  constructor(url, options = {}) { this.url = localEndpoint(url); this.token = options.token || callerToken; }
+  auth() {
+    const token = this.token('ide');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
   async json(path, body, method) {
     const response = await fetch(this.url + path, {
       method: method || (body === undefined ? 'GET' : 'POST'), redirect: 'error',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...this.auth() },
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(15000),
     });
@@ -90,7 +118,7 @@ class Gateway {
 
   async *events(id, cursor, signal) {
     const response = await fetch(`${this.url}/v1/sessions/${encodeURIComponent(id)}/stream?last_event_id=${cursor}`, {
-      headers: { Accept: 'text/event-stream' }, signal, redirect: 'error',
+      headers: { Accept: 'text/event-stream', ...this.auth() }, signal, redirect: 'error',
     });
     if (!response.ok) {
       await response.body?.cancel();
@@ -104,4 +132,4 @@ class Gateway {
   }
 }
 
-module.exports = { Gateway, GatewayError, localEndpoint, decodeSSE };
+module.exports = { Gateway, GatewayError, localEndpoint, decodeSSE, callerToken };
