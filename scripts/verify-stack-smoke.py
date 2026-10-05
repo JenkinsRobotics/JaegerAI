@@ -9,7 +9,7 @@ agent/bridge reachability. Live LLM tool-calls are gated behind --live
 Usage:
   ./scripts/verify-stack-smoke.py
   ./scripts/verify-stack-smoke.py --start
-  ./scripts/verify-stack-smoke.py --chat-url http://100.74.2.15:8790/ --start
+  ./scripts/verify-stack-smoke.py --chat-url https://<host>.<tailnet>.ts.net:8443/ --start
   ./scripts/verify-stack-smoke.py --live   # also run live chat/tool verify
 
 Exit code: 0 when all required checks PASS; non-zero on any FAIL.
@@ -35,7 +35,24 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Locked product topology
 DEFAULT_CHAT_URL = "http://127.0.0.1:8790/"
-TAILSCALE_CHAT_URL = "http://100.74.2.15:8790/"
+# The WebUI binds loopback; other devices reach it only through Tailscale
+# Serve (HTTPS on the MagicDNS name). A raw tailnet IP on :8790 never answers.
+SERVE_HTTPS_PORT = int(os.environ.get("JAEGER_SERVE_HTTPS_PORT", "8443"))
+
+
+def serve_chat_url() -> str | None:
+    """Tailscale Serve URL for the chat face, discovered from ``tailscale status``."""
+    try:
+        proc = subprocess.run(
+            ["tailscale", "status", "--json"], capture_output=True, text=True, timeout=5, check=False,
+        )
+        name = json.loads(proc.stdout or "{}").get("Self", {}).get("DNSName")
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+        return None
+    if proc.returncode != 0 or not isinstance(name, str) or not name.rstrip("."):
+        return None
+    dns = name.rstrip(".")
+    return f"https://{dns}/" if SERVE_HTTPS_PORT == 443 else f"https://{dns}:{SERVE_HTTPS_PORT}/"
 HERMES_AGENT_API_PORT = 8645
 CHAT_PORT = 8790
 ADAPTERS = (
@@ -299,9 +316,10 @@ def check_http_health(matrix: Matrix, chat_url: str) -> None:
         f"{base}/ -> HTTP {status}" + (f" ({err})" if err and not ok else ""),
     )
 
-    # Optional Tailscale face
-    if "127.0.0.1" in base or "localhost" in base:
-        ts = TAILSCALE_CHAT_URL.rstrip("/")
+    # Optional Tailscale Serve face
+    serve = serve_chat_url() if ("127.0.0.1" in base or "localhost" in base) else None
+    if serve:
+        ts = serve.rstrip("/")
         st, _, e = _http(ts + "/api/auth/status", timeout=5)
         matrix.add(
             "http.chat_face_tailscale",
@@ -559,10 +577,8 @@ def print_ui_checklist_section() -> None:
 def resolve_chat_url(cli_url: str | None) -> str:
     if cli_url:
         return cli_url.rstrip("/") + "/"
-    # Prefer Tailscale face when reachable; else loopback
-    st, _, _ = _http(TAILSCALE_CHAT_URL.rstrip("/") + "/api/auth/status", timeout=3)
-    if 200 <= st < 500:
-        return TAILSCALE_CHAT_URL
+    # The smoke verifies this Mac's stack, which listens on loopback. The
+    # Serve face is checked separately as an optional row.
     return DEFAULT_CHAT_URL
 
 
@@ -571,7 +587,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--chat-url",
         default=None,
-        help="Chat face base URL (default: Tailscale :8790 if up, else 127.0.0.1:8790)",
+        help="Chat face base URL (default: loopback 127.0.0.1:8790; the Tailscale Serve URL is checked as an optional row)",
     )
     parser.add_argument(
         "--start",

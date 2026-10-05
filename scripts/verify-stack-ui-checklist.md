@@ -4,7 +4,7 @@ Companion to `scripts/verify-stack-smoke.py` (API-level smoke). Browser
 button-level coverage is not fully automated here — use this list after the
 smoke matrix is green.
 
-**Chat face:** http://100.74.2.15:8790/ (or http://127.0.0.1:8790/)  
+**Chat face:** http://127.0.0.1:8790/ on this Mac; other devices use the Tailscale Serve URL (`https://<host>.<tailnet>.ts.net:8443/`, shown by `jaeger webui url`)  
 **Hermes Agent API:** loopback :8645 — not a chat surface.
 **Adapters:** Jaeger :8642 · Roundtable :8643 · OpenClaw :8644  
 

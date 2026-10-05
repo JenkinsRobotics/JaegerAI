@@ -56,6 +56,27 @@ def webui_urls(
 
 
 
+def _tailscale_dns_name() -> str | None:
+    """This node's MagicDNS name (``host.tailnet.ts.net``), or None."""
+    binary = shutil.which("tailscale")
+    if not binary:
+        return None
+    try:
+        proc = subprocess.run(
+            [binary, "status", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        name = json.loads(proc.stdout or "{}").get("Self", {}).get("DNSName")
+    except (OSError, subprocess.TimeoutExpired, ValueError, AttributeError):
+        return None
+    if proc.returncode != 0 or not isinstance(name, str):
+        return None
+    return name.rstrip(".") or None
+
+
 def _tailscale_ipv4() -> str | None:
     binary = shutil.which("tailscale")
     if not binary:
@@ -311,6 +332,21 @@ class WebUIService:
         """
         return self.urls().web_ui
 
+    def serve_url(self) -> str | None:
+        """The Tailscale Serve HTTPS URL other devices use, when publishing is on.
+
+        Serve proxies ``https://<magicdns>:<port>`` to the loopback WebUI, so
+        this is the only remote address to advertise; the raw :8790 port is
+        never reachable from the tailnet.
+        """
+        if not self.tailscale_publish:
+            return None
+        dns = _tailscale_dns_name()
+        if not dns:
+            return None
+        port = self.tailscale_https_port
+        return f"https://{dns}/" if port == 443 else f"https://{dns}:{port}/"
+
     def status(self) -> dict[str, Any]:
         urls = self.urls()
         adapter = self._adapter_status()
@@ -344,6 +380,7 @@ class WebUIService:
             },
             "webui_url": urls.web_ui,
             "chat_url": self.browser_url(),
+            "serve_url": self.serve_url(),
             "ports": {
                 "adapter": self.adapter_port,
                 "webui": self.webui_port,
@@ -375,6 +412,7 @@ class WebUIService:
             "webui": webui_res,
             "tailscale": tailscale_res,
             "open": self.urls().web_ui,
+            "serve_url": self.serve_url() if should_publish else None,
         }
 
     def publish_tailscale(self) -> dict[str, Any]:
