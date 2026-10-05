@@ -4280,14 +4280,24 @@ async def run_gateway_forever(
             except asyncio.TimeoutError:
                 continue
         logger.warning("Gateway leaving after lifecycle shutdown")
-        try:
-            from jaeger_ai.core.runtime.stack import stack_down
-            stack_down(wait_timeout=2.0)
-        except Exception:
-            logger.error("lifecycle stack shutdown failed", exc_info=True)
-        await gateway._bounded_shutdown(gateway.app)
+        await leave_after_lifecycle_shutdown(gateway)
     finally:
         await runner.cleanup()
+
+
+async def leave_after_lifecycle_shutdown(gateway: JaegerGatewayApp) -> None:
+    """Boot the launchd jobs out, then stop this process.
+
+    KeepAlive is still set on the plists. bootout is what stops launchd from
+    starting a privileged gateway again. The menu bar has already retired the
+    lease, so a race that loses the bootout still fails closed.
+    """
+    try:
+        from jaeger_ai.core.runtime.stack import stack_down
+        stack_down(wait_timeout=2.0)
+    except Exception:
+        logger.error("lifecycle stack shutdown failed", exc_info=True)
+    await gateway._bounded_shutdown(gateway.app)
 
 
 def main(argv: list[str] | None = None) -> int:

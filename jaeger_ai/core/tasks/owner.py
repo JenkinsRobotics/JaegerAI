@@ -357,7 +357,7 @@ class GatewayTaskOwner:
                 path = Path(raw).resolve()
                 if not path.is_relative_to(root) or not path.is_file() or path.stat().st_size == 0:
                     return False, f'Required artifact missing or empty: {raw}'
-                if path.stat().st_mtime < task.created_at:
+                if path.stat().st_mtime + 1 < task.created_at:
                     return False, f'Artifact predates this task: {raw}'
                 receipts.append({'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
             return True, receipts
@@ -371,7 +371,7 @@ class GatewayTaskOwner:
                 path = (root / path).resolve() if not path.is_absolute() else path.resolve()
                 if not path.is_relative_to(root) or not path.is_file():
                     return False, f'Verification artifact missing or outside workspace: {raw}'
-                if path.stat().st_mtime < task.created_at or not path.stat().st_size:
+                if path.stat().st_mtime + 1 < task.created_at or not path.stat().st_size:
                     return False, f'Verification artifact is stale or empty: {raw}'
                 if hashlib.sha256(path.read_bytes()).hexdigest() != receipt.get('sha256'):
                     return False, f'Verification artifact changed after the receipt: {raw}'

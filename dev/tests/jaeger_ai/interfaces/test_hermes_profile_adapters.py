@@ -416,7 +416,11 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
     assert config["agents"]["defaults"]["memorySearch"] == {
         "provider": "ollama",
         "model": setup.OPENCLAW_EMBEDDING_MODEL,
-        "remote": {"baseUrl": "http://192.168.64.1:11435"},
+        "remote": {
+            "baseUrl": "http://192.168.64.1:11435",
+            "apiKey": bridge_token,
+            "headers": {"Authorization": f"Bearer {bridge_token}"},
+        },
     }
     assert config["models"]["providers"]["ollama-cloud-via-host"]["baseUrl"] == "http://192.168.64.1:11435"
     assert config["models"]["providers"]["ollama-cloud-via-host"]["apiKey"] == bridge_token

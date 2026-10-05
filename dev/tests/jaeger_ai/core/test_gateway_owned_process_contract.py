@@ -1282,10 +1282,10 @@ def test_durable_task_uses_real_owner_tools_and_delivers_after_restart(gateway):
             gateway.request('/v1/approvals/' + approval['approval_id'], {'approved':True, 'decision':'once'})
         _, row = gateway.request('/v1/tasks/' + tid)
         task = row.get('task', row)
-        if task['state'] in {'completed','failed','cancelled'}:
+        if task['state'] in {'completed_verified', 'failed', 'cancelled', 'needs_owner', 'blocked'}:
             break
         time.sleep(0.05)
-    assert task['state'] == 'completed', (task, (gateway.root/'gateway.log').read_text()[-15000:])
+    assert task['state'] == 'completed_verified', (task, (gateway.root/'gateway.log').read_text()[-15000:])
     assert (workspace/'workspace/durable-report.txt').read_text() == 'DURABLE-VERIFIED-CONTENT'
     before = (gateway.root/'provider-calls.jsonl').read_text()
     gateway.stop()
