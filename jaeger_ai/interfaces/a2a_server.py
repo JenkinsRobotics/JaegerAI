@@ -139,8 +139,11 @@ class JaegerBridgeExecutor(AgentExecutor):
                     self._bridge().control("cancel", turn_id=control["turn_id"])
 
         try:
+            # The Gateway runs A2A work as the ``a2a`` caller (untrusted actor,
+            # ``a2a:`` sessions only), never as the bridge.
             result = await asyncio.to_thread(self._bridge().turn, objective, session,
-                                            on_event=event, turn_id=control["turn_id"])
+                                            on_event=event, turn_id=control["turn_id"],
+                                            gateway_caller="a2a")
         except Exception as exc:  # noqa: BLE001
             await updater.update_status(
                 state=TaskState.TASK_STATE_FAILED,
@@ -188,8 +191,59 @@ class JaegerBridgeExecutor(AgentExecutor):
             raise ValueError(f"Jaeger bridge could not cancel the task: {exc}") from exc
 
 
-def build_app(client: Any | None = None, executor: AgentExecutor | None = None) -> Starlette:
-    """Starlette app with official SDK card + JSON-RPC routes. No homemade RPC."""
+#: Discovery routes stay public (they describe Jaeger, they run nothing).
+A2A_PUBLIC_PATHS = frozenset({"/.well-known/agent-card.json", "/.well-known/agent.json"})
+
+
+def resolve_inbound_tokens() -> dict[str, str]:
+    """Bearer tokens accepted for A2A work: the ``a2a`` Gateway caller token
+    (agentgateway presents it via backendAuth). Values never printed."""
+    from jaeger_ai.core.gateway.caller_auth import TokenStoreError, read_token
+
+    try:
+        value = read_token("a2a")
+    except TokenStoreError:
+        value = None
+    return {"a2a": value} if value else {}
+
+
+class RequireA2ABearer:
+    """ASGI wrapper: every non-discovery request needs an accepted bearer."""
+
+    def __init__(self, app: Any, tokens: dict[str, str]) -> None:
+        if not tokens:
+            raise RuntimeError("A2A requires a caller token (run `jaeger auth init`)")
+        self.app = app
+        self.tokens = [v.encode("utf-8") for v in tokens.values() if v]
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope.get("type") != "http" or scope.get("path") in A2A_PUBLIC_PATHS:
+            await self.app(scope, receive, send)
+            return
+        import hmac
+        auth = dict((k.decode("latin1").lower(), v) for k, v in scope.get("headers") or []).get(
+            "authorization", b"")
+        ok = False
+        for token in self.tokens:
+            expected = b"Bearer " + token
+            ok = (len(auth) == len(expected) and hmac.compare_digest(auth, expected)) or ok
+        if not ok:
+            body = b'{"error":"unauthorized"}'
+            await send({"type": "http.response.start", "status": 401, "headers": [
+                (b"content-type", b"application/json"),
+                (b"www-authenticate", b'Bearer realm="jaeger-a2a"'),
+                (b"content-length", str(len(body)).encode("ascii"))]})
+            await send({"type": "http.response.body", "body": body})
+            return
+        await self.app(scope, receive, send)
+
+
+def build_app(client: Any | None = None, executor: AgentExecutor | None = None,
+              tokens: dict[str, str] | None = None) -> Any:
+    """Official SDK card + JSON-RPC routes behind mandatory bearer auth.
+
+    The agent card is public; every JSON-RPC call needs the ``a2a`` caller
+    token. There is no unauthenticated mode."""
     card = build_agent_card()
     handler = DefaultRequestHandler(
         agent_executor=executor or JaegerBridgeExecutor(client),
@@ -202,7 +256,8 @@ def build_app(client: Any | None = None, executor: AgentExecutor | None = None) 
         routes.append(Route("/.well-known/agent.json", card_routes[0].endpoint, methods=["GET"]))
     routes.extend(card_routes)
     routes.extend(create_jsonrpc_routes(handler, "/", enable_v0_3_compat=True))
-    return Starlette(routes=routes)
+    return RequireA2ABearer(Starlette(routes=routes),
+                            tokens if tokens is not None else resolve_inbound_tokens())
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -226,7 +281,13 @@ def main(argv: list[str] | None = None) -> int:
         from jaeger_ai.features.webui.adapter.bridge_client import BridgeClient
 
         client = BridgeClient(instance=args.instance)
-    app = build_app(client=client)
+    tokens = resolve_inbound_tokens()
+    if not tokens:
+        import sys
+        print("[jaeger-a2a] No A2A caller token in the Keychain; run `jaeger auth init`. "
+              "Refusing to serve A2A without authentication.", file=sys.stderr)
+        return 1
+    app = build_app(client=client, tokens=tokens)
     import uvicorn
 
     uvicorn.run(app, host=args.host, port=args.port)
