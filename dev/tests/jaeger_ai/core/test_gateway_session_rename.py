@@ -7,6 +7,15 @@ from jaeger_ai.core.gateway.server import JaegerGatewayApp
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
 
+class _CallerAuthedTestCase(AioHTTPTestCase):
+    """Route tests run as the owner CLI caller (the Gateway requires a token)."""
+
+    async def get_client(self, server):
+        from aiohttp.test_utils import TestClient
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        return TestClient(server, headers=client_headers("cli"))
+
+
 def test_store_rename_keeps_updated_at_so_the_sidebar_does_not_reorder(tmp_path: Path):
     store = GatewaySessionStore(tmp_path / "s.sqlite3")
     before = store.ensure_session("a", title="New Conversation")
@@ -19,7 +28,7 @@ def test_store_rename_unknown_session_is_none(tmp_path: Path):
     assert GatewaySessionStore(tmp_path / "s.sqlite3").rename_session("missing", "x") is None
 
 
-class TestRenameRoute(AioHTTPTestCase):
+class TestRenameRoute(_CallerAuthedTestCase):
     async def get_application(self):
         import tempfile
         self.db_path = Path(tempfile.mktemp(suffix=".sqlite3"))
@@ -58,7 +67,7 @@ class TestRenameRoute(AioHTTPTestCase):
         assert resp.status == 404
 
 
-class TestSkillsRoute(AioHTTPTestCase):
+class TestSkillsRoute(_CallerAuthedTestCase):
     async def get_application(self):
         import tempfile
         self.db_path = Path(tempfile.mktemp(suffix=".sqlite3"))

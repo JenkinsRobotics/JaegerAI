@@ -65,6 +65,8 @@ def input_fingerprint(text: str, *, extra: dict[str, Any] | None = None) -> str:
 EXECUTION_INPUT_KEYS = (
     "model", "provider", "attachment_ids", "workspace", "options",
     "allowed_tools", "display_text", "is_subordinate", "interaction_tier",
+    # Assigned by the Gateway from the authenticated caller, never by a client.
+    "caller",
 )
 #: Version 1 digests covered text only (pre-2026-09-22 receipts). Version 2
 #: covers text plus every explicit ``EXECUTION_INPUT_KEYS`` value.
@@ -1114,6 +1116,7 @@ class GatewaySessionStore:
             "display_text": choices["display_text"] if "display_text" in choices else None,
             "is_subordinate": bool(choices.get("is_subordinate")),
             "interaction_tier": choices.get("interaction_tier") or meta.get("interaction_tier"),
+            "caller": choices.get("caller"),
         }
 
     def bind_native(

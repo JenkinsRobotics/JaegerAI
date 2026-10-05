@@ -19,6 +19,15 @@ RAW = {
 }
 
 
+class _CallerAuthedTestCase(AioHTTPTestCase):
+    """Route tests run as the owner CLI caller (the Gateway requires a token)."""
+
+    async def get_client(self, server):
+        from aiohttp.test_utils import TestClient
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        return TestClient(server, headers=client_headers("cli"))
+
+
 def test_clean_keeps_only_known_fields_and_dedupes_open_files():
     out = ide_context.clean({**RAW, "evil": "x", "options": {"background": True}})
     assert set(out) == {"workspace_folders", "active_file", "language", "cursor_line", "selection", "open_files"}
@@ -57,7 +66,7 @@ def test_selected_code_is_fenced_as_data_never_as_an_instruction():
     assert prompt.rstrip().endswith("fix the bug")
 
 
-class TestAdmission(AioHTTPTestCase):
+class TestAdmission(_CallerAuthedTestCase):
     async def get_application(self):
         import tempfile
         self.db = Path(tempfile.mktemp(suffix=".sqlite3"))
