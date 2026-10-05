@@ -426,10 +426,53 @@ def _configure_honcho(home: Path | None = None) -> list[Path]:
     return written
 
 
+def _instance_config_path(home: Path) -> Path:
+    if home == Path.home().resolve():
+        return JAEGER_INSTANCE_ROOT / "config.yaml"
+    return home / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml"
+
+
+def _read_yaml_mapping(path: Path) -> dict:
+    try:
+        import yaml
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return document if isinstance(document, dict) else {}
+
+
+def instance_external_model(home: Path | None = None) -> dict:
+    """The instance config's chosen external model section (may be empty)."""
+    home = (home or Path.home()).expanduser().resolve()
+    section = _read_yaml_mapping(_instance_config_path(home)).get("external_model")
+    return section if isinstance(section, dict) else {}
+
+
+def chosen_agent_model(home: Path | None = None) -> str:
+    """The agent model the operator chose in the instance config.
+
+    ``stack up`` and app start must not replace an operator's lineup with
+    the shipped default; the default only fills a config that names none.
+    """
+    model = instance_external_model(home).get("model")
+    if isinstance(model, str) and model.strip():
+        return model.strip()
+    return DEFAULT_AGENT_MODEL
+
+
+def is_cloud_model(model: str) -> bool:
+    return model.endswith(":cloud") or model.endswith("-cloud")
+
+
 def _configure_agent_models(
     home: Path | None = None, *, container_host: str | None = None
 ) -> None:
-    """Apply the cloud default to WebUI profiles and native agent runtimes."""
+    """Point WebUI profiles and native runtimes at the instance's chosen model.
+
+    The model comes from the instance config (``external_model.model``);
+    ``DEFAULT_AGENT_MODEL`` is used only when the config names none. An
+    existing OpenClaw embedding model and context windows are kept.
+    """
     from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
 
     home = (home or Path.home()).expanduser().resolve()
@@ -461,27 +504,27 @@ def _configure_agent_models(
                 f"  mac:\n    label: Mac\n    base_url: {profile_ollama_url}\n"
             )
             path.write_text(text, encoding="utf-8")
+    instance_config = _instance_config_path(home)
+    external = instance_external_model(home)
+    agent_model = chosen_agent_model(home)
     for profile in SERVICES:
         _set_yaml_section_value(
             hermes / "profiles" / profile / "config.yaml",
-            "model", "default", DEFAULT_AGENT_MODEL,
+            "model", "default", agent_model,
         )
     _set_yaml_section_value(
         hermes / "config.yaml",
-        "model", "default", DEFAULT_AGENT_MODEL,
+        "model", "default", agent_model,
     )
-    _set_yaml_section_value(
-        JAEGER_INSTANCE_ROOT / "config.yaml" if home == Path.home().resolve() else home / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml",
-        "external_model", "provider", "ollama",
-    )
-    _set_yaml_section_value(
-        JAEGER_INSTANCE_ROOT / "config.yaml" if home == Path.home().resolve() else home / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml",
-        "external_model", "model", DEFAULT_AGENT_MODEL,
-    )
-    _set_yaml_section_value(
-        JAEGER_INSTANCE_ROOT / "config.yaml" if home == Path.home().resolve() else home / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml",
-        "external_model", "base_url", OLLAMA_OPENAI_URL,
-    )
+    provider_value = external.get("provider")
+    if not (isinstance(provider_value, str) and provider_value.strip()):
+        _set_yaml_section_value(instance_config, "external_model", "provider", "ollama")
+        provider_value = "ollama"
+    if agent_model != external.get("model"):
+        _set_yaml_section_value(instance_config, "external_model", "model", agent_model)
+    if provider_value == "ollama":
+        # Ollama is loopback-only; the instance always reaches it there.
+        _set_yaml_section_value(instance_config, "external_model", "base_url", OLLAMA_OPENAI_URL)
 
     openclaw_path = home / ".jaeger" / "openclaw" / "openclaw.json"
     if openclaw_path.exists():
@@ -501,6 +544,15 @@ def _configure_agent_models(
         if isinstance(local, dict):
             local["baseUrl"] = container_ollama
         models = provider.setdefault("models", [])
+        local_models = local.setdefault("models", []) if isinstance(local, dict) else []
+        if not is_cloud_model(agent_model) and not any(
+            item.get("id") == agent_model for item in local_models if isinstance(item, dict)
+        ):
+            entry = {"id": agent_model, "name": agent_model, "input": ["text"], "reasoning": False}
+            ctx = external.get("ctx")
+            if isinstance(ctx, int) and ctx > 0:
+                entry["contextWindow"] = ctx
+            local_models.append(entry)
         for model_id in AVAILABLE_AGENT_MODELS:
             if not any(item.get("id") == model_id for item in models if isinstance(item, dict)):
                 models.append({
@@ -537,14 +589,18 @@ def _configure_agent_models(
         if bridge_token:
             remote["apiKey"] = bridge_token
             remote["headers"] = {"Authorization": f"Bearer {bridge_token}"}
+        embedding_model = memory_search.get("model")
+        if memory_search.get("provider") != "ollama" or not (
+            isinstance(embedding_model, str) and embedding_model.strip()
+        ):
+            embedding_model = OPENCLAW_EMBEDDING_MODEL
         memory_search.update({
             "provider": "ollama",
-            "model": OPENCLAW_EMBEDDING_MODEL,
+            "model": embedding_model,
             "remote": remote,
         })
-        defaults.setdefault("model", {})["primary"] = (
-            f"{provider_name}/{DEFAULT_AGENT_MODEL}"
-        )
+        primary_provider = provider_name if is_cloud_model(agent_model) else "ollama-local"
+        defaults.setdefault("model", {})["primary"] = f"{primary_provider}/{agent_model}"
         temporary = openclaw_path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
         temporary.chmod(0o600)
@@ -592,7 +648,7 @@ def install(bridge_host: str) -> int:
     catalogs = _configure_webui_workspaces()
     print(f"workspace tabs: updated {len(catalogs)} profiles")
     _configure_agent_models()
-    print(f"agent model default: {DEFAULT_AGENT_MODEL}")
+    print(f"agent model: {chosen_agent_model()}")
     _configure_agent_connectivity()
     print(f"agent network: MCP {MCP_HTTP_URL}; A2A {A2A_URL}")
     honcho_configs = _configure_honcho()
