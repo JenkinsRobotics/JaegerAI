@@ -379,7 +379,7 @@ def test_setup_configures_native_and_profile_model_defaults(tmp_path):
     hermes_default.write_text("model:\n  default: old:cloud\n  provider: ollama\n")
     jaeger = tmp_path / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml"
     jaeger.parent.mkdir(parents=True)
-    jaeger.write_text("external_model:\n  enabled: true\n  model: old:cloud\n")
+    jaeger.write_text("external_model:\n  enabled: true\n")
     openclaw = tmp_path / ".jaeger" / "openclaw" / "openclaw.json"
     openclaw.parent.mkdir(parents=True)
     openclaw.write_text(json.dumps({
@@ -527,3 +527,71 @@ def test_setup_configures_profile_isolated_honcho_peers_on_lan(tmp_path):
         assert block["workspace"] == "jenkins-robotics"
         assert block["enabled"] is True
         assert "provider: honcho" in path.with_name("config.yaml").read_text()
+
+
+def _local_lineup_home(tmp_path):
+    for profile in setup.SERVICES:
+        path = tmp_path / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "model:\n  default: glm-5.3-flash:cloud\n  provider: ollama\n"
+            "auxiliary:\n  title_generation:\n    provider: custom\n"
+            "    model: qwen2.5:3b\n    base_url: http://127.0.0.1:11434/v1\n"
+        )
+    hermes_default = tmp_path / ".jaeger" / "hermes" / "config.yaml"
+    hermes_default.write_text("model:\n  default: gemma-4-26b:latest\n  provider: ollama\n")
+    jaeger = tmp_path / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml"
+    jaeger.parent.mkdir(parents=True)
+    jaeger.write_text(
+        "external_model:\n  enabled: true\n  provider: ollama\n"
+        "  base_url: http://127.0.0.1:11434/v1\n  model: gemma-4-26b:latest\n"
+        "  ctx: 32768\n  fallback:\n  - provider: ollama\n    model: gemma4:latest\n"
+    )
+    openclaw = tmp_path / ".jaeger" / "openclaw" / "openclaw.json"
+    openclaw.parent.mkdir(parents=True)
+    openclaw.write_text(json.dumps({
+        "agents": {"defaults": {
+            "model": {"primary": "ollama-local/gemma-4-26b:latest"},
+            "memorySearch": {"provider": "ollama", "model": "nomic-embed-text:latest"},
+        }},
+        "models": {"providers": {
+            "ollama-local": {"models": [
+                {"id": "gemma-4-26b:latest", "contextWindow": 32768},
+                {"id": "qwen2.5:3b", "contextWindow": 32768},
+                {"id": "nomic-embed-text:latest"},
+            ]},
+            "ollama-cloud-via-host": {"models": []},
+        }},
+    }))
+    return jaeger, hermes_default, openclaw
+
+
+def test_stack_setup_keeps_instance_chosen_local_lineup(tmp_path):
+    """stack up / app start must not reset a local lineup to the cloud default."""
+    jaeger, hermes_default, openclaw = _local_lineup_home(tmp_path)
+    instance_before = jaeger.read_text()
+    for _ in range(2):  # a restart runs setup again; the result is stable
+        setup._configure_agent_models(tmp_path, container_host="192.168.64.1")
+
+    assert jaeger.read_text() == instance_before
+    for profile in setup.SERVICES:
+        text = (tmp_path / ".jaeger" / "hermes" / "profiles" / profile / "config.yaml").read_text()
+        assert "default: gemma-4-26b:latest" in text
+        assert "glm-5.3-flash:cloud" not in text
+        assert "    model: qwen2.5:3b" in text  # auxiliary lineup untouched
+    assert "default: gemma-4-26b:latest" in hermes_default.read_text()
+    config = json.loads(openclaw.read_text())
+    defaults = config["agents"]["defaults"]
+    assert defaults["model"]["primary"] == "ollama-local/gemma-4-26b:latest"
+    assert defaults["memorySearch"]["model"] == "nomic-embed-text:latest"
+    local = config["models"]["providers"]["ollama-local"]["models"]
+    assert [m["id"] for m in local].count("gemma-4-26b:latest") == 1
+    assert next(m for m in local if m["id"] == "gemma-4-26b:latest")["contextWindow"] == 32768
+
+
+def test_chosen_agent_model_falls_back_only_when_unset(tmp_path):
+    assert setup.chosen_agent_model(tmp_path) == setup.DEFAULT_AGENT_MODEL
+    jaeger = tmp_path / ".jaeger_ai" / "instances" / "jaeger" / "config.yaml"
+    jaeger.parent.mkdir(parents=True)
+    jaeger.write_text("external_model:\n  model: qwen2.5:3b\n")
+    assert setup.chosen_agent_model(tmp_path) == "qwen2.5:3b"

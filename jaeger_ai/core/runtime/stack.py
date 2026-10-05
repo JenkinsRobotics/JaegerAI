@@ -310,14 +310,90 @@ def _xml_text(value: str) -> str:
     return str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+#: Tuning variables an operator may set on a managed service. The stack owns
+#: every other variable (bind addresses, paths, identity, auth), so a
+#: carried-over or configured value can never re-expose a port or move state.
+_OPERATOR_ENV_PREFIXES = ("OLLAMA_",)
+_OPERATOR_ENV_KEYS = frozenset({
+    "HF_HUB_OFFLINE", "HF_DATASETS_OFFLINE", "TRANSFORMERS_OFFLINE",
+    "TOKENIZERS_PARALLELISM",
+    # The Gateway's direct-Ollama model; derived from the chosen model below.
+    "JAEGER_GATEWAY_OLLAMA_MODEL",
+})
+_STACK_OWNED_ENV = frozenset({"OLLAMA_HOST", "OLLAMA_ORIGINS"})
+
+
+def _operator_env_allowed(key: str) -> bool:
+    return key not in _STACK_OWNED_ENV and (
+        key in _OPERATOR_ENV_KEYS or key.startswith(_OPERATOR_ENV_PREFIXES)
+    )
+
+
+def _instance_config() -> dict[str, Any]:
+    path = operator_state_root() / "instances" / "jaeger" / "config.yaml"
+    try:
+        import yaml
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return document if isinstance(document, dict) else {}
+
+
+def _existing_plist_env(service: ServiceDef) -> dict[str, str]:
+    import plistlib
+    try:
+        with plist_path_for(service).open("rb") as handle:
+            env = plistlib.load(handle).get("EnvironmentVariables")
+    except Exception:
+        return {}
+    return {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else {}
+
+
+def operator_env(service: ServiceDef) -> dict[str, str]:
+    """Operator tuning env for one service, kept across ``stack up``.
+
+    Precedence (later wins): the service's current plist, values derived from
+    the instance's chosen model (``external_model.ctx`` sets Ollama's context
+    for a local model; ``external_model.model`` sets the Gateway's direct
+    Ollama model), then ``stack.env.all`` / ``stack.env.<service id>`` in
+    the instance config. Only tuning keys pass; see ``_operator_env_allowed``.
+    """
+    env = dict(_existing_plist_env(service))
+    config = _instance_config()
+    external = config.get("external_model")
+    if isinstance(external, dict):
+        model = str(external.get("model") or "").strip()
+        provider = str(external.get("provider") or "ollama")
+        ctx = external.get("ctx")
+        local = bool(model) and not model.endswith((":cloud", "-cloud"))
+        if service.id == "ollama" and local and isinstance(ctx, int) \
+                and not isinstance(ctx, bool) and ctx > 0:
+            env["OLLAMA_CONTEXT_LENGTH"] = str(ctx)
+        if service.id == "gateway" and model and provider == "ollama":
+            env["JAEGER_GATEWAY_OLLAMA_MODEL"] = model
+    stack_section = config.get("stack")
+    configured = stack_section.get("env") if isinstance(stack_section, dict) else None
+    if isinstance(configured, dict):
+        for scope in ("all", service.id):
+            values = configured.get(scope)
+            if isinstance(values, dict):
+                env.update({
+                    str(k): str(v).lower() if isinstance(v, bool) else str(v)
+                    for k, v in values.items() if v is not None
+                })
+    return {k: v for k, v in env.items() if _operator_env_allowed(k)}
+
+
 def build_plist(service: ServiceDef, commit_sha: str | None = None) -> str:
     """Generate launchd plist content pointing to ~/.jaeger/logs/."""
     commit = commit_sha or _current_git_commit()
     prog_args = "".join(f"    <string>{_xml_text(a)}</string>\n" for a in service.command_builder())
     log_file = _logs_dir() / f"{service.id}.log"
 
-    env = dict(service.env_builder())
-    env["JAEGER_GIT_COMMIT"] = commit
+    managed = dict(service.env_builder())
+    managed["JAEGER_GIT_COMMIT"] = commit
+    env = {k: v for k, v in operator_env(service).items() if k not in managed}
+    env.update(managed)
 
     env_lines = "".join(
         f"    <key>{_xml_text(k)}</key><string>{_xml_text(v)}</string>\n"

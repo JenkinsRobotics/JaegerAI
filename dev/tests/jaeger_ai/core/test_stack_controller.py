@@ -124,3 +124,67 @@ def test_stack_down_terminates_services(monkeypatch: pytest.MonkeyPatch):
     source = Path("jaeger_ai/core/runtime/stack.py").read_text(encoding="utf-8")
     assert "pgrep" not in source
     assert "lsof" not in source
+
+
+def _write_instance_config(root: Path, text: str) -> None:
+    path = root / "instances" / "jaeger" / "config.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+
+
+def test_plists_keep_operator_ollama_and_offline_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Regenerating plists keeps the operator's Ollama limits and offline flags."""
+    from jaeger_ai.core.runtime import stack
+
+    monkeypatch.setattr(stack, "operator_state_root", lambda: tmp_path)
+    _write_instance_config(tmp_path, (
+        "external_model:\n  provider: ollama\n  model: gemma-4-26b:latest\n  ctx: 32768\n"
+    ))
+    ollama, mcp = SERVICE_BY_ID["ollama"], SERVICE_BY_ID["mcp"]
+    stack._launchd_dir()
+    stack.plist_path_for(ollama).write_bytes(plistlib.dumps({"EnvironmentVariables": {
+        "OLLAMA_CONTEXT_LENGTH": "16384", "OLLAMA_FLASH_ATTENTION": "1",
+        "OLLAMA_KV_CACHE_TYPE": "q8_0", "OLLAMA_KEEP_ALIVE": "30m",
+        "OLLAMA_MAX_LOADED_MODELS": "3",
+        "OLLAMA_HOST": "0.0.0.0:11434",           # never carried over
+        "JAEGER_STATE_DIR": "/elsewhere",          # stack-owned
+        "SOME_SECRET_TOKEN": "x",                  # not a tuning key
+    }}))
+    stack.plist_path_for(mcp).write_bytes(plistlib.dumps({"EnvironmentVariables": {
+        "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
+    }}))
+
+    for _ in range(2):  # the second sync reads the first sync's output
+        stack.sync_plists(commit_sha="abc")
+        o_env = plistlib.loads(stack.plist_path_for(ollama).read_bytes())["EnvironmentVariables"]
+        m_env = plistlib.loads(stack.plist_path_for(mcp).read_bytes())["EnvironmentVariables"]
+        assert o_env["OLLAMA_CONTEXT_LENGTH"] == "32768"  # instance ctx wins over stale plist
+        assert o_env["OLLAMA_FLASH_ATTENTION"] == "1"
+        assert o_env["OLLAMA_KV_CACHE_TYPE"] == "q8_0"
+        assert o_env["OLLAMA_KEEP_ALIVE"] == "30m"
+        assert o_env["OLLAMA_MAX_LOADED_MODELS"] == "3"
+        assert o_env["OLLAMA_HOST"].startswith("127.0.0.1:")
+        assert o_env["JAEGER_STATE_DIR"] == str(tmp_path)
+        assert "SOME_SECRET_TOKEN" not in o_env
+        assert m_env["HF_HUB_OFFLINE"] == "1"
+        assert m_env["TRANSFORMERS_OFFLINE"] == "1"
+        g_env = plistlib.loads(stack.plist_path_for(SERVICE_BY_ID["gateway"]).read_bytes())["EnvironmentVariables"]
+        assert g_env["JAEGER_GATEWAY_OLLAMA_MODEL"] == "gemma-4-26b:latest"
+
+
+def test_instance_stack_env_section_drives_plists(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from jaeger_ai.core.runtime import stack
+
+    monkeypatch.setattr(stack, "operator_state_root", lambda: tmp_path)
+    _write_instance_config(tmp_path, (
+        "external_model:\n  model: glm-5.3-flash:cloud\n  ctx: 1048576\n"
+        "stack:\n  env:\n    all:\n      HF_HUB_OFFLINE: 1\n"
+        "    ollama:\n      OLLAMA_CONTEXT_LENGTH: 8192\n      OLLAMA_HOST: 0.0.0.0:11434\n"
+    ))
+    o_env = plistlib.loads(build_plist(SERVICE_BY_ID["ollama"], commit_sha="abc").encode())["EnvironmentVariables"]
+    g_env = plistlib.loads(build_plist(SERVICE_BY_ID["gateway"], commit_sha="abc").encode())["EnvironmentVariables"]
+    assert o_env["OLLAMA_CONTEXT_LENGTH"] == "8192"   # cloud ctx is not pushed into Ollama
+    assert o_env["OLLAMA_HOST"].startswith("127.0.0.1:")  # config cannot re-expose Ollama
+    assert o_env["HF_HUB_OFFLINE"] == "1"
+    assert g_env["HF_HUB_OFFLINE"] == "1"
+    assert g_env["JAEGER_GATEWAY_HOST"] == "127.0.0.1"
