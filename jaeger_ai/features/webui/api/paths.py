@@ -320,4 +320,10 @@ def _platform_default_hermes_home() -> Path:
             ):
                 return legacy_home
             return new_home
+    if os.environ.get("JAEGER_STATE_DIR", "").strip() or os.environ.get("JAEGER_HOME", "").strip():
+        try:
+            from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+            return hermes_profile_root()
+        except Exception:
+            pass
     return HOME / ".jaeger" / "hermes"

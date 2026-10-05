@@ -136,6 +136,9 @@ def _start_jaeger_gateway() -> bool:
 
 
 def _repair_jaeger() -> bool:
+    from jaeger_ai.core.runtime.lifecycle_lease import repairs_allowed
+    if not repairs_allowed():
+        return False
     # Preserve healthy dependencies when only one endpoint has failed.
     bridge = _bridge_ready() or _kickstart("com.jenkinsrobotics.jaeger-bridge")
     mcp = _tcp("127.0.0.1", 8792) or _kickstart("com.jenkinsrobotics.jaeger-mcp-http")

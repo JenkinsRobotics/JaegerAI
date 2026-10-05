@@ -128,12 +128,18 @@ def is_interrupted() -> bool:
     Safe to call from any thread, including a tool worker thread. A tool
     polls this in its work loop and bails out cooperatively.
     """
-    return _interrupt.is_set()
+    if _interrupt.is_set():
+        return True
+    # The turn's own cancel event, bound by the agent while it runs a tool. This is how
+    # a per-request cancel (or Global Stop) reaches a command that has already started.
+    from jaeger_agent.core.cancellation import current_cancellation
+    event = current_cancellation()
+    return event is not None and event.is_set()
 
 
 def raise_if_interrupted() -> None:
     """Raise :class:`ToolInterrupted` if the current turn was cancelled."""
-    if _interrupt.is_set():
+    if is_interrupted():
         raise ToolInterrupted()
 
 

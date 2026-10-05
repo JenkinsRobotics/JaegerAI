@@ -432,6 +432,20 @@ class EntityRuntime:
             event=event, user_text=user_text, session_id=session_id,
         )
 
+    def record_world_claim(
+        self, subject: str, predicate: str, value: str, *, provenance: str,
+        source_id: str = "gateway", confidence: float = 1.0,
+    ) -> dict[str, Any]:
+        """Record what Jaeger observed, inferred, planned or verified about the world.
+
+        The resident Entity is the only writer of world claims. The Gateway and the
+        task owner ask it to; they never open the claim store themselves.
+        """
+        return self.memory_subsystem.semantic.record_claim(
+            subject, predicate, str(value)[:400], source_id=source_id,
+            confidence=confidence, provenance=provenance,
+        )
+
     def finish_turn(self, prepared: "PreparedTurn", response_text: str) -> None:
         """The memory write side of a turn: the answer becomes an event and an
         episodic record, so later turns (in any conversation) can recall it."""

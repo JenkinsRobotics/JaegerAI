@@ -43,7 +43,7 @@ def test_same_named_model_can_switch_provider_without_mutating_default(monkeypat
     assert select_client(default, config, None, "shared-model", None) is default
 
 
-def test_conversation_pick_preserves_history_and_does_not_change_another_session(monkeypatch):
+def test_conversation_pick_preserves_history_and_does_not_change_another_session(monkeypatch, legacy_local_runtime):
     from jaeger_ai import main
     from jaeger_ai.core import sessions
     from jaeger_ai.core.models import session_selection
@@ -75,7 +75,7 @@ def test_conversation_pick_preserves_history_and_does_not_change_another_session
     assert picks==[('a','default-model',['first']),('a','chosen',['first','second']),('b','default-model',['other'])]
 
 
-def test_local_only_voice_turn_cannot_enter_dynamic_model_routing(monkeypatch):
+def test_local_only_voice_turn_cannot_enter_dynamic_model_routing(monkeypatch, legacy_local_runtime):
     from jaeger_ai import main
     from jaeger_ai.core import sessions
     from jaeger_ai.core.models import sensitivity_gate, session_selection

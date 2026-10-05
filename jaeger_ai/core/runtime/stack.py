@@ -3,7 +3,7 @@
 Owns the lifecycle of all Jaeger host services via launchd in ``~/.jaeger/launchd/``:
 - No unmanaged plists in ``~/Library/LaunchAgents`` (so macOS never auto-starts services at login).
 - The Mac menu-bar app is the sovereign owner: app up -> stack up; app quit -> stack down.
-- Hard termination: bootout followed by PID/port sweep and SIGKILL for any lingering stragglers.
+- Automatic shutdown boots out Jaeger's launchd labels and signals only the PIDs those jobs reported, plus descendants snapshotted from those PIDs. It does not kill by process name or by whoever happens to hold a port.
 - Verification: reset and health checks run real synthetic test turns through the Gateway.
 - Code freshness: tracks running process commit vs repo HEAD to flag stale code.
 """
@@ -93,6 +93,14 @@ class ServiceDef:
 def _ollama_command() -> list[str]:
     exe = shutil.which("ollama") or "/usr/local/bin/ollama"
     return [exe, "serve"]
+
+
+def _ollama_bridge_command() -> list[str]:
+    return [_default_python(), "-u", "-B", "-m", "jaeger_ai.core.models.ollama_bridge"]
+
+
+def _ollama_bridge_env() -> dict[str, str]:
+    return _common_env()
 
 
 def _gateway_command() -> list[str]:
@@ -195,11 +203,14 @@ def _gateway_env() -> dict[str, str]:
 
 def _ollama_env() -> dict[str, str]:
     env = _common_env()
-    env["OLLAMA_HOST"] = "0.0.0.0:11434"
+    from jaeger_ai.core.models.ollama_bridge import daemon_listen
+    env["OLLAMA_HOST"] = daemon_listen()
     return env
 
 
 # Authoritative service registry in boot order
+from jaeger_ai.core.models.ollama_bridge import PROXY_PORT as _OLLAMA_PROXY_PORT
+
 STACK_SERVICES: list[ServiceDef] = [
     ServiceDef(
         id="ollama",
@@ -209,6 +220,15 @@ STACK_SERVICES: list[ServiceDef] = [
         health_path="/api/tags",
         command_builder=_ollama_command,
         env_builder=_ollama_env,
+    ),
+    ServiceDef(
+        id="ollama-bridge",
+        name="Ollama bridge",
+        label="com.jenkinsrobotics.jaeger-ollama-bridge",
+        port=_OLLAMA_PROXY_PORT,
+        health_path="/api/tags",
+        command_builder=_ollama_bridge_command,
+        env_builder=_ollama_bridge_env,
     ),
     ServiceDef(
         id="gateway",
@@ -525,76 +545,39 @@ def stack_up(services: list[ServiceDef] | None = None, wait_timeout: float = 25.
     }
 
 
-def _find_straggler_pids() -> set[int]:
-    """Find lingering processes matching jaeger or bound to stack ports."""
-    pids: set[int] = set()
-    my_pid = os.getpid()
+def _owned_service_pids(services: list[ServiceDef]) -> set[int]:
+    """PIDs launchd currently attributes to these Jaeger jobs, plus their descendants.
 
-    # 1. Inspect processes matching jaeger keywords
-    try:
-        p = subprocess.run(
-            ["pgrep", "-fl", "jaeger_ai|hermes-native-api|run-jaeger-webui"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        for line in p.stdout.splitlines():
-            parts = line.strip().split(maxsplit=1)
-            if parts and parts[0].isdigit():
-                pid_num = int(parts[0])
-                if pid_num != my_pid:
-                    pids.add(pid_num)
-    except Exception:
-        pass
+    Captured before bootout. A process whose command line merely contains
+    ``jaeger`` is not owned, and neither is an unrelated listener on a stack port.
+    """
+    from jaeger_ai.core.runtime.owned_processes import snapshot_owned
 
-    # 2. Inspect processes listening on stack ports
-    ports_to_check = [
-        GATEWAY_PORT,
-        WEBUI_PORT,
-        WEBUI_ADAPTER_PORT,
-        MCP_HTTP_PORT,
-        A2A_PORT,
-        HERMES_NATIVE_API_PORT,
-    ]
-    for port in ports_to_check:
-        try:
-            p = subprocess.run(
-                ["lsof", "-ti", f":{port}"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            for line in p.stdout.splitlines():
-                if line.strip().isdigit():
-                    pid_num = int(line.strip())
-                    if pid_num != my_pid:
-                        pids.add(pid_num)
-        except Exception:
-            pass
-
-    return pids
+    roots: set[int] = set()
+    for service in services:
+        pid = inspect_service(service).get("pid")
+        if isinstance(pid, int) and pid > 1:
+            roots.add(pid)
+    return snapshot_owned(roots)
 
 
 def stack_down(services: list[ServiceDef] | None = None, wait_timeout: float = 5.0) -> dict[str, Any]:
-    """Bring the stack down: bootout services, wait, kill stragglers, verify ports."""
+    """Boot out Jaeger's jobs, then signal only the PIDs those jobs owned."""
+    from jaeger_ai.core.runtime.owned_processes import survivors
+
     target = services or STACK_SERVICES
     domain = get_user_domain()
+    owned = _owned_service_pids(target)
 
-    # 1. Send launchctl bootout
     for s in target:
         _launchctl(["bootout", f"{domain}/{s.label}"])
 
-    # 2. Wait up to wait_timeout for graceful exit
     deadline = time.time() + wait_timeout
-    while time.time() < deadline:
-        if not _find_straggler_pids():
-            break
+    while time.time() < deadline and survivors(owned):
         time.sleep(0.3)
 
-    # 3. Kill stragglers
-    stragglers = _find_straggler_pids()
     killed: list[int] = []
-    for pid in stragglers:
+    for pid in survivors(owned):
         try:
             os.kill(pid, signal.SIGKILL)
             killed.append(pid)
@@ -604,7 +587,7 @@ def stack_down(services: list[ServiceDef] | None = None, wait_timeout: float = 5
     if killed:
         time.sleep(0.5)
 
-    remaining = _find_straggler_pids()
+    remaining = survivors(owned)
     return {
         "ok": len(remaining) == 0,
         "stragglers_killed": killed,
