@@ -971,8 +971,10 @@ class EntityRuntime:
         # observers — the Gateway streams stream_delta/reasoning to clients.
         agent = (continuation_state or {}).get("agent")
         if agent is None:
+            from jaeger_ai.core.entity.owner_agent import owner_agent_options
             agent = build_jaeger_agent(client, max_iterations=max_iterations,
-                                       max_tool_calls=max_tool_calls, callbacks=callbacks)
+                                       max_tool_calls=max_tool_calls, callbacks=callbacks,
+                                       **owner_agent_options(layout, cfg, client))
             if continuation_state is not None:
                 continuation_state["agent"] = agent
                 continuation_state["client"] = client
