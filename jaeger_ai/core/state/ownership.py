@@ -29,6 +29,9 @@ class StateDomain(str, Enum):
     SKILLS = "skills"
     ATTACHMENTS = "attachments"
     PROVIDER_CERTIFICATIONS = "provider_certifications"
+    TASKS = "tasks"
+    EVENT_STREAM = "event_stream"
+    AGENT_FACTS = "agent_facts"
 
 
 @dataclass(frozen=True)
@@ -128,6 +131,35 @@ STATE_OWNERSHIP_REGISTRY: Mapping[StateDomain, StateOwner] = {
         canonical_location_description="<instance>/workspace/uploads/ & gateway_sessions.sqlite3 [attachments]",
         read_access=("EntityRuntime", "GatewayApp", "MultimodalVisionProcessor"),
         write_access=("GatewayApp.handle_upload",),
+    ),
+    StateDomain.TASKS: StateOwner(
+        domain=StateDomain.TASKS,
+        authoritative_class="GatewayTaskOwner (SqliteDurableTaskStore)",
+        authoritative_module="jaeger_ai.core.tasks.owner",
+        canonical_location_description="~/.jaeger/gateway_sessions.sqlite3 [durable_tasks]",
+        read_access=("GatewayApp", "WebUI", "IDE", "MenuBar", "EntityRuntime"),
+        # Goals and task history live here. A worker returns evidence; only the owner
+        # settles a task, and only through tasks.completion.authoritative_transition.
+        write_access=("GatewayTaskOwner",),
+    ),
+    StateDomain.EVENT_STREAM: StateOwner(
+        domain=StateDomain.EVENT_STREAM,
+        authoritative_class="GatewayEventBus",
+        authoritative_module="jaeger_ai.core.gateway.event_bus",
+        canonical_location_description="~/.jaeger/gateway_sessions.sqlite3 [events]",
+        read_access=("*",),
+        # Presence (``jaeger.state``) is a projection of this stream, not another bus.
+        write_access=("GatewayEventBus",),
+    ),
+    StateDomain.AGENT_FACTS: StateOwner(
+        domain=StateDomain.AGENT_FACTS,
+        authoritative_class="SqliteMemoryStore",
+        authoritative_module="jaeger_agent.memory.sqlite_adapter",
+        canonical_location_description="<instance>/data/memory.sqlite3 [facts]",
+        read_access=("EntityRuntime", "TurnExecutive", "DeliberatePlanner"),
+        # Preferences and corrections. Written only by the resident Entity's memory
+        # tools; PolicyKernel denies them to outside callers (mcp, a2a, helpers).
+        write_access=("EntityRuntime", "memory_tools"),
     ),
     StateDomain.PROVIDER_CERTIFICATIONS: StateOwner(
         domain=StateDomain.PROVIDER_CERTIFICATIONS,
