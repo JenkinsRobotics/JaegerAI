@@ -77,6 +77,7 @@ subprocess workers, cancelled by process tree, `unconfirmed` when a descendant s
 | `EntityRuntime.execute_turn` (full UPAA pipeline: executive → router → verification → learning) | callable only from the guarded `main.py` path and the fault injector *(test)* |
 | Gateway native-MCP lead lane | behind `legacy_paths_enabled()` *(test)* |
 | WebUI in-process agent, `:8791` runner, Hermes/OpenClaw/Roundtable profiles | existing switch |
+| Deep Think daemon | `run_daemon` now runs the Gateway owner; legacy board cards are imported once into `GatewayTaskOwner` (`migrate_legacy`) and the board is a projection |
 
 **Unreachable — listed for removal.** `jaeger_ai/mind/cognition/` (3,027 lines: its own identity,
 planner, router, orchestrator, evaluator, trust engine, worker registry) and
@@ -100,6 +101,9 @@ denies `mc_*`, and `EmbodimentGate` refuses *(test)*. It stays disabled.
   result is only prose settles `failed` (unverified) until a deliverable is declared.
 - **Messaging (Telegram/Discord/iMessage) has no Gateway adapter.** The wired daemon is isolated;
   it needs a caller identity of its own before it can be reattached.
+- **Request ids are global, not per session.** An identical retry replays the first receipt even from
+  another session. It returns only the response to text the caller already sent, but ids should be
+  scoped to a session.
 - Delegate-health telemetry shares the memory SQLite file (`delegates/health/store.py`); it is not
   owner memory.
 - `jaeger_ai/mind/cognition/` and `interfaces/messaging/` await deletion.
