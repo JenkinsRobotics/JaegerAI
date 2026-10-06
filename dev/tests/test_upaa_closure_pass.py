@@ -529,6 +529,7 @@ def test_closure_skill_promotion_and_restart_discovery(isolated_closure_env: Pat
 
 # ── 8. Degraded-Safe Mode Failure Injection in _run_turn ──────────────────
 
+@pytest.mark.usefixtures("legacy_local_runtime")
 def test_closure_degraded_safe_halt_on_runtime_failure(isolated_closure_env: Path, monkeypatch: pytest.MonkeyPatch):
     """Prove _run_turn does NOT silently bypass into full-power legacy ReAct on kernel failure:
     - Actionable / mutating requests fail-closed with degraded_safe_halt

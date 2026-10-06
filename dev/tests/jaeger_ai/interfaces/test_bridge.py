@@ -62,12 +62,22 @@ def _instance_on_disk(tmp_path, monkeypatch):
     # These protocol tests intentionally exercise the isolated local worker.
     # Product launches use the Gateway unless explicitly overridden.
     monkeypatch.setenv("JAEGER_BRIDGE_EXECUTION", "local")
+    monkeypatch.setenv("JAEGER_LEGACY_PATHS", "1")      # local execution is legacy-only
     root.mkdir()
     for f in ("identity.yaml", "config.yaml", "manifest.json"):
         (root / f).write_text("{}", encoding="utf-8")
     _write_valid_instance(root)
     monkeypatch.setenv("JAEGER_INSTANCE_DIR", str(root))
     return root
+
+
+def test_local_bridge_execution_needs_the_legacy_switch(monkeypatch):
+    """``JAEGER_BRIDGE_EXECUTION=local`` alone must not boot a second agent."""
+    monkeypatch.setenv("JAEGER_BRIDGE_EXECUTION", "local")
+    monkeypatch.delenv("JAEGER_LEGACY_PATHS", raising=False)
+    assert bridge.gateway_execution_enabled()
+    monkeypatch.setenv("JAEGER_LEGACY_PATHS", "1")
+    assert not bridge.gateway_execution_enabled()
 
 
 def test_bridge_defaults_to_gateway_owner(monkeypatch):

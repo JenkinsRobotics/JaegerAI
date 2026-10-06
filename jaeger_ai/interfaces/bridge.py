@@ -1852,7 +1852,15 @@ BRIDGE_EXECUTION_ENV = "JAEGER_BRIDGE_EXECUTION"
 
 
 def gateway_execution_enabled() -> bool:
-    return os.environ.get(BRIDGE_EXECUTION_ENV, "gateway").strip().lower() != "local"
+    """True unless the operator asked for local execution AND re-enabled legacy paths.
+
+    ``JAEGER_BRIDGE_EXECUTION=local`` alone no longer boots a second agent in this
+    process: a local executor is an isolated legacy path (contract/legacy_paths.py).
+    """
+    if os.environ.get(BRIDGE_EXECUTION_ENV, "gateway").strip().lower() != "local":
+        return True
+    from jaeger_ai.contract.legacy_paths import legacy_paths_enabled
+    return not legacy_paths_enabled()
 
 
 def _merge_gateway_history(local: list[dict[str, Any]], session_id: str) -> list[dict[str, Any]]:
@@ -3016,6 +3024,36 @@ def _execute_attached_turn(proto: TextIO, ctx: _Ctx, queued: Any) -> None:
             return
     if cancelled is not None and cancelled.is_set():
         _emit(reply_out, _reply_frame(protocol, req, "", "turn cancelled", session))
+        return
+    if ctx.gateway is not None:
+        # Gateway-first: an attached face (TUI, Swift, PySide6) is a client of the one
+        # Gateway-owned execution path. The local executor below is legacy-only.
+        import uuid as _uuid
+
+        rid = str(req.get("id") or "") or _uuid.uuid4().hex
+        finished = threading.Event()
+
+        def _relay_cancel() -> None:
+            while not finished.wait(0.1):
+                if cancelled is not None and cancelled.is_set():
+                    try:
+                        ctx.gateway.cancel(session, rid)
+                    except Exception:  # noqa: BLE001 — the Gateway's own cancel stands
+                        pass
+                    return
+
+        threading.Thread(target=_relay_cancel, name="bridge-attached-cancel", daemon=True).start()
+        _emit_state(reply_out, ctx, True, session)
+        try:
+            result = _gateway_turn(reply_out, ctx, req, text, session, rid)
+            _emit(reply_out, _reply_frame(
+                protocol, req, result.get("text") or "", result.get("error"), session,
+            ))
+        except Exception as exc:  # noqa: BLE001 — a bad turn must not kill the bridge
+            _emit(reply_out, _reply_frame(protocol, req, "", str(exc), session))
+        finally:
+            finished.set()
+            _emit_state(reply_out, ctx, False, session)
         return
     if ctx.client is None or ctx.boot_error:
         _emit(

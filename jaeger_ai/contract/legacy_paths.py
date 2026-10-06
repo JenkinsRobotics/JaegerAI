@@ -49,3 +49,18 @@ def disabled_reason(path: str) -> str:
         f"{path} is isolated: Jaeger turns run through the Gateway only. "
         f"Set {LEGACY_PATHS_ENV}=1 to re-enable it."
     )
+
+
+class LegacyPathDisabled(RuntimeError):
+    """An isolated execution path was reached while legacy paths are off."""
+
+
+def require_legacy_path(path: str) -> None:
+    """Raise unless the operator re-enabled the isolated paths.
+
+    The guard for the in-process agent turn: a Jaeger turn that did not come
+    through the Gateway would be a second Jaeger with its own model, memory
+    writes and task state, so it fails closed instead of quietly running.
+    """
+    if not legacy_paths_enabled():
+        raise LegacyPathDisabled(disabled_reason(path))
