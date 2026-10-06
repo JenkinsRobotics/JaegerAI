@@ -257,6 +257,39 @@ def stop_background(layout: Any, process_id: str) -> dict[str, Any]:
     return {"ok": True, "process_id": process_id, "status": "stopped"}
 
 
+def stop_all_background(layout: Any) -> dict[str, Any]:
+    """Terminate every running background process of this instance (Global Stop).
+
+    Reports the pids that were still alive afterwards, so a stop is never confirmed
+    over a surviving process.
+    """
+    stopped: list[str] = []
+    pids: list[int] = []
+    for entry in list_background(layout).get("processes", []):
+        if entry.get("status") != "running":
+            continue
+        pid = int(entry.get("pid") or 0)
+        result = stop_background(layout, str(entry["process_id"]))
+        if result.get("ok"):
+            stopped.append(str(entry["process_id"]))
+        if pid > 1:
+            pids.append(pid)
+    deadline = time.time() + 2.0
+    while time.time() < deadline and any(_pid_alive(p) for p in pids):
+        time.sleep(0.1)
+    return {"stopped": stopped, "survivors": [p for p in pids if _pid_alive(p)]}
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def consume_pending_completions(layout: Any, *, persist=None) -> list[dict[str, Any]]:
     """Return every newly-completed background process whose completion
     has not yet been surfaced to the agent — and mark each one notified
