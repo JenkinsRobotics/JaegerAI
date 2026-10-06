@@ -31,3 +31,17 @@ def test_require_legacy_path_fails_closed_by_default(monkeypatch):
 def test_the_in_process_turn_refuses_to_run_without_the_switch(call):
     with pytest.raises(LegacyPathDisabled):
         call()
+
+
+def test_profile_root_ignores_hermes_home_so_agent_home_never_self_links(tmp_path, monkeypatch):
+    """HERMES_HOME names the WebUI *agent* home; the shared profile tree is a different dir.
+
+    Honouring it made both the same path and ``profiles`` was linked to itself (ELOOP).
+    """
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
+
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "hermes-webui-agent"))
+    assert hermes_profile_root() == tmp_path / "hermes"
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path.parent / "elsewhere"))
+    assert hermes_profile_root() == tmp_path / "hermes"
