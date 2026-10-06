@@ -59,6 +59,18 @@ This single command deterministically verifies:
 - An IMMEDIATE event, or a DIGEST while the operator is active, submits one idempotent Jaeger-tier background turn. The Gateway publishes one `notification.proactive` SSE event on the terminal receipt. Swift `AmbientLoop` speaks it only when `speak` is true.
 - Verified by `dev/tests/jaeger_ai/core/test_proactive_tier3.py` (14) and `test_background_producers.py` (11). No live acceptance run.
 
+## One Gateway consolidation (2026-10-05, branch `consolidate/one-gateway`)
+
+- Every production turn enters the Gateway; the in-process agent runtime, local bridge execution, the
+  PySide6 shell and the old voice and messaging daemons are isolated behind `JAEGER_LEGACY_PATHS`.
+- An operational turn becomes one `TaskCard` on `GatewayTaskOwner`, is verified by the owner, and
+  settles through `authoritative_transition`; IDE orchestration dispatches fold under the same owner.
+- Presence is `jaeger.state` on `GatewayEventBus`. Identity has one writer. Outside callers cannot
+  write memory or identity. Descendants of a cancelled worker are signalled, and an unconfirmed stop is
+  reported as unconfirmed.
+- Read [`architecture/PRODUCTION_PATHS.md`](architecture/PRODUCTION_PATHS.md) first; the guard tests are
+  `dev/tests/jaeger_ai/contract/test_single_path_architecture.py`.
+
 ## Read first
 
 1. This file.

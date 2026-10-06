@@ -19,6 +19,20 @@ from .models import DurableTask, Goal, NotificationPolicy, Receipt, TaskCard, Ta
 from .store import SqliteDurableTaskStore
 
 
+#: What a worker must return for the owner to call work verified. One definition, used by
+#: durable tasks and by turn-owned cards, so the verifier and the worker agree on evidence.
+EVIDENCE_CONTRACT = (
+    'Use work_ledger with verify={kind: paths_exist, paths: [your result files]} and complete_task. '
+    'A count-only ledger or a successful command is not a verified deliverable.'
+)
+
+
+def has_file_receipt(completion: dict | None) -> bool:
+    """True when a completion carries a receipt for a file the owner can re-check."""
+    receipts = (completion or {}).get('verification_receipts') or []
+    return bool((completion or {}).get('ok')) and any(r.get('kind') == 'file_sha256' for r in receipts)
+
+
 def background_requested(text: str) -> bool:
     body = ' '.join((text or '').split())
     if re.match(r'(?i)^(what|why|how|which|explain|tell me)\b', body):
@@ -425,8 +439,7 @@ class GatewayTaskOwner:
                       'actionable': True})
         prompt = ('Execute this authorized durable task fully. Do not queue the same work again. '
                   'Use the real tools, preserve progress, verify the requested outcome, and return the result. '
-                  'Use work_ledger with verify={kind: paths_exist, paths: [your result files]} and complete_task. '
-                  'A count-only ledger or a successful command is not a verified deliverable.\n\n'
+                  + EVIDENCE_CONTRACT + '\n\n'
                   + task.goal)
         if task.payload.get('artifacts'):
             prompt += '\nRequired result artifacts: ' + json.dumps(task.payload['artifacts'])

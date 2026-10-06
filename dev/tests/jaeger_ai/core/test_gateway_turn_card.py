@@ -326,3 +326,68 @@ def test_the_resident_entity_persists_claims_with_the_four_epistemic_kinds(tmp_p
     stored = {c["predicate"]: c["provenance"] for c in entity.memory_subsystem.semantic.query_claims("task-1")}
     assert stored == {"is_observed": "observed", "is_inferred": "inferred",
                       "is_planned": "planned", "is_verified": "verified"}
+
+
+# ── the worker and the verifier agree on evidence ───────────────────────────
+
+COUNT_ONLY = {"ok": True, "verification_receipts": [{"kind": "ledger_count", "done": 4, "total": 4, "remaining": 0}]}
+FILE_RECEIPT = {"ok": True, "verification_receipts": [
+    {"kind": "ledger_count", "done": 1, "total": 1, "remaining": 0},
+    {"kind": "file_sha256", "path": "report.md", "sha256": "ab" * 32}]}
+
+
+def test_only_a_file_receipt_counts_as_evidence_a_count_does_not():
+    from jaeger_ai.core.tasks.owner import has_file_receipt
+    assert not has_file_receipt(None)
+    assert not has_file_receipt({})
+    assert not has_file_receipt(COUNT_ONLY)
+    assert not has_file_receipt({**FILE_RECEIPT, "ok": False})
+    assert has_file_receipt(FILE_RECEIPT)
+
+
+def _scripted_worker(env, monkeypatch, completions, *, decline_in_step=None):
+    """Calls the real continuation loop; the model's tool results are scripted per step."""
+    calls: list[str] = []
+
+    def owner_react(prompt, **kwargs):
+        calls.append(prompt)
+        if decline_in_step == len(calls):
+            env.app._owner_declined.add("r")           # the owner answers an approval card mid-step
+        return {"text": f"step {len(calls)}", "status": "completed"}
+
+    def last_completion():
+        return completions[min(len(calls), len(completions) - 1)]
+
+    monkeypatch.setattr(env.app, "_owner_react_turn", owner_react)
+    monkeypatch.setattr("jaeger_ai.core.runtime.work_ledger.last_completion", last_completion)
+    monkeypatch.setattr("jaeger_ai.core.runtime.autonomous_runner.last_completion", last_completion)
+    return calls
+
+
+def _turn_owned(env):
+    return {**_execution(env), "options": {"task_id": "turn:r", "turn_owned": True}}
+
+
+def test_a_count_only_completion_gets_one_correction_that_names_the_evidence_contract(env, monkeypatch):
+    calls = _scripted_worker(env, monkeypatch, [None, COUNT_ONLY, FILE_RECEIPT])
+
+    result = env.app._continued_owner_react("write the report", session_key="s", request_id="r",
+                                           execution=_turn_owned(env), objective="write the report")
+
+    assert len(calls) == 2
+    assert "Owner verification requires correction" in calls[1] and "paths_exist" in calls[1]
+    assert result["task_completion"] == FILE_RECEIPT
+
+
+def test_a_completion_that_already_has_a_file_receipt_is_not_asked_again(env, monkeypatch):
+    calls = _scripted_worker(env, monkeypatch, [None, FILE_RECEIPT])
+    result = env.app._continued_owner_react("write the report", session_key="s", request_id="r",
+                                           execution=_turn_owned(env), objective="write the report")
+    assert len(calls) == 1 and result["task_completion"] == FILE_RECEIPT
+
+
+def test_a_declined_approval_gets_no_correction_and_no_further_push(env, monkeypatch):
+    calls = _scripted_worker(env, monkeypatch, [None, None, None], decline_in_step=1)
+    result = env.app._continued_owner_react("write the report", session_key="s", request_id="r",
+                                           execution=_turn_owned(env), objective="write the report")
+    assert len(calls) == 1 and result["halt_reason"] == "blocked"
