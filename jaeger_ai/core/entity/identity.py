@@ -144,3 +144,15 @@ def rename_entity(state_root: Path | str | None, display_name: str) -> EntityIde
     updated = replace(current, display_name=name)
     updated.save_to_file(root / IDENTITY_FILE_NAME)
     return updated
+
+
+def _register_name_authority() -> None:
+    """Make ``rename_entity`` the writer behind the agent's ``set_name`` tool."""
+    try:
+        from jaeger_agent.tools import identity_tools
+    except Exception:  # noqa: BLE001 - the agent package is optional for this module
+        return
+    identity_tools.set_name_authority(rename_entity)
+
+
+_register_name_authority()
