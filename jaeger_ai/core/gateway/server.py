@@ -2865,6 +2865,15 @@ class JaegerGatewayApp:
                 if turn_owned and request_id in self._owner_declined and not self._cancellations.is_cancelled(request_id):
                     result = {**result, "halt_reason": "blocked", "error": None,
                               "evidence": {"declined_by_owner": True}}
+                elif turn_owned and not result.get("error") and not stop_requested():
+                    # One bounded correction, as a durable task gets: a completion with no
+                    # file receipt is not something the owner can verify.
+                    from jaeger_ai.core.tasks.owner import EVIDENCE_CONTRACT, has_file_receipt
+                    if not has_file_receipt(last_completion()):
+                        fix = step(
+                            "Owner verification requires correction: your completion carried no receipt for a "
+                            "file the owner can check. Finish the work if it is not done, then " + EVIDENCE_CONTRACT)
+                        result = {**result, **fix, "text": fix.get("text") or result.get("text")}
                 return {**result, "task_completion": last_completion()}
             finally:
                 self._active_agents.pop(request_id, None)
@@ -3134,6 +3143,11 @@ class JaegerGatewayApp:
                 request_text=request_text, actionable=actionable, tier=tier, role_s=role_s,
                 execution=execution,
             )
+            if card_task_id:
+                # The worker must know what the owner will accept as evidence.
+                from jaeger_ai.core.tasks.owner import EVIDENCE_CONTRACT
+                prompt = (f"This request is owned by a task card. When the work is done: {EVIDENCE_CONTRACT}\n\n"
+                          + prompt)
             if tier == "chat":
                 model_only = True
             else:

@@ -22,6 +22,9 @@ No subsystem may directly modify another subsystem's private persistence.
 | **REFLECTIONS** | `ReflexionStore` | `jaeger_ai.core.entity.reflexion_store:ReflexionStore` | `<instance>/memory/structured_reflections.json` | `ReflexionStore.append` | `CognitionRouter`, `DeliberatePlanner` | No |
 | **SKILLS & PROCEDURES** | `SkillPipeline` | `jaeger_agent.skills.skills_core:SkillPipeline` | `<instance>/skills/` | `SkillPipeline.promote`, Operator CLI | `EntityRuntime`, `CognitionRouter` | No |
 | **ATTACHMENTS** | `AttachmentStore` | `jaeger_ai.core.gateway.session_store:GatewaySessionStore` | `<instance>/workspace/uploads/` & SQLite | `GatewayApp.handle_upload` | `EntityRuntime`, Multimodal Vision | No |
+| **TASKS / GOALS / TASK HISTORY** | `GatewayTaskOwner` | `jaeger_ai.core.tasks.owner:GatewayTaskOwner` | `~/.jaeger/gateway_sessions.sqlite3 [durable_tasks]` | `GatewayTaskOwner` (state only via `authoritative_transition`) | Gateway, WebUI, IDE, menu bar | No |
+| **EVENT STREAM / PRESENCE** | `GatewayEventBus` | `jaeger_ai.core.gateway.event_bus:GatewayEventBus` | `~/.jaeger/gateway_sessions.sqlite3 [events]` | `GatewayEventBus` | All clients | Presence (`jaeger.state`) is a projection |
+| **AGENT FACTS (preferences, corrections)** | `SqliteMemoryStore` | `jaeger_agent.memory.sqlite_adapter` | `<instance>/data/memory.sqlite3 [facts]` | Resident Entity's memory tools (denied to outside callers) | `EntityRuntime`, planner | No |
 | **PROVIDER CERTIFICATIONS** | `CertificationRegistry` | `jaeger_ai.features.webui.adapter.profile_catalog` | Live Runtime Probe & Certifications | Certification Harness | WebUI, Gateway, Runtime | No |
 
 ---
@@ -33,3 +36,5 @@ No subsystem may directly modify another subsystem's private persistence.
 3. **Agent Isolation:** `jaeger-agent` must never mutate Gateway sessions. It operates on its bound `runs.sqlite3` and `commitments.sqlite3`.
 4. **Identity Invariance:** The Agent's entity identity (`entity_identity.json`) is persistent and immutable across LLM model swaps, provider switches, conversation resets, and process restarts.
 5. **No Blind Writes:** Every side-effect is prefaced by an `EffectIntent` with an idempotency key in `EffectLedger` before execution, guaranteeing at-most-once semantics across process crashes.
+
+6. **One Path:** see [`PRODUCTION_PATHS.md`](PRODUCTION_PATHS.md) for every production path, which writer owns each fact, and the tests that fail when a second authority appears.
