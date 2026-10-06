@@ -602,6 +602,9 @@ def _verification_receipts(ledger: WorkLedger) -> list[dict[str, Any]]:
                 digest = hashlib.sha256(resolved.read_bytes()).hexdigest()
                 receipts.append({
                     "kind": "file_sha256", "path": raw,
+                    # The file actually hashed. ``path`` is how the model named it; a verifier
+                    # re-checks this one, so it never depends on the model's path convention.
+                    "resolved": str(resolved),
                     "bytes": resolved.stat().st_size, "sha256": digest,
                 })
             except OSError:
