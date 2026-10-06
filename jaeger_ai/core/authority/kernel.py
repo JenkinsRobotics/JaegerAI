@@ -62,6 +62,9 @@ PRIVILEGED_TOOL_IDS = frozenset({"shell", "remote_shell", "code_exec", "deploy",
 #: (an authenticated ``owner:<client>`` turn) may run them: not an outside caller, and
 #: not a background turn the entity started for itself (``agent:jaeger``).
 IDENTITY_TOOL_IDS = frozenset({"set_name", "update_soul", "adjust_trait"})
+#: Tools that write durable memory. The resident Entity is the one memory writer; an
+#: outside caller's turn (mcp, a2a, helper) may read memory but not write it.
+MEMORY_WRITE_TOOL_IDS = frozenset({"remember", "forget", "memory", "remember_person"})
 OWNER_ACTOR_PREFIXES = ("owner", "human")
 #: Actors (exact, or ``<prefix>:<name>``) that are outside callers, not the owner.
 UNTRUSTED_ACTOR_PREFIXES = ("guest", "untrusted", "external_agent", "helper", "mcp", "a2a")
@@ -417,6 +420,14 @@ class PolicyKernel:
                 decision=AuthorityDecisionType.DENY,
                 reason=f"Actor {actor!r} may not change Jaeger's identity ({proposal.tool_name!r} is owner-only)",
                 policy_name="identity_authority",
+                granted_by="policy_kernel",
+                proposal_id=proposal.proposal_id,
+            )
+        if is_untrusted_actor(actor) and canonical_tool_id(proposal.tool_name) in MEMORY_WRITE_TOOL_IDS:
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason=f"Actor {actor!r} is an outside caller and may not write durable memory ({proposal.tool_name!r})",
+                policy_name="memory_authority",
                 granted_by="policy_kernel",
                 proposal_id=proposal.proposal_id,
             )
