@@ -103,11 +103,30 @@ class PtySession:
         finally:
             os.close(slave)
         self._master = master
+        # The turn that started this command. Its cancel (a /cancel or Global Stop) must
+        # take the command with it; a detached session otherwise outlives a stopped turn.
+        from jaeger_agent.core.cancellation import current_cancellation
+        self.owner_event = current_cancellation()
         self._reader = threading.Thread(target=self._pump, daemon=True, name="pty-reader")
         self._reader.start()
 
+    def _terminate_group(self) -> None:
+        """Signal the command's whole process group; escalate if it lingers."""
+        for sig, wait_s in ((signal.SIGTERM, 1.0), (signal.SIGKILL, 1.0)):
+            if self.proc.poll() is not None:
+                return
+            try:
+                os.killpg(self.proc.pid, sig)
+            except (ProcessLookupError, PermissionError):
+                return
+            deadline = time.monotonic() + wait_s
+            while time.monotonic() < deadline and self.proc.poll() is None:
+                time.sleep(0.05)
+
     def _pump(self) -> None:
         while True:
+            if self.owner_event is not None and self.owner_event.is_set() and self.proc.poll() is None:
+                self._terminate_group()
             try:
                 ready, _, _ = select.select([self._master], [], [], 0.2)
                 if not ready:
@@ -302,6 +321,18 @@ class PtyManager:
 
 
 _manager = PtyManager()
+
+
+def kill_all_sessions() -> dict[str, Any]:
+    """Terminate every live command session (Global Stop). Reports any that survived."""
+    with _manager._lock:
+        sessions, _manager._sessions = list(_manager._sessions.values()), {}
+    for session in sessions:
+        try:
+            session.kill()
+        except Exception:  # noqa: BLE001 — one stuck session must not hide the rest
+            pass
+    return {"killed": len(sessions), "survivors": [s.proc.pid for s in sessions if s.running]}
 
 
 def _yield_seconds(yield_time_ms: Any, default_ms: int) -> float:

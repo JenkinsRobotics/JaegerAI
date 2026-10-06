@@ -438,3 +438,59 @@ def test_the_verifier_rechecks_the_file_the_ledger_hashed_not_the_name_the_model
     forged = {**receipt, "resolved": str(outside), "sha256": hashlib.sha256(outside.read_bytes()).hexdigest()}
     verified, evidence = owner.verify(owner.store.get_task(task.task_id), {"task_completion": {"ok": True, "verification_receipts": [forged]}})
     assert not verified and "outside" in evidence
+
+
+# ── Global Stop reaches commands the owner's workers started ────────────────
+
+@pytest.fixture(autouse=False)
+def no_background_processes(monkeypatch):
+    import jaeger_agent.background.processes as bg
+    monkeypatch.setattr(bg, "stop_all_background", lambda layout: {"stopped": [], "survivors": []})
+
+
+@pytest.mark.asyncio
+async def test_global_stop_terminates_a_running_command_session_and_reports_it_confirmed(env, no_background_processes, tmp_path, monkeypatch):
+    import os
+    import jaeger_agent.tools.pty_exec as pty_exec
+
+    manager = pty_exec.PtyManager()
+    monkeypatch.setattr(pty_exec, "_manager", manager)
+    monkeypatch.setattr(env.app, "orchestration", None)
+    out = manager.start("sleep 300", cwd=str(tmp_path), yield_s=0.2)
+    pid = manager.get(out["session_id"]).proc.pid
+    assert os.kill(pid, 0) is None
+
+    unconfirmed = await env.app._halt_for_stop()
+
+    assert unconfirmed == []
+    for _ in range(60):
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            break
+        await asyncio.sleep(0.1)
+    else:
+        raise AssertionError("the command survived Global Stop")
+
+
+@pytest.mark.asyncio
+async def test_global_stop_reports_a_survivor_instead_of_confirming(env, no_background_processes, monkeypatch):
+    import jaeger_agent.tools.pty_exec as pty_exec
+
+    monkeypatch.setattr(env.app, "orchestration", None)
+    monkeypatch.setattr(pty_exec, "kill_all_sessions", lambda: {"killed": 1, "survivors": [4242]})
+    assert await env.app._halt_for_stop() == ["command-session:4242"]
+
+
+@pytest.mark.asyncio
+async def test_a_turn_that_ends_when_cancelled_is_not_reported_unconfirmed(env, no_background_processes, monkeypatch):
+    monkeypatch.setattr(env.app, "orchestration", None)
+
+    async def turn():
+        await asyncio.sleep(30)
+
+    task = asyncio.create_task(turn())
+    env.app._running_tasks["r-x"] = task
+    await asyncio.sleep(0)
+    assert await env.app._halt_for_stop() == []
+    assert task.cancelled()

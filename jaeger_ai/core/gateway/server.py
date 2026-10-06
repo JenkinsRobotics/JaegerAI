@@ -1301,11 +1301,39 @@ class JaegerGatewayApp:
                     unconfirmed.extend(str(item) for item in pending)
             except Exception:
                 unconfirmed.append("orchestration")
+        cancelled_tasks = []
         for key, task in list(self._running_tasks.items()):
             if not task.done():
                 task.cancel()
-                unconfirmed.append(str(key))
+                cancelled_tasks.append((key, task))
+        # Commands the owner's workers started are not stopped by cancelling the task that
+        # awaits them: terminate them, and report anything that survives.
+        unconfirmed.extend(await asyncio.to_thread(self._stop_owned_processes))
+        if cancelled_tasks:
+            _done, still = await asyncio.wait([t for _, t in cancelled_tasks], timeout=2.0)
+            unconfirmed.extend(str(k) for k, t in cancelled_tasks if t in still)
         return unconfirmed
+
+    @staticmethod
+    def _stop_owned_processes() -> list[str]:
+        """Terminate command sessions and background processes this owner started."""
+        survivors: list[str] = []
+        try:
+            from jaeger_agent.tools.pty_exec import kill_all_sessions
+            survivors += [f"command-session:{pid}" for pid in kill_all_sessions()["survivors"]]
+        except Exception:
+            logger.warning("could not stop command sessions", exc_info=True)
+            survivors.append("command-sessions")
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+            if layout is not None:
+                from jaeger_agent.background.processes import stop_all_background
+                survivors += [f"background:{pid}" for pid in stop_all_background(layout)["survivors"]]
+        except Exception:
+            logger.warning("could not stop background processes", exc_info=True)
+            survivors.append("background-processes")
+        return survivors
 
     async def handle_stop_status(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.gateway.global_stop import GlobalStop, GlobalStopError
