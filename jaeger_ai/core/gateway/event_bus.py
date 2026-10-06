@@ -19,6 +19,8 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any, AsyncGenerator
 
+from jaeger_ai.contract.presence import ACTIVITY_STATES, DISPLAY
+
 from .session_store import GatewaySessionStore
 
 
@@ -58,6 +60,9 @@ EVENT_TYPES = frozenset({
     # IDE bridge + attachments + agent lifecycle.
     "ide.request", "attachment.added",
     "agent.created", "agent.activated", "agent.handoff", "agent.handoff.finished",
+    # Durable task projection. The task owner is the authority; these are its
+    # stream. ``jaeger.state`` is the presence projection (see contract/presence.py).
+    "task.created", "task.updated", "jaeger.state",
 })
 
 #: Names that carry a card the WebUI renders interactively. The adapter shim
@@ -123,6 +128,27 @@ class GatewayEventBus:
 
         self._fanout(evt)
         return evt
+
+    def publish_state(
+        self,
+        session_id: str,
+        state: str,
+        *,
+        task_id: str | None = None,
+        status: str = "",
+        intent: str = "",
+        worker: str | None = None,
+        approval_required: bool = False,
+        **extra: Any,
+    ) -> GatewayEvent:
+        """Publish what Jaeger is doing as ``jaeger.state`` on the one stream."""
+        if state not in ACTIVITY_STATES:
+            raise ValueError(f"unknown activity state: {state!r}")
+        return self.publish(session_id, "jaeger.state", {
+            "state": state, "session_id": session_id, "task_id": task_id, "status": status,
+            "intent": intent, "worker": worker, "approval_required": approval_required,
+            "display": DISPLAY[state], **extra,
+        })
 
     def fanout(self, record: dict[str, Any] | GatewayEvent) -> GatewayEvent:
         """Notify live subscribers of an event already persisted by the store."""
@@ -210,3 +236,25 @@ class GatewayEventBus:
         finally:
             with self._lock:
                 self._subscribers.pop(wake, None)
+
+
+def project_presence(events: Any, *, session_id: str) -> dict[str, Any]:
+    """The latest ``jaeger.state`` for a session, for avatars and phones to read.
+
+    A pure read of the stream. Nothing here writes state back.
+    """
+    latest: dict[str, Any] | None = None
+    for evt in events:
+        name = getattr(evt, "event", None) if not isinstance(evt, dict) else evt.get("event")
+        if name != "jaeger.state":
+            continue
+        data = getattr(evt, "data", None) if not isinstance(evt, dict) else evt.get("data")
+        if isinstance(data, dict) and data.get("session_id") in (None, "", session_id):
+            latest = data
+    if not latest or latest.get("state") not in ACTIVITY_STATES:
+        return {"state": "idle", "display": DISPLAY["idle"], "owner_needed": False,
+                "task_id": None, "session_id": session_id}
+    state = latest["state"]
+    return {"state": state, "display": DISPLAY[state], "task_id": latest.get("task_id"),
+            "owner_needed": state == "needs_owner" or bool(latest.get("approval_required")),
+            "session_id": session_id}
