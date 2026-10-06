@@ -33,6 +33,10 @@ class _Runtime:
         self.identity = SimpleNamespace(entity_id="jaeger-entity-test", display_name="Jaeger")
         self.layout = SimpleNamespace(workspace_dir=workspace)
         self.finished: list[str] = []
+        self.claims: list[tuple[str, str, str, str]] = []
+
+    def record_world_claim(self, subject, predicate, value, *, provenance, **_):
+        self.claims.append((subject, predicate, str(value), provenance))
 
     def prepare_turn(self, text, *, session_id, **_):
         event = JaegerEvent.human_message(text, actor="human:operator", source="gateway", session_id=session_id)
@@ -281,3 +285,44 @@ def test_presence_states_are_validated_and_projected(env):
     view = project_presence(bus.get_replay_events("s", since_event_id=0), session_id="s")
     assert view["state"] == "needs_owner" and view["owner_needed"] is True and view["task_id"] == "t1"
     assert project_presence([], session_id="x")["state"] == "idle"
+
+
+@pytest.mark.asyncio
+async def test_world_claims_keep_planned_observed_and_verified_apart(env):
+    report = env.workspace / "report.md"
+
+    def worker(prompt, **kw):
+        report.write_text("# report\nfiles: 3\n")
+        return _evidence_for(report)
+
+    await _run(env, REQUEST, "r-claims", worker=worker)
+
+    [task] = env.app.task_owner.store.list_tasks()
+    assert [(c[0], c[1], c[3]) for c in env.runtime.claims] == [
+        (task.task_id, "planned_strategy", "planned"),
+        (task.task_id, "worker_evidence", "observed"),
+        (task.task_id, "completed_verified", "verified"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_unverified_turn_records_a_plan_but_never_a_verified_claim(env):
+    await _run(env, REQUEST, "r-noclaim", worker=lambda prompt, **kw: {"text": "done"})
+    assert [c[3] for c in env.runtime.claims] == ["planned"]
+
+
+@pytest.mark.asyncio
+async def test_a_conversation_records_no_world_claims(env):
+    await _run(env, "hello", "r-chat", worker=lambda prompt, **kw: {"text": "Hello."})
+    assert env.runtime.claims == []
+
+
+def test_the_resident_entity_persists_claims_with_the_four_epistemic_kinds(tmp_path):
+    from jaeger_ai.core.entity.ownership import EntityRuntimeMode
+
+    entity = EntityRuntime(state_root=tmp_path, mode=EntityRuntimeMode.TEST)
+    for kind in ("observed", "inferred", "planned", "verified"):
+        entity.record_world_claim("task-1", f"is_{kind}", "yes", provenance=kind)
+    stored = {c["predicate"]: c["provenance"] for c in entity.memory_subsystem.semantic.query_claims("task-1")}
+    assert stored == {"is_observed": "observed", "is_inferred": "inferred",
+                      "is_planned": "planned", "is_verified": "verified"}
