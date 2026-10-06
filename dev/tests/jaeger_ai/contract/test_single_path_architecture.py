@@ -188,8 +188,11 @@ def test_the_entity_identity_file_has_one_writer():
 
 
 def test_only_the_identity_tool_renames_jaeger_at_runtime():
-    callers = _modules_where(lambda rel, text, tree: bool(_calls(tree, "rename_entity")))
-    assert callers == {"packages/jaeger-agent/jaeger_agent/tools/identity_tools.py"}
+    # The agent package cannot import the product, so the identity tool reaches the
+    # authority through an injected hook that identity.py alone registers.
+    assert _modules_where(lambda rel, text, tree: bool(_calls(tree, "rename_entity"))) == set()
+    registrants = _modules_where(lambda rel, text, tree: bool(_calls(tree, "set_name_authority")))
+    assert registrants == {"jaeger_ai/core/entity/identity.py"}
 
 
 #: identity.yaml is a configuration input the owner edits in setup and settings, and

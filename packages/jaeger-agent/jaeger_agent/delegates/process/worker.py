@@ -148,7 +148,7 @@ def main(root):
                         owned = _snapshot_owned(process.pid)
                         try:
                             os.killpg(process.pid, signal.SIGTERM)
-                        except ProcessLookupError:
+                        except OSError:  # gone, or macOS EPERM on a group whose leader already exited
                             pass
                         _signal_owned(owned, signal.SIGTERM)
                     if kill_at and time.monotonic() >= kill_at:
@@ -156,7 +156,7 @@ def main(root):
                         owned |= set(still)
                         try:
                             os.killpg(process.pid, signal.SIGKILL)
-                        except ProcessLookupError:
+                        except OSError:  # gone, or macOS EPERM on a group whose leader already exited
                             pass
                         _signal_owned(still, signal.SIGKILL)
                         kill_at = None
@@ -206,7 +206,7 @@ def main(root):
             if process is not None and process.poll() is None:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
+                except OSError:
                     pass
                 _signal_owned(owned, signal.SIGKILL)
                 process.wait()
