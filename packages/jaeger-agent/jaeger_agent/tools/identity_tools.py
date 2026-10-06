@@ -21,6 +21,17 @@ from jaeger_agent.core.workspace import _require_layout
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 
+# The product registers the authority for the display name (EntityIdentity). The agent
+# package cannot import it, so it is injected: ``set_name_authority(fn)`` with
+# ``fn(memory_dir, name)``. Unregistered (standalone agent) means identity.yaml only.
+_name_authority: Any = None
+
+
+def set_name_authority(fn: Any) -> None:
+    global _name_authority
+    _name_authority = fn
+
+
 _ILLEGAL_NAME_CHARS = set('/\\:*?"<>|')
 _SOUL_HEADER = (
     "<!-- soul.md — who this instance is: character, values, voice.\n"
@@ -58,11 +69,11 @@ def set_name(name: str) -> dict[str, Any]:
     old = ident.name
     # EntityIdentity is the authority for the display name; identity.yaml below is
     # a projection of it that the prompt header, wake word and TTS read.
-    from jaeger_ai.core.entity.identity import rename_entity
-    try:
-        rename_entity(layout.memory_dir, name)
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "error": f"couldn't update the entity identity: {exc}"}
+    if _name_authority is not None:
+        try:
+            _name_authority(layout.memory_dir, name)
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "error": f"couldn't update the entity identity: {exc}"}
     ident.name = name
     try:
         dump_yaml(layout.identity_path, ident)
