@@ -58,6 +58,11 @@ TOOL_ALIASES: Mapping[str, str] = {
 SHELL_TOOL_IDS = frozenset({"shell", "remote_shell"})
 #: Canonical tools an untrusted/external caller may never run.
 PRIVILEGED_TOOL_IDS = frozenset({"shell", "remote_shell", "code_exec", "deploy", "git_push"})
+#: Tools that change who Jaeger is (name, soul, character). Only an owner-class actor
+#: (an authenticated ``owner:<client>`` turn) may run them: not an outside caller, and
+#: not a background turn the entity started for itself (``agent:jaeger``).
+IDENTITY_TOOL_IDS = frozenset({"set_name", "update_soul", "adjust_trait"})
+OWNER_ACTOR_PREFIXES = ("owner", "human")
 #: Actors (exact, or ``<prefix>:<name>``) that are outside callers, not the owner.
 UNTRUSTED_ACTOR_PREFIXES = ("guest", "untrusted", "external_agent", "helper", "mcp", "a2a")
 KNOWN_TIERS = frozenset({"read_only", "write_local", "external_effect", "hardware", "privileged"})
@@ -83,6 +88,11 @@ def canonical_tool_id(name: Any) -> str:
             if tail in TOOL_ALIASES:
                 return TOOL_ALIASES[tail]
     return raw
+
+
+def is_owner_actor(actor: str) -> bool:
+    a = (actor or "").strip().lower()
+    return any(a == p or a.startswith(p + ":") for p in OWNER_ACTOR_PREFIXES)
 
 
 def is_untrusted_actor(actor: str) -> bool:
@@ -402,6 +412,14 @@ class PolicyKernel:
         actor = (proposal.actor or "").strip()
         if not actor:
             return _deny(proposal, "Missing caller identity (actor) on proposed action", "identity_required")
+        if canonical_tool_id(proposal.tool_name) in IDENTITY_TOOL_IDS and not is_owner_actor(actor):
+            return AuthorityDecision(
+                decision=AuthorityDecisionType.DENY,
+                reason=f"Actor {actor!r} may not change Jaeger's identity ({proposal.tool_name!r} is owner-only)",
+                policy_name="identity_authority",
+                granted_by="policy_kernel",
+                proposal_id=proposal.proposal_id,
+            )
         if is_untrusted_actor(actor):
             if canonical_tool_id(proposal.tool_name) in PRIVILEGED_TOOL_IDS:
                 return AuthorityDecision(

@@ -56,6 +56,13 @@ def set_name(name: str) -> dict[str, Any]:
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"couldn't read identity.yaml: {exc}"}
     old = ident.name
+    # EntityIdentity is the authority for the display name; identity.yaml below is
+    # a projection of it that the prompt header, wake word and TTS read.
+    from jaeger_ai.core.entity.identity import rename_entity
+    try:
+        rename_entity(layout.memory_dir, name)
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"couldn't update the entity identity: {exc}"}
     ident.name = name
     try:
         dump_yaml(layout.identity_path, ident)
