@@ -499,3 +499,13 @@ async def test_a_turn_that_ends_when_cancelled_is_not_reported_unconfirmed(env, 
     await asyncio.sleep(0)
     assert await env.app._halt_for_stop() == []
     assert task.cancelled()
+
+
+def test_a_worker_unwinding_after_a_stop_cannot_resurrect_an_unknown_outcome(env):
+    store = env.app.store
+    store.admit_request("s", "run it", request_id="r-unk")
+    store.complete_request("r-unk", status="execution_unknown", result={"status": "execution_unknown"})
+
+    store.bind_native("r-unk", native_run_id="run-1", native_session="owner:s")      # a late bind
+
+    assert store.get_request("r-unk")["status"] == "execution_unknown"

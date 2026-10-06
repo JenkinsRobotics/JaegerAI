@@ -1182,7 +1182,9 @@ class GatewaySessionStore:
             ).fetchone()
             if row is None:
                 return None
-            if row["status"] in {"completed", "failed", "cancelled"}:
+            # execution_unknown is an outcome awaiting reconciliation, not a state to resume
+            # from: a worker still unwinding after a stop must not turn it back into 'running'.
+            if row["status"] in {"completed", "failed", "cancelled", "execution_unknown"}:
                 return self._request_row(row)
             conn.execute(
                 "UPDATE client_requests SET native_run_id=?, native_session=?, status=?, "
