@@ -397,7 +397,7 @@ class _GatewayToolConfirmationProvider:
         # PolicyKernel REQUIRE_APPROVAL: only an explicit owner decision on an
         # approval card answers it; grants and autonomy shortcuts do not.
         if getattr(request, "force_prompt", False) is True:
-            return self._prompt(request)
+            return self._decided(self._prompt(request))
         try:
             if self._grants().is_granted(skill_name):
                 return True
@@ -429,7 +429,12 @@ class _GatewayToolConfirmationProvider:
                 return True
         except Exception:
             pass
-        return self._prompt(request)
+        return self._decided(self._prompt(request))
+
+    def _decided(self, approved: bool) -> bool:
+        if not approved:
+            self.app._owner_declined.add(self.request_id)
+        return approved
 
     def _prompt(self, request: Any) -> bool:
         """Park an approval card and wait for the owner's decision."""
@@ -573,6 +578,8 @@ class JaegerGatewayApp:
         from jaeger_agent import task_port
         task_port.install_ide_requester(self._ide_request)
         self._running_tasks: dict[str | tuple[str, str], asyncio.Future[Any]] = {}
+        # Requests whose owner declined an approval. A turn-owned card ends there (blocked).
+        self._owner_declined: set[str] = set()
         # Request-scoped live ReAct agents. The Gateway does not own the agent;
         # EntityRuntime supplies it while an admitted request is executing so
         # steering can be forwarded to the active JaegerAgent.
@@ -2834,16 +2841,30 @@ class JaegerGatewayApp:
             }
 
         from jaeger_ai.core.runtime.work_ledger import ledger_scope, last_completion
-        with ledger_scope(session_key, resume_completed=bool(((execution or {}).get("options") or {}).get("task_id")) and not bool(((execution or {}).get("options") or {}).get("verification_error"))):
+        _options = ((execution or {}).get("options") or {})
+        # A turn-owned card runs in the chat's own session, so it must start from a
+        # fresh ledger: resuming would hand it an earlier request's completion.
+        turn_owned = bool(_options.get("turn_owned"))
+
+        def stop_requested() -> bool:
+            if self._cancellations.is_cancelled(request_id):
+                return True
+            # An owner decline is an answer, not a stall: do not push the model on.
+            return turn_owned and request_id in self._owner_declined
+
+        with ledger_scope(session_key, resume_completed=bool(_options.get("task_id")) and not bool(_options.get("verification_error")) and not turn_owned):
             try:
                 result = run_continued_turn(
                     step, prompt, objective=objective or prompt,
-                    durable=bool(((execution or {}).get("options") or {}).get("task_id")),
-                    max_steps=8 if ((execution or {}).get("options") or {}).get("task_id") else None,
-                    is_cancelled=lambda: self._cancellations.is_cancelled(request_id),
+                    durable=bool(_options.get("task_id")),
+                    max_steps=(4 if turn_owned else 8) if _options.get("task_id") else None,
+                    is_cancelled=stop_requested,
                     on_checkpoint=lambda checkpoint: self.event_bus.publish(
                         session_key, "turn.checkpoint", {**checkpoint, "request_id": request_id}),
                 )
+                if turn_owned and request_id in self._owner_declined and not self._cancellations.is_cancelled(request_id):
+                    result = {**result, "halt_reason": "blocked", "error": None,
+                              "evidence": {"declined_by_owner": True}}
                 return {**result, "task_completion": last_completion()}
             finally:
                 self._active_agents.pop(request_id, None)
@@ -2910,6 +2931,9 @@ class JaegerGatewayApp:
         role_s = str(agent_fields.get("role") or "")
         rid = request_id or turn_id
         admitted_request = self.store.get_request(rid)
+        # One Goal/TaskCard per operational turn (see _open_turn_card). None for conversation.
+        card_task_id: str | None = None
+        self._present(session_id, "listening", intent="turn")
         # What the operator wrote, before attachment notes are inlined. Lane
         # decisions read this: an inlined "inspect it with the vision_analyze
         # tool" note made a plain question about an image look actionable.
@@ -3104,6 +3128,12 @@ class JaegerGatewayApp:
                 # request must still reach the agent, unadorned.
                 logger.warning("turn context unavailable for %s; running the bare request", rid, exc_info=True)
                 prepared, prompt = None, text
+            self._present(session_id, "thinking", intent="turn")
+            card_task_id, execution = self._open_turn_card(
+                runtime, prepared, session=session, session_id=session_id, rid=rid,
+                request_text=request_text, actionable=actionable, tier=tier, role_s=role_s,
+                execution=execution,
+            )
             if tier == "chat":
                 model_only = True
             else:
@@ -3116,6 +3146,7 @@ class JaegerGatewayApp:
                     logger.warning("could not record the answer for %s", rid, exc_info=True)
 
             if self._cancellations.is_cancelled(rid):
+                self._close_turn_card(card_task_id, {"error": "cancelled"}, "cancelled", session_id=session_id)
                 if self._settle_cancelled(session_id, turn_id, rid, agent_fields):
                     return
                 raise RuntimeError(
@@ -3127,6 +3158,12 @@ class JaegerGatewayApp:
                 raise RuntimeError(str(turn_result["error"]))
 
             response_text = str(turn_result.get("text") or "")
+            card_fields = self._close_turn_card(
+                card_task_id, turn_result, "completed", session_id=session_id,
+                models=(model, backend),
+            )
+            if not card_task_id:
+                self._present(session_id, "done", intent="conversation", status="completed")
 
             self.event_bus.publish(session_id, "turn.delta", {
                 "turn_id": turn_id,
@@ -3161,6 +3198,7 @@ class JaegerGatewayApp:
                 "task_completion": turn_result.get("task_completion"),
                 "halt_reason": turn_result.get("halt_reason"),
                 "trace_id": turn_result.get("trace_id"),
+                **card_fields,
                 **agent_fields,
                 **proactive_fields,
             }
@@ -3208,6 +3246,9 @@ class JaegerGatewayApp:
                 }
             if receipt:
                 result["native_receipt"] = receipt
+            result.update(self._close_turn_card(card_task_id, result, status, session_id=session_id))
+            if not card_task_id:
+                self._present(session_id, "stopped" if status == "cancelled" else "failed", status=status)
             self._persist_terminal(
                 rid,
                 session_id,
@@ -3216,8 +3257,98 @@ class JaegerGatewayApp:
                 assistant_text=str(reply.get("text") or "") or None if status == "completed" else None,
             )
         finally:
+            # Global Stop cancels this asyncio task (CancelledError skips the except
+            # above). A card still open here is settled, never left running.
+            self._close_turn_card(
+                card_task_id, {"error": "the turn ended before the task was settled"},
+                "cancelled", session_id=session_id,
+            )
+            self._owner_declined.discard(rid)
             self._running_tasks.pop(rid, None)
             self._cancellations.release(rid)
+
+    def _present(self, session_id: str, state: str, **fields: Any) -> None:
+        """Publish ``jaeger.state``. Presence reports a turn; it never decides whether one runs."""
+        try:
+            self.event_bus.publish_state(session_id, state, **fields)
+        except Exception:
+            logger.debug("presence publish skipped", exc_info=True)
+
+    def _open_turn_card(
+        self, runtime: Any, prepared: Any, *, session: Any, session_id: str, rid: str,
+        request_text: str, actionable: bool, tier: str, role_s: str,
+        execution: dict[str, Any] | None,
+    ) -> tuple[str | None, dict[str, Any] | None]:
+        """Conversation stays a conversation. Work becomes one Goal/TaskCard on GatewayTaskOwner.
+
+        The existing ExecutiveStrategySelector judges the prepared turn; the existing
+        owner ReAct is the worker, run in durable mode so it must return evidence.
+        """
+        if prepared is None or execution is None or not actionable or tier == "chat" or role_s == "specialist":
+            return None, execution
+        from jaeger_ai.core.entity.executive import CognitiveStrategy
+
+        try:
+            decision = runtime.executive_selector.select_strategy(prepared.event, runtime.current_state)
+        except Exception:
+            logger.debug("executive strategy unavailable for %s", rid, exc_info=True)
+            decision = None
+        strategy = decision.strategy if decision is not None else CognitiveStrategy.REACT_LOOP
+        if strategy in {
+            CognitiveStrategy.DIRECT_RESPONSE, CognitiveStrategy.PASSIVE_OBSERVE,
+            CognitiveStrategy.SLEEP_TIME_CONSOLIDATION,
+        }:
+            return None, execution
+        workspace = str(
+            execution.get("workspace") or (session or {}).get("workspace")
+            or getattr(getattr(runtime, "layout", None), "workspace_dir", "") or ""
+        )
+        try:
+            task = self.task_owner.open_turn(
+                session_id=session_id, request_id=rid, text=request_text, strategy=strategy.value,
+                owner=str(execution.get("caller") or "owner"), workspace=workspace,
+            )
+        except Exception:
+            logger.warning("could not open a task card for %s; running as a plain turn", rid, exc_info=True)
+            return None, execution
+        self._present(
+            session_id, "planning", task_id=task.task_id, intent="work", status=strategy.value,
+            strategy=strategy.value,
+            complexity=float(getattr(decision, "complexity_score", 0.0) or 0.0),
+            requires_work_ledger=bool(getattr(decision, "requires_work_ledger", False)),
+        )
+        options = {**(execution.get("options") or {}), "task_id": task.task_id, "turn_owned": True}
+        self._present(session_id, "working", task_id=task.task_id, intent="work", worker="owner-react")
+        return task.task_id, {**execution, "options": options}
+
+    def _close_turn_card(
+        self, card_task_id: str | None, turn_result: dict[str, Any], status: str, *,
+        session_id: str, models: tuple[str, ...] = (),
+    ) -> dict[str, Any]:
+        """Verify and settle a turn's card through the task owner, then report it. Idempotent."""
+        if not card_task_id:
+            return {}
+        try:
+            existing = self.task_owner.store.get_task(card_task_id)
+            if existing is not None and existing.is_terminal:
+                return {}  # already settled and reported once
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            from jaeger_ai.contract.presence import ACTIVITY_FOR_TASK_STATE
+
+            if status == "completed" and not turn_result.get("error"):
+                self._present(session_id, "verifying", task_id=card_task_id, intent="work")
+            task, receipt = self.task_owner.close_turn(
+                card_task_id, turn_result, status=status,
+                identity=EntityRuntime.get_singleton().identity, models=models,
+            )
+            self._present(
+                session_id, ACTIVITY_FOR_TASK_STATE.get(task.state.value, "failed"), task_id=task.task_id,
+                intent="work", status=task.state.value, receipt_id=receipt.receipt_id,
+            )
+            return {"task_id": task.task_id, "task_state": task.state.value, "receipt": receipt.to_dict()}
+        except Exception:
+            logger.exception("could not settle turn card %s", card_task_id)
+            return {}
 
     def _settle_cancelled(
         self,
