@@ -351,3 +351,23 @@ def test_every_worker_dispatch_opens_a_card_on_the_task_owner():
     # The orchestration service never settles an authoritative state itself.
     service = _sources()["jaeger_ai/features/ide_orchestration/service.py"][1]
     assert "authoritative_transition" not in {n.id for n in ast.walk(service) if isinstance(n, ast.Name)}
+
+
+# ── 9. disconnected code stays disconnected until it is removed ─────────────
+
+#: Parallel stacks nothing imports. They are listed for removal in
+#: docs/architecture/PRODUCTION_PATHS.md; this keeps them from becoming reachable first.
+_UNREACHABLE = {
+    "jaeger_ai.mind.cognition": "a parallel cognition stack: its own identity, planner, router, orchestrator",
+    "jaeger_ai.interfaces.messaging": "messaging adapters with no production constructor",
+}
+
+
+@pytest.mark.parametrize("package", sorted(_UNREACHABLE))
+def test_disconnected_packages_have_no_importer_outside_themselves(package):
+    prefix = package.replace(".", "/") + "/"
+    importers = {
+        rel: sorted(i for i in _imports(tree) if i == package or i.startswith(package + "."))
+        for rel, (_, tree) in _sources().items() if not rel.startswith(prefix)
+    }
+    assert {k: v for k, v in importers.items() if v} == {}, _UNREACHABLE[package]
