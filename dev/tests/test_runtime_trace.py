@@ -354,6 +354,7 @@ def test_audit_7_learning_pipeline(clean_entity_env: Path):
 
 # ── Audit 9: Single Runtime Authority Executable Trace ────────────────
 
+@pytest.mark.usefixtures("legacy_local_runtime")
 def test_audit_9_single_runtime_authority_trace(clean_entity_env: Path, monkeypatch: pytest.MonkeyPatch):
     """Prove all 7 entry points converge into the identical EntityRuntime singleton instance
     through their REAL production entrypoints:

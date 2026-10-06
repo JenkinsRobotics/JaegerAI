@@ -6,6 +6,8 @@ import pytest
 from jaeger_ai import main
 from jaeger_agent.core.outputs import multimodal_output_scope, multimodal_output_active
 
+pytestmark = pytest.mark.usefixtures("legacy_local_runtime")  # tests the isolated local executor
+
 
 @pytest.mark.parametrize('modality,reply,speech', [
     ('text', '[OUTPUT:TEXT] Hello', ''),

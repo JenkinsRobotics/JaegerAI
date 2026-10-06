@@ -68,3 +68,39 @@ def test_attached_slash_unknown_command_is_a_reply_not_a_crash():
     assert len(replies) == 1, frames
     assert not replies[0].get("error"), replies[0]
     assert replies[0]["id"] == 5
+
+
+def test_an_attached_turn_goes_to_the_gateway_and_never_to_a_local_runtime(monkeypatch):
+    """The attach socket's ``turn`` op is a Gateway client; a local executor is legacy-only."""
+    seen = []
+
+    def fake_gateway_turn(out, ctx, req, text, session, turn_id):
+        seen.append((text, session, turn_id))
+        return {"text": "from the gateway", "error": None}
+
+    class _Runtime:
+        def __getattr__(self, name):
+            raise AssertionError(f"a local runtime was used: {name}")
+
+    monkeypatch.setattr(bridge, "_gateway_turn", fake_gateway_turn)
+    ctx = bridge._Ctx()
+    ctx.gateway = object()
+    ctx.runtime = _Runtime()
+    ctx.client = None
+    ctx.booted.set()
+    out = io.StringIO()
+    req = {"op": "turn", "id": "req-1", "text": "hello", "session": "s1",
+           "_cancel_event": threading.Event(), "_on_complete": lambda: None}
+    turns: "queue.Queue" = queue.Queue()
+    turns.put((req, out))
+    turns.put(None)
+    worker = threading.Thread(target=bridge._turn_worker, args=(out, ctx, turns))
+    worker.start()
+    worker.join(timeout=20)
+    assert not worker.is_alive()
+
+    assert seen == [("hello", "s1", "req-1")]
+    replies = [f for f in (json.loads(line) for line in out.getvalue().splitlines() if line.strip())
+               if f.get("type") == "reply"]
+    assert len(replies) == 1 and replies[0]["text"] == "from the gateway" and replies[0]["id"] == "req-1"
+    assert not replies[0].get("error")

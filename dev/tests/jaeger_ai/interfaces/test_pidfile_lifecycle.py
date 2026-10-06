@@ -124,6 +124,7 @@ def _drive_main(monkeypatch, root, observer):
     # tests exercise the local-boot path (where the bridge owns the instance lock
     # and must register itself), so they select it explicitly.
     monkeypatch.setenv("JAEGER_BRIDGE_EXECUTION", "local")
+    monkeypatch.setenv("JAEGER_LEGACY_PATHS", "1")      # local execution is legacy-only
     monkeypatch.setattr("jaeger_ai.main.boot_for_tui", fake_boot, raising=False)
     monkeypatch.setattr("jaeger_ai.main.run_for_voice",
                         lambda *a, **k: {"text": "", "error": None}, raising=False)
