@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 import time
 from typing import Any
@@ -125,3 +125,22 @@ def resolve_entity_identity(
     identity.save_to_file(identity_path)
     logger.info("Minted new persistent entity identity %s at %s", new_id, identity_path)
     return identity
+
+
+def rename_entity(state_root: Path | str | None, display_name: str) -> EntityIdentity:
+    """The one place Jaeger's display name changes. ``entity_id`` never does.
+
+    ``identity.yaml`` and the prompt header are projections of this; a model, a
+    provider switch or a session cannot reach it (the ``set_name`` tool is
+    owner-only in PolicyKernel).
+    """
+    name = (display_name or "").strip()
+    if not name:
+        raise ValueError("display name is empty")
+    current = resolve_entity_identity(state_root)
+    if current.display_name == name:
+        return current
+    root = Path(state_root) if state_root else operator_state_root()
+    updated = replace(current, display_name=name)
+    updated.save_to_file(root / IDENTITY_FILE_NAME)
+    return updated
