@@ -558,7 +558,7 @@ class GatewayTaskOwner:
         if completion.get('ok') and receipts:
             root = Path(task.payload['execution'].get('workspace') or '').resolve()
             for receipt in receipts:
-                raw = receipt.get('path') or ''
+                raw = receipt.get('resolved') or receipt.get('path') or ''
                 path = Path(raw).expanduser()
                 path = (root / path).resolve() if not path.is_absolute() else path.resolve()
                 if not path.is_relative_to(root) or not path.is_file():
