@@ -22,15 +22,13 @@ def _inside(path: Path, root: Path) -> bool:
 
 
 def hermes_profile_root() -> Path:
-    """Hermes/WebUI profile tree for this process."""
-    state = _state_dir()
-    explicit = os.environ.get("HERMES_HOME", "").strip()
-    if state is not None:
-        if explicit and _inside(Path(explicit), state):
-            return Path(explicit).expanduser()
-        return state / "hermes"
-    if explicit:
-        return Path(explicit).expanduser()
+    """The shared Hermes/WebUI profile tree: ``<state root>/hermes``.
+
+    ``HERMES_HOME`` is deliberately not consulted. For the host WebUI it names the
+    *agent* home (``hermes-webui-agent``), a different directory; honouring it here made
+    the profile tree and the agent home the same path and linked ``profiles`` to itself.
+    The state root already follows ``JAEGER_STATE_DIR`` then ``JAEGER_HOME``.
+    """
     from jaeger_ai.core.instance.instance import operator_state_root
 
     return operator_state_root() / "hermes"
