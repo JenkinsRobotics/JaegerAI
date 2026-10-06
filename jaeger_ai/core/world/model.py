@@ -35,6 +35,8 @@ class EpistemicProvenance(str, Enum):
     BELIEVED = "believed"      # Synthesized world consensus
     PREDICTED = "predicted"    # Probabilistic forecast
     SYSTEM = "system"          # Ground-truth configuration or commissioning fact
+    PLANNED = "planned"        # What the executive intends to do; not yet done
+    VERIFIED = "verified"      # Confirmed by evidence an independent verifier checked
 
 
 class BeliefStatus(str, Enum):

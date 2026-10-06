@@ -3000,7 +3000,7 @@ class JaegerGatewayApp:
                 # with no tools, and recorded as completed.
                 if has_image and not actionable and _asks_about_the_image(request_text):
                     backend = LOCKED_OLLAMA_URL
-                    model = "kimi-k2.7-code:cloud"
+                    model = self._lane_model(request_text, None)
                     current = self.store.get_session(session_id) or {}
                     chat_fut = asyncio.run_coroutine_threadsafe(
                         self._ollama_chat(
@@ -3081,12 +3081,12 @@ class JaegerGatewayApp:
                 """
                 nonlocal backend, model
                 backend = LOCKED_OLLAMA_URL
-                model = active_model
+                model = self._lane_model(request_text, active_model)
                 current = self.store.get_session(session_id) or {}
                 chat_fut = asyncio.run_coroutine_threadsafe(
                     self._ollama_chat(
                         prompt,
-                        model=active_model,
+                        model=model,
                         system_prompt=system_prompt,
                         history=self._history_before_admitted_user(current, admitted_request),
                         attachments=self._turn_attachments(session_id, execution),
@@ -3267,6 +3267,19 @@ class JaegerGatewayApp:
             self._running_tasks.pop(rid, None)
             self._cancellations.release(rid)
 
+    @staticmethod
+    def _lane_model(request_text: str, requested: str | None) -> str:
+        """The Gateway's one routing decision for a direct model lane.
+
+        It is the existing router's sensitivity decision (``core/models/router.py``):
+        private text stays on the local model, public text uses the requested one.
+        Judged on what the operator wrote, not on the prompt with recalled memory.
+        """
+        from jaeger_ai.core.models.router import apply_sensitivity_routing
+
+        model, _provider, _decision = apply_sensitivity_routing(request_text, model=requested or None)
+        return provider_model_name(model or requested or DEFAULT_OLLAMA_MODEL)
+
     def _present(self, session_id: str, state: str, **fields: Any) -> None:
         """Publish ``jaeger.state``. Presence reports a turn; it never decides whether one runs."""
         try:
@@ -3318,8 +3331,20 @@ class JaegerGatewayApp:
             requires_work_ledger=bool(getattr(decision, "requires_work_ledger", False)),
         )
         options = {**(execution.get("options") or {}), "task_id": task.task_id, "turn_owned": True}
+        self._world_claim(runtime, task.task_id, "planned_strategy", strategy.value, "planned")
         self._present(session_id, "working", task_id=task.task_id, intent="work", worker="owner-react")
         return task.task_id, {**execution, "options": options}
+
+    @staticmethod
+    def _world_claim(runtime: Any, subject: str, predicate: str, value: str, provenance: str) -> None:
+        """Ask the resident Entity to record a world claim. A claim never gates a turn."""
+        record = getattr(runtime, "record_world_claim", None)
+        if record is None:
+            return
+        try:
+            record(subject, predicate, value, provenance=provenance, source_id="gateway")
+        except Exception:
+            logger.debug("world claim skipped: %s %s", subject, predicate, exc_info=True)
 
     def _close_turn_card(
         self, card_task_id: str | None, turn_result: dict[str, Any], status: str, *,
@@ -3341,6 +3366,10 @@ class JaegerGatewayApp:
                 card_task_id, turn_result, status=status,
                 identity=EntityRuntime.get_singleton().identity, models=models,
             )
+            runtime = EntityRuntime.get_singleton()
+            if task.state.value == "completed_verified":
+                self._world_claim(runtime, task.task_id, "worker_evidence", str(receipt.evidence)[:300], "observed")
+                self._world_claim(runtime, task.task_id, "completed_verified", task.goal, "verified")
             self._present(
                 session_id, ACTIVITY_FOR_TASK_STATE.get(task.state.value, "failed"), task_id=task.task_id,
                 intent="work", status=task.state.value, receipt_id=receipt.receipt_id,
