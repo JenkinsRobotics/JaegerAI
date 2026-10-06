@@ -2993,19 +2993,23 @@ def _execute_attached_turn(proto: TextIO, ctx: _Ctx, queued: Any) -> None:
     if cancelled is not None and cancelled.is_set():
         _emit(reply_out, _reply_frame(protocol, req, "", "turn cancelled", session))
         return
-    # Slash pre-dispatch — same contract as the TUI REPL: a leading
+    # Slash pre-dispatch — same contract as the native path: a leading
     # ``/`` is a command, never a prompt for the model. Runs before
     # the boot wait so ``/help`` answers even while the model loads.
-    if text.startswith("/"):
+    # ``/goal <job>`` stays a real turn.
+    goal_text = _goal_turn_text(text)
+    if text.startswith("/") and goal_text is None:
         _emit_state(reply_out, ctx, True, session)
         try:
-            reply = _run_slash(text, ctx)
-            _emit(reply_out, _reply_frame(protocol, req, reply, None, session))
+            slash_reply = _windowed_control_slash(text) or _run_slash(text, ctx)
+            _emit(reply_out, _reply_frame(protocol, req, slash_reply, None, session))
         except Exception as exc:  # noqa: BLE001 — a bad command must not kill the bridge
             _emit(reply_out, _reply_frame(protocol, req, "", str(exc), session))
         finally:
             _emit_state(reply_out, ctx, False, session)
         return
+    if goal_text is not None:
+        text = goal_text
     while not ctx.booted.wait(timeout=0.1):
         if cancelled is not None and cancelled.is_set():
             _emit(reply_out, _reply_frame(protocol, req, "", "turn cancelled", session))
