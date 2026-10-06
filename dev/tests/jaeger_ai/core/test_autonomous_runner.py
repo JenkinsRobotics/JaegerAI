@@ -132,6 +132,7 @@ def test_controller_step_cannot_spawn_nested_top_level_controller(monkeypatch):
     [{"type": "image_url", "image_url": {"url": "data:image/png;base64,test"}}],
     "Use write_file to create workspace/report.txt containing READY; read it back.",
 ])
+@pytest.mark.usefixtures("legacy_local_runtime")      # exercises the isolated in-process turn
 def test_actionable_multimodal_request_keeps_media_and_output_policy(monkeypatch, media):
     """The completion controller must not drop a camera input or voice policy."""
     import jaeger_ai.main as main

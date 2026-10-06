@@ -432,7 +432,7 @@ class _GatewayToolConfirmationProvider:
         return self._decided(self._prompt(request))
 
     def _decided(self, approved: bool) -> bool:
-        if not approved:
+        if not approved and self.request_id not in self.app._owner_unanswered:
             self.app._owner_declined.add(self.request_id)
         return approved
 
@@ -509,6 +509,7 @@ class _GatewayToolConfirmationProvider:
         # if the operator's answer won the race, honour it instead.
         self.app.pending_approvals.pop(aid, None)
         if self.app.store.resolve_approval(aid, approved=False, decision="expired") is not None:
+            self.app._owner_unanswered.add(self.request_id)     # nobody answered: needs the owner
             return False
         row = self.app.store.get_approval(aid) or {}
         return row.get("decision") not in {None, "deny", "expired"}
@@ -580,6 +581,8 @@ class JaegerGatewayApp:
         self._running_tasks: dict[str | tuple[str, str], asyncio.Future[Any]] = {}
         # Requests whose owner declined an approval. A turn-owned card ends there (blocked).
         self._owner_declined: set[str] = set()
+        # Requests whose approval the owner never answered. That is needs_owner, not blocked.
+        self._owner_unanswered: set[str] = set()
         # Request-scoped live ReAct agents. The Gateway does not own the agent;
         # EntityRuntime supplies it while an admitted request is executing so
         # steering can be forwarded to the active JaegerAgent.
@@ -2849,8 +2852,9 @@ class JaegerGatewayApp:
         def stop_requested() -> bool:
             if self._cancellations.is_cancelled(request_id):
                 return True
-            # An owner decline is an answer, not a stall: do not push the model on.
-            return turn_owned and request_id in self._owner_declined
+            # An owner decline is an answer, and an unanswered approval needs the owner:
+            # neither is a stall to push the model through.
+            return turn_owned and (request_id in self._owner_declined or request_id in self._owner_unanswered)
 
         with ledger_scope(session_key, resume_completed=bool(_options.get("task_id")) and not bool(_options.get("verification_error")) and not turn_owned):
             try:
@@ -2862,7 +2866,10 @@ class JaegerGatewayApp:
                     on_checkpoint=lambda checkpoint: self.event_bus.publish(
                         session_key, "turn.checkpoint", {**checkpoint, "request_id": request_id}),
                 )
-                if turn_owned and request_id in self._owner_declined and not self._cancellations.is_cancelled(request_id):
+                if turn_owned and request_id in self._owner_unanswered and not self._cancellations.is_cancelled(request_id):
+                    result = {**result, "halt_reason": "needs_owner", "error": None,
+                              "evidence": {"approval_unanswered": True}}
+                elif turn_owned and request_id in self._owner_declined and not self._cancellations.is_cancelled(request_id):
                     result = {**result, "halt_reason": "blocked", "error": None,
                               "evidence": {"declined_by_owner": True}}
                 elif turn_owned and not result.get("error") and not stop_requested():
@@ -3278,6 +3285,7 @@ class JaegerGatewayApp:
                 "cancelled", session_id=session_id,
             )
             self._owner_declined.discard(rid)
+            self._owner_unanswered.discard(rid)
             self._running_tasks.pop(rid, None)
             self._cancellations.release(rid)
 

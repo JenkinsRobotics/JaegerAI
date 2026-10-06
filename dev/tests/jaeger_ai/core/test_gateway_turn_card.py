@@ -391,3 +391,50 @@ def test_a_declined_approval_gets_no_correction_and_no_further_push(env, monkeyp
     result = env.app._continued_owner_react("write the report", session_key="s", request_id="r",
                                            execution=_turn_owned(env), objective="write the report")
     assert len(calls) == 1 and result["halt_reason"] == "blocked"
+
+
+@pytest.mark.asyncio
+async def test_an_unanswered_approval_settles_needs_owner_not_blocked(env):
+    def worker(prompt, **kw):
+        env.app._owner_unanswered.add("r-unans")          # the approval card expired unanswered
+        return {"text": "I need your approval to run that.", "halt_reason": "needs_owner",
+                "evidence": {"approval_unanswered": True}}
+
+    await _run(env, REQUEST, "r-unans", worker=worker)
+
+    [task] = env.app.task_owner.store.list_tasks()
+    assert task.state == TaskState.NEEDS_OWNER
+    assert _states(env)[-1] == "needs_owner"
+
+
+def test_expiry_and_decline_are_recorded_apart(env, monkeypatch):
+    from jaeger_ai.core.gateway.server import _GatewayToolConfirmationProvider
+
+    provider = _GatewayToolConfirmationProvider(env.app, "s", "r-expiry")
+    assert provider._decided(False) is False
+    assert "r-expiry" in env.app._owner_declined
+    env.app._owner_unanswered.add("r-late")
+    late = _GatewayToolConfirmationProvider(env.app, "s", "r-late")
+    assert late._decided(False) is False
+    assert "r-late" not in env.app._owner_declined and "r-late" in env.app._owner_unanswered
+    assert provider._decided(True) is True
+
+
+def test_the_verifier_rechecks_the_file_the_ledger_hashed_not_the_name_the_model_gave(env):
+    import hashlib
+
+    owner = env.app.task_owner
+    task = owner.open_turn(session_id="s", request_id="r-resolved", text=REQUEST, strategy="react_loop", owner="o",
+                           workspace=str(env.workspace))
+    report = env.workspace / "report.md"
+    report.write_text("# real report\n")
+    receipt = {"kind": "file_sha256", "path": "workspace/report.md",          # the model's own convention
+               "resolved": str(report), "sha256": hashlib.sha256(report.read_bytes()).hexdigest()}
+    verified, evidence = owner.verify(owner.store.get_task(task.task_id), {"task_completion": {"ok": True, "verification_receipts": [receipt]}})
+    assert verified, evidence
+
+    outside = env.workspace.parent / "elsewhere.txt"
+    outside.write_text("not in the workspace")
+    forged = {**receipt, "resolved": str(outside), "sha256": hashlib.sha256(outside.read_bytes()).hexdigest()}
+    verified, evidence = owner.verify(owner.store.get_task(task.task_id), {"task_completion": {"ok": True, "verification_receipts": [forged]}})
+    assert not verified and "outside" in evidence
