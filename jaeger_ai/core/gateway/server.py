@@ -3335,6 +3335,27 @@ class JaegerGatewayApp:
         self._present(session_id, "working", task_id=task.task_id, intent="work", worker="owner-react")
         return task.task_id, {**execution, "options": options}
 
+    def _settle_dispatch(self, orchestration_id: str, done: Any) -> None:
+        """Settle the owner's card for a worker dispatch once the worker has returned."""
+        card_id = f"orch:{orchestration_id}"
+        try:
+            from jaeger_ai.contract.presence import ACTIVITY_FOR_TASK_STATE
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+
+            record = self.orchestration.get_task(orchestration_id) if self.orchestration else None
+            task, receipt = self.task_owner.close_dispatch(
+                card_id, record, cancelled=bool(done.cancelled()),
+                identity=EntityRuntime.get_singleton().identity,
+            )
+            session = task.notification_policy.recipient_session_id or "orchestration"
+            self._present(
+                session, ACTIVITY_FOR_TASK_STATE.get(task.state.value, "failed"), task_id=task.task_id,
+                intent="work", status=task.state.value, worker=str((record or {}).get("worker") or ""),
+                receipt_id=receipt.receipt_id,
+            )
+        except Exception:
+            logger.exception("could not settle the card for orchestration task %s", orchestration_id)
+
     @staticmethod
     def _world_claim(runtime: Any, subject: str, predicate: str, value: str, provenance: str) -> None:
         """Ask the resident Entity to record a world claim. A claim never gates a turn."""
@@ -4313,6 +4334,12 @@ class JaegerGatewayApp:
                 metadata=metadata,
                 required_capabilities=frozenset(capabilities),
             )
+            raw_artifacts = body.get("artifacts") or []
+            if not isinstance(raw_artifacts, list) or any(not isinstance(a, str) or not a.strip() for a in raw_artifacts):
+                raise TypeError("artifacts must be a list of nonempty strings")
+            # Declared deliverables are what the task owner can verify. Resolve them
+            # first so a bad path never leaves a dispatched worker without a card.
+            self.task_owner.artifact_paths(str(workspace or ""), raw_artifacts)
             operation, replayed = self.orchestration.admit_parent_task(parent_task)
         except DuplicateSubmissionConflict as exc:
             return web.json_response({"error": str(exc)}, status=409)
@@ -4334,6 +4361,17 @@ class JaegerGatewayApp:
                     logger.error("Orchestration task %s failed: %s", task_id, done.exception())
 
             operation.add_done_callback(completed)
+            # The worker's own "completed" is a transport status. The task owner holds
+            # the card and settles it from evidence it can check.
+            try:
+                self.task_owner.open_dispatch(
+                    orchestration_id=task_id, goal=body["goal"].strip(), worker=body["worker"].strip(),
+                    workspace=str(workspace or ""), artifacts=raw_artifacts,
+                    session_id=str(body.get("session_id") or ""),
+                )
+                operation.add_done_callback(lambda done, oid=task_id: self._settle_dispatch(oid, done))
+            except Exception:
+                logger.exception("could not open a task card for orchestration task %s", task_id)
         return web.json_response(
             self.orchestration.get_task(task_id), status=200 if replayed else 201,
         )
@@ -4346,7 +4384,10 @@ class JaegerGatewayApp:
         task = self.orchestration.get_task(task_id)
         if task is None:
             return web.json_response({"error": f"Task {task_id} not found"}, status=404)
-        return web.json_response(task)
+        card = self.task_owner.store.get_task(f"orch:{task_id}")
+        # ``state`` is the worker's own status. ``task_state`` is the owner's verdict.
+        return web.json_response({**task, "task_state": card.state.value if card else None,
+                                  "task_id_owner": card.task_id if card else None})
 
     async def handle_cancel_orchestration_task(self, request: web.Request) -> web.Response:
         """Cancel an in-flight orchestration task."""
@@ -4403,6 +4444,14 @@ class JaegerGatewayApp:
                 lambda done: self._running_tasks.pop(operation_key, None)
                 if self._running_tasks.get(operation_key) is done else None
             )
+            try:
+                self.task_owner.open_dispatch(
+                    orchestration_id=task_id, goal=goal.strip(), worker=str(parent["worker"]),
+                    session_id=str(body.get("session_id") or ""),
+                )
+                operation.add_done_callback(lambda done, oid=task_id: self._settle_dispatch(oid, done))
+            except Exception:
+                logger.exception("could not open a task card for follow-up task %s", task_id)
         return web.json_response(
             self.orchestration.get_task(task_id), status=200 if replayed else 201
         )
