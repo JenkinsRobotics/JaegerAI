@@ -231,6 +231,11 @@ async def test_global_stop_cancelling_the_turn_task_never_leaves_the_card_runnin
     [task] = env.app.task_owner.store.list_tasks()
     assert task.state == TaskState.CANCELLED
     assert not task.state == TaskState.COMPLETED_VERIFIED
+    # The request ends terminal and a new turn is admitted in the same session. It is never left 'running'.
+    assert env.app.store.get_request("r-stop")["status"] in {"cancelled", "execution_unknown"}
+    assert [e.event for e in _events(env, "turn.cancelled", "turn.unknown", "turn.finish", "turn.failed")] != []
+    again = env.app.store.admit_request("s", "hello again", request_id="r-after-stop")
+    assert again["status"] != "running" or again.get("replayed") is False
 
 
 @pytest.mark.asyncio
