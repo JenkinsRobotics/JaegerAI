@@ -3252,6 +3252,16 @@ class JaegerGatewayApp:
                 **proactive_fields,
             }
             self._persist_terminal(rid, session_id, "completed", result, assistant_text=response_text, record_entity_event=False)
+        except asyncio.CancelledError:
+            # Global Stop cancels this task. Persist how the request ended (cancelled, or
+            # execution_unknown when an effect is pending) so it is never left 'running'.
+            try:
+                self._close_turn_card(card_task_id, {"error": "cancelled"}, "cancelled", session_id=session_id)
+                if not self._settle_cancelled(session_id, turn_id, rid, agent_fields):
+                    self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled by Global Stop")
+            except Exception:
+                logger.exception("could not persist the cancelled outcome of %s", rid)
+            raise
         except Exception as exc:
             if self._cancellations.is_cancelled(rid) and self._settle_cancelled(
                 session_id, turn_id, rid, agent_fields,
