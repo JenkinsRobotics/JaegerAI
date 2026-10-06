@@ -308,3 +308,36 @@ def test_the_native_mcp_lead_lane_is_behind_the_legacy_switch():
 def test_the_gateway_routes_operational_turns_through_the_task_owner():
     text = _sources()["jaeger_ai/core/gateway/server.py"][0]
     assert "self.task_owner.open_turn(" in text and "self.task_owner.close_turn(" in text
+
+
+# ── 8. avatars and embodiment are adapters ──────────────────────────────────
+
+_AVATAR_ROOTS = ("jaeger_ai/interfaces/avatar", "jaeger_ai/interfaces/avatar_chat",
+                 "jaeger_ai/interfaces/avatar_player")
+_AVATAR_FORBIDDEN = (
+    "jaeger_ai.core.tasks", "jaeger_ai.core.entity", "jaeger_ai.core.authority",
+    "jaeger_ai.core.gateway.session_store", "jaeger_ai.core.gateway.server",
+    "jaeger_ai.core.gateway.event_bus", "jaeger_agent.memory", "jaeger_ai.core.world",
+)
+
+
+def test_avatar_surfaces_own_no_memory_identity_goals_permissions_or_task_state():
+    """An avatar renders Gateway state. It does not decide, remember or authorize."""
+    offenders = {
+        rel: sorted(i for i in _imports(tree) if i.startswith(_AVATAR_FORBIDDEN))
+        for rel, (_, tree) in _sources().items() if rel.startswith(_AVATAR_ROOTS)
+    }
+    assert {k: v for k, v in offenders.items() if v} == {}
+
+
+def test_embodiment_stays_closed_and_minecraft_is_not_an_agent():
+    from jaeger_ai.core.embodiment.gate import EmbodimentDisabled, minecraft_action
+    with pytest.raises(EmbodimentDisabled):
+        minecraft_action("chat", text="hi")
+    # The tool module opens no socket and runs no loop of its own.
+    tree = _sources()["packages/jaeger-agent/jaeger_agent/tools/minecraft.py"][1]
+    imported = {i.split(".")[0] for i in _imports(tree)}
+    assert not imported & {"urllib", "socket", "http", "requests", "httpx", "subprocess", "threading", "asyncio"}
+    assert not [n for n in ast.walk(tree) if isinstance(n, ast.While)]
+    assert _modules_where(lambda rel, t, tree: "minecraft_action" in t) <= {
+        "jaeger_ai/core/embodiment/gate.py"}
