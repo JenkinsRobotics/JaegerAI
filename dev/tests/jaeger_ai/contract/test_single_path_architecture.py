@@ -341,3 +341,13 @@ def test_embodiment_stays_closed_and_minecraft_is_not_an_agent():
     assert not [n for n in ast.walk(tree) if isinstance(n, ast.While)]
     assert _modules_where(lambda rel, t, tree: "minecraft_action" in t) <= {
         "jaeger_ai/core/embodiment/gate.py"}
+
+
+def test_every_worker_dispatch_opens_a_card_on_the_task_owner():
+    """Both orchestration admissions (new task, follow-up) hand the owner a card to settle."""
+    text = _sources()["jaeger_ai/core/gateway/server.py"][0]
+    assert text.count("self.task_owner.open_dispatch(") == 2
+    assert text.count("self._settle_dispatch(") == 2 and "def _settle_dispatch(" in text
+    # The orchestration service never settles an authoritative state itself.
+    service = _sources()["jaeger_ai/features/ide_orchestration/service.py"][1]
+    assert "authoritative_transition" not in {n.id for n in ast.walk(service) if isinstance(n, ast.Name)}

@@ -34,6 +34,21 @@ class GatewayTaskOwner:
         self._active: dict[str, asyncio.Task] = {}
         self._stopping = False
 
+    @staticmethod
+    def artifact_paths(workspace: str, artifacts: list[str] | None) -> list[str]:
+        """Declared deliverables, resolved and confined to the admitted workspace."""
+        paths = []
+        for raw in artifacts or []:
+            if not workspace:
+                raise ValueError('Artifact verification requires an admitted workspace')
+            root = Path(workspace).expanduser().resolve()
+            path = Path(raw).expanduser()
+            path = (root / path).resolve() if not path.is_absolute() else path.resolve()
+            if not path.is_relative_to(root):
+                raise ValueError('Artifact lies outside the admitted workspace')
+            paths.append(str(path))
+        return sorted(set(paths))
+
     def submit(self, goal: str, *, context: dict, artifacts: list[str] | None = None,
                proposal: bool = False, key: str = '') -> dict:
         goal = goal.strip()
@@ -49,19 +64,10 @@ class GatewayTaskOwner:
         authorized = context.get('source') == 'user' and background_requested(context.get('user_text', ''))
         approved = authorized or (not proposal and context.get('source') == 'client')
         workspace = str(execution.get('workspace') or '')
-        paths = []
-        for raw in artifacts or []:
-            if not workspace:
-                raise ValueError('Artifact verification requires an admitted workspace')
-            root = Path(workspace).expanduser().resolve()
-            path = Path(raw).expanduser()
-            path = (root / path).resolve() if not path.is_absolute() else path.resolve()
-            if not path.is_relative_to(root):
-                raise ValueError('Artifact lies outside the admitted workspace')
-            paths.append(str(path))
+        paths = self.artifact_paths(workspace, artifacts)
         identity = key or json.dumps([context.get('request_id') or '', ' '.join(goal.casefold().split())])
         tid = 'task_' + hashlib.sha256(json.dumps([parent, identity]).encode()).hexdigest()[:24]
-        payload = {'execution': execution, 'artifacts': sorted(set(paths))}
+        payload = {'execution': execution, 'artifacts': paths}
         task = DurableTask(tid, 'native:jaeger', goal, kind=TaskKind.LONG_RUNNING,
             state=TaskState.QUEUED if approved else TaskState.PAUSED, payload=payload,
             notification_policy=NotificationPolicy(recipient_session_id=parent),
@@ -172,7 +178,8 @@ class GatewayTaskOwner:
                                                'approval.request', approval)
         return count
 
-    def admit_turn_card(self, card_payload: dict, *, execution: dict | None = None) -> DurableTask:
+    def admit_turn_card(self, card_payload: dict, *, execution: dict | None = None,
+                        artifacts: list[str] | None = None, source: str = 'gateway_turn') -> DurableTask:
         """Admit the Goal/TaskCard of a live turn.
 
         The turn that admits it is also its executor, so the scheduler must not
@@ -185,9 +192,9 @@ class GatewayTaskOwner:
         task = DurableTask(
             tid, 'native:jaeger', str(card_payload["goal"]),
             kind=TaskKind.LONG_RUNNING, state=TaskState.QUEUED,
-            payload={'turn_card': dict(card_payload), 'execution': dict(execution or {}), 'artifacts': []},
+            payload={'turn_card': dict(card_payload), 'execution': dict(execution or {}), 'artifacts': list(artifacts or [])},
             notification_policy=NotificationPolicy(recipient_session_id=parent),
-            provenance={'authorized': True, 'turn_owned': True, 'source': 'gateway_turn',
+            provenance={'authorized': True, 'turn_owned': True, 'source': source,
                         'session_id': parent, 'request_id': card_payload.get('request_id')},
         )
         task, replayed = self.store.admit_task(task)
@@ -272,9 +279,61 @@ class GatewayTaskOwner:
         )
         return task, receipt
 
+    def open_dispatch(self, *, orchestration_id: str, goal: str, worker: str, workspace: str = '',
+                      artifacts: list[str] | None = None, session_id: str = '') -> DurableTask:
+        """A task handed to an external-agent worker is still this owner's task.
+
+        The orchestration service tracks the dispatch (transport); the worker's own
+        ``completed`` is a worker status. This card is what settles, from evidence the
+        owner can check: the artifacts declared here.
+        """
+        parent = session_id
+        if not parent or not self.gateway.store.get_session(parent):
+            parent = 'orchestration'
+            self.gateway.store.ensure_session(parent, title='Worker dispatch', profile='jaeger')
+        paths = self.artifact_paths(workspace, artifacts)
+        goal_obj = Goal.from_owner(owner='owner', objective=goal.strip(), session_id=parent)
+        goal_obj.goal_id = f'goal:orch:{orchestration_id}'
+        card = TaskCard.open(goal_obj, strategy='specialist_delegation', request_id=f'orch:{orchestration_id}',
+                             task_id=f'orch:{orchestration_id}', allowed=(worker,))
+        return self.admit_turn_card(card.to_payload(), execution={'workspace': workspace},
+                                    artifacts=paths, source='worker_dispatch')
+
+    def close_dispatch(self, task_id: str, record: dict | None, *, cancelled: bool = False,
+                       identity=None) -> tuple[DurableTask, Receipt]:
+        """Settle a dispatch card from the orchestration record of what the worker returned."""
+        res = (record or {}).get('result') or {}
+        state = str(res.get('state') or (record or {}).get('state') or '')
+        evidence = res.get('evidence') if isinstance(res.get('evidence'), dict) else {}
+        worker = str((record or {}).get('worker') or '')
+        output = str(res.get('output') or '')
+        if cancelled or evidence.get('cancelled'):
+            status, result = 'cancelled', {'error': 'cancelled'}
+        elif state == 'unknown' or evidence.get('worker_cancel_confirmed') is False or evidence.get('surviving_pids'):
+            status, result = 'execution_unknown', {'error': res.get('reason') or 'worker outcome unknown'}
+        elif state in {'blocked', 'approval', 'auth', 'quota'}:
+            halt = 'needs_owner' if state in {'approval', 'auth', 'quota'} else 'blocked'
+            status, result = 'completed', {'halt_reason': halt, 'evidence': {'worker_state': state}, 'output': output}
+        elif state == 'completed':
+            status, result = 'completed', {'output': output}
+        else:
+            status, result = 'failed', {'error': res.get('reason') or output or state or 'worker failed'}
+        return self.close_turn(task_id, result, status=status, identity=identity,
+                               models=(worker,) if worker else ())
+
     def _reconcile_turn_card(self, task: DurableTask) -> None:
         """Settle a turn-owned card whose turn ended without settling it (crash, restart)."""
         rid = str(task.provenance.get('request_id') or '')
+        if task.provenance.get('source') == 'worker_dispatch':
+            orchestration = getattr(self.gateway, 'orchestration', None)
+            oid = rid.removeprefix('orch:')
+            if orchestration is None or oid in getattr(orchestration, '_active_executions', {}):
+                return  # still dispatched: the orchestration service owns the worker
+            record = orchestration.get_task(oid)
+            if record is None and time.time() - task.updated_at < 30:
+                return
+            self.close_dispatch(task.task_id, record)
+            return
         if not rid or rid in getattr(self.gateway, '_running_tasks', {}):
             return
         row = self.gateway.store.get_request(rid)
