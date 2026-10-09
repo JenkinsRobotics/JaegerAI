@@ -952,6 +952,11 @@ class JaegerGatewayApp:
                 asyncio.run_coroutine_threadsafe(_on_loop(), loop).result(timeout=30)
         else:
             _write()
+        try:
+            from jaeger_ai.core.runtime.notifier import fan_out
+            payload["channels"] = fan_out(payload)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("proactive fan-out failed: %s", exc)
         return {"delivered": True, "session_id": session_id, **payload}
 
     def submit_background_turn(
@@ -1170,6 +1175,7 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/sessions/{id}/handoff", self.handle_session_handoff)
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
         self.app.router.add_get("/v1/sessions/{id}/events", self.handle_session_events_json)
+        self.app.router.add_get("/v1/notifications", self.handle_list_notifications)
         self.app.router.add_get("/v1/requests/{request_id}", self.handle_get_request_any_session)
         self.app.router.add_get("/v1/sessions/{id}/activity", self.handle_activity_history)
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
@@ -3762,6 +3768,22 @@ class JaegerGatewayApp:
         if row is None:
             return web.json_response({"error": "Request not found"}, status=404)
         return web.json_response(row)
+
+    async def handle_list_notifications(self, request: web.Request) -> web.Response:
+        """GET /v1/notifications?since_event_id=N - Jaeger's speak-first messages.
+
+        One cross-session feed of durable ``notification.proactive`` events so
+        any surface (WebUI, menu bar, phone bridge) can show and speak what
+        Jaeger said first, without knowing which session it landed in.
+        """
+        try:
+            since = int(request.query.get("since_event_id") or 0)
+            limit = int(request.query.get("limit") or 20)
+        except ValueError:
+            return web.json_response({"error": "Invalid since_event_id or limit"}, status=400)
+        items = self.store.proactive_notifications(since, limit)
+        cursor = items[-1]["event_id"] if items else since
+        return web.json_response({"notifications": items, "cursor": cursor})
 
     async def handle_session_events_json(self, request: web.Request) -> web.Response:
         """GET /v1/sessions/{id}/events?since_event_id=N — the replay window as JSON.

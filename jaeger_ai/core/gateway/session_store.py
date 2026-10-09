@@ -1345,6 +1345,25 @@ class GatewaySessionStore:
             conn.execute("INSERT INTO background_deliveries VALUES(?,?,?)", (key, digest, json.dumps(receipt)))
             return {**receipt, "replayed": False}
 
+    def proactive_notifications(self, since_event_id: int = 0, limit: int = 20) -> list[dict[str, Any]]:
+        """Durable ``notification.proactive`` events across sessions, oldest first."""
+        limit = max(1, min(int(limit or 20), 100))
+        with self._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT event_id, session_id, data_json, timestamp FROM activity_history "
+                "WHERE event='notification.proactive' AND event_id > ? ORDER BY event_id DESC LIMIT ?",
+                (int(since_event_id or 0), limit),
+            ).fetchall()
+        out = []
+        for row in reversed(rows):
+            try:
+                data = json.loads(row["data_json"] or "{}")
+            except json.JSONDecodeError:
+                data = {}
+            out.append({"event_id": int(row["event_id"]), "session_id": row["session_id"],
+                        "timestamp": row["timestamp"], **(data if isinstance(data, dict) else {})})
+        return out
+
     def append_event(self, session_id: str, event: str, data: dict[str, Any]) -> dict[str, Any]:
         with self._immediate() as conn:
             return self._insert_event(conn, session_id, event, data)
