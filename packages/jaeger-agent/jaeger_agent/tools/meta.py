@@ -166,13 +166,23 @@ def list_tools(query: str = "") -> dict[str, Any]:
     q = (query or "").strip().lower()
     rows = []
     for t in sorted(get_tools(), key=lambda x: x.name):
-        desc = " ".join((t.description or "").split())[:80]
-        if q and q not in t.name.lower() and q not in desc.lower():
-            continue
+        full_desc = " ".join((t.description or "").split())
+        desc = full_desc[:80]
         loc = "CORE" if t.name in CORE else where.get(t.name, "other")
+        # Match the toolset name and the whole description too: a model that
+        # asks for "delegate" means the ``delegates`` toolset (call_agent),
+        # not only tools whose name happens to contain the word.
+        if q and q not in t.name.lower() and q not in full_desc.lower() and q not in loc.lower():
+            continue
         rows.append({"tool": t.name, "toolset": loc, "does": desc})
-    return {"ok": True, "count": len(rows), "tools": rows,
-            "note": "not-CORE tools: load their toolset with load_tools(<toolset>)"}
+    out = {"ok": True, "count": len(rows), "tools": rows,
+           "note": "not-CORE tools: load their toolset with load_tools(<toolset>)"}
+    if q and not rows:
+        from jaeger_agent.skill_registry.toolset_scoping import all_toolsets
+        out["note"] = ("no tool matches that word; these are the loadable toolsets — "
+                       "try a broader word or load_tools(<toolset>)")
+        out["toolsets"] = all_toolsets()
+    return out
 
 
 __all__ = ["describe_tool", "load_tools", "list_tools"]
