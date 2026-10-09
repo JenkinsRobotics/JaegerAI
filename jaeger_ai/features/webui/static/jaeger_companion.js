@@ -50,9 +50,9 @@
     }catch(_){}
   }
 
-  async function speakAudio(text, engine){
-    const r=await fetch('api/tts',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({text:String(text).slice(0,600),engine,voice:localStorage.getItem('hermes-tts-voice')||undefined})});
+  async function speakAudio(url, payload){
+    const r=await fetch(url,{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(payload)});
     if(!r.ok) throw new Error('tts '+r.status);
     const el=new Audio(URL.createObjectURL(await r.blob()));
     audioEl=el; meter(el);
@@ -80,9 +80,14 @@
   function speak(text){
     if(localStorage.getItem(MUTE)==='1') return;
     stopSpeaking();
+    // Jaeger's own local voice (Kokoro) first, unless the owner picked a
+    // server engine for the WebUI; browser speech is the last fallback.
     const engine=localStorage.getItem('hermes-tts-engine')||'browser';
-    if(engine!=='browser'){ speakAudio(text,engine).catch(()=>speakBrowser(text)); return; }
-    try{ speakBrowser(text); }catch(_){}
+    const t=String(text).slice(0,600);
+    const req=(engine==='browser'||engine==='kokoro')
+      ? speakAudio('api/jaeger/tts',{text:t})
+      : speakAudio('api/tts',{text:t,engine,voice:localStorage.getItem('hermes-tts-voice')||undefined});
+    req.catch(()=>{ try{ speakBrowser(t); }catch(_){} });
   }
 
   function show(n){
