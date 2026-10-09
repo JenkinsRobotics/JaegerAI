@@ -326,3 +326,15 @@ def test_a_stand_in_pipeline_layout_persists_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(main, "_pipeline", {"layout": MagicMock()})
     assert work_ledger._layout_run_dir() is None
     assert list(tmp_path.iterdir()) == []
+
+
+def test_screen_capture_path_ignores_a_stand_in_layout(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    import jaeger_ai.main as main
+    from jaeger_ai.core.runtime import screen
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main, "_pipeline", {"layout": MagicMock()})
+    assert screen._capture_path().name == "jaeger_screen_latest.png"
+    assert list(tmp_path.iterdir()) == []
