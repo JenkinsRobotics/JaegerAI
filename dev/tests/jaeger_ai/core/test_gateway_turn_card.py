@@ -526,7 +526,10 @@ def test_step_reports_the_tools_it_ran_and_a_state_change_gets_one_check(env, mo
     def owner_react(prompt, **kwargs):
         prompts.append(prompt)
         cb, flush = env.app._turn_stream_callbacks("s", "r")
-        cb.on_tool_done("terminal", {"command": "git branch x"}, {"exit_code": 0}, True, None, 0.1)
+        if len(prompts) == 1:  # the work changes state ...
+            cb.on_tool_done("terminal", {"command": "git branch x"}, {"exit_code": 0}, True, None, 0.1)
+        else:                  # ... the check only observes, so the turn ends verified
+            cb.on_tool_done("read_file", {"path": "x"}, {"content": "ok"}, True, None, 0.1)
         flush()
         return {"text": f"done {len(prompts)}", "status": "completed"}
 
