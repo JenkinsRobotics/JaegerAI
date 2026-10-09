@@ -110,7 +110,21 @@
     if(n.speak!==false) speak(n.body||'');
   }
 
+  // One poll at a time. A slow first response (cold gateway) used to overlap
+  // the next interval tick: the first to return set primed=true, then the other,
+  // still holding since_event_id=0, showed every item unfiltered (the stale
+  // replay). Also never show an event at or below the cursor, or one twice.
+  let inflight=false;
+  const seen=new Set();
+  function fresh(n){
+    const id=+n.event_id||0;
+    if(id && (id<=cursor || seen.has(id))) return false;
+    if(id) seen.add(id);
+    return true;
+  }
   async function poll(){
+    if(inflight) return;
+    inflight=true;
     try{
       const r=await fetch('api/jaeger/notifications?since_event_id='+cursor+'&limit=10',{credentials:'same-origin'});
       if(!r.ok) return;
@@ -119,15 +133,16 @@
       if(!primed){
         // First load: only surface what arrived in the last 10 minutes.
         const cutoff=Date.now()/1000-600;
-        items.filter(n=>(n.created_at||n.timestamp||0)>=cutoff).forEach(show);
+        items.filter(n=>(n.created_at||n.timestamp||0)>=cutoff).filter(fresh).forEach(show);
         primed=true;
       }else{
-        items.forEach(show);
+        items.filter(fresh).forEach(show);
       }
       if(typeof data.cursor==='number' && data.cursor>cursor){
         cursor=data.cursor; localStorage.setItem(KEY,String(cursor));
       }
-    }catch(_){}
+    }catch(_){
+    }finally{ inflight=false; }
   }
 
   document.addEventListener('keydown',e=>{ if(e.key==='Escape') stopSpeaking(); });
