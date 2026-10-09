@@ -184,6 +184,7 @@ class BackgroundProducers:
         self._accepting = False
         self.held = False
         self.webhook_port: int | None = None
+        self._initiative_policy: Any = None
         self.backoff = RefusalBackoff(
             base_s=_float_env("JAEGER_BACKGROUND_BACKOFF_S", 30.0),
             cap_s=_float_env("JAEGER_BACKGROUND_BACKOFF_CAP_S", 1800.0),
@@ -376,6 +377,10 @@ class BackgroundProducers:
             self._sensor_action(cfg)
         except Exception as exc:  # noqa: BLE001
             print(f"[background] sensor bus: {exc}", flush=True)
+        try:
+            self._release_held()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[background] initiative release: {exc}", flush=True)
         layout = self.layout
         try:
             reclaim_stale(layout)
@@ -425,8 +430,21 @@ class BackgroundProducers:
                     hb_prompt = "Say CONTRACT-ANSWER"
             if not wake_cognition:
                 return
-            prompt = hb_prompt
-            session = hb_session
+            # Heartbeat is a proactive check-in, not an acting turn: it
+            # becomes a typed Initiative and goes through the one gate.
+            from jaeger_ai.core.runtime.initiative import Initiative
+            from jaeger_ai.core.runtime.salience import SalienceLevel
+
+            beat = int(hb.last_beat_at(layout) or time.time())
+            outcome = self.offer_initiative(Initiative(
+                source="heartbeat", kind="heartbeat", level=SalienceLevel.DIGEST,
+                summary="Scheduled heartbeat check-in",
+                details={"beat": beat, "checklist": str(hb_prompt or "")[:1000]},
+            ))
+            if outcome not in {"refused"}:
+                hb.mark_beat(layout, silent=outcome != "delivered")
+            _ = hb_session
+            return
         if not prompt:
             return
         if not self.backoff.allowed(source):
@@ -468,6 +486,73 @@ class BackgroundProducers:
                 or result.get("execution_unknown")
             )
             hb.mark_beat(layout, silent=silent or failed)
+
+    # -- initiative pipeline (speak first; never act) --------------------
+    PROACTIVE_SESSION = "jaeger-initiative"
+
+    def initiative_policy(self) -> Any:
+        if self._initiative_policy is None:
+            from jaeger_ai.core.runtime.initiative import InterruptionPolicy
+
+            state_dir = getattr(self.layout, "memory_dir", None) or getattr(self.layout, "run_dir", None)
+            self._initiative_policy = InterruptionPolicy(state_dir)
+        return self._initiative_policy
+
+    def offer_initiative(self, initiative: Any) -> str:
+        """Gate one initiative in code; speak only when the policy allows.
+
+        Returns delivered | silent | held | refused | journal | drop.
+        """
+        decision = self.initiative_policy().decide(initiative)
+        if decision.verdict != "deliver":
+            return decision.verdict
+        return self._speak(initiative)
+
+    def _release_held(self) -> None:
+        if not self.backoff.allowed("initiative") or self.sink.is_busy():
+            return
+        initiative = self.initiative_policy().release_held()
+        if initiative is not None:
+            self._speak(initiative)
+
+    def _speak(self, initiative: Any) -> str:
+        from jaeger_ai.core.runtime.initiative import compose_prompt, is_silent
+
+        policy = self.initiative_policy()
+        if not self._accepting or not self.backoff.allowed("initiative"):
+            policy.requeue(initiative, "backoff")
+            return "held"
+        request_id = f"initiative:{initiative.dedupe_key}:{int(initiative.created_at)}"
+        # allowed_tools=[]: the talker composes one message and can act on
+        # nothing. Doing anything is the owner's reply -> TaskCard ->
+        # approval -> PolicyKernel, the same path as every owner turn.
+        result = self.sink.submit_turn(
+            compose_prompt(initiative), session=self.PROACTIVE_SESSION,
+            request_id=request_id, source="initiative", allowed_tools=[],
+        )
+        if is_refusal(result):
+            self.backoff.refused("initiative")
+            policy.requeue(initiative, f"refused:{result.get('halt_reason') or result.get('status') or 'error'}")
+            return "refused"
+        self.backoff.succeeded("initiative")
+        text = str(result.get("text") or "").strip()
+        if is_silent(text):
+            policy.note(initiative, "silent", "talker_declined")
+            return "silent"
+        deliver = getattr(self.sink, "deliver_proactive", None)
+        if callable(deliver):
+            outcome = deliver(text, initiative=initiative, request_id=request_id) or {}
+            if not outcome.get("delivered"):
+                policy.requeue(initiative, f"undelivered:{outcome.get('reason')}")
+                return "held"
+        else:
+            from jaeger_ai.core.runtime.background_delivery import record_result
+            record_result(
+                self.layout, {"text": text, "status": "completed"}, source="initiative",
+                source_session=self.PROACTIVE_SESSION, display_name=self.display_name,
+            )
+        policy.note(initiative, "delivered", "spoken")
+        return "delivered"
 
     def _current_tier(self, cfg: Any) -> str:
         tier = getattr(self.sink, "current_tier", None)
@@ -518,21 +603,15 @@ class BackgroundProducers:
         candidate = self.sensor_bus.next_action(user_active=quiet < 90.0)
         if candidate is None:
             return
-        from jaeger_ai.core.runtime.sensor_bus import sensor_prompt
+        from jaeger_ai.core.runtime.initiative import Initiative
 
         event = candidate.event
-        if not self.backoff.allowed("sensor"):
-            return
-        request_id = f"sensor:{event.source}:{event.kind}:{event.identity}"
-        result = self.sink.submit_turn(
-            sensor_prompt(event), session=self.sink.last_user_session(),
-            request_id=request_id, source="sensor",
-            salience=candidate.level.name.lower(),
-        )
-        if isinstance(result, dict) and is_refusal(result):
-            self.backoff.refused("sensor")
-        else:
-            self.backoff.succeeded("sensor")
+        self.offer_initiative(Initiative(
+            source="sensor", kind=event.kind, summary=event.summary,
+            level=candidate.level,
+            details={"observer": event.source, **dict(event.details or {})},
+            created_at=event.timestamp,
+        ))
 
     def _start_webhooks(self, cfg: Any) -> None:
         from jaeger_ai.core.runtime import webhooks as hooks

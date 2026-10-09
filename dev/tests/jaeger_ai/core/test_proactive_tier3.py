@@ -51,6 +51,7 @@ def test_background_producer_submits_immediate_sensor_turn(tmp_path: pathlib.Pat
     class _Sink:
         def __init__(self) -> None:
             self.turns = []
+            self.delivered = []
         def current_tier(self):
             return "jaeger"
         def is_busy(self):
@@ -59,9 +60,12 @@ def test_background_producer_submits_immediate_sensor_turn(tmp_path: pathlib.Pat
             return 0.0
         def last_user_session(self):
             return "s1"
-        def submit_turn(self, prompt, *, session, request_id, source, salience=None):
-            self.turns.append((prompt, session, request_id, source, salience))
-            return {"text": "done", "status": "completed"}
+        def submit_turn(self, prompt, *, session, request_id, source, salience=None, allowed_tools=None):
+            self.turns.append((prompt, session, request_id, source, allowed_tools))
+            return {"text": "Disk is low, want me to clear caches?", "status": "completed"}
+        def deliver_proactive(self, text, *, initiative, request_id):
+            self.delivered.append((text, initiative, request_id))
+            return {"delivered": True}
 
     root = tmp_path / "instance"
     root.mkdir()
@@ -69,6 +73,9 @@ def test_background_producer_submits_immediate_sensor_turn(tmp_path: pathlib.Pat
     cfg = Config(instance_name="test", model=ModelConfig(model_path="/dev/null"))
     cfg.automation.interaction_tier = "jaeger"
     producers = BackgroundProducers(InstanceLayout(root=root), _Sink())
+    producers._accepting = True  # as after try_start()
+    from jaeger_ai.core.runtime.initiative import InterruptionPolicy
+    producers._initiative_policy = InterruptionPolicy(tmp_path / "policy", local_hour=lambda _t: 12)
     telemetry = [
         {"disk_free_gb": 5.0, "memory_pressure_level": 1},
         {"disk_free_gb": 5.0, "memory_pressure_level": 1},
@@ -83,12 +90,16 @@ def test_background_producer_submits_immediate_sensor_turn(tmp_path: pathlib.Pat
     producers.sensor_bus.poll_once()
     producers._sensor_action(cfg)  # low disk transition is the immediate candidate
     assert len(producers.sink.turns) == 1
-    prompt_text, session, request_id, source, salience = producers.sink.turns[0]
-    assert prompt_text == prompt(producers.sensor_bus.journals()[0]) or prompt_text.startswith("A Jaeger Tier 3")
-    assert session == "s1"
-    assert request_id.startswith("sensor:host:disk_low:")
-    assert source == "sensor"
-    assert salience == "immediate"
+    prompt_text, session, request_id, source, allowed_tools = producers.sink.turns[0]
+    _ = prompt
+    # Initiative pipeline: a compose-only talker turn, then speak-first delivery.
+    assert "<observation>" in prompt_text and "kind: disk_low" in prompt_text
+    assert session == producers.PROACTIVE_SESSION
+    assert request_id.startswith("initiative:sensor:disk_low:")
+    assert source == "initiative"
+    assert allowed_tools == []
+    assert len(producers.sink.delivered) == 1
+    assert producers.sink.delivered[0][1].kind == "disk_low"
 
 
 def test_workspace_observer_debounces_and_classifies_changes(tmp_path: pathlib.Path) -> None:
