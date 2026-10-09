@@ -262,3 +262,56 @@ def test_ntfy_is_tailnet_only_and_off_by_default(monkeypatch):
     monkeypatch.setenv("JAEGER_NTFY_URL", "https://ntfy.sh/jaeger")
     (res,) = notifier.fan_out({"body": "secret stuff"})
     assert res["sent"] is False and "refused" in res["error"]
+
+
+def test_heartbeat_facts_are_tool_free_and_timestamp_free(tmp_path):
+    from jaeger_ai.core.instance.instance import InstanceLayout
+    from jaeger_ai.core.runtime.background_producers import heartbeat_facts
+
+    lay = InstanceLayout(root=tmp_path / "inst")
+    lay.ensure_dirs()
+    from datetime import datetime
+    nine = datetime(2026, 10, 9, 9, 0).timestamp()
+    a = heartbeat_facts(lay, now=nine)
+    b = heartbeat_facts(lay, now=nine + 600)
+    assert a == b and a["slot"] == "morning" and a["date"] == "2026-10-09"
+    i1 = Initiative(source="heartbeat", kind="check_in", summary="morning check-in",
+                    level=SalienceLevel.DIGEST, details=a, created_at=1)
+    i2 = Initiative(source="heartbeat", kind="check_in", summary="morning check-in",
+                    level=SalienceLevel.DIGEST, details=b, created_at=2)
+    assert i1.dedupe_key == i2.dedupe_key  # unchanged facts -> zero model calls
+
+
+def test_heartbeat_is_silent_in_quiet_hours_and_never_gets_tools(tmp_path, monkeypatch):
+    from jaeger_ai.core.instance.schemas import Config, ModelConfig
+
+    monkeypatch.setenv("JAEGER_IDLE_READY", "1")
+    cfg = Config(instance_name="t", model=ModelConfig(model_path="/dev/null"))
+    cfg.sensors.proactive.enabled = False  # no sensor thread in this test
+    monkeypatch.setattr("jaeger_ai.core.runtime.completions.pending_count", lambda: 0)
+    monkeypatch.setattr("jaeger_ai.core.runtime.heartbeat.is_due", lambda *a, **k: True)
+    monkeypatch.setattr("jaeger_ai.core.runtime.heartbeat.execute_heartbeat_event",
+                        lambda layout: (None, True, "1. Look at board_view ..."))
+    marks = []
+    monkeypatch.setattr("jaeger_ai.core.runtime.heartbeat.mark_beat",
+                        lambda layout, silent: marks.append(silent))
+    sink = _Sink()
+    prod = _producers(tmp_path, sink)
+    prod._initiative_policy = InterruptionPolicy(tmp_path / "q", local_hour=lambda _t: 23)
+    prod._idle_once(cfg)
+    assert sink.turns == [] and marks == [True]
+    prod._initiative_policy = InterruptionPolicy(tmp_path / "d", local_hour=lambda _t: 9)
+    prod._idle_once(cfg)
+    assert len(sink.turns) == 1
+    assert sink.turns[0]["allowed_tools"] == [] and "board_view" not in sink.turns[0]["prompt"]
+    assert sink.delivered and marks[-1] is False
+    prod._idle_once(cfg)  # same facts: deduped, no second model call
+    assert len(sink.turns) == 1
+
+
+def test_cron_result_is_spoken_first(tmp_path):
+    sink = _Sink()
+    prod = _producers(tmp_path, sink)
+    prod._speak_cron_result("morning-heartbeat", "Morning: 13 cards blocked. Want the list?", "cron:x:1")
+    prod._speak_cron_result("morning-heartbeat", "HEARTBEAT_OK", "cron:x:2")
+    assert sink.delivered == ["Morning: 13 cards blocked. Want the list?"]
