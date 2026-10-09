@@ -72,6 +72,9 @@ class GatewayTaskOwner:
         self._loop_task = None
         self._active: dict[str, asyncio.Task] = {}
         self._stopping = False
+        # Results kept because their parent session is gone. Logged once each: the
+        # 1 s tick otherwise rewrote the same warning forever (500k+ lines live).
+        self._retained: set[str] = set()
 
     @staticmethod
     def artifact_paths(workspace: str, artifacts: list[str] | None) -> list[str]:
@@ -433,7 +436,9 @@ class GatewayTaskOwner:
                 except ValueError:
                     # A deleted parent cannot consume the scheduler's whole tick.
                     # Keep the result available through /v1/tasks/{id}.
-                    logging.getLogger(__name__).warning('Task %s result retained: parent session unavailable', task.task_id)
+                    if task.task_id not in self._retained:
+                        self._retained.add(task.task_id)
+                        logging.getLogger(__name__).warning('Task %s result retained: parent session unavailable', task.task_id)
                 continue
             if task.state == TaskState.PAUSED and task.provenance.get('authorized'):
                 receipt = self.gateway.store.get_request(f'{task.task_id}:{task.payload.get("attempt", 0)}') or {}
