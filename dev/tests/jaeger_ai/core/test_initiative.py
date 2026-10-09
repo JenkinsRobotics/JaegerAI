@@ -214,3 +214,51 @@ def test_global_stop_silences_delivery(tmp_path, monkeypatch):
     monkeypatch.setattr(srv, "_control_plane_block", lambda: "Global Stop engaged")
     out = app.deliver_proactive("hello", initiative=_init(), request_id="r")
     assert out == {"delivered": False, "reason": "stopped"}
+
+
+def test_notifications_feed_lists_speak_first_messages(tmp_path, monkeypatch):
+    import asyncio
+
+
+
+    from jaeger_ai.core.gateway import server as srv
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+
+    monkeypatch.setattr(srv, "_control_plane_block", lambda: None)
+    store = GatewaySessionStore(tmp_path / "gw.sqlite3")
+    app = JaegerGatewayApp(store=store)
+    app._last_human_session = "owner-chat"
+    app.deliver_proactive("first", initiative=_init(), request_id="a")
+    app.deliver_proactive("second", initiative=_init(summary="y"), request_id="b")
+    items = store.proactive_notifications(0)
+    assert [i["body"] for i in items] == ["first", "second"]
+    assert store.proactive_notifications(items[0]["event_id"])[0]["body"] == "second"
+
+    async def go():
+        handler = app.handle_list_notifications
+
+        class _Req:
+            query = {"since_event_id": str(items[0]["event_id"])}
+        resp = await handler(_Req())
+        return json.loads(resp.body)
+
+    data = asyncio.run(go())
+    assert [n["body"] for n in data["notifications"]] == ["second"]
+    assert data["cursor"] == items[1]["event_id"]
+
+
+
+def test_ntfy_is_tailnet_only_and_off_by_default(monkeypatch):
+    from jaeger_ai.core.runtime import notifier
+
+    monkeypatch.delenv("JAEGER_NTFY_URL", raising=False)
+    assert notifier.fan_out({"body": "x"}) == []
+    assert notifier.tailnet_only("https://matthews-mac-studio.tail80f206.ts.net:8443/ntfy/j")
+    assert notifier.tailnet_only("http://100.74.2.15:2586/j")
+    assert notifier.tailnet_only("http://127.0.0.1:2586/j")
+    assert not notifier.tailnet_only("https://ntfy.sh/jaeger")
+    assert not notifier.tailnet_only("http://192.168.1.5/j")
+    monkeypatch.setenv("JAEGER_NTFY_URL", "https://ntfy.sh/jaeger")
+    (res,) = notifier.fan_out({"body": "secret stuff"})
+    assert res["sent"] is False and "refused" in res["error"]

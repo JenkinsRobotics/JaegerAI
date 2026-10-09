@@ -130,6 +130,11 @@ def route(handler, parsed, method: str) -> bool:
             raw = json.dumps(read_body(handler) or {}).encode("utf-8")
         return _proxy(handler, "POST", f"/v1/agents/{suffix}", raw)
 
+    # Speak-first feed: what Jaeger said on its own initiative, any session.
+    if method == "GET" and path == "/api/jaeger/notifications":
+        qs = ("?" + parsed.query) if parsed.query else ""
+        return _proxy(handler, "GET", f"/v1/notifications{qs}")
+
     if method == "GET" and path in {"/api/handoffs", "/v1/handoffs"}:
         return _proxy(handler, "GET", "/v1/handoffs")
 
