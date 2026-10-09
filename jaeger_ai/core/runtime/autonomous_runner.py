@@ -496,8 +496,35 @@ MISSING_PATHS_NOTE = (
 )
 
 
+#: Tools that only observe. Anything else (shell, writes, edits, git, sql, ...)
+#: may have changed state, so its result gets an independent check.
+READ_ONLY_TOOLS = frozenset({
+    "read_file", "search_files", "list_skill_dir", "list_tools", "describe_tool", "load_tools",
+    "search_memory", "recall", "recall_insight", "web_search", "web_extract", "update_plan",
+    "list_skills", "get_time", "calculate", "clarify", "todo", "board_view", "see_screen",
+    "ocr_window", "vision_analyze", "list_mailboxes", "list_mail", "read_mail",
+})
+
+CHECK_STEP = (
+    "[Check step] Before this result is reported, verify it independently. For each fact "
+    "your answer states (an id or SHA, a count, a file and its contents, a test result, a "
+    "setting), re-derive what it SHOULD be from the original source of truth by a different "
+    "route than the one you used, then confirm what it IS now with a read-only tool. Examples: "
+    "for a restored git ref, read the reflog to see which commit it pointed at before, then "
+    "rev-parse the ref; for a file, read it back; for code, run the tests; for a database, "
+    "query it. If any check disagrees, fix the work and check again. Then reply with the "
+    "final result and the evidence you checked. If something cannot be verified, say so "
+    "plainly. The objective:\n{objective}"
+)
+
+
+def changed_state(tools_used: list[str] | tuple[str, ...]) -> bool:
+    return any(t and t not in READ_ONLY_TOOLS for t in tools_used)
+
+
 def interactive_followup(answer: str, objective: str, halt_reason: str | None,
-                         *, paths_checked: bool) -> str | None:
+                         *, paths_checked: bool, tools_used: list[str] | tuple[str, ...] = (),
+                         checked: bool = True) -> str | None:
     """Next prompt for an operator's turn-owned request, or ``None`` to reply.
 
     A durable background task keeps the strict ledger contract (``harness_prompt``
@@ -520,6 +547,10 @@ def interactive_followup(answer: str, objective: str, halt_reason: str | None,
         missing = missing_named_paths(objective)
         if missing:
             return MISSING_PATHS_NOTE.format(paths=", ".join(missing[:8]))
+    if not checked and changed_state(tools_used):
+        # Verify before complete: one independent re-derivation of every claimed
+        # fact, after any turn that may have changed state. Slower, not luckier.
+        return CHECK_STEP.format(objective=objective)
     return None
 
 
@@ -552,6 +583,8 @@ def run_continued_turn(
     result: dict[str, Any] = {}
     nxt = None
     paths_checked = False
+    checked = False
+    tools_used: list[str] = []
 
     while True:
         if durable and last_completion():
@@ -578,10 +611,14 @@ def run_continued_turn(
         halt = result.get("halt_reason")
         if continuation.is_loop_breaker(halt):
             break
+        tools_used.extend(str(t) for t in (result.get("tools_used") or []))
         if durable and not last_completion() and interactive and not ledger_open():
-            nxt = interactive_followup(ans, goal, halt, paths_checked=paths_checked)
+            nxt = interactive_followup(ans, goal, halt, paths_checked=paths_checked,
+                                       tools_used=tools_used, checked=checked)
             if nxt and nxt.startswith(MISSING_PATHS_NOTE[:30]):
                 paths_checked = True
+            elif nxt and nxt.startswith(CHECK_STEP[:12]):
+                checked = True
         elif durable and not last_completion():
             nxt = harness_prompt(objective=goal)
         elif ledger_open() or continuation.hit_inner_cap(halt):

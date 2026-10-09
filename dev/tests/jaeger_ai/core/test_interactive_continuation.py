@@ -85,3 +85,36 @@ def test_required_paths_keeps_absolute_paths():
     assert ar._required_paths("Write a report to /tmp/x/report.md now.") == ["/tmp/x/report.md"]
     assert ar._required_paths("see ~/notes/a.txt and b.json") == ["~/notes/a.txt", "b.json"]
 
+
+
+def _run_tools(monkeypatch, answers, objective, tools_per_step):
+    prompts: list[str] = []
+
+    def step(p):
+        prompts.append(p)
+        i = len(prompts) - 1
+        return {"text": answers[min(i, len(answers) - 1)], "halt_reason": None,
+                "tools_used": tools_per_step[min(i, len(tools_per_step) - 1)]}
+
+    monkeypatch.setattr(ar, "last_completion", lambda: None)
+    monkeypatch.setattr(ar, "ledger_open", lambda: False)
+    ar.run_continued_turn(step, objective, objective=objective, durable=True, interactive=True, max_steps=4)
+    return prompts
+
+
+def test_state_changing_turn_gets_exactly_one_independent_check(monkeypatch):
+    prompts = _run_tools(monkeypatch, ["Restored release-2.3 at 3dd897e.", "Checked: reflog says 1bbdd96; fixed."],
+                         "Restore the deleted branch release-2.3.", [["terminal"], ["terminal"]])
+    assert len(prompts) == 2
+    assert prompts[1].startswith("[Check step]") and "reflog" in prompts[1]
+    assert "Restore the deleted branch release-2.3." in prompts[1]
+
+
+def test_read_only_turn_needs_no_check(monkeypatch):
+    prompts = _run_tools(monkeypatch, ["The file says 42."], "What number is in notes?", [["read_file", "search_files"]])
+    assert len(prompts) == 1
+
+
+def test_no_tools_no_check(monkeypatch):
+    prompts = _run_tools(monkeypatch, ["391"], "What is 17*23?", [[]])
+    assert len(prompts) == 1

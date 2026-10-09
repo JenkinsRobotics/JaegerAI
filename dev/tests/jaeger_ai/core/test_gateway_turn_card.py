@@ -518,3 +518,22 @@ def test_a_worker_unwinding_after_a_stop_cannot_resurrect_an_unknown_outcome(env
     store.bind_native("r-unk", native_run_id="run-1", native_session="owner:s")      # a late bind
 
     assert store.get_request("r-unk")["status"] == "execution_unknown"
+
+
+def test_step_reports_the_tools_it_ran_and_a_state_change_gets_one_check(env, monkeypatch):
+    prompts: list[str] = []
+
+    def owner_react(prompt, **kwargs):
+        prompts.append(prompt)
+        cb, flush = env.app._turn_stream_callbacks("s", "r")
+        cb.on_tool_done("terminal", {"command": "git branch x"}, {"exit_code": 0}, True, None, 0.1)
+        flush()
+        return {"text": f"done {len(prompts)}", "status": "completed"}
+
+    monkeypatch.setattr(env.app, "_owner_react_turn", owner_react)
+    monkeypatch.setattr("jaeger_ai.core.runtime.work_ledger.last_completion", lambda: None)
+    monkeypatch.setattr("jaeger_ai.core.runtime.autonomous_runner.last_completion", lambda: None)
+    env.app._continued_owner_react("restore the branch", session_key="s", request_id="r",
+                                   execution=_turn_owned(env), objective="restore the branch")
+    assert len(prompts) == 2 and prompts[1].startswith("[Check step]")
+    assert "r" not in env.app._request_tools

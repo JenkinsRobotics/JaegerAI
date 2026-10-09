@@ -626,6 +626,8 @@ class JaegerGatewayApp:
         self._running_tasks: dict[str | tuple[str, str], asyncio.Future[Any]] = {}
         # Requests whose owner declined an approval. A turn-owned card ends there (blocked).
         self._owner_declined: set[str] = set()
+        # Tool names each live request has run, in order (for the owner's check step).
+        self._request_tools: dict[str, list[str]] = {}
         # Requests whose approval the owner never answered. That is needs_owner, not blocked.
         self._owner_unanswered: set[str] = set()
         # Request-scoped live ReAct agents. The Gateway does not own the agent;
@@ -2773,6 +2775,7 @@ class JaegerGatewayApp:
             # The one exception is ``update_plan``: its result is the plan the
             # model chose to show the operator, and only that validated payload
             # (steps, statuses, an optional note) leaves this callback.
+            self._request_tools.setdefault(request_id, []).append(str(name or ""))
             output_text = _tool_output_text(str(name or ""), result)
             plan_payload = None
             if str(name or "") == "update_plan" and ok and isinstance(result, dict) and result.get("ok"):
@@ -2907,6 +2910,7 @@ class JaegerGatewayApp:
         continuation_state: dict[str, Any] = {}
 
         def step(inner_prompt: str) -> dict[str, Any]:
+            before = len(self._request_tools.get(request_id, []))
             out = self._owner_react_turn(
                 inner_prompt, session_key=session_key, request_id=request_id,
                 on_model=on_model, execution=execution,
@@ -2917,6 +2921,7 @@ class JaegerGatewayApp:
                 "text": out.get("text") or "",
                 "halt_reason": out.get("halt_reason"),
                 "status": "completed",
+                "tools_used": list(self._request_tools.get(request_id, [])[before:]),
             }
 
         from jaeger_ai.core.runtime.work_ledger import ledger_scope, last_completion
@@ -2968,6 +2973,7 @@ class JaegerGatewayApp:
                 return {**result, "task_completion": last_completion()}
             finally:
                 self._active_agents.pop(request_id, None)
+                self._request_tools.pop(request_id, None)
 
     async def _execute_turn(
         self,
