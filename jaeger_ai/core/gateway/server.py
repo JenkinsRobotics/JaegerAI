@@ -891,14 +891,68 @@ class JaegerGatewayApp:
 
             def submit_turn(
                 self, prompt: str, *, session: str, request_id: str, source: str,
-                salience: str | None = None,
+                salience: str | None = None, allowed_tools: list[str] | None = None,
             ) -> dict[str, Any]:
                 return app.submit_background_turn(
                     prompt, session_id=session, request_id=request_id, source=source,
-                    salience=salience,
+                    salience=salience, allowed_tools=allowed_tools,
                 )
 
+            def deliver_proactive(self, text: str, *, initiative: Any, request_id: str) -> dict[str, Any]:
+                return app.deliver_proactive(text, initiative=initiative, request_id=request_id)
+
         return _Sink()
+
+    def deliver_proactive(self, text: str, *, initiative: Any, request_id: str) -> dict[str, Any]:
+        """Speak first: put one composed initiative into the owner's conversation.
+
+        Thread-safe (called from the producer thread). The message lands as
+        an assistant message in the owner's last session plus one
+        ``notification.proactive`` SSE event there, which the Mac app and
+        WebUI surface (and speak). Global Stop silences delivery.
+        """
+        body = str(text or "").strip()
+        if not body:
+            return {"delivered": False, "reason": "empty"}
+        blocked = _control_plane_block()
+        if blocked:
+            return {"delivered": False, "reason": "stopped"}
+        session_id = self._last_human_session or "desktop-app"
+        level = getattr(getattr(initiative, "level", None), "name", "DIGEST").lower()
+        payload = {
+            "title": "Jaeger",
+            "body": body,
+            "session_id": session_id,
+            "salience": level,
+            "speak": True,
+            "audio_cue": "chime" if level != "immediate" else "alert",
+            "request_id": request_id,
+            "proactive": True,
+            "proactive_source": str(getattr(initiative, "source", "") or "initiative"),
+            "kind": str(getattr(initiative, "kind", "") or ""),
+            "created_at": time.time(),
+        }
+
+        def _write() -> None:
+            self.store.ensure_session(session_id)
+            self.store.append_message(session_id, "assistant", body)
+            self.event_bus.publish(session_id, "notification.proactive", payload)
+
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            try:
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            if running is loop:
+                _write()
+            else:
+                async def _on_loop() -> None:
+                    _write()
+                asyncio.run_coroutine_threadsafe(_on_loop(), loop).result(timeout=30)
+        else:
+            _write()
+        return {"delivered": True, "session_id": session_id, **payload}
 
     def submit_background_turn(
         self,
@@ -908,6 +962,7 @@ class JaegerGatewayApp:
         request_id: str,
         source: str,
         salience: str | int | None = None,
+        allowed_tools: list[str] | None = None,
     ) -> dict[str, Any]:
         """Admit and run a background turn on the Gateway event loop.
 
@@ -923,7 +978,7 @@ class JaegerGatewayApp:
         future = asyncio.run_coroutine_threadsafe(
             self._run_background_turn(
                 prompt, session_id=session_id, request_id=request_id, source=source,
-                salience=salience,
+                salience=salience, allowed_tools=allowed_tools,
             ),
             loop,
         )
@@ -937,6 +992,7 @@ class JaegerGatewayApp:
         request_id: str,
         source: str,
         salience: str | int | None = None,
+        allowed_tools: list[str] | None = None,
     ) -> dict[str, Any]:
         tier = self._current_tier()
         if tier != "jaeger":
@@ -951,7 +1007,10 @@ class JaegerGatewayApp:
         options = {"source": source, "background": True}
         if salience is not None:
             options["proactive_salience"] = _normalize_salience(salience)
-        requested = {"options": options}
+        requested: dict[str, Any] = {"options": options}
+        if allowed_tools is not None:
+            # [] = a compose-only turn: the agent is built with no tools.
+            requested["allowed_tools"] = list(allowed_tools)
         try:
             admitted = self.store.admit_request(
                 session_id, prompt, request_id=request_id, requested=requested,
