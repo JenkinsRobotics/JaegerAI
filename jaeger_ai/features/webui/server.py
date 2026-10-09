@@ -660,6 +660,11 @@ def main() -> None:
             print('[tip] Gateway watcher still initializing (non-blocking)', flush=True)
     except Exception as e:
         print(f'[!!] WARNING: Gateway watcher failed to start: {e}', flush=True)
+    try:
+        from api.jaeger_agents import warm_kokoro_in_background
+        warm_kokoro_in_background()
+    except Exception as e:
+        print(f'[!!] WARNING: Kokoro warm-up not started: {e}', flush=True)
 
     try:
         from api.background_process import start_drain_thread
