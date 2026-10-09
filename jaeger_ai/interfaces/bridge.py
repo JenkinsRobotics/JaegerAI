@@ -2002,13 +2002,14 @@ def _gateway_turn(out: TextIO, ctx: _Ctx, req: dict[str, Any], text: str,
             _emit(out, _reasoning_frame(str(data.get("text") or ""), session))
         elif name in _GATEWAY_TOOL_PHASES:
             # Every tool call reaches socket clients as a ``tool`` frame, as it
-            # did when this bridge executed turns itself. Only the catalog name,
-            # phase and duration cross: the Gateway already withholds args and
-            # results from its events, and this frame adds nothing back.
+            # did when this bridge executed turns itself. The start frame carries
+            # the arguments exactly as the Gateway published them (redacted and
+            # bounded there); results are never relayed.
             deltas.flush()
+            args = data.get("args") if isinstance(data.get("args"), dict) else None
             _emit(out, protocol.tool_frame(
                 str(data.get("tool") or "tool"), _GATEWAY_TOOL_PHASES[name],
-                float(data.get("elapsed_s") or 0.0), session))
+                float(data.get("elapsed_s") or 0.0), session, args=args))
         elif name == "approval.request" and data.get("approval_id"):
             deltas.flush()
             if gateway is not ctx.gateway:
