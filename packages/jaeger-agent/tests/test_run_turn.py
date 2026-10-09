@@ -734,3 +734,21 @@ def test_error_only_results_are_failures_and_preserve_partial_summary():
     assert adapter.last_tools_count == 0
     assert 'failure 2 times' in agent.last_halt_reason
     assert 'lookup' not in agent._turn_tool_successes
+
+
+def test_failed_tool_result_carries_a_recovery_hint():
+    """2026-10-09: a failed call reaches the model with a structured
+    ``recovery`` line (cause, change something, never the identical call)."""
+    @register_tool("flaky_read", "Read.", _SmallArgs, side_effect="read")
+    def _flaky(value: str = "x") -> dict:
+        return {"ok": False, "error": "No such file or directory: notes.txt"}
+
+    adapter = _ScriptedAdapter([
+        {"role": "assistant", "content": None,
+         "tool_calls": [{"id": "c1", "name": "flaky_read", "arguments": {"value": "a"}}]},
+        {"role": "assistant", "content": "it does not exist"},
+    ])
+    agent = JaegerAgent(adapter=adapter)
+    assert agent.run_turn("read it") == "it does not exist"
+    tool_row = next(m for m in agent.messages if m["role"] == "tool")
+    assert "No such file" in tool_row["content"] and "Do not repeat the identical call" in tool_row["content"]

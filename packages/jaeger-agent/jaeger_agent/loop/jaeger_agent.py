@@ -2215,6 +2215,8 @@ class JaegerAgent:
             content = replacement
         if guidance:
             content = _merge_guidance(content, guidance)
+        if not _ok and isinstance(content, dict) and "recovery" not in content:
+            content = {**content, "recovery": _recovery_hint(name, args, _err)}
 
         elapsed = time.perf_counter() - started
         self.callbacks.on_tool_progress(
@@ -2443,6 +2445,34 @@ def _stringify(content: Any) -> str:
         return json.dumps(content, default=str, ensure_ascii=False)
     except Exception:  # noqa: BLE001 — last-resort fallback
         return str(content)
+
+
+_PATH_ERROR = _re.compile(
+    r"(?i)(no such file|not found|does not exist|outside (the )?(allowed|writable)|"
+    r"not a directory|is a directory|permission denied|escapes|not allowed)")
+
+
+def _recovery_hint(name: str, args: Any, error: str | None) -> str:
+    """What to do after a failed call: reflect, change something, retry.
+
+    Small local models tend to repeat the identical failing call or quietly
+    give up. One structured line on every failed result asks for the cause,
+    a concrete change, and an honest report if it cannot work.
+    """
+    hint = ("This call failed. Read the error, state the cause in one line, then change "
+            "something before retrying (arguments, path, or a different tool). Do not repeat "
+            "the identical call. If it cannot work, say so plainly instead of guessing.")
+    has_path = isinstance(args, dict) and any(k in args for k in ("path", "file", "src", "dst", "cwd", "workdir"))
+    if has_path and _PATH_ERROR.search(str(error or "")):
+        try:
+            from jaeger_agent.core import workspace as _ws
+            roots = ", ".join(str(r) for r in _ws.writable_roots())
+            base = _ws.get_project_root() or _ws._require_layout().root
+            hint += (f" Relative paths resolve from {base}; absolute paths must be inside "
+                     f"{roots}. Check what exists (search_files, or ls in terminal) first.")
+        except Exception:  # noqa: BLE001 — the generic hint still stands
+            hint += " Check what exists (search_files, or ls in terminal) before retrying."
+    return hint
 
 
 def _merge_guidance(content: Any, guidance: str) -> Any:
