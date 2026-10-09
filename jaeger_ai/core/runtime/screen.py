@@ -33,7 +33,7 @@ def _capture_path() -> Path:
 
         layout = _pipeline.get("layout")
         run_dir = getattr(layout, "run_dir", None)
-        if run_dir is not None:
+        if isinstance(run_dir, (str, Path)):  # never a stand-in layout's attribute
             path = Path(str(run_dir))
             path.mkdir(parents=True, exist_ok=True)
             return path / "screen_latest.png"
