@@ -151,7 +151,10 @@ def start_trace_recorder(layout: Any) -> "TraceRecorder | None":
         try:
             from jaeger_os.nodes import runtime
             from jaeger_os.transport import topics
-            rec = TraceRecorder(layout.logs_dir / "trace.jsonl")
+            logs = getattr(layout, "logs_dir", None)
+            if not isinstance(logs, (str, Path)):
+                return None  # a stand-in layout (tests, previews): nowhere real to write
+            rec = TraceRecorder(Path(logs) / "trace.jsonl")
             runtime.get_bus().subscribe(topics.SYS_TRACE_STEP, rec.on_step)
             _recorder_started = True
             return rec
