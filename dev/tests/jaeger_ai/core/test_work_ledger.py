@@ -312,3 +312,17 @@ def test_completed_durable_receipt_survives_owner_scope_restart(monkeypatch, tmp
         assert result['text'] == 'Report verified'
     with module.ledger_scope('task:one'):
         assert module.last_completion() is None
+
+
+def test_a_stand_in_pipeline_layout_persists_nothing(tmp_path, monkeypatch):
+    """A MagicMock left in main._pipeline made ledgers land in
+    '<MagicMock name=mock.run_dir ...>/' under the cwd (repo root)."""
+    from unittest.mock import MagicMock
+
+    import jaeger_ai.main as main
+    from jaeger_ai.core.runtime import work_ledger
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(main, "_pipeline", {"layout": MagicMock()})
+    assert work_ledger._layout_run_dir() is None
+    assert list(tmp_path.iterdir()) == []
