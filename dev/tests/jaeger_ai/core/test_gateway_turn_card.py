@@ -127,20 +127,22 @@ async def test_operational_request_becomes_one_verified_task_with_one_receipt(en
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("claim", [
-    {"text": "Done."},
-    {"text": "success"},
-    {"text": "ok", "task_completion": {"ok": True, "success": True, "status": "done"}},
-    {"text": "", "task_completion": {"ok": True, "verification_receipts": []}},
+@pytest.mark.parametrize("claim,expected", [
+    # A plain answer the owner cannot check goes to the owner, unverified.
+    ({"text": "Done."}, "needs_owner"),
+    ({"text": "success"}, "needs_owner"),
+    # An asserted completion with nothing checkable behind it fails.
+    ({"text": "ok", "task_completion": {"ok": True, "success": True, "status": "done"}}, "failed"),
+    ({"text": "", "task_completion": {"ok": True, "verification_receipts": []}}, "failed"),
 ])
-async def test_a_bare_claim_never_becomes_completed_verified(env, claim):
+async def test_a_bare_claim_never_becomes_completed_verified(env, claim, expected):
     row = await _run(env, REQUEST, "r-bare", worker=lambda prompt, **kw: dict(claim))
 
     [task] = env.app.task_owner.store.list_tasks()
-    assert task.state == TaskState.FAILED
-    assert row["result"]["task_state"] == "failed"
+    assert task.state == TaskState(expected)
+    assert row["result"]["task_state"] == expected
     assert row["result"]["receipt"]["verification"] == "unverified"
-    assert _states(env)[-1] == "failed"
+    assert _states(env)[-1] == expected
 
 
 @pytest.mark.asyncio

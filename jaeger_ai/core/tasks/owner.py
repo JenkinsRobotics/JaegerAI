@@ -27,6 +27,18 @@ EVIDENCE_CONTRACT = (
 )
 
 
+#: The owner found nothing it can check deterministically (no declared artifact,
+#: no file receipt, no named file). Turn cards with only this go to needs_owner.
+UNVERIFIABLE = 'No objective verification receipt; continue execution and verify the result'
+
+
+def _asserts_success(result: dict) -> bool:
+    """The worker claimed completion (complete_task, a dispatched worker's own
+    "completed", or state/verification fields)."""
+    return bool(result.get('task_completion')) or any(
+        k in result for k in ('state', 'task_state', 'verification', 'worker_state'))
+
+
 def has_file_receipt(completion: dict | None) -> bool:
     """True when a completion carries a receipt for a file the owner can re-check."""
     receipts = (completion or {}).get('verification_receipts') or []
@@ -275,8 +287,16 @@ class GatewayTaskOwner:
                 state, error = TaskState.FAILED, str(result['error'])
             else:
                 verified, evidence = self.verify(task, result)
-                state = TaskState.COMPLETED_VERIFIED if verified else TaskState.FAILED
-                error = None if verified else str(evidence)
+                if verified:
+                    state, error = TaskState.COMPLETED_VERIFIED, None
+                elif evidence == UNVERIFIABLE and not _asserts_success(result):
+                    # Nothing the owner can check (an answer, not an artifact). That is
+                    # the owner's call, not a failure and never a verified completion.
+                    # A worker that asserted success it cannot show still fails.
+                    state, error = TaskState.NEEDS_OWNER, UNVERIFIABLE
+                    evidence = {'unverified_answer': str(result.get('text') or '')[:2000]}
+                else:
+                    state, error = TaskState.FAILED, str(evidence)
             task = self.settle_turn_card(task_id, state, evidence=evidence, error=error)
         card = task.payload.get('turn_card') or {}
         receipt = Receipt(
@@ -330,7 +350,8 @@ class GatewayTaskOwner:
             halt = 'needs_owner' if state in {'approval', 'auth', 'quota'} else 'blocked'
             status, result = 'completed', {'halt_reason': halt, 'evidence': {'worker_state': state}, 'output': output}
         elif state == 'completed':
-            status, result = 'completed', {'output': output}
+            # The worker's own "completed" is a claim, settled only by evidence.
+            status, result = 'completed', {'output': output, 'worker_state': 'completed'}
         else:
             status, result = 'failed', {'error': res.get('reason') or output or state or 'worker failed'}
         return self.close_turn(task_id, result, status=status, identity=identity,
@@ -574,7 +595,43 @@ class GatewayTaskOwner:
                 if hashlib.sha256(path.read_bytes()).hexdigest() != receipt.get('sha256'):
                     return False, f'Verification artifact changed after the receipt: {raw}'
             return True, receipts
-        return False, 'No objective verification receipt; continue execution and verify the result'
+        named = GatewayTaskOwner._named_path_receipts(task)
+        if named is not None:
+            return named
+        return False, UNVERIFIABLE
+
+    @staticmethod
+    def _named_path_receipts(task):
+        """The owner checks the files the request names itself; no worker ritual needed.
+
+        Every named path must exist inside the workspace, be non-empty, and at
+        least one must have been written during this task (named inputs predate
+        it). Each is hashed. ``None`` means the request names no checkable file.
+        """
+        from jaeger_ai.core.runtime.autonomous_runner import _required_paths
+        names = _required_paths(task.goal or '')
+        workspace = str((task.payload.get('execution') or {}).get('workspace') or '')
+        if not names or not workspace:
+            return None
+        root = Path(workspace).resolve()
+        receipts, fresh = [], False
+        for raw in names:
+            path = Path(raw).expanduser()
+            if not path.is_absolute():
+                candidates = [(root / path).resolve(), (root.parent / path).resolve()]
+                path = next((c for c in candidates if c.exists()), candidates[0])
+            else:
+                path = path.resolve()
+            if not path.is_relative_to(root):
+                return None  # outside what the owner may vouch for: not checkable here
+            if not path.is_file() or not path.stat().st_size:
+                return False, f'Named file missing or empty: {raw}'
+            fresh = fresh or path.stat().st_mtime + 1 >= task.created_at
+            receipts.append({'kind': 'owner_file_sha256', 'path': str(path),
+                             'sha256': hashlib.sha256(path.read_bytes()).hexdigest()})
+        if not fresh:
+            return None  # only inputs named: the deliverable is the answer, not a file
+        return True, receipts
 
     def _deliver(self, task):
         if task.payload.get('delivered'):
