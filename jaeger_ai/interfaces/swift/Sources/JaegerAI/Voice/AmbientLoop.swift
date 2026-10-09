@@ -111,6 +111,12 @@ final class AmbientLoop: ObservableObject {
     /// spoken over the new one.
     private var epoch = 0
 
+    /// Speak-first: proactive feed watcher, its cursor, and event ids
+    /// already voiced (the SSE path and the feed can both carry one event).
+    private var feedTask: Task<Void, Never>?
+    private var feedCursor: Int?
+    private var spokenProactiveIDs: Set<Int> = []
+
     init(gateway: GatewayClient, tts: TTSManager, detector: SpeechEnergyDetector) {
         self.gateway = gateway
         self.tts = tts
@@ -233,15 +239,65 @@ final class AmbientLoop: ObservableObject {
 
         case "notification.proactive":
             guard let notification = event.proactiveNotification else { return }
-            transcriptTail = String((transcriptTail + notification.body).suffix(400))
-            if notification.speak {
-                speak(notification.body)
-            }
+            deliverProactive(eventID: event.eventID, body: notification.body,
+                             speak: notification.speak)
 
         default:
             break
         }
     }
+
+    // MARK: - Speak first
+
+    /// Start watching jaegerd's proactive feed. Idempotent. The first poll
+    /// only sets the cursor, so launching the app never replays history.
+    func startProactiveWatch(intervalNanoseconds: UInt64 = 4_000_000_000) {
+        guard feedTask == nil else { return }
+        feedTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.pollProactiveFeed()
+                try? await Task.sleep(nanoseconds: intervalNanoseconds)
+            }
+        }
+    }
+
+    func stopProactiveWatch() {
+        feedTask?.cancel()
+        feedTask = nil
+    }
+
+    func pollProactiveFeed() async {
+        let since = feedCursor ?? 0
+        guard let feed = try? await gateway.listNotifications(since: since) else {
+            return   // gateway down or Stop: stay quiet, try next tick
+        }
+        guard feedCursor != nil else {
+            feedCursor = feed.cursor
+            return
+        }
+        feedCursor = max(since, feed.cursor)
+        for item in feed.notifications {
+            deliverProactive(eventID: item.eventID, body: item.body ?? "",
+                             speak: item.speak ?? true)
+        }
+    }
+
+    /// Show and (optionally) say one proactive message, once per event.
+    /// Never talks over a live turn: while thinking or speaking the text
+    /// goes to the transcript only.
+    func deliverProactive(eventID: Int, body: String, speak shouldSpeak: Bool) {
+        let text = body.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, !spokenProactiveIDs.contains(eventID) else { return }
+        spokenProactiveIDs.insert(eventID)
+        if spokenProactiveIDs.count > 256 { spokenProactiveIDs.removeAll() ; spokenProactiveIDs.insert(eventID) }
+        transcriptTail = String((transcriptTail + text).suffix(400))
+        lastProactive = text
+        if shouldSpeak && state != .thinking && state != .speaking {
+            speak(text)
+        }
+    }
+
+    @Published private(set) var lastProactive: String?
 
     private func speak(_ clause: String) {
         state = .speaking
