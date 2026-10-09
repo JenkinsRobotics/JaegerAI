@@ -1176,6 +1176,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
         self.app.router.add_get("/v1/sessions/{id}/events", self.handle_session_events_json)
         self.app.router.add_get("/v1/notifications", self.handle_list_notifications)
+        self.app.router.add_get("/v1/presence", self.handle_presence)
         self.app.router.add_get("/v1/requests/{request_id}", self.handle_get_request_any_session)
         self.app.router.add_get("/v1/sessions/{id}/activity", self.handle_activity_history)
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
@@ -3784,6 +3785,30 @@ class JaegerGatewayApp:
         items = self.store.proactive_notifications(since, limit)
         cursor = items[-1]["event_id"] if items else since
         return web.json_response({"notifications": items, "cursor": cursor})
+
+    async def handle_presence(self, request: web.Request) -> web.Response:
+        """GET /v1/presence - what Jaeger is doing now, for avatars to animate.
+
+        A read of the newest ``jaeger.state`` event (contract/presence.py). It
+        reports; it never decides anything.
+        """
+        from jaeger_ai.contract.presence import ACTIVITY_STATES, DISPLAY
+        from jaeger_ai.core.gateway.event_bus import latest_presence
+        latest = latest_presence(self.store) or {}
+        state = latest.get("state")
+        if state not in ACTIVITY_STATES:
+            state = "idle"
+        try:
+            from jaeger_ai.core.gateway.server import _control_plane_block
+            if _control_plane_block():
+                state = "stopped"
+        except Exception:
+            pass
+        return web.json_response({
+            "state": state, "display": DISPLAY[state],
+            "session_id": latest.get("session_id"), "event_id": latest.get("event_id"),
+            "owner_needed": state == "needs_owner" or bool(latest.get("approval_required")),
+        })
 
     async def handle_session_events_json(self, request: web.Request) -> web.Response:
         """GET /v1/sessions/{id}/events?since_event_id=N — the replay window as JSON.

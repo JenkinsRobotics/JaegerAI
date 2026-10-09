@@ -238,6 +238,11 @@ class GatewayEventBus:
                 self._subscribers.pop(wake, None)
 
 
+def latest_presence(store: Any) -> dict[str, Any] | None:
+    """The newest durable ``jaeger.state`` across sessions (a read; for avatars)."""
+    return store.latest_event("jaeger.state") if store is not None else None
+
+
 def project_presence(events: Any, *, session_id: str) -> dict[str, Any]:
     """The latest ``jaeger.state`` for a session, for avatars and phones to read.
 

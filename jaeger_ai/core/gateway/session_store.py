@@ -1364,6 +1364,22 @@ class GatewaySessionStore:
                         "timestamp": row["timestamp"], **(data if isinstance(data, dict) else {})})
         return out
 
+    def latest_event(self, event: str) -> dict[str, Any] | None:
+        """The newest durable event with this name across sessions, or None."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT event_id, session_id, data_json, timestamp FROM activity_history "
+                "WHERE event=? ORDER BY event_id DESC LIMIT 1", (event,),
+            ).fetchone()
+        if row is None:
+            return None
+        try:
+            data = json.loads(row["data_json"] or "{}")
+        except json.JSONDecodeError:
+            data = {}
+        return {"event_id": int(row["event_id"]), "session_id": row["session_id"],
+                "timestamp": row["timestamp"], **(data if isinstance(data, dict) else {})}
+
     def append_event(self, session_id: str, event: str, data: dict[str, Any]) -> dict[str, Any]:
         with self._immediate() as conn:
             return self._insert_event(conn, session_id, event, data)
