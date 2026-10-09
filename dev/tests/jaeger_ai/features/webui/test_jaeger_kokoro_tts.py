@@ -48,3 +48,22 @@ def test_companion_prefers_the_local_voice_and_falls_back_to_browser_speech():
     js = (WEBUI / "static" / "jaeger_companion.js").read_text()
     assert "speakAudio('api/jaeger/tts'" in js
     assert "req.catch(()=>{ try{ speakBrowser(t); }catch(_){} })" in js
+
+
+def test_startup_warm_renders_once_off_the_request_path(agents, monkeypatch):
+    monkeypatch.delenv("JAEGER_KOKORO_WARM", raising=False)
+    t = agents.warm_kokoro_in_background()
+    t.join(timeout=10)
+    assert agents._calls == ["Ready."] and agents._KOKORO is not None
+    agents.kokoro_wav("hello")                      # the warm engine is reused
+    assert agents._calls == ["Ready.", "hello"]
+
+
+def test_startup_warm_can_be_turned_off(agents, monkeypatch):
+    monkeypatch.setenv("JAEGER_KOKORO_WARM", "0")
+    assert agents.warm_kokoro_in_background() is None
+    assert agents._calls == []
+
+
+def test_webui_main_starts_the_warm_up():
+    assert "warm_kokoro_in_background()" in (WEBUI / "server.py").read_text()

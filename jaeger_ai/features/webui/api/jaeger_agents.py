@@ -142,6 +142,27 @@ def kokoro_wav(text: str) -> bytes | None:
     return buf.getvalue()
 
 
+def warm_kokoro_in_background():
+    """Load Kokoro and render one short line off the request path, so the first
+    speak-first message is not 7-12 s late. Opens no audio device. Off with
+    JAEGER_KOKORO_WARM=0. Returns the thread, or None when disabled."""
+    import threading
+
+    if (os.environ.get("JAEGER_KOKORO_WARM") or "1").strip() == "0":
+        return None
+
+    def _warm():
+        try:
+            kokoro_wav("Ready.")
+            print("[jaeger] Kokoro voice warm", flush=True)
+        except Exception as exc:  # optional: the companion falls back to browser speech
+            print(f"[jaeger] Kokoro warm skipped: {type(exc).__name__}", flush=True)
+
+    t = threading.Thread(target=_warm, name="kokoro-warm", daemon=True)
+    t.start()
+    return t
+
+
 def _serve_kokoro(handler) -> bool:
     from api.helpers import read_body
 
