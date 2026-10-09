@@ -45,6 +45,13 @@ export async function start(api) {
   const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(0.6, 1.8, 1.4); scene.add(key);
 
   const loader = new GLTFLoader();
+  // Decode embedded textures through <img> (CSP img-src allows blob:) instead
+  // of fetch() (the WebUI's connect-src does not), which left the model white.
+  loader.register((parser) => {
+    parser.textureLoader = new THREE.TextureLoader(parser.options.manager);
+    parser.textureLoader.setCrossOrigin(parser.options.crossOrigin || 'anonymous');
+    return { name: 'JAEGER_img_textures' };
+  });
   loader.register((parser) => new VRMLoaderPlugin(parser));
   const gltf = await loader.loadAsync('api/jaeger/avatar/model.vrm');
   const vrm = gltf.userData.vrm;

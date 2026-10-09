@@ -19,7 +19,7 @@
     box.id='jaegerCompanion';
     box.setAttribute('role','log');
     box.setAttribute('aria-live','polite');
-    box.style.cssText='position:fixed;right:100px;bottom:120px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:min(380px,90vw);pointer-events:none';
+    box.style.cssText='position:fixed;right:196px;bottom:120px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:min(380px,90vw);pointer-events:none';
     document.body.appendChild(box);
     return box;
   }
