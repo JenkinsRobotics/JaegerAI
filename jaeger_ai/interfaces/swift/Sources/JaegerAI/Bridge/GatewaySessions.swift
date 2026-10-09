@@ -143,6 +143,34 @@ extension GatewayClient {
         return try JSONDecoder().decode(TurnAccepted.self, from: data)
     }
 
+    // MARK: - Speak-first feed
+
+    /// One proactive message jaegerd delivered on its own initiative.
+    struct ProactiveFeedItem: Decodable, Sendable {
+        let eventID: Int
+        let body: String?
+        let title: String?
+        let speak: Bool?
+        let salience: String?
+
+        enum CodingKeys: String, CodingKey {
+            case eventID = "event_id", body, title, speak, salience
+        }
+    }
+
+    struct ProactiveFeed: Decodable, Sendable {
+        let notifications: [ProactiveFeedItem]
+        let cursor: Int
+    }
+
+    /// `GET /v1/notifications` — durable notification.proactive events
+    /// across every session, so the menu bar hears Jaeger speak first even
+    /// when no turn stream is open.
+    func listNotifications(since: Int, limit: Int = 10) async throws -> ProactiveFeed {
+        let data = try await request(path: "v1/notifications?since_event_id=\(since)&limit=\(limit)")
+        return try JSONDecoder().decode(ProactiveFeed.self, from: data)
+    }
+
     @discardableResult
     func cancelTurn(sessionID: String) async throws -> Bool {
         _ = try await request(path: "v1/sessions/\(sessionID)/cancel", method: "POST")

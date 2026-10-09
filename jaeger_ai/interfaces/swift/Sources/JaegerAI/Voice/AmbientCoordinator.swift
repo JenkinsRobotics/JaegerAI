@@ -75,6 +75,7 @@ final class AmbientCoordinator: ObservableObject {
             self.reconcileMonitoring()
         }
         observeLoopState()
+        loop.startProactiveWatch()
         log.info("ambient coordinator activated")
     }
 
@@ -85,6 +86,7 @@ final class AmbientCoordinator: ObservableObject {
         recorder.onSpeechOnset = nil
         recorder.onSpeechEnded = nil
         stopMonitoring()
+        loop.stopProactiveWatch()
         loop.stop()
     }
 

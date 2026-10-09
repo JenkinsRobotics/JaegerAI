@@ -257,4 +257,26 @@ final class BargeInWiringTests: XCTestCase {
         recorder.stopMonitoring()
         XCTAssertFalse(recorder.isMonitoring)
     }
+
+    // MARK: - Speak first
+
+    @MainActor
+    func testProactiveMessageIsSpokenOncePerEvent() {
+        let loop = AmbientLoop(gateway: GatewayClient(baseURL: GatewayClient.defaultBaseURL),
+                               tts: TTSManager(), detector: SpeechEnergyDetector())
+        loop.deliverProactive(eventID: 7, body: "Tests broke. Want me to look?", speak: false)
+        loop.deliverProactive(eventID: 7, body: "Tests broke. Want me to look?", speak: false)
+        XCTAssertEqual(loop.lastProactive, "Tests broke. Want me to look?")
+        XCTAssertEqual(loop.transcriptTail, "Tests broke. Want me to look?")
+        loop.deliverProactive(eventID: 8, body: "   ", speak: false)
+        XCTAssertEqual(loop.transcriptTail, "Tests broke. Want me to look?")
+    }
+
+    func testProactiveFeedDecodes() throws {
+        let json = #"{"notifications":[{"event_id":12,"body":"hi","title":"Jaeger","speak":true,"salience":"digest","session_id":"s"}],"cursor":12}"#
+        let feed = try JSONDecoder().decode(GatewayClient.ProactiveFeed.self, from: Data(json.utf8))
+        XCTAssertEqual(feed.cursor, 12)
+        XCTAssertEqual(feed.notifications.first?.eventID, 12)
+        XCTAssertEqual(feed.notifications.first?.body, "hi")
+    }
 }
