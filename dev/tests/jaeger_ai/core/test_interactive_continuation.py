@@ -102,12 +102,41 @@ def _run_tools(monkeypatch, answers, objective, tools_per_step):
     return prompts
 
 
-def test_state_changing_turn_gets_exactly_one_independent_check(monkeypatch):
-    prompts = _run_tools(monkeypatch, ["Restored release-2.3 at 3dd897e.", "Checked: reflog says 1bbdd96; fixed."],
-                         "Restore the deleted branch release-2.3.", [["terminal"], ["terminal"]])
+def test_state_changing_turn_gets_one_independent_check(monkeypatch):
+    prompts = _run_tools(monkeypatch, ["Restored release-2.3 at 3dd897e.", "Checked: reflog and rev-parse agree."],
+                         "Restore the deleted branch release-2.3.", [["terminal"], ["read_file"]])
     assert len(prompts) == 2
     assert prompts[1].startswith("[Check step]") and "reflog" in prompts[1]
     assert "Restore the deleted branch release-2.3." in prompts[1]
+
+
+def test_a_check_that_fixed_something_is_checked_once_more_then_stops(monkeypatch):
+    prompts = _run_tools(monkeypatch, ["Restored at 3dd897e.", "Reflog says 1bbdd96; fixed.", "Fixed again."],
+                         "Restore the deleted branch release-2.3.", [["terminal"]])
+    assert len(prompts) == 3  # work, check (fixed), re-check (fixed) -> MAX_CHECKS reached
+    assert prompts[1].startswith("[Check step]") and prompts[2].startswith("[Check step]")
+
+
+def test_verified_turn_stops_even_when_the_answer_sounds_unfinished(monkeypatch):
+    """SOTA CLAR-03 2026-10-09: after a passed read-only check, the objective was
+    re-sent three times and the model redid finished work until the cap."""
+    prompts: list[str] = []
+    answers = ["Wrote sales/analysis.md: there is no Q5 in the data.", ""]
+    tools = [["write_file"], ["read_file"]]
+
+    def step(p):
+        prompts.append(p)
+        i = min(len(prompts) - 1, 1)
+        return {"text": answers[i], "halt_reason": None, "tools_used": tools[i]}
+
+    monkeypatch.setattr(ar, "last_completion", lambda: None)
+    monkeypatch.setattr(ar, "ledger_open", lambda: False)
+    monkeypatch.setattr(ar, "missing_named_paths", lambda text: [])  # the file was written
+    out = ar.run_continued_turn(step, "Write sales/analysis.md about the Q5 drop.",
+                                objective="Write sales/analysis.md about the Q5 drop.",
+                                durable=True, interactive=True, max_steps=6)
+    assert len(prompts) == 2 and prompts[1].startswith("[Check step]")
+    assert out["text"] == answers[0]  # never an empty reply after a verified result
 
 
 def test_read_only_turn_needs_no_check(monkeypatch):
