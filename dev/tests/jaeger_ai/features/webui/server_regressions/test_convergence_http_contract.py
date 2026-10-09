@@ -114,3 +114,12 @@ def test_profile_auth_denial_preserves_error_schema(authentication_required, mon
     body = handler.wfile.getvalue()
     assert int(handler.response_headers["content-length"]) == len(body)
     assert json.loads(body) == {"error": "Profile access forbidden"}
+
+
+def test_speak_first_feed_is_behind_the_webui_auth_gate(authentication_required):
+    """The proactive feed carries Jaeger's messages; when WebUI auth is on it is
+    an owner route like /api/jaeger/sessions, never a public path."""
+    assert "/api/jaeger/notifications" not in auth.PUBLIC_PATHS
+    handler = Handler("GET", "/api/jaeger/notifications?since_event_id=0")
+    assert auth.check_auth(handler, urlparse(handler.path)) is False
+    assert handler.status == 401
