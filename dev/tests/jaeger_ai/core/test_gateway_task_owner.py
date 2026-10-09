@@ -257,3 +257,19 @@ def test_worker_evidence_is_the_only_completed_verified_path(owner):
     assert [needs.state, blocked.state, failed.state, cancelled.state] == [
         TaskState.NEEDS_OWNER, TaskState.BLOCKED, TaskState.FAILED, TaskState.CANCELLED,
     ]
+
+
+def test_a_result_for_a_missing_parent_is_reported_once_not_every_tick(owner, monkeypatch, caplog):
+    import logging
+    terminal = SimpleNamespace(task_id='t-orphan', provenance={}, is_terminal=True,
+                               updated_at=0.0, state=TaskState.COMPLETED)
+    monkeypatch.setattr(owner.store, 'list_tasks', lambda: [terminal])
+
+    def gone(task):
+        raise ValueError('parent session unavailable')
+
+    monkeypatch.setattr(owner, '_deliver', gone)
+    with caplog.at_level(logging.WARNING, logger='jaeger_ai.core.tasks.owner'):
+        for _ in range(5):
+            asyncio.run(owner.tick())
+    assert sum('result retained' in r.getMessage() for r in caplog.records) == 1
