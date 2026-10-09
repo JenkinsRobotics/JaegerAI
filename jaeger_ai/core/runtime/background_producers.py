@@ -108,6 +108,30 @@ def is_refusal(result: dict[str, Any]) -> bool:
     )
 
 
+def heartbeat_facts(layout: Any, *, now: float | None = None) -> dict[str, Any]:
+    """Deterministic, tool-free facts for a heartbeat check-in."""
+    from datetime import datetime
+
+    stamp = datetime.fromtimestamp(time.time() if now is None else now)
+    hour = stamp.hour
+    slot = "morning" if 6 <= hour < 11 else "evening" if 17 <= hour < 21 else "daytime"
+    facts: dict[str, Any] = {"date": stamp.strftime("%Y-%m-%d"), "slot": slot}
+    try:
+        from jaeger_agent.background.board import board_for_layout
+
+        cards = board_for_layout(layout).list()
+        columns: dict[str, list[str]] = {}
+        for card in cards:
+            columns.setdefault(str(card.column), []).append(str(card.title or "").strip()[:80])
+        facts["board"] = {
+            col: {"count": len(titles), "titles": sorted(titles)[:5]}
+            for col, titles in sorted(columns.items()) if col != "done"
+        }
+    except Exception:  # noqa: BLE001
+        facts["board"] = "unavailable"
+    return facts
+
+
 def cron_request_id(name: str, occurrence: str) -> str:
     occ = (occurrence or "").strip() or str(int(time.time()))
     return f"cron:{name}:{occ}"
@@ -339,6 +363,7 @@ class BackgroundProducers:
         except Exception as exc:  # noqa: BLE001
             print(f"[background] cron record skipped: {exc}", flush=True)
         text = result.get("text") or ""
+        self._speak_cron_result(name, text, request_id)
         try:
             sent = deliver_text(self.layout, name, text)
             if sent and not sent.get("sent"):
@@ -435,15 +460,22 @@ class BackgroundProducers:
             from jaeger_ai.core.runtime.initiative import Initiative
             from jaeger_ai.core.runtime.salience import SalienceLevel
 
-            beat = int(hb.last_beat_at(layout) or time.time())
+            _ = (hb_prompt, hb_session)
+            policy = self.initiative_policy()
+            if policy.in_quiet_hours():
+                # Deterministic pre-check: nothing to say at night, zero tokens.
+                hb.mark_beat(layout, silent=True)
+                return
+            # The talker has no tools, so it gets real facts read here in
+            # code, never a checklist it cannot execute. Facts carry no
+            # timestamp: unchanged facts dedupe to zero model calls.
+            facts = heartbeat_facts(layout)
             outcome = self.offer_initiative(Initiative(
-                source="heartbeat", kind="heartbeat", level=SalienceLevel.DIGEST,
-                summary="Scheduled heartbeat check-in",
-                details={"beat": beat, "checklist": str(hb_prompt or "")[:1000]},
+                source="heartbeat", kind="check_in", level=SalienceLevel.DIGEST,
+                summary=f"{facts['slot']} check-in", details=facts,
             ))
-            if outcome not in {"refused"}:
+            if outcome != "refused":
                 hb.mark_beat(layout, silent=outcome != "delivered")
-            _ = hb_session
             return
         if not prompt:
             return
@@ -553,6 +585,32 @@ class BackgroundProducers:
             )
         policy.note(initiative, "delivered", "spoken")
         return "delivered"
+
+    def _speak_cron_result(self, name: str, text: str, request_id: str) -> None:
+        """An owner-scheduled job's result is said first, at its time.
+
+        The schedule itself is the owner's consent to hear it then, so it
+        skips the interruption budget; it is still audited and silenced by
+        Global Stop inside deliver_proactive.
+        """
+        from jaeger_ai.core.runtime.initiative import Initiative, is_silent
+        from jaeger_ai.core.runtime.salience import SalienceLevel
+
+        deliver = getattr(self.sink, "deliver_proactive", None)
+        if not callable(deliver) or is_silent(text):
+            return
+        initiative = Initiative(
+            source="cron", kind=name or "cron", level=SalienceLevel.DIGEST,
+            summary=f"scheduled job {name}",
+        )
+        try:
+            outcome = deliver(str(text).strip(), initiative=initiative, request_id=request_id) or {}
+            self.initiative_policy().note(
+                initiative, "delivered" if outcome.get("delivered") else "undelivered",
+                "owner_schedule" if outcome.get("delivered") else str(outcome.get("reason")),
+            )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[background] cron speak failed: {exc}", flush=True)
 
     def _current_tier(self, cfg: Any) -> str:
         tier = getattr(self.sink, "current_tier", None)
@@ -761,6 +819,7 @@ __all__ = [
     "RefusalBackoff",
     "is_refusal",
     "cron_request_id",
+    "heartbeat_facts",
     "webhook_request_id",
     "other_holder_pid",
 ]
