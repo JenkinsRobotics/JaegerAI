@@ -100,6 +100,80 @@ def _serve_avatar_model(handler) -> bool:
     return True
 
 
+_KOKORO = None
+_KOKORO_LOCK = None
+KOKORO_MAX_CHARS = 600
+
+
+def kokoro_wav(text: str) -> bytes | None:
+    """Jaeger's local voice (Kokoro, offline) as a 16-bit mono WAV, or None.
+
+    One lazily loaded engine per WebUI process; renders are serialized. Opens
+    no audio device; the browser plays the clip, so the avatar's mouth can
+    follow its real level.
+    """
+    global _KOKORO, _KOKORO_LOCK
+    import io
+    import threading
+    import wave
+
+    text = (text or "").strip()[:KOKORO_MAX_CHARS]
+    if not text:
+        return None
+    if _KOKORO_LOCK is None:
+        _KOKORO_LOCK = threading.Lock()
+    with _KOKORO_LOCK:
+        if _KOKORO is None:
+            from jaeger_kokoro_tts.engine import KokoroTTS
+            _KOKORO = KokoroTTS()
+        audio = _KOKORO.render(text)
+    if audio is None or len(audio) == 0:
+        return None
+    import numpy as np
+    from jaeger_kokoro_tts.engine import KOKORO_SAMPLE_RATE
+
+    pcm = (np.clip(np.asarray(audio, dtype=np.float32), -1.0, 1.0) * 32767).astype("<i2")
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(KOKORO_SAMPLE_RATE)
+        w.writeframes(pcm.tobytes())
+    return buf.getvalue()
+
+
+def _serve_kokoro(handler) -> bool:
+    from api.helpers import read_body
+
+    raw = getattr(handler, "_json_body_bytes", None)
+    try:
+        data = json.loads(raw) if raw is not None else (read_body(handler) or {})
+    except Exception:
+        data = {}
+    text = str(data.get("text") or "") if isinstance(data, dict) else ""
+    try:
+        body = kokoro_wav(text)
+    except Exception as exc:  # engine missing or failed: the client falls back
+        body, err = None, f"kokoro unavailable: {type(exc).__name__}"
+    else:
+        err = "text is required"
+    if body is None:
+        payload = json.dumps({"error": err}).encode("utf-8")
+        handler.send_response(503 if err.startswith("kokoro") else 400)
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.end_headers()
+        handler.wfile.write(payload)
+        return True
+    handler.send_response(200)
+    handler.send_header("Content-Type", "audio/wav")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+    return True
+
+
 def route(handler, parsed, method: str) -> bool:
     """Return True if this request was handled (success or error response)."""
     path = parsed.path or ""
@@ -165,6 +239,10 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path == "/api/jaeger/notifications":
         qs = ("?" + parsed.query) if parsed.query else ""
         return _proxy(handler, "GET", f"/v1/notifications{qs}")
+
+    # Jaeger's local voice for the companion (Kokoro, offline).
+    if method == "POST" and path == "/api/jaeger/tts":
+        return _serve_kokoro(handler)
 
     # The 3D avatar's model (a fixed local file; no path from the request).
     if method == "GET" and path == "/api/jaeger/avatar/model.vrm":
