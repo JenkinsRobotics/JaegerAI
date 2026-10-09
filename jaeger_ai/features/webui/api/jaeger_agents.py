@@ -69,6 +69,37 @@ def _proxy(handler, method: str, path: str, body: bytes | None = None,
         return True
 
 
+def avatar_model_path():
+    """The one VRM the WebUI avatar may load: JAEGER_AVATAR_VRM, else the first
+    ``*.vrm`` in ~/.jaeger/assets/avatar. Runtime asset, never in git."""
+    from pathlib import Path
+
+    raw = (os.environ.get("JAEGER_AVATAR_VRM") or "").strip()
+    if raw:
+        path = Path(raw).expanduser()
+        return path if path.is_file() and path.suffix.lower() == ".vrm" else None
+    folder = Path.home() / ".jaeger" / "assets" / "avatar"
+    found = sorted(folder.glob("*.vrm")) if folder.is_dir() else []
+    return found[0] if found else None
+
+
+def _serve_avatar_model(handler) -> bool:
+    path = avatar_model_path()
+    if path is None:
+        body = b'{"error":"no avatar model installed"}'
+        handler.send_response(404)
+        handler.send_header("Content-Type", "application/json")
+    else:
+        body = path.read_bytes()
+        handler.send_response(200)
+        handler.send_header("Content-Type", "model/gltf-binary")
+        handler.send_header("Cache-Control", "private, max-age=86400")
+    handler.send_header("Content-Length", str(len(body)))
+    handler.end_headers()
+    handler.wfile.write(body)
+    return True
+
+
 def route(handler, parsed, method: str) -> bool:
     """Return True if this request was handled (success or error response)."""
     path = parsed.path or ""
@@ -134,6 +165,10 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path == "/api/jaeger/notifications":
         qs = ("?" + parsed.query) if parsed.query else ""
         return _proxy(handler, "GET", f"/v1/notifications{qs}")
+
+    # The 3D avatar's model (a fixed local file; no path from the request).
+    if method == "GET" and path == "/api/jaeger/avatar/model.vrm":
+        return _serve_avatar_model(handler)
 
     # What Jaeger is doing now (jaeger.state), for the companion avatar.
     if method == "GET" and path == "/api/jaeger/presence":

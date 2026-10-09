@@ -7,6 +7,8 @@
   'use strict';
   if(window.jaegerAvatar) return;
   const MODE_KEY='jaeger-avatar-mode';           // 'face' | 'vrm' | 'off'
+  const BASE=(document.currentScript&&document.currentScript.src)||location.href;
+  let v2=null, v2Loading=null;
   const EXPR={
     idle:{brow:0,eye:1,smile:.35,hue:220},
     listening:{brow:.25,eye:1.1,smile:.25,hue:200},
@@ -40,16 +42,35 @@
     wrap.appendChild(canvas);
     document.body.append(wrap,label);
     ctx=canvas.getContext('2d');
-    wrap.addEventListener('click',()=>{
-      const order=['face','vrm','off'];
-      setMode(order[(order.indexOf(mode())+1)%order.length]);
-    });
+    wrap.addEventListener('click',cycle);
+  }
+
+  function cycle(){
+    const order=['face','vrm','off'];
+    setMode(order[(order.indexOf(mode())+1)%order.length]);
+  }
+
+  // v2 (3D VRM) loads on demand; any failure falls back to this face.
+  function startV2(){
+    if(v2||v2Loading) return;
+    v2Loading=Promise.resolve().then(()=>import(new URL('jaeger_avatar_vrm.js',BASE).href))
+      .then(m=>m.start(api).then(()=>{ v2=m; }))
+      .catch(err=>{ try{console.warn('[jaeger-avatar] 3D unavailable, using the face:',err&&err.message);}catch(_){}
+        localStorage.setItem(MODE_KEY,'face'); applyMode('face'); })
+      .finally(()=>{ v2Loading=null; if(mode()!=='vrm' && v2){ v2.stop(); v2=null; } });
+  }
+
+  function applyMode(m){
+    if(wrap){
+      wrap.style.display=m==='vrm'?'none':'block';
+      wrap.style.opacity=m==='off'?'.25':'1';
+    }
+    if(m==='vrm') startV2(); else if(v2){ v2.stop(); v2=null; }
   }
 
   function setMode(m){
     localStorage.setItem(MODE_KEY,m);
-    if(m==='off'){ if(wrap) wrap.style.opacity='.25'; }
-    else if(wrap){ wrap.style.opacity='1'; }
+    applyMode(m);
     try{ window.dispatchEvent(new CustomEvent('jaeger-avatar-mode',{detail:m})); }catch(_){}
   }
 
@@ -99,7 +120,9 @@
     }catch(_){ setState('offline'); }
   }
 
-  window.jaegerAvatar={
+  const api=window.jaegerAvatar={
+    cycle,
+    raw(){ return {display,speaking,level:speaking?level:0}; },
     setLevel(v){ level=Math.max(0,Math.min(1,+v||0)); },
     setSpeaking(on){ speaking=!!on; if(!on) level=0; if(label) label.textContent=on?'speaking':display.replace('_',' '); },
     setState, setMode, mode,
