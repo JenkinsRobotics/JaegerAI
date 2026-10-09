@@ -149,3 +149,8 @@ jaeger_ai/vendor/
 vendor/
 .kilo/
 packages/jaeger-agent/.build/
+
+# Phase 1b: agent-generated files belong under ~/.jaeger/instances/<name>/, never the repo root
+/notes/
+/skills/
+/*.png
