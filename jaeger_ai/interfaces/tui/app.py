@@ -284,9 +284,15 @@ class _TuiConfirmationProvider:
         # <instance>/permissions.json — loaded for the booted instance.
         self._grants = PermissionGrants.load(getattr(tui, "instance_dir", None))
 
+    #: Asks a human for this call when ``force_prompt`` is set (no standing
+    #: grant, autonomy shortcut or remembered answer). Required by
+    #: PolicyKernel REQUIRE_APPROVAL (tool_executor._owner_approves).
+    fresh_approval = True
+
     def confirm(self, request: Any) -> bool:
         skill = getattr(request, "skill", "") or ""
-        if self._grants.is_granted(skill):
+        fresh = getattr(request, "force_prompt", False) is True
+        if not fresh and self._grants.is_granted(skill):
             return True
         # Non-interactive stdin (piped / the synchronous REPL) — there
         # is no live user to answer; fail safe, never block.
@@ -318,6 +324,8 @@ class _TuiConfirmationProvider:
         ans = (box["answer"] or "").strip().lower()
         # First-letter match: "always"/"allow"/"a" persist the grant;
         # "yes"/"y" grant it for the session; anything else denies.
+        if fresh:  # this call only; never remembered
+            return ans.startswith(("y", "a"))
         if ans.startswith("a"):
             self._grants.grant_persistent(skill)
             c.print(f"  [green]✓ remembered[/] — [cyan]{skill or 'this'}[/] "

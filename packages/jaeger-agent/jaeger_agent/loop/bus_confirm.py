@@ -39,6 +39,11 @@ class BusConfirmationProvider:
         self.current_session = ""                        # set by the bridge per turn
         bus.subscribe(AgentResponse.topic, self._on_response)
 
+    #: Asks a human for this call when ``force_prompt`` is set (no standing
+    #: grant, autonomy shortcut or remembered answer). Required by
+    #: PolicyKernel REQUIRE_APPROVAL (tool_executor._owner_approves).
+    fresh_approval = True
+
     def confirm(self, request: Any) -> bool:
         # Trust gate: a non-admin (uncertified remote) session can't elevate.
         # Deny anything tier-gated outright instead of prompting — a stranger on
@@ -54,9 +59,10 @@ class BusConfirmationProvider:
         #   ask    → pause on every action (ignore standing grants)
         from jaeger_ai.core.runtime import autonomy
         mode = autonomy.current_autonomy()
-        if mode == "auto":
+        fresh = getattr(request, "force_prompt", False) is True
+        if mode == "auto" and not fresh:
             return True
-        honor_grants = mode != "ask"
+        honor_grants = mode != "ask" and not fresh
         skill = getattr(request, "skill", "") or ""
         # Session-scoped "always" grant — stop re-asking for an approved skill.
         with self._lock:
@@ -78,7 +84,7 @@ class BusConfirmationProvider:
             id=rid,
             kind="approval",
             prompt=prompt,
-            options=("allow", "always", "deny"),
+            options=("allow", "deny") if fresh else ("allow", "always", "deny"),
             tool=op,
             session=self.current_session,
         ))

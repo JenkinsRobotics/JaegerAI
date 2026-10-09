@@ -82,7 +82,14 @@ def _owner_approves(tool_name: str, args: Mapping[str, Any], reason: str) -> boo
             arguments=dict(args),
             force_prompt=True,
         )
-        return bool(current_policy().confirmation.confirm(request))
+        provider = current_policy().confirmation
+        if getattr(provider, "fresh_approval", False) is not True:
+            # Auto-approve, bench, commissioning and deny-all providers cannot
+            # give a fresh human decision for this call: refuse.
+            logger.warning("approval for %r refused: provider %s cannot ask a human for this call",
+                           tool_name, type(provider).__name__)
+            return False
+        return bool(provider.confirm(request))
     except Exception as exc:  # noqa: BLE001 — cannot ask means no
         logger.warning("approval for %r could not be requested: %s (refused)", tool_name, exc)
         return False

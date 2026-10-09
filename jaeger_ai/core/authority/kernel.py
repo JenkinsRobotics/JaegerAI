@@ -223,6 +223,8 @@ class PolicyKernel:
         Evaluates:
         1. Security Policy & Safety Mode (PAUSED, READ_ONLY)
         2. Identity & Trust Scope
+        2b. Destructive / irreversible actions -> fresh owner approval
+            (non-overridable; see authority/destructive.py)
         3. Capability Allowlist & Current Grants
         4. Protected System Targets
         5. Operator Shell Hooks (pre_tool_call)
@@ -252,6 +254,13 @@ class PolicyKernel:
             if ident_decision is not None:
                 return ident_decision
 
+            # ── 2b. Destructive / irreversible actions (non-overridable) ─────
+            # Needs a fresh owner approval for this call. Evaluated before
+            # grants, operator hooks and commissioning so none can waive it.
+            destructive = self._check_destructive(proposal, proposal.arguments)
+            if destructive is not None:
+                return destructive
+
             # ── 3. Capability Allowlist & Current Grants ──────────────────────
             grant_decision = self._check_capability_grants(proposal)
             if grant_decision is not None:
@@ -268,6 +277,11 @@ class PolicyKernel:
                 return hook_decision
             if modified_args is not None:
                 current_args = modified_args
+                # A hook rewrite is judged again: it cannot turn a call into
+                # a destructive one without the fresh-approval gate.
+                destructive = self._check_destructive(proposal, current_args)
+                if destructive is not None:
+                    return destructive
 
             # ── 6. Commissioning & Operator Policy Grants ────────────────────
             comm_decision = self._check_commissioning_policy(proposal, current_args)
@@ -458,6 +472,32 @@ class PolicyKernel:
             logger.error("Allowlist grant check failed for %r: %s (fail-closed)", proposal.tool_name, exc)
             return _deny(proposal, f"Capability grant check failed: {exc} (fail-closed)", "tool_allowlist")
         return None
+
+    def _check_destructive(
+        self, proposal: ProposedAction, arguments: Mapping[str, Any],
+    ) -> AuthorityDecision | None:
+        """Destructive or irreversible -> REQUIRE_APPROVAL (fresh, per call).
+
+        Not overridable: standing "always" grants, autonomy "auto",
+        commissioning policy and hooks never reach this decision, and the
+        executor answers it only through a provider that asks a human for
+        this call (``fresh_approval``). Detection failure fails closed.
+        """
+        try:
+            from jaeger_ai.core.authority.destructive import destructive_reason
+            reason = destructive_reason(proposal.tool_name, arguments)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("Destructive-action check failed for %r: %s (fail-closed)", proposal.tool_name, exc)
+            return _deny(proposal, f"Destructive-action check failed: {exc} (fail-closed)", "destructive_action")
+        if not reason:
+            return None
+        return AuthorityDecision(
+            decision=AuthorityDecisionType.REQUIRE_APPROVAL,
+            reason=f"Destructive or irreversible action needs a fresh owner approval: {reason}",
+            policy_name="destructive_action",
+            granted_by="policy_kernel",
+            proposal_id=proposal.proposal_id,
+        )
 
     def _check_protected_targets(self, proposal: ProposedAction) -> AuthorityDecision | None:
         # Check target path for protected system files or in-repo runtime state

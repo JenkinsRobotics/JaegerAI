@@ -1806,9 +1806,15 @@ class BridgeConfirmationProvider:
             self._ctx.pending.pop(rid, None)
             self._ctx.pending_outputs.pop(rid, None)
 
+    #: Asks a human for this call when ``force_prompt`` is set (no standing
+    #: grant, autonomy shortcut or remembered answer). Required by
+    #: PolicyKernel REQUIRE_APPROVAL (tool_executor._owner_approves).
+    fresh_approval = True
+
     def confirm(self, request: object) -> bool:
         skill = getattr(request, "skill", "") or ""
-        if self._grants.is_granted(skill):
+        fresh = getattr(request, "force_prompt", False) is True
+        if not fresh and self._grants.is_granted(skill):
             return True  # already approved (console "always", or ours) — no frame
         op = f"{skill}.{getattr(request, 'operation', '') or 'this action'}"
         summary = str(getattr(request, "summary", "") or "").strip()
@@ -1819,8 +1825,10 @@ class BridgeConfirmationProvider:
         if tier:
             prompt = f"{prompt} [{tier}]"
         answer = self.request(
-            "approval", prompt, ("once", "always", "deny"),
+            "approval", prompt, ("once", "deny") if fresh else ("once", "always", "deny"),
         ).lower()
+        if fresh:
+            return answer in ("once", "allow", "yes", "y", "true", "1", "approve")
         if answer == "always":
             self._grants.grant_persistent(skill)
             return True
