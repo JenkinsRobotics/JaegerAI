@@ -305,6 +305,8 @@ def test_live_loop_require_approval_runs_after_owner_approves(live):
     seen = []
 
     class Owner:
+        fresh_approval = True  # asks a human for this call (approval card)
+
         def confirm(self, request):
             seen.append(request)
             return True
@@ -318,3 +320,33 @@ def test_live_loop_require_approval_runs_after_owner_approves(live):
 def test_live_loop_allowed_command_runs(live):
     live.run("terminal", "ls")
     assert live.ran == ["ls"]
+
+
+def test_live_loop_destructive_command_ignores_standing_approval(live):
+    """POL-01 (2026-10-09): standing 'always' grants / autonomy auto / a
+    commissioning shell allow must not let rm -rf run without a fresh approval."""
+    from jaeger_os.core.safety.permissions import AllowAllProvider, PermissionPolicy, use_policy
+
+    (live.root / "authority_policy.yaml").write_text("shell:\n  risk_mode: allow\n")
+    with use_policy(PermissionPolicy(confirmation=AllowAllProvider())):
+        msgs = live.run("terminal", "rm -rf ./old_logs")
+    assert live.ran == []
+    assert "fresh owner approval" in _tool_text(msgs)
+
+
+def test_live_loop_destructive_command_runs_after_a_fresh_owner_approval(live):
+    from jaeger_os.core.safety.permissions import PermissionPolicy, use_policy
+    seen = []
+
+    class Owner:
+        fresh_approval = True
+
+        def confirm(self, request):
+            seen.append(request)
+            return True
+
+    (live.root / "authority_policy.yaml").write_text("shell:\n  risk_mode: allow\n")
+    with use_policy(PermissionPolicy(confirmation=Owner())):
+        live.run("terminal", "rm -rf ./old_logs")
+    assert seen and seen[0].force_prompt is True
+    assert live.ran == ["rm -rf ./old_logs"]

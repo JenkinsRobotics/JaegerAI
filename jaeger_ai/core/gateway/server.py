@@ -426,6 +426,11 @@ class _GatewayToolConfirmationProvider:
         self.session_id = session_id
         self.request_id = request_id
 
+    #: Asks a human for this call when ``force_prompt`` is set (no standing
+    #: grant, autonomy shortcut or remembered answer). Required by
+    #: PolicyKernel REQUIRE_APPROVAL (tool_executor._owner_approves).
+    fresh_approval = True
+
     def _grants(self) -> Any:
         """The instance's persistent per-skill grants — the same
         ``<instance>/permissions.json`` the bridge and console read, so an
@@ -543,7 +548,8 @@ class _GatewayToolConfirmationProvider:
                 break
         else:
             approved = bool(box["approved"]) and not (scope is not None and scope.cancelled)
-            if approved and (self.app.store.get_approval(aid) or {}).get("decision") == "always":
+            if (approved and not getattr(request, "force_prompt", False)
+                    and (self.app.store.get_approval(aid) or {}).get("decision") == "always"):
                 try:
                     self._grants().grant_persistent(skill)
                 except Exception:  # noqa: BLE001 — the call itself stays approved

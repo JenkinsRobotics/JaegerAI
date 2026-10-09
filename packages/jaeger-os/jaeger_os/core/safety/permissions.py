@@ -284,9 +284,15 @@ class ConsoleConfirmationProvider:
     def __init__(self, instance_dir: Any = None) -> None:
         self._grants = PermissionGrants.load(instance_dir)
 
+    #: Asks a human for this call when ``force_prompt`` is set (no standing
+    #: grant, autonomy shortcut or remembered answer). Required by
+    #: PolicyKernel REQUIRE_APPROVAL (tool_executor._owner_approves).
+    fresh_approval = True
+
     def confirm(self, request: "PermissionRequest") -> bool:
         skill = getattr(request, "skill", "") or ""
-        if self._grants.is_granted(skill):
+        fresh = getattr(request, "force_prompt", False) is True
+        if not fresh and self._grants.is_granted(skill):
             return True
         if not sys.stdin.isatty():
             return False  # unattended — fail safe, never block
@@ -305,6 +311,8 @@ class ConsoleConfirmationProvider:
             print()
             return False
         ans = ans.strip().lower()
+        if fresh:  # this call only; never remembered
+            return ans.startswith(("y", "a"))
         # First-letter match: "always" / "allow" / "a" all persist;
         # "yes" / "y" grant for the session.
         if ans.startswith("a"):
