@@ -2782,3 +2782,30 @@ def test_gateway_turn_relays_every_tool_event_as_a_tool_frame():
     assert tools == [("terminal", "start", 0.0, "sess"), ("terminal", "done", 1.5, "sess"),
                      ("write_file", "start", 0.0, "sess"), ("write_file", "error", 0.1, "sess")]
     assert "secret" not in out.getvalue()
+
+
+def test_gateway_tool_start_frame_carries_the_published_args():
+    """SOTA smoke 2026-10-09: evaluators and run drivers could not see what a
+    tool was asked to do. The start frame now carries the Gateway's (already
+    redacted, bounded) args; results still never cross."""
+    import json
+
+    class FakeGateway:
+        def stream_turn(self, session, text, *, on_event, request_id=None, **choices):
+            on_event("tool.started", {"tool": "terminal", "args": {"command": "git log -1"}})
+            on_event("tool.completed", {"tool": "terminal", "elapsed_s": 0.2, "output": "secret out"})
+            from jaeger_ai.core.gateway.client import TurnResult
+            return TurnResult(request_id or "r", "completed", "ok")
+
+        def resolve_approval(self, *a, **k):
+            return {}
+
+    ctx = bridge._Ctx()
+    ctx.gateway = FakeGateway()
+    out = io.StringIO()
+    bridge._gateway_turn(out, ctx, {}, "hi", "sess", "rid-4")
+    frames = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+    tools = [f for f in frames if f.get("type") == "tool"]
+    assert tools[0]["args"] == {"command": "git log -1"}
+    assert "args" not in tools[1]
+    assert "secret" not in out.getvalue()

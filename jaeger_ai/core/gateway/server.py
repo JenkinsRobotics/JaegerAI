@@ -144,6 +144,51 @@ def _tool_output_text(name: str, result: Any) -> str:
     return _inline_text("\n".join(parts), _INLINE_OUTPUT_MAX)
 
 
+_ARG_VALUE_MAX = 240
+_ARGS_TOTAL_MAX = 2048
+_SECRET_ARG_KEY = re.compile(r"(?i)(pass(word|phrase)?|secret|token|api[_-]?key|auth|credential|cookie|private[_-]?key)")
+#: Payload bodies (file contents, edits, prompts, stdin) never cross; only their size does.
+_BODY_ARG_KEY = re.compile(r"(?i)^(content|contents|text|body|data|new_string|old_string|new_str|old_str|"
+                           r"patch|diff|input|stdin|prompt|message|messages|code|source|replacement)$")
+
+
+def _tool_event_args(args: Any) -> dict[str, Any]:
+    """A bounded, redacted copy of a tool call's arguments for the event stream.
+
+    Observers (the bridge, run drivers, evaluators) need to see WHAT a tool was
+    asked to do. Credentials never cross: values under credential-like keys are
+    withheld, payload bodies (file contents, edits, prompts) are replaced by
+    their size, known secret shapes are masked, long strings are clipped, and
+    the whole payload is size-bounded.
+    """
+    if not isinstance(args, dict):
+        return {}
+    from jaeger_os.core.safety.redact import redact_text
+
+    def clip(value: Any, depth: int = 0) -> Any:
+        if isinstance(value, str):
+            value = redact_text(value)
+            return value if len(value) <= _ARG_VALUE_MAX else value[:_ARG_VALUE_MAX] + f"…(+{len(value) - _ARG_VALUE_MAX} chars)"
+        if isinstance(value, (int, float, bool)) or value is None:
+            return value
+        if depth >= 2:
+            return f"<{type(value).__name__}>"
+        if isinstance(value, dict):
+            return {str(k)[:64]: ("<withheld>" if _SECRET_ARG_KEY.search(str(k))
+                                  else f"<{len(v) if isinstance(v, (str, list, dict)) else '?'} {type(v).__name__}>"
+                                  if _BODY_ARG_KEY.match(str(k)) else clip(v, depth + 1))
+                    for k, v in list(value.items())[:24]}
+        if isinstance(value, (list, tuple)):
+            return [clip(v, depth + 1) for v in list(value)[:24]]
+        return f"<{type(value).__name__}>"
+
+    shown = clip(args)
+    if len(json.dumps(shown, default=str)) > _ARGS_TOTAL_MAX:
+        shown = {k: (v if isinstance(v, (int, float, bool)) or v is None else str(v)[:80])
+                 for k, v in list(shown.items())[:12]}
+    return shown
+
+
 def _safe_tool_event_name(value: Any) -> str:
     """Return a bounded identifier, never arbitrary tool-supplied text.
 
@@ -2640,8 +2685,9 @@ class JaegerGatewayApp:
         ``turn.delta`` carries answer text (what Swift's voice loop and the
         bridge speak/render incrementally); ``turn.reasoning`` carries model
         deliberation, never part of the answer. Tool lifecycle events contain
-        only a catalog-shaped name, phase, outcome, and bounded duration: raw
-        arguments, results, and errors never enter the client event stream.
+        a catalog-shaped name, phase, outcome, bounded duration and, on start,
+        redacted and bounded arguments (``_tool_event_args``: no credentials,
+        no payload bodies). Results and errors never enter the client stream.
         Deltas are batched — each publish is a durable row — and are flushed
         before reasoning/tool boundaries and the terminal event so replay
         reproduces the exact observed order.
@@ -2711,6 +2757,7 @@ class JaegerGatewayApp:
                 "ok": None,
                 "text": "Started",
                 **({"input": shown} if (shown := _tool_input_text(raw_name, data)) else {}),
+                "args": _tool_event_args(data),
             })
 
         def on_tool_done(
