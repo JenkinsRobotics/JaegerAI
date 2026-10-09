@@ -459,7 +459,12 @@ def test_the_verifier_rechecks_the_file_the_ledger_hashed_not_the_name_the_model
 @pytest.fixture(autouse=False)
 def no_background_processes(monkeypatch):
     import jaeger_agent.background.processes as bg
+    import jaeger_ai.core.devices.registry as devices
     monkeypatch.setattr(bg, "stop_all_background", lambda layout: {"stopped": [], "survivors": []})
+    # _halt_for_stop blocks device commands process-wide; only an owner release
+    # lifts it. These tests never release, so put the flag back afterwards or
+    # every later device test in the run sees "device commands are blocked".
+    monkeypatch.setattr(devices, "_COMMANDS_BLOCKED", devices._COMMANDS_BLOCKED)
 
 
 @pytest.mark.asyncio
