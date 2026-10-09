@@ -33,3 +33,17 @@ def test_path_failure_without_a_bound_instance_still_guides(monkeypatch):
     monkeypatch.setattr(ws, "writable_roots", boom)
     hint = ja._recovery_hint("write_file", {"path": "/x"}, "path is outside the allowed roots")
     assert "Check what exists" in hint
+
+
+def test_memory_bind_ignores_a_stand_in_layout(tmp_path, monkeypatch):
+    """A MagicMock layout bound in one test made later tool_calls writes
+    create '<MagicMock ...memory_dir...>' SQLite files in the repo root."""
+    from unittest.mock import MagicMock
+
+    from jaeger_agent.memory import memory, sqlite_store
+
+    monkeypatch.chdir(tmp_path)
+    before = dict(sqlite_store._state)
+    memory.bind(MagicMock())
+    assert sqlite_store._state == before
+    assert list(tmp_path.iterdir()) == []
