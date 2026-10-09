@@ -518,13 +518,18 @@ CHECK_STEP = (
 )
 
 
+#: A check that itself changed state (it fixed something) earns one re-check.
+MAX_CHECKS = 2
+
+
 def changed_state(tools_used: list[str] | tuple[str, ...]) -> bool:
     return any(t and t not in READ_ONLY_TOOLS for t in tools_used)
 
 
 def interactive_followup(answer: str, objective: str, halt_reason: str | None,
                          *, paths_checked: bool, tools_used: list[str] | tuple[str, ...] = (),
-                         checked: bool = True) -> str | None:
+                         checked: bool = True, checks_done: int | None = None,
+                         last_tools: list[str] | tuple[str, ...] | None = None) -> str | None:
     """Next prompt for an operator's turn-owned request, or ``None`` to reply.
 
     A durable background task keeps the strict ledger contract (``harness_prompt``
@@ -535,7 +540,17 @@ def interactive_followup(answer: str, objective: str, halt_reason: str | None,
     Continue only on evidence of unfinished work: the inner budget tripped,
     the model said it is not done, or files named in the request are missing
     (one neutral check; never an instruction to invent them).
+
+    Stop after verified: once a check step ran and that check only observed
+    (read-only tools), the result is verified and is replied, whatever the
+    wording of the answer. Re-sending the objective after a passed check made
+    the model redo finished work until the cap (SOTA CLAR-03 2026-10-09:
+    three extra rounds after a correct, read-back file).
     """
+    done = int(checked) if checks_done is None else int(checks_done)
+    check_changed = changed_state(last_tools or ())
+    if checks_done and not check_changed and not continuation.hit_inner_cap(halt_reason):
+        return None
     if continuation.hit_inner_cap(halt_reason):
         return continuation.continuation_prompt(objective)
     verdict = continuation.classify(answer)
@@ -547,9 +562,10 @@ def interactive_followup(answer: str, objective: str, halt_reason: str | None,
         missing = missing_named_paths(objective)
         if missing:
             return MISSING_PATHS_NOTE.format(paths=", ".join(missing[:8]))
-    if not checked and changed_state(tools_used):
-        # Verify before complete: one independent re-derivation of every claimed
-        # fact, after any turn that may have changed state. Slower, not luckier.
+    if changed_state(tools_used) and (done == 0 or (check_changed and done < MAX_CHECKS)):
+        # Verify before complete: an independent re-derivation of every claimed
+        # fact after any turn that may have changed state, and once more if the
+        # check had to fix something. Slower, not luckier.
         return CHECK_STEP.format(objective=objective)
     return None
 
@@ -583,8 +599,9 @@ def run_continued_turn(
     result: dict[str, Any] = {}
     nxt = None
     paths_checked = False
-    checked = False
+    checks = 0
     tools_used: list[str] = []
+    last_answer = ""
 
     while True:
         if durable and last_completion():
@@ -611,14 +628,22 @@ def run_continued_turn(
         halt = result.get("halt_reason")
         if continuation.is_loop_breaker(halt):
             break
-        tools_used.extend(str(t) for t in (result.get("tools_used") or []))
+        step_tools = [str(t) for t in (result.get("tools_used") or [])]
+        tools_used.extend(step_tools)
+        if ans:
+            last_answer = ans
         if durable and not last_completion() and interactive and not ledger_open():
             nxt = interactive_followup(ans, goal, halt, paths_checked=paths_checked,
-                                       tools_used=tools_used, checked=checked)
+                                       tools_used=tools_used, checks_done=checks,
+                                       last_tools=step_tools if checks else None)
             if nxt and nxt.startswith(MISSING_PATHS_NOTE[:30]):
                 paths_checked = True
             elif nxt and nxt.startswith(CHECK_STEP[:12]):
-                checked = True
+                checks += 1
+            elif nxt is None and not ans and last_answer:
+                # Verified and done, but the last inner turn said nothing:
+                # reply with the latest real answer, never an empty one.
+                result = {**result, "text": last_answer}
         elif durable and not last_completion():
             nxt = harness_prompt(objective=goal)
         elif ledger_open() or continuation.hit_inner_cap(halt):
