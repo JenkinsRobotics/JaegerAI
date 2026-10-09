@@ -54,15 +54,19 @@ def bind(layout: Any) -> None:
     ``.legacy`` after a successful import — and the lazy importers
     need to know where to look.
     """
+    from pathlib import Path
+
     from jaeger_agent.memory import sqlite_store
     mem = getattr(layout, "memory_dir", None)
     if mem is None:
         root = getattr(layout, "root", None)
         if root is not None:
-            from pathlib import Path
             mem = Path(root) / "memory"
         else:
             return
+    if not isinstance(mem, (str, Path)):
+        return  # a stand-in layout (tests, previews): never open a store under it
+    mem = Path(mem)
     mem.mkdir(parents=True, exist_ok=True)
     _state["facts_path"] = mem / "facts.json"
     _state["episodic_path"] = mem / "episodic.jsonl"
