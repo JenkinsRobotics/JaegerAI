@@ -2890,6 +2890,7 @@ class JaegerGatewayApp:
                 result = run_continued_turn(
                     step, prompt, objective=objective or prompt,
                     durable=bool(_options.get("task_id")),
+                    interactive=turn_owned,
                     max_steps=(4 if turn_owned else 8) if _options.get("task_id") else None,
                     is_cancelled=stop_requested,
                     on_checkpoint=lambda checkpoint: self.event_bus.publish(
@@ -2904,8 +2905,15 @@ class JaegerGatewayApp:
                 elif turn_owned and not result.get("error") and not stop_requested():
                     # One bounded correction, as a durable task gets: a completion with no
                     # file receipt is not something the owner can verify.
+                    from jaeger_ai.core.runtime.autonomous_runner import missing_named_paths
                     from jaeger_ai.core.tasks.owner import EVIDENCE_CONTRACT, has_file_receipt
-                    if not has_file_receipt(last_completion()):
+                    # Only when the worker claimed completion without a file receipt, or
+                    # the request names files that still do not exist. An answer-only
+                    # request has no file to receipt; asking for one invites the model
+                    # to invent an artifact.
+                    completion = last_completion()
+                    if not has_file_receipt(completion) and (
+                            completion is not None or missing_named_paths(objective or prompt)):
                         fix = step(
                             "Owner verification requires correction: your completion carried no receipt for a "
                             "file the owner can check. Finish the work if it is not done, then " + EVIDENCE_CONTRACT)
