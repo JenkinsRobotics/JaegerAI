@@ -419,6 +419,8 @@ def _layout_run_dir() -> Path | None:
         from jaeger_ai.main import _pipeline
         layout = _pipeline.get("layout")
         root = getattr(layout, "root", None)
+        if root is not None and not isinstance(root, (str, Path)):
+            return None  # a stand-in layout (tests, previews): persist nothing
         if root is None:
             from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
             layout = InstanceLayout(root=resolve_instance_dir())
