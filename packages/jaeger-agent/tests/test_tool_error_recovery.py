@@ -47,3 +47,26 @@ def test_memory_bind_ignores_a_stand_in_layout(tmp_path, monkeypatch):
     memory.bind(MagicMock())
     assert sqlite_store._state == before
     assert list(tmp_path.iterdir()) == []
+
+
+def test_execute_code_path_failure_points_at_tools_that_see_the_workspace(monkeypatch, tmp_path):
+    from jaeger_agent.core import workspace as ws
+    from jaeger_agent.loop.jaeger_agent import _recovery_hint, _stderr_tail
+
+    monkeypatch.setattr(ws, "get_project_root", lambda: None)
+    layout = type("L", (), {"root": tmp_path, "skills_dir": tmp_path / "skills"})()
+    monkeypatch.setattr(ws, "_require_layout", lambda: layout)
+    err = _stderr_tail({"ok": False, "stderr": "Traceback (most recent call last):\n  ...\n"
+                        "FileNotFoundError: [Errno 2] No such file or directory: 'workspace/x/a.csv'\n"})
+    assert err.startswith("FileNotFoundError")
+    hint = _recovery_hint("execute_code", {"code": "open('workspace/x/a.csv')"}, err)
+    assert "cannot see workspace files" in hint
+    assert str(tmp_path / "skills") in hint and "read_file" in hint and "write_file" in hint
+    assert f"terminal tool (starts in {tmp_path}" in hint
+
+
+def test_execute_code_non_path_failure_gets_only_the_generic_hint():
+    from jaeger_agent.loop.jaeger_agent import _recovery_hint
+
+    hint = _recovery_hint("execute_code", {"code": "1/0"}, "ZeroDivisionError: division by zero")
+    assert "cannot see workspace files" not in hint and "Do not repeat" in hint
