@@ -19,12 +19,14 @@ def test_safe_commands_are_not_overblocked():
     assert not any(_DESTRUCTIVE_COMMAND_RE.search(command) for command in commands)
 
 
-def test_project_root_override_does_not_replace_process_fallback(tmp_path: Path):
+def test_project_root_override_does_not_replace_process_fallback(tmp_path: Path, monkeypatch):
     base = tmp_path / "base"
     override = tmp_path / "override"
     base.mkdir()
     override.mkdir()
-    workspace._project_root_global_fallback = base
+    # monkeypatch restores the process-wide fallback; leaking it bound a project
+    # root into whichever test ran next on this xdist worker.
+    monkeypatch.setattr(workspace, "_project_root_global_fallback", base)
 
     def set_override():
         workspace.set_project_root(override)
