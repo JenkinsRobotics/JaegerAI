@@ -64,6 +64,50 @@ def _float_env(name: str, default: float) -> float:
         return default
 
 
+class RefusalBackoff:
+    """Per-source exponential backoff for refused or failed background turns.
+
+    A refused turn (tier off, Stop engaged, busy, error) used to be
+    retried on every idle poll: ~1,700 failures an hour on Sep 28. Same
+    shape as OpenClaw's heartbeat ``skipWhenBusy`` plus retry backoff:
+    each consecutive refusal doubles the wait (base -> cap); a success
+    resets it. Pure apart from the injected clock, so it is testable.
+    """
+
+    def __init__(self, *, base_s: float = 30.0, cap_s: float = 1800.0,
+                 clock: Any = time.monotonic) -> None:
+        self.base_s = base_s
+        self.cap_s = cap_s
+        self._clock = clock
+        self._failures: dict[str, int] = {}
+        self._until: dict[str, float] = {}
+
+    def allowed(self, key: str) -> bool:
+        return self._clock() >= self._until.get(key, 0.0)
+
+    def refused(self, key: str) -> float:
+        count = self._failures.get(key, 0) + 1
+        self._failures[key] = count
+        delay = min(self.cap_s, self.base_s * (2 ** (count - 1)))
+        self._until[key] = self._clock() + delay
+        return delay
+
+    def succeeded(self, key: str) -> None:
+        self._failures.pop(key, None)
+        self._until.pop(key, None)
+
+    def failures(self, key: str) -> int:
+        return self._failures.get(key, 0)
+
+
+def is_refusal(result: dict[str, Any]) -> bool:
+    """A turn that never ran or ended without a usable outcome."""
+    return bool(
+        result.get("skipped") or result.get("error") or result.get("halt_reason")
+        or result.get("execution_unknown") or result.get("status") in {"disabled", "failed"}
+    )
+
+
 def cron_request_id(name: str, occurrence: str) -> str:
     occ = (occurrence or "").strip() or str(int(time.time()))
     return f"cron:{name}:{occ}"
@@ -140,6 +184,10 @@ class BackgroundProducers:
         self._accepting = False
         self.held = False
         self.webhook_port: int | None = None
+        self.backoff = RefusalBackoff(
+            base_s=_float_env("JAEGER_BACKGROUND_BACKOFF_S", 30.0),
+            cap_s=_float_env("JAEGER_BACKGROUND_BACKOFF_CAP_S", 1800.0),
+        )
 
     def try_start(self) -> bool:
         """Acquire the instance lease and start enabled producers.
@@ -274,6 +322,10 @@ class BackgroundProducers:
             _restore_claimed_schedule(name)
             print(f"[background] cron submit failed: {exc}", flush=True)
             return
+        if result.get("halt_reason") == "tier_disabled":
+            # The tier forbids background turns: drop this occurrence
+            # instead of restoring it (a restore re-fires every poll).
+            return
         if result.get("skipped") or result.get("halt_reason") in {"busy", "error", "conflict"}:
             if not result.get("replayed"):
                 _restore_claimed_schedule(name)
@@ -377,6 +429,8 @@ class BackgroundProducers:
             session = hb_session
         if not prompt:
             return
+        if not self.backoff.allowed(source):
+            return
 
         request_id = batch_id(completion_events) if completion_events else f"{source}:{int(time.time())}"
         if action is Action.HEARTBEAT:
@@ -384,7 +438,16 @@ class BackgroundProducers:
         result = self.sink.submit_turn(
             prompt, session=session, request_id=request_id, source=source,
         )
-        if result.get("skipped"):
+        if is_refusal(result):
+            delay = self.backoff.refused(source)
+            if self.backoff.failures(source) == 1:
+                print(
+                    f"[background] {source} refused ({result.get('halt_reason') or result.get('status') or 'error'});"
+                    f" backing off {delay:.0f}s", flush=True,
+                )
+        else:
+            self.backoff.succeeded(source)
+        if result.get("skipped") or result.get("halt_reason") == "tier_disabled":
             return
         if completion_events and result.get("status") == "completed" and not result.get("error"):
             acknowledge(completion_events)
@@ -458,12 +521,18 @@ class BackgroundProducers:
         from jaeger_ai.core.runtime.sensor_bus import sensor_prompt
 
         event = candidate.event
+        if not self.backoff.allowed("sensor"):
+            return
         request_id = f"sensor:{event.source}:{event.kind}:{event.identity}"
-        self.sink.submit_turn(
+        result = self.sink.submit_turn(
             sensor_prompt(event), session=self.sink.last_user_session(),
             request_id=request_id, source="sensor",
             salience=candidate.level.name.lower(),
         )
+        if isinstance(result, dict) and is_refusal(result):
+            self.backoff.refused("sensor")
+        else:
+            self.backoff.succeeded("sensor")
 
     def _start_webhooks(self, cfg: Any) -> None:
         from jaeger_ai.core.runtime import webhooks as hooks
@@ -610,6 +679,8 @@ __all__ = [
     "STATUS_NAME",
     "BackgroundProducers",
     "BackgroundTurnSink",
+    "RefusalBackoff",
+    "is_refusal",
     "cron_request_id",
     "webhook_request_id",
     "other_holder_pid",
