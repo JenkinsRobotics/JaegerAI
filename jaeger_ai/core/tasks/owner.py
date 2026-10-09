@@ -46,9 +46,10 @@ UNVERIFIABLE = 'No objective verification receipt; continue execution and verify
 
 
 def _asserts_success(result: dict) -> bool:
-    """The worker claimed completion (complete_task, or state/verification fields)."""
+    """The worker claimed completion (complete_task, a dispatched worker's own
+    "completed", or state/verification fields)."""
     return bool(result.get('task_completion')) or any(
-        k in result for k in ('state', 'task_state', 'verification'))
+        k in result for k in ('state', 'task_state', 'verification', 'worker_state'))
 
 
 def has_file_receipt(completion: dict | None) -> bool:
@@ -362,7 +363,8 @@ class GatewayTaskOwner:
             halt = 'needs_owner' if state in {'approval', 'auth', 'quota'} else 'blocked'
             status, result = 'completed', {'halt_reason': halt, 'evidence': {'worker_state': state}, 'output': output}
         elif state == 'completed':
-            status, result = 'completed', {'output': output}
+            # The worker's own "completed" is a claim, settled only by evidence.
+            status, result = 'completed', {'output': output, 'worker_state': 'completed'}
         else:
             status, result = 'failed', {'error': res.get('reason') or output or state or 'worker failed'}
         return self.close_turn(task_id, result, status=status, identity=identity,
