@@ -109,3 +109,16 @@ def test_a_stand_in_layout_is_never_published_process_wide(layout, monkeypatch):
     monkeypatch.setattr(main, "_register_builtins", lambda client: None)
     owner_agent.owner_agent_options(MagicMock(), _cfg(), _client("ollama", "gemma-4-26b:latest"))
     assert "layout" not in main._pipeline
+
+
+def test_a_stand_in_with_a_real_root_is_still_not_published(layout, monkeypatch):
+    """MagicMock(root=<real path>) passed the root-only check; its mock
+    identity_path then hung prompt assembly (yaml never reached EOF)."""
+    from unittest.mock import MagicMock
+
+    import jaeger_ai.main as main
+    monkeypatch.setattr(owner_agent, "_system_prompt", lambda _main, _layout: "P")
+    monkeypatch.setattr(main, "_context_budget_for", lambda cfg: (32768, 4096))
+    monkeypatch.setattr(main, "_register_builtins", lambda client: None)
+    owner_agent.owner_agent_options(MagicMock(root=layout.root), _cfg(), _client("ollama", "gemma-4-26b:latest"))
+    assert "layout" not in main._pipeline
