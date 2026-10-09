@@ -135,6 +135,10 @@ def route(handler, parsed, method: str) -> bool:
         qs = ("?" + parsed.query) if parsed.query else ""
         return _proxy(handler, "GET", f"/v1/notifications{qs}")
 
+    # What Jaeger is doing now (jaeger.state), for the companion avatar.
+    if method == "GET" and path == "/api/jaeger/presence":
+        return _proxy(handler, "GET", "/v1/presence")
+
     if method == "GET" and path in {"/api/handoffs", "/v1/handoffs"}:
         return _proxy(handler, "GET", "/v1/handoffs")
 

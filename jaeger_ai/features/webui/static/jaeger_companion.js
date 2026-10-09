@@ -19,24 +19,70 @@
     box.id='jaegerCompanion';
     box.setAttribute('role','log');
     box.setAttribute('aria-live','polite');
-    box.style.cssText='position:fixed;right:18px;bottom:96px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:min(380px,90vw);pointer-events:none';
+    box.style.cssText='position:fixed;right:100px;bottom:120px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:min(380px,90vw);pointer-events:none';
     document.body.appendChild(box);
     return box;
   }
 
-  function stopSpeaking(){ try{ if('speechSynthesis' in window) speechSynthesis.cancel(); }catch(_){} }
+  // The avatar's mouth follows a 0..1 level: real audio when a server engine
+  // (or Kokoro) returns a clip, word boundaries for browser speech.
+  const face=()=>window.jaegerAvatar;
+  let audioEl=null, audioCtx=null, meterRaf=0, pulseTimer=0;
+
+  function stopSpeaking(){
+    try{ if('speechSynthesis' in window) speechSynthesis.cancel(); }catch(_){}
+    try{ if(audioEl){ audioEl.pause(); audioEl=null; } }catch(_){}
+    cancelAnimationFrame(meterRaf); clearInterval(pulseTimer);
+    if(face()) face().setSpeaking(false);
+  }
+
+  function meter(el){
+    try{
+      audioCtx=audioCtx||new (window.AudioContext||window.webkitAudioContext)();
+      const src=audioCtx.createMediaElementSource(el), an=audioCtx.createAnalyser();
+      an.fftSize=512; src.connect(an); an.connect(audioCtx.destination);
+      const buf=new Uint8Array(an.fftSize);
+      const tick=()=>{ an.getByteTimeDomainData(buf); let sum=0;
+        for(const v of buf){ const d=(v-128)/128; sum+=d*d; }
+        if(face()) face().setLevel(Math.min(1,Math.sqrt(sum/buf.length)*4));
+        meterRaf=requestAnimationFrame(tick); };
+      tick();
+    }catch(_){}
+  }
+
+  async function speakAudio(text, engine){
+    const r=await fetch('api/tts',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text:String(text).slice(0,600),engine,voice:localStorage.getItem('hermes-tts-voice')||undefined})});
+    if(!r.ok) throw new Error('tts '+r.status);
+    const el=new Audio(URL.createObjectURL(await r.blob()));
+    audioEl=el; meter(el);
+    el.onplay=()=>face()&&face().setSpeaking(true);
+    el.onended=el.onerror=()=>stopSpeaking();
+    await el.play();
+  }
+
+  function speakBrowser(text){
+    if(!('speechSynthesis' in window)) return;
+    const u=new SpeechSynthesisUtterance(String(text).slice(0,600));
+    const saved=localStorage.getItem('hermes-tts-voice');
+    const voices=speechSynthesis.getVoices();
+    if(saved&&voices.length){ const m=voices.find(v=>v.name===saved); if(m) u.voice=m; }
+    const rate=parseFloat(localStorage.getItem('hermes-tts-rate')); if(!isNaN(rate)) u.rate=rate;
+    let hit=0;
+    u.onstart=()=>{ if(!face()) return; face().setSpeaking(true);
+      // Envelope: a syllable-rate wobble, re-energised by every word boundary.
+      pulseTimer=setInterval(()=>{ hit*=.82; face()&&face().setLevel(.25+.45*Math.abs(Math.sin(performance.now()/90))*(.4+hit)); },45); };
+    u.onboundary=()=>{ hit=1; };
+    u.onend=u.onerror=()=>stopSpeaking();
+    speechSynthesis.speak(u);
+  }
 
   function speak(text){
-    if(localStorage.getItem(MUTE)==='1' || !('speechSynthesis' in window)) return;
-    try{
-      stopSpeaking();
-      const u=new SpeechSynthesisUtterance(String(text).slice(0,600));
-      const saved=localStorage.getItem('hermes-tts-voice');
-      const voices=speechSynthesis.getVoices();
-      if(saved&&voices.length){ const m=voices.find(v=>v.name===saved); if(m) u.voice=m; }
-      const rate=parseFloat(localStorage.getItem('hermes-tts-rate')); if(!isNaN(rate)) u.rate=rate;
-      speechSynthesis.speak(u);
-    }catch(_){}
+    if(localStorage.getItem(MUTE)==='1') return;
+    stopSpeaking();
+    const engine=localStorage.getItem('hermes-tts-engine')||'browser';
+    if(engine!=='browser'){ speakAudio(text,engine).catch(()=>speakBrowser(text)); return; }
+    try{ speakBrowser(text); }catch(_){}
   }
 
   function show(n){
