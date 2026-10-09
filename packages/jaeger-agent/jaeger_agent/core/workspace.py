@@ -286,6 +286,46 @@ def _resolve_under(root: Path, path: str) -> Path:
     return full
 
 
+def writable_roots() -> list[Path]:
+    """Roots an absolute write path may land in. A bound project is an
+    explicit, contained write scope, so it is the only root then; otherwise
+    the effective workspace dir and the instance skills dir."""
+    project = get_project_root()
+    if project is not None:
+        return [project.resolve()]
+    layout = _require_layout()
+    return [r.resolve() for r in (get_effective_workspace_dir(), layout.skills_dir)]
+
+
+_INSTANCE_PROTECTED = frozenset({
+    "identity.yaml", "config.yaml", "manifest.json", "permissions.json",
+    "credentials", "memory", "logs", "run",
+})
+
+
+def _resolve_absolute_write(p: Path) -> Path:
+    full = p.resolve()
+    roots = writable_roots()
+    instance_root = getattr(_require_layout(), "root", None)
+    instance_root = Path(instance_root).resolve() if instance_root else None
+    if instance_root is not None and full.is_relative_to(instance_root):
+        rel = full.relative_to(instance_root).parts
+        # Even if a workspace override points at (or above) the instance
+        # root, its control files and secrets are never write targets.
+        if not rel or rel[0] in _INSTANCE_PROTECTED or "credentials" in rel:
+            raise SandboxError(f"{str(p)!r} is a protected instance path")
+    for root in roots:
+        if full == root or full.is_relative_to(root):
+            if "credentials" in full.relative_to(root).parts:
+                break
+            return full
+    raise SandboxError(
+        f"{str(p)!r} is outside the writable roots ("
+        + ", ".join(str(r) for r in roots)
+        + "); write under one of them, e.g. workspace/<name>"
+    )
+
+
 def _resolve_write(path: str) -> Path:
     """Resolve a path for an agent WRITE operation. Picks the
     sandbox root from the lead path component (INST-11):
@@ -311,6 +351,13 @@ def _resolve_write(path: str) -> Path:
     if not path:
         raise SandboxError("path must be non-empty")
     p = Path(path)
+    if p.is_absolute() or path.startswith("~"):
+        # One path rule for every tool (capability run 2026-10-09): the
+        # shell runs from the instance root and prints absolute paths, so
+        # the write tools take an absolute path too, as long as it lands
+        # inside a writable root. Resolving first means a symlink or ``..``
+        # cannot smuggle the target out.
+        return _resolve_absolute_write(Path(path).expanduser())
     # Lead component picks the sandbox root.
     project = get_project_root()
     if project is not None and (not p.parts or p.parts[0] not in {"workspace", "skills"}):

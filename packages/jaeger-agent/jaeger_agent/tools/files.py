@@ -110,7 +110,8 @@ def file_write(path: str, content: str) -> dict[str, Any]:
       - everything else → ``<instance>/skills/`` — code modules
         (``SKILL.md`` + ``.py``). Backward-compatible default.
 
-    Refuses absolute paths, ``..`` escapes, symlinks that escape the
+    Absolute paths are accepted only inside the writable roots (project,
+    workspace, skills). Refuses ``..`` escapes, symlinks that escape the
     sandbox, and any attempt to touch identity.yaml / config.yaml /
     manifest.json / credentials / memory / logs. Every write is
     recorded in ``logs/audit.log`` AND auto-committed to the instance's
@@ -665,8 +666,10 @@ def search_files(query: str, path: str = ".", max_results: int = 50) -> dict[str
 def _t_write_file(path: str, content: str) -> dict:
     """Write a text file. Relative paths land in the operator's open project
     (the IDE workspace) when one is selected — use paths relative to it, e.g.
-    `src/app.py` — otherwise in the instance's skills workspace. Overwrites
-    if it already exists."""
+    `src/app.py`. Otherwise `workspace/...` lands in the instance workspace
+    and a bare name in skills/. Absolute paths work when they are inside one
+    of those roots (the same paths run_shell sees; it starts in the instance
+    root). Overwrites if it already exists."""
     return file_write(path=path, content=content)
 
 
