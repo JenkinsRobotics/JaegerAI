@@ -650,7 +650,11 @@ def run_bench(
             from jaeger_agent.prompts.assemble import build_system_prompt
             from jaeger_ai.main import _pipeline
             layout = _pipeline.get("layout")
-            if layout is not None:
+            # Only a real layout: a stand-in (MagicMock) answers every
+            # attribute with another mock, and yaml reading its
+            # identity_path never reaches EOF -- the unit-tier hang.
+            from jaeger_ai.core.entity.owner_agent import _is_real_layout
+            if layout is not None and _is_real_layout(layout):
                 prev_prompt = _pipeline.get("system_prompt")
                 _pipeline["system_prompt"] = build_system_prompt(layout)
                 pipeline = _pipeline

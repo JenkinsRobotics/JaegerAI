@@ -69,9 +69,17 @@ def _system_prompt(main: Any, layout: Any) -> str:
     return cached
 
 
+_LAYOUT_PATHS = ("root", "identity_path", "config_path", "run_dir")
+
+
 def _is_real_layout(layout: Any) -> bool:
-    """A layout with a filesystem root (not a stand-in such as a test double)."""
-    return isinstance(getattr(layout, "root", None), (str, Path))
+    """A layout whose paths are real (not a stand-in such as a test double).
+
+    Checking ``root`` alone let ``MagicMock(root=<real path>)`` through; its
+    ``identity_path`` was still a mock, and later prompt assembly read that
+    "file" with yaml forever (the unit-tier hang).
+    """
+    return all(isinstance(getattr(layout, name, None), (str, Path)) for name in _LAYOUT_PATHS)
 
 
 def owner_agent_options(layout: Any, cfg: Any, client: Any) -> dict[str, Any]:

@@ -210,3 +210,25 @@ def test_hermetic_rolls_back_sqlite_and_rebinds(bound):
     assert mem.recall("pre_existing") == "yes"
     mem.remember("post_bench", "still works")
     assert mem.recall("post_bench") == "still works"
+
+
+
+def test_bench_identity_guard_ignores_a_stand_in_layout(bound, monkeypatch):
+    """A MagicMock layout in main._pipeline made run_bench rebuild the prompt
+    from it; with the identity fragment registered, yaml read the mock
+    identity file forever (the unit-tier hang). The guard must not build a
+    prompt from a stand-in at all."""
+    from unittest.mock import MagicMock
+
+    import jaeger_ai.main as main
+    from jaeger_agent.prompts import assemble
+    from jaeger_ai.core.bench import runner as bench_runner
+    from jaeger_ai.core.bench.cases import CASES
+
+    built = []
+    monkeypatch.setattr(assemble, "build_system_prompt", lambda layout, *a, **k: built.append(layout) or "P")
+    monkeypatch.setitem(main._pipeline, "layout", MagicMock())
+    monkeypatch.setattr(bench_runner, "_drive_one", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("stop")))
+    with pytest.raises(RuntimeError, match="stop"):
+        bench_runner.run_bench(object(), ids=[CASES[0].id], hermetic=False)
+    assert built == []
