@@ -289,3 +289,75 @@ def test_disabled_heartbeat_does_not_submit(tmp_path, monkeypatch):
     producers._idle_once(load_yaml(lay.config_path, Config))
     assert sink.turns == []
     producers.stop()
+
+
+class _RefusingSink(_Sink):
+    def current_tier(self):
+        return "agent"
+
+    def submit_turn(self, prompt, *, session, request_id, source, salience=None):
+        self.turns.append({"source": source, "request_id": request_id})
+        return {
+            "text": "", "status": "disabled", "skipped": True, "replayed": False,
+            "error": "Proactive background turns are disabled in 'agent' mode",
+            "halt_reason": "tier_disabled",
+        }
+
+
+def test_refusal_backoff_doubles_and_resets():
+    from jaeger_ai.core.runtime.background_producers import RefusalBackoff
+
+    now = [0.0]
+    b = RefusalBackoff(base_s=30, cap_s=120, clock=lambda: now[0])
+    assert b.allowed("board")
+    assert b.refused("board") == 30
+    assert not b.allowed("board")
+    now[0] = 30
+    assert b.allowed("board")
+    assert b.refused("board") == 60
+    assert b.refused("board") == 120
+    assert b.refused("board") == 120  # capped
+    b.succeeded("board")
+    assert b.allowed("board") and b.failures("board") == 0
+
+
+def test_tier_refusal_does_not_storm_or_log_failures(tmp_path, monkeypatch):
+    """Sep 28 regression: a refused board turn retried every 2 s poll."""
+    lay = _layout(tmp_path)
+    dump_yaml(lay.config_path, _cfg(webhooks=WebhookConfig(enabled=False)))
+    monkeypatch.setenv("JAEGER_IDLE_READY", "1")
+    monkeypatch.setenv("JAEGER_BACKGROUND_PRODUCERS", "1")
+    monkeypatch.setenv("JAEGER_IDLE_POLL_S", "3600")
+    monkeypatch.setattr(
+        "jaeger_agent.background.cron_runner.CronRunner",
+        lambda *a, **k: type("C", (), {"start": lambda self: None, "shutdown": lambda self, wait=True: None})(),
+    )
+    monkeypatch.setattr("jaeger_agent.background.board.has_actionable_work", lambda layout: True)
+    recorded = []
+    monkeypatch.setattr(
+        "jaeger_ai.core.runtime.background_delivery.record_result",
+        lambda *a, **k: recorded.append(a),
+    )
+    sink = _RefusingSink()
+    producers = BackgroundProducers(lay, sink)
+    assert producers.try_start()
+    cfg = load_yaml(lay.config_path, Config)
+    for _ in range(50):
+        producers._idle_once(cfg)
+    producers.stop()
+    assert len(sink.turns) == 1, sink.turns
+    assert recorded == []
+
+
+def test_gateway_tier_refusal_is_a_skip(tmp_path):
+    import asyncio
+
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+
+    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "gw.sqlite3"))
+    app._current_tier = lambda: "agent"
+    result = asyncio.run(app._run_background_turn(
+        "hi", session_id="s", request_id="r", source="board",
+    ))
+    assert result["skipped"] is True and result["halt_reason"] == "tier_disabled"

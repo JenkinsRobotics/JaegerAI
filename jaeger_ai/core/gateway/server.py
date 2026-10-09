@@ -945,6 +945,7 @@ class JaegerGatewayApp:
                 "error": f"Proactive background turns are disabled in '{tier}' mode (requires 'jaeger' mode)",
                 "status": "disabled",
                 "replayed": False,
+                "skipped": True,
                 "halt_reason": "tier_disabled",
             }
         options = {"source": source, "background": True}
