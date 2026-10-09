@@ -96,3 +96,16 @@ def test_an_existing_booted_pipeline_is_not_overwritten(layout, monkeypatch):
     monkeypatch.setattr(main, "_context_budget_for", lambda cfg: (None, None))
     owner_agent.owner_agent_options(layout, _cfg(), _client("ollama", "gemma-4-26b:latest"))
     assert main._pipeline["layout"] is other and main._pipeline["system_prompt"] == "BOOTED"
+
+
+def test_a_stand_in_layout_is_never_published_process_wide(layout, monkeypatch):
+    """A MagicMock layout once leaked into main._pipeline, and the work ledger
+    then created '<MagicMock ...run_dir>' directories in the repo root."""
+    from unittest.mock import MagicMock
+
+    import jaeger_ai.main as main
+    monkeypatch.setattr(owner_agent, "_system_prompt", lambda _main, _layout: "P")
+    monkeypatch.setattr(main, "_context_budget_for", lambda cfg: (32768, 4096))
+    monkeypatch.setattr(main, "_register_builtins", lambda client: None)
+    owner_agent.owner_agent_options(MagicMock(), _cfg(), _client("ollama", "gemma-4-26b:latest"))
+    assert "layout" not in main._pipeline

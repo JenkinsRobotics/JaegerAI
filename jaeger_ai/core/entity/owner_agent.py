@@ -69,6 +69,11 @@ def _system_prompt(main: Any, layout: Any) -> str:
     return cached
 
 
+def _is_real_layout(layout: Any) -> bool:
+    """A layout with a filesystem root (not a stand-in such as a test double)."""
+    return isinstance(getattr(layout, "root", None), (str, Path))
+
+
 def owner_agent_options(layout: Any, cfg: Any, client: Any) -> dict[str, Any]:
     """Keyword arguments for ``build_jaeger_agent`` on the OWNER turn path."""
     global _registered_for, _owns_pipeline
@@ -79,7 +84,9 @@ def owner_agent_options(layout: Any, cfg: Any, client: Any) -> dict[str, Any]:
         if _owns_pipeline is None:
             _owns_pipeline = pipeline.get("layout") is None
         prompt = _system_prompt(main, layout)
-        if _owns_pipeline:
+        # Only a real instance layout is published process-wide; a stand-in
+        # (tests, previews) must never become the layout other code persists under.
+        if _owns_pipeline and _is_real_layout(layout):
             pipeline["layout"] = layout
             pipeline["config"] = cfg
             pipeline["system_prompt"] = prompt
@@ -93,13 +100,13 @@ def owner_agent_options(layout: Any, cfg: Any, client: Any) -> dict[str, Any]:
         ctx, reserve = main._context_budget_for(cfg)
     except Exception:  # noqa: BLE001 — budget is a guard, never a blocker
         ctx, reserve = None, None
-    logs = Path(getattr(layout, "logs_dir", Path(layout.root) / "logs"))
+    logs = Path(getattr(layout, "logs_dir", Path(layout.root) / "logs")) if _is_real_layout(layout) else None
     full_tools = os.environ.get("JAEGER_FULL_TOOLS", "").strip().lower() in {"1", "true", "yes"}
     return {
         "system_prompt": prompt,
         "ctx_window": ctx,
         "completion_reserve": reserve,
-        "artifact_dir": logs / "tool_results",
+        "artifact_dir": logs / "tool_results" if logs is not None else None,
         "skip_final_tools": getattr(main, "SKIP_FINAL_TOOLS", None),
         # Local models route far better over the curated CORE surface plus
         # list_tools/load_tools than over the full catalogue.
@@ -164,7 +171,8 @@ class traced_turn:
         import time
         try:
             from jaeger_agent.core import trace as _trace
-            _trace.start_trace_recorder(self.layout)
+            if _is_real_layout(self.layout):  # never write a trace under a stand-in layout
+                _trace.start_trace_recorder(self.layout)
             _trace.trace_begin(self.session_key, self.user_text)
         except Exception:  # noqa: BLE001
             pass
