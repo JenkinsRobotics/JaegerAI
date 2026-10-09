@@ -426,6 +426,8 @@ def _layout_run_dir() -> Path | None:
             layout = InstanceLayout(root=resolve_instance_dir())
             root = layout.root
         run_dir = getattr(layout, "run_dir", None)
+        if run_dir is not None and not isinstance(run_dir, (str, Path)):
+            return None  # real root, stand-in run_dir (MagicMock(root=...)): persist nothing
         path = Path(str(run_dir)) if run_dir is not None else Path(str(root)) / "run"
         path.mkdir(parents=True, exist_ok=True)
         return path
