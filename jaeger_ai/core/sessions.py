@@ -838,7 +838,11 @@ def get_store(layout: Any = None) -> SessionStore | None:
         layout = _pipeline.get("layout")
     if layout is None:
         return None
-    path = str(layout.memory_dir / "sessions.db")
+    memory_dir = getattr(layout, "memory_dir", None)
+    if not isinstance(memory_dir, (str, Path)):
+        return None  # a stand-in layout (tests, previews): open no store
+    memory_dir = Path(memory_dir)
+    path = str(memory_dir / "sessions.db")
     if _active["path"] == path and _active["store"] is not None:
         return _active["store"]
     if _active["store"] is not None:
@@ -846,7 +850,7 @@ def get_store(layout: Any = None) -> SessionStore | None:
             _active["store"].close()
         except Exception:  # noqa: BLE001
             pass
-    layout.memory_dir.mkdir(parents=True, exist_ok=True)
+    memory_dir.mkdir(parents=True, exist_ok=True)
     _active["store"] = SessionStore(Path(path))
     _active["path"] = path
     return _active["store"]
