@@ -2194,7 +2194,8 @@ class JaegerAgent:
             content.get("ok") is False or content.get("success") is False
             or bool(content.get("error"))
         ))
-        _err = str(content.get("error") or content.get("reason") or "tool failed") if not _ok else None
+        _err = str(content.get("error") or content.get("reason") or _stderr_tail(content)
+                   or "tool failed") if not _ok else None
 
         # Per-tool-result oversize guard. A single ``run_shell`` dump
         # or screenshot can dominate the next turn's context; cap it
@@ -2472,7 +2473,25 @@ def _recovery_hint(name: str, args: Any, error: str | None) -> str:
                      f"{roots}. Check what exists (search_files, or ls in terminal) first.")
         except Exception:  # noqa: BLE001 — the generic hint still stands
             hint += " Check what exists (search_files, or ls in terminal) before retrying."
+    elif name == "execute_code" and _PATH_ERROR.search(str(error or "")):
+        try:
+            from jaeger_agent.core import workspace as _ws
+            sandbox = _ws.get_project_root() or _ws._require_layout().skills_dir
+            base = _ws.get_project_root() or _ws._require_layout().root
+            where = f" It runs sandboxed in {sandbox} and can only open files there."
+            shell = f" or the terminal tool (starts in {base}, so `workspace/...` resolves)"
+        except Exception:  # noqa: BLE001 — the generic hint still stands
+            where, shell = " It runs sandboxed and can only open files in its own directory.", " or the terminal tool"
+        hint += (f" execute_code cannot see workspace files.{where} Read inputs with read_file and "
+                 f"write outputs with write_file (paths like `workspace/...`){shell}.")
     return hint
+
+
+def _stderr_tail(content: dict) -> str:
+    """Last non-empty stderr line of a failed code/shell result, so the
+    recorded error and recovery hint name the real cause."""
+    lines = [ln.strip() for ln in str(content.get("stderr") or "").splitlines() if ln.strip()]
+    return lines[-1][:300] if lines else ""
 
 
 def _merge_guidance(content: Any, guidance: str) -> Any:
