@@ -40,3 +40,18 @@ def test_gateway_records_the_suggestion_once_and_keeps_the_lead(tmp_path):
     assert meta["suggested_agent_id"] == "native:everyday" and meta["agent_id"] == "native:jaeger"
     JaegerGatewayApp._suggest_route(app, store.get_session("c1"), lead, "webui sidebar")
     assert store.get_session("c1")["metadata"]["suggested_agent_id"] == "native:everyday"
+
+
+def test_specialist_sees_only_its_own_notes(tmp_path, monkeypatch):
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+
+    monkeypatch.setattr(JaegerGatewayApp, "_instance_root", staticmethod(lambda: tmp_path))
+    d = JaegerGatewayApp.agent_memory_dir("everyday"); d.mkdir(parents=True)
+    (d / "NOTES.md").write_text("Matthew prefers mornings.")
+    other = JaegerGatewayApp.agent_memory_dir("gateway"); other.mkdir(parents=True)
+    (other / "NOTES.md").write_text("gateway secret plan")
+    ev = SimpleNamespace(role=SimpleNamespace(value="specialist"), display_name="Everyday", name="everyday",
+                         metadata={"specialty": "everyday"})
+    prompt = JaegerGatewayApp._system_prompt_for_agent(ev)
+    assert "Matthew prefers mornings." in prompt and "gateway secret plan" not in prompt
+    assert JaegerGatewayApp.agent_memory_dir("../x").name == "___x"

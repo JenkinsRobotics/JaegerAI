@@ -2392,6 +2392,27 @@ class JaegerGatewayApp:
             logger.warning("SI SOUL prompt unavailable: %s", exc)
             return None
 
+    AGENT_NOTES_MAX_CHARS = 4000
+
+    @staticmethod
+    def agent_memory_dir(name: str) -> Path:
+        """Per-agent memory scope: ``<instance>/memory/agents/<name>/``.
+
+        A specialist sees only its own notes; the lead's memory is never
+        injected into a specialist turn."""
+        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name)[:48] or "_"
+        return JaegerGatewayApp._instance_root() / "memory" / "agents" / safe
+
+    @staticmethod
+    def _agent_notes(name: str) -> str:
+        if not name:
+            return ""
+        try:
+            path = JaegerGatewayApp.agent_memory_dir(name) / "NOTES.md"
+            return path.read_text(encoding="utf-8")[: JaegerGatewayApp.AGENT_NOTES_MAX_CHARS].strip()
+        except OSError:
+            return ""
+
     @staticmethod
     def _system_prompt_for_agent(agent) -> str:
         """Build the turn system prompt.
@@ -2425,7 +2446,9 @@ class JaegerGatewayApp:
             if summary:
                 parts.append(summary.rstrip(".") + ".")
             parts.append("Reply briefly and helpfully.")
-            return " ".join(parts)
+            notes = JaegerGatewayApp._agent_notes(str(getattr(agent, "name", "") or ""))
+            prompt = " ".join(parts)
+            return f"{prompt}\n\n[Your notes]\n{notes}" if notes else prompt
 
         sections: list[str] = []
         si = JaegerGatewayApp._si_character_prompt()
