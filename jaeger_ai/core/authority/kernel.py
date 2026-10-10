@@ -254,6 +254,11 @@ class PolicyKernel:
             if ident_decision is not None:
                 return ident_decision
 
+            # ── 2a. Other agent frameworks: the owner's per-framework grant ──
+            framework_decision = self._check_framework_grant(proposal)
+            if framework_decision is not None:
+                return framework_decision
+
             # ── 2b. Destructive / irreversible actions (non-overridable) ─────
             # Needs a fresh owner approval for this call. Evaluated before
             # grants, operator hooks and commissioning so none can waive it.
@@ -454,6 +459,26 @@ class PolicyKernel:
                     granted_by="policy_kernel",
                     proposal_id=proposal.proposal_id,
                 )
+        return None
+
+    def _check_framework_grant(self, proposal: ProposedAction) -> AuthorityDecision | None:
+        """framework_read / framework_delegate need the owner's grant for that
+        framework and capability (set only from the owner's own surfaces)."""
+        name = str(proposal.tool_name or "").strip().lower()
+        if name not in {"framework_read", "framework_delegate"}:
+            return None
+        try:
+            from jaeger_ai.core.frameworks.grants import FrameworkGrants
+
+            fid = str(proposal.arguments.get("framework") or "")
+            if name == "framework_delegate":
+                cap = "delegate"
+            else:
+                cap = "read_memory" if str(proposal.arguments.get("kind") or "sessions") == "memory" else "read_sessions"
+            if not FrameworkGrants().is_granted(fid, cap):
+                return _deny(proposal, f"The owner has not granted {cap} for framework {fid!r}", "framework_grant")
+        except Exception as exc:  # noqa: BLE001
+            return _deny(proposal, f"Framework grant check failed: {exc} (fail-closed)", "framework_grant")
         return None
 
     def _check_capability_grants(self, proposal: ProposedAction) -> AuthorityDecision | None:
