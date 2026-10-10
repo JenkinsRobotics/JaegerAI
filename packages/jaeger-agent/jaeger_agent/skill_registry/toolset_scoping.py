@@ -60,6 +60,7 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "web": (r"\b(weather|forecast)\b",),
     "sessions": (r"\b(conversation|session|chat history)\b",),
     "board": (r"\b(board|kanban|card)\b",),
+    "agent_notes": (r"\b(notes?|remember|preferences?|keep track)\b",),
     "scheduling": (r"\b(schedule|cron|remind|recurring)\b",),
     "background": (r"\b(background|long[- ]running|process|job)\b",),
     "identity": (r"\b(your name|identity|soul|persona)\b",),
@@ -228,6 +229,8 @@ TOOLSETS: dict[str, frozenset[str]] = {
     # Planning primitives (Codex ``update_plan`` / ``wait``): stateless display
     # of the model's plan and a cancellable bounded pause.
     "planning": frozenset({"update_plan", "wait"}),
+    # A specialist agent's own NOTES.md (bound by the Gateway per turn).
+    "agent_notes": frozenset({"agent_notes"}),
     # Ask the operator's editor: open a file at a line, list Problems, read what is open.
     "ide": frozenset({"ide_context", "ide_open_file", "ide_diagnostics"}),
     "sessions": frozenset({"session_search"}),
@@ -342,6 +345,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "web": "weather lookups (web_search / web_extract are always-on)",
     "memory_granular": "the pre-umbrella remember/recall/forget tools",
     "planning": "show and update a step plan (update_plan); wait for a bounded time",
+    "agent_notes": "a specialist agent's own persistent notes (read / append / replace)",
     "ide": "the operator's editor: open a file at a line, list Problems, read what is open",
     "sessions": "search and inspect canonical conversation history",
     "board": "board_move / board_update / board_delete (board_add + board_view are CORE)",
