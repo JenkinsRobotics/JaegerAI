@@ -318,6 +318,19 @@ def route(handler, parsed, method: str) -> bool:
         return _proxy(handler, "GET", f"/v1/notifications{qs}")
 
     # Jaeger's local voice for the companion (Kokoro, offline).
+    if method == "GET" and path == "/api/jaeger/frameworks":
+        qs = f"?{parsed.query}" if parsed.query else ""
+        return _proxy(handler, "GET", f"/v1/frameworks{qs}")
+    if method == "POST" and path.startswith("/api/jaeger/frameworks/") and path.endswith("/grants"):
+        from urllib.parse import quote
+        fid = path[len("/api/jaeger/frameworks/"):-len("/grants")]
+        if not fid or "/" in fid:
+            from api.helpers import bad
+            return bad(handler, "bad framework id", 400)
+        import json as _json
+        from api.helpers import read_body
+        return _proxy(handler, "POST", f"/v1/frameworks/{quote(fid, safe='')}/grants",
+                      _json.dumps(read_body(handler) or {}).encode())
     if method == "POST" and path == "/api/jaeger/agent-home":
         return _serve_agent_home(handler)
     if method == "POST" and path == "/api/jaeger/tts":

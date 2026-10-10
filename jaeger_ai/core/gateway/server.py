@@ -1146,6 +1146,8 @@ class JaegerGatewayApp:
         self.app.router.add_get("/version", self.handle_version)
         # Agent catalog — persistence spine for Mac app + WebUI clients.
         self.app.router.add_get("/v1/agents", self.handle_list_agents)
+        self.app.router.add_get("/v1/frameworks", self.handle_list_frameworks)
+        self.app.router.add_post("/v1/frameworks/{id}/grants", self.handle_framework_grant)
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
         self.app.router.add_get("/v1/agents/{id}", self.handle_get_agent)
         self.app.router.add_post("/v1/agents/{id}/activate", self.handle_activate_agent)
@@ -1603,6 +1605,48 @@ class JaegerGatewayApp:
         from jaeger_ai.core.agent_registry import AgentRegistry
 
         return AgentRegistry()
+
+    _frameworks_cache: tuple[float, list] | None = None
+
+    async def handle_list_frameworks(self, request: web.Request) -> web.Response:
+        """Detected agent frameworks (presence and counts only) with the owner's grants."""
+        from jaeger_ai.core.frameworks.discovery import detect
+        from jaeger_ai.core.frameworks.grants import CAPABILITIES, FrameworkGrants
+
+        now = time.monotonic()
+        cached = JaegerGatewayApp._frameworks_cache
+        if cached is None or now - cached[0] > 30 or request.query.get("refresh"):
+            JaegerGatewayApp._frameworks_cache = (now, await asyncio.to_thread(detect))
+        grants = FrameworkGrants().all()
+        out = []
+        for fw in JaegerGatewayApp._frameworks_cache[1]:
+            g = grants.get(fw["id"]) or {}
+            out.append({**fw, "grants": {c: bool((g.get(c) or {}).get("granted")) for c in CAPABILITIES}})
+        return web.json_response({"frameworks": out, "capabilities": list(CAPABILITIES)})
+
+    async def handle_framework_grant(self, request: web.Request) -> web.Response:
+        """Owner grants or revokes one capability for one framework (admin scope)."""
+        from jaeger_ai.core.frameworks.discovery import by_id
+        from jaeger_ai.core.frameworks.grants import CAPABILITIES, FrameworkGrants
+
+        fid = request.match_info["id"]
+        fw = by_id(fid)
+        if fw is None:
+            return web.json_response({"error": "Unknown framework"}, status=404)
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        cap = str((body or {}).get("capability") or "")
+        granted = (body or {}).get("granted")
+        if cap not in CAPABILITIES or not isinstance(granted, bool):
+            return web.json_response({"error": "capability and boolean granted are required"}, status=400)
+        if granted and cap != "delegate" and not fw.readable:
+            return web.json_response({"error": f"{fw.name} has no read connector"}, status=400)
+        caller = _REQUEST_CALLER.get()
+        by = caller[1] if caller else "owner"
+        state = FrameworkGrants().set(fid, cap, granted, by=by)
+        return web.json_response({"framework": fid, "grants": {c: bool((state.get(c) or {}).get("granted")) for c in CAPABILITIES}})
 
     async def handle_list_agents(self, request: web.Request) -> web.Response:
         """List JaegerNativeAgent + ThirdPartyAgent for Mac app / WebUI.

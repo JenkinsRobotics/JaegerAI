@@ -30,7 +30,10 @@
   }
   function render(root,agents){
     root.innerHTML='';
-    const h=document.createElement('div');h.className='jaeger-agents-title';h.textContent='Agents';root.appendChild(h);
+    const h=document.createElement('div');h.className='jaeger-agents-title';h.textContent='Agents';
+    const fx=document.createElement('button');fx.type='button';fx.className='jaeger-fw-btn';fx.textContent='Frameworks…';fx.title='Other agent frameworks on this Mac';
+    fx.addEventListener('click',()=>window.jaegerFrameworks&&window.jaegerFrameworks.open().catch(e=>console.warn('frameworks',e)));
+    h.appendChild(fx);root.appendChild(h);
     for(const a of agents){
       const b=document.createElement('button');b.type='button';b.className='jaeger-agent';b.dataset.home=homeId(a);
       b.title=a.summary||(a.metadata&&a.metadata.summary)||label(a);
@@ -53,6 +56,7 @@
       '.jaeger-agent-menu{position:absolute;top:26px;left:0;z-index:50;min-width:200px;background:var(--bg,#111);border:1px solid var(--border,rgba(127,127,127,.35));border-radius:8px;padding:4px}'+
       '.jaeger-agent-menu button{display:block;width:100%;text-align:left;background:transparent;border:0;color:inherit;padding:6px 8px;border-radius:6px;cursor:pointer;font:inherit}.jaeger-agent-menu button:hover{background:rgba(127,127,127,.15)}'+
       '.jaeger-routed{opacity:.8}.jaeger-undo{background:transparent;border:0;color:#4af;cursor:pointer;font:inherit;padding:0;text-decoration:underline}'+
+      '.jaeger-fw-btn{float:right;background:transparent;border:0;color:#4af;cursor:pointer;font:inherit;text-transform:none;letter-spacing:0;font-size:11px}'+
       '.jaeger-agent-dot{width:8px;height:8px;border-radius:50%;background:#7a8;flex:none}.jaeger-agent-dot.lead{background:#4af}';
     document.head.appendChild(st);
   }
