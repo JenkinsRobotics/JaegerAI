@@ -3394,7 +3394,8 @@ class JaegerGatewayApp:
                 model_only = (text_only and not actionable) or (
                     role_s == "specialist" and specialist_scope is None)
             if specialist_scope is not None and not model_only:
-                prompt = f"[Agent]\n{system_prompt}\n\n" + prompt
+                prompt = (f"[Agent]\n{system_prompt}\nYour own notes: use the agent_notes tool "
+                          "(read/append/replace) to keep what matters for your specialty.\n\n") + prompt
                 from jaeger_agent.tools.agent_notes import bound_notes_dir
                 with bound_notes_dir(specialist_scope["notes_dir"]):
                     turn_result = await asyncio.to_thread(_sync_react, prompt)
