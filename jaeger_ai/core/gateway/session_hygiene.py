@@ -24,6 +24,7 @@ SYSTEM_SESSIONS = frozenset({"desktop-app", "jaeger-initiative", "heartbeat", "k
 _JUNK_ID = (
     (re.compile(r"^sota-"), "benchmark run (sota)"),
     (re.compile(r"^noskip-"), "eval probe (noskip)"),
+    (re.compile(r"^cap-[a-z0-9]+-[0-9a-f]{6}$"), "capability probe"),
     (re.compile(r"^task:"), "durable-task child session"),
     (re.compile(r"^specialist:"), "specialist child session"),
     (re.compile(r"^jaeger-(computer-use|screenshot|mouse)-live"), "live verification probe"),

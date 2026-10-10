@@ -12,7 +12,7 @@ def test_classification():
     cases = {
         "sota-CLAR-03-127832": "junk", "noskip-mem-01-jaeger-5cb": "junk",
         "task:task_28bed9cc6f43e3": "junk", "jaeger-computer-use-live-1": "junk",
-        "paste-only": "junk", "desktop-app": "system", "jaeger-initiative": "system",
+        "paste-only": "junk", "cap-mem2a-de4ebd": "junk", "cap-tool-de4ebd": "junk", "desktop-app": "system", "jaeger-initiative": "system",
         "heartbeat": "system", "kanban_idle": "system",
     }
     for sid, kind in cases.items():
