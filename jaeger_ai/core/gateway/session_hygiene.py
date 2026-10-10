@@ -69,10 +69,22 @@ def archive_on_create(store: Any, session: dict[str, Any]) -> dict[str, Any]:
     """Gateway hook: a probe/test/benchmark session is archived the moment it is
     created, so it never reaches the sidebar. Recorded, reversible, never deleted."""
     kind, why = classify(session, at_creation=True)
+    if kind == "chat" and not (session.get("metadata") or {}).get("agent_id"):
+        # One persistent identity: an unassigned conversation belongs to Jaeger.
+        from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID
+
+        return store.update_metadata(session["session_id"], {"agent_id": LEAD_AGENT_ID}) or session
     if kind != "junk":
         return session
     store.update_metadata(session["session_id"], {"auto_archived": why})
     return store.set_session_archived(session["session_id"], True) or session
+
+
+def unassigned_chats(rows: list[dict[str, Any]]) -> list[str]:
+    """Visible real conversations with no agent yet (migrated to the lead)."""
+    return [str(r["session_id"]) for r in rows
+            if classify(r)[0] == "chat" and not (r.get("metadata") or {}).get("agent_id")
+            and not (r.get("metadata") or {}).get("archived")]
 
 
 def plan(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
@@ -127,20 +139,35 @@ def _gateway(base: str = "http://127.0.0.1:8810"):  # pragma: no cover - live wi
         except urllib.error.HTTPError as exc:
             return exc.code
 
-    return get_rows, patch
+    def handoff(session_id: str) -> int:
+        url = f"{base}/v1/sessions/{urllib.parse.quote(session_id, safe='')}/handoff"
+        body = {"to_agent_id": "native:jaeger", "reason": "default owner: Jaeger", "keep_history": True}
+        req = urllib.request.Request(url, data=json.dumps(body).encode(), headers=headers, method="POST")
+        try:
+            return urllib.request.urlopen(req, timeout=30).status
+        except urllib.error.HTTPError as exc:
+            return exc.code
+
+    return get_rows, patch, handoff
 
 
 def main(argv: list[str] | None = None) -> int:  # pragma: no cover - CLI
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--restore", type=Path)
+    ap.add_argument("--assign-lead", action="store_true",
+                    help="hand every unassigned real chat to Jaeger (session handoff, history kept)")
     ap.add_argument("--manifests", type=Path, default=Path.home() / ".jaeger" / "archive-manifests")
     args = ap.parse_args(argv)
-    get_rows, patch = _gateway()
+    get_rows, patch, handoff = _gateway()
     if args.restore:
         print(json.dumps(restore(args.restore, patch), indent=1))
         return 0
     rows = get_rows()
+    if args.assign_lead:
+        sids = unassigned_chats(rows)
+        print(json.dumps({sid: handoff(sid) for sid in sids}, indent=1))
+        return 0
     items = plan(rows)
     kinds: dict[str, int] = {}
     for row in rows:
