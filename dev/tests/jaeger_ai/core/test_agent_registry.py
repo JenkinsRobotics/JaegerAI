@@ -192,7 +192,7 @@ def test_standing_specialists_seeded(tmp_path: Path, monkeypatch: pytest.MonkeyP
     agents = registry.list_agents()
     by_id = {a.id: a for a in agents}
     assert "native:jaeger" in by_id
-    assert by_id["native:jaeger"].display_name == "Assistant"
+    assert by_id["native:jaeger"].display_name == "Jaeger"
     assert by_id["native:jaeger"].metadata.get("role") == "lead"
     for name in ("surfaces", "gateway", "everyday"):
         aid = f"native:{name}"
@@ -983,3 +983,28 @@ class TestGatewayTurnUsesSessionAgent(_CallerAuthedTestCase):
         assert data.get("agent_id") == "native:gateway"
         assert data.get("role") == "specialist"
         assert data.get("display_name") == "Gateway"
+
+
+def test_lead_is_named_jaeger_old_default_migrates_and_test_agents_are_hidden(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    import json as _json
+    from jaeger_ai.core.agent_registry.specialists import is_test_agent
+
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path))
+    registry = AgentRegistry(tmp_path)
+    registry.list_agents()
+    path = registry.path if hasattr(registry, "path") else None
+    registry._data["agents"]["native:jaeger"]["display_name"] = "Assistant"
+    registry._save()
+    again = AgentRegistry(tmp_path)
+    assert {a.id: a for a in again.list_agents()}["native:jaeger"].display_name == "Jaeger"
+    # An owner rename is never overwritten.
+    again._data["agents"]["native:jaeger"]["display_name"] = "Jae"
+    again._save()
+    assert {a.id: a for a in AgentRegistry(tmp_path).list_agents()}["native:jaeger"].display_name == "Jae"
+
+    class R:
+        def __init__(self, name, role):
+            self.name, self.role = name, role
+    assert is_test_agent(R("onboarding-character-test-20260913", "runtime"))
+    assert not is_test_agent(R("everyday", "specialist"))
+    assert not is_test_agent(R("health", "runtime"))

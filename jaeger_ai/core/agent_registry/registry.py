@@ -411,7 +411,7 @@ class AgentRegistry:
             "fundamentals_fee_gated": False,
             "active": active,
             "lead": lead,
-            "agents": [a.to_dict() for a in agents],
+            "agents": [_with_hidden(a) for a in agents],
             "jaeger_native": native,
             "third_party": third_party,
             "specialists": specialists,
@@ -472,3 +472,12 @@ def create_agent(*args, **kwargs):
 def list_agents(*args, **kwargs):
     """Module-level list_agents — native + third-party catalog."""
     return get_default_registry().list_agents(*args, **kwargs)
+
+
+def _with_hidden(record) -> dict[str, Any]:
+    from jaeger_ai.core.agent_registry.specialists import is_test_agent
+
+    out = record.to_dict()
+    if is_test_agent(record):
+        out["hidden"] = True
+    return out
