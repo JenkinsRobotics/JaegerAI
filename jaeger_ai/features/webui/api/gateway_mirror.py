@@ -130,6 +130,7 @@ def mirror_session(session_id: str, *, gateway_session: dict | None = None) -> b
         push_title(session_id, local_title)
         gw_title = local_title
     title = gw_title if not _is_generic(gw_title) else (local_title or gw_title or "New conversation")
+    archived = _gw_archived(gw)
     updated = gw.get("updated_at") or time.time()
     last_ts = next((m.get("timestamp") for m in reversed(messages) if m.get("timestamp")), updated)
 
@@ -140,8 +141,11 @@ def mirror_session(session_id: str, *, gateway_session: dict | None = None) -> b
             profile=gw.get("profile"),
         )
         changed = True
+        session.archived = archived
     else:
-        changed = (session.messages != messages or session.title != title)
+        changed = (session.messages != messages or session.title != title
+                   or bool(getattr(session, "archived", False)) != archived)
+        session.archived = archived
         session.messages = messages
         session.title = title
         if gw.get("workspace"):
@@ -154,7 +158,7 @@ def mirror_session(session_id: str, *, gateway_session: dict | None = None) -> b
     with models.LOCK:
         models.SESSIONS[session.session_id] = session
     with _lock:
-        _fingerprints[session_id] = (gw.get("updated_at"), len(messages))
+        _fingerprints[session_id] = (gw.get("updated_at"), len(messages), archived)
     return changed
 
 
@@ -174,13 +178,33 @@ def mirror_all(*, force: bool = False) -> int:
         sid = entry["session_id"]
         with _lock:
             seen = _fingerprints.get(sid)
-        if not force and seen and seen[0] == entry.get("updated_at"):
+        if (not force and seen and seen[0] == entry.get("updated_at")
+                and seen[2:] == (_gw_archived(entry),)):
             continue
         try:
             changed += bool(mirror_session(sid))
         except Exception:
             logger.warning("mirroring gateway session %s failed", sid, exc_info=True)
     return changed
+
+
+def _gw_archived(gw: dict) -> bool:
+    """The Gateway owns archive state (``metadata.archived``); the cache mirrors it."""
+    return bool((gw.get("metadata") or {}).get("archived"))
+
+
+def push_archived(session_id: str, archived: bool) -> bool:
+    """Archive/unarchive on the Gateway. True when it accepted (False: not Gateway-backed)."""
+    result = _request(
+        "PATCH", f"/v1/sessions/{urllib.parse.quote(session_id, safe='')}", {"archived": bool(archived)},
+    )
+    if isinstance(result, dict) and not result.get("error"):
+        with _lock:
+            seen = _fingerprints.get(session_id)
+            if seen:
+                _fingerprints[session_id] = (seen[0], seen[1], bool(archived))
+        return True
+    return False
 
 
 def push_title(session_id: str, title: str) -> bool:

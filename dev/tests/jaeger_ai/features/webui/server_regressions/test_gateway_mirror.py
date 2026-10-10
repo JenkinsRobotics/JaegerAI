@@ -131,3 +131,29 @@ def test_unchanged_sessions_are_not_refetched(gateway, monkeypatch):
     monkeypatch.setattr(gateway_mirror, "_last_sweep", 0.0)
     gateway_mirror.mirror_all()
     assert fetched == ["/v1/sessions"]  # the list only; no per-session GET
+
+
+def test_gateway_archive_state_is_mirrored_both_ways_without_touching_updated_at(gateway):
+    """Archiving on the Gateway (session_hygiene) hides the row in the WebUI;
+    restoring it there brings it back — archive is metadata, not activity."""
+    sid = _sid()
+    gateway[sid] = _gw_session(sid, "Probe", [("user", "hi")])
+    gateway_mirror.mirror_all(force=True)
+    assert models.get_session(sid).archived is False
+    gateway[sid]["metadata"] = {"archived": True}  # same updated_at
+    gateway_mirror.mirror_all()
+    gateway_mirror._last_sweep = 0.0
+    gateway_mirror.mirror_all()
+    assert models.get_session(sid).archived is True
+    gateway[sid]["metadata"] = {"archived": False}
+    gateway_mirror._last_sweep = 0.0
+    gateway_mirror.mirror_all()
+    assert models.get_session(sid).archived is False
+
+
+def test_webui_archive_is_pushed_to_the_gateway(monkeypatch):
+    calls = []
+    monkeypatch.setattr(gateway_mirror, "_request",
+                        lambda m, p, b=None: calls.append((m, p, b)) or {"session_id": "s1"})
+    assert gateway_mirror.push_archived("s 1", True) is True
+    assert calls == [("PATCH", "/v1/sessions/s%201", {"archived": True})]
