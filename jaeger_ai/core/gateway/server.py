@@ -1837,6 +1837,7 @@ class JaegerGatewayApp:
         if surface and "source" not in metadata:
             metadata = {**metadata, "source": surface}
 
+        existed = self.store.get_session(session_id) is not None
         session = self.store.ensure_session(
             session_id,
             title=title,
@@ -1844,6 +1845,9 @@ class JaegerGatewayApp:
             workspace=workspace,
             metadata=metadata,
         )
+        if not existed:
+            from jaeger_ai.core.gateway.session_hygiene import archive_on_create
+            session = archive_on_create(self.store, session)
         self.event_bus.publish(session_id, "session.created", {"session": session})
         return web.json_response(session, status=201)
 
