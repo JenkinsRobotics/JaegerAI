@@ -195,6 +195,62 @@ def _serve_kokoro(handler) -> bool:
     return True
 
 
+def agent_home_request(agent: dict) -> dict:
+    """The gateway create-session body for an agent's one persistent home session.
+
+    The id is derived here from the registry record (never from the client), so a
+    click always lands in the same row: ``ensure_session`` is idempotent.
+    """
+    name = str(agent.get("name") or str(agent.get("id") or "").split(":")[-1])
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in name.lower())[:48] or "jaeger"
+    lead = str(agent.get("role") or "") == "lead"
+    title = "Jaeger" if lead else str(agent.get("display_name") or name)
+    return {
+        "session_id": f"agent-{safe}",
+        "title": title,
+        "source": "webui",
+        "metadata": {"agent_id": str(agent.get("id")), "home": True, "source": "webui"},
+    }
+
+
+def _serve_agent_home(handler) -> bool:
+    """POST /api/jaeger/agent-home {agent_id} -> the agent's home session."""
+    import json as _json
+    from urllib.parse import quote
+
+    from api.helpers import bad, read_body
+
+    try:
+        body = read_body(handler) or {}
+    except Exception:  # noqa: BLE001
+        body = {}
+    agent_id = str(body.get("agent_id") or "").strip()
+    if not agent_id:
+        return bad(handler, "agent_id required", 400)
+    status, agent = _gateway_json("GET", f"/v1/agents/{quote(agent_id, safe='')}")
+    if status != 200 or not isinstance(agent, dict) or not agent.get("id"):
+        return bad(handler, "unknown agent", 404)
+    raw = _json.dumps(agent_home_request(agent)).encode()
+    return _proxy(handler, "POST", "/v1/sessions", raw)
+
+
+def _gateway_json(method: str, path: str):
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    import json as _json
+
+    req = Request(f"{gateway_base()}{path}", method=method)
+    req.add_header("Accept", "application/json")
+    for key, value in client_headers("webui").items():
+        req.add_header(key, value)
+    try:
+        with urlopen(req, timeout=15) as resp:
+            return resp.status, _json.loads(resp.read() or b"{}")
+    except HTTPError as exc:
+        return exc.code, {}
+    except Exception:  # noqa: BLE001
+        return 502, {}
+
+
 def route(handler, parsed, method: str) -> bool:
     """Return True if this request was handled (success or error response)."""
     path = parsed.path or ""
@@ -262,6 +318,8 @@ def route(handler, parsed, method: str) -> bool:
         return _proxy(handler, "GET", f"/v1/notifications{qs}")
 
     # Jaeger's local voice for the companion (Kokoro, offline).
+    if method == "POST" and path == "/api/jaeger/agent-home":
+        return _serve_agent_home(handler)
     if method == "POST" and path == "/api/jaeger/tts":
         return _serve_kokoro(handler)
 
