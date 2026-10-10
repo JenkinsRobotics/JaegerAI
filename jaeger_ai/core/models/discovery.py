@@ -12,6 +12,8 @@ any model on the host system or local network.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import json
 import os
 import pathlib
@@ -437,6 +439,28 @@ _CANONICAL_CACHE_TS: float = 0.0
 _CANONICAL_LOCK = threading.Lock()
 
 
+def configured_instance_model(instance_root: Any | None = None) -> str:
+    """The model named in the instance's config.yaml ``external_model`` block, or ""."""
+    try:
+        import yaml
+
+        if instance_root is None:
+            from jaeger_ai.core.instance.instance import resolve_instance_dir
+
+            root = Path(resolve_instance_dir())
+        else:
+            from jaeger_ai.core.instance.first_boot import instance_dir
+
+            root = Path(instance_dir(instance_root))
+        data = yaml.safe_load((root / "config.yaml").read_text(encoding="utf-8")) or {}
+        ext = data.get("external_model") or {}
+        if isinstance(ext, dict) and ext.get("enabled", True) and ext.get("model"):
+            return str(ext["model"]).strip()
+    except Exception:
+        pass
+    return ""
+
+
 def canonical_runtime_inventory(
     instance_root: Any | None = None,
     *,
@@ -464,11 +488,19 @@ def canonical_runtime_inventory(
     from jaeger_ai.core.instance.provider_certification import load_matrix, select_production_model
 
     # Determine certified production baseline
+    # A certified assignment wins; otherwise the instance's configured model
+    # (config.yaml ``external_model``). The cloud fallback is last: with no
+    # certification file the picker used to show it even though the instance
+    # was configured for a local model.
+    default_model_name = ""
     try:
         matrix = load_matrix(instance_root)
-        _, default_model_name = select_production_model(matrix)
+        if matrix.assignments.get("REACT") or matrix.assignments.get("CHAT"):
+            _, default_model_name = select_production_model(matrix)
     except Exception:
-        default_model_name = "glm-5.3-flash:cloud"
+        pass
+    if not default_model_name:
+        default_model_name = configured_instance_model(instance_root) or "glm-5.3-flash:cloud"
 
     groups: list[dict[str, Any]] = []
 
@@ -599,11 +631,21 @@ def canonical_runtime_inventory(
 
     # The default model is a cloud tag, so route it through Ollama Cloud
     # when no live catalog is available; otherwise prefer the discovered group.
-    if cloud_models:
+    # The lane follows the default model itself: a local tag is local.
+    _is_cloud_default = default_model_name.endswith(":cloud") or default_model_name.endswith("-cloud")
+    if any(m["name"] == default_model_name for m in local_models):
+        active_provider = "ollama-local"
+    elif any(m["name"] == default_model_name for m in cloud_models):
+        active_provider = "ollama-cloud"
+    elif cloud_models and _is_cloud_default:
+        active_provider = "ollama-cloud"
+    elif local_models and not _is_cloud_default:
+        active_provider = "ollama-local"
+    elif cloud_models:
         active_provider = "ollama-cloud"
     elif local_models:
         active_provider = "ollama-local"
-    elif default_model_name.endswith(":cloud"):
+    elif _is_cloud_default:
         active_provider = "ollama-cloud"
     else:
         active_provider = "ollama-local"
