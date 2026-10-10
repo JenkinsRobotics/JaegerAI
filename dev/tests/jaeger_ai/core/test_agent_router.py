@@ -28,18 +28,34 @@ def test_new_chats_belong_to_jaeger(tmp_path):
     assert h.unassigned_chats(rows) == ["x"]
 
 
-def test_gateway_records_the_suggestion_once_and_keeps_the_lead(tmp_path):
+def _app(store):
     from jaeger_ai.core.gateway.server import JaegerGatewayApp
 
+    events = []
+    app = SimpleNamespace(store=store, event_bus=SimpleNamespace(publish=lambda *a: events.append(a)),
+                          _registry=lambda: SimpleNamespace(get_agent=lambda aid: object()))
+    app._session_agent_id = lambda s: JaegerGatewayApp._session_agent_id(app, s)
+    return app, events, JaegerGatewayApp
+
+
+def test_auto_route_hands_off_once_with_a_notice_and_never_overrides_the_owner(tmp_path):
     store = GatewaySessionStore(tmp_path / "s.sqlite3")
     store.ensure_session("c1", metadata={"agent_id": "native:jaeger"})
-    app = SimpleNamespace(store=store)
-    lead = SimpleNamespace(role=SimpleNamespace(value="lead"))
-    JaegerGatewayApp._suggest_route(app, store.get_session("c1"), lead, "check my calendar")
+    app, events, G = _app(store)
+    assert G._auto_route(app, store.get_session("c1"), "check my calendar") is True
     meta = store.get_session("c1")["metadata"]
-    assert meta["suggested_agent_id"] == "native:everyday" and meta["agent_id"] == "native:jaeger"
-    JaegerGatewayApp._suggest_route(app, store.get_session("c1"), lead, "webui sidebar")
-    assert store.get_session("c1")["metadata"]["suggested_agent_id"] == "native:everyday"
+    assert meta["agent_id"] == "native:everyday" and meta["previous_agent_id"] == "native:jaeger"
+    assert meta["routed_by"] == "auto" and events[-1][1] == "session.handoff"
+    # Once per conversation.
+    assert G._auto_route(app, store.get_session("c1"), "webui sidebar") is False
+    # Owner-pinned and home sessions are never moved; no match stays with Jaeger.
+    store.ensure_session("c2", metadata={"agent_id": "native:jaeger", "agent_pinned": True})
+    store.ensure_session("c3", metadata={"agent_id": "native:jaeger", "home": True})
+    store.ensure_session("c4", metadata={"agent_id": "native:jaeger"})
+    assert not G._auto_route(app, store.get_session("c2"), "my calendar")
+    assert not G._auto_route(app, store.get_session("c3"), "my calendar")
+    assert not G._auto_route(app, store.get_session("c4"), "how are you")
+    assert store.get_session("c4")["metadata"]["agent_id"] == "native:jaeger"
 
 
 def test_specialist_sees_only_its_own_notes(tmp_path, monkeypatch):

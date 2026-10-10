@@ -66,3 +66,20 @@ def test_chat_chip_names_the_owner_and_puts_the_suggestion_first():
     assert chip == "with Jaeger" and default == "with Jaeger"
     assert items[0] == "★ Suggested: Gateway"
     assert "Hand off to Everyday" in items and not any("Jaeger" in i for i in items)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_auto_route_notice_offers_one_click_undo_back_to_jaeger():
+    harness = (
+        "global.window={};global.document={readyState:'loading',addEventListener(){}};"
+        f"require({json.dumps(str(STATIC / 'jaeger_agents_panel.js'))});"
+        "const J=window.jaegerAgents;"
+        f"J.setRoster(J.sortAgents({json.dumps(AGENTS)}));"
+        "const auto={agent_id:'native:everyday',metadata:{routed_by:'auto',previous_agent_id:'native:jaeger'}};"
+        "const owner={agent_id:'native:everyday',metadata:{routed_by:'owner',previous_agent_id:'native:jaeger'}};"
+        "console.log(JSON.stringify([J.routedNotice(auto),J.routedNotice(owner)]));"
+    )
+    out = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=30, check=True)
+    auto, owner = json.loads(out.stdout)
+    assert auto == {"text": "Jaeger handed this to Everyday", "undoTo": "native:jaeger"}
+    assert owner is None

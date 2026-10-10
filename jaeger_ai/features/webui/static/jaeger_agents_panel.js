@@ -52,6 +52,7 @@
       '.jaeger-agent-chip{border:1px solid var(--border,rgba(127,127,127,.35));border-radius:999px;background:transparent;color:inherit;padding:2px 10px;cursor:pointer;font:inherit}'+
       '.jaeger-agent-menu{position:absolute;top:26px;left:0;z-index:50;min-width:200px;background:var(--bg,#111);border:1px solid var(--border,rgba(127,127,127,.35));border-radius:8px;padding:4px}'+
       '.jaeger-agent-menu button{display:block;width:100%;text-align:left;background:transparent;border:0;color:inherit;padding:6px 8px;border-radius:6px;cursor:pointer;font:inherit}.jaeger-agent-menu button:hover{background:rgba(127,127,127,.15)}'+
+      '.jaeger-routed{opacity:.8}.jaeger-undo{background:transparent;border:0;color:#4af;cursor:pointer;font:inherit;padding:0;text-decoration:underline}'+
       '.jaeger-agent-dot{width:8px;height:8px;border-radius:50%;background:#7a8;flex:none}.jaeger-agent-dot.lead{background:#4af}';
     document.head.appendChild(st);
   }
@@ -65,7 +66,7 @@
   }
 
   // ── Chat header: which agent owns this conversation + "Hand off to…" ──
-  let roster=[],chipSid=null;
+  let roster=[],chipSid=null,chipAt=0;
   function agentById(id){return roster.find(a=>a.id===id);}
   function chipText(sess){
     const a=agentById(sess.agent_id||'native:jaeger');
@@ -76,6 +77,10 @@
     return roster.filter(a=>a.id!==cur).map(a=>({id:a.id,text:(a.id===sug?'★ Suggested: ':'Hand off to ')+label(a)}))
       .sort((x,y)=>(y.text.startsWith('★'))-(x.text.startsWith('★')));
   }
+  function routedNotice(sess){
+    const m=sess.metadata||{};if(m.routed_by!=='auto'||!m.previous_agent_id)return null;
+    const a=agentById(sess.agent_id);return {text:'Jaeger handed this to '+(a?label(a):sess.agent_id),undoTo:m.previous_agent_id};
+  }
   async function handoff(sid,to){
     await getJSON('api/jaeger/sessions/'+encodeURIComponent(sid)+'/handoff',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({to_agent_id:to,reason:'owner',keep_history:true})});
@@ -85,8 +90,8 @@
     const sid=curSid();
     let chip=document.getElementById('jaegerAgentChip');
     if(!sid){if(chip)chip.hidden=true;return;}
-    if(sid===chipSid&&chip&&!chip.hidden)return;
-    chipSid=sid;
+    if(sid===chipSid&&chip&&!chip.hidden&&Date.now()-chipAt<4000)return;
+    chipSid=sid;chipAt=Date.now();
     let sess;try{sess=await getJSON('api/jaeger/sessions/'+encodeURIComponent(sid));}catch(_){if(chip)chip.hidden=true;return;}
     if(!chip){
       const host=document.getElementById('appTitlebarTitle');if(!host||!host.parentNode)return;
@@ -101,7 +106,11 @@
       o.addEventListener('click',()=>{m.hidden=true;handoff(sid,it.id).catch(e=>console.warn('handoff',e));});m.appendChild(o);}
     b.addEventListener('click',()=>{m.hidden=!m.hidden;});
     chip.appendChild(b);chip.appendChild(m);
+    const n=routedNotice(sess);
+    if(n){const t=document.createElement('span');t.className='jaeger-routed';t.textContent=' '+n.text+' · ';
+      const u=document.createElement('button');u.type='button';u.className='jaeger-undo';u.textContent='Undo';
+      u.addEventListener('click',()=>handoff(sid,n.undoTo).catch(e=>console.warn('undo',e)));t.appendChild(u);chip.appendChild(t);}
   }
-  window.jaegerAgents={sortAgents,label,homeId,boot,chipText,menuItems,setRoster:r=>{roster=r;}};
+  window.jaegerAgents={sortAgents,label,homeId,boot,chipText,menuItems,routedNotice,setRoster:r=>{roster=r;}};
   if(typeof document!=='undefined'&&document.readyState!=='loading')boot();else document.addEventListener('DOMContentLoaded',boot);
 })();

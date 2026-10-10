@@ -2035,6 +2035,9 @@ class JaegerGatewayApp:
             "previous_agent_id": previous_agent_id,
             "handoff_reason": reason,
             "handed_off_at": time.time(),
+            # An explicit handoff is the owner's choice: auto-routing never overrides it.
+            "agent_pinned": True,
+            "routed_by": "owner",
         }
         updated = self.store.update_metadata(session_id, patch)
         if updated is None:
@@ -2331,26 +2334,41 @@ class JaegerGatewayApp:
             "notes_dir": self.agent_memory_dir(str(getattr(agent, "name", "") or "")),
         }
 
-    def _suggest_route(self, session: dict[str, Any] | None, agent: Any, text: str) -> None:
-        """Lead triage, once per conversation: record which specialist fits.
+    def _auto_route(self, session: dict[str, Any] | None, text: str) -> bool:
+        """Lead triage, once per conversation, before the first turn runs.
 
-        Only a suggestion; the owner accepts it with a session handoff."""
+        A chat still on Jaeger by default moves to the one specialist whose
+        domain clearly matches; the move is a normal session handoff with a
+        visible notice and one-click undo. Home sessions and chats the owner
+        assigned (``agent_pinned``) are never moved. True when it handed off."""
         meta = (session or {}).get("metadata") or {}
-        if not session or meta.get("route_checked") or meta.get("home"):
-            return
-        role = getattr(getattr(agent, "role", None), "value", None)
-        if agent is not None and role != "lead":
-            return
+        if not session or meta.get("route_checked") or meta.get("home") or meta.get("agent_pinned"):
+            return False
+        from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID
+
+        current = self._session_agent_id(session)
+        if current not in (None, LEAD_AGENT_ID):
+            return False
+        sid = session["session_id"]
         try:
             from jaeger_ai.core.agent_registry.router import suggest_specialist
 
-            patch: dict[str, Any] = {"route_checked": True}
             target = suggest_specialist(text)
-            if target:
-                patch["suggested_agent_id"] = target
-            self.store.update_metadata(session["session_id"], patch)
+            if not target or self._registry().get_agent(target) is None:
+                self.store.update_metadata(sid, {"route_checked": True})
+                return False
+            self.store.update_metadata(sid, {
+                "route_checked": True, "agent_id": target, "previous_agent_id": current or LEAD_AGENT_ID,
+                "routed_by": "auto", "handoff_reason": "matched specialty", "handed_off_at": time.time(),
+            })
+            self.event_bus.publish(sid, "session.handoff", {
+                "session_id": sid, "from_agent_id": current or LEAD_AGENT_ID, "to_agent_id": target,
+                "reason": "auto-routed", "routed_by": "auto", "keep_history": True,
+            })
+            return True
         except Exception:  # noqa: BLE001 — triage must never fail a turn
-            logger.debug("route suggestion failed", exc_info=True)
+            logger.debug("auto-route failed", exc_info=True)
+            return False
 
     def _resolve_session_agent(self, session_id: str):
         """Look up the session's AgentRecord via AgentRegistry (or None)."""
@@ -3156,10 +3174,11 @@ class JaegerGatewayApp:
         Cancellation is explicit; a dropped SSE client does not stop work.
         """
         session = self.store.get_session(session_id)
+        if self._auto_route(session, text):
+            session = self.store.get_session(session_id)
         session_agent_id = self._session_agent_id(session)
         agent = self._resolve_session_agent(session_id)
         system_prompt = self._system_prompt_for_agent(agent)
-        self._suggest_route(session, agent, text)
         agent_fields: dict[str, Any] = {}
         if session_agent_id:
             agent_fields["agent_id"] = session_agent_id
