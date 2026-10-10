@@ -44,3 +44,16 @@ def test_apply_archives_through_the_patch_writer_and_restore_undoes_it(tmp_path)
     calls.clear()
     assert h.restore(manifest, patch) == {"sota-A": 200, "noskip-B": 200}
     assert calls == [("sota-A", False), ("noskip-B", False)]
+
+
+def test_gateway_archives_probe_sessions_at_creation_but_never_a_new_chat(tmp_path):
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+
+    store = GatewaySessionStore(tmp_path / "s.sqlite3")
+    probe = h.archive_on_create(store, store.ensure_session("sota-X-1", title="New Conversation"))
+    assert probe["metadata"]["archived"] is True and probe["metadata"]["auto_archived"]
+    titled = h.archive_on_create(store, store.ensure_session("abc", title="stack-verify-probe"))
+    assert titled["metadata"]["archived"] is True
+    chat = h.archive_on_create(store, store.ensure_session("def", title="New Conversation"))
+    assert not (chat.get("metadata") or {}).get("archived")
+    assert store.get_session("sota-X-1") is not None  # archived, not deleted

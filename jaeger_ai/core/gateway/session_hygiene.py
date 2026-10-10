@@ -42,8 +42,11 @@ _JUNK_TITLE = (
 _EMPTY_TITLES = frozenset({"new conversation", "new chat", ""})
 
 
-def classify(row: dict[str, Any]) -> tuple[str, str]:
-    """Return (kind, reason). kind is chat | system | agent | junk."""
+def classify(row: dict[str, Any], *, at_creation: bool = False) -> tuple[str, str]:
+    """Return (kind, reason). kind is chat | system | agent | junk.
+
+    ``at_creation`` skips the empty-conversation rule: every chat starts empty.
+    """
     sid = str(row.get("session_id") or "")
     title = str(row.get("title") or "").strip()
     meta = row.get("metadata") or {}
@@ -57,9 +60,19 @@ def classify(row: dict[str, Any]) -> tuple[str, str]:
     for rx, why in _JUNK_TITLE:
         if rx.search(title):
             return "junk", why
-    if int(row.get("message_count") or 0) == 0 and title.lower() in _EMPTY_TITLES:
+    if not at_creation and int(row.get("message_count") or 0) == 0 and title.lower() in _EMPTY_TITLES:
         return "junk", "empty conversation"
     return "chat", "conversation"
+
+
+def archive_on_create(store: Any, session: dict[str, Any]) -> dict[str, Any]:
+    """Gateway hook: a probe/test/benchmark session is archived the moment it is
+    created, so it never reaches the sidebar. Recorded, reversible, never deleted."""
+    kind, why = classify(session, at_creation=True)
+    if kind != "junk":
+        return session
+    store.update_metadata(session["session_id"], {"auto_archived": why})
+    return store.set_session_archived(session["session_id"], True) or session
 
 
 def plan(rows: list[dict[str, Any]]) -> list[dict[str, str]]:
