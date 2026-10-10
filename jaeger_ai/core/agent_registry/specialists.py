@@ -17,7 +17,7 @@ LEAD_AGENT_ID = "native:jaeger"
 LEAD_NAME = "jaeger"
 LEAD_DISPLAY = "Jaeger"
 _OLD_LEAD_DISPLAY = "Assistant"  # pre-2026-10-09 default; migrated once
-_TEST_AGENT = re.compile(r"(?i)(^|[-_])(test|probe|bench|tmp)([-_]|$)|onboarding-.*test")
+_TEST_AGENT = re.compile(r"(?i)(^|[-_])(test|probe|bench|tmp)([-_]|$)|onboarding-.*test|\.bak\.")
 
 STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
     {

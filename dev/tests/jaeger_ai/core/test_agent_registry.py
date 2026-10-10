@@ -1006,5 +1006,6 @@ def test_lead_is_named_jaeger_old_default_migrates_and_test_agents_are_hidden(tm
         def __init__(self, name, role):
             self.name, self.role = name, role
     assert is_test_agent(R("onboarding-character-test-20260913", "runtime"))
+    assert is_test_agent(R("os-1.bak.20260913T040826", "runtime"))
     assert not is_test_agent(R("everyday", "specialist"))
     assert not is_test_agent(R("health", "runtime"))

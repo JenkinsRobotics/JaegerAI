@@ -5,6 +5,8 @@
 (function(){
   'use strict';
   const ORDER={lead:0,specialist:1};
+  // sessions.js declares S with let at top level: a global binding, not a window property.
+  function curSid(){try{return (typeof S!=='undefined'&&S&&S.session&&S.session.session_id)||null;}catch(_){return null;}}
   function visible(a){return a&&!a.hidden&&(a.role==='lead'||a.role==='specialist');}
   function label(a){return a.role==='lead'?'Jaeger':(a.display_name||a.name||a.id);}
   function sortAgents(list){
@@ -38,7 +40,7 @@
       b.addEventListener('click',()=>open(a).catch(e=>console.warn('agent open',e)));
       root.appendChild(b);
     }
-    const cur=window.S&&S.session&&S.session.session_id;if(cur)mark(cur);
+    const cur=curSid();if(cur)mark(cur);
   }
   function css(){
     if(document.getElementById('jaegerAgentsCss'))return;
@@ -80,7 +82,7 @@
     chipSid=null;await refreshChip();
   }
   async function refreshChip(){
-    const sid=window.S&&S.session&&S.session.session_id;
+    const sid=curSid();
     let chip=document.getElementById('jaegerAgentChip');
     if(!sid){if(chip)chip.hidden=true;return;}
     if(sid===chipSid&&chip&&!chip.hidden)return;
