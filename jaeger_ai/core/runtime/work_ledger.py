@@ -862,3 +862,8 @@ __all__ = [
     "set_progress_publisher",
     "work_ledger",
 ]
+
+
+# framework_read / framework_delegate ride the same builtin-registration
+# import (main.py is on hold; move this there when the hold lifts).
+from jaeger_ai.core.frameworks import tools as _framework_tools  # noqa: E402,F401
