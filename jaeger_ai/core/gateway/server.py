@@ -2315,6 +2315,27 @@ class JaegerGatewayApp:
         out["display_name"] = agent.display_name
         return out
 
+    def _suggest_route(self, session: dict[str, Any] | None, agent: Any, text: str) -> None:
+        """Lead triage, once per conversation: record which specialist fits.
+
+        Only a suggestion; the owner accepts it with a session handoff."""
+        meta = (session or {}).get("metadata") or {}
+        if not session or meta.get("route_checked") or meta.get("home"):
+            return
+        role = getattr(getattr(agent, "role", None), "value", None)
+        if agent is not None and role != "lead":
+            return
+        try:
+            from jaeger_ai.core.agent_registry.router import suggest_specialist
+
+            patch: dict[str, Any] = {"route_checked": True}
+            target = suggest_specialist(text)
+            if target:
+                patch["suggested_agent_id"] = target
+            self.store.update_metadata(session["session_id"], patch)
+        except Exception:  # noqa: BLE001 — triage must never fail a turn
+            logger.debug("route suggestion failed", exc_info=True)
+
     def _resolve_session_agent(self, session_id: str):
         """Look up the session's AgentRecord via AgentRegistry (or None)."""
         session = self.store.get_session(session_id)
@@ -3099,6 +3120,7 @@ class JaegerGatewayApp:
         session_agent_id = self._session_agent_id(session)
         agent = self._resolve_session_agent(session_id)
         system_prompt = self._system_prompt_for_agent(agent)
+        self._suggest_route(session, agent, text)
         agent_fields: dict[str, Any] = {}
         if session_agent_id:
             agent_fields["agent_id"] = session_agent_id

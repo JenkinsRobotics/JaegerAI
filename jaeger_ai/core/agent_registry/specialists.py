@@ -25,18 +25,21 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "display_name": "Surfaces",
         "specialty": "surfaces",
         "summary": "Mac app + WebUI chrome, nav, branding, and session UX.",
+        "keywords": ("webui", "menu bar", "menubar", "sidebar", "avatar", "branding", "mac app", "swift"),
     },
     {
         "name": "gateway",
         "display_name": "Gateway",
         "specialty": "gateway",
         "summary": "Spine health, agents catalog, sessions, and approvals on :8810.",
+        "keywords": ("gateway", "8810", "sse", "approval", "approvals", "session store", "agents catalog"),
     },
     {
         "name": "everyday",
         "display_name": "Everyday",
         "specialty": "everyday",
         "summary": "Daily-driver tasks: calendar, mail, reminders, host helpers.",
+        "keywords": ("calendar", "email", "mail", "inbox", "reminder", "reminders", "meeting", "schedule"),
     },
 )
 
