@@ -17516,6 +17516,11 @@ def handle_post(handler, parsed) -> bool:
         with _get_session_agent_lock(sid):
             s.archived = bool(body.get("archived", True))
             s.save(touch_updated_at=False)
+        try:  # Jaeger: the Gateway owns archive state; keep it in step (no-op if not Gateway-backed).
+            from api.gateway_mirror import push_archived
+            push_archived(sid, s.archived)
+        except Exception:
+            pass
         publish_session_list_changed(
             "session_archive",
             profile=getattr(s, "profile", None),
