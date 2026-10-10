@@ -25,6 +25,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "display_name": "Surfaces",
         "specialty": "surfaces",
         "summary": "Mac app + WebUI chrome, nav, branding, and session UX.",
+        "allowed_tools": ("read_file", "search_files", "write_file", "patch", "terminal", "ide_context", "ide_diagnostics", "ide_open_file", "vision_analyze", "web_search", "web_extract", "update_plan", "get_time", "agent_notes"),
         "keywords": ("webui", "menu bar", "menubar", "sidebar", "avatar", "branding", "mac app", "swift"),
     },
     {
@@ -32,6 +33,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "display_name": "Gateway",
         "specialty": "gateway",
         "summary": "Spine health, agents catalog, sessions, and approvals on :8810.",
+        "allowed_tools": ("read_file", "search_files", "terminal", "exec_command", "system_status", "self_check", "list_background", "check_background", "web_search", "update_plan", "get_time", "calculate", "agent_notes"),
         "keywords": ("gateway", "8810", "sse", "approval", "approvals", "session store", "agents catalog"),
     },
     {
@@ -39,6 +41,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "display_name": "Everyday",
         "specialty": "everyday",
         "summary": "Daily-driver tasks: calendar, mail, reminders, host helpers.",
+        "allowed_tools": ("get_events", "create_event", "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage", "move_mail", "sweep_mail", "send_email", "lookup_contact", "todo", "notify", "list_schedules", "schedule_prompt", "get_time", "calculate", "get_weather", "web_search", "web_extract", "update_plan", "agent_notes"),
         "keywords": ("calendar", "email", "mail", "inbox", "reminder", "reminders", "meeting", "schedule"),
     },
 )
@@ -171,3 +174,19 @@ def is_test_agent(record) -> bool:
     """Leftover onboarding/probe instances: kept in the registry, hidden from the roster."""
     role = getattr(getattr(record, "role", None), "value", getattr(record, "role", None))
     return str(role) == "runtime" and bool(_TEST_AGENT.search(str(getattr(record, "name", "") or "")))
+
+
+def specialist_tools(agent) -> list[str] | None:
+    """Per-agent allowed tools (Claude Code subagent ``tools:`` list).
+
+    ``metadata.allowed_tools`` on the registry record wins; else the standing
+    definition; None when the agent has no scoped set (it stays model-only)."""
+    meta = getattr(agent, "metadata", None) or {}
+    own = meta.get("allowed_tools") if isinstance(meta, dict) else None
+    if isinstance(own, list) and all(isinstance(x, str) for x in own):
+        return list(own)
+    name = str(getattr(agent, "name", "") or "")
+    for spec in STANDING_SPECIALISTS:
+        if spec["name"] == name:
+            return list(spec.get("allowed_tools") or ())
+    return None

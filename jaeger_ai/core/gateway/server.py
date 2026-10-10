@@ -2315,6 +2315,22 @@ class JaegerGatewayApp:
         out["display_name"] = agent.display_name
         return out
 
+    def _specialist_scope(self, agent: Any, execution: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The specialist's tool grant and notes dir for this turn, or None (model-only)."""
+        if execution is None:
+            return None
+        from jaeger_ai.core.agent_registry.specialists import specialist_tools
+
+        tools = specialist_tools(agent)
+        if not tools:
+            return None
+        grant = execution.get("allowed_tools")
+        scoped = list(tools) if grant is None else [t for t in tools if t in set(grant)]
+        return {
+            "execution": {**execution, "allowed_tools": scoped},
+            "notes_dir": self.agent_memory_dir(str(getattr(agent, "name", "") or "")),
+        }
+
     def _suggest_route(self, session: dict[str, Any] | None, agent: Any, text: str) -> None:
         """Lead triage, once per conversation: record which specialist fits.
 
@@ -3157,6 +3173,12 @@ class JaegerGatewayApp:
                 "display_name": agent.display_name,
             }
         role_s = str(agent_fields.get("role") or "")
+        # A specialist runs on the same agent loop as Jaeger with its own
+        # allowed tools (intersected with any admitted grant) and its own notes
+        # (Claude Code subagent pattern). Without a scoped set it stays model-only.
+        specialist_scope = self._specialist_scope(agent, execution) if role_s == "specialist" else None
+        if specialist_scope is not None:
+            execution = specialist_scope["execution"]
         rid = request_id or turn_id
         admitted_request = self.store.get_request(rid)
         # One Goal/TaskCard per operational turn (see _open_turn_card). None for conversation.
@@ -3369,8 +3391,15 @@ class JaegerGatewayApp:
             if tier == "chat":
                 model_only = True
             else:
-                model_only = (text_only and not actionable) or role_s == "specialist"
-            turn_result = await asyncio.to_thread(_model_only_lane if model_only else _sync_react, prompt)
+                model_only = (text_only and not actionable) or (
+                    role_s == "specialist" and specialist_scope is None)
+            if specialist_scope is not None and not model_only:
+                prompt = f"[Agent]\n{system_prompt}\n\n" + prompt
+                from jaeger_agent.tools.agent_notes import bound_notes_dir
+                with bound_notes_dir(specialist_scope["notes_dir"]):
+                    turn_result = await asyncio.to_thread(_sync_react, prompt)
+            else:
+                turn_result = await asyncio.to_thread(_model_only_lane if model_only else _sync_react, prompt)
             if prepared is not None and not turn_result.get("error"):
                 try:
                     await asyncio.to_thread(runtime.finish_turn, prepared, str(turn_result.get("text") or ""))

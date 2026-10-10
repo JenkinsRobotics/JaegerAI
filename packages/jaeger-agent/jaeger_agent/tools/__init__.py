@@ -57,6 +57,7 @@ from .meta import describe_tool, load_tools
 
 # Memory
 from .memory import forget, list_facts, memory, recall, remember, search_memory
+from .agent_notes import agent_notes
 from .insights import record_insight, recall_insight
 
 # Scheduling
