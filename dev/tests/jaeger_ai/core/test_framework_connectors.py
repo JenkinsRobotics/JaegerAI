@@ -10,6 +10,19 @@ from jaeger_ai.core.frameworks import connectors, delegate
 from jaeger_ai.core.frameworks.grants import FrameworkGrants
 
 
+@pytest.fixture(autouse=True)
+def _isolated_runtime(tmp_path, monkeypatch):
+    """PolicyKernel.evaluate can create the EntityRuntime singleton; never let it
+    bind the real instance or outlive this test (it leaked grants into later
+    approval tests)."""
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "jh"))
+    EntityRuntime.reset_singleton()
+    yield
+    EntityRuntime.reset_singleton()
+
+
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     home = tmp_path / "home"
