@@ -5,7 +5,7 @@
 (function(){
   'use strict';
   const ORDER={lead:0,specialist:1};
-  function visible(a){return a&&(a.role==='lead'||a.role==='specialist');}
+  function visible(a){return a&&!a.hidden&&(a.role==='lead'||a.role==='specialist');}
   function label(a){return a.role==='lead'?'Jaeger':(a.display_name||a.name||a.id);}
   function sortAgents(list){
     return list.filter(visible).sort((x,y)=>

@@ -7,6 +7,7 @@ sidebar names). ``AgentRecord.role`` is lead|specialist|runtime; domain labels
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from jaeger_ai.core.agent_registry.types import AgentKind, AgentRecord, AgentRole
@@ -14,7 +15,9 @@ from jaeger_ai.core.agent_registry.types import AgentKind, AgentRecord, AgentRol
 # Lead stays the primary face; specialists are callable via handoff / call_agent.
 LEAD_AGENT_ID = "native:jaeger"
 LEAD_NAME = "jaeger"
-LEAD_DISPLAY = "Assistant"
+LEAD_DISPLAY = "Jaeger"
+_OLD_LEAD_DISPLAY = "Assistant"  # pre-2026-10-09 default; migrated once
+_TEST_AGENT = re.compile(r"(?i)(^|[-_])(test|probe|bench|tmp)([-_]|$)|onboarding-.*test")
 
 STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
     {
@@ -54,6 +57,8 @@ def _needs_seed(registry) -> bool:
             return True
     lead = agents.get(LEAD_AGENT_ID)
     if not isinstance(lead, dict):
+        return True
+    if lead.get("display_name") == _OLD_LEAD_DISPLAY:  # the default, never an owner rename
         return True
     if str(lead.get("role") or "") != AgentRole.LEAD.value and (
         lead.get("metadata") or {}
@@ -157,3 +162,9 @@ def ensure_standing_specialists(registry) -> list[AgentRecord]:
 
 def specialist_ids() -> list[str]:
     return [f"native:{s['name']}" for s in STANDING_SPECIALISTS]
+
+
+def is_test_agent(record) -> bool:
+    """Leftover onboarding/probe instances: kept in the registry, hidden from the roster."""
+    role = getattr(getattr(record, "role", None), "value", getattr(record, "role", None))
+    return str(role) == "runtime" and bool(_TEST_AGENT.search(str(getattr(record, "name", "") or "")))
