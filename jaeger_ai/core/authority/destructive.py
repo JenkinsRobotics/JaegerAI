@@ -230,6 +230,10 @@ def destructive_reason(tool_name: Any, arguments: Mapping[str, Any] | None) -> s
             cmd = shlex.join(str(c) for c in cmd)
         reason = shell_command_reason(str(cmd))
         return f"{reason} ({raw or cid})" if reason else None
+    if raw == "framework_delegate":
+        # Another agent acts on the owner's machine with its own tools: every
+        # handoff is approved by the owner for that call.
+        return f"handing a task to another agent framework ({args.get('framework') or '?'})"
     if cid == "delete_file" or raw in {"remove_file", "delete_path", "delete_dir", "remove_dir", "rmtree"}:
         target = next((args[k] for k in _PATH_KEYS if args.get(k)), "")
         if target and _in_scratch(str(target)):
