@@ -49,3 +49,20 @@ def test_home_session_request_is_stable_and_tagged_with_the_agent():
 
 def test_index_loads_the_roster():
     assert "static/jaeger_agents_panel.js" in (STATIC / "index.html").read_text()
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_chat_chip_names_the_owner_and_puts_the_suggestion_first():
+    harness = (
+        "global.window={};global.document={readyState:'loading',addEventListener(){}};"
+        f"require({json.dumps(str(STATIC / 'jaeger_agents_panel.js'))});"
+        "const J=window.jaegerAgents;"
+        f"J.setRoster(J.sortAgents({json.dumps(AGENTS)}));"
+        "const s={agent_id:'native:jaeger',metadata:{suggested_agent_id:'native:gateway'}};"
+        "console.log(JSON.stringify([J.chipText(s),J.menuItems(s).map(i=>i.text),J.chipText({})]));"
+    )
+    out = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=30, check=True)
+    chip, items, default = json.loads(out.stdout)
+    assert chip == "with Jaeger" and default == "with Jaeger"
+    assert items[0] == "★ Suggested: Gateway"
+    assert "Hand off to Everyday" in items and not any("Jaeger" in i for i in items)
