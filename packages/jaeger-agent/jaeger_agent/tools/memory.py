@@ -241,3 +241,6 @@ def _t_memory(action: str, key: str = "", value: str = "",
     ``describe_tool("memory")`` for the full when-to-call contract."""
     return memory(action=action, key=key, value=value, query=query,
                   category=category, subject=subject, tags=tags, note=note)
+
+# Specialist notes tool: registered with the memory tools it sits beside.
+from .agent_notes import agent_notes  # noqa: E402,F401
