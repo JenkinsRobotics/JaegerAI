@@ -122,3 +122,36 @@ def test_delegate_uses_fixed_safe_argv_in_a_scratch_dir(env, tmp_path, monkeypat
     assert Path(seen["cwd"]).is_relative_to(tmp_path / "jh") and seen["stdin"] is subprocess.DEVNULL
     assert out["content"].startswith('<untrusted_data source="codex:delegate">') and "ANSWER" in out["content"]
     assert "abcdefghijklmnopqrstuvwxyz0123" not in out["content"]
+
+
+def test_saved_diff_requires_git_check_before_apply(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    target = root / "note.txt"
+    target.write_text("before\n")
+    subprocess.run(["git", "-C", str(root), "add", "note.txt"], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-qm", "base"], check=True)
+
+    patch = tmp_path / "change.patch"
+    patch.write_text("""diff --git a/note.txt b/note.txt
+index 8a09d1a..c2d1f91 100644
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-before
++after
+""")
+    out = delegate.apply_saved_diff(patch, workspace=root)
+    assert out["ok"] is True
+    assert target.read_text() == "after\n"
+
+    with pytest.raises(ValueError, match="empty"):
+        empty = tmp_path / "empty.patch"
+        empty.write_text("")
+        delegate.apply_saved_diff(empty, workspace=root)
+
+    with pytest.raises(ValueError, match="git apply --check"):
+        bad = tmp_path / "bad.patch"
+        bad.write_text("This is not a patch")
+        delegate.apply_saved_diff(bad, workspace=root)

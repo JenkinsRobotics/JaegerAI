@@ -197,19 +197,18 @@ def test_build_jaeger_agent_honors_explicit_max_iterations():
     assert agent.max_iterations == 60
 
 
-def test_build_jaeger_agent_picks_120s_stall_for_local_backend():
+def test_build_jaeger_agent_picks_progress_aware_grace_for_local_backend():
     """In-process llama-cpp can have legitimately slow cold-prefill
-    plus a long decode on a 30B Q4. The default stall watchdog must
-    leave headroom (120s) so legitimate work doesn't false-positive
-    while still catching the multi-minute Metal hangs."""
+    plus a long decode on a 30B Q4. The default watchdog must leave
+    headroom while CallProgress still catches a multi-minute no-token hang."""
     agent = build_jaeger_agent(_FakeLocalClient())
-    assert agent.stale_call_timeout_s == 120.0
+    assert agent.stale_call_timeout_s == 300.0
 
 
 def test_build_jaeger_agent_honors_explicit_stall_timeout():
     """The caller (main.py reading config) can override the default —
     e.g. a power user who wants to surface stalls in 60s instead of
-    120s. Pin the override path."""
+    the local-model default. Pin the override path."""
     agent = build_jaeger_agent(
         _FakeLocalClient(),
         stale_call_timeout_s=42.0,

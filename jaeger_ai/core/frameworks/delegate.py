@@ -46,6 +46,44 @@ def workspace_root() -> Path:
     return home / "instances" / "jaeger" / "workspace" / "delegations"
 
 
+def apply_saved_diff(patch_file: str | os.PathLike[str], *, workspace: str | os.PathLike[str]) -> dict[str, Any]:
+    """Apply a saved delegated diff after Git accepts it.
+
+    Delegated output is untrusted.  It must be saved to a file first; empty,
+    prose, or malformed patches fail before any working-tree mutation.  The
+    caller supplies the exact worktree, so this is not a model-facing tool.
+    """
+    patch = Path(patch_file).expanduser()
+    root = Path(workspace).expanduser().resolve()
+    if not patch.is_file():
+        raise FileNotFoundError(f"delegated patch does not exist: {patch}")
+    if patch.stat().st_size == 0:
+        raise ValueError("delegated patch is empty")
+    if not root.is_dir():
+        raise FileNotFoundError(f"patch workspace does not exist: {root}")
+    probe = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+        capture_output=True, text=True, check=False,
+    )
+    if probe.returncode != 0:
+        raise ValueError(f"patch workspace is not a Git worktree: {root}")
+    check = subprocess.run(
+        ["git", "-C", str(root), "apply", "--check", str(patch)],
+        capture_output=True, text=True, check=False,
+    )
+    if check.returncode != 0:
+        detail = (check.stderr or check.stdout or "git apply --check rejected the patch").strip()
+        raise ValueError(f"delegated patch failed git apply --check: {detail[:1000]}")
+    applied = subprocess.run(
+        ["git", "-C", str(root), "apply", str(patch)],
+        capture_output=True, text=True, check=False,
+    )
+    if applied.returncode != 0:
+        detail = (applied.stderr or applied.stdout or "git apply failed").strip()
+        raise RuntimeError(f"delegated patch failed to apply: {detail[:1000]}")
+    return {"ok": True, "patch": str(patch), "workspace": str(root)}
+
+
 def run(fid: str, task: str, *, grants: FrameworkGrants | None = None,
         runner=subprocess.run) -> dict[str, Any]:
     from jaeger_ai.core.redaction import redact_text
