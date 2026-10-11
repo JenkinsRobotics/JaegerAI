@@ -103,6 +103,7 @@ TURN_ROUTES = frozenset({
     ("POST", "/v1/sessions/{id}/reconcile"),
     ("POST", "/v1/sessions/{id}/attachments"),
     ("POST", "/v1/sessions/{id}/feedback"),
+    ("POST", "/v1/sessions/{id}/annotations"),
     ("POST", "/v1/sessions/{id}/branch"),
     ("POST", "/v1/sessions/{id}/retry"),
 })

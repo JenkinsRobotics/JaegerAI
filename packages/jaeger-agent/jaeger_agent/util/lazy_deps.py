@@ -49,9 +49,6 @@ LAZY_DEPS: dict[str, FeatureSpec] = {
     "stt.whisper": FeatureSpec(
         "stt.whisper", "faster_whisper", ("faster-whisper",),
         "faster-whisper speech-to-text"),
-    "vision.moondream": FeatureSpec(
-        "vision.moondream", "moondream", ("moondream",),
-        "Moondream vision model"),
     "image.diffusers": FeatureSpec(
         "image.diffusers", "diffusers", ("diffusers", "torch"),
         "diffusers image generation (SDXL-Turbo)"),

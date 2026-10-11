@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from jaeger_ai.core.authority.kernel import AuthorityDecisionType, PolicyKernel, ProposedAction
+from jaeger_ai.core.authority.destructive import destructive_reason
 from jaeger_ai.core.frameworks import connectors, delegate
 from jaeger_ai.core.frameworks.grants import FrameworkGrants
 
@@ -79,6 +80,43 @@ def test_policy_kernel_enforces_the_grant_and_a_fresh_approval_for_handoff(env):
     assert d.decision is AuthorityDecisionType.REQUIRE_APPROVAL and d.policy_name == "destructive_action"
 
 
+@pytest.mark.parametrize("tool", ["shell", "terminal", "bash", "exec", "run_shell", "mcp__jaeger__terminal"])
+@pytest.mark.parametrize("command", [
+    "git checkout -b supervised-test",
+    "git switch feature/test",
+    "git reset --soft HEAD~1",
+    "git rebase main",
+    "git worktree add /tmp/child feature/test",
+])
+def test_policy_kernel_gates_checkout_head_changes_through_shell_aliases(tool, command):
+    reason = destructive_reason(tool, {"command": command})
+    assert reason and "HEAD" in reason or reason and "checkout state" in reason
+    decision = PolicyKernel().evaluate(ProposedAction(tool, {"command": command}))
+    assert decision.decision is AuthorityDecisionType.REQUIRE_APPROVAL
+    assert decision.policy_name == "destructive_action"
+
+
+def test_checkout_path_restore_is_not_mistaken_for_head_change():
+    assert destructive_reason("terminal", {"command": "git checkout -- src/file.py"})
+
+
+def test_read_only_worktree_listing_does_not_need_destructive_approval():
+    assert destructive_reason("terminal", {"command": "git worktree list --porcelain"}) is None
+
+
+def test_reset_hard_reports_discard_risk():
+    reason = destructive_reason("terminal", {"command": "git reset --hard HEAD"})
+    assert reason and "discards work" in reason
+
+
+def test_delegated_patch_application_always_needs_fresh_approval():
+    decision = PolicyKernel().evaluate(ProposedAction(
+        "framework_apply_diff", {"patch_file": "/tmp/delegation/output.txt"},
+    ))
+    assert decision.decision is AuthorityDecisionType.REQUIRE_APPROVAL
+    assert decision.policy_name == "destructive_action"
+
+
 def test_delegate_uses_fixed_safe_argv_in_a_scratch_dir(env, tmp_path, monkeypatch):
     _, grants = env
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "jh"))
@@ -101,3 +139,49 @@ def test_delegate_uses_fixed_safe_argv_in_a_scratch_dir(env, tmp_path, monkeypat
     assert Path(seen["cwd"]).is_relative_to(tmp_path / "jh") and seen["stdin"] is subprocess.DEVNULL
     assert out["content"].startswith('<untrusted_data source="codex:delegate">') and "ANSWER" in out["content"]
     assert "abcdefghijklmnopqrstuvwxyz0123" not in out["content"]
+    artifact = Path(out["artifact"])
+    assert artifact.parent == Path(seen["cwd"])
+    assert artifact.read_text() == "ANSWER sk-abcdefghijklmnopqrstuvwxyz0123"
+    assert artifact.stat().st_mode & 0o777 == 0o600
+
+
+def test_saved_diff_requires_git_check_before_apply(tmp_path, monkeypatch):
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    target = root / "note.txt"
+    target.write_text("before\n")
+    subprocess.run(["git", "-C", str(root), "add", "note.txt"], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-qm", "base"], check=True)
+
+    delegation_root = tmp_path / "delegations"
+    delegation_root.mkdir()
+    patch = delegation_root / "change.patch"
+    patch.write_text("""diff --git a/note.txt b/note.txt
+index 8a09d1a..c2d1f91 100644
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-before
++after
+""")
+    monkeypatch.setattr(delegate, "workspace_root", lambda: delegation_root)
+    monkeypatch.setattr("jaeger_agent.core.workspace.get_project_root", lambda: root)
+    out = delegate.apply_saved_diff(patch)
+    assert out["ok"] is True
+    assert target.read_text() == "after\n"
+
+    with pytest.raises(ValueError, match="empty"):
+        empty = delegation_root / "empty.patch"
+        empty.write_text("")
+        delegate.apply_saved_diff(empty)
+
+    with pytest.raises(ValueError, match="git apply --check"):
+        bad = delegation_root / "bad.patch"
+        bad.write_text("This is not a patch")
+        delegate.apply_saved_diff(bad)
+
+    outside = tmp_path / "outside.patch"
+    outside.write_text(patch.read_text())
+    with pytest.raises(PermissionError, match="artifact store"):
+        delegate.apply_saved_diff(outside)

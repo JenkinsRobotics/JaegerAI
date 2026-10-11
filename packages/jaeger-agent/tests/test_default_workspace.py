@@ -23,7 +23,7 @@ def test_default_workspace_uses_external_operator_state(tmp_path, monkeypatch) -
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "legacy-override"))
     ws = workspace.DefaultWorkspace().create()
     assert ws.root == (state / "agent").resolve()
-    assert ws.root.is_dir() and ws.workspace_dir.is_dir()
+    assert ws.root.is_dir() and ws.workspace_dir.is_dir() and ws.run_dir.is_dir()
     assert not list(source.iterdir())
 
 
@@ -31,7 +31,7 @@ def test_the_seven_paths_are_the_whole_contract(tmp_path) -> None:
     """Everything jaeger_agent asks of a host layout. JaegerAI's
     InstanceLayout satisfies it structurally; so does this."""
     ws = workspace.DefaultWorkspace(tmp_path / "ws")
-    for attr in ("root", "logs_dir", "skills_dir", "memory_dir",
+    for attr in ("root", "logs_dir", "skills_dir", "memory_dir", "run_dir",
                  "audit_log_path", "config_path", "identity_path"):
         assert isinstance(getattr(ws, attr), pathlib.Path), attr
 

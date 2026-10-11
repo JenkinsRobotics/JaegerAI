@@ -28610,6 +28610,15 @@ def _persist_handoff_summary_to_state_db(sid: str, message: dict) -> bool:
 def _persist_handoff_summary(sid: str, summary: str, channel: str | None, rounds: int | None, fallback: bool = False) -> dict:
     """Persist a handoff summary marker across local/session backends."""
     marker = _build_handoff_summary_tool_message(sid, summary, channel, rounds, fallback)
+    # The Gateway is the durable session owner.  Keep the legacy mirrors only
+    # as compatibility projections for sessions that predate Gateway routing.
+    try:
+        from jaeger_ai.core.gateway.client import GatewayTurnClient
+        GatewayTurnClient(caller="webui").append_annotation(
+            sid, name="handoff_summary", content=str(marker.get("content") or ""),
+        )
+    except Exception:
+        logger.debug("Gateway handoff annotation unavailable for %s", sid, exc_info=True)
     is_messaging_session = _is_messaging_session_id(sid)
     if is_messaging_session:
         _persist_handoff_summary_to_state_db(sid, marker)

@@ -434,12 +434,11 @@ def build_jaeger_agent(
     # The caller can override this for latency-sensitive surfaces.
     if stale_call_timeout_s is None:
         if adapter.__class__.__name__ in ("LocalLlamaAdapter", "MLXAdapter"):
-            # Cold prefill on a 30B Q4 can take ~60s; allow headroom
-            # for an unusual prompt without false-positive stall
-            # alarms during legitimate slow decodes. The pathological
-            # hang we're guarding against is multi-minute, so 120s
-            # catches it cleanly while letting normal work finish.
-            stale_call_timeout_s = 120.0
+            # Local prefill can be silent for several minutes on a cold,
+            # heavily quantized model.  The adapter supplies CallProgress for
+            # every decoded token, so this remains a no-progress timeout once
+            # generation starts instead of a wall-clock cap on a healthy turn.
+            stale_call_timeout_s = 300.0
         else:
             stale_call_timeout_s = 120.0
     agent = JaegerAgent(

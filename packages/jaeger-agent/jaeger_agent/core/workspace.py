@@ -134,13 +134,14 @@ class DefaultWorkspace:
         self.skills_dir = self.root / "skills"
         self.memory_dir = self.root / "memory"
         self.workspace_dir = self.root / "workspace"
+        self.run_dir = self.root / "run"
         self.audit_log_path = self.logs_dir / "audit.log"
         self.config_path = self.root / "config.yaml"
         self.identity_path = self.root / "identity.yaml"
 
     def create(self) -> "DefaultWorkspace":
         for directory in (self.logs_dir, self.skills_dir,
-                          self.memory_dir, self.workspace_dir):
+                          self.memory_dir, self.workspace_dir, self.run_dir):
             directory.mkdir(parents=True, exist_ok=True)
         return self
 

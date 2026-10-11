@@ -8,6 +8,7 @@ Validates that:
 """
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 import pytest
 
@@ -102,6 +103,40 @@ def test_entity_runtime_owns_subordinate_react(isolated_entity_runtime):
         assert state["agent"] is mock_agent
         assert mock_agent.messages[0]["content"] == "inspection evidence"
         assert mock_agent._skill_route_query == ""
+
+
+def test_entity_runtime_loads_code_skills_once_before_gateway_react(
+    isolated_entity_runtime, monkeypatch, tmp_path
+):
+    rt = isolated_entity_runtime
+    rt.layout = SimpleNamespace(
+        root=tmp_path,
+        skills_dir=tmp_path / "skills",
+        config_path=tmp_path / "config.yaml",
+    )
+    calls = []
+
+    monkeypatch.setattr(
+        "jaeger_agent.skill_registry.skill_loader.load_and_register",
+        lambda agent, layout, **kwargs: calls.append((agent, layout, kwargs)),
+    )
+    cfg = SimpleNamespace(
+        skills=SimpleNamespace(
+            run_smoke_tests=True,
+            enabled_base_skills=["macos_computer"],
+        )
+    )
+
+    rt._ensure_subordinate_skills(cfg)
+    rt._ensure_subordinate_skills(cfg)
+
+    assert len(calls) == 1
+    assert calls[0][0] is None
+    assert calls[0][1] is rt.layout
+    assert calls[0][2] == {
+        "run_smoke_tests": True,
+        "enabled_allowlist": ["macos_computer"],
+    }
 
 
 

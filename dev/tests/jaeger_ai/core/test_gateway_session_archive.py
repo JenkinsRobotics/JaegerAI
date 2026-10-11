@@ -83,3 +83,19 @@ class TestSessionArchiveRoute:
         assert response.status == 404
         response = asyncio.run(app.handle_patch_session(_PatchRequest(sid, {})))
         assert response.status == 400
+
+    def test_handoff_annotation_has_durable_identity_and_deduplicates(self, tmp_path):
+        app = self._app(tmp_path)
+        sid = self._create_session(app)
+        body = {"name": "handoff_summary", "content": '{"_handoff_summary_card":true}'}
+
+        created = asyncio.run(app.handle_session_annotation(_PatchRequest(sid, body)))
+        assert created.status == 201
+        message = app.store.get_session(sid)["messages"][-1]
+        assert message["role"] == "tool"
+        assert message["tool_calls"] == [{"type": "annotation", "name": "handoff_summary"}]
+
+        duplicate = asyncio.run(app.handle_session_annotation(_PatchRequest(sid, body)))
+        assert duplicate.status == 200
+        assert _body(duplicate)["duplicate"] is True
+        assert len(app.store.get_session(sid)["messages"]) == 1

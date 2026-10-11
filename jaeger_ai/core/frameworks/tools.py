@@ -41,3 +41,20 @@ def framework_delegate(framework: str, task: str) -> dict[str, Any]:
         return {"ok": True, **delegate.run(framework, task)}
     except (PermissionError, ValueError, FileNotFoundError) as exc:
         return {"ok": False, "error": str(exc)}
+
+
+@register_tool_from_function(name="framework_apply_diff", side_effect="write")
+def framework_apply_diff(patch_file: str) -> dict[str, Any]:
+    """Apply a delegated patch artifact to the active Git project.
+
+    patch_file must be the artifact path returned by framework_delegate. The
+    active project is supplied by the session and cannot be overridden here.
+    Git validates the complete patch before any file is changed, and the owner
+    must approve every call.
+    """
+    from jaeger_ai.core.frameworks import delegate
+
+    try:
+        return delegate.apply_saved_diff(patch_file)
+    except (PermissionError, ValueError, FileNotFoundError, RuntimeError) as exc:
+        return {"ok": False, "error": str(exc)}
