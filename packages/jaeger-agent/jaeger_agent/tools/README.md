@@ -47,7 +47,7 @@ provide a one-line formatter in `_format_tool_result_as_answer`.
 | `web.py` | `web_search`, `web_fetch`, `get_weather` |
 | `code.py` | `run_python`, `run_shell` (sandboxed subprocess) |
 | `speak.py` | `speak` (literal text or workspace file), `warm_kokoro` (Kokoro TTS) |
-| `vision.py` | `look_at`, `generate_image` (Moondream2 + SDXL-Turbo) |
+| `vision.py` | `look_at`, `generate_image` (native llama.cpp mmproj + SDXL-Turbo) |
 | `host.py` | `open_on_host` (macOS: URL / file / app) |
 | `credentials.py` | `get_credential`, `list_credentials` |
 | `delegation.py` | `ask_user`, `help_me` |

@@ -162,6 +162,12 @@ class GatewayTurnClient:
 
         return self._call("GET", f"/v1/sessions/{quote(session_id, safe='')}")
 
+    def append_annotation(self, session_id: str, *, name: str, content: str) -> dict[str, Any]:
+        from urllib.parse import quote
+        return self._call("POST", f"/v1/sessions/{quote(session_id, safe='')}/annotations", {
+            "name": name, "content": content,
+        })
+
     def cancel(self, session_id: str, request_id: str) -> dict[str, Any]:
         return self._call("POST", f"/v1/sessions/{session_id}/cancel", {"request_id": request_id})
 

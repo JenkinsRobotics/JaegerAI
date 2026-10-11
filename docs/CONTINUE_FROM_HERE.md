@@ -2,7 +2,7 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `0.13-dev`
-**Current commit:** tag `0.13.0` (source head `9b361d68`)
+**Current commit:** `96390725` plus the uncommitted `release/0.14.0` candidate; see `docs/RELEASE_0.14.md`
 **Date:** 2026-09-28
 **Branch rule:** work on `0.13-dev`; do not modify or merge `master` unless the operator explicitly asks.
 

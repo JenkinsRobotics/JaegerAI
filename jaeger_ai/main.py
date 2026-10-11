@@ -2110,6 +2110,11 @@ def _get_agent(client: Any) -> object:
     exists only so the skill loader's ``_ToolCapturingAgent`` wrapper
     has something to wrap.
     """
+    from jaeger_agent.tools.vision import bind_native_vision
+
+    cfg = _pipeline.get("config")
+    mmproj = getattr(getattr(cfg, "multimodal", None), "vision_mmproj_path", "")
+    bind_native_vision(client, mmproj)
     key = _agent_key(client)
     if key not in _agent_cache:
         _agent_cache.clear()
@@ -4824,7 +4829,13 @@ class LlamaCppPythonClient:
                 try:
                     from jaeger_ai.core.models.aux_lane import spawn_aux_context
                     self._aux_llm = spawn_aux_context(self.llm, **self._aux_kwargs)
-                except Exception as exc:  # noqa: BLE001 — lane is an optimisation
+                    # The aux context shares the worker's model weights but
+                    # has its own KV cache. Copy the active native multimodal
+                    # handler so image side-calls use the same mmproj path.
+                    handler = getattr(self.llm, "chat_handler", None)
+                    if handler is not None:
+                        self._aux_llm.chat_handler = handler
+                except Exception as exc:  # noqa: BLE001 - lane is an optimisation
                     print(f"[jaeger] aux lane unavailable "
                           f"({type(exc).__name__}: {exc}); side-channel "
                           "calls will share the worker context.", flush=True)

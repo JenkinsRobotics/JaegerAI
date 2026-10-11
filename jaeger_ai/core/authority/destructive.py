@@ -104,8 +104,25 @@ def _git_reason(args: list[str]) -> str | None:
         return None
     sub, rest = args[i], args[i + 1:]
     fl = _flags(rest)
+    # Changing the checked-out ref changes the operator's checkout/HEAD.  This
+    # includes the root-level worktree command, whose child worktree may be
+    # created successfully while the current checkout's refs are changed.
+    # Keep this in the canonical command classifier so terminal/bash/exec and
+    # their namespaced aliases all receive the same approval gate.
     if sub == "reset" and "--hard" in fl | set(rest):
         return "git reset --hard discards work"
+    if sub in {"switch", "reset", "rebase"}:
+        return f"git {sub} changes the checkout HEAD"
+    if sub == "checkout" and "--" not in rest:
+        operands = _operands(rest)
+        # `git checkout -b name` and `git checkout branch` move HEAD; a
+        # path-only checkout is handled by the existing destructive rule.
+        if operands or "-b" in fl or "-B" in fl:
+            return "git checkout changes the checkout HEAD"
+    if sub == "worktree" and rest[:1] and rest[0] in {
+        "add", "lock", "move", "prune", "remove", "repair", "unlock",
+    }:
+        return "git worktree changes repository checkout state"
     if sub == "push" and ({"-f", "--force", "--force-with-lease", "--mirror", "--delete", "-d"} & fl
                           or any(a.startswith(("--force", "+")) or (a.startswith(":") and len(a) > 1)
                                  for a in rest)):
@@ -234,6 +251,8 @@ def destructive_reason(tool_name: Any, arguments: Mapping[str, Any] | None) -> s
         # Another agent acts on the owner's machine with its own tools: every
         # handoff is approved by the owner for that call.
         return f"handing a task to another agent framework ({args.get('framework') or '?'})"
+    if raw == "framework_apply_diff":
+        return "applying a delegated patch to the active project"
     if cid == "delete_file" or raw in {"remove_file", "delete_path", "delete_dir", "remove_dir", "rmtree"}:
         target = next((args[k] for k in _PATH_KEYS if args.get(k)), "")
         if target and _in_scratch(str(target)):

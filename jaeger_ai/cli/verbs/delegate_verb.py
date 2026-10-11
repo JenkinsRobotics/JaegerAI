@@ -23,6 +23,7 @@ import asyncio
 import json
 import sys
 import uuid
+from pathlib import Path
 
 from jaeger_ai.cli import _common as c
 
@@ -134,6 +135,7 @@ def _delegate_run(argv: list[str]) -> int:
         return 2
 
     from jaeger_agent.cognition.runs import InMemoryRunStore
+    from jaeger_agent.core.workspace import bind
     from jaeger_agent.delegates import (
         AllDelegatesFailed,
         DelegateExecutor,
@@ -150,11 +152,20 @@ def _delegate_run(argv: list[str]) -> int:
     request = DelegateRequest(
         task_id=run.id,
         prompt=prompt,
+        workspace=Path.cwd(),
         required_capabilities=caps,
         sensitivity=args.sensitivity,  # type: ignore[arg-type]
         timeout_seconds=args.timeout,
         idempotency_key=uuid.uuid4().hex,
     )
+    # The subprocess transport stores its admission/events/receipt under the
+    # active operator instance. Never use the reusable package's cwd-relative
+    # standalone default from a JaegerAI product entry point.
+    layout = c.get_active_instance_layout()
+    if layout is None:
+        print("jaeger delegate run: no active instance is configured", file=sys.stderr)
+        return 2
+    bind(layout, project_root=Path.cwd())
 
     async def go():
         if args.to and not args.chain:
