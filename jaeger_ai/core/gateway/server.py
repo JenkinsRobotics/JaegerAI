@@ -1160,6 +1160,7 @@ class JaegerGatewayApp:
         self.app.router.add_patch("/v1/sessions/{id}", self.handle_patch_session)
         self.app.router.add_post("/v1/sessions/{id}/branch", self.handle_branch_session)
         self.app.router.add_post("/v1/sessions/{id}/feedback", self.handle_message_feedback)
+        self.app.router.add_post("/v1/sessions/{id}/annotations", self.handle_session_annotation)
         self.app.router.add_get("/v1/sessions/{id}/feedback", self.handle_message_feedback)
         self.app.router.add_post("/v1/sessions/{id}/retry", self.handle_retry_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
@@ -1954,6 +1955,27 @@ class JaegerGatewayApp:
         })
         self.event_bus.publish(session_id, "message.feedback", event)
         return web.json_response({"ok": True, "feedback": event})
+
+    async def handle_session_annotation(self, request: web.Request) -> web.Response:
+        """Persist one bounded display-only annotation in the Gateway transcript."""
+        session_id = request.match_info["id"]
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        body = await request.json() if request.can_read_body else {}
+        if not isinstance(body, dict) or body.get("name") != "handoff_summary":
+            return web.json_response({"error": "Only handoff_summary annotations are supported"}, status=400)
+        content = body.get("content")
+        if not isinstance(content, str) or not content.strip() or len(content) > 20000:
+            return web.json_response({"error": "content must be a nonempty bounded string"}, status=400)
+        messages = (self.store.get_session(session_id) or {}).get("messages") or []
+        if messages and messages[-1].get("role") == "tool" and messages[-1].get("name") == "handoff_summary":
+            if messages[-1].get("content") == content:
+                return web.json_response({"ok": True, "duplicate": True})
+        message_id = self.store.append_message(session_id, "tool", content)
+        self.event_bus.publish(session_id, "message.annotation", {
+            "message_id": message_id, "name": "handoff_summary",
+        })
+        return web.json_response({"ok": True, "message_id": message_id}, status=201)
 
     async def handle_retry_session(self, request: web.Request) -> web.Response:
         """Replay the last completed request with a new durable identity."""
