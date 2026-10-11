@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from jaeger_ai.core.authority.kernel import AuthorityDecisionType, PolicyKernel, ProposedAction
+from jaeger_ai.core.authority.destructive import destructive_reason
 from jaeger_ai.core.frameworks import connectors, delegate
 from jaeger_ai.core.frameworks.grants import FrameworkGrants
 
@@ -77,6 +78,26 @@ def test_policy_kernel_enforces_the_grant_and_a_fresh_approval_for_handoff(env):
     grants.set("codex", "delegate", True, by="owner:webui")
     d = k.evaluate(deleg)
     assert d.decision is AuthorityDecisionType.REQUIRE_APPROVAL and d.policy_name == "destructive_action"
+
+
+@pytest.mark.parametrize("tool", ["shell", "terminal", "bash", "exec", "run_shell", "mcp__jaeger__terminal"])
+@pytest.mark.parametrize("command", [
+    "git checkout -b supervised-test",
+    "git switch feature/test",
+    "git reset --soft HEAD~1",
+    "git rebase main",
+    "git worktree add /tmp/child feature/test",
+])
+def test_policy_kernel_gates_checkout_head_changes_through_shell_aliases(tool, command):
+    reason = destructive_reason(tool, {"command": command})
+    assert reason and "HEAD" in reason or reason and "checkout state" in reason
+    decision = PolicyKernel().evaluate(ProposedAction(tool, {"command": command}))
+    assert decision.decision is AuthorityDecisionType.REQUIRE_APPROVAL
+    assert decision.policy_name == "destructive_action"
+
+
+def test_checkout_path_restore_is_not_mistaken_for_head_change():
+    assert destructive_reason("terminal", {"command": "git checkout -- src/file.py"})
 
 
 def test_delegate_uses_fixed_safe_argv_in_a_scratch_dir(env, tmp_path, monkeypatch):

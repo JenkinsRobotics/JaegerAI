@@ -104,6 +104,21 @@ def _git_reason(args: list[str]) -> str | None:
         return None
     sub, rest = args[i], args[i + 1:]
     fl = _flags(rest)
+    # Changing the checked-out ref changes the operator's checkout/HEAD.  This
+    # includes the root-level worktree command, whose child worktree may be
+    # created successfully while the current checkout's refs are changed.
+    # Keep this in the canonical command classifier so terminal/bash/exec and
+    # their namespaced aliases all receive the same approval gate.
+    if sub in {"switch", "reset", "rebase"}:
+        return f"git {sub} changes the checkout HEAD"
+    if sub == "checkout" and "--" not in rest:
+        operands = _operands(rest)
+        # `git checkout -b name` and `git checkout branch` move HEAD; a
+        # path-only checkout is handled by the existing destructive rule.
+        if operands or "-b" in fl or "-B" in fl:
+            return "git checkout changes the checkout HEAD"
+    if sub == "worktree":
+        return "git worktree changes repository checkout state"
     if sub == "reset" and "--hard" in fl | set(rest):
         return "git reset --hard discards work"
     if sub == "push" and ({"-f", "--force", "--force-with-lease", "--mirror", "--delete", "-d"} & fl
