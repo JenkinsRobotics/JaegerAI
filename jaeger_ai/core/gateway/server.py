@@ -504,6 +504,8 @@ class _GatewayToolConfirmationProvider:
         # approval card answers it; grants and autonomy shortcuts do not.
         if getattr(request, "force_prompt", False) is True:
             return self._decided(self._prompt(request))
+        if skill_name and skill_name in self._session_grants():
+            return True
         try:
             if self._grants().is_granted(skill_name):
                 return True
@@ -537,6 +539,18 @@ class _GatewayToolConfirmationProvider:
             pass
         return self._decided(self._prompt(request))
 
+    def _session_grants(self) -> set[str]:
+        """Skills the owner allowed "for this session" (session metadata)."""
+        try:
+            meta = (self.app.store.get_session(self.session_id) or {}).get("metadata") or {}
+            return {str(s) for s in meta.get("session_grants") or []}
+        except Exception:  # noqa: BLE001 — unreadable means "ask", never "allow"
+            return set()
+
+    def _grant_for_session(self, skill: str) -> None:
+        grants = sorted(self._session_grants() | {skill})
+        self.app.store.update_metadata(self.session_id, {"session_grants": grants})
+
     def _decided(self, approved: bool) -> bool:
         if not approved and self.request_id not in self.app._owner_unanswered:
             self.app._owner_declined.add(self.request_id)
@@ -561,7 +575,7 @@ class _GatewayToolConfirmationProvider:
             self.app.store.create_approval(
                 kind="tool_confirm",
                 prompt=f"Allow {skill}.{op}? {target}".strip(),
-                options=["once", "deny"],
+                options=APPROVAL_OPTIONS,
                 session_id=self.session_id,
                 request_id=self.request_id,
                 approval_id=aid,
@@ -577,6 +591,7 @@ class _GatewayToolConfirmationProvider:
                 "tool": f"{skill}.{op}" if skill else op,
                 "target": target,
                 "reason": tier_name,
+                "options": APPROVAL_OPTIONS,
                 "session_id": self.session_id,
                 "request_id": self.request_id,
             })
@@ -604,8 +619,14 @@ class _GatewayToolConfirmationProvider:
                 break
         else:
             approved = bool(box["approved"]) and not (scope is not None and scope.cancelled)
+            decision = (self.app.store.get_approval(aid) or {}).get("decision")
+            if approved and skill and decision == "session" and not getattr(request, "force_prompt", False):
+                try:
+                    self._grant_for_session(skill)
+                except Exception:  # noqa: BLE001 — the call itself stays approved
+                    logger.warning("could not record session grant for %s", skill, exc_info=True)
             if (approved and not getattr(request, "force_prompt", False)
-                    and (self.app.store.get_approval(aid) or {}).get("decision") == "always"):
+                    and decision == "always"):
                 try:
                     self._grants().grant_persistent(skill)
                 except Exception:  # noqa: BLE001 — the call itself stays approved
@@ -620,6 +641,11 @@ class _GatewayToolConfirmationProvider:
             return False
         row = self.app.store.get_approval(aid) or {}
         return row.get("decision") not in {None, "deny", "expired"}
+
+
+#: Tool-confirm card choices. ``session`` = "Allow for this session": recorded
+#: in the session's metadata (``session_grants``), never for force_prompt calls.
+APPROVAL_OPTIONS = ["once", "session", "deny"]
 
 
 def _proactive_notification_payload(
@@ -4778,7 +4804,7 @@ class JaegerGatewayApp:
         body = await request.json() if request.can_read_body else {}
         approved = bool(body.get("approved", True))
         decision = str(body.get("decision") or body.get("choice") or ("once" if approved else "deny"))
-        if decision not in {"once", "deny", "always", "allow", "yes"}:
+        if decision not in {"once", "session", "deny", "always", "allow", "yes"}:
             return web.json_response({"error": "Unsupported approval decision"}, status=400)
         approved = decision != "deny"
 
