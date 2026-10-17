@@ -79,6 +79,12 @@ class DurableTask:
     provenance: dict[str, Any] = field(default_factory=dict)
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
+    #: Agents View (Tasks board): which agent the work is for, when it should
+    #: land (ISO 8601 with offset) and who runs it (``native`` or
+    #: ``delegate:<agent id>``). Defaults keep every older row valid.
+    agent_id: str = ""
+    eta: str | None = None
+    runner: str = "native"
 
     @property
     def is_terminal(self) -> bool:
@@ -109,6 +115,9 @@ class DurableTask:
             "provenance": self.provenance,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
+            "agent_id": self.agent_id or self.owning_agent,
+            "eta": self.eta,
+            "runner": self.runner or "native",
         }
 
     @classmethod
@@ -151,6 +160,9 @@ class DurableTask:
             provenance=dict(data.get("provenance") or {}),
             created_at=data.get("created_at", time.time()),
             updated_at=data.get("updated_at", time.time()),
+            agent_id=str(data.get("agent_id") or ""),
+            eta=data.get("eta"),
+            runner=str(data.get("runner") or "native"),
         )
 
 

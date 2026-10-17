@@ -1230,6 +1230,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/frameworks", self.handle_list_frameworks)
         self.app.router.add_post("/v1/frameworks/{id}/grants", self.handle_framework_grant)
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
+        self.app.router.add_get("/v1/agents/summary", self.handle_agents_summary)
         self.app.router.add_get("/v1/agents/{id}", self.handle_get_agent)
         self.app.router.add_post("/v1/agents/{id}/activate", self.handle_activate_agent)
         self.app.router.add_post("/v1/agents/{id}/handoff", self.handle_handoff_agent)
@@ -1792,6 +1793,29 @@ class JaegerGatewayApp:
             return web.json_response({"error": str(exc)}, status=400)
         self.event_bus.publish("*", "agent.created", {"agent": record.to_dict()})
         return web.json_response(record.to_dict(), status=201)
+
+    async def handle_agents_summary(self, request: web.Request) -> web.Response:
+        """GET /v1/agents/summary — per-agent status for the sidebar and Tasks board.
+
+        Computed, never stored: from durable tasks (agent_id/eta/runner),
+        handoffs and the agent's direct-chat sessions. No agent_status table.
+        """
+        from jaeger_ai.core.gateway.agent_summary import summarize_agents
+        registry = self._registry()
+        agents = [a for a in registry.list_agents() if a.role.value in {"lead", "specialist"}]
+        tasks = [t.to_dict() for t in self.task_owner.store.list_tasks()] if self.task_owner else []
+        return web.json_response(summarize_agents(
+            [a.to_dict() for a in agents],
+            tasks=tasks,
+            handoffs=self.store.list_handoffs(limit=500),
+            sessions=self.store.list_sessions(),
+            last_message=self._last_message_preview,
+        ))
+
+    def _last_message_preview(self, session_id: str) -> str:
+        session = self.store.get_session(session_id) or {}
+        messages = session.get("messages") or []
+        return str(messages[-1].get("content") or "") if messages else ""
 
     async def handle_get_agent(self, request: web.Request) -> web.Response:
         agent_id = request.match_info["id"]
@@ -4749,9 +4773,43 @@ class JaegerGatewayApp:
             raise RuntimeError("Specialist native execution returned no confirmed result")
         return native
 
+    def _task_board_fields(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Validate the Tasks-board fields of a task submission (raises ValueError)."""
+        out: dict[str, Any] = {}
+        registry = None
+        if body.get('agent_id'):
+            registry = self._registry()
+            agent_id = str(body['agent_id']).strip()
+            if registry.get_agent(agent_id) is None:
+                raise ValueError(f'Unknown agent_id {agent_id!r}')
+            out['agent_id'] = agent_id
+        if body.get('eta'):
+            from datetime import datetime
+            eta = str(body['eta']).strip()
+            try:
+                parsed = datetime.fromisoformat(eta)
+            except ValueError as exc:
+                raise ValueError('eta must be ISO 8601') from exc
+            if parsed.tzinfo is None:
+                raise ValueError('eta must carry a UTC offset')
+            out['eta'] = eta
+        if body.get('runner'):
+            runner = str(body['runner']).strip()
+            if runner != 'native':
+                target = runner[len('delegate:'):] if runner.startswith('delegate:') else ''
+                registry = registry or self._registry()
+                if not target or registry.get_agent(target) is None:
+                    raise ValueError("runner must be 'native' or 'delegate:<agent id>'")
+            out['runner'] = runner
+        return out
+
     async def handle_tasks(self, request: web.Request) -> web.Response:
         if request.method == 'GET':
-            return web.json_response({'tasks': [t.to_dict() for t in self.task_owner.store.list_tasks()]})
+            tasks = [t.to_dict() for t in self.task_owner.store.list_tasks()]
+            agent_filter = request.query.get('agent_id')
+            if agent_filter:
+                tasks = [t for t in tasks if t.get('agent_id') == agent_filter]
+            return web.json_response({'tasks': tasks})
         tier = self._current_tier()
         if tier == "chat":
             return web.json_response({'error': 'Task submission is disabled in Chat mode'}, status=403)
@@ -4762,9 +4820,10 @@ class JaegerGatewayApp:
         execution = dict(body.get('execution') or {})
         execution.setdefault('workspace', parent.get('workspace') or '')
         try:
+            board = self._task_board_fields(body)
             result = self.task_owner.submit(str(body.get('goal') or ''),
                 context={'session_id': parent['session_id'], 'source': 'client', 'execution': execution,
-                         'request_id': body.get('request_id')},
+                         'request_id': body.get('request_id'), **board},
                 artifacts=body.get('artifacts'), proposal=bool(body.get('proposal')))
         except ValueError as exc:
             return web.json_response({'error': str(exc)}, status=400)
