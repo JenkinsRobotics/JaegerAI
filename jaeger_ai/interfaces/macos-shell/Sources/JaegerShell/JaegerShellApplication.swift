@@ -5,7 +5,8 @@
 // loopback Jaeger WebUI (http://127.0.0.1:8790/?host=macos or the dev override); loopback-only
 // navigation + WKContentRuleList; inline "not running" page instead of alert+quit; minimal main
 // menu (Quit, Edit, Reload); developer extras only in DEBUG; menu-bar (accessory) app with a
-// status item, window hides on close; --verify-launch self-check; global hotkey (JaegerHotkey).
+// status item, window hides on close; --verify-launch self-check; global hotkey (JaegerHotkey);
+// `jaeger` JS⇄native bridge (NativeBridge) + headless --verify-bridge.
 
 import AppKit
 import JaegerShellCore
@@ -32,12 +33,24 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     private(set) var statusController: StatusItemController?
     let start: StartURL.Resolution = ShellEnvironment.webUI()
     let verifyMode = CommandLine.arguments.contains("--verify-launch")
+    let verifyBridgeMode = CommandLine.arguments.contains("--verify-bridge")
+    private(set) var bridge: NativeBridge?
+    private var bridgeVerifier: BridgeVerifier?
     var mainWindow: NSWindow? { window }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let rejected = start.rejected { shellLog("[shell][override] rejected \(rejected)") }
         if let override = start.override { shellLog("[shell][override] accepted \(override)") }
         shellLog("[shell] start_url=\(start.url.absoluteString)")
+        if verifyBridgeMode {
+            // Headless: no menu, status item, hotkey or visible window.
+            let verifier = BridgeVerifier(app: self)
+            bridgeVerifier = verifier
+            _ = makeWindow()
+            installRulesThenLoad()
+            verifier.startTimeout()
+            return
+        }
         installMainMenu()
         statusController = StatusItemController(app: self)
         registerHotkey()
@@ -63,6 +76,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         Hotkey.shared.register(hotkeyChoice.spec) { [weak self] in
             shellLog("[shell][hotkey] pressed")
             self?.toggleWindow()
+            self?.bridge?.send(["type": "hotkey"])
         }
     }
 
@@ -71,8 +85,14 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
-        sender.orderOut(nil)
+        hideWindow()
         return false
+    }
+
+    func hideWindow() {
+        window?.orderOut(nil)
+        shellLog("[shell] window hidden")
+        bridge?.send(["type": "window.visibility", "visible": false])
     }
 
     private func emitVerifyReport() {
@@ -119,12 +139,17 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
         #endif
         windowChrome.install(in: configuration)
+        let host: BridgeHost = bridgeVerifier ?? self
+        let bridge = NativeBridge(allowed: start.origin, host: host, label: "main")
+        bridge.install(in: configuration)
+        self.bridge = bridge
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsMagnification = false
         self.webView = webView
+        bridge.webView = webView
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1024, height: 720),
@@ -144,16 +169,17 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     }
 
     func showWindow() {
+        if verifyBridgeMode { return }  // never show a window in the headless check
         let window = self.window ?? makeWindow()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        bridge?.send(["type": "window.visibility", "visible": true])
         if !rulesInstalled && !verifyMode && webView?.url == nil { installRulesThenLoad() }
     }
 
     func toggleWindow() {
         if let window, window.isVisible, NSApp.isActive, window.isKeyWindow {
-            window.orderOut(nil)
-            shellLog("[shell] window hidden")
+            hideWindow()
         } else {
             showWindow()
             shellLog("[shell] window shown")
@@ -225,7 +251,10 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        if !showingErrorPage { shellLog("[shell] loaded \(webView.url?.absoluteString ?? "nil")") }
+        if !showingErrorPage {
+            shellLog("[shell] loaded \(webView.url?.absoluteString ?? "nil")")
+            bridgeVerifier?.pageLoaded(webView)
+        }
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
