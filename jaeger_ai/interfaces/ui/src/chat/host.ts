@@ -56,6 +56,8 @@ export interface ChatTurn {
   message: string;
   parts: ChatPart[];
   state: "pending" | TurnState;
+  /** PROPOSED addition: epoch ms the turn started, for day/time separators. */
+  createdAt?: number;
 }
 
 export interface ChatSessionSummary {

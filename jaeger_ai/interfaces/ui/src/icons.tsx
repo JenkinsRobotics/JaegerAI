@@ -12,6 +12,7 @@ export const SearchIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}>
 export const StarIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} viewBox="0 0 16 16" {...p}><path d="m8 1.8 1.9 3.9 4.3.6-3.1 3 .7 4.3L8 11.6l-3.8 2 .7-4.3-3.1-3 4.3-.6z" fill="currentColor" stroke="none" /></svg>;
 export const TasksIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><rect x="2.5" y="2.5" width="11" height="11" rx="2.2" /><path d="m5.2 8 1.9 1.9 3.7-3.8" /></svg>;
 export const AppsIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1.2" /><rect x="9" y="2.5" width="4.5" height="4.5" rx="1.2" /><rect x="2.5" y="9" width="4.5" height="4.5" rx="1.2" /><path d="M11.25 9.2v4.1M9.2 11.25h4.1" /></svg>;
+export const ArrowDownIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" /></svg>;
 export const ChevronIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="m6 4 4 4-4 4" /></svg>;
 export const WaveIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="M3 6.5v3M5.5 4.5v7M8 3v10M10.5 5v6M13 6.5v3" /></svg>;
 /** Neutral app glyphs for the Connect apps pill (D11: no vendor logos yet). */

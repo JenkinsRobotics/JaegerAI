@@ -2,17 +2,46 @@
  * same-origin /v1 and /api fetches; mock = dev-only sample data). Failures
  * surface to the caller; there is no silent fallback. */
 import type { JaegerSource } from "../api/source";
-import type { SessionMessage } from "../api/types";
+import type { PersistedPart, SessionMessage } from "../api/types";
 import { followTurn } from "./followTurn";
 import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, HostKind, StartTurnRequest, TurnHandle, TurnState } from "./host";
 
 const KEY = (id: string) => `jaeger.ui.session.${id}`;
 
-function messagesToTurns(messages: SessionMessage[] = []): ChatSession["turns"] {
+function persistedToPart(p: PersistedPart, agentName: (id: string) => string): ChatPart | null {
+  switch (p.type) {
+    case "text": return p.text ? { kind: "markdownContent", text: p.text } : null;
+    case "reasoning": return { kind: "thinking", text: p.text ?? "", durationMs: p.duration_ms };
+    case "tool": return {
+      kind: "toolInvocation", callId: String(p.call_id ?? ""), toolName: String(p.tool ?? "tool"), input: p.input ?? null,
+      state: p.status === "done" ? "completed" : p.status === "error" ? "cancelled" : "executing", output: p.output,
+    };
+    case "handoff": {
+      const agentId = String(p.agent_id ?? "");
+      return { kind: "handoff", handoffId: String(p.handoff_id ?? ""), agentId, agentName: p.agent_name || agentName(agentId), count: 1, direction: p.direction };
+    }
+    default: return null;
+  }
+}
+
+const epochMs = (m: SessionMessage) => {
+  const seconds = Number(m.timestamp ?? m.created_at);
+  return Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : undefined;
+};
+
+export function messagesToTurns(messages: SessionMessage[] = [], agentName: (id: string) => string = (id) => id): ChatSession["turns"] {
   const turns: ChatSession["turns"] = [];
   for (const m of messages) {
-    if (m.role === "user") turns.push({ turnId: m.request_id ?? `t${turns.length}`, message: m.content ?? "", parts: [], state: "complete" });
-    else if (m.role === "assistant" && turns.length) turns[turns.length - 1].parts.push({ kind: "markdownContent", text: m.content ?? "" });
+    if (m.role === "user") {
+      turns.push({ turnId: m.request_id ?? `t${turns.length}`, message: m.content ?? "", parts: [], state: "complete", createdAt: epochMs(m) });
+    } else if (m.role === "assistant") {
+      // A reply with no user turn before it (proactive note, relayed report) still shows.
+      if (!turns.length) turns.push({ turnId: `t${turns.length}`, message: "", parts: [], state: "complete", createdAt: epochMs(m) });
+      const parts = m.parts?.length
+        ? m.parts.map((p) => persistedToPart(p, agentName)).filter((p): p is ChatPart => p !== null)
+        : [{ kind: "markdownContent" as const, text: m.content ?? "" }];
+      turns[turns.length - 1].parts.push(...parts);
+    }
   }
   return turns;
 }
@@ -93,7 +122,7 @@ export class WebHost implements ChatHost {
       if (rich) return structuredClone(rich);
       const detail = await this.source.session(id);
       if (typeof detail.last_event_id === "number") this.advance(id, detail.last_event_id);
-      return { id, title: detail.title ?? "Untitled", agentId: detail.agent_id ?? undefined, turns: messagesToTurns(detail.messages) };
+      return { id, title: detail.title ?? "Untitled", agentId: detail.agent_id ?? undefined, turns: messagesToTurns(detail.messages, this.agentName) };
     },
     save: async (session: ChatSession) => { localStorage.setItem(KEY(session.id), JSON.stringify(session)); },
     delete: async (id: string) => { localStorage.removeItem(KEY(id)); },
