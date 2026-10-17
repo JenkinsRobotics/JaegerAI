@@ -370,6 +370,13 @@ class GatewaySessionStore:
                 conn.execute("ALTER TABLE handoffs ADD COLUMN session_id TEXT")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_handoffs_session ON handoffs(session_id)")
             current = 10
+        if current < 11:
+            # Response parts (reasoning/text/tool/plan), projected from the
+            # turn's events at completion. NULL for older rows and user turns.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
+            if "parts_json" not in columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN parts_json TEXT")
+            current = 11
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -533,6 +540,7 @@ class GatewaySessionStore:
                         "content": m["content"],
                         "timestamp": m["timestamp"],
                         "tool_calls": json.loads(m["tool_calls_json"] or "[]"),
+                        **({"parts": json.loads(m["parts_json"])} if m["parts_json"] else {}),
                     }
                     for m in messages
                 ],
@@ -657,17 +665,19 @@ class GatewaySessionStore:
         tool_calls: list[dict[str, Any]] | None = None,
         timestamp: float | None = None,
         conn: sqlite3.Connection | None = None,
+        parts: list[dict[str, Any]] | None = None,
     ) -> int:
         now = timestamp or time.time()
         tool_str = json.dumps(tool_calls or [])
+        parts_str = json.dumps(parts) if parts else None
 
         def _write(db: sqlite3.Connection) -> int:
             cursor = db.execute(
                 """
-                INSERT INTO messages (session_id, role, content, timestamp, tool_calls_json)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO messages (session_id, role, content, timestamp, tool_calls_json, parts_json)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, role, content, now, tool_str),
+                (session_id, role, content, now, tool_str, parts_str),
             )
             db.execute(
                 "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
@@ -1259,7 +1269,18 @@ class GatewaySessionStore:
                 (status, json.dumps(result), now, request_id),
             )
             if assistant_text is not None:
-                self.append_message(row["session_id"], "assistant", assistant_text, timestamp=now, conn=conn)
+                from jaeger_ai.core.gateway.turn_parts import PART_EVENTS, project_parts
+                marks = ",".join("?" * len(PART_EVENTS))
+                turn_events = [
+                    {"event": e["event"], "data": json.loads(e["data_json"] or "{}"), "timestamp": e["timestamp"]}
+                    for e in conn.execute(
+                        f"SELECT event, data_json, timestamp FROM events WHERE session_id=? AND event IN ({marks}) "
+                        "AND json_extract(data_json, '$.request_id')=? ORDER BY event_id ASC",
+                        (row["session_id"], *PART_EVENTS, request_id),
+                    )
+                ]
+                self.append_message(row["session_id"], "assistant", assistant_text, timestamp=now, conn=conn,
+                                    parts=project_parts(turn_events) or None)
             sess_status = session_status or ("idle" if status == "completed" else status)
             conn.execute(
                 "UPDATE sessions SET status=?, updated_at=? WHERE session_id=?",

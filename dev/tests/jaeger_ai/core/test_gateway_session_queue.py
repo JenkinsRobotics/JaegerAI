@@ -38,7 +38,7 @@ def test_durable_queue_survives_store_restart_and_preserves_order(tmp_path: Path
     store = GatewaySessionStore(path)
     store.enqueue_request("session", "first", request_id="q1")
     second = store.enqueue_request("session", "second", request_id="q2", requested={"model": "glm"})
-    assert store.schema_version() == 10
+    assert store.schema_version() == 11
     assert [row["request_id"] for row in store.list_queue("session")] == ["q1", "q2"]
     assert second["execution"]["model"] == "glm"
 
