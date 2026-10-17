@@ -84,3 +84,8 @@ def test_kokoro_rate_wav_is_resampled_before_whisper(tmp_path: Path) -> None:
         with wave.open(str(converted), "rb") as handle:
             assert handle.getframerate() == 16_000
     assert not converted.exists()  # temp copy is cleaned up
+
+
+def test_dotted_stem_is_kept_in_export_name(tmp_path: Path) -> None:
+    paths = write_transcripts(sample_result(tmp_path), tmp_path / "ep1.narration", ("txt",))
+    assert paths[0].name == "ep1.narration.txt"

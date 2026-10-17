@@ -169,7 +169,8 @@ def write_transcripts(
     written: list[Path] = []
     for raw_format in formats:
         fmt = raw_format.lower().lstrip(".")
-        path = base.with_suffix(f".{fmt}")
+        # Append, don't replace: with_suffix turned "ep1.narration" into "ep1.txt".
+        path = base.with_name(f"{base.name}.{fmt}")
         if fmt == "txt":
             path.write_text(result.text + "\n", encoding="utf-8")
         elif fmt == "srt":
