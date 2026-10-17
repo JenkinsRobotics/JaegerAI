@@ -323,6 +323,14 @@ def test_webui_launcher_stays_on_loopback_unless_lan_is_explicit():
     assert opened == "0.0.0.0"
 
 
+def test_webui_launcher_never_touches_legacy_hermes_homes():
+    text = Path("scripts/run-jaeger-webui.sh").read_text(encoding="utf-8")
+    for legacy in ("hermes-webui-agent", "~/.hermes", "$HOME/.hermes", "${HOME}/.hermes",
+                   "prepare_webui_home", "link_shared_profiles", "JAEGER_HERMES_AGENT_SRC"):
+        assert legacy not in text, legacy
+    assert "/webui-agent}" in text
+
+
 def test_ollama_bridge_refuses_unrestricted_paths():
     import threading
     from http.server import ThreadingHTTPServer
@@ -442,15 +450,15 @@ def test_state_dir_isolates_webui_profile_writes(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("JAEGER_WEBUI_AGENT_STATE", raising=False)
     monkeypatch.delenv("JAEGER_HOME", raising=False)
 
-    from jaeger_ai.features.webui.service.profile_layout import prepare_webui_home
+    from jaeger_ai.core.runtime.profile_paths import webui_agent_home
+    from jaeger_ai.features.webui.service.profile_layout import ensure_agent_state_schema
 
-    result = prepare_webui_home()
-    agent = Path(result["agent_home"]).resolve()
-    hermes = Path(result["layout"]["hermes_home"]).resolve()
-    assert agent.is_relative_to(state.resolve())
-    assert hermes.is_relative_to(state.resolve())
-    assert (agent / "profile.yaml").is_file()
+    agent = webui_agent_home()
+    assert agent.name == "webui-agent"
+    result = ensure_agent_state_schema(agent)
+    assert Path(result["path"]).resolve().is_relative_to(state.resolve())
     assert not (live / ".jaeger").exists()
+    assert not (live / ".hermes").exists()
 
 
 

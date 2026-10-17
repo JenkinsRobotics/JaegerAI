@@ -136,6 +136,7 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
                             or path.name.endswith(("-shm", "-wal"))
                             or "hermes-webui-state" in path.parts
                             or "hermes-webui-agent" in path.parts
+                            or "webui-agent" in path.parts
                             or "hermes-webui-adapter" in path.parts
                             or "openclaw" in path.parts):
                         continue

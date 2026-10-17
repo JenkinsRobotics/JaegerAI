@@ -30,10 +30,7 @@ DEFAULT_WEBUI_PORT = 8790
 REPO_ROOT = Path(__file__).resolve().parents[4]
 WEBUI_SCRIPT = REPO_ROOT / "scripts" / "run-jaeger-webui.sh"
 
-from .profile_layout import (
-    ensure_webui_profile_layout,
-    prepare_webui_home,
-)
+from .profile_layout import ensure_agent_state_schema
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,15 +97,12 @@ def _tailscale_ipv4() -> str | None:
     return None
 
 
-def _ensure_shared_profiles(agent_home: Path) -> None:
-    """Expose ~/.hermes/profiles and a current-schema state.db to :8790."""
+def _ensure_agent_home(agent_home: Path) -> None:
+    """Give the :8790 agent home a current-schema state.db (best-effort)."""
     try:
-        prepare_webui_home(agent_home)
+        ensure_agent_state_schema(agent_home)
     except Exception:
-        try:
-            ensure_webui_profile_layout()
-        except Exception:
-            pass
+        pass
 
 
 def _load_webui_config(instance: str | None = None) -> dict[str, Any]:
@@ -392,10 +386,9 @@ class WebUIService:
         """Start Jaeger's WebUI and runtime adapter."""
         if self.layout is None:
             return {"ok": False, "error": f"instance {self.instance!r} not found"}
-        try:
-            prepare_webui_home()
-        except Exception:
-            pass
+        from jaeger_ai.core.runtime.profile_paths import webui_agent_home
+
+        _ensure_agent_home(webui_agent_home())
         adapter_res = self._start_adapter()
         if not adapter_res.get("ok"):
             return {"ok": False, "adapter": adapter_res}
@@ -518,7 +511,7 @@ class WebUIService:
         from jaeger_ai.core.runtime.profile_paths import webui_agent_home
 
         agent_home = webui_agent_home()
-        _ensure_shared_profiles(agent_home)
+        _ensure_agent_home(agent_home)
         log_path = _webui_log_path(self.layout)
         pid_path = _webui_pid_path(self.layout)
         env = os.environ.copy()

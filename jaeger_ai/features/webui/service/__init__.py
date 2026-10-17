@@ -7,10 +7,7 @@ from .profile_layout import (
     PROFILE_DISPLAY_NAMES,
     profile_display_name,
     library_model,
-    ensure_webui_profile_layout,
-    link_shared_profiles,
     ensure_agent_state_schema,
-    prepare_webui_home,
 )
 from .session_unify import (
     normalize_session_profile,
@@ -26,10 +23,7 @@ __all__ = [
     "PROFILE_DISPLAY_NAMES",
     "profile_display_name",
     "library_model",
-    "ensure_webui_profile_layout",
-    "link_shared_profiles",
     "ensure_agent_state_schema",
-    "prepare_webui_home",
     "normalize_session_profile",
     "infer_session_profile",
     "profile_badge_for_session",
