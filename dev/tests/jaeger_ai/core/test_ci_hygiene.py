@@ -123,11 +123,12 @@ def test_ci_and_local_share_the_isolated_runner():
 
 
 def test_webui_launcher_does_not_adopt_a_sibling_hermes_checkout():
-    """H03: the product is self-contained. A Hermes checkout beside the repo
-    is used only when named by JAEGER_HERMES_AGENT_SRC, never by default."""
+    """H03: the product is self-contained. The launcher never wires an
+    external Hermes agent checkout (the JAEGER_HERMES_AGENT_SRC hook is gone)."""
     launcher = (REPO_ROOT / "scripts/run-jaeger-webui.sh").read_text(encoding="utf-8")
-    assert 'JAEGER_HERMES_AGENT_SRC:-${HOME}/GitHub/hermes-agent' not in launcher
-    assert 'hermes_agent_src="${JAEGER_HERMES_AGENT_SRC:-}"' in launcher
+    assert "GitHub/hermes-agent" not in launcher
+    assert "JAEGER_HERMES_AGENT_SRC" not in launcher
+    assert "HERMES_WEBUI_AGENT_DIR" not in launcher
     # H03 (updated): the vendor tree has been removed (2026-09-26 cleanup).
     # The product is self-contained via jaeger_ai/core + packages/jaeger-agent.
     # The webui bootstrap discovers an external agent dir at runtime; it no
