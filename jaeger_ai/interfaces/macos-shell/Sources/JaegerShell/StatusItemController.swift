@@ -3,8 +3,8 @@
 //
 // Left click toggles the shell window; right click (or ⌃-click) opens the menu.
 // The menu probes the loopback WebUI and gateway only when it opens (and once after a normal launch,
-// never in --verify-launch). "Start Jaeger stack…" runs `<launcher> stack up --json` only after the user
-// confirms a sheet. Launch at Login is opt-in through SMAppService.mainApp and never changed automatically.
+// never in --verify-launch). "Start/Stop Jaeger stack…" go through StackController after a confirm sheet
+// (dev mode: own child processes; production: `<launcher> stack up|down --json`). Launch at Login is opt-in through SMAppService.mainApp and never changed automatically.
 
 import AppKit
 import JaegerShellCore
@@ -14,10 +14,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private unowned let app: JaegerShellApplication
     let statusItem: NSStatusItem
     private let menu = NSMenu()
-    private let webUIItem = NSMenuItem(title: "WebUI: …", action: nil, keyEquivalent: "")
+    private let webUIItem = NSMenuItem(title: "Main screen: …", action: nil, keyEquivalent: "")
     private let gatewayItem = NSMenuItem(title: "Gateway: …", action: nil, keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Launch at Login", action: nil, keyEquivalent: "")
-    private var stackRunning = false
     private let runningIcon = StatusItemController.loadIcon("jaeger_icon_22")
     private let offIcon = StatusItemController.loadIcon("jaeger_icon_off_22")
 
@@ -69,6 +68,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         webUIItem.isEnabled = false; menu.addItem(webUIItem)
         gatewayItem.isEnabled = false; menu.addItem(gatewayItem)
         _ = add("Start Jaeger stack…", #selector(startStack(_:)))
+        _ = add("Stop Jaeger stack…", #selector(stopStack(_:)))
         menu.addItem(.separator())
         loginItem.target = self; loginItem.action = #selector(toggleLoginItem(_:)); menu.addItem(loginItem)
         _ = add("Reload", #selector(reload(_:)))
@@ -92,7 +92,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         loginItem.state = SMAppService.mainApp.status == .enabled ? .on : .off
-        probe(webUIItem, "WebUI", app.start.origin.string + "/")
+        probe(webUIItem, "Main screen", app.start.origin.string + "/")
         probe(gatewayItem, "Gateway", ShellEnvironment.gateway().origin.string + "/health")
     }
 
@@ -102,7 +102,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         ShellEnvironment.probe(urlString) { [weak self] text in
             item.title = "\(name): \(text.replacingOccurrences(of: "_", with: " ")) (\(url?.host ?? ""):\(url?.port ?? 0))"
             shellLog("[shell][status] \(name.lowercased()) \(text)")
-            if name == "WebUI" { self?.setRunning(text == "running") }
+            if name == "Main screen" { self?.setRunning(text == "running") }
         }
     }
 
@@ -132,39 +132,19 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
-    @objc private func startStack(_ sender: Any?) {
-        let launcher = ShellEnvironment.launcherPath()
-        let alert = NSAlert()
-        alert.messageText = "Start the Jaeger stack?"
-        if let launcher {
-            alert.informativeText = "This runs:\n\(launcher) \(StackCLI.upArguments.joined(separator: " "))\n\nIt starts the Jaeger services the same way the CLI does."
-            alert.addButton(withTitle: "Start")
-            alert.addButton(withTitle: "Cancel")
-        } else {
-            alert.informativeText = "No jaeger launcher was found (set JaegerLauncher in Info.plist or install the CLI)."
-            alert.addButton(withTitle: "OK")
-        }
-        let run: (NSApplication.ModalResponse) -> Void = { [weak self] response in
-            guard let self, let launcher, response == .alertFirstButtonReturn else {
-                shellLog("[shell][stack] start cancelled")
-                return
-            }
-            self.runStackUp(launcher)
-        }
-        app.showWindow()
-        if let window = app.mainWindow { alert.beginSheetModal(for: window, completionHandler: run) } else { run(alert.runModal()) }
-    }
+    @objc private func startStack(_ sender: Any?) { runStack(.start) }
+    @objc private func stopStack(_ sender: Any?) { runStack(.stop) }
 
-    private func runStackUp(_ launcher: String) {
-        guard !stackRunning else { return }
-        stackRunning = true
-        shellLog("[shell][stack] started \(launcher) \(StackCLI.upArguments.joined(separator: " "))")
-        StackRunner.run(launcher: launcher, arguments: StackCLI.upArguments) { [weak self] data, stderr, status in
-            let summary = (try? StackCLI.decodeAction(data)).map(StackCLI.summary) ?? "undecodable reply"
-            shellLog("[shell][stack] stack up exited \(status): \(summary)\(stderr.isEmpty ? "" : " stderr=\(stderr.suffix(300))")")
-            self?.stackRunning = false
-            self?.app.reloadShell(nil)
-            self?.refreshIcon()
+    /// Confirm sheet, then StackController (dev: own children; production: `jaeger stack up|down --json`).
+    private func runStack(_ action: StackController.Action) {
+        app.stack.confirmThen(action) { [weak self] in
+            guard let self else { return }
+            let finish: BridgeDone = { [weak self] result, error in
+                shellLog("[shell][stack] \(action.rawValue) → \(error ?? "ok \(result?["mode"] ?? "")")")
+                self?.app.reloadShell(nil)
+                self?.refreshIcon()
+            }
+            action == .start ? self.app.stack.start(done: finish) : self.app.stack.stop(done: finish)
         }
     }
 }

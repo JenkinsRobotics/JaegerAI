@@ -9,7 +9,10 @@ public struct LoopbackOrigin: Sendable, Equatable {
 }
 
 public enum StartURL {
+    /// Legacy Hermes WebUI port (no longer the main screen; kept for old overrides/tests).
     public static let defaultWebUI = LoopbackOrigin(port: 8790)
+    /// Main-screen override (new UI). The legacy JAEGER_SHELL_WEBUI_URL is still accepted after it.
+    public static let mainScreenEnvKey = "JAEGER_SHELL_UI_URL"
     public static let defaultGateway = LoopbackOrigin(port: 33418)
     public static let webUIEnvKey = "JAEGER_SHELL_WEBUI_URL"
     public static let webUIDefaultsKey = "JaegerShellWebUIURL"
@@ -21,6 +24,13 @@ public enum StartURL {
     /// Gateway override from the environment: the shell-specific key wins, then JAEGER_GATEWAY_URL.
     /// The value still goes through `resolve` (dev build + loopback validation), unlike the old app,
     /// which accepted any host.
+    /// Main-screen override from the environment: JAEGER_SHELL_UI_URL, then legacy JAEGER_SHELL_WEBUI_URL.
+    public static func mainScreenEnvValue(_ env: [String: String]) -> String? {
+        [mainScreenEnvKey, webUIEnvKey].lazy
+            .compactMap { env[$0]?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
+
     public static func gatewayEnvValue(_ env: [String: String]) -> String? {
         [gatewayEnvKey, gatewaySharedEnvKey].lazy
             .compactMap { env[$0]?.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -32,6 +42,11 @@ public enum StartURL {
         public let override: String?
         public let rejected: String?
         public var url: URL { URL(string: origin.string + "/?host=macos")! }
+        public init(origin: LoopbackOrigin, override: String?, rejected: String?) {
+            self.origin = origin
+            self.override = override
+            self.rejected = rejected
+        }
     }
 
     /// Accept only http://127.0.0.1:<1024-65535>[/] with no credentials.

@@ -247,7 +247,7 @@ final class VisibleChecker {
                 step("icon_running_with_webui_up", snap["icon"] as? String == "running", snap["icon"] ?? NSNull())
                 let expected = ["Show / Hide Jaeger", "Start Jaeger stack…", "Launch at Login", "Reload", "Open in Browser", "Quit Jaeger Shell"]
                 step("menu_items", expected.allSatisfy(titles.contains), titles)
-                step("webui_probe_running", titles.contains { $0.hasPrefix("WebUI: running") }, titles.first { $0.hasPrefix("WebUI") } ?? "")
+                step("webui_probe_running", titles.contains { $0.hasPrefix("Main screen: running") }, titles.first { $0.hasPrefix("Main screen") } ?? "")
                 step("gateway_probe_running", titles.contains { $0.hasPrefix("Gateway: running") }, titles.first { $0.hasPrefix("Gateway") } ?? "")
                 step("start_never_invoked", true, "Start item present but not triggered")
                 await yesNo("menu_icon_seen", "Menu-bar icon", "Is the Jaeger icon visible in the menu bar (top right)? Do not click Start.")

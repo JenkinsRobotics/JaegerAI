@@ -61,6 +61,18 @@ final class VoiceController {
         ]
     }
 
+    /// `mic.status` for the new UI's probeVoice (permission reads only; never prompts).
+    static func micStatus(recording: Bool) -> [String: Any] {
+        ["state": recording ? "recording" : "idle", "available": VoiceRecorder.hasAudioInput,
+         "permission": micPermission(), "speech_permission": speechPermission(), "modes": ["dictation", "push-to-talk"]]
+    }
+
+    /// `tts.status` for the new UI's probeVoice.
+    static func ttsStatus(speaking: Bool) -> [String: Any] {
+        ["state": speaking ? "speaking" : "idle", "available": !installedVoices().isEmpty,
+         "voices_installed": installedVoices().count]
+    }
+
     func micStart(mode: String, done: @escaping BridgeDone) {
         if recorder.isRecording { done(["listening": true, "mode": mode], nil); return }
         tts.stop()

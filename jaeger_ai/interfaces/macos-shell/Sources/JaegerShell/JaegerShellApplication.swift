@@ -39,6 +39,8 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     private var visibleChecker: VisibleChecker?
     var hotkeyLabel: String { hotkeyChoice.spec.label }
     private(set) var voiceController: VoiceController?
+    private var appearanceObservation: NSKeyValueObservation?
+    private(set) lazy var stack = StackController(app: self)
 
     /// Created on first voice use (never in --verify-launch / --verify-bridge).
     func voice() -> VoiceController {
@@ -48,21 +50,35 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         return created
     }
     var mainWindow: NSWindow? { window }
+    var mainWebView: WKWebView? { webView }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let rejected = start.rejected { shellLog("[shell][override] rejected \(rejected)") }
         if let override = start.override { shellLog("[shell][override] accepted \(override)") }
         shellLog("[shell] start_url=\(start.url.absoluteString)")
+        appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
+            DispatchQueue.main.async { self?.sendAppearanceChanged() }
+        }
         let gw = ShellEnvironment.gateway()
         if let rejected = gw.rejected { shellLog("[shell][override] gateway rejected \(rejected)") }
         shellLog("[shell] gateway=\(gw.origin.string)")
+        if case .failure(let error) = ShellEnvironment.devStack, StackMode.resolve(
+            env: ProcessInfo.processInfo.environment, isDevBuild: ShellEnvironment.isDevBuild) == .dev {
+            shellLog("[shell][stack] dev mode unavailable: \(error.message)")
+        }
+        shellLog("[shell][stack] \(stack.summary)")
         if verifyBridgeMode {
             // Headless: no menu, status item, hotkey or visible window.
             let verifier = BridgeVerifier(app: self)
             bridgeVerifier = verifier
             _ = makeWindow()
-            installRulesThenLoad()
-            verifier.startTimeout()
+            if CommandLine.arguments.contains("--with-dev-stack") {
+                verifier.startTimeout(seconds: 120)
+                verifier.startDevStackThenLoad { [weak self] in self?.installRulesThenLoad() }
+            } else {
+                installRulesThenLoad()
+                verifier.startTimeout(seconds: 30)
+            }
             return
         }
         installMainMenu()
@@ -104,12 +120,20 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     func applicationWillTerminate(_ notification: Notification) {
         Hotkey.shared.unregister()
         voiceController?.shutdown()
+        stack.shutdown()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
         hideWindow()
         return false
     }
+
+    var appearanceName: String {
+        NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? "dark" : "light"
+    }
+
+    /// `appearance.changed` for the new UI's NativeHost.onThemeChanged.
+    func sendAppearanceChanged() { bridge?.send(["type": "appearance.changed", "appearance": appearanceName]) }
 
     func hideWindow() {
         window?.orderOut(nil)
@@ -255,7 +279,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             <body style="font-family:-apple-system,sans-serif;background:#f4f4f5;color:#222;
                          display:grid;place-items:center;height:100vh;margin:0">
             <div style="max-width:440px;text-align:center">
-            <h3>Jaeger WebUI is not running</h3>
+            <h3>Jaeger main screen is not available</h3>
             <p>\(detail)</p><p>Expected it at <code>\(address)</code>.
             Start it, then choose <b>View › Reload</b> (⌘R).</p></div></body>
             """, baseURL: nil)
@@ -280,6 +304,19 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             bridgeVerifier?.pageLoaded(webView)
             visibleChecker?.pageLoaded(webView)
         }
+    }
+
+    /// A main-frame HTTP error (e.g. 404 while the gateway does not serve the UI yet) shows the inline page.
+    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse,
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        if navigationResponse.isForMainFrame, let http = navigationResponse.response as? HTTPURLResponse,
+           http.statusCode >= 400 {
+            shellLog("[shell] main screen HTTP \(http.statusCode) at \(http.url?.absoluteString ?? "?")")
+            decisionHandler(.cancel)
+            showErrorPage("The main screen answered HTTP \(http.statusCode) — it is not served at this address yet.")
+            return
+        }
+        decisionHandler(.allow)
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -397,16 +434,30 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
 enum ShellEnvironment {
     static var isDevBuild: Bool { Bundle.main.object(forInfoDictionaryKey: "JaegerDevBuild") as? Bool == true }
 
+    /// Main screen: the new UI, served at the gateway origin (`/?host=macos`) unless overridden
+    /// (JAEGER_SHELL_UI_URL, legacy JAEGER_SHELL_WEBUI_URL, or the uirebuild defaults domain).
     static func webUI() -> StartURL.Resolution {
-        StartURL.resolve(
-            fallback: StartURL.defaultWebUI,
-            envValue: ProcessInfo.processInfo.environment[StartURL.webUIEnvKey],
+        if case .success(let dev) = devStack {
+            return StartURL.Resolution(origin: dev.uiOrigin, override: dev.uiOrigin.string + "/ (dev stack)", rejected: nil)
+        }
+        return StartURL.resolve(
+            fallback: gateway().origin,
+            envValue: StartURL.mainScreenEnvValue(ProcessInfo.processInfo.environment),
             defaultsValue: UserDefaults.standard.string(forKey: StartURL.webUIDefaultsKey),
             isDevBuild: isDevBuild)
     }
 
+    /// Dev/test stack (dev build + JAEGER_SHELL_STACK_MODE=dev + JAEGER_SHELL_DEV_ROOT); resolved once.
+    static let devStack: Result<DevStackConfig, DevStackError> = DevStackConfig.resolve(
+        env: ProcessInfo.processInfo.environment, home: NSHomeDirectory(), isDevBuild: isDevBuild,
+        fileExists: { FileManager.default.fileExists(atPath: $0) },
+        isExecutable: { FileManager.default.isExecutableFile(atPath: $0) })
+
     static func gateway() -> StartURL.Resolution {
-        StartURL.resolve(
+        if case .success(let dev) = devStack {
+            return StartURL.Resolution(origin: dev.gatewayOrigin, override: dev.gatewayOrigin.string + "/ (dev stack)", rejected: nil)
+        }
+        return StartURL.resolve(
             fallback: StartURL.defaultGateway,
             envValue: StartURL.gatewayEnvValue(ProcessInfo.processInfo.environment),
             defaultsValue: UserDefaults.standard.string(forKey: StartURL.gatewayDefaultsKey),
