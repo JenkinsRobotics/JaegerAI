@@ -1412,7 +1412,7 @@ class JaegerGatewayApp:
 
     async def _probe_native_mcp(self, *, timeout_s: float = 3.0) -> dict[str, Any]:
         """Read-only MCP and native-agent readiness; never executes chat."""
-        from jaeger_ai.core.frameworks.jaeger import (
+        from jaeger_ai.core.gateway.native_mcp import (
             MCP_URL, MCP_HOST_HEADER, mcp_api_key,
         )
         headers = {"Accept": "application/json, text/event-stream", "Host": MCP_HOST_HEADER}
@@ -2889,7 +2889,7 @@ class JaegerGatewayApp:
         def _blocking_chat() -> tuple[str, str]:
             from urllib.parse import urlparse
 
-            from jaeger_ai.core.frameworks.jaeger import (
+            from jaeger_ai.core.gateway.native_mcp import (
                 MCPClient,
                 MCP_URL,
                 MCP_HOST_HEADER,
@@ -4334,7 +4334,7 @@ class JaegerGatewayApp:
 
     async def _request_native_cancel(self, native_run_id: str, native_session: str) -> bool:
         try:
-            from jaeger_ai.core.frameworks.jaeger import (
+            from jaeger_ai.core.gateway.native_mcp import (
                 MCPClient, MCP_URL, MCP_HOST_HEADER, mcp_api_key,
             )
             def _call() -> bool:

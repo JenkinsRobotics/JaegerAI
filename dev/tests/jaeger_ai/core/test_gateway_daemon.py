@@ -249,7 +249,7 @@ async def test_native_lead_turn_success_and_soft_fail(monkeypatch, tmp_path):
             assert arguments.get("session_id") == "dispatcher"
             return {"content": [{"type": "text", "text": "NATIVE_MCP_OK autonomy=tools"}]}
 
-    import jaeger_ai.core.frameworks.jaeger as jaeger_mcp
+    import jaeger_ai.core.gateway.native_mcp as jaeger_mcp
 
     monkeypatch.setattr(jaeger_mcp, "MCPClient", _FakeClient)
     monkeypatch.setattr(jaeger_mcp, "MCP_URL", "http://127.0.0.1:8792/mcp")
@@ -296,7 +296,7 @@ async def test_native_lead_reuses_catalog_and_refreshes_after_credential_rotatio
         def _execute_call(self, name, arguments):
             return {"content": [{"type": "text", "text": self.key}]}
 
-    import jaeger_ai.core.frameworks.jaeger as transport
+    import jaeger_ai.core.gateway.native_mcp as transport
     monkeypatch.setattr(transport, "MCPClient", Client)
     monkeypatch.setattr(transport, "mcp_api_key", lambda: current_key[0])
     assert (await app._native_lead_turn("s", "one"))[0] == "first"
@@ -314,7 +314,7 @@ async def test_missing_mcp_credential_fails_before_native_ownership(monkeypatch,
     app = JaegerGatewayApp(store=store)
     store.ensure_session("s")
     admitted = store.admit_request("s", "hello", request_id="request")
-    import jaeger_ai.core.frameworks.jaeger as transport
+    import jaeger_ai.core.gateway.native_mcp as transport
     monkeypatch.setattr(
         transport, "mcp_api_key",
         lambda: (_ for _ in ()).throw(RuntimeError("MCP credential missing: configure it")),
@@ -497,7 +497,7 @@ async def test_text_only_mode_rejects_an_empty_model(monkeypatch, tmp_path):
 async def test_mcp_health_requires_chat_catalog_not_merely_http_200(monkeypatch, tmp_path):
     from aiohttp import web
     from aiohttp.test_utils import TestServer
-    import jaeger_ai.core.frameworks.jaeger as transport
+    import jaeger_ai.core.gateway.native_mcp as transport
     methods = []
     catalog = []
     async def handler(request):
@@ -536,7 +536,7 @@ async def test_mcp_health_requires_chat_catalog_not_merely_http_200(monkeypatch,
 async def test_mcp_health_terminates_session_when_catalog_probe_fails(monkeypatch, tmp_path):
     from aiohttp import web
     from aiohttp.test_utils import TestServer
-    import jaeger_ai.core.frameworks.jaeger as transport
+    import jaeger_ai.core.gateway.native_mcp as transport
 
     deleted = []
 
@@ -566,7 +566,7 @@ async def test_mcp_health_terminates_session_when_catalog_probe_fails(monkeypatc
 
 @pytest.mark.asyncio
 async def test_native_uncertain_result_is_not_reexecuted_under_another_tool(monkeypatch, tmp_path):
-    import jaeger_ai.core.frameworks.jaeger as transport
+    import jaeger_ai.core.gateway.native_mcp as transport
     calls = []
     class Client:
         def __init__(self, *args): pass
@@ -584,7 +584,7 @@ async def test_native_uncertain_result_is_not_reexecuted_under_another_tool(monk
 def test_mcp_tool_discovery_follows_catalog_without_calling_tools(monkeypatch):
     import io
     import json
-    import jaeger_ai.core.frameworks.jaeger as transport
+    import jaeger_ai.core.gateway.native_mcp as transport
     seen = []
     def respond(request, **kwargs):
         body = json.loads(request.data)

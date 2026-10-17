@@ -666,7 +666,7 @@ def test_openclaw_reconcile_retains_unknown_execution(status, monkeypatch):
 
 def test_http_400_and_404_are_not_retried_as_transient():
     from urllib.error import HTTPError
-    from jaeger_ai.core.frameworks.jaeger import _is_transient_http
+    from jaeger_ai.core.gateway.native_mcp import _is_transient_http
 
     for status in (400, 404):
         assert _is_transient_http(HTTPError("http://mcp", status, "bad request", {}, None)) is False
@@ -675,7 +675,7 @@ def test_http_400_and_404_are_not_retried_as_transient():
 
 
 def test_mcp_credential_is_resolved_at_call_time(tmp_path, monkeypatch):
-    from jaeger_ai.core.frameworks import jaeger
+    from jaeger_ai.core.gateway import native_mcp as jaeger
 
     monkeypatch.delenv("JAEGERS_MCP_API_KEY", raising=False)
     monkeypatch.setattr(jaeger, "_profile_secret", lambda _name: "")
