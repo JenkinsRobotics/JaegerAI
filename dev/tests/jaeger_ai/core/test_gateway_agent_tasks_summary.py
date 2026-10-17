@@ -174,3 +174,25 @@ async def test_sessions_filter_by_agent_and_direct_chat_is_global(tmp_path):
     direct = [e for e in events if e["event"] == "agent.direct_chat"]
     assert direct and direct[-1]["data"]["agent_id"] == agent_id and direct[-1]["data"]["session_id"] == "a"
     assert {"session.handoff", "agent.direct_chat"} <= EVENT_TYPES
+
+
+@pytest.mark.asyncio
+async def test_session_list_rows_carry_preview_activity_and_event_cursor(tmp_path):
+    gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "s.db"))
+    gateway.app.on_startup.clear()
+    store = gateway.store
+    store.ensure_session("specialist:gateway:1", title="Specialist chat")
+    store.append_message("specialist:gateway:1", "user", "first")
+    store.append_message("specialist:gateway:1", "assistant", "line one\n  line two " + "x" * 200)
+    evt = gateway.event_bus.publish("specialist:gateway:1", "session.updated", {"session": {}})
+    async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as client:
+        resp = await client.get("/v1/sessions")
+        assert resp.status == 200
+        row = (await resp.json())["sessions"][0]
+        # The WebUI (unprefixed caller) reads specialist: sessions.
+        assert (await client.get("/v1/sessions/specialist:gateway:1")).status == 200
+    assert row["session_id"] == "specialist:gateway:1"
+    assert row["last_message_preview"].startswith("line one line two x")
+    assert len(row["last_message_preview"]) == 140
+    assert row["last_activity_at"] >= row["updated_at"]
+    assert row["last_event_id"] == evt.event_id

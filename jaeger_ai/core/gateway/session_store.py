@@ -149,6 +149,16 @@ def _row_meta(raw: str | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+LIST_PREVIEW_CHARS = 140
+
+
+def _list_preview(content: Any) -> str | None:
+    if content is None:
+        return None
+    text = " ".join(str(content).split())
+    return text if len(text) <= LIST_PREVIEW_CHARS else text[: LIST_PREVIEW_CHARS - 1] + "\u2026"
+
+
 class GatewaySessionStore:
     def __init__(self, path: Path | str | None = None) -> None:
         self.path = Path(path) if path else default_store_path()
@@ -384,7 +394,13 @@ class GatewaySessionStore:
     def list_sessions(self, profile: str | None = None, query: str | None = None,
                       agent_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
-            sql = "SELECT s.*, COUNT(m.id) as message_count FROM sessions s LEFT JOIN messages m ON s.session_id = m.session_id"
+            sql = (
+                "SELECT s.*, COUNT(m.id) as message_count, MAX(m.timestamp) AS last_message_at, "
+                "(SELECT lm.content FROM messages lm WHERE lm.session_id = s.session_id "
+                " ORDER BY lm.timestamp DESC, lm.id DESC LIMIT 1) AS last_content, "
+                "(SELECT MAX(e.event_id) FROM events e WHERE e.session_id = s.session_id) AS last_event_id "
+                "FROM sessions s LEFT JOIN messages m ON s.session_id = m.session_id"
+            )
             params: list[Any] = []
             clauses = []
             if profile:
@@ -416,6 +432,10 @@ class GatewaySessionStore:
                     "message_count": r["message_count"],
                     "metadata": meta,
                     "agent_id": meta.get("agent_id"),
+                    # Sidebar row without N follow-up reads (Agents View).
+                    "last_message_preview": _list_preview(r["last_content"]),
+                    "last_activity_at": max(float(r["updated_at"] or 0), float(r["last_message_at"] or 0)),
+                    "last_event_id": r["last_event_id"],
                 }
                 if term:
                     row["search_match"] = True
