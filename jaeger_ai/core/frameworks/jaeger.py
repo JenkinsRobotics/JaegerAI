@@ -31,7 +31,6 @@ from jaeger_ai.core.gateway.native_mcp import (  # transport owned by the Gatewa
     REQUEST_TIMEOUT,
     MCPClient,
     _is_transient_http,
-    _profile_secret,
     mcp_api_key,
 )
 

@@ -105,3 +105,21 @@ async def test_handoff_routes_need_token_and_refuse_prefixed_callers(store):
     async with TestClient(TestServer(gateway.app)) as anon:
         assert (await anon.get("/v1/handoffs/h_x/messages")).status == 401
         assert (await anon.get("/v1/handoffs/h_x/messages", headers=client_headers("mcp"))).status == 403
+
+
+@pytest.mark.asyncio
+async def test_approval_and_handoff_show_in_the_chat_that_asked(store):
+    gateway = JaegerGatewayApp(store=store)
+    gateway.app.on_startup.clear()
+    store.ensure_session("chat-1", title="chat")
+    store.admit_request("chat-1", "ask everyday", request_id="run-1")
+    async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as c:
+        resp = await c.post("/v1/agents/native:everyday/handoff", json={
+            "task": "reply pong", "require_approval": True, "request_id": "h-req-1",
+            "session_id": "chat-1", "parent_run_id": "run-1"})
+        assert resp.status == 202, await resp.text()
+    on_chat = [e for e in store.replay_events("chat-1", 0)["events"] if e["session_id"] == "chat-1"]
+    by_name = {e["event"]: e["data"] for e in on_chat}
+    assert by_name["approval.request"]["request_id"] == "run-1"
+    assert by_name["approval.request"]["prompt"] == "reply pong"
+    assert by_name["agent.handoff"]["request_id"] == "run-1"

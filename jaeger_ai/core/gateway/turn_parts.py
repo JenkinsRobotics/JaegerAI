@@ -1,7 +1,7 @@
 """Project one turn's durable events into ordered response parts.
 
 The event log already records everything a chat bubble shows; this folds it
-into ``[{type: reasoning|text|tool|plan, ...}]`` once, when the turn
+into ``[{type: reasoning|text|tool|plan|handoff, ...}]`` once, when the turn
 completes, so a reload renders the same bubble without replaying events.
 """
 from __future__ import annotations
@@ -9,8 +9,9 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 _TOOL_END = {"tool.completed": "done", "tool.done": "done", "tool.failed": "error", "tool.error": "error"}
+_HANDOFF = {"agent.handoff": "to", "agent.handoff.finished": "from"}
 PART_EVENTS = ("turn.delta", "turn.reasoning", "turn.reasoning.done", "tool.started",
-               *_TOOL_END, "turn.plan")
+               *_TOOL_END, "turn.plan", *_HANDOFF)
 
 
 def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -52,6 +53,13 @@ def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
                 part["output"] = data["output"]
         elif name == "turn.plan":
             parts.append({"type": "plan", **{k: v for k, v in data.items() if k not in {"turn_id", "request_id"}}})
+        elif name in _HANDOFF:
+            handoff = data.get("handoff") or {}
+            agent_id = handoff.get("to_agent_id")
+            parts.append({"type": "handoff", "direction": _HANDOFF[name], "handoff_id": handoff.get("id"),
+                          "agent_id": agent_id,
+                          "agent_name": (handoff.get("metadata") or {}).get("target_display") or agent_id,
+                          "status": handoff.get("status")})
     return parts
 
 
