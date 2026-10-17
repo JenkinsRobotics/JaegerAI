@@ -99,7 +99,7 @@ def _git_reason(args: list[str]) -> str | None:
     # skip global options (-C dir, -c k=v, --git-dir=...)
     i = 0
     while i < len(args) and args[i].startswith("-"):
-        i += 2 if args[i] in {"-C", "-c"} else 1
+        i += 2 if args[i] in {"-C", "-c", "--git-dir", "--work-tree", "--namespace"} else 1
     if i >= len(args):
         return None
     sub, rest = args[i], args[i + 1:]
@@ -109,6 +109,8 @@ def _git_reason(args: list[str]) -> str | None:
     # created successfully while the current checkout's refs are changed.
     # Keep this in the canonical command classifier so terminal/bash/exec and
     # their namespaced aliases all receive the same approval gate.
+    if sub == "reset" and "--hard" in fl | set(rest):
+        return "git reset --hard discards work"
     if sub in {"switch", "reset", "rebase"}:
         return f"git {sub} changes the checkout HEAD"
     if sub == "checkout" and "--" not in rest:
@@ -117,10 +119,10 @@ def _git_reason(args: list[str]) -> str | None:
         # path-only checkout is handled by the existing destructive rule.
         if operands or "-b" in fl or "-B" in fl:
             return "git checkout changes the checkout HEAD"
-    if sub == "worktree":
+    if sub == "worktree" and rest[:1] != ["list"]:
+        # ``git worktree list`` is read-only; add/move/remove/prune/repair/lock
+        # change which checkouts exist or which branch they hold.
         return "git worktree changes repository checkout state"
-    if sub == "reset" and "--hard" in fl | set(rest):
-        return "git reset --hard discards work"
     if sub == "push" and ({"-f", "--force", "--force-with-lease", "--mirror", "--delete", "-d"} & fl
                           or any(a.startswith(("--force", "+")) or (a.startswith(":") and len(a) > 1)
                                  for a in rest)):
