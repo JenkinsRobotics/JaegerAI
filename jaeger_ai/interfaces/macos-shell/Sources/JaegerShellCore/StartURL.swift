@@ -9,8 +9,10 @@ public struct LoopbackOrigin: Sendable, Equatable {
 }
 
 public enum StartURL {
-    /// Legacy Hermes WebUI port (no longer the main screen; kept for old overrides/tests).
+    /// Jaeger WebUI: serves the new UI at `/` and proxies its API calls to the gateway with its own
+    /// caller token. The gateway origin answers `/` with 401, so it cannot be the main screen.
     public static let defaultWebUI = LoopbackOrigin(port: 8790)
+    public static let defaultMainScreen = defaultWebUI
     /// Main-screen override (new UI). The legacy JAEGER_SHELL_WEBUI_URL is still accepted after it.
     public static let mainScreenEnvKey = "JAEGER_SHELL_UI_URL"
     public static let defaultGateway = LoopbackOrigin(port: 33418)

@@ -46,8 +46,8 @@ final class HostContractTests: XCTestCase {
                        "http://127.0.0.1:18800/")
         XCTAssertEqual(StartURL.mainScreenEnvValue(["JAEGER_SHELL_WEBUI_URL": "http://127.0.0.1:18790/"]), "http://127.0.0.1:18790/")
         XCTAssertNil(StartURL.mainScreenEnvValue([:]))
-        // default main screen = the gateway origin (33418), loopback-validated overrides only
-        let r = StartURL.resolve(fallback: StartURL.defaultGateway, envValue: nil, defaultsValue: nil, isDevBuild: true)
-        XCTAssertEqual(r.url.absoluteString, "http://127.0.0.1:33418/?host=macos")
+        // default main screen = the Jaeger WebUI (8790); the gateway origin 401s on `/`
+        let r = StartURL.resolve(fallback: StartURL.defaultMainScreen, envValue: nil, defaultsValue: nil, isDevBuild: true)
+        XCTAssertEqual(r.url.absoluteString, "http://127.0.0.1:8790/?host=macos")
     }
 }
