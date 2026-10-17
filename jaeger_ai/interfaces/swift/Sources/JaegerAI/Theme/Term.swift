@@ -12,12 +12,24 @@
 
 import SwiftUI
 
+// Term bridges directly to AetherTheme so that native macOS windowed surfaces,
+// chat windows, avatar views, and HUD cards read as one visual family with
+// Aether Studio while preserving Jaeger's native identity.
 enum Term {
-    static let accent  = Color(red: 0.227, green: 0.627, blue: 1.000) // #3aa0ff
-    static let canvas  = Color(red: 0.043, green: 0.055, blue: 0.078) // #0B0E14
-    static let panel   = Color(red: 0.075, green: 0.090, blue: 0.122) // #131720
-    static let ink     = Color(red: 0.866, green: 0.886, blue: 0.918) // #DDE2EA
-    static let inkDim  = Color(red: 0.533, green: 0.560, blue: 0.612) // #888F9C
-    static let rule    = Color(red: 0.227, green: 0.627, blue: 1.000).opacity(0.25)
-    static let mono    = Font.system(size: 13, design: .monospaced)
+    static let accent   = AetherTheme.accent
+    static let canvas   = AetherTheme.bgApp
+    static let panel    = AetherTheme.bgShell
+    static let ink      = AetherTheme.text
+    static let inkDim   = AetherTheme.textDim
+    static let rule     = AetherTheme.border
+    static let selected = AetherTheme.bgSelected
+    static let mono     = Font.system(size: 13, design: .monospaced)
+    static let uiBody   = AetherTheme.fontBody
+
+    // Geometry tokens
+    static let radiusControl = AetherTheme.radiusControl
+    static let radiusButton  = AetherTheme.radiusButton
+    static let radiusField   = AetherTheme.radiusField
+    static let radiusRow     = AetherTheme.radiusRow
 }
+
