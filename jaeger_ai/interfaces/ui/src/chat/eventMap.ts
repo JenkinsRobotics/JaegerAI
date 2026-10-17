@@ -20,6 +20,8 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       return { parts: [{ kind: "markdownContent", text: str(p.delta ?? p.text) }] };
     case "turn.reasoning":
       return { parts: [{ kind: "thinking", text: str(p.text ?? p.delta), durationMs: typeof p.duration_ms === "number" ? p.duration_ms : undefined }] };
+    case "turn.reasoning.done":
+      return { parts: [{ kind: "thinking", text: "", durationMs: typeof p.duration_ms === "number" ? p.duration_ms : undefined }] };
     case "turn.progress":
     case "turn.plan":
       return { parts: [{ kind: "progress", message: str(p.message ?? p.text ?? p.summary) }] };
