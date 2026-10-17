@@ -28,7 +28,6 @@ from jaeger_ai.contract.ports import (
     GATEWAY_PORT,
     OLLAMA_PORT,
     OLLAMA_URL,
-    gateway_candidate_urls,
     resolve_gateway_url,
 )
 
@@ -205,11 +204,8 @@ def _service_port_open(
     if label == "com.jenkinsrobotics.hermes-native-api":
         return _is_port_open(port, "127.0.0.1")
     if label == "com.jenkinsrobotics.jaeger-gateway":
-        # Current port first, then the legacy fallback (contract.ports).
-        return any(
-            _is_port_open(urlsplit(url).port or port, urlsplit(url).hostname or "127.0.0.1")
-            for url in gateway_candidate_urls()
-        )
+        url = resolve_gateway_url()
+        return _is_port_open(urlsplit(url).port or port, urlsplit(url).hostname or "127.0.0.1")
     return _is_port_open(port)
 
 

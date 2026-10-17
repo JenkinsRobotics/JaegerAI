@@ -87,8 +87,7 @@ class GatewayStub {
 class GatewayErrorStub extends Error {}
 const gwPath = require.resolve('../gateway');
 require.cache[gwPath] = { id: gwPath, filename: gwPath, loaded: true,
-  exports: { Gateway: GatewayStub, GatewayError: GatewayErrorStub, localEndpoint: u => u, decodeSSE: async function* () {},
-    resolveDefaultEndpoint: async contract => contract.gatewayUrl } };
+  exports: { Gateway: GatewayStub, GatewayError: GatewayErrorStub, localEndpoint: u => u, decodeSSE: async function* () {} } };
 
 // ---- Load extension ------------------------------------------------------
 const { activate } = require('../extension');

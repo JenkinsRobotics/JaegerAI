@@ -232,24 +232,4 @@ class Gateway {
   }
 }
 
-// The default endpoint when `jaeger.gatewayUrl` is unset: the contract's current
-// Gateway URL if it answers /health, else its legacy URL (contract.json is
-// generated from jaeger_ai/contract/ports.py), else the current URL so errors
-// name where the Gateway should be.
-async function resolveDefaultEndpoint(contract, probe) {
-  const current = contract && contract.gatewayUrl;
-  const legacy = contract && contract.legacyGatewayUrl;
-  if (!legacy || legacy === current) return current;
-  const healthy = probe || (async url => {
-    try {
-      const response = await nativeRequest(`${url}/health`, { method: 'GET', signal: AbortSignal.timeout(1500) });
-      return response.ok;
-    } catch (_) { return false; }
-  });
-  for (const url of [current, legacy]) {
-    if (await healthy(url)) return url;
-  }
-  return current;
-}
-
-module.exports = { Gateway, GatewayError, localEndpoint, isAllowedGatewayHost, decodeSSE, callerToken, nativeRequest, resolveDefaultEndpoint };
+module.exports = { Gateway, GatewayError, localEndpoint, isAllowedGatewayHost, decodeSSE, callerToken, nativeRequest };

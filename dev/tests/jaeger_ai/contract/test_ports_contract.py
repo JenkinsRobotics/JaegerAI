@@ -119,7 +119,6 @@ def test_live_modules_agree_with_the_contract(module_path, attr, expected) -> No
 def test_the_chat_spine_ports_are_what_the_docs_promise() -> None:
     """AGENTS.md's topology table is the first thing a newcomer reads."""
     assert ports.GATEWAY_PORT == 33418  # JAEGER_GATEWAY_PORT unset in tests
-    assert ports.LEGACY_GATEWAY_PORT != ports.GATEWAY_PORT
     assert ports.WEBUI_PORT == 8790
     assert ports.WEBUI_ADAPTER_PORT == 8791
     topology = (REPO / "AGENTS.md").read_text(encoding="utf-8")

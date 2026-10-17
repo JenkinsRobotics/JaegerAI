@@ -45,16 +45,13 @@ enum GatewayCallerToken {
 }
 
 /// Where the Jaeger Gateway lives. Mirrors `jaeger_ai/contract/ports.py`
-/// (`GATEWAY_PORT` default, `LEGACY_GATEWAY_PORT`); a Python test
+/// (`GATEWAY_PORT` default); a Python test
 /// (`test_gateway_port_mirrors_agree_with_the_contract`) fails if they drift.
+/// The pre-2026-10-17 port is retired; there is no fallback.
 enum GatewayEndpoint {
     static let loopback = "127.0.0.1"
     static let currentPort = 33418
-    /// Pre-2026-10-17 port, tried only when `currentPort` does not answer.
-    /// `JAEGER_GATEWAY_LEGACY_FALLBACK=0` turns the fallback off.
-    static let legacyPort = 8810
     static let currentURL = URL(string: "http://\(loopback):\(currentPort)")!
-    static let legacyURL = URL(string: "http://\(loopback):\(legacyPort)")!
 
     static func resolve(
         _ environment: [String: String],
@@ -70,11 +67,6 @@ enum GatewayEndpoint {
            let url = URL(string: "http://\(loopback):\(port)") {
             current = url
         }
-        let fallbackOff = ["0", "false", "no", "off"].contains(
-            (environment["JAEGER_GATEWAY_LEGACY_FALLBACK"] ?? "").lowercased())
-        if fallbackOff || current == legacyURL { return current }
-        if reachable(current) { return current }
-        if reachable(legacyURL) { return legacyURL }
         return current
     }
 
@@ -151,8 +143,7 @@ struct GatewayClient: Sendable {
 
     static let defaultBaseURL = GatewayEndpoint.currentURL
 
-    /// `JAEGER_GATEWAY_URL` if set; else the current Gateway port if it accepts
-    /// a loopback connection; else the legacy port if that does; else current.
+    /// `JAEGER_GATEWAY_URL` if set; else `JAEGER_GATEWAY_PORT`; else the contract port.
     static func fromEnvironment(
         _ environment: [String: String] = ProcessInfo.processInfo.environment,
         reachable: (URL) -> Bool = GatewayEndpoint.acceptsConnection

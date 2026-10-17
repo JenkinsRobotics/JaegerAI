@@ -27,7 +27,7 @@ _SMD_SHA384 = "T6r95ocN9t3W8tUK2Fa6FPaO7bJryyjyW0WCalrUnpgtm2qXr5xcN4vwPYEJ6vHa"
 
 
 def gateway_contract(repo: Path) -> dict:
-    """LOOPBACK, GATEWAY_PORT's default and LEGACY_GATEWAY_PORT from ports.py.
+    """LOOPBACK and GATEWAY_PORT's default from ports.py.
 
     Read with ``ast`` (never imported). ``GATEWAY_PORT`` is an env-overridable
     expression (``int(os.environ.get(...) or <default>)``); the built extension
@@ -38,7 +38,7 @@ def gateway_contract(repo: Path) -> dict:
         if not (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)):
             continue
         name = node.target.id
-        if name not in {"LOOPBACK", "GATEWAY_PORT", "LEGACY_GATEWAY_PORT"}:
+        if name not in {"LOOPBACK", "GATEWAY_PORT"}:
             continue
         if isinstance(node.value, ast.Constant):
             constants[name] = node.value.value
@@ -48,7 +48,7 @@ def gateway_contract(repo: Path) -> dict:
             if len(ints) != 1:
                 raise SystemExit(f"cannot read the default of {name} from ports.py")
             constants[name] = ints[0]
-    missing = {"LOOPBACK", "GATEWAY_PORT", "LEGACY_GATEWAY_PORT"} - set(constants)
+    missing = {"LOOPBACK", "GATEWAY_PORT"} - set(constants)
     if missing:
         raise SystemExit(f"ports.py is missing {sorted(missing)}")
     return constants
@@ -88,7 +88,6 @@ def main() -> None:
     constants = gateway_contract(repo)
     (stage / "contract.json").write_text(json.dumps({
         "gatewayUrl": f"http://{constants['LOOPBACK']}:{constants['GATEWAY_PORT']}",
-        "legacyGatewayUrl": f"http://{constants['LOOPBACK']}:{constants['LEGACY_GATEWAY_PORT']}",
     }) + "\n")
     print(f"STAGE={stage}", flush=True)
     if not args.stage_only:

@@ -1,41 +1,29 @@
 import XCTest
 @testable import JaegerAI
 
-/// The Gateway moved to the contract's current port; the legacy port is a
-/// fallback only while installed services still run there.
+/// The Gateway lives on the contract's port; the old port is retired, so
+/// nothing falls back to it. JAEGER_GATEWAY_URL / JAEGER_GATEWAY_PORT override.
 final class GatewayEndpointTests: XCTestCase {
-    func testExplicitURLWinsWithoutProbing() {
-        var probed = false
-        let url = GatewayEndpoint.resolve(["JAEGER_GATEWAY_URL": "http://example.local:1234"]) { _ in
-            probed = true; return false
-        }
+    func testExplicitURLWins() {
+        let url = GatewayEndpoint.resolve(["JAEGER_GATEWAY_URL": "http://example.local:1234"]) { _ in false }
         XCTAssertEqual(url.absoluteString, "http://example.local:1234")
+    }
+
+    func testDefaultIsTheContractPortWithoutProbing() {
+        var probed = false
+        let url = GatewayEndpoint.resolve([:]) { _ in probed = true; return false }
+        XCTAssertEqual(url, GatewayEndpoint.currentURL)
+        XCTAssertEqual(GatewayEndpoint.currentURL.absoluteString, "http://127.0.0.1:33418")
         XCTAssertFalse(probed)
     }
 
-    func testCurrentPortFirst() {
-        let url = GatewayEndpoint.resolve([:]) { $0 == GatewayEndpoint.currentURL }
-        XCTAssertEqual(url, GatewayEndpoint.currentURL)
-    }
-
-    func testLegacyFallbackWhenCurrentIsDown() {
-        let url = GatewayEndpoint.resolve([:]) { $0 == GatewayEndpoint.legacyURL }
-        XCTAssertEqual(url, GatewayEndpoint.legacyURL)
-    }
-
-    func testNothingAnsweringKeepsCurrent() {
-        XCTAssertEqual(GatewayEndpoint.resolve([:]) { _ in false }, GatewayEndpoint.currentURL)
-    }
-
-    func testFallbackCanBeTurnedOff() {
-        let url = GatewayEndpoint.resolve(["JAEGER_GATEWAY_LEGACY_FALLBACK": "0"]) {
-            $0 == GatewayEndpoint.legacyURL
-        }
-        XCTAssertEqual(url, GatewayEndpoint.currentURL)
-    }
-
     func testPortOverride() {
-        let url = GatewayEndpoint.resolve(["JAEGER_GATEWAY_PORT": "\(GatewayEndpoint.legacyPort)"]) { _ in false }
-        XCTAssertEqual(url, GatewayEndpoint.legacyURL)
+        let url = GatewayEndpoint.resolve(["JAEGER_GATEWAY_PORT": "40001"]) { _ in false }
+        XCTAssertEqual(url.absoluteString, "http://127.0.0.1:40001")
+    }
+
+    func testRetiredFallbackEnvIsIgnored() {
+        let url = GatewayEndpoint.resolve(["JAEGER_GATEWAY_LEGACY_FALLBACK": "1"]) { _ in false }
+        XCTAssertEqual(url, GatewayEndpoint.currentURL)
     }
 }
