@@ -53,6 +53,9 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         if let rejected = start.rejected { shellLog("[shell][override] rejected \(rejected)") }
         if let override = start.override { shellLog("[shell][override] accepted \(override)") }
         shellLog("[shell] start_url=\(start.url.absoluteString)")
+        let gw = ShellEnvironment.gateway()
+        if let rejected = gw.rejected { shellLog("[shell][override] gateway rejected \(rejected)") }
+        shellLog("[shell] gateway=\(gw.origin.string)")
         if verifyBridgeMode {
             // Headless: no menu, status item, hotkey or visible window.
             let verifier = BridgeVerifier(app: self)
@@ -405,7 +408,7 @@ enum ShellEnvironment {
     static func gateway() -> StartURL.Resolution {
         StartURL.resolve(
             fallback: StartURL.defaultGateway,
-            envValue: ProcessInfo.processInfo.environment[StartURL.gatewayEnvKey],
+            envValue: StartURL.gatewayEnvValue(ProcessInfo.processInfo.environment),
             defaultsValue: UserDefaults.standard.string(forKey: StartURL.gatewayDefaultsKey),
             isDevBuild: isDevBuild)
     }
