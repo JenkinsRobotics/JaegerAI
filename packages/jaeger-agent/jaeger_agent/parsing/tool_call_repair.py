@@ -114,11 +114,10 @@ def _extract_xml_function_tags(text: str) -> list[RepairedToolCall]:
 
 
 def _extract_tool_call_tags(text: str) -> list[RepairedToolCall]:
-    """Parse <tool_call>...</tool_call> or <tool_call> JSON blocks."""
+    """Parse <tool_call>...</tool_call>, <ai:tool_call>...</ai:tool_call>, or unclosed tags."""
     results: list[RepairedToolCall] = []
-    # Both closed and unclosed (if at end) tool_call tags
     pattern = re.compile(
-        r"<tool_call>(.*?)(?:</tool_call>|$)",
+        r"<(?:ai:)?tool_call>(.*?)(?:</(?:ai:)?tool_call>|$)",
         flags=re.DOTALL | re.IGNORECASE,
     )
 
@@ -128,6 +127,20 @@ def _extract_tool_call_tags(text: str) -> list[RepairedToolCall]:
         if not body:
             continue
 
+        # Check for <ai:function_name>name</ai:function_name><ai:parameters>json</ai:parameters>
+        fn_match = re.search(r"<(?:ai:)?function_name>(.*?)</(?:ai:)?function_name>", body, flags=re.DOTALL | re.IGNORECASE)
+        param_match = re.search(r"<(?:ai:)?parameters>(.*?)</(?:ai:)?parameters>", body, flags=re.DOTALL | re.IGNORECASE)
+        if fn_match:
+            name = fn_match.group(1).strip()
+            param_str = param_match.group(1).strip() if param_match else "{}"
+            args = _safe_parse_json(param_str) or {}
+            if isinstance(args, str):
+                args = _safe_parse_json(args) or {}
+            if name and isinstance(args, dict):
+                call_id = f"call_{uuid.uuid4().hex[:24]}"
+                results.append(RepairedToolCall(id=call_id, name=name, arguments=args, raw=raw))
+                continue
+
         # If wrapped in markdown code fence inside the tag
         body = re.sub(r"^```(?:json)?\s*", "", body)
         body = re.sub(r"\s*```$", "", body)
@@ -136,6 +149,9 @@ def _extract_tool_call_tags(text: str) -> list[RepairedToolCall]:
         if isinstance(parsed, dict):
             name = str(parsed.get("name") or parsed.get("tool") or parsed.get("tool_name") or "").strip()
             args = parsed.get("arguments") or parsed.get("parameters") or parsed.get("input") or {}
+            if not name and "command" in parsed:
+                name = "terminal"
+                args = {"command": parsed["command"]}
             if isinstance(args, str):
                 parsed_args = _safe_parse_json(args)
                 if isinstance(parsed_args, dict):
@@ -278,9 +294,19 @@ def repair_plain_text_tool_calls(
     if not extracted:
         return [], text
 
-    # Filter by allowed_tool_names if provided
+    # Filter by allowed_tool_names if provided, resolving common aliases (e.g. terminal <-> run_shell)
     if allowed_tool_names:
-        extracted = [tc for tc in extracted if tc.name in allowed_tool_names]
+        remapped: list[RepairedToolCall] = []
+        for tc in extracted:
+            tc_name = tc.name
+            if tc_name not in allowed_tool_names:
+                if tc_name in ("terminal", "bash", "sh") and "run_shell" in allowed_tool_names:
+                    tc_name = "run_shell"
+                elif tc_name in ("run_shell", "bash", "sh") and "terminal" in allowed_tool_names:
+                    tc_name = "terminal"
+            if tc_name in allowed_tool_names:
+                remapped.append(RepairedToolCall(id=tc.id, name=tc_name, arguments=tc.arguments, raw=tc.raw))
+        extracted = remapped
         if not extracted:
             return [], text
 

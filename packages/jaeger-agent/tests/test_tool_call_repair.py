@@ -118,3 +118,23 @@ def test_repair_implicit_command_json_block():
     assert args == {"command": "ls -la /tmp"}
     assert "```json" not in cleaned
     assert "Here is the command to list files:" in cleaned
+
+
+def test_repair_ai_tool_call_tag():
+    raw = (
+        "Let me run this:\n"
+        "<ai:tool_call>\n"
+        "<ai:function_name>terminal</ai:function_name>\n"
+        "<ai:parameters>\n"
+        '{"command": "git status"}\n'
+        "</ai:parameters>\n"
+        "</ai:tool_call>"
+    )
+    tool_calls, cleaned = repair_plain_text_tool_calls(raw, allowed_tool_names={"terminal", "read_file"})
+    assert len(tool_calls) == 1
+    call = tool_calls[0]
+    assert call["function"]["name"] == "terminal"
+    args = json.loads(call["function"]["arguments"])
+    assert args == {"command": "git status"}
+    assert "<ai:tool_call>" not in cleaned
+    assert "Let me run this:" in cleaned
