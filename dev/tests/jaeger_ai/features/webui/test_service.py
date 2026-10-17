@@ -57,7 +57,7 @@ def test_start_runs_adapter_then_webui_and_can_publish(tmp_path):
         "jaeger_ai.features.webui.service.service._load_webui_config",
         return_value=_config(layout),
     ), patch(
-        "jaeger_ai.features.webui.service.service.prepare_webui_home", return_value={}
+        "jaeger_ai.features.webui.service.service.ensure_agent_state_schema", return_value={}
     ):
         svc = WebUIService("jaeger")
         with patch.object(

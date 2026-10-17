@@ -5,7 +5,6 @@ from jaeger_ai.contract.frameworks import FRAMEWORKS
 from jaeger_ai.features.webui import (
     WebUIService,
     webui_urls,
-    ensure_webui_profile_layout,
     profile_display_name,
     HermesWebUIAdapterServer,
     BridgeClient,
@@ -22,7 +21,6 @@ _INDEX = _REPO / "jaeger_ai" / "features" / "webui" / "static" / "index.html"
 def test_webui_feature_exports():
     assert WebUIService is not None
     assert callable(webui_urls)
-    assert callable(ensure_webui_profile_layout)
     # Asserted against the contract, not retyped: these two assertions said
     # "Jaeger" for weeks after the shipped name became "Jaeger AI".
     for f in FRAMEWORKS:

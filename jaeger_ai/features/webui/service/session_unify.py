@@ -428,10 +428,11 @@ def stamp_ended_at(state_db: Path, session_id: str, *, ended_at: float | None = 
 
 
 def close_reconciled_webui_session(session_id: str) -> None:
-    home = Path.home()
+    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root, webui_agent_home
+
     for path in (
-        home / ".jaeger_ai" / "hermes-webui-agent" / "state.db",
-        home / ".jaeger" / "hermes" / "state.db",
+        webui_agent_home() / "state.db",
+        hermes_profile_root() / "state.db",
     ):
         try:
             stamp_ended_at(path, session_id)
