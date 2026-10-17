@@ -2730,6 +2730,7 @@ const _SKINS=[
   {name:'Neon Paint', value:'neon-paint', colors:['#FF2D95','#00E5FF','#FFB800']},
   {name:'Geist Contrast', value:'geist-contrast', colors:['#000000','#ffffff','#FFF175']},
   {name:'Zeus',     colors:['#FFD700','#FFBF00','#1A1A00']},
+  {name:'Aether',   colors:['#4C9DFF','#171A20','#0E1013']},
   {name:'Verdigris', value:'verdigris', colors:['#C89A5A','#0F1714','#22342C']},
 ];
 const _VALID_THEMES=new Set((_THEMES||[]).map(t=>t.value));
