@@ -2036,7 +2036,8 @@ class JaegerGatewayApp:
 
     async def handle_list_sessions(self, request: web.Request) -> web.Response:
         profile = request.query.get("profile")
-        sessions = self.store.list_sessions(profile=profile, query=request.query.get("q"))
+        sessions = self.store.list_sessions(profile=profile, query=request.query.get("q"),
+                                            agent_id=(request.query.get("agent_id") or "").strip() or None)
         return web.json_response({"sessions": sessions})
 
     async def handle_create_session(self, request: web.Request) -> web.Response:
@@ -2295,6 +2296,15 @@ class JaegerGatewayApp:
                 "keep_history": keep_history,
             },
         )
+        # The same handoff, globally: the sidebar learns an agent now has a
+        # direct chat without subscribing to every session (D4).
+        self.event_bus.publish("*", "agent.direct_chat", {
+            "session_id": session_id,
+            "agent_id": target.id,
+            "from_agent_id": previous_agent_id,
+            "title": updated.get("title"),
+            "reason": reason,
+        })
         return web.json_response(
             {
                 "session_id": session_id,

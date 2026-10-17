@@ -42,6 +42,9 @@ EVENT_TYPES = frozenset({
     "tool.started", "tool.done", "tool.error", "files.changed",
     # Session lifecycle (the projection's list is built from these).
     "session.created", "session.updated", "session.deleted",
+    # Owner/auto handoff of a session to an agent; ``agent.direct_chat`` is the
+    # global twin of an owner handoff (Agents View sidebar).
+    "session.handoff", "agent.direct_chat",
     # Approvals — the approval card. ``approval.request`` carries
     # {approval_id, kind, prompt, options, session_id}; resolve via
     # POST /v1/approvals/{id} which emits ``approval.resolved``.
