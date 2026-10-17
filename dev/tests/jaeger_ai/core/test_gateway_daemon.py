@@ -309,6 +309,34 @@ async def test_native_lead_reuses_catalog_and_refreshes_after_credential_rotatio
 
 
 @pytest.mark.asyncio
+async def test_native_lead_reconnects_once_when_mcp_forgot_the_session(monkeypatch, tmp_path):
+    from urllib.error import HTTPError
+
+    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "mcp-404.sqlite3"))
+    created = []
+
+    class Client:
+        def __init__(self, url, key, host):
+            self.calls = 0
+            created.append(self)
+        def initialize(self): pass
+        def list_tools(self): return [{"name": "jaeger_chat"}]
+        def _execute_call(self, name, arguments):
+            self.calls += 1
+            if len(created) == 1:  # the first transport outlived an MCP restart
+                raise HTTPError("http://mcp", 404, "Not Found", {}, None)
+            return {"content": [{"type": "text", "text": "after-restart"}]}
+
+    import jaeger_ai.core.gateway.native_mcp as transport
+    monkeypatch.setattr(transport, "MCPClient", Client)
+    monkeypatch.setattr(transport, "mcp_api_key", lambda: "k")
+    assert (await app._native_lead_turn("s", "hi"))[0] == "after-restart"
+    assert [c.calls for c in created] == [1, 1]
+    assert (await app._native_lead_turn("s", "again"))[0] == "after-restart"
+    assert len(created) == 2  # the reconnected transport is reused
+
+
+@pytest.mark.asyncio
 async def test_missing_mcp_credential_fails_before_native_ownership(monkeypatch, tmp_path):
     store = GatewaySessionStore(tmp_path / "missing-key.sqlite3")
     app = JaegerGatewayApp(store=store)
