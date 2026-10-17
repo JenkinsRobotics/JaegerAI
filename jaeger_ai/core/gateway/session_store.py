@@ -381,7 +381,8 @@ class GatewaySessionStore:
             conn.execute("VACUUM INTO ?", (str(dest_path),))
         return dest_path
 
-    def list_sessions(self, profile: str | None = None, query: str | None = None) -> list[dict[str, Any]]:
+    def list_sessions(self, profile: str | None = None, query: str | None = None,
+                      agent_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             sql = "SELECT s.*, COUNT(m.id) as message_count FROM sessions s LEFT JOIN messages m ON s.session_id = m.session_id"
             params: list[Any] = []
@@ -389,6 +390,9 @@ class GatewaySessionStore:
             if profile:
                 clauses.append("s.profile = ?")
                 params.append(profile)
+            if agent_id:
+                clauses.append("json_extract(s.metadata_json, '$.agent_id') = ?")
+                params.append(agent_id)
             term = str(query or "").strip()
             if term:
                 like = f"%{term}%"

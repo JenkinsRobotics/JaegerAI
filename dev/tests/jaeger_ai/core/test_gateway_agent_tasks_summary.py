@@ -153,3 +153,24 @@ async def test_role_filter_carries_hidden_and_disabled_flags(tmp_path):
     assert body["role"] == "specialist" and body["agents"]
     for agent in body["agents"]:
         assert isinstance(agent["hidden"], bool) and isinstance(agent["disabled"], bool)
+
+
+@pytest.mark.asyncio
+async def test_sessions_filter_by_agent_and_direct_chat_is_global(tmp_path):
+    from jaeger_ai.core.gateway.event_bus import EVENT_TYPES
+
+    gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "s.db"))
+    gateway.app.on_startup.clear()
+    agent_id = gateway._registry().list_agents(role="specialist")[0].id
+    async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as client:
+        for sid in ("a", "b"):
+            assert (await client.post("/v1/sessions", json={"session_id": sid})).status in (200, 201)
+        resp = await client.post("/v1/sessions/a/handoff", json={"to_agent_id": agent_id})
+        assert resp.status == 200
+        listed = (await (await client.get(f"/v1/sessions?agent_id={agent_id}")).json())["sessions"]
+        assert [s["session_id"] for s in listed] == ["a"]
+        assert len((await (await client.get("/v1/sessions")).json())["sessions"]) == 2
+    events = gateway.store.replay_events("*", 0)["events"]
+    direct = [e for e in events if e["event"] == "agent.direct_chat"]
+    assert direct and direct[-1]["data"]["agent_id"] == agent_id and direct[-1]["data"]["session_id"] == "a"
+    assert {"session.handoff", "agent.direct_chat"} <= EVENT_TYPES
