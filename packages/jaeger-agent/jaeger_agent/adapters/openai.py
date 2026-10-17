@@ -69,6 +69,8 @@ logger = logging.getLogger(__name__)
 # Backends that talk the OpenAI wire format. Mirrors
 # ``_OPENAI_COMPATIBLE`` in ``core/external_model.py`` so the slugs stay
 # consistent between the legacy code path and the new adapter.
+_OLLAMA_PROVIDERS: frozenset[str] = frozenset({"ollama", "ollama-cloud"})
+
 KNOWN_PROVIDERS: frozenset[str] = frozenset({
     "openai", "lmstudio", "ollama", "ollama-cloud", "gemini",
     "openrouter", "groq", "deepseek", "vllm", "together",
@@ -379,7 +381,8 @@ class OpenAIAdapter(ProviderAdapter):
         """One request; when the model spent the whole output budget
         thinking and produced no answer or tool call, retry it once with
         reasoning off (``reasoning_effort="none"``) instead of failing the
-        step. Only when this adapter is the one capping reasoning."""
+        step. Only when this adapter is the one capping reasoning, or (for
+        Ollama providers at the provider default) once more at ``low``."""
         raw = self._call_once(formatted, interrupt_event, **kwargs)
         effort = (kwargs.get("reasoning_effort") or (formatted or {}).get("reasoning_effort")
                   if isinstance(formatted, dict) else None)
@@ -388,6 +391,20 @@ class OpenAIAdapter(ProviderAdapter):
             and _thinking_exhausted(raw)
         ):
             retry = {**formatted, "reasoning_effort": "none"}
+            self.last_reasoning_retry = True
+            return self._call_once(retry, interrupt_event, **{k: v for k, v in kwargs.items() if k != "reasoning_effort"})
+        if (
+            not effort and self.provider in _OLLAMA_PROVIDERS
+            and isinstance(formatted, dict) and not interrupt_event.is_set()
+            and _thinking_exhausted(raw)
+        ):
+            # Ollama cloud models (glm-5.3-flash:cloud) keep the provider's
+            # default reasoning, which can spend a whole 4096-token step
+            # thinking on a ~26K-token tool prompt (2026-10-16 SOTA TERM-01:
+            # "spent its entire output budget thinking"). Ollama honours
+            # ``reasoning_effort`` for these models, so retry once at ``low``
+            # rather than failing the step.
+            retry = {**formatted, "reasoning_effort": "low"}
             self.last_reasoning_retry = True
             return self._call_once(retry, interrupt_event, **{k: v for k, v in kwargs.items() if k != "reasoning_effort"})
         self.last_reasoning_retry = False

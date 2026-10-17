@@ -77,3 +77,24 @@ def test_no_retry_when_the_adapter_is_not_capping():
     a = OpenAIAdapter(provider="openai", model="o4", client=client, stream_transport=False)
     a.call(a.format_messages([{"role": "user", "content": "q"}], [], ""), threading.Event())
     assert len(client.calls) == 1
+
+
+def test_ollama_cloud_default_effort_exhausted_step_is_retried_at_low():
+    # glm-5.3-flash:cloud keeps the provider default (no cap sent); a step that
+    # spends the whole budget thinking is retried once at ``low``.
+    client = _Seq([_resp("", "long thoughts...", "length"), _resp("391", "brief", "stop")])
+    a = OpenAIAdapter(provider="ollama", model="glm-5.3-flash:cloud", client=client, stream_transport=False)
+    fm = a.format_messages([{"role": "user", "content": "17*23?"}], [], "")
+    assert "reasoning_effort" not in fm
+    raw = a.call(fm, threading.Event())
+    assert [c.get("reasoning_effort") for c in client.calls] == [None, "low"]
+    assert a.parse_response(raw)["content"] == "391"
+    assert a.last_reasoning_retry is True
+
+
+def test_ollama_cloud_answered_step_is_not_retried():
+    client = _Seq([_resp("391", "brief", "stop")])
+    a = OpenAIAdapter(provider="ollama", model="glm-5.3-flash:cloud", client=client, stream_transport=False)
+    a.call(a.format_messages([{"role": "user", "content": "q"}], [], ""), threading.Event())
+    assert len(client.calls) == 1
+    assert a.last_reasoning_retry is False
