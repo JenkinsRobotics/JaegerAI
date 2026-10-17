@@ -258,6 +258,22 @@ def _extract_markdown_json_blocks(text: str, allowed_tool_names: set[str] | None
     return results
 
 
+def _extract_markdown_bash_blocks(text: str, allowed_tool_names: set[str] | None = None) -> list[RepairedToolCall]:
+    """Parse ```bash ... ``` or ```sh ... ``` blocks as shell command tool calls."""
+    if allowed_tool_names and not ({"terminal", "run_shell", "bash"} & allowed_tool_names):
+        return []
+    target_name = "terminal" if (not allowed_tool_names or "terminal" in allowed_tool_names) else "run_shell"
+    results: list[RepairedToolCall] = []
+    pattern = re.compile(r"```(?:bash|sh)\s*\n(.*?)```", flags=re.DOTALL | re.IGNORECASE)
+    for match in pattern.finditer(text):
+        cmd = match.group(1).strip()
+        raw = match.group(0)
+        if cmd:
+            call_id = f"call_{uuid.uuid4().hex[:24]}"
+            results.append(RepairedToolCall(id=call_id, name=target_name, arguments={"command": cmd}, raw=raw))
+    return results
+
+
 def repair_plain_text_tool_calls(
     text: str,
     *,
@@ -290,6 +306,10 @@ def repair_plain_text_tool_calls(
     # Priority 4: Markdown JSON blocks
     if not extracted:
         extracted.extend(_extract_markdown_json_blocks(text, allowed_tool_names))
+
+    # Priority 5: Markdown bash/sh code blocks
+    if not extracted:
+        extracted.extend(_extract_markdown_bash_blocks(text, allowed_tool_names))
 
     if not extracted:
         return [], text
