@@ -11772,6 +11772,15 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path in ("/session/manifest.json", "/session/manifest.webmanifest"):
         return _serve_manifest(handler)
 
+    # New UI build at / (interfaces/ui/dist); the old shell only at /legacy
+    # behind JAEGER_WEBUI_LEGACY=1 (api/ui_shell.py).
+    from api.ui_shell import serve as _serve_ui_shell
+    _shell = _serve_ui_shell(handler, parsed)
+    if _shell is True:
+        return True
+    if _shell == "legacy":
+        parsed = parsed._replace(path="/")
+
     if parsed.path in ("/", "/index.html") or parsed.path.startswith("/session/"):
         try:
             from api.extensions import inject_extension_tags

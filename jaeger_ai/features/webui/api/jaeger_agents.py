@@ -361,6 +361,22 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path == "/api/jaeger/presence":
         return _proxy(handler, "GET", "/v1/presence")
 
+    # Durable tasks (Tasks board, Mac host): GET list (?agent_id=, ...), POST create.
+    if path in {"/api/tasks", "/v1/tasks"} and method in {"GET", "POST"}:
+        qs = f"?{parsed.query}" if parsed.query else ""
+        if method == "GET":
+            return _proxy(handler, "GET", f"/v1/tasks{qs}")
+        raw = getattr(handler, "_json_body_bytes", None)
+        if raw is None:
+            from api.helpers import read_body
+
+            raw = json.dumps(read_body(handler) or {}).encode("utf-8")
+        return _proxy(handler, "POST", "/v1/tasks", raw)
+    if method == "GET" and (path.startswith("/api/tasks/") or path.startswith("/v1/tasks/")):
+        from urllib.parse import quote
+
+        return _proxy(handler, "GET", f"/v1/tasks/{quote(path.split('/tasks/', 1)[1], safe='')}")
+
     # Connect Apps (Agents View panel). The install body is relayed as-is;
     # the Gateway enforces confirm:true and the owner-caller rule.
     if path == "/api/connect-apps" and method == "GET":
