@@ -36,9 +36,12 @@ from jaeger_ai.contract.ports import (
     WEBUI_ADAPTER_PORT,
     WEBUI_PORT,
 )
-from jaeger_ai.core.instance.instance import operator_state_root
+from jaeger_ai.core.instance.instance import install_root, operator_state_root
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+# The source checkout the services run from. From an installed wheel
+# ``__file__`` is site-packages, which has no scripts/ and no packages/, so the
+# launcher's JAEGER_INSTALL_ROOT (install_root) is the only reliable answer.
+REPO_ROOT = install_root()
 
 
 def _current_git_commit() -> str:
@@ -112,10 +115,16 @@ def _bridge_command() -> list[str]:
 
 
 def _webui_command() -> list[str]:
+    # server.py imports its siblings as top-level ``api.*`` and only starts
+    # from its own directory with the launcher's environment; ``python -m``
+    # crash-loops under launchd.
     run_script = REPO_ROOT / "scripts" / "run-jaeger-webui.sh"
-    if run_script.exists():
-        return ["/bin/zsh", str(run_script)]
-    return [_default_python(), "-u", "-B", "-m", "jaeger_ai.features.webui.server"]
+    if not run_script.exists():
+        raise RuntimeError(
+            f"Web UI launcher missing at {run_script}; set JAEGER_INSTALL_ROOT "
+            "to the JaegerAI checkout (the ./jaeger wrapper does this)."
+        )
+    return ["/bin/zsh", str(run_script)]
 
 
 def _runner_command() -> list[str]:
@@ -173,6 +182,7 @@ def _common_env() -> dict[str, str]:
         "PYTHONPYCACHEPREFIX": str(pycache),
         "PYTHONPATH": pythonpath,
         "PYTHONUNBUFFERED": "1",
+        "JAEGER_INSTALL_ROOT": str(REPO_ROOT),
         "JAEGER_STATE_DIR": str(state_root),
         "JAEGER_STATE_HOME": str(state_root),
     }

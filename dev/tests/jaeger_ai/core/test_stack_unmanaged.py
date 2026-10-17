@@ -57,6 +57,7 @@ def test_stack_up_skips_service_already_serving_outside_launchd(monkeypatch):
     monkeypatch.setattr(stack, "probe_service_health", lambda s: True)
     monkeypatch.setattr(stack, "migrate_legacy_launchagents", lambda: [])
     monkeypatch.setattr(stack, "sync_plists", lambda *a, **k: [])
+    monkeypatch.setattr("jaeger_ai.core.frameworks.setup._configure_agent_models", lambda: None)
     monkeypatch.setattr(stack, "_current_git_commit", lambda: "abc")
     res = stack.stack_up([_gateway()], wait_timeout=0.1)
     assert res["skipped_unmanaged"] == ["gateway"]
