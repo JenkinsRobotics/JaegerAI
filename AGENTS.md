@@ -117,7 +117,7 @@ JaegerAI/
 ├── docs/               # Technical specifications and architectural docs
 ├── integrations/       # External service and platform adapters
 ├── jaeger              # Single operator entrypoint script (executes ~/.jaeger/venv)
-├── jaeger_ai/          # Core engine — see STRUCTURE.md for the full map
+├── jaeger_ai/          # Core engine — see docs/architecture/STRUCTURE.md for the full map
 │   ├── core/           # Shared engine: gateway (sessions, :8810), frameworks, models
 │   ├── features/       # One folder per feature, each with its own README.md
 │   ├── interfaces/     # Client surfaces ONLY (swift, tui, pyside6, messaging, bridge)

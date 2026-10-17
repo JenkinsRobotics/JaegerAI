@@ -7,4 +7,4 @@
 * **Task Dispatcher & Kanban Board**: Unified under [`jaeger_ai/features/dispatcher/`](file:///Users/matthewjenkins/GitHub/JaegerAI/jaeger_ai/features/dispatcher/).
 * **Agent Workspaces**: Documented under [`jaeger_ai/features/webui/README.md`](file:///Users/matthewjenkins/GitHub/JaegerAI/jaeger_ai/features/webui/README.md) and [`integrations/agent_workspaces/`](file:///Users/matthewjenkins/GitHub/JaegerAI/integrations/agent_workspaces/).
 
-Please refer to [`STRUCTURE.md`](file:///Users/matthewjenkins/GitHub/JaegerAI/STRUCTURE.md) for the complete directory guide.
+Please refer to [`STRUCTURE.md`](file:///Users/matthewjenkins/GitHub/JaegerAI/docs/architecture/STRUCTURE.md) for the complete directory guide.
