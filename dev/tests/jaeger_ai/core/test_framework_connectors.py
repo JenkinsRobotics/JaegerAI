@@ -97,7 +97,45 @@ def test_policy_kernel_gates_checkout_head_changes_through_shell_aliases(tool, c
 
 
 def test_checkout_path_restore_is_not_mistaken_for_head_change():
-    assert destructive_reason("terminal", {"command": "git checkout -- src/file.py"})
+    reason = destructive_reason("terminal", {"command": "git checkout -- src/file.py"})
+    assert reason.startswith("git checkout -f / -- discards local changes")
+    assert "HEAD" not in reason
+
+
+def test_the_oct9_main_checkout_branch_switch_is_gated():
+    """The supervised manager run executed exactly this with no approval card."""
+    command = "git -C ~/GitHub/JaegerAI checkout -b 0.13-dev-lean-prompt"
+    assert destructive_reason("terminal", {"command": command}).startswith("git checkout changes the checkout HEAD")
+    decision = PolicyKernel().evaluate(ProposedAction("terminal", {"command": command}))
+    assert decision.decision is AuthorityDecisionType.REQUIRE_APPROVAL
+    assert decision.policy_name == "destructive_action"
+
+
+@pytest.mark.parametrize("command", [
+    "git --git-dir /repo/.git switch main",
+    "cd /repo && git checkout main",
+    "bash -c 'git rebase -i HEAD~3'",
+    "git worktree remove /tmp/child",
+    "git worktree prune",
+])
+def test_head_change_gate_sees_through_globals_chains_and_shells(command):
+    assert destructive_reason("terminal", {"command": command})
+
+
+def test_reset_hard_keeps_its_specific_reason():
+    assert destructive_reason("terminal", {"command": "git reset --hard HEAD~1"}).startswith("git reset --hard discards work")
+
+
+@pytest.mark.parametrize("command", [
+    "git status --short",
+    "git log --oneline -5",
+    "git diff HEAD",
+    "git branch --list",
+    "git worktree list",
+    "git -C /repo rev-parse --abbrev-ref HEAD",
+])
+def test_read_only_git_stays_ungated(command):
+    assert destructive_reason("terminal", {"command": command}) is None
 
 
 def test_delegate_uses_fixed_safe_argv_in_a_scratch_dir(env, tmp_path, monkeypatch):
@@ -155,3 +193,4 @@ index 8a09d1a..c2d1f91 100644
         bad = tmp_path / "bad.patch"
         bad.write_text("This is not a patch")
         delegate.apply_saved_diff(bad, workspace=root)
+
