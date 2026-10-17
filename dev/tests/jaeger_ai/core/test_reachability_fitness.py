@@ -137,7 +137,6 @@ KNOWN_ORPHANS = {
     "jaeger_ai.plugins.messaging_daemon",
     "jaeger_ai.core.runtime._shakedown",
     # Consumers (interfaces/studio, interfaces/v4) were deleted.
-    "jaeger_ai.nodes.animation_dev.mscript.mscript_engine",
     # Engine capability with no client surface.
     "jaeger_ai.features.skill_tree.xp_emitter",
     "jaeger_ai.features.personality.persona_state",
