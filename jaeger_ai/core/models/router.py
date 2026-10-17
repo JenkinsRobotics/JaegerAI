@@ -11,6 +11,7 @@ that new developers can easily understand:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -210,6 +211,13 @@ def _log_path() -> Path:
 
 def log_decision(decision: SensitivityDecision, *, text_preview: str = "") -> Path:
     """Record an audit trail entry for every model routing decision."""
+    raw = text_preview or ""
+    if decision.classification != "public":
+        sha = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        preview = f"<redacted:sha256={sha}:len={len(raw)}>"
+    else:
+        preview = raw[:160]
+
     row = {
         "ts": time.time(),
         "class": decision.classification,
@@ -217,7 +225,7 @@ def log_decision(decision: SensitivityDecision, *, text_preview: str = "") -> Pa
         "provider": decision.provider,
         "tokens": decision.tokens_est,
         "reason": decision.reason,
-        "preview": (text_preview or "")[:160],
+        "preview": preview,
     }
     path = _log_path()
     with path.open("a", encoding="utf-8") as fh:
