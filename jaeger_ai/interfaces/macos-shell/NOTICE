@@ -1,0 +1,7 @@
+Jaeger macOS shell (jaeger_ai/interfaces/macos-shell)
+This product includes software derived from AetherStudio by Jonathan Jenkins and Jenkins Robotics,
+at commit ece0209, used under the Apache License, Version 2.0:
+  core/ui/native/StudioWindowChrome.swift (unmodified)
+  Aether CAD/Launcher/AetherCADApplication.swift (modified)
+  Aether CAD/Launcher/Info.plist (modified)
+Copyright (c) Jonathan Jenkins and Jenkins Robotics. See LICENSES/AetherStudio-Apache-2.0.txt for the license text.
