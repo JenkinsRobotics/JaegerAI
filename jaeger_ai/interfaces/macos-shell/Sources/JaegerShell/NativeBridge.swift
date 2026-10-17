@@ -165,9 +165,9 @@ extension JaegerShellApplication: BridgeHost {
     func bridgeLoginItemStatus() -> String { ShellEnvironment.loginItemStatus() }
 
     func bridgeSetLoginItem(_ enabled: Bool) throws -> String {
-        if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
-        shellLog("[shell][login] set enabled=\(enabled) via bridge → \(ShellEnvironment.loginItemStatus())")
-        return ShellEnvironment.loginItemStatus()
+        let status = try ShellEnvironment.setLoginItem(enabled)
+        shellLog("[shell][login] set enabled=\(enabled) via bridge → \(status)")
+        return status
     }
 
     func bridgeNotify(title: String, body: String) {

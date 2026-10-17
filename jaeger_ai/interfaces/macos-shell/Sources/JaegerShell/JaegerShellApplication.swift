@@ -62,6 +62,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         }
         showWindow()
         installRulesThenLoad()
+        statusController?.refreshIcon()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -400,15 +401,27 @@ enum ShellEnvironment {
         }
     }
 
-    /// `JaegerLauncher` Info.plist key, else the usual CLI locations. Never run here.
+    /// Launcher for `jaeger stack up` (LauncherResolver, ported from the old BridgeProcess.jaegerPath()).
     static func launcherPath() -> String? {
-        var candidates: [String] = []
-        if let configured = Bundle.main.object(forInfoDictionaryKey: "JaegerLauncher") as? String {
-            candidates.append((configured as NSString).expandingTildeInPath)
+        LauncherResolver.resolve(
+            env: ProcessInfo.processInfo.environment,
+            plistLauncher: Bundle.main.object(forInfoDictionaryKey: "JaegerLauncher") as? String,
+            bundlePath: Bundle.main.bundlePath, home: NSHomeDirectory(),
+            isExecutable: { FileManager.default.isExecutableFile(atPath: $0) })
+    }
+
+    /// Opt-in only. Ported (adapted) from jaeger_ai/interfaces/swift/Sources/JaegerAI/MenuCard/LaunchAtLogin.swift:45-62
+    /// (guarded register/unregister + refresh). The old init's default registration (lines 24-35, which turned
+    /// Launch at Login on for every fresh install) is deliberately NOT ported. Called only from a user action.
+    @discardableResult
+    static func setLoginItem(_ enabled: Bool) throws -> String {
+        let service = SMAppService.mainApp
+        if enabled {
+            if service.status != .enabled { try service.register() }
+        } else {
+            if service.status == .enabled { try service.unregister() }
         }
-        candidates += ["~/.jaeger/venv/bin/jaeger", "/opt/homebrew/bin/jaeger", "/usr/local/bin/jaeger"]
-            .map { ($0 as NSString).expandingTildeInPath }
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+        return loginItemStatus()
     }
 }
 
