@@ -34,6 +34,10 @@
   <true/>
   <key>JaegerHotkey</key>
   <string>ctrl-opt-space</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Jaeger uses your microphone for local voice dictation when you press the mic button.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Jaeger uses speech recognition (on-device when available) to turn your dictation into text.</string>
   <key>JaegerDevBuild</key>
   <true/>
   <key>NSAppTransportSecurity</key>

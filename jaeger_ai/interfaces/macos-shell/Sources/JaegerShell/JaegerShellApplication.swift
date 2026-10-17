@@ -36,6 +36,15 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     let verifyBridgeMode = CommandLine.arguments.contains("--verify-bridge")
     private(set) var bridge: NativeBridge?
     private var bridgeVerifier: BridgeVerifier?
+    private(set) var voiceController: VoiceController?
+
+    /// Created on first voice use (never in --verify-launch / --verify-bridge).
+    func voice() -> VoiceController {
+        if let voiceController { return voiceController }
+        let created = VoiceController(emit: { [weak self] detail in self?.bridge?.send(detail) })
+        voiceController = created
+        return created
+    }
     var mainWindow: NSWindow? { window }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -83,6 +92,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
 
     func applicationWillTerminate(_ notification: Notification) {
         Hotkey.shared.unregister()
+        voiceController?.shutdown()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {

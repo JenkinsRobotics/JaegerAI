@@ -6,6 +6,7 @@
 // recorded, never performed (no window shown, no link opened, login item never changed).
 // Prints one JSON line to stdout and exits.
 
+import AVFoundation
 import AppKit
 import JaegerShellCore
 import WebKit
@@ -19,6 +20,8 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
     private var fixture: WKWebView?
     private var fixtureBridge: NativeBridge?
     private var fixtureChrome: StudioWindowChrome?
+    private let renderer = AppleSpeechSynth()
+    private var permissionsBefore: [String] = []
 
     init(app: JaegerShellApplication) { self.app = app }
 
@@ -42,12 +45,35 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
     func bridgeSetLoginItem(_ enabled: Bool) throws -> String {
         calls.append("launchAtLogin.set \(enabled) (recorded, not changed)"); return "recorded"
     }
+    func bridgeVoiceStatus() -> [String: Any] {
+        calls.append("voice.status"); return VoiceController.status(state: "idle", speaking: false)
+    }
+    func bridgeMicStart(mode: String, done: @escaping BridgeDone) {
+        calls.append("mic.start \(mode) (recorded, mic not opened)")
+        app.bridge?.send(["type": "voice.state", "state": "listening"])
+        done(["listening": false, "recorded": true], nil)
+    }
+    func bridgeMicStop(done: @escaping BridgeDone) {
+        calls.append("mic.stop (recorded)")
+        app.bridge?.send(["type": "voice.state", "state": "idle"])
+        done(["recorded": true], nil)
+    }
+    func bridgeTTSSpeak(text: String, voice: String?, done: @escaping BridgeDone) {
+        calls.append("tts.speak (silent render, not played)")
+        renderer.voiceIdentifier = VoiceCatalog.resolve(voice, installed: VoiceController.installedVoices())
+        renderer.render(text: TTSText.plainForSpeech(text)) { [weak self] frames, rate, voiceID in
+            self?.app.bridge?.send(["type": "tts.done", "completed": frames > 0, "rendered": true])
+            done(["rendered_frames": frames, "sample_rate": rate, "voice": voiceID ?? "none", "played": false], nil)
+        }
+    }
+    func bridgeTTSStop() { calls.append("tts.stop") }
 
     // MARK: flow
     func pageLoaded(_ webView: WKWebView) {
         guard !ran, let url = webView.url, url.port == app.start.origin.port else { return }
         ran = true
         report["page"] = url.absoluteString
+        permissionsBefore = [VoiceController.micPermission(), VoiceController.speechPermission()]
         webView.callAsyncJavaScript(Self.mainScript, arguments: [:], in: nil, in: .page) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -103,6 +129,9 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
         report["fixture_accepted"] = fixtureBridge?.accepted ?? -1
         report["fixture_rejections"] = fixtureBridge?.rejections ?? []
         report["host_calls"] = calls
+        let permissionsAfter = [VoiceController.micPermission(), VoiceController.speechPermission()]
+        report["permissions_before"] = permissionsBefore
+        report["permissions_after"] = permissionsAfter
         report["window_visible"] = app.mainWindow?.isVisible ?? false
         report["aether_main_accepted"] = app.chrome.accepted
         report["aether_main_rejections"] = app.chrome.rejections
@@ -121,7 +150,19 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
             "link_file_refused": ok("link_file") == false,
             "link_js_refused": ok("link_js") == false,
             "reveal_outside_home_refused": ok("reveal_outside_home") == false,
-            "mic_stubbed": err("mic").hasPrefix("not_implemented"),
+            "voice_status_ok": ok("voice_status") == true && ((js["voice_status"] as? [String: Any])?["result"] as? [String: Any])?["mic_permission"] != nil,
+            "mic_start_routed": ok("mic_start") == true,
+            "mic_bad_mode_refused": ok("mic_bad_mode") == false,
+            "mic_stop_routed": ok("mic_stop") == true,
+            "tts_rendered_silently": (((js["tts"] as? [String: Any])?["result"] as? [String: Any])?["rendered_frames"] as? Int ?? 0) > 0,
+            "tts_empty_refused": ok("tts_empty") == false,
+            "tts_stop_routed": ok("tts_stop") == true,
+            "voice_events_received": {
+                let events = js["voice_events"] as? [[String: Any]] ?? []
+                return events.contains { $0["type"] as? String == "voice.state" && $0["state"] as? String == "listening" }
+                    && events.contains { $0["type"] as? String == "tts.done" }
+            }(),
+            "no_permission_change": permissionsBefore == permissionsAfter && !permissionsBefore.isEmpty,
             "unknown_type_refused": err("unknown").hasPrefix("unknown_type"),
             "iframe_rejected": (main?.rejections ?? []).contains { $0.contains("main=false") },
             "wrong_origin_rejected": (fixtureBridge?.accepted ?? -1) == 0 && (fixtureBridge?.rejections.count ?? 0) >= 2,
@@ -159,7 +200,19 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
         out.link_file = await call('link.open', { url: 'file:///etc/hosts' });
         out.link_js = await call('link.open', { url: 'javascript:alert(1)' });
         out.reveal_outside_home = await call('file.reveal', { path: '/etc/hosts' });
-        out.mic = await call('mic.start', { mode: 'dictation' });
+        out.voice_status = await call('voice.status');
+        const voiceEvents = [];
+        const vh = (e) => { if (e.detail && (e.detail.type === 'voice.state' || e.detail.type === 'tts.done')) voiceEvents.push(e.detail); };
+        window.addEventListener('jaeger:native', vh);
+        out.mic_start = await call('mic.start', { mode: 'dictation' });
+        out.mic_bad_mode = await call('mic.start', { mode: 'always-on' });
+        out.mic_stop = await call('mic.stop');
+        out.tts = await call('tts.speak', { text: '**Hello** from the Jaeger shell.', voice: 'female' });
+        out.tts_empty = await call('tts.speak', { text: '```' + String.fromCharCode(10) + '```' });
+        out.tts_stop = await call('tts.stop');
+        await new Promise((r) => setTimeout(r, 300));
+        window.removeEventListener('jaeger:native', vh);
+        out.voice_events = voiceEvents;
         out.unknown = await call('bogus.type');
         out.login_get = await call('launchAtLogin.get');
         out.stack_status = await call('stack.status');
