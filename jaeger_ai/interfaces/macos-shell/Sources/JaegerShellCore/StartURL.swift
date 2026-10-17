@@ -15,6 +15,17 @@ public enum StartURL {
     public static let webUIDefaultsKey = "JaegerShellWebUIURL"
     public static let gatewayEnvKey = "JAEGER_SHELL_GATEWAY_URL"
     public static let gatewayDefaultsKey = "JaegerShellGatewayURL"
+    /// The stack-wide gateway variable the old app read (GatewayClient.swift:60, M1).
+    public static let gatewaySharedEnvKey = "JAEGER_GATEWAY_URL"
+
+    /// Gateway override from the environment: the shell-specific key wins, then JAEGER_GATEWAY_URL.
+    /// The value still goes through `resolve` (dev build + loopback validation), unlike the old app,
+    /// which accepted any host.
+    public static func gatewayEnvValue(_ env: [String: String]) -> String? {
+        [gatewayEnvKey, gatewaySharedEnvKey].lazy
+            .compactMap { env[$0]?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
+    }
 
     public struct Resolution: Sendable, Equatable {
         public let origin: LoopbackOrigin

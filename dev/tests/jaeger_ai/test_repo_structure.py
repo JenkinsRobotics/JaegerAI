@@ -121,7 +121,7 @@ def test_interfaces_holds_only_client_surfaces() -> None:
     interfaces = REPO / "jaeger_ai" / "interfaces"
     allowed = {
         "swift", "tui", "pyside6", "messaging", "avatar", "avatar_chat", "ide",
-        "avatar_player", "gateway",
+        "avatar_player", "gateway", "macos-shell",
     }
     unexpected = sorted(
         d.name for d in interfaces.iterdir()
