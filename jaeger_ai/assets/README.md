@@ -18,3 +18,11 @@ for understanding the docs, it belongs somewhere else. See
 for the full convention.
 
 Convention borrowed from `python_hermes_agent/upstream/assets/`.
+
+## Design System Tokens (`design-system/`)
+
+Single source of truth for design tokens shared between JaegerAI and Aether Studio:
+- `aether-default.json`: Core geometry, typography, icon metrics, and dark/light palettes.
+- `tokens.css`: CSS custom property declarations (`--aether-*`) consumed by WebUI, IDE webviews, and bridged to Swift.
+- `dev/scripts/sync_design_tokens.py`: Deterministic verification script asserting token parity across JSON, CSS, and Swift.
+
