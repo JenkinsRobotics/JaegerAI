@@ -5,10 +5,10 @@
 #   --go --only hotkey,speech    a subset (names: menu close pin notify link reveal login hotkey speech tts)
 # Every human step is announced first in a floating on-screen panel (inside JaegerShell) and mirrored here.
 # Never presses Start, quits the app at the end, restores every toggle it changed.
-# Test servers: gateway 127.0.0.1:43428, WebUI 127.0.0.1:18790 (Scripts/test-servers.sh; never 43418).
+# Test servers: gateway 127.0.0.1:43428, main screen 127.0.0.1:18800 (Scripts/test-servers.sh; never 43418).
 set -u
 HERE=${0:A:h}
-APP=$HOME/.jaeger/apps/swift-build/ui-rebuild/JaegerShell.app
+APP=${0:A:h:h}/.build/ui-rebuild/JaegerShell.app
 BIN=$APP/Contents/MacOS/JaegerShell
 BID=com.jenkinsrobotics.JaegerAI.uirebuild
 STATE=$HOME/.cache/jaeger/ui-rebuild-test-state
@@ -20,7 +20,7 @@ MAX_WAIT=2520   # 42 min; the app gives up at 40 min, each on-screen question at
 
 steps() { cat <<'EOF'
 Visible-session steps (S4 + S5), all inside ONE app launch (--only <names> runs a subset):
- 0  preflight: main-repo check; app built; JaegerShell not running; ports 43428/18790 free; no URL override in
+ 0  preflight: main-repo check; app built; JaegerShell not running; ports 43428/18800 free; no URL override in
     the uirebuild defaults domain; baseline launch-at-login on/off (headless --verify-launch)
  1  start loopback test servers (test-servers.sh start; fails unless loopback-only)
  2  launch JaegerShell via `open -n` (its own TCC identity) with --visible-check + WebUI/gateway overrides;
@@ -78,7 +78,7 @@ echo "== 0 preflight (steps: ${ONLY:-all})"
 mainck || exit 1
 [[ -x $BIN ]] || { echo "app not built: $BIN"; exit 1; }
 running && { echo "JaegerShell already running - STOP"; exit 1; }
-for p in 43428 18790; do lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null 2>&1 && { echo "port $p busy - STOP"; exit 1; }; done
+for p in 43428 18800; do lsof -nP -iTCP:$p -sTCP:LISTEN >/dev/null 2>&1 && { echo "port $p busy - STOP"; exit 1; }; done
 defaults read $BID 2>/dev/null | grep -Ei 'url' && { echo "URL override in defaults domain - STOP"; exit 1; }
 LOGIN_BEFORE=$(login_status); echo "launch-at-login baseline: $LOGIN_BEFORE ($(onoff $LOGIN_BEFORE))"
 trap cleanup EXIT INT TERM
@@ -91,7 +91,7 @@ echo "== 2 launch — follow the floating 'Jaeger visible check' panel on screen
 env -u HERMES_WEBUI_HOST open -n -a "$APP" --stdout $LOGF --stderr $LOGF \
   --env JAEGER_SHELL_VISIBLE_CHECK=1 --env JAEGER_SHELL_CHECK_OUT=$OUT --env JAEGER_SHELL_CHECK_REVEAL=$REVEAL \
   --env JAEGER_SHELL_CHECK_ONLY=$ONLY \
-  --env JAEGER_SHELL_WEBUI_URL=http://127.0.0.1:18790/ --env JAEGER_SHELL_GATEWAY_URL=http://127.0.0.1:43428/ \
+  --env JAEGER_SHELL_UI_URL=http://127.0.0.1:18800/ --env JAEGER_SHELL_GATEWAY_URL=http://127.0.0.1:43428/ \
   --args --visible-check || exit 1
 # Mirror the app's log read-only (the live file is never edited): print each new PROMPT/ANSWER/result line once.
 seen=0; launched=0

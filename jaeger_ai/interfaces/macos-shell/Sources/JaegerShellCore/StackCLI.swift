@@ -43,6 +43,8 @@ public struct StackActionReply: Decodable, Sendable {
 public enum StackCLI {
     public static let upArguments = ["stack", "up", "--json"]
     public static let statusArguments = ["stack", "status", "--json"]
+    /// Ported from StackManager.swift:59-61 (`down`); used only by the production Stop (never in tests).
+    public static let downArguments = ["stack", "down", "--json"]
 
     public static func decodeAction(_ data: Data) throws -> StackActionReply {
         try JSONDecoder().decode(StackActionReply.self, from: data)

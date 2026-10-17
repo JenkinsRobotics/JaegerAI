@@ -5,7 +5,8 @@
 // native→JS: window.dispatchEvent(new CustomEvent("jaeger:native", {detail})), including
 // {type:"reply", id, ok, result|error}.
 // Messages are accepted only from the main frame of the effective loopback WebUI origin.
-// No eval, no command execution, no file contents; `stack.up` is deliberately not exposed.
+// No eval, no arbitrary command execution, no file contents. stack.start/stop run only the fixed stack
+// actions of StackController (dev: own child processes; production: confirm sheet first).
 import CoreFoundation
 import Foundation
 
@@ -68,12 +69,18 @@ public enum BridgeCommand: Equatable {
     case linkOpen(URL)
     case fileReveal(URL)
     case appInfo, stackStatus, launchAtLoginGet
+    case stackStart, stackStop
     case launchAtLoginSet(Bool)
     case voiceStatus
     case micStart(mode: String)
     case micStop
     case ttsSpeak(text: String, voice: String?)
     case ttsStop
+    // jaeger_ai/interfaces/ui NativeHost (chat/nativeHost.ts, platform/native.ts)
+    case openExternal(URL)
+    case openFile(URL)
+    case clipboardWrite(String)
+    case micStatus, ttsStatus
     case notImplemented(String)
 
     /// Types that are routed but not implemented yet (none since S4 voice).
@@ -110,6 +117,8 @@ public enum BridgeCommand: Equatable {
             return .success(.fileReveal(url))
         case "app.info": return .success(.appInfo)
         case "stack.status": return .success(.stackStatus)
+        case "stack.start": return .success(.stackStart)
+        case "stack.stop": return .success(.stackStop)
         case "launchAtLogin.get": return .success(.launchAtLoginGet)
         case "launchAtLogin.set":
             guard let enabled = strictBool(p["enabled"]) else { return .failure(.invalidPayload("enabled must be a boolean")) }
@@ -131,6 +140,23 @@ public enum BridgeCommand: Equatable {
             if let voice, voice.count > 128 { return .failure(.invalidPayload("voice too long")) }
             return .success(.ttsSpeak(text: text, voice: voice))
         case "tts.stop": return .success(.ttsStop)
+        case "open.external":
+            guard let raw = p["url"] as? String, let url = BridgeLinks.validate(raw) else {
+                return .failure(.invalidPayload("url must be an http(s) URL with a host"))
+            }
+            return .success(.openExternal(url))
+        case "open.file":
+            guard let raw = p["path"] as? String,
+                  let url = BridgeFiles.validateReveal(raw, home: home, fileExists: fileExists)
+            else { return .failure(.invalidPayload("path must be an existing absolute path under the home folder")) }
+            return .success(.openFile(url))
+        case "clipboard.write":
+            guard let text = p["text"] as? String, text.count <= 1_000_000 else {
+                return .failure(.invalidPayload("text must be a string (≤1,000,000)"))
+            }
+            return .success(.clipboardWrite(text))
+        case "mic.status": return .success(.micStatus)
+        case "tts.status": return .success(.ttsStatus)
         default:
             if stubbedTypes.contains(request.type) { return .success(.notImplemented(request.type)) }
             return .failure(.unknownType(request.type))
@@ -148,6 +174,8 @@ public enum BridgeCommand: Equatable {
         case .fileReveal: return "file.reveal"
         case .appInfo: return "app.info"
         case .stackStatus: return "stack.status"
+        case .stackStart: return "stack.start"
+        case .stackStop: return "stack.stop"
         case .launchAtLoginGet: return "launchAtLogin.get"
         case .launchAtLoginSet: return "launchAtLogin.set"
         case .voiceStatus: return "voice.status"
@@ -155,6 +183,11 @@ public enum BridgeCommand: Equatable {
         case .micStop: return "mic.stop"
         case .ttsSpeak: return "tts.speak"
         case .ttsStop: return "tts.stop"
+        case .openExternal: return "open.external"
+        case .openFile: return "open.file"
+        case .clipboardWrite: return "clipboard.write"
+        case .micStatus: return "mic.status"
+        case .ttsStatus: return "tts.status"
         case .notImplemented(let type): return type
         }
     }
@@ -238,4 +271,13 @@ public enum WindowChromePolicy {
         guard let allowed else { return false }
         return BridgeOriginPolicy.accepts(frame, allowed: allowed)
     }
+}
+
+/// What the new main screen (jaeger_ai/interfaces/ui, 2026-10-17) expects from window.jaegerNative:
+/// src/chat/nativeHost.ts (open.external, open.file, clipboard.write, appearance.changed) and
+/// src/platform/native.ts (probeVoice: mic.status + tts.status must not be not_implemented;
+/// events window.visibility, hotkey). `post(type, payload) => Promise<result>`; errors reject.
+public enum HostContract {
+    public static let requestTypes = ["open.external", "open.file", "clipboard.write", "mic.status", "tts.status"]
+    public static let eventTypes = ["window.visibility", "hotkey", "appearance.changed"]
 }

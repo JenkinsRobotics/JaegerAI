@@ -25,8 +25,34 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
 
     init(app: JaegerShellApplication) { self.app = app }
 
-    func startTimeout() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in self?.finish(error: "timeout") }
+    private var withDevStack = false
+    private var stackLog: [String: Any] = [:]
+
+    func startTimeout(seconds: Double) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in self?.finish(error: "timeout") }
+    }
+
+    /// --with-dev-stack: start the dev stack (own children), then load the main screen from it.
+    func startDevStackThenLoad(_ load: @escaping () -> Void) {
+        withDevStack = true
+        guard app.stack.dev != nil else {
+            finish(error: "dev stack unavailable: \(app.stack.devError?.message ?? "not dev mode")")
+            return
+        }
+        stackLog["ports_free_before"] = devPortsFree()
+        let started = Date()
+        app.stack.start { [weak self] result, error in
+            guard let self else { return }
+            self.stackLog["start"] = error.map { ["ok": false, "error": $0] as [String: Any] } ?? ["ok": true, "result": result ?? [:]]
+            self.stackLog["start_seconds"] = (Date().timeIntervalSince(started) * 10).rounded() / 10
+            if let error { self.finish(error: "dev stack start failed: \(error)") } else { load() }
+        }
+    }
+
+    private func devPortsFree() -> [String: Bool] {
+        guard let dev = app.stack.dev else { return [:] }
+        return [String(dev.gatewayPort): !StackController.isListening(dev.gatewayPort),
+                String(dev.uiPort): !StackController.isListening(dev.uiPort)]
     }
 
     // MARK: recording host
@@ -39,7 +65,16 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
     func bridgeReveal(_ url: URL) { calls.append("file.reveal \(url.path) (recorded)") }
     func bridgeAppInfo() -> [String: Any] { calls.append("app.info"); return ShellEnvironment.appInfo(app.start) }
     func bridgeStackStatus(_ done: @escaping ([String: Any]) -> Void) {
-        calls.append("stack.status"); ShellEnvironment.stackStatus(app.start, done)
+        calls.append("stack.status"); app.stack.status(done)
+    }
+    /// Real only in dev mode (own children); production is refused here and never invoked.
+    func bridgeStackStart(done: @escaping BridgeDone) {
+        guard app.stack.dev != nil else { calls.append("stack.start refused (not dev)"); return done(nil, "verify_requires_dev_stack") }
+        calls.append("stack.start (dev)"); app.stack.start(done: done)
+    }
+    func bridgeStackStop(done: @escaping BridgeDone) {
+        guard app.stack.dev != nil else { calls.append("stack.stop refused (not dev)"); return done(nil, "verify_requires_dev_stack") }
+        calls.append("stack.stop (dev)"); app.stack.stop(done: done)
     }
     func bridgeLoginItemStatus() -> String { calls.append("launchAtLogin.get"); return ShellEnvironment.loginItemStatus() }
     func bridgeSetLoginItem(_ enabled: Bool) throws -> String {
@@ -67,6 +102,10 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
         }
     }
     func bridgeTTSStop() { calls.append("tts.stop") }
+    func bridgeOpenFile(_ url: URL) { calls.append("open.file \(url.path) (recorded, not opened)") }
+    func bridgeCopy(_ text: String) { calls.append("clipboard.write \(text.count) chars (recorded, clipboard untouched)") }
+    func bridgeMicStatus() -> [String: Any] { calls.append("mic.status"); return VoiceController.micStatus(recording: false) }
+    func bridgeTTSStatus() -> [String: Any] { calls.append("tts.status"); return VoiceController.ttsStatus(speaking: false) }
 
     // MARK: flow
     func pageLoaded(_ webView: WKWebView) {
@@ -74,6 +113,8 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
         ran = true
         report["page"] = url.absoluteString
         permissionsBefore = [VoiceController.micPermission(), VoiceController.speechPermission()]
+        // appearance.changed for NativeHost.onThemeChanged (the script listens for it)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in self?.app.sendAppearanceChanged() }
         webView.callAsyncJavaScript(Self.mainScript, arguments: [:], in: nil, in: .page) { [weak self] result in
             guard let self else { return }
             switch result {
@@ -114,8 +155,19 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
-            self?.report["fixture_title"] = webView.title ?? ""
-            self?.finish(error: nil)
+            guard let self else { return }
+            self.report["fixture_title"] = webView.title ?? ""
+            guard self.withDevStack, let main = self.app.mainWebView else { return self.finish(error: nil) }
+            // stop the dev stack from the page through the bridge, then check its ports natively
+            let body = "try { return JSON.stringify({ ok: true, result: await window.jaegerNative.post('stack.stop') }); } catch (e) { return JSON.stringify({ ok: false, error: String(e) }); }"
+            main.callAsyncJavaScript(body, arguments: [:], in: nil, in: .page) { result in
+                if case .success(let value) = result, let text = value as? String,
+                   let obj = try? JSONSerialization.jsonObject(with: Data(text.utf8)) { self.stackLog["stop_via_bridge"] = obj }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self.stackLog["ports_free_after"] = self.devPortsFree()
+                    self.finish(error: nil)
+                }
+            }
         }
     }
 
@@ -141,7 +193,7 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
         let js = report["js"] as? [String: Any] ?? [:]
         func ok(_ key: String) -> Bool? { (js[key] as? [String: Any])?["ok"] as? Bool }
         func err(_ key: String) -> String { (js[key] as? [String: Any])?["error"] as? String ?? "" }
-        let checks: [String: Bool] = [
+        let baseChecks: [String: Bool] = [
             "host_attr_macos": js["host_attr"] as? String == "macos",
             "app_info_round_trip": ok("app_info") == true,
             "window_hide_round_trip": ok("window_hide") == true,
@@ -163,6 +215,15 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
                     && events.contains { $0["type"] as? String == "tts.done" }
             }(),
             "no_permission_change": permissionsBefore == permissionsAfter && !permissionsBefore.isEmpty,
+            "new_ui_loaded": js["new_ui"] as? Bool == true,
+            "new_ui_rendered": (js["ui_rendered"] as? Int ?? 0) > 0,
+            "hostts_open_external_ok": ok("open_external") == true && calls.contains { $0.hasPrefix("link.open") },
+            "hostts_open_file_outside_home_refused": ok("open_file_outside") == false,
+            "hostts_clipboard_write_ok": ok("clipboard") == true && calls.contains { $0.hasPrefix("clipboard.write") },
+            "hostts_mic_status_ok": ok("mic_status") == true,
+            "hostts_tts_status_ok": ok("tts_status") == true,
+            "hostts_probe_voice_true": js["probe_voice"] as? Bool == true,
+            "hostts_appearance_event": (js["appearance_event"] as? [String: Any])?["type"] as? String == "appearance.changed",
             "unknown_type_refused": err("unknown").hasPrefix("unknown_type"),
             "iframe_rejected": (main?.rejections ?? []).contains { $0.contains("main=false") },
             "wrong_origin_rejected": (fixtureBridge?.accepted ?? -1) == 0 && (fixtureBridge?.rejections.count ?? 0) >= 2,
@@ -172,6 +233,25 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
             "aether_wrong_origin_rejected": (fixtureChrome?.accepted ?? -1) == 0 && (fixtureChrome?.rejections.count ?? 0) >= 1,
             "no_window_shown": !(app.mainWindow?.isVisible ?? false) && !calls.contains("window.show"),
         ]
+        var allChecks = baseChecks
+        if withDevStack {
+            report["dev_stack"] = stackLog
+            let startResult = (stackLog["start"] as? [String: Any])?["result"] as? [String: Any]
+            let statusFromPage = (js["stack_status"] as? [String: Any])?["result"] as? [String: Any]
+            let stop = (stackLog["stop_via_bridge"] as? [String: Any])
+            let before = stackLog["ports_free_before"] as? [String: Bool] ?? [:]
+            let after = stackLog["ports_free_after"] as? [String: Bool] ?? [:]
+            let agents = js["agents_http"] as? [String: Any] ?? [:]
+            allChecks["dev_ports_free_before_start"] = !before.isEmpty && before.values.allSatisfy { $0 }
+            allChecks["dev_stack_start_running"] = startResult?["running"] as? Bool == true
+            allChecks["dev_stack_status_running_from_page"] = statusFromPage?["mode"] as? String == "dev" && statusFromPage?["running"] as? Bool == true
+            allChecks["ui_loaded_from_dev_stack"] = (report["page"] as? String ?? "").hasPrefix(app.stack.dev!.uiOrigin.string + "/?host=macos")
+            allChecks["ui_proxy_reaches_dev_gateway"] = agents["status"] as? Int == 401 && (agents["body"] as? String ?? "").contains("caller token")
+            allChecks["dev_stack_stop_via_bridge"] = stop?["ok"] as? Bool == true && (stop?["result"] as? [String: Any])?["stopped"] as? Bool == true
+            allChecks["dev_ports_free_after_stop"] = !after.isEmpty && after.values.allSatisfy { $0 }
+            allChecks["no_production_stack_call"] = app.stack.productionInvocations == 0
+        }
+        let checks = allChecks
         report["checks"] = checks
         report["ok"] = error == nil && checks.values.allSatisfy { $0 }
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
@@ -188,12 +268,35 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
           try { return { ok: true, result: await window.jaegerNative.post(t, p || {}) }; }
           catch (e) { return { ok: false, error: String((e && e.message) || e) }; }
         };
+        out.new_ui = document.documentElement.hasAttribute('data-aether-native-window');
+        const appearance = new Promise((resolve) => {
+          const h = (e) => { if (e.detail && e.detail.type === 'appearance.changed') { window.removeEventListener('jaeger:native', h); resolve(e.detail); } };
+          window.addEventListener('jaeger:native', h);
+          setTimeout(() => resolve(null), 5000);
+        });
+        await new Promise((r) => setTimeout(r, 800));
+        out.ui_rendered = (document.getElementById('root') || { childElementCount: 0 }).childElementCount;
+        out.title = document.title;
+        out.ui_text_sample = ((document.getElementById('root') || {}).innerText || '').trim().slice(0, 160);
+        out.mic_status = await call('mic.status');
+        out.tts_status = await call('tts.status');
+        const notImpl = (r) => r == null || r.error === 'not_implemented' || r.status === 'not_implemented';
+        out.probe_voice = out.mic_status.ok && out.tts_status.ok && !notImpl(out.mic_status.result) && !notImpl(out.tts_status.result);
+        out.open_external = await call('open.external', { url: 'https://example.com/' });
+        out.open_file_outside = await call('open.file', { path: '/etc/hosts' });
+        out.clipboard = await call('clipboard.write', { text: 'jaeger verify' });
+        try {
+          const r = await fetch('/v1/agents');
+          out.agents_http = { status: r.status, body: (await r.text()).slice(0, 120) };
+        } catch (e) { out.agents_http = { error: String(e) }; }
+        out.appearance_event = await appearance;
+        out.app_info = await call('app.info');
+        // armed right before window.hide so slow earlier steps can't eat its timeout
         const vis = new Promise((resolve) => {
           const h = (e) => { if (e.detail && e.detail.type === 'window.visibility') { window.removeEventListener('jaeger:native', h); resolve(e.detail); } };
           window.addEventListener('jaeger:native', h);
-          setTimeout(() => resolve(null), 4000);
+          setTimeout(() => resolve(null), 5000);
         });
-        out.app_info = await call('app.info');
         out.window_hide = await call('window.hide');
         out.visibility_event = await vis;
         out.link_https = await call('link.open', { url: 'https://example.com/' });

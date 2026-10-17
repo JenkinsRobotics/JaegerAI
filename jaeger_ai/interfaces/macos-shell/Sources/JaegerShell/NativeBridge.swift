@@ -18,6 +18,8 @@ protocol BridgeHost: AnyObject {
     func bridgeReveal(_ url: URL)
     func bridgeAppInfo() -> [String: Any]
     func bridgeStackStatus(_ done: @escaping ([String: Any]) -> Void)
+    func bridgeStackStart(done: @escaping BridgeDone)
+    func bridgeStackStop(done: @escaping BridgeDone)
     func bridgeLoginItemStatus() -> String
     func bridgeSetLoginItem(_ enabled: Bool) throws -> String
     func bridgeVoiceStatus() -> [String: Any]
@@ -25,6 +27,10 @@ protocol BridgeHost: AnyObject {
     func bridgeMicStop(done: @escaping BridgeDone)
     func bridgeTTSSpeak(text: String, voice: String?, done: @escaping BridgeDone)
     func bridgeTTSStop()
+    func bridgeOpenFile(_ url: URL)
+    func bridgeCopy(_ text: String)
+    func bridgeMicStatus() -> [String: Any]
+    func bridgeTTSStatus() -> [String: Any]
 }
 
 /// Breaks the WKUserContentController → handler retain cycle.
@@ -99,6 +105,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case .fileReveal(let url): host.bridgeReveal(url); reply(id, ["revealed": url.path])
         case .appInfo: reply(id, host.bridgeAppInfo())
         case .stackStatus: host.bridgeStackStatus { [weak self] result in self?.reply(id, result) }
+        case .stackStart: host.bridgeStackStart { [weak self] r, e in self?.finish(id, r, e) }
+        case .stackStop: host.bridgeStackStop { [weak self] r, e in self?.finish(id, r, e) }
         case .launchAtLoginGet: reply(id, ["status": host.bridgeLoginItemStatus()])
         case .launchAtLoginSet(let enabled):
             do { reply(id, ["status": try host.bridgeSetLoginItem(enabled)]) } catch {
@@ -109,6 +117,11 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case .micStop: host.bridgeMicStop { [weak self] r, e in self?.finish(id, r, e) }
         case .ttsSpeak(let text, let voice): host.bridgeTTSSpeak(text: text, voice: voice) { [weak self] r, e in self?.finish(id, r, e) }
         case .ttsStop: host.bridgeTTSStop(); reply(id, ["stopped": true])
+        case .openExternal(let url): host.bridgeOpenLink(url); reply(id, ["opened": url.absoluteString])
+        case .openFile(let url): host.bridgeOpenFile(url); reply(id, ["opened": url.path])
+        case .clipboardWrite(let text): host.bridgeCopy(text); reply(id, ["copied": text.count])
+        case .micStatus: reply(id, host.bridgeMicStatus())
+        case .ttsStatus: reply(id, host.bridgeTTSStatus())
         case .notImplemented(let type): replyError(id, "not_implemented: \(type)")
         }
     }
@@ -159,9 +172,9 @@ extension ShellEnvironment {
 
     /// Read-only probes of the loopback WebUI and gateway (same as the status menu).
     static func stackStatus(_ start: StartURL.Resolution, _ done: @escaping ([String: Any]) -> Void) {
-        var result: [String: Any] = ["webui_origin": start.origin.string, "gateway_origin": gateway().origin.string]
+        var result: [String: Any] = ["main_screen_origin": start.origin.string, "gateway_origin": gateway().origin.string]
         let group = DispatchGroup()
-        group.enter(); probe(start.origin.string + "/") { result["webui"] = $0; group.leave() }
+        group.enter(); probe(start.origin.string + "/") { result["main_screen"] = $0; group.leave() }
         group.enter(); probe(gateway().origin.string + "/health") { result["gateway"] = $0; group.leave() }
         group.notify(queue: .main) { done(result) }
     }
@@ -175,7 +188,9 @@ extension JaegerShellApplication: BridgeHost {
     func bridgeOpenLink(_ url: URL) { NSWorkspace.shared.open(url) }
     func bridgeReveal(_ url: URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     func bridgeAppInfo() -> [String: Any] { ShellEnvironment.appInfo(start) }
-    func bridgeStackStatus(_ done: @escaping ([String: Any]) -> Void) { ShellEnvironment.stackStatus(start, done) }
+    func bridgeStackStatus(_ done: @escaping ([String: Any]) -> Void) { stack.status(done) }
+    func bridgeStackStart(done: @escaping BridgeDone) { stack.fromBridge(.start, done: done) }
+    func bridgeStackStop(done: @escaping BridgeDone) { stack.fromBridge(.stop, done: done) }
     func bridgeLoginItemStatus() -> String { ShellEnvironment.loginItemStatus() }
 
     func bridgeSetLoginItem(_ enabled: Bool) throws -> String {
@@ -209,4 +224,11 @@ extension JaegerShellApplication {
         voice().speak(text: text, voice: choice, done: done)
     }
     func bridgeTTSStop() { voiceController?.stopSpeaking() }
+    func bridgeOpenFile(_ url: URL) { NSWorkspace.shared.open(url) }
+    func bridgeCopy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+    func bridgeMicStatus() -> [String: Any] { VoiceController.micStatus(recording: voiceController?.isRecording ?? false) }
+    func bridgeTTSStatus() -> [String: Any] { VoiceController.ttsStatus(speaking: voiceController?.tts.isSpeaking ?? false) }
 }
