@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JaegerSource } from "./api/source";
 import { agentsSidebarSlots, type Selection } from "./agents/AgentsSidebar";
 import { useAgentsStore } from "./agents/agentsStore";
@@ -36,28 +36,37 @@ export function App({ source }: { source: JaegerSource }) {
   useEffect(() => { if (host instanceof NativeHost) void host.probeCapabilities(voiceFlag()); }, [host]);
   useEffect(() => onNativeEvent((detail) => { if (detail.type === "window.visibility") void store.refresh(); }), [store.refresh]);
 
-  // Resolve the selected agent to its chat session (summary row, then ?agent_id=, then create).
+  // Resolve the selected agent to its chat session: the chat this device last
+  // opened for that agent, else the summary row, else ?agent_id=, else create.
+  // Keyed on the agent id only, so roster polling never switches chats.
+  const summariesRef = useRef(store.summaries);
+  summariesRef.current = store.summaries;
+  const chosen = useRef(new Map<string, string>());
+  const selectedAgentId = selection.type === "agent" ? selection.agentId : undefined;
   useEffect(() => {
-    if (selection.type !== "agent") return;
+    if (!selectedAgentId) return;
     let live = true;
-    const agentId = selection.agentId;
-    const known = store.summaries.find((s) => s.id === agentId)?.session_id;
+    const agentId = selectedAgentId;
+    const known = chosen.current.get(agentId) ?? summariesRef.current.find((s) => s.id === agentId)?.session_id ?? undefined;
     const resolve = known
       ? Promise.resolve(known)
       : source.sessions({ agent_id: agentId }).then((rows) => rows[0]?.session_id ?? source.createSession({ agent_id: agentId }).then((s) => s.session_id));
     setSessionError(undefined);
     resolve.then(
-      (id) => { if (live) setSessionId(id); },
+      (id) => { if (live) { chosen.current.set(agentId, id); setSessionId(id); } },
       (error: unknown) => { if (live) { setSessionId(undefined); setSessionError(String((error as Error)?.message ?? error)); } },
     );
     store.seeAgent(agentId);
     return () => { live = false; };
-  }, [selection, source, store.summaries, store.seeAgent, sessionAttempt]);
+  }, [selectedAgentId, source, store.seeAgent, sessionAttempt]);
 
   const newChat = useCallback(() => {
-    const agentId = selection.type === "agent" ? selection.agentId : LEAD_ID;
-    void source.createSession({ agent_id: agentId }).then((s) => { setSelection({ type: "agent", agentId }); setSessionId(s.session_id); });
-  }, [selection, source]);
+    const agentId = selectedAgentId ?? LEAD_ID;
+    void source.createSession({ agent_id: agentId }).then(
+      (s) => { chosen.current.set(agentId, s.session_id); setSelection({ type: "agent", agentId }); setSessionId(s.session_id); },
+      (error: unknown) => setSessionError(String((error as Error)?.message ?? error)),
+    );
+  }, [selectedAgentId, source]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
