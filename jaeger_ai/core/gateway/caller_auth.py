@@ -121,6 +121,15 @@ PREFIXED_READ_ROUTES = frozenset({
 })
 
 
+#: OpenAI-compatible surface (core/gateway/openai_compat.py). It runs a turn,
+#: so it needs ``turn``; it is deliberately absent from TURN_ROUTES so callers
+#: confined to a session prefix (mcp, a2a) cannot use it to open unprefixed
+#: sessions.
+OPENAI_COMPAT_ROUTES = frozenset({
+    ("POST", "/v1/chat/completions"),
+})
+
+
 def required_scope(method: str, route: str | None) -> str | None:
     """Scope a request needs; ``None`` means public. Unknown routes need admin."""
     method = (method or "").upper()
@@ -129,7 +138,7 @@ def required_scope(method: str, route: str | None) -> str | None:
     if method in {"GET", "HEAD", "OPTIONS"}:
         return "read"
     key = (method, route or "")
-    if key in TURN_ROUTES:
+    if key in TURN_ROUTES or key in OPENAI_COMPAT_ROUTES:
         return "turn"
     if key in APPROVE_ROUTES:
         return "approve"
