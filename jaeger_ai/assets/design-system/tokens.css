@@ -1,0 +1,98 @@
+/* Shared Visual Design Tokens — JaegerAI & Aether Studio Family
+   Derived from jaeger_ai/assets/design-system/aether-default.json.
+   Single source of truth for shell geometry, dark/light palette, and typography. */
+
+:root {
+  /* Dark Mode Palette (Default) */
+  --aether-color-bg-app: #0e1013;
+  --aether-color-bg-shell: #171a20;
+  --aether-color-bg-bar: #171a20;
+  --aether-color-bg-panel: #171a20;
+  --aether-color-bg-rail: #171a20;
+  --aether-color-bg-inset: #1e222a;
+  --aether-color-bg-control: #0f1216;
+  --aether-color-bg-control-hover: #303945;
+  --aether-color-bg-hover: #29313a;
+  --aether-color-bg-row-hover: #252c35;
+  --aether-color-bg-selected: #174b72;
+  --aether-color-text-on-selected: #ffffff;
+  --aether-color-border: #303640;
+  --aether-color-border-control: #3a424d;
+  --aether-color-border-control-hover: #526073;
+  --aether-color-border-focus: #4c9dff;
+  --aether-color-text: #e7edf3;
+  --aether-color-text-soft: #cbd5df;
+  --aether-color-text-dim: #8b96a5;
+  --aether-color-text-faint: #6f7b89;
+  --aether-color-accent: #4c9dff;
+  --aether-color-accent-strong: #126fba;
+  --aether-color-accent-icon: #4c9dff;
+  --aether-color-selection-edge: #37a8f4;
+  --aether-focus-halo: none;
+  --aether-color-shadow: #060809;
+  --aether-color-ok: #32cf84;
+  --aether-color-warn: #e7a843;
+  --aether-color-error: #ff5a62;
+
+  /* Geometry & Rhythm */
+  --aether-radius-control: 7px;
+  --aether-radius-button: 8px;
+  --aether-radius-field: 6px;
+  --aether-radius-row: 6px;
+  --aether-space-1: 3px;
+  --aether-space-2: 5px;
+  --aether-space-3: 7px;
+  --aether-space-4: 9px;
+  --aether-space-5: 13px;
+  --aether-size-topbar: 56px;
+  --aether-size-statusbar: 27px;
+  --aether-size-rail: 42px;
+  --aether-size-sidebar: 250px;
+  --aether-size-row: 36px;
+  --aether-size-icon-slot: 36px;
+  --aether-size-grid: 4px;
+
+  /* Typography */
+  --aether-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, ui-sans-serif, sans-serif;
+  --aether-font-size-body: 12px;
+  --aether-font-size-label: 10px;
+  --aether-font-size-caption: 9px;
+  --aether-font-size-micro: 8px;
+  --aether-font-weight-strong: 650;
+  --aether-font-letter-caps: 0.09em;
+
+  /* Icon Grammar */
+  --aether-icon-stroke-width: 1.7px;
+  --aether-icon-viewbox-size: 24px;
+}
+
+/* Light Mode Overrides */
+:root[data-theme="light"],
+.aether-light-theme {
+  --aether-color-bg-app: #ececee;
+  --aether-color-bg-shell: #f6f6f7;
+  --aether-color-bg-bar: #f6f6f7;
+  --aether-color-bg-panel: #fbfbfc;
+  --aether-color-bg-rail: #f1f1f3;
+  --aether-color-bg-inset: #ececef;
+  --aether-color-bg-control: #ffffff;
+  --aether-color-bg-control-hover: #e3e6ea;
+  --aether-color-bg-hover: #e7e9ec;
+  --aether-color-bg-row-hover: #eceef1;
+  --aether-color-bg-selected: #3273d6;
+  --aether-color-text-on-selected: #ffffff;
+  --aether-color-border: #d6d8db;
+  --aether-color-border-control: #c8cbd0;
+  --aether-color-border-control-hover: #9aa4b0;
+  --aether-color-border-focus: #2f7fe0;
+  --aether-color-text: #1c1e21;
+  --aether-color-text-soft: #33373c;
+  --aether-color-text-dim: #5c6269;
+  --aether-color-text-faint: #878d95;
+  --aether-color-accent: #2f7fe0;
+  --aether-color-accent-strong: #2f7fe0;
+  --aether-color-accent-icon: #2f7fe0;
+  --aether-color-selection-edge: #1d5fc4;
+  --aether-color-shadow: #30343a;
+}
+
