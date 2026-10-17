@@ -361,6 +361,27 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path == "/api/jaeger/presence":
         return _proxy(handler, "GET", "/v1/presence")
 
+    # Connect Apps (Agents View panel). The install body is relayed as-is;
+    # the Gateway enforces confirm:true and the owner-caller rule.
+    if path == "/api/connect-apps" and method == "GET":
+        return _proxy(handler, "GET", "/v1/connect-apps")
+    if path.startswith("/api/connect-apps/"):
+        rest = path[len("/api/connect-apps/"):].split("/")
+        if len(rest) == 2 and rest[0]:
+            from urllib.parse import quote
+
+            app = quote(rest[0], safe="")
+            if rest[1] == "state" and method == "GET":
+                qs = f"?{parsed.query}" if parsed.query else ""
+                return _proxy(handler, "GET", f"/v1/connect-apps/{app}/state{qs}")
+            if rest[1] == "install" and method == "POST":
+                raw = getattr(handler, "_json_body_bytes", None)
+                if raw is None:
+                    from api.helpers import read_body
+
+                    raw = json.dumps(read_body(handler) or {}).encode("utf-8")
+                return _proxy(handler, "POST", f"/v1/connect-apps/{app}/install", raw)
+
     if method == "GET" and path in {"/api/handoffs", "/v1/handoffs"}:
         qs = ("?" + parsed.query) if parsed.query else ""
         return _proxy(handler, "GET", f"/v1/handoffs{qs}")

@@ -1260,6 +1260,9 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/sessions/{id}/handoff", self.handle_session_handoff)
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
         self.app.router.add_get("/v1/events/stream", self.handle_global_stream)
+        self.app.router.add_get("/v1/connect-apps", self.handle_connect_apps)
+        self.app.router.add_get("/v1/connect-apps/{id}/state", self.handle_connect_app_state)
+        self.app.router.add_post("/v1/connect-apps/{id}/install", self.handle_connect_app_install)
         self.app.router.add_get("/v1/sessions/{id}/events", self.handle_session_events_json)
         self.app.router.add_get("/v1/notifications", self.handle_list_notifications)
         self.app.router.add_get("/v1/presence", self.handle_presence)
@@ -4386,6 +4389,57 @@ class JaegerGatewayApp:
         ``{"approved": true|false}`` → emits ``approval.resolved``.
         """
         return await self._sse_stream(request, request.match_info["id"])
+
+    def _connect_apps(self):
+        if getattr(self, "_connect_apps_service", None) is None:
+            from jaeger_ai.core.gateway.connect_apps import ConnectApps
+            self._connect_apps_service = ConnectApps()
+        return self._connect_apps_service
+
+    async def handle_connect_apps(self, request: web.Request) -> web.Response:
+        """GET /v1/connect-apps — registry + live (30 s cached, read-only) state."""
+        return web.json_response(await asyncio.to_thread(self._connect_apps().listing))
+
+    async def handle_connect_app_state(self, request: web.Request) -> web.Response:
+        app_id = request.match_info["id"]
+        refresh = request.query.get("refresh") in {"1", "true"}
+        state = await asyncio.to_thread(self._connect_apps().state, app_id, refresh=refresh)
+        if state is None:
+            return web.json_response({"error": "Unknown app"}, status=404)
+        return web.json_response({"id": app_id, "state": state})
+
+    async def handle_connect_app_install(self, request: web.Request) -> web.Response:
+        """POST /v1/connect-apps/{id}/install ``{"confirm": true}`` — owner callers only.
+
+        202 then ``connect_app.updated`` {id, state, audit} on the global stream
+        (the durable event row is the audit record). Fixed argv, shell=False.
+        """
+        from jaeger_ai.core.gateway.connect_apps import OWNER_INSTALL_CALLERS
+        caller = request.get("caller")
+        if getattr(caller, "name", None) not in OWNER_INSTALL_CALLERS:
+            return web.json_response({"error": "Only the owner's apps may install"}, status=403)
+        try:
+            body = await request.json() if request.can_read_body else {}
+        except Exception:
+            body = {}
+        if not isinstance(body, dict) or body.get("confirm") is not True:
+            return web.json_response({"error": "confirm: true is required"}, status=400)
+        app_id = request.match_info["id"]
+        service = self._connect_apps()
+        status, payload, plan = await asyncio.to_thread(service.begin_install, app_id)
+        if plan is None:
+            return web.json_response(payload, status=status)
+        self.event_bus.publish("*", "connect_app.updated", {
+            "id": app_id, "state": {"value": "installing", "checked_at": time.time()}})
+
+        async def _run() -> None:
+            result = await asyncio.to_thread(service.run_install, app_id, plan, caller=caller.name)
+            logger.info("connect-apps install audit: %s", result["audit"])
+            self.event_bus.publish("*", "connect_app.updated", {"id": app_id, **result})
+
+        task = asyncio.create_task(_run())
+        self._connect_install_task = task
+        return web.json_response(payload, status=202)
 
     async def handle_global_stream(self, request: web.Request) -> web.StreamResponse:
         """GET /v1/events/stream — global (``*``) events only: agent.*, approvals,

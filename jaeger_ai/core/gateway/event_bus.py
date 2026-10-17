@@ -66,6 +66,8 @@ EVENT_TYPES = frozenset({
     # Durable task projection. The task owner is the authority; these are its
     # stream. ``jaeger.state`` is the presence projection (see contract/presence.py).
     "task.created", "task.updated", "jaeger.state",
+    # Connect Apps panel: {id, state, audit?} on the global stream.
+    "connect_app.updated",
 })
 
 #: Names that carry a card the WebUI renders interactively. The adapter shim
