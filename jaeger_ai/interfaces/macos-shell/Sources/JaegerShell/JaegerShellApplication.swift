@@ -5,7 +5,7 @@
 // loopback Jaeger WebUI (http://127.0.0.1:8790/?host=macos or the dev override); loopback-only
 // navigation + WKContentRuleList; inline "not running" page instead of alert+quit; minimal main
 // menu (Quit, Edit, Reload); developer extras only in DEBUG; menu-bar (accessory) app with a
-// status item, window hides on close; --verify-launch self-check.
+// status item, window hides on close; --verify-launch self-check; global hotkey (JaegerHotkey).
 
 import AppKit
 import JaegerShellCore
@@ -40,6 +40,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         shellLog("[shell] start_url=\(start.url.absoluteString)")
         installMainMenu()
         statusController = StatusItemController(app: self)
+        registerHotkey()
         if verifyMode {
             _ = makeWindow()  // created, never shown, nothing loaded
             emitVerifyReport()
@@ -52,6 +53,21 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false  // menu-bar app: closing the window only hides it
+    }
+
+    private lazy var hotkeyChoice = HotkeyConfig.resolve(
+        Bundle.main.object(forInfoDictionaryKey: HotkeyConfig.infoPlistKey) as? String)
+
+    private func registerHotkey() {
+        if let note = hotkeyChoice.note { shellLog("[shell][hotkey] \(note)") }
+        Hotkey.shared.register(hotkeyChoice.spec) { [weak self] in
+            shellLog("[shell][hotkey] pressed")
+            self?.toggleWindow()
+        }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Hotkey.shared.unregister()
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -80,6 +96,13 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             "login_item_status": ShellEnvironment.loginItemStatus(),
             "launcher": ShellEnvironment.launcherPath() ?? NSNull(),
             "network_requested": false,
+            "hotkey": [
+                "configured": hotkeyChoice.spec.name,
+                "label": hotkeyChoice.spec.label,
+                "registered": Hotkey.shared.registered != nil,
+                "status": Int(Hotkey.shared.lastStatus),
+                "note": hotkeyChoice.note ?? NSNull(),
+            ] as [String: Any],
         ]
         if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
             FileHandle.standardOutput.write(data + Data("\n".utf8))
