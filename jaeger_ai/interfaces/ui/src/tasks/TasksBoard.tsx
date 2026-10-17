@@ -31,7 +31,7 @@ export function TasksBoard({ source, agents }: { source: JaegerSource; agents: A
   };
   return (
     <div className="jg-tasks">
-      <div className="jg-chat__band" data-aether-window-drag-region><span className="jg-title-pill">Tasks</span></div>
+      <div className="jg-tasks__band" data-aether-window-drag-region><span className="jg-title-pill">Tasks</span></div>
       {error && <ErrorState compact={tasks !== null} title="Couldn't load tasks" error={error} onRetry={() => setAttempt((n) => n + 1)} />}
       {(tasks !== null || !error) && <div className="jg-board">
         {COLUMNS.map((col) => {

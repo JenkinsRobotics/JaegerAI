@@ -1,16 +1,19 @@
-/* Minimal stand-in chat renderer. Just enough for the mock screenshot; the
- * shared VS Code-derived widget replaces it through ChatPaneMount. Not polished
- * on purpose. */
+/* Minimal stand-in chat renderer, styled to the Grok Bot Mac target. The
+ * shared VS Code-derived widget replaces it through ChatPaneMount. */
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { AgentAvatar } from "../agents/AgentAvatar";
 import { HandoffMarker } from "../agents/HandoffMarker";
+import { MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
-import { MicIcon, PlusIcon, SendIcon, StopIcon } from "../icons";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { MiniMarkdown } from "./miniMarkdown";
 
 const seconds = (ms?: number) => Math.max(1, Math.round((ms ?? 0) / 1000));
+type Decide = (callId: string, decision: "approve" | "deny") => void;
+type CardPart = Extract<ChatPart, { kind: "confirmation" | "question" }>;
+type MarkerPart = Extract<ChatPart, { kind: "handoff" }>;
 
-function Part({ part, onDecide }: { part: ChatPart; onDecide: (callId: string, decision: "approve" | "deny") => void }) {
+function BubblePart({ part }: { part: ChatPart }) {
   switch (part.kind) {
     case "markdownContent":
       return <div className="jg-md"><MiniMarkdown text={part.text} /></div>;
@@ -25,44 +28,74 @@ function Part({ part, onDecide }: { part: ChatPart; onDecide: (callId: string, d
           <code>{part.toolName}</code>
         </div>
       );
-    case "confirmation":
-      return (
-        <div className="jg-confirm" role="group" aria-label={part.title}>
-          <div className="jg-confirm__title">{part.title}</div>
-          <div className="jg-confirm__message">{part.message}</div>
-          <div className="jg-confirm__actions">
-            <button type="button" className="aui-button aui-button--primary" onClick={() => onDecide(part.callId, "approve")}>Allow</button>
-            <button type="button" className="aui-button" onClick={() => onDecide(part.callId, "deny")}>Deny</button>
-          </div>
-        </div>
-      );
     case "warning":
       return <div className="jg-notice jg-notice--warn">{part.message}</div>;
     case "error":
       return <div className="jg-notice jg-notice--error">{part.message}</div>;
-    case "handoff":
+    default:
       return null;
   }
 }
 
-/** Split a response into bubble runs and centered handoff markers. */
+function Card({ part, onDecide }: { part: CardPart; onDecide: Decide }) {
+  if (part.kind === "question") {
+    return (
+      <div className="jg-card-widget" role="group" aria-label={part.title}>
+        <div className="jg-card-widget__title">{part.title}</div>
+        <ul className="jg-options">
+          {part.options.map((o, i) => (
+            <li key={o.id} className={`jg-option${o.id === part.chosenId ? " is-chosen" : ""}`} aria-current={o.id === part.chosenId ? "true" : undefined}>
+              <span className="jg-option__key">{String.fromCharCode(65 + i)}</span>
+              <span>{o.label}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  return (
+    <div className="jg-card-widget" role="group" aria-label={part.title}>
+      <div className="jg-card-widget__title">{part.title}</div>
+      <div className="jg-card-widget__message">{part.message}</div>
+      <div className="jg-confirm__actions">
+        <button type="button" className="jg-action jg-action--primary" onClick={() => onDecide(part.callId, "approve")}>Allow</button>
+        <button type="button" className="jg-action" onClick={() => onDecide(part.callId, "deny")}>Deny</button>
+      </div>
+    </div>
+  );
+}
+
+/** Split a response into bubbles, cards and centered markers. */
 function segments(parts: ChatPart[]) {
-  const out: Array<{ marker: Extract<ChatPart, { kind: "handoff" }> } | { bubble: ChatPart[] }> = [];
+  const out: Array<{ marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] }> = [];
   for (const part of parts) {
     if (part.kind === "handoff") out.push({ marker: part });
+    else if (part.kind === "confirmation" || part.kind === "question") out.push({ card: part });
     else {
       const last = out[out.length - 1];
-      if (last && "bubble" in last) last.bubble.push(part);
+      // Each new markdown block after text starts its own bubble, like the target.
+      const startsNew = part.kind === "markdownContent" && last && "bubble" in last && last.bubble.some((p) => p.kind === "markdownContent");
+      if (last && "bubble" in last && !startsNew) last.bubble.push(part);
       else out.push({ bubble: [part] });
     }
   }
   return out;
 }
 
+export function Typing() {
+  return (
+    <div className="jg-typing" role="status" aria-live="polite">
+      <span className="jg-typing__dots" aria-hidden="true"><i /><i /><i /></span>
+      Putting it together
+    </div>
+  );
+}
+
 export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: string }) {
   const [session, setSession] = useState<ChatSession | null>(null);
   const [loadError, setLoadError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
+  const [agent, setAgent] = useState<{ id: string; name: string }>({ id: "native:jaeger", name: "Jaeger" });
   const [draft, setDraft] = useState("");
   const [active, setActive] = useState<TurnHandle | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -77,6 +110,17 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     );
     return () => { live = false; };
   }, [host, sessionId, attempt]);
+
+  // The agent this chat talks to: pill + placeholder.
+  useEffect(() => {
+    const agentId = session?.agentId ?? "native:jaeger";
+    let live = true;
+    void host.listAgents?.().then((agents) => {
+      const found = agents.find((a) => a.id === agentId);
+      if (live) setAgent({ id: agentId, name: found?.name ?? (agentId === "native:jaeger" ? "Jaeger" : agentId) });
+    }, () => {});
+    return () => { live = false; };
+  }, [host, session?.agentId]);
 
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }); }, [session]);
 
@@ -101,7 +145,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); }
   };
 
-  const decide = (turnId: string) => (callId: string, decision: "approve" | "deny") => {
+  const decide = (turnId: string): Decide => (callId, decision) => {
     void host.respondToConfirmation(turnId, callId, decision);
     updateTurn(turnId, (t) => ({
       ...t,
@@ -110,10 +154,15 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     }));
   };
 
+  const voice = host.capabilities.voice;
+  const hasText = Boolean(draft.trim());
   return (
     <div className="jg-chat">
       <div className="jg-chat__band" data-aether-window-drag-region>
-        <button type="button" className="jg-title-pill">{session?.title ?? "New chat"}</button>
+        <button type="button" className="jg-agent-pill" title={session?.title}>
+          <AgentAvatar id={agent.id} name={agent.name} size={20} />
+          <span>{agent.name}</span>
+        </button>
       </div>
       <div className="jg-chat__scroll" ref={scroller}>
         <div className="jg-chat__column">
@@ -121,23 +170,25 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
           {session && !session.turns.length && <p className="jg-chat__empty">What should we work on?</p>}
           {session?.turns.map((turn) => (
             <section key={turn.turnId} className="jg-turn">
-              <div className="jg-bubble jg-bubble--user">{turn.message}</div>
+              {turn.message && <div className="jg-bubble jg-bubble--user">{turn.message}</div>}
               {segments(turn.parts).map((seg, i) =>
-                "marker" in seg
-                  ? <HandoffMarker key={i} part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} />
-                  : <div key={i} className="jg-bubble jg-bubble--assistant">{seg.bubble.map((p, j) => <Part key={j} part={p} onDecide={decide(turn.turnId)} />)}</div>)}
-              {turn.state === "pending" && !turn.parts.length && <div className="jg-bubble jg-bubble--assistant"><div className="jg-progress"><span className="jg-spinner" aria-hidden="true" />Working…</div></div>}
+                "marker" in seg ? <HandoffMarker key={i} part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} />
+                : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} />
+                : <div key={i} className="jg-bubble jg-bubble--assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} />)}</div>)}
+              {turn.state === "pending" && !turn.parts.some((p) => p.kind === "markdownContent" && p.text) && <Typing />}
             </section>
           ))}
         </div>
       </div>
       <form className="jg-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
-        <button type="button" className="jg-composer__icon" aria-label="Attach"><PlusIcon /></button>
-        <textarea className="jg-composer__input" rows={1} placeholder="Message Jaeger" value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} aria-label="Message" />
-        {host.capabilities.voice && <button type="button" className="jg-composer__icon" aria-label="Voice input"><MicIcon /></button>}
+        <button type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach"><PlusIcon /></button>
+        <textarea className="jg-composer__input" rows={1} placeholder={`Message ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} aria-label="Message" />
+        {voice && <button type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Dictate"><MicIcon /></button>}
         {active
           ? <button type="button" className="jg-send" aria-label="Stop (⌘Esc)" onClick={stop}><StopIcon /></button>
-          : <button type="submit" className="jg-send" aria-label="Send" disabled={!draft.trim()}><SendIcon /></button>}
+          : hasText || !voice
+            ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText}><SendIcon /></button>
+            : <button type="button" className="jg-send" aria-label="Voice mode"><WaveIcon /></button>}
       </form>
     </div>
   );

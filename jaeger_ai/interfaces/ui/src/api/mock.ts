@@ -16,6 +16,9 @@ export const MOCK_AGENTS: Agent[] = [
   { id: "agent:ide-chat", name: "ide-chat", display_name: "IDE Chat", role: "specialist", kind: "native", runner: "delegate:claude-code" },
   { id: "agent:agents-view", name: "agents-view", display_name: "Agents View", role: "specialist", kind: "native", runner: "native" },
   { id: "agent:architect-notes", name: "architect-notes", display_name: "Architect & Notes", role: "specialist", kind: "native", runner: "delegate:grok-cli" },
+  { id: "agent:swe", name: "swe", display_name: "SWE", role: "specialist", kind: "native", runner: "delegate:codex" },
+  { id: "agent:system-sweep", name: "system-sweep", display_name: "System Sweep", role: "specialist", kind: "native", runner: "native" },
+  { id: "agent:personality", name: "personality", display_name: "Personality", role: "specialist", kind: "native", runner: "native" },
   { id: "native:gateway", name: "gateway", role: "native", kind: "native", metadata: { internal: true } },
 ];
 
@@ -30,7 +33,10 @@ export const MOCK_SUMMARY: AgentSummary[] = [
   summary("agent:ide-chat", 6, "ChatHost interface frozen; mount(el, host, opts) ⇒ dispose.", true, "working"),
   summary("agent:gateway-webui", 14, "Shipped /v1/agents/summary and the global events stream.", false),
   summary("agent:mac-app", 31, "WKWebView shell loads 127.0.0.1:8790/?host=macos.", false, "waiting_approval"),
-  summary("agent:architect-notes", 95, "Reuse audit: extend /v1/tasks instead of a new status route.", false),
+  summary("agent:architect-notes", 95, "The \"path to functional\" checklist is in your Documents folder.", true),
+  summary("agent:swe", 40, "Next up from your supervisor: allow-list interfaces/ui.", true),
+  summary("agent:system-sweep", 55, "Starting the repo purge now; batch 3 of 10.", true),
+  summary("agent:personality", 120, "Yes. Here's what I'd change in the greeting.", true),
 ];
 
 export const MOCK_TASKS: Task[] = [
@@ -51,18 +57,27 @@ export const MOCK_TRANSCRIPTS: Record<string, ChatSession> = {
     turns: [
       {
         turnId: "m1", state: "complete",
-        message: "Where are we on the UI rebuild? I want the new main screen today.",
+        message: "Why won't the gateway start under the new Mac app?",
         parts: [
-          { kind: "thinking", text: "Four tracks: shell + sidebar, the shared chat widget, the gateway endpoints, and the Mac shell.", durationMs: 12_000 },
-          { kind: "markdownContent", text: "On it. I split the work so nothing blocks the 3:30 PM screenshot." },
-          { kind: "handoff", handoffId: "h1", agentId: "agent:agents-view", agentName: name("agent:agents-view"), count: 1, direction: "to", agents: [ref("agent:agents-view"), ref("agent:ide-chat")] },
+          { kind: "thinking", text: "The owner file still names the old app.", durationMs: 6_000 },
+          { kind: "markdownContent", text: "The gateway still points at the old owner file, so it can't start under the new Mac app. I can move `gateway.json` into the Desktop archive and start the gateway again. The new Mac app will take over as owner once it's running. Don't try relaunching the old app instead, since it rewrites settings and uses the old port." },
+          { kind: "question", callId: "q1", title: "Archive the stale owner file and restart the gateway?", options: [{ id: "yes", label: "Yes, archive it and restart" }, { id: "no", label: "Not now" }], chosenId: "yes" },
+          { kind: "handoff", handoffId: "h0", agentId: "agent:agents-view", agentName: name("agent:agents-view"), count: 1, direction: "from" },
+          { kind: "markdownContent", text: "Archiving it and restarting the gateway now." },
+          { kind: "handoff", handoffId: "h1", agentId: "agent:gateway-webui", agentName: name("agent:gateway-webui"), count: 1, direction: "to", agents: [ref("agent:gateway-webui"), ref("agent:mac-app")] },
+          { kind: "markdownContent", text: "I'll confirm once the gateway has stayed up and passed its checks, and the new Mac app will be set up to keep it running." },
+          { kind: "markdownContent", text: "The new main screen now really talks to Jaeger. In a test, it asked Jaeger to reply \"pong\" and got \"Thought for 8 s, pong\" back, a second message streamed fine, and the stop button worked.\n\nYou can try it in your browser right now at **Jaeger main screen (test)**. It's only reachable from your own Mac. Replies take about 20 seconds because the test uses a small local model." },
           { kind: "handoff", handoffId: "h2", agentId: "agent:gateway-webui", agentName: name("agent:gateway-webui"), count: 4, direction: "to" },
-          { kind: "handoff", handoffId: "h3", agentId: "agent:mac-app", agentName: name("agent:mac-app"), count: 1, direction: "from" },
-          { kind: "markdownContent", text: "Here's where things stand:\n\n- **Agents View** is building the sidebar, shell and markers in `interfaces/ui`.\n- **IDE Chat** owns the shared chat renderer. `ChatHost` is frozen.\n- **Gateway & WebUI** shipped `/v1/agents/summary` and the global stream.\n- **Mac App** has the WKWebView shell loading `?host=macos`." },
         ],
       },
+      { turnId: "m2", state: "pending", message: "Great. What's left before I can use it every day?", parts: [] },
+    ],
+  },
+  "s-agent:agents-view": {
+    id: "s-agent:agents-view", title: "Main screen build", agentId: "agent:agents-view", updatedAt: ago(2),
+    turns: [
       {
-        turnId: "m2", state: "needs_input",
+        turnId: "a1", state: "needs_input",
         message: "Run the build on the worktree and commit if it's green.",
         parts: [
           { kind: "progress", message: "Checking the worktree" },

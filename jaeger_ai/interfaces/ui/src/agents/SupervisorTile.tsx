@@ -1,11 +1,16 @@
 import type { SidebarRow } from "./agentsLogic";
-import { AgentAvatar } from "./AgentAvatar";
+import { label } from "./agentsLogic";
+import { SupervisorArt } from "./AgentAvatar";
 
+/** Pinned supervisor card: square tile, art + star badge, name underneath. */
 export function SupervisorTile({ row, selected, onSelect }: { row: SidebarRow; selected: boolean; onSelect: () => void }) {
+  const name = label(row.agent);
   return (
-    <button type="button" className={`jg-supervisor${selected ? " is-selected" : ""}`} aria-current={selected ? "page" : undefined} onClick={onSelect}>
-      <AgentAvatar name="Jaeger" src={row.agent.avatar_url} lead size={36} />
-      <span className="jg-supervisor__label">Jaeger</span>
-    </button>
+    <div className="jg-supervisor-wrap">
+      <button type="button" className={`jg-supervisor${selected ? " is-selected" : ""}`} aria-current={selected ? "page" : undefined} onClick={onSelect} title={name}>
+        <SupervisorArt />
+        <span className="jg-supervisor__label">{name}</span>
+      </button>
+    </div>
   );
 }

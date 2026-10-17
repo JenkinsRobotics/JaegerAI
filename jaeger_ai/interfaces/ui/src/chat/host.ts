@@ -19,6 +19,10 @@ export type ChatPart =
   | { kind: "progress"; message: string }
   | { kind: "error"; message: string }
   | { kind: "warning"; message: string }
+  /** PROPOSED addition (not yet in the frozen IDE Chat contract): an answered
+   * question widget. Renders the question plus its options with the chosen
+   * one highlighted. */
+  | { kind: "question"; callId: string; title: string; options: Array<{ id: string; label: string }>; chosenId?: string }
   /** Centered hand-off marker. `agents` set means a grouped "Messaged X and Y". */
   | { kind: "handoff"; handoffId: string; agentId: string; agentName: string; count: number; direction: "to" | "from"; agents?: Array<{ id: string; name: string }> };
 
