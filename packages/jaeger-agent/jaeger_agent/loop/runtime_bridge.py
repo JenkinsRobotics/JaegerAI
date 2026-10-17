@@ -193,6 +193,8 @@ def _adapter_for_client(
             num_ctx=getattr(client, "num_ctx", None),
             timeout_s=timeout_s,
             max_tokens=max_tokens,
+            temperature=getattr(ext, "temperature", None),
+            top_p=getattr(ext, "top_p", None),
             reasoning_effort=reasoning_effort_for(provider, model, getattr(ext, "reasoning_effort", None)),
         )
 
@@ -257,10 +259,14 @@ def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
             provider = str(row.get("provider") or primary_provider)
             model = str(row.get("model") or "")
             base_url = row.get("base_url") or primary_base
+            fallback_temp = row.get("temperature")
+            fallback_top_p = row.get("top_p")
         else:
             provider = str(getattr(row, "provider", None) or primary_provider)
             model = str(getattr(row, "model", "") or "")
             base_url = getattr(row, "base_url", None) or primary_base
+            fallback_temp = getattr(row, "temperature", None)
+            fallback_top_p = getattr(row, "top_p", None)
         if not model or model == primary_model:
             continue
         if provider == "cli":
@@ -278,6 +284,8 @@ def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
                 base_url=base_url or None, num_ctx=num_ctx,
                 timeout_s=timeout_s,
                 max_tokens=max_tokens,
+                temperature=fallback_temp,
+                top_p=fallback_top_p,
             ))
     return out
 
