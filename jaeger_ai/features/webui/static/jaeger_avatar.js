@@ -25,20 +25,21 @@
   let level=0, shown=0, speaking=false, blinkAt=performance.now()+2500, blinkT=0;
   let wrap=null, canvas=null, ctx=null, label=null, raf=0;
 
-  function mode(){ return localStorage.getItem(MODE_KEY)||'face'; }
+  function isMobileViewport(){ return typeof window!=='undefined' && window.innerWidth<=768; }
+  function mode(){ const saved=localStorage.getItem(MODE_KEY); if(isMobileViewport()) return saved==='face'?'face':'off'; return saved||'off'; }
 
   function mount(){
     if(wrap) return;
     wrap=document.createElement('div');
     wrap.id='jaegerAvatar';
     wrap.title='Jaeger (click to switch face / 3D / off)';
-    wrap.style.cssText='position:fixed;right:18px;bottom:120px;z-index:9999;width:72px;height:72px;border-radius:50%;overflow:hidden;cursor:pointer;box-shadow:0 6px 24px rgba(0,0,0,.4);background:#11131c';
+    wrap.style.cssText='position:fixed;right:18px;bottom:calc(120px + var(--keyboard-bottom-inset, 0px));z-index:9999;width:72px;height:72px;border-radius:50%;overflow:hidden;cursor:pointer;box-shadow:0 6px 24px rgba(0,0,0,.4);background:#11131c';
     canvas=document.createElement('canvas');
     canvas.width=144; canvas.height=144;
     canvas.style.cssText='width:100%;height:100%;display:block';
     label=document.createElement('div');
     label.id='jaegerAvatarState';
-    label.style.cssText='position:fixed;right:18px;bottom:104px;z-index:9999;font:10px system-ui;opacity:.6;color:var(--text,#ccc);width:72px;text-align:center;pointer-events:none';
+    label.style.cssText='position:fixed;right:18px;bottom:calc(104px + var(--keyboard-bottom-inset, 0px));z-index:9999;font:10px system-ui;opacity:.6;color:var(--text,#ccc);width:72px;text-align:center;pointer-events:none';
     wrap.appendChild(canvas);
     document.body.append(wrap,label);
     ctx=canvas.getContext('2d');
@@ -61,11 +62,17 @@
   }
 
   function applyMode(m){
+    const stale3d=document.getElementById('jaegerAvatar3d');
+    if(m!=='vrm' && stale3d) stale3d.remove();
+    const hideAll=(m==='off' || isMobileViewport());
     if(wrap){
-      wrap.style.display=m==='vrm'?'none':'block';
-      wrap.style.opacity=m==='off'?'.25':'1';
+      wrap.style.display=(hideAll || m==='vrm')?'none':'block';
+      wrap.style.opacity='1';
     }
-    if(m==='vrm') startV2(); else if(v2){ v2.stop(); v2=null; }
+    if(label){
+      label.style.display=hideAll?'none':'block';
+    }
+    if(m==='vrm' && !isMobileViewport()) startV2(); else if(v2){ v2.stop(); v2=null; }
   }
 
   function setMode(m){

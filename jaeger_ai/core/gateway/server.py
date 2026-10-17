@@ -11,6 +11,7 @@ import asyncio
 import time
 import json
 import logging
+import ipaddress
 import os
 import re
 import threading
@@ -44,7 +45,7 @@ from .session_store import EXECUTION_INPUT_KEYS, GatewaySessionStore, RequestBus
 logger = logging.getLogger("jaeger.gateway")
 
 DEFAULT_GATEWAY_PORT = int(os.environ.get("JAEGER_GATEWAY_PORT", str(GATEWAY_PORT)))
-DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST", LOOPBACK)
+DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST", "0.0.0.0")
 
 # Locked spine endpoints (docs/spine-acceptance.md M10). Chat does not use :8813.
 LOCKED_BRIDGE_HEALTH_URL = os.environ.get(
@@ -255,23 +256,40 @@ def _asks_about_the_image(request: str) -> bool:
 
 
 _LOOPBACK_HOSTNAMES = frozenset({"127.0.0.1", "localhost", "::1"})
+_TAILSCALE_CGNAT_NET = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _is_allowed_gateway_host(host: str | None) -> bool:
+    if not host:
+        return False
+    host = host.strip().lower()
+    if host in _LOOPBACK_HOSTNAMES or host == "0.0.0.0":
+        return True
+    if host.endswith(".ts.net") or host.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip in _TAILSCALE_CGNAT_NET or ip.is_private or ip.is_loopback:
+            return True
+    except ValueError:
+        pass
+    extra_hosts = os.environ.get("JAEGER_GATEWAY_ALLOW_HOSTS", "").split(",")
+    for extra in extra_hosts:
+        extra = extra.strip().lower()
+        if extra and (extra == "*" or extra == host):
+            return True
+    return False
 
 
 @web.middleware
 async def _reject_browser_cross_site(request: web.Request, handler: Any) -> web.StreamResponse:
     """Refuse requests a web page could forge.
 
-    The Gateway has no credentials of its own; loopback is its boundary. That
-    boundary does not stop a browser: any page the operator opens can send a
-    ``text/plain`` POST here without a CORS preflight, and ``request.json()``
-    does not check the content type. The 2026-09-21 audit created a session
-    and started an agent turn that way with ``Origin: https://evil.example``.
-
-    Its real clients (the WebUI's server-side proxy, the Mac app, CLIs, the
-    MCP server) send no ``Origin``. A browser always does on a cross-origin
-    POST, and a DNS-rebinding page cannot fake ``Host``.
+    The Gateway has no credentials of its own; loopback/tailnet is its boundary.
+    That boundary stops public web pages and DNS rebinding attacks while allowing
+    legitimate loopback, LAN, and Tailscale callers.
     """
-    if request.url.host not in _LOOPBACK_HOSTNAMES:
+    if not _is_allowed_gateway_host(request.url.host):
         return web.json_response({"error": "Gateway accepts loopback Host only"}, status=421)
     origin = request.headers.get("Origin")
     if origin is not None:
@@ -280,7 +298,7 @@ async def _reject_browser_cross_site(request: web.Request, handler: Any) -> web.
             source = URL(origin)
         except ValueError:
             source = None
-        if source is None or source.host not in _LOOPBACK_HOSTNAMES or source.port != request.url.port:
+        if source is None or not _is_allowed_gateway_host(source.host) or source.port != request.url.port:
             return web.json_response({"error": "Cross-origin requests are refused"}, status=403)
     if request.headers.get("Sec-Fetch-Site") == "cross-site":
         return web.json_response({"error": "Cross-site requests are refused"}, status=403)
@@ -702,6 +720,31 @@ class JaegerGatewayApp:
                 logger.debug("sqlite_store/workspace bind skipped: %s", exc)
             rt = EntityRuntime.get_singleton(mode=EntityRuntimeMode.OWNER)
             runtime_for_producers = rt
+            if not getattr(rt, "_gateway_cognition_handler_registered", False):
+                def _on_cognition_wake(ev: Any, state: Any) -> None:
+                    from jaeger_ai.core.entity.events import EventType, JaegerEvent
+
+                    # Human turns already execute through Gateway turn admission / execute_turn.
+                    # Non-turn salient events (perceptions, observations, heartbeats) record an
+                    # executive decision when they wake cognition on the resident owner.
+                    if str(getattr(ev, "event_type", "")) in {
+                        EventType.HUMAN_MESSAGE.value,
+                        EventType.AGENT_RESPONSE.value,
+                        EventType.EXECUTIVE_DECISION.value,
+                    }:
+                        return
+                    dec = rt.executive_selector.select_strategy(ev, state)
+                    rt.event_store.append(
+                        JaegerEvent.executive_decision(
+                            dec.strategy.value,
+                            dec.reason,
+                            parent_event_id=ev.event_id,
+                            session_id=getattr(ev, "session_id", "system") or "system",
+                        )
+                    )
+
+                rt.register_cognition_handler(_on_cognition_wake)
+                rt._gateway_cognition_handler_registered = True
             logger.info(
                 "Gateway attached EntityRuntime %s resident=%s",
                 rt.identity.entity_id,
@@ -1518,17 +1561,31 @@ class JaegerGatewayApp:
         )
         # Read-only surface availability. Never create fake chat requests from
         # health checks, and never mistake a 404 for a working conversation.
+        external_model_configured = False
+        try:
+            from jaeger_ai.core.instance.instance import resolve_instance_dir
+            from jaeger_ai.core.instance.schemas import Config, load_yaml
+            cfg_path = resolve_instance_dir() / "config.yaml"
+            if cfg_path.exists():
+                cfg = load_yaml(cfg_path, Config)
+                ext = getattr(cfg, "external_model", None)
+                if ext and getattr(ext, "enabled", False):
+                    external_model_configured = True
+        except Exception:
+            pass
+
+        ollama_required = not external_model_configured
         checks = {
             "gateway": {"ok": True, "url": f"http://{DEFAULT_GATEWAY_HOST}:{DEFAULT_GATEWAY_PORT}"},
             "bridge": {**bridge, "required": False},
-            "ollama": {**ollama, "required": True},
+            "ollama": {**ollama, "required": ollama_required},
             "webui": {**webui_chat, "required": False, "chat_execution_verified": False},
             "native_mcp": native_mcp,
             "owner_runtime": owner,
         }
         native_mcp["required"] = not owner["ok"]
         required_ok = (
-            bool(ollama.get("ok"))
+            (bool(ollama.get("ok")) or not ollama_required)
             and (owner["ok"] or bool(native_mcp.get("ok")))
         )
         all_green = required_ok

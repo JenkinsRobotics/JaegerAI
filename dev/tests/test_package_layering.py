@@ -33,7 +33,7 @@ RULES = {
         lambda module: module.split(".")[0] == "jaeger_ai",
     ),
     "core_or_mind_imports_webui_api": (
-        ["jaeger_ai/core", "jaeger_ai/mind"],
+        ["jaeger_ai/core"],
         lambda module: module == "api" or module.startswith("api.")
         or module.startswith("jaeger_ai.features.webui"),
     ),

@@ -2,7 +2,7 @@
 	"name": "jaeger-ide",
 	"displayName": "Jaeger",
 	"description": "A local IDE conversation surface for your persistent Jaeger Gateway.",
-	"version": "0.1.2",
+	"version": "0.1.3",
 	"publisher": "jenkins-robotics",
 	"engines": {
 		"vscode": "^1.96.0"
@@ -46,6 +46,18 @@
 			{
 				"command": "jaeger.diagnostics",
 				"title": "Jaeger: Connection Diagnostics"
+			},
+			{
+				"command": "jaeger.setToken",
+				"title": "Jaeger: Set Caller Token"
+			},
+			{
+				"command": "jaeger.selectModel",
+				"title": "Jaeger: Select Default Model"
+			},
+			{
+				"command": "jaeger.onboarding",
+				"title": "Jaeger: New Device Setup Guide"
 			}
 		],
 		"viewsContainers": {
@@ -79,18 +91,25 @@
 					"type": "boolean",
 					"default": false,
 					"scope": "application",
-					"description": "Start a local Jaeger Gateway daemon when the panel opens and none is answering. Off by default; the macOS app normally owns the Gateway. User settings only."
+					"description": "Start a local Jaeger Gateway daemon when the panel opens and none is answering. User settings only."
 				},
 				"jaeger.gatewayUrl": {
 					"type": "string",
 					"default": "",
-					"scope": "application",
-					"description": "Local Gateway URL. Empty uses the canonical Jaeger port embedded during packaging. No remote/public access in this release."
+					"scope": "machine",
+					"description": "Gateway URL for this device (e.g. \"http://127.0.0.1:8810\" or Tailscale host \"http://home-mac.ts.net:8810\"). Per-device connection setting; not synced across devices."
+				},
+				"jaeger.callerToken": {
+					"type": "string",
+					"default": "",
+					"scope": "machine",
+					"description": "Optional Gateway caller token fallback. Use \"Jaeger: Set Caller Token\" to store your token securely in OS SecretStorage instead of settings. Not synced across devices."
 				},
 				"jaeger.model": {
 					"type": "string",
 					"default": "",
-					"description": "Default model identifier for new turns. Overridden by the panel's own model picker when one is chosen there; empty preserves the session/Gateway selection."
+					"scope": "window",
+					"description": "Default provider/model for new turns (\"provider::model\" or \"@provider:model\"). Eligible for Settings Sync when user-settings sync is enabled and this key is not excluded. Validated against the connected Gateway catalog; empty preserves the server/Gateway default."
 				}
 			}
 		}

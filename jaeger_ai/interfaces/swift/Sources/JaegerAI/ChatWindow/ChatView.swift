@@ -582,19 +582,27 @@ struct ChatView: View {
     private var mainToolbar: some View {
         VStack(spacing: 0) {
             toolbarHeader
-            // Keep every feature accessible without squeezing the conversation header.
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 2) {
-                    tabPillButton(title: "Chat", icon: "bubble.left.and.bubble.right.fill", tab: .chat)
-                    tabPillButton(title: "Kanban", icon: "square.grid.3x1.folder.fill.badge.plus", tab: .kanban)
-                    tabPillButton(title: "Workspace", icon: "folder.badge.gearshape", tab: .workspace)
-                    tabPillButton(title: "Tasks", icon: "clock.badge.checkmark", tab: .tasks)
-                    tabPillButton(title: "Skills", icon: "wrench.and.screwdriver.fill", tab: .skills)
-                    tabPillButton(title: "Avatar", icon: "waveform.circle.fill", tab: .avatar)
-                    tabPillButton(title: "Work", icon: "briefcase.fill", tab: .work)
+            HStack(spacing: 8) {
+                tabPillButton(title: "Chat", icon: "bubble.left.and.bubble.right.fill", tab: .chat)
+                tabPillButton(title: "Repo", icon: "folder", tab: .workspace)
+                Menu {
+                    Button("Tasks", systemImage: "checklist") { selectTab(.tasks) }
+                    Button("Skills", systemImage: "wrench.and.screwdriver") { selectTab(.skills) }
+                    Button("Work board", systemImage: "rectangle.3.group") { selectTab(.kanban) }
+                    Button("Voice", systemImage: "waveform") { selectTab(.avatar) }
+                    Button("Work", systemImage: "briefcase") { selectTab(.work) }
+                } label: {
+                    Label("More", systemImage: "ellipsis")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(Term.inkDim)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .contentShape(Capsule())
                 }
-                .padding(.horizontal, 12)
+                .menuStyle(.borderlessButton)
+                Spacer()
             }
+            .padding(.horizontal, 16)
             .padding(.bottom, 8)
         }
         .background(tabState.currentTab == .chat ? ChatPresentation.canvas : Term.panel)
@@ -625,6 +633,12 @@ struct ChatView: View {
         .buttonStyle(.plain)
     }
 
+    private func selectTab(_ tab: AppNavTab) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            tabState.currentTab = tab
+        }
+    }
+
     // MARK: - Empty State Hero
 
     private var emptyStateHero: some View {
@@ -640,25 +654,6 @@ struct ChatView: View {
                     .foregroundColor(Term.inkDim)
             }
 
-            // Quick suggestion chips in horizontal scroll view to prevent ANY wrapping!
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    suggestionChip(title: "Connect Monarch", icon: "creditcard.fill") {
-                        showMonarchAuthSheet = true
-                    }
-                    suggestionChip(title: "Audit repo hygiene", icon: "shield.checkerboard") {
-                        chat.composerText = "Audit repository hygiene and check all test suites"
-                    }
-                    suggestionChip(title: "Review release draft", icon: "doc.text") {
-                        chat.composerText = "Review the release draft and summarize changes"
-                    }
-                    suggestionChip(title: "Check model router", icon: "network") {
-                        chat.composerText = "Check model router endpoints and active models"
-                    }
-                }
-                .padding(.horizontal, 2)
-            }
-
             // Hero composer pill
             floatingComposer
                 .frame(maxWidth: 580)
@@ -667,32 +662,6 @@ struct ChatView: View {
         }
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    private func suggestionChip(title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: icon)
-                    .font(.system(size: 11))
-                    .foregroundColor(Term.accent)
-                Text(title)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(Term.ink)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color.white.opacity(0.05))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 16)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                    )
-            )
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Avatar Stage View

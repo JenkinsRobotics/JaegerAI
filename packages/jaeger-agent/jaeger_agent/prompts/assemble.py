@@ -47,7 +47,7 @@ from .context_blocks import (
     load_v2_self_improvement,
 )
 
-PromptMode = Literal["agent", "subagent", "deep_think", "idle_board", "cron"]
+PromptMode = Literal["agent", "subagent", "deep_think", "idle_board", "cron", "lean"]
 
 
 # Subagent-specific opener. Same rules/identity scaffold the parent uses, so
@@ -65,8 +65,16 @@ def _all(_mode: PromptMode) -> bool:
     return True
 
 
+def _non_lean(mode: PromptMode) -> bool:
+    return mode != "lean"
+
+
 def _non_subagent(mode: PromptMode) -> bool:
     return mode != "subagent"
+
+
+def _non_subagent_or_lean(mode: PromptMode) -> bool:
+    return mode not in ("subagent", "lean")
 
 
 def _agent_only(mode: PromptMode) -> bool:
@@ -190,12 +198,12 @@ PROMPT_FRAGMENTS: list[PromptFragment] = [
     ),
     PromptFragment(
         "entity_self_state", "dynamic", "(generated: EntityRuntime.current_state)",
-        _entity_self_state, _non_subagent,
+        _entity_self_state, _non_subagent_or_lean,
         "authoritative entity self-state projection — live facts and active goals",
     ),
     PromptFragment(
         "retrieved_reflections", "dynamic", "(generated: ReflexionStore)",
-        _retrieved_reflections, _all,
+        _retrieved_reflections, _non_lean,
         "retrieved failure warnings and reflection hypotheses from prior experience",
     ),
     PromptFragment(
@@ -219,13 +227,13 @@ PROMPT_FRAGMENTS: list[PromptFragment] = [
     ),
     PromptFragment(
         "framework", "framework", "agent/prompts/framework_agent.md",
-        lambda c: load_framework_prompt(), _all,
-        "standing framework instructions — every mode",
+        lambda c: load_framework_prompt(), _non_lean,
+        "standing framework instructions — every mode except lean",
     ),
     PromptFragment(
         "skill_index", "dynamic", "(generated: skill library)",
-        lambda c: build_skill_index_block(), _non_subagent,
-        "available playbooks — skipped for sub-agents",
+        lambda c: build_skill_index_block(), _non_subagent_or_lean,
+        "available playbooks — skipped for sub-agents and lean mode",
     ),
     PromptFragment(
         "v2_contract", "instance", "agent/prompts/agent_system_prompt.md",
@@ -234,17 +242,17 @@ PROMPT_FRAGMENTS: list[PromptFragment] = [
     ),
     PromptFragment(
         "runtime_tail", "dynamic", "(generated: toolset scoping)",
-        lambda c: build_runtime_tail(), _all,
-        "scoped vs. unscoped tool-surface note — every mode",
+        lambda c: build_runtime_tail(), _non_lean,
+        "scoped vs. unscoped tool-surface note — skipped in lean mode",
     ),
     PromptFragment(
         "board_digest", "dynamic", "(generated: kanban board)",
-        lambda c: build_board_block(c.layout), _non_subagent,
-        "actionable cards — skipped for sub-agents",
+        lambda c: build_board_block(c.layout), _non_subagent_or_lean,
+        "actionable cards — skipped for sub-agents and lean mode",
     ),
     PromptFragment(
         "tool_catalog", "dynamic", "(generated: toolset catalog)",
-        lambda c: build_toolset_catalog(), _all,
+        lambda c: build_toolset_catalog(), _non_lean,
         "loadable toolsets, under lean-surface scoping",
     ),
 ]

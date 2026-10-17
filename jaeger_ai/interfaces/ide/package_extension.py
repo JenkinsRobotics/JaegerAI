@@ -40,7 +40,12 @@ def main() -> None:
     for name in ("package.json", "extension.js", "gateway.js", "conversation.js", "commands.js",
                  "README.md", "VERIFICATION.md", "THIRD_PARTY_NOTICES.md"):
         shutil.copy2(source / name, stage / name)
-    shutil.copytree(source / "media", stage / "media")
+    # Editors and patch tools may leave rejected/backup files beside live
+    # assets. They are neither runtime dependencies nor release content.
+    shutil.copytree(
+        source / "media", stage / "media",
+        ignore=shutil.ignore_patterns("*.orig", "*.rej", ".DS_Store"),
+    )
     smd_bytes = (repo / _SMD_SOURCE).read_bytes()
     actual = base64.b64encode(hashlib.sha384(smd_bytes).digest()).decode()
     if actual != _SMD_SHA384:

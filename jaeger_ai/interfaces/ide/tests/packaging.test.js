@@ -37,3 +37,7 @@ test('every script and stylesheet the panel loads is a media file that exists', 
     if (asset && key !== 'SMD') assert.ok(fs.existsSync(path.join(root, 'media', asset)), `media/${asset} does not exist`);
   }
 });
+
+test('the IDE packager excludes editor backup and rejected patch files', () => {
+  assert.match(packager, /ignore_patterns\("\*\.orig", "\*\.rej", "\.DS_Store"\)/);
+});

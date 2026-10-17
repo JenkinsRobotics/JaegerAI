@@ -34,13 +34,9 @@ enum AppNavTab: String, CaseIterable, Identifiable {
 
 /// Release-candidate visibility policy for the native chat surface.
 ///
-/// Jaeger’s daily conversations live in the IDE extension and WebUI for this
-/// release.  The native transcript, avatar, and pill are deliberately kept in
-/// the binary for continued development, but are not a normal launch path.
-/// Settings and the menu-bar controller remain the supported macOS surface.
-/// Developers can explicitly bring the native surface back with
-/// ``--native-chat --chat`` (or ``--native-chat --avatar``), or with the
-/// environment switch used by manual QA.
+/// Controls automatic window presentation at process launch. The menu-bar
+/// Chat action can still open the native client on demand; these switches are
+/// reserved for launch-time QA and do not change the app's normal menu layout.
 enum NativeSurfaceVisibility {
     static func exposesChat(
         arguments: [String] = ProcessInfo.processInfo.arguments,

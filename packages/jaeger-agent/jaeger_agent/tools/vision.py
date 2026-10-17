@@ -1,10 +1,10 @@
-"""Vision skills — local VLM + local image generator.
+"""Vision skills — Jaeger-native local vision + local image generator.
 
-  • look_at(image_path, question)       — Moondream2 VLM (lazy CPU load)
+  • look_at(image_path, question)       — active llama.cpp + mmproj brain
   • generate_image(prompt, out_path)    — SDXL-Turbo (lazy MPS load)
 
-Both backbones load on first use. Override the default model IDs via
-VISION_MODEL_ID / IMAGE_GEN_MODEL_ID env vars.
+The local vision projector is configured by Jaeger; the image generator can
+be overridden with IMAGE_GEN_MODEL_ID.
 
 Ported from pydantic_ai/skills/vision.py. The only Jaeger-specific
 adjustment is sandbox: paths must resolve inside <instance>/skills/.
@@ -121,53 +121,65 @@ def generate_image(
 
 
 # ---------------------------------------------------------------------------
-# look_at — Moondream2 VLM on CPU (Metal-safe)
+# look_at — Jaeger-native llama.cpp + mmproj vision
 # ---------------------------------------------------------------------------
-_vision_state: dict[str, Any] = {"model": None, "tokenizer": None, "model_id": None}
+_vision_state: dict[str, Any] = {"node": None, "handler": None, "model_path": None}
 _vision_lock = _threading.Lock()
 
 
-def _ensure_vision_model() -> tuple[Any, Any, str]:
-    model_id = os.environ.get("VISION_MODEL_ID", "vikhyatk/moondream2")
+def _ensure_native_vision() -> tuple[Any, Any]:
+    """Return the active local client and its Jaeger-owned vision handler.
+
+    The agent loop already owns the GGUF.  Vision must use that same model
+    and the configured llama.cpp projector; loading a second Transformers
+    VLM here was the source of the CPU/MPS failure and split Jaeger's brain.
+    """
+    from jaeger_ai.main import _pipeline
+
+    client = _pipeline.get("client")
+    llm = getattr(client, "llm", None)
+    if client is None or llm is None or not hasattr(client, "chat"):
+        raise RuntimeError("native Jaeger vision requires an active local llama.cpp brain")
+
+    handler = getattr(llm, "chat_handler", None)
+    if handler is not None:
+        return client, handler
+
+    config = _pipeline.get("config")
+    model_path = getattr(getattr(config, "multimodal", None), "vision_mmproj_path", "")
+    if not model_path:
+        raise RuntimeError("no vision_mmproj_path is configured")
+
     with _vision_lock:
-        return _ensure_vision_model_locked(model_id)
-
-
-def _ensure_vision_model_locked(model_id: str) -> tuple[Any, Any, str]:
-    if _vision_state["model"] is not None and _vision_state["model_id"] == model_id:
-        return _vision_state["model"], _vision_state["tokenizer"], model_id
-
-    from transformers import AutoModelForCausalLM, AutoTokenizer
-    import torch
-
-    started = time.perf_counter()
-    tok = AutoTokenizer.from_pretrained(model_id, trust_remote_code=True)
-    # Pin to CPU — small model, and avoids Metal contention with llama-cpp.
-    device = "cpu"
-    model = AutoModelForCausalLM.from_pretrained(
-        model_id, trust_remote_code=True, torch_dtype=torch.float32,
-    ).to(device).eval()
-    print(f"[vision] {model_id} loaded on {device} in {time.perf_counter() - started:.1f}s", flush=True)
-    _vision_state["model"] = model
-    _vision_state["tokenizer"] = tok
-    _vision_state["model_id"] = model_id
-    return model, tok, model_id
+        handler = getattr(llm, "chat_handler", None)
+        if handler is None:
+            node = _vision_state.get("node")
+            if node is None or _vision_state.get("model_path") != model_path:
+                from jaeger_agent.core.engine import vis_mod
+                node = vis_mod.VisionMmproj()
+                handler = node.load(True, model_path=model_path)
+                if handler is None:
+                    raise RuntimeError(f"vision projector unavailable: {model_path}")
+                _vision_state.update(node=node, handler=handler, model_path=model_path)
+            else:
+                handler = _vision_state["handler"]
+            llm.chat_handler = handler
+        return client, handler
 
 
 def warm_vision() -> dict[str, Any]:
-    """Pre-load the Moondream2 VLM so the first ``look_at`` is inference-
-    only, not a cold model load. Called by the boot warmup when
-    ``warmup.vision`` is enabled. Idempotent — the model is memoized."""
-    _, _, model_id = _ensure_vision_model()
-    return {"warmed": True, "model": model_id}
+    """Ensure Jaeger's configured local projector is attached."""
+    _, handler = _ensure_native_vision()
+    return {"warmed": True, "backend": "llama.cpp", "handler": type(handler).__name__}
 
 
 def look_at(image_path: str, question: str = "Describe this image in one short sentence.") -> dict[str, Any]:
     """Look at an image file under <instance>/skills/ and answer a question.
 
     Path is sandbox-resolved under the instance's skills/ dir.
-    Default backbone: Moondream2 (~1.9 B Apache-2.0 VLM). Override via
-    VISION_MODEL_ID. First call lazy-loads on CPU.
+    Uses the active local llama.cpp model and configured Gemma mmproj. The
+    completion runs on Jaeger's auxiliary context, keeping the agent turn's
+    worker context and KV cache intact.
     """
     clean_path = (image_path or "").strip()
     if not clean_path:
@@ -180,11 +192,6 @@ def look_at(image_path: str, question: str = "Describe this image in one short s
     if not target.exists():
         return {"saw": False, "error": "image not found", "path": clean_path}
 
-    try:
-        from PIL import Image
-    except Exception as exc:
-        return {"saw": False, "error": f"Pillow missing: {exc}"}
-
     # The VLM load + inference below are single blocking calls that cannot
     # be interrupted partway. Bail before starting if the turn was already
     # cancelled so we don't kick off a multi-second model load nobody is
@@ -193,34 +200,34 @@ def look_at(image_path: str, question: str = "Describe this image in one short s
         return {"saw": False, "interrupted": True,
                 "error": "look_at interrupted by user"}
 
-    try:
-        model, tok, model_id = _ensure_vision_model()
-    except Exception as exc:
-        return {"saw": False, "error": f"vision model load failed: {exc}"}
-
-    try:
-        img = Image.open(target).convert("RGB")
-    except Exception as exc:
-        return {"saw": False, "error": f"could not open image: {exc}"}
-
     q = (question or "Describe this image in one short sentence.").strip()
+    try:
+        import base64
+        import mimetypes
+        from jaeger_agent.core.engine import vis_mod
+
+        client, _handler = _ensure_native_vision()
+        mime = mimetypes.guess_type(target.name)[0] or "image/png"
+        image_uri = f"data:{mime};base64,{base64.b64encode(target.read_bytes()).decode('ascii')}"
+        messages = [{
+            "role": "user",
+            "content": vis_mod.VisionMmproj.content(q, image_uri),
+        }]
+    except Exception as exc:
+        return {"saw": False, "error": f"native vision setup failed: {exc}"}
+
     started = time.perf_counter()
     try:
-        if hasattr(model, "encode_image") and hasattr(model, "answer_question"):
-            enc = model.encode_image(img)
-            answer = model.answer_question(enc, q, tok)
-        else:
-            inputs = tok(q, return_tensors="pt").to(model.device)
-            out = model.generate(**inputs, max_new_tokens=128)
-            answer = tok.decode(out[0], skip_special_tokens=True)
+        result = client.chat(messages, max_tokens=256, temperature=0.0)
+        answer = getattr(result, "text", "") or ""
     except Exception as exc:
-        return {"saw": False, "error": f"inference failed: {exc}"}
+        return {"saw": False, "error": f"native vision inference failed: {exc}"}
     elapsed = time.perf_counter() - started
 
     return {
         "saw": True,
         "answer": str(answer).strip(),
-        "model_id": model_id,
+        "backend": "llama.cpp + vision_mmproj",
         "elapsed_s": round(elapsed, 3),
         "path": clean_path,
     }
@@ -232,9 +239,8 @@ def look_at(image_path: str, question: str = "Describe this image in one short s
 @register_tool_from_function(name="vision_analyze")
 def _t_vision_analyze(image_path: str, question: str = "Describe this image in one short sentence.") -> dict:
     """Look at a workspace image and answer a question about it.
-    Default backbone: Moondream2 (~1.9B VLM, Apache-2.0). image_path is
-    sandbox-resolved under <instance>/skills/. First call lazy-loads
-    the VLM on CPU."""
+    Uses Jaeger's active local llama.cpp model plus its configured vision
+    projector. image_path is sandbox-resolved under <instance>/skills/."""
     return look_at(image_path=image_path, question=question)
 
 

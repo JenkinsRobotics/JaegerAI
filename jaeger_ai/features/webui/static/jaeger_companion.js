@@ -1,8 +1,6 @@
 // Jaeger speaks first: show and speak proactive messages from jaegerd.
-// Polls the durable /api/jaeger/notifications feed (Gateway
-// notification.proactive events), so it works for any session and survives
-// reconnects. Speaking is interruptible: typing, clicking the bubble or
-// pressing Escape stops it (same rule as the voice-mode TTS).
+// Docked in a dedicated top-right notification slot with explicit Reply and
+// Dismiss controls so notifications never overlap status messages or the composer.
 (function(){
   'use strict';
   if(window.__jaegerCompanion) return;
@@ -17,15 +15,14 @@
     if(box) return box;
     box=document.createElement('div');
     box.id='jaegerCompanion';
-    box.setAttribute('role','log');
+    box.setAttribute('role','region');
+    box.setAttribute('aria-label','Notifications');
     box.setAttribute('aria-live','polite');
-    box.style.cssText='position:fixed;right:196px;bottom:120px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:min(380px,90vw);pointer-events:none';
+    box.style.cssText='position:fixed;top:60px;right:20px;bottom:auto;z-index:9500;display:flex;flex-direction:column;align-items:flex-end;gap:10px;max-width:min(380px,calc(100vw - 32px));pointer-events:none';
     document.body.appendChild(box);
     return box;
   }
 
-  // The avatar's mouth follows a 0..1 level: real audio when a server engine
-  // (or Kokoro) returns a clip, word boundaries for browser speech.
   const face=()=>window.jaegerAvatar;
   let audioEl=null, audioCtx=null, meterRaf=0, pulseTimer=0;
 
@@ -70,7 +67,6 @@
     const rate=parseFloat(localStorage.getItem('hermes-tts-rate')); if(!isNaN(rate)) u.rate=rate;
     let hit=0;
     u.onstart=()=>{ if(!face()) return; face().setSpeaking(true);
-      // Envelope: a syllable-rate wobble, re-energised by every word boundary.
       pulseTimer=setInterval(()=>{ hit*=.82; face()&&face().setLevel(.25+.45*Math.abs(Math.sin(performance.now()/90))*(.4+hit)); },45); };
     u.onboundary=()=>{ hit=1; };
     u.onend=u.onerror=()=>stopSpeaking();
@@ -80,8 +76,6 @@
   function speak(text){
     if(localStorage.getItem(MUTE)==='1') return;
     stopSpeaking();
-    // Jaeger's own local voice (Kokoro) first, unless the owner picked a
-    // server engine for the WebUI; browser speech is the last fallback.
     const engine=localStorage.getItem('hermes-tts-engine')||'browser';
     const t=String(text).slice(0,600);
     const req=(engine==='browser'||engine==='kokoro')
@@ -94,17 +88,50 @@
     const el=document.createElement('div');
     el.className='jaeger-companion-msg';
     el.dataset.salience=n.salience||'digest';
-    el.style.cssText='pointer-events:auto;background:var(--surface,#1d1d2e);color:var(--text,#eee);border:1px solid var(--accent,#6b8afd);border-radius:14px;padding:10px 12px;box-shadow:0 6px 24px rgba(0,0,0,.35);font-size:14px;line-height:1.4;cursor:pointer';
+    el.style.cssText='pointer-events:auto;background:var(--surface,#171a22);color:var(--text,#f3f5f8);border:1px solid var(--border,rgba(255,255,255,.14));border-left:3px solid var(--accent,#3b82f6);border-radius:14px;padding:12px 14px;box-shadow:0 10px 30px rgba(0,0,0,.45);font-size:13.5px;line-height:1.45;width:100%';
+
+    const topRow=document.createElement('div');
+    topRow.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px';
     const head=document.createElement('div');
-    head.style.cssText='font-weight:600;font-size:12px;opacity:.8;margin-bottom:4px';
-    head.textContent=(n.title||'Jaeger')+' \u00b7 messaged you first';
+    head.style.cssText='font-weight:600;font-size:12px;color:var(--text,#fff);opacity:.9';
+    head.textContent=(n.title||'Jaeger')+' · Notification';
+    const closeBtn=document.createElement('button');
+    closeBtn.type='button';
+    closeBtn.className='jaeger-companion-dismiss';
+    closeBtn.setAttribute('aria-label','Dismiss notification');
+    closeBtn.title='Dismiss';
+    closeBtn.style.cssText='background:transparent;border:0;color:var(--text-muted,#9aa2b2);font-size:16px;line-height:1;padding:2px 6px;border-radius:6px;cursor:pointer';
+    closeBtn.textContent='×';
+    closeBtn.addEventListener('click',(e)=>{ e.stopPropagation(); stopSpeaking(); el.remove(); });
+    topRow.append(head,closeBtn);
+
     const body=document.createElement('div');
+    body.style.cssText='margin-bottom:10px;color:var(--text,#e5e9f0)';
     body.textContent=n.body||'';
-    const hint=document.createElement('div');
-    hint.style.cssText='font-size:11px;opacity:.6;margin-top:6px';
-    hint.textContent='Reply in chat to answer. Click to dismiss.';
-    el.append(head,body,hint);
-    el.addEventListener('click',()=>{ stopSpeaking(); el.remove(); });
+
+    const actions=document.createElement('div');
+    actions.style.cssText='display:flex;align-items:center;justify-content:flex-end;gap:8px';
+    const replyBtn=document.createElement('button');
+    replyBtn.type='button';
+    replyBtn.className='jaeger-companion-reply-btn';
+    replyBtn.style.cssText='background:var(--accent,#3b82f6);color:#fff;border:0;border-radius:999px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer';
+    replyBtn.textContent='Reply in chat';
+    replyBtn.addEventListener('click',(e)=>{
+      e.stopPropagation();
+      stopSpeaking();
+      const msgInput=document.getElementById('msg');
+      if(msgInput){ msgInput.focus(); }
+      el.remove();
+    });
+    const dismissBtn=document.createElement('button');
+    dismissBtn.type='button';
+    dismissBtn.className='jaeger-companion-dismiss-btn';
+    dismissBtn.style.cssText='background:rgba(255,255,255,.07);color:var(--text,#eee);border:1px solid rgba(255,255,255,.1);border-radius:999px;padding:4px 12px;font-size:12px;cursor:pointer';
+    dismissBtn.textContent='Dismiss';
+    dismissBtn.addEventListener('click',(e)=>{ e.stopPropagation(); stopSpeaking(); el.remove(); });
+    actions.append(replyBtn,dismissBtn);
+
+    el.append(topRow,body,actions);
     ensureBox().appendChild(el);
     setTimeout(()=>{ if(el.isConnected) el.remove(); }, n.salience==='immediate'?120000:45000);
     try{
@@ -115,10 +142,6 @@
     if(n.speak!==false) speak(n.body||'');
   }
 
-  // One poll at a time. A slow first response (cold gateway) used to overlap
-  // the next interval tick: the first to return set primed=true, then the other,
-  // still holding since_event_id=0, showed every item unfiltered (the stale
-  // replay). Also never show an event at or below the cursor, or one twice.
   let inflight=false;
   const seen=new Set();
   function fresh(n){
@@ -136,7 +159,6 @@
       const data=await r.json();
       const items=(data&&data.notifications)||[];
       if(!primed){
-        // First load: only surface what arrived in the last 10 minutes.
         const cutoff=Date.now()/1000-600;
         items.filter(n=>(n.created_at||n.timestamp||0)>=cutoff).filter(fresh).forEach(show);
         primed=true;

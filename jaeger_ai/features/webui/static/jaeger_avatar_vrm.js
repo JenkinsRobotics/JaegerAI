@@ -25,10 +25,27 @@ let running = null;
 
 export async function start(api) {
   if (running) return running;
+  if (typeof window !== 'undefined' && window.innerWidth <= 768) {
+    throw new Error('3D avatar disabled on compact mobile viewport');
+  }
+  const stale = document.getElementById('jaegerAvatar3d');
+  if (stale) stale.remove();
+
+  const loader = new GLTFLoader();
+  loader.register((parser) => {
+    parser.textureLoader = new THREE.TextureLoader(parser.options.manager);
+    parser.textureLoader.setCrossOrigin(parser.options.crossOrigin || 'anonymous');
+    return { name: 'JAEGER_img_textures' };
+  });
+  loader.register((parser) => new VRMLoaderPlugin(parser));
+  const gltf = await loader.loadAsync('api/jaeger/avatar/model.vrm');
+  const vrm = gltf.userData.vrm;
+  if (!vrm) throw new Error('not a VRM');
+
   const panel = document.createElement('div');
   panel.id = 'jaegerAvatar3d';
   panel.title = 'Jaeger (click to switch face / 3D / off)';
-  panel.style.cssText = 'position:fixed;right:12px;bottom:112px;z-index:9999;width:170px;height:230px;border-radius:18px;overflow:hidden;cursor:pointer;background:radial-gradient(circle at 50% 35%,#2a3350,#11131c 75%);box-shadow:0 8px 30px rgba(0,0,0,.45)';
+  panel.style.cssText = 'position:fixed;right:12px;bottom:calc(112px + var(--keyboard-bottom-inset, 0px));z-index:9999;width:170px;height:230px;border-radius:18px;overflow:hidden;cursor:pointer;background:radial-gradient(circle at 50% 35%,#2a3350,#11131c 75%);box-shadow:0 8px 30px rgba(0,0,0,.45)';
   document.body.appendChild(panel);
   panel.addEventListener('click', () => api.cycle());
 
@@ -44,18 +61,6 @@ export async function start(api) {
   scene.add(new THREE.AmbientLight(0xffffff, 0.9));
   const key = new THREE.DirectionalLight(0xffffff, 1.6); key.position.set(0.6, 1.8, 1.4); scene.add(key);
 
-  const loader = new GLTFLoader();
-  // Decode embedded textures through <img> (CSP img-src allows blob:) instead
-  // of fetch() (the WebUI's connect-src does not), which left the model white.
-  loader.register((parser) => {
-    parser.textureLoader = new THREE.TextureLoader(parser.options.manager);
-    parser.textureLoader.setCrossOrigin(parser.options.crossOrigin || 'anonymous');
-    return { name: 'JAEGER_img_textures' };
-  });
-  loader.register((parser) => new VRMLoaderPlugin(parser));
-  const gltf = await loader.loadAsync('api/jaeger/avatar/model.vrm');
-  const vrm = gltf.userData.vrm;
-  if (!vrm) throw new Error('not a VRM');
   VRMUtils.removeUnnecessaryVertices(gltf.scene);
   VRMUtils.combineSkeletons ? VRMUtils.combineSkeletons(gltf.scene) : null;
   VRMUtils.rotateVRM0(vrm);
@@ -63,7 +68,6 @@ export async function start(api) {
   const lookTarget = new THREE.Object3D(); camera.add(lookTarget); scene.add(camera);
   if (vrm.lookAt) vrm.lookAt.target = lookTarget;
   const bone = (n) => vrm.humanoid && vrm.humanoid.getNormalizedBoneNode(n);
-  // Relaxed arms instead of the T-pose.
   const lu = bone('leftUpperArm'), ru = bone('rightUpperArm');
   if (lu) lu.rotation.z = -1.2; if (ru) ru.rotation.z = 1.2;
   const lf = bone('leftLowerArm'), rf = bone('rightLowerArm');
@@ -82,15 +86,12 @@ export async function start(api) {
       weights[k] += ((want[k] || 0) - weights[k]) * Math.min(1, dt * 4);
       if (em) em.setValue(k, weights[k]);
     }
-    // Lip-sync: smoothed audio level onto the vowel visemes.
     const target = s.speaking ? s.level : 0;
     mouth += (target - mouth) * Math.min(1, dt * 18);
     if (em) { em.setValue('aa', Math.min(1, mouth * 1.1)); em.setValue('oh', mouth * 0.3); }
-    // Blink every 2-5.5 s (150 ms), suppressed while very happy (eyes already narrow).
     if (now > blinkAt) { blinkT = now; blinkAt = now + 2000 + Math.random() * 3500; }
     const b = Math.max(0, 1 - Math.abs(now - blinkT - 75) / 75);
     if (em) em.setValue('blink', b * (1 - weights.happy * 0.6));
-    // Idle: breathing, a slow sway, a small head tilt; a nod while speaking.
     const spine = bone('spine'), chest = bone('chest'), neck = bone('neck'), head = bone('head');
     if (spine) { spine.rotation.z = Math.sin(t * 0.6) * 0.025; spine.rotation.x = Math.sin(t * 1.4) * 0.012; }
     if (chest) chest.rotation.x = Math.sin(t * 1.4 + 0.6) * 0.015;

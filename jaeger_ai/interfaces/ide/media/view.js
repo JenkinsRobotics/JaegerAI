@@ -1,14 +1,14 @@
 (function bootJaegerView() {
 'use strict';
+const api = acquireVsCodeApi();
 const { groupActivity, activityTitle, activitySummary, activityIcon, groupWorkRows, diffLines, toolName, failureCount, groupTurns, selectableModels,
-  providerModelValue, filterChats, groupSelectableModels, modelSelectionLabel }
+  providerModelValue, filterChats, groupSelectableModels, modelSelectionLabel, modelSelectionAvailable }
   = window.JaegerPresentation;
 const { renderMarkdownOnce } = window.JaegerMarkdown;
 const { createFrameQueue } = window.JaegerFrameQueue;
 const { KeyedRenderer } = window.JaegerKeyedRenderer;
 const { match: matchSlash, parse: parseSlash } = window.JaegerSlash;
 
-const api = acquireVsCodeApi();
 const $ = id => document.getElementById(id);
 let state = { connected: false, busy: false, staged: [], queue: [], activity: [], reasoning: '', models: null, configuredModel: '', ideContext: null, diagnostics: 0, selectedWorkspace: '' };
 let revision = '', modelRevision = '', draftSession = '';
@@ -20,12 +20,14 @@ let chatSearch = api.getState()?.chatSearch || '';
 const drafts = api.getState()?.drafts || {};
 const post = (type, extra = {}) => api.postMessage({ type, ...extra });
 window.JaegerPostMessage = post;
+window.JaegerTranscriptRows = transcriptRows;
 
 let ideContextOn = api.getState()?.ideContext !== false;
 let mode = api.getState()?.mode || 'manual';
 let planModeOn = mode === 'plan';
 let deepThinkOn = Boolean(api.getState()?.deepThink);
-const persistView = () => api.setState({ drafts, ideContext: ideContextOn, mode, planMode: planModeOn, deepThink: deepThinkOn, chatSearch });
+let modelChoice = api.getState()?.modelChoice ?? 'config';
+const persistView = () => api.setState({ drafts, ideContext: ideContextOn, mode, planMode: planModeOn, deepThink: deepThinkOn, chatSearch, modelChoice });
 function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
 function resizePrompt() {
   const prompt = $('prompt');
@@ -249,8 +251,8 @@ function transcriptRows() {
   const workRow = work => ({ ...work, key: `work:${work.requestId}`, kind: 'work',
     live: !work.finishedAt && state.busy,
     rows: (state.timeline || []).filter(row => row.requestId === work.requestId
-      && (['reasoning', 'tool', 'progress', 'checkpoint', 'plan'].includes(row.kind) || (state.busy && row.kind === 'answer'))) });
-  history.filter(item => item.role === 'user' || item.role === 'assistant').forEach((item, index) => {
+      && ['reasoning', 'tool', 'progress', 'checkpoint', 'plan'].includes(row.kind)) });
+  history.filter(item => item.role === 'user' || item.role === 'assistant').forEach((item, index, filtered) => {
     rows.push({
       key: `history:${item.message_id || item.id || index}:${item.role}`,
       kind: item.role, text: String(item.content || ''), messageId: item.id,
@@ -260,11 +262,24 @@ function transcriptRows() {
       userIndex++;
       for (const work of state.workTurns || []) if (work.userIndex === userIndex) {
         rows.push(workRow(work)); placed.add(work.requestId);
+        const nextMsg = filtered[index + 1];
+        if (!nextMsg || nextMsg.role !== 'assistant') {
+          const liveAnswers = (state.timeline || []).filter(r => r.requestId === work.requestId && r.kind === 'answer');
+          const answerText = liveAnswers.map(r => r.text || '').join('');
+          if (answerText) {
+            rows.push({ key: `live:answer:${work.requestId}`, kind: 'assistant', text: answerText, live: true });
+          }
+        }
       }
     }
   });
   for (const work of state.workTurns || []) if (!placed.has(work.requestId) && !work.finishedAt) {
     rows.push(workRow(work)); placed.add(work.requestId);
+    const liveAnswers = (state.timeline || []).filter(r => r.requestId === work.requestId && r.kind === 'answer');
+    const answerText = liveAnswers.map(r => r.text || '').join('');
+    if (answerText) {
+      rows.push({ key: `live:answer:${work.requestId}`, kind: 'assistant', text: answerText, live: true });
+    }
   }
   const legacyActivity = (state.timeline || []).filter(row => !placed.has(row.requestId)
     && ['reasoning', 'tool', 'progress', 'checkpoint', 'plan'].includes(row.kind));
@@ -274,9 +289,10 @@ function transcriptRows() {
       { key: 'legacy-work', kind: 'work', status: 'completed', live: false, rows: legacyActivity });
   }
   for (const row of state.timeline || []) {
-    if (placed.has(row.requestId) && (state.busy || row.kind !== 'answer')) continue;
+    if (placed.has(row.requestId)) continue;
     if (legacyActivity.includes(row) || row.kind === 'control' || row.kind === 'terminal') continue;
-    rows.push({ ...row, key: `live:${row.key}` });
+    if (row.kind === 'answer' && rows.some(r => r.key === `live:answer:${row.requestId}`)) continue;
+    rows.push({ ...row, key: `live:${row.key}`, kind: row.kind === 'answer' ? 'assistant' : row.kind });
   }
   if (state.preview) rows.push({ key: `diff:${state.preview.requestId}:${state.preview.path}`, kind: 'diff', file: state.preview });
   if (!rows.length) rows.push({ key: 'empty', kind: 'empty', live: false });
@@ -396,7 +412,6 @@ setInterval(() => {
 
 // The selected admission value: '' is the Gateway/session default, 'config' is
 // the settings-configured model, anything else is a `provider::model` choice.
-let modelChoice = '';
 
 function renderModelItems() {
   const list = $('model-list');
@@ -413,6 +428,7 @@ function renderModelItems() {
     if (value === modelChoice) item.classList.add('selected');
     item.onclick = () => {
       modelChoice = value;
+      persistView();
       $('model-display').textContent = modelSelectionLabel(modelChoice, { configuredModel: state.configuredModel, sessionModel: state.session?.model });
       $('model-trigger').title = modelSelectionLabel(modelChoice, { configuredModel: state.configuredModel, sessionModel: state.session?.model });
       list.querySelectorAll('.model-item').forEach(el => el.classList.toggle('selected', el === item));
@@ -430,8 +446,12 @@ function renderModelItems() {
     for (const row of models) addItem(providerModelValue(row.provider, row.id), `${row.provider} · ${row.id}`);
   }
   list.replaceChildren(...items);
-  $('model-display').textContent = modelSelectionLabel(modelChoice, { configuredModel: state.configuredModel, sessionModel: state.session?.model });
-  $('model-trigger').title = state.modelsError ? `Couldn't load the model list: ${state.modelsError}` : modelSelectionLabel(modelChoice, { configuredModel: state.configuredModel, sessionModel: state.session?.model });
+  const selection = modelChoice === 'config' ? state.configuredModel : modelChoice;
+  const unavailable = Boolean(selection) && (Boolean(state.modelsError) || Boolean(state.models) && !modelSelectionAvailable(selection, state.models));
+  const labelChoice = modelChoice === 'config' && !state.configuredModel ? '' : modelChoice;
+  const label = modelSelectionLabel(labelChoice, { configuredModel: state.configuredModel, sessionModel: state.session?.model, unavailable });
+  $('model-display').textContent = label;
+  $('model-trigger').title = state.modelsError ? `Couldn't load the model list: ${state.modelsError}. Selection preserved.` : label;
 }
 
 function renderModels() {
@@ -439,10 +459,8 @@ function renderModels() {
   const signature = JSON.stringify(rows) + (state.modelsError || '') + (state.configuredModel || '') + (state.session?.model || '');
   if (signature === modelRevision) return;
   modelRevision = signature;
-  // Restore an explicit prior selection when it is still valid; otherwise fall
-  // back to the configured model so the display matches what will be sent.
-  const valid = new Set(['', ...(state.configuredModel ? ['config'] : []), ...rows.map(r => providerModelValue(r.provider, r.id))]);
-  if (!valid.has(modelChoice)) modelChoice = state.configuredModel ? 'config' : '';
+  // Keep the chosen lane even if this endpoint cannot serve it. Admission
+  // rejects an unavailable choice; catalog refresh must never pick a fallback.
   renderModelItems();
 }
 
@@ -690,7 +708,7 @@ function render() {
   if (ctx) ctx.textContent = state.session?.workspace ? state.session.workspace.split('/').filter(Boolean).at(-1) : 'Work locally';
   $('stop').hidden = !state.busy || !state.canCancel; eligibility(); renderComposerBar();
   $('attach').disabled = !state.connected || state.busy;
-  renderSessionTabs(); renderModels(); renderStaged(); renderContextChips();
+  renderSessionTabs(); renderModels(); renderStaged(); renderContextChips(); renderChats();
 
   timelineRenderer.reconcile(transcriptRows());
   renderChanges();
@@ -828,7 +846,22 @@ function showInfo(info) {
   box.replaceChildren(heading, body); box.hidden = false;
 }
 
-window.addEventListener('message', ({ data }) => { if (data?.info) showInfo(data.info); else stateQueue.push(data); });
+window.addEventListener('message', ({ data }) => {
+  if (data?.info) {
+    showInfo(data.info);
+    return;
+  }
+  // Connection snapshots must be applied immediately. Gateway stream updates
+  // can be coalesced, but leaving the first connected snapshot in the frame
+  // queue can strand the composer in its boot-time Connecting state when the
+  // webview is backgrounded or its animation frame is throttled.
+  if (data?.connected !== undefined || data?.status !== undefined) {
+    stateQueue.flush();
+    stateQueue.push({ ...data, updateKind: undefined });
+    return;
+  }
+  stateQueue.push(data);
+});
 
 // ── composer bar: permission pill + IDE-context toggle ─────────────────────
 const TIER_OPTIONS = [
@@ -926,15 +959,16 @@ function setComposerExpanded(open) {
   const barRight = document.querySelector('.bar-right');
   const execution = document.querySelector('.execution-row');
   if (!form || !options || !flow || !barLeft || !barRight || !execution) return;
-  const ids = ['mode-switch', 'autonomy-subswitch', 'jaeger-autonomous-indicator', 'model-trigger', 'ide-context', 'queue-next'];
-  const locations = ['workspace', 'worktree'];
+  const advanced = ['mode-switch', 'autonomy-subswitch', 'jaeger-autonomous-indicator', 'ide-context', 'queue-next', 'worktree'];
   if (composerExpanded) {
-    for (const id of [...ids, ...locations]) { const node = $(id); if (node) flow.append(node); }
+    for (const id of [...advanced, 'model-trigger', 'workspace']) { const node = $(id); if (node) flow.append(node); }
     options.hidden = false;
   } else {
-    for (const id of ids.slice(0, 3)) { const node = $(id); if (node) barLeft.append(node); }
-    for (const id of ids.slice(3)) { const node = $(id); if (node) barRight.insertBefore(node, $('stop')); }
-    for (const id of locations) { const node = $(id); if (node) execution.insertBefore(node, execution.querySelector('.send-hint')); }
+    for (const id of advanced) { const node = $(id); if (node) flow.append(node); }
+    const model = $('model-trigger');
+    if (model) barRight.insertBefore(model, $('stop'));
+    const workspace = $('workspace');
+    if (workspace) execution.insertBefore(workspace, execution.querySelector('.send-hint'));
     options.hidden = true;
   }
   form.classList.toggle('composer-expanded', composerExpanded);
@@ -964,6 +998,7 @@ function setMode(value) {
 
 $('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); };
 $('composer-controls-toggle').onclick = () => setComposerExpanded(!composerExpanded);
+setComposerExpanded(false);
 $('workspace').onclick = () => post('selectWorkspace');
 $('worktree').onclick = () => post('selectWorktree');
 if ($('jaeger-autonomous-indicator')) $('jaeger-autonomous-indicator').onclick = () => post('info', { what: 'cognitiveRouting' });

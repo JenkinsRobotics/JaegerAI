@@ -149,12 +149,59 @@ class SkillPromotionPipeline:
 
         return candidate
 
+    @staticmethod
+    def is_placeholder_code(code: str) -> bool:
+        """Return True when candidate code is empty, comment-only, or a no-op stub."""
+        import ast
+
+        cleaned = (code or "").strip()
+        if not cleaned:
+            return True
+        non_comment = [
+            line.strip()
+            for line in cleaned.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+        if not non_comment:
+            return True
+        try:
+            tree = ast.parse(cleaned)
+        except SyntaxError:
+            return True
+        real_defs = [
+            node for node in tree.body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        ]
+        if not real_defs:
+            return True
+        for fn in real_defs:
+            stmts = [
+                s for s in fn.body
+                if not (isinstance(s, ast.Expr) and isinstance(getattr(s, "value", None), ast.Constant) and isinstance(s.value.value, str))
+            ]
+            if not stmts:
+                return True
+            if all(
+                isinstance(s, ast.Pass)
+                or (isinstance(s, ast.Expr) and isinstance(getattr(s, "value", None), ast.Constant) and s.value.value is Ellipsis)
+                or (isinstance(s, ast.Raise) and "NotImplementedError" in ast.dump(s))
+                for s in stmts
+            ):
+                return True
+        return False
+
     def verify_candidate(
         self,
         candidate: SkillCandidate,
         verification_test: Callable[[str], bool],
     ) -> VerificationResult:
         """Execute the automated verification test against the candidate skill code."""
+        if self.is_placeholder_code(candidate.code):
+            return VerificationResult(
+                passed=False,
+                evidence=f"Rejected placeholder or comment-only code for skill {candidate.skill_name}",
+                error="Candidate code is a placeholder or lacks an executable function definition",
+            )
         try:
             passed = bool(verification_test(candidate.code))
             if passed:
@@ -185,6 +232,12 @@ class SkillPromotionPipeline:
                 "Refusing to promote unverified skill %s: %s",
                 candidate.skill_name,
                 verification.error,
+            )
+            return False
+        if self.is_placeholder_code(candidate.code):
+            logger.warning(
+                "Refusing to promote placeholder skill %s",
+                candidate.skill_name,
             )
             return False
 
@@ -233,10 +286,19 @@ class SkillPromotionPipeline:
             run_code = f"{run_code}\n\ndef register(agent=None):\n    return True\n"
         (skill_folder / "run.py").write_text(run_code, encoding="utf-8")
 
-        # Write smoke test
+        # Write smoke test that imports and verifies the module's register entrypoint
         smoke_py = skill_folder / "tests" / "smoke_test.py"
         smoke_py.write_text(
-            "def test_smoke():\n    assert True\n",
+            "import importlib.util\n"
+            "from pathlib import Path\n\n"
+            "def test_smoke():\n"
+            "    run_py = Path(__file__).resolve().parent.parent / 'run.py'\n"
+            "    spec = importlib.util.spec_from_file_location('skill_run', run_py)\n"
+            "    assert spec is not None and spec.loader is not None\n"
+            "    mod = importlib.util.module_from_spec(spec)\n"
+            "    spec.loader.exec_module(mod)\n"
+            "    assert callable(getattr(mod, 'register', None))\n"
+            "    assert mod.register(None) is not False\n",
             encoding="utf-8",
         )
 

@@ -205,6 +205,15 @@ def _extract_markdown_json_blocks(text: str, allowed_tool_names: set[str] | None
                     name = key
                     args = parsed[key]
 
+            # If no explicit name was found, detect implicit shell command payloads: {"command": "..."}
+            if not name and "command" in parsed:
+                if not allowed_tool_names or "run_shell" in allowed_tool_names:
+                    name = "run_shell"
+                    args = {"command": parsed["command"]}
+                elif "bash" in allowed_tool_names:
+                    name = "bash"
+                    args = {"command": parsed["command"]}
+
             if isinstance(args, str):
                 parsed_args = _safe_parse_json(args)
                 if isinstance(parsed_args, dict):

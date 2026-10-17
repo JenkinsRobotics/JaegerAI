@@ -147,3 +147,30 @@ HTML directly.
 
 API references: https://code.visualstudio.com/api/extension-guides/webview and
 https://code.visualstudio.com/api/working-with-extensions/publishing-extension.
+
+## Remote device and Tailscale setup (Thin IDE Client)
+
+Jaeger operates as a **thin IDE client** on laptops or remote machines, connecting
+over Tailscale to your persistent Jaeger Gateway running on your home server/Mac:
+
+- **Zero local models:** No local LLM weights or models are loaded or executed on
+  the laptop (preserving RAM and battery). The client communicates strictly with the
+  remote Gateway and never silently falls back to local models.
+- **Dynamic model selection:** Available models—including Ollama Cloud models exposed
+  by the server—are queried directly from the Gateway's `/v1/runtime/models` catalog.
+- **VS Code Settings Sync reality:** VS Code Settings Sync synchronizes user settings
+  (such as model preference `jaeger.model`) across your machines, but Settings Sync
+  *only* auto-installs extensions published to the public VS Code Marketplace. For
+  private VSIX builds, install the `.vsix` once on each machine via **Extensions: Install from VSIX…**.
+
+### Setup steps on a new device
+
+1. **Install extension:** Install the Jaeger VSIX via **Extensions: Install from VSIX…**.
+2. **Configure Gateway URL:** Set `jaeger.gatewayUrl` in Settings to your server's Tailscale
+   address (e.g. `http://home-mac.ts.net:8810` or `http://100.x.y.z:8810`). This setting has
+   `application` scope and is retained per-device (not synced).
+3. **Configure Caller Token:** Run **Jaeger: Set Caller Token** from the Command Palette.
+   Paste the token from `jaeger auth status` on your server. This token is saved in OS
+   SecretStorage via `context.secrets` and is never written to plaintext settings or synced.
+4. **Choose default model:** Run **Jaeger: Select Default Model** or click the model picker
+   in the footer to choose from the server's available models (including Ollama Cloud models).

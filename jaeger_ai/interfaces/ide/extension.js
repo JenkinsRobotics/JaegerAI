@@ -8,7 +8,7 @@ const path = require('node:path');
 const os = require('node:os');
 const { Gateway } = require('./gateway');
 const { Conversation } = require('./conversation');
-const { parseProviderModel } = require('./media/presentation');
+const { parseProviderModel, selectableModels, providerModelValue, modelSelectionAvailable } = require('./media/presentation');
 const commands = require('./commands');
 const execFileAsync = util.promisify(execFile);
 
@@ -31,20 +31,24 @@ const MIME_BY_EXTENSION = {
 
 function activate(context) {
   const output = vscode.window.createOutputChannel('Jaeger'); context.subscriptions.push(output);
-  let view, controller;
+  let view, controller, lastViewState = null;
+  const postToView = message => {
+    if (message && typeof message === 'object' && ('connected' in message || 'status' in message)) lastViewState = message;
+    return view?.webview.postMessage(message);
+  };
   // What the operator has open right now. The active editor stays "active" while the
   // Jaeger panel has focus, so this reflects their file, not the panel.
   // The permission pill: what the agent may do without asking, saved on the instance.
   const sendAutonomy = async mode => {
     try {
-      const gw = controller?.gateway || new Gateway(endpoint());
+      const gw = controller?.gateway || gatewayClient();
       const result = mode ? await gw.setAutonomy(mode) : await gw.autonomy();
       view?.webview.postMessage({ autonomy: { mode: result.autonomy, options: result.options } });
     } catch (error) { if (mode) throw error; /* reading is best-effort: the pill just stays unknown */ }
   };
   const sendTier = async tier => {
     try {
-      const gw = controller?.gateway || new Gateway(endpoint());
+      const gw = controller?.gateway || gatewayClient();
       const result = tier ? await gw.setTier(tier) : await gw.tier();
       view?.webview.postMessage({ tier: { current: result.tier, options: result.options } });
     } catch (error) { if (tier) throw error; /* reading is best-effort */ }
@@ -327,6 +331,51 @@ function activate(context) {
   }));
   const storageKey = () => `connection:${endpoint()}`;
   const endpoint = () => vscode.workspace.getConfiguration('jaeger').get('gatewayUrl') || contract.gatewayUrl;
+  const callerTokenSetting = () => (vscode.workspace.getConfiguration('jaeger').get('callerToken') || '').trim();
+  let currentCallerToken = callerTokenSetting();
+  const getStoredCallerToken = async () => {
+    const fallback = callerTokenSetting();
+    if (!context.secrets || typeof context.secrets.get !== 'function') return fallback;
+    const timeout = new Promise(resolve => setTimeout(() => resolve(fallback), 2000));
+    const read = (async () => {
+      const secretGet = key => context.secrets.get(key);
+      const ep = endpoint();
+      const scopedSecret = await secretGet(`jaeger.callerToken:${ep}`);
+      if (typeof scopedSecret === 'string' && scopedSecret.trim()) return scopedSecret.trim();
+
+      const pairedEndpoint = await secretGet('jaeger.pairedEndpoint');
+      if (pairedEndpoint && pairedEndpoint !== ep) {
+        // Changed endpoint: do not leak or reuse credential across unrelated servers
+        return '';
+      }
+      const secret = await secretGet('jaeger.callerToken');
+      return typeof secret === 'string' && secret.trim() ? secret.trim() : fallback;
+    })().catch(() => fallback);
+    try {
+      return await Promise.race([read, timeout]);
+    } catch (_) { return fallback; }
+  };
+  void getStoredCallerToken().then(tok => {
+    if (tok && tok !== currentCallerToken) {
+      currentCallerToken = tok;
+      if (controller) {
+        const selected = createController();
+        void controller.refresh(selected);
+      }
+    }
+  });
+  if (context.secrets && typeof context.secrets.onDidChange === 'function') {
+    context.subscriptions.push(context.secrets.onDidChange(async event => {
+      if (event.key === 'jaeger.callerToken') {
+        currentCallerToken = await getStoredCallerToken();
+        if (controller) {
+          const selected = createController();
+          await controller.refresh(selected);
+        }
+      }
+    }));
+  }
+  const gatewayClient = () => new Gateway(endpoint(), { callerToken: currentCallerToken, nativeLoopback: true });
   const settings = () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:jenkins-robotics.jaeger-ide');
   const configuredModel = () => vscode.workspace.getConfiguration('jaeger').get('model') || '';
   const workspaceStorageKey = () => `workspace:${endpoint()}`;
@@ -414,9 +463,19 @@ function activate(context) {
     view?.webview.postMessage({ mention: `@${picked.description}` });
   };
   const selectedModel = value => {
-    if (value === 'config') return { model: configuredModel(), provider: '' };
+    if (value === 'config') return parseProviderModel(configuredModel());
     if (typeof value === 'string' && value) return parseProviderModel(value);
     return { model: '', provider: '' };
+  };
+  const validateModelSelection = (model, provider) => {
+    if (!model) return; // Server/Gateway default is permitted
+    if (!controller?.state?.models || controller.state.modelsError) {
+      throw new Error('Could not verify the selected model against the connected Gateway catalog. Reconnect to reload it; the selected model has been preserved.');
+    }
+    if (!modelSelectionAvailable(provider ? providerModelValue(provider, model) : model, controller.state.models)) {
+      const provStr = provider ? ` (${provider})` : '';
+      throw new Error(`The selected model "${model}"${provStr} is unavailable or ambiguous on the connected Gateway. The client will not switch to another model. Please select an available model.`);
+    }
   };
   let daemonProcess = null;
   let runtimeStartPromise = null;
@@ -472,12 +531,20 @@ function activate(context) {
     runtimeStartPromise = new Promise(resolve => {
       let starter;
       try {
+        const root = workspaceRoots[0] || '';
+        const pythonPath = [
+          root,
+          path.join(root, 'packages', 'jaeger-agent'),
+          path.join(root, 'packages', 'jaeger-os'),
+          process.env.PYTHONPATH || '',
+        ].filter(Boolean).join(path.delimiter);
         starter = spawn(exec.cmd, exec.args, {
           stdio: ['ignore', 'pipe', 'pipe'],
           env: {
             ...process.env,
             PYTHONDONTWRITEBYTECODE: '1',
             PYTHONPYCACHEPREFIX: path.join(os.homedir(), '.cache', 'jaeger', 'pycache'),
+            ...(pythonPath ? { PYTHONPATH: pythonPath } : {}),
           },
         });
         starter.stdout?.on('data', chunk => output.appendLine(`[runtime] ${chunk.toString().trim()}`));
@@ -517,14 +584,14 @@ function activate(context) {
   function createController() {
     controller?.dispose();
     controller = undefined;
-    view?.webview.postMessage({ connected: false, busy: false, session: null, sessions: [], text: '',
+    postToView({ connected: false, busy: false, session: null, sessions: [], text: '',
       reasoning: '', activity: [], approvals: [], staged: [], models: null, modelsError: null,
       status: 'Connecting…', error: '', queue: [], openSessionIds: [], selectedWorkspace: restoreWorkspace(), configuredModel: configuredModel() });
     const key = storageKey(), restored = context.workspaceState.get(key, {});
-    const gw = new Gateway(endpoint());
+    const gw = gatewayClient();
     controller = new Conversation(gw, state => {
       if (state.changes) changes = state.changes;
-      view?.webview.postMessage(state);
+      postToView(state);
       const key = `${state.session?.session_id || ''}:${state.workTurns?.at(-1)?.requestId || ''}`;
       if (key !== changeKey) selectedChangeRequest = '';
       if ((wasBusy && !state.busy) || key !== changeKey) { changeKey = key; void refreshChanges(); }
@@ -536,7 +603,7 @@ function activate(context) {
   async function report(action) {
     try { await action(); } catch (error) {
       output.appendLine(`${new Date().toISOString()} ${error.message}`);
-      view?.webview.postMessage({ error: error.message });
+      postToView({ error: error.message });
     }
   }
   const provider = {
@@ -560,7 +627,6 @@ function activate(context) {
         SMD: asset('vendor/smd.min.js'),
       };
       html = html.replace(/\{\{(CSP|NONCE|CSS|MOTION|SLASH|LOGO|FRAME_QUEUE|TIMELINE|KEYED_RENDERER|PRESENTATION|DURATION|MARKDOWN|JS|SMD)\}\}/g, (_, key) => values[key]);
-      view.webview.html = html;
       let selected;
       const messageSubscription = view.webview.onDidReceiveMessage(message => report(async () => {
         if (!message || typeof message.type !== 'string') return;
@@ -587,14 +653,32 @@ function activate(context) {
           return;
         }
         if (message.type === 'ready') {
+          output.appendLine(`[debug] webview ready; endpoint=${endpoint()}`);
+          // Resolve the existing OS-stored IDE pairing before the first
+          // Gateway request. Starting refresh first creates a race where an
+          // authenticated SecretStorage result replaces the controller while
+          // its initial fetch is still in flight.
+          const storedToken = await getStoredCallerToken();
+          output.appendLine(`[debug] secure caller token available=${Boolean(storedToken)}`);
+          if (storedToken) currentCallerToken = storedToken;
           selected = createController();
+          // Replay the latest control state after the webview's listener has
+          // installed. This covers retained/reloaded webviews that miss a
+          // postMessage during the HTML/script boot window.
+          if (lastViewState) await new Promise(resolve => setTimeout(resolve, 0)).then(() => postToView(lastViewState));
           controller.ideHandler = ideCall;
           void refreshChanges();
           void sendAutonomy();
           void sendTier();
           postContext();
           if (userSetting('autoStartGateway') === true) await ensureGatewayDaemon(controller.gateway);
-          return controller.refresh(selected);
+          await controller.refresh(selected);
+          output.appendLine(`[debug] initial refresh settled; connected=${controller.state.connected}; status=${controller.state.status}; error=${controller.state.error || '(none)'}`);
+          // The refresh callback may publish several states while a retained
+          // webview is still attaching. Replay the final state after refresh,
+          // not only the initial Connecting snapshot.
+          if (lastViewState) await postToView(lastViewState);
+          return;
         }
         if (message.type === 'turnChanges' && !controller?.state.busy) {
           const turns = controller?.workBySession[controller?.state.session?.session_id] || [];
@@ -658,6 +742,7 @@ function activate(context) {
         }
         if (message.type === 'send' && typeof message.text === 'string') {
           const { model, provider } = selectedModel(message.model);
+          validateModelSelection(model, provider);
           const allowedTools = message.planOnly ? ['update_plan'] : null;
           const options = message.deepThink ? { deep_think: true, reasoning_effort: 'high' } : null;
           const sent = controller.send(message.text, model, provider, selectedWorkspace, message.ideContext === false ? null : ideContext(), allowedTools, options);
@@ -666,6 +751,7 @@ function activate(context) {
         }
         if (message.type === 'queue' && typeof message.text === 'string') {
           const { model, provider } = selectedModel(message.model);
+          validateModelSelection(model, provider);
           const allowedTools = message.planOnly ? ['update_plan'] : null;
           const options = message.deepThink ? { deep_think: true, reasoning_effort: 'high' } : null;
           const queued = controller.queue(message.text, model, provider, selectedWorkspace, message.ideContext === false ? null : ideContext(), allowedTools, options);
@@ -767,9 +853,34 @@ function activate(context) {
           let title, lines;
           if (message.what === 'status') {
             const version = await controller.gateway.json('/version');
+            let autonomy = null, tier = null, capabilities = null;
+            try {
+              const [a, t, c] = await Promise.all([
+                controller.gateway.autonomy().catch(() => null),
+                controller.gateway.tier().catch(() => null),
+                controller.gateway.capabilities ? controller.gateway.capabilities().catch(() => null) : controller.gateway.json('/v1/runtime/capabilities').catch(() => null),
+              ]);
+              autonomy = a?.autonomy;
+              tier = t?.tier;
+              capabilities = c;
+            } catch (_) {}
+            let isLocal = false;
+            try { isLocal = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(new URL(controller.gateway.url).hostname); } catch (_) {}
+            const connectionHealth = controller.state.connected
+              ? (isLocal ? 'connected (local loopback)' : 'connected (remote Tailscale/LAN)')
+              : 'disconnected';
             title = 'Status';
-            lines = commands.statusLines({ version, endpoint: controller.gateway.url, session: controller.state.session,
-              model: configuredModel() || controller.state.session?.metadata?.model || '' });
+            lines = commands.statusLines({
+              version,
+              endpoint: controller.gateway.url,
+              session: controller.state.session,
+              model: configuredModel() || controller.state.session?.metadata?.model || '',
+              autonomy,
+              tier,
+              capabilities,
+              connectionHealth,
+              scopes: true,
+            });
           } else if (message.what === 'skills') {
             const query = String(message.query || '').trim().slice(0, 60);
             const found = await controller.gateway.skills(query);
@@ -880,15 +991,157 @@ function activate(context) {
         controller?.dispose();
         view = undefined;
       }, undefined, context.subscriptions);
+      // Install the receiver before assigning HTML so the ready handshake
+      // cannot race the extension-host listener registration.
+      view.webview.html = html;
     }
   };
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('jaeger.conversation', provider, { webviewOptions: { retainContextWhenHidden: true } }),
     vscode.commands.registerCommand('jaeger.open', () => vscode.commands.executeCommand('jaeger.conversation.focus')),
     vscode.commands.registerCommand('jaeger.settings', settings),
+    vscode.commands.registerCommand('jaeger.setToken', async () => {
+      const current = currentCallerToken || (await getStoredCallerToken());
+      const token = await vscode.window.showInputBox({
+        title: 'Jaeger Gateway Caller Token',
+        prompt: 'Enter the Gateway caller token for the IDE (e.g. from `jaeger auth status` or ~/.jaeger/caller_tokens/ide.token on your host). Stored securely in SecretStorage.',
+        value: current,
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (token !== undefined) {
+        const trimmed = token.trim();
+        if (context.secrets && typeof context.secrets.store === 'function') {
+          const ep = endpoint();
+          if (trimmed) {
+            await context.secrets.store('jaeger.callerToken', trimmed);
+            await context.secrets.store(`jaeger.callerToken:${ep}`, trimmed);
+            await context.secrets.store('jaeger.pairedEndpoint', ep);
+          } else if (typeof context.secrets.delete === 'function') {
+            await context.secrets.delete('jaeger.callerToken');
+            await context.secrets.delete(`jaeger.callerToken:${ep}`);
+            await context.secrets.delete('jaeger.pairedEndpoint');
+          }
+        }
+        const config = vscode.workspace.getConfiguration('jaeger');
+        if (config.get('callerToken')) {
+          await config.update('callerToken', undefined, vscode.ConfigurationTarget.Global);
+        }
+        currentCallerToken = trimmed;
+        vscode.window.showInformationMessage('Jaeger caller token saved securely in SecretStorage.');
+        if (controller) {
+          const selected = createController();
+          await controller.refresh(selected);
+        }
+      }
+    }),
+    vscode.commands.registerCommand('jaeger.selectModel', async () => {
+      const gw = gatewayClient();
+      let catalog;
+      try {
+        catalog = await gw.models();
+      } catch (err) {
+        vscode.window.showErrorMessage(`Could not fetch models from Gateway: ${err.message}`);
+        return;
+      }
+      const rows = selectableModels(catalog);
+      const items = [
+        { label: 'Gateway Default', description: 'Use the default model configured on the server', modelValue: '' },
+      ];
+      for (const row of rows) {
+        const isCloud = row.provider.includes('cloud') || row.id.includes(':cloud');
+        items.push({
+          label: row.id,
+          description: `${row.provider}${isCloud ? ' · Cloud' : ''}`,
+          modelValue: providerModelValue(row.provider, row.id),
+        });
+      }
+      const picked = await vscode.window.showQuickPick(items, {
+        title: 'Jaeger: Select Default Model',
+        placeHolder: 'Choose a model from the connected Gateway catalog',
+      });
+      if (picked) {
+        await vscode.workspace.getConfiguration('jaeger').update('model', picked.modelValue, vscode.ConfigurationTarget.Global);
+        vscode.window.showInformationMessage(`Jaeger default model set to ${picked.label}`);
+        if (view) view.webview.postMessage({ configuredModel: picked.modelValue });
+      }
+    }),
+    vscode.commands.registerCommand('jaeger.onboarding', async () => {
+      const lines = [
+        '# Jaeger Thin IDE Client — Remote Setup Guide',
+        '',
+        'Jaeger is a thin client that connects to your persistent Jaeger Gateway on your server (e.g. home Mac) over Tailscale.',
+        '',
+        '## Thin Client Architecture',
+        '- Zero local models are downloaded, installed, or executed on this laptop/device.',
+        '- No local RAM is consumed for model weights.',
+        '- All models (including Ollama Cloud models) run on or are accessed by your remote server.',
+        '- The client never silently falls back to local models or alters your chosen model.',
+        '',
+        '## VS Code Settings Sync Reality',
+        '- If enabled for your profile, VS Code Settings Sync can sync nonsecret user preferences such as `jaeger.model`, unless excluded.',
+        '- The machine-scoped Gateway endpoint and caller-token fallback are not synced. SecretStorage is encrypted and not synced across machines.',
+        '- Do not assume a private/local VSIX installs on another device. Install this client explicitly using the supported distribution path:',
+        '  Extensions: Install from VSIX…',
+        '',
+        '## Configuration Steps for This Device',
+        '1. Gateway Endpoint (per-device setting, not synced):',
+        '   Open Settings -> search for `jaeger.gatewayUrl`.',
+        '   Use the existing server endpoint supplied by its owner. Do not expose a port or change network policy as part of client setup.',
+        '2. Caller Token (securely stored in OS SecretStorage):',
+        '   Run `Jaeger: Set Caller Token` from the Command Palette.',
+        '   Use an owner-provisioned, revocable credential scoped to this device. This guide does not create or activate pairing.',
+        '   This token is stored in your OS keychain via VS Code SecretStorage and is NEVER synced to the cloud.',
+        '3. Model Selection (eligible for user-settings sync):',
+        '   Run `Jaeger: Select Default Model` to save a default. The footer picker overrides the current client selection.',
+        '   Choose any model exposed by your server (including Ollama Cloud models).',
+        '   A missing model or failed catalog lookup is an error, not permission to fall back to another provider.',
+      ];
+      output.clear();
+      output.appendLine(lines.join('\n'));
+      output.show(true);
+    }),
     vscode.commands.registerCommand('jaeger.diagnostics', () => report(async () => {
-      const gw = new Gateway(endpoint()), version = await gw.json('/version');
-      output.appendLine(JSON.stringify({ endpoint: gw.url, version, selected: controller?.state.session?.session_id || null }, null, 2));
+      const gw = gatewayClient(), version = await gw.json('/version');
+      const tokenPresent = Boolean(gw.auth().Authorization);
+      let isLoopback = false;
+      try { isLoopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(new URL(gw.url).hostname); } catch (_) {}
+      let catalogSummary = null;
+      try {
+        const cat = await gw.models();
+        const rows = selectableModels(cat);
+        const cloudCount = rows.filter(r => r.provider.includes('cloud') || r.id.includes(':cloud')).length;
+        catalogSummary = { totalModels: rows.length, cloudModels: cloudCount };
+      } catch (err) {
+        catalogSummary = { error: err.message };
+      }
+      let capabilitiesSummary = null;
+      try {
+        const caps = await gw.capabilities();
+        capabilitiesSummary = {
+          audio: Boolean(caps?.audio?.available),
+          vision: Boolean(caps?.vision?.available),
+          frameworks: Boolean(caps?.frameworks?.available),
+        };
+      } catch (err) {
+        capabilitiesSummary = { error: err.message };
+      }
+      output.appendLine(JSON.stringify({
+        endpoint: gw.url,
+        connectionType: isLoopback ? 'local-loopback' : 'remote-tailscale',
+        clientArchitecture: 'thin-ide-client (no local models loaded)',
+        version,
+        tokenConfigured: tokenPresent,
+        configuredModel: configuredModel() || 'Gateway default',
+        catalog: catalogSummary,
+        capabilities: capabilitiesSummary,
+        settingsScopes: {
+          gatewayUrl: 'machine (per-device connection, not synced)',
+          callerToken: 'machine / OS SecretStorage (never synced)',
+          model: 'window (syncable user setting)',
+        },
+        selected: controller?.state.session?.session_id || null,
+      }, null, 2));
       output.show(true);
     })),
     ...(typeof vscode.window?.onDidChangeActiveTextEditor === 'function' ? [vscode.window.onDidChangeActiveTextEditor(() => debouncedPostContext())] : []),
@@ -896,7 +1149,7 @@ function activate(context) {
     ...(typeof vscode.languages?.onDidChangeDiagnostics === 'function' ? [vscode.languages.onDidChangeDiagnostics(() => debouncedPostContext())] : []),
     ...(typeof vscode.workspace?.onDidSaveTextDocument === 'function' ? [vscode.workspace.onDidSaveTextDocument(() => debouncedPostContext())] : []),
     vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('jaeger.gatewayUrl') && view) report(async () => {
+      if ((event.affectsConfiguration('jaeger.gatewayUrl') || event.affectsConfiguration('jaeger.callerToken')) && view) report(async () => {
         const selected = createController(); await controller.refresh(selected);
       });
       if (event.affectsConfiguration('jaeger.model') && view) {

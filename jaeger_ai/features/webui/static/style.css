@@ -1499,7 +1499,9 @@
   :root{--app-titlebar-safe-top:0px;}
   .pwa-standalone{overscroll-behavior:none;}
   .pwa-standalone body{-webkit-tap-highlight-color:transparent;}
-  .app-titlebar-new-chat{display:none;}
+  .app-titlebar-new-chat{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;height:28px;font-size:12px;font-weight:600;border:1px solid var(--border);border-radius:999px;color:var(--text);background:color-mix(in srgb,var(--accent) 12%,transparent);cursor:pointer;flex-shrink:0;}
+  .panel-head-new-chat{display:inline-flex!important;align-items:center;gap:4px;width:auto!important;padding:4px 9px!important;font-size:12px;font-weight:600;border-radius:999px!important;}
+  .new-chat-btn-label{line-height:1;white-space:nowrap;}
   .pwa-standalone .app-titlebar-reload{display:inline-flex;}
   .pwa-offline .app-titlebar::after{content:'';position:absolute;left:50%;bottom:5px;width:5px;height:5px;border-radius:999px;background:var(--warning);box-shadow:0 0 0 3px color-mix(in srgb,var(--warning) 22%,transparent);transform:translateX(-50%);}
   .pwa-resumed .app-titlebar-title{animation:pwa-title-resume .6s ease-out;}
@@ -1515,7 +1517,7 @@
     .pull-to-refresh-indicator .ptr-icon{display:inline-block;transition:transform .2s;font-size:16px;}
     .pull-to-refresh-indicator .ptr-icon.ready{transform:rotate(180deg);color:var(--accent);}
     /* Reload and mobile new-chat titlebar controls with shared icon-button styles */
-    .app-titlebar-new-chat,
+    .app-titlebar-new-chat{display:inline-flex;align-items:center;justify-content:center;gap:5px;height:28px;padding:0 10px;flex-shrink:0;background:color-mix(in srgb,var(--accent) 12%,transparent);border:1px solid var(--border);color:var(--text);border-radius:999px;cursor:pointer;font-size:12px;font-weight:600;-webkit-tap-highlight-color:transparent;transition:background-color .15s,color .15s;}
     .app-titlebar-reload{display:none;align-items:center;justify-content:center;width:32px;height:32px;flex-shrink:0;background:none;border:none;color:var(--muted);border-radius:8px;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent;transition:background-color .15s,color .15s;}
     .app-titlebar-new-chat:hover,
     .app-titlebar-reload:hover{background:var(--hover-bg);color:var(--text);}
@@ -7392,3 +7394,575 @@ html[data-conversation-outline="enabled"] #outlineToggleBtn:not([hidden]){displa
   border-bottom: 1px solid var(--border);
 }
 .pwa-ios .phone-status-chip, .pwa-standalone .phone-status-chip { display: block; }
+
+/* === JAEGER PRODUCTION UI OVERHAUL (MOBILE + DESKTOP) === */
+/* 1. Single Assistant Header (#appTitlebar) — Selected-Agent Avatar, Name, Connection Status, History, New Conversation, Voice Call */
+.app-titlebar {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  height: 54px !important;
+  padding: 0 16px !important;
+  gap: 12px !important;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.08)) !important;
+}
+.app-titlebar-inner {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+.app-titlebar-icon {
+  display: none !important;
+}
+.assistant-header-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.28);
+}
+#appTitlebarTitle {
+  background: transparent !important;
+  border: 0 !important;
+  padding: 0 !important;
+  font-size: 15px !important;
+  font-weight: 600 !important;
+  color: var(--text, #f3f5f8) !important;
+}
+.assistant-header-summary {
+  font-size: 12px;
+  color: var(--text-muted, #8e96a8);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 260px;
+  margin-left: 2px;
+  opacity: 0.9;
+}
+.assistant-conn-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--text-muted, #8e96a8);
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.25);
+}
+.assistant-conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #10b981;
+}
+#appTitlebarSub,
+#titlebarProfileBtn,
+#jaegerAgentChip,
+.app-titlebar-reload,
+#btnReload {
+  display: none !important;
+}
+
+/* Hide duplicate 'CHAT' panel-head in the left sidebar so 'Chat' is never repeated */
+#panelChat > .panel-head {
+  display: none !important;
+}
+
+/* Workspace header controls: History, New conversation, Voice Call */
+.app-titlebar-history,
+.app-titlebar-voice-call,
+.app-titlebar-new-chat,
+#btnTitlebarNewChat {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  width: auto !important;
+  height: 34px !important;
+  padding: 0 12px !important;
+  border-radius: 999px !important;
+  border: 1px solid var(--border, rgba(255,255,255,0.12)) !important;
+  background: color-mix(in srgb, var(--surface, #171a22) 88%, rgba(255,255,255,0.05)) !important;
+  color: var(--text, #f3f5f8) !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  overflow: visible !important;
+  white-space: nowrap !important;
+  flex-shrink: 0 !important;
+}
+.app-titlebar-history:hover,
+.app-titlebar-voice-call:hover,
+.app-titlebar-new-chat:hover {
+  background: color-mix(in srgb, var(--accent, #3b82f6) 18%, var(--surface, #171a22)) !important;
+}
+
+/* 2. Selected-Agent Workspace History Drawer (#agentHistoryDrawer) */
+.agent-history-drawer {
+  position: fixed;
+  top: 58px;
+  right: 16px;
+  width: min(380px, calc(100vw - 32px));
+  max-height: calc(100dvh - 140px);
+  background: var(--surface, #171a22);
+  border: 1px solid var(--border, rgba(255,255,255,0.14));
+  border-radius: 16px;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.55);
+  z-index: 9400;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.agent-history-drawer[hidden] {
+  display: none !important;
+}
+.agent-history-drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border, rgba(255,255,255,0.08));
+}
+.agent-history-drawer-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text, #f3f5f8);
+  flex: 1;
+}
+.agent-history-new-btn {
+  border: 1px solid rgba(59,130,246,0.35);
+  background: rgba(59,130,246,0.15);
+  color: var(--text, #fff);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.agent-history-close-btn {
+  border: 0;
+  background: transparent;
+  color: var(--text-muted, #8e96a8);
+  font-size: 18px;
+  line-height: 1;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+/* 3. Agent-First Sidebar: Specialized Agents with Avatars + Projects, Scheduled, Settings */
+.sidebar-primary-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border, rgba(255,255,255,0.07));
+  margin-top: 4px;
+}
+.sidebar-primary-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text, #e5e9f0);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+.sidebar-primary-link:hover {
+  background: var(--hover-bg, rgba(255,255,255,0.06));
+}
+.sidebar-primary-link svg {
+  color: var(--text-muted, #8e96a8);
+  flex-shrink: 0;
+}
+.sidebar-primary-chevron {
+  margin-left: auto;
+  color: var(--text-muted, #8e96a8);
+  font-size: 15px;
+  line-height: 1;
+}
+
+/* Hide developer-facing 'All | Unassigned | +' filter bar */
+.project-chip-bar,
+.session-project-chips {
+  display: none !important;
+}
+
+/* 4. Simple Everyday Composer — matching ARES reference */
+.composer-options-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border, rgba(255,255,255,0.1));
+  background: transparent;
+  color: var(--text-muted, #8e96a8);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+body:not(.composer-show-advanced) #btnSavedPrompts,
+body:not(.composer-show-advanced) #profileChipWrap,
+body:not(.composer-show-advanced) .composer-ws-wrap,
+body:not(.composer-show-advanced) #composerWorkspaceChip,
+body:not(.composer-show-advanced) .composer-model-wrap,
+body:not(.composer-show-advanced) #composerModelChip,
+body:not(.composer-show-advanced) #contextMeterWrap,
+body:not(.composer-show-advanced) .composer-divider {
+  display: none !important;
+}
+
+.msg-date-sep:has(+ .msg-date-sep) {
+  display: none !important;
+}
+
+/* 5. Mobile & Compact Viewport (<=768px) */
+@media (max-width: 768px) {
+  .app-titlebar {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    height: 64px !important;
+    padding: 0 14px !important;
+    gap: 8px !important;
+    background: rgba(var(--bg-rgb, 15, 17, 23), 0.85) !important;
+    backdrop-filter: blur(20px) saturate(180%) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
+    border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08)) !important;
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 50 !important;
+  }
+  :root:not(.dark) .app-titlebar {
+    background: rgba(255, 255, 255, 0.85) !important;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08) !important;
+  }
+  .app-titlebar-left {
+    display: flex !important;
+    align-items: center !important;
+    flex: 0 0 auto !important;
+  }
+  .app-titlebar-hamburger {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px !important;
+    border-radius: 50% !important;
+    background: var(--surface-1, #ffffff) !important;
+    border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08)) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08) !important;
+    cursor: pointer !important;
+    color: var(--text, #111) !important;
+  }
+  :root.dark .app-titlebar-hamburger {
+    background: var(--surface-2, rgba(255, 255, 255, 0.08)) !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
+    color: var(--text, #f3f5f8) !important;
+  }
+  /* Convert 3-line hamburger to clean 2-line menu button matching visual reference */
+  .app-titlebar-hamburger svg line:nth-child(2) {
+    display: none !important;
+  }
+  .app-titlebar-hamburger svg line:nth-child(1) {
+    transform: translateY(2px) !important;
+  }
+  .app-titlebar-hamburger svg line:nth-child(3) {
+    transform: translateY(-2px) !important;
+  }
+  .app-titlebar-inner {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 0 !important;
+    flex: 1 1 auto !important;
+    text-align: center !important;
+    position: relative !important;
+  }
+  .app-titlebar-icon,
+  .app-titlebar-reload,
+  .app-titlebar-history,
+  .app-titlebar-new-chat,
+  .app-titlebar-spacer,
+  #btnReload,
+  #btnAgentHistoryToggle,
+  #btnTitlebarNewChat,
+  .assistant-conn-text,
+  .history-btn-label,
+  .voice-call-btn-label,
+  .assistant-header-summary,
+  #assistantHeaderSummary {
+    display: none !important;
+  }
+  .assistant-header-avatar {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    line-height: 1 !important;
+    margin-bottom: -4px !important;
+    z-index: 2 !important;
+  }
+  .app-titlebar-title {
+    font-size: 11.5px !important;
+    font-weight: 800 !important;
+    letter-spacing: 0.08em !important;
+    text-transform: uppercase !important;
+    padding: 3px 14px !important;
+    background: var(--surface-1, #ffffff) !important;
+    color: var(--text, #111111) !important;
+    border-radius: 999px !important;
+    border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08)) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08) !important;
+    z-index: 1 !important;
+    line-height: 1.2 !important;
+  }
+  :root.dark .app-titlebar-title {
+    background: var(--surface-2, #252733) !important;
+    color: var(--text, #f3f5f8) !important;
+    border-color: rgba(255, 255, 255, 0.14) !important;
+  }
+  .assistant-conn-badge {
+    display: none !important;
+  }
+  .app-titlebar-voice-call {
+    width: 38px !important;
+    min-width: 38px !important;
+    height: 38px !important;
+    border-radius: 50% !important;
+    background: var(--surface-1, #ffffff) !important;
+    border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.08)) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex: 0 0 auto !important;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08) !important;
+    cursor: pointer !important;
+    color: var(--text, #111) !important;
+  }
+  :root.dark .app-titlebar-voice-call {
+    background: var(--surface-2, rgba(255, 255, 255, 0.08)) !important;
+    border-color: rgba(255, 255, 255, 0.12) !important;
+    color: var(--text, #f3f5f8) !important;
+  }
+  .app-titlebar-voice-call svg {
+    width: 17px !important;
+    height: 17px !important;
+    stroke-width: 2.2 !important;
+  }
+  #jaegerAvatar,
+  #jaegerAvatar3d,
+  #jaegerAvatarState {
+    display: none !important;
+  }
+  .assistant-turn-anchor,
+  .turn-anchor-btn {
+    display: none !important;
+  }
+  /* Mobile Floating Capsule Composer */
+  .composer-wrap {
+    padding: 8px 14px max(14px, env(safe-area-inset-bottom)) !important;
+    background: transparent !important;
+    border: none !important;
+  }
+  .composer-wrap::before {
+    display: none !important;
+  }
+  #composerBox.composer-box {
+    border-radius: 30px !important;
+    background: var(--surface-1, #ffffff) !important;
+    border: 1px solid var(--border, rgba(0, 0, 0, 0.12)) !important;
+    padding: 4px 8px 4px 10px !important;
+    min-height: 48px !important;
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08) !important;
+    gap: 4px !important;
+  }
+  :root.dark #composerBox.composer-box {
+    background: var(--surface-1, #1c1c1e) !important;
+    border-color: rgba(255, 255, 255, 0.14) !important;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35) !important;
+  }
+  .attach-tray {
+    order: 1 !important;
+    width: 100% !important;
+  }
+  .composer-footer,
+  .composer-left,
+  .composer-right {
+    display: contents !important;
+  }
+  #btnAttach {
+    order: 2 !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+    border: none !important;
+    color: var(--text, #111) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    cursor: pointer !important;
+    box-shadow: none !important;
+  }
+  #btnAttach svg {
+    width: 22px !important;
+    height: 22px !important;
+    stroke-width: 1.8 !important;
+  }
+  #msg {
+    order: 3 !important;
+    flex: 1 1 auto !important;
+    font-size: 16px !important;
+    line-height: 1.4 !important;
+    min-height: 24px !important;
+    max-height: 120px !important;
+    padding: 8px 8px !important;
+    border: none !important;
+    background: transparent !important;
+    color: var(--text, #111) !important;
+    outline: none !important;
+    resize: none !important;
+    margin: 0 !important;
+  }
+  #msg::placeholder {
+    color: var(--text-muted, #8e8e93) !important;
+    opacity: 1 !important;
+  }
+  #btnMic {
+    order: 4 !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    border-radius: 50% !important;
+    background: transparent !important;
+    border: none !important;
+    color: var(--text, #111) !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    cursor: pointer !important;
+  }
+  #btnMic svg {
+    width: 22px !important;
+    height: 22px !important;
+    stroke-width: 1.8 !important;
+  }
+  .send-btn {
+    order: 5 !important;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    border-radius: 50% !important;
+    background: var(--primary, #007aff) !important;
+    color: #ffffff !important;
+    border: none !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    cursor: pointer !important;
+  }
+  /* In mobile view, hide the send button when message draft is empty, showing mic button */
+  #composerBox:not(:has(#btnSend.visible)) .send-btn:not(.stop) {
+    display: none !important;
+  }
+  /* When send button is active (draft entered or busy/stop), hide mic button */
+  #composerBox:has(#btnSend.visible) #btnMic,
+  #composerBox:has(.send-btn.stop) #btnMic {
+    display: none !important;
+  }
+  /* Hide desktop-only controls in compact mobile mode */
+  body:not(.composer-show-advanced) .composer-options-toggle,
+  body:not(.composer-show-advanced) #btnSavedPrompts,
+  body:not(.composer-show-advanced) #composerMobileConfigBtn,
+  body:not(.composer-show-advanced) .composer-divider,
+  body:not(.composer-show-advanced) .composer-ws-wrap,
+  body:not(.composer-show-advanced) .composer-toolsets-wrap,
+  body:not(.composer-show-advanced) .composer-model-wrap,
+  body:not(.composer-show-advanced) .composer-reasoning-wrap,
+  body:not(.composer-show-advanced) .composer-profile-wrap,
+  body:not(.composer-show-advanced) #btnVoiceMode,
+  body:not(.composer-show-advanced) .ctx-indicator-wrap {
+    display: none !important;
+  }
+  /* Mobile Rounded Conversation Bubbles */
+  .messages-shell {
+    padding: 0 12px !important;
+  }
+  .messages-inner {
+    padding-bottom: 90px !important;
+  }
+  .msg-row {
+    margin-bottom: 12px !important;
+  }
+  .msg-bubble {
+    border-radius: 22px !important;
+    padding: 14px 18px !important;
+    font-size: 15.5px !important;
+    line-height: 1.5 !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04) !important;
+  }
+  .msg-row[data-role="user"] .msg-bubble {
+    border-bottom-right-radius: 6px !important;
+    background: var(--primary, #007aff) !important;
+    color: #ffffff !important;
+  }
+  .msg-row[data-role="assistant"] .msg-bubble {
+    border-bottom-left-radius: 6px !important;
+    background: var(--surface-1, #f2f2f7) !important;
+    color: var(--text, #111111) !important;
+    border: 1px solid var(--border-subtle, rgba(0, 0, 0, 0.04)) !important;
+  }
+  :root.dark .msg-row[data-role="assistant"] .msg-bubble {
+    background: var(--surface-2, #252733) !important;
+    color: var(--text, #f3f5f8) !important;
+    border-color: rgba(255, 255, 255, 0.08) !important;
+  }
+  .msg-bubble ul,
+  .msg-bubble ol {
+    padding-left: 20px !important;
+    margin: 8px 0 !important;
+  }
+  .msg-bubble li {
+    margin-bottom: 6px !important;
+  }
+  .msg-bubble p {
+    margin: 8px 0 !important;
+  }
+  .msg-bubble p:first-child {
+    margin-top: 0 !important;
+  }
+  .msg-bubble p:last-child {
+    margin-bottom: 0 !important;
+  }
+}

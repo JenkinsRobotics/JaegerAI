@@ -53,6 +53,7 @@ def _sid():
 def test_conversation_filter_skips_machine_sessions():
     assert is_conversation_session({"session_id": "abc", "metadata": {}})
     assert not is_conversation_session({"session_id": "task:task_1"})
+    assert not is_conversation_session({"session_id": "cron:morning-heartbeat"})
     assert not is_conversation_session({"session_id": "heartbeat"})
     assert not is_conversation_session({"session_id": "x", "metadata": {"task_id": "t"}})
     assert not is_conversation_session({"session_id": "y", "metadata": {"native_session": "n"}})

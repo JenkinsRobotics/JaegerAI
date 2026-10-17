@@ -4824,7 +4824,13 @@ class LlamaCppPythonClient:
                 try:
                     from jaeger_ai.core.models.aux_lane import spawn_aux_context
                     self._aux_llm = spawn_aux_context(self.llm, **self._aux_kwargs)
-                except Exception as exc:  # noqa: BLE001 — lane is an optimisation
+                    # The aux context shares the worker's model weights but
+                    # has its own KV cache. Copy the active native multimodal
+                    # handler so image side-calls use the same mmproj path.
+                    handler = getattr(self.llm, "chat_handler", None)
+                    if handler is not None:
+                        self._aux_llm.chat_handler = handler
+                except Exception as exc:  # noqa: BLE001 - lane is an optimisation
                     print(f"[jaeger] aux lane unavailable "
                           f"({type(exc).__name__}: {exc}); side-channel "
                           "calls will share the worker context.", flush=True)

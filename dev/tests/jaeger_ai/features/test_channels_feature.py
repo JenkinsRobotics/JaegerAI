@@ -90,3 +90,22 @@ def test_plugin_bridge_adapter_registers_on_protocol():
     result = reg.send("discord", "99", "ping")
     assert result["sent"] is True
     assert bridge.sent == [("99", "ping")]
+
+
+def test_slack_gateway_event_handling():
+    import asyncio
+    from jaeger_ai.features.channels.platforms.slack import SlackGateway
+
+    async def run_test():
+        gateway = SlackGateway(allowed_channels=["C12345"], agent_runner=lambda t: f"Echo: {t}")
+        assert gateway.is_channel_allowed("C12345") is True
+        assert gateway.is_channel_allowed("C99999") is False
+
+        res = await gateway.handle_slack_event("C12345", "U67890", "Hi Slack", thread_ts="1234.5678")
+        assert res == {
+            "channel": "C12345",
+            "text": "Echo: Hi Slack",
+            "thread_ts": "1234.5678",
+        }
+
+    asyncio.run(run_test())

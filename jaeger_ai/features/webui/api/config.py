@@ -8,6 +8,7 @@ Discovery order for all paths:
   3. Hardened defaults relative to $HOME
   4. Fail loudly with a human-readable fix-it message if required modules are missing
 """
+from __future__ import annotations
 
 import collections
 import copy

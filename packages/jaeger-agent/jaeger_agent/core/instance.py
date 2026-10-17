@@ -46,6 +46,7 @@ class Layout(Protocol):
     skills_dir: Path
     identity_path: Path
     config_path: Path
+    run_dir: Path
 
 
 def read_yaml(path: Any) -> dict[str, Any]:

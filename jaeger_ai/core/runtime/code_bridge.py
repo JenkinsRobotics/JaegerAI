@@ -176,33 +176,52 @@ class _BridgeServer:
     than a deadlock.
     """
 
-    def __init__(self, socket_path: Path, *, max_calls: int = MAX_BRIDGE_CALLS):
+    def __init__(
+        self,
+        socket_path: Path,
+        *,
+        max_calls: int = MAX_BRIDGE_CALLS,
+        executor: Any | None = None,
+        caller: str | None = None,
+        allowed_tools: frozenset[str] | None = None,
+        policy_ctx: Any | None = None,
+        bind_socket: bool = True,
+    ):
         self.socket_path = socket_path
         self.max_calls = max_calls
         self.calls: list[str] = []
         self.errors: list[str] = []
+        self._executor = executor
+        self._caller = caller
+        self._allowed_tools = allowed_tools
+        self._policy_ctx = policy_ctx
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
-        self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._server.bind(str(socket_path))
-        self._server.listen(4)
-        self._server.settimeout(0.25)
-        self._accept_thread = threading.Thread(
-            target=self._accept_loop, name="tool-bridge", daemon=True,
-        )
+        self._server: socket.socket | None = None
+        self._accept_thread: threading.Thread | None = None
+        if bind_socket:
+            self._server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self._server.bind(str(socket_path))
+            self._server.listen(4)
+            self._server.settimeout(0.25)
+            self._accept_thread = threading.Thread(
+                target=self._accept_loop, name="tool-bridge", daemon=True,
+            )
 
     # -- lifecycle --------------------------------------------------
 
     def start(self) -> None:
-        self._accept_thread.start()
+        if self._accept_thread is not None:
+            self._accept_thread.start()
 
     def stop(self) -> None:
         self._stop.set()
-        try:
-            self._server.close()
-        except OSError:
-            pass
+        if self._server is not None:
+            try:
+                self._server.close()
+            except OSError:
+                pass
         for thread in list(self._threads):
             thread.join(timeout=1.0)
         try:
@@ -260,6 +279,16 @@ class _BridgeServer:
                 ),
             }
 
+        if self._allowed_tools is not None and name not in self._allowed_tools:
+            with self._lock:
+                self.errors.append(f"{name}: permission_denied")
+            return {
+                "ok": False,
+                "error": "Tool is outside the child grant",
+                "error_type": "permission_denied",
+                "retryable": False,
+            }
+
         with self._lock:
             if len(self.calls) >= self.max_calls:
                 return {
@@ -288,12 +317,61 @@ class _BridgeServer:
             }
 
         try:
-            result = tool_def.dispatch(args)
+            from contextlib import ExitStack
+            from jaeger_agent.tool_executor import caller_identity, tool_allowlist
+            from jaeger_os.core.safety.permissions import use_policy
+
+            with ExitStack() as stack:
+                if self._caller:
+                    stack.enter_context(caller_identity(self._caller))
+                if self._allowed_tools is not None:
+                    stack.enter_context(tool_allowlist(sorted(self._allowed_tools)))
+                if self._policy_ctx is not None:
+                    stack.enter_context(use_policy(self._policy_ctx))
+                if self._executor is not None:
+                    result = self._executor.execute(tool_def, args)
+                else:
+                    result = tool_def.dispatch(args)
+            if isinstance(result, dict) and result.get("ok") is False and result.get("error_type") in {
+                "blocked_by_authority",
+                "blocked_by_hook",
+                "permission_denied",
+            }:
+                with self._lock:
+                    self.errors.append(f"{name}: {result.get('error_type')}")
+                return {
+                    "ok": False,
+                    "error": str(result.get("error") or "tool blocked"),
+                    "error_type": result.get("error_type"),
+                }
         except Exception as exc:  # noqa: BLE001 — becomes ToolError in the child
             with self._lock:
                 self.errors.append(f"{name}: {type(exc).__name__}")
             return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
         return {"ok": True, "result": result}
+
+
+def _build_bridge_executor(run_id: str | None = None) -> Any:
+    """Build the canonical Hooked -> Checkpointing -> Ledger executor for nested calls."""
+    from jaeger_agent.cognition.effects import EffectLedger
+    from jaeger_agent.tool_executor import (
+        CheckpointingToolExecutor,
+        DirectToolExecutor,
+        HookedToolExecutor,
+        LedgerToolExecutor,
+    )
+
+    inner: Any = DirectToolExecutor()
+    try:
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+
+        rt = EntityRuntime.get_singleton()
+        ledger_path = rt.state_root / "bridge_effects.sqlite3"
+        ledger = EffectLedger(ledger_path)
+        inner = LedgerToolExecutor(ledger, inner, run_id=run_id or f"bridge-{int(time.time()*1000)}")
+    except Exception:
+        pass
+    return HookedToolExecutor(CheckpointingToolExecutor(inner))
 
 
 def run_bridged_script(
@@ -303,6 +381,8 @@ def run_bridged_script(
     workspace: Path | None = None,
     max_output_chars: int = 200_000,
     max_calls: int = MAX_BRIDGE_CALLS,
+    executor: Any | None = None,
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     """Run ``code`` in a subprocess that can call the agent's tools.
 
@@ -318,9 +398,23 @@ def run_bridged_script(
             "use run_python and the ordinary tools on this platform"
         )
 
+    from jaeger_agent.tool_executor import active_caller_identity, active_tool_allowlist
+    from jaeger_agent.util.tool_interrupt import ToolInterrupted, run_interruptible
+    from jaeger_os.core.safety.permissions import current_policy
+
+    captured_caller = active_caller_identity()
+    captured_allowlist = active_tool_allowlist()
+    try:
+        captured_policy = current_policy()
+    except Exception:
+        captured_policy = None
+    bridge_executor = executor if executor is not None else _build_bridge_executor(run_id=run_id)
+
     # 0700 so the socket is reachable only by this user, and torn down
-    # with the directory when the call ends.
-    with tempfile.TemporaryDirectory(prefix="jaeger-bridge-") as tmp:
+    # with the directory when the call ends. Use /tmp when available so
+    # macOS long TMPDIR paths never exceed the 104-byte AF_UNIX limit.
+    short_tmp_base = "/tmp" if os.path.isdir("/tmp") else None
+    with tempfile.TemporaryDirectory(prefix="jaeger-bridge-", dir=short_tmp_base) as tmp:
         tmpdir = Path(tmp)
         os.chmod(tmpdir, 0o700)
         socket_path = tmpdir / "tools.sock"
@@ -329,7 +423,14 @@ def run_bridged_script(
         script_path.write_text(code, encoding="utf-8")
         cwd = Path(workspace).resolve() if workspace is not None else tmpdir
 
-        server = _BridgeServer(socket_path, max_calls=max_calls)
+        server = _BridgeServer(
+            socket_path,
+            max_calls=max_calls,
+            executor=bridge_executor,
+            caller=captured_caller,
+            allowed_tools=captured_allowlist,
+            policy_ctx=captured_policy,
+        )
         server.start()
 
         from jaeger_agent.tools.code import _sandboxed_python_command
@@ -357,13 +458,12 @@ def run_bridged_script(
 
         started = time.perf_counter()
         timed_out = False
+        interrupted = False
         try:
-            proc = subprocess.run(  # noqa: S603 — sandbox argv is fixed
+            proc = run_interruptible(
                 command,
                 cwd=str(cwd),
                 env=env,
-                capture_output=True,
-                text=True,
                 timeout=max(1.0, float(timeout_s)),
             )
             stdout, stderr, returncode = proc.stdout, proc.stderr, proc.returncode
@@ -378,17 +478,23 @@ def run_bridged_script(
                 stdout = stdout.decode("utf-8", "replace")
             if isinstance(stderr, bytes):
                 stderr = stderr.decode("utf-8", "replace")
+        except ToolInterrupted as exc:
+            interrupted = True
+            returncode = 130
+            stdout = (exc.stdout.decode("utf-8", "replace") if isinstance(exc.stdout, bytes) else (exc.stdout or "")) or ""
+            stderr = (exc.stderr.decode("utf-8", "replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")) or ""
         finally:
             server.stop()
 
         elapsed = time.perf_counter() - started
 
     return {
-        "ok": (returncode == 0) and not timed_out,
+        "ok": (returncode == 0) and not timed_out and not interrupted,
         "stdout": stdout[:max_output_chars],
         "stderr": stderr[:max_output_chars],
         "returncode": returncode,
         "timed_out": timed_out,
+        "interrupted": interrupted,
         "tool_calls": list(server.calls),
         "tool_call_count": len(server.calls),
         "tool_errors": list(server.errors),

@@ -7,6 +7,15 @@ const endEvents = new Set(['turn.finish', 'turn.failed', 'turn.cancelled', 'turn
 const COMPLETED_TIMELINE_SESSION_LIMIT = 20;
 const COMPLETED_TIMELINE_ROW_LIMIT = 100;
 const COMPLETED_TIMELINE_TEXT_LIMIT = 16000;
+const OPTIONAL_REFRESH_TIMEOUT_MS = 5000;
+
+function boundedRefresh(promise, label, timeout = OPTIONAL_REFRESH_TIMEOUT_MS) {
+  let timer;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} refresh timed out`)), timeout);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timer));
+}
 
 function boundedText(value, limit = COMPLETED_TIMELINE_TEXT_LIMIT) {
   const text = String(value || '');
@@ -41,6 +50,7 @@ function boundedCompletedTimelines(value) {
 class Conversation {
   constructor(gateway, publish, save, restored = {}) {
     this.gateway = gateway; this.publish = publish; this.save = save;
+    this.reconnectTimer = null;
     this.pending = restored.pending || {};
     this.pendingTask = restored.pendingTask || null;
     this.searchRevision = 0;
@@ -130,16 +140,23 @@ class Conversation {
       if (version.component !== 'jaeger-gateway' && version.service !== 'jaeger-gateway') {
         throw new Error('This endpoint is not a Jaeger Gateway.');
       }
+      if (epoch !== this.epoch) return;
+      this.state.sessions = listed.sessions || [];
+      // Publish transport connectivity before fetching a restored session. A
+      // slow or unavailable history endpoint must not leave the whole panel in
+      // its initial Connecting state.
+      this.state.connected = true;
+      this.state.status = 'Connected';
+      this.emit();
       const session = selected ? await this.gateway.session(selected) : null;
       if (epoch !== this.epoch) return;
-      this.state.sessions = listed.sessions || []; this.state.session = session;
+      this.state.session = session;
       if (session && !this.openSessionIds.includes(session.session_id)) {
         this.openSessionIds = [...this.openSessionIds, session.session_id];
       }
       // A conversation switch drops this client's staged (unsent) attachments —
       // they were picked for the previous conversation, not this one.
       this.stagedGen++; this.staged = [];
-      this.state.connected = true;
       this.restoreCompletedTimeline(session?.session_id);
       if (session && this.gateway.activity) await this.loadHistory(selected, epoch);
       if (session) await this.loadQueue(selected, epoch);
@@ -148,18 +165,39 @@ class Conversation {
       this.state.busy = Boolean(session && (this.pending[selected] || ['running', 'cancelling', 'busy'].includes(session.status)));
       this.state.status = this.state.busy ? 'Work in progress · reconnecting' : 'Connected';
       if (this.state.busy && !this.pending[selected]) this.state.status = 'Work in another client · Refresh for latest history';
+      // Core connectivity is established once version/session discovery and any
+      // selected-session history are complete. Optional control-plane/catalog
+      // calls must not keep the panel in Connecting when one of them stalls.
+      this.emit();
       if (explicit) { this.modelsLoaded = false; this.workersLoaded = false; }
-      await this.loadApprovals(epoch); await this.loadTasks(epoch); await this.loadModels(epoch); await this.loadWorkers(epoch); await this.persist(); this.emit();
+      await Promise.allSettled([
+        boundedRefresh(this.loadApprovals(epoch), 'Approvals'),
+        boundedRefresh(this.loadTasks(epoch), 'Tasks'),
+        boundedRefresh(this.loadModels(epoch), 'Model catalog'),
+        boundedRefresh(this.loadWorkers(epoch), 'Workers'),
+      ]);
+      void this.persist().catch(() => {});
+      this.emit();
       const pending = this.pending[selected];
       if (pending) this.observe(selected, pending.requestId, pending.startCursor || 0, epoch);
       else if (session && this.gateway.activity) this.watchSession(selected, epoch);
     } catch (error) {
       if (epoch !== this.epoch) return;
-      this.state.connected = false; this.state.error = error.message;
-      this.state.status = 'Unavailable · reconnecting'; this.emit();
-      this.reconnectTimer = setTimeout(() => {
-        if (!this.disposed && epoch === this.epoch) this.refresh(selected);
-      }, 1000);
+      this.state.connected = false;
+      let errorMsg = error.message;
+      if (error.status === 401 || error.status === 403) {
+        errorMsg = `Gateway authentication failed (${error.status}): Caller token is invalid or missing. Run 'Jaeger: Set Caller Token' to configure your token.`;
+        this.state.status = 'Authentication required';
+      } else {
+        this.state.status = 'Unavailable · reconnecting';
+      }
+      this.state.error = errorMsg;
+      this.emit();
+      if (error.status !== 401 && error.status !== 403) {
+        this.reconnectTimer = setTimeout(() => {
+          if (!this.disposed && epoch === this.epoch) this.refresh(selected);
+        }, 1000);
+      }
     }
   }
   async loadFeedback(sid, epoch = this.epoch) {
@@ -357,8 +395,13 @@ class Conversation {
         work.finishedAt = Date.now(); work.status = 'failed';
         delete this.pending[sid]; await this.persist(); this.state.busy = false;
       }
-      this.state.error = `${error.message}${this.pending[sid] ? ' Delivery is uncertain. Retry connection to check the same request; it will not be resent.' : ''}`;
-      this.state.status = 'Request not confirmed'; this.emit();
+      let errorMsg = error.message;
+      if (error.status === 401 || error.status === 403) {
+        errorMsg = `Gateway authentication failed (${error.status}): Caller token is invalid or missing. Run 'Jaeger: Set Caller Token' to configure your token.`;
+      }
+      this.state.error = `${errorMsg}${this.pending[sid] ? ' Delivery is uncertain. Retry connection to check the same request; it will not be resent.' : ''}`;
+      this.state.status = (error.status === 401 || error.status === 403) ? 'Authentication required' : 'Request not confirmed';
+      this.emit();
     } finally { this.sending = false; }
   }
   async retry() {

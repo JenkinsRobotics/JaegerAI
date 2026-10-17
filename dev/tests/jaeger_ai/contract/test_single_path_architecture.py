@@ -356,21 +356,15 @@ def test_every_worker_dispatch_opens_a_card_on_the_task_owner():
     assert "authoritative_transition" not in {n.id for n in ast.walk(service) if isinstance(n, ast.Name)}
 
 
-# ── 9. disconnected code stays disconnected until it is removed ─────────────
+# ── 9. disconnected code is deleted and must never reappear ─────────────────
 
-#: Parallel stacks nothing imports. They are listed for removal in
-#: docs/architecture/PRODUCTION_PATHS.md; this keeps them from becoming reachable first.
-_UNREACHABLE = {
-    "jaeger_ai.mind.cognition": "a parallel cognition stack: its own identity, planner, router, orchestrator",
-    "jaeger_ai.interfaces.messaging": "messaging adapters with no production constructor",
+_FORBIDDEN_DEAD_PACKAGES = {
+    "jaeger_ai/mind": "a parallel cognition stack deleted in architecture cleanup",
+    "jaeger_ai/interfaces/messaging": "legacy messaging adapters deleted in architecture cleanup",
 }
 
 
-@pytest.mark.parametrize("package", sorted(_UNREACHABLE))
-def test_disconnected_packages_have_no_importer_outside_themselves(package):
-    prefix = package.replace(".", "/") + "/"
-    importers = {
-        rel: sorted(i for i in _imports(tree) if i == package or i.startswith(package + "."))
-        for rel, (_, tree) in _sources().items() if not rel.startswith(prefix)
-    }
-    assert {k: v for k, v in importers.items() if v} == {}, _UNREACHABLE[package]
+@pytest.mark.parametrize("rel_path", sorted(_FORBIDDEN_DEAD_PACKAGES))
+def test_disconnected_packages_are_deleted_and_do_not_reappear(rel_path):
+    target = ROOT / rel_path
+    assert not target.exists(), f"{rel_path} was deleted: {_FORBIDDEN_DEAD_PACKAGES[rel_path]}"

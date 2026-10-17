@@ -1,19 +1,21 @@
-"""Slack gateway adapter for JaegerAI (ported from Hermes Agent)."""
+"""Slack Socket Mode adapter for JaegerAI channels.
+
+Folded from jaeger_ai/interfaces/messaging/slack_adapter.py into canonical
+features/channels/platforms/.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
-import json
 from typing import Any, Callable, Optional, List
-
-from jaeger_ai.interfaces.messaging import BaseMessagingGateway
 
 logger = logging.getLogger(__name__)
 
 
-class SlackGateway(BaseMessagingGateway):
+class SlackGateway:
     """Slack Events / Socket Mode gateway messaging adapter."""
 
     def __init__(
@@ -23,7 +25,6 @@ class SlackGateway(BaseMessagingGateway):
         allowed_channels: Optional[List[str]] = None,
         agent_runner: Optional[Callable[[str], Any]] = None,
     ):
-        super().__init__("slack", agent_runner)
         self.bot_token = bot_token or os.environ.get("SLACK_BOT_TOKEN", "")
         self.app_token = app_token or os.environ.get("SLACK_APP_TOKEN", "")
         env_channels = {
@@ -31,11 +32,21 @@ class SlackGateway(BaseMessagingGateway):
             if value.strip()
         }
         self.allowed_channels = set(allowed_channels) if allowed_channels is not None else env_channels
+        self.agent_runner = agent_runner
         self._task: Optional[asyncio.Task] = None
         self._session: Any = None
 
     def is_channel_allowed(self, channel_id: str) -> bool:
         return channel_id in self.allowed_channels
+
+    async def on_message_received(self, user_id: str, text: str) -> str:
+        """Default handler when an inbound message is received."""
+        if self.agent_runner:
+            result = self.agent_runner(text)
+            if asyncio.iscoroutine(result):
+                result = await result
+            return str(result or "")
+        return ""
 
     async def handle_slack_event(self, channel_id: str, user_id: str, text: str, thread_ts: Optional[str] = None) -> Optional[dict]:
         """Process incoming Slack message event payload."""
@@ -73,7 +84,6 @@ class SlackGateway(BaseMessagingGateway):
             raise
         self._session = session
         self._task = asyncio.create_task(self._socket_loop(payload["url"]), name="slack-gateway")
-        await super().start()
 
     async def _socket_loop(self, url: str) -> None:
         import aiohttp
@@ -118,7 +128,6 @@ class SlackGateway(BaseMessagingGateway):
         if self._session is not None:
             await self._session.close()
             self._session = None
-        await super().stop()
 
 
 __all__ = ["SlackGateway"]

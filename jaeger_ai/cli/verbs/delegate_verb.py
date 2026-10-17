@@ -23,6 +23,7 @@ import asyncio
 import json
 import sys
 import uuid
+from pathlib import Path
 
 from jaeger_ai.cli import _common as c
 
@@ -134,12 +135,14 @@ def _delegate_run(argv: list[str]) -> int:
         return 2
 
     from jaeger_agent.cognition.runs import InMemoryRunStore
+    from jaeger_agent.core.workspace import bind as bind_workspace
     from jaeger_agent.delegates import (
         AllDelegatesFailed,
         DelegateExecutor,
         DelegateRequest,
     )
     from jaeger_agent.delegates.routing import DelegateRouter, NoEligibleDelegate
+    from jaeger_ai.core.entity.ownership import instance_layout
 
     registry = _registry()
     runs = InMemoryRunStore()
@@ -150,11 +153,16 @@ def _delegate_run(argv: list[str]) -> int:
     request = DelegateRequest(
         task_id=run.id,
         prompt=prompt,
+        workspace=Path.cwd(),
         required_capabilities=caps,
         sensitivity=args.sensitivity,  # type: ignore[arg-type]
         timeout_seconds=args.timeout,
         idempotency_key=uuid.uuid4().hex,
     )
+    # The subprocess transport stores its admission/events/receipt outside the
+    # repository. A bare CLI invocation is an execution boundary, so bind the
+    # operator layout here just as the Gateway/runtime entry points do.
+    bind_workspace(instance_layout())
 
     async def go():
         if args.to and not args.chain:
