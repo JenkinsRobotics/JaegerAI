@@ -137,7 +137,11 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
                             or "hermes-webui-state" in path.parts
                             or "hermes-webui-agent" in path.parts
                             or "hermes-webui-adapter" in path.parts
-                            or "openclaw" in path.parts):
+                            or "openclaw" in path.parts
+                            or "models" in path.parts
+                            or "scratch" in path.parts
+                            or "venv" in path.parts
+                            or "cache" in path.parts):
                         continue
                     # The independent production supervisor rewrites this
                     # non-sensitive liveness snapshot every 20 seconds. Its
