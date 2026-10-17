@@ -145,11 +145,11 @@ KNOWN_ORPHANS = {
 
 
 def test_gateway_daemon_has_a_cli_route():
-    """`jaeger gateway daemon` must reach the :8810 daemon, not Agentgateway.
+    """`jaeger gateway daemon` must reach the :33418 daemon, not Agentgateway.
 
     These are two different processes and the names are one word apart:
     `jaeger gateway` manages the EXTERNAL Agentgateway (:8811/:8812), while
-    `jaeger gateway daemon` runs the Jaeger Gateway (sessions + SSE, :8810)
+    `jaeger gateway daemon` runs the Jaeger Gateway (sessions + SSE, :33418)
     that the WebUI integrations point clients at.
     """
     from jaeger_ai.cli.entry import _route

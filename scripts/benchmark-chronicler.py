@@ -16,7 +16,15 @@ import uuid
 import aiohttp
 
 ROOT = Path(__file__).resolve().parents[1]
-GATEWAY = "http://127.0.0.1:8810"
+import sys as _sys
+from pathlib import Path as _Path
+
+_REPO = str(_Path(__file__).resolve().parents[1])
+if _REPO not in _sys.path:
+    _sys.path.insert(0, _REPO)
+from jaeger_ai.contract.ports import resolve_gateway_url  # noqa: E402
+
+GATEWAY = resolve_gateway_url()
 DELAY_SECONDS = 7200
 
 

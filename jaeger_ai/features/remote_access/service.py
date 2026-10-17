@@ -22,11 +22,11 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from jaeger_ai.contract.ports import GATEWAY_PORT, LEGACY_GATEWAY_PORT, resolve_gateway_url
 from jaeger_ai.features.remote_access import store
 from jaeger_ai.features.remote_access.policy import RemoteAccessPolicy
 
 WEBUI_LOOPBACK_PORT = 8790
-GATEWAY_PORT = 8810
 HTTPS_PORT = 8443
 PAIR_TTL_S = 15 * 60
 
@@ -287,9 +287,11 @@ def _apply_webui_launchagent(password: str) -> dict[str, Any]:
         "HERMES_WEBUI_SECURE": "1",
         "HERMES_WEBUI_TRUST_FORWARDED_PROTO": "1",
         "HERMES_WEBUI_PASSKEY": "1",
-        "JAEGER_GATEWAY_URL": "http://127.0.0.1:8810",
         "JAEGER_RUNNER_BASE_URL": "http://127.0.0.1:8791",
     })
+    # No JAEGER_GATEWAY_URL default: an explicit URL disables the WebUI's
+    # current-port-then-legacy discovery (contract.ports.resolve_gateway_url).
+    # An operator-set value already in the plist is left as it is.
     data["EnvironmentVariables"] = env
     with path.open("wb") as handle:
         plistlib.dump(data, handle)
@@ -437,6 +439,10 @@ def doctor() -> dict[str, Any]:
     ts = tailscale_status()
     serve = serve_status()
     gw = _listener(GATEWAY_PORT)
+    if not gw.get("listening"):
+        legacy = _listener(LEGACY_GATEWAY_PORT)
+        if legacy.get("listening"):
+            gw = legacy
     webui = _listener(WEBUI_LOOPBACK_PORT)
     adapter = _listener(8791)
     mcp = _listener(8792)
@@ -454,7 +460,7 @@ def doctor() -> dict[str, Any]:
     entity_id = ""
     try:
         from jaeger_ai.core.gateway.caller_auth import client_headers
-        gw_status = _http_ok("http://127.0.0.1:8810/v1/runtime/status",
+        gw_status = _http_ok(f"{resolve_gateway_url()}/v1/runtime/status",
                              headers={"User-Agent": "jaeger-remote-doctor", **client_headers("cli")})
         payload = json.loads((gw_status.get("body") or b"{}").decode("utf-8", "replace"))
         entity_id = str(((payload.get("Agent") or {}).get("entity_id")) or "")

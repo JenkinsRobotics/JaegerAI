@@ -20,6 +20,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from jaeger_ai.contract.ports import GATEWAY_PORT
+
 from jaeger_ai.core.agent_registry.types import (
     BUILTIN_THIRD_PARTY,
     AgentKind,
@@ -407,7 +409,7 @@ class AgentRegistry:
         return {
             "model": "grok_bot_shape",
             "persistence_spine": "jaeger_gateway",
-            "gateway_port": 8810,
+            "gateway_port": GATEWAY_PORT,
             "fundamentals_fee_gated": False,
             "active": active,
             "lead": lead,

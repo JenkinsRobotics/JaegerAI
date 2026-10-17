@@ -44,8 +44,11 @@ from .session_store import EXECUTION_INPUT_KEYS, GatewaySessionStore, RequestBus
 
 logger = logging.getLogger("jaeger.gateway")
 
-DEFAULT_GATEWAY_PORT = int(os.environ.get("JAEGER_GATEWAY_PORT", str(GATEWAY_PORT)))
-DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST", "0.0.0.0")
+# GATEWAY_PORT already honours JAEGER_GATEWAY_PORT (contract/ports.py).
+DEFAULT_GATEWAY_PORT = GATEWAY_PORT
+# Loopback by default. JAEGER_GATEWAY_HOST is the explicit opt-out for anyone
+# who really needs a wider bind; publish to a tailnet rather than widening it.
+DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST") or LOOPBACK
 
 # Locked spine endpoints (docs/spine-acceptance.md M10). Chat does not use :8813.
 LOCKED_BRIDGE_HEALTH_URL = os.environ.get(
@@ -338,6 +341,10 @@ _REQUEST_CALLER: ContextVar[tuple[str, str] | None] = ContextVar("gateway_reques
 _DELEGABLE_ACTORS = frozenset({spec.actor for spec in caller_auth.CALLERS.values()})
 
 
+_BOUND_GATEWAY_PORT: int | None = None
+"""The port :func:`run_gateway_forever` actually bound, once it has."""
+
+
 def _register_tool_gateway_auth() -> None:
     """Give jaeger-agent's ``call_agent`` jaegerd's Gateway credential."""
     import importlib
@@ -347,6 +354,12 @@ def _register_tool_gateway_auth() -> None:
     except ImportError:
         return
     module.set_gateway_auth(lambda: caller_auth.client_headers("jaegerd"))
+    if hasattr(module, "set_gateway_base"):
+        # The tool runs inside this process; it reaches the port we bound.
+        module.set_gateway_base(
+            lambda: os.environ.get("JAEGER_GATEWAY_URL")
+            or f"http://{LOOPBACK}:{_BOUND_GATEWAY_PORT or DEFAULT_GATEWAY_PORT}"
+        )
 
 
 def current_request_actor() -> str | None:
@@ -4951,6 +4964,8 @@ async def run_gateway_forever(
     await runner.setup()
     site = web.TCPSite(runner, host, port)
     await site.start()
+    global _BOUND_GATEWAY_PORT
+    _BOUND_GATEWAY_PORT = int(port)
     print(f"[jaeger-gateway] Listening on http://{host}:{port}", flush=True)
     if getattr(gateway, "_pending_resume", False):
         try:
@@ -5008,7 +5023,7 @@ def _is_launchd_stack_gateway() -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """``jaeger gateway daemon`` — run the Jaeger Gateway on :8810.
+    """``jaeger gateway daemon`` — run the Jaeger Gateway on :data:`GATEWAY_PORT`.
 
     This is the daemon AGENTS.md §3 describes: persistent SQLite session
     state and SSE multi-client broadcast, with the native app, WebUI and
@@ -5018,7 +5033,7 @@ def main(argv: list[str] | None = None) -> int:
     ``features.gateway``, which manages the *external* Agentgateway on
     :8811/:8812 — a different process entirely — while
     ``jaeger_ai/features/webui/api/jaeger_agents.py`` and
-    ``scripts/run-jaeger-webui.sh`` both pointed clients at :8810 with
+    ``scripts/run-jaeger-webui.sh`` both pointed clients at the Gateway with
     nothing listening. Adding the route is what makes those clients real.
 
     Binds loopback by default; publish to a tailnet rather than widening

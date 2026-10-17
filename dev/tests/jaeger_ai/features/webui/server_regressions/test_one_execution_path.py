@@ -23,7 +23,7 @@ def test_in_process_backend_needs_the_explicit_switch():
     assert gateway_chat.webui_chat_backend_mode({}, {ENV: "1"}) == "legacy"
     # An explicit gateway selection still wins over the switch.
     assert gateway_chat.webui_chat_backend_mode(
-        {}, {ENV: "1", "JAEGER_GATEWAY_URL": "http://127.0.0.1:8810"}
+        {}, {ENV: "1", "JAEGER_GATEWAY_URL": "http://127.0.0.1:33418"}
     ) == "gateway"
 
 

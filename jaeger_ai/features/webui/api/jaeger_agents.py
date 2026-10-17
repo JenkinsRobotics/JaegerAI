@@ -1,6 +1,6 @@
-"""Proxy WebUI /api/agents* to Jaeger Gateway :8810 /v1/agents*.
+"""Proxy WebUI /api/agents* to the Jaeger Gateway's /v1/agents*.
 
-Browser clients on :8790 cannot reliably reach loopback :8810; the WebUI
+Browser clients on :8790 cannot reliably reach the loopback Gateway; the WebUI
 process proxies server-side. Chat spine is Gateway — not ARES :8813.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 def runner_base() -> str:
     """The Jaeger runner (:8791), which owns per-framework execution.
 
-    Distinct from :func:`gateway_base` (:8810). The session index lives on the
+    Distinct from :func:`gateway_base` (the Gateway). The session index lives on the
     runner because that is the process holding the framework adapters; sending
     it to the gateway would 404, and the two ports are one digit apart.
     """
@@ -29,8 +29,14 @@ def gateway_base() -> str:
     return (
         os.environ.get("JAEGER_GATEWAY_URL")
         or os.environ.get("HERMES_WEBUI_GATEWAY_URL")
-        or "http://127.0.0.1:8810"
+        or _resolved_gateway_url()
     ).rstrip("/")
+
+
+def _resolved_gateway_url() -> str:
+    """Current Gateway port first, legacy fallback (contract.ports)."""
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    return resolve_gateway_url()
 
 
 def _proxy(handler, method: str, path: str, body: bytes | None = None,

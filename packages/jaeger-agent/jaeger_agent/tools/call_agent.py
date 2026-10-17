@@ -18,8 +18,25 @@ from urllib.request import Request, urlopen
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 
+#: Supplies the Gateway base URL. Like the credential below, the Gateway
+#: registers it at startup (``set_gateway_base``) so the port lives in one
+#: place (``jaeger_ai/contract/ports.py``); jaeger-agent never imports product
+#: code. ``JAEGER_GATEWAY_URL`` still wins when set.
+_GATEWAY_BASE: Callable[[], str] | None = None
+
+
+def set_gateway_base(provider: Callable[[], str] | None) -> None:
+    global _GATEWAY_BASE
+    _GATEWAY_BASE = provider
+
+
 def _gateway_base() -> str:
-    return (os.environ.get("JAEGER_GATEWAY_URL") or "http://127.0.0.1:8810").rstrip("/")
+    explicit = (os.environ.get("JAEGER_GATEWAY_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    if _GATEWAY_BASE is not None:
+        return str(_GATEWAY_BASE() or "").rstrip("/")
+    return ""
 
 
 #: Supplies jaegerd's Gateway caller credential. The Gateway registers it at
@@ -50,7 +67,10 @@ def _caller_headers() -> dict[str, str]:
 
 
 def _request_json(method: str, path: str, body: dict[str, Any] | None = None, timeout: float = 10) -> tuple[int, dict[str, Any]]:
-    url = f"{_gateway_base()}{path}"
+    base = _gateway_base()
+    if not base:
+        return 503, {"error": "gateway URL not configured (set JAEGER_GATEWAY_URL)", "http_status": 503}
+    url = f"{base}{path}"
     raw = json.dumps(body or {}).encode("utf-8") if body is not None else None
     req = Request(url, data=raw, method=method)
     req.add_header("Accept", "application/json")

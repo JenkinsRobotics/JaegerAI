@@ -25,6 +25,34 @@ _SMD_SOURCE = "jaeger_ai/features/webui/static/vendor/smd.min.js"
 _SMD_SHA384 = "T6r95ocN9t3W8tUK2Fa6FPaO7bJryyjyW0WCalrUnpgtm2qXr5xcN4vwPYEJ6vHa"
 
 
+
+def gateway_contract(repo: Path) -> dict:
+    """LOOPBACK, GATEWAY_PORT's default and LEGACY_GATEWAY_PORT from ports.py.
+
+    Read with ``ast`` (never imported). ``GATEWAY_PORT`` is an env-overridable
+    expression (``int(os.environ.get(...) or <default>)``); the built extension
+    gets the default, the literal int inside it.
+    """
+    constants: dict = {}
+    for node in ast.parse((repo / "jaeger_ai/contract/ports.py").read_text()).body:
+        if not (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)):
+            continue
+        name = node.target.id
+        if name not in {"LOOPBACK", "GATEWAY_PORT", "LEGACY_GATEWAY_PORT"}:
+            continue
+        if isinstance(node.value, ast.Constant):
+            constants[name] = node.value.value
+        else:
+            ints = [n.value for n in ast.walk(node.value)
+                    if isinstance(n, ast.Constant) and type(n.value) is int]
+            if len(ints) != 1:
+                raise SystemExit(f"cannot read the default of {name} from ports.py")
+            constants[name] = ints[0]
+    missing = {"LOOPBACK", "GATEWAY_PORT", "LEGACY_GATEWAY_PORT"} - set(constants)
+    if missing:
+        raise SystemExit(f"ports.py is missing {sorted(missing)}")
+    return constants
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-root", required=True, type=Path)
@@ -57,13 +85,10 @@ def main() -> None:
         )
     (stage / "media" / "vendor").mkdir(parents=True, exist_ok=True)
     (stage / "media" / "vendor" / "smd.min.js").write_bytes(smd_bytes)
-    constants = {}
-    for node in ast.parse((repo / "jaeger_ai/contract/ports.py").read_text()).body:
-        if (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
-                and node.target.id in {"LOOPBACK", "GATEWAY_PORT"}):
-            constants[node.target.id] = ast.literal_eval(node.value)
+    constants = gateway_contract(repo)
     (stage / "contract.json").write_text(json.dumps({
         "gatewayUrl": f"http://{constants['LOOPBACK']}:{constants['GATEWAY_PORT']}",
+        "legacyGatewayUrl": f"http://{constants['LOOPBACK']}:{constants['LEGACY_GATEWAY_PORT']}",
     }) + "\n")
     print(f"STAGE={stage}", flush=True)
     if not args.stage_only:

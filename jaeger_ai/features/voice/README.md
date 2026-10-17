@@ -2,7 +2,7 @@
 
 ```text
 microphone → speech detection → STT        stt slot: jaeger-whisper-stt (whisper.cpp)
-           → Gateway :8810 → Entity         the same turn path as the WebUI
+           → Gateway :33418 → Entity         the same turn path as the WebUI
            → reply → TTS → speaker          tts slot: jaeger-kokoro-tts (Kokoro-82M)
 ```
 

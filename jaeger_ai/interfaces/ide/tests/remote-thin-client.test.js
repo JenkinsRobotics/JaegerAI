@@ -28,25 +28,25 @@ test('package.json excludes machine connection settings from sync while model re
 
 test('gateway endpoint accepts loopback and secure Tailscale / private LAN hosts without credential or path ambiguity', () => {
   // Loopback
-  assert.equal(localEndpoint('http://127.0.0.1:8810'), 'http://127.0.0.1:8810');
-  assert.equal(localEndpoint('http://localhost:8810'), 'http://localhost:8810');
+  assert.equal(localEndpoint('http://127.0.0.1:33418'), 'http://127.0.0.1:33418');
+  assert.equal(localEndpoint('http://localhost:33418'), 'http://localhost:33418');
 
   // Tailscale MagicDNS (*.ts.net)
-  assert.equal(localEndpoint('http://home-mac.ts.net:8810'), 'http://home-mac.ts.net:8810');
-  assert.equal(localEndpoint('http://laptop.tailnet-xyz.ts.net:8810'), 'http://laptop.tailnet-xyz.ts.net:8810');
+  assert.equal(localEndpoint('http://home-mac.ts.net:33418'), 'http://home-mac.ts.net:33418');
+  assert.equal(localEndpoint('http://laptop.tailnet-xyz.ts.net:33418'), 'http://laptop.tailnet-xyz.ts.net:33418');
   assert.equal(localEndpoint('https://home-mac.ts.net:8443'), 'https://home-mac.ts.net:8443');
 
   // Tailscale IPv4 CGNAT (100.64.0.0/10)
-  assert.equal(localEndpoint('http://100.85.12.34:8810'), 'http://100.85.12.34:8810');
+  assert.equal(localEndpoint('http://100.85.12.34:33418'), 'http://100.85.12.34:33418');
 
   // Local network names / mDNS
-  assert.equal(localEndpoint('http://home-mac.local:8810'), 'http://home-mac.local:8810');
-  assert.equal(localEndpoint('http://home-mac:8810'), 'http://home-mac:8810');
+  assert.equal(localEndpoint('http://home-mac.local:33418'), 'http://home-mac.local:33418');
+  assert.equal(localEndpoint('http://home-mac:33418'), 'http://home-mac:33418');
 
   // Rejections: credentials, paths, query params, public domains
-  assert.throws(() => localEndpoint('http://user:pass@127.0.0.1:8810'), /credentials/i);
-  assert.throws(() => localEndpoint('http://home-mac.ts.net:8810/path'), /path/i);
-  assert.throws(() => localEndpoint('http://home-mac.ts.net:8810/?q=1'), /query/i);
+  assert.throws(() => localEndpoint('http://user:pass@127.0.0.1:33418'), /credentials/i);
+  assert.throws(() => localEndpoint('http://home-mac.ts.net:33418/path'), /path/i);
+  assert.throws(() => localEndpoint('http://home-mac.ts.net:33418/?q=1'), /query/i);
   assert.throws(() => localEndpoint('http://example.org'), /Public domains/i);
   assert.throws(() => localEndpoint('https://api.github.com'), /Public domains/i);
 });
@@ -145,7 +145,7 @@ test('selectableModels dynamically extracts Ollama Cloud models without hardcode
 
 test('authentication failure (401/403) surfaces clear actionable error without silent fallback', async () => {
   const fakeGateway = {
-    url: 'http://127.0.0.1:8810',
+    url: 'http://127.0.0.1:33418',
     auth() { return { Authorization: 'Bearer invalid' }; },
     async json() {
       const err = new Error('Gateway rejected credentials');
@@ -168,7 +168,7 @@ test('authentication failure (401/403) surfaces clear actionable error without s
 
 test('turn admission auth rejection surfaces clear authentication error', async () => {
   const fakeGateway = {
-    url: 'http://127.0.0.1:8810',
+    url: 'http://127.0.0.1:33418',
     auth() { return {}; },
     async create() { return { session_id: 's-1' }; },
     async send() {
@@ -196,7 +196,7 @@ test('statusLines formats capabilities, permissions, health, and scopes cleanly'
   const { statusLines } = require('../commands');
   const lines = statusLines({
     version: { component: 'jaeger-gateway', version: '0.13.0' },
-    endpoint: 'http://home-mac.ts.net:8810',
+    endpoint: 'http://home-mac.ts.net:33418',
     model: 'ollama-cloud::synthetic-cloud-model:cloud',
     session: { title: 'Refactor auth', messages: [{}, {}], workspace: '/remote/workspace', status: 'idle' },
     autonomy: 'auto',
@@ -207,7 +207,7 @@ test('statusLines formats capabilities, permissions, health, and scopes cleanly'
   });
 
   assert.ok(lines.some(l => l.includes('Gateway: jaeger-gateway 0.13.0')));
-  assert.ok(lines.some(l => l.includes('Endpoint: http://home-mac.ts.net:8810')));
+  assert.ok(lines.some(l => l.includes('Endpoint: http://home-mac.ts.net:33418')));
   assert.ok(lines.some(l => l.includes('Model: ollama-cloud::synthetic-cloud-model:cloud')));
   assert.ok(lines.some(l => l.includes('Connection: connected (remote Tailscale/LAN)')));
   assert.ok(lines.some(l => l.includes('Permissions: Autonomy: auto · Tier: agent')));
@@ -218,7 +218,7 @@ test('statusLines formats capabilities, permissions, health, and scopes cleanly'
 test('Gateway.capabilities() calls /v1/runtime/capabilities', async () => {
   const { Gateway } = require('../gateway');
   let requestedPath = '';
-  const gw = new Gateway('http://127.0.0.1:8810');
+  const gw = new Gateway('http://127.0.0.1:33418');
   gw.json = async path => { requestedPath = path; return { frameworks: { available: true } }; };
   const res = await gw.capabilities();
   assert.equal(requestedPath, '/v1/runtime/capabilities');
@@ -246,7 +246,7 @@ test('endpoint changes do not reuse or leak credentials across unrelated servers
     async delete(key) { secrets.delete(key); },
   };
 
-  let currentEndpoint = 'http://server-alpha.ts.net:8810';
+  let currentEndpoint = 'http://server-alpha.ts.net:33418';
   const getStoredCallerToken = async () => {
     const ep = currentEndpoint;
     const scopedSecret = await mockSecrets.get(`jaeger.callerToken:${ep}`);
@@ -258,18 +258,18 @@ test('endpoint changes do not reuse or leak credentials across unrelated servers
 
   // Pair server-alpha with a secret token
   await mockSecrets.store('jaeger.callerToken', 'alpha-secret-token');
-  await mockSecrets.store('jaeger.callerToken:http://server-alpha.ts.net:8810', 'alpha-secret-token');
-  await mockSecrets.store('jaeger.pairedEndpoint', 'http://server-alpha.ts.net:8810');
+  await mockSecrets.store('jaeger.callerToken:http://server-alpha.ts.net:33418', 'alpha-secret-token');
+  await mockSecrets.store('jaeger.pairedEndpoint', 'http://server-alpha.ts.net:33418');
 
   // Verify server-alpha retrieves its paired token
   assert.equal(await getStoredCallerToken(), 'alpha-secret-token');
 
   // Now change endpoint to server-beta: must NOT return alpha's token
-  currentEndpoint = 'http://server-beta.ts.net:8810';
+  currentEndpoint = 'http://server-beta.ts.net:33418';
   assert.equal(await getStoredCallerToken(), '', 'unrelated server must not receive alpha token');
 
   // Explicitly pair server-beta
-  await mockSecrets.store('jaeger.callerToken:http://server-beta.ts.net:8810', 'beta-secret-token');
+  await mockSecrets.store('jaeger.callerToken:http://server-beta.ts.net:33418', 'beta-secret-token');
   assert.equal(await getStoredCallerToken(), 'beta-secret-token');
 });
 

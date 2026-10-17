@@ -21,8 +21,8 @@ a chat bookmark. Adapter **8791** is the runner every chat POST hits.
 
 Launchd labels (KeepAlive): `com.jenkinsrobotics.jaeger-webui`,
 `com.jenkinsrobotics.jaeger-hermes-webui-adapter`,
-`com.jenkinsrobotics.jaeger-gateway` (`:8810`). A python process listening
-on 8810 is not enough — `launchctl print gui/$UID/com.jenkinsrobotics.jaeger-gateway`
+`com.jenkinsrobotics.jaeger-gateway` (`:33418`). A python process listening
+on 33418 is not enough — `launchctl print gui/$UID/com.jenkinsrobotics.jaeger-gateway`
 must find the job. "Could not find service" means an orphan: kill the
 listener, `launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.jenkinsrobotics.jaeger-gateway.plist`.
 `jaeger webui status` pid files can say stopped while launchd is serving —

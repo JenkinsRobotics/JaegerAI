@@ -2,7 +2,7 @@
  *
  * Binds to the routes audited from core/gateway/server.py via the WebUI's
  * server-side proxy (api/jaeger_sessions.py). No mock layer: every call
- * below hits :8810 for real, and every failure is rendered rather than
+ * below hits the Gateway for real, and every failure is rendered rather than
  * swallowed. A stalled stream must never look like a quiet agent.
  *
  * Event vocabulary comes from the gateway, not from guesses:

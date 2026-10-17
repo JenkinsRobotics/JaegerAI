@@ -1,11 +1,11 @@
-"""Proxy WebUI ``/api/jaeger/sessions*`` to Jaeger Gateway :8810 ``/v1/sessions*``.
+"""Proxy WebUI ``/api/jaeger/sessions*`` to the Jaeger Gateway's ``/v1/sessions*``.
 
 Companion to ``jaeger_agents.py``, which already proxies ``/v1/agents*`` and
 ``/v1/handoffs``. Sessions, the SSE event stream and approvals had no proxy,
 so the browser had no route to the conversation spine at all — it could list
 agents and nothing else.
 
-Browser clients on :8790 cannot reach loopback :8810, so the WebUI process
+Browser clients on :8790 cannot reach the loopback Gateway, so the WebUI process
 proxies server-side. Routes mirror the gateway exactly (audited from
 ``core/gateway/server.py``); nothing is invented:
 
@@ -46,8 +46,14 @@ def gateway_base() -> str:
     return (
         os.environ.get("JAEGER_GATEWAY_URL")
         or os.environ.get("HERMES_WEBUI_GATEWAY_URL")
-        or "http://127.0.0.1:8810"
+        or _resolved_gateway_url()
     ).rstrip("/")
+
+
+def _resolved_gateway_url() -> str:
+    """Current Gateway port first, legacy fallback (contract.ports)."""
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    return resolve_gateway_url()
 
 
 # ── unary proxy ──────────────────────────────────────────────────────

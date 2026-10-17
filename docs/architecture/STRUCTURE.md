@@ -39,7 +39,7 @@ editing a file anywhere else will not change what the browser loads.
 
 **1b. A fact two layers share lives in `jaeger_ai/contract/`.**
 Framework names and service ports are defined there once and imported. If you
-find yourself typing `"openclaw"` or `8810` into a second file, that is the
+find yourself typing `"openclaw"` or a port number into a second file, that is the
 signal — import it instead. `dev/tests/jaeger_ai/contract/` fails if a copy
 reappears.
 
@@ -52,7 +52,7 @@ to none of them.
 
 | Path | What it actually is |
 | :--- | :--- |
-| `jaeger_ai/core/gateway/` | **The Jaeger Gateway.** Owns chat sessions and live events on port 8810. Started by `jaeger gateway daemon`. |
+| `jaeger_ai/core/gateway/` | **The Jaeger Gateway.** Owns chat sessions and live events on port 33418. Started by `jaeger gateway daemon`. |
 | `jaeger_ai/features/agentgateway/` | Installs and runs the third-party `agentgateway` binary (MCP 8811, A2A 8812). Started by `jaeger gateway start`. |
 | `jaeger_ai/interfaces/messaging/` | Discord, Slack and Telegram chat adapters. |
 
@@ -88,7 +88,7 @@ JaegerAI/
 │   ├── assets/                 # 🎨 Icons + the browser extension scripts (see rule 1 above)
 │   ├── contract/               # 📜 Facts two layers must agree on — imported, never copied
 │   ├── core/                   # Shared engine — used by more than one feature
-│   │   ├── gateway/            # 🚪 THE Jaeger Gateway: sessions + live events, port 8810
+│   │   ├── gateway/            # 🚪 THE Jaeger Gateway: sessions + live events, port 33418
 │   │   ├── frameworks/         # 🔀 Runs a turn against Jaeger / Hermes / OpenClaw / Roundtable
 │   │   ├── models/             # Model resolution and catalogs
 │   │   ├── instance/           # Per-instance config, first boot, personas

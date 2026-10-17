@@ -441,7 +441,7 @@ def allow_bridge_attach(bindable_instance_root):
     from it rather than re-deriving one.
     """
     previous = os.environ.pop("JAEGER_NO_ATTACH", None)
-    # Lifting the bridge gate must not also reach the operator Gateway on :8810.
+    # Lifting the bridge gate must not also reach the operator Gateway (current or legacy port).
     previous_url = os.environ.get("JAEGER_GATEWAY_URL")
     os.environ["JAEGER_GATEWAY_URL"] = "http://127.0.0.1:9"
     try:

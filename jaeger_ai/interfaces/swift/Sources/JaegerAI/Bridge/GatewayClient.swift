@@ -44,7 +44,61 @@ enum GatewayCallerToken {
     }
 }
 
-/// Persistence-spine client for Jaeger Gateway (`:8810`).
+/// Where the Jaeger Gateway lives. Mirrors `jaeger_ai/contract/ports.py`
+/// (`GATEWAY_PORT` default, `LEGACY_GATEWAY_PORT`); a Python test
+/// (`test_gateway_port_mirrors_agree_with_the_contract`) fails if they drift.
+enum GatewayEndpoint {
+    static let loopback = "127.0.0.1"
+    static let currentPort = 33418
+    /// Pre-2026-10-17 port, tried only when `currentPort` does not answer.
+    /// `JAEGER_GATEWAY_LEGACY_FALLBACK=0` turns the fallback off.
+    static let legacyPort = 8810
+    static let currentURL = URL(string: "http://\(loopback):\(currentPort)")!
+    static let legacyURL = URL(string: "http://\(loopback):\(legacyPort)")!
+
+    static func resolve(
+        _ environment: [String: String],
+        reachable: (URL) -> Bool = acceptsConnection
+    ) -> URL {
+        let raw = environment["JAEGER_GATEWAY_URL"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let raw, !raw.isEmpty, let url = URL(string: raw), url.host != nil {
+            return url
+        }
+        var current = currentURL
+        if let portText = environment["JAEGER_GATEWAY_PORT"], let port = Int(portText),
+           let url = URL(string: "http://\(loopback):\(port)") {
+            current = url
+        }
+        let fallbackOff = ["0", "false", "no", "off"].contains(
+            (environment["JAEGER_GATEWAY_LEGACY_FALLBACK"] ?? "").lowercased())
+        if fallbackOff || current == legacyURL { return current }
+        if reachable(current) { return current }
+        if reachable(legacyURL) { return legacyURL }
+        return current
+    }
+
+    /// Blocking loopback TCP connect. Loopback refuses or accepts at once, so
+    /// this does not stall the caller.
+    static func acceptsConnection(_ url: URL) -> Bool {
+        guard let host = url.host, let port = url.port else { return false }
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var addr = sockaddr_in()
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(UInt16(port).bigEndian)
+        guard inet_pton(AF_INET, host, &addr.sin_addr) == 1 else { return false }
+        let result = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return result == 0
+    }
+}
+
+/// Persistence-spine client for Jaeger Gateway (`GatewayEndpoint`).
 ///
 /// Lists / activates agents and session handoffs via `GET|POST /v1/*`
 /// without rewriting the desktop UI around the Python NDJSON bridge.
@@ -95,15 +149,15 @@ struct GatewayClient: Sendable {
         let reason: String?
     }
 
-    static let defaultBaseURL = URL(string: "http://127.0.0.1:8810")!
+    static let defaultBaseURL = GatewayEndpoint.currentURL
 
-    static func fromEnvironment() -> GatewayClient {
-        let raw = ProcessInfo.processInfo.environment["JAEGER_GATEWAY_URL"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if let raw, let url = URL(string: raw), url.host != nil {
-            return GatewayClient(baseURL: url)
-        }
-        return GatewayClient(baseURL: defaultBaseURL)
+    /// `JAEGER_GATEWAY_URL` if set; else the current Gateway port if it accepts
+    /// a loopback connection; else the legacy port if that does; else current.
+    static func fromEnvironment(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment,
+        reachable: (URL) -> Bool = GatewayEndpoint.acceptsConnection
+    ) -> GatewayClient {
+        GatewayClient(baseURL: GatewayEndpoint.resolve(environment, reachable: reachable))
     }
 
     /// Lightweight liveness probe. Avoids `[String: Any]` so Swift 6

@@ -4,7 +4,7 @@
 
 # Production paths: one Gateway
 
-The Gateway (`jaeger gateway daemon`, `:8810`) is the single production runtime. A Jaeger turn has
+The Gateway (`jaeger gateway daemon`, `:33418`) is the single production runtime. A Jaeger turn has
 one path. Everything else is a client of it, an adapter into it, a library it calls, or is
 isolated behind `JAEGER_LEGACY_PATHS` (`jaeger_ai/contract/legacy_paths.py`).
 

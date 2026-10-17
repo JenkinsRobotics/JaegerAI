@@ -58,10 +58,10 @@ def _port_constants(root: pathlib.Path = REPO) -> dict[str, dict[int, list[str]]
 
 
 def test_port_scan_detects_drift_against_annotated_contract(tmp_path):
-    (tmp_path / "contract.py").write_text("GATEWAY_PORT: Final = 8810\n")
+    (tmp_path / "contract.py").write_text("GATEWAY_PORT: Final = 33418\n")
     (tmp_path / "client.py").write_text("GATEWAY_PORT = 9999\nDEFAULT_PORT = 8000\n")
     definitions = _port_constants(tmp_path)
-    assert set(definitions["GATEWAY_PORT"]) == {8810, 9999}
+    assert set(definitions["GATEWAY_PORT"]) == {33418, 9999}
     assert "DEFAULT_PORT" not in definitions
 
 
@@ -118,7 +118,8 @@ def test_live_modules_agree_with_the_contract(module_path, attr, expected) -> No
 
 def test_the_chat_spine_ports_are_what_the_docs_promise() -> None:
     """AGENTS.md's topology table is the first thing a newcomer reads."""
-    assert ports.GATEWAY_PORT == 8810
+    assert ports.GATEWAY_PORT == 33418  # JAEGER_GATEWAY_PORT unset in tests
+    assert ports.LEGACY_GATEWAY_PORT != ports.GATEWAY_PORT
     assert ports.WEBUI_PORT == 8790
     assert ports.WEBUI_ADAPTER_PORT == 8791
     topology = (REPO / "AGENTS.md").read_text(encoding="utf-8")

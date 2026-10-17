@@ -116,13 +116,15 @@ def restore(manifest: Path, patch: Callable[[str, bool], int]) -> dict[str, int]
     return {item["session_id"]: patch(item["session_id"], False) for item in record.get("items", [])}
 
 
-def _gateway(base: str = "http://127.0.0.1:8810"):  # pragma: no cover - live wiring
+def _gateway(base: str | None = None):  # pragma: no cover - live wiring
     import urllib.error
     import urllib.parse
     import urllib.request
 
+    from jaeger_ai.contract.ports import resolve_gateway_url
     from jaeger_ai.core.gateway import caller_auth
 
+    base = (base or resolve_gateway_url()).rstrip("/")
     headers = {**caller_auth.client_headers("cli"), "Content-Type": "application/json"}
 
     def get_rows() -> list[dict[str, Any]]:

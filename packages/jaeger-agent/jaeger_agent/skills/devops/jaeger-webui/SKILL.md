@@ -74,7 +74,7 @@ are the wrong engine for page QA and EXTERNAL_EFFECT-tier besides.
    the port / `launchctl list`. 8787 is not the chat bookmark.
 6. Reset `com.jenkinsrobotics.jaeger-gateway` if
    `launchctl print gui/$UID/com.jenkinsrobotics.jaeger-gateway` is missing
-   even while `:8810` listens (orphan). Kill the listener, bootstrap the
+   even while `:33418` listens (orphan). Kill the listener, bootstrap the
    plist, then reload the Tailscale Safari tab until the Agents list is
    back (not "Gateway agents unavailable").
 

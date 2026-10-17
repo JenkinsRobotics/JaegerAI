@@ -17,6 +17,13 @@ import uuid
 
 import aiohttp
 
+import sys as _sys
+from pathlib import Path as _Path
+
+_REPO = str(_Path(__file__).resolve().parents[1])
+if _REPO not in _sys.path:
+    _sys.path.insert(0, _REPO)
+
 
 async def run(args):
     report = {"started_at": datetime.now(timezone.utc).isoformat(),
@@ -96,7 +103,8 @@ async def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--gateway", default="http://127.0.0.1:8810")
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    parser.add_argument("--gateway", default=resolve_gateway_url())
     parser.add_argument("--count", type=int, default=3)
     parser.add_argument("--timeout", type=float, default=90)
     parser.add_argument("--prompt", help="Optional single custom probe; requires --expected and --count 1")

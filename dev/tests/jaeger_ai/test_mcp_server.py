@@ -276,7 +276,8 @@ def test_main_stdio_truthful_error_when_gateway_unavailable(monkeypatch, capsys)
     ret = mcp_server.main(["jaeger-test"])
     assert ret == 1
     stderr = capsys.readouterr().err
-    assert "Neither live bridge nor canonical Jaeger Gateway (127.0.0.1:8810) is running" in stderr
+    from jaeger_ai.interfaces.mcp_server import _canonical_gateway_url
+    assert f"Neither live bridge nor canonical Jaeger Gateway ({_canonical_gateway_url()}) is running" in stderr
     assert "kimi-k2.7-code:cloud" not in stderr
     assert "11434" not in stderr
 
@@ -286,7 +287,7 @@ def test_build_server_routes_chat_through_gateway():
     from jaeger_ai.interfaces.mcp_server import build_server
 
     class DummyGW:
-        base_url = "http://127.0.0.1:8810"
+        base_url = "http://127.0.0.1:33418"
         def turn(self, session, message):
             assert session == "mcp:test_session"
             assert message == "hello gateway"

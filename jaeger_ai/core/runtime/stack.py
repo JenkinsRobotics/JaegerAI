@@ -698,12 +698,13 @@ def stack_down(services: list[ServiceDef] | None = None, wait_timeout: float = 5
 
 
 def run_gateway_test_turn(timeout_s: float = 60.0) -> dict[str, Any]:
-    """Execute a real synthetic end-to-end turn through the Gateway (:8810).
+    """Execute a real synthetic end-to-end turn through the Gateway (contract.ports.GATEWAY_URL).
 
     Proves that Gateway, SessionStore, ReAct EntityRuntime, and Model Provider
     are genuinely answering queries.
     """
-    base_url = f"http://{LOOPBACK}:{GATEWAY_PORT}"
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    base_url = resolve_gateway_url().rstrip("/")
     from jaeger_ai.core.gateway.caller_auth import client_headers
     auth = client_headers("cli")
 

@@ -54,7 +54,13 @@ case "$(printf '%s' "${JAEGER_LEGACY_PATHS:-}" | tr '[:upper:]' '[:lower:]')" in
 esac
 # Health uses JAEGER_GATEWAY_URL. Do not synthesize a global chat gateway
 # override: named profiles own their individual native gateway addresses.
-export JAEGER_GATEWAY_URL="${JAEGER_GATEWAY_URL:-http://127.0.0.1:8810}"
+# Without an explicit URL, resolve it from the port contract at launch: the
+# current Gateway port if it answers, else the legacy one (contract/ports.py).
+if [[ -z "${JAEGER_GATEWAY_URL:-}" ]]; then
+  JAEGER_GATEWAY_URL="$(PYTHONPATH="$repo_root" "$python_exe" -c \
+    'from jaeger_ai.contract.ports import resolve_gateway_url; print(resolve_gateway_url())')"
+fi
+export JAEGER_GATEWAY_URL
 export JAEGER_OLLAMA_URL="${JAEGER_OLLAMA_URL:-http://127.0.0.1:11434}"
 export HERMES_WEBUI_EXTENSION_DIR="$repo_root/jaeger_ai/assets"
 export HERMES_WEBUI_EXTENSION_SCRIPT_URLS=/extensions/jaeger_webui_branding.js
