@@ -24,6 +24,14 @@ final class BridgeTests: XCTestCase {
         XCTAssertFalse(BridgeOriginPolicy.accepts(.init(isMainFrame: true, scheme: "", host: "", port: 0), allowed: allowed))
     }
 
+    func testWindowChromePolicy() {
+        let main = BridgeFrame(isMainFrame: true, scheme: "http", host: "127.0.0.1", port: 18790)
+        XCTAssertTrue(WindowChromePolicy.accepts(main, allowed: allowed))
+        XCTAssertFalse(WindowChromePolicy.accepts(main, allowed: nil))  // fails closed
+        XCTAssertFalse(WindowChromePolicy.accepts(.init(isMainFrame: false, scheme: "http", host: "127.0.0.1", port: 18790), allowed: allowed))
+        XCTAssertFalse(WindowChromePolicy.accepts(.init(isMainFrame: true, scheme: "http", host: "127.0.0.1", port: 18791), allowed: allowed))
+    }
+
     func testParse() {
         XCTAssertEqual(BridgeRequest.parse("nope").failureValue, .badMessage)
         XCTAssertEqual(BridgeRequest.parse(["type": "app.info"]).failureValue, .badMessage)

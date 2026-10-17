@@ -130,6 +130,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     }
 
     private let windowChrome = StudioWindowChrome()
+    var chrome: StudioWindowChrome { windowChrome }
 
     func makeWindow() -> NSWindow {
         let configuration = WKWebViewConfiguration()
@@ -138,6 +139,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         #if DEBUG
         configuration.preferences.setValue(true, forKey: "developerExtrasEnabled")
         #endif
+        windowChrome.allowedOrigin = start.origin
         windowChrome.install(in: configuration)
         let host: BridgeHost = bridgeVerifier ?? self
         let bridge = NativeBridge(allowed: start.origin, host: host, label: "main")

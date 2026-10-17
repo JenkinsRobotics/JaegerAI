@@ -202,3 +202,12 @@ public enum BridgeScript {
         })();
         """
 }
+
+/// Origin rule for StudioWindowChrome's `aetherWindow` handler (same rule as the `jaeger` bridge;
+/// fails closed when no origin is configured).
+public enum WindowChromePolicy {
+    public static func accepts(_ frame: BridgeFrame, allowed: LoopbackOrigin?) -> Bool {
+        guard let allowed else { return false }
+        return BridgeOriginPolicy.accepts(frame, allowed: allowed)
+    }
+}
