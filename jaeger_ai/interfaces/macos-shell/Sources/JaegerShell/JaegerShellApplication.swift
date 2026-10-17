@@ -210,7 +210,8 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         window.delegate = self
         windowChrome.attach(to: window)
         window.setFrameAutosaveName("JaegerShellMainWindow")
-        window.contentView = webView
+        NativeChrome.apply(to: window, webView: webView)
+        NativeChrome.installUserScript(NativeChrome.metrics(window), in: webView)
         window.center()
         self.window = window
         return window

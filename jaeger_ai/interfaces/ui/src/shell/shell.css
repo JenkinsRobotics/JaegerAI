@@ -63,6 +63,13 @@ html[data-jaeger-host="macos"] .jg-desktop { padding: 0; background: transparent
 html[data-aether-native-window] .jg-shell,
 html[data-jaeger-host="macos"] .jg-shell { border: 0; border-radius: 0; box-shadow: none; }
 html[data-jaeger-host="macos"] body { background: transparent; }
+/* The shell puts a native sidebar-material view behind the page
+ * (NativeChromeContract): let it show through the sidebar; the chat stays solid. */
+html[data-native-vibrancy="sidebar"] .jg-shell { background: transparent; }
+html[data-native-vibrancy="sidebar"] .jg-shell__sidebar {
+  background: color-mix(in srgb, var(--aether-color-bg-rail) 35%, transparent);
+  -webkit-backdrop-filter: none; backdrop-filter: none;
+}
 html[data-jaeger-host="macos"] .jg-traffic-lights i { visibility: hidden; }
 [data-aether-window-drag-region] { -webkit-user-select: none; user-select: none; }
 
