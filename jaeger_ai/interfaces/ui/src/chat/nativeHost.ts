@@ -8,6 +8,7 @@ import { WebHost } from "./webHost";
 
 /** Shell voice: dictation in, speech out. Only the macOS shell provides it. */
 export interface VoiceHost {
+  probeCapabilities(): Promise<{ voice: boolean }>;
   micStart(): Promise<void>;
   micStop(): Promise<string>;
   speak(text: string): void;

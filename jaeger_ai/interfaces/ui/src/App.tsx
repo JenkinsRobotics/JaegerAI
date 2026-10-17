@@ -38,7 +38,6 @@ export function App({ source }: { source: JaegerSource }) {
     host.setAgentNames(new Map(store.agents.map((a) => [a.id, label(a)])));
     host.openHandoff = (id: string) => setExchange(id);
   }, [host, store.agents]);
-  useEffect(() => { if (host instanceof NativeHost) void host.probeCapabilities(); }, [host]);
   useEffect(() => onNativeEvent((detail) => { if (detail.type === "window.visibility") void store.refresh(); }), [store.refresh]);
 
   // One continuous conversation per agent: the chat this device last opened

@@ -136,6 +136,14 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   const scroller = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const voiceHost = "micStart" in host ? (host as ChatHost & VoiceHost) : undefined;
+  const [voiceReady, setVoiceReady] = useState(host.capabilities.voice);
+
+  // Ask the shell for mic + tts once per host; re-render when it answers.
+  useEffect(() => {
+    let live = true;
+    if (voiceHost) void voiceHost.probeCapabilities().then((c) => { if (live) setVoiceReady(c.voice); });
+    return () => { live = false; };
+  }, [voiceHost]);
 
   useEffect(() => {
     let live = true;
@@ -232,7 +240,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   };
 
   const links: Links = { onCopy: (text) => void host.copy(text), onOpen: (url) => host.openExternal(url) };
-  const voice = host.capabilities.voice && Boolean(voiceHost);
+  const voice = voiceReady && Boolean(voiceHost);
   const hasText = Boolean(draft.trim());
   const tint = { "--jg-agent-color": avatarColor(agent.id) } as CSSProperties;
   return (
