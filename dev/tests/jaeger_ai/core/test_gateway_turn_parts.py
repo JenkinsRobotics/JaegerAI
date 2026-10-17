@@ -94,3 +94,22 @@ async def test_patch_session_model_is_validated_and_drives_turn_defaults(tmp_pat
     async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as client:
         cleared = await client.patch("/v1/sessions/s1", json={"model": None})
         assert cleared.status == 200 and (await cleared.json())["metadata"].get("model") is None
+
+
+def test_reasoning_pieces_are_coalesced_and_flushed_before_other_events(tmp_path):
+    gateway = _gateway(tmp_path)
+    callbacks, finish = gateway._turn_stream_callbacks("s1", "rc")
+    for piece in "thinking hard about it":
+        callbacks.reasoning(piece)
+    callbacks.stream_delta("Answer")
+    callbacks.reasoning("more")
+    finish()
+    events = [e for e in _events(gateway) if e["data"].get("request_id") == "rc"]
+    names = [e["event"] for e in events]
+    reasoning = [e["data"]["text"] for e in events if e["event"] == "turn.reasoning"]
+    assert "".join(reasoning) == "thinking hard about itmore"
+    assert len(reasoning) <= 3  # 23 pieces -> a few frames, not one per piece
+    assert names[-3:] == ["turn.reasoning", "turn.reasoning.done", "turn.delta"] or \
+        names.index("turn.delta") > names.index("turn.reasoning.done")
+    first_delta = names.index("turn.delta")
+    assert set(names[:first_delta]) >= {"turn.reasoning", "turn.reasoning.done"}
