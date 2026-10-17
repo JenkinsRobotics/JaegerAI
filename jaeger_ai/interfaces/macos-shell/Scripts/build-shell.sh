@@ -2,18 +2,21 @@
 #
 # build-shell.sh — assemble the JaegerShell dev app (debug only).
 #
-#   Output:    ~/.jaeger/apps/swift-build/ui-rebuild/JaegerShell.app   (fixed, no override)
+#   Output:    <macos-shell>/.build/ui-rebuild/JaegerShell.app   (fixed, gitignored, no override)
 #   Bundle ID: com.jenkinsrobotics.JaegerAI.uirebuild                   (asserted)
 #
 # It never builds release, never installs, never touches JaegerAI.app (either
-# location), launchd, ~/.jaeger config or the venv. Takes no arguments.
+# location), launchd, ~/.jaeger (refused as a build root) or the venv. Takes no arguments.
 set -euo pipefail
 [[ $# -eq 0 ]] || { echo "build-shell.sh takes no arguments (debug only)" >&2; exit 2; }
 
-ROOT="$HOME/.jaeger/apps/swift-build/ui-rebuild"
 PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO="$(git -C "$PKG" rev-parse --show-toplevel)"
-case "$ROOT/" in "$REPO"/*) echo "build root is inside the repo" >&2; exit 1 ;; esac
+ROOT="$PKG/.build/ui-rebuild"
+# Guards: never under ~/.jaeger; only inside this package's gitignored .build folder.
+case "$ROOT/" in "$HOME/.jaeger/"*) echo "build root under ~/.jaeger is refused" >&2; exit 1 ;; esac
+case "$ROOT/" in "$PKG/.build/"*) ;; *) echo "build root must be inside $PKG/.build" >&2; exit 1 ;; esac
+git -C "$PKG" check-ignore -q "$ROOT" || { echo "build root is not gitignored" >&2; exit 1; }
 SCRATCH="$ROOT/scratch"
 APP="$ROOT/JaegerShell.app"
 WANT_ID="com.jenkinsrobotics.JaegerAI.uirebuild"
