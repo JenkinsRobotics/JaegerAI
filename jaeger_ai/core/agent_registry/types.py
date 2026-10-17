@@ -130,6 +130,11 @@ class AgentRecord:
     port: int | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    @property
+    def disabled(self) -> bool:
+        """Owner-disabled (``metadata.disabled``): kept in the roster, not routed to."""
+        return bool((self.metadata or {}).get("disabled"))
+
     def to_dict(self) -> dict[str, Any]:
         raw = asdict(self)
         raw["kind"] = self.kind.value
