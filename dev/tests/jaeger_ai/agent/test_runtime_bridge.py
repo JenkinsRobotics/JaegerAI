@@ -383,3 +383,60 @@ def test_cli_provider_resolves_to_cli_backend_adapter():
     adapter = _adapter_for_client(client)
     assert isinstance(adapter, CliBackendAdapter)
     assert adapter.backend_id == "claude"
+
+
+def test_glm_and_custom_sampling_parameters_plumbed_to_request():
+    # 1. Configured GLM with temperature=1.0 and top_p=0.95 produces request kwargs with both
+    client = _FakeExternalClient(provider="ollama", model="glm-5.3-flash:cloud")
+    client.ext.temperature = 1.0
+    client.ext.top_p = 0.95
+    adapter = _adapter_for_client(client)
+    assert isinstance(adapter, OpenAIAdapter)
+    assert adapter.temperature == 1.0
+    assert adapter.top_p == 0.95
+    kwargs = adapter.format_messages([{"role": "user", "content": "hi"}], [], "")
+    assert kwargs.get("temperature") == 1.0
+    assert kwargs.get("top_p") == 0.95
+
+    # 2. Model with None (default) omits both temperature and top_p from request kwargs
+    client_default = _FakeExternalClient(provider="ollama", model="glm-5.3-flash:cloud")
+    client_default.ext.temperature = None
+    client_default.ext.top_p = None
+    adapter_default = _adapter_for_client(client_default)
+    assert isinstance(adapter_default, OpenAIAdapter)
+    assert adapter_default.temperature is None
+    assert adapter_default.top_p is None
+    kwargs_default = adapter_default.format_messages([{"role": "user", "content": "hi"}], [], "")
+    assert "temperature" not in kwargs_default
+    assert "top_p" not in kwargs_default
+
+
+def test_fallback_adapters_inherit_configured_sampling_parameters(monkeypatch):
+    import jaeger_ai.main as _main
+    from jaeger_agent.loop.runtime_bridge import _fallback_adapters_for
+    fake_cfg = SimpleNamespace(
+        external_model=SimpleNamespace(
+            fallback=[
+                {"provider": "ollama", "model": "qwen3:4b", "temperature": 0.7, "top_p": 0.8},
+                {"provider": "ollama", "model": "gemma-4-26b:latest"},
+            ]
+        )
+    )
+    monkeypatch.setitem(_main._pipeline, "config", fake_cfg)
+    client = _FakeExternalClient(provider="ollama", model="glm-5.3-flash:cloud")
+    fallbacks = _fallback_adapters_for(client)
+    assert len(fallbacks) == 2
+
+    # First fallback has explicit temperature & top_p
+    assert fallbacks[0].temperature == 0.7
+    assert fallbacks[0].top_p == 0.8
+    kw0 = fallbacks[0].format_messages([{"role": "user", "content": "hi"}], [], "")
+    assert kw0.get("temperature") == 0.7
+    assert kw0.get("top_p") == 0.8
+
+    # Second fallback has None -> omitted from request kwargs
+    assert fallbacks[1].temperature is None
+    assert fallbacks[1].top_p is None
+    kw1 = fallbacks[1].format_messages([{"role": "user", "content": "hi"}], [], "")
+    assert "temperature" not in kw1
+    assert "top_p" not in kw1

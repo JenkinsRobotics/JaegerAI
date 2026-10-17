@@ -155,6 +155,9 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
                     # live path remain fingerprinted.
                     if path == root / "gateway_sessions.sqlite3":
                         continue
+                    # The running menu-bar app continuously pulses its heartbeat lease.
+                    if path == root / "control/lifecycle-lease.json":
+                        continue
                     st = path.stat()
                     out[str(path)] = (st.st_size, st.st_mtime_ns)
             except OSError:  # racing with the running app is not our failure
