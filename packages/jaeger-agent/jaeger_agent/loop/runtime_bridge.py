@@ -312,6 +312,19 @@ def _make_fast_finalize_finalizer(client: Any) -> Any:
     return _finalize
 
 
+#: Pre-first-token grace for local inference (see build_jaeger_agent).
+LOCAL_FIRST_PROGRESS_TIMEOUT_S = 600.0
+
+
+def _is_local_backend(adapter: Any) -> bool:
+    """In-process llama-cpp / MLX, or a local (non ``:cloud``) Ollama model."""
+    if adapter.__class__.__name__ in ("LocalLlamaAdapter", "MLXAdapter"):
+        return True
+    model = str(getattr(adapter, "model", "") or "").lower()
+    return (getattr(adapter, "provider", None) == "ollama"
+            and ":cloud" not in model and not model.endswith("-cloud"))
+
+
 def build_jaeger_agent(
     client: Any,
     *,
@@ -327,6 +340,7 @@ def build_jaeger_agent(
     completion_reserve: int | None = None,
     artifact_dir: Any = None,
     stale_call_timeout_s: float | None = None,
+    first_progress_timeout_s: float | None = None,
     context_summarizer: Any = None,
     turn_max_elapsed_s: float | None = None,
     turn_max_tokens: int | None = None,
@@ -433,14 +447,10 @@ def build_jaeger_agent(
     # and local adapters; network connect/read timeouts still catch dead peers.
     # The caller can override this for latency-sensitive surfaces.
     if stale_call_timeout_s is None:
-        if adapter.__class__.__name__ in ("LocalLlamaAdapter", "MLXAdapter"):
-            # Local prefill can be silent for several minutes on a cold,
-            # heavily quantized model.  The adapter supplies CallProgress for
-            # every decoded token, so this remains a no-progress timeout once
-            # generation starts instead of a wall-clock cap on a healthy turn.
-            stale_call_timeout_s = 300.0
-        else:
-            stale_call_timeout_s = 120.0
+        # Between streamed tokens/chunks this is a pure no-progress timeout
+        # (CallProgress), so 120s catches a hung decode or socket on every
+        # backend without capping a long healthy answer.
+        stale_call_timeout_s = 120.0
     agent = JaegerAgent(
         adapter=adapter,
         fallback_adapters=_fallback_adapters_for(client),
@@ -466,6 +476,13 @@ def build_jaeger_agent(
         ),
     )
     agent.stale_call_timeout_s = stale_call_timeout_s
+    if first_progress_timeout_s is None and _is_local_backend(adapter):
+        # Silence BEFORE the first token is prefill or a cold model load,
+        # not a hang: a local 26B at 32k context took 170-300s after a
+        # large tool result on Oct 9 and was killed at 120s. Allow it once
+        # per call; the per-token budget above applies after that.
+        first_progress_timeout_s = LOCAL_FIRST_PROGRESS_TIMEOUT_S
+    agent.first_progress_timeout_s = first_progress_timeout_s
     return agent
 
 

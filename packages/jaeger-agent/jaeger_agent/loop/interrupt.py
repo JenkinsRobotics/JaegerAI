@@ -31,8 +31,9 @@ from __future__ import annotations
 
 import threading
 import time
-from contextvars import copy_context
-from typing import Any, Callable, TypeVar
+from contextlib import contextmanager
+from contextvars import ContextVar, copy_context
+from typing import Any, Callable, Iterator, TypeVar
 
 
 T = TypeVar("T")
@@ -98,6 +99,28 @@ class CallProgress:
         call, or None if nothing has flowed yet. ``first - call_start``
         is the time-to-first-token."""
         return self._first
+
+
+#: Silence allowed BEFORE the first progress touch of a call (prompt
+#: prefill / cold model load). ``None`` = same as ``stale_timeout``. Set by
+#: the agent loop around one model call via :func:`first_progress_grace`, so
+#: every adapter's ``interruptible_call`` honours it without new parameters.
+_FIRST_PROGRESS_GRACE: ContextVar[float | None] = ContextVar("first_progress_grace", default=None)
+
+
+@contextmanager
+def first_progress_grace(seconds: float | None) -> Iterator[None]:
+    """Allow up to ``seconds`` of silence before a call's first token.
+
+    A local 26B model at 32k context can prefill for minutes after a large
+    tool result before streaming a single byte; after the first token the
+    normal no-progress ``stale_timeout`` applies between tokens again.
+    """
+    token = _FIRST_PROGRESS_GRACE.set(seconds)
+    try:
+        yield
+    finally:
+        _FIRST_PROGRESS_GRACE.reset(token)
 
 
 def interruptible_call(
@@ -170,6 +193,7 @@ def interruptible_call(
         except BaseException as exc:  # noqa: BLE001 — re-raised below
             box["error"] = exc
 
+    grace = _FIRST_PROGRESS_GRACE.get()
     started = time.perf_counter()
     if executor is not None:
         # Thread-affine backend (MLX): run on the caller's single thread.
@@ -218,11 +242,14 @@ def interruptible_call(
                 if progress is not None
                 else elapsed
             )
-            if since_progress > stale_timeout:
+            limit = stale_timeout
+            if grace is not None and (progress is None or progress.first is None):
+                limit = max(stale_timeout, grace)
+            if since_progress > limit:
                 _abandon(StaleCallTimeout(
                     f"no progress for {since_progress:.1f}s "
                     f"({elapsed:.1f}s total, "
-                    f"stale_timeout={stale_timeout:.0f}s)"
+                    f"stale_timeout={limit:.0f}s)"
                 ))
         if on_heartbeat is not None:
             try:
@@ -239,6 +266,7 @@ def interruptible_call(
 __all__ = [
     "AgentInterrupted",
     "CallProgress",
+    "first_progress_grace",
     "StaleCallTimeout",
     "interruptible_call",
 ]
