@@ -42,7 +42,7 @@ def test_project_parts_folds_events_in_order():
         {"event": "turn.reasoning", "data": {"text": "b"}, "timestamp": 1.5},
         {"event": "turn.reasoning.done", "data": {"started_at": 1.0, "duration_ms": 900}},
         {"event": "tool.started", "data": {"call_id": "c1", "tool": "read_file", "input": "x.py"}},
-        {"event": "tool.done", "data": {"call_id": "c1", "tool": "read_file", "elapsed_s": 0.2}},
+        {"event": "tool.completed", "data": {"call_id": "c1", "tool": "read_file", "elapsed_s": 0.2}},
         {"event": "turn.delta", "data": {"delta": "Hel"}},
         {"event": "turn.delta", "data": {"delta": "lo"}},
     ])

@@ -39,7 +39,9 @@ EVENT_TYPES = frozenset({
     "turn.plan", "turn.steer", "turn.finish", "turn.failed", "turn.cancelled",
     "turn.unknown", "turn.cancel",
     # Tools and files.
-    "tool.started", "tool.done", "tool.error", "files.changed",
+    # The Gateway publishes tool.completed / tool.failed; tool.done / tool.error
+    # are the older names some clients still accept.
+    "tool.started", "tool.completed", "tool.failed", "tool.done", "tool.error", "files.changed",
     # Session lifecycle (the projection's list is built from these).
     "session.created", "session.updated", "session.deleted",
     # Owner/auto handoff of a session to an agent; ``agent.direct_chat`` is the
@@ -68,6 +70,8 @@ EVENT_TYPES = frozenset({
     "task.created", "task.updated", "jaeger.state",
     # Connect Apps panel: {id, state, audit?} on the global stream.
     "connect_app.updated",
+    # Published by POST /v1/runtime/tier (was emitted but never registered).
+    "runtime.tier.changed",
 })
 
 #: Names that carry a card the WebUI renders interactively. The adapter shim
