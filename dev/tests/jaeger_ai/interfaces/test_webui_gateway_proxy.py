@@ -122,3 +122,27 @@ def test_global_event_stream_uses_the_session_stream_pump(monkeypatch):
                         lambda h, sid, q, upstream_path=None: seen.append((sid, q, upstream_path)) or True)
     assert _route(mod, "/api/jaeger/events/stream?last_event_id=5") is True
     assert seen == [("*", "?last_event_id=5", "/v1/events/stream")]
+
+
+def test_connect_apps_proxy_routes_live_in_the_agents_overlay(monkeypatch):
+    import importlib.util
+    import pathlib
+    import sys as _sys
+
+    root = pathlib.Path(__file__).resolve().parents[4] / "jaeger_ai/features/webui"
+    _sys.path.insert(0, str(root))
+    try:
+        spec = importlib.util.spec_from_file_location("_ja", root / "api/jaeger_agents.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        _sys.path.pop(0)
+    calls = []
+    monkeypatch.setattr(mod, "_proxy", lambda h, m, p, b=None, **k: calls.append((m, p)) or True)
+    monkeypatch.setattr(mod, "_sessions_route", lambda *a: False, raising=False)
+    handler = SimpleNamespace(_json_body_bytes=b'{"confirm": true}')
+    for path, method in (("/api/connect-apps", "GET"), ("/api/connect-apps/vscode/state?refresh=1", "GET"),
+                         ("/api/connect-apps/vscode/install", "POST")):
+        assert mod.route(handler, urlparse(path), method) is True
+    assert calls == [("GET", "/v1/connect-apps"), ("GET", "/v1/connect-apps/vscode/state?refresh=1"),
+                     ("POST", "/v1/connect-apps/vscode/install")]
