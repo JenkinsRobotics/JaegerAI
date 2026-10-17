@@ -1,10 +1,9 @@
 /* WebHost: ChatHost for the browser. Data comes from a JaegerSource (live =
- * same-origin /v1 and /api fetches; mock = sample data). Sessions cache in
- * localStorage. */
-import { MOCK_TRANSCRIPTS } from "../api/mock";
+ * same-origin /v1 and /api fetches; mock = dev-only sample data). Failures
+ * surface to the caller; there is no silent fallback. */
 import type { JaegerSource } from "../api/source";
 import type { SessionMessage } from "../api/types";
-import { mapEvent } from "./eventMap";
+import { followTurn } from "./followTurn";
 import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, HostKind, StartTurnRequest, TurnHandle, TurnState } from "./host";
 
 const KEY = (id: string) => `jaeger.ui.session.${id}`;
@@ -18,45 +17,63 @@ function messagesToTurns(messages: SessionMessage[] = []): ChatSession["turns"] 
   return turns;
 }
 
+const message = (error: unknown) => String((error as Error)?.message ?? error);
+
 export class WebHost implements ChatHost {
   readonly kind: HostKind = "web";
   capabilities = { voice: false };
   /** Set by the app: opens the exchange panel for a handoff marker. */
   openHandoff?: (handoffId: string) => void;
   private agentNames = new Map<string, string>();
+  /** Last SSE event id seen per session; the stream never resumes behind it. */
+  private readonly cursors = new Map<string, number>();
 
-  constructor(protected readonly source: JaegerSource) {}
+  constructor(protected readonly source: JaegerSource, private readonly backoffMs?: number[]) {}
 
   setAgentNames(names: Map<string, string>) { this.agentNames = names; }
   private agentName = (id: string) => this.agentNames.get(id) ?? id;
+
+  cursorFor(sessionId: string) { return this.cursors.get(sessionId) ?? 0; }
+  private advance(sessionId: string, eventId: number) {
+    if (eventId > this.cursorFor(sessionId)) this.cursors.set(sessionId, eventId);
+  }
 
   async getConfig() { return { defaultMode: "agent" }; }
   async listModels() { return []; }
 
   startTurn(request: StartTurnRequest, onPart: (part: ChatPart) => void): TurnHandle {
     const controller = new AbortController();
-    let requestId: string | undefined;
-    let finish: (value: { state: TurnState }) => void = () => {};
-    const done = new Promise<{ state: TurnState }>((resolve) => { finish = resolve; });
-    const settle = (state: TurnState) => { controller.abort(); finish({ state }); };
-    void this.source
-      .stream(request.sessionId, undefined, (event) => {
-        if (requestId && event.request_id && event.request_id !== requestId) return;
-        const mapped = mapEvent(event, this.agentName);
-        mapped?.parts.forEach(onPart);
-        if (mapped?.state) settle(mapped.state);
-      }, controller.signal)
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        onPart({ kind: "error", message: String((error as Error)?.message ?? error) });
-        settle("failed");
+    const requestId = request.turnId;
+    let admitted = false;
+    const done = (async (): Promise<{ state: TurnState }> => {
+      let receipt;
+      try {
+        receipt = await this.source.send(request.sessionId, request.message, requestId);
+      } catch (error) {
+        onPart({ kind: "error", message: message(error) });
+        return { state: "failed" };
+      }
+      admitted = true;
+      if (controller.signal.aborted) { void this.source.cancel(request.sessionId, receipt.request_id); return { state: "cancelled" }; }
+      const start = typeof receipt.start_event_id === "number" ? receipt.start_event_id - 1 : 0;
+      return followTurn({
+        source: this.source,
+        sessionId: request.sessionId,
+        requestId: receipt.request_id ?? requestId,
+        turnId: receipt.turn_id,
+        cursor: Math.max(start, this.cursorFor(request.sessionId)),
+        signal: controller.signal,
+        onPart,
+        onCursor: (id) => this.advance(request.sessionId, id),
+        agentName: this.agentName,
+        backoffMs: this.backoffMs,
       });
-    this.source.send(request.sessionId, request.message).then(
-      (reply) => { requestId = reply.request_id; },
-      (error: unknown) => { onPart({ kind: "error", message: String((error as Error)?.message ?? error) }); settle("failed"); },
-    );
+    })();
     return {
-      cancel: () => { void this.source.cancel(request.sessionId, requestId); },
+      cancel: () => {
+        if (admitted) void this.source.cancel(request.sessionId, requestId);
+        controller.abort();
+      },
       done,
     };
   }
@@ -70,16 +87,13 @@ export class WebHost implements ChatHost {
       id: s.session_id, title: s.title ?? "Untitled", agentId: s.agent_id ?? undefined,
       updatedAt: s.last_activity_at ?? s.updated_at, preview: s.last_message_preview,
     })),
+    /** Throws when the gateway can't load the session; the pane shows an ErrorState. */
     load: async (id: string): Promise<ChatSession> => {
-      if (this.source.kind === "mock" && MOCK_TRANSCRIPTS[id]) return structuredClone(MOCK_TRANSCRIPTS[id]);
-      try {
-        const detail = await this.source.session(id);
-        return { id, title: detail.title ?? "Untitled", agentId: detail.agent_id ?? undefined, turns: messagesToTurns(detail.messages) };
-      } catch {
-        const cached = localStorage.getItem(KEY(id));
-        if (cached) return JSON.parse(cached) as ChatSession;
-        return { id, title: "New chat", turns: [] };
-      }
+      const rich = this.source.transcript?.(id);
+      if (rich) return structuredClone(rich);
+      const detail = await this.source.session(id);
+      if (typeof detail.last_event_id === "number") this.advance(id, detail.last_event_id);
+      return { id, title: detail.title ?? "Untitled", agentId: detail.agent_id ?? undefined, turns: messagesToTurns(detail.messages) };
     },
     save: async (session: ChatSession) => { localStorage.setItem(KEY(session.id), JSON.stringify(session)); },
     delete: async (id: string) => { localStorage.removeItem(KEY(id)); },

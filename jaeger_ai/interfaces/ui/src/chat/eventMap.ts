@@ -48,7 +48,10 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       return { parts: [{ kind: "handoff", handoffId: str(h.id ?? h.handoff_id), agentId, agentName: agentName(agentId), count: 1, direction }] };
     }
     case "turn.finish":
+    case "turn.reconciled":
       return { parts: [], state: "complete" };
+    case "turn.unknown":
+      return { parts: [{ kind: "error", message: str(p.error ?? p.message ?? "The gateway lost track of this turn.") }], state: "failed" };
     case "turn.cancelled":
       return { parts: [], state: "cancelled" };
     case "turn.failed":
