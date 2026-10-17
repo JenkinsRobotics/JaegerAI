@@ -11,7 +11,7 @@ if (!base || !/^http:\/\/127\.0\.0\.1:\d+\//.test(base)) throw new Error("pass a
 mkdirSync("screenshots", { recursive: true });
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
 const browser = await chromium.launch({ headless: true });
-const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
+const context = await browser.newContext({ viewport: { width: Number(process.env.SHOT_W ?? 1086), height: Number(process.env.SHOT_H ?? 782) }, deviceScaleFactor: 2 });
 const page = await context.newPage();
 const calls = [];
 page.on("response", (r) => { const u = new URL(r.url()); if (/^\/(v1|api)\//.test(u.pathname)) calls.push(`${r.request().method()} ${u.pathname}${u.search} -> ${r.status()}`); });
@@ -29,7 +29,7 @@ const lastAssistant = () => page.locator(".jg-turn").last().locator(".jg-bubble-
 await page.goto(base, { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".jg-supervisor", { timeout: 20_000 });
 log("roster:", (await page.locator(".jg-supervisor__label, .jg-agent-row__name").allInnerTexts()).join(" | "));
-log("tray:", await page.locator(".jg-tray").innerText());
+log("status:", await page.locator(".jg-user-chip").getAttribute("title"));
 
 await page.click(`button[aria-label="New chat"]`);
 await page.waitForSelector(".jg-chat__empty", { timeout: 15_000 });
