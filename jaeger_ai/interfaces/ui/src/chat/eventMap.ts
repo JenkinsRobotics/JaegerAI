@@ -28,8 +28,10 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
     case "tool.started":
       return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "executing" }] };
     case "tool.done":
+    case "tool.completed":
       return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "completed", output: p.output ?? p.result }] };
     case "tool.error":
+    case "tool.failed":
       return {
         parts: [
           { kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "cancelled", output: p.error },

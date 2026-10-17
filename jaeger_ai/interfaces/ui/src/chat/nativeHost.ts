@@ -6,16 +6,39 @@ import { nativeBridge, onNativeEvent, postNative, probeVoice } from "../platform
 import type { HostKind } from "./host";
 import { WebHost } from "./webHost";
 
-export class NativeHost extends WebHost {
+/** Shell voice: dictation in, speech out. Only the macOS shell provides it. */
+export interface VoiceHost {
+  micStart(): Promise<void>;
+  micStop(): Promise<string>;
+  speak(text: string): void;
+  stopSpeaking(): void;
+}
+
+export class NativeHost extends WebHost implements VoiceHost {
   override readonly kind: HostKind = "native";
 
   constructor(source: JaegerSource) { super(source); }
 
-  /** Voice needs the flag AND a mic/tts that is not not_implemented. */
-  async probeCapabilities(voiceFlag: boolean) {
-    this.capabilities = { voice: voiceFlag && (await probeVoice()) };
+  /** Voice needs a shell mic and tts that are not not_implemented. */
+  async probeCapabilities() {
+    this.capabilities = { voice: await probeVoice() };
     return this.capabilities;
   }
+
+  /** Dictation: start recording, or stop and resolve with the transcript. */
+  async micStart() { await postNative("mic.start", { mode: "dictation" }); }
+  micStop(): Promise<string> {
+    return new Promise((resolve) => {
+      const off = onNativeEvent((detail) => {
+        const d = detail as { type: string; text?: string; final?: boolean };
+        if (d.type === "voice.transcript" && d.final !== false) { off(); resolve(d.text ?? ""); }
+        else if (d.type === "voice.error") { off(); resolve(""); }
+      });
+      void postNative("mic.stop").then((reply) => { if (reply === undefined) { off(); resolve(""); } });
+    });
+  }
+  speak(text: string) { if (text.trim()) void postNative("tts.speak", { text }); }
+  stopSpeaking() { void postNative("tts.stop"); }
 
   override openExternal(url: string) {
     if (nativeBridge()) void postNative("open.external", { url });

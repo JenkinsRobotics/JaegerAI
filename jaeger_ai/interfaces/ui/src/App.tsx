@@ -8,7 +8,7 @@ import { ChatPane } from "./chat/ChatPane";
 import { NativeHost } from "./chat/nativeHost";
 import { WebHost } from "./chat/webHost";
 import { ConnectAppsDialog } from "./connect-apps/ConnectAppsDialog";
-import { detectHost, voiceFlag } from "./platform/host";
+import { detectHost } from "./platform/host";
 import { onNativeEvent } from "./platform/native";
 import { AppShell } from "./shell/AppShell";
 import { ErrorState } from "./shell/ErrorState";
@@ -38,24 +38,30 @@ export function App({ source }: { source: JaegerSource }) {
     host.setAgentNames(new Map(store.agents.map((a) => [a.id, label(a)])));
     host.openHandoff = (id: string) => setExchange(id);
   }, [host, store.agents]);
-  useEffect(() => { if (host instanceof NativeHost) void host.probeCapabilities(voiceFlag()); }, [host]);
+  useEffect(() => { if (host instanceof NativeHost) void host.probeCapabilities(); }, [host]);
   useEffect(() => onNativeEvent((detail) => { if (detail.type === "window.visibility") void store.refresh(); }), [store.refresh]);
 
-  // Resolve the selected agent to its chat session: the chat this device last
-  // opened for that agent, else the summary row, else ?agent_id=, else create.
-  // Keyed on the agent id only, so roster polling never switches chats.
-  const summariesRef = useRef(store.summaries);
-  summariesRef.current = store.summaries;
+  // One continuous conversation per agent: the chat this device last opened
+  // for that agent, else its latest chat with messages, else an existing empty
+  // one, else a new one. One lookup per agent at a time, so effect re-runs
+  // never create a burst of empty chats. Keyed on the agent id only, so roster
+  // polling never switches chats.
   const chosen = useRef(new Map<string, string>());
+  const resolving = useRef(new Map<string, Promise<string>>());
   const selectedAgentId = selection.type === "agent" ? selection.agentId : undefined;
   useEffect(() => {
     if (!selectedAgentId) return;
     let live = true;
     const agentId = selectedAgentId;
-    const known = chosen.current.get(agentId) ?? summariesRef.current.find((s) => s.id === agentId)?.session_id ?? undefined;
-    const resolve = known
-      ? Promise.resolve(known)
-      : source.sessions({ agent_id: agentId }).then((rows) => rows[0]?.session_id ?? source.createSession({ agent_id: agentId }).then((s) => s.session_id));
+    const known = chosen.current.get(agentId);
+    let resolve = known ? Promise.resolve(known) : resolving.current.get(agentId);
+    if (!resolve) {
+      resolve = source.sessions({ agent_id: agentId }).then((rows) => {
+        const thread = rows.find((r) => (r.message_count ?? 0) > 0 || r.last_message_preview) ?? rows[0];
+        return thread?.session_id ?? source.createSession({ agent_id: agentId }).then((s) => s.session_id);
+      }).finally(() => resolving.current.delete(agentId));
+      resolving.current.set(agentId, resolve);
+    }
     setSessionError(undefined);
     resolve.then(
       (id) => { if (live) { chosen.current.set(agentId, id); setSessionId(id); } },

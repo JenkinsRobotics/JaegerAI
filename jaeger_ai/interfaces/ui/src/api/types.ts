@@ -45,14 +45,26 @@ export interface SessionRow {
   last_message_preview?: string;
   last_activity_at?: number;
   last_event_id?: number;
+  message_count?: number;
   archived?: boolean;
 }
+
+/** One persisted response part (core/gateway/turn_parts.py). */
+export type PersistedPart =
+  | { type: "text"; text: string }
+  | { type: "reasoning"; text: string; duration_ms?: number }
+  | { type: "tool"; call_id?: string; tool?: string; status?: "running" | "done" | "error"; input?: unknown; output?: unknown }
+  | { type: "plan"; [key: string]: unknown }
+  | { type: "handoff"; direction: "to" | "from"; handoff_id?: string; agent_id?: string; agent_name?: string; status?: string };
 
 export interface SessionMessage {
   role: "user" | "assistant" | "system" | "tool" | string;
   content?: string;
   created_at?: number;
+  /** Epoch seconds; the store serialises it as a string. */
+  timestamp?: number | string;
   request_id?: string;
+  parts?: PersistedPart[];
 }
 
 export interface SessionDetail extends SessionRow {
