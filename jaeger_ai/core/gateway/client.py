@@ -19,7 +19,7 @@ import urllib.error
 import urllib.request
 import uuid
 
-from jaeger_ai.contract.ports import GATEWAY_PORT, LOOPBACK
+from jaeger_ai.contract.ports import GATEWAY_PORT, LOOPBACK, resolve_gateway_url  # noqa: F401
 
 #: Request states after which the Gateway will not change its answer.
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "execution_unknown"})
@@ -55,7 +55,8 @@ class TurnResult:
 
 
 def gateway_base_url() -> str:
-    return (os.environ.get("JAEGER_GATEWAY_URL") or f"http://{LOOPBACK}:{GATEWAY_PORT}").rstrip("/")
+    """``JAEGER_GATEWAY_URL`` if set, else the current port, else the legacy one."""
+    return resolve_gateway_url().rstrip("/")
 
 
 class GatewayTurnClient:

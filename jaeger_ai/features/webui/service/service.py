@@ -523,9 +523,10 @@ class WebUIService:
         pid_path = _webui_pid_path(self.layout)
         env = os.environ.copy()
         env["JAEGER_RUNNER_BASE_URL"] = self.urls().adapter.rstrip("/")
-        env["JAEGER_GATEWAY_URL"] = (
-            os.environ.get("JAEGER_GATEWAY_URL") or "http://127.0.0.1:8810"
-        ).rstrip("/")
+        # Only an explicit URL is forwarded; without one the WebUI discovers
+        # the Gateway itself (current port, then legacy; contract.ports).
+        if env.get("JAEGER_GATEWAY_URL"):
+            env["JAEGER_GATEWAY_URL"] = env["JAEGER_GATEWAY_URL"].rstrip("/")
         env["JAEGER_WEBUI_PORT"] = str(self.webui_port)
         env["JAEGER_WEBUI_HOST"] = webui_bind_host(env)
         hermes_agent_src = Path(

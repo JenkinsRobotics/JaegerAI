@@ -30,7 +30,7 @@ This single command deterministically verifies:
 - **Safety Archiving:** 2,562 non-core files (iOS client, Swabble, Codex prompts, sample extensions, benchmark logs) safely preserved at `~/Desktop/JaegerAI_Archive`.
 - **Multimodal IDE & Feature Parity:** 3-way mode switcher (`[Plan | Auto | Manual]`), slash commands (`/clear`, `/review`, `/test`, `/compact`), collapsible reasoning disclosure, quick action suggestion chips, CSP updated for clipboard screenshots (`data:`, `blob:`), and drag-and-drop image attachments.
 - **3-Tier Agency Contract (`Chat | Agent | Jaeger`):** Added canonical `jaeger_ai/contract/modes.py` and schema integration under `AutomationConfig.interaction_tier` with single-source catalog derivation and Gateway routes (`/v1/runtime/tier`). Decouples interaction initiative from execution blast radius (`autonomy`).
-- **Auto-Daemon Management:** The IDE extension auto-probes `127.0.0.1:8810/health` and launches the Gateway daemon on-demand if not already running.
+- **Auto-Daemon Management:** The IDE extension auto-probes `127.0.0.1:33418/health` and launches the Gateway daemon on-demand if not already running.
 - **Operational Tripwires & Deny Rules:** Added [`.agents/rules/deny-rules.md`](../.agents/rules/deny-rules.md) forbidding `pkill -f`, `killall`, and blanket `git add .`.
 
 ## 0.13 Release Qualification (2026-09-27)
@@ -299,7 +299,7 @@ Preserve useful source and evidence for deferred work, but do not treat a deferr
 
 ```text
 IDE / WebUI / Mac / TUI
-    → Gateway REST + SSE (:8810)
+    → Gateway REST + SSE (:33418)
     → JaegerGatewayApp.handle_send_turn / handle_add_queue
     → GatewaySessionStore.admit_request / promote_next_queue_item
     → Gateway._execute_turn

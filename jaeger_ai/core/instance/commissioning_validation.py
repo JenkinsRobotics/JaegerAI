@@ -121,7 +121,13 @@ def _add(
 
 
 def _gateway_port() -> int:
-    return int(os.environ.get("JAEGER_GATEWAY_PORT") or 8810)
+    from urllib.parse import urlsplit
+
+    from jaeger_ai.contract.ports import GATEWAY_PORT, resolve_gateway_url
+    if os.environ.get("JAEGER_GATEWAY_PORT"):
+        return int(os.environ["JAEGER_GATEWAY_PORT"])
+    # Current port first, legacy fallback while installed services still use it.
+    return urlsplit(resolve_gateway_url()).port or GATEWAY_PORT
 
 
 def _gateway_auth(url: str) -> dict[str, str]:

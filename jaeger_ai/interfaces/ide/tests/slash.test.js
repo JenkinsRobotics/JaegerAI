@@ -74,11 +74,11 @@ test('every command names a group and a description, and names are unique', () =
 
 test('status lines describe the gateway, model and conversation', () => {
   const lines = commands.statusLines({
-    version: { component: 'jaeger-gateway', version: '0.11.0' }, endpoint: 'http://127.0.0.1:8810',
+    version: { component: 'jaeger-gateway', version: '0.11.0' }, endpoint: 'http://127.0.0.1:33418',
     model: 'kimi-k2.7-code:cloud',
     session: { title: 'Fix loop', messages: [{}, {}, {}], workspace: '/w', status: 'idle' },
   });
-  assert.deepEqual(lines, ['Gateway: jaeger-gateway 0.11.0', 'Endpoint: http://127.0.0.1:8810',
+  assert.deepEqual(lines, ['Gateway: jaeger-gateway 0.11.0', 'Endpoint: http://127.0.0.1:33418',
     'Model: kimi-k2.7-code:cloud', 'Conversation: Fix loop', 'Messages: 3', 'Workspace: /w', 'State: idle']);
   assert.ok(commands.statusLines({ version: {} }).includes('Conversation: none open'));
 });

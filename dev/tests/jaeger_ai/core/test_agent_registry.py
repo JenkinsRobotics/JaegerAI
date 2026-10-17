@@ -648,7 +648,7 @@ def test_system_prompt_for_session_agent_specialist():
         role=AgentRole.SPECIALIST,
         metadata={
             "specialty": "gateway",
-            "summary": "Spine health, agents catalog, sessions, and approvals on :8810.",
+            "summary": "Spine health, agents catalog, sessions, and approvals on :33418.",
         },
     )
     prompt = JaegerGatewayApp._system_prompt_for_agent(agent)

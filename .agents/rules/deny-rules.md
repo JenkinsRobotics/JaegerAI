@@ -3,7 +3,7 @@
 ## 1. Process Management & Termination Guard
 * **NEVER run `pkill -f` or `killall`:**
   * Blanket process killing risks abruptly killing active Gateway daemons (`jaeger gateway daemon`), IDE extension servers, or user workspace processes.
-  * To stop or restart services, use explicit lifecycle verbs (e.g., `jaeger gateway stop`, `jaeger bridge stop`) or query the specific process PID (`lsof -i :8810`) and terminate only that PID.
+  * To stop or restart services, use explicit lifecycle verbs (e.g., `jaeger gateway stop`, `jaeger bridge stop`) or query the specific process PID (`lsof -i :33418`, or the legacy `:8810` while installed services still use it) and terminate only that PID.
 
 ## 2. Git Staging & Index Safety
 * **NEVER run blanket staging commands:**

@@ -3,7 +3,7 @@
 
 Scope:
 - Isolated test state only (/tmp/jaeger-acceptance-$$).
-- Loopback Gateway on 127.0.0.1:8810 and WebUI on 127.0.0.1:8790.
+- Loopback Gateway on 127.0.0.1:GATEWAY_PORT (contract/ports.py) and WebUI on 127.0.0.1:8790.
 - Scripted / cloud model representation without loading local model weights in RAM.
 - Zero credential migration, zero secret reads, zero billing, zero network egress.
 - Bounded verification of:
@@ -37,7 +37,10 @@ import aiohttp
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TEST_DIR = Path(f"/tmp/jaeger-live-accept-{os.getpid()}")
-GATEWAY_PORT = 8810
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+from jaeger_ai.contract.ports import GATEWAY_PORT  # noqa: E402
+
 WEBUI_PORT = 8790
 
 
@@ -360,14 +363,14 @@ async def run_acceptance():
 
     OpenAIAdapter.call = mock_model_call
 
-    # Initialize and start Gateway on 127.0.0.1:8810
+    # Initialize and start Gateway on 127.0.0.1:GATEWAY_PORT
     store = GatewaySessionStore(TEST_DIR / "gateway_sessions.sqlite3")
     gateway_app = JaegerGatewayApp(store=store)
     gw_runner = web.AppRunner(gateway_app.app)
     await gw_runner.setup()
     site = web.TCPSite(gw_runner, "127.0.0.1", GATEWAY_PORT)
     await site.start()
-    print("[+] Gateway daemon started on 127.0.0.1:8810")
+    print(f"[+] Gateway daemon started on 127.0.0.1:{GATEWAY_PORT}")
 
     # Initialize and start WebUI on 127.0.0.1:8790
     webui_root = REPO_ROOT / "jaeger_ai" / "features" / "webui"

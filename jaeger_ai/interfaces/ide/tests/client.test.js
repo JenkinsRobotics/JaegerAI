@@ -26,7 +26,7 @@ test('SSE UTF-8, CRLF, multiline data, arbitrary chunk splits and incomplete EOF
   assert.deepEqual(events, [{ name: 'turn.delta', id: '7', payload: { text: '🌱' } }]);
 });
 test('Gateway passes callerToken option into Authorization header', () => {
-  const gw = new Gateway('http://127.0.0.1:8810', { callerToken: 'test-token-123' });
+  const gw = new Gateway('http://127.0.0.1:33418', { callerToken: 'test-token-123' });
   assert.deepEqual(gw.auth(), { Authorization: 'Bearer test-token-123' });
 });
 test('native loopback transport reaches an authenticated Gateway without global fetch', async t => {

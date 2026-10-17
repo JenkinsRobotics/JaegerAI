@@ -290,9 +290,12 @@ def _gateway_base_url(config_data=None, environ: dict[str, str] | None = None) -
         or source.get("HERMES_WEBUI_GATEWAY_URL")
         or source.get(_WEBUI_GATEWAY_BASE_URL_ENV)
         or cfg.get("webui_gateway_base_url")
-        or "http://127.0.0.1:8810"
+        or ""
     ).strip()
-    return raw.rstrip("/") or "http://127.0.0.1:8810"
+    if raw:
+        return raw.rstrip("/")
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    return resolve_gateway_url(source)
 
 
 def _is_jaeger_gateway(base_url: str) -> bool:
@@ -301,8 +304,14 @@ def _is_jaeger_gateway(base_url: str) -> bool:
     jg = (os.environ.get("JAEGER_GATEWAY_URL") or "").rstrip("/")
     if jg and target == jg:
         return True
-    if target.endswith(":8810"):
-        return True
+    from urllib.parse import urlsplit
+
+    from jaeger_ai.contract.ports import is_gateway_port
+    try:
+        if is_gateway_port(urlsplit(target).port):
+            return True
+    except ValueError:
+        pass
     try:
         req = urllib.request.Request(f"{target}/version", headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=1.0) as resp:

@@ -82,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
         "  a2a         run the A2A JSON-RPC server (loopback :8796)\n"
         "  gateway     install/start/stop Agentgateway (MCP :8811, A2A :8812)\n"
         "  gateway daemon\n"
-        "              run the Jaeger Gateway (sessions + SSE, loopback :8810)\n"
+        "              run the Jaeger Gateway (sessions + SSE, loopback :33418)\n"
         "  hermes-webui-adapter\n"
         "              run the loopback adapter for the Hermes WebUI\n"
         "  capability  validate a capability package (`capability validate`)\n"

@@ -63,7 +63,7 @@ Module._resolveFilename = (req, parent, isMain, opts) => {
 };
 require.cache['__mock_vscode__'] = { id: '__mock_vscode__', filename: '__mock_vscode__', loaded: true, exports: mockVscode };
 require.cache[CONTRACT_KEY] = { id: CONTRACT_KEY, filename: CONTRACT_KEY, loaded: true,
-  exports: { gatewayUrl: 'http://127.0.0.1:8810' } };
+  exports: { gatewayUrl: 'http://127.0.0.1:33418' } };
 
 // ---- Stub gateway --------------------------------------------------------
 // Records the most-recent admission body. Injected into the module cache so
@@ -87,7 +87,8 @@ class GatewayStub {
 class GatewayErrorStub extends Error {}
 const gwPath = require.resolve('../gateway');
 require.cache[gwPath] = { id: gwPath, filename: gwPath, loaded: true,
-  exports: { Gateway: GatewayStub, GatewayError: GatewayErrorStub, localEndpoint: u => u, decodeSSE: async function* () {} } };
+  exports: { Gateway: GatewayStub, GatewayError: GatewayErrorStub, localEndpoint: u => u, decodeSSE: async function* () {},
+    resolveDefaultEndpoint: async contract => contract.gatewayUrl } };
 
 // ---- Load extension ------------------------------------------------------
 const { activate } = require('../extension');

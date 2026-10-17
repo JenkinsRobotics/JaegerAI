@@ -15,6 +15,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from jaeger_ai.contract.ports import GATEWAY_PORT
+
 
 def _cmd_capability_argv(argv: list[str]) -> int:
     if not argv or argv[0] in ("-h", "--help"):
@@ -318,8 +320,8 @@ def device_inspect_report(device_id: str | None = None) -> dict[str, Any]:
         "ok": device_id is None or match is not None,
         "registry_status": "EXPERIMENTAL in-memory DeviceRegistry (not production persistence)",
         "client_surfaces": [
-            {"name": "Mac SwiftUI", "role": "ATTACHED_CLIENT", "transport": "REST+SSE :8810 / AF_UNIX bridge"},
-            {"name": "WebUI", "role": "ATTACHED_CLIENT", "transport": "HTTP :8790 → Gateway :8810"},
+            {"name": "Mac SwiftUI", "role": "ATTACHED_CLIENT", "transport": f"REST+SSE :{GATEWAY_PORT} / AF_UNIX bridge"},
+            {"name": "WebUI", "role": "ATTACHED_CLIENT", "transport": f"HTTP :8790 → Gateway :{GATEWAY_PORT}"},
             {"name": "CLI", "role": "ATTACHED_CLIENT", "transport": "in-process / Gateway"},
             {"name": "Phone PWA", "role": "ATTACHED_CLIENT", "transport": "Tailscale HTTPS :8443 → WebUI"},
         ],
