@@ -135,6 +135,8 @@ _IMAGE_QUESTION_OPENERS = frozenset({
 #: whichever comes first: this many characters or this many seconds.
 TURN_DELTA_BATCH_CHARS = 96
 TURN_DELTA_BATCH_S = 0.1
+#: Reasoning batches flush on time (TURN_DELTA_BATCH_S) or at this size.
+TURN_REASONING_BATCH_CHARS = 2048
 TOOL_EVENT_NAME_MAX = 80
 TOOL_EVENT_DURATION_MAX_S = 86_400.0
 
@@ -3185,10 +3187,24 @@ class JaegerGatewayApp:
                 self.event_bus.publish(session_id, "turn.delta", {**ids, "delta": text, "channel": "provisional"})
 
         reasoning_started: list[float | None] = [None]
+        # Reasoning arrives a few characters at a time; like text deltas it is
+        # coalesced (~TURN_DELTA_BATCH_S) and always flushed before any other
+        # event, so ordering is unchanged.
+        reasoning_pending: list[str] = []
+        reasoning_last = [time.monotonic()]
+
+        def flush_reasoning() -> None:
+            with lock:
+                text = "".join(reasoning_pending)
+                reasoning_pending.clear()
+                reasoning_last[0] = time.monotonic()
+            if text:
+                self.event_bus.publish(session_id, "turn.reasoning", {**ids, "text": text})
 
         def end_reasoning() -> None:
             # One ``turn.reasoning.done`` per reasoning run, when the answer,
             # a tool, or the end of the turn follows it (chat "Thought for Ns").
+            flush_reasoning()
             with lock:
                 started, reasoning_started[0] = reasoning_started[0], None
             if started is not None:
@@ -3211,7 +3227,11 @@ class JaegerGatewayApp:
                 with lock:
                     if reasoning_started[0] is None:
                         reasoning_started[0] = time.time()
-                self.event_bus.publish(session_id, "turn.reasoning", {**ids, "text": str(text)})
+                    reasoning_pending.append(str(text))
+                    due = sum(map(len, reasoning_pending)) >= TURN_REASONING_BATCH_CHARS or (
+                        time.monotonic() - reasoning_last[0] >= TURN_DELTA_BATCH_S)
+                if due:
+                    flush_reasoning()
 
         def on_tool_progress(name: str, phase: str, data: Any) -> None:
             # ``done`` is followed immediately by the richer ``tool_done``
@@ -3275,6 +3295,7 @@ class JaegerGatewayApp:
                     plan_payload["explanation"] = result["explanation"][:500]
             del args, result, error
             flush()
+            end_reasoning()
             raw_name = str(name or "")
             with lock:
                 queued = active_tools.get(raw_name)
