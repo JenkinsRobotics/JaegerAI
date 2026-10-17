@@ -61,7 +61,7 @@ def register(subparsers: Any) -> None:
 
 
 def run_list(args: Any) -> int:
-    wanted = (args.profile or "").strip().lower() or None
+    wanted = (getattr(args, "profile", None) or "").strip().lower() or None
     limit = max(0, int(getattr(args, "limit", 5) or 0))
     buckets = by_profile()
 
