@@ -124,6 +124,7 @@ def test_jaeger_chat_returns_json_when_body_is_invalid():
 
 
 def test_jaeger_chat_uses_a_fresh_mcp_session_per_turn(monkeypatch):
+    from jaeger_ai.core.gateway import native_mcp as jaeger
     created = []
     host = jaeger.MCPClient("http://127.0.0.1:8811/mcp", "key", "127.0.0.1:8811")
 
@@ -150,6 +151,7 @@ def test_jaeger_chat_uses_a_fresh_mcp_session_per_turn(monkeypatch):
 
 
 def test_jaeger_host_adapter_uses_native_mcp_by_default(monkeypatch):
+    from jaeger_ai.core.gateway import native_mcp as jaeger
     monkeypatch.delenv("JAEGERS_MCP_API_KEY", raising=False)
     monkeypatch.setattr(jaeger, "_profile_secret", lambda _name: "")
 
@@ -192,6 +194,7 @@ def test_jaeger_nonstream_completion_returns_openai_json(monkeypatch):
 
 
 def test_jaeger_retry_classifier_does_not_replay_client_errors():
+    from jaeger_ai.core.gateway import native_mcp as jaeger
     from urllib.error import HTTPError
 
     assert not jaeger._is_transient_http(HTTPError("http://mcp", 400, "bad", {}, None))
@@ -200,6 +203,7 @@ def test_jaeger_retry_classifier_does_not_replay_client_errors():
 
 
 def test_mcp_key_is_resolved_after_import(monkeypatch):
+    from jaeger_ai.core.gateway import native_mcp as jaeger
     monkeypatch.setattr(jaeger, "_profile_secret", lambda _name: "late-profile-key")
     monkeypatch.delenv("JAEGERS_MCP_API_KEY", raising=False)
     assert jaeger.mcp_api_key() == "late-profile-key"
