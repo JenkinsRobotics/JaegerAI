@@ -128,6 +128,7 @@ final class VoiceController {
     }
 
     func stopSpeaking() { tts.stop() }
+    var isRecording: Bool { recorder.isRecording }
 
     func shutdown() {
         levelTimer?.invalidate()

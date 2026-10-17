@@ -6,7 +6,7 @@
 // navigation + WKContentRuleList; inline "not running" page instead of alert+quit; minimal main
 // menu (Quit, Edit, Reload); developer extras only in DEBUG; menu-bar (accessory) app with a
 // status item, window hides on close; --verify-launch self-check; global hotkey (JaegerHotkey);
-// `jaeger` JS⇄native bridge (NativeBridge) + headless --verify-bridge.
+// `jaeger` JS⇄native bridge (NativeBridge) + headless --verify-bridge; gated visible --visible-check.
 
 import AppKit
 import JaegerShellCore
@@ -36,6 +36,8 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     let verifyBridgeMode = CommandLine.arguments.contains("--verify-bridge")
     private(set) var bridge: NativeBridge?
     private var bridgeVerifier: BridgeVerifier?
+    private var visibleChecker: VisibleChecker?
+    var hotkeyLabel: String { hotkeyChoice.spec.label }
     private(set) var voiceController: VoiceController?
 
     /// Created on first voice use (never in --verify-launch / --verify-bridge).
@@ -68,6 +70,12 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             emitVerifyReport()
             NSApp.terminate(nil)
             return
+        }
+        if VisibleChecker.enabled {
+            shellLog("[shell][visible-check] enabled")
+            let checker = VisibleChecker(app: self)
+            visibleChecker = checker
+            checker.startTimeout()
         }
         showWindow()
         installRulesThenLoad()
@@ -267,6 +275,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         if !showingErrorPage {
             shellLog("[shell] loaded \(webView.url?.absoluteString ?? "nil")")
             bridgeVerifier?.pageLoaded(webView)
+            visibleChecker?.pageLoaded(webView)
         }
     }
 

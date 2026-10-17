@@ -106,6 +106,14 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
     }
 
+    // MARK: --visible-check hooks (read-only: titles/icon; probe = what opening the menu does)
+    func debugProbe() { menuWillOpen(menu) }
+    func debugSnapshot() -> [String: Any] {
+        let image = statusItem.button?.image
+        let icon = image == nil ? "none" : (image === runningIcon ? "running" : (image === offIcon ? "off" : "fallback"))
+        return ["present": isPresent, "icon": icon, "titles": menu.items.filter { !$0.isSeparatorItem }.map(\.title)]
+    }
+
     @objc private func toggle(_ sender: Any?) { app.toggleWindow() }
     @objc private func reload(_ sender: Any?) { app.showWindow(); app.reloadShell(nil) }
     @objc private func quit(_ sender: Any?) { NSApp.terminate(nil) }
