@@ -1,0 +1,10 @@
+.jg-tasks { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.jg-board { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--aether-space-3); padding: 0 var(--aether-space-4) var(--aether-space-4); overflow: auto; }
+.jg-board__col { display: flex; flex-direction: column; gap: var(--aether-space-2); background: var(--aether-color-bg-inset); border-radius: var(--aether-radius-button); padding: var(--aether-space-3); min-height: 0; }
+.jg-board__title { margin: 0 0 var(--aether-space-1); font-size: var(--aether-font-size-label); font-weight: var(--aether-font-weight-strong); }
+.jg-card { background: var(--aether-color-bg-control); border: 1px solid var(--aether-color-border); border-radius: var(--aether-radius-button); padding: var(--aether-space-3); }
+.jg-card__goal { margin-bottom: var(--aether-space-2); }
+.jg-card__meta { display: flex; flex-wrap: wrap; gap: var(--aether-space-2); color: var(--aether-color-text-dim); font-size: var(--aether-font-size-caption); }
+.jg-card--needs_owner, .jg-card--blocked { border-color: color-mix(in srgb, var(--aether-color-warn) 55%, transparent); }
+.jg-card--failed { border-color: color-mix(in srgb, var(--aether-color-error) 55%, transparent); }
+.jg-tag { padding: 0 var(--aether-space-2); border-radius: 999px; border: 1px solid var(--aether-color-border); }
