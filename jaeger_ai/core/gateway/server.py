@@ -3124,7 +3124,20 @@ class JaegerGatewayApp:
             if text:
                 self.event_bus.publish(session_id, "turn.delta", {**ids, "delta": text, "channel": "provisional"})
 
+        reasoning_started: list[float | None] = [None]
+
+        def end_reasoning() -> None:
+            # One ``turn.reasoning.done`` per reasoning run, when the answer,
+            # a tool, or the end of the turn follows it (chat "Thought for Ns").
+            with lock:
+                started, reasoning_started[0] = reasoning_started[0], None
+            if started is not None:
+                self.event_bus.publish(session_id, "turn.reasoning.done", {
+                    **ids, "started_at": started,
+                    "duration_ms": max(0, int((time.time() - started) * 1000))})
+
         def on_delta(piece: str) -> None:
+            end_reasoning()
             with lock:
                 pending.append(str(piece))
                 due = sum(map(len, pending)) >= TURN_DELTA_BATCH_CHARS or (
@@ -3135,6 +3148,9 @@ class JaegerGatewayApp:
         def on_reasoning(text: str) -> None:
             flush()
             if text:
+                with lock:
+                    if reasoning_started[0] is None:
+                        reasoning_started[0] = time.time()
                 self.event_bus.publish(session_id, "turn.reasoning", {**ids, "text": str(text)})
 
         def on_tool_progress(name: str, phase: str, data: Any) -> None:
@@ -3144,6 +3160,7 @@ class JaegerGatewayApp:
             if phase != "start":
                 return
             flush()
+            end_reasoning()
             raw_name = str(name or "")
             self.event_bus.publish(session_id, "turn.progress", {**ids, "channel": "progress"})
             activity_id = f"tool_{uuid.uuid4().hex}"
@@ -3237,12 +3254,16 @@ class JaegerGatewayApp:
             if plan_payload is not None:
                 self.event_bus.publish(session_id, "turn.plan", {**ids, **plan_payload})
 
+        def finish() -> None:
+            flush()
+            end_reasoning()
+
         return AgentCallbacks(
             stream_delta=on_delta,
             reasoning=on_reasoning,
             tool_progress=on_tool_progress,
             tool_done=on_tool_done,
-        ), flush
+        ), finish
 
     def _owner_react_turn(
         self, prompt: str, *, session_key: str, request_id: str,
