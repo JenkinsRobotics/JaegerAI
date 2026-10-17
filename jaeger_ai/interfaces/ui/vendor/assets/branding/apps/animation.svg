@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024"><defs>
+ <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#083773"/><stop offset=".48" stop-color="#181956"/><stop offset="1" stop-color="#0b1026"/></linearGradient>
+ <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0087ef"/><stop offset=".45" stop-color="#3426d1"/><stop offset="1" stop-color="#0d152c"/></linearGradient>
+ <linearGradient id="shine" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#4aa9fa" stop-opacity=".6"/><stop offset=".6" stop-color="#8170fb" stop-opacity=".45"/><stop offset="1" stop-color="#647699" stop-opacity=".25"/></linearGradient>
+ <linearGradient id="left" x1=".6" y1="0" x2=".3" y2="1"><stop stop-color="#bcf5ff"/><stop offset=".4" stop-color="#2dbaff"/><stop offset="1" stop-color="#00dcf3"/></linearGradient>
+ <linearGradient id="right" x1=".25" y1="0" x2=".7" y2="1"><stop stop-color="#3111c6"/><stop offset=".35" stop-color="#ae7dff"/><stop offset=".55" stop-color="#b897ff"/><stop offset=".72" stop-color="#7841f9"/><stop offset="1" stop-color="#a36aff"/></linearGradient>
+ <linearGradient id="bar"><stop stop-color="#21c5ed"/><stop offset=".55" stop-color="#3187ff"/><stop offset="1" stop-color="#7145ff"/></linearGradient>
+ <linearGradient id="fold"><stop stop-color="#002971"/><stop offset="1" stop-color="#087cff"/></linearGradient>
+ <linearGradient id="foot" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#25f7ee"/><stop offset="1" stop-color="#0491ff"/></linearGradient>
+ <linearGradient id="purplefold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#3923bb"/><stop offset=".55" stop-color="#865bff"/><stop offset="1" stop-color="#b798ff"/></linearGradient>
+ <radialGradient id="orange"><stop stop-color="#ffad56"/><stop offset="1" stop-color="#ff704b"/></radialGradient>
+ <filter id="shadow" x="-.3" y="-.3" width="1.6" height="1.6"><feDropShadow dx="0" dy="8" stdDeviation="9" flood-color="#00061f" flood-opacity=".7"/></filter>
+ </defs><rect x="24" y="24" width="976" height="976" rx="220" fill="url(#rim)"/><rect x="43" y="44" width="938" height="930" rx="197" fill="url(#tile)" stroke="url(#shine)" stroke-width="9"/><g filter="url(#shadow)">
+  <path d="M570 195L900 830H693L503 385Z" fill="url(#right)"/>
+  <path d="M441 195H570L403 507L330 830H110Z" fill="url(#left)"/>
+  <path d="M110 830L258 516L330 830Z" fill="url(#foot)"/>
+  <path d="M258 516L405 617L330 830Z" fill="url(#fold)"/>
+  <path d="M318 409L403 507L258 516Z" fill="#18c8ed"/>
+  <path d="M693 830L693 607L818 713Z" fill="url(#purplefold)"/>
+  <path d="M258 516L405 507H695L755 617H317Z" fill="url(#bar)"/>
+  <path d="M442 195H570" fill="none" stroke="#d7fcff" stroke-width="3" opacity=".8"/>
+  </g><g filter="url(#shadow)"><circle cx="508" cy="558" r="42" fill="url(#orange)" stroke="#fff" stroke-width="14"/></g><path d="M305 882H715" stroke="#8eacc8" stroke-width="8"/><circle cx="305" cy="882" r="20" fill="#8eacc8"/><circle cx="715" cy="882" r="20" fill="#8eacc8"/><circle cx="509" cy="882" r="27" fill="url(#orange)" stroke="#fff" stroke-width="10"/></svg>

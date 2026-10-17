@@ -1,0 +1,7 @@
+{
+  "$schema": "aether-icon-pack/v1",
+  "id": "aether-default",
+  "name": "Aether Default Icons",
+  "description": "The default interface icon pack: 24px stroke glyphs (1.7px, currentColor) registered through the AetherIcon registry. An alternate pack registers the same names with different artwork.",
+  "iconsFromDirectory": true
+}

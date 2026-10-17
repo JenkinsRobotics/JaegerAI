@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <g stroke="var(--tool-blue,#198fdf)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">
+<circle cx="16" cy="16" r="11" fill="var(--tool-blue,#198fdf)" fill-opacity=".12"/>
+<rect x="14" y="3" width="4" height="4" fill="var(--tool-paper,#eff6fb)" stroke="var(--tool-orange,#e99343)" stroke-width="1.5"/><rect x="4.5" y="19.5" width="4" height="4" fill="var(--tool-paper,#eff6fb)" stroke="var(--tool-orange,#e99343)" stroke-width="1.5"/><rect x="23.5" y="19.5" width="4" height="4" fill="var(--tool-paper,#eff6fb)" stroke="var(--tool-orange,#e99343)" stroke-width="1.5"/>
+  </g>
+</svg>
