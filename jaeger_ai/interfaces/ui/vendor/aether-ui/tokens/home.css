@@ -1,0 +1,18 @@
+/* Shared home/admin surface palette, based on the Studio workspace reference. */
+.aether-home-theme {
+  --aether-color-bg-app: #1e1e1e;
+  --aether-color-bg-shell: #262829;
+  --aether-color-bg-bar: #262829;
+  --aether-color-bg-panel: #2b2d30;
+  --aether-color-bg-inset: #333537;
+  --aether-color-bg-control: #333537;
+  --aether-color-border: #414345;
+  --aether-color-text: #f0f0f1;
+  --aether-color-text-dim: #a6a9ae;
+  --aether-color-accent: #3269ff;
+}
+
+.aether-home-theme .aui-button--primary:hover:not(:disabled) {
+  background: #2454d6;
+  border-color: #7198ff;
+}

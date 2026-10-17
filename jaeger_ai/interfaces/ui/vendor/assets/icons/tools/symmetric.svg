@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+ <path d="M16 3V29" stroke="var(--tool-orange,#e99343)" stroke-width="2" stroke-dasharray="3 3"/>
+ <path d="M4 24V8L11 16ZM28 24V8L21 16Z" fill="var(--tool-blue,#198fdf)" fill-opacity=".2" stroke="var(--tool-blue,#198fdf)" stroke-width="2" stroke-linejoin="round"/>
+ <path d="M11 16H21" stroke="var(--tool-orange,#e99343)" stroke-width="1.5"/>
+</svg>
