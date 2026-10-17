@@ -56,3 +56,12 @@ describe("agents", () => {
     expect(isUnread("a", 30, { a: 20 }, false)).toBe(true);
   });
 });
+
+import { AVATAR_PALETTE, avatarColor } from "./agents/avatarColor";
+describe("avatar color", () => {
+  it("is deterministic and drawn from Aether tokens", () => {
+    expect(avatarColor("agent:mac-app")).toBe(avatarColor("agent:mac-app"));
+    expect(AVATAR_PALETTE).toContain(avatarColor("x"));
+    expect(avatarColor("x")).toMatch(/^var\(--aether-color-/);
+  });
+});

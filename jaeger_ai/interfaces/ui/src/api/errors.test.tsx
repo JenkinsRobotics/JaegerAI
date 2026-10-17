@@ -33,7 +33,7 @@ describe("no silent fallback to fake data", () => {
     const slots = agentsSidebarSlots({
       state: { agents: [], summaries: [], seen: {}, loading: false, error: down.message },
       selection: { type: "agent", agentId: "native:jaeger" },
-      onSelect: () => {}, onNewChat: () => {}, onSearch: () => {}, onConnectApps: () => {}, onRetry: () => {}, userInitials: "MJ",
+      onSelect: () => {}, onNewChat: () => {}, onSearch: () => {}, onConnectApps: () => {}, onRetry: () => {}, userInitials: "MJ", status: { kind: "error", label: "Gateway unreachable" },
     });
     const html = renderToStaticMarkup(<>{slots.primary}</>);
     expect(html).toContain("Couldn&#x27;t load agents");

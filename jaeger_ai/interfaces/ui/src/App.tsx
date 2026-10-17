@@ -12,14 +12,19 @@ import { detectHost, voiceFlag } from "./platform/host";
 import { onNativeEvent } from "./platform/native";
 import { AppShell } from "./shell/AppShell";
 import { ErrorState } from "./shell/ErrorState";
-import { Tray } from "./shell/Tray";
 import { TasksBoard } from "./tasks/TasksBoard";
 
 const LEAD_ID = "native:jaeger";
 
 export function App({ source }: { source: JaegerSource }) {
   const hostKind = detectHost();
-  const host = useMemo(() => (hostKind === "macos" ? new NativeHost(source) : new WebHost(source)), [source, hostKind]);
+  const host = useMemo(() => {
+    const created = hostKind === "macos" ? new NativeHost(source) : new WebHost(source);
+    // Dev mock only: show the voice controls for visual parity with the target.
+    // Live default stays off (flag + native mic/tts probe).
+    if (source.kind === "mock" && hostKind !== "macos") created.capabilities = { voice: true };
+    return created;
+  }, [source, hostKind]);
   const store = useAgentsStore(source);
   const [selection, setSelection] = useState<Selection>({ type: "agent", agentId: LEAD_ID });
   const [sessionId, setSessionId] = useState<string>();
@@ -85,6 +90,9 @@ export function App({ source }: { source: JaegerSource }) {
     onConnectApps: () => setConnectOpen(true),
     onRetry: () => void store.refresh(),
     userInitials: "MJ",
+    status: source.kind === "mock"
+      ? { kind: "warn", label: "Mock data (dev)" }
+      : store.error ? { kind: "error", label: "Gateway unreachable" } : { kind: "ok", label: "Connected" },
   });
 
   return (
@@ -94,7 +102,6 @@ export function App({ source }: { source: JaegerSource }) {
         primary={slots.primary}
         sections={slots.sections}
         footer={slots.footer}
-        tray={<Tray status={source.kind === "mock" ? "warn" : store.error ? "error" : "ok"} label={source.kind === "mock" ? "Mock data" : store.error ? "Gateway unreachable" : "Connected"} />}
       >
         {selection.type === "tasks"
           ? <TasksBoard source={source} agents={store.agents} />
