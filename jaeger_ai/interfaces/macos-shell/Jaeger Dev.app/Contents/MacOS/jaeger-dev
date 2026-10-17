@@ -1,0 +1,80 @@
+#!/bin/zsh
+# Jaeger Dev launcher — script-only bundle, committed as source (no compiled binaries).
+#
+# Opening "Jaeger Dev.app":
+#   1. JaegerShell (dev build) already running → skip the rebuild, activate it.
+#   2. Otherwise run an incremental debug build (Scripts/build-shell.sh → .build/ui-rebuild,
+#      bundle id com.jenkinsrobotics.JaegerAI.uirebuild), then open the built JaegerShell.app.
+#      With no overrides it loads the new UI from the gateway at http://127.0.0.1:33418/?host=macos.
+#   3. Build failure → dialog naming the log (~/Library/Logs/JaegerDev/build.log).
+#
+# Headless checks (never open anything):  jaeger-dev --dry-run | --build-only
+# Never touches /Applications, JaegerAI.app, launchd, ~/.jaeger or the Dock.
+set -u
+export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin"
+# Don't hand inherited non-loopback bind vars to the build.
+unset HERMES_WEBUI_HOST HOST 2>/dev/null
+
+MODE=open
+case "${1:-}" in
+  --dry-run) MODE=dry ;;
+  --build-only) MODE=build ;;
+  "") ;;
+  -psn_*) ;;   # Finder/LaunchServices process serial number
+  *) print -u2 "usage: jaeger-dev [--dry-run|--build-only]"; exit 2 ;;
+esac
+
+BUNDLE="${0:A:h:h:h}"            # …/macos-shell/Jaeger Dev.app
+PKG="${BUNDLE:h}"                # …/macos-shell
+BUILD="$PKG/Scripts/build-shell.sh"
+APP="$PKG/.build/ui-rebuild/JaegerShell.app"
+EXE="$APP/Contents/MacOS/JaegerShell"
+LOGDIR="$HOME/Library/Logs/JaegerDev"
+LOG="$LOGDIR/build.log"
+
+case "$APP/" in "$HOME/.jaeger/"*|/Applications/*) print -u2 "refusing app path $APP"; exit 1 ;; esac
+[[ -x "$BUILD" ]] || { print -u2 "missing $BUILD"; exit 1; }
+
+say() { print -r -- "[jaeger-dev] $*"; }
+alert() {   # only when opened for real
+  [[ $MODE == open ]] || return 0
+  /usr/bin/osascript - "$1" <<'AS' >/dev/null 2>&1
+on run argv
+  display dialog (item 1 of argv) with title "Jaeger Dev" buttons {"OK"} default button "OK" with icon caution
+end run
+AS
+}
+
+running=no
+/usr/bin/pgrep -f "^$EXE" >/dev/null 2>&1 && running=yes
+
+say "package:  $PKG"
+say "app:      $APP"
+say "log:      $LOG"
+say "running:  $running"
+
+if [[ $MODE == dry ]]; then
+  if [[ $running == yes ]]; then say "plan: skip rebuild, activate running JaegerShell (open \"$APP\")"
+  else say "plan: $BUILD > $LOG, then open \"$APP\" (main screen: gateway default http://127.0.0.1:33418/?host=macos)"; fi
+  exit 0
+fi
+
+if [[ $running == yes && $MODE == open ]]; then
+  say "JaegerShell already running → activating (no rebuild)"
+  exec /usr/bin/open "$APP"
+fi
+
+mkdir -p "$LOGDIR"
+say "building (debug, incremental) …"
+{ print "=== $(date '+%Y-%m-%d %H:%M:%S %Z') jaeger-dev build"; "$BUILD"; } >"$LOG" 2>&1
+rc=$?
+if (( rc != 0 )); then
+  say "build FAILED (exit $rc) — log: $LOG"
+  alert "JaegerShell build failed (exit $rc). Log: $LOG"
+  exit $rc
+fi
+[[ -x "$EXE" ]] || { say "build reported success but $EXE is missing — log: $LOG"; alert "Build output missing. Log: $LOG"; exit 1; }
+ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Contents/Info.plist" 2>/dev/null)"
+say "build ok: $APP ($ID)"
+[[ $MODE == build ]] && exit 0
+exec /usr/bin/open "$APP"
