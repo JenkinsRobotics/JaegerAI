@@ -57,6 +57,31 @@ LOCKED_WEBUI_URL = os.environ.get(
 DEFAULT_OLLAMA_MODEL = os.environ.get("JAEGER_GATEWAY_OLLAMA_MODEL", "kimi-k2.7-code:cloud")
 
 
+NO_TOOLS_LANE_NOTE = (
+    "[No tools in this conversation]\n"
+    "This turn runs without tools: you cannot run commands, read or write files, "
+    "or change memory here. Do not write tool calls, JSON tool arguments, or "
+    "commands as if you were running them, and never claim an action happened. "
+    "Answer from what you already know, or say plainly that the task needs Agent "
+    "mode (tools enabled)."
+)
+
+
+def no_tools_lane_system_prompt(system_prompt: str | None) -> str:
+    """System prompt for the tool-less model-only lane (Chat tier, specialists).
+
+    The base prompt still describes Jaeger's tools. With ``interaction_tier: chat``
+    the SOTA run (2026-10-16) sent every request down this lane, and the model
+    wrote its tool calls out as text (```json {"command": ...}``` and
+    ``recall(key=...)``) that nothing executed. Stating the lane's limits keeps
+    the answer honest instead of looking like work that was done.
+    """
+    base = (system_prompt or "").rstrip()
+    if NO_TOOLS_LANE_NOTE in base:
+        return base
+    return f"{base}\n\n{NO_TOOLS_LANE_NOTE}" if base else NO_TOOLS_LANE_NOTE
+
+
 def _model_has_vision(model: str) -> bool:
     """True when this model has a VISION certification (or an explicit override)."""
     try:
@@ -3457,7 +3482,7 @@ class JaegerGatewayApp:
                     self._ollama_chat(
                         prompt,
                         model=model,
-                        system_prompt=system_prompt,
+                        system_prompt=no_tools_lane_system_prompt(system_prompt),
                         history=self._history_before_admitted_user(current, admitted_request),
                         attachments=self._turn_attachments(session_id, execution),
                     ),
