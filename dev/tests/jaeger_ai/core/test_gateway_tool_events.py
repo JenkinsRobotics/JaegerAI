@@ -48,6 +48,7 @@ def test_tool_callbacks_preserve_text_order_and_distinguish_repeated_calls(tmp_p
         "turn.start",
         "turn.delta",
         "turn.reasoning",
+        "turn.reasoning.done",  # the tool call ends the reasoning run
         "turn.progress",
         "tool.started",
         "turn.progress",

@@ -588,6 +588,9 @@ class _GatewayToolConfirmationProvider:
             )
             self.app.event_bus.publish(self.session_id, "approval.request", {
                 "approval_id": aid,
+                # Same card shape as handoff approvals (see handle_stream_events).
+                "kind": "tool",
+                "prompt": f"Allow {skill}.{op}? {target}".strip(),
                 "tool": f"{skill}.{op}" if skill else op,
                 "target": target,
                 "reason": tier_name,

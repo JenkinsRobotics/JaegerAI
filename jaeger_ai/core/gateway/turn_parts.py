@@ -8,8 +8,9 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
+_TOOL_END = {"tool.completed": "done", "tool.done": "done", "tool.failed": "error", "tool.error": "error"}
 PART_EVENTS = ("turn.delta", "turn.reasoning", "turn.reasoning.done", "tool.started",
-               "tool.done", "tool.error", "turn.plan")
+               *_TOOL_END, "turn.plan")
 
 
 def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -40,12 +41,12 @@ def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
                     "status": "running", **({"input": data["input"]} if data.get("input") else {})}
             tools[str(data.get("call_id"))] = part
             parts.append(part)
-        elif name in {"tool.done", "tool.error"}:
+        elif name in _TOOL_END:
             part = tools.get(str(data.get("call_id")))
             if part is None:
                 part = {"type": "tool", "call_id": data.get("call_id"), "tool": data.get("tool")}
                 parts.append(part)
-            part["status"] = "done" if name == "tool.done" else "error"
+            part["status"] = _TOOL_END[name]
             part["elapsed_s"] = data.get("elapsed_s")
             if data.get("output"):
                 part["output"] = data["output"]
