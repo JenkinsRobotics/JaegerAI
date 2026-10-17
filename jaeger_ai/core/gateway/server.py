@@ -2209,8 +2209,26 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Invalid cursor"}, status=400)
         return web.json_response(self.store.activity_history(session_id, after))
 
+    def _session_model_choice(self, model_id: str) -> dict[str, Any] | None:
+        """``{model, provider}`` if ``model_id`` is a reachable /v1/runtime/models entry.
+
+        Accepts a bare model name or a routed ``@provider:model`` id."""
+        from jaeger_ai.contract.model_ids import split_routed_model_id
+        from jaeger_ai.core.runtime.truth import provider_model_inventory
+
+        lane, name = split_routed_model_id(model_id)
+        for provider in provider_model_inventory().get("providers") or []:
+            if not provider.get("reachable") or (lane and provider.get("id") != lane):
+                continue
+            if any(str(m.get("id")) == name for m in provider.get("models") or []):
+                return {"model": name, "provider": provider.get("id")}
+        return None
+
     async def handle_patch_session(self, request: web.Request) -> web.Response:
-        """PATCH /v1/sessions/{id} — the one place title and archive state change."""
+        """PATCH /v1/sessions/{id} — the one place title, archive state and the
+        session's default ``model`` change. ``model`` must be a reachable
+        /v1/runtime/models entry (or null to clear); turns use it unless the
+        turn names its own model."""
         session_id = request.match_info["id"]
         try:
             body = await request.json()
@@ -2225,10 +2243,23 @@ class JaegerGatewayApp:
         archived = body.get("archived")
         if "archived" in body and not isinstance(archived, bool):
             return web.json_response({"error": "archived must be a boolean"}, status=400)
+        model = body.get("model")
+        if "model" in body and model is not None and (not isinstance(model, str) or not model.strip()):
+            return web.json_response({"error": "model must be a non-empty string or null"}, status=400)
 
         session = self.store.get_session(session_id)
         if session is None:
             return web.json_response({"error": "Session not found"}, status=404)
+        if "model" in body:
+            if model is None:
+                choice = {"model": None, "provider": None}
+            else:
+                choice = await asyncio.to_thread(self._session_model_choice, model.strip())
+                if choice is None:
+                    return web.json_response(
+                        {"error": f"Unknown or unreachable model {model.strip()!r} (see /v1/runtime/models)"},
+                        status=400)
+            session = self.store.update_metadata(session_id, choice) or session
         if "title" in body:
             session = self.store.rename_session(session_id, title.strip()[:200])
         if "archived" in body:
