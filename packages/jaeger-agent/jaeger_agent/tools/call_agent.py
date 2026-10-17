@@ -39,6 +39,11 @@ def _gateway_base() -> str:
     return ""
 
 
+#: How long a handoff waits for the owner's approval decision before the
+#: tool reports ``pending_approval`` and the turn moves on.
+APPROVAL_WAIT_S = 300.0
+APPROVAL_POLL_S = 0.5
+
 #: Supplies jaegerd's Gateway caller credential. The Gateway registers it at
 #: startup (``set_gateway_auth``); jaeger-agent never imports product code or
 #: reads a token store itself. Unregistered = no credential = 401 (fail closed).
@@ -113,7 +118,9 @@ def call_agent(
 
     Uses Gateway ``POST /v1/agents/{id}/handoff``. Approval, timeout, cancel
     and specialist failure are explicit. This is not complete until a child
-    run result is persisted.
+    run result is persisted. ``require_approval=False`` is honoured only when
+    the owner's autonomy is ``auto``; otherwise the owner approves in the chat,
+    and retrying with it off does not skip that.
     """
     target = (agent_id or "").strip()
     work = (task or "").strip()
@@ -167,16 +174,24 @@ def call_agent(
     if status >= 400 or payload.get("error"):
         return {"ok": False, "status": payload.get("status") or "failed", **payload}
     handoff_id = payload.get("id")
-    if payload.get("status") == "pending_approval":
+    current = payload
+    # Keep the turn open while the owner decides on the approval card in the
+    # chat, so the lead can relay the specialist's reply in the same turn.
+    approval_deadline = time.monotonic() + APPROVAL_WAIT_S
+    while current.get("status") == "pending_approval" and time.monotonic() < approval_deadline:
+        time.sleep(APPROVAL_POLL_S)
+        _, current = _request_json("GET", f"/v1/handoffs/{handoff_id}", timeout=10)
+        if current.get("error"):
+            return {"ok": False, "status": "failed", **current, "request_id": rid}
+    if current.get("status") == "pending_approval":
         return {
             "ok": False,
             "status": "pending_approval",
             "error": "Specialist is waiting for an explicit approval decision",
-            "handoff": payload,
+            "handoff": current,
             "request_id": rid,
         }
     deadline = time.monotonic() + max(1, int(timeout_seconds))
-    current = payload
     if native_parent and current.get("status") in {"admitted", "running"}:
         return {"ok": True, "completed": False, "status": current["status"],
                 "handoff_id": handoff_id, "request_id": rid,
