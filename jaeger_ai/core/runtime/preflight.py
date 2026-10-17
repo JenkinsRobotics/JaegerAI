@@ -609,8 +609,13 @@ def install_missing(checks: list[Check]) -> list[Check]:
 def format_report(checks: list[Check]) -> str:
     """A grouped, human-readable report for ``jaeger doctor``."""
     lines = ["", "  Jaeger AI — environment check", ""]
-    for category in ("instance", "daemon", "runtime", "memory", "plugins", "skills",
-                     "voice", "vision", "external", "messaging", "system"):
+    known = ("instance", "daemon", "runtime", "memory", "plugins", "skills",
+             "voice", "vision", "external", "messaging", "system")
+    # Any category not in the known order (``webui``, ``update`` from
+    # run_doctor, …) still renders after it: a failing check that is
+    # counted in the footer but never printed is worse than no check.
+    extra = sorted({c.category for c in checks} - set(known))
+    for category in (*known, *extra):
         group = [c for c in checks if c.category == category]
         if not group:
             continue
@@ -631,6 +636,8 @@ def format_report(checks: list[Check]) -> str:
         lines.append("  Verify these by hand before relying on them.")
     else:
         lines.append(f"  {len(bad)} item(s) need attention:")
+        for c in bad:
+            lines.append(f"    ✗ {c.name}: {c.detail}")
         for cmd in sorted({c.fix for c in bad if c.fix}):
             lines.append(f"    {cmd}")
     lines.append("")

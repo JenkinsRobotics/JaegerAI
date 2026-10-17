@@ -315,12 +315,20 @@ def _is_jaeger_gateway(base_url: str) -> bool:
 
 
 def _jaeger_gateway_token(api_key: str = "") -> str:
-    """The WebUI's own Gateway caller token (Keychain), unless an explicit key
-    was configured. Never logged."""
-    if api_key:
-        return api_key
+    """The WebUI's own Jaeger Gateway caller token, falling back to an
+    explicitly configured key only when this host has no ``webui`` token.
+
+    The Jaeger Gateway accepts caller tokens only. ``api_key`` comes from
+    ``HERMES_WEBUI_GATEWAY_API_KEY``/``API_SERVER_KEY``, which the WebUI also
+    picks up from a Hermes profile ``.env``; preferring it sent a Hermes key
+    to the Jaeger Gateway and every WebUI turn failed with HTTP 401.
+    Never logged."""
     from jaeger_ai.core.gateway.caller_auth import client_token
-    return client_token("webui") or ""
+    try:
+        token = client_token("webui")
+    except Exception:  # noqa: BLE001 — token store unavailable
+        token = None
+    return token or api_key or ""
 
 
 def _gateway_api_key(environ: dict[str, str] | None = None) -> str:

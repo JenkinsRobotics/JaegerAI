@@ -346,3 +346,18 @@ def test_fixable_dedups_runnable_commands():
     ]
     cmds = fixable(checks)
     assert cmds == [["pip", "install", "kokoro"]]
+
+
+def test_format_report_shows_failures_in_unlisted_categories():
+    """A failing check from a category outside the fixed order (``webui`` from
+    run_doctor) must be printed, not just counted in the footer."""
+    checks = [
+        Check("a", "voice", ok=True),
+        Check("hermes_agent_host_api", "webui", ok=False,
+              detail="Hermes Agent native API is offline"),
+    ]
+    report = format_report(checks)
+    assert "webui" in report
+    assert "✗ hermes_agent_host_api" in report
+    assert "1 item(s) need attention" in report
+    assert "Hermes Agent native API is offline" in report.split("need attention")[1]
