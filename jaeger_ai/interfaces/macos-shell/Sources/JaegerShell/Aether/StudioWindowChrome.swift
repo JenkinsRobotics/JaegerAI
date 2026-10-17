@@ -1,13 +1,20 @@
 // Derived from AetherStudio @ ece0209 — core/ui/native/StudioWindowChrome.swift
 // Copyright (c) Jonathan Jenkins and Jenkins Robotics (AetherStudio). Licensed under the Apache License 2.0
-// (see LICENSES/AetherStudio-Apache-2.0.txt). Modified for Jaeger by Jenkins Robotics on 2026-10-17:
-// unmodified (verbatim copy below this header).
+// (see LICENSES/AetherStudio-Apache-2.0.txt).
+// Modified by Jenkins Robotics, 2026-10-17: the aetherWindow handler accepts messages only from the
+// main frame of the configured 127.0.0.1 WebUI origin (`allowedOrigin`, checked with
+// JaegerShellCore.WindowChromePolicy) and logs/counts rejections. Everything else is verbatim.
 // Shared macOS presentation adapter. All product UI remains in the web app.
 import AppKit
+import JaegerShellCore
 import WebKit
 
 final class StudioWindowChrome: NSObject, WKScriptMessageHandler {
     private weak var window: NSWindow?
+    /// Jenkins Robotics 2026-10-17: the only origin whose main frame may drive the window.
+    var allowedOrigin: LoopbackOrigin?
+    private(set) var accepted = 0
+    private(set) var rejections: [String] = []
 
     func install(in configuration: WKWebViewConfiguration) {
         configuration.userContentController.add(self, name: "aetherWindow")
@@ -46,6 +53,16 @@ final class StudioWindowChrome: NSObject, WKScriptMessageHandler {
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage
     ) {
+        // Jenkins Robotics 2026-10-17: main frame + configured loopback origin only.
+        let info = message.frameInfo
+        let frame = BridgeFrame(isMainFrame: info.isMainFrame, scheme: info.securityOrigin.protocol,
+                                host: info.securityOrigin.host, port: info.securityOrigin.port)
+        guard WindowChromePolicy.accepts(frame, allowed: allowedOrigin) else {
+            rejections.append(frame.description)
+            shellLog("[shell][aetherWindow] rejected \(frame.description)")
+            return
+        }
+        accepted += 1
         guard
             message.name == "aetherWindow",
             let payload = message.body as? [String: Any],

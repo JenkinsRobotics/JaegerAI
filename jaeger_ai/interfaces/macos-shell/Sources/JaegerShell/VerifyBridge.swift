@@ -18,6 +18,7 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
     private var finished = false
     private var fixture: WKWebView?
     private var fixtureBridge: NativeBridge?
+    private var fixtureChrome: StudioWindowChrome?
 
     init(app: JaegerShellApplication) { self.app = app }
 
@@ -64,6 +65,10 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
         let configuration = WKWebViewConfiguration()
         let bridge = NativeBridge(allowed: app.start.origin, host: self, label: "fixture")
         bridge.install(in: configuration)
+        let chrome = StudioWindowChrome()
+        chrome.allowedOrigin = app.start.origin
+        chrome.install(in: configuration)
+        fixtureChrome = chrome
         let webView = WKWebView(frame: NSRect(x: 0, y: 0, width: 200, height: 200), configuration: configuration)
         bridge.webView = webView
         webView.navigationDelegate = self
@@ -73,6 +78,7 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
             <html><body><script>
             window.jaegerNative.post('app.info', {}).then(function(){ document.title = 'replied'; });
             window.webkit.messageHandlers.jaeger.postMessage({id: 'fx-2', type: 'window.show', payload: {}});
+            window.webkit.messageHandlers.aetherWindow.postMessage({action: 'drag'});
             </script></body></html>
             """
         let base = URL(string: "http://127.0.0.1:\(app.start.origin.port + 1)/")
@@ -98,6 +104,10 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
         report["fixture_rejections"] = fixtureBridge?.rejections ?? []
         report["host_calls"] = calls
         report["window_visible"] = app.mainWindow?.isVisible ?? false
+        report["aether_main_accepted"] = app.chrome.accepted
+        report["aether_main_rejections"] = app.chrome.rejections
+        report["aether_fixture_accepted"] = fixtureChrome?.accepted ?? -1
+        report["aether_fixture_rejections"] = fixtureChrome?.rejections ?? []
 
         let js = report["js"] as? [String: Any] ?? [:]
         func ok(_ key: String) -> Bool? { (js[key] as? [String: Any])?["ok"] as? Bool }
@@ -116,6 +126,9 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
             "iframe_rejected": (main?.rejections ?? []).contains { $0.contains("main=false") },
             "wrong_origin_rejected": (fixtureBridge?.accepted ?? -1) == 0 && (fixtureBridge?.rejections.count ?? 0) >= 2,
             "wrong_origin_got_no_reply": (report["fixture_title"] as? String ?? "") != "replied",
+            "aether_main_frame_accepted": app.chrome.accepted >= 1,
+            "aether_iframe_rejected": app.chrome.rejections.contains { $0.contains("main=false") },
+            "aether_wrong_origin_rejected": (fixtureChrome?.accepted ?? -1) == 0 && (fixtureChrome?.rejections.count ?? 0) >= 1,
             "no_window_shown": !(app.mainWindow?.isVisible ?? false) && !calls.contains("window.show"),
         ]
         report["checks"] = checks
@@ -156,6 +169,10 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
         await new Promise((r) => setTimeout(r, 400));
         try { f.contentWindow.webkit.messageHandlers.jaeger.postMessage({ id: 'iframe-1', type: 'window.show', payload: {} }); out.iframe_posted = true; }
         catch (e) { out.iframe_posted = String(e); }
+        try { f.contentWindow.webkit.messageHandlers.aetherWindow.postMessage({ action: 'drag' }); out.aether_iframe_posted = true; }
+        catch (e) { out.aether_iframe_posted = String(e); }
+        // main frame, allowed origin, harmless unknown action: must pass the origin check, then be ignored
+        window.webkit.messageHandlers.aetherWindow.postMessage({ action: 'verify-noop' });
         await new Promise((r) => setTimeout(r, 600));
         f.remove();
         return JSON.stringify(out);
