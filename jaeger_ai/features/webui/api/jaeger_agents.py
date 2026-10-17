@@ -351,6 +351,17 @@ def route(handler, parsed, method: str) -> bool:
         return _proxy(handler, "GET", "/v1/presence")
 
     if method == "GET" and path in {"/api/handoffs", "/v1/handoffs"}:
-        return _proxy(handler, "GET", "/v1/handoffs")
+        qs = ("?" + parsed.query) if parsed.query else ""
+        return _proxy(handler, "GET", f"/v1/handoffs{qs}")
+
+    # One handoff, or its exchange (task + specialist messages + summary).
+    if method == "GET" and path.startswith("/api/handoffs/"):
+        from urllib.parse import quote
+        rest = path[len("/api/handoffs/"):].strip("/").split("/")
+        if len(rest) == 1 and rest[0]:
+            return _proxy(handler, "GET", f"/v1/handoffs/{quote(rest[0], safe='')}")
+        if len(rest) == 2 and rest[0] and rest[1] == "messages":
+            return _proxy(handler, "GET", f"/v1/handoffs/{quote(rest[0], safe='')}/messages")
+        return False
 
     return False

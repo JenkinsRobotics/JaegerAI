@@ -1263,6 +1263,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/requests/{request_id}", self.handle_get_request_any_session)
         self.app.router.add_get("/v1/sessions/{id}/activity", self.handle_activity_history)
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
+        self.app.router.add_get("/v1/handoffs/{id}/messages", self.handle_handoff_messages)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
         self.app.router.add_get("/v1/approvals/{id}", self.handle_get_approval)
@@ -1863,8 +1864,14 @@ class JaegerGatewayApp:
 
         approval_id = f"approval_{uuid.uuid4().hex[:12]}" if require_approval else None
         handoff_id = f"handoff_{uuid.uuid4().hex[:12]}"
+        origin_session = str(body.get("session_id") or "").strip() or None
+        if origin_session is None and parent_run_id:
+            parent_row = (self.store.get_request(str(parent_run_id))
+                          or self.store.get_request_by_turn(str(parent_run_id)))
+            origin_session = (parent_row or {}).get("session_id")
         record = {
             "id": handoff_id,
+            "session_id": origin_session,
             "request_id": request_id,
             "from_agent_id": from_id,
             "to_agent_id": target.id,
@@ -1914,8 +1921,51 @@ class JaegerGatewayApp:
         return web.json_response(saved, status=202 if require_approval else 200)
 
     async def handle_list_handoffs(self, request: web.Request) -> web.Response:
-        records = self.store.list_handoffs()
+        """GET /v1/handoffs[?agent_id=&session_id=&since=&limit=] — newest first."""
+        query = request.query
+        try:
+            since = float(query["since"]) if query.get("since") else None
+            limit = int(query["limit"]) if query.get("limit") else None
+        except ValueError:
+            return web.json_response({"error": "since must be epoch seconds and limit an integer"}, status=400)
+        if limit is not None and not 1 <= limit <= 500:
+            return web.json_response({"error": "limit must be between 1 and 500"}, status=400)
+        records = self.store.list_handoffs(
+            agent_id=query.get("agent_id") or None,
+            session_id=query.get("session_id") or None,
+            since=since,
+            limit=limit,
+        )
         return web.json_response({"handoffs": records, "count": len(records)})
+
+    async def handle_handoff_messages(self, request: web.Request) -> web.Response:
+        """GET /v1/handoffs/{id}/messages — the specialist's side of one exchange.
+
+        Hides the ``specialist:<agent>:<request>`` worker-session naming from
+        clients; the exchange panel reads task + messages + summary in one call.
+        """
+        record = self.store.get_handoff(request.match_info["id"])
+        if record is None:
+            return web.json_response({"error": "Handoff not found"}, status=404)
+        from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
+        result = record.get("result") or {}
+        worker = str(result.get("worker_session_id") or "") or specialist_session(
+            record["to_agent_id"], record.get("request_id") or record["id"])
+        session = self.store.get_session(worker) or {}
+        messages = [
+            {key: m.get(key) for key in ("id", "role", "content", "timestamp")}
+            for m in session.get("messages") or []
+        ]
+        return web.json_response({
+            "handoff_id": record["id"],
+            "session_id": record.get("session_id"),
+            "to_agent_id": record["to_agent_id"],
+            "status": record["status"],
+            "task": record["task"],
+            "worker_session_id": worker,
+            "messages": messages,
+            "summary": result.get("summary") or "",
+        })
 
     async def handle_get_handoff(self, request: web.Request) -> web.Response:
         record = self.store.get_handoff(request.match_info["id"])
