@@ -4,10 +4,12 @@
 // renamed; engine spawn (python animacore.httpbridge, .venv, Resources/Web) removed; loads the
 // loopback Jaeger WebUI (http://127.0.0.1:8790/?host=macos or the dev override); loopback-only
 // navigation + WKContentRuleList; inline "not running" page instead of alert+quit; minimal main
-// menu (Quit, Edit, Reload); developer extras only in DEBUG.
+// menu (Quit, Edit, Reload); developer extras only in DEBUG; menu-bar (accessory) app with a
+// status item, window hides on close; --verify-launch self-check.
 
 import AppKit
 import JaegerShellCore
+import ServiceManagement
 import WebKit
 import os
 
@@ -19,26 +21,69 @@ func shellLog(_ message: String) {
     FileHandle.standardError.write(Data((message + "\n").utf8))
 }
 
-final class JaegerShellApplication: NSObject, NSApplicationDelegate, WKNavigationDelegate,
+final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate,
     WKUIDelegate, WKDownloadDelegate
 {
     private var window: NSWindow?
     private var webView: WKWebView?
     private var loadAttempts = 0
     private var showingErrorPage = false
+    private var rulesInstalled = false
+    private(set) var statusController: StatusItemController?
     let start: StartURL.Resolution = ShellEnvironment.webUI()
+    let verifyMode = CommandLine.arguments.contains("--verify-launch")
+    var mainWindow: NSWindow? { window }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let rejected = start.rejected { shellLog("[shell][override] rejected \(rejected)") }
         if let override = start.override { shellLog("[shell][override] accepted \(override)") }
         shellLog("[shell] start_url=\(start.url.absoluteString)")
         installMainMenu()
+        statusController = StatusItemController(app: self)
+        if verifyMode {
+            _ = makeWindow()  // created, never shown, nothing loaded
+            emitVerifyReport()
+            NSApp.terminate(nil)
+            return
+        }
         showWindow()
         installRulesThenLoad()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        false  // menu-bar app: closing the window only hides it
+    }
+
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        sender.orderOut(nil)
+        return false
+    }
+
+    private func emitVerifyReport() {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let lsui = (info["LSUIElement"] as? Bool) == true
+        let report: [String: Any] = [
+            "ok": lsui && NSApp.activationPolicy() == .accessory && (statusController?.isPresent ?? false)
+                && window != nil && start.origin.host == "127.0.0.1",
+            "bundle_id": Bundle.main.bundleIdentifier ?? NSNull(),
+            "bundle_version": info["CFBundleVersion"] ?? NSNull(),
+            "dev_build": ShellEnvironment.isDevBuild,
+            "menu_bar_only": lsui && NSApp.activationPolicy() == .accessory,
+            "status_item_present": statusController?.isPresent ?? false,
+            "window_created": window != nil,
+            "window_visible": window?.isVisible ?? false,
+            "start_url": start.url.absoluteString,
+            "start_url_loopback": start.origin.host == "127.0.0.1",
+            "webui_url_override": start.override ?? NSNull(),
+            "webui_url_override_rejected": start.rejected ?? NSNull(),
+            "gateway_url": ShellEnvironment.gateway().origin.string,
+            "login_item_status": ShellEnvironment.loginItemStatus(),
+            "launcher": ShellEnvironment.launcherPath() ?? NSNull(),
+            "network_requested": false,
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: report, options: [.sortedKeys]) {
+            FileHandle.standardOutput.write(data + Data("\n".utf8))
+        }
     }
 
     private let windowChrome = StudioWindowChrome()
@@ -65,6 +110,8 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, WKNavigatio
             defer: false
         )
         window.title = "Jaeger"
+        window.isReleasedWhenClosed = false
+        window.delegate = self
         windowChrome.attach(to: window)
         window.setFrameAutosaveName("JaegerShellMainWindow")
         window.contentView = webView
@@ -77,20 +124,36 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, WKNavigatio
         let window = self.window ?? makeWindow()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+        if !rulesInstalled && !verifyMode && webView?.url == nil { installRulesThenLoad() }
     }
 
+    func toggleWindow() {
+        if let window, window.isVisible, NSApp.isActive, window.isKeyWindow {
+            window.orderOut(nil)
+            shellLog("[shell] window hidden")
+        } else {
+            showWindow()
+            shellLog("[shell] window shown")
+        }
+    }
+
+    private var compiling = false
     private func installRulesThenLoad() {
+        guard !compiling, !rulesInstalled else { return }
+        compiling = true
         let json = NavigationPolicy.contentRuleListJSON(allowed: start.origin)
         WKContentRuleListStore.default().compileContentRuleList(
             forIdentifier: "jaeger-shell-loopback-\(start.origin.port)", encodedContentRuleList: json
         ) { [weak self] list, error in
             DispatchQueue.main.async {
                 guard let self else { return }
+                self.compiling = false
                 guard let list else {
                     shellLog("[shell] content rule list failed: \(String(describing: error))")
                     self.showErrorPage("The loopback network guard could not be installed.")
                     return
                 }
+                self.rulesInstalled = true
                 self.webView?.configuration.userContentController.add(list)
                 shellLog("[shell] loopback rule list installed for \(self.start.origin.string)")
                 self.scheduleLoad(after: 0.35)
@@ -100,7 +163,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, WKNavigatio
 
     private func scheduleLoad(after delay: TimeInterval) {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self else { return }
+            guard let self, self.rulesInstalled else { return }
             self.loadAttempts += 1
             self.showingErrorPage = false
             self.webView?.load(URLRequest(url: self.start.url))
@@ -109,7 +172,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, WKNavigatio
 
     @objc func reloadShell(_ sender: Any?) {
         loadAttempts = 0
-        scheduleLoad(after: 0)
+        if rulesInstalled { scheduleLoad(after: 0) } else { installRulesThenLoad() }
     }
 
     private func showErrorPage(_ detail: String) {
@@ -264,6 +327,35 @@ enum ShellEnvironment {
             defaultsValue: UserDefaults.standard.string(forKey: StartURL.webUIDefaultsKey),
             isDevBuild: isDevBuild)
     }
+
+    static func gateway() -> StartURL.Resolution {
+        StartURL.resolve(
+            fallback: StartURL.defaultGateway,
+            envValue: ProcessInfo.processInfo.environment[StartURL.gatewayEnvKey],
+            defaultsValue: UserDefaults.standard.string(forKey: StartURL.gatewayDefaultsKey),
+            isDevBuild: isDevBuild)
+    }
+
+    static func loginItemStatus() -> String {
+        switch SMAppService.mainApp.status {
+        case .notRegistered: return "not_registered"
+        case .enabled: return "enabled"
+        case .requiresApproval: return "requires_approval"
+        case .notFound: return "not_found"
+        @unknown default: return "unknown"
+        }
+    }
+
+    /// `JaegerLauncher` Info.plist key, else the usual CLI locations. Never run here.
+    static func launcherPath() -> String? {
+        var candidates: [String] = []
+        if let configured = Bundle.main.object(forInfoDictionaryKey: "JaegerLauncher") as? String {
+            candidates.append((configured as NSString).expandingTildeInPath)
+        }
+        candidates += ["~/.jaeger/venv/bin/jaeger", "/opt/homebrew/bin/jaeger", "/usr/local/bin/jaeger"]
+            .map { ($0 as NSString).expandingTildeInPath }
+        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
 }
 
 @main
@@ -272,7 +364,7 @@ enum JaegerShellMain {
         let application = NSApplication.shared
         let delegate = JaegerShellApplication()
         application.delegate = delegate
-        application.setActivationPolicy(.regular)
+        application.setActivationPolicy(.accessory)
         application.run()
     }
 }
