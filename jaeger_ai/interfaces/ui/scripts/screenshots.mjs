@@ -15,7 +15,7 @@ const shots = [
   ["jaeger-ui-tasks.png", "?mock=1", "Tasks"],
 ];
 for (const [file, query, click] of shots) {
-  const page = await browser.newPage({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2 });
+  const page = await browser.newPage({ viewport: { width: Number(process.env.SHOT_W ?? 1086), height: Number(process.env.SHOT_H ?? 782) }, deviceScaleFactor: 2 });
   const errors = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
