@@ -26,7 +26,9 @@ export async function postNative<T = unknown>(type: string, payload?: unknown): 
   if (!bridge) return undefined;
   try {
     return (await bridge.post(type, payload)) as T;
-  } catch {
+  } catch (error) {
+    // Optional host feature: report it, then let the caller fall back.
+    console.warn(`jaegerNative.post(${type}) failed`, error);
     return undefined;
   }
 }

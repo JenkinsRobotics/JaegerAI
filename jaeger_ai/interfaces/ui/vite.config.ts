@@ -8,12 +8,13 @@ const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 // Dev proxy: the browser only ever talks to its own origin. /v1 and /api go to
 // the Jaeger WebUI (127.0.0.1:8790), which already proxies the gateway and
 // adds the caller token on the server side. This config never reads a token.
-// Override the target with JAEGER_UI_PROXY_TARGET (loopback only).
+// Point it elsewhere with JAEGER_WEBUI_URL (loopback only), e.g. the test
+// stack: JAEGER_WEBUI_URL=http://127.0.0.1:18790 npm run dev
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
-  const target = env.JAEGER_UI_PROXY_TARGET || "http://127.0.0.1:8790";
+  const target = (env.JAEGER_WEBUI_URL || "http://127.0.0.1:8790").replace(/\/+$/, "");
   if (!/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(target)) {
-    throw new Error(`JAEGER_UI_PROXY_TARGET must be a loopback http origin, got ${target}`);
+    throw new Error(`JAEGER_WEBUI_URL must be a loopback http origin, got ${target}`);
   }
   const proxy = { "/v1": { target, changeOrigin: false }, "/api": { target, changeOrigin: false } };
   return {
