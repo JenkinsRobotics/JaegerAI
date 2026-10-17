@@ -34,4 +34,4 @@ Paths below are relative to `jaeger_ai/interfaces/swift/Sources/JaegerAI/` (old)
 | `Voice/TTS/VoiceStage.swift:57-75, 114-127, 149-152` | `Sources/JaegerShellCore/VoiceCatalog.swift` | adapted (S4) | Persona voice tables + first-installed resolver, pure and unit-tested. Installer stage not reused. |
 | `Voice/TTS/TTSManager.swift:20-219` | — | not reused | Kokoro path goes through `AgentBridge` `speak`, and the class is coupled to `ChatViewModel`. Kokoro stays available web-side (WebUI TTS route). |
 | `jaeger_ai/interfaces/swift/Resources/Info.plist:35-40` (usage strings) | `Resources/Info.plist` | adapted (S4) | Mic + speech recognition descriptions reworded for the shell. Camera/AppleEvents not needed. |
-| rest of repo | — | not reused | No other Swift code; the PySide6 and web voice paths are Python/JS, not portable to the Swift shell. |
+| rest of repo | — | not reused | `jaeger_ai/interfaces/avatar` (Swift avatar renderer over WebSocket) has no hotkey, status item, stack, voice, login-item or token logic. `interfaces/pyside6/tray/hotkey.py` and the web voice paths are Python/JS, not portable to the Swift shell. |

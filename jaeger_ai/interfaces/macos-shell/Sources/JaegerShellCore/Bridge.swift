@@ -69,10 +69,16 @@ public enum BridgeCommand: Equatable {
     case fileReveal(URL)
     case appInfo, stackStatus, launchAtLoginGet
     case launchAtLoginSet(Bool)
+    case voiceStatus
+    case micStart(mode: String)
+    case micStop
+    case ttsSpeak(text: String, voice: String?)
+    case ttsStop
     case notImplemented(String)
 
-    /// Voice is S4; these reply with a not_implemented error until then.
-    public static let stubbedTypes: Set<String> = ["mic.start", "mic.stop", "tts.speak", "tts.stop"]
+    /// Types that are routed but not implemented yet (none since S4 voice).
+    public static let stubbedTypes: Set<String> = []
+    public static let micModes: Set<String> = ["dictation", "push-to-talk"]
 
     public static func from(_ request: BridgeRequest, home: String, fileExists: (String) -> Bool)
         -> Result<BridgeCommand, BridgeError>
@@ -108,6 +114,23 @@ public enum BridgeCommand: Equatable {
         case "launchAtLogin.set":
             guard let enabled = strictBool(p["enabled"]) else { return .failure(.invalidPayload("enabled must be a boolean")) }
             return .success(.launchAtLoginSet(enabled))
+        case "voice.status": return .success(.voiceStatus)
+        case "mic.start":
+            if let raw = p["mode"], !(raw is String) { return .failure(.invalidPayload("mode must be a string")) }
+            let mode = p["mode"] as? String ?? "dictation"
+            guard micModes.contains(mode) else { return .failure(.invalidPayload("mode must be dictation or push-to-talk")) }
+            return .success(.micStart(mode: mode))
+        case "mic.stop": return .success(.micStop)
+        case "tts.speak":
+            guard let text = p["text"] as? String, !text.isEmpty, text.count <= 10000 else {
+                return .failure(.invalidPayload("text must be a non-empty string (≤10000)"))
+            }
+            guard !TTSText.plainForSpeech(text).isEmpty else { return .failure(.invalidPayload("nothing to speak")) }
+            if let raw = p["voice"], !(raw is String) { return .failure(.invalidPayload("voice must be a string")) }
+            let voice = p["voice"] as? String
+            if let voice, voice.count > 128 { return .failure(.invalidPayload("voice too long")) }
+            return .success(.ttsSpeak(text: text, voice: voice))
+        case "tts.stop": return .success(.ttsStop)
         default:
             if stubbedTypes.contains(request.type) { return .success(.notImplemented(request.type)) }
             return .failure(.unknownType(request.type))
@@ -127,6 +150,11 @@ public enum BridgeCommand: Equatable {
         case .stackStatus: return "stack.status"
         case .launchAtLoginGet: return "launchAtLogin.get"
         case .launchAtLoginSet: return "launchAtLogin.set"
+        case .voiceStatus: return "voice.status"
+        case .micStart: return "mic.start"
+        case .micStop: return "mic.stop"
+        case .ttsSpeak: return "tts.speak"
+        case .ttsStop: return "tts.stop"
         case .notImplemented(let type): return type
         }
     }

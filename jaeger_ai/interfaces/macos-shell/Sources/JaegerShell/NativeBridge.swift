@@ -20,6 +20,11 @@ protocol BridgeHost: AnyObject {
     func bridgeStackStatus(_ done: @escaping ([String: Any]) -> Void)
     func bridgeLoginItemStatus() -> String
     func bridgeSetLoginItem(_ enabled: Bool) throws -> String
+    func bridgeVoiceStatus() -> [String: Any]
+    func bridgeMicStart(mode: String, done: @escaping BridgeDone)
+    func bridgeMicStop(done: @escaping BridgeDone)
+    func bridgeTTSSpeak(text: String, voice: String?, done: @escaping BridgeDone)
+    func bridgeTTSStop()
 }
 
 /// Breaks the WKUserContentController → handler retain cycle.
@@ -99,8 +104,17 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
             do { reply(id, ["status": try host.bridgeSetLoginItem(enabled)]) } catch {
                 replyError(id, "launch_at_login_failed: \(error.localizedDescription)")
             }
-        case .notImplemented(let type): replyError(id, "not_implemented: \(type) (voice arrives in S4)")
+        case .voiceStatus: reply(id, host.bridgeVoiceStatus())
+        case .micStart(let mode): host.bridgeMicStart(mode: mode) { [weak self] r, e in self?.finish(id, r, e) }
+        case .micStop: host.bridgeMicStop { [weak self] r, e in self?.finish(id, r, e) }
+        case .ttsSpeak(let text, let voice): host.bridgeTTSSpeak(text: text, voice: voice) { [weak self] r, e in self?.finish(id, r, e) }
+        case .ttsStop: host.bridgeTTSStop(); reply(id, ["stopped": true])
+        case .notImplemented(let type): replyError(id, "not_implemented: \(type)")
         }
+    }
+
+    private func finish(_ id: String, _ result: [String: Any]?, _ error: String?) {
+        if let error { replyError(id, error) } else { reply(id, result ?? [:]) }
     }
 
     func reply(_ id: String, _ result: [String: Any]) { send(["type": "reply", "id": id, "ok": true, "result": result]) }
@@ -183,4 +197,16 @@ extension JaegerShellApplication: BridgeHost {
             center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
         }
     }
+}
+
+extension JaegerShellApplication {
+    func bridgeVoiceStatus() -> [String: Any] {
+        VoiceController.status(state: voiceController?.state ?? "idle", speaking: voiceController?.tts.isSpeaking ?? false)
+    }
+    func bridgeMicStart(mode: String, done: @escaping BridgeDone) { voice().micStart(mode: mode, done: done) }
+    func bridgeMicStop(done: @escaping BridgeDone) { voice().micStop(done: done) }
+    func bridgeTTSSpeak(text: String, voice choice: String?, done: @escaping BridgeDone) {
+        voice().speak(text: text, voice: choice, done: done)
+    }
+    func bridgeTTSStop() { voiceController?.stopSpeaking() }
 }
