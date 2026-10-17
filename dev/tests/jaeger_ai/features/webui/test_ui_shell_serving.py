@@ -77,3 +77,6 @@ def test_without_a_build_root_falls_through_to_the_old_shell(tmp_path, monkeypat
 def test_run_script_defaults_to_loopback():
     script = (ROOT.parents[4] / "scripts/run-jaeger-webui.sh").read_text()
     assert 'JAEGER_WEBUI_ALLOW_LAN:-0' in script
+    # An inherited HERMES_WEBUI_HOST must not re-open LAN on its own.
+    head = script.split('JAEGER_WEBUI_ALLOW_LAN:-0', 1)[0]
+    assert 'if [[ -n "${HERMES_WEBUI_HOST:-}" ]]' not in head
