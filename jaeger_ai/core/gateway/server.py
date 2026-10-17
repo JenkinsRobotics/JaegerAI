@@ -2918,6 +2918,7 @@ class JaegerGatewayApp:
         native_session = mcp_session or "dispatcher"
 
         def _blocking_chat() -> tuple[str, str]:
+            import urllib.error
             from urllib.parse import urlparse
 
             from jaeger_ai.core.gateway.native_mcp import (
@@ -2962,7 +2963,17 @@ class JaegerGatewayApp:
                         native_session=native_session,
                         status="running",
                     )
-                result = client._execute_call(tool_name, args)
+                try:
+                    result = client._execute_call(tool_name, args)
+                except urllib.error.HTTPError as exc:
+                    if exc.code != 404:
+                        raise
+                    # MCP HTTP restarted and forgot this transport's session;
+                    # a 404 means the call never ran, so reconnect and send once.
+                    client = MCPClient(MCP_URL, key, MCP_HOST_HEADER)
+                    client.initialize()
+                    self._mcp_transport = client
+                    result = client._execute_call(tool_name, args)
             response_text = JaegerGatewayApp._mcp_chat_text(result)
             if not response_text:
                 raise RuntimeError("MCP chat returned empty content")
