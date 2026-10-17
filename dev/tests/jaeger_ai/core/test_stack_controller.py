@@ -196,6 +196,45 @@ def test_every_stack_plist_restarts_only_after_a_crash():
         assert data["KeepAlive"] == {"SuccessfulExit": False}, service.id
 
 
+def test_installed_copy_writes_plists_for_the_source_checkout(tmp_path: Path, monkeypatch):
+    """Run from site-packages, the stack must still launch the checkout.
+
+    An installed wheel's ``__file__`` is site-packages: plists built from it
+    had a site-packages WorkingDirectory/PYTHONPATH and a ``python -m``
+    Web UI that crash-looped on ``No module named 'api'``."""
+    import importlib
+
+    from jaeger_ai.core.runtime import stack
+
+    checkout = tmp_path / "JaegerAI"
+    (checkout / "scripts").mkdir(parents=True)
+    (checkout / "scripts" / "run-jaeger-webui.sh").write_text("#!/bin/zsh\n")
+    monkeypatch.setenv("JAEGER_INSTALL_ROOT", str(checkout))
+    try:
+        stack = importlib.reload(stack)
+        webui = plistlib.loads(build_plist_for(stack, "webui").encode())
+        gateway = plistlib.loads(build_plist_for(stack, "gateway").encode())
+        assert webui["ProgramArguments"] == ["/bin/zsh", str(checkout / "scripts" / "run-jaeger-webui.sh")]
+        assert webui["WorkingDirectory"] == str(checkout)
+        assert gateway["EnvironmentVariables"]["JAEGER_INSTALL_ROOT"] == str(checkout)
+        assert gateway["EnvironmentVariables"]["PYTHONPATH"].split(":")[0] == str(checkout)
+    finally:
+        monkeypatch.delenv("JAEGER_INSTALL_ROOT")
+        importlib.reload(stack)
+
+
+def test_webui_without_its_launcher_fails_loudly(tmp_path: Path, monkeypatch):
+    from jaeger_ai.core.runtime import stack
+
+    monkeypatch.setattr(stack, "REPO_ROOT", tmp_path)
+    with pytest.raises(RuntimeError, match="JAEGER_INSTALL_ROOT"):
+        build_plist(SERVICE_BY_ID["webui"], commit_sha="abc")
+
+
+def build_plist_for(module, service_id: str) -> str:
+    return module.build_plist(module.SERVICE_BY_ID[service_id], commit_sha="abc")
+
+
 def test_gateway_lease_shutdown_exits_zero(monkeypatch):
     """A clean lease shutdown returns 0, so SuccessfulExit=false keeps it down."""
     import jaeger_ai.core.gateway.server as gateway_server
