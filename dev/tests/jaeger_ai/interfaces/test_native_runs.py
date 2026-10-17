@@ -678,7 +678,6 @@ def test_mcp_credential_is_resolved_at_call_time(tmp_path, monkeypatch):
     from jaeger_ai.core.gateway import native_mcp as jaeger
 
     monkeypatch.delenv("JAEGERS_MCP_API_KEY", raising=False)
-    monkeypatch.setattr(jaeger, "_profile_secret", lambda _name: "")
     # MCP HTTP needs a caller token: jaegerd presents its own by default.
     from jaeger_ai.core.gateway.caller_auth import read_token
     assert jaeger.mcp_api_key() == read_token("jaegerd")

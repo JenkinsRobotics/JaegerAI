@@ -144,6 +144,10 @@ def call_agent(
 
     rid = (request_id or "").strip() or uuid.uuid4().hex
     tools = [part.strip() for part in str(allowed_tools or "").split(",") if part.strip()]
+    # The Gateway-owned turn this tool runs in, so the handoff (its markers and
+    # approval card) belongs to that chat. Set by the host, never by the model.
+    from jaeger_agent.task_port import current_task_context
+    turn = current_task_context() or {}
     status, payload = _request_json(
         "POST",
         f"/v1/agents/{target}/handoff",
@@ -152,7 +156,8 @@ def call_agent(
             "from_agent_id": from_agent_id or "native:jaeger",
             "require_approval": bool(require_approval),
             "request_id": rid,
-            "parent_run_id": parent_run_id or None,
+            "parent_run_id": parent_run_id or turn.get("request_id") or None,
+            "session_id": turn.get("session_id") or None,
             "permitted_context": permitted_context,
             "timeout_seconds": int(timeout_seconds),
             "allowed_tools": tools,

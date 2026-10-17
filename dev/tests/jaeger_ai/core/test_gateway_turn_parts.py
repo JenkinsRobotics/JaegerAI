@@ -69,6 +69,31 @@ def test_completed_turn_persists_parts_on_the_assistant_message(tmp_path):
     assert message["parts"][0]["duration_ms"] >= 0 and message["parts"][1]["text"] == "Hi there"
 
 
+def test_handoffs_stream_on_the_origin_turn_and_persist_as_parts(tmp_path):
+    gateway = _gateway(tmp_path)
+    store = gateway.store
+    store.admit_request("s1", "ask research", request_id="r1")
+    record = {"id": "handoff_1", "session_id": "s1", "parent_run_id": "r1", "to_agent_id": "native:research",
+              "status": "admitted", "metadata": {"target_display": "Research"}}
+    gateway._publish_handoff("agent.handoff", record)
+    gateway._publish_handoff("agent.handoff.finished", {**record, "status": "completed"})
+    on_chat = [e for e in _events(gateway) if e["event"].startswith("agent.handoff") and e["session_id"] == "s1"]
+    assert [e["data"]["request_id"] for e in on_chat] == ["r1", "r1"]
+    assert sum(e["session_id"] == "*" for e in _events(gateway)) == 2  # global copies are unchanged
+
+    store.complete_request("r1", status="completed", result={}, assistant_text="Research says hi")
+    parts = store.get_session("s1")["messages"][-1]["parts"]
+    assert [(p["type"], p.get("direction"), p.get("agent_name")) for p in parts] == [
+        ("handoff", "to", "Research"), ("handoff", "from", "Research")]
+
+
+def test_handoff_without_a_matching_origin_turn_stays_global(tmp_path):
+    gateway = _gateway(tmp_path)
+    gateway._publish_handoff("agent.handoff", {"id": "h2", "session_id": "s1", "parent_run_id": "nope",
+                                               "to_agent_id": "native:research"})
+    assert [e["session_id"] for e in _events(gateway, "agent.handoff")] == ["*"]
+
+
 @pytest.mark.asyncio
 async def test_patch_session_model_is_validated_and_drives_turn_defaults(tmp_path, monkeypatch):
     from aiohttp.test_utils import TestClient, TestServer

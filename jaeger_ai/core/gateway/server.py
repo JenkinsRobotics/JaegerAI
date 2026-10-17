@@ -1987,7 +1987,7 @@ class JaegerGatewayApp:
             )
             loop = asyncio.get_running_loop()
             self.pending_approvals[approval_id] = loop.create_future()
-            self.event_bus.publish("*", "approval.request", {
+            request_payload = {
                 "approval_id": approval_id,
                 "handoff_id": handoff_id,
                 "kind": "handoff",
@@ -1996,11 +1996,42 @@ class JaegerGatewayApp:
                 "task": task,
                 "options": ["once", "deny"],
                 "prompt": f"Allow handoff to {target.display_name}?",
-            })
+            }
+            self.event_bus.publish("*", "approval.request", request_payload)
+            origin = self._origin_turn(saved)
+            if origin:
+                # The approval card shows in the chat that asked for the handoff.
+                self.event_bus.publish(origin[0], "approval.request", {
+                    **request_payload, "title": f"Hand off to {target.display_name}?",
+                    "prompt": task, "request_id": origin[1],
+                })
         else:
             self._running_tasks[request_id] = asyncio.create_task(self._execute_handoff(handoff_id))
-        self.event_bus.publish("*", "agent.handoff", {"handoff": saved})
+        self._publish_handoff("agent.handoff", saved)
         return web.json_response(saved, status=202 if require_approval else 200)
+
+    def _origin_turn(self, record: dict[str, Any]) -> tuple[str, str] | None:
+        """(session_id, request_id) of the chat turn that started a handoff."""
+        session_id = record.get("session_id")
+        parent = str(record.get("parent_run_id") or "")
+        if not session_id or not parent:
+            return None
+        row = self.store.get_request(parent) or self.store.get_request_by_turn(parent)
+        if not row or row.get("session_id") != session_id:
+            return None
+        return session_id, row["request_id"]
+
+    def _publish_handoff(self, event: str, record: dict[str, Any]) -> None:
+        """Publish a handoff globally and on the chat whose turn started it.
+
+        The copy on the origin session carries that turn's ``request_id``, so
+        the chat streams it with the turn and turn_parts persists it as a
+        ``handoff`` part when the turn completes.
+        """
+        self.event_bus.publish("*", event, {"handoff": record})
+        origin = self._origin_turn(record)
+        if origin:
+            self.event_bus.publish(origin[0], event, {"handoff": record, "request_id": origin[1]})
 
     async def handle_list_handoffs(self, request: web.Request) -> web.Response:
         """GET /v1/handoffs[?agent_id=&session_id=&since=&limit=] — newest first."""
@@ -2066,7 +2097,7 @@ class JaegerGatewayApp:
                     "result": {"ok": receipt["status"] == "completed", "status": receipt["status"],
                                "summary": reply.get("text") or reply.get("error") or reply.get("halt_reason") or "",
                                "worker_session_id": session, "metadata": {"native_receipt": receipt}}})
-                self.event_bus.publish("*", "agent.handoff.finished", {"handoff": record})
+                self._publish_handoff("agent.handoff.finished", record)
         return web.json_response(record)
 
     async def handle_list_sessions(self, request: web.Request) -> web.Response:
@@ -2932,8 +2963,6 @@ class JaegerGatewayApp:
                         status="running",
                     )
                 result = client._execute_call(tool_name, args)
-            if result.get("isError"):
-                raise RuntimeError("MCP chat returned a tool error")
             response_text = JaegerGatewayApp._mcp_chat_text(result)
             if not response_text:
                 raise RuntimeError("MCP chat returned empty content")
@@ -4953,7 +4982,7 @@ class JaegerGatewayApp:
                     "worker_session_id": result.worker_session_id,
                 },
             })
-            self.event_bus.publish("*", "agent.handoff.finished", {"handoff": saved})
+            self._publish_handoff("agent.handoff.finished", saved)
         except Exception as exc:  # noqa: BLE001 — specialist failure must not kill the gateway
             logger.exception("specialist handoff failed: %s", exc)
             saved = self.store.save_handoff({
@@ -4961,7 +4990,7 @@ class JaegerGatewayApp:
                 "status": "failed",
                 "result": {"ok": False, "status": "failed", "summary": f"{type(exc).__name__}: {exc}"},
             })
-            self.event_bus.publish("*", "agent.handoff.finished", {"handoff": saved})
+            self._publish_handoff("agent.handoff.finished", saved)
         finally:
             self._running_tasks.pop(record.get("request_id") or handoff_id, None)
 

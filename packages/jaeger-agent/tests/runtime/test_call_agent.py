@@ -63,3 +63,18 @@ def test_call_agent_ok_only_after_completed_child_result(monkeypatch, tmp_path):
     assert out["ok"] is True
     assert out["child_run_id"] == "run1"
     assert out["result"]["summary"] == "done"
+
+
+def test_call_agent_links_the_handoff_to_the_running_gateway_turn(monkeypatch, tmp_path):
+    _isolate(monkeypatch, tmp_path)
+    from jaeger_agent.task_port import task_scope
+    bodies = []
+    def submit(method, path, body=None, **kwargs):
+        bodies.append(body)
+        return 202, {"id": "handoff_3", "status": "pending_approval"}
+    monkeypatch.setattr(mod, "_request_json", submit)
+    with task_scope(object(), session_id="chat-1", request_id="run-1", execution={}, user_text="ask"):
+        call_agent("native:everyday", "bounded work")
+    call_agent("native:everyday", "outside a turn")
+    assert (bodies[0]["session_id"], bodies[0]["parent_run_id"]) == ("chat-1", "run-1")
+    assert (bodies[1]["session_id"], bodies[1]["parent_run_id"]) == (None, None)

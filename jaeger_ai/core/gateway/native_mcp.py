@@ -21,31 +21,15 @@ from jaeger_ai.contract.ports import MCP_HTTP_URL
 from jaeger_ai.core.frameworks.resilience import CircuitBreaker, timeout_setting
 
 
-def _profile_secret(name: str) -> str:
-    """Read a local profile secret without baking credentials into source."""
-    direct = os.environ.get(name, "").strip()
-    if direct:
-        return direct
-    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
-
-    env_path = hermes_profile_root() / "profiles" / "jaeger" / ".env"
-    try:
-        for line in env_path.read_text(encoding="utf-8").splitlines():
-            key, sep, value = line.partition("=")
-            if sep and key.strip() == name:
-                return value.strip().strip("\"'")
-    except OSError:
-        pass
-    return ""
-
-
 def mcp_api_key() -> str:
     """Credential for Jaeger's own MCP HTTP server (resolved per attempt).
 
-    MCP HTTP requires a caller token; jaegerd presents its own ``jaegerd``
-    Gateway caller token (Keychain) so the relayed turn is attributed to
-    jaegerd, not to an outside MCP agent."""
-    key = os.environ.get("JAEGERS_MCP_API_KEY", "").strip() or _profile_secret("MCP_ARES_HOST_API_KEY")
+    MCP HTTP accepts only the ``mcp`` and ``jaegerd`` caller tokens
+    (``interfaces/mcp_server.MCP_INBOUND_CALLERS``); jaegerd presents its own
+    so the relayed turn is attributed to jaegerd, not to an outside MCP agent.
+    The legacy ARES host key in the Hermes profile is never a candidate: the
+    server rejects it, which failed every native and specialist turn."""
+    key = os.environ.get("JAEGERS_MCP_API_KEY", "").strip()
     if key:
         return key
     from jaeger_ai.core.gateway.caller_auth import client_token
