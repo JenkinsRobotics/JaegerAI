@@ -19,9 +19,7 @@ them from there is correct, and re-declaring them here is what created the
 from __future__ import annotations
 
 import os
-import socket
-from typing import Callable, Final, Mapping
-from urllib.parse import urlsplit
+from typing import Final, Mapping
 
 LOOPBACK: Final = "127.0.0.1"
 """Bind address for everything that must not leave the machine."""
@@ -34,21 +32,11 @@ CONTAINER_HOST: Final = os.environ.get("JAEGER_CONTAINER_HOST", "192.168.64.1")
 GATEWAY_PORT: Final = int(os.environ.get("JAEGER_GATEWAY_PORT") or 33418)
 """Jaeger Gateway — sessions, SSE events, approvals. Started by
 ``jaeger gateway daemon``. The one every client connects to.
-Serves ``/health``, *not* ``/v1/health``. ``JAEGER_GATEWAY_PORT`` overrides it
-(``JAEGER_GATEWAY_PORT=8810`` is the emergency way back to the old port)."""
+Serves ``/health``, *not* ``/v1/health``. ``JAEGER_GATEWAY_PORT`` overrides it.
+The pre-2026-10-17 port is retired: there is no fallback to it."""
 
 GATEWAY_URL: Final = f"http://{LOOPBACK}:{GATEWAY_PORT}"
 """Where clients look for the Gateway first. Loopback only."""
-
-LEGACY_GATEWAY_PORT: Final = 8810
-"""The Gateway's port before 2026-10-17. The ONLY place this number lives in
-code. Clients fall back to it while installed services (launchd plists,
-agentgateway, older extensions) still run the Gateway there; set
-``JAEGER_GATEWAY_LEGACY_FALLBACK=0`` to turn the fallback off. Remove once
-everything has moved to :data:`GATEWAY_PORT`."""
-
-LEGACY_GATEWAY_URL: Final = f"http://{LOOPBACK}:{LEGACY_GATEWAY_PORT}"
-"""The legacy Gateway URL clients try when :data:`GATEWAY_URL` is unreachable."""
 
 WEBUI_PORT: Final = 8790
 """The first-party Jaeger WebUI. What a person opens."""
@@ -121,71 +109,23 @@ DISPATCHER_SIDECAR_PORT: Final = 8646
 """Token-authenticated loopback proxy the Dispatcher board talks to."""
 
 
-# ── Gateway discovery (current port first, legacy fallback) ────────────────
-
-_FALSEY = {"0", "false", "no", "off"}
+# ── Gateway discovery ──────────────────────────────────────────────────────
 
 
-def gateway_legacy_fallback_enabled(environ: Mapping[str, str] | None = None) -> bool:
-    """Whether clients may fall back to :data:`LEGACY_GATEWAY_URL`."""
-    env = os.environ if environ is None else environ
-    return str(env.get("JAEGER_GATEWAY_LEGACY_FALLBACK", "1")).strip().lower() not in _FALSEY
-
-
-def gateway_candidate_urls(environ: Mapping[str, str] | None = None) -> list[str]:
-    """Gateway base URLs a client should try, in order.
-
-    An explicit ``JAEGER_GATEWAY_URL`` is the only candidate: a URL somebody
-    typed is never second-guessed. Otherwise the current loopback URL (honouring
-    ``JAEGER_GATEWAY_PORT``) comes first and the legacy URL second.
-    """
+def resolve_gateway_url(environ: Mapping[str, str] | None = None) -> str:
+    """The Gateway base URL: an explicit ``JAEGER_GATEWAY_URL``, else loopback
+    on ``JAEGER_GATEWAY_PORT`` (default :data:`GATEWAY_PORT`). No probing and
+    no fallback port."""
     env = os.environ if environ is None else environ
     explicit = str(env.get("JAEGER_GATEWAY_URL") or "").strip().rstrip("/")
     if explicit:
-        return [explicit]
-    port = int(env.get("JAEGER_GATEWAY_PORT") or GATEWAY_PORT)
-    urls = [f"http://{LOOPBACK}:{port}"]
-    if gateway_legacy_fallback_enabled(env) and port != LEGACY_GATEWAY_PORT:
-        urls.append(LEGACY_GATEWAY_URL)
-    return urls
-
-
-def _tcp_reachable(url: str, timeout: float) -> bool:
-    parts = urlsplit(url)
-    host = parts.hostname or LOOPBACK
-    port = parts.port or (443 if parts.scheme == "https" else 80)
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except OSError:
-        return False
-
-
-def resolve_gateway_url(
-    environ: Mapping[str, str] | None = None,
-    *,
-    timeout: float = 0.25,
-    reachable: Callable[[str, float], bool] | None = None,
-) -> str:
-    """The Gateway base URL to use right now.
-
-    The first candidate from :func:`gateway_candidate_urls` that accepts a TCP
-    connection wins. If none does, the current URL is returned so error
-    messages name where the Gateway is supposed to be.
-    """
-    candidates = gateway_candidate_urls(environ)
-    if len(candidates) == 1:
-        return candidates[0]
-    probe = reachable or _tcp_reachable
-    for url in candidates:
-        if probe(url, timeout):
-            return url
-    return candidates[0]
+        return explicit
+    return f"http://{LOOPBACK}:{int(env.get('JAEGER_GATEWAY_PORT') or GATEWAY_PORT)}"
 
 
 def is_gateway_port(port: int | None) -> bool:
-    """True for the current or the legacy Gateway port."""
-    return port is not None and int(port) in {GATEWAY_PORT, LEGACY_GATEWAY_PORT}
+    """True for the Gateway's port."""
+    return port is not None and int(port) == GATEWAY_PORT
 
 
 __all__ = [
@@ -199,8 +139,6 @@ __all__ = [
     "GATEWAY_PORT",
     "GATEWAY_URL",
     "HERMES_NATIVE_API_PORT",
-    "LEGACY_GATEWAY_PORT",
-    "LEGACY_GATEWAY_URL",
     "LOOPBACK",
     "MCP_GATEWAY_PORT",
     "MCP_GATEWAY_URL",
@@ -213,8 +151,6 @@ __all__ = [
     "OLLAMA_URL",
     "WEBUI_ADAPTER_PORT",
     "WEBUI_PORT",
-    "gateway_candidate_urls",
-    "gateway_legacy_fallback_enabled",
     "is_gateway_port",
     "resolve_gateway_url",
 ]

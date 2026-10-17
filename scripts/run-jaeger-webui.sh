@@ -55,7 +55,7 @@ esac
 # Health uses JAEGER_GATEWAY_URL. Do not synthesize a global chat gateway
 # override: named profiles own their individual native gateway addresses.
 # Without an explicit URL, resolve it from the port contract at launch: the
-# current Gateway port if it answers, else the legacy one (contract/ports.py).
+# Gateway URL from contract/ports.py (env overrides honoured).
 if [[ -z "${JAEGER_GATEWAY_URL:-}" ]]; then
   JAEGER_GATEWAY_URL="$(PYTHONPATH="$repo_root" "$python_exe" -c \
     'from jaeger_ai.contract.ports import resolve_gateway_url; print(resolve_gateway_url())')"

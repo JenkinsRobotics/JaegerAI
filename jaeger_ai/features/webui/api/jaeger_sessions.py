@@ -51,7 +51,7 @@ def gateway_base() -> str:
 
 
 def _resolved_gateway_url() -> str:
-    """Current Gateway port first, legacy fallback (contract.ports)."""
+    """The Gateway URL from contract.ports (env overrides honoured)."""
     from jaeger_ai.contract.ports import resolve_gateway_url
     return resolve_gateway_url()
 

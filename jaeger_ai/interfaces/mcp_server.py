@@ -43,7 +43,7 @@ MCP_HTTP_HOST = LOOPBACK
 
 
 def _canonical_gateway_url() -> str:
-    """Where the canonical Gateway is (current port, legacy fallback), sans scheme."""
+    """Where the canonical Gateway is (contract.ports), sans scheme."""
     from jaeger_ai.contract.ports import resolve_gateway_url
     return resolve_gateway_url().split("://", 1)[-1].rstrip("/")
 

@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from jaeger_ai.contract.ports import GATEWAY_PORT, LEGACY_GATEWAY_PORT, WEBUI_PORT
+from jaeger_ai.contract.ports import GATEWAY_PORT, WEBUI_PORT
 
 import pytest
 
@@ -47,7 +47,7 @@ def _isolated_endpoint(key: str) -> str:
     value = os.environ.get(key, "").strip().rstrip("/")
     endpoint = urlsplit(value)
     if (endpoint.scheme != "http" or endpoint.hostname not in {"127.0.0.1", "localhost", "::1"}
-            or endpoint.port is None or endpoint.port in {GATEWAY_PORT, LEGACY_GATEWAY_PORT, WEBUI_PORT}
+            or endpoint.port is None or endpoint.port in {GATEWAY_PORT, WEBUI_PORT}
             or endpoint.username or endpoint.password or endpoint.path
             or endpoint.query or endpoint.fragment):
         raise RuntimeError(f"{key} must specify an isolated loopback HTTP listener on a non-production port")

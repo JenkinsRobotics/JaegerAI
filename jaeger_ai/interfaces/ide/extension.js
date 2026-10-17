@@ -6,14 +6,14 @@ const util = require('node:util');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { Gateway, resolveDefaultEndpoint } = require('./gateway');
+const { Gateway } = require('./gateway');
 const { Conversation } = require('./conversation');
 const { parseProviderModel, selectableModels, providerModelValue, modelSelectionAvailable } = require('./media/presentation');
 const commands = require('./commands');
 const execFileAsync = util.promisify(execFile);
 
-// Packaged builds get contract.json (gatewayUrl + legacyGatewayUrl) generated
-// from jaeger_ai/contract/ports.py; this is only the unpackaged default.
+// Packaged builds get contract.json (gatewayUrl) generated from
+// jaeger_ai/contract/ports.py; this is only the unpackaged default.
 let contract = { gatewayUrl: 'http://127.0.0.1:33418' };
 try { contract = require('./contract.json'); } catch (_) {}
 
@@ -332,9 +332,7 @@ function activate(context) {
     },
   }));
   const storageKey = () => `connection:${endpoint()}`;
-  // Current Gateway port first, legacy fallback; re-resolved when the panel boots.
-  let defaultEndpoint = contract.gatewayUrl;
-  const endpoint = () => vscode.workspace.getConfiguration('jaeger').get('gatewayUrl') || defaultEndpoint;
+  const endpoint = () => vscode.workspace.getConfiguration('jaeger').get('gatewayUrl') || contract.gatewayUrl;
   const callerTokenSetting = () => (vscode.workspace.getConfiguration('jaeger').get('callerToken') || '').trim();
   let currentCallerToken = callerTokenSetting();
   const getStoredCallerToken = async () => {
@@ -657,11 +655,6 @@ function activate(context) {
           return;
         }
         if (message.type === 'ready') {
-          // Probe only when the packaged contract names a distinct legacy URL.
-          if (!vscode.workspace.getConfiguration('jaeger').get('gatewayUrl')
-              && contract.legacyGatewayUrl && contract.legacyGatewayUrl !== contract.gatewayUrl) {
-            defaultEndpoint = await resolveDefaultEndpoint(contract);
-          }
           output.appendLine(`[debug] webview ready; endpoint=${endpoint()}`);
           // Resolve the existing OS-stored IDE pairing before the first
           // Gateway request. Starting refresh first creates a race where an

@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from jaeger_ai.contract.ports import GATEWAY_PORT, LEGACY_GATEWAY_PORT
+from jaeger_ai.contract.ports import GATEWAY_PORT
 
 from jaeger_ai.core.agent_registry.types import AgentKind, AgentRecord, AgentRole
 
@@ -38,7 +38,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "internal": True,
         "summary": f"Spine health, agents catalog, sessions, and approvals on :{GATEWAY_PORT}.",
         "allowed_tools": ("read_file", "search_files", "terminal", "exec_command", "system_status", "self_check", "list_background", "check_background", "web_search", "update_plan", "get_time", "calculate", "agent_notes"),
-        "keywords": ("gateway", str(GATEWAY_PORT), str(LEGACY_GATEWAY_PORT), "sse", "approval", "approvals", "session store", "agents catalog"),
+        "keywords": ("gateway", str(GATEWAY_PORT), "sse", "approval", "approvals", "session store", "agents catalog"),
     },
     {
         "name": "everyday",

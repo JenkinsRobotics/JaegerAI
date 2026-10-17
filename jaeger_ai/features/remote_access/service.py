@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from jaeger_ai.contract.ports import GATEWAY_PORT, LEGACY_GATEWAY_PORT, resolve_gateway_url
+from jaeger_ai.contract.ports import GATEWAY_PORT, resolve_gateway_url
 from jaeger_ai.features.remote_access import store
 from jaeger_ai.features.remote_access.policy import RemoteAccessPolicy
 
@@ -290,7 +290,7 @@ def _apply_webui_launchagent(password: str) -> dict[str, Any]:
         "JAEGER_RUNNER_BASE_URL": "http://127.0.0.1:8791",
     })
     # No JAEGER_GATEWAY_URL default: an explicit URL disables the WebUI's
-    # current-port-then-legacy discovery (contract.ports.resolve_gateway_url).
+    # contract.ports.resolve_gateway_url.
     # An operator-set value already in the plist is left as it is.
     data["EnvironmentVariables"] = env
     with path.open("wb") as handle:
@@ -439,10 +439,6 @@ def doctor() -> dict[str, Any]:
     ts = tailscale_status()
     serve = serve_status()
     gw = _listener(GATEWAY_PORT)
-    if not gw.get("listening"):
-        legacy = _listener(LEGACY_GATEWAY_PORT)
-        if legacy.get("listening"):
-            gw = legacy
     webui = _listener(WEBUI_LOOPBACK_PORT)
     adapter = _listener(8791)
     mcp = _listener(8792)

@@ -55,7 +55,7 @@ class TurnResult:
 
 
 def gateway_base_url() -> str:
-    """``JAEGER_GATEWAY_URL`` if set, else the current port, else the legacy one."""
+    """``JAEGER_GATEWAY_URL`` if set, else the contract port (contract.ports)."""
     return resolve_gateway_url().rstrip("/")
 
 

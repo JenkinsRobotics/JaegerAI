@@ -524,7 +524,7 @@ class WebUIService:
         env = os.environ.copy()
         env["JAEGER_RUNNER_BASE_URL"] = self.urls().adapter.rstrip("/")
         # Only an explicit URL is forwarded; without one the WebUI discovers
-        # the Gateway itself (current port, then legacy; contract.ports).
+        # the Gateway itself (contract.ports).
         if env.get("JAEGER_GATEWAY_URL"):
             env["JAEGER_GATEWAY_URL"] = env["JAEGER_GATEWAY_URL"].rstrip("/")
         env["JAEGER_WEBUI_PORT"] = str(self.webui_port)

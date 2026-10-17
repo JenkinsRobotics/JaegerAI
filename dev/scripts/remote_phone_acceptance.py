@@ -17,7 +17,7 @@ from pathlib import Path as _Path
 _REPO = str(_Path(__file__).resolve().parents[2])
 if _REPO not in _sys.path:
     _sys.path.insert(0, _REPO)
-from jaeger_ai.contract.ports import GATEWAY_PORT, LEGACY_GATEWAY_PORT, resolve_gateway_url
+from jaeger_ai.contract.ports import GATEWAY_PORT, resolve_gateway_url
 
 GATEWAY = resolve_gateway_url()
 
@@ -73,13 +73,12 @@ def operator_snapshot() -> dict:
     sessions_https = _json("GET", ORIGIN + "/api/jaeger/sessions")
     auth = _json("GET", ORIGIN + "/api/auth/status")
     gw_tailnet = _json("GET", f"http://100.74.2.15:{GATEWAY_PORT}/health")
-    gw_tailnet_legacy = _json("GET", f"http://100.74.2.15:{LEGACY_GATEWAY_PORT}/health")
     return {
         "entity_id": entity,
         "gateway_loopback": gw.get("status") == 200,
         "gateway_tailnet_closed": all(
             probe.get("status") in {0, None} or "error" in probe
-            for probe in (gw_tailnet, gw_tailnet_legacy)
+            for probe in (gw_tailnet,)
         ),
         "https_webui": sessions_https.get("status") in {200, 401, 403},
         "unauth_sessions_status": sessions_https.get("status"),

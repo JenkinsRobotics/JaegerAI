@@ -11688,11 +11688,10 @@ def _jaeger_gateway_bases() -> list[str]:
         raw = (os.environ.get(key) or "").strip().rstrip("/")
         if raw:
             bases.append(raw)
-    from jaeger_ai.contract.ports import gateway_candidate_urls
-    # Current loopback port, then the legacy one (contract.ports), after any
-    # explicitly configured URL above.
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    # The loopback Gateway (contract.ports), after any explicitly configured URL above.
     implicit = {k: v for k, v in os.environ.items() if k != "JAEGER_GATEWAY_URL"}
-    bases.extend(gateway_candidate_urls(implicit))
+    bases.append(resolve_gateway_url(implicit))
     runner = (
         os.environ.get("HERMES_WEBUI_RUNNER_BASE_URL")
         or os.environ.get("JAEGER_RUNNER_BASE_URL")
