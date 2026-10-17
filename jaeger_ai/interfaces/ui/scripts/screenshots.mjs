@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Headless screenshots of the mock screen. Never opens a visible window.
-// Usage: node scripts/screenshots.mjs http://127.0.0.1:<port>/
+// Usage: start `npm run dev` (mock works in dev only), then
+//        node scripts/screenshots.mjs http://127.0.0.1:<port>/
 import { mkdirSync } from "node:fs";
 import { chromium } from "playwright";
 
