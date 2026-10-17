@@ -1,0 +1,43 @@
+/* Modified from AetherStudio studio/src/studio.css (Apache-2.0, ece0209):
+ * the .studio sidebar/body/content frame, tokens only. */
+* { box-sizing: border-box; }
+html, body, #root { margin: 0; height: 100%; }
+body {
+  background: var(--aether-color-bg-app);
+  color: var(--aether-color-text);
+  font-family: var(--aether-font-family);
+  font-size: var(--aether-font-size-label);
+}
+.jg-shell {
+  --jg-sidebar-width: 280px;
+  --jg-traffic-lights: 0px;
+  display: grid;
+  grid-template-columns: var(--jg-sidebar-width) minmax(0, 1fr);
+  height: 100%;
+  background: var(--aether-color-bg-app);
+  overflow: hidden;
+}
+.jg-shell__sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--aether-color-bg-rail);
+  border-right: 1px solid var(--aether-color-border);
+}
+.jg-shell__top { flex: none; }
+.jg-shell__primary { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--aether-space-3) var(--aether-space-3); }
+.jg-shell__footer { flex: none; padding: var(--aether-space-3); border-top: 1px solid var(--aether-color-border); }
+.jg-shell__body { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--aether-color-bg-panel); }
+.jg-shell__content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.jg-tray { flex: none; border-top: 1px solid var(--aether-color-border); }
+.jg-tray__item { display: inline-flex; align-items: center; gap: var(--aether-space-2); color: var(--aether-color-text-dim); font-size: var(--aether-font-size-caption); }
+
+/* macOS host: the native window draws traffic lights over the sidebar header;
+   leave room for them and drop any outer frame. */
+html[data-aether-native-window] .jg-shell,
+html[data-jaeger-host="macos"] .jg-shell { --jg-traffic-lights: 78px; border: 0; border-radius: 0; }
+html[data-jaeger-host="macos"] body { background: var(--aether-color-bg-rail); }
+[data-aether-window-drag-region] { -webkit-user-select: none; user-select: none; }
+
+.jg-muted { color: var(--aether-color-text-dim); }
+.jg-pad { padding: var(--aether-space-3); }
