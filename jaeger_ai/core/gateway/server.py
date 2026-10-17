@@ -1287,6 +1287,9 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/orchestration/tasks/{id}", self.handle_get_orchestration_task)
         self.app.router.add_post("/v1/orchestration/tasks/{id}/follow-up", self.handle_follow_up_orchestration_task)
         self.app.router.add_post("/v1/orchestration/tasks/{id}/cancel", self.handle_cancel_orchestration_task)
+        # OpenAI-compatible surface for the IDE (GET /v1/models, POST /v1/chat/completions).
+        from jaeger_ai.core.gateway import openai_compat
+        openai_compat.register(self.app)
 
     async def handle_version(self, request: web.Request) -> web.Response:
         """Stable, read-only identity for clients and deployment checks."""
