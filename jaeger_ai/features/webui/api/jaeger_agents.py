@@ -301,6 +301,17 @@ def route(handler, parsed, method: str) -> bool:
             raw = json.dumps(read_body(handler) or {}).encode("utf-8")
         return _proxy(handler, "POST", "/v1/agents", raw)
 
+    if method == "POST" and path.endswith("/seen") and (
+        path.startswith("/api/agents/") or path.startswith("/v1/agents/")
+    ):
+        suffix = path.split("/agents/", 1)[-1]
+        raw = getattr(handler, "_json_body_bytes", None)
+        if raw is None:
+            from api.helpers import read_body
+
+            raw = json.dumps(read_body(handler) or {}).encode("utf-8")
+        return _proxy(handler, "POST", f"/v1/agents/{suffix}", raw)
+
     if method == "POST" and path.endswith("/activate") and (
         path.startswith("/api/agents/") or path.startswith("/v1/agents/")
     ):
