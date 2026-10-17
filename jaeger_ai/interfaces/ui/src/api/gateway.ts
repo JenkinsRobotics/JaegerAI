@@ -3,7 +3,7 @@
  * proxy), which forwards /v1/* to the gateway and adds the caller token on the
  * server side. The browser never sees or sends a token. */
 import { decodeSSE } from "./sse";
-import type { JaegerSource } from "./source";
+import type { JaegerSource, TurnReceipt } from "./source";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, SessionDetail, SessionRow, Task } from "./types";
 
 export class GatewayError extends Error {
@@ -58,8 +58,8 @@ export class GatewayClient implements JaegerSource {
   createSession(body: { agent_id?: string; title?: string }) {
     return this.json<SessionRow>("/v1/sessions", { session_id: crypto.randomUUID(), source: "webui", title: body.title ?? "New chat", ...body });
   }
-  send(sessionId: string, text: string) {
-    return this.json<{ request_id?: string }>(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`, { text, request_id: crypto.randomUUID() });
+  send(sessionId: string, text: string, requestId: string) {
+    return this.json<TurnReceipt>(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`, { text, request_id: requestId });
   }
   async cancel(sessionId: string, requestId?: string) {
     await this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, requestId ? { request_id: requestId } : {});
@@ -82,7 +82,11 @@ export class GatewayClient implements JaegerSource {
     const response = await fetch(`${this.base}/v1/sessions/${encodeURIComponent(sessionId)}/stream${qs}`, {
       headers: { Accept: "text/event-stream" }, credentials: "same-origin", signal,
     });
-    if (!response.ok || !response.body) throw new GatewayError(`stream ${response.status}`, response.status);
+    if (!response.ok || !response.body) {
+      let body: unknown;
+      try { body = await response.json(); } catch { /* not JSON */ }
+      throw new GatewayError((body as { error?: string })?.error ?? `stream ${response.status}`, response.status, body);
+    }
     for await (const frame of decodeSSE(response.body, signal)) {
       const envelope = (frame.data && typeof frame.data === "object" ? frame.data : { payload: { text: frame.data } }) as Record<string, unknown>;
       onEvent({ ...envelope, event: frame.event ?? String(envelope.event ?? envelope.type ?? "message"), event_id: frame.id ? Number(frame.id) : (envelope.event_id as number | undefined) });

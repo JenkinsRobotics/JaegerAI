@@ -1,4 +1,5 @@
-/* Typed mock adapter (?mock=1 or VITE_JAEGER_MOCK=1). Sample roster, previews,
+/* Typed mock adapter. DEV ONLY: loaded through a dynamic import that
+ * production builds drop (see api/index.ts). Sample roster, previews,
  * tasks, and transcripts with every ChatPart kind and each handoff marker
  * shape. send() replays a scripted gateway event sequence over stream(). */
 import type { ChatSession } from "../chat/host";
@@ -69,7 +70,7 @@ export const MOCK_TRANSCRIPTS: Record<string, ChatSession> = {
           { kind: "markdownContent", text: "Build is green: theme check, `tsc` and `vite build` all pass." },
           { kind: "toolInvocation", callId: "c2", toolName: "git commit", input: { pathspec: "jaeger_ai/interfaces/ui" }, state: "waitingForConfirmation" },
           { kind: "confirmation", callId: "c2", title: "Run git commit?", message: "Commit 14 files under jaeger_ai/interfaces/ui on feat/ui-rebuild." },
-          { kind: "warning", message: "Gateway at 127.0.0.1:33418 isn't responding, so this shows cached state." },
+          { kind: "warning", message: "Sample warning (dev mock data): the build log has 2 deprecation notices." },
         ],
       },
     ],
@@ -87,6 +88,8 @@ const turnScript = (sessionId: string, text: string): Array<[number, GatewayEven
 export class MockSource implements JaegerSource {
   readonly kind = "mock" as const;
   private listeners = new Map<string, Set<(event: GatewayEvent) => void>>();
+  /** Per-session event log so stream(cursor) replays like the gateway does. */
+  private log = new Map<string, GatewayEvent[]>();
   private eventId = 1000;
   private timers: ReturnType<typeof setTimeout>[] = [];
 
@@ -98,30 +101,35 @@ export class MockSource implements JaegerSource {
       last_message_preview: s.last_preview, last_activity_at: s.last_activity_at ?? undefined, updated_at: s.last_activity_at ?? undefined,
     }));
   }
-  async session(id: string): Promise<SessionDetail> { return { session_id: id, title: MOCK_TRANSCRIPTS[id]?.title ?? name(id.replace(/^s-/, "")), messages: [] }; }
+  async session(id: string): Promise<SessionDetail> {
+    return { session_id: id, title: MOCK_TRANSCRIPTS[id]?.title ?? name(id.replace(/^s-/, "")), messages: [], last_event_id: this.eventId };
+  }
+  transcript(id: string) { return MOCK_TRANSCRIPTS[id]; }
   async createSession(body: { agent_id?: string; title?: string }): Promise<SessionRow> {
     return { session_id: `s-new-${Date.now()}`, agent_id: body.agent_id, title: body.title ?? "New chat", created_at: now() };
   }
-  async send(sessionId: string, text: string) {
-    const requestId = `r-${Date.now()}`;
+  async send(sessionId: string, text: string, requestId: string) {
+    const start = this.eventId + 1;
     let delay = 0;
-    for (const [wait, event] of turnScript(sessionId, text)) {
+    turnScript(sessionId, text).forEach(([wait, event], index) => {
+      if (index === 0) { this.emit(sessionId, { ...event, request_id: requestId }); return; }
       delay += wait;
       this.timers.push(setTimeout(() => this.emit(sessionId, { ...event, request_id: requestId }), delay));
-    }
-    return { request_id: requestId };
+    });
+    return { request_id: requestId, start_event_id: start, status: "running" };
   }
-  async cancel(sessionId: string) {
+  async cancel(sessionId: string, requestId?: string) {
     this.timers.forEach(clearTimeout);
     this.timers = [];
-    this.emit(sessionId, { event: "turn.cancelled", payload: {} });
+    this.emit(sessionId, { event: "turn.cancelled", request_id: requestId, payload: {} });
   }
   async approve() { /* mock: accepted */ }
   async tasks() { return MOCK_TASKS; }
   async handoffs(): Promise<Handoff[]> {
     return [{ id: "h2", from_agent_id: "native:jaeger", to_agent_id: "agent:gateway-webui", status: "completed", task: "Ship /v1/agents/summary", updated_at: ago(14) }];
   }
-  stream(sessionId: string, _cursor: number | undefined, onEvent: (event: GatewayEvent) => void, signal: AbortSignal): Promise<void> {
+  stream(sessionId: string, cursor: number | undefined, onEvent: (event: GatewayEvent) => void, signal: AbortSignal): Promise<void> {
+    for (const event of this.log.get(sessionId) ?? []) if ((event.event_id ?? 0) > (cursor ?? 0)) onEvent(event);
     const set = this.listeners.get(sessionId) ?? new Set();
     this.listeners.set(sessionId, set);
     set.add(onEvent);
@@ -129,6 +137,10 @@ export class MockSource implements JaegerSource {
   }
   private emit(sessionId: string, event: GatewayEvent) {
     this.eventId += 1;
-    this.listeners.get(sessionId)?.forEach((cb) => cb({ ...event, event_id: this.eventId }));
+    const framed = { ...event, event_id: this.eventId };
+    const log = this.log.get(sessionId) ?? [];
+    log.push(framed);
+    this.log.set(sessionId, log.slice(-500));
+    this.listeners.get(sessionId)?.forEach((cb) => cb(framed));
   }
 }
