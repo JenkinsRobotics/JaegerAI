@@ -1,6 +1,8 @@
 """Chat-study gaps: reasoning duration and persisted response parts."""
 from __future__ import annotations
 
+import pytest
+
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
@@ -65,3 +67,30 @@ def test_completed_turn_persists_parts_on_the_assistant_message(tmp_path):
     assert message["role"] == "assistant"
     assert [p["type"] for p in message["parts"]] == ["reasoning", "text"]
     assert message["parts"][0]["duration_ms"] >= 0 and message["parts"][1]["text"] == "Hi there"
+
+
+@pytest.mark.asyncio
+async def test_patch_session_model_is_validated_and_drives_turn_defaults(tmp_path, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    from jaeger_ai.core.runtime import truth
+
+    monkeypatch.setattr(truth, "provider_model_inventory", lambda *a, **k: {"providers": [
+        {"id": "ollama", "reachable": True, "models": [{"id": "qwen3:4b"}]},
+        {"id": "lmstudio", "reachable": False, "models": [{"id": "offline-model"}]},
+    ]})
+    gateway = _gateway(tmp_path)
+    async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as client:
+        ok = await client.patch("/v1/sessions/s1", json={"model": "@ollama:qwen3:4b"})
+        assert ok.status == 200
+        assert (await ok.json())["metadata"]["model"] == "qwen3:4b"
+        assert (await client.patch("/v1/sessions/s1", json={"model": "offline-model"})).status == 400
+        assert (await client.patch("/v1/sessions/s1", json={"model": "nope"})).status == 400
+        assert (await client.patch("/v1/sessions/s1", json={"model": 3})).status == 400
+    meta = gateway.store.get_session("s1")["metadata"]
+    assert (meta["model"], meta["provider"]) == ("qwen3:4b", "ollama")
+    admitted = gateway.store.admit_request("s1", "hi", request_id="rm")
+    assert "qwen3:4b" in str(admitted)  # the frozen execution input uses the session model
+    async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as client:
+        cleared = await client.patch("/v1/sessions/s1", json={"model": None})
+        assert cleared.status == 200 and (await cleared.json())["metadata"].get("model") is None
