@@ -83,3 +83,14 @@ def test_missing_sections_are_flagged(tmp_path: Path) -> None:
 def test_empty_reply_from_reasoning_model_fails_loudly(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="raise --max-tokens"):
         script.chat(script.ModelSettings(), [], opener=_opener({}, "", "length"))
+
+
+def test_reasoning_effort_sent_and_leaked_thinking_stripped() -> None:
+    captured: dict = {}
+    text = script.chat(script.ModelSettings(), [],
+                       opener=_opener(captured, "I should reply.</think>READY"))
+    assert text == "READY"
+    assert captured["body"]["reasoning_effort"] == "low"
+    script.chat(script.ModelSettings(), [], reasoning_effort=None,
+                opener=_opener(captured, "ok"))
+    assert "reasoning_effort" not in captured["body"]

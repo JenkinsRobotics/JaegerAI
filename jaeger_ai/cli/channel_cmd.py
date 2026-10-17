@@ -31,6 +31,8 @@ def register(subparsers: Any) -> None:
     s.add_argument("--model", help="override the instance's external_model")
     s.add_argument("--base-url", help="override the instance's external_model base_url")
     s.add_argument("--max-tokens", type=int, default=8000)
+    s.add_argument("--reasoning-effort", default="low",
+                   help="low|medium|high, or '' to omit (default: low)")
     s.set_defaults(_handler=_script)
 
     v = sub.add_parser("voice", help="script markdown -> narration WAV (Kokoro)")
@@ -62,7 +64,8 @@ def _script(args: Any) -> int:
     print(c.dim(f"  writing script with {settings.model} …"))
     out = mod.generate_script(args.brief, args.out, episode=args.episode,
                               log_paths=args.logs, settings=settings,
-                              max_tokens=args.max_tokens)
+                              max_tokens=args.max_tokens,
+                              reasoning_effort=args.reasoning_effort or None)
     gaps = mod.missing_sections(out.read_text(encoding="utf-8"))
     print(c.green(f"  wrote {out}") + (c.yellow(f"  (missing: {', '.join(gaps)})") if gaps else ""))
     return 0
