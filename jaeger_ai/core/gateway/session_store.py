@@ -1645,6 +1645,30 @@ class GatewaySessionStore:
         "WHERE cr.request_id = h.parent_run_id OR cr.turn_id = h.parent_run_id LIMIT 1))"
     )
 
+    # Agent "seen" markers reuse schema_meta (key ``agent_seen:<id>``): one
+    # small row per agent, no new table.
+    def mark_agent_seen(self, agent_id: str, *, seen_at: float, event_id: int | None = None) -> dict[str, Any]:
+        record = {"agent_id": agent_id, "seen_at": float(seen_at), "event_id": event_id}
+        with self._immediate() as conn:
+            conn.execute(
+                "INSERT INTO schema_meta(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (f"agent_seen:{agent_id}", json.dumps(record)),
+            )
+        return record
+
+    def agents_seen(self) -> dict[str, dict[str, Any]]:
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT value FROM schema_meta WHERE key LIKE 'agent_seen:%'").fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            try:
+                record = json.loads(row["value"])
+            except (TypeError, ValueError):
+                continue
+            out[str(record.get("agent_id"))] = record
+        return out
+
     def list_handoffs(
         self,
         *,

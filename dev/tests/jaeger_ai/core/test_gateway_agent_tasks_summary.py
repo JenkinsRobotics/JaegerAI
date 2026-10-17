@@ -106,3 +106,28 @@ async def test_summary_route_is_not_shadowed_and_needs_token(gateway):
     async with TestClient(TestServer(anon_gw.app)) as anon:
         assert (await anon.get("/v1/agents/summary")).status == 401
         assert (await anon.get("/v1/agents/summary", headers=client_headers("mcp"))).status == 403
+
+
+def test_summary_marks_unseen_until_seen():
+    agents = [{"id": "native:gateway", "display_name": "Gateway", "role": "specialist"}]
+    sessions = [{"session_id": "s1", "agent_id": "native:gateway", "updated_at": 100.0,
+                 "last_message_preview": "hi"}]
+    row = summarize_agents(agents, tasks=[], handoffs=[], sessions=sessions)["agents"][0]
+    assert row["unseen"] is True and row["seen_at"] is None
+    row = summarize_agents(agents, tasks=[], handoffs=[], sessions=sessions,
+                           seen={"native:gateway": {"seen_at": 150.0}})["agents"][0]
+    assert row["unseen"] is False and row["seen_at"] == 150.0
+
+
+@pytest.mark.asyncio
+async def test_agent_seen_route_persists_and_validates(tmp_path):
+    gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "s.db"))
+    gateway.app.on_startup.clear()
+    agent_id = gateway._registry().list_agents()[0].id
+    async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as client:
+        resp = await client.post(f"/v1/agents/{agent_id}/seen", json={"seen_at": 42, "event_id": 7})
+        assert resp.status == 200
+        assert (await resp.json()) == {"agent_id": agent_id, "seen_at": 42.0, "event_id": 7}
+        assert gateway.store.agents_seen()[agent_id]["seen_at"] == 42.0
+        assert (await client.post("/v1/agents/nope/seen", json={})).status == 404
+        assert (await client.post(f"/v1/agents/{agent_id}/seen", json={"seen_at": "x"})).status == 400

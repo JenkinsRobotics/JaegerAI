@@ -1233,6 +1233,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/agents/summary", self.handle_agents_summary)
         self.app.router.add_get("/v1/agents/{id}", self.handle_get_agent)
         self.app.router.add_post("/v1/agents/{id}/activate", self.handle_activate_agent)
+        self.app.router.add_post("/v1/agents/{id}/seen", self.handle_agent_seen)
         self.app.router.add_post("/v1/agents/{id}/handoff", self.handle_handoff_agent)
         self.app.router.add_get("/v1/handoffs", self.handle_list_handoffs)
         self.app.router.add_get("/v1/sessions", self.handle_list_sessions)
@@ -1810,7 +1811,28 @@ class JaegerGatewayApp:
             handoffs=self.store.list_handoffs(limit=500),
             sessions=self.store.list_sessions(),
             last_message=self._last_message_preview,
+            seen=self.store.agents_seen(),
         ))
+
+    async def handle_agent_seen(self, request: web.Request) -> web.Response:
+        """POST /v1/agents/{id}/seen — mark an agent's activity read (summary ``unseen``).
+
+        Body (optional): ``{seen_at?: epoch seconds, event_id?: int}``; defaults to now.
+        """
+        agent_id = request.match_info["id"]
+        if self._registry().get_agent(agent_id) is None:
+            return web.json_response({"error": "Agent not found"}, status=404)
+        try:
+            body = await request.json() if request.can_read_body else {}
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        try:
+            seen_at = float(body["seen_at"]) if body.get("seen_at") is not None else time.time()
+            event_id = int(body["event_id"]) if body.get("event_id") is not None else None
+        except (TypeError, ValueError):
+            return web.json_response({"error": "seen_at must be a number and event_id an integer"}, status=400)
+        return web.json_response(self.store.mark_agent_seen(agent_id, seen_at=seen_at, event_id=event_id))
 
     def _last_message_preview(self, session_id: str) -> str:
         session = self.store.get_session(session_id) or {}
