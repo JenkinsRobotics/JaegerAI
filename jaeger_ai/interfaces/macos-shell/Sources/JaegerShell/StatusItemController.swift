@@ -1,10 +1,10 @@
-// StatusItemController.swift — JaegerShell menu-bar item (Jaeger original, not derived from AetherStudio).
+// StatusItemController.swift — JaegerShell menu-bar item (Jaeger original; the running/off icon pair
+// follows jaeger_ai/interfaces/swift/Sources/JaegerAI/JaegerAIApp.swift:116-150, adapted to NSStatusItem).
 //
 // Left click toggles the shell window; right click (or ⌃-click) opens the menu.
-// The menu probes the loopback WebUI and gateway only when it opens. "Start Jaeger
-// stack…" runs `<launcher> stack up --json` only after the user confirms a sheet.
-// Launch at Login is opt-in through SMAppService.mainApp and is never changed
-// automatically.
+// The menu probes the loopback WebUI and gateway only when it opens (and once after a normal launch,
+// never in --verify-launch). "Start Jaeger stack…" runs `<launcher> stack up --json` only after the user
+// confirms a sheet. Launch at Login is opt-in through SMAppService.mainApp and never changed automatically.
 
 import AppKit
 import JaegerShellCore
@@ -17,19 +17,17 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let webUIItem = NSMenuItem(title: "WebUI: …", action: nil, keyEquivalent: "")
     private let gatewayItem = NSMenuItem(title: "Gateway: …", action: nil, keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Launch at Login", action: nil, keyEquivalent: "")
-    private var stackProcess: Process?
+    private var stackRunning = false
+    private let runningIcon = StatusItemController.loadIcon("jaeger_icon_22")
+    private let offIcon = StatusItemController.loadIcon("jaeger_icon_off_22")
 
     init(app: JaegerShellApplication) {
         self.app = app
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         super.init()
         if let button = statusItem.button {
-            if let image = Bundle.main.image(forResource: "jaeger_icon_22") {
-                image.size = NSSize(width: 18, height: 18)
-                button.image = image
-            } else {
-                button.image = NSImage(systemSymbolName: "circle.hexagongrid", accessibilityDescription: "Jaeger")
-            }
+            button.image = runningIcon
+                ?? NSImage(systemSymbolName: "circle.hexagongrid", accessibilityDescription: "Jaeger")
             button.toolTip = "Jaeger (ui-rebuild)"
             button.target = self
             button.action = #selector(clicked(_:))
@@ -38,7 +36,24 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         buildMenu()
     }
 
+    /// PNGs ship at 44×44 (22pt @2x); sized to 18×18 like the old app.
+    private static func loadIcon(_ name: String) -> NSImage? {
+        guard let image = Bundle.main.image(forResource: name) else { return nil }
+        image.size = NSSize(width: 18, height: 18)
+        return image
+    }
+
     var isPresent: Bool { statusItem.button != nil && statusItem.isVisible }
+
+    private func setRunning(_ running: Bool) {
+        if let icon = running ? runningIcon : offIcon { statusItem.button?.image = icon }
+        statusItem.button?.toolTip = running ? "Jaeger (ui-rebuild)" : "Jaeger (ui-rebuild) — WebUI not running"
+    }
+
+    /// One read-only probe of the WebUI to pick the icon (normal launch only).
+    func refreshIcon() {
+        ShellEnvironment.probe(app.start.origin.string + "/") { [weak self] text in self?.setRunning(text == "running") }
+    }
 
     private func add(_ title: String, _ action: Selector?, _ key: String = "") -> NSMenuItem {
         let item = menu.addItem(withTitle: title, action: action, keyEquivalent: key)
@@ -83,17 +98,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     private func probe(_ item: NSMenuItem, _ name: String, _ urlString: String) {
         item.title = "\(name): checking…"
-        guard let url = URL(string: urlString) else { return }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 1.5)
-        request.httpMethod = "GET"
-        URLSession(configuration: .ephemeral).dataTask(with: request) { _, response, error in
-            let code = (response as? HTTPURLResponse)?.statusCode
-            let text = code.map { (200..<400).contains($0) ? "running" : "HTTP \($0)" } ?? "not running"
-            DispatchQueue.main.async {
-                item.title = "\(name): \(text) (\(url.host ?? ""):\(url.port ?? 0))"
-                shellLog("[shell][status] \(name.lowercased()) \(text)\(error.map { " \($0.localizedDescription)" } ?? "")")
-            }
-        }.resume()
+        let url = URL(string: urlString)
+        ShellEnvironment.probe(urlString) { [weak self] text in
+            item.title = "\(name): \(text.replacingOccurrences(of: "_", with: " ")) (\(url?.host ?? ""):\(url?.port ?? 0))"
+            shellLog("[shell][status] \(name.lowercased()) \(text)")
+            if name == "WebUI" { self?.setRunning(text == "running") }
+        }
     }
 
     @objc private func toggle(_ sender: Any?) { app.toggleWindow() }
@@ -105,18 +115,12 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     @objc private func toggleLoginItem(_ sender: Any?) {
-        let service = SMAppService.mainApp
         do {
-            if service.status == .enabled {
-                try service.unregister()
-            } else {
-                try service.register()
-            }
-            shellLog("[shell][login] status now \(ShellEnvironment.loginItemStatus())")
+            let status = try ShellEnvironment.setLoginItem(SMAppService.mainApp.status != .enabled)
+            shellLog("[shell][login] status now \(status)")
         } catch {
             shellLog("[shell][login] change failed: \(error.localizedDescription)")
-            let alert = NSAlert(error: error)
-            alert.runModal()
+            NSAlert(error: error).runModal()
         }
     }
 
@@ -125,7 +129,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "Start the Jaeger stack?"
         if let launcher {
-            alert.informativeText = "This runs:\n\(launcher) stack up --json\n\nIt starts the Jaeger services the same way the CLI does."
+            alert.informativeText = "This runs:\n\(launcher) \(StackCLI.upArguments.joined(separator: " "))\n\nIt starts the Jaeger services the same way the CLI does."
             alert.addButton(withTitle: "Start")
             alert.addButton(withTitle: "Cancel")
         } else {
@@ -144,28 +148,15 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     }
 
     private func runStackUp(_ launcher: String) {
-        guard stackProcess == nil else { return }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: launcher)
-        process.arguments = ["stack", "up", "--json"]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-        process.terminationHandler = { [weak self] p in
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let tail = String(decoding: data.suffix(400), as: UTF8.self)
-            DispatchQueue.main.async {
-                shellLog("[shell][stack] stack up exited \(p.terminationStatus): \(tail)")
-                self?.stackProcess = nil
-                self?.app.reloadShell(nil)
-            }
-        }
-        do {
-            try process.run()
-            stackProcess = process
-            shellLog("[shell][stack] started \(launcher) stack up --json")
-        } catch {
-            shellLog("[shell][stack] launch failed: \(error.localizedDescription)")
+        guard !stackRunning else { return }
+        stackRunning = true
+        shellLog("[shell][stack] started \(launcher) \(StackCLI.upArguments.joined(separator: " "))")
+        StackRunner.run(launcher: launcher, arguments: StackCLI.upArguments) { [weak self] data, stderr, status in
+            let summary = (try? StackCLI.decodeAction(data)).map(StackCLI.summary) ?? "undecodable reply"
+            shellLog("[shell][stack] stack up exited \(status): \(summary)\(stderr.isEmpty ? "" : " stderr=\(stderr.suffix(300))")")
+            self?.stackRunning = false
+            self?.app.reloadShell(nil)
+            self?.refreshIcon()
         }
     }
 }
