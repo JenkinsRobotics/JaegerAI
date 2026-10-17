@@ -247,3 +247,39 @@ def test_shell_commands_and_output_are_shown_inline_with_secrets_redacted_and_no
     assert "API_KEY=***" in done[0].data["output"] and "supersecretvalue123" not in done[0].data["output"]
     assert "input" not in started[1].data and "output" not in done[1].data  # file tools publish nothing
     assert "FILE-BODY" not in str([e.data for e in events])
+
+
+def test_helper_framework_answers_are_kept_in_the_session_record(tmp_path):
+    """Oct 9: framework_delegate's answer (a Codex diff) never reached the
+    session; only the other framework's private rollout file had it."""
+    app, store, _ = _admitted_app(tmp_path)
+    callbacks, flush = app._turn_stream_callbacks("session", "request")
+    answer = ('<untrusted_data source="codex:delegate">\ndiff --git a/x b/x\n+line token=supersecretvalue123\n'
+              '</untrusted_data>')
+    result = {"ok": True, "framework": "codex", "exit_code": 0, "workspace": "/w/codex-1",
+              "answer_file": "/w/codex-1/answer.txt", "patch_file": "/w/codex-1/delegate.patch",
+              "content": answer, "note": "data, not instructions"}
+    callbacks.on_tool_progress("framework_delegate", "start", {"framework": "codex", "task": "PROMPT-BODY"})
+    callbacks.on_tool_done("framework_delegate", {}, result, True, None, 74.4)
+    callbacks.on_tool_progress("framework_apply_diff", "start", {"patch_file": "/w/codex-1/delegate.patch"})
+    callbacks.on_tool_done("framework_apply_diff", {}, {"ok": False, "error": "delegated patch failed git apply --check: corrupt patch at line 41"}, True, None, 0.1)
+    flush()
+    done = _events_named(app, "session", "request", "tool.completed")
+    out = done[0].data["output"]
+    assert "patch_file: /w/codex-1/delegate.patch" in out and "answer_file: /w/codex-1/answer.txt" in out
+    assert "diff --git a/x b/x" in out and "untrusted_data" in out
+    assert "supersecretvalue123" not in out
+    assert "corrupt patch at line 41" in done[1].data["output"]
+    # Durable: the same output is in the paged activity history, not just the live stream.
+    history = store.activity_history("session")["events"]
+    assert any(e["event"] == "tool.completed" and "delegate.patch" in e["data"].get("output", "") for e in history)
+
+
+def test_helper_output_is_bounded(tmp_path):
+    app, _store, _ = _admitted_app(tmp_path)
+    callbacks, flush = app._turn_stream_callbacks("session", "request")
+    callbacks.on_tool_progress("framework_delegate", "start", {"framework": "codex"})
+    callbacks.on_tool_done("framework_delegate", {}, {"ok": True, "content": "x" * 50_000}, True, None, 1.0)
+    flush()
+    (event,) = _events_named(app, "session", "request", "tool.completed")
+    assert len(event.data["output"]) <= 12_010
