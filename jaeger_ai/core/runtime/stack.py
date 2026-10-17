@@ -530,7 +530,20 @@ def inspect_service(service: ServiceDef, head_commit: str | None = None) -> dict
     is_ready = is_running and probe_service_health(service)
     is_stale = is_running and loaded_commit != "unknown" and head != "unknown" and loaded_commit != head
 
-    display_state = "Ready" if is_ready else ("Running (Unhealthy)" if is_running else "Stopped")
+    # A service launchd does not own can still be up (started by hand with
+    # ``jaeger gateway daemon``, a dev shell, another agent). Reporting it as
+    # "Stopped" made the menu bar flag a healthy stack as broken, and made
+    # ``stack up`` start a duplicate onto the occupied port.
+    managed = is_running
+    if not is_running and probe_service_health(service):
+        is_ready = True
+        managed = False
+        state = "unmanaged"
+
+    if is_ready and not managed:
+        display_state = "Ready (unmanaged)"
+    else:
+        display_state = "Ready" if is_ready else ("Running (Unhealthy)" if is_running else "Stopped")
 
     return {
         "id": service.id,
@@ -540,6 +553,7 @@ def inspect_service(service: ServiceDef, head_commit: str | None = None) -> dict
         "state": display_state,
         "raw_state": state,
         "ready": is_ready,
+        "managed": managed,
         "configured": True,
         "port": service.port,
         "git_commit": loaded_commit,
@@ -586,11 +600,16 @@ def stack_up(services: list[ServiceDef] | None = None, wait_timeout: float = 25.
     # Step 3: Write plists to ~/.jaeger/launchd/
     sync_plists()
 
-    # Step 4: Bootstrap each service
+    # Step 4: Bootstrap each service — except ones already serving outside
+    # launchd: a second copy would only fight over the port.
+    skipped_unmanaged: list[str] = []
     for s in target:
         p_path = plist_path_for(s)
         # Check if already loaded
         chk = _launchctl(["print", f"{domain}/{s.label}"])
+        if chk.returncode != 0 and probe_service_health(s):
+            skipped_unmanaged.append(s.id)
+            continue
         if chk.returncode == 0:
             # kickstart restarts the cached job; it does not reread its plist.
             _launchctl(["bootout", f"{domain}/{s.label}"])
@@ -623,6 +642,7 @@ def stack_up(services: list[ServiceDef] | None = None, wait_timeout: float = 25.
         "ok": all_ready or all(st["ready"] for st in final_statuses),
         "commit": head,
         "services": final_statuses,
+        "skipped_unmanaged": skipped_unmanaged,
     }
 
 
