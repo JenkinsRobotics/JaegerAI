@@ -16,6 +16,7 @@ AGENTS = [
     {"id": "native:gateway", "name": "gateway", "display_name": "Gateway", "role": "specialist", "kind": "jaeger_native"},
     {"id": "native:jaeger", "name": "jaeger", "display_name": "Assistant", "role": "lead", "kind": "jaeger_native"},
     {"id": "native:everyday", "name": "everyday", "display_name": "Everyday", "role": "specialist", "kind": "jaeger_native"},
+    {"id": "native:research", "name": "research", "display_name": "Research", "role": "specialist", "kind": "jaeger_native"},
 ]
 
 
@@ -28,9 +29,12 @@ def test_roster_order_labels_and_home_ids():
         "console.log(JSON.stringify(A.map(a=>[window.jaegerAgents.label(a),window.jaegerAgents.homeId(a)])));"
     )
     out = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=30, check=True)
+    # Lead first, then user-facing specialists. Runtime rows, the internal
+    # 'gateway'/'surfaces' components and third-party framework adapters are
+    # hidden (jaeger_agents_panel.js:3-4, :10-26 since 25aed5c1).
     assert json.loads(out.stdout) == [
         ["Jaeger", "agent-jaeger"], ["Everyday", "agent-everyday"],
-        ["Gateway", "agent-gateway"], ["Hermes Agent", "agent-hermes"],
+        ["Research", "agent-research"],
     ]
 
 
@@ -58,13 +62,13 @@ def test_chat_chip_names_the_owner_and_puts_the_suggestion_first():
         f"require({json.dumps(str(STATIC / 'jaeger_agents_panel.js'))});"
         "const J=window.jaegerAgents;"
         f"J.setRoster(J.sortAgents({json.dumps(AGENTS)}));"
-        "const s={agent_id:'native:jaeger',metadata:{suggested_agent_id:'native:gateway'}};"
+        "const s={agent_id:'native:jaeger',metadata:{suggested_agent_id:'native:research'}};"
         "console.log(JSON.stringify([J.chipText(s),J.menuItems(s).map(i=>i.text),J.chipText({})]));"
     )
     out = subprocess.run(["node", "-e", harness], capture_output=True, text=True, timeout=30, check=True)
     chip, items, default = json.loads(out.stdout)
     assert chip == "with Jaeger" and default == "with Jaeger"
-    assert items[0] == "★ Suggested: Gateway"
+    assert items[0] == "★ Suggested: Research"
     assert "Hand off to Everyday" in items and not any("Jaeger" in i for i in items)
 
 
