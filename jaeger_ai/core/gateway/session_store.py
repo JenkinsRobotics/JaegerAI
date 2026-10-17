@@ -352,6 +352,14 @@ class GatewaySessionStore:
             if "requested_json" not in columns:
                 conn.execute("ALTER TABLE client_requests ADD COLUMN requested_json TEXT NOT NULL DEFAULT '{}'")
             current = 9
+        if current < 10:
+            # Handoffs carry the chat session they were started from, so the
+            # Agents View can place and filter markers without a join per row.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(handoffs)")}
+            if "session_id" not in columns:
+                conn.execute("ALTER TABLE handoffs ADD COLUMN session_id TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_handoffs_session ON handoffs(session_id)")
+            current = 10
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -1588,9 +1596,10 @@ class GatewaySessionStore:
                 INSERT INTO handoffs(
                     id, request_id, from_agent_id, to_agent_id, parent_run_id, child_run_id,
                     task, status, require_approval, approval_id, result_json, metadata_json,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, session_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    session_id=COALESCE(handoffs.session_id, excluded.session_id),
                     status=excluded.status,
                     child_run_id=excluded.child_run_id,
                     result_json=excluded.result_json,
@@ -1612,6 +1621,7 @@ class GatewaySessionStore:
                     json.dumps(record.get("metadata") or {}),
                     record.get("created_at") or now,
                     now,
+                    record.get("session_id"),
                 ),
             )
         return self.get_handoff(record["id"]) or record
@@ -1628,11 +1638,42 @@ class GatewaySessionStore:
             ).fetchone()
             return self._handoff_row(row) if row else None
 
-    def list_handoffs(self) -> list[dict[str, Any]]:
+    #: A handoff's chat session: its own column, else the session of the run
+    #: that started it (``parent_run_id`` is a request or turn id).
+    _HANDOFF_SESSION_SQL = (
+        "COALESCE(h.session_id, (SELECT cr.session_id FROM client_requests cr "
+        "WHERE cr.request_id = h.parent_run_id OR cr.turn_id = h.parent_run_id LIMIT 1))"
+    )
+
+    def list_handoffs(
+        self,
+        *,
+        agent_id: str | None = None,
+        session_id: str | None = None,
+        since: float | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Newest first. ``agent_id`` matches either end of the handoff."""
+        sql = f"SELECT h.*, {self._HANDOFF_SESSION_SQL} AS resolved_session_id FROM handoffs h"
+        clauses: list[str] = []
+        params: list[Any] = []
+        if agent_id:
+            clauses.append("(h.to_agent_id = ? OR h.from_agent_id = ?)")
+            params.extend([agent_id, agent_id])
+        if session_id:
+            clauses.append(f"{self._HANDOFF_SESSION_SQL} = ?")
+            params.append(session_id)
+        if since is not None:
+            clauses.append("h.updated_at > ?")
+            params.append(float(since))
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY h.created_at DESC"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(int(limit))
         with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM handoffs ORDER BY created_at DESC"
-            ).fetchall()
+            rows = conn.execute(sql, params).fetchall()
             return [self._handoff_row(r) for r in rows]
 
     def count_active_handoffs(self, *, parent_run_id: str | None = None) -> int:
@@ -1651,6 +1692,7 @@ class GatewaySessionStore:
             return int(row["n"] if row else 0)
 
     def _handoff_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        keys = row.keys()
         result = json.loads(row["result_json"] or "{}")
         meta = _row_meta(row["metadata_json"])
         return {
@@ -1667,6 +1709,8 @@ class GatewaySessionStore:
             "result": result,
             "result_summary": result.get("summary"),
             "metadata": meta,
+            "session_id": (row["resolved_session_id"] if "resolved_session_id" in keys
+                           else row["session_id"] if "session_id" in keys else None),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }
