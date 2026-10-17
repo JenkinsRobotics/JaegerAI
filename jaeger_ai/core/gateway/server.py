@@ -1905,6 +1905,12 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Agent not found"}, status=404)
         from_id = str(body.get("from_agent_id") or "native:jaeger").strip()
         require_approval = bool(body.get("require_approval", True))
+        caller = request.get("caller")
+        if not require_approval and getattr(caller, "name", None) == "jaegerd":
+            # The agent asks through jaegerd's credential and cannot waive the
+            # owner's approval itself; only the owner's autonomy=auto does.
+            from jaeger_ai.core.runtime.autonomy import effective_autonomy
+            require_approval = effective_autonomy(self._config_path()) != "auto"
         request_id = str(body.get("request_id") or uuid.uuid4().hex)
         parent_run_id = body.get("parent_run_id") or body.get("parent_request_id")
         parent_chain = list(body.get("parent_chain") or [])

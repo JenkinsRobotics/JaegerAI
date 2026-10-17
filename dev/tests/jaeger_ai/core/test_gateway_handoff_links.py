@@ -123,3 +123,26 @@ async def test_approval_and_handoff_show_in_the_chat_that_asked(store):
     assert by_name["approval.request"]["request_id"] == "run-1"
     assert by_name["approval.request"]["prompt"] == "reply pong"
     assert by_name["agent.handoff"]["request_id"] == "run-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("caller,autonomy,expected", [
+    ("jaegerd", "ask", "pending_approval"),     # the agent cannot waive approval
+    ("jaegerd", "scoped", "pending_approval"),
+    ("jaegerd", "auto", "admitted"),            # the owner's auto mode can
+    ("webui", "ask", "admitted"),               # the owner's own explicit choice
+])
+async def test_only_the_owner_can_skip_handoff_approval(store, monkeypatch, caller, autonomy, expected):
+    import jaeger_ai.core.runtime.autonomy as autonomy_mod
+    gateway = JaegerGatewayApp(store=store)
+    gateway.app.on_startup.clear()
+
+    async def no_run(_handoff_id):
+        return None
+
+    monkeypatch.setattr(gateway, "_execute_handoff", no_run)
+    monkeypatch.setattr(autonomy_mod, "effective_autonomy", lambda *_a, **_k: autonomy)
+    async with TestClient(TestServer(gateway.app), headers=client_headers(caller)) as c:
+        resp = await c.post("/v1/agents/native:everyday/handoff", json={
+            "task": "reply pong", "require_approval": False, "request_id": f"skip-{caller}-{autonomy}"})
+        assert (await resp.json())["status"] == expected
