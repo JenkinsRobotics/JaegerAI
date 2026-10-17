@@ -850,7 +850,7 @@ class TestGatewayTurnUsesSessionAgent(_CallerAuthedTestCase):
 
         captured: dict = {}
 
-        async def fake_chat(text: str, *, system_prompt: str | None = None, history=None) -> str:
+        async def fake_chat(text: str, *, system_prompt: str | None = None, history=None, **_lane_kwargs) -> str:
             captured["system_prompt"] = system_prompt
             captured["text"] = text
             return "SPECIALIST:Gateway"
@@ -911,7 +911,7 @@ class TestGatewayTurnUsesSessionAgent(_CallerAuthedTestCase):
 
         captured: dict = {}
 
-        async def fake_chat(text: str, *, system_prompt: str | None = None, history=None) -> str:
+        async def fake_chat(text: str, *, system_prompt: str | None = None, history=None, **_lane_kwargs) -> str:
             captured["system_prompt"] = system_prompt
             return "SPECIALIST:Surfaces"
 
@@ -961,7 +961,7 @@ class TestGatewayTurnUsesSessionAgent(_CallerAuthedTestCase):
         assert resp.status == 200
         assert self.temp_store.get_session("p6-kh")["messages"] == []
 
-        async def fake_chat(text: str, *, system_prompt: str | None = None, history=None) -> str:
+        async def fake_chat(text: str, *, system_prompt: str | None = None, history=None, **_lane_kwargs) -> str:
             return "ok-after-clear"
 
         self.gateway_app._ollama_chat = fake_chat  # type: ignore[method-assign]
