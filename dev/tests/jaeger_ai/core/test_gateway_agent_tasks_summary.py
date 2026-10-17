@@ -196,3 +196,27 @@ async def test_session_list_rows_carry_preview_activity_and_event_cursor(tmp_pat
     assert len(row["last_message_preview"]) == 140
     assert row["last_activity_at"] >= row["updated_at"]
     assert row["last_event_id"] == evt.event_id
+
+
+@pytest.mark.asyncio
+async def test_global_stream_replays_only_global_events_and_respects_scopes(tmp_path):
+    import asyncio
+    import json as _json
+
+    gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "s.db"))
+    gateway.app.on_startup.clear()
+    gateway.event_bus.publish("s1", "session.updated", {"session": {}})
+    glob = gateway.event_bus.publish("*", "agent.created", {"agent": {"id": "x"}})
+    async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as client:
+        resp = await client.get("/v1/events/stream")
+        assert resp.status == 200 and resp.headers["Content-Type"].startswith("text/event-stream")
+        chunk = await asyncio.wait_for(resp.content.readuntil(b"\n\n"), 5)
+        resp.close()
+        frame = chunk.decode()
+        assert frame.startswith(f"id: {glob.event_id}\nevent: agent.created\n")
+        assert _json.loads(frame.split("data: ", 1)[1])["session_id"] == "*"
+        assert (await client.get("/v1/events/stream?last_event_id=x")).status == 400
+    async with TestClient(TestServer(gateway.app), headers=client_headers("mcp")) as client:
+        assert (await client.get("/v1/events/stream")).status in (401, 403)
+    async with TestClient(TestServer(gateway.app)) as client:
+        assert (await client.get("/v1/events/stream")).status == 401

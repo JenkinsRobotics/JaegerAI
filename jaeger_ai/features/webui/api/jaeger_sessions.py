@@ -116,7 +116,7 @@ def _body_bytes(handler) -> bytes:
 # ── SSE streaming proxy ──────────────────────────────────────────────
 
 
-def _proxy_stream(handler, session_id: str, query: str) -> bool:
+def _proxy_stream(handler, session_id: str, query: str, *, upstream_path: str | None = None) -> bool:
     """Pump the gateway's SSE stream straight through to the browser.
 
     Deliberately NOT built on ``_proxy``: that reads the whole body before
@@ -133,7 +133,7 @@ def _proxy_stream(handler, session_id: str, query: str) -> bool:
     and an HTTP status is no longer available. The UI listens for it and
     shows a disconnected state rather than a silently stalled stream.
     """
-    url = f"{gateway_base()}/v1/sessions/{session_id}/stream{query}"
+    url = f"{gateway_base()}{upstream_path or f'/v1/sessions/{session_id}/stream'}{query}"
     req = Request(url, method="GET")
     req.add_header("Accept", "text/event-stream")
     _add_caller_auth(req)
@@ -223,6 +223,11 @@ def route(handler, parsed, method: str) -> bool:
             return True
     except Exception:
         pass
+
+    # Global event stream (agents, approvals, tasks, connect-apps): the same
+    # SSE pump as the session stream, no separate proxy.
+    if path == "/api/jaeger/events/stream" and method == "GET":
+        return _proxy_stream(handler, "*", query, upstream_path="/v1/events/stream")
 
     if path in ("/api/jaeger/gateway/health", "/api/jaeger/health"):
         # The gateway serves /health, NOT /v1/health — the latter 404s.

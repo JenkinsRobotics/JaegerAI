@@ -113,3 +113,12 @@ def test_overlay_is_installed_by_the_webui_build():
     root = OVERLAY.parents[4]
     assert OVERLAY.is_file()
     assert (root / "jaeger_ai/assets/jaeger_gateway_console.js").is_file()
+
+
+def test_global_event_stream_uses_the_session_stream_pump(monkeypatch):
+    mod = _load()
+    seen = []
+    monkeypatch.setattr(mod, "_proxy_stream",
+                        lambda h, sid, q, upstream_path=None: seen.append((sid, q, upstream_path)) or True)
+    assert _route(mod, "/api/jaeger/events/stream?last_event_id=5") is True
+    assert seen == [("*", "?last_event_id=5", "/v1/events/stream")]

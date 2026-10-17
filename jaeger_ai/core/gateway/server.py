@@ -1259,6 +1259,7 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/sessions/{id}/requests/{request_id}/changes/undo", self.handle_file_changes)
         self.app.router.add_post("/v1/sessions/{id}/handoff", self.handle_session_handoff)
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
+        self.app.router.add_get("/v1/events/stream", self.handle_global_stream)
         self.app.router.add_get("/v1/sessions/{id}/events", self.handle_session_events_json)
         self.app.router.add_get("/v1/notifications", self.handle_list_notifications)
         self.app.router.add_get("/v1/presence", self.handle_presence)
@@ -4384,8 +4385,20 @@ class JaegerGatewayApp:
         Resolve with ``POST /v1/approvals/{approval_id}`` body
         ``{"approved": true|false}`` → emits ``approval.resolved``.
         """
-        session_id = request.match_info["id"]
-        last_event_id = int(request.query.get("last_event_id") or 0)
+        return await self._sse_stream(request, request.match_info["id"])
+
+    async def handle_global_stream(self, request: web.Request) -> web.StreamResponse:
+        """GET /v1/events/stream — global (``*``) events only: agent.*, approvals,
+        task.*, connect_app.updated. Same framing, resume (``last_event_id``) and
+        410 rules as the session stream; session-prefixed callers (mcp/a2a) are
+        refused by the scope middleware (not in PREFIXED_READ_ROUTES)."""
+        return await self._sse_stream(request, "*")
+
+    async def _sse_stream(self, request: web.Request, session_id: str) -> web.StreamResponse:
+        try:
+            last_event_id = int(request.query.get("last_event_id") or request.headers.get("Last-Event-ID") or 0)
+        except ValueError:
+            return web.json_response({"error": "last_event_id must be an integer"}, status=400)
         window = self.event_bus.replay_window(session_id, last_event_id)
         if window.get("cursor_expired"):
             return web.json_response(
