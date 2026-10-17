@@ -476,6 +476,16 @@ def list_agents(*args, **kwargs):
     return get_default_registry().list_agents(*args, **kwargs)
 
 
+def with_roster_flags(record) -> dict[str, Any]:
+    """``to_dict`` plus explicit ``hidden`` / ``disabled`` booleans (Agents View roster)."""
+    from jaeger_ai.core.agent_registry.specialists import is_test_agent
+
+    out = record.to_dict()
+    out["hidden"] = bool(is_test_agent(record))
+    out["disabled"] = bool(getattr(record, "disabled", False))
+    return out
+
+
 def _with_hidden(record) -> dict[str, Any]:
     from jaeger_ai.core.agent_registry.specialists import is_test_agent
 

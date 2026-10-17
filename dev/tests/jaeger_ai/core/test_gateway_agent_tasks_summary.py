@@ -131,3 +131,25 @@ async def test_agent_seen_route_persists_and_validates(tmp_path):
         assert gateway.store.agents_seen()[agent_id]["seen_at"] == 42.0
         assert (await client.post("/v1/agents/nope/seen", json={})).status == 404
         assert (await client.post(f"/v1/agents/{agent_id}/seen", json={"seen_at": "x"})).status == 400
+
+
+def test_agent_record_disabled_comes_from_metadata():
+    from jaeger_ai.core.agent_registry.registry import with_roster_flags
+    from jaeger_ai.core.agent_registry.types import AgentKind, AgentRecord, AgentRole
+
+    rec = AgentRecord(id="x", name="x", kind=AgentKind.NATIVE, display_name="X", source="registry",
+                      role=AgentRole.SPECIALIST, metadata={"disabled": True})
+    assert rec.disabled is True
+    flags = with_roster_flags(rec)
+    assert (flags["hidden"], flags["disabled"]) == (False, True)
+
+
+@pytest.mark.asyncio
+async def test_role_filter_carries_hidden_and_disabled_flags(tmp_path):
+    gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "s.db"))
+    gateway.app.on_startup.clear()
+    async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as client:
+        body = await (await client.get("/v1/agents?role=specialist")).json()
+    assert body["role"] == "specialist" and body["agents"]
+    for agent in body["agents"]:
+        assert isinstance(agent["hidden"], bool) and isinstance(agent["disabled"], bool)

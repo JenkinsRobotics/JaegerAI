@@ -1759,8 +1759,9 @@ class JaegerGatewayApp:
         role = request.query.get("role")
         registry = self._registry()
         if kind or role:
+            from jaeger_ai.core.agent_registry.registry import with_roster_flags
             agents = [
-                a.to_dict()
+                with_roster_flags(a)
                 for a in registry.list_agents(kind=kind or None, role=role or None)
             ]
             payload: dict[str, Any] = {"agents": agents}
