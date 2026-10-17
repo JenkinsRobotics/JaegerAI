@@ -32,6 +32,8 @@
   <string>14.0</string>
   <key>LSUIElement</key>
   <true/>
+  <key>JaegerHotkey</key>
+  <string>ctrl-opt-space</string>
   <key>JaegerDevBuild</key>
   <true/>
   <key>NSAppTransportSecurity</key>
