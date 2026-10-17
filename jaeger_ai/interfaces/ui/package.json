@@ -6,12 +6,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "node scripts/check-theme-literals.mjs && tsc --noEmit && vite build",
+    "build": "node scripts/check-theme-literals.mjs && tsc --noEmit && vite build && node scripts/check-no-mock.mjs",
     "preview": "vite preview --host 127.0.0.1",
     "check:theme": "node scripts/check-theme-literals.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "shots": "node scripts/screenshots.mjs"
+    "shots": "node scripts/screenshots.mjs",
+    "check:no-mock": "node scripts/check-no-mock.mjs"
   },
   "dependencies": {
     "react": "^19.1.0",

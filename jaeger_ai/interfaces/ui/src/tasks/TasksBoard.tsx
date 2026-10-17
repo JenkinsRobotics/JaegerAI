@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { label, runnerLabel } from "../agents/agentsLogic";
 import type { JaegerSource } from "../api/source";
 import type { Agent, Task } from "../api/types";
+import { ErrorState } from "../shell/ErrorState";
 
 const COLUMNS: Array<{ id: string; title: string; states: string[] }> = [
   { id: "queued", title: "Queued", states: ["queued"] },
@@ -16,13 +17,14 @@ const COLUMNS: Array<{ id: string; title: string; states: string[] }> = [
 export function TasksBoard({ source, agents }: { source: JaegerSource; agents: Agent[] }) {
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [error, setError] = useState<string>();
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
     const load = () => source.tasks().then((t) => live && (setTasks(t), setError(undefined)), (e: Error) => live && setError(e.message));
     void load();
     const timer = setInterval(load, 15_000);
     return () => { live = false; clearInterval(timer); };
-  }, [source]);
+  }, [source, attempt]);
   const agentName = (id?: string | null) => {
     const agent = agents.find((a) => a.id === id);
     return agent ? label(agent) : id ?? "Unassigned";
@@ -30,8 +32,8 @@ export function TasksBoard({ source, agents }: { source: JaegerSource; agents: A
   return (
     <div className="jg-tasks">
       <div className="jg-chat__band" data-aether-window-drag-region><span className="jg-title-pill">Tasks</span></div>
-      {error && <p className="jg-notice jg-notice--error jg-pad">Couldn't load tasks: {error}</p>}
-      <div className="jg-board">
+      {error && <ErrorState compact={tasks !== null} title="Couldn't load tasks" error={error} onRetry={() => setAttempt((n) => n + 1)} />}
+      {(tasks !== null || !error) && <div className="jg-board">
         {COLUMNS.map((col) => {
           const items = (tasks ?? []).filter((t) => col.states.includes(String(t.state)));
           return (
@@ -50,7 +52,7 @@ export function TasksBoard({ source, agents }: { source: JaegerSource; agents: A
             </section>
           );
         })}
-      </div>
+      </div>}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { AppsIcon, PlusIcon, SearchIcon, TasksIcon } from "../icons";
+import { ErrorState } from "../shell/ErrorState";
 import type { AgentsState } from "./agentsStore";
 import { AgentRow } from "./AgentRow";
 import { sidebarRows } from "./agentsLogic";
@@ -14,11 +15,12 @@ interface Props {
   onNewChat: () => void;
   onSearch: () => void;
   onConnectApps: () => void;
+  onRetry: () => void;
   userInitials: string;
 }
 
 /** Sidebar content split into the AppShell slots: top / primary / sections / footer. */
-export function agentsSidebarSlots({ state, selection, onSelect, onNewChat, onSearch, onConnectApps, userInitials }: Props) {
+export function agentsSidebarSlots({ state, selection, onSelect, onNewChat, onSearch, onConnectApps, onRetry, userInitials }: Props) {
   const { lead, specialists } = sidebarRows(state.agents, state.summaries);
   const selectedAgent = selection.type === "agent" ? selection.agentId : undefined;
   return {
@@ -31,6 +33,7 @@ export function agentsSidebarSlots({ state, selection, onSelect, onNewChat, onSe
     ),
     primary: (
       <>
+        {state.error && <ErrorState compact title="Couldn't load agents" error={state.error} onRetry={onRetry} />}
         {lead && <SupervisorTile row={lead} selected={selectedAgent === lead.agent.id} onSelect={() => onSelect({ type: "agent", agentId: lead.agent.id })} />}
         <nav className="jg-agent-list" aria-label="Specialists">
           {specialists.map((row) => (
@@ -42,7 +45,7 @@ export function agentsSidebarSlots({ state, selection, onSelect, onNewChat, onSe
               onSelect={() => onSelect({ type: "agent", agentId: row.agent.id })}
             />
           ))}
-          {!state.loading && !specialists.length && <p className="jg-muted jg-pad">No specialists yet.</p>}
+          {!state.loading && !state.error && !specialists.length && <p className="jg-muted jg-pad">No specialists yet.</p>}
         </nav>
       </>
     ),

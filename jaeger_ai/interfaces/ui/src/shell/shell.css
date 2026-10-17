@@ -41,3 +41,13 @@ html[data-jaeger-host="macos"] body { background: var(--aether-color-bg-rail); }
 
 .jg-muted { color: var(--aether-color-text-dim); }
 .jg-pad { padding: var(--aether-space-3); }
+
+.jg-error-state {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--aether-space-2);
+  margin: var(--aether-space-4) auto; max-width: 480px; padding: var(--aether-space-4);
+  border-radius: var(--aether-radius-button); background: var(--aether-color-bg-control);
+  border: 1px solid color-mix(in srgb, var(--aether-color-error) 45%, transparent);
+}
+.jg-error-state--compact { margin: 0 0 var(--aether-space-3); padding: var(--aether-space-3); }
+.jg-error-state__title { font-weight: var(--aether-font-weight-strong); }
+.jg-error-state__detail { color: var(--aether-color-text-dim); font-size: var(--aether-font-size-caption); word-break: break-word; }
