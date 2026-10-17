@@ -35,11 +35,10 @@ export HERMES_WEBUI_STATE_DIR="${JAEGER_WEBUI_STATE_DIR:-$jaeger_state_home/herm
 # An inherited HERMES_WEBUI_HOST (e.g. 0.0.0.0 exported by a login shell) is
 # ignored otherwise. Tailscale Serve proxies this port; a raw interface bind
 # is not the remote path.
-if [[ "${JAEGER_WEBUI_ALLOW_LAN:-0}" =~ ^(1|true|yes|on)$ ]]; then
-  export HERMES_WEBUI_HOST="${JAEGER_WEBUI_HOST:-${HERMES_WEBUI_HOST:-0.0.0.0}}"
-else
-  export HERMES_WEBUI_HOST="127.0.0.1"
-fi
+case "$(printf '%s' "${JAEGER_WEBUI_ALLOW_LAN:-0}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on) export HERMES_WEBUI_HOST="${JAEGER_WEBUI_HOST:-${HERMES_WEBUI_HOST:-0.0.0.0}}" ;;
+  *) export HERMES_WEBUI_HOST="127.0.0.1" ;;
+esac
 export HERMES_WEBUI_PORT="${JAEGER_WEBUI_PORT:-8790}"
 export HERMES_WEBUI_BOT_NAME="${JAEGER_WEBUI_BOT_NAME:-JaegerAI}"
 export HERMES_WEBUI_DEFAULT_WORKSPACE="${JAEGER_WEBUI_WORKSPACE:-${HOME}/workspace}"
