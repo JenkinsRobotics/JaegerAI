@@ -1,4 +1,4 @@
-"""framework_read / framework_delegate — other agent frameworks on this Mac.
+"""framework_read / framework_delegate / framework_apply_diff — other agent frameworks on this Mac.
 
 Both need the owner's per-framework grant (Frameworks… in the WebUI);
 PolicyKernel enforces it, and every delegation needs a fresh approval.
@@ -40,4 +40,19 @@ def framework_delegate(framework: str, task: str) -> dict[str, Any]:
     try:
         return {"ok": True, **delegate.run(framework, task)}
     except (PermissionError, ValueError, FileNotFoundError) as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+@register_tool_from_function(name="framework_apply_diff", side_effect="write")
+def framework_apply_diff(patch_file: str, workspace: str) -> dict[str, Any]:
+    """Apply a diff another framework produced, from its saved patch file
+    (framework_delegate returns ``patch_file``), to a Git worktree. Runs
+    ``git apply --check`` first; an empty, malformed or no-op patch fails
+    loudly and changes nothing. Asks for the owner's approval each time.
+    Never pipe a diff into ``patch`` or ``git apply`` through the shell."""
+    from jaeger_ai.core.frameworks import delegate
+
+    try:
+        return delegate.apply_saved_diff(patch_file, workspace=workspace)
+    except (FileNotFoundError, ValueError, RuntimeError) as exc:
         return {"ok": False, "error": str(exc)}

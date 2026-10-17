@@ -251,6 +251,10 @@ def destructive_reason(tool_name: Any, arguments: Mapping[str, Any] | None) -> s
         # Another agent acts on the owner's machine with its own tools: every
         # handoff is approved by the owner for that call.
         return f"handing a task to another agent framework ({args.get('framework') or '?'})"
+    if raw == "framework_apply_diff":
+        # Another framework's diff is untrusted output; landing it in a
+        # checkout is the owner's call, per patch.
+        return f"applying another framework's patch to {args.get('workspace') or '?'}"
     if cid == "delete_file" or raw in {"remove_file", "delete_path", "delete_dir", "remove_dir", "rmtree"}:
         target = next((args[k] for k in _PATH_KEYS if args.get(k)), "")
         if target and _in_scratch(str(target)):
