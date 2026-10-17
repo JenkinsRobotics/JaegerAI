@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { createSource } from "./api";
 import type { JaegerSource } from "./api/source";
 import { agentsSidebarSlots, type Selection } from "./agents/AgentsSidebar";
 import { useAgentsStore } from "./agents/agentsStore";
@@ -12,18 +11,20 @@ import { ConnectAppsDialog } from "./connect-apps/ConnectAppsDialog";
 import { detectHost, voiceFlag } from "./platform/host";
 import { onNativeEvent } from "./platform/native";
 import { AppShell } from "./shell/AppShell";
+import { ErrorState } from "./shell/ErrorState";
 import { Tray } from "./shell/Tray";
 import { TasksBoard } from "./tasks/TasksBoard";
 
 const LEAD_ID = "native:jaeger";
 
-export function App({ source: injected }: { source?: JaegerSource }) {
-  const [source] = useState<JaegerSource>(() => injected ?? createSource());
+export function App({ source }: { source: JaegerSource }) {
   const hostKind = detectHost();
   const host = useMemo(() => (hostKind === "macos" ? new NativeHost(source) : new WebHost(source)), [source, hostKind]);
   const store = useAgentsStore(source);
   const [selection, setSelection] = useState<Selection>({ type: "agent", agentId: LEAD_ID });
   const [sessionId, setSessionId] = useState<string>();
+  const [sessionError, setSessionError] = useState<string>();
+  const [sessionAttempt, setSessionAttempt] = useState(0);
   const [connectOpen, setConnectOpen] = useState(false);
   const [exchange, setExchange] = useState<string | null>(null);
 
@@ -44,10 +45,14 @@ export function App({ source: injected }: { source?: JaegerSource }) {
     const resolve = known
       ? Promise.resolve(known)
       : source.sessions({ agent_id: agentId }).then((rows) => rows[0]?.session_id ?? source.createSession({ agent_id: agentId }).then((s) => s.session_id));
-    resolve.then((id) => live && setSessionId(id), () => live && setSessionId(undefined));
+    setSessionError(undefined);
+    resolve.then(
+      (id) => { if (live) setSessionId(id); },
+      (error: unknown) => { if (live) { setSessionId(undefined); setSessionError(String((error as Error)?.message ?? error)); } },
+    );
     store.seeAgent(agentId);
     return () => { live = false; };
-  }, [selection, source, store.summaries, store.seeAgent]);
+  }, [selection, source, store.summaries, store.seeAgent, sessionAttempt]);
 
   const newChat = useCallback(() => {
     const agentId = selection.type === "agent" ? selection.agentId : LEAD_ID;
@@ -69,6 +74,7 @@ export function App({ source: injected }: { source?: JaegerSource }) {
     onNewChat: newChat,
     onSearch: () => { /* search lands with /v1/sessions?q= */ },
     onConnectApps: () => setConnectOpen(true),
+    onRetry: () => void store.refresh(),
     userInitials: "MJ",
   });
 
@@ -83,7 +89,9 @@ export function App({ source: injected }: { source?: JaegerSource }) {
       >
         {selection.type === "tasks"
           ? <TasksBoard source={source} agents={store.agents} />
-          : <ChatPane host={host} sessionId={sessionId} />}
+          : sessionError
+            ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
+            : <ChatPane host={host} sessionId={sessionId} />}
       </AppShell>
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
       <ExchangePanel source={source} handoffId={exchange} onClose={() => setExchange(null)} />

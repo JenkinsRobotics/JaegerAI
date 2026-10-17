@@ -3,7 +3,6 @@
 import type { Agent, AgentSummary } from "../api/types";
 
 export const INTERNAL_IDS = new Set(["native:gateway", "native:surfaces", "gateway", "surfaces"]);
-export const FALLBACK_ROSTER: Agent[] = [{ id: "native:jaeger", name: "jaeger", display_name: "Jaeger", role: "lead", kind: "native" }];
 const ROLE_ORDER: Record<string, number> = { lead: 0, specialist: 1, native: 2 };
 
 export function visible(agent: Agent): boolean {

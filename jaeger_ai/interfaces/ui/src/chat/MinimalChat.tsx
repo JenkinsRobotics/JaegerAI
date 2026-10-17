@@ -3,6 +3,7 @@
  * on purpose. */
 import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { HandoffMarker } from "../agents/HandoffMarker";
+import { ErrorState } from "../shell/ErrorState";
 import { MicIcon, PlusIcon, SendIcon, StopIcon } from "../icons";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { MiniMarkdown } from "./miniMarkdown";
@@ -60,6 +61,8 @@ function segments(parts: ChatPart[]) {
 
 export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: string }) {
   const [session, setSession] = useState<ChatSession | null>(null);
+  const [loadError, setLoadError] = useState<string>();
+  const [attempt, setAttempt] = useState(0);
   const [draft, setDraft] = useState("");
   const [active, setActive] = useState<TurnHandle | null>(null);
   const scroller = useRef<HTMLDivElement>(null);
@@ -67,9 +70,13 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   useEffect(() => {
     let live = true;
     setSession(null);
-    if (sessionId) host.sessions.load(sessionId).then((s) => live && setSession(s), () => live && setSession({ id: sessionId, title: "New chat", turns: [] }));
+    setLoadError(undefined);
+    if (sessionId) host.sessions.load(sessionId).then(
+      (s) => { if (live) setSession(s); },
+      (error: unknown) => { if (live) setLoadError(String((error as Error)?.message ?? error)); },
+    );
     return () => { live = false; };
-  }, [host, sessionId]);
+  }, [host, sessionId, attempt]);
 
   useEffect(() => { scroller.current?.scrollTo({ top: scroller.current.scrollHeight }); }, [session]);
 
@@ -110,6 +117,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
       </div>
       <div className="jg-chat__scroll" ref={scroller}>
         <div className="jg-chat__column">
+          {loadError && <ErrorState title="Couldn't load this chat" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
           {session && !session.turns.length && <p className="jg-chat__empty">What should we work on?</p>}
           {session?.turns.map((turn) => (
             <section key={turn.turnId} className="jg-turn">
