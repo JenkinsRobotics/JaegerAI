@@ -158,9 +158,21 @@ class TokenStoreError(RuntimeError):
     """The token store could not be read or written (value never included)."""
 
 
-def _token_dir() -> Path | None:
+def _explicit_token_dir() -> Path | None:
     raw = os.environ.get(TOKEN_DIR_ENV, "").strip()
     return Path(raw).expanduser() if raw else None
+
+
+def _state_token_dir() -> Path | None:
+    try:
+        from jaeger_ai.core.instance.instance import operator_state_root
+        return operator_state_root() / "caller_tokens"
+    except Exception:
+        return None
+
+
+def _token_dir() -> Path | None:
+    return _explicit_token_dir() or _state_token_dir()
 
 
 def _known(name: str) -> None:
@@ -171,9 +183,9 @@ def _known(name: str) -> None:
 def read_token(name: str) -> str | None:
     """The stored token for ``name`` or ``None`` if absent. Never logs it."""
     _known(name)
-    directory = _token_dir()
-    if directory is not None:
-        path = directory / f"{name}.token"
+    explicit = _explicit_token_dir()
+    if explicit is not None:
+        path = explicit / f"{name}.token"
         try:
             st = path.stat()
         except FileNotFoundError:
@@ -182,6 +194,21 @@ def read_token(name: str) -> str | None:
             raise TokenStoreError(f"{path} must be mode 0600")
         value = path.read_text(encoding="utf-8").strip()
         return value or None
+
+    state_dir = _state_token_dir()
+    if state_dir is not None:
+        path = state_dir / f"{name}.token"
+        if path.exists():
+            try:
+                st = path.stat()
+                if stat.S_IMODE(st.st_mode) & 0o077:
+                    raise TokenStoreError(f"{path} must be mode 0600")
+                value = path.read_text(encoding="utf-8").strip()
+                if value:
+                    return value
+            except FileNotFoundError:
+                pass
+
     try:
         proc = subprocess.run(
             [SECURITY_BIN, "find-generic-password", "-s", KEYCHAIN_SERVICE, "-a", name, "-w"],
@@ -198,36 +225,55 @@ def read_token(name: str) -> str | None:
 
 
 def _write_token(name: str, value: str) -> None:
-    directory = _token_dir()
-    if directory is not None:
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{name}.token"
+    explicit = _explicit_token_dir()
+    if explicit is not None:
+        explicit.mkdir(parents=True, exist_ok=True)
+        path = explicit / f"{name}.token"
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(value)
         os.chmod(path, 0o600)
         return
-    # ``security -i`` reads the command from stdin, so the value never
-    # appears in argv (ps) or in this process's logs.
-    command = (f'add-generic-password -U -s {KEYCHAIN_SERVICE} -a {name} '
-               f'-l "Jaeger Gateway caller: {name}" -w {value}\n')
-    try:
-        proc = subprocess.run([SECURITY_BIN, "-i"], input=command, capture_output=True,
-                              text=True, timeout=15, check=False)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise TokenStoreError(f"Keychain unavailable: {type(exc).__name__}") from None
-    if proc.returncode != 0 or "error" in (proc.stderr or "").lower():
-        raise TokenStoreError(f"Keychain write failed for {name!r}")
+
+    state_dir = _state_token_dir()
+    if state_dir is not None:
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+            path = state_dir / f"{name}.token"
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(value)
+            os.chmod(path, 0o600)
+        except Exception:
+            pass
+
+    if Path(SECURITY_BIN).exists():
+        command = (f'add-generic-password -U -s {KEYCHAIN_SERVICE} -a {name} '
+                   f'-l "Jaeger Gateway caller: {name}" -w {value}\n')
+        try:
+            proc = subprocess.run([SECURITY_BIN, "-i"], input=command, capture_output=True,
+                                  text=True, timeout=15, check=False)
+            if proc.returncode != 0 or "error" in (proc.stderr or "").lower():
+                if state_dir is None:
+                    raise TokenStoreError(f"Keychain write failed for {name!r}")
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            if state_dir is None:
+                raise TokenStoreError(f"Keychain unavailable: {type(exc).__name__}") from None
 
 
 def ensure_tokens(names: Iterable[str] | None = None) -> dict[str, str]:
     """Create any missing token; returns ``{name: "existing"|"created"}``."""
     result: dict[str, str] = {}
     for name in (list(names) if names is not None else list(CALLERS)):
-        if read_token(name):
+        existing = read_token(name)
+        if existing:
+            # Sync to state dir if present in Keychain but not yet on disk
+            if _explicit_token_dir() is None:
+                state_dir = _state_token_dir()
+                if state_dir is not None and not (state_dir / f"{name}.token").exists():
+                    _write_token(name, existing)
             result[name] = "existing"
             continue
-        # URL-safe alphabet only: no quoting issues in ``security -i``.
         _write_token(name, secrets.token_urlsafe(32))
         if not read_token(name):
             raise TokenStoreError(f"token for {name!r} did not persist")

@@ -137,6 +137,7 @@ def test_webui_launcher_does_not_adopt_a_sibling_hermes_checkout():
 
 ALLOWED_ROOT_ITEMS = {
     ".agents",
+    ".claude",
     ".git",
     ".gitattributes",
     ".github",

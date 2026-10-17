@@ -108,6 +108,9 @@ def mirror_session(session_id: str, *, gateway_session: dict | None = None) -> b
     """
     from api import models
 
+    if not models.is_safe_session_id(session_id):
+        return False
+
     gw = gateway_session
     if gw is None or "messages" not in gw:
         gw = _request("GET", f"/v1/sessions/{urllib.parse.quote(session_id, safe='')}")
@@ -213,3 +216,41 @@ def push_title(session_id: str, title: str) -> bool:
         "PATCH", f"/v1/sessions/{urllib.parse.quote(session_id, safe='')}", {"title": title},
     )
     return isinstance(result, dict) and not result.get("error")
+
+
+def is_mirrored_gateway_session(session_id: str) -> bool:
+    """Return True if session_id is known to the Gateway mirror or is an agent home session."""
+    sid = str(session_id or "").strip()
+    if not sid:
+        return False
+    if sid.startswith("agent-"):
+        return True
+    with _lock:
+        return sid in _fingerprints
+
+
+def ensure_gateway_session(session: Any) -> bool:
+    """Register a newly created WebUI session on the Gateway so both stores share its ID."""
+    sid = str(getattr(session, "session_id", "") or "").strip()
+    if not sid:
+        return False
+    title = str(getattr(session, "title", "") or "Untitled")
+    workspace = str(getattr(session, "workspace", "") or "")
+    profile = str(getattr(session, "profile", "") or "jaeger")
+    result = _request(
+        "POST",
+        "/v1/sessions",
+        {
+            "session_id": sid,
+            "title": title,
+            "workspace": workspace,
+            "profile": profile,
+            "source": "webui",
+            "metadata": {"source": "webui"},
+        },
+    )
+    if isinstance(result, dict) and not result.get("error"):
+        with _lock:
+            _fingerprints[sid] = (result.get("updated_at"), 0, False)
+        return True
+    return False

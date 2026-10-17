@@ -74,6 +74,7 @@ class EntityRuntime:
 
     _instance: EntityRuntime | None = None
     _lock = threading.Lock()
+    _skill_load_lock = threading.Lock()
 
     def __init__(
         self,
@@ -963,6 +964,12 @@ class EntityRuntime:
                 cfg.external_model = client.ext
             else:
                 cfg.external_model.enabled = False
+        # The Gateway constructs its ReAct agent here rather than through
+        # jaeger_ai.main._get_agent(). Therefore this owner path must load the
+        # shipped code skills itself before build_jaeger_agent snapshots the
+        # global registry. Without this, computer_look/computer_do existed on
+        # disk and in unit tests but were absent from every Gateway turn.
+        self._ensure_subordinate_skills(cfg=cfg)
         if on_model is not None:
             on_model(f"{client.provider}:{client.model_name}")
         if cancellation is not None and cancellation.cancelled:
@@ -1029,6 +1036,36 @@ class EntityRuntime:
             "text": out if out else "(No response text returned)",
             "halt_reason": getattr(turn_exec.agent, "last_halt_reason", None),
         }
+
+    def _ensure_subordinate_skills(self, cfg: Any = None) -> None:
+        """Load code-skill tools before the owner ReAct agent is built.
+
+        Idempotence is per EntityRuntime. ``load_and_register`` is also
+        idempotent, but avoiding a full skill-tree discovery on every Gateway
+        request keeps the hot path small. Test/minimal layouts without a real
+        ``skills_dir`` deliberately skip this host integration.
+        """
+        if getattr(self, "_subordinate_skills_loaded", False):
+            return
+        skills_dir = getattr(self.layout, "skills_dir", None)
+        if not isinstance(skills_dir, (str, Path)):
+            return
+        with type(self)._skill_load_lock:
+            if getattr(self, "_subordinate_skills_loaded", False):
+                return
+            from jaeger_agent.skill_registry.skill_loader import load_and_register
+
+            skills_cfg = getattr(cfg, "skills", None) if cfg is not None else None
+            run_smoke_tests = bool(getattr(skills_cfg, "run_smoke_tests", False))
+            enabled = getattr(skills_cfg, "enabled_base_skills", None)
+            allowlist = (list(enabled) or None) if enabled is not None else None
+            load_and_register(
+                None,
+                self.layout,
+                run_smoke_tests=run_smoke_tests,
+                enabled_allowlist=allowlist,
+            )
+            self._subordinate_skills_loaded = True
 
     @staticmethod
     def _project_episodic(user_text: str, answer: str, *, session_id: str) -> None:

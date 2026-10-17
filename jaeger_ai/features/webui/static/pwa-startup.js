@@ -31,6 +31,15 @@
     try{window.dispatchEvent(new CustomEvent(name,{detail:detail||{}}));}catch(_){}
   }
 
+  try{
+    if(localStorage.getItem('jaeger-ui-build')!=='jaeger-ui-build-v16' && window.caches){
+      localStorage.setItem('jaeger-ui-build','jaeger-ui-build-v16');
+      window.caches.keys().then(function(ks){ks.forEach(function(k){window.caches.delete(k);});});
+      if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
+        navigator.serviceWorker.getRegistrations().then(function(regs){regs.forEach(function(r){r.update();});});
+      }
+    }
+  }catch(_){}
   syncMode();
   window.addEventListener('online',function(){syncMode();dispatch('hermes:pwa-connection-change',{online:true});});
   window.addEventListener('offline',function(){syncMode();dispatch('hermes:pwa-connection-change',{online:false});});
@@ -66,23 +75,19 @@
   });
 
   function paintPhoneStatus(){
-    if(!window.fetch)return;
-    window.fetch('api/remote/phone-status',{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(data){
-      var chip=document.getElementById('phoneStatusChip');
-      if(!chip){
-        chip=document.createElement('div');
-        chip.id='phoneStatusChip';
-        chip.className='phone-status-chip';
-        var host=document.querySelector('.messages')||document.body;
-        host.insertBefore(chip, host.firstChild);
-      }
-      var current=data.current||'Idle';
-      var attention=data.needs_attention&&data.needs_attention!=='none'?(' · '+data.needs_attention):'';
-      chip.textContent=(data.online?'Jaeger Online':'Jaeger is currently unreachable')+' · '+current+attention;
-    }).catch(function(){
-      var chip=document.getElementById('phoneStatusChip');
-      if(chip)chip.textContent='Jaeger is currently unreachable';
-    });
+    var existing=document.getElementById('phoneStatusChip');
+    if(window.navigator.onLine!==false){
+      if(existing)existing.remove();
+      return;
+    }
+    if(!existing){
+      existing=document.createElement('div');
+      existing.id='phoneStatusChip';
+      existing.className='phone-status-chip';
+      var host=document.querySelector('.messages')||document.body;
+      host.insertBefore(existing, host.firstChild);
+    }
+    existing.textContent='Offline — reconnecting…';
   }
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',paintPhoneStatus);
   else paintPhoneStatus();

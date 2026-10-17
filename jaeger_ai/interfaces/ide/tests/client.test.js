@@ -1,6 +1,7 @@
 'use strict';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const http = require('http');
 const { Gateway, GatewayError, localEndpoint, decodeSSE } = require('../gateway');
 const { statusLabel } = require('../media/presentation');
 const {
@@ -24,6 +25,36 @@ test('SSE UTF-8, CRLF, multiline data, arbitrary chunk splits and incomplete EOF
   const events = []; for await (const event of decodeSSE(chunks())) events.push(event);
   assert.deepEqual(events, [{ name: 'turn.delta', id: '7', payload: { text: '🌱' } }]);
 });
+test('Gateway passes callerToken option into Authorization header', () => {
+  const gw = new Gateway('http://127.0.0.1:8810', { callerToken: 'test-token-123' });
+  assert.deepEqual(gw.auth(), { Authorization: 'Bearer test-token-123' });
+});
+test('native loopback transport reaches an authenticated Gateway without global fetch', async t => {
+  const server = http.createServer((request, response) => {
+    assert.equal(request.url, '/version');
+    assert.equal(request.headers.authorization, 'Bearer test-token-123');
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({ component: 'jaeger-gateway', version: '0.13.0' }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const port = server.address().port;
+    const gateway = new Gateway(`http://127.0.0.1:${port}`, {
+      callerToken: 'test-token-123', nativeLoopback: true,
+    });
+    try {
+      assert.deepEqual(await gateway.json('/version'), { component: 'jaeger-gateway', version: '0.13.0' });
+    } catch (err) {
+      if (err.code === 'EPERM' || err.message?.includes('EPERM')) {
+        t.skip('Sandbox blocks local loopback socket connect');
+        return;
+      }
+      throw err;
+    }
+  } finally {
+    await new Promise(resolve => server.close(resolve));
+  }
+});
 function fixture() {
   const gateway = {
     url: 'http://127.0.0.1:1234', row: { session_id: 'one', title: 'One', status: 'idle', messages: [] },
@@ -44,6 +75,17 @@ function fixture() {
   const client = new Conversation(gateway, () => {}, async value => { saved = structuredClone(value); });
   return { gateway, client, saved: () => saved };
 }
+test('publishes connected before an optional control-plane call stalls', async () => {
+  const { gateway } = fixture();
+  gateway.approvals = () => new Promise(() => {});
+  const states = [];
+  const client = new Conversation(gateway, state => states.push(state), async () => {});
+  try {
+    void client.refresh('one');
+    await waitFor(() => states.some(state => state.connected === true));
+    assert.equal(client.state.status, 'Connected');
+  } finally { client.dispose(); }
+});
 test('initial reconnect failure retries without submitting a turn', async () => {
   const { gateway, client } = fixture();
   let attempts = 0;

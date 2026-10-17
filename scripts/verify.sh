@@ -11,13 +11,18 @@ echo "  JaegerAI Verification Pipeline"
 echo "=================================================="
 
 # 1. Enforce python environment & byte-code isolation
+if [[ -d /opt/homebrew/bin ]]; then
+  export PATH="/opt/homebrew/bin:${PATH}"
+fi
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
-VENV_PY="${HOME}/.jaeger/venv/bin/python"
-VENV_PYTEST="${HOME}/.jaeger/venv/bin/pytest"
+export PYTHONPATH="${REPO_ROOT}/packages/jaeger-agent:${REPO_ROOT}/packages/jaeger-os:${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+JAEGER_VENV_ROOT="${JAEGER_VENV:-${HOME}/.jaeger/venv}"
+VENV_PY="${JAEGER_VENV_ROOT}/bin/python"
+VENV_PYTEST="${JAEGER_VENV_ROOT}/bin/pytest"
 
-if [[ ! -x "${VENV_PY}" ]]; then
-  echo "[-] ERROR: Virtual environment not found at ${VENV_PY}."
+if [[ ! -x "${VENV_PY}" || ! -x "${VENV_PYTEST}" ]]; then
+  echo "[-] ERROR: Virtual environment not found at ${JAEGER_VENV_ROOT}."
   echo "    Please run ./install.sh first."
   exit 1
 fi
@@ -33,7 +38,7 @@ fi
 echo "[+] Git tracking is pristine."
 
 echo "[2/4] Running CI hygiene tripwires (root allowlist, features READMEs, zero in-repo state)..."
-"${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ci_hygiene.py -q --no-header
+"${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ci_hygiene.py -q --no-header
 echo "[+] CI hygiene tripwires passed."
 
 echo "[3/4] Running IDE interface unit tests..."
@@ -42,7 +47,7 @@ PASSED_COUNT=$(echo "${IDE_OUTPUT}" | grep -E '^(ℹ|#) pass ' | awk '{print $3}
 echo "[+] IDE interface tests passed (${PASSED_COUNT} passed)."
 
 echo "[4/4] Running core Gateway client, Skill Catalog audit & Tier contract..."
-"${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ide_gateway_client.py dev/tests/jaeger_ai/core/test_skill_catalog_audit.py dev/tests/jaeger_ai/core/test_interaction_tiers.py -q --no-header
+"${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ide_gateway_client.py dev/tests/jaeger_ai/core/test_skill_catalog_audit.py dev/tests/jaeger_ai/core/test_interaction_tiers.py -q --no-header
 echo "[+] Core Gateway client, Skill Catalog audit & Tier contract passed."
 
 echo "=================================================="

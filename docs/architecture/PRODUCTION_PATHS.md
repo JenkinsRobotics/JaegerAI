@@ -79,9 +79,10 @@ subprocess workers, cancelled by process tree, `unconfirmed` when a descendant s
 | WebUI in-process agent, `:8791` runner, Hermes/OpenClaw/Roundtable profiles | existing switch |
 | Deep Think daemon | `run_daemon` now runs the Gateway owner; legacy board cards are imported once into `GatewayTaskOwner` (`migrate_legacy`) and the board is a projection |
 
-**Unreachable — listed for removal.** `jaeger_ai/mind/cognition/` (3,027 lines: its own identity,
-planner, router, orchestrator, evaluator, trust engine, worker registry) and
-`jaeger_ai/interfaces/messaging/` have no importer; pinned unreachable *(test)* until deleted.
+**Deleted in architecture cleanup.** `jaeger_ai/mind/cognition/` (3,027 lines: duplicate identity,
+planner, router, orchestrator, evaluator, trust engine, worker registry superseded by `core/entity/`) and
+`jaeger_ai/interfaces/messaging/` (Slack Socket Mode folded into `features/channels/platforms/slack.py`)
+have been completely removed; pinned forbidden *(test)* so they never reappear.
 
 ## Avatar, phone, Minecraft
 
@@ -106,4 +107,3 @@ denies `mc_*`, and `EmbodimentGate` refuses *(test)*. It stays disabled.
   scoped to a session.
 - Delegate-health telemetry shares the memory SQLite file (`delegates/health/store.py`); it is not
   owner memory.
-- `jaeger_ai/mind/cognition/` and `interfaces/messaging/` await deletion.

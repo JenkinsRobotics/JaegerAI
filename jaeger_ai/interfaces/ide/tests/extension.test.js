@@ -11,18 +11,33 @@ const Module = require('node:module');
 let jaegerModelSetting = 'settings-model';
 let copiedText = null;
 const configChangeListeners = [];
+const registeredCommands = new Map();
+let chooseItem = items => items[0];
+let catalog = { providers: [] };
 const mockVscode = {
+  ConfigurationTarget: { Global: 1 },
+  languages: { getDiagnostics: () => [] },
   window: {
     createOutputChannel: () => ({ appendLine: () => {}, show: () => {}, dispose: () => {} }),
     showInputBox: async () => 'Test',
     showWorkspaceFolderPick: async () => ({ uri: { fsPath: '/workspace/two' } }),
-    showQuickPick: async items => items[0],
+    showQuickPick: async items => chooseItem(items),
+    showInformationMessage: () => {},
+    showErrorMessage: () => {},
     registerWebviewViewProvider: () => ({ dispose: () => {} }),
   },
-  commands: { registerCommand: () => ({ dispose: () => {} }), executeCommand: async () => {} },
+  commands: { registerCommand: (id, fn) => { registeredCommands.set(id, fn); return { dispose() {} }; }, executeCommand: async () => {} },
   workspace: {
     registerTextDocumentContentProvider: () => ({ dispose() {} }),
-    getConfiguration: () => ({ get: (key) => key === 'model' ? jaegerModelSetting : '' }),
+    getConfiguration: () => ({
+      get: key => key === 'model' ? jaegerModelSetting : '',
+      inspect: () => ({ globalValue: undefined, defaultValue: undefined }),
+      update: async (key, value, target) => {
+        assert.equal(key, 'model');
+        assert.equal(target, mockVscode.ConfigurationTarget.Global);
+        jaegerModelSetting = value;
+      },
+    }),
     onDidChangeConfiguration: (fn) => { configChangeListeners.push(fn); return { dispose: () => {} }; },
     findFiles: async () => [
       { fsPath: '/workspace/one/src/main.py' },
@@ -60,7 +75,9 @@ class GatewayStub {
   async sessions() { return { sessions: [] }; }
   async session(id) { return { session_id: id, title: id, status: 'idle', messages: [] }; }
   async approvals() { return { approvals: [] }; }
-  async models() { return { providers: [] }; }
+  async models() { return catalog; }
+  async queueAdd(sid, body) { stubGateway.queued = { sid, body }; return { status: 'queued' }; }
+  async queue() { return { items: [] }; }
   async send(sid, body) { stubGateway.sent = body; return { start_event_id: 1, status: 'running' }; }
   async addAttachment() { return { attachment_id: 'mention-attachment', original_filename: 'main.py' }; }
   async receipt() { return { status: 'running' }; }
@@ -92,8 +109,14 @@ function makeContext() {
 }
 
 // Activate the extension and return a handle to simulate webview messages.
-function wireExtension() {
+function wireExtension(options = {}) {
   stubGateway.sent = null;
+  stubGateway.queued = null;
+  catalog = options.catalog || { providers: [
+    { id: 'fixture', reachable: true, models: [{ id: 'my-static-model', available: true }] },
+    ...['openai', 'anthropic'].map(id => ({ id, reachable: true, models: [{ id: 'gpt-4', available: true }] })),
+  ] };
+  chooseItem = items => items[0];
   const posted = [];
   let msgHandler, disposeHandler, messageDisposed = false;
   const mockView = {
@@ -171,7 +194,7 @@ test('@ mention stages the picked workspace file through the Gateway attachment 
 });
 
 test('pasteAttachment writes data to attachment scratch and stages it through Gateway', async () => {
-  const { send, gateway } = wireExtension();
+  const { send, gateway, posted } = wireExtension();
   send({ type: 'ready' });
   await waitFor(() => gateway.instance !== undefined);
   gateway.instance.sessions = async () => ({ sessions: [{ session_id: 'paste-session', title: 'T', status: 'idle', messages: [] }] });
@@ -200,7 +223,7 @@ test('pasteAttachment writes data to attachment scratch and stages it through Ga
 
 test('copy message action reaches the native IDE clipboard', async () => {
   copiedText = null;
-  const { send, gateway } = wireExtension();
+  const { send, gateway, posted } = wireExtension();
   send({ type: 'ready' });
   await waitFor(() => gateway.instance !== undefined);
   send({ type: 'copy', text: 'copied from Jaeger' });
@@ -210,7 +233,7 @@ test('copy message action reaches the native IDE clipboard', async () => {
 
 test('model "config" → jaeger.model setting reaches admission body', async () => {
   jaegerModelSetting = 'my-static-model';
-  const { send, gateway } = wireExtension();
+  const { send, gateway, posted } = wireExtension();
   send({ type: 'ready' });
   await waitFor(() => gateway.instance !== undefined);
   // Simulate a connected session so send() goes through.
@@ -218,7 +241,7 @@ test('model "config" → jaeger.model setting reaches admission body', async () 
   gateway.instance.session = async id => ({ session_id: id, title: 'T', status: 'idle', messages: [] });
   send({ type: 'select', id: 'sid' });
   await new Promise(r => setTimeout(r, 50));
-  send({ type: 'send', text: 'hello', model: 'config' });
+  await send({ type: 'send', text: 'hello', model: 'config' });
   await waitFor(() => gateway.sent !== null);
   assert.equal(gateway.sent.model, 'my-static-model', '"config" must use the jaeger.model setting');
   assert.ok(!('provider' in gateway.sent), 'no provider for a setting-only model string');
@@ -246,7 +269,7 @@ test('model "openai::gpt-4" → provider and model both reach admission body', a
   gateway.instance.session = async id => ({ session_id: id, title: 'T', status: 'idle', messages: [] });
   send({ type: 'select', id: 's3' });
   await new Promise(r => setTimeout(r, 50));
-  send({ type: 'send', text: 'hello', model: 'openai::gpt-4' });
+  await send({ type: 'send', text: 'hello', model: 'openai::gpt-4' });
   await waitFor(() => gateway.sent !== null);
   assert.equal(gateway.sent.model, 'gpt-4');
   assert.equal(gateway.sent.provider, 'openai');
@@ -261,7 +284,7 @@ test('duplicate model-id across providers stays distinct: anthropic::gpt-4 ≠ o
   send1({ type: 'select', id: 'sa' });
   await new Promise(r => setTimeout(r, 50));
 
-  send1({ type: 'send', text: 'q', model: 'anthropic::gpt-4' });
+  await send1({ type: 'send', text: 'q', model: 'anthropic::gpt-4' });
   await waitFor(() => gw1.sent !== null);
   assert.equal(gw1.sent.provider, 'anthropic');
   assert.equal(gw1.sent.model, 'gpt-4');
@@ -301,3 +324,69 @@ test('initial state posted to webview includes configuredModel', async () => {
   assert.ok(connecting, 'extension must post an initial connecting state');
   assert.equal(connecting.configuredModel, 'cfg-model-x', 'configuredModel must be in the initial state');
 });
+
+test('ready handshake replays the latest connection state after controller startup', async () => {
+  const { send, posted } = wireExtension();
+  await send({ type: 'ready' });
+  await waitFor(() => posted.some(message => message.connected === true));
+  const connectedStates = posted.filter(message => message.connected === true);
+  assert.ok(connectedStates.length >= 1, 'extension must deliver a connected state after ready');
+  assert.equal(connectedStates.at(-1).status, 'Connected');
+});
+
+const cloudCatalog = model => ({ providers: [
+  { id: 'ollama-cloud', reachable: true, models: [{ id: model, available: true }] },
+] });
+
+async function connectedWire(modelCatalog) {
+  const wired = wireExtension({ catalog: modelCatalog });
+  await wired.send({ type: 'ready' });
+  await wired.send({ type: 'select', id: 'cloud-session' });
+  await waitFor(() => wired.posted.some(state => state.connected && state.models));
+  return wired;
+}
+
+test('discovered Ollama Cloud default persists and reaches immediate and queued admissions unchanged', async () => {
+  const model = 'fixture-cloud-cognition:cloud';
+  const wired = await connectedWire(cloudCatalog(model));
+  chooseItem = items => items.find(item => item.modelValue === `ollama-cloud::${model}`);
+  await registeredCommands.get('jaeger.selectModel')();
+  assert.equal(jaegerModelSetting, `ollama-cloud::${model}`);
+  await wired.send({ type: 'send', text: 'synthetic turn', model: 'config', ideContext: false });
+  assert.deepEqual({ provider: wired.gateway.sent.provider, model: wired.gateway.sent.model },
+    { provider: 'ollama-cloud', model });
+  await wired.send({ type: 'queue', text: 'synthetic follow-up', model: 'config', ideContext: false });
+  assert.equal(wired.gateway.queued.sid, 'cloud-session');
+  assert.deepEqual({ provider: wired.gateway.queued.body.provider, model: wired.gateway.queued.body.model },
+    { provider: 'ollama-cloud', model });
+  wired.dispose();
+});
+
+test('routed catalog ID is decoded once before default admission', async () => {
+  const model = 'fixture-routed:cloud';
+  const wired = await connectedWire(cloudCatalog(`@ollama-cloud:${model}`));
+  chooseItem = items => items.find(item => item.label === `@ollama-cloud:${model}`);
+  await registeredCommands.get('jaeger.selectModel')();
+  await wired.send({ type: 'send', text: 'synthetic turn', model: 'config', ideContext: false });
+  assert.deepEqual({ provider: wired.gateway.sent.provider, model: wired.gateway.sent.model },
+    { provider: 'ollama-cloud', model });
+  wired.dispose();
+});
+
+for (const [name, modelCatalog, selection] of [
+  ['unavailable provider', { providers: [{ id: 'ollama-cloud', reachable: false, models: [{ id: 'fixture-model', available: true }] }] }, 'ollama-cloud::fixture-model'],
+  ['suffix collision', cloudCatalog('other:fixture-model'), 'ollama-cloud::fixture-model'],
+  ['empty catalog', { providers: [] }, 'ollama-cloud::fixture-model'],
+]) {
+  test(`${name} rejects send and queue without replacing the selected model`, async () => {
+    jaegerModelSetting = selection;
+    const wired = await connectedWire(modelCatalog);
+    await wired.send({ type: 'send', text: 'must not be admitted', model: 'config' });
+    await wired.send({ type: 'queue', text: 'must not be queued', model: 'config' });
+    assert.equal(wired.gateway.sent, null);
+    assert.equal(wired.gateway.queued, null);
+    assert.equal(jaegerModelSetting, selection);
+    assert.ok(wired.posted.some(state => /unavailable|catalog/i.test(state.error || '')));
+    wired.dispose();
+  });
+}

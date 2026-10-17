@@ -122,7 +122,7 @@ class SleepTimeProcessor:
                 # Extract and record semantic claims from verified completed tools
                 completed = [e for e in events if e.event_type == EventType.TOOL_COMPLETED.value]
                 for comp in completed:
-                    tool_n = comp.payload.get("tool_name", "tool")
+                    tool_n = str(comp.payload.get("tool") or comp.payload.get("tool_name") or "tool")
                     self.memory.semantic.record_claim(
                         subject=f"tool:{tool_n}",
                         predicate="last_successful_invocation",
@@ -146,10 +146,13 @@ class SleepTimeProcessor:
                     if e.event_type == EventType.TOOL_FAILED.value
                 ]
                 if failed_tools:
-                    tool_names = {e.payload.get("tool_name", "unknown") for e in failed_tools}
+                    tool_names = {
+                        str(e.payload.get("tool") or e.payload.get("tool_name") or "unknown")
+                        for e in failed_tools
+                    }
                     ins = self.memory.reflective.store_insight(
                         topic="tool_reliability",
-                        observation=f"Detected recent tool failures in: {', '.join(tool_names)}",
+                        observation=f"Detected recent tool failures in: {', '.join(sorted(tool_names))}",
                         implication="Require defensive argument validation and fallback execution paths.",
                     )
                     result.reflections_generated += 1
@@ -162,28 +165,31 @@ class SleepTimeProcessor:
         # 3. Job: Skill Candidate Review
         if SleepTimeJobType.SKILL_CANDIDATE_REVIEW in selected_jobs:
             try:
-                from collections import Counter
-                completed = [
+                candidates = [
                     e for e in self.event_store.query_events(
-                        event_types=[EventType.TOOL_COMPLETED.value],
+                        event_types=[EventType.SKILL_CANDIDATE.value],
                         since_ts=time.time() - 86400,
                         limit=200,
                     )
                 ]
-                counts = Counter(
-                    str((e.payload or {}).get("tool") or "")
-                    for e in completed
-                )
-                for tool, n in counts.items():
-                    if tool in {"write_file", "terminal", "memory"} and n >= 2:
-                        cand = self.skill_pipeline.extract_candidate(
-                            name=f"learned_{tool.replace('.', '_')}",
-                            description=f"Repeated successful {tool} procedure observed {n} times",
-                            code=f"# verified {tool} playbook\n",
-                        )
-                        ver = self.skill_pipeline.verify_candidate(cand, lambda code: "verified" in code or "playbook" in code)
-                        if self.skill_pipeline.promote(cand, ver):
-                            result.skills_promoted += 1
+                for cand_ev in candidates:
+                    payload = cand_ev.payload or {}
+                    skill_name = str(payload.get("skill_name") or "").strip()
+                    code = str(payload.get("code") or "")
+                    if not skill_name or skill_name in self.skill_pipeline.list_promoted_skills():
+                        continue
+                    cand = self.skill_pipeline.extract_candidate(
+                        name=skill_name,
+                        description=str(payload.get("description") or f"Learned skill {skill_name}"),
+                        code=code,
+                        source_turn_id=str(payload.get("source_turn_id") or cand_ev.event_id),
+                    )
+                    ver = self.skill_pipeline.verify_candidate(
+                        cand,
+                        lambda c: not self.skill_pipeline.is_placeholder_code(c),
+                    )
+                    if self.skill_pipeline.promote(cand, ver):
+                        result.skills_promoted += 1
                 result.jobs_executed.append("skill_candidate_review")
             except Exception as exc:
                 err = f"Skill review job error: {exc}"

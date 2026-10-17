@@ -101,3 +101,20 @@ def test_no_tool_call_plain_text():
     tool_calls, cleaned = repair_plain_text_tool_calls(raw)
     assert len(tool_calls) == 0
     assert cleaned == raw
+
+
+def test_repair_implicit_command_json_block():
+    raw = (
+        "Here is the command to list files:\n"
+        "```json\n"
+        '{\n  "command": "ls -la /tmp"\n}\n'
+        "```"
+    )
+    tool_calls, cleaned = repair_plain_text_tool_calls(raw, allowed_tool_names={"run_shell", "read_file"})
+    assert len(tool_calls) == 1
+    call = tool_calls[0]
+    assert call["function"]["name"] == "run_shell"
+    args = json.loads(call["function"]["arguments"])
+    assert args == {"command": "ls -la /tmp"}
+    assert "```json" not in cleaned
+    assert "Here is the command to list files:" in cleaned

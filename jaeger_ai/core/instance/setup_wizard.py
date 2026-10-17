@@ -729,7 +729,7 @@ def run_wizard(
         print("           installed — run `jaeger --tui` for the terminal.")
 
     # ── Step 5 · Warm-up ────────────────────────────────────────────
-    # Vision (Moondream2) is wired in code (core/tools/vision.py) but
+    # Native mmproj vision is wired in code (core/tools/vision.py) but
     # has no test coverage and no bench case in 0.2.x — surfacing it
     # in the wizard implied a first-class feature it isn't yet. The
     # warmup flag is hard-coded off here; anyone who needs it can set

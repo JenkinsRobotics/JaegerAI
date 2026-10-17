@@ -143,13 +143,20 @@ function groupTurns(messages) {
 // Composite picker option value that encodes both provider and model ID,
 // keeping options distinguishable when two providers offer the same model ID.
 function providerModelValue(provider, id) {
+  const routed = parseProviderModel(id);
+  if (routed.provider === provider) id = routed.model;
   return `${provider}::${id}`;
 }
 
 // Parse a providerModelValue back to its parts. Returns empty strings for the
 // 'Gateway default' sentinel (empty composite).
 function parseProviderModel(value) {
-  const s = String(value || '');
+  let s = String(value || '');
+  if (s.startsWith('@')) {
+    const colon = s.indexOf(':');
+    if (colon > 1) return { provider: s.slice(1, colon), model: s.slice(colon + 1) };
+    s = s.slice(1);
+  }
   const sep = s.indexOf('::');
   if (sep === -1) return { provider: '', model: s };
   return { provider: s.slice(0, sep), model: s.slice(sep + 2) };
@@ -161,15 +168,61 @@ function parseProviderModel(value) {
 // reachable; an unusable row would let the operator pick something that
 // fails admission immediately after.
 function selectableModels(catalog) {
-  const providers = (catalog && catalog.providers) || [];
   const rows = [];
+  const seen = new Set();
+  const addRow = (provider, id) => {
+    provider = String(provider || '').trim();
+    id = String(id || '').trim();
+    if (!id) return;
+    const key = `${provider}::${id}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    rows.push({ provider, id });
+  };
+
+  const providers = (catalog && Array.isArray(catalog.providers)) ? catalog.providers : [];
   for (const provider of providers) {
     if (!provider || !provider.reachable) continue;
+    const providerId = provider.id || 'ollama';
     for (const model of provider.models || []) {
-      if (model && model.available) rows.push({ provider: provider.id, id: model.id });
+      if (!model || model.available === false) continue;
+      const modelId = model.id || model.name;
+      if (model.remote_host === 'cloud' && providerId === 'ollama') {
+        addRow('ollama-cloud', modelId);
+      }
+      addRow(providerId, modelId);
     }
   }
+
+  const rawGroups = (catalog && (Array.isArray(catalog.groups) ? catalog.groups : (catalog.webui_catalog && Array.isArray(catalog.webui_catalog.groups)) ? catalog.webui_catalog.groups : [])) || [];
+  for (const group of rawGroups) {
+    if (!group) continue;
+    const isOnline = group.status
+      ? group.status === 'online'
+      : group.reachable !== false && group.credentials_available !== false;
+    if (!isOnline) continue;
+    const providerName = String(group.provider_id || group.provider || 'Other');
+    const providerId = providerName.toLowerCase().replace(/\s+/g, '-') === 'ollama-cloud'
+      ? 'ollama-cloud' : providerName;
+    for (const model of group.models || []) {
+      if (!model || model.available === false) continue;
+      const modelId = model.id || model.name;
+      addRow(providerId, modelId);
+    }
+  }
+
   return rows;
+}
+
+// Compare exact provider/model identities, never suffixes. A bare model may
+// only be used when the catalog identifies one provider for it.
+function modelSelectionAvailable(value, catalog) {
+  const selected = parseProviderModel(value);
+  if (!selected.model) return true;
+  const matches = selectableModels(catalog)
+    .map(row => parseProviderModel(providerModelValue(row.provider, row.id)))
+    .filter(row => row.model === selected.model && (!selected.provider || row.provider === selected.provider));
+  return matches.length > 0 && (Boolean(selected.provider) || new Set(matches.map(row => row.provider)).size === 1);
 }
 
 // Filter the Gateway-owned session projection by title, workspace, or ID.
@@ -178,7 +231,9 @@ function selectableModels(catalog) {
 function groupSelectableModels(rows) {
   const groups = new Map();
   for (const row of rows || []) {
-    const key = row.provider || 'Other';
+    let key = row.provider || 'Other';
+    if (key === 'ollama-cloud') key = 'Ollama Cloud';
+    else if (key === 'ollama') key = 'Ollama';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(row);
   }
@@ -187,10 +242,12 @@ function groupSelectableModels(rows) {
 
 // The pill label for a picker selection. '' is the Gateway/session default,
 // 'config' is the settings-configured model, anything else is `provider::model`.
-function modelSelectionLabel(choice, { configuredModel, sessionModel } = {}) {
-  if (choice === 'config') return configuredModel || 'From settings';
-  if (choice) return parseProviderModel(choice).model || choice;
-  return sessionModel || 'Gateway default';
+function modelSelectionLabel(choice, { configuredModel, sessionModel, unavailable = false } = {}) {
+  let label = '';
+  if (choice === 'config') label = configuredModel || 'From settings';
+  else if (choice) label = parseProviderModel(choice).model || choice;
+  else label = sessionModel || 'Gateway default';
+  return unavailable ? `${label} (Unavailable)` : label;
 }
 
 // The Gateway provides transcript-aware search; this remains a client-side
@@ -211,7 +268,7 @@ function filterChats(sessions, query) {
 const exportsObject = {
   modelLabel, toolName, activityTitle, activitySummary, activityIcon, groupWorkRows, diffLines, groupActivity, failureCount, statusLabel,
   groupTurns, selectableModels, providerModelValue, parseProviderModel, filterChats,
-  groupSelectableModels, modelSelectionLabel,
+  groupSelectableModels, modelSelectionLabel, modelSelectionAvailable,
 };
 if (typeof module !== 'undefined') module.exports = exportsObject;
 if (root) root.JaegerPresentation = exportsObject;

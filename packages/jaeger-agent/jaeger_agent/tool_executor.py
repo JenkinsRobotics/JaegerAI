@@ -338,28 +338,47 @@ class HookedToolExecutor:
             result = self._inner.execute(tool, args)
             dur = time.time() - t0
             is_err = isinstance(result, dict) and (result.get("ok") is False or result.get("error"))
+            err_str = str(result.get("error")) if is_err else None
             try:
                 from jaeger_ai.core.entity.runtime import EntityRuntime
-                EntityRuntime.get_singleton().record_tool_result(
+                rt = EntityRuntime.get_singleton()
+                tool_ev = rt.record_tool_result(
                     tool.name,
                     result,
                     call_id=call_id,
                     duration_s=dur,
-                    error=str(result.get("error")) if is_err else None,
+                    error=err_str,
                 )
+                if getattr(rt, "verification_registry", None) is not None and getattr(rt, "learning_pipeline", None) is not None:
+                    ver = rt.verification_registry.verify_tool_outcome(
+                        tool.name,
+                        args,
+                        result,
+                        error=err_str,
+                    )
+                    rt.learning_pipeline.process_experience(tool_ev, ver, rt.current_state)
             except Exception:
                 pass
         except Exception as exc:
             dur = time.time() - t0
             try:
                 from jaeger_ai.core.entity.runtime import EntityRuntime
-                EntityRuntime.get_singleton().record_tool_result(
+                rt = EntityRuntime.get_singleton()
+                tool_ev = rt.record_tool_result(
                     tool.name,
                     None,
                     call_id=call_id,
                     duration_s=dur,
                     error=str(exc),
                 )
+                if getattr(rt, "verification_registry", None) is not None and getattr(rt, "learning_pipeline", None) is not None:
+                    ver = rt.verification_registry.verify_tool_outcome(
+                        tool.name,
+                        args,
+                        None,
+                        error=str(exc),
+                    )
+                    rt.learning_pipeline.process_experience(tool_ev, ver, rt.current_state)
             except Exception:
                 pass
             raise

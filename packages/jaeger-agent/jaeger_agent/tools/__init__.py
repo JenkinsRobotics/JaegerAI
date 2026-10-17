@@ -16,7 +16,7 @@ Categories:
   • web.py            — web_search, get_weather
   • code.py           — run_python
   • speak.py          — speak (text or workspace file), warm_kokoro
-  • vision.py         — look_at, generate_image (Moondream2 + SDXL-Turbo)
+  • vision.py         — look_at, generate_image (native mmproj + SDXL-Turbo)
   • host.py           — open_on_host (macOS: URL / file / app)
   • credentials.py    — get_credential, list_credentials
   • delegation.py     — ask_user, help_me, delegate

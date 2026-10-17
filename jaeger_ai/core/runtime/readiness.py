@@ -89,8 +89,8 @@ def _hardware_enabled(config: Any) -> bool:
 
 
 def _vision_enabled(config: Any) -> bool:
-    # Heavy VLM. Warmed when the instance opts in (warmup.vision) — the one
-    # system that stays opt-in by weight; everything else warms by default.
+    # Vision projector. Warmed when the instance opts in (warmup.vision) —
+    # the one system that stays opt-in by weight; everything else warms by default.
     w = getattr(config, "warmup", None)
     return bool(w is not None and getattr(w, "vision", False))
 
@@ -144,7 +144,7 @@ def _registry(config: Any) -> list[System]:
         # lets Metal settle. Integration-race fix, mirrored from the smoke test.
         System("STT (Whisper)", _always, _warm_stt),
         System("TTS (Kokoro)", _always, _warm_tts, _health_tts),
-        System("vision (Moondream2)", _vision_enabled, _warm_vision,
+        System("vision (native mmproj)", _vision_enabled, _warm_vision,
                skip_reason="warmup.vision is off (heavy VLM — opt-in)"),
         System("avatar (animation node)", _avatar_enabled, _warm_avatar,
                skip_reason="avatar disabled in config"),

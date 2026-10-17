@@ -1,7 +1,7 @@
 {
   "_ceilings": {
-    "core_or_mind_imports_webui_api": 19,
-    "jaeger_agent_imports_product": 53,
+    "core_or_mind_imports_webui_api": 12,
+    "jaeger_agent_imports_product": 43,
     "jaeger_os_imports_product_or_agent": 1
   },
   "core_or_mind_imports_webui_api": {
@@ -36,22 +36,6 @@
     ],
     "jaeger_ai/core/sessions.py": [
       "jaeger_ai.features.webui.service.session_unify"
-    ],
-    "jaeger_ai/mind/cognition/bridge.py": [
-      "api.backends.router",
-      "api.config"
-    ],
-    "jaeger_ai/mind/cognition/context_compiler.py": [
-      "api.journal.schema"
-    ],
-    "jaeger_ai/mind/cognition/orchestrator.py": [
-      "api.journal.paths"
-    ],
-    "jaeger_ai/mind/cognition/router.py": [
-      "api.worker_rankings"
-    ],
-    "jaeger_ai/mind/cognition/trust_engine.py": [
-      "api.journal.paths"
     ]
   },
   "jaeger_agent_imports_product": {
@@ -154,6 +138,9 @@
       "jaeger_ai.core.safety.skills_guard"
     ],
     "packages/jaeger-agent/jaeger_agent/tools/speak.py": [
+      "jaeger_ai.main"
+    ],
+    "packages/jaeger-agent/jaeger_agent/tools/vision.py": [
       "jaeger_ai.main"
     ],
     "packages/jaeger-agent/jaeger_agent/util/lazy_deps.py": [

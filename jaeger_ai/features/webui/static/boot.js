@@ -2077,6 +2077,18 @@ window.renderTranscript=function(container, messages, opts){
 })();
 function _currentSessionIsReusableEmptyChat(){
   if(!S.session) return false;
+  const sid=String(S.session.session_id||'');
+  const meta=(S.session.metadata&&typeof S.session.metadata==='object')?S.session.metadata:{};
+  // Never treat a persistent agent home session (e.g. agent-jaeger) or a
+  // custom-titled conversation as an ephemeral scratch pad — clicking New chat
+  // from an agent home session must start a fresh conversation.
+  if(sid.startsWith('agent-')||meta.home===true||meta.agent_id) return false;
+  const title=String(S.session.title||'Untitled').trim();
+  if(title && title!=='Untitled' && title!=='New Chat' && title!=='New conversation') return false;
+  const msgEl=typeof $==='function'?$('msg'):null;
+  const hasDraft=!!(msgEl&&typeof msgEl.value==='string'&&msgEl.value.trim());
+  const hasAttachments=typeof _attachFiles!=='undefined'&&Array.isArray(_attachFiles)&&_attachFiles.length>0;
+  if(hasDraft||hasAttachments) return false;
   const hasVisibleMessages=Array.isArray(S.messages)
     && S.messages.some(m=>m&&m.role&&m.role!=='tool');
   return (S.session.message_count||0)===0
@@ -2088,25 +2100,22 @@ function _currentSessionIsReusableEmptyChat(){
 
 $('fileInput').onchange=e=>{addFiles(Array.from(e.target.files));e.target.value='';};
 $('btnNewChat').onclick=async()=>{
-  // If the current session has no messages AND nothing is in flight, just focus
-  // the composer rather than creating another empty session that will clutter the
-  // sidebar list (#1171).
-  //
-  // The "nothing in flight" half is critical (#1432): if the user clicks + while
-  // their first message is still streaming (or queued), `message_count` is still 0
-  // server-side because the user turn hasn't been merged yet. The old guard treated
-  // that as "empty" and made + a no-op for the entire stream duration, so users
-  // couldn't actually start a parallel chat. Use the same in-flight signal as
-  // `_restoreSettledSession()` in messages.js: an active stream id or a queued
-  // pending user message means the session is real, not empty.
+  // If the current session has no messages AND nothing is in flight (and is not
+  // a standing agent home session), reuse the empty scratch chat, clear any
+  // active search filter, and focus the composer (#1171, #1432).
   if(_currentSessionIsReusableEmptyChat()){
+    if(typeof clearSessionSearch==='function' && ($('sessionSearch')?.value||'').trim()){
+      clearSessionSearch();
+    }
+    if(typeof renderMessages==='function') renderMessages();
     $('msg').focus();closeMobileSidebar();return;
   }
-  if(typeof _restoreRememberedNewChatDraftSession==='function'
+  if(!S.session
+     && typeof _restoreRememberedNewChatDraftSession==='function'
      && await _restoreRememberedNewChatDraftSession()){
     await renderSessionList();closeMobileSidebar();$('msg').focus();return;
   }
-  await newSession();await renderSessionList();closeMobileSidebar();$('msg').focus();
+  await newSession(true);await renderSessionList();closeMobileSidebar();$('msg').focus();
 };
 $('btnDownload').onclick=()=>{
   if(!S.session)return;
@@ -3063,7 +3072,7 @@ function applyBotName(){
   const topbarTitle=$('topbarTitle');
   if(topbarTitle && (!S.session)) topbarTitle.textContent=name;
   const msg=$('msg');
-  if(msg) msg.placeholder='Message '+name+'\u2026';
+  if(msg) msg.placeholder='Ask Jaeger\u2026';
   if(typeof _applyBusyComposerPlaceholder==='function') _applyBusyComposerPlaceholder();
 }
 

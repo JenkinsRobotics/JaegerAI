@@ -173,7 +173,7 @@ def is_conversation_session(session: dict) -> bool:
     rule lives in one place.
     """
     sid = str(session.get("session_id") or "")
-    if not sid or sid in INTERNAL_SESSION_IDS or sid.startswith("task:"):
+    if not sid or sid in INTERNAL_SESSION_IDS or sid.startswith("task:") or sid.startswith("cron:"):
         return False
     meta = session.get("metadata") or {}
     return not (meta.get("task_id") or meta.get("parent_session_id") or meta.get("native_session"))

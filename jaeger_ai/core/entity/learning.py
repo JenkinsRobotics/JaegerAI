@@ -147,7 +147,7 @@ class LearningPipeline:
         if verification.is_verified:
             # 2a. Semantic / World Model Update
             if event.event_type == EventType.TOOL_COMPLETED.value:
-                tool_name = event.payload.get("tool_name", "")
+                tool_name = str(event.payload.get("tool") or event.payload.get("tool_name") or "")
                 result = event.payload.get("result")
                 # Record verified factual claim
                 claim_res = self.memory.semantic.record_claim(
@@ -165,7 +165,7 @@ class LearningPipeline:
             # If a complex tool sequence or script succeeded and verified, submit candidate
             if event.payload.get("is_novel_pattern"):
                 targets.append(LearningTarget.SKILL_LIBRARY)
-                updates["skill_candidate"] = event.payload.get("tool_name")
+                updates["skill_candidate"] = event.payload.get("tool") or event.payload.get("tool_name")
 
             # 2c. Strategy Metadata Update
             targets.append(LearningTarget.STRATEGY_METADATA)

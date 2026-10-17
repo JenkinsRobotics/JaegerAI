@@ -8,7 +8,7 @@ const clip = (text, max) => {
   return value.length > max ? `${value.slice(0, max - 1)}…` : value;
 };
 
-function statusLines({ version, session, model, endpoint }) {
+function statusLines({ version, session, model, endpoint, autonomy, tier, capabilities, connectionHealth, scopes }) {
   const lines = [];
   lines.push(`Gateway: ${version?.component || 'jaeger-gateway'} ${version?.version || ''}`.trim());
   if (endpoint) lines.push(`Endpoint: ${endpoint}`);
@@ -20,6 +20,24 @@ function statusLines({ version, session, model, endpoint }) {
     if (session.status) lines.push(`State: ${session.status}`);
   } else {
     lines.push('Conversation: none open');
+  }
+  if (connectionHealth) lines.push(`Connection: ${connectionHealth}`);
+  if (autonomy || tier) {
+    const permParts = [];
+    if (autonomy) permParts.push(`Autonomy: ${autonomy}`);
+    if (tier) permParts.push(`Tier: ${tier}`);
+    lines.push(`Permissions: ${permParts.join(' · ')}`);
+  }
+  if (capabilities) {
+    const caps = [];
+    if (capabilities.audio?.available) caps.push('Audio');
+    if (capabilities.vision?.available) caps.push('Vision');
+    if (capabilities.frameworks?.available) caps.push('Frameworks');
+    if (caps.length) lines.push(`Capabilities: ${caps.join(', ')}`);
+    else if (capabilities.audio === false || capabilities.vision === false) lines.push('Capabilities: baseline text');
+  }
+  if (scopes) {
+    lines.push('Scopes: Endpoint & token are machine-specific (not synced); Model is eligible for Settings Sync');
   }
   return lines;
 }

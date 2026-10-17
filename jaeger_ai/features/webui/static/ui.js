@@ -17054,10 +17054,15 @@ function renderMessages(options){
       const _d=new Date(_tsSep*1000);
       const _key=_d.toDateString();
       if(_prevSepKey && _prevSepKey!==_key){
-        const sep=document.createElement('div');
-        sep.className='msg-date-sep';
-        sep.textContent=_fmtDateSep(_d);
-        inner.appendChild(sep);
+        const lastEl=inner.lastElementChild;
+        if(lastEl && lastEl.classList && lastEl.classList.contains('msg-date-sep')){
+          lastEl.textContent=_fmtDateSep(_d);
+        }else{
+          const sep=document.createElement('div');
+          sep.className='msg-date-sep';
+          sep.textContent=_fmtDateSep(_d);
+          inner.appendChild(sep);
+        }
       }
       _prevSepKey=_key;
     }

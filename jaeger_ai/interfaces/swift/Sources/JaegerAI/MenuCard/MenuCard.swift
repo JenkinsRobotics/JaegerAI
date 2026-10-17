@@ -56,14 +56,19 @@ struct MenuCard: View {
                     onStop: { agent.cancelTurn() }
                 )
             }
-            // The release-candidate Mac app is a menu-bar/status/settings
-            // companion.  Native chat controls remain opt-in for focused QA
-            // until the WebUI and IDE experience are the supported daily
-            // conversation surfaces.
-            if NativeSurfaceVisibility.exposesChat() {
-                actionBar
+            Button {
+                ChatWindowController.show(agent: agent)
+            } label: {
+                Label("Chat with Jaeger", systemImage: "bubble.left.and.bubble.right.fill")
+                    .frame(maxWidth: .infinity)
             }
-            ServerControlsView()
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            DisclosureGroup("Advanced service controls") {
+                ServerControlsView()
+                    .padding(.top, 8)
+            }
+            .font(.system(size: 11, weight: .medium))
         }
         .padding(14)
         .frame(width: 320)
@@ -135,41 +140,6 @@ struct MenuCard: View {
             Image(systemName: "power").font(.system(size: 15)).foregroundStyle(.secondary)
         }
         .menuStyle(.borderlessButton).fixedSize().help("Agent · restart · quit")
-    }
-
-    // MARK: - action bar (chat · avatar chat · multimodal · quick-input)
-
-    private var actionBar: some View {
-        HStack(spacing: 8) {
-            iconButton("bubble.left", "Open chat window") {
-                ChatWindowController.show(agent: agent)
-            }
-            iconButton("person.crop.circle", "Agent — avatar + chat") {
-                AvatarChatWindowController.show(agent: agent)
-            }
-            iconButton("camera.viewfinder", "Multimodal — camera + microphone + text") {
-                MultimodalWindowController.show(agent: agent)
-            }
-            Spacer()
-            iconButton("bolt.fill", "Quick input") {
-                PillPanelController.toggle(agent: agent)
-            }
-        }
-        .padding(10)
-        .background(RoundedRectangle(cornerRadius: 10)
-            .fill(Color(nsColor: .controlBackgroundColor)))
-    }
-
-    private func iconButton(_ symbol: String, _ help: String,
-                            _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: symbol)
-                .font(.system(size: 16))
-                .foregroundStyle(.secondary)
-                .frame(width: 30, height: 26)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain).help(help)
     }
 
     private func relaunch() {

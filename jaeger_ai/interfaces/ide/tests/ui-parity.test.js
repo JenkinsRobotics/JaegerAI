@@ -42,7 +42,9 @@ test('advanced composer controls collapse behind one compact control', () => {
   assert.match(html, /id="composer-options"/);
   assert.match(view, /function setComposerExpanded\(open\)/);
   assert.match(view, /aria-expanded/);
-  assert.match(view, /model-trigger.*ide-context.*queue-next/);
+  assert.match(view, /const advanced = \['mode-switch', 'autonomy-subswitch'.*'ide-context', 'queue-next', 'worktree'\]/);
+  assert.match(view, /const model = \$\('model-trigger'\)/);
+  assert.match(view, /const workspace = \$\('workspace'\)/);
 });
 
 test('message actions expose copy, feedback, and fork operations', () => {
