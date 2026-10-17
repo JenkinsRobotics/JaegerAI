@@ -45,7 +45,7 @@ from .session_store import EXECUTION_INPUT_KEYS, GatewaySessionStore, RequestBus
 logger = logging.getLogger("jaeger.gateway")
 
 DEFAULT_GATEWAY_PORT = int(os.environ.get("JAEGER_GATEWAY_PORT", str(GATEWAY_PORT)))
-DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST", "0.0.0.0")
+DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST", "127.0.0.1")
 
 # Locked spine endpoints (docs/spine-acceptance.md M10). Chat does not use :8813.
 LOCKED_BRIDGE_HEALTH_URL = os.environ.get(

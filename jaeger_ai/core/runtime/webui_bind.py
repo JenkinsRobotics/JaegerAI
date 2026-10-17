@@ -13,5 +13,5 @@ def webui_bind_host(environ: Mapping[str, str] | None = None) -> str:
     env = os.environ if environ is None else environ
     allow = str(env.get("JAEGER_WEBUI_ALLOW_LAN", "")).strip().lower()
     if allow in {"1", "true", "yes", "on"}:
-        return str(env.get("JAEGER_WEBUI_HOST") or "0.0.0.0")
+        return str(env.get("JAEGER_WEBUI_HOST") or env.get("HERMES_WEBUI_HOST") or "0.0.0.0")
     return "127.0.0.1"
