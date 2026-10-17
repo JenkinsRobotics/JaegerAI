@@ -434,14 +434,14 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
 enum ShellEnvironment {
     static var isDevBuild: Bool { Bundle.main.object(forInfoDictionaryKey: "JaegerDevBuild") as? Bool == true }
 
-    /// Main screen: the new UI, served at the gateway origin (`/?host=macos`) unless overridden
+    /// Main screen: the new UI, served by the Jaeger WebUI (`/?host=macos`) unless overridden
     /// (JAEGER_SHELL_UI_URL, legacy JAEGER_SHELL_WEBUI_URL, or the uirebuild defaults domain).
     static func webUI() -> StartURL.Resolution {
         if case .success(let dev) = devStack {
             return StartURL.Resolution(origin: dev.uiOrigin, override: dev.uiOrigin.string + "/ (dev stack)", rejected: nil)
         }
         return StartURL.resolve(
-            fallback: gateway().origin,
+            fallback: StartURL.defaultMainScreen,
             envValue: StartURL.mainScreenEnvValue(ProcessInfo.processInfo.environment),
             defaultsValue: UserDefaults.standard.string(forKey: StartURL.webUIDefaultsKey),
             isDevBuild: isDevBuild)
