@@ -3,7 +3,7 @@
 POST /v1/sessions, GET /v1/sessions/{id}/stream (SSE), POST /v1/sessions/{id}/turns.
 Loopback only; carries no token itself (the dev token proxy behind the UI origin adds it).
 Prints the gateway's active runtime model and the model that answered. --expect-fence: fail unless the
-reply contains a fenced code block."""
+reply contains a fenced code block. --trace: print the non-text event sequence (tool, progress)."""
 import json
 import sys
 import threading
@@ -41,6 +41,7 @@ if status >= 300:
 
 events, reply, done = [], [], threading.Event()
 finish = {}
+trace = []
 
 
 def stream():
@@ -62,6 +63,11 @@ def stream():
                     ev = name or (obj.get("event") if isinstance(obj, dict) else None) or "?"
                     events.append(ev)
                     p = obj.get("payload", obj) if isinstance(obj, dict) else {}
+                    if "--trace" in sys.argv and ev not in ("turn.delta", "turn.reasoning"):
+                        d = p.get("data", p) if isinstance(p, dict) else {}
+                        d = d if isinstance(d, dict) else {}
+                        bits = {k: str(d[k])[:60] for k in ("tool", "message", "status", "title") if d.get(k)}
+                        trace.append(f"{ev}{' ' + str(bits) if bits else ''}")
                     if ev == "turn.delta":
                         if not reply and "--raw" in sys.argv:
                             print("first delta frame:", json.dumps(obj)[:300])
@@ -89,6 +95,8 @@ print(f"POST /v1/sessions/{{id}}/turns -> {status} {str(receipt)[:160]}")
 done.wait(TIMEOUT)
 seen = sorted(set(events))
 print(f"stream events: {seen}")
+if trace:
+    print("trace:\n  " + "\n  ".join(trace[:30]))
 text = ''.join(reply).strip()
 models = {k: v for k, v in finish.items() if "model" in k or k in ("provider", "fallback_used", "fallback")}
 print(f"answered by: {models or 'not reported in turn.finish'}")

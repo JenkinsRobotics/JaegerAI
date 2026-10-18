@@ -6,6 +6,8 @@
 // buttons (cacheDisplay) at their window frames with the window's corner radius. Writes
 // <dir>/jaeger-light.png and <dir>/jaeger-dark.png, prints one JSON line (chrome report + page probe), exits.
 // Optional `--snapshot-size WxH` (clamped to the window minimum) shoots another window size.
+// Optional, repeatable `--snapshot-click <css selector>` clicks the first match of each selector in order
+// (0.8 s apart) before the shots, e.g. to open another chat or expand a fold. Clicks only inside the page.
 // Host actions from the page are recorded, never performed.
 
 import AppKit
@@ -58,12 +60,32 @@ final class Snapshotter: NSObject, BridgeHost {
         return NSSize(width: parts[0], height: parts[1])
     }
 
+    static func requestedClicks() -> [String] {
+        let a = CommandLine.arguments
+        return a.indices.compactMap { i in a[i] == "--snapshot-click" && i + 1 < a.count ? a[i + 1] : nil }
+    }
+
     func pageLoaded(_ webView: WKWebView) {
         guard !loaded else { return }
         loaded = true
         report["url"] = webView.url?.absoluteString ?? "nil"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            self?.capture(["light", "dark"], webView: webView)
+            self?.click(Self.requestedClicks(), webView: webView)
+        }
+    }
+
+    private func click(_ selectors: [String], webView: WKWebView) {
+        guard let selector = selectors.first else { return capture(["light", "dark"], webView: webView) }
+        let literal = String(data: (try? JSONSerialization.data(withJSONObject: [selector])) ?? Data("[\"\"]".utf8), encoding: .utf8) ?? "[\"\"]"
+        let js = "(() => { const el = document.querySelector(\(literal)[0]); if (!el) return false; el.click(); return true; })()"
+        webView.evaluateJavaScript(js) { [weak self] result, _ in
+            guard let self else { return }
+            var clicks = self.report["clicks"] as? [[String: Any]] ?? []
+            clicks.append(["selector": selector, "clicked": (result as? Bool) ?? false])
+            self.report["clicks"] = clicks
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+                self.click(Array(selectors.dropFirst()), webView: webView)
+            }
         }
     }
 
