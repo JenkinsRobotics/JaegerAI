@@ -10,7 +10,7 @@
 // (0.8 s apart) before the shots, e.g. to open another chat or expand a fold; `scrollTop:<selector>` scrolls
 // that element to the top instead; `focus:<selector>` focuses it; `type:<selector>|<text>` focuses a text field and
 // sets its value the way typing would (React sees an input event; `\n` in the text is a newline). Acts only
-// inside the page. The report lists every window the process owns (AppKit's list and the window server's list
+// inside the page; `wait:<ms>` pauses (max 45 s). The report lists every window the process owns (AppKit's list and the window server's list
 // for this PID) after load and after the actions, so stray windows show up by class, size and level.
 // Host actions from the page are recorded, never performed.
 
@@ -39,7 +39,7 @@ final class Snapshotter: NSObject, BridgeHost {
     }
 
     func start() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 60) { [weak self] in self?.finish(error: "timeout") }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak self] in self?.finish(error: "timeout") }
         do { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
         catch { return finish(error: "cannot create \(dir.path): \(error.localizedDescription)") }
         guard let window = app.mainWindow else { return finish(error: "no window") }
@@ -85,6 +85,16 @@ final class Snapshotter: NSObject, BridgeHost {
         guard let selector = selectors.first else {
             report["windows_after_actions"] = Self.windowCensus()
             return capture(["light", "dark"], webView: webView)
+        }
+        // "wait:<ms>" just waits (e.g. for a live reply to stream in).
+        if selector.hasPrefix("wait:"), let ms = Double(selector.dropFirst(5)) {
+            var clicks = report["clicks"] as? [[String: Any]] ?? []
+            clicks.append(["selector": selector, "clicked": true])
+            report["clicks"] = clicks
+            DispatchQueue.main.asyncAfter(deadline: .now() + min(ms, 45_000) / 1000) { [weak self] in
+                self?.click(Array(selectors.dropFirst()), webView: webView)
+            }
+            return
         }
         let literal = String(data: (try? JSONSerialization.data(withJSONObject: [selector])) ?? Data("[\"\"]".utf8), encoding: .utf8) ?? "[\"\"]"
         // "scrollTop:<selector>" scrolls that element to the top instead of clicking it.
