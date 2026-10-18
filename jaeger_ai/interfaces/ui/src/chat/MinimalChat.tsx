@@ -1,11 +1,14 @@
 /* Minimal stand-in chat renderer, styled to the Grok Bot Mac target. The
- * shared VS Code-derived widget replaces it through ChatPaneMount. */
+ * shared VS Code-derived widget replaces it through ChatPaneMount.
+ * Jenkins Robotics 2026-10-17: tool steps fold into a "Show steps" card, and a
+ * pending turn shows an activity-named progress line with a shimmer. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { avatarColor } from "../agents/avatarColor";
 import { HandoffMarker } from "../agents/HandoffMarker";
 import { ArrowDownIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
+import { activityPhrase, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
 import type { VoiceHost } from "./nativeHost";
@@ -44,14 +47,9 @@ function BubblePart({ part, links }: { part: ChatPart; links: Links }) {
     case "thinking":
       return <details className="jg-thinking"><summary>Thought for {seconds(part.durationMs)} s</summary><p>{part.text}</p></details>;
     case "progress":
-      return <div className="jg-progress"><span className="jg-spinner" aria-hidden="true" />{part.message}</div>;
+      return null; // shown live by the progress line
     case "toolInvocation":
-      return (
-        <div className={`jg-tool jg-tool--${part.state}`}>
-          <span className="jg-tool__verb">{part.state === "completed" ? "Ran" : part.state === "cancelled" ? "Stopped" : part.state === "waitingForConfirmation" ? "Run" : "Running"}</span>{" "}
-          <code>{part.toolName}</code>
-        </div>
-      );
+      return <ToolLine part={part} />;
     case "warning":
       return <div className="jg-notice jg-notice--warn">{part.message}</div>;
     case "error":
@@ -61,10 +59,38 @@ function BubblePart({ part, links }: { part: ChatPart; links: Links }) {
   }
 }
 
+function ToolLine({ part }: { part: ToolPart }) {
+  const verb = part.state === "completed" ? "Ran" : part.state === "cancelled" ? "Stopped" : part.state === "waitingForConfirmation" ? "Run" : "Running";
+  return (
+    <div className={`jg-tool jg-tool--${part.state}`}>
+      <span className="jg-tool__verb">{verb}</span>{" "}
+      <code>{part.toolName}</code>
+    </div>
+  );
+}
+
+/** Tool steps, collapsed to one summary row ("Ran 3 commands · Read 2 files"). */
+export function StepsFold({ tools, defaultOpen = false }: { tools: ToolPart[]; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className={`jg-steps${open ? " is-open" : ""}`} data-sender="assistant">
+      <button type="button" className="jg-steps__summary" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="jg-steps__text">{stepsSummary(tools)}</span>
+        <span className="jg-steps__toggle">{open ? "Hide steps" : "Show steps"}</span>
+      </button>
+      {open && (
+        <ol className="jg-steps__list">
+          {tools.map((t) => <li key={t.callId}><ToolLine part={t} /></li>)}
+        </ol>
+      )}
+    </div>
+  );
+}
+
 function Card({ part, onDecide }: { part: CardPart; onDecide: Decide }) {
   if (part.kind === "question") {
     return (
-      <div className="jg-card-widget" role="group" aria-label={part.title}>
+      <div className="jg-card-widget" role="group" aria-label={part.title} data-sender="assistant">
         <div className="jg-card-widget__title">{part.title}</div>
         <ul className="jg-options">
           {part.options.map((o, i) => (
@@ -78,7 +104,7 @@ function Card({ part, onDecide }: { part: CardPart; onDecide: Decide }) {
     );
   }
   return (
-    <div className="jg-card-widget" role="group" aria-label={part.title}>
+    <div className="jg-card-widget" role="group" aria-label={part.title} data-sender="assistant">
       <div className="jg-card-widget__title">{part.title}</div>
       <div className="jg-card-widget__message">{part.message}</div>
       <div className="jg-confirm__actions">
@@ -89,13 +115,19 @@ function Card({ part, onDecide }: { part: CardPart; onDecide: Decide }) {
   );
 }
 
-/** Split a response into bubbles, cards and centered markers. Back-to-back
- * "Messaged" markers fold into one "Messaged X and Y", like the target. */
+/** Split a response into bubbles, cards, tool-step folds and centered markers.
+ * Back-to-back "Messaged" markers fold into one "Messaged X and Y", like the
+ * target; consecutive tool calls fold into one steps card. */
 export function segments(parts: ChatPart[]) {
-  const out: Array<{ marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] }> = [];
+  const out: Array<{ marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] } | { steps: ToolPart[] }> = [];
   for (const part of parts) {
     const last = out[out.length - 1];
-    if (part.kind === "handoff") {
+    if (part.kind === "toolInvocation") {
+      if (last && "steps" in last) last.steps.push(part);
+      else out.push({ steps: [part] });
+    } else if (part.kind === "progress") {
+      continue; // live only: the progress line
+    } else if (part.kind === "handoff") {
       const prev = last && "marker" in last ? last.marker : undefined;
       if (prev && prev.direction === "to" && part.direction === "to") {
         const agents = [...(prev.agents ?? [{ id: prev.agentId, name: prev.agentName }])];
@@ -113,13 +145,20 @@ export function segments(parts: ChatPart[]) {
   return out;
 }
 
-export function Typing() {
+/** Activity-named progress line with a shimmer ("Searching the web…"). */
+export function ProgressLine({ phrase }: { phrase: string }) {
   return (
-    <div className="jg-typing" role="status" aria-live="polite">
-      <span className="jg-typing__dots" aria-hidden="true"><i /><i /><i /></span>
-      Putting it together
+    <div className="jg-progress-line" role="status" aria-live="polite" data-sender="assistant">
+      <span className="jg-shimmer">{phrase}</span>
     </div>
   );
+}
+
+/** A pending turn shows the line until text streams, and again while it works after text. */
+export function showsProgress(turn: ChatTurn): boolean {
+  if (turn.state !== "pending") return false;
+  const last = [...turn.parts].reverse().find((p) => p.kind !== "progress");
+  return !last || last.kind !== "markdownContent" || !last.text;
 }
 
 const replyText = (turn: ChatTurn) => turn.parts.filter((p) => p.kind === "markdownContent").map((p) => (p as { text: string }).text).join("\n\n");
@@ -240,6 +279,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   };
 
   const links: Links = { onCopy: (text) => void host.copy(text), onOpen: (url) => host.openExternal(url) };
+  const agentName = (id: string) => (id === agent.id ? agent.name : undefined);
   const voice = voiceReady && Boolean(voiceHost);
   const hasText = Boolean(draft.trim());
   const tint = { "--jg-agent-color": avatarColor(agent.id) } as CSSProperties;
@@ -260,12 +300,13 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
               {needsSeparator(session.turns[index - 1]?.createdAt, turn.createdAt) && (
                 <div className="jg-separator" role="separator">{separatorLabel(turn.createdAt!)}</div>
               )}
-              {turn.message && <div className="jg-bubble jg-bubble--user">{turn.message}</div>}
+              {turn.message && <div className="jg-bubble jg-bubble--user" data-sender="user">{turn.message}</div>}
               {segments(turn.parts).map((seg, i) =>
-                "marker" in seg ? <HandoffMarker key={i} part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} />
+                "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} />
-                : <div key={i} className="jg-bubble jg-bubble--assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} />)}</div>)}
-              {turn.state === "pending" && !turn.parts.some((p) => p.kind === "markdownContent" && p.text) && <Typing />}
+                : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />
+                : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} />)}</div>)}
+              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} />}
             </section>
           ))}
         </div>
