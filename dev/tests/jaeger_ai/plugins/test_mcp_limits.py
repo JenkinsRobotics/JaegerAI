@@ -134,3 +134,52 @@ def test_read_only_list_is_parsed_and_matched_by_glob():
     assert not is_read_only_tool("install_adb_package", cfg)
     assert not is_read_only_tool("", cfg)
     assert server_config_from_entry({"name": "x", "command": "y"}).tools_read_only == []
+
+
+class _Recorder:
+    fresh_approval = True
+
+    def __init__(self, answer):
+        self.answer, self.requests = answer, []
+
+    def confirm(self, request):
+        self.requests.append(request)
+        return self.answer
+
+
+def _spec(tool, read_only):
+    from jaeger_ai.plugins.mcp.client import MCPToolSpec, _agent_tool_name
+    return MCPToolSpec(qualified_name=f"mcp:testsrv/{tool}", server_name="testsrv", tool_name=tool,
+                       description="t", input_schema={"type": "object", "properties": {}},
+                       agent_name=_agent_tool_name("testsrv", tool), read_only=read_only)
+
+
+def test_non_read_only_mcp_tool_asks_and_denial_blocks_the_call(monkeypatch):
+    import pytest
+    from jaeger_ai.plugins.mcp import client
+    from jaeger_os.core.safety.permissions import PermissionDenied, PermissionPolicy, PermissionTier, use_policy
+    from jaeger_os.core.tools.tool_registry import get_tool, unregister_tool
+
+    calls = []
+    monkeypatch.setattr(client, "call_mcp_tool", lambda q, a: calls.append((q, a)) or {"ok": True})
+    mut, ro = _spec("install_thing", False), _spec("inspect_thing", True)
+    client._register_agent_tool(mut)
+    client._register_agent_tool(ro)
+    try:
+        deny = _Recorder(False)
+        with use_policy(PermissionPolicy(confirmation=deny)):
+            with pytest.raises(PermissionDenied):
+                get_tool(mut.agent_name).fn(path="/tmp/x")
+            assert calls == []
+            assert get_tool(ro.agent_name).fn(path="/tmp/y") == {"ok": True}
+        assert len(deny.requests) == 1
+        req = deny.requests[0]
+        assert req.tier == PermissionTier.EXTERNAL_EFFECT
+        assert req.skill == "mcp:testsrv/install_thing" and req.arguments == {"path": "/tmp/x"}
+        allow = _Recorder(True)
+        with use_policy(PermissionPolicy(confirmation=allow)):
+            assert get_tool(mut.agent_name).fn(path="/tmp/z") == {"ok": True}
+        assert [c[0] for c in calls] == ["mcp:testsrv/inspect_thing", "mcp:testsrv/install_thing"]
+    finally:
+        unregister_tool(mut.agent_name)
+        unregister_tool(ro.agent_name)
