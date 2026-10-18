@@ -9,10 +9,14 @@ import { MinimalChat } from "./MinimalChat";
 
 describe("composer helpers", () => {
   it("morphs the primary button Stop → Send → Voice chat", () => {
-    expect(primaryAction({ running: true, hasContent: true, voice: true })).toBe("stop");
-    expect(primaryAction({ running: false, hasContent: true, voice: true })).toBe("send");
-    expect(primaryAction({ running: false, hasContent: false, voice: true })).toBe("voice");
-    expect(primaryAction({ running: false, hasContent: false, voice: false })).toBe("send");
+    const both = { voiceChat: true, dictation: true };
+    expect(primaryAction({ running: true, hasContent: true, ...both })).toBe("stop");
+    expect(primaryAction({ running: false, hasContent: true, ...both })).toBe("send");
+    expect(primaryAction({ running: false, hasContent: false, ...both })).toBe("voice");
+    // Dictation only (no voices to speak with): Dictate takes the primary.
+    expect(primaryAction({ running: false, hasContent: false, voiceChat: false, dictation: true })).toBe("dictate");
+    expect(primaryAction({ running: false, hasContent: true, voiceChat: false, dictation: true })).toBe("send");
+    expect(primaryAction({ running: false, hasContent: false, voiceChat: false, dictation: false })).toBe("send");
   });
 
   it("caps attachments by count and size and says what it left out", () => {
@@ -23,7 +27,10 @@ describe("composer helpers", () => {
     expect(r.files).toHaveLength(MAX_ATTACHMENTS);
     expect(r.note).toBe("1 over 20 MB left out · only 8 files per message");
     expect(addFiles([], [{ name: "", size: 1, type: "image/png" }], id).files[0].name).toBe("pasted file");
-    expect(toAttachments([{ id: "x", name: "a.bin", size: 1, type: "" }])).toEqual([{ name: "a.bin", mimeType: "application/octet-stream" }]);
+    expect(toAttachments([{ id: "x", name: "a.bin", size: 1, type: "" }])).toEqual([{ name: "a.bin", mimeType: "application/octet-stream", size: 1 }]);
+    // Host-picked files keep their H8 path + uri so the gateway can register them.
+    expect(toAttachments([{ id: "y", name: "b.pdf", size: 9, type: "application/pdf", path: "/w/b.pdf", uri: "file:///w/b.pdf" }]))
+      .toEqual([{ name: "b.pdf", mimeType: "application/pdf", size: 9, path: "/w/b.pdf", uri: "file:///w/b.pdf" }]);
     expect(fileSize(2048)).toBe("2 KB");
   });
 });
@@ -57,7 +64,7 @@ describe("composer (DOM)", () => {
     const send = el.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!;
     expect(send.disabled).toBe(false); // a file alone is enough to send
     await act(async () => { send.click(); });
-    expect(started[0].attachments).toEqual([{ name: "notes.md", mimeType: "text/markdown" }]);
+    expect(started[0].attachments).toEqual([{ name: "notes.md", mimeType: "text/markdown", size: 5 }]);
     expect(el.querySelector(".jg-chip")).toBeNull();
   });
 

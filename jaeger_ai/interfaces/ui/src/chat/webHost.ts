@@ -5,6 +5,7 @@ import type { JaegerSource } from "../api/source";
 import type { PersistedPart, SessionMessage } from "../api/types";
 import { followTurn } from "./followTurn";
 import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, HostKind, StartTurnRequest, TurnHandle, TurnState } from "./host";
+import type { HostAttachment, HostCapabilities } from "./hostH8";
 
 const KEY = (id: string) => `jaeger.ui.session.${id}`;
 
@@ -50,7 +51,7 @@ const message = (error: unknown) => String((error as Error)?.message ?? error);
 
 export class WebHost implements ChatHost {
   readonly kind: HostKind = "web";
-  capabilities = { voice: false };
+  capabilities: HostCapabilities = { voice: false };
   /** Set by the app: a handoff marker opens the specialist's side of it. */
   openHandoff?: (handoffId: string) => void;
   /** Set by the app: the header pill opens the agent's details panel. */
@@ -70,6 +71,23 @@ export class WebHost implements ChatHost {
   }
 
   async getConfig() { return { defaultMode: "agent" }; }
+
+  /** POST each picked file to /v1/sessions/{id}/attachments; the ids that registered go with the turn. */
+  private async registerAttachments(sessionId: string, files: HostAttachment[], onPart: (part: ChatPart) => void): Promise<string[]> {
+    const ids: string[] = [];
+    const skipped: string[] = [];
+    for (const file of files) {
+      if (!file.path) { skipped.push(`${file.name} (no file path from this window)`); continue; }
+      try {
+        const row = await this.source.addAttachment(sessionId, { path: file.path, filename: file.name, mime_type: file.mimeType });
+        ids.push(row.attachment_id);
+      } catch (error) {
+        skipped.push(`${file.name} (${message(error)})`);
+      }
+    }
+    if (skipped.length) onPart({ kind: "warning", message: `Not sent: ${skipped.join(", ")}. The rest of your message went through.` });
+    return ids;
+  }
   async listModels() { return []; }
 
   startTurn(request: StartTurnRequest, onPart: (part: ChatPart) => void): TurnHandle {
@@ -77,14 +95,12 @@ export class WebHost implements ChatHost {
     const requestId = request.turnId;
     let admitted = false;
     const done = (async (): Promise<{ state: TurnState }> => {
-      // The gateway attaches workspace file paths, which a web page can't supply; say so instead of dropping them.
-      const files = request.attachments ?? [];
-      if (files.length) {
-        onPart({ kind: "warning", message: `Not sent: ${files.map((f) => f.name).join(", ")}. This window can't hand files to Jaeger yet, so only your text went through.` });
-      }
+      // The gateway attaches workspace files by path. Host-picked files (H8 `path`) are registered first;
+      // pasted or dropped ones have no path, so they're named in a warning instead of silently dropped.
+      const attachmentIds = await this.registerAttachments(request.sessionId, request.attachments ?? [], onPart);
       let receipt;
       try {
-        receipt = await this.source.send(request.sessionId, request.message, requestId);
+        receipt = await this.source.send(request.sessionId, request.message, requestId, attachmentIds);
       } catch (error) {
         onPart({ kind: "error", message: message(error) });
         return { state: "failed" };

@@ -18,7 +18,9 @@ export interface JaegerSource {
   handoffExchange(handoffId: string): Promise<HandoffExchange>;
   /** POST /v1/sessions/{id}/turns. `start_event_id` is the durable cursor of
    * this turn's turn.start (stream from start_event_id - 1). */
-  send(sessionId: string, text: string, requestId: string): Promise<TurnReceipt>;
+  send(sessionId: string, text: string, requestId: string, attachmentIds?: string[]): Promise<TurnReceipt>;
+  /** POST /v1/sessions/{id}/attachments: register a workspace file (the gateway sizes and hashes it). */
+  addAttachment(sessionId: string, body: { path: string; filename?: string; mime_type?: string }): Promise<{ attachment_id: string }>;
   cancel(sessionId: string, requestId?: string): Promise<void>;
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   tasks(): Promise<Task[]>;

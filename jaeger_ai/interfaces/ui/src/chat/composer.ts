@@ -1,29 +1,33 @@
 /* Composer helpers (Jenkins Robotics, 2026-10-17, original): the primary button's morph, the attachment
  * caps and the auto-grow fallback for WebKit builds that ignore `field-sizing: content`. */
-import type { ChatAttachment } from "./host";
+import type { HostAttachment } from "./hostH8";
 
-export type Primary = "stop" | "send" | "voice";
-/** Stop while a turn runs, Send once there is text or a file, else Start voice chat when the shell has voice.
- * Without voice the primary stays a (disabled) Send. Dictation is the ghost mic beside it. */
-export function primaryAction(o: { running: boolean; hasContent: boolean; voice: boolean }): Primary {
+export type Primary = "stop" | "send" | "voice" | "dictate";
+/** Stop while a turn runs, Send once there is text or a file; on an empty composer, Start voice chat
+ * when the host has it, else Dictate when it can only take speech-to-text, else a (disabled) Send.
+ * The ghost mic beside it is dictation, shown only while voice chat holds the primary. */
+export function primaryAction(o: { running: boolean; hasContent: boolean; voiceChat: boolean; dictation: boolean }): Primary {
   if (o.running) return "stop";
-  if (o.hasContent || !o.voice) return "send";
-  return "voice";
+  if (o.hasContent) return "send";
+  if (o.voiceChat) return "voice";
+  if (o.dictation) return "dictate";
+  return "send";
 }
 
 export const MAX_ATTACHMENTS = 8;
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
-export interface PendingFile { id: string; name: string; size: number; type: string }
+/** `path`/`uri` when the host picker supplied a real file (H8); paste/drag files have neither. */
+export interface PendingFile { id: string; name: string; size: number; type: string; path?: string; uri?: string }
 
 /** Add picked or pasted files under the caps; says what was left out. */
-export function addFiles(current: PendingFile[], incoming: Array<{ name: string; size: number; type: string }>, makeId: () => string):
+export function addFiles(current: PendingFile[], incoming: Array<{ name: string; size: number; type: string; path?: string; uri?: string }>, makeId: () => string):
   { files: PendingFile[]; note?: string } {
   const files = [...current];
   let tooBig = 0, overCount = 0;
   for (const f of incoming) {
     if (f.size > MAX_ATTACHMENT_BYTES) { tooBig += 1; continue; }
     if (files.length >= MAX_ATTACHMENTS) { overCount += 1; continue; }
-    files.push({ id: makeId(), name: f.name || "pasted file", size: f.size, type: f.type });
+    files.push({ id: makeId(), name: f.name || "pasted file", size: f.size, type: f.type, ...(f.path ? { path: f.path, uri: f.uri } : {}) });
   }
   const notes = [
     tooBig ? `${tooBig} over ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB left out` : "",
@@ -32,8 +36,11 @@ export function addFiles(current: PendingFile[], incoming: Array<{ name: string;
   return { files, note: notes.length ? notes.join(" · ") : undefined };
 }
 
-export const toAttachments = (files: PendingFile[]): ChatAttachment[] =>
-  files.map((f) => ({ name: f.name, mimeType: f.type || "application/octet-stream" }));
+export const toAttachments = (files: PendingFile[]): HostAttachment[] =>
+  files.map((f) => ({ name: f.name, mimeType: f.type || "application/octet-stream", size: f.size, ...(f.path ? { path: f.path, uri: f.uri } : {}) }));
+
+/** A host-picked attachment as composer input (size 0 when the host left it out). */
+export const fromHost = (a: HostAttachment) => ({ name: a.name, size: a.size ?? 0, type: a.mimeType, path: a.path, uri: a.uri });
 
 export function fileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

@@ -123,7 +123,10 @@ export class MockSource implements JaegerSource {
   async createSession(body: { agent_id?: string; title?: string }): Promise<SessionRow> {
     return { session_id: `s-new-${Date.now()}`, agent_id: body.agent_id, title: body.title ?? "New chat", created_at: now() };
   }
-  async send(sessionId: string, text: string, requestId: string) {
+  async addAttachment(_sessionId: string, body: { path: string }) {
+    return { attachment_id: `att_mock_${body.path.split("/").pop()}` };
+  }
+  async send(sessionId: string, text: string, requestId: string, _attachmentIds: string[] = []) {
     const start = this.eventId + 1;
     let delay = 0;
     turnScript(sessionId, text).forEach(([wait, event], index) => {

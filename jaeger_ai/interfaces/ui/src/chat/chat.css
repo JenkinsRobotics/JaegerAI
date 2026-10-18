@@ -2,6 +2,11 @@
  * brings its own). Colors: --aether-* tokens; tints via color-mix(). */
 .jg-chat-mount, .jg-chat-mount__inner { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .jg-chat { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Files dragged over the chat: a soft accent wash + inset ring until dropped. */
+.jg-chat.is-dropping::after {
+  content: ""; position: absolute; inset: 6px; z-index: 3; pointer-events: none; border-radius: 14px;
+  background: color-mix(in srgb, var(--jg-color-accent) 6%, transparent); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--jg-color-accent) 55%, transparent);
+}
 
 /* Floating agent pill over the scrolling transcript. */
 .jg-chat__band { position: absolute; z-index: 2; top: 0; left: 0; right: 0; height: var(--jg-band-height); padding-top: 8px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; pointer-events: none; }
