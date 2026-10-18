@@ -12,15 +12,16 @@ import type { CSSProperties } from "react";
 const text = (parts: ChatPart[]) => parts.filter((p) => p.kind === "markdownContent").map((p) => (p as { text: string }).text).join("\n\n");
 const noop = () => {};
 
-export function HistoryPanel({ agentName, agentId, home, onOpenLink = noop, onClose }: {
-  agentName: string; agentId: string; home: HomeSessions; onOpenLink?: (url: string) => void; onClose: () => void;
+export function HistoryPanel({ agentName, agentId, home, openSessionId, onOpenLink = noop, onClose }: {
+  agentName: string; agentId: string; home: HomeSessions; openSessionId?: string; onOpenLink?: (url: string) => void; onClose: () => void;
 }) {
   const [rows, setRows] = useState<HistoryRow[] | null>(null);
   const [error, setError] = useState<string>();
   const [open, setOpen] = useState<{ row: HistoryRow; page?: HomePage; error?: string } | null>(null);
   useEffect(() => {
     let live = true;
-    setRows(null); setOpen(null); setError(undefined);
+    setRows(null); setError(undefined);
+    if (!openSessionId) setOpen(null);
     home.history(agentId).then((r) => { if (live) setRows(r); }, (e: unknown) => { if (live) setError(String((e as Error)?.message ?? e)); });
     return () => { live = false; };
   }, [home, agentId]);
@@ -29,6 +30,8 @@ export function HistoryPanel({ agentName, agentId, home, onOpenLink = noop, onCl
     home.read(row.sessionId).then((page) => setOpen((o) => (o?.row === row ? { row, page } : o)),
       (e: unknown) => setOpen((o) => (o?.row === row ? { row, error: String((e as Error)?.message ?? e) } : o)));
   };
+  // A post's "Open chat": go straight to that chat's read-only view.
+  useEffect(() => { if (openSessionId) show({ sessionId: openSessionId, title: "Chat" }); }, [openSessionId]); // eslint-disable-line react-hooks/exhaustive-deps
   const links = { onOpen: onOpenLink, onCopy: noop };
   return (
     <aside className="jg-details jg-history" aria-label={`${agentName} history`} style={{ "--jg-agent-color": avatarColor(agentId) } as CSSProperties}>

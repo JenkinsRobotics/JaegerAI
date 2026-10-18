@@ -126,7 +126,9 @@ export class MockSource implements JaegerSource {
   async createSession(body: { agent_id?: string; title?: string }): Promise<SessionRow> {
     return { session_id: `s-new-${Date.now()}`, agent_id: body.agent_id, title: body.title ?? "New chat", created_at: now() };
   }
-  async uploadAttachment(_sessionId: string, body: { filename: string }) { return { attachment_id: `mock-bytes-${body.filename}` }; }
+  async uploadAttachment(_sessionId: string, body: { name: string; mime: string; data_base64: string }) {
+    return { attachment_id: `mock-bytes-${body.name}`, name: body.name, mime: body.mime, size: Math.floor((body.data_base64.length * 3) / 4), sha256: "mock" };
+  }
   async addAttachment(_sessionId: string, body: { path: string }) {
     return { attachment_id: `att_mock_${body.path.split("/").pop()}` };
   }
@@ -164,7 +166,8 @@ export class MockSource implements JaegerSource {
     set.add(onEvent);
     return new Promise((resolve) => signal.addEventListener("abort", () => { set.delete(onEvent); resolve(); }, { once: true }));
   }
-  private emit(sessionId: string, event: GatewayEvent) {
+  /** Dev/test: announce an event on a session stream (mockPost uses it for home-chat posts). */
+  emit(sessionId: string, event: GatewayEvent) {
     this.eventId += 1;
     const framed = { ...event, event_id: this.eventId };
     const log = this.log.get(sessionId) ?? [];

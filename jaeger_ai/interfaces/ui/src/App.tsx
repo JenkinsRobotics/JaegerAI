@@ -43,7 +43,7 @@ export function App({ source }: { source: JaegerSource }) {
   const names = useRef<(id: string) => string>((id) => id);
   const home: HomeSessions = useMemo(() => {
     const opts = { agentName: (id: string) => names.current(id), onCursor: (sid: string, id: number) => host.noteCursor(sid, id) };
-    return source.homeSessions?.(opts) ?? (wantsContract() ? contractHome(httpGetJson(), opts) : fallbackHome(source, opts));
+    return source.homeSessions?.(opts) ?? (wantsContract() ? contractHome(httpGetJson(), opts, source.stream.bind(source)) : fallbackHome(source, opts));
   }, [source, host]);
   host.home = home;
   const [selection, setSelection] = useState<Selection>({ type: "agent", agentId: LEAD_ID });
@@ -54,6 +54,7 @@ export function App({ source }: { source: JaegerSource }) {
   const [newChatAnchor, setNewChatAnchor] = useState<HTMLElement | null>(null);
   const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null);
   const [historyAgentId, setHistoryAgentId] = useState<string | null>(null);
+  const [historySessionId, setHistorySessionId] = useState<string>();
   const [pins, setPins] = useState<string[]>(loadPins);
   const updatePins = useCallback((next: (cur: string[]) => string[]) => setPins((cur) => { const n = next(cur); savePins(n); return n; }), []);
 
@@ -98,10 +99,11 @@ export function App({ source }: { source: JaegerSource }) {
     host.setAgentNames(new Map(store.agents.map((a) => [a.id, label(a)])));
     host.openHandoff = openHandoff;
     host.openDetails = (agentId: string) => { setHistoryAgentId(null); setDetailsAgentId(agentId); };
-    host.openHistory = (agentId: string) => { setDetailsAgentId(null); setHistoryAgentId(agentId); };
+    host.openHistory = (agentId: string) => { setDetailsAgentId(null); setHistorySessionId(undefined); setHistoryAgentId(agentId); };
+    host.openChat = (sessionId: string) => { setDetailsAgentId(null); setHistorySessionId(sessionId); setHistoryAgentId(selectedAgentId ?? LEAD_ID); };
     const byId = new Map(store.agents.map((a) => [a.id, label(a)]));
     names.current = (id: string) => byId.get(id) ?? id;
-  }, [host, store.agents, openHandoff]);
+  }, [host, store.agents, openHandoff, selectedAgentId]);
   useEffect(() => onNativeEvent((detail) => { if (detail.type === "window.visibility") void store.refresh(); }), [store.refresh]);
 
   useEffect(() => {
@@ -149,8 +151,8 @@ export function App({ source }: { source: JaegerSource }) {
                   onOpenHistory={() => { setDetailsAgentId(null); setHistoryAgentId(detailsAgent.id); }} onClose={() => setDetailsAgentId(null)} />
               )}
               {historyAgent && (
-                <HistoryPanel agentId={historyAgent.id} agentName={label(historyAgent)} home={home}
-                  onOpenLink={(url) => host.openExternal(url)} onClose={() => setHistoryAgentId(null)} />
+                <HistoryPanel agentId={historyAgent.id} agentName={label(historyAgent)} home={home} openSessionId={historySessionId}
+                  onOpenLink={(url) => host.openExternal(url)} onClose={() => { setHistoryAgentId(null); setHistorySessionId(undefined); }} />
               )}
             </div>
           )}

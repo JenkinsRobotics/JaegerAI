@@ -54,7 +54,44 @@ describe("bytes upload prep (flag, off by default)", () => {
     localStorage.setItem(BYTES_UPLOAD_FLAG, "1");
     const on = source();
     await turn(new WebHost(on.s));
-    expect(on.uploads).toEqual([{ filename: "note.txt", mime_type: "text/plain", data_base64: btoa("hello") }]);
+    expect(on.uploads).toEqual([{ name: "note.txt", mime: "text/plain", data_base64: btoa("hello") }]);
     expect((on.s.send as ReturnType<typeof vi.fn>).mock.calls[0][3]).toEqual(["att_b1"]);
+  });
+
+  const failing = (status: number) => ({
+    kind: "live",
+    uploadAttachment: vi.fn(async () => { throw Object.assign(new Error(`status ${status}`), { status }); }),
+    addAttachment: vi.fn(),
+    send: vi.fn(async () => { throw new Error("stop"); }),
+    cancel: async () => {},
+  } as unknown as JaegerSource);
+  it("413 becomes 'Too large (25 MB max)'; attachment_ids is still sent ([] for none)", async () => {
+    localStorage.setItem(BYTES_UPLOAD_FLAG, "1");
+    const s = failing(413);
+    const host = new WebHost(s);
+    const rejected: unknown[] = [];
+    host.onAttachmentsRejected = (_t, r) => rejected.push(...r);
+    await turn(host);
+    expect(rejected).toEqual([{ name: "note.txt", reason: "Too large (25 MB max)" }]);
+    expect((s.send as ReturnType<typeof vi.fn>).mock.calls[0][3]).toEqual([]);
+  });
+  it("feature-detects a gateway without the bytes route (404/405) and stops trying", async () => {
+    localStorage.setItem(BYTES_UPLOAD_FLAG, "1");
+    const s = failing(405);
+    const host = new WebHost(s);
+    const parts = await turn(host);
+    expect(parts.find((p) => p.kind === "warning")).toMatchObject({ message: expect.stringContaining("no file path from this window") });
+    await turn(host);
+    expect((s.uploadAttachment as ReturnType<typeof vi.fn>).mock.calls.length).toBe(1);
+  });
+  it("refuses files over 25 MB before uploading", async () => {
+    localStorage.setItem(BYTES_UPLOAD_FLAG, "1");
+    const s = failing(500);
+    const host = new WebHost(s);
+    const rejected: unknown[] = [];
+    host.onAttachmentsRejected = (_t, r) => rejected.push(...r);
+    await host.startTurn({ sessionId: "s1", turnId: "t2", message: "m", attachments: [{ name: "big.bin", mimeType: "application/octet-stream", data: "A".repeat(36 * 1024 * 1024) }] }, () => {}).done;
+    expect(rejected).toEqual([{ name: "big.bin", reason: "Too large (25 MB max)" }]);
+    expect(s.uploadAttachment).not.toHaveBeenCalled();
   });
 });

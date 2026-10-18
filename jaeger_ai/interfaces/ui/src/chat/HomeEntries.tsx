@@ -30,19 +30,20 @@ export function SummaryCard({ entry, links, defaultOpen = false }: { entry: Summ
 }
 
 const STATUS: Record<string, string> = { done: "Done", failed: "Failed", cancelled: "Cancelled" };
+const WHAT: Record<Post["post"], string> = { handoff_request: "Handoff request", handoff: "Handoff result", task_result: "Task result" };
 export function postChipText(entry: Post): string {
-  const what = entry.post === "handoff" ? "Handoff result" : "Task result";
+  const what = WHAT[entry.post];
   return [what, entry.title, entry.status ? STATUS[entry.status] ?? entry.status : ""].filter(Boolean).join(" · ");
 }
 
 /** A message another agent posted into this chat: avatar + name, its text, the handoff/task line, links. */
-export function PostMessage({ entry, links, onOpenHandoff }: { entry: Post; links: Open; onOpenHandoff?: (handoffId: string) => void }) {
+export function PostMessage({ entry, links, onOpenHandoff, onOpenChat }: { entry: Post; links: Open; onOpenHandoff?: (handoffId: string) => void; onOpenChat?: (sessionId: string) => void }) {
   const chip = postChipText(entry);
-  const canOpen = entry.post === "handoff" && entry.handoffId && onOpenHandoff;
+  const canOpen = entry.post !== "task_result" && entry.handoffId && onOpenHandoff;
   return (
     <article className={`jg-post jg-post--${entry.post}${entry.status ? ` is-${entry.status}` : ""}`} data-sender="post" aria-label={`${entry.sender.name}: ${chip}`}>
       <header className="jg-post__who">
-        <AgentAvatar id={entry.sender.id} name={entry.sender.name} size={20} state={entry.status === "failed" ? "failed" : "spawning"} />
+        <AgentAvatar id={entry.sender.id} name={entry.sender.name} size={20} state={entry.status === "failed" ? "failed" : entry.post === "handoff_request" ? undefined : "spawning"} />
         <span className="jg-post__name">{entry.sender.name}</span>
       </header>
       <div className="jg-bubble jg-bubble--assistant jg-post__body">
@@ -51,9 +52,9 @@ export function PostMessage({ entry, links, onOpenHandoff }: { entry: Post; link
           {canOpen
             ? <button type="button" className="jg-post__chip" onClick={() => onOpenHandoff!(entry.handoffId!)}>{chip}</button>
             : <span className="jg-post__chip">{chip}</span>}
-          {entry.links.map((l) => (
-            <a key={l.url} className="jg-post__link" href={l.url} onClick={(e) => { e.preventDefault(); links.onOpen(l.url); }}>{l.label}</a>
-          ))}
+          {entry.childSessionId && onOpenChat && (
+            <button type="button" className="jg-post__link" onClick={() => onOpenChat(entry.childSessionId!)}>Open chat</button>
+          )}
         </div>
       </div>
     </article>

@@ -39,23 +39,32 @@ describe("SummaryCard", () => {
 });
 
 describe("PostMessage (handoff and task results as real messages)", () => {
-  const handoff: Post = { kind: "post", id: "p", post: "handoff", sender: { id: "agent:swe", name: "SWE" }, text: "Fixed it.", title: "Lockfile", status: "done", handoffId: "h9", links: [{ label: "PR #1", url: "https://x.invalid/1" }] };
-  it("shows the sender's avatar and name, the text, the handoff chip and links", async () => {
+  const handoff: Post = { kind: "post", id: "p", post: "handoff", sender: { id: "agent:swe", name: "SWE" }, text: "Fixed it.", handoffId: "h9", childSessionId: "s-child" };
+  it("shows the sender's avatar and name, the text, the handoff chip and the child chat link", async () => {
     const open = vi.fn();
-    const { el, done } = await mount(<PostMessage entry={handoff} links={links} onOpenHandoff={open} />);
+    const openChat = vi.fn();
+    const { el, done } = await mount(<PostMessage entry={handoff} links={links} onOpenHandoff={open} onOpenChat={openChat} />);
     expect(el.querySelector(".jg-post__who .jg-avatar")).toBeTruthy();
     expect(el.querySelector(".jg-post__name")?.textContent).toBe("SWE");
     expect(el.querySelector(".jg-post__body")?.textContent).toContain("Fixed it.");
+    expect(el.querySelector(".jg-post__chip")?.textContent).toBe("Handoff result");
     await act(async () => { el.querySelector<HTMLButtonElement>("button.jg-post__chip")!.click(); });
     expect(open).toHaveBeenCalledWith("h9");
-    await act(async () => { el.querySelector<HTMLAnchorElement>(".jg-post__link")!.click(); });
-    expect(links.onOpen).toHaveBeenCalledWith("https://x.invalid/1");
+    await act(async () => { el.querySelector<HTMLButtonElement>(".jg-post__link")!.click(); });
+    expect(openChat).toHaveBeenCalledWith("s-child");
     done();
   });
-  it("labels task results with their status; a failed one is marked", () => {
-    const task: Post = { ...handoff, post: "task_result", handoffId: undefined, taskId: "t5", title: "Notarize", status: "failed", links: [] };
-    expect(postChipText(task)).toBe("Task result · Notarize · Failed");
-    const html = renderToStaticMarkup(<PostMessage entry={task} links={links} />);
+  it("renders a handoff request with its own chip, opening the same handoff", () => {
+    const request: Post = { ...handoff, post: "handoff_request", sender: { id: "native:jaeger", name: "Jaeger" }, text: "Asked SWE to fix it." };
+    expect(postChipText(request)).toBe("Handoff request");
+    const html = renderToStaticMarkup(<PostMessage entry={request} links={links} onOpenHandoff={() => {}} />);
+    expect(html).toContain("jg-post--handoff_request");
+    expect(html).toContain('<button type="button" class="jg-post__chip">Handoff request</button>');
+  });
+  it("labels task results; no handoff button, no chat link without a child session", () => {
+    const task: Post = { ...handoff, post: "task_result", handoffId: undefined, childSessionId: undefined, taskId: "t5", status: "failed" };
+    expect(postChipText(task)).toBe("Task result · Failed");
+    const html = renderToStaticMarkup(<PostMessage entry={task} links={links} onOpenChat={() => {}} />);
     expect(html).toContain("jg-post--task_result is-failed");
     expect(html).not.toContain("<button");
   });
@@ -71,7 +80,7 @@ describe("home chat in MinimalChat", () => {
   it("renders the newest page with posted results, then loads the older page on scroll-up, keeping the reader's place", async () => {
     const { el, done } = await mount(<MinimalChat host={host()} sessionId="s-native:jaeger" />);
     await flush();
-    expect(el.querySelectorAll('[data-sender="post"]').length).toBe(2);
+    expect(el.querySelectorAll('[data-sender="post"]').length).toBe(3);
     expect(el.querySelector('[data-sender="summary"]')).toBeNull();
     expect(el.textContent).toContain("Show earlier messages");
     const scroller = el.querySelector<HTMLDivElement>(".jg-chat__scroll")!;

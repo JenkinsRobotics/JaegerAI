@@ -2,63 +2,101 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JaegerSource } from "../api/source";
 import type { SessionRow } from "../api/types";
 import { MockSource } from "../api/mock";
-import { mockHome, mockHomeWire } from "../api/mockHome";
-import { contractHome, ENTRY_PREFIX, fallbackHome, fromWirePage, HOME_ROUTES, type WirePage } from "./homeSession";
+import { MOCK_MESSAGES, mockHome, mockHomeWire, mockPost } from "../api/mockHome";
+import { contractHome, ENTRY_PREFIX, fallbackHome, fromWirePage, HOME_ROUTES, toMs, type HomeLiveEvent, type WireMessage, type WirePage } from "./homeSession";
 
 afterEach(() => localStorage.clear());
 
-describe("fromWirePage (provisional wire → UI page)", () => {
+const W = (m: Partial<WireMessage> & { id: string }): WireMessage => ({ session_id: "s", role: "assistant", kind: "message", content: "", created_at: 0, ...m });
+
+describe("fromWirePage (contract wire → UI page)", () => {
+  // Newest first, as the route returns it.
   const page: WirePage = {
-    has_more: true, before: "c9", last_event_id: 41,
+    next_before: "s1",
     messages: [
-      { id: "s1", kind: "summary", role: "system", summary: { text: "Planned it.", covers_count: 12, from_ts: 100, to_ts: 200 } },
-      { id: "u1", role: "user", content: "hi", timestamp: 300 },
-      { id: "a1", role: "assistant", content: "hello", timestamp: 301 },
-      { id: "p1", kind: "handoff_result", role: "assistant", sender: { agent_id: "agent:swe" }, handoff_id: "h1", title: "Fix", content: "Done.", links: [{ label: "PR", url: "https://x.invalid" }] },
-      { id: "a2", role: "assistant", content: "Noted." },
+      W({ id: "a2", content: "Noted.", created_at: 500 }),
+      W({ id: "p1", kind: "handoff_result", sender_agent_id: "agent:swe", content: "Done.", created_at: 400, links: { handoff_id: "h1", child_session_id: "s-swe" } }),
+      W({ id: "r1", kind: "handoff_request", sender_agent_id: "native:jaeger", content: "Asked SWE.", created_at: 350, links: { handoff_id: "h1" } }),
+      W({ id: "a1", content: "hello", created_at: 301 }),
+      W({ id: "u1", role: "user", content: "hi", created_at: 300 }),
+      W({ id: "s1", kind: "summary", role: "system", content: "Planned it.", created_at: 200, summary: { covers_from: 100, covers_to: 200, message_count: 12 } }),
     ],
   };
-  it("keeps order, turns summaries and posts into entries, and names turns after message ids", () => {
-    const ui = fromWirePage("s", page, (id) => (id === "agent:swe" ? "SWE" : id));
-    expect(ui.turns.map((t) => t.turnId)).toEqual([`${ENTRY_PREFIX}s1`, "u1", `${ENTRY_PREFIX}p1`, "reply:a2"]);
+  const names = (id: string) => ({ "agent:swe": "SWE", "native:jaeger": "Jaeger" })[id] ?? id;
+  it("orders oldest first, turns summaries and posts into entries, and names turns after message ids", () => {
+    const ui = fromWirePage("s", page, names);
+    expect(ui.turns.map((t) => t.turnId)).toEqual([`${ENTRY_PREFIX}s1`, "u1", `${ENTRY_PREFIX}r1`, `${ENTRY_PREFIX}p1`, "reply:a2"]);
     expect(ui.turns[1]).toMatchObject({ message: "hi", parts: [{ kind: "markdownContent", text: "hello" }], createdAt: 300_000 });
     expect(ui.entries[`${ENTRY_PREFIX}s1`]).toEqual({ kind: "summary", id: "s1", text: "Planned it.", count: 12, fromAt: 100_000, toAt: 200_000 });
-    expect(ui.entries[`${ENTRY_PREFIX}p1`]).toMatchObject({ kind: "post", post: "handoff", sender: { id: "agent:swe", name: "SWE" }, handoffId: "h1", text: "Done.", links: [{ label: "PR", url: "https://x.invalid" }] });
-    expect(ui.before).toBe("c9");
-    expect(ui.lastEventId).toBe(41);
+    expect(ui.entries[`${ENTRY_PREFIX}r1`]).toMatchObject({ kind: "post", post: "handoff_request", sender: { id: "native:jaeger", name: "Jaeger" }, handoffId: "h1" });
+    expect(ui.entries[`${ENTRY_PREFIX}p1`]).toMatchObject({ kind: "post", post: "handoff", sender: { id: "agent:swe", name: "SWE" }, handoffId: "h1", childSessionId: "s-swe", text: "Done." });
+    expect(ui.before).toBe("s1");
   });
-  it("has no older cursor at the start of the chat", () => {
-    expect(fromWirePage("s", { ...page, has_more: false }, String).before).toBeUndefined();
+  it("has no older cursor when next_before is null; ISO created_at works too", () => {
+    const ui = fromWirePage("s", { next_before: null, messages: [W({ id: "u", role: "user", content: "x", created_at: "2026-10-18T18:00:00Z" })] }, String);
+    expect(ui.before).toBeUndefined();
+    expect(ui.turns[0].createdAt).toBe(Date.parse("2026-10-18T18:00:00Z"));
+    expect(toMs("not-a-date")).toBeUndefined();
   });
 });
 
 describe("contractHome", () => {
-  it("calls exactly the provisional routes and reports the cursor once", async () => {
+  it("calls exactly the contract routes: home, newest page, older page by message id", async () => {
     const calls: string[] = [];
     const wire = mockHomeWire();
-    const onCursor = vi.fn();
-    const home = contractHome(async (p) => { calls.push(p); return wire(p); }, { pageSize: 30, onCursor });
+    const home = contractHome(async (p) => { calls.push(p); return wire(p); });
     expect(await home.home("native:jaeger")).toBe("s-native:jaeger");
     const newest = await home.page("s-native:jaeger");
+    expect(newest.before).toBe("old-4");
     const older = await home.page("s-native:jaeger", newest.before);
-    expect(calls).toEqual([HOME_ROUTES.home("native:jaeger"), HOME_ROUTES.page("s-native:jaeger", 30), HOME_ROUTES.page("s-native:jaeger", 30, "p2")]);
-    expect(onCursor).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual([
+      "/v1/agents/native%3Ajaeger/home",
+      "/v1/sessions/s-native%3Ajaeger/messages?limit=50",
+      "/v1/sessions/s-native%3Ajaeger/messages?before=old-4&limit=50",
+    ]);
     expect(older.before).toBeUndefined();
     expect(Object.values(older.entries)[0]).toMatchObject({ kind: "summary", count: 48 });
+    expect(HOME_ROUTES.page("x", 999)).toBe("/v1/sessions/x/messages?limit=200");
   });
-  it("reads a whole older chat and lists history without the home chat", async () => {
-    const home = contractHome(mockHomeWire());
+  it("lists older chats from GET /v1/sessions?agent_id= without the home chat, and reads one whole", async () => {
+    const calls: string[] = [];
+    const wire = mockHomeWire();
+    const home = contractHome(async (p) => { calls.push(p); return wire(p); });
     expect((await home.history("native:jaeger")).map((r) => r.sessionId)).toEqual(["s-old-1", "s-old-2"]);
+    expect(calls).toContain("/v1/sessions?agent_id=native%3Ajaeger");
+    expect(calls.some((c) => c.includes("/history"))).toBe(false);
     const read = await home.read("s-native:jaeger");
     expect(read.before).toBeUndefined();
     expect(read.turns[0].turnId).toBe(`${ENTRY_PREFIX}sum-1`);
+  });
+  it("delivers message.created posts and session.summarized live from the session stream (mock stream)", async () => {
+    const source = new MockSource();
+    const onCursor = vi.fn();
+    const home = contractHome(mockHomeWire(), { onCursor }, source.stream.bind(source));
+    const sid = await home.home("native:jaeger");
+    const keep = MOCK_MESSAGES[sid].length;
+    const seen: HomeLiveEvent[] = [];
+    const controller = new AbortController();
+    const running = home.live!(sid, (e) => seen.push(e), controller.signal);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onCursor).toHaveBeenCalledWith(sid, 0);
+    mockPost((s, e) => source.emit(s, e), W({ id: "live-1", session_id: sid, kind: "task_result", sender_agent_id: "agent:swe", content: "Built.", created_at: 900, links: { task_id: "t9" } }));
+    mockPost((s, e) => source.emit(s, e), W({ id: "live-m", session_id: sid, content: "plain" }));
+    mockPost((s, e) => source.emit(s, e), W({ id: "live-s", session_id: sid, role: "system", kind: "summary", content: "Sum.", summary: { message_count: 3 } }));
+    mockPost((s, e) => source.emit(s, e), W({ id: "other", session_id: "s-elsewhere", kind: "task_result", content: "x" }));
+    expect(seen.map((e) => e.type)).toEqual(["entry", "entry", "summarized"]);
+    expect(seen[0].type === "entry" && seen[0].page.entries[`${ENTRY_PREFIX}live-1`]).toMatchObject({ post: "task_result", taskId: "t9", text: "Built." });
+    expect(seen[2]).toEqual({ type: "summarized", summaryMessageId: "live-s" });
+    controller.abort();
+    await running;
+    MOCK_MESSAGES[sid].splice(keep);
   });
 });
 
 describe("mockHome", () => {
   it("puts the rich sample transcript after the newest wire page", async () => {
     const page = await mockHome(new MockSource()).page("s-native:jaeger");
-    expect(page.turns.slice(0, 2).map((t) => t.turnId)).toEqual([`${ENTRY_PREFIX}post-h7`, `${ENTRY_PREFIX}post-t5`]);
+    expect(page.turns.slice(0, 4).map((t) => t.turnId)).toEqual(["reply:old-4", `${ENTRY_PREFIX}post-r6`, `${ENTRY_PREFIX}post-h7`, `${ENTRY_PREFIX}post-t5`]);
     expect(page.turns.at(-1)?.turnId).toBe("m2");
   });
 });
