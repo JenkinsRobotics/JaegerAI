@@ -7,7 +7,8 @@
 // <dir>/jaeger-light.png and <dir>/jaeger-dark.png, prints one JSON line (chrome report + page probe), exits.
 // Optional `--snapshot-size WxH` (clamped to the window minimum) shoots another window size.
 // Optional, repeatable `--snapshot-click <css selector>` clicks the first match of each selector in order
-// (0.8 s apart) before the shots, e.g. to open another chat or expand a fold. Clicks only inside the page.
+// (0.8 s apart) before the shots, e.g. to open another chat or expand a fold; `scrollTop:<selector>` scrolls
+// that element to the top instead. Acts only inside the page.
 // Host actions from the page are recorded, never performed.
 
 import AppKit
@@ -70,14 +71,20 @@ final class Snapshotter: NSObject, BridgeHost {
         loaded = true
         report["url"] = webView.url?.absoluteString ?? "nil"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            self?.click(Self.requestedClicks(), webView: webView)
+            // An off-screen window doesn't run CSS transitions, so a still would freeze mid-fade; turn them off.
+            webView.evaluateJavaScript(Self.stillsCSS) { _, _ in self?.click(Self.requestedClicks(), webView: webView) }
         }
     }
 
     private func click(_ selectors: [String], webView: WKWebView) {
         guard let selector = selectors.first else { return capture(["light", "dark"], webView: webView) }
         let literal = String(data: (try? JSONSerialization.data(withJSONObject: [selector])) ?? Data("[\"\"]".utf8), encoding: .utf8) ?? "[\"\"]"
-        let js = "(() => { const el = document.querySelector(\(literal)[0]); if (!el) return false; el.click(); return true; })()"
+        // "scrollTop:<selector>" scrolls that element to the top instead of clicking it.
+        let js = """
+            (() => { let s = \(literal)[0]; const scroll = s.startsWith('scrollTop:'); if (scroll) s = s.slice(10);
+              const el = document.querySelector(s); if (!el) return false;
+              if (scroll) { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); } else el.click(); return true; })()
+            """
         webView.evaluateJavaScript(js) { [weak self] result, _ in
             guard let self else { return }
             var clicks = self.report["clicks"] as? [[String: Any]] ?? []
@@ -122,6 +129,11 @@ final class Snapshotter: NSObject, BridgeHost {
         }
     }
 
+    static let stillsCSS = """
+        (() => { const s = document.createElement('style'); s.dataset.snapshot = 'stills';
+          s.textContent = '*, *::before, *::after { transition: none !important; }'; document.head.append(s); return true; })()
+        """
+
     static let probeJS = """
         (() => {
           const d = document.documentElement, cs = getComputedStyle(d), b = getComputedStyle(document.body);
@@ -133,6 +145,8 @@ final class Snapshotter: NSObject, BridgeHost {
             body_background: b.backgroundColor, html_background: cs.backgroundColor,
             prefers_dark: matchMedia('(prefers-color-scheme: dark)').matches,
             viewport: [innerWidth, innerHeight], title: document.title,
+            chat_scroll: (() => { const e = document.querySelector('.jg-chat__scroll'); return e ? [e.scrollTop, e.scrollHeight, e.clientHeight, getComputedStyle(e).overflowY] : null; })(),
+            jump: (document.querySelector('.jg-jump') || {}).className || null,
             text_sample: (document.body.innerText || '').replace(/\\s+/g, ' ').slice(0, 160)
           });
         })()

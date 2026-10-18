@@ -24,7 +24,7 @@ print("snapshot ok:", r["ok"], "| error:", r.get("error"), "| on any screen:", r
 if r.get("clicks"): print("  clicks:", r["clicks"])
 for n, s in sorted(r["shots"].items()):
     c, p = s["chrome"], s.get("page") or {}
-    print(f"  {n}: {s.get('pixels')} chrome_ok={c['ok']} bg={c['background'][n]} under={c['under_page_background']} lights={c['traffic_lights'][0][:2]} band={p.get('band')} reserve={p.get('reserve')} prefers_dark={p.get('prefers_dark')} body_bg={p.get('body_background')}")
+    print(f"  {n}: {s.get('pixels')} chrome_ok={c['ok']} bg={c['background'][n]} under={c['under_page_background']} lights={c['traffic_lights'][0][:2]} band={p.get('band')} reserve={p.get('reserve')} prefers_dark={p.get('prefers_dark')} body_bg={p.get('body_background')} chat_scroll={p.get('chat_scroll')} jump={p.get('jump')!r}")
 PY
 ls .build/shots/$TAG-* 2>/dev/null
 exit $rc
