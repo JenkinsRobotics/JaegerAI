@@ -5,6 +5,7 @@
 // appearance, waits for the page to restyle, takes WKWebView.takeSnapshot and composites the real traffic-light
 // buttons (cacheDisplay) at their window frames with the window's corner radius. Writes
 // <dir>/jaeger-light.png and <dir>/jaeger-dark.png, prints one JSON line (chrome report + page probe), exits.
+// Optional `--snapshot-size WxH` (clamped to the window minimum) shoots another window size.
 // Host actions from the page are recorded, never performed.
 
 import AppKit
@@ -36,6 +37,10 @@ final class Snapshotter: NSObject, BridgeHost {
         do { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
         catch { return finish(error: "cannot create \(dir.path): \(error.localizedDescription)") }
         guard let window = app.mainWindow else { return finish(error: "no window") }
+        if let size = Self.requestedSize() {
+            window.setContentSize(NSSize(width: max(size.width, window.minSize.width),
+                                         height: max(size.height, window.minSize.height)))
+        }
         window.setFrameOrigin(Self.offscreenOrigin)
         window.collectionBehavior.insert([.transient, .ignoresCycle])
         window.ignoresMouseEvents = true
@@ -43,6 +48,14 @@ final class Snapshotter: NSObject, BridgeHost {
         NativeChrome.layoutTrafficLights(window)
         report["window_on_any_screen"] = NSScreen.screens.contains { $0.frame.intersects(window.frame) }
         report["app_active"] = NSApp.isActive
+    }
+
+    static func requestedSize() -> NSSize? {
+        let a = CommandLine.arguments
+        guard let i = a.firstIndex(of: "--snapshot-size"), i + 1 < a.count else { return nil }
+        let parts = a[i + 1].lowercased().split(separator: "x").compactMap { Double($0) }
+        guard parts.count == 2, parts[0] > 0, parts[1] > 0 else { return nil }
+        return NSSize(width: parts[0], height: parts[1])
     }
 
     func pageLoaded(_ webView: WKWebView) {
