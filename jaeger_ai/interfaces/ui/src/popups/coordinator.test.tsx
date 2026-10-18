@@ -4,7 +4,7 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AppMenu } from "./AppMenu";
-import { announcePopup } from "./coordinator";
+import { announcePopup, anyPopupOpen, whenNoPopup } from "./coordinator";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 let el: HTMLDivElement; let root: Root;
@@ -49,5 +49,20 @@ describe("popup coordinator", () => {
     await act(async () => openA());
     act(() => announcePopup("palette"));
     expect(menus()).toEqual([]);
+  });
+});
+
+describe("auto-follow pause", () => {
+  beforeEach(async () => { await act(async () => { root.render(<Two />); }); });
+  it("runs at once with no popup; while one is open it waits and runs (latest only) on close", async () => {
+    const ran: string[] = [];
+    whenNoPopup(() => ran.push("now")); expect(ran).toEqual(["now"]);
+    await act(async () => openA()); expect(anyPopupOpen()).toBe(true);
+    whenNoPopup(() => ran.push("first")); whenNoPopup(() => ran.push("latest"));
+    expect(ran).toEqual(["now"]);
+    await act(async () => openB()); expect(ran).toEqual(["now"]);
+    act(() => { document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })); });
+    expect(anyPopupOpen()).toBe(false);
+    expect(ran).toEqual(["now", "latest"]);
   });
 });
