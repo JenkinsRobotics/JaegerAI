@@ -5,7 +5,11 @@ Loopback only; carries no token itself (the dev token proxy behind the UI origin
 Prints the gateway's active runtime model and the model that answered. Default text: Scripts/live-prompt.txt (one
 realistic prompt: a long markdown answer with headings, a list, a table, a code fence and >=2 read-only tool calls);
 with it, the run fails unless the reply has a fenced code block AND a table AND the stream shows >=2 completed tools.
---expect-fence: also require a fence for a custom text. --trace: print the non-text event sequence (tool, progress)."""
+--expect-fence: also require a fence for a custom text. --trace: print the non-text event sequence (tool, progress).
+--home=<agent_id>: send in that agent's home chat (GET /v1/agents/{id}/home) instead of a new session, then check the
+stored page (integer ids, float created_at, newest first, tool parts with state) and that message.created arrived.
+--upload: stage a small text file via POST .../attachments/upload (Idempotency-Key) and send its id in attachment_ids.
+attachment_ids is always sent ([] for none)."""
 import os
 import json
 import sys
@@ -39,9 +43,15 @@ print(f"GET /v1/runtime/models -> {status} active={str(active)[:160]}")
 status, agents = call("GET", "/v1/agents")
 names = [a.get("name") or a.get("label") or a.get("id") for a in (agents.get("agents", agents) if isinstance(agents, dict) else agents or [])] if status == 200 else agents
 print(f"GET /v1/agents -> {status} {str(names)[:160]}")
-sid = str(uuid.uuid4())
-status, row = call("POST", "/v1/sessions", {"session_id": sid, "source": "webui", "title": "live chat check"})
-print(f"POST /v1/sessions -> {status} {str(row)[:120]}")
+HOME = next((a.split("=", 1)[1] for a in sys.argv[1:] if a.startswith("--home=")), None)
+if HOME:
+    status, row = call("GET", f"/v1/agents/{HOME}/home")
+    sid = row.get("session_id") if isinstance(row, dict) else ""
+    print(f"GET /v1/agents/{HOME}/home -> {status} {row}")
+else:
+    sid = str(uuid.uuid4())
+    status, row = call("POST", "/v1/sessions", {"session_id": sid, "source": "webui", "title": "live chat check"})
+    print(f"POST /v1/sessions -> {status} {str(row)[:120]}")
 if status >= 300:
     sys.exit(1)
 
@@ -96,7 +106,19 @@ t = threading.Thread(target=stream, daemon=True)
 t.start()
 time.sleep(1.0)
 t0 = time.time()
-status, receipt = call("POST", f"/v1/sessions/{sid}/turns", {"text": TEXT, "request_id": str(uuid.uuid4())})
+attachment_ids = []
+if "--upload" in sys.argv:
+    import base64
+    body = {"name": "live-check-note.txt", "mime": "text/plain",
+            "data_base64": base64.b64encode(b"Live check note: the reply should mention this file by name.\n").decode()}
+    key = str(uuid.uuid4())
+    req = urllib.request.Request(f"{ORIGIN}/v1/sessions/{sid}/attachments/upload", data=json.dumps(body).encode(), method="POST",
+                                 headers={"Content-Type": "application/json", "Idempotency-Key": key})
+    with urllib.request.urlopen(req, timeout=30) as r:
+        up = json.loads(r.read())
+        print(f"POST .../attachments/upload -> {r.status} {up}")
+    attachment_ids.append(up["attachment_id"])
+status, receipt = call("POST", f"/v1/sessions/{sid}/turns", {"text": TEXT, "request_id": str(uuid.uuid4()), "attachment_ids": attachment_ids})
 print(f"POST /v1/sessions/{{id}}/turns -> {status} {str(receipt)[:160]}")
 done.wait(TIMEOUT)
 seen = sorted(set(events))
@@ -113,6 +135,18 @@ table = any(set(line.replace("|", "").replace(":", "").strip()) == {"-"} and lin
 tools_done = sum(1 for e in events if e in ("tool.completed", "tool.done"))
 headings = sum(1 for line in text.splitlines() if line.startswith("## "))
 print(f"checks: fence={fenced} table={table} tool.completed={tools_done} headings={headings} chars={len(text)}")
+if HOME:
+    time.sleep(1.0)
+    status, page = call("GET", f"/v1/sessions/{sid}/messages?limit=50")
+    msgs = page.get("messages", []) if isinstance(page, dict) else []
+    ids = [m.get("id") for m in msgs]
+    tool_states = [p.get("state") for m in msgs for p in (m.get("parts") or []) if p.get("type") == "tool"]
+    shape = (bool(msgs) and all(isinstance(i, int) for i in ids) and ids == sorted(ids, reverse=True)
+             and all(isinstance(m.get("created_at"), float) for m in msgs) and "next_before" in page)
+    print(f"page: {status} n={len(msgs)} ids={ids[:6]} next_before={page.get('next_before') if isinstance(page, dict) else None} "
+          f"created_at={msgs[0].get('created_at') if msgs else None} kinds={sorted({m.get('kind') for m in msgs})} tool_states={tool_states}")
+    print(f"checks: page_shape={shape} message.created={'message.created' in events}")
+    ok = ok and shape and "message.created" in events
 if DEFAULT_PROMPT:
     ok = ok and fenced and table and tools_done >= 2
 elif "--expect-fence" in sys.argv:

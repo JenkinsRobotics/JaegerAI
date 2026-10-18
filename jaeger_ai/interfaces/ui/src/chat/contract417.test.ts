@@ -52,3 +52,25 @@ describe("417d8a0c contract", () => {
     } finally { vi.unstubAllGlobals(); }
   });
 });
+
+describe("autoHome feature-detect", async () => {
+  const { autoHome } = await import("./homeSession");
+  const fake = (mode: "contract" | "fallback", home: (id: string) => Promise<string>) =>
+    ({ mode, home, page: vi.fn(), history: vi.fn(async () => []), read: vi.fn() }) as never;
+  it("uses the contract when the route exists", async () => {
+    const h = autoHome(fake("contract", async (id) => `agent-${id}`), fake("fallback", async () => "old"));
+    expect(await h.home("native:jaeger")).toBe("agent-native:jaeger");
+    expect(h.mode).toBe("contract");
+  });
+  it("falls back when the gateway has no home route (404 without a JSON error)", async () => {
+    const missing = Object.assign(new Error("404 Not Found"), { status: 404, routeMissing: true });
+    const h = autoHome(fake("contract", async () => { throw missing; }), fake("fallback", async () => "recent-chat"));
+    expect(await h.home("native:jaeger")).toBe("recent-chat");
+    expect(h.mode).toBe("fallback");
+  });
+  it("passes an unknown agent's 404 through", async () => {
+    const unknown = Object.assign(new Error("Unknown agent"), { status: 404, routeMissing: false });
+    const h = autoHome(fake("contract", async () => { throw unknown; }), fake("fallback", async () => "recent-chat"));
+    await expect(h.home("nope")).rejects.toThrow("Unknown agent");
+  });
+});
