@@ -5,6 +5,9 @@ It plays the role the WebUI plays in production: the page talks to its own origi
 adds the dev stack's OWN `webui` caller token (created in the isolated JAEGER_CALLER_TOKEN_DIR,
 never the real Keychain tokens) before forwarding /v1, /api, /health and /version to the test gateway.
 Loopback only. Refuses token dirs under ~/.jaeger. Never prints the token value. Streams SSE through.
+Like the WebUI (a server-side caller), it checks the browser's Origin itself (only the dev page's origin,
+--page-origin, may call) and forwards without the browser-only Origin / Sec-Fetch-* / Referer headers;
+the gateway refuses any Origin on another port, so a page POST could never reach it otherwise.
 """
 import argparse
 import http.client
@@ -17,6 +20,8 @@ from pathlib import Path
 
 HOP = {"connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailers",
        "transfer-encoding", "upgrade", "host", "authorization", "content-length"}
+# Browser-only request headers the WebUI never forwards (it calls the gateway from its own server).
+BROWSER = {"origin", "referer", "sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "sec-fetch-user"}
 
 
 def ensure_token(directory: str) -> str:
@@ -41,7 +46,12 @@ def main() -> int:
     ap.add_argument("--port", type=int, required=True)
     ap.add_argument("--target", required=True, help="http://127.0.0.1:<port> (loopback only)")
     ap.add_argument("--token-dir", required=True)
+    ap.add_argument("--page-origin", default="http://127.0.0.1:18800", help="the dev main screen's origin (loopback)")
     args = ap.parse_args()
+    page = urllib.parse.urlsplit(args.page_origin)
+    if page.scheme != "http" or page.hostname != "127.0.0.1" or not page.port:
+        sys.exit("[dev-token-proxy] page origin must be http://127.0.0.1:<port>")
+    page_origin = f"http://127.0.0.1:{page.port}"
     target = urllib.parse.urlsplit(args.target)
     if target.scheme != "http" or target.hostname != "127.0.0.1" or not target.port:
         sys.exit("[dev-token-proxy] target must be http://127.0.0.1:<port>")
@@ -55,9 +65,16 @@ def main() -> int:
             if not (path.startswith("/v1/") or path.startswith("/api/") or path.split("?")[0] in ("/health", "/version", "/v1")):
                 self.send_error(404)
                 return
+            origin = self.headers.get("Origin")
+            if origin is not None and origin != page_origin:
+                self.send_error(403, "origin not allowed")
+                return
+            if self.headers.get("Sec-Fetch-Site") == "cross-site":
+                self.send_error(403, "cross-site")
+                return
             length = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(length) if length else None
-            headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP}
+            headers = {k: v for k, v in self.headers.items() if k.lower() not in HOP and k.lower() not in BROWSER}
             headers["Authorization"] = "Bearer " + token
             conn = http.client.HTTPConnection(target.hostname, target.port, timeout=900)
             try:

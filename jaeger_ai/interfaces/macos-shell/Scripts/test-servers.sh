@@ -26,7 +26,7 @@ start)
     nohup "$HOME/.jaeger/venv/bin/python" -m jaeger_ai.core.gateway.server --host 127.0.0.1 --port $GW_PORT \
     > $PIDS-gateway.log 2>&1 &
   echo $! > $PIDS-gateway.pid
-  nohup /usr/bin/python3 "$(dirname "$0")/dev-token-proxy.py" --port $PX_PORT --target http://127.0.0.1:$GW_PORT --token-dir "$TOKENS" \
+  nohup /usr/bin/python3 "$(dirname "$0")/dev-token-proxy.py" --port $PX_PORT --target http://127.0.0.1:$GW_PORT --token-dir "$TOKENS" --page-origin http://127.0.0.1:$UI_PORT \
     > $PIDS-proxy.log 2>&1 &
   echo $! > $PIDS-proxy.pid
   [[ -f "$UI_DIST/index.html" ]] || { echo "main screen not built — run Scripts/build-main-screen.sh"; "$0" stop; exit 1; }
