@@ -1,6 +1,7 @@
 /* The specialist list: a drop target that unpins a dragged tile, and a right-click "Pin to top" on
  * each row (the keyboard/VoiceOver path to the same thing). */
-import { Menu, type MenuItem } from "@aether/ui";
+import { type MenuItem } from "@aether/ui";
+import { AppMenu as Menu } from "../popups/AppMenu";
 import { useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
 
 // Grok's Bot actions, scoped to what Jaeger has (Pin, plus the info pane and older chats).

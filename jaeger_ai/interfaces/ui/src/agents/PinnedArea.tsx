@@ -1,6 +1,7 @@
 /* The pinned strip: the supervisor's tile, then pinned specialists. Drop an agent row here to pin it
  * (at the tile it's dropped on); drag a tile back to the list, or right-click it, to unpin. */
-import { Menu, type MenuItem } from "@aether/ui";
+import { type MenuItem } from "@aether/ui";
+import { AppMenu as Menu } from "../popups/AppMenu";
 import { useState, type DragEvent, type ReactNode } from "react";
 import type { SidebarRow } from "./agentsLogic";
 import { AGENT_DRAG_TYPE } from "./pins";

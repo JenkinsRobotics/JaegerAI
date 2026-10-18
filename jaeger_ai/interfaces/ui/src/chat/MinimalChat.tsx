@@ -4,7 +4,7 @@
  * pending turn shows an activity-named progress line with a shimmer for as long as it runs. The composer
  * auto-grows (JS fallback), takes picked or pasted files as chips and morphs its primary button. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
-import { Menu } from "@aether/ui";
+import { AppMenu as Menu } from "../popups/AppMenu";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { avatarColor } from "../agents/avatarColor";
 import { HandoffMarker } from "../agents/HandoffMarker";
@@ -421,7 +421,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     const bubble = (e.target as HTMLElement).closest<HTMLElement>(".jg-bubble");
     if (!bubble) return;
     e.preventDefault();
-    setMessageMenu({ x: e.clientX, y: e.clientY, text: bubble.innerText.trim() });
+    setMessageMenu({ x: e.clientX, y: e.clientY, text: (bubble.innerText ?? bubble.textContent ?? "").trim() });
   };
   const onMessageAction = (action: string) => {
     const text = messageMenu?.text ?? "";
