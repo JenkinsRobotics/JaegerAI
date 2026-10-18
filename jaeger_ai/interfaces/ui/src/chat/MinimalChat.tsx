@@ -10,7 +10,8 @@ import { HandoffMarker } from "../agents/HandoffMarker";
 import { ArrowDownIcon, CloseIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
 import { badge, messageCount, unreadSince } from "./scrollFollow";
-import { addFiles, autoGrow, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, toAttachments, type PendingFile } from "./composer";
+import { WebHost } from "./webHost";
+import { addFiles, autoGrow, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
 import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
@@ -184,6 +185,16 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   const [atBottom, setAtBottom] = useState(true);
   const [listening, setListening] = useState<"dictation" | "voice" | null>(null);
   const [files, setFiles] = useState<PendingFile[]>([]);
+  /** Files sent with each turn, so a refusal can put exactly those back as error chips. */
+  const sentFiles = useRef(new Map<string, PendingFile[]>());
+  useEffect(() => {
+    if (!(host instanceof WebHost)) return;
+    host.onAttachmentsRejected = (turnId: string, rejected: RejectedAttachment[]) => {
+      const sent = sentFiles.current.get(turnId) ?? [];
+      setFiles((current) => restoreRejected(current, sent, rejected));
+    };
+    return () => { host.onAttachmentsRejected = undefined; };
+  }, [host]);
   const [fileNote, setFileNote] = useState<string>();
   const scroller = useRef<HTMLDivElement>(null);
   const chatRoot = useRef<HTMLDivElement>(null);
@@ -312,12 +323,12 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   }, []);
 
   const send = (text = draft, speakReply = false) => {
-    const attached = speakReply ? [] : files;
+    const attached = speakReply ? [] : files.filter((f) => !f.error);
     const message = text.trim() || (attached.length ? `Attached: ${attached.map((f) => f.name).join(", ")}` : "");
     if (!message || !session || active) return;
     const turnId = crypto.randomUUID();
     setDraft("");
-    if (attached.length) { setFiles([]); setFileNote(undefined); }
+    if (attached.length) { setFiles([]); setFileNote(undefined); sentFiles.current.set(turnId, attached); }
     stick.current = true;
     setSession({ ...session, turns: [...session.turns, { turnId, message, parts: [], state: "pending", createdAt: Date.now() }] });
     let finished: ChatTurn | undefined;
@@ -407,9 +418,9 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">
             {files.map((f) => (
-              <span key={f.id} className="jg-chip" role="listitem" title={`${f.name} · ${fileSize(f.size)}`}>
+              <span key={f.id} className={`jg-chip${f.error ? " is-error" : ""}`} role="listitem" title={f.error ? `${f.name}: ${f.error}` : `${f.name} · ${fileSize(f.size)}`}>
                 <span className="jg-chip__name">{f.name}</span>
-                <span className="jg-chip__size">{fileSize(f.size)}</span>
+                {f.error ? <span className="jg-chip__error" role="alert">{f.error}</span> : <span className="jg-chip__size">{fileSize(f.size)}</span>}
                 <button type="button" className="jg-chip__remove" aria-label={`Remove ${f.name}`} onClick={() => removeFile(f.id)}><CloseIcon width={12} height={12} /></button>
               </span>
             ))}

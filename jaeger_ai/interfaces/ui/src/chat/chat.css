@@ -154,6 +154,8 @@
 .jg-chip__size { flex: none; color: var(--jg-color-text-tertiary); font-size: var(--jg-font-tiny); }
 .jg-chip__remove { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border: 0; border-radius: 50%; background: transparent; color: var(--jg-color-text-secondary); cursor: pointer; }
 .jg-chip__remove:hover { background: var(--jg-color-active, var(--jg-color-hover)); color: var(--jg-color-fg); }
+.jg-chip.is-error { background: color-mix(in srgb, var(--aether-color-error) 9%, var(--jg-color-inset)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--aether-color-error) 35%, transparent); }
+.jg-chip__error { flex: none; font-size: var(--jg-font-tiny); color: var(--aether-color-error); white-space: nowrap; }
 .jg-chip-note { font-size: var(--jg-font-tiny); color: var(--jg-color-text-tertiary); }
 .jg-composer__icon { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; border: 0; background: transparent; color: var(--aether-color-text-dim); cursor: pointer; }
 .jg-composer__icon--filled { background: var(--jg-color-inset); color: var(--jg-color-text-secondary); }
