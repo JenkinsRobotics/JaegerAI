@@ -61,6 +61,8 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         return created
     }
     var mainWindow: NSWindow? { window }
+    /// One files.pick panel at a time.
+    var filePanelOpen = false
     var mainWebView: WKWebView? { webView }
 
     func applicationDidFinishLaunching(_ notification: Notification) {

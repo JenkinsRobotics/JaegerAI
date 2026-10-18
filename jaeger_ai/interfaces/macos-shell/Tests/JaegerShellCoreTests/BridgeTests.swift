@@ -95,9 +95,45 @@ final class BridgeTests: XCTestCase {
         XCTAssertNil(BridgeScript.event(["bad": Date()]))
         XCTAssertTrue(BridgeScript.userScript.contains("data-jaeger-host"))
     }
+
+    func testFilePickOptions() {
+        func parse(_ p: [String: Any]) -> FilePickOptions? { try? FilePickOptions.parse(p).get() }
+        XCTAssertEqual(parse([:]), FilePickOptions(multiple: false, maxFiles: 1, maxBytes: nil, accept: []))
+        XCTAssertEqual(parse(["multiple": true])?.maxFiles, FilePickOptions.maxFilesCap)
+        XCTAssertEqual(parse(["multiple": true, "maxFiles": 8, "maxBytes": 20_971_520, "accept": ["Image/*", ".PDF"]]),
+                       FilePickOptions(multiple: true, maxFiles: 8, maxBytes: 20_971_520, accept: ["image/*", ".pdf"]))
+        XCTAssertEqual(parse(["multiple": true, "maxFiles": 500])?.maxFiles, FilePickOptions.maxFilesCap)
+        XCTAssertNil(parse(["multiple": "yes"]))
+        XCTAssertNil(parse(["maxFiles": 0]))
+        XCTAssertNil(parse(["maxBytes": 1.5]))
+        XCTAssertNil(parse(["maxBytes": true]))
+        XCTAssertNil(parse(["accept": "image/*"]))
+        XCTAssertNil(parse(["accept": [""]]))
+        let req = try! BridgeRequest.parse(["id": "1", "type": "files.pick", "payload": ["multiple": true]]).get()
+        XCTAssertEqual(try BridgeCommand.from(req, home: "/Users/x", fileExists: { _ in true }).get().name, "files.pick")
+    }
+
+    func testFilePickSelect() {
+        let png = PickedFile(path: "/Users/x/a.png", name: "a.png", size: 10, mimeType: "image/png")
+        let pdf = PickedFile(path: "/Users/x/b.pdf", name: "b.pdf", size: 30, mimeType: "application/pdf")
+        let big = PickedFile(path: "/Users/x/c.mov", name: "c.mov", size: 9_000, mimeType: "video/quicktime")
+        let dir = PickedFile(path: "/Users/x/d", name: "d", size: 0, mimeType: "", isRegularFile: false)
+        let all = FilePickOptions(multiple: true)
+        XCTAssertEqual(FilePick.select([png, pdf, big, dir], all), [png, pdf, big])
+        XCTAssertEqual(FilePick.select([png, pdf, big], FilePickOptions(multiple: true, maxBytes: 100)), [png, pdf])
+        XCTAssertEqual(FilePick.select([png, pdf, big], FilePickOptions(multiple: true, maxFiles: 1)), [png])
+        XCTAssertEqual(FilePick.select([png, pdf, big], FilePickOptions(multiple: false)), [png])
+        XCTAssertEqual(FilePick.select([png, pdf, big], FilePickOptions(multiple: true, accept: ["image/*"])), [png])
+        XCTAssertEqual(FilePick.select([png, pdf, big], FilePickOptions(multiple: true, accept: [".pdf", "video/quicktime"])), [pdf, big])
+        XCTAssertEqual(FilePick.select([], all), [])
+        let reply = png.reply
+        XCTAssertEqual(reply["uri"] as? String, "file:///Users/x/a.png")
+        XCTAssertEqual(Set(reply.keys), ["path", "name", "size", "mimeType", "uri"])
+    }
 }
 
 extension Result {
     var successValue: Success? { if case .success(let v) = self { return v }; return nil }
     var failureValue: Failure? { if case .failure(let e) = self { return e }; return nil }
+
 }
