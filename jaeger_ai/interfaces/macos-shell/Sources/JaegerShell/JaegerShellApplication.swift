@@ -266,8 +266,12 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         NativeChrome.apply(to: window, webView: webView)
         NativeChrome.installUserScript(NativeChrome.metrics(window), in: webView)
         window.center()
+        // Dev builds only: JAEGER_SHELL_DEV_WINDOW_FRAME="x,y,w,h" (screen points, top-left origin, like
+        // CGWindow bounds) places the window for side-by-side checks and never writes the saved frame.
+        let devFrame = ShellEnvironment.devWindowFrame()
+        if let devFrame { window.setFrame(devFrame, display: false) }
         // Headless checks keep the default size and never write the user's saved frame.
-        if !(snapshotMode || verifyMode || verifyBridgeMode) { window.setFrameAutosaveName("JaegerShellMainWindow") }
+        if !(snapshotMode || verifyMode || verifyBridgeMode || devFrame != nil) { window.setFrameAutosaveName("JaegerShellMainWindow") }
         self.window = window
         return window
     }
@@ -502,6 +506,14 @@ enum ShellEnvironment {
             envValue: StartURL.mainScreenEnvValue(ProcessInfo.processInfo.environment),
             defaultsValue: UserDefaults.standard.string(forKey: StartURL.webUIDefaultsKey),
             isDevBuild: isDevBuild)
+    }
+
+    /// JAEGER_SHELL_DEV_WINDOW_FRAME="x,y,w,h" in top-left screen points → an AppKit frame (dev builds only).
+    static func devWindowFrame() -> NSRect? {
+        guard isDevBuild, let raw = ProcessInfo.processInfo.environment["JAEGER_SHELL_DEV_WINDOW_FRAME"] else { return nil }
+        let v = raw.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard v.count == 4, v[2] > 0, v[3] > 0, let screen = NSScreen.screens.first else { return nil }
+        return NSRect(x: v[0], y: screen.frame.height - v[1] - v[3], width: v[2], height: v[3])
     }
 
     /// Dev/test stack (dev build + JAEGER_SHELL_STACK_MODE=dev + JAEGER_SHELL_DEV_ROOT); resolved once.
