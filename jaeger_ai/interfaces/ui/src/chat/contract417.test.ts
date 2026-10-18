@@ -10,14 +10,14 @@ describe("417d8a0c contract", () => {
   it("pages with integer ids and float epoch-second created_at", () => {
     const page = {
       messages: [
-        { id: 12, session_id: "agent-jaeger", role: "assistant", kind: "message", sender_agent_id: "jaeger", created_at: 1760815200.25, content: "hi", parts: [], links: {} },
-        { id: 11, session_id: "agent-jaeger", role: "user", kind: "message", sender_agent_id: null, created_at: 1760815199.5, content: "hello", parts: [], links: {} },
-        { id: 10, session_id: "agent-jaeger", role: "system", kind: "summary", sender_agent_id: null, created_at: 1760815100.0, content: "Earlier…",
+        { id: 12, session_id: "agent-native:jaeger", role: "assistant", kind: "message", sender_agent_id: "jaeger", created_at: 1760815200.25, content: "hi", parts: [], links: {} },
+        { id: 11, session_id: "agent-native:jaeger", role: "user", kind: "message", sender_agent_id: null, created_at: 1760815199.5, content: "hello", parts: [], links: {} },
+        { id: 10, session_id: "agent-native:jaeger", role: "system", kind: "summary", sender_agent_id: null, created_at: 1760815100.0, content: "Earlier…",
           parts: [], links: {}, summary: { covers_from: 1760810000.0, covers_to: 1760815000.0, message_count: 13 } },
       ],
       next_before: 10,
     } as unknown as WirePage;
-    const ui = fromWirePage("agent-jaeger", page, (id) => id);
+    const ui = fromWirePage("agent-native:jaeger", page, (id) => id);
     expect(ui.before).toBe("10");
     expect(ui.turns.map((t) => t.turnId)).toEqual(["entry:10", "11"]);
     expect(ui.turns[1].createdAt).toBe(1760815199500);
@@ -46,7 +46,7 @@ describe("417d8a0c contract", () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ attachment_id: "att_1", name: "a.txt", mime: "text/plain", size: 1, sha256: "x" }), { status: 201 }));
     vi.stubGlobal("fetch", fetchMock);
     try {
-      await new GatewayClient("").uploadAttachment("agent-jaeger", { name: "a.txt", mime: "text/plain", data_base64: "YQ==" }, "key-1");
+      await new GatewayClient("").uploadAttachment("agent-native:jaeger", { name: "a.txt", mime: "text/plain", data_base64: "YQ==" }, "key-1");
       const init = (fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1];
       expect((init.headers as Record<string, string>)["Idempotency-Key"]).toBe("key-1");
     } finally { vi.unstubAllGlobals(); }
@@ -72,5 +72,18 @@ describe("autoHome feature-detect", async () => {
     const unknown = Object.assign(new Error("Unknown agent"), { status: 404, routeMissing: false });
     const h = autoHome(fake("contract", async () => { throw unknown; }), fake("fallback", async () => "recent-chat"));
     await expect(h.home("nope")).rejects.toThrow("Unknown agent");
+  });
+});
+
+describe("fba6cea9 shared home id", () => {
+  it("jaeger and native:jaeger use the session id the /home response names (agent-native:jaeger)", async () => {
+    const { contractHome } = await import("./homeSession");
+    const getJson = vi.fn(async (path: string) => {
+      if (/\/v1\/agents\/(jaeger|native%3Ajaeger)\/home$/.test(path)) return { session_id: "agent-native:jaeger", agent_id: "native:jaeger", created: false };
+      throw new Error(`unexpected ${path}`);
+    });
+    const h = contractHome(getJson as never);
+    expect(await h.home("jaeger")).toBe("agent-native:jaeger");
+    expect(await h.home("native:jaeger")).toBe("agent-native:jaeger");
   });
 });
