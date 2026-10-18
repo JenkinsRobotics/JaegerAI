@@ -299,7 +299,12 @@ def test_skill_pipeline_reloads_from_disk_and_skill_used(isolated: Path):
     cand = pipeline.extract_candidate(
         name="learned_write_file",
         description="Repeated successful write_file procedure observed 3 times",
-        code="# verified write_file playbook\n",
+        code=(
+            "def learned_write_file(path, content):\n"
+            "    \"\"\"Verified write_file playbook.\"\"\"\n"
+            "    with open(path, 'w', encoding='utf-8') as handle:\n"
+            "        handle.write(content)\n"
+        ),
     )
     ver = pipeline.verify_candidate(cand, lambda code: "playbook" in code)
     assert pipeline.promote(cand, ver)

@@ -39,10 +39,11 @@ SLOT = "mind"
 #: The exact import package integrated by this module file.
 PACKAGE = "jaeger_agent"
 
-#: JaegerAI owns the discoverable mind binding and product glue
-#: (aliases, cron delivery, prompt documents). The reusable loop is the
-#: pinned ``jaeger-agent`` package in this venv — not a sibling checkout.
-DISCOVERY_PACKAGE = "jaeger_ai"
+#: The package whose module.yaml fills the slot in discovery: jaeger-agent's
+#: own binding. JaegerAI's product glue (aliases, cron delivery, prompt
+#: documents) reaches the loop through RUNTIME_FACTORY, not through a second
+#: mind binding (jaeger_ai/mind was removed in the architecture cleanup).
+DISCOVERY_PACKAGE = "jaeger_agent"
 
 #: The runtime JaegerAI hands the module — its product pipeline, not
 #: the module's config-built default. See the docstring above.
