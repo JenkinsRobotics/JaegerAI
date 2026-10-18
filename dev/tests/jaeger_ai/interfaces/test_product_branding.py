@@ -34,7 +34,7 @@ def test_terminal_and_cli_product_copy_has_no_legacy_heading() -> None:
         "jaeger_ai/interfaces/tui/slash_commands.py",
         "jaeger_ai/cli/devtools.py",
         "jaeger_ai/core/instance/setup_wizard.py",
-        "run.sh",
+        "jaeger",
     ]
     copy = "\n".join((REPO / path).read_text() for path in paths)
     for legacy in (
