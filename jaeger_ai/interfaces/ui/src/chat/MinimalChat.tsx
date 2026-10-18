@@ -185,6 +185,8 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   const chatRoot = useRef<HTMLDivElement>(null);
   const composer = useRef<HTMLFormElement>(null);
   const unreadBase = useRef<number | null>(null);
+  /** Turns already there when the chat loaded don't play the enter animation. */
+  const loadedTurns = useRef<Set<string>>(new Set());
   const field = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const stick = useRef(true);
@@ -204,7 +206,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     setLoadError(undefined);
     stick.current = true;
     if (sessionId) host.sessions.load(sessionId).then(
-      (s) => { if (live) setSession(s); },
+      (s) => { if (live) { loadedTurns.current = new Set(s.turns.map((t) => t.turnId)); setSession(s); } },
       (error: unknown) => { if (live) setLoadError(String((error as Error)?.message ?? error)); },
     );
     return () => { live = false; };
@@ -360,7 +362,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
           {loadError && <ErrorState title="Couldn't load this chat" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
           {session && !session.turns.length && <p className="jg-chat__empty">What should we work on?</p>}
           {session?.turns.map((turn, index) => (
-            <section key={turn.turnId} className="jg-turn">
+            <section key={turn.turnId} className={`jg-turn${loadedTurns.current.has(turn.turnId) ? "" : " is-new"}`}>
               {needsSeparator(session.turns[index - 1]?.createdAt, turn.createdAt) && (
                 <div className="jg-separator" role="separator">{separatorLabel(turn.createdAt!)}</div>
               )}
