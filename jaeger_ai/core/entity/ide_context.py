@@ -36,17 +36,40 @@ def _line(value: Any) -> int | None:
     return number if 1 <= number <= 10_000_000 else None
 
 
+def _is_int(value: Any) -> bool:
+    try:
+        int(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def _char(value: Any) -> int:
+    try:
+        return max(0, min(int(value), 10_000_000))
+    except (TypeError, ValueError):
+        return 0
+
+
 def clean(raw: Any) -> dict[str, Any] | None:
     """The bounded, allow-listed IDE context, or ``None`` when there is nothing usable."""
     if not isinstance(raw, dict):
         return None
     out: dict[str, Any] = {}
+    primary = _text(raw.get("workspace_folder"), MAX_PATH_CHARS)
     folders = [_text(f, MAX_PATH_CHARS) for f in _items(raw.get("workspace_folders")) if isinstance(f, str)]
+    if primary:
+        out["workspace_folder"] = primary
+        folders = [primary, *[f for f in folders if f != primary]]
     if folders := [f for f in folders if f][:MAX_FOLDERS]:
         out["workspace_folders"] = folders
-    if active := _text(raw.get("active_file"), MAX_PATH_CHARS):
+    active_raw = raw.get("active_file")
+    # jaeger-tab shape: active_file {path, language?}; older: a path + top-level language.
+    active_path = active_raw.get("path") if isinstance(active_raw, dict) else active_raw
+    if active := _text(active_path, MAX_PATH_CHARS):
         out["active_file"] = active
-        if language := _text(raw.get("language"), 40):
+        lang_raw = active_raw.get("language") if isinstance(active_raw, dict) else raw.get("language")
+        if language := _text(lang_raw or raw.get("language"), 40):
             out["language"] = language
         if cursor := _line(raw.get("cursor_line")):
             out["cursor_line"] = cursor
@@ -54,12 +77,19 @@ def clean(raw: Any) -> dict[str, Any] | None:
     if isinstance(selection, dict):
         body = str(selection.get("text") or "")
         if body.strip():
+            start, end = selection.get("start"), selection.get("end")
+            # jaeger-tab sends 0-based {line, char}; start_line/end_line stay 1-based.
+            s_line = _line(int(start.get("line")) + 1) if isinstance(start, dict) and _is_int(start.get("line")) else None
+            e_line = _line(int(end.get("line")) + 1) if isinstance(end, dict) and _is_int(end.get("line")) else None
             out["selection"] = {
                 "text": body[:MAX_SELECTION_CHARS],
                 "truncated": len(body) > MAX_SELECTION_CHARS or bool(selection.get("truncated")),
-                "start_line": _line(selection.get("start_line")) or 1,
-                "end_line": _line(selection.get("end_line")) or 1,
+                "start_line": s_line or _line(selection.get("start_line")) or 1,
+                "end_line": e_line or _line(selection.get("end_line")) or 1,
             }
+            if isinstance(start, dict) and isinstance(end, dict):
+                out["selection"]["start"] = {"line": _char(start.get("line")), "char": _char(start.get("char"))}
+                out["selection"]["end"] = {"line": _char(end.get("line")), "char": _char(end.get("char"))}
     seen: set[str] = set()
     files: list[str] = []
     for item in _items(raw.get("open_files")):
