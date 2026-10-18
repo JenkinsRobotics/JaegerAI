@@ -438,8 +438,11 @@ _GLOBAL_REGISTRY: MCPRegistry | None = None
 _LAST_ERRORS: dict[str, str] = {}
 
 
-def init_from_config(config_path: Path | None = None, *, layout: Any = None) -> MCPRegistry:
-    """Initialize the global MCP registry from a JSON config file."""
+def init_from_config(config_path: Path | None = None, *, layout: Any = None,
+                     only: Any = None) -> MCPRegistry:
+    """Initialize the global MCP registry from a JSON config file.
+
+    ``only`` (optional predicate on a server row) limits which servers start."""
     global _GLOBAL_REGISTRY, _LAST_ERRORS
     if _GLOBAL_REGISTRY is not None:
         return _GLOBAL_REGISTRY
@@ -453,6 +456,8 @@ def init_from_config(config_path: Path | None = None, *, layout: Any = None) -> 
     errors: dict[str, str] = {}
     for entry in data.get("servers", []):
         if not entry.get("enabled", True):
+            continue
+        if only is not None and not only(entry):
             continue
         name = str(entry.get("name") or "unknown")
         env: dict[str, str] = {}

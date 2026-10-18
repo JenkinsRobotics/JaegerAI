@@ -85,3 +85,40 @@ def test_service_validates_and_keeps_limits(tmp_path):
         service.configure_server(layout, "rea", {"call_timeout_s": 0})
     with pytest.raises(service.MCPServiceError):
         service.configure_server(layout, "rea", {"tools": {"max": -1}})
+
+
+def test_gateway_loads_only_marked_servers(tmp_path, monkeypatch):
+    import json as _json
+    from types import SimpleNamespace
+    from jaeger_ai.core.mcp import service
+    from jaeger_ai.plugins.mcp import client
+
+    seen = []
+
+    class FakeRegistry:
+        def list_tools(self):
+            return [SimpleNamespace(server_name=n) for n in seen]
+
+    def fake_init(path, *, layout=None, only=None):
+        rows = _json.loads(path.read_text())["servers"]
+        seen.extend(r["name"] for r in rows if r.get("enabled", True) and (only is None or only(r)))
+        return FakeRegistry()
+
+    cfg = tmp_path / "mcp.json"
+    cfg.write_text(_json.dumps({"servers": [
+        {"name": "rea", "command": "npx", "gateway": True, "tools": {"gated": True}},
+        {"name": "other", "command": "x"},
+        {"name": "off", "command": "x", "gateway": True, "enabled": False}]}))
+    monkeypatch.setattr(service, "_path", lambda layout: cfg)
+    monkeypatch.setattr(service, "migrate_inline_secrets", lambda layout: None)
+    monkeypatch.setattr(client, "init_from_config", fake_init)
+    monkeypatch.setattr(client, "connection_errors", lambda: {})
+    monkeypatch.delenv("JAEGER_WITH_MCP", raising=False)
+    service._GATEWAY_MCP_LOADED.clear()
+    out = service.load_gateway_servers(object())
+    assert out["servers"] == ["rea"] and seen == ["rea"]
+    assert service.load_gateway_servers(object())["servers"] == ["rea"] and seen == ["rea"]  # once
+    service._GATEWAY_MCP_LOADED.clear()
+    monkeypatch.setenv("JAEGER_WITH_MCP", "1")
+    assert service.gateway_server_selected({"name": "other"})
+    service._GATEWAY_MCP_LOADED.clear()

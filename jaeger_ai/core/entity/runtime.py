@@ -980,6 +980,7 @@ class EntityRuntime:
         # global registry. Without this, computer_look/computer_do existed on
         # disk and in unit tests but were absent from every Gateway turn.
         self._ensure_subordinate_skills(cfg=cfg)
+        self._ensure_gateway_mcp()
         if on_model is not None:
             on_model(f"{client.provider}:{client.model_name}")
         if cancellation is not None and cancellation.cancelled:
@@ -1046,6 +1047,17 @@ class EntityRuntime:
             "text": out if out else "(No response text returned)",
             "halt_reason": getattr(turn_exec.agent, "last_halt_reason", None),
         }
+
+    def _ensure_gateway_mcp(self) -> None:
+        """Start the instance's Gateway MCP servers (mcp.json rows marked
+        ``gateway: true``) before the owner agent snapshots the tool registry."""
+        if not isinstance(getattr(self.layout, "skills_dir", None), (str, Path)):
+            return  # test/minimal layouts skip host integrations
+        try:
+            from jaeger_ai.core.mcp.service import load_gateway_servers
+            load_gateway_servers(self.layout)
+        except Exception:  # noqa: BLE001
+            logger.warning("gateway MCP load failed", exc_info=True)
 
     def _ensure_subordinate_skills(self, cfg: Any = None) -> None:
         """Load code-skill tools before the owner ReAct agent is built.
