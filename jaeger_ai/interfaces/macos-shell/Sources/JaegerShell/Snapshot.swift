@@ -39,7 +39,8 @@ final class Snapshotter: NSObject, BridgeHost {
     }
 
     func start() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 120) { [weak self] in self?.finish(error: "timeout") }
+        let limit = Double(ProcessInfo.processInfo.environment["SNAPSHOT_TIMEOUT_S"] ?? "") ?? 120  // long live runs raise it
+        DispatchQueue.main.asyncAfter(deadline: .now() + limit) { [weak self] in self?.finish(error: "timeout") }
         do { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
         catch { return finish(error: "cannot create \(dir.path): \(error.localizedDescription)") }
         guard let window = app.mainWindow else { return finish(error: "no window") }
@@ -94,6 +95,45 @@ final class Snapshotter: NSObject, BridgeHost {
             DispatchQueue.main.asyncAfter(deadline: .now() + min(ms, 45_000) / 1000) { [weak self] in
                 self?.click(Array(selectors.dropFirst()), webView: webView)
             }
+            return
+        }
+        // "eval:<js>" runs page JS in the offscreen web view (e.g. drop a File on the composer); no OS input.
+        if selector.hasPrefix("eval:") {
+            webView.evaluateJavaScript(String(selector.dropFirst(5))) { [weak self] result, error in
+                guard let self else { return }
+                var clicks = self.report["clicks"] as? [[String: Any]] ?? []
+                clicks.append(["selector": String(selector.prefix(40)), "clicked": error == nil, "result": String(describing: result ?? "nil")])
+                self.report["clicks"] = clicks
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.click(Array(selectors.dropFirst()), webView: webView) }
+            }
+            return
+        }
+        // "frames:<count>:<ms>" writes <dir>/frames/f-NNN.png every <ms> (a streaming reply, for a video).
+        if selector.hasPrefix("frames:") {
+            let bits = selector.split(separator: ":")
+            let count = bits.count > 1 ? Int(bits[1]) ?? 0 : 0, ms = bits.count > 2 ? Double(bits[2]) ?? 100 : 100
+            let frames = dir.appendingPathComponent("frames")
+            try? FileManager.default.createDirectory(at: frames, withIntermediateDirectories: true)
+            webView.evaluateJavaScript("document.querySelector('style[data-snapshot=stills]')?.remove(); true") { _, _ in }
+            func shoot(_ i: Int) {
+                guard i < count else {
+                    var clicks = report["clicks"] as? [[String: Any]] ?? []
+                    clicks.append(["selector": selector, "clicked": true])
+                    report["clicks"] = clicks
+                    webView.evaluateJavaScript(Self.stillsCSS) { _, _ in self.click(Array(selectors.dropFirst()), webView: webView) }
+                    return
+                }
+                let started = Date()
+                webView.takeSnapshot(with: nil) { image, _ in
+                    if let image, let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+                       let png = rep.representation(using: .png, properties: [:]) {
+                        try? png.write(to: frames.appendingPathComponent(String(format: "f-%03d.png", i)))
+                    }
+                    let wait = max(0, ms / 1000 - Date().timeIntervalSince(started))
+                    DispatchQueue.main.asyncAfter(deadline: .now() + wait) { shoot(i + 1) }
+                }
+            }
+            shoot(0)
             return
         }
         let literal = String(data: (try? JSONSerialization.data(withJSONObject: [selector])) ?? Data("[\"\"]".utf8), encoding: .utf8) ?? "[\"\"]"

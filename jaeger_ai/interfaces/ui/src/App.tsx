@@ -8,7 +8,7 @@ import { agentSlug, NewChatMenu } from "./agents/NewChatMenu";
 import { loadPins, pin, savePins, unpin } from "./agents/pins";
 import { HistoryPanel } from "./agents/HistoryPanel";
 import { ChatPane } from "./chat/ChatPane";
-import { contractHome, fallbackHome, httpGetJson, type HomeSessions } from "./chat/homeSession";
+import { autoHome, contractHome, fallbackHome, httpGetJson, type HomeSessions } from "./chat/homeSession";
 import { NativeHost } from "./chat/nativeHost";
 import { WebHost } from "./chat/webHost";
 import { ConnectAppsDialog } from "./connect-apps/ConnectAppsDialog";
@@ -21,11 +21,11 @@ import { TasksBoard } from "./tasks/TasksBoard";
 
 const LEAD_ID = "native:jaeger";
 
-/** `?home=contract` (or localStorage jaeger.ui.home-contract=1) talks the provisional home-chat
- * contract; the default is today's gateway via fallbackHome. */
-function wantsContract(): boolean {
-  if (typeof location !== "undefined" && new URLSearchParams(location.search).get("home") === "contract") return true;
-  try { return localStorage.getItem("jaeger.ui.home-contract") === "1"; } catch { return false; }
+/** The home-chat contract (landed 417d8a0c) is the default, feature-detected per gateway (autoHome);
+ * `?home=fallback` (or localStorage jaeger.ui.home-contract=0) forces today's most-recent-chat fallback. */
+function forcesFallback(): boolean {
+  if (typeof location !== "undefined" && new URLSearchParams(location.search).get("home") === "fallback") return true;
+  try { return localStorage.getItem("jaeger.ui.home-contract") === "0"; } catch { return false; }
 }
 
 const message = (error: unknown) => String((error as Error)?.message ?? error);
@@ -44,7 +44,9 @@ export function App({ source }: { source: JaegerSource }) {
   const names = useRef<(id: string) => string>((id) => id);
   const home: HomeSessions = useMemo(() => {
     const opts = { agentName: (id: string) => names.current(id), onCursor: (sid: string, id: number) => host.noteCursor(sid, id) };
-    return source.homeSessions?.(opts) ?? (wantsContract() ? contractHome(httpGetJson(), opts, source.stream.bind(source)) : fallbackHome(source, opts));
+    if (source.homeSessions) return source.homeSessions(opts);
+    const fallback = fallbackHome(source, opts);
+    return forcesFallback() ? fallback : autoHome(contractHome(httpGetJson(), opts, source.stream.bind(source)), fallback);
   }, [source, host]);
   host.home = home;
   const [selection, setSelection] = useState<Selection>({ type: "agent", agentId: LEAD_ID });

@@ -233,10 +233,38 @@ export function contractHome(getJson: GetJson, opts: HomeOptions = {}, stream?: 
 /** Same-origin JSON GET for contractHome (the dev proxy / WebUI adds the caller token). */
 export const httpGetJson = (base = ""): GetJson => async (path) => {
   const response = await fetch(`${base}${path}`, { headers: { Accept: "application/json" }, credentials: "same-origin" });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error((body as { error?: string }).error ?? `${response.status} ${response.statusText}`);
-  return body;
+  const body = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const error = (body as { error?: string } | undefined)?.error;
+    // routeMissing: a 404/405 without the gateway's JSON error body (an older gateway has no such route).
+    throw Object.assign(new Error(error ?? `${response.status} ${response.statusText}`),
+      { status: response.status, routeMissing: (response.status === 404 || response.status === 405) && !error });
+  }
+  return body ?? {};
 };
+
+/** The landed contract (417d8a0c) by default; a gateway without GET /v1/agents/{id}/home falls back to
+ * fallbackHome for the rest of the session (feature-detect on the first home lookup). An unknown agent's
+ * 404 carries a JSON error and is passed through, not treated as a missing route. */
+export function autoHome(contract: HomeSessions, fallback: HomeSessions): HomeSessions {
+  let use: HomeSessions | undefined;
+  const pick = async (agentId?: string): Promise<HomeSessions> => {
+    if (use) return use;
+    if (!agentId) return contract;
+    try { await contract.home(agentId); use = contract; } catch (error) {
+      if ((error as { routeMissing?: boolean }).routeMissing) use = fallback; else throw error;
+    }
+    return use;
+  };
+  return {
+    get mode() { return (use ?? contract).mode; },
+    async home(agentId) { return (await pick(agentId)).home(agentId); },
+    async page(sessionId, before) { return (use ?? contract).page(sessionId, before); },
+    async history(agentId) { return (await pick(agentId)).history(agentId); },
+    async read(sessionId) { return (use ?? contract).read(sessionId); },
+    live(sessionId, on, signal) { const h = use ?? contract; return h.live ? h.live(sessionId, on, signal) : Promise.resolve(); },
+  };
+}
 
 const CHOSEN_KEY = "jaeger.ui.chosen-chat";
 function loadChosen(): Record<string, string> {
