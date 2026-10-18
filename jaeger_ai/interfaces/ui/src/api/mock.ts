@@ -3,6 +3,8 @@
  * tasks, and transcripts with every ChatPart kind and each handoff marker
  * shape. send() replays a scripted gateway event sequence over stream(). */
 import type { ChatSession } from "../chat/host";
+import type { HomeOptions } from "../chat/homeSession";
+import { mockHome } from "./mockHome";
 import type { JaegerSource } from "./source";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, SessionDetail, SessionRow, Task } from "./types";
 
@@ -120,6 +122,7 @@ export class MockSource implements JaegerSource {
     return { session_id: id, title: MOCK_TRANSCRIPTS[id]?.title ?? name(id.replace(/^s-/, "")), messages: [], last_event_id: this.eventId };
   }
   transcript(id: string) { return MOCK_TRANSCRIPTS[id]; }
+  homeSessions(opts: HomeOptions) { return mockHome(this, opts); }
   async createSession(body: { agent_id?: string; title?: string }): Promise<SessionRow> {
     return { session_id: `s-new-${Date.now()}`, agent_id: body.agent_id, title: body.title ?? "New chat", created_at: now() };
   }

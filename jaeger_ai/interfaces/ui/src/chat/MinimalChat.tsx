@@ -4,6 +4,7 @@
  * pending turn shows an activity-named progress line with a shimmer for as long as it runs. The composer
  * auto-grows (JS fallback), takes picked or pasted files as chips and morphs its primary button. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type KeyboardEvent } from "react";
+import { Menu } from "@aether/ui";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { avatarColor } from "../agents/avatarColor";
 import { HandoffMarker } from "../agents/HandoffMarker";
@@ -11,6 +12,8 @@ import { ArrowDownIcon, CloseIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIc
 import { ErrorState } from "../shell/ErrorState";
 import { badge, messageCount, unreadSince } from "./scrollFollow";
 import { WebHost } from "./webHost";
+import type { HomeEntry, HomeSessions } from "./homeSession";
+import { PostMessage, SummaryCard } from "./HomeEntries";
 import { addFiles, autoGrow, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
 import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
@@ -28,6 +31,9 @@ type Links = { onCopy: (text: string) => void; onOpen: (url: string) => void };
 const SEPARATOR_GAP_MS = 30 * 60 * 1000;
 /** Auto-scroll only while the reader is this close to the bottom. */
 const STICK_PX = 80;
+/** Scrolled this close to the top, the next older page loads. */
+const OLDER_PX = 160;
+
 
 export function separatorLabel(at: number, now = Date.now()): string {
   const d = new Date(at);
@@ -177,6 +183,16 @@ const replyText = (turn: ChatTurn) => turn.parts.filter((p) => p.kind === "markd
 
 export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: string }) {
   const [session, setSession] = useState<ChatSession | null>(null);
+  /** Home chat (Grok-style): summary + posted-result entries, and the cursor for the next older page. */
+  const home: HomeSessions | undefined = host instanceof WebHost ? host.home : undefined;
+  const [entries, setEntries] = useState<Record<string, HomeEntry>>({});
+  const [older, setOlder] = useState<string>();
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [olderError, setOlderError] = useState<string>();
+  /** Scroll height and offset just before an older page is prepended, to keep the reader's place. */
+  const prepend = useRef<{ height: number; top: number } | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const pill = useRef<HTMLButtonElement>(null);
   const [loadError, setLoadError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
   const [agent, setAgent] = useState<{ id: string; name: string }>({ id: "native:jaeger", name: "Jaeger" });
@@ -221,12 +237,39 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     setSession(null);
     setLoadError(undefined);
     stick.current = true;
-    if (sessionId) host.sessions.load(sessionId).then(
+    setEntries({});
+    setOlder(undefined);
+    setOlderError(undefined);
+    const fail = (error: unknown) => { if (live) setLoadError(String((error as Error)?.message ?? error)); };
+    if (sessionId && home) home.page(sessionId).then((p) => {
+      if (!live) return;
+      loadedTurns.current = new Set(p.turns.map((t) => t.turnId));
+      setEntries(p.entries);
+      setOlder(p.before);
+      setSession({ id: p.sessionId, title: p.title ?? "", agentId: p.agentId, turns: p.turns });
+    }, fail);
+    else if (sessionId) host.sessions.load(sessionId).then(
       (s) => { if (live) { loadedTurns.current = new Set(s.turns.map((t) => t.turnId)); setSession(s); } },
-      (error: unknown) => { if (live) setLoadError(String((error as Error)?.message ?? error)); },
+      fail,
     );
     return () => { live = false; };
-  }, [host, sessionId, attempt]);
+  }, [host, home, sessionId, attempt]);
+
+  /** Prepend the next older page, keeping what the reader sees in place. */
+  const loadOlder = useCallback(() => {
+    const el = scroller.current;
+    if (!home || !sessionId || !older || loadingOlder) return;
+    setLoadingOlder(true);
+    setOlderError(undefined);
+    home.page(sessionId, older).then((p) => {
+      if (el) prepend.current = { height: el.scrollHeight, top: el.scrollTop };
+      stick.current = false;
+      p.turns.forEach((t) => loadedTurns.current.add(t.turnId));
+      setEntries((cur) => ({ ...p.entries, ...cur }));
+      setOlder(p.before);
+      setSession((s) => (s && s.id === p.sessionId ? { ...s, turns: [...p.turns, ...s.turns.filter((t) => !p.turns.some((n) => n.turnId === t.turnId))] } : s));
+    }, (error: unknown) => setOlderError(String((error as Error)?.message ?? error))).finally(() => setLoadingOlder(false));
+  }, [home, sessionId, older, loadingOlder]);
 
   // The agent this chat talks to: pill, placeholder and tint.
   useEffect(() => {
@@ -239,9 +282,15 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     return () => { live = false; };
   }, [host, session?.agentId]);
 
-  // Follow new content only while the reader is at the bottom.
+  // Follow new content only while the reader is at the bottom; after an older page lands, hold the
+  // reader's place instead.
   useLayoutEffect(() => {
     const el = scroller.current;
+    if (el && prepend.current) {
+      el.scrollTop = el.scrollHeight - prepend.current.height + prepend.current.top;
+      prepend.current = null;
+      return;
+    }
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [session]);
   // ...also when the column grows on its own (code highlighting lands late, off-screen turns get their real
@@ -257,6 +306,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     const el = scroller.current;
     if (!el) return;
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+    if (el.scrollTop < OLDER_PX && older && !loadingOlder) loadOlder();
     stick.current = near;
     // Remember how much was there when the reader left, for the unread badge.
     if (near) unreadBase.current = null;
@@ -384,16 +434,38 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   return (
     <div className={`jg-chat${dropping ? " is-dropping" : ""}`} style={tint} ref={chatRoot} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <div className="jg-chat__band" data-aether-window-drag-region>
-        <button type="button" className="jg-agent-pill" title={`${agent.name} details`} onClick={() => host.openDetails?.(agent.id)}>
-          <AgentAvatar id={agent.id} name={agent.name} size={20} />
-          <span>{agent.name}</span>
-        </button>
+        <div className="jg-agent-pill-wrap">
+          <button ref={pill} type="button" className="jg-agent-pill" title={`${agent.name}`} aria-haspopup="menu" aria-expanded={menuOpen}
+            onClick={() => (host instanceof WebHost && host.openHistory ? setMenuOpen((o) => !o) : host.openDetails?.(agent.id))}>
+            <AgentAvatar id={agent.id} name={agent.name} size={20} />
+            <span>{agent.name}</span>
+          </button>
+          <Menu open={menuOpen} anchor={menuOpen ? pill.current : null} ariaLabel={`${agent.name} menu`} onClose={() => setMenuOpen(false)}
+            items={[{ id: "details", label: "Agent info" }, { id: "history", label: "History" }]}
+            onSelect={(id) => { setMenuOpen(false); if (id === "history") (host as WebHost).openHistory?.(agent.id); else host.openDetails?.(agent.id); }} />
+        </div>
       </div>
       <div className="jg-chat__scroll" ref={scroller} onScroll={onScroll}>
         <div className="jg-chat__column">
           {loadError && <ErrorState title="Couldn't load this chat" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
           {session && !session.turns.length && <p className="jg-chat__empty">What should we work on?</p>}
-          {session?.turns.map((turn, index) => (
+          {session && (older || olderError) && (
+            <div className="jg-older" role="status">
+              {loadingOlder ? "Loading earlier messages…"
+                : olderError ? <>Couldn't load earlier messages · <button type="button" onClick={loadOlder}>Retry</button></>
+                : <button type="button" onClick={loadOlder}>Show earlier messages</button>}
+            </div>
+          )}
+          {session?.turns.map((turn, index) => entries[turn.turnId] ? (
+            <section key={turn.turnId} className={`jg-turn jg-turn--entry${loadedTurns.current.has(turn.turnId) ? "" : " is-new"}`}>
+              {needsSeparator(session.turns[index - 1]?.createdAt, turn.createdAt) && (
+                <div className="jg-separator" role="separator">{separatorLabel(turn.createdAt!)}</div>
+              )}
+              {entries[turn.turnId].kind === "summary"
+                ? <SummaryCard entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "summary" }>} links={links} />
+                : <PostMessage entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "post" }>} links={links} onOpenHandoff={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} />}
+            </section>
+          ) : (
             <section key={turn.turnId} className={`jg-turn${loadedTurns.current.has(turn.turnId) ? "" : " is-new"}`}>
               {needsSeparator(session.turns[index - 1]?.createdAt, turn.createdAt) && (
                 <div className="jg-separator" role="separator">{separatorLabel(turn.createdAt!)}</div>

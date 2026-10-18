@@ -1,3 +1,4 @@
+import type { HomeOptions, HomeSessions } from "../chat/homeSession";
 import type { ChatSession } from "../chat/host";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
@@ -25,6 +26,8 @@ export interface JaegerSource {
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   tasks(): Promise<Task[]>;
   handoffs(query?: { session_id?: string }): Promise<Handoff[]>;
+  /** Its own home-chat implementation, when the source has one (dev mock only). */
+  homeSessions?(opts: HomeOptions): HomeSessions;
   /** Rich transcript, when the source has one (dev mock only). */
   transcript?(sessionId: string): ChatSession | undefined;
   /** Session SSE (`/v1/sessions/{id}/stream?last_event_id=<cursor>`). Resolves

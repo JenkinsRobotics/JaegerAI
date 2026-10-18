@@ -6,7 +6,7 @@ import { AgentDetails } from "./AgentDetails";
 import { visible } from "./agentsLogic";
 
 const render = (agent: Agent) => renderToStaticMarkup(
-  <AgentDetails agent={agent} chats={[]} onOpenChat={() => {}} onNewChat={() => {}} onClose={() => {}} />);
+  <AgentDetails agent={agent} onOpenHistory={() => {}} onClose={() => {}} />);
 
 describe("AgentDetails skills and tools", () => {
   const swe: Agent = {

@@ -5,6 +5,7 @@ import type { JaegerSource } from "../api/source";
 import type { PersistedPart, SessionMessage } from "../api/types";
 import type { RejectedAttachment } from "./composer";
 import { followTurn } from "./followTurn";
+import type { HomeSessions } from "./homeSession";
 import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, HostKind, StartTurnRequest, TurnHandle, TurnState } from "./host";
 import type { HostAttachment, HostCapabilities } from "./hostH8";
 
@@ -53,6 +54,12 @@ const message = (error: unknown) => String((error as Error)?.message ?? error);
 export class WebHost implements ChatHost {
   readonly kind: HostKind = "web";
   capabilities: HostCapabilities = { voice: false };
+  /** Set by the app: the agent's one home chat, its pages and history (Grok-style sessions). */
+  home?: HomeSessions;
+  /** Set by the app: the header menu's History opens the agent's older chats. */
+  openHistory?: (agentId: string) => void;
+  /** A home-chat page reports the stream cursor it was read at. */
+  noteCursor(sessionId: string, eventId: number) { this.advance(sessionId, eventId); }
   /** Set by the app: a handoff marker opens the specialist's side of it. */
   openHandoff?: (handoffId: string) => void;
   /** Set by the app: the header pill opens the agent's details panel. */

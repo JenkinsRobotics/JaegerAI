@@ -4,10 +4,11 @@ import { AgentDetails } from "./agents/AgentDetails";
 import { agentsSidebarSlots, type Selection } from "./agents/AgentsSidebar";
 import { useAgentsStore } from "./agents/agentsStore";
 import { label, visible } from "./agents/agentsLogic";
-import { useAgentChats, visibleChats } from "./agents/chats";
 import { agentSlug, NewChatMenu } from "./agents/NewChatMenu";
 import { loadPins, pin, savePins, unpin } from "./agents/pins";
+import { HistoryPanel } from "./agents/HistoryPanel";
 import { ChatPane } from "./chat/ChatPane";
+import { contractHome, fallbackHome, httpGetJson, type HomeSessions } from "./chat/homeSession";
 import { NativeHost } from "./chat/nativeHost";
 import { WebHost } from "./chat/webHost";
 import { ConnectAppsDialog } from "./connect-apps/ConnectAppsDialog";
@@ -18,15 +19,12 @@ import { ErrorState } from "./shell/ErrorState";
 import { TasksBoard } from "./tasks/TasksBoard";
 
 const LEAD_ID = "native:jaeger";
-/** The chat this device last opened for each agent, kept across restarts. */
-const CHOSEN_KEY = "jaeger.ui.chosen-chat";
 
-function loadChosen(): Map<string, string> {
-  try {
-    return new Map(Object.entries(JSON.parse(localStorage.getItem(CHOSEN_KEY) ?? "{}") as Record<string, string>));
-  } catch {
-    return new Map();
-  }
+/** `?home=contract` (or localStorage jaeger.ui.home-contract=1) talks the provisional home-chat
+ * contract; the default is today's gateway via fallbackHome. */
+function wantsContract(): boolean {
+  if (typeof location !== "undefined" && new URLSearchParams(location.search).get("home") === "contract") return true;
+  try { return localStorage.getItem("jaeger.ui.home-contract") === "1"; } catch { return false; }
 }
 
 const message = (error: unknown) => String((error as Error)?.message ?? error);
@@ -41,6 +39,13 @@ export function App({ source }: { source: JaegerSource }) {
     return created;
   }, [source, hostKind]);
   const store = useAgentsStore(source);
+  // Grok-style sessions: one home chat per agent, history read-only.
+  const names = useRef<(id: string) => string>((id) => id);
+  const home: HomeSessions = useMemo(() => {
+    const opts = { agentName: (id: string) => names.current(id), onCursor: (sid: string, id: number) => host.noteCursor(sid, id) };
+    return source.homeSessions?.(opts) ?? (wantsContract() ? contractHome(httpGetJson(), opts) : fallbackHome(source, opts));
+  }, [source, host]);
+  host.home = home;
   const [selection, setSelection] = useState<Selection>({ type: "agent", agentId: LEAD_ID });
   const [sessionId, setSessionId] = useState<string>();
   const [sessionError, setSessionError] = useState<string>();
@@ -48,64 +53,28 @@ export function App({ source }: { source: JaegerSource }) {
   const [connectOpen, setConnectOpen] = useState(false);
   const [newChatAnchor, setNewChatAnchor] = useState<HTMLElement | null>(null);
   const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null);
-  const [chatsVersion, setChatsVersion] = useState(0);
+  const [historyAgentId, setHistoryAgentId] = useState<string | null>(null);
   const [pins, setPins] = useState<string[]>(loadPins);
   const updatePins = useCallback((next: (cur: string[]) => string[]) => setPins((cur) => { const n = next(cur); savePins(n); return n; }), []);
-  const refreshChats = useCallback(() => setChatsVersion((n) => n + 1), []);
 
   const selectedAgentId = selection.type === "agent" ? selection.agentId : undefined;
   const explicitSessionId = selection.type === "agent" ? selection.sessionId : undefined;
 
-  // Chats follow the roster poll, so a fresh chat appears once it has messages.
-  useEffect(() => { refreshChats(); }, [store.summaries, refreshChats]);
-  const chatRows = useAgentChats(source, selectedAgentId, chatsVersion);
-  const chats = useMemo(() => visibleChats(chatRows, sessionId), [chatRows, sessionId]);
-  const detailsRows = useAgentChats(source, detailsAgentId ?? undefined, chatsVersion);
-
-  const chosen = useRef(loadChosen());
-  const remember = useCallback((agentId: string, id: string | undefined) => {
-    if (id) chosen.current.set(agentId, id);
-    else chosen.current.delete(agentId);
-    localStorage.setItem(CHOSEN_KEY, JSON.stringify(Object.fromEntries(chosen.current)));
-  }, []);
-
-  // Resolve the selection to a chat: the one asked for, else the one this
-  // device last opened for that agent, else its latest chat with messages,
-  // else an existing empty one, else a new one. One lookup per agent at a
-  // time, so effect re-runs never create a burst of empty chats.
-  const resolving = useRef(new Map<string, Promise<string>>());
+  // Selecting an agent opens its one home chat. An explicit session (a handoff's worker side) opens as is.
   useEffect(() => {
     if (!selectedAgentId) return;
     let live = true;
-    const agentId = selectedAgentId;
-    // A remembered chat is only a hint: it may be archived or gone (another
-    // device, a reset state), so it is checked against the agent's chats.
-    const remembered = explicitSessionId ? undefined : chosen.current.get(agentId);
-    let resolve = explicitSessionId ? Promise.resolve(explicitSessionId) : resolving.current.get(agentId);
-    if (!resolve) {
-      resolve = source.sessions({ agent_id: agentId }).then((rows) => {
-        if (remembered && rows.some((r) => r.session_id === remembered && !r.archived)) return remembered;
-        const thread = rows.find((r) => !r.archived && ((r.message_count ?? 0) > 0 || r.last_message_preview)) ?? rows.find((r) => !r.archived);
-        return thread?.session_id ?? source.createSession({ agent_id: agentId }).then((s) => s.session_id);
-      }).finally(() => resolving.current.delete(agentId));
-      resolving.current.set(agentId, resolve);
-    }
     setSessionError(undefined);
-    resolve.then(
-      (id) => { if (live) { remember(agentId, id); setSessionId(id); } },
+    (explicitSessionId ? Promise.resolve(explicitSessionId) : home.home(selectedAgentId)).then(
+      (id) => { if (live) setSessionId(id); },
       (error: unknown) => { if (live) { setSessionId(undefined); setSessionError(message(error)); } },
     );
-    store.seeAgent(agentId);
+    store.seeAgent(selectedAgentId);
     return () => { live = false; };
-  }, [selectedAgentId, explicitSessionId, source, store.seeAgent, sessionAttempt, remember]);
+  }, [selectedAgentId, explicitSessionId, home, store.seeAgent, sessionAttempt]);
 
-  /** A fresh chat with `agentId`. The old chat keeps its place in the sidebar. */
-  const newChat = useCallback((agentId: string) => {
-    void source.createSession({ agent_id: agentId }).then(
-      (s) => { remember(agentId, s.session_id); setSelection({ type: "agent", agentId, sessionId: s.session_id }); refreshChats(); },
-      (error: unknown) => setSessionError(message(error)),
-    );
-  }, [source, remember, refreshChats]);
+  /** There is one chat per agent now: "new chat with X" opens X's home chat. */
+  const newChat = useCallback((agentId: string) => setSelection({ type: "agent", agentId }), []);
 
   const createAgent = useCallback(async (displayName: string, job: string) => {
     const agent = await source.createAgent({
@@ -114,21 +83,6 @@ export function App({ source }: { source: JaegerSource }) {
     await store.refresh();
     newChat(agent.id);
   }, [source, store.refresh, newChat]);
-
-  const renameChat = useCallback((id: string, title: string) => {
-    void source.updateSession(id, { title }).then(refreshChats, (error: unknown) => setSessionError(message(error)));
-  }, [source, refreshChats]);
-
-  const archiveChat = useCallback((id: string) => {
-    void source.updateSession(id, { archived: true }).then(() => {
-      if (id === sessionId && selectedAgentId) {
-        remember(selectedAgentId, undefined);
-        setSelection({ type: "agent", agentId: selectedAgentId });
-        setSessionAttempt((n) => n + 1);
-      }
-      refreshChats();
-    }, (error: unknown) => setSessionError(message(error)));
-  }, [source, sessionId, selectedAgentId, remember, refreshChats]);
 
   // A handoff marker opens the specialist's side of that exchange: its own
   // chat, selected under its agent in the sidebar.
@@ -143,7 +97,10 @@ export function App({ source }: { source: JaegerSource }) {
   useEffect(() => {
     host.setAgentNames(new Map(store.agents.map((a) => [a.id, label(a)])));
     host.openHandoff = openHandoff;
-    host.openDetails = (agentId: string) => setDetailsAgentId(agentId);
+    host.openDetails = (agentId: string) => { setHistoryAgentId(null); setDetailsAgentId(agentId); };
+    host.openHistory = (agentId: string) => { setDetailsAgentId(null); setHistoryAgentId(agentId); };
+    const byId = new Map(store.agents.map((a) => [a.id, label(a)]));
+    names.current = (id: string) => byId.get(id) ?? id;
   }, [host, store.agents, openHandoff]);
   useEffect(() => onNativeEvent((detail) => { if (detail.type === "window.visibility") void store.refresh(); }), [store.refresh]);
 
@@ -158,11 +115,11 @@ export function App({ source }: { source: JaegerSource }) {
   const slots = agentsSidebarSlots({
     state: store,
     selection: selection.type === "agent" ? { ...selection, sessionId } : selection,
-    chats,
+    chats: [],
     onSelect: setSelection,
     onNewChatMenu: setNewChatAnchor,
-    onRenameChat: renameChat,
-    onArchiveChat: archiveChat,
+    onRenameChat: () => {},
+    onArchiveChat: () => {},
     onSearch: () => { /* search lands with /v1/sessions?q= */ },
     onConnectApps: () => setConnectOpen(true),
     onRetry: () => void store.refresh(),
@@ -176,6 +133,7 @@ export function App({ source }: { source: JaegerSource }) {
   });
 
   const detailsAgent = store.agents.find((a) => a.id === detailsAgentId);
+  const historyAgent = store.agents.find((a) => a.id === historyAgentId);
   return (
     <>
       <AppShell top={slots.top} primary={slots.primary} sections={slots.sections} footer={slots.footer}>
@@ -188,9 +146,11 @@ export function App({ source }: { source: JaegerSource }) {
                 : <ChatPane host={host} sessionId={sessionId} />}
               {detailsAgent && (
                 <AgentDetails agent={detailsAgent} summary={store.summaries.find((s) => s.id === detailsAgent.id)}
-                  chats={visibleChats(detailsRows, sessionId)} openId={sessionId}
-                  onOpenChat={(id) => setSelection({ type: "agent", agentId: detailsAgent.id, sessionId: id })}
-                  onNewChat={() => newChat(detailsAgent.id)} onClose={() => setDetailsAgentId(null)} />
+                  onOpenHistory={() => { setDetailsAgentId(null); setHistoryAgentId(detailsAgent.id); }} onClose={() => setDetailsAgentId(null)} />
+              )}
+              {historyAgent && (
+                <HistoryPanel agentId={historyAgent.id} agentName={label(historyAgent)} home={home}
+                  onOpenLink={(url) => host.openExternal(url)} onClose={() => setHistoryAgentId(null)} />
               )}
             </div>
           )}
