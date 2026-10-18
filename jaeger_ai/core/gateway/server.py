@@ -163,7 +163,28 @@ def _tool_input_text(name: str, args: Any) -> str:
     return _inline_text(args.get(key), _INLINE_INPUT_MAX) if key and isinstance(args, dict) else ""
 
 
+#: Helper-framework tools whose answer IS the work product. Their result is
+#: already redacted and fenced as untrusted data by ``frameworks.delegate``;
+#: the session record keeps a bounded copy plus the saved-file paths, so the
+#: answer survives a stalled turn without digging through another
+#: framework's private rollout files (Oct 9 manager run).
+_HELPER_OUTPUT_TOOLS = frozenset({"framework_delegate", "framework_apply_diff"})
+_HELPER_OUTPUT_MAX = 12_000
+
+
+def _helper_output_text(result: Any) -> str:
+    if not isinstance(result, dict):
+        return ""
+    head = [f"{k}: {result[k]}" for k in ("framework", "exit_code", "answer_file", "patch_file",
+                                          "workspace", "files", "error")
+            if result.get(k) not in (None, "", [])]
+    body = result.get("content") or result.get("status") or ""
+    return _inline_text("\n".join(head + ([str(body)] if body else [])), _HELPER_OUTPUT_MAX)
+
+
 def _tool_output_text(name: str, result: Any) -> str:
+    if name in _HELPER_OUTPUT_TOOLS:
+        return _helper_output_text(result)
     if name not in _INLINE_INPUT_KEY or not isinstance(result, dict):
         return ""
     parts = [str(result[k]) for k in _INLINE_OUTPUT_KEYS if isinstance(result.get(k), (str, int, float)) and str(result[k]).strip()]

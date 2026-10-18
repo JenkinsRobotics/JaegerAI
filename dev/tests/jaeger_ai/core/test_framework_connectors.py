@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from jaeger_ai.core.authority.kernel import AuthorityDecisionType, PolicyKernel, ProposedAction
+from jaeger_ai.core.authority.destructive import destructive_reason
 from jaeger_ai.core.frameworks import connectors, delegate
 from jaeger_ai.core.frameworks.grants import FrameworkGrants
 
@@ -79,6 +80,64 @@ def test_policy_kernel_enforces_the_grant_and_a_fresh_approval_for_handoff(env):
     assert d.decision is AuthorityDecisionType.REQUIRE_APPROVAL and d.policy_name == "destructive_action"
 
 
+@pytest.mark.parametrize("tool", ["shell", "terminal", "bash", "exec", "run_shell", "mcp__jaeger__terminal"])
+@pytest.mark.parametrize("command", [
+    "git checkout -b supervised-test",
+    "git switch feature/test",
+    "git reset --soft HEAD~1",
+    "git rebase main",
+    "git worktree add /tmp/child feature/test",
+])
+def test_policy_kernel_gates_checkout_head_changes_through_shell_aliases(tool, command):
+    reason = destructive_reason(tool, {"command": command})
+    assert reason and "HEAD" in reason or reason and "checkout state" in reason
+    decision = PolicyKernel().evaluate(ProposedAction(tool, {"command": command}))
+    assert decision.decision is AuthorityDecisionType.REQUIRE_APPROVAL
+    assert decision.policy_name == "destructive_action"
+
+
+def test_checkout_path_restore_is_not_mistaken_for_head_change():
+    reason = destructive_reason("terminal", {"command": "git checkout -- src/file.py"})
+    assert reason.startswith("git checkout -f / -- discards local changes")
+    assert "HEAD" not in reason
+
+
+def test_the_oct9_main_checkout_branch_switch_is_gated():
+    """The supervised manager run executed exactly this with no approval card."""
+    command = "git -C ~/GitHub/JaegerAI checkout -b 0.13-dev-lean-prompt"
+    assert destructive_reason("terminal", {"command": command}).startswith("git checkout changes the checkout HEAD")
+    decision = PolicyKernel().evaluate(ProposedAction("terminal", {"command": command}))
+    assert decision.decision is AuthorityDecisionType.REQUIRE_APPROVAL
+    assert decision.policy_name == "destructive_action"
+
+
+@pytest.mark.parametrize("command", [
+    "git --git-dir /repo/.git switch main",
+    "cd /repo && git checkout main",
+    "bash -c 'git rebase -i HEAD~3'",
+    "git worktree remove /tmp/child",
+    "git worktree prune",
+])
+def test_head_change_gate_sees_through_globals_chains_and_shells(command):
+    assert destructive_reason("terminal", {"command": command})
+
+
+def test_reset_hard_keeps_its_specific_reason():
+    assert destructive_reason("terminal", {"command": "git reset --hard HEAD~1"}).startswith("git reset --hard discards work")
+
+
+@pytest.mark.parametrize("command", [
+    "git status --short",
+    "git log --oneline -5",
+    "git diff HEAD",
+    "git branch --list",
+    "git worktree list",
+    "git -C /repo rev-parse --abbrev-ref HEAD",
+])
+def test_read_only_git_stays_ungated(command):
+    assert destructive_reason("terminal", {"command": command}) is None
+
+
 def test_delegate_uses_fixed_safe_argv_in_a_scratch_dir(env, tmp_path, monkeypatch):
     _, grants = env
     monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "jh"))
@@ -101,3 +160,138 @@ def test_delegate_uses_fixed_safe_argv_in_a_scratch_dir(env, tmp_path, monkeypat
     assert Path(seen["cwd"]).is_relative_to(tmp_path / "jh") and seen["stdin"] is subprocess.DEVNULL
     assert out["content"].startswith('<untrusted_data source="codex:delegate">') and "ANSWER" in out["content"]
     assert "abcdefghijklmnopqrstuvwxyz0123" not in out["content"]
+
+
+def test_saved_diff_requires_git_check_before_apply(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    target = root / "note.txt"
+    target.write_text("before\n")
+    subprocess.run(["git", "-C", str(root), "add", "note.txt"], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=test", "-c", "user.email=test@example.com", "commit", "-qm", "base"], check=True)
+
+    patch = tmp_path / "change.patch"
+    patch.write_text("""diff --git a/note.txt b/note.txt
+index 8a09d1a..c2d1f91 100644
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-before
++after
+""")
+    out = delegate.apply_saved_diff(patch, workspace=root)
+    assert out["ok"] is True
+    assert target.read_text() == "after\n"
+
+    with pytest.raises(ValueError, match="empty"):
+        empty = tmp_path / "empty.patch"
+        empty.write_text("")
+        delegate.apply_saved_diff(empty, workspace=root)
+
+    with pytest.raises(ValueError, match="git apply --check"):
+        bad = tmp_path / "bad.patch"
+        bad.write_text("This is not a patch")
+        delegate.apply_saved_diff(bad, workspace=root)
+
+
+_NOTE_PATCH = """diff --git a/note.txt b/note.txt
+index 8a09d1a..c2d1f91 100644
+--- a/note.txt
++++ b/note.txt
+@@ -1 +1 @@
+-before
++after
+"""
+
+
+def _repo(tmp_path):
+    root = tmp_path / "repo"
+    root.mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)
+    (root / "note.txt").write_text("before\n")
+    subprocess.run(["git", "-C", str(root), "add", "note.txt"], check=True)
+    subprocess.run(["git", "-C", str(root), "-c", "user.name=test", "-c", "user.email=test@example.com",
+                    "commit", "-qm", "base"], check=True)
+    return root
+
+
+def test_extract_diff_from_a_fenced_prose_answer():
+    answer = ('<untrusted_data source="codex:delegate">\nHere is the change:\n\n```diff\n'
+              + _NOTE_PATCH + "```\n\nLet me know.\n</untrusted_data>")
+    diff = delegate.extract_diff(answer)
+    assert diff is not None and diff.startswith("diff --git a/note.txt") and diff == _NOTE_PATCH
+    assert "```" not in diff and "untrusted_data" not in diff
+    assert delegate.extract_diff("I could not produce a patch.") is None
+
+
+def test_delegate_run_saves_the_answer_and_its_patch(env, tmp_path, monkeypatch):
+    _, grants = env
+    grants.set("codex", "delegate", True, by="owner:webui")
+    monkeypatch.setattr(delegate.shutil, "which", lambda x: "/bin/" + x)
+
+    def fake(argv, **kw):
+        return subprocess.CompletedProcess(argv, 0, stdout="Proposed diff:\n```diff\n" + _NOTE_PATCH + "```\n", stderr="")
+
+    out = delegate.run("codex", "change note", grants=grants, runner=fake)
+    assert Path(out["answer_file"]).read_text().startswith("Proposed diff:")
+    assert Path(out["patch_file"]).read_text() == _NOTE_PATCH
+    assert Path(out["patch_file"]).parent == Path(out["workspace"])
+    root = _repo(tmp_path)
+    assert delegate.apply_saved_diff(out["patch_file"], workspace=root)["files"] == ["note.txt"]
+    assert (root / "note.txt").read_text() == "after\n"
+
+
+def test_delegate_run_without_a_diff_reports_no_patch(env, monkeypatch):
+    _, grants = env
+    grants.set("codex", "delegate", True, by="owner:webui")
+    monkeypatch.setattr(delegate.shutil, "which", lambda x: "/bin/" + x)
+    out = delegate.run("codex", "t", grants=grants,
+                       runner=lambda argv, **kw: subprocess.CompletedProcess(argv, 0, stdout="just prose", stderr=""))
+    assert out["patch_file"] is None and Path(out["answer_file"]).read_text() == "just prose"
+
+
+@pytest.mark.parametrize("body,match", [
+    ("   \n\n", "empty"),
+    # The Oct 9 Codex diff failed exactly like this: a hunk whose body does not match its header.
+    (_NOTE_PATCH.replace("@@ -1 +1 @@", "@@ -1,4 +1,9 @@"), "git apply --check"),
+    (_NOTE_PATCH.replace("-before", "-something else"), "git apply --check"),
+])
+def test_bad_saved_diffs_fail_loudly_and_change_nothing(tmp_path, body, match):
+    root = _repo(tmp_path)
+    patch = tmp_path / "bad.patch"
+    patch.write_text(body)
+    with pytest.raises(ValueError, match=match):
+        delegate.apply_saved_diff(patch, workspace=root)
+    assert (root / "note.txt").read_text() == "before\n"
+    assert subprocess.run(["git", "-C", str(root), "status", "--porcelain"], capture_output=True, text=True).stdout == ""
+
+
+def test_an_apply_that_changes_nothing_is_not_reported_as_success(tmp_path, monkeypatch):
+    root = _repo(tmp_path)
+    patch = tmp_path / "change.patch"
+    patch.write_text(_NOTE_PATCH)
+    real = delegate._git
+
+    def no_op_apply(r, *args):
+        if args[:1] == ("apply",) and not ({"--check", "--numstat"} & set(args)):
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        return real(r, *args)
+
+    monkeypatch.setattr(delegate, "_git", no_op_apply)
+    with pytest.raises(RuntimeError, match="unchanged"):
+        delegate.apply_saved_diff(patch, workspace=root)
+
+
+def test_apply_diff_tool_reports_errors_and_needs_fresh_approval(tmp_path):
+    from jaeger_ai.core.frameworks.tools import framework_apply_diff
+
+    root = _repo(tmp_path)
+    empty = tmp_path / "e.patch"
+    empty.write_text("")
+    out = framework_apply_diff(str(empty), str(root))
+    assert out == {"ok": False, "error": "delegated patch is empty"}
+    args = {"patch_file": str(empty), "workspace": str(root)}
+    assert "applying another framework's patch" in destructive_reason("framework_apply_diff", args)
+    d = PolicyKernel().evaluate(ProposedAction("framework_apply_diff", args))
+    assert d.decision is AuthorityDecisionType.REQUIRE_APPROVAL and d.policy_name == "destructive_action"
