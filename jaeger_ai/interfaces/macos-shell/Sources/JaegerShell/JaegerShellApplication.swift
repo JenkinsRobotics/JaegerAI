@@ -34,6 +34,8 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     let start: StartURL.Resolution = ShellEnvironment.webUI()
     let verifyMode = CommandLine.arguments.contains("--verify-launch")
     let verifyBridgeMode = CommandLine.arguments.contains("--verify-bridge")
+    let verifyLeaseMode = CommandLine.arguments.contains("--verify-lease")
+    private var leaseVerifier: LeaseVerifier?
     private(set) var bridge: NativeBridge?
     private var bridgeVerifier: BridgeVerifier?
     private var visibleChecker: VisibleChecker?
@@ -67,6 +69,13 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             shellLog("[shell][stack] dev mode unavailable: \(error.message)")
         }
         shellLog("[shell][stack] \(stack.summary)")
+        if verifyLeaseMode {
+            // Headless: no menu, status item, hotkey or window; dev stack only.
+            let verifier = LeaseVerifier(app: self)
+            leaseVerifier = verifier
+            verifier.run()
+            return
+        }
         if verifyBridgeMode {
             // Headless: no menu, status item, hotkey or visible window.
             let verifier = BridgeVerifier(app: self)
@@ -99,6 +108,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         showWindow()
         installRulesThenLoad()
         statusController?.refreshIcon()
+        stack.acquireLeaseIfStackRunning()
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -120,6 +130,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     func applicationWillTerminate(_ notification: Notification) {
         Hotkey.shared.unregister()
         voiceController?.shutdown()
+        stack.retireLease("app quit")  // removes the lease: the stack outlives the window
         stack.shutdown()
     }
 
