@@ -44,7 +44,10 @@
 .jg-avatar__face i { animation: jg-blink var(--jg-blink, 5s) linear var(--jg-glance-delay, 0s) infinite; }
 @keyframes jg-glance { 0%, 34%, 70%, 100% { translate: 0 0; } 40%, 64% { translate: var(--jg-glance-x, 0) var(--jg-glance-y, 0); } }
 @keyframes jg-blink { 0%, 95%, 100% { scale: 1 1; } 97.5% { scale: 1 0.12; } }
-@media (prefers-reduced-motion: reduce) { .jg-avatar__face, .jg-avatar__face i { animation: none; } }
+/* Lead tilt drift: base spin (-24deg) plus 0..18deg, one sweep per 20 min, eased at the ends. */
+.jg-avatar--squircle .jg-avatar__body { animation: jg-lead-drift 1200s ease-in-out var(--jg-drift-delay, 0s) infinite alternate; }
+@keyframes jg-lead-drift { from { rotate: 0deg; } to { rotate: 18deg; } }
+@media (prefers-reduced-motion: reduce) { .jg-avatar__face, .jg-avatar__face i, .jg-avatar--squircle .jg-avatar__body { animation: none; } }
 
 /* Pinned supervisor card. */
 .jg-supervisor-wrap { display: flex; justify-content: center; }

@@ -13,6 +13,14 @@ const SHAPES: Record<AvatarShape, ReactNode> = {
   squircle: <rect x="3.3" y="4" width="29.4" height="28" rx="5.6" />,
 };
 
+/** The lead squircle's tilt drifts slowly (observed in the reference: about -25° at one point,
+ * about -8° half an hour later). One sweep takes LEAD_DRIFT_SECONDS; the phase comes from the wall
+ * clock so a remount or reload never snaps it back. */
+export const LEAD_DRIFT_SECONDS = 1200;
+export function leadDriftPhase(now = Date.now()): number {
+  return Math.round((now / 1000) % (LEAD_DRIFT_SECONDS * 2));
+}
+
 export function AgentAvatar({ id, name, src, size = 36 }: { id: string; name: string; src?: string; size?: number }) {
   const shape = avatarShape(id);
   const face = avatarFace(id, shape);
@@ -22,6 +30,7 @@ export function AgentAvatar({ id, name, src, size = 36 }: { id: string; name: st
     "--jg-eye-y": `${(face.dy * size) / 100}px`, "--jg-eye-tilt": `${face.tilt}deg`,
     "--jg-glance-x": `${(face.glance.dx * size) / 100}px`, "--jg-glance-y": `${(face.glance.dy * size) / 100}px`,
     "--jg-glance-delay": `-${face.glance.delay}s`, "--jg-blink": `${face.blink}s`,
+    ...(shape === "squircle" ? { "--jg-drift-delay": `-${leadDriftPhase()}s` } : {}),
   } as CSSProperties;
   return (
     <span className={`jg-avatar jg-avatar--${src ? "image" : shape}`} style={style} aria-hidden="true" title={name} data-shape={src ? undefined : shape}>
