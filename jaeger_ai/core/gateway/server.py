@@ -1841,13 +1841,13 @@ class JaegerGatewayApp:
                 with_roster_flags(a)
                 for a in registry.list_agents(kind=kind or None, role=role or None)
             ]
-            payload: dict[str, Any] = {"agents": agents}
+            payload: dict[str, Any] = {"agents": self._with_skills(agents)}
             if kind:
                 payload["kind"] = kind
             if role:
                 payload["role"] = role
             return web.json_response(payload)
-        return web.json_response(registry.to_catalog())
+        return web.json_response(self._with_skills(registry.to_catalog()))
 
     async def handle_create_agent(self, request: web.Request) -> web.Response:
         body = await request.json() if request.can_read_body else {}
@@ -1922,7 +1922,7 @@ class JaegerGatewayApp:
         record = self._registry().get_agent(agent_id)
         if record is None:
             return web.json_response({"error": "Agent not found"}, status=404)
-        return web.json_response(record.to_dict())
+        return web.json_response({**record.to_dict(), "skills": self._agent_skill_cards(record)})
 
     async def handle_activate_agent(self, request: web.Request) -> web.Response:
         """Switch active agent — never fee-gated (fundamentals stay open)."""
@@ -2716,17 +2716,72 @@ class JaegerGatewayApp:
         """The specialist's tool grant and notes dir for this turn, or None (model-only)."""
         if execution is None:
             return None
-        from jaeger_ai.core.agent_registry.specialists import specialist_tools
+        from jaeger_ai.core.agent_registry.specialists import (
+            expand_tool_patterns, scoped_skill_names, specialist_tools,
+        )
 
         tools = specialist_tools(agent)
         if not tools:
             return None
+        try:
+            from jaeger_os.core.tools.tool_registry import get_tools
+            available = {t.name for t in get_tools()}
+        except Exception:  # noqa: BLE001 — no registry: globs expand to nothing
+            available = set()
+        tools = expand_tool_patterns(tools, available)
         grant = execution.get("allowed_tools")
         scoped = list(tools) if grant is None else [t for t in tools if t in set(grant)]
         return {
             "execution": {**execution, "allowed_tools": scoped},
             "notes_dir": self.agent_memory_dir(str(getattr(agent, "name", "") or "")),
+            "skills": scoped_skill_names(agent) or [],
         }
+
+    @staticmethod
+    def _skill_roots() -> list[Path]:
+        roots = [JaegerGatewayApp._instance_root() / "skills"]
+        try:
+            from jaeger_agent.skill_registry import playbook_skills as _pb
+            roots.append(Path(_pb._SKILLS_DIR))
+        except Exception:  # noqa: BLE001
+            pass
+        return roots
+
+    @staticmethod
+    def _agent_skill_cards(agent: Any) -> list[dict[str, Any]]:
+        from jaeger_ai.core.agent_registry.specialists import agent_skill_names, resolve_skill_cards
+        try:
+            return resolve_skill_cards(agent_skill_names(agent), JaegerGatewayApp._skill_roots())
+        except Exception:  # noqa: BLE001 — a listing must stay readable
+            logger.debug("skill cards unavailable for %s", getattr(agent, "id", agent), exc_info=True)
+            return []
+
+    def _with_skills(self, payload: Any) -> Any:
+        """Add ``skills: [{id, name, description, source_path}]`` to agent dicts."""
+        from jaeger_ai.core.agent_registry.types import AgentRecord
+
+        def one(row: Any) -> Any:
+            if not isinstance(row, dict) or not row.get("id"):
+                return row
+            try:
+                return {**row, "skills": self._agent_skill_cards(AgentRecord.from_dict(row))}
+            except Exception:  # noqa: BLE001
+                return row
+
+        if isinstance(payload, list):
+            return [one(r) for r in payload]
+        if isinstance(payload, dict) and "id" in payload and "kind" in payload:
+            return one(payload)
+        if isinstance(payload, dict):
+            out = dict(payload)
+            for key in ("agents", "jaeger_native", "third_party", "specialists"):
+                if isinstance(out.get(key), list):
+                    out[key] = [one(r) for r in out[key]]
+            for key in ("active", "lead"):
+                if isinstance(out.get(key), dict):
+                    out[key] = one(out[key])
+            return out
+        return payload
 
     def _auto_route(self, session: dict[str, Any] | None, text: str) -> bool:
         """Lead triage, once per conversation, before the first turn runs.
@@ -2823,6 +2878,25 @@ class JaegerGatewayApp:
     AGENT_NOTES_MAX_CHARS = 4000
 
     @staticmethod
+    def _skills_block(agent: Any) -> str:
+        """``[Your skills]`` for a specialist prompt: exactly the skills it may load."""
+        from jaeger_ai.core.agent_registry.specialists import resolve_skill_cards, scoped_skill_names
+        names = scoped_skill_names(agent) or []
+        if not names:
+            return ""
+        try:
+            cards = resolve_skill_cards(names, JaegerGatewayApp._skill_roots())
+        except Exception:  # noqa: BLE001
+            cards = [{"name": n, "description": "", "missing": True} for n in names]
+        lines = ["[Your skills]",
+                 "These are the only skills loaded for you. Load one with use_skill(name=...) "
+                 "and follow it before acting; skill(action=\"list\") shows the same set."]
+        for card in cards:
+            note = " (not installed)" if card.get("missing") else ""
+            lines.append(f"- {card['name']}{note}: {card.get('description') or ''}".rstrip(": "))
+        return "\n".join(lines)
+
+    @staticmethod
     def agent_memory_dir(name: str) -> Path:
         """Per-agent memory scope: ``<instance>/memory/agents/<name>/``.
 
@@ -2876,6 +2950,9 @@ class JaegerGatewayApp:
             parts.append("Reply briefly and helpfully.")
             notes = JaegerGatewayApp._agent_notes(str(getattr(agent, "name", "") or ""))
             prompt = " ".join(parts)
+            skills = JaegerGatewayApp._skills_block(agent)
+            if skills:
+                prompt = f"{prompt}\n\n{skills}"
             return f"{prompt}\n\n[Your notes]\n{notes}" if notes else prompt
 
         sections: list[str] = []
@@ -3641,6 +3718,19 @@ class JaegerGatewayApp:
         specialist_scope = self._specialist_scope(agent, execution) if role_s == "specialist" else None
         if specialist_scope is not None:
             execution = specialist_scope["execution"]
+            # This turn runs in its own asyncio task, so the skill scope set
+            # here covers its prepare/run threads (to_thread copies context)
+            # and ends with the task: the specialist sees only its own skills.
+            from jaeger_agent.skill_registry.playbook_skills import bind_skill_scope
+            bind_skill_scope(specialist_scope["skills"])
+            logger.info("specialist run agent=%s session=%s skills=%s tools=%d",
+                        getattr(agent, "id", None), session_id, specialist_scope["skills"],
+                        len(execution.get("allowed_tools") or []))
+            self.event_bus.publish(session_id, "agent.skills", {
+                "session_id": session_id, "request_id": request_id or turn_id,
+                "agent_id": getattr(agent, "id", None), "skills": specialist_scope["skills"],
+                "allowed_tools": list(execution.get("allowed_tools") or []),
+            })
         rid = request_id or turn_id
         admitted_request = self.store.get_request(rid)
         # One Goal/TaskCard per operational turn (see _open_turn_card). None for conversation.

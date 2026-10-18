@@ -309,6 +309,16 @@ class EntityRuntime:
 
     def _skill_matches(self, user_text: str, event: Any, session_id: str) -> tuple[str, list[Any]]:
         try:
+            from jaeger_agent.skill_registry.playbook_skills import active_skill_scope
+            if active_skill_scope() is not None:
+                # A scoped (specialist) run loads only its own role skills.
+                return "", []
+        except Exception:  # noqa: BLE001
+            pass
+        return self._skill_matches_unscoped(user_text, event, session_id)
+
+    def _skill_matches_unscoped(self, user_text: str, event: Any, session_id: str) -> tuple[str, list[Any]]:
+        try:
             pipeline = getattr(self.sleep_time_processor, "skill_pipeline", None)
             matched = pipeline.matching_skills(user_text) if pipeline is not None else []
             if not matched:

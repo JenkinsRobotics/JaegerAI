@@ -48,7 +48,65 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "allowed_tools": ("get_events", "create_event", "list_mailboxes", "list_mail", "read_mail", "plan_mail_triage", "move_mail", "sweep_mail", "send_email", "lookup_contact", "todo", "notify", "list_schedules", "schedule_prompt", "get_time", "calculate", "get_weather", "web_search", "web_extract", "update_plan", "agent_notes"),
         "keywords": ("calendar", "email", "mail", "inbox", "reminder", "reminders", "meeting", "schedule"),
     },
+    # Project team roles. No keywords: the lead assigns them explicitly
+    # (run_team / call_agent), auto-routing never moves a chat to them.
+    {
+        "name": "reverse-engineer",
+        "display_name": "Reverse Engineer",
+        "specialty": "reverse-engineering",
+        "team_role": "reverse-engineer",
+        "summary": "Studies shipped apps read-only with REA and reports structure and features with evidence.",
+        "allowed_tools": ("mcp__rea__*", "read_file", "search_files", "web_search", "web_extract", "update_plan", "get_time", "agent_notes", "team_notes", "use_skill", "skill"),
+        "skills": ("reverse-engineer-anything", "jaeger-reverse-engineer"),
+        "keywords": (),
+    },
+    {
+        "name": "builder",
+        "display_name": "Builder",
+        "specialty": "builder",
+        "team_role": "builder",
+        "summary": "Implements apps inside the project root, builds and tests them, and proves it with the checker.",
+        "allowed_tools": ("read_file", "search_files", "write_file", "append_file", "patch", "move_file", "copy_file", "terminal", "exec_command", "write_stdin", "kill_command", "list_background", "check_background", "run_build_check", "update_plan", "get_time", "agent_notes", "team_notes", "use_skill", "skill"),
+        "skills": ("jaeger-builder",),
+        "keywords": (),
+    },
+    {
+        "name": "reviewer",
+        "display_name": "Reviewer",
+        "specialty": "reviewer",
+        "team_role": "reviewer",
+        "summary": "Reviews builds against the spec and reruns the build/test checker.",
+        "allowed_tools": ("read_file", "search_files", "run_build_check", "update_plan", "get_time", "agent_notes", "team_notes", "use_skill", "skill"),
+        "skills": ("jaeger-reviewer",),
+        "keywords": (),
+    },
+    {
+        "name": "researcher",
+        "display_name": "Researcher",
+        "specialty": "researcher",
+        "team_role": "researcher",
+        "summary": "Answers outside-knowledge questions from the web and local files, with sources.",
+        "allowed_tools": ("web_search", "web_extract", "read_file", "search_files", "update_plan", "get_time", "agent_notes", "team_notes", "use_skill", "skill"),
+        "skills": ("jaeger-researcher",),
+        "keywords": (),
+    },
+    {
+        "name": "designer",
+        "display_name": "Designer",
+        "specialty": "designer",
+        "team_role": "designer",
+        "summary": "Turns findings into screen lists and UI specs a builder can implement.",
+        "allowed_tools": ("read_file", "search_files", "write_file", "patch", "vision_analyze", "web_search", "update_plan", "get_time", "agent_notes", "team_notes", "use_skill", "skill"),
+        "skills": ("jaeger-designer",),
+        "keywords": (),
+    },
 )
+
+#: Skills every agent loads on top of its own role skills.
+SHARED_SKILLS: tuple[str, ...] = ("jaeger-team-handbook",)
+#: The lead's role skills. The lead keeps the owner's full skill catalog;
+#: these are surfaced first and listed on its agent record.
+LEAD_SKILLS: tuple[str, ...] = ("jaeger-team-lead",)
 
 
 def _needs_seed(registry) -> bool:
@@ -139,6 +197,7 @@ def ensure_standing_specialists(registry) -> list[AgentRecord]:
                 "product_shape": "grok_bot",
                 "summary": spec["summary"],
                 "specialist": True,
+                **({"team_role": spec["team_role"]} if spec.get("team_role") else {}),
                 "replace": True,
             },
             make_active=False,
@@ -154,6 +213,7 @@ def ensure_standing_specialists(registry) -> list[AgentRecord]:
                 "product_shape": "grok_bot",
                 "summary": spec["summary"],
                 "specialist": True,
+                **({"team_role": spec["team_role"]} if spec.get("team_role") else {}),
             }
         )
         stored_s["display_name"] = spec["display_name"]
@@ -194,3 +254,111 @@ def specialist_tools(agent) -> list[str] | None:
         if spec["name"] == name:
             return list(spec.get("allowed_tools") or ())
     return None
+
+
+def _standing(agent) -> dict[str, Any] | None:
+    name = str(getattr(agent, "name", "") or "")
+    return next((spec for spec in STANDING_SPECIALISTS if spec["name"] == name), None)
+
+
+def _role_value(agent) -> str:
+    role = getattr(agent, "role", None)
+    return str(getattr(role, "value", role) or "")
+
+
+def specialist_skills(agent) -> list[str] | None:
+    """The agent's own role skills (by SKILL.md name).
+
+    ``metadata.skills`` on the registry record wins; else the standing
+    definition; the lead gets :data:`LEAD_SKILLS`; None for agents with no
+    role skills defined."""
+    meta = getattr(agent, "metadata", None) or {}
+    own = meta.get("skills") if isinstance(meta, dict) else None
+    if isinstance(own, list) and all(isinstance(x, str) for x in own):
+        return list(own)
+    spec = _standing(agent)
+    if spec is not None:
+        return list(spec.get("skills") or ())
+    if _role_value(agent) == "lead" or getattr(agent, "id", "") == LEAD_AGENT_ID:
+        return list(LEAD_SKILLS)
+    return None
+
+
+def scoped_skill_names(agent) -> list[str] | None:
+    """Skills a specialist run may load: its own plus the shared ones.
+
+    None means unscoped (the lead and non-specialists keep the full catalog)."""
+    if _role_value(agent) != "specialist":
+        return None
+    own = specialist_skills(agent) or []
+    return list(dict.fromkeys([*own, *SHARED_SKILLS]))
+
+
+def agent_skill_names(agent) -> list[str]:
+    """Every skill listed on an agent record (own + shared, lead included)."""
+    own = specialist_skills(agent) or []
+    if not own and _role_value(agent) not in {"specialist", "lead"}:
+        return []
+    return list(dict.fromkeys([*own, *SHARED_SKILLS]))
+
+
+def expand_tool_patterns(names: list[str], available: set[str] | frozenset[str]) -> list[str]:
+    """Expand ``mcp__rea__*``-style globs against the registered tool names.
+
+    Exact names pass through unchanged (a missing exact tool stays listed so
+    the allowlist stays honest about what was granted)."""
+    import fnmatch
+
+    out: list[str] = []
+    for name in names:
+        if any(ch in name for ch in "*?["):
+            out.extend(sorted(n for n in available if fnmatch.fnmatchcase(n, name)))
+        else:
+            out.append(name)
+    return list(dict.fromkeys(out))
+
+
+_CARD_CACHE: dict[str, Any] = {}
+
+
+def resolve_skill_cards(names: list[str], roots: list[Any]) -> list[dict[str, Any]]:
+    """``[{id, name, description, source_path}]`` for skill names, first root wins.
+
+    Roots are skills directories (instance first, then bundled). A name with no
+    SKILL.md on disk is still listed, with ``source_path: None`` and
+    ``missing: True``, so the UI shows an uninstalled skill instead of hiding it."""
+    from pathlib import Path
+
+    from jaeger_agent.skill_registry.playbook_skills import _parse_frontmatter
+
+    index: dict[str, tuple[str, str]] = {}
+    for root in reversed([Path(r) for r in roots if r]):
+        if not root.is_dir():
+            continue
+        try:
+            sig = (str(root), root.stat().st_mtime_ns)
+        except OSError:
+            continue
+        cached = _CARD_CACHE.get(str(root))
+        if cached is None or cached[0] != sig:
+            found: dict[str, tuple[str, str]] = {}
+            for md in root.rglob("SKILL.md"):
+                try:
+                    fm = _parse_frontmatter(md.read_text(encoding="utf-8"))
+                except OSError:
+                    continue
+                name = str(fm.get("name") or md.parent.name)
+                found[name] = (str(md.parent), " ".join(str(fm.get("description") or "").split()))
+            cached = (sig, found)
+            _CARD_CACHE[str(root)] = cached
+        index.update(cached[1])
+    cards = []
+    for name in names:
+        hit = index.get(name)
+        card = {"id": name, "name": name,
+                "description": hit[1] if hit else "",
+                "source_path": hit[0] if hit else None}
+        if hit is None:
+            card["missing"] = True
+        cards.append(card)
+    return cards
