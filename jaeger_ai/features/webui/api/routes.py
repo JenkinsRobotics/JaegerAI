@@ -16670,6 +16670,12 @@ def handle_patch(handler, parsed) -> bool:
     """Handle all PATCH routes. Returns True if handled, False for 404."""
     if not _check_csrf(handler):
         return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
+    try:
+        from api.jaeger_agents import route as jaeger_agents_route
+        if jaeger_agents_route(handler, parsed, "PATCH"):
+            return True
+    except Exception:
+        pass
     proxy_result = _handle_extension_sidecar_proxy(
         handler,
         parsed,

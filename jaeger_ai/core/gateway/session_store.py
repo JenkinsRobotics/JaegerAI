@@ -149,6 +149,15 @@ def _row_meta(raw: str | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _session_agent(session_id: str, meta: dict[str, Any]) -> str | None:
+    """The agent a session belongs to. A specialist's worker session is created
+    by its first turn, without metadata, so its id names the agent."""
+    if meta.get("agent_id"):
+        return meta["agent_id"]
+    from jaeger_ai.core.agent_registry.specialist_runtime import specialist_agent
+    return specialist_agent(session_id)
+
+
 LIST_PREVIEW_CHARS = 140
 
 
@@ -414,8 +423,12 @@ class GatewaySessionStore:
                 clauses.append("s.profile = ?")
                 params.append(profile)
             if agent_id:
-                clauses.append("json_extract(s.metadata_json, '$.agent_id') = ?")
-                params.append(agent_id)
+                from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
+                prefix = specialist_session(agent_id, "")
+                clauses.append("(json_extract(s.metadata_json, '$.agent_id') = ? "
+                               "OR (json_extract(s.metadata_json, '$.agent_id') IS NULL "
+                               "AND substr(s.session_id, 1, ?) = ?))")
+                params.extend([agent_id, len(prefix), prefix])
             term = str(query or "").strip()
             if term:
                 like = f"%{term}%"
@@ -438,7 +451,7 @@ class GatewaySessionStore:
                     "status": r["status"],
                     "message_count": r["message_count"],
                     "metadata": meta,
-                    "agent_id": meta.get("agent_id"),
+                    "agent_id": _session_agent(r["session_id"], meta),
                     # Sidebar row without N follow-up reads (Agents View).
                     "last_message_preview": _list_preview(r["last_content"]),
                     "last_activity_at": max(float(r["updated_at"] or 0), float(r["last_message_at"] or 0)),
@@ -532,7 +545,7 @@ class GatewaySessionStore:
                 "updated_at": row["updated_at"],
                 "status": row["status"],
                 "metadata": meta,
-                "agent_id": meta.get("agent_id"),
+                "agent_id": _session_agent(row["session_id"], meta),
                 "messages": [
                     {
                         "id": m["id"],

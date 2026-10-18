@@ -56,6 +56,7 @@ def _route(mod, path, method="GET"):
     ("/api/jaeger/sessions", "POST", ("POST", "/v1/sessions")),
     ("/api/jaeger/sessions/abc", "GET", ("GET", "/v1/sessions/abc")),
     ("/api/jaeger/sessions/abc", "DELETE", ("DELETE", "/v1/sessions/abc")),
+    ("/v1/sessions/abc", "PATCH", ("PATCH", "/v1/sessions/abc")),
     ("/api/jaeger/sessions/abc/turns", "POST", ("POST", "/v1/sessions/abc/turns")),
     ("/api/jaeger/sessions/abc/cancel", "POST", ("POST", "/v1/sessions/abc/cancel")),
     ("/api/jaeger/sessions/abc/reconcile", "POST", ("POST", "/v1/sessions/abc/reconcile")),

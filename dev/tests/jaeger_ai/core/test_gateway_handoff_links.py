@@ -146,3 +146,20 @@ async def test_only_the_owner_can_skip_handoff_approval(store, monkeypatch, call
         resp = await c.post("/v1/agents/native:everyday/handoff", json={
             "task": "reply pong", "require_approval": False, "request_id": f"skip-{caller}-{autonomy}"})
         assert (await resp.json())["status"] == expected
+
+
+def test_specialist_worker_sessions_belong_to_their_agent(store):
+    """A specialist's worker session is created by its first turn, without
+    metadata; listing that agent's chats and loading it still name the agent."""
+    from jaeger_ai.core.agent_registry.specialist_runtime import specialist_agent, specialist_session
+
+    worker = specialist_session("native:everyday", "req-1")
+    assert specialist_agent(worker) == "native:everyday"
+    assert specialist_agent("chat-1") is None
+    store.ensure_session(worker)
+    store.ensure_session("chat-e", metadata={"agent_id": "native:everyday"})
+    store.ensure_session("chat-j", metadata={"agent_id": "native:jaeger"})
+    store.ensure_session(specialist_session("native:every", "req-2"))  # a prefix, not the same agent
+    assert {r["session_id"] for r in store.list_sessions(agent_id="native:everyday")} == {worker, "chat-e"}
+    assert store.get_session(worker)["agent_id"] == "native:everyday"
+    assert next(r for r in store.list_sessions() if r["session_id"] == worker)["agent_id"] == "native:everyday"
