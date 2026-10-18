@@ -2477,6 +2477,21 @@ class JaegerGatewayApp:
                                             agent_id=(request.query.get("agent_id") or "").strip() or None)
         return web.json_response({"sessions": sessions})
 
+    @staticmethod
+    def _validate_workspace_folder(raw: Any) -> tuple[str, str | None]:
+        """(realpath, None) or ("", error): absolute, existing directory, not / or $HOME."""
+        value = str(raw or "").strip()
+        if not value:
+            return "", "workspace_folder must be a non-empty absolute path"
+        if not os.path.isabs(value):
+            return "", f"workspace_folder must be absolute: {value!r}"
+        real = os.path.realpath(value)
+        if not os.path.isdir(real):
+            return "", f"workspace_folder does not exist or is not a directory: {value!r}"
+        if real == os.path.sep or real == os.path.realpath(os.path.expanduser("~")):
+            return "", f"workspace_folder may not be / or your home folder itself: {value!r}"
+        return real, None
+
     async def handle_create_session(self, request: web.Request) -> web.Response:
         body = await request.json() if request.can_read_body else {}
         # The Gateway owns the session namespace, but an explicitly supplied
@@ -2496,6 +2511,15 @@ class JaegerGatewayApp:
         title = str(body.get("title") or "New Conversation")
         workspace = str(body.get("workspace") or "")
         metadata = dict(body.get("metadata") or {})
+        if body.get("workspace_folder") is not None:
+            # The client's open folder (IDE / Mac app) becomes the session's
+            # existing ``workspace``: the turn's project_root for file and
+            # shell tools and the ide_context fallback. Same field, validated.
+            folder, error = self._validate_workspace_folder(body.get("workspace_folder"))
+            if error:
+                return web.json_response({"error": error, "field": "workspace_folder"}, status=400)
+            workspace = folder
+            metadata = {**metadata, "workspace_folder": folder}
         # Profile binding is enforced HERE, gateway-side. The client may name a
         # profile; the gateway validates it against the framework registry and
         # stamps it — the id no longer carries the profile, so a client cannot
@@ -5172,7 +5196,7 @@ class JaegerGatewayApp:
 
         loop = getattr(self, "_loop", None)
         if kind not in self._IDE_KINDS or loop is None or not loop.is_running():
-            return {"ok": False, "error": "The IDE bridge is unavailable"}
+            return self._ide_context_fallback(session_id, kind, {"ok": False, "error": "The IDE bridge is unavailable"})
         ide_request_id = uuid.uuid4().hex[:12]
         future: concurrent.futures.Future = concurrent.futures.Future()
         self._ide_pending[ide_request_id] = (session_id, future)
@@ -5180,11 +5204,29 @@ class JaegerGatewayApp:
                    "args": {k: (v if isinstance(v, (int, float)) else str(v)[:500]) for k, v in (args or {}).items()}}
         loop.call_soon_threadsafe(self.event_bus.publish, session_id, "ide.request", payload)
         try:
-            return future.result(timeout=timeout)
+            answer = future.result(timeout=timeout)
         except concurrent.futures.TimeoutError:
-            return {"ok": False, "error": "The IDE did not answer. Is the Jaeger panel open in your editor?"}
+            answer = {"ok": False, "error": "The IDE did not answer. Is the Jaeger panel open in your editor?"}
         finally:
             self._ide_pending.pop(ide_request_id, None)
+        return self._ide_context_fallback(session_id, kind, answer)
+
+    def _ide_context_fallback(self, session_id: str, kind: str, answer: dict[str, Any]) -> dict[str, Any]:
+        """``context`` answers are cleaned to the allow-listed shape; the session's
+        workspace folder fills in when the IDE is absent or omits it."""
+        if kind != "context":
+            return answer
+        folder = str((self.store.get_session(session_id) or {}).get("workspace") or "")
+        if answer.get("ok") and isinstance(answer.get("result"), dict):
+            from jaeger_ai.core.entity.ide_context import clean as clean_ide_context
+            result = clean_ide_context(answer["result"]) or {}
+            if folder and not result.get("workspace_folder"):
+                result["workspace_folder"] = folder
+            return {**answer, "result": result}
+        if folder:
+            return {"ok": True, "result": {"workspace_folder": folder, "workspace_folders": [folder]},
+                    "fallback": True, "ide_error": answer.get("error")}
+        return answer
 
     async def handle_ide_result(self, request: web.Request) -> web.Response:
         """POST /v1/sessions/{id}/ide/{ide_request_id}: the extension's answer. First one wins."""
