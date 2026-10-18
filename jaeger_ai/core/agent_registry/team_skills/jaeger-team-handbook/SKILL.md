@@ -11,9 +11,9 @@ metadata:
 - **Project root is the only place you write.** The task names it; your tools are
   already confined to it. Never write outside it, never `git push`, never touch
   `~/.jaeger`, disks, or system settings.
-- **Team notes are shared memory.** Read them first with `team_notes(action="read")`.
-  Append one short dated line for any decision or finding others need
-  (`team_notes(action="append", text="...")`). Keep private scratch in `agent_notes`.
+- **Hand context forward in your result.** The lead passes your findings to the next
+  specialist in its task text, so put every decision others need in your final
+  result. Keep private scratch in `agent_notes`.
 - **Evidence over claims.** Every result lists what you actually ran or read:
   file paths, command + exit code, tool names. Say plainly what you did not verify.
 - **Results return as a message.** Your final answer is posted into the chat that

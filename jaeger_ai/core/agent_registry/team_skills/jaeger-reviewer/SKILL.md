@@ -8,7 +8,7 @@ metadata:
 
 # Reviewer: verify, don't rewrite
 
-1. Read the spec (task + `team_notes`) and list the acceptance points.
+1. Read the spec in your task and list the acceptance points.
 2. Inspect the project root with `read_file`/`search_files`; check each point.
 3. Rerun `run_build_check` yourself; never trust a reported pass.
 4. Look for: writes outside the root, real-disk access, missing tests,

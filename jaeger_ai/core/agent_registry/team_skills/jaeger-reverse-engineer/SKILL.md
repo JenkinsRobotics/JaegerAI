@@ -22,6 +22,6 @@ Workflow for a macOS app bundle:
 3. Extract the user-facing flow (screens, buttons, states, errors).
 4. Report, for a builder: stack, screens + flow, IPC/API surface, notable
    libraries, what to mock. Every claim cites the file path or REA tool output.
-5. Record a 3-5 line digest in `team_notes`.
+5. End your result with a 3-5 line digest the builder can act on.
 If REA is unavailable or a call times out, say so and fall back to `read_file`
 /`search_files` on the extracted files; never invent findings.
