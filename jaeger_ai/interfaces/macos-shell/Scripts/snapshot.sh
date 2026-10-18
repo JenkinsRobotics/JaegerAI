@@ -8,8 +8,10 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"; cd "$HERE"
 TAG="${1:-latest}"; shift $(( $# > 0 ? 1 : 0 ))   # remaining args go to JaegerShell (e.g. --snapshot-size 640x760)
 APP=.build/ui-rebuild/JaegerShell.app/Contents/MacOS/JaegerShell
 [[ -x $APP ]] || { echo "build first: Scripts/build-shell.sh"; exit 1; }
-Scripts/build-main-screen.sh --mock | tail -1
-Scripts/test-servers.sh start --mock | tail -1
+# SNAPSHOT_LIVE=1: the real UI build against the isolated dev gateway (43438, glm) instead of mock data.
+MODE=--mock; [[ ${SNAPSHOT_LIVE:-0} == 1 ]] && MODE=
+Scripts/build-main-screen.sh $MODE | tail -1
+Scripts/test-servers.sh start $MODE | tail -1
 rm -rf /tmp/jaeger-shots
 env -u HERMES_WEBUI_HOST -u JAEGER_WEBUI_HOST JAEGER_SHELL_UI_URL='http://127.0.0.1:18800/?host=macos' \
   $APP --snapshot /tmp/jaeger-shots "$@" 2>/tmp/jaeger-snapshot.log > /tmp/jaeger-snapshot.json
