@@ -176,6 +176,28 @@ def _agent_tool_name(server: str, tool: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "_", f"mcp__{server}__{tool}")[:64]
 
 
+def check_mcp_permission(spec: MCPToolSpec, arguments: dict[str, Any]) -> None:
+    """Gate one MCP call on the live PermissionPolicy (the same check
+    ``requires_tier`` runs for native tools, so the Gateway's approval card).
+
+    Owner-declared read-only tools check at READ_ONLY (allowed unless the
+    policy is paused). Every other tool checks at EXTERNAL_EFFECT with a
+    per-tool skill id ``mcp:<server>/<tool>``: a specialist allowlist or a
+    grant naming only the server does not approve it; an "always" answer
+    applies to that one tool. Raises PermissionDenied when refused."""
+    from jaeger_os.core.safety.permissions import PermissionRequest, PermissionTier, current_policy
+
+    tier = PermissionTier.READ_ONLY if spec.read_only else PermissionTier.EXTERNAL_EFFECT
+    current_policy().check(PermissionRequest(
+        tier=tier,
+        skill=f"mcp:{spec.server_name}/{spec.tool_name}",
+        operation=spec.agent_name or spec.tool_name,
+        summary=f"MCP {spec.server_name}: {spec.tool_name}"
+                + ("" if spec.read_only else " (not declared read-only)"),
+        arguments=dict(arguments or {}),
+    ))
+
+
 def _register_agent_tool(spec: MCPToolSpec) -> None:
     """Expose a connected MCP tool through Jaeger's canonical registry."""
     from jaeger_os.core.tools.tool_registry import (
@@ -232,6 +254,7 @@ def _register_agent_tool(spec: MCPToolSpec) -> None:
         except Exception:
             pass
 
+        check_mcp_permission(spec, arguments if isinstance(arguments, dict) else {})
         return call_mcp_tool(spec.qualified_name, arguments)
 
     if has_tool(spec.agent_name):

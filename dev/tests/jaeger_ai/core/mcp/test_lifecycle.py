@@ -13,6 +13,18 @@ from jaeger_ai.core.mcp import service
 from jaeger_ai.plugins.mcp import client
 
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _owner_approves_mcp_calls():
+    """MCP calls not declared read-only now go through the permission policy
+    (approval card in the Gateway); these lifecycle tests approve them."""
+    from jaeger_os.core.safety.permissions import AllowAllProvider, PermissionPolicy, use_policy
+    with use_policy(PermissionPolicy(confirmation=AllowAllProvider())):
+        yield
+
+
 def _unused_port() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
