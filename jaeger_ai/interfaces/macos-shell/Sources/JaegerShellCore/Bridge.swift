@@ -81,6 +81,7 @@ public enum BridgeCommand: Equatable {
     case openFile(URL)
     case clipboardWrite(String)
     case micStatus, ttsStatus
+    case filesPick(FilePickOptions)
     case notImplemented(String)
 
     /// Types that are routed but not implemented yet (none since S4 voice).
@@ -157,6 +158,7 @@ public enum BridgeCommand: Equatable {
             return .success(.clipboardWrite(text))
         case "mic.status": return .success(.micStatus)
         case "tts.status": return .success(.ttsStatus)
+        case "files.pick": return FilePickOptions.parse(p).map { .filesPick($0) }
         default:
             if stubbedTypes.contains(request.type) { return .success(.notImplemented(request.type)) }
             return .failure(.unknownType(request.type))
@@ -188,6 +190,7 @@ public enum BridgeCommand: Equatable {
         case .clipboardWrite: return "clipboard.write"
         case .micStatus: return "mic.status"
         case .ttsStatus: return "tts.status"
+        case .filesPick: return "files.pick"
         case .notImplemented(let type): return type
         }
     }
@@ -280,4 +283,89 @@ public enum WindowChromePolicy {
 public enum HostContract {
     public static let requestTypes = ["open.external", "open.file", "clipboard.write", "mic.status", "tts.status"]
     public static let eventTypes = ["window.visibility", "hotkey", "appearance.changed"]
+}
+
+// MARK: files.pick — the composer's + on the macOS host (IDE Chat H8 contract: JaegerChatHost.pickFiles).
+// The page asks; the shell shows NSOpenPanel; only what the user picked comes back, filtered by these
+// options: {path, name, size, mimeType, uri file://}. [] on cancel. Paths go only to the loopback page.
+
+public struct FilePickOptions: Equatable, Sendable {
+    public static let maxFilesCap = 32
+    public var multiple: Bool
+    public var maxFiles: Int
+    public var maxBytes: Int?
+    /// MIME types (`image/png`, `image/*`) or extensions (`.pdf`), lowercased. Empty: anything.
+    public var accept: [String]
+
+    public init(multiple: Bool = false, maxFiles: Int? = nil, maxBytes: Int? = nil, accept: [String] = []) {
+        self.multiple = multiple
+        self.maxFiles = multiple ? min(maxFiles ?? Self.maxFilesCap, Self.maxFilesCap) : 1
+        self.maxBytes = maxBytes
+        self.accept = accept
+    }
+
+    public static func parse(_ p: [String: Any]) -> Result<FilePickOptions, BridgeError> {
+        var multiple = false
+        if let raw = p["multiple"] {
+            guard let value = strictBool(raw) else { return .failure(.invalidPayload("multiple must be a boolean")) }
+            multiple = value
+        }
+        func positiveInt(_ key: String) -> Result<Int?, BridgeError> {
+            guard let raw = p[key] else { return .success(nil) }
+            guard let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+                  number.doubleValue == number.doubleValue.rounded(), number.doubleValue >= 1, number.doubleValue <= 1e15
+            else { return .failure(.invalidPayload("\(key) must be a positive integer")) }
+            return .success(number.intValue)
+        }
+        let maxFiles: Int?, maxBytes: Int?
+        switch positiveInt("maxFiles") { case .failure(let e): return .failure(e); case .success(let v): maxFiles = v }
+        switch positiveInt("maxBytes") { case .failure(let e): return .failure(e); case .success(let v): maxBytes = v }
+        var accept: [String] = []
+        if let raw = p["accept"] {
+            guard let list = raw as? [Any], list.count <= 64,
+                  let items = list as? [String], items.allSatisfy({ !$0.isEmpty && $0.count <= 128 })
+            else { return .failure(.invalidPayload("accept must be a list of MIME types or .ext (≤64)")) }
+            accept = items.map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+        }
+        return .success(FilePickOptions(multiple: multiple, maxFiles: maxFiles, maxBytes: maxBytes, accept: accept))
+    }
+
+    /// Whether a file passes `accept` (by extension or MIME, `type/*` wildcards).
+    public func accepts(name: String, mimeType: String) -> Bool {
+        if accept.isEmpty { return true }
+        let ext = (name as NSString).pathExtension.lowercased()
+        let mime = mimeType.lowercased()
+        return accept.contains { rule in
+            if rule.hasPrefix(".") { return !ext.isEmpty && rule == ".\(ext)" }
+            if rule.hasSuffix("/*") { return mime.hasPrefix(String(rule.dropLast(1))) }
+            return rule == mime
+        }
+    }
+}
+
+public struct PickedFile: Equatable, Sendable {
+    public let path: String
+    public let name: String
+    public let size: Int
+    public let mimeType: String
+    public let isRegularFile: Bool
+    public init(path: String, name: String, size: Int, mimeType: String, isRegularFile: Bool = true) {
+        self.path = path; self.name = name; self.size = size; self.mimeType = mimeType; self.isRegularFile = isRegularFile
+    }
+
+    /// The H8 ChatAttachment shape the page receives.
+    public var reply: [String: Any] {
+        ["path": path, "name": name, "size": size, "mimeType": mimeType, "uri": URL(fileURLWithPath: path).absoluteString]
+    }
+}
+
+public enum FilePick {
+    /// Regular files only; drops what `accept` or `maxBytes` refuse, then keeps the first `maxFiles`.
+    public static func select(_ picked: [PickedFile], _ options: FilePickOptions) -> [PickedFile] {
+        let kept = picked.filter { file in
+            file.isRegularFile && file.path.hasPrefix("/") && options.accepts(name: file.name, mimeType: file.mimeType)
+                && (options.maxBytes.map { file.size <= $0 } ?? true)
+        }
+        return Array(kept.prefix(options.maxFiles))
+    }
 }
