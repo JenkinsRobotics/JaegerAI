@@ -51,13 +51,23 @@
 /* "Today 3:31 PM" between turns. */
 .jg-separator { align-self: center; margin: 10px 0 4px; color: var(--aether-color-text-faint); font-size: var(--jg-font-tiny); }
 
-/* Jump to the latest message. */
+/* Jump to the latest message: docked 8px above the composer (its height comes from a ResizeObserver),
+ * fades and slides in and out; a badge counts what arrived while scrolled up. */
 .jg-jump {
-  position: absolute; z-index: 2; left: 50%; bottom: 72px; transform: translateX(-50%); display: grid; place-items: center;
-  width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--aether-color-bg-control); color: var(--aether-color-text); cursor: pointer;
-  box-shadow: 0 2px 10px color-mix(in srgb, var(--aether-color-shadow) 18%, transparent), 0 0 0 0.5px color-mix(in srgb, var(--aether-color-border) 80%, transparent);
+  position: absolute; z-index: 2; left: 50%; bottom: calc(var(--jg-composer-h, 52px) + 12px + 8px); display: grid; place-items: center;
+  width: 32px; height: 32px; border-radius: 50%; border: 0; background: var(--jg-color-elevated); color: var(--aether-color-text); cursor: pointer;
+  box-shadow: var(--jg-shadow-card), 0 0 0 1px var(--aether-color-border);
+  opacity: 0; transform: translate(-50%, 8px); pointer-events: none;
+  transition: opacity var(--jg-dur-base) var(--jg-ease-out-quint), transform var(--jg-dur-base) var(--jg-ease-out-quint);
 }
-.jg-jump:hover { background: var(--aether-color-bg-hover); }
+.jg-jump.is-visible { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.jg-jump:hover { background: var(--jg-color-control-hover); }
+.jg-jump__badge {
+  position: absolute; top: -6px; right: -8px; min-width: 18px; height: 18px; box-sizing: border-box; padding: 0 5px; border-radius: 9px;
+  display: grid; place-items: center; background: var(--jg-color-accent); color: var(--jg-color-on-accent);
+  font-size: var(--jg-font-tiny); font-weight: 600; line-height: 1;
+}
+@media (prefers-reduced-motion: reduce) { .jg-jump { transition: none; } }
 .jg-md code, .jg-tool code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.9em; background: color-mix(in srgb, var(--aether-color-text-faint) 18%, transparent); padding: 1px 4px; border-radius: 4px; }
 .jg-thinking summary { cursor: pointer; color: var(--aether-color-text-dim); font-size: var(--jg-font-small); list-style: none; }
 .jg-thinking summary::before { content: "›"; display: inline-block; margin-right: 5px; transition: transform 0.15s; }
