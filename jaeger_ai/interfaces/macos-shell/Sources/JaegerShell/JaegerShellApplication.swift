@@ -166,7 +166,18 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
 
     // AppKit re-lays out the standard buttons on these; put them back at the contract inset.
     func windowDidResize(_ notification: Notification) { relayoutChrome() }
-    func windowDidBecomeKey(_ notification: Notification) { relayoutChrome() }
+    func windowDidBecomeKey(_ notification: Notification) {
+        relayoutChrome()
+        if let window, let webView, window.firstResponder === window { window.makeFirstResponder(webView) }
+    }
+
+    /// Activation (Dock-less app brought forward by a hotkey, the status item or another app) must leave the
+    /// main window key with the web view as first responder, or plain keys and left clicks never reach the page.
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard !(verifyBridgeMode || snapshotMode), let window, window.isVisible else { return }
+        if window.isKeyWindow && window.firstResponder === webView { KeyFocus.log(window, "app activated"); return }
+        KeyFocus.focus(window, webView: webView, activate: false, reason: "app activated")
+    }
     func windowDidResignKey(_ notification: Notification) { relayoutChrome() }
     func windowDidEnterFullScreen(_ notification: Notification) { relayoutChrome(push: true) }
     func windowDidExitFullScreen(_ notification: Notification) { relayoutChrome(push: true) }
@@ -281,8 +292,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     func showWindow() {
         if verifyBridgeMode || snapshotMode { return }  // never show a window in the headless checks
         let window = self.window ?? makeWindow()
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        KeyFocus.focus(window, webView: webView, activate: true, reason: "window shown")
         bridge?.send(["type": "window.visibility", "visible": true])
         if !rulesInstalled && !verifyMode && webView?.url == nil { installRulesThenLoad() }
     }
@@ -585,5 +595,14 @@ enum JaegerShellMain {
 /// Stock WKWebView declines first mouse, so that click only activated the window: Send, menus and outside-click
 /// dismissal never saw it (proved headlessly with --snapshot nsclick: real NSEvents, no DOM events until this).
 final class ShellWebView: WKWebView {
+    private var loggedFirstMouse = false
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+    /// A non-opaque view reports true by default, so with isMovableByWindowBackground AppKit could treat a left
+    /// press on the page as a window drag. Window dragging is explicit (data-aether-window-drag-region →
+    /// performDrag in StudioWindowChrome), so presses on web content always go to the page.
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func mouseDown(with event: NSEvent) {
+        if !loggedFirstMouse { loggedFirstMouse = true; KeyFocus.log(window, "first left mouseDown") }
+        super.mouseDown(with: event)
+    }
 }

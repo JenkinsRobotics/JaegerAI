@@ -97,6 +97,16 @@ final class Snapshotter: NSObject, BridgeHost {
             }
             return
         }
+        // "focus" runs the shell's show-time focus (key window + web view first responder) without activating the
+        // app (headless never takes focus); "keystatus" records KeyFocus.status.
+        if selector == "focus" || selector == "keystatus" {
+            if selector == "focus", let window = webView.window { KeyFocus.focus(window, webView: webView, activate: false, reason: "snapshot focus") }
+            var clicks = report["clicks"] as? [[String: Any]] ?? []
+            clicks.append(["selector": selector, "clicked": true, "result": KeyFocus.status(webView.window, selector)])
+            report["clicks"] = clicks
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.click(Array(selectors.dropFirst()), webView: webView) }
+            return
+        }
         // "nsclick:<sel>" / "nsrclick:<sel>" / "nskey:return|escape": REAL NSEvents posted through NSWindow.sendEvent
         // (the same path a hardware click or key takes inside the app), to tell our input handling apart from
         // synthetic-event tools. The element's centre comes from getBoundingClientRect.
