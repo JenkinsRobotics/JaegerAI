@@ -69,7 +69,7 @@ export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewCha
             {pinned.map((row) => <div key={row.agent.id}>{chatsFor(row.agent.id)}</div>)}
           </PinnedArea>
         )}
-        <SpecialistList dragType={AGENT_DRAG_TYPE} onPin={onPin} onUnpin={onUnpin}>
+        <SpecialistList dragType={AGENT_DRAG_TYPE} onPin={onPin} onUnpin={onUnpin} emptyDropHint={!specialists.length && pinned.length > 0}>
           {specialists.map((row) => (
             <div key={row.agent.id} className="jg-agent-list__item" draggable
               onDragStart={(e) => { e.dataTransfer.setData(AGENT_DRAG_TYPE, row.agent.id); e.dataTransfer.effectAllowed = "move"; }}
