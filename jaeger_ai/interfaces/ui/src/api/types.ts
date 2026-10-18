@@ -98,6 +98,17 @@ export interface Handoff {
   created_at?: number;
 }
 
+/** GET /v1/handoffs/{id}/messages (proxied as /api/handoffs/{id}/messages). */
+export interface HandoffExchange {
+  handoff_id: string;
+  session_id?: string | null;
+  to_agent_id: string;
+  status?: string;
+  task?: string;
+  worker_session_id: string;
+  summary?: string;
+}
+
 /** One frame of the gateway SSE stream: `id:` / `event:` / `data:` lines. */
 export interface GatewayEvent {
   event: string;

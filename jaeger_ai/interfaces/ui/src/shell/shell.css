@@ -85,3 +85,5 @@ html[data-jaeger-host="macos"] .jg-traffic-lights i { visibility: hidden; }
 .jg-error-state--compact { margin: 0 0 var(--aether-space-3); padding: var(--aether-space-3); }
 .jg-error-state__title { font-weight: var(--aether-font-weight-strong); }
 .jg-error-state__detail { color: var(--aether-color-text-dim); font-size: var(--jg-font-tiny); word-break: break-word; }
+.jg-main-row { flex: 1; min-height: 0; display: flex; }
+.jg-main-row > .jg-chat-mount, .jg-main-row > .jg-error-state { flex: 1; min-width: 0; }

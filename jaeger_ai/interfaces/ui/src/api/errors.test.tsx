@@ -32,8 +32,8 @@ describe("no silent fallback to fake data", () => {
   it("sidebar shows an ErrorState with Retry and the error text, and no agents", () => {
     const slots = agentsSidebarSlots({
       state: { agents: [], summaries: [], seen: {}, loading: false, error: down.message },
-      selection: { type: "agent", agentId: "native:jaeger" },
-      onSelect: () => {}, onNewChat: () => {}, onSearch: () => {}, onConnectApps: () => {}, onRetry: () => {}, userInitials: "MJ", status: { kind: "error", label: "Gateway unreachable" },
+      selection: { type: "agent", agentId: "native:jaeger" }, chats: [],
+      onSelect: () => {}, onNewChatMenu: () => {}, onRenameChat: () => {}, onArchiveChat: () => {}, onSearch: () => {}, onConnectApps: () => {}, onRetry: () => {}, userInitials: "MJ", status: { kind: "error", label: "Gateway unreachable" },
     });
     const html = renderToStaticMarkup(<>{slots.primary}</>);
     expect(html).toContain("Couldn&#x27;t load agents");

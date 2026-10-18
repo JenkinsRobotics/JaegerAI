@@ -246,7 +246,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   return (
     <div className="jg-chat" style={tint}>
       <div className="jg-chat__band" data-aether-window-drag-region>
-        <button type="button" className="jg-agent-pill" title={session?.title}>
+        <button type="button" className="jg-agent-pill" title={`${agent.name} details`} onClick={() => host.openDetails?.(agent.id)}>
           <AgentAvatar id={agent.id} name={agent.name} size={20} />
           <span>{agent.name}</span>
         </button>
