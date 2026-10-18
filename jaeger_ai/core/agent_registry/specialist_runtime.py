@@ -19,9 +19,13 @@ from jaeger_agent.delegates.contracts import (
     RuntimeStatus,
 )
 
-MAX_DELEGATION_DEPTH = 2
-MAX_FANOUT = 3
+# Defaults raised for project teams (was depth 2 / fanout 3 / 600 s cap).
+# Env-configurable via jaeger_ai.core.agent_registry.projects.default_limits;
+# a project's own limits override these per handoff.
+MAX_DELEGATION_DEPTH = 3
+MAX_FANOUT = 4
 DEFAULT_TIMEOUT_S = 120
+MAX_CHILD_TIMEOUT_S = 1800
 
 
 SPECIALIST_SESSION_PREFIX = "specialist:"
@@ -48,14 +52,22 @@ def bounded_prompt(
     task: str,
     permitted_context: str = "",
     allowed_tools: frozenset[str] | None = None,
+    workspace: str | None = None,
+    project_name: str | None = None,
 ) -> str:
-    tools = ", ".join(sorted(allowed_tools)) if allowed_tools else "none"
+    tools = ", ".join(sorted(allowed_tools)) if allowed_tools else "your standing specialist tools"
     context = (permitted_context or "").strip() or "(no additional context granted)"
+    where = ""
+    if workspace:
+        label = f" ({project_name})" if project_name else ""
+        where = (f"Project root{label}: {workspace}\n"
+                 "Write only inside the project root; it is your working directory.\n")
     return (
         f"You are {display_name}, the {specialty} specialist for a bounded child task.\n"
         "You are not the lead. Do not take over the lead conversation or identity.\n"
         "Relationship membership is not permission to execute tools.\n"
         f"Permitted tools: {tools}.\n"
+        f"{where}"
         f"Permitted context:\n{context}\n"
         f"Task:\n{task.strip()}\n"
         "Return only the specialist result and the evidence you actually obtained. "
@@ -70,17 +82,21 @@ def check_delegation_limits(
     parent_chain: list[str],
     depth: int,
     active_children: int,
+    max_depth: int | None = None,
+    max_fanout: int | None = None,
 ) -> str | None:
+    max_depth = MAX_DELEGATION_DEPTH if max_depth is None else int(max_depth)
+    max_fanout = MAX_FANOUT if max_fanout is None else int(max_fanout)
     if not to_agent_id:
         return "target agent is required"
     if to_agent_id == from_agent_id:
         return "an agent cannot delegate to itself"
     if to_agent_id in parent_chain:
         return "recursive delegation loop rejected"
-    if depth >= MAX_DELEGATION_DEPTH:
-        return f"delegation depth {depth} exceeds maximum {MAX_DELEGATION_DEPTH}"
-    if active_children >= MAX_FANOUT:
-        return f"parent already has {active_children} active children; max {MAX_FANOUT}"
+    if depth >= max_depth:
+        return f"delegation depth {depth} exceeds maximum {max_depth}"
+    if active_children >= max_fanout:
+        return f"parent already has {active_children} active children; max {max_fanout}"
     return None
 
 
@@ -112,13 +128,18 @@ class NativeSpecialistRuntime:
             DelegateEvent(1, "started", {"session": session, "parent": request.parent_task_id})
         ]
         handle = DelegateHandle(request.task_id, self.runtime_id, session)
-        timeout = min(int(request.timeout_seconds), 600)
+        cap = int(request.metadata.get("max_child_timeout_s") or MAX_CHILD_TIMEOUT_S)
+        timeout = min(int(request.timeout_seconds), cap)
+        chat_kwargs = dict(request.metadata.get("chat_kwargs") or {})
         try:
             if request.task_id in self._cancelled:
                 raise asyncio.CancelledError()
+            # An empty grant means "the specialist's standing tools", never
+            # "no tools": the host applies specialist_tools() to the child.
             text, backend = await asyncio.wait_for(self._chat(
                 session, request.prompt, request_id=request.idempotency_key,
-                allowed_tools=sorted(request.allowed_tools),
+                allowed_tools=sorted(request.allowed_tools) if request.allowed_tools else None,
+                **chat_kwargs,
             ), timeout=timeout)
             if request.task_id in self._cancelled:
                 self._results[request.task_id] = DelegateResult(
