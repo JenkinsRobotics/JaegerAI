@@ -42,7 +42,7 @@ export function PostMessage({ entry, links, onOpenHandoff }: { entry: Post; link
   return (
     <article className={`jg-post jg-post--${entry.post}${entry.status ? ` is-${entry.status}` : ""}`} data-sender="post" aria-label={`${entry.sender.name}: ${chip}`}>
       <header className="jg-post__who">
-        <AgentAvatar id={entry.sender.id} name={entry.sender.name} size={20} />
+        <AgentAvatar id={entry.sender.id} name={entry.sender.name} size={20} state={entry.status === "failed" ? "failed" : "spawning"} />
         <span className="jg-post__name">{entry.sender.name}</span>
       </header>
       <div className="jg-bubble jg-bubble--assistant jg-post__body">

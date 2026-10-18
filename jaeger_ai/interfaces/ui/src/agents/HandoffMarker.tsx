@@ -19,7 +19,7 @@ export function handoffText(part: HandoffPart): string {
 }
 
 const who = (ref: Ref) => (
-  <span className="jg-handoff__who"><AgentAvatar id={ref.id} name={ref.name} size={18} /> <span className="jg-handoff__name">{ref.name}</span></span>
+  <span className="jg-handoff__who"><AgentAvatar id={ref.id} name={ref.name} size={18} state="spawning" /> <span className="jg-handoff__name">{ref.name}</span></span>
 );
 
 function people(refs: Ref[]): ReactNode {
@@ -45,7 +45,7 @@ export function RecipientStack({ refs, defaultOpen = false }: { refs: Ref[]; def
   }, [open]);
   return (
     <span className="jg-handoff__group" ref={box}>
-      <span className="jg-handoff__stack">{refs.slice(0, 3).map((r) => <AgentAvatar key={r.id} id={r.id} name={r.name} size={18} />)}</span>
+      <span className="jg-handoff__stack">{refs.slice(0, 3).map((r) => <AgentAvatar key={r.id} id={r.id} name={r.name} size={18} state="spawning" />)}</span>
       <button type="button" className="jg-handoff__count" aria-haspopup="true" aria-expanded={open}
         aria-label={`${refs.length} agents in this exchange`} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}>{refs.length}</button>
       {open && (
