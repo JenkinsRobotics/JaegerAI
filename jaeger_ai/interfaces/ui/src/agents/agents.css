@@ -13,13 +13,17 @@
   outline: 2px solid var(--aether-color-border-focus); outline-offset: 1px;
 }
 
-/* Round agent avatars: token color + a two-eye face. */
+/* Agent avatars: a silhouette in the agent's color + a two-eye face (or the agent's image, round). */
 .jg-avatar {
-  position: relative; flex: none; display: inline-grid; place-items: center; border-radius: 50%;
-  background: var(--jg-avatar-color, var(--aether-color-accent)); overflow: hidden;
+  position: relative; flex: none; display: inline-grid; place-items: center;
+  color: var(--jg-avatar-color, var(--aether-color-accent));
 }
+.jg-avatar > * { grid-area: 1 / 1; }
+.jg-avatar__shape { width: 100%; height: 100%; display: block; }
+.jg-avatar--image { border-radius: 50%; overflow: hidden; background: var(--jg-avatar-color, var(--aether-color-accent)); }
 .jg-avatar img { width: 100%; height: 100%; object-fit: cover; }
-.jg-avatar__face { display: flex; gap: 16%; width: 100%; justify-content: center; margin-top: -4%; }
+.jg-avatar__face { position: relative; display: flex; gap: 16%; width: 100%; justify-content: center; margin-top: -4%; }
+.jg-avatar--cloud .jg-avatar__face { margin-top: 6%; }
 .jg-avatar__face i { width: 13%; aspect-ratio: 1 / 1.25; border-radius: 50%; background: var(--aether-color-text-on-selected); }
 
 /* Pinned supervisor card. */
@@ -42,19 +46,19 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--aether-color-bg-rail) 90%, transparent);
 }
 
-/* Specialist rows (~56px). */
+/* Specialist rows: 58px, 36px avatar, 8px gap, radius 10; hover fg 6%, selected fg 8%. */
 .jg-agent-list { display: flex; flex-direction: column; gap: 1px; }
 .jg-agent-row, .jg-nav-entry {
-  display: flex; align-items: center; gap: 11px; width: 100%; border: 0; background: transparent;
+  display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent;
   color: var(--aether-color-text); font: inherit; text-align: left; cursor: pointer; border-radius: 10px;
 }
-.jg-agent-row { min-height: 56px; padding: 7px 8px 7px 10px; }
+.jg-agent-row { min-height: 58px; box-sizing: border-box; padding: 7px 8px 7px 10px; }
 .jg-agent-row:hover, .jg-nav-entry:hover { background: var(--jg-color-hover); }
 .jg-agent-row.is-selected, .jg-nav-entry.is-selected { background: var(--jg-color-active); }
 .jg-agent-row__text { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
 .jg-agent-row__name { font-size: var(--jg-font-body); font-weight: var(--jg-font-weight-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.jg-agent-row__preview { color: var(--aether-color-text-dim); font-size: var(--jg-font-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.jg-unread-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--aether-color-accent); }
+.jg-agent-row__preview { color: var(--jg-color-text-secondary); font-size: var(--jg-font-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-unread-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--jg-color-accent); }
 .jg-unread-dot.is-hidden { visibility: hidden; }
 .jg-nav-entry { margin-top: 6px; padding: 6px 10px; gap: 8px; color: var(--aether-color-text-dim); font-size: var(--jg-font-small); }
 .jg-nav-entry.is-selected { color: var(--aether-color-text); }
@@ -84,7 +88,7 @@
   display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 5px; padding: 2px 6px;
   border: 0; border-radius: 8px; background: transparent; color: var(--aether-color-text-dim); font: inherit; font-size: var(--jg-font-tiny);
 }
-.jg-handoff__chip .jg-avatar { margin-left: 3px; }
+.jg-handoff__who .jg-avatar { margin-left: 3px; }
 .jg-handoff__name { color: var(--aether-color-text-dim); }
 button.jg-handoff__chip { cursor: pointer; }
 button.jg-handoff__chip:hover { color: var(--aether-color-text); background: color-mix(in srgb, var(--aether-color-text-faint) 12%, transparent); }
@@ -92,6 +96,25 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-apps__row { display: flex; align-items: center; gap: var(--aether-space-3); padding: var(--aether-space-2) 0; }
 .jg-avatar__initials { color: var(--aether-color-text-on-selected); font-size: var(--jg-font-tiny); font-weight: var(--aether-font-weight-strong); }
 .jg-handoff__who { display: inline-flex; align-items: center; gap: 4px; }
+/* 3+ recipients: overlapping 18px avatars and a count chip that lists them. */
+.jg-handoff__group { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+.jg-handoff__stack { display: inline-flex; align-items: center; }
+.jg-handoff__stack .jg-avatar { margin-left: -6px; filter: drop-shadow(0 0 0.75px var(--jg-color-pane)) drop-shadow(0 0 0.75px var(--jg-color-pane)); }
+.jg-handoff__stack .jg-avatar:first-child { margin-left: 0; }
+.jg-handoff__count {
+  display: inline-grid; place-items: center; min-width: 20px; height: 18px; box-sizing: border-box; padding: 0 6px; border: 0; border-radius: 9px;
+  background: var(--jg-color-hover); color: var(--jg-color-text-secondary); font: inherit; font-size: var(--jg-font-tiny); font-weight: 600; cursor: pointer;
+}
+.jg-handoff__count:hover, .jg-handoff__count[aria-expanded="true"] { background: var(--jg-color-active); color: var(--jg-color-fg); }
+.jg-handoff__count:focus-visible { outline: 2px solid var(--aether-color-border-focus); outline-offset: 1px; }
+.jg-handoff__menu {
+  position: absolute; z-index: 5; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); min-width: 200px; width: max-content; max-width: 320px; padding: 6px;
+  border-radius: 12px; background: var(--jg-color-elevated); box-shadow: var(--jg-shadow-card), 0 0 0 0.5px var(--aether-color-border);
+  text-align: left; color: var(--jg-color-fg);
+}
+.jg-handoff__menu-title { padding: 4px 8px 6px; font-size: var(--jg-font-tiny); color: var(--jg-color-text-tertiary); }
+.jg-handoff__menu ul { list-style: none; margin: 0; padding: 0; }
+.jg-handoff__menu li { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; font-size: var(--jg-font-small); white-space: nowrap; }
 
 /* An agent's chats, under its row: every chat keeps a place (Grok Bot). */
 .jg-chat-list { list-style: none; margin: 2px 0 8px; padding: 0 0 0 54px; display: flex; flex-direction: column; gap: 1px; }
@@ -128,3 +151,5 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-form { display: flex; flex-direction: column; gap: 12px; min-width: 340px; }
 .jg-form__field { display: flex; flex-direction: column; gap: 4px; font-size: var(--jg-font-small); color: var(--aether-color-text-dim); }
 .jg-form__error { margin: 0; color: var(--aether-color-error); font-size: var(--jg-font-small); }
+.jg-handoff__open { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.jg-handoff__open:hover { color: var(--aether-color-text); text-decoration: underline; }

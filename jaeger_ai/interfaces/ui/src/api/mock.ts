@@ -64,7 +64,7 @@ export const MOCK_TRANSCRIPTS: Record<string, ChatSession> = {
           { kind: "question", callId: "q1", title: "Archive the stale owner file and restart the gateway?", options: [{ id: "yes", label: "Yes, archive it and restart" }, { id: "no", label: "Not now" }], chosenId: "yes" },
           { kind: "handoff", handoffId: "h0", agentId: "agent:agents-view", agentName: name("agent:agents-view"), count: 1, direction: "from" },
           { kind: "markdownContent", text: "Archiving it and restarting the gateway now." },
-          { kind: "handoff", handoffId: "h1", agentId: "agent:gateway-webui", agentName: name("agent:gateway-webui"), count: 1, direction: "to", agents: [ref("agent:gateway-webui"), ref("agent:mac-app")] },
+          { kind: "handoff", handoffId: "h1", agentId: "agent:gateway-webui", agentName: name("agent:gateway-webui"), count: 1, direction: "to", agents: [ref("agent:gateway-webui"), ref("agent:mac-app"), ref("agent:swe")] },
           { kind: "markdownContent", text: "I'll confirm once the gateway has stayed up and passed its checks, and the new Mac app will be set up to keep it running." },
           { kind: "markdownContent", text: "The new main screen now really talks to Jaeger. In a test, it asked Jaeger to reply \"pong\" and got \"Thought for 8 s, pong\" back, a second message streamed fine, and the stop button worked.\n\nYou can try it in your browser right now at **Jaeger main screen (test)**. It's only reachable from your own Mac. Replies take about 20 seconds because the test uses a small local model." },
           { kind: "handoff", handoffId: "h2", agentId: "agent:gateway-webui", agentName: name("agent:gateway-webui"), count: 4, direction: "to" },
