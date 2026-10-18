@@ -13,6 +13,7 @@ import { NativeHost } from "./chat/nativeHost";
 import { WebHost } from "./chat/webHost";
 import { ConnectAppsDialog } from "./connect-apps/ConnectAppsDialog";
 import { SettingsDialog } from "./settings/SettingsDialog";
+import { JumpTo } from "./agents/JumpTo";
 import { detectHost } from "./platform/host";
 import { onNativeEvent } from "./platform/native";
 import { AppShell } from "./shell/AppShell";
@@ -55,6 +56,7 @@ export function App({ source }: { source: JaegerSource }) {
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [connectOpen, setConnectOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [jumpOpen, setJumpOpen] = useState(false);
   const [newChatAnchor, setNewChatAnchor] = useState<HTMLElement | null>(null);
   const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null);
   const [historyAgentId, setHistoryAgentId] = useState<string | null>(null);
@@ -113,6 +115,7 @@ export function App({ source }: { source: JaegerSource }) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); setSettingsOpen(true); return; }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setJumpOpen((v) => !v); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newChat(selectedAgentId ?? LEAD_ID); }
     };
     window.addEventListener("keydown", onKey);
@@ -127,7 +130,7 @@ export function App({ source }: { source: JaegerSource }) {
     onNewChatMenu: setNewChatAnchor,
     onRenameChat: () => {},
     onArchiveChat: () => {},
-    onSearch: () => { /* search lands with /v1/sessions?q= */ },
+    onSearch: () => setJumpOpen(true),
     onConnectApps: () => setConnectOpen(true),
     onSettings: () => setSettingsOpen(true),
     onRetry: () => void store.refresh(),
@@ -135,6 +138,8 @@ export function App({ source }: { source: JaegerSource }) {
     pins,
     onPin: (agentId, index) => updatePins((cur) => pin(cur, agentId, index)),
     onUnpin: (agentId) => updatePins((cur) => unpin(cur, agentId)),
+    onInfo: (agentId) => { setSelection({ type: "agent", agentId }); host.openDetails?.(agentId); },
+    onHistory: (agentId) => host.openHistory?.(agentId),
     status: source.kind === "mock"
       ? { kind: "warn", label: "Mock data (dev)" }
       : store.error ? { kind: "error", label: "Gateway unreachable" } : { kind: "ok", label: "Connected" },
@@ -167,6 +172,14 @@ export function App({ source }: { source: JaegerSource }) {
         onNewChat={newChat} onCreateAgent={createAgent} />
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
+        onAgent={(agentId) => setSelection({ type: "agent", agentId })}
+        actions={[
+          { id: "new", label: "New chat", shortcut: "⌘N", run: () => newChat(selectedAgentId ?? LEAD_ID) },
+          { id: "history", label: "Chat history", run: () => host.openHistory?.(selectedAgentId ?? LEAD_ID) },
+          { id: "tasks", label: "Tasks", run: () => setSelection({ type: "tasks" }) },
+          { id: "settings", label: "Settings", shortcut: "⌘,", run: () => setSettingsOpen(true) },
+        ]} />
     </>
   );
 }

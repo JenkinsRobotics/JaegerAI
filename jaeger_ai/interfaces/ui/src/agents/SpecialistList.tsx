@@ -3,10 +3,16 @@
 import { Menu, type MenuItem } from "@aether/ui";
 import { useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
 
-const ROW_MENU: MenuItem[] = [{ id: "pin", label: "Pin to top" }];
+// Grok's Bot actions, scoped to what Jaeger has (Pin, plus the info pane and older chats).
+const ROW_MENU: MenuItem[] = [
+  { id: "pin", label: "Pin to top" },
+  { id: "info", label: "Show info", separatorBefore: true },
+  { id: "history", label: "Chat history" },
+];
 
-export function SpecialistList({ dragType, onPin, onUnpin, emptyDropHint = false, children }: {
+export function SpecialistList({ dragType, onPin, onUnpin, onInfo, onHistory, emptyDropHint = false, children }: {
   dragType: string; onPin: (agentId: string) => void; onUnpin: (agentId: string) => void;
+  onInfo?: (agentId: string) => void; onHistory?: (agentId: string) => void;
   /** Every specialist is pinned: keep a visible zone so a tile can still be dragged back. */
   emptyDropHint?: boolean; children: ReactNode;
 }) {
@@ -26,8 +32,11 @@ export function SpecialistList({ dragType, onPin, onUnpin, emptyDropHint = false
       onDrop={(e) => { if (!carries(e)) return; e.preventDefault(); setOver(false); const id = e.dataTransfer.getData(dragType); if (id) onUnpin(id); }}>
       {children}
       {emptyDropHint && <p className="jg-agent-list__drop-hint">Drag a pinned agent here to unpin it</p>}
-      <Menu open={Boolean(menu)} anchor={menu ? { x: menu.x, y: menu.y } : null} items={ROW_MENU} ariaLabel="Agent actions"
-        onClose={() => setMenu(null)} onSelect={() => { if (menu) onPin(menu.id); setMenu(null); }} />
+      <Menu open={Boolean(menu)} anchor={menu ? { x: menu.x, y: menu.y } : null} items={ROW_MENU.filter((i) => (i.id !== "info" || onInfo) && (i.id !== "history" || onHistory))} ariaLabel="Agent actions"
+        onClose={() => setMenu(null)} onSelect={(action) => {
+          if (menu) (action === "info" ? onInfo : action === "history" ? onHistory : onPin)?.(menu.id);
+          setMenu(null);
+        }} />
     </nav>
   );
 }

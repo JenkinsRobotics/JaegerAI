@@ -1,0 +1,79 @@
+// The popups people hit: ⌘K Jump to, the composer's + menu, the message right-click menu, the agent menu.
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { JumpTo } from "../agents/JumpTo";
+import { SpecialistList } from "../agents/SpecialistList";
+import type { Agent } from "../api/types";
+import { MinimalChat } from "./MinimalChat";
+import { WebHost } from "./webHost";
+import type { JaegerSource } from "../api/source";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+let el: HTMLDivElement; let root: Root;
+beforeEach(() => { el = document.createElement("div"); document.body.append(el); root = createRoot(el); });
+afterEach(() => { act(() => root.unmount()); el.remove(); document.body.innerHTML = ""; });
+const agents = [{ id: "native:builder", name: "builder", role: "builder" }, { id: "native:designer", name: "designer", role: "designer" }] as unknown as Agent[];
+const key = (target: Element, k: string) => act(() => { target.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })); });
+const items = () => [...document.querySelectorAll('[role="menuitem"]')].map((n) => n.textContent?.trim()).filter(Boolean);
+
+describe("⌘K Jump to", () => {
+  it("filters Bots and actions, moves with arrows and opens with Enter", async () => {
+    const onAgent = vi.fn(); const run = vi.fn(); const onClose = vi.fn();
+    await act(async () => { root.render(<JumpTo open agents={agents} actions={[{ id: "settings", label: "Settings", run }]} onAgent={onAgent} onClose={onClose} />); });
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Jump to"]')!;
+    expect([...document.querySelectorAll('[role="option"]')].length).toBe(3);
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "des"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect([...document.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual([expect.stringMatching(/designer/i)]);
+    await key(input, "Enter");
+    expect(onAgent).toHaveBeenCalledWith("native:designer");
+    expect(onClose).toHaveBeenCalled();
+  });
+  it("says No matches for a query with no hits, and Esc closes", async () => {
+    const onClose = vi.fn();
+    await act(async () => { root.render(<JumpTo open agents={agents} actions={[]} onAgent={vi.fn()} onClose={onClose} />); });
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Jump to"]')!;
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "zzz"); input.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(document.body.textContent).toContain('No matches for "zzz"');
+    await key(input, "Escape");
+    expect(onClose).toHaveBeenCalled();
+  });
+});
+
+describe("agent right-click", () => {
+  it("offers Pin to top, Show info and Chat history", async () => {
+    const onInfo = vi.fn();
+    await act(async () => { root.render(<SpecialistList dragType="x" onPin={vi.fn()} onUnpin={vi.fn()} onInfo={onInfo} onHistory={vi.fn()}><div data-agent-id="native:builder">Builder</div></SpecialistList>); });
+    await act(async () => { el.querySelector("[data-agent-id]")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })); });
+    expect(items()).toEqual(["Pin to top", "Show info", "Chat history"]);
+  });
+});
+
+describe("composer + and message menus", () => {
+  const source = { kind: "mock", session: vi.fn(async () => ({ sessionId: "s1", turns: [{ turnId: "t1", message: "hello there", parts: [{ kind: "markdownContent", text: "Hi! **Done.**" }], state: "complete" }] })),
+    stream: vi.fn(async () => {}), agents: vi.fn(async () => []) } as unknown as JaegerSource;
+  it("+ opens Composer actions; Attach files opens the picker", async () => {
+    await act(async () => { root.render(<MinimalChat host={new WebHost(source)} sessionId="s1" />); });
+    const picker = el.querySelector<HTMLInputElement>('input[type="file"]')!;
+    const click = vi.spyOn(picker, "click").mockImplementation(() => {});
+    await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Attach file"]')!.click(); });
+    expect(document.querySelector('[aria-label="Composer actions"]')).toBeTruthy();
+    expect(items()).toContain("Attach files");
+    const attach = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((n) => n.textContent?.includes("Attach files"))!;
+    await act(async () => { attach.click(); });
+    expect(click).toHaveBeenCalled();
+  });
+  it("right-click on a bubble offers Copy and Reply; Reply quotes it into the composer", async () => {
+    const host = { capabilities: { voice: false }, startTurn: vi.fn(), respondToConfirmation: vi.fn(), copy: vi.fn(), openExternal: vi.fn(),
+      sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [{ turnId: "t1", message: "hello there", parts: [{ kind: "markdownContent", text: "Hi! **Done.**" }], state: "complete" }] })) } };
+    await act(async () => { root.render(<MinimalChat host={host as never} sessionId="s1" />); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    const bubble = el.querySelector(".jg-bubble--assistant")!;
+    Object.defineProperty(bubble, "innerText", { configurable: true, get: () => "Hi! Done." });
+    await act(async () => { bubble.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })); });
+    expect(items()).toEqual(["Copy", "Reply"]);
+    const reply = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((n) => n.textContent?.includes("Reply"))!;
+    await act(async () => { reply.click(); });
+    expect(el.querySelector<HTMLTextAreaElement>(".jg-composer__input")!.value).toBe("> Hi! Done.\n\n");
+  });
+});

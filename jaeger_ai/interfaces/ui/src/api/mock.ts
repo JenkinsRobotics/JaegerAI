@@ -2,6 +2,7 @@
  * production builds drop (see api/index.ts). Sample roster, previews,
  * tasks, and transcripts with every ChatPart kind and each handoff marker
  * shape. send() replays a scripted gateway event sequence over stream(). */
+import { longAnswerScript } from "./mockLongAnswer";
 import type { ChatSession } from "../chat/host";
 import type { HomeOptions } from "../chat/homeSession";
 import { mockHome } from "./mockHome";
@@ -94,7 +95,7 @@ export const MOCK_TRANSCRIPTS: Record<string, ChatSession> = {
   },
 };
 
-const turnScript = (sessionId: string, text: string): Array<[number, GatewayEvent]> => [
+const turnScript = (sessionId: string, text: string): Array<[number, GatewayEvent]> => text.startsWith("I'm new to this project") ? longAnswerScript(sessionId) : [
   [150, { event: "turn.start", session_id: sessionId }],
   [250, { event: "turn.reasoning", payload: { text: "Reading the request.", duration_ms: 1_000 } }],
   [200, { event: "turn.progress", payload: { message: "Looking at the roster" } }],

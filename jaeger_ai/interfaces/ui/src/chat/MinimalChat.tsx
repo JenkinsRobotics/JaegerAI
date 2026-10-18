@@ -3,7 +3,7 @@
  * Jenkins Robotics 2026-10-17: tool steps fold into a "Show steps" card, and a
  * pending turn shows an activity-named progress line with a shimmer for as long as it runs. The composer
  * auto-grows (JS fallback), takes picked or pasted files as chips and morphs its primary button. */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { Menu } from "@aether/ui";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { avatarColor } from "../agents/avatarColor";
@@ -237,6 +237,10 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   /** Turns already there when the chat loaded don't play the enter animation. */
   const loadedTurns = useRef<Set<string>>(new Set());
   const field = useRef<HTMLTextAreaElement>(null);
+  /** Grok's "Composer actions" (the + button) and "Message actions" (right-click a bubble) menus. */
+  const plus = useRef<HTMLButtonElement>(null);
+  const [composerMenu, setComposerMenu] = useState(false);
+  const [messageMenu, setMessageMenu] = useState<{ x: number; y: number; text: string } | null>(null);
   const picker = useRef<HTMLInputElement>(null);
   const stick = useRef(true);
   const voiceHost = "micStart" in host ? (host as ChatHost & VoiceHost) : undefined;
@@ -413,6 +417,22 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
       () => picker.current?.click(),
     );
   };
+  const onMessageMenu = (e: ReactMouseEvent<HTMLElement>) => {
+    const bubble = (e.target as HTMLElement).closest<HTMLElement>(".jg-bubble");
+    if (!bubble) return;
+    e.preventDefault();
+    setMessageMenu({ x: e.clientX, y: e.clientY, text: bubble.innerText.trim() });
+  };
+  const onMessageAction = (action: string) => {
+    const text = messageMenu?.text ?? "";
+    setMessageMenu(null);
+    if (action === "copy") void navigator.clipboard?.writeText(text).catch(() => {});
+    if (action === "reply") {
+      const quote = text.split("\n").filter(Boolean).slice(0, 3).map((l) => `> ${l}`).join("\n");
+      setDraft((d) => `${quote}\n\n${d}`);
+      requestAnimationFrame(() => field.current?.focus());
+    }
+  };
   /** Files dragged onto the chat become chips, like paste. */
   const dragHasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
   const onDragOver = (e: DragEvent<HTMLDivElement>) => { if (!dragHasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDropping(true); };
@@ -497,7 +517,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
             onSelect={(id) => { setMenuOpen(false); if (id === "history") (host as WebHost).openHistory?.(agent.id); else host.openDetails?.(agent.id); }} />
         </div>
       </div>
-      <div className="jg-chat__scroll" ref={scroller} onScroll={onScroll} onWheel={markInput} onTouchMove={markInput} onPointerDown={markInput} onKeyDown={markInput}>
+      <div className="jg-chat__scroll" ref={scroller} onContextMenu={onMessageMenu} onScroll={onScroll} onWheel={markInput} onTouchMove={markInput} onPointerDown={markInput} onKeyDown={markInput}>
         <div className="jg-chat__column">
           {loadError && <ErrorState title="Couldn't load this chat" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
           {session && !session.turns.length && <p className="jg-chat__empty">What should we work on?</p>}
@@ -538,6 +558,8 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
         <ArrowDownIcon />
         {unread > 0 && <span className="jg-jump__badge">{badge(unread)}</span>}
       </button>
+      <Menu open={Boolean(messageMenu)} anchor={messageMenu ? { x: messageMenu.x, y: messageMenu.y } : null} ariaLabel="Message actions"
+        items={[{ id: "copy", label: "Copy" }, { id: "reply", label: "Reply" }]} onClose={() => setMessageMenu(null)} onSelect={onMessageAction} />
       <form ref={composer} className="jg-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">
@@ -552,7 +574,11 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
           </div>
         )}
         <input ref={picker} type="file" multiple hidden tabIndex={-1} onChange={(e) => { takeFiles(e.currentTarget.files); e.currentTarget.value = ""; }} />
-        <button type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach files" title="Attach files" onClick={attach}><PlusIcon /></button>
+        <button ref={plus} type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach file" title="Attach file" aria-haspopup="menu"
+          aria-expanded={composerMenu} onClick={() => setComposerMenu(true)}><PlusIcon /></button>
+        <Menu open={composerMenu} anchor={composerMenu ? plus.current : null} ariaLabel="Composer actions" placement="top-start" onClose={() => setComposerMenu(false)}
+          items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
+          onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
         <textarea ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : `Message ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
         {dictation && primary !== "dictate" && (
           <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
