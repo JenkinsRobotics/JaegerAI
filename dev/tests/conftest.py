@@ -59,7 +59,7 @@ _TEST_STATE_HOME = Path(tempfile.mkdtemp(prefix="jaeger-tests-", dir="/tmp"))
 # so in-repo clients under test authenticate the way they do in production.
 _CALLER_TOKEN_DIR = _TEST_STATE_HOME / "caller-tokens"
 _CALLER_TOKEN_DIR.mkdir(mode=0o700)
-for _caller in ("menubar", "cli", "webui", "ide", "bridge", "jaegerd", "mcp", "a2a"):
+for _caller in ("menubar", "cli", "webui", "ide", "bridge", "jaegerd", "mcp", "a2a", "ares", "grokbot"):
     import secrets as _secrets
     _fd = os.open(_CALLER_TOKEN_DIR / f"{_caller}.token", os.O_WRONLY | os.O_CREAT, 0o600)
     os.write(_fd, _secrets.token_urlsafe(32).encode("ascii"))

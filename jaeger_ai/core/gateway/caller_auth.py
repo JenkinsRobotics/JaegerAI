@@ -77,6 +77,10 @@ CALLERS: Mapping[str, CallerSpec] = {
                    description="jaegerd's own tools calling back into the Gateway"),
         CallerSpec("mcp", "mcp", frozenset({"read", "turn", "stop"}), session_prefix="mcp:",
                    description="Jaeger MCP server (agentgateway, OpenClaw, Hermes, other AIs)"),
+        CallerSpec("ares", "mcp:ares", frozenset({"read", "turn"}), session_prefix="ares:",
+                   description="ARES agent bridge client; dedicated credential required"),
+        CallerSpec("grokbot", "mcp:grokbot", frozenset({"read", "turn"}), session_prefix="grokbot:",
+                   description="GrokBot local bridge client; dedicated credential required"),
         CallerSpec("a2a", "a2a", frozenset({"read", "turn", "stop"}), session_prefix="a2a:",
                    description="Jaeger A2A server"),
     )
@@ -91,6 +95,9 @@ PUBLIC_ROUTES = frozenset({("GET", "/health"), ("GET", "/version"), ("HEAD", "/h
 
 #: Non-GET routes an outside caller's turn needs (canonical aiohttp paths).
 TURN_ROUTES = frozenset({
+    ("POST", "/v1/agent-messages"),
+    ("POST", "/v1/agent-goals"),
+    ("POST", "/v1/agent-goals/{goal_id}/cancel"),
     ("POST", "/v1/sessions"),
     ("PATCH", "/v1/sessions/{id}"),
     ("POST", "/v1/sessions/{id}/turns"),
@@ -114,6 +121,8 @@ STOP_ROUTES = frozenset({("POST", "/v1/stop")})
 DELEGATE_ROUTES = frozenset({("POST", "/v1/agents/{id}/handoff")})
 #: GET routes an outside (prefixed) caller may use; all are session-scoped.
 PREFIXED_READ_ROUTES = frozenset({
+    "/v1/agent-messages", "/v1/agent-threads/{thread}",
+    "/v1/agent-goals/{goal_id}",
     "/v1/sessions/{id}", "/v1/sessions/{id}/stream", "/v1/sessions/{id}/events",
     "/v1/sessions/{id}/requests/{request_id}", "/v1/sessions/{id}/queue",
     "/v1/sessions/{id}/attachments", "/v1/sessions/{id}/activity", "/v1/stop",

@@ -123,18 +123,24 @@ def _gateway_approval_wait(frame: dict[str, Any], request_id: str,
 MCP_SESSION_PREFIX = "mcp:"
 
 
-def _mcp_session(session_id: str = "") -> str:
+def _mcp_session(session_id: str = "", caller: str = "mcp") -> str:
     """Namespace an MCP-chosen session id under ``mcp:``; the Gateway refuses
     the MCP caller any other session, so an outside agent cannot read or
     continue the owner's conversations."""
+    from jaeger_ai.core.gateway.caller_auth import CALLERS
+
     raw = (session_id or "").strip() or "default"
-    return raw if raw.startswith(MCP_SESSION_PREFIX) else MCP_SESSION_PREFIX + raw
+    spec = CALLERS.get(caller)
+    if spec is None:
+        raise PermissionError("Unknown MCP caller")
+    prefix = spec.session_prefix
+    return raw if prefix is None or raw.startswith(prefix) else prefix + raw
 
 
 #: Gateway caller tokens the MCP HTTP server accepts inbound. ``mcp`` is
 #: what outside agents present (via agentgateway's backendAuth); ``jaegerd``
 #: is jaegerd's own native-lead/specialist client. Values stay in the Keychain.
-MCP_INBOUND_CALLERS = ("mcp", "jaegerd")
+MCP_INBOUND_CALLERS = ("mcp", "ares", "grokbot", "jaegerd")
 
 
 def resolve_inbound_tokens() -> dict[str, str]:
@@ -150,6 +156,49 @@ def resolve_inbound_tokens() -> dict[str, str]:
         if value:
             out[name] = value
     return out
+
+
+def _stdio_agent_caller() -> tuple[str, str]:
+    """Bind stdio identity to an existing proved token, never a caller flag.
+
+    Dedicated clients supply a private token-file path. Without it, only the
+    generic MCP credential is read; there is no ARES/Grok auto-detection.
+    """
+    import stat
+    from pathlib import Path
+
+    from jaeger_ai.core.gateway.caller_auth import (
+        CallerAuthenticator,
+        bearer,
+        read_token,
+    )
+
+    path = os.environ.get("JAEGER_MCP_TOKEN_FILE", "").strip()
+    if path:
+        source = Path(path)
+        if not source.is_absolute() or source.is_symlink():
+            raise PermissionError("Private absolute MCP token file required")
+        try:
+            descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+                info = os.fstat(handle.fileno())
+                private = (stat.S_ISREG(info.st_mode) and not stat.S_IMODE(info.st_mode) & 0o077
+                           and info.st_uid == os.getuid())
+                token = handle.read(4097).strip() if private else ""
+        except (OSError, UnicodeError):
+            raise PermissionError("MCP authorization file unavailable") from None
+        if not private:
+            raise PermissionError("MCP token file must be private (0600) and caller owned")
+        if not token or len(token) > 4096:
+            raise PermissionError("Invalid MCP authorization")
+    else:
+        token = read_token("mcp")
+    if not token:
+        raise PermissionError("Existing caller authorization required")
+    spec = CallerAuthenticator().authenticate(bearer(token).get("Authorization"))
+    if spec is None or spec.name not in {"mcp", "ares", "grokbot"}:
+        raise PermissionError("Invalid agent bridge caller authorization")
+    return spec.name, token
 
 
 def _presented_caller(ctx: Any) -> tuple[str | None, str | None]:
@@ -170,6 +219,19 @@ def _presented_caller(ctx: Any) -> tuple[str | None, str | None]:
     return found
 
 
+def _agent_bridge_caller(ctx: Any) -> tuple[str, str]:
+    caller, token = _presented_caller(ctx)
+    if token:
+        return caller, token
+    try:
+        http_request = ctx.request_context.request
+    except (AttributeError, TypeError):
+        http_request = None
+    if http_request is not None:
+        raise PermissionError("Authenticated MCP caller required")
+    return _stdio_agent_caller()
+
+
 def _bridge_chat(bridge: Any, message: str, session: str = "mcp", request_id: str = "",
                  allowed_tools: list[str] | None = None, is_subordinate: bool = False,
                  gateway_token: str | None = None, relay_caller: str | None = None) -> str:
@@ -187,7 +249,7 @@ def _bridge_chat(bridge: Any, message: str, session: str = "mcp", request_id: st
     if relay_caller == "jaegerd" and gateway_token:
         out = bridge.turn(message, session=session or "mcp", gateway_token=gateway_token, **kwargs)
     elif gateway_token:
-        out = bridge.turn(message, session=_mcp_session(session), gateway_token=gateway_token, **kwargs)
+        out = bridge.turn(message, session=_mcp_session(session, relay_caller or "mcp"), gateway_token=gateway_token, **kwargs)
     else:
         out = bridge.turn(message, session=_mcp_session(session), gateway_caller="mcp", **kwargs)
     if isinstance(out, dict) and (out.get("error") or out.get("halt_reason") or out.get("execution_unknown")):
@@ -335,6 +397,16 @@ def build_server(client: Any, instance: str, model: str | None,
         ),
     )
 
+    from jaeger_ai.features.agent_bridge.mcp import register as register_agent_bridge
+
+    def agent_bridge_client(ctx):
+        from jaeger_ai.core.gateway.client import GatewayTurnClient
+
+        caller, token = _agent_bridge_caller(ctx)
+        return GatewayTurnClient(getattr(gateway, "base_url", None), caller=caller, token=token)
+
+    register_agent_bridge(mcp, agent_bridge_client)
+
     @mcp.tool()
     @_off_event_loop
     def chat(message: str, session_id: str = "", request_id: str = "",
@@ -352,7 +424,9 @@ def build_server(client: Any, instance: str, model: str | None,
         initial grant and cannot expand it on a later request.
         """
         relay_caller, relay_token = _presented_caller(ctx)
-        session = (session_id or "").strip() if relay_caller == "jaegerd" else _mcp_session(session_id)
+        if relay_token is None and os.environ.get("JAEGER_MCP_TOKEN_FILE"):
+            relay_caller, relay_token = _agent_bridge_caller(ctx)
+        session = (session_id or "").strip() if relay_caller == "jaegerd" else _mcp_session(session_id, relay_caller or "mcp")
         if bridge is not None:
             return _bridge_chat(
                 bridge, message, session=session, request_id=request_id,
@@ -388,20 +462,30 @@ def build_server(client: Any, instance: str, model: str | None,
     if bridge is not None:
         @mcp.tool()
         @_off_event_loop
-        def cancel_turn(session_id: str = "", request_id: str = "") -> dict:
+        def cancel_turn(session_id: str = "", request_id: str = "", ctx: Context | None = None) -> dict:
             """Request native cancellation. Does not claim the native effect stopped."""
             try:
-                bridge.control("cancel", turn_id=request_id, session=_mcp_session(session_id))
+                _caller, token = _presented_caller(ctx)
+                if token or os.environ.get("JAEGER_MCP_TOKEN_FILE"):
+                    client = agent_bridge_client(ctx)
+                    client.cancel(_mcp_session(session_id, client.caller), request_id)
+                else:
+                    bridge.control("cancel", turn_id=request_id, session=_mcp_session(session_id))
                 return {"ok": True, "requested": True, "confirmed": False, "request_id": request_id}
             except Exception as exc:  # noqa: BLE001
                 return {"ok": False, "requested": False, "confirmed": False, "error": str(exc)}
     elif gateway is not None:
         @mcp.tool()
         @_off_event_loop
-        def cancel_turn(session_id: str = "", request_id: str = "") -> dict:
+        def cancel_turn(session_id: str = "", request_id: str = "", ctx: Context | None = None) -> dict:
             """Request Gateway turn cancellation."""
             try:
-                gateway.cancel(_mcp_session(session_id), request_id)
+                _caller, token = _presented_caller(ctx)
+                if token or os.environ.get("JAEGER_MCP_TOKEN_FILE"):
+                    client = agent_bridge_client(ctx)
+                    client.cancel(_mcp_session(session_id, client.caller), request_id)
+                else:
+                    gateway.cancel(_mcp_session(session_id), request_id)
                 return {"ok": True, "requested": True, "confirmed": False, "request_id": request_id}
             except Exception as exc:  # noqa: BLE001
                 return {"ok": False, "requested": False, "confirmed": False, "error": str(exc)}
