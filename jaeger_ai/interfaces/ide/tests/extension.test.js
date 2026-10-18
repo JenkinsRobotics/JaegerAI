@@ -12,6 +12,7 @@ let jaegerModelSetting = 'settings-model';
 let copiedText = null;
 const configChangeListeners = [];
 const registeredCommands = new Map();
+const chatParticipants = new Map();
 let chooseItem = items => items[0];
 let catalog = { providers: [] };
 const mockVscode = {
@@ -27,6 +28,7 @@ const mockVscode = {
     registerWebviewViewProvider: () => ({ dispose: () => {} }),
   },
   commands: { registerCommand: (id, fn) => { registeredCommands.set(id, fn); return { dispose() {} }; }, executeCommand: async () => {} },
+  chat: { createChatParticipant: (id, handler) => { chatParticipants.set(id, handler); return { dispose() {} }; } },
   workspace: {
     registerTextDocumentContentProvider: () => ({ dispose() {} }),
     getConfiguration: () => ({
@@ -151,6 +153,44 @@ test('disposing a view releases its message listener', () => {
   assert.equal(wired.messageDisposed(), false);
   wired.dispose();
   assert.equal(wired.messageDisposed(), true);
+});
+
+test('native chat participant uses one Gateway-owned session across turns', async () => {
+  const wired = wireExtension();
+  wired.send({ type: 'ready' });
+  await waitFor(() => wired.gateway.instance !== undefined);
+  const handler = chatParticipants.get('jaeger.chatParticipant');
+  assert.equal(typeof handler, 'function');
+  const gateway = wired.gateway.instance;
+  const createdSessions = [];
+  gateway.create = async body => {
+    createdSessions.push(body);
+    return { session_id: body.session_id };
+  };
+  gateway.send = async (sessionId, body) => {
+    gateway.sent = { sessionId, ...body };
+    return { start_event_id: 1, status: 'running' };
+  };
+  gateway.events = async function* () {
+    yield { event_id: 1, event: 'turn.delta', data: { request_id: gateway.sent.request_id, delta: 'partial' } };
+    yield { event_id: 2, event: 'turn.finish', data: { request_id: gateway.sent.request_id } };
+  };
+  gateway.receipt = async () => ({ status: 'completed', result: { output: 'Jaeger answer' } });
+  gateway.session = async sessionId => ({ session_id: sessionId, messages: [] });
+
+  const responses = [];
+  const stream = { markdown: text => responses.push(text), progress: () => {} };
+  const token = { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) };
+  const first = await handler({ prompt: 'First question' }, { history: [] }, stream, token);
+  assert.ok(first, responses.join('\n'));
+  const sessionId = first.metadata.jaegerSessionId;
+  const second = await handler({ prompt: 'Follow-up' }, { history: [{ result: first }] }, stream, token);
+
+  assert.equal(createdSessions.length, 1);
+  assert.equal(gateway.sent.sessionId, sessionId);
+  assert.equal(gateway.sent.text, 'Follow-up');
+  assert.equal(second.metadata.jaegerSessionId, sessionId);
+  assert.deepEqual(responses, ['Jaeger answer', 'Jaeger answer']);
 });
 
 test('explicit workspace selection reaches the Gateway admission body', async () => {

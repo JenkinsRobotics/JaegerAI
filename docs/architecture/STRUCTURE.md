@@ -9,17 +9,17 @@
 
 | I want to... | Where do I look? | Key files |
 | :--- | :--- | :--- |
-| **Edit the Web UI (chat page, profiles, adapter)** | [`jaeger_ai/features/webui/`](jaeger_ai/features/webui/) | `adapter/server.py`, `service/profile_layout.py` |
-| **Edit the Web UI's look & branding** | [`jaeger_ai/assets/`](jaeger_ai/assets/) | `jaeger_webui_branding.js` — **the only copy**; see below |
-| **Edit the Task Dispatcher & Kanban board** | [`jaeger_ai/features/dispatcher/`](jaeger_ai/features/dispatcher/) | `store.py`, `router.py`, `sidecar.py` (board UI: `jaeger_ai/assets/jaeger_dispatcher.js`) |
-| **Edit Roundtable (multi-agent debate & consensus)** | [`jaeger_ai/features/roundtable/`](jaeger_ai/features/roundtable/) | `policy.py` (rules), `service.py` (engine), `roundtable.py` (streaming) |
-| **Add or edit Agent Tools (FastMCP tools)** | [`jaeger_ai/features/host_capabilities/`](jaeger_ai/features/host_capabilities/) | `server.py`, `grants.py`, `*_tools.py` |
-| **Change the agent's persona / tone** | [`jaeger_ai/features/personality/`](jaeger_ai/features/personality/) | `characters/<name>/` (editable YAML — no code needed) |
-| **Add/rename a framework, or change a port** | [`jaeger_ai/contract/`](jaeger_ai/contract/) | `frameworks.py`, `ports.py` — the single copy; everything else imports it |
-| **Change how a framework runs a turn** | [`jaeger_ai/core/frameworks/`](jaeger_ai/core/frameworks/) | `jaeger.py`, `hermes_native.py`, `openclaw_native.py` |
-| **Edit Shared Memory (Honcho)** | [`jaeger_ai/features/shared_memory/`](jaeger_ai/features/shared_memory/) | `honcho_client.py` |
-| **Change CLI commands (`jaeger start`, `stop`, `bench`)** | [`jaeger_ai/cli/verbs/`](jaeger_ai/cli/verbs/) | `lifecycle_verbs.py`, `dispatch.py` (CLI arg router) |
-| **Run diagnostic / verification scripts** | [`scripts/`](scripts/) | `run-host-capability-server.py`, `verify-*.py` |
+| **Edit the Web UI (chat page, profiles, adapter)** | [`jaeger_ai/features/webui/`](../../jaeger_ai/features/webui/) | `adapter/server.py`, `service/profile_layout.py` |
+| **Edit the Web UI's look & branding** | [`jaeger_ai/assets/`](../../jaeger_ai/assets/) | `jaeger_webui_branding.js` — **the only copy**; see below |
+| **Edit the Task Dispatcher & Kanban board** | [`jaeger_ai/features/dispatcher/`](../../jaeger_ai/features/dispatcher/) | `store.py`, `router.py`, `sidecar.py` (board UI: `jaeger_ai/assets/jaeger_dispatcher.js`) |
+| **Edit Roundtable (multi-agent debate & consensus)** | [`jaeger_ai/features/roundtable/`](../../jaeger_ai/features/roundtable/) | `policy.py` (rules), `service.py` (engine), `roundtable.py` (streaming) |
+| **Add or edit Agent Tools (FastMCP tools)** | [`jaeger_ai/features/host_capabilities/`](../../jaeger_ai/features/host_capabilities/) | `server.py`, `grants.py`, `*_tools.py` |
+| **Change the agent's persona / tone** | [`jaeger_ai/features/personality/`](../../jaeger_ai/features/personality/) | `characters/<name>/` (editable YAML — no code needed) |
+| **Add/rename a framework, or change a port** | [`jaeger_ai/contract/`](../../jaeger_ai/contract/) | `frameworks.py`, `ports.py` — the single copy; everything else imports it |
+| **Change how a framework runs a turn** | [`jaeger_ai/core/frameworks/`](../../jaeger_ai/core/frameworks/) | `jaeger.py`, `hermes_native.py`, `openclaw_native.py` |
+| **Edit Shared Memory (Honcho)** | [`jaeger_ai/features/shared_memory/`](../../jaeger_ai/features/shared_memory/) | `honcho_client.py` |
+| **Change CLI commands (`jaeger start`, `stop`, `bench`)** | [`jaeger_ai/cli/verbs/`](../../jaeger_ai/cli/verbs/) | `lifecycle_verbs.py`, `dispatch.py` (CLI arg router) |
+| **Run diagnostic / verification scripts** | [`scripts/`](../../scripts/) | `run-host-capability-server.py`, `verify-*.py` |
 
 ---
 
@@ -107,9 +107,10 @@ JaegerAI/
 │   ├── cli/                    # 💻 Command-line verbs (`start`, `stop`, `webui`, …)
 │   ├── interfaces/             # 🔌 Client surfaces ONLY — how a human or peer connects
 │   │   ├── swift/              # Native macOS app
+│   │   ├── ide/                # VS Code / IDE extension webview & server client
 │   │   ├── tui/                # Terminal UI
 │   │   ├── pyside6/            # Qt desktop UI
-│   │   ├── messaging/          # Discord / Slack / Telegram adapters
+│   │   ├── avatar/             # Avatar window surfaces
 │   │   └── bridge.py           # The NDJSON socket the native clients speak
 │   ├── nodes/                  # 🧩 Manifest-driven modules (each with module.yaml)
 │   └── plugins/                # 🧩 Messaging + integration plugins

@@ -3,7 +3,7 @@
 
 # Jaeger Architecture (surviving design)
 
-**Branch:** `pinocchio`
+**Branch:** `0.13-dev` (canonical)
 **Status:** Canonical contributor-facing architecture after the Master Architecture Completion program
 **Evidence rule:** `IMPLEMENTED` means code is on the production path. `EXPERIMENTAL` means a module and unit tests exist. `PLANNED` is not shipped. `DEPRECATED` must not be used. `VERIFIED` requires a named test command or live request id.
 
@@ -31,7 +31,7 @@ AVAILABLE != AUTHORIZED
 ONE FACT = ONE AUTHORITATIVE OWNER
 ```
 
-Jaeger remains the same entity across model, provider, conversation, interface, device, and restart. Identity for the operator instance is stored as `EntityIdentity` under the instance memory directory (operator entity `jaeger-entity-7615957f0fa6` on this machine; tests use isolated ids).
+Jaeger remains the same entity across model, provider, conversation, interface, device, and restart. Identity for the operator instance is stored as `EntityIdentity` under the instance memory directory (e.g., `jaeger-entity-<uuid>`; tests use isolated ids).
 
 ---
 

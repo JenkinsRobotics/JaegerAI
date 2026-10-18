@@ -211,7 +211,7 @@ struct WebUIChatContainer: View {
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(red: 0.043, green: 0.055, blue: 0.078).opacity(0.72))
+                .background(AetherTheme.bgApp.opacity(0.85))
             } else if let err = controller.lastError, controller.webViewHasNoPage {
                 VStack(spacing: 12) {
                     Text("Jaeger WebUI is not reachable")

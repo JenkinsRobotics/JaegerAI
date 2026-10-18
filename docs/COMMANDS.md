@@ -43,6 +43,7 @@ instance, one word now.)
 | `jaeger runtime …` | Inspect / select GGUF and MLX inference engines |
 | `jaeger backends` | List installed agent CLI backends (models, not delegates) |
 | `jaeger memory …` | Agent memory tools |
+| `jaeger sessions [list]` | List conversations across profiles and endpoints |
 | `jaeger settings …` | Runtime settings |
 | `jaeger skill …` | Single-skill operations |
 | `jaeger webui {start,stop,status,url}` | Jaeger WebUI + adapter, optional Tailscale publishing |
@@ -91,10 +92,14 @@ explicit operator restart after its active work has been checked.
 | `jaeger bridge` | Run the app bridge protocol on stdio |
 | `jaeger mcp` | Run the MCP server (stdio)|
 | `jaeger mcp --http` | Streamable HTTP MCP on :8792 attached to the live bridge|
-| `jaeger a2a` | Official a2a-sdk JSON-RPC host on :8796|
-| `jaeger gateway {install,start,stop,status}` | Optional Jaeger-owned Agentgateway proxy (MCP :8811, A2A :8812) |
+| `jaeger a2a` | Official a2a-sdk JSON-RPC host on :8796 |
+| `jaeger gateway daemon` | **Jaeger Gateway** (:8810) — owns sessions, SSE multi-client events, approvals |
+| `jaeger gateway {install,start,stop,status}` | External Agentgateway proxy (MCP :8811, A2A :8812) via `features/agentgateway` |
 | `jaeger gateway verify [--json]` | Exercise native MCP :8792, bridge health/capabilities, and native A2A :8796 |
 | `jaeger launcher …` | Launcher plumbing |
+
+> **Note on `gateway` commands:** `jaeger gateway daemon` and `jaeger gateway` are distinct processes.
+> Only `daemon` runs the core Jaeger Gateway (:8810). Bare `jaeger gateway` manages the external Agentgateway proxy (:8811/:8812).
 
 There is ONE app bundle: `JaegerAI.app`. Dev is a launch state
 (`jaeger dev`), not a separate app — one TCC permission grant covers

@@ -5,18 +5,22 @@ The current execution entry point is
 release-path work or writing another plan.
 
 Operator instructions live in the root [README](../README.md) and
-[COMMANDS.md](../COMMANDS.md); contributor workflow lives in
+[COMMANDS.md](COMMANDS.md); contributor workflow lives in
 [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 | Document | Classification | Purpose |
 | --- | --- | --- |
 | [CONTINUE_FROM_HERE.md](CONTINUE_FROM_HERE.md) | CURRENT AUTHORITATIVE | Current baseline, proven state, remaining work, continuation rules, and document classification |
+| [COMMANDS.md](COMMANDS.md) | CURRENT REFERENCE | Operator CLI commands and subcommands |
 | [OPERATIONS.md](OPERATIONS.md) | CURRENT REFERENCE | State roots, upgrades, backups, cancellation, retry, and health |
+| [RELEASE_0.13.md](RELEASE_0.13.md) | RELEASE RECORD | 0.13.0 qualification, verification gates, and packaging evidence |
 | [gateway-task-ownership.md](gateway-task-ownership.md) | CURRENT REFERENCE | Gateway-owned durable background work |
 | [EXTENSION_GUIDE.md](EXTENSION_GUIDE.md) | CURRENT AUTHORITATIVE | Public capability, provider, and device contracts |
 | [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) | CURRENT AUTHORITATIVE | Topology and ownership, with IMPLEMENTED / EXPERIMENTAL / PLANNED status |
 | [architecture/MAIN_LOOP.md](architecture/MAIN_LOOP.md) | CURRENT AUTHORITATIVE | One Gateway turn path |
+| [architecture/PRODUCTION_PATHS.md](architecture/PRODUCTION_PATHS.md) | CURRENT AUTHORITATIVE | Single production runtime path, invariants, and ownership |
 | [architecture/STATE_OWNERSHIP_MAP.md](architecture/STATE_OWNERSHIP_MAP.md) | CURRENT AUTHORITATIVE | One authoritative owner per fact |
+| [architecture/STRUCTURE.md](architecture/STRUCTURE.md) | CURRENT REFERENCE | System directory map and component boundaries |
 | [architecture/TEST_ARCHITECTURE.md](architecture/TEST_ARCHITECTURE.md) | CURRENT AUTHORITATIVE | What each test tier proves |
 | [architecture/THREAT_MODEL.md](architecture/THREAT_MODEL.md) | CURRENT AUTHORITATIVE | Trust domains and mitigations |
 | [architecture/DONOR_PROVENANCE.md](architecture/DONOR_PROVENANCE.md) | CURRENT REFERENCE | Donor sources, licenses, and decision records |

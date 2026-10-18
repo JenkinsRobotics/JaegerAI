@@ -3,7 +3,7 @@
 
 # JaegerAI Architectural Threat Model & Security Specification (Workstream 19)
 
-**Branch:** `pinocchio`  
+**Branch:** `0.13-dev` (canonical)  
 **Classification:** Engineering Security Architecture & Threat Specification
 **Status:** Canonical & Implemented  
 

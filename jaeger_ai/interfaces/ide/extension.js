@@ -1,6 +1,6 @@
 'use strict';
 const vscode = require('vscode');
-const { randomBytes } = require('node:crypto');
+const { randomBytes, randomUUID } = require('node:crypto');
 const { execFile, spawn } = require('node:child_process');
 const util = require('node:util');
 const fs = require('node:fs');
@@ -997,8 +997,27 @@ function activate(context) {
     }
   };
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider('jaeger.conversation', provider, { webviewOptions: { retainContextWhenHidden: true } }),
-    vscode.commands.registerCommand('jaeger.open', () => vscode.commands.executeCommand('jaeger.conversation.focus')),
+    ...(typeof vscode.window?.registerWebviewViewProvider === 'function' ? [
+      vscode.window.registerWebviewViewProvider('jaeger.conversation', provider, { webviewOptions: { retainContextWhenHidden: true } })
+    ] : []),
+    vscode.commands.registerCommand('jaeger.open', async () => {
+      if (typeof vscode.commands?.executeCommand === 'function') {
+        try {
+          return await vscode.commands.executeCommand('jaeger.conversation.focus');
+        } catch {
+          return await vscode.commands.executeCommand('workbench.action.chat.open').catch(() => {});
+        }
+      }
+    }),
+    vscode.commands.registerCommand('jaeger.openChatTab', async () => {
+      if (typeof vscode.commands?.executeCommand === 'function') {
+        try {
+          return await vscode.commands.executeCommand('workbench.action.chat.openInEditor');
+        } catch {
+          return await vscode.commands.executeCommand('workbench.action.chat.open').catch(() => {});
+        }
+      }
+    }),
     vscode.commands.registerCommand('jaeger.settings', settings),
     vscode.commands.registerCommand('jaeger.setToken', async () => {
       const current = currentCallerToken || (await getStoredCallerToken());
@@ -1156,6 +1175,120 @@ function activate(context) {
         view.webview.postMessage({ configuredModel: configuredModel() });
       }
     }),
+    // Register Microsoft VS Code native Chat Participant (@jaeger) if supported by host
+    ...(typeof vscode.chat?.createChatParticipant === 'function' ? [
+      vscode.chat.createChatParticipant('jaeger.chatParticipant', async (request, chatContext, stream, token) => {
+        let sessionId = '';
+        let cancellation;
+        const requestAbort = new AbortController();
+        try {
+          const gw = controller?.gateway || gatewayClient();
+          const history = Array.isArray(chatContext?.history) ? chatContext.history : [];
+          sessionId = [...history].reverse().find(turn => turn?.result?.metadata?.jaegerSessionId)
+            ?.result.metadata.jaegerSessionId || '';
+          const workspace = selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+          if (request.command === 'verify') {
+            stream.progress('Running verification test suite...');
+            const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+            if (!root) {
+              stream.markdown('*(No workspace folder open)*');
+              return;
+            }
+            const runner = detectTestRunner(root);
+            if (!runner) {
+              stream.markdown('*(No supported test runner found in this workspace)*');
+              return;
+            }
+            const { stdout, stderr } = await execFileAsync(runner.executable, runner.args, {
+              cwd: root, timeout: 120000, maxBuffer: 1024 * 1024 * 5,
+              env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1',
+                PYTHONPYCACHEPREFIX: path.join(os.tmpdir(), 'jaeger', 'pycache') },
+            });
+            const out = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
+            stream.markdown('```\n' + (out.slice(-2000) || 'Verification completed.') + '\n```');
+            return;
+          }
+          if (request.command === 'status') {
+            const health = await gw.json('/health').catch(err => ({ error: err.message }));
+            stream.markdown('**Jaeger Gateway Status:** `' + (health.gateway?.ok ? 'available' : 'unavailable') + '`\n\n' +
+              '- Endpoint: `' + gw.url + '`\n' +
+              '- Model: `' + (configuredModel() || 'Gateway default') + '`' +
+              (health.error ? '\n- Error: ' + health.error : ''));
+            return;
+          }
+          if (request.command === 'skills') {
+            const catalog = await gw.skills().catch(() => ({ skills: [] }));
+            const skills = catalog.skills || [];
+            if (!skills.length) {
+              stream.markdown('No skills reported by the connected Gateway.');
+              return;
+            }
+            stream.markdown('**Loaded Skills (' + skills.length + '):**\n\n' +
+              skills.map(s => '- **' + (s.name || s.id) + '**: ' + (s.description || '')).join('\n'));
+            return;
+          }
+
+          const prompt = String(request.prompt || '').trim();
+          if (!prompt) return;
+          if (!sessionId) {
+            const created = await gw.create({
+              session_id: randomUUID(), title: prompt.replace(/\s+/g, ' ').slice(0, 72),
+              workspace, source: 'ide',
+            });
+            sessionId = created.session_id;
+          }
+          const requestId = randomUUID();
+          const selectedModel = parseProviderModel(configuredModel());
+          const ide = ideContext();
+          stream.progress('Connecting to Jaeger...');
+          cancellation = token?.onCancellationRequested?.(() => {
+            void gw.cancel(sessionId, requestId).catch(error => output.appendLine(`[jaeger] Chat cancellation failed: ${error.message}`));
+          });
+          const admitted = await gw.send(sessionId, {
+            text: prompt, request_id: requestId, workspace,
+            ...(selectedModel.model ? { model: selectedModel.model, ...(selectedModel.provider ? { provider: selectedModel.provider } : {}) } : {}),
+            ...(ide ? { options: { ide } } : {}),
+          });
+          if (token?.isCancellationRequested) void gw.cancel(sessionId, requestId).catch(() => {});
+          stream.progress('Jaeger is working...');
+          let cursor = Math.max(0, Number(admitted.start_event_id || 1) - 1);
+          const terminalStatuses = ['completed', 'failed', 'cancelled', 'execution_unknown'];
+          let settled = terminalStatuses.includes(admitted.status);
+          if (!settled) {
+            for await (const event of gw.events(sessionId, cursor, requestAbort.signal)) {
+              if (event.event_id) cursor = Math.max(cursor, Number(event.event_id));
+              const data = event.data || {};
+              if (data.request_id !== requestId) continue;
+              if (event.event === 'turn.progress') stream.progress(String(data.text || 'Jaeger is working...'));
+              else if (event.event === 'tool.started') stream.progress(`Jaeger is using ${String(data.tool || 'a tool')}...`);
+              if (['turn.finish', 'turn.failed', 'turn.cancelled', 'turn.unknown', 'turn.reconciled'].includes(event.event)) {
+                settled = true;
+                break;
+              }
+            }
+          }
+          const receipt = await gw.receipt(sessionId, requestId);
+          if (!terminalStatuses.includes(receipt.status)) {
+            throw new Error(`Jaeger accepted the request, but its terminal status is not available yet (request ${requestId}).`);
+          }
+          if (receipt.status !== 'completed') {
+            stream.markdown(`Jaeger request ${receipt.status}: ${String(receipt.result?.error || 'No completed answer was returned.')}`);
+            return { metadata: { jaegerSessionId: sessionId, jaegerRequestId: requestId } };
+          }
+          const session = await gw.session(sessionId);
+          const assistantMessage = [...(session.messages || [])].reverse().find(message => message.role === 'assistant');
+          const answer = String(receipt.result?.output || receipt.result?.text || assistantMessage?.content || 'Jaeger completed the request.');
+          stream.markdown(answer);
+          return { metadata: { jaegerSessionId: sessionId, jaegerRequestId: requestId } };
+        } catch (err) {
+          stream.markdown('**Jaeger Gateway Error:** ' + err.message);
+          return sessionId ? { metadata: { jaegerSessionId: sessionId } } : undefined;
+        } finally {
+          cancellation?.dispose();
+          requestAbort.abort();
+        }
+      })
+    ] : []),
     { dispose: () => {
       controller?.dispose();
       if (daemonProcess) {

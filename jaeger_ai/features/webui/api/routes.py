@@ -16794,7 +16794,11 @@ def _serve_static(handler, parsed):
     try:
         static_file.relative_to(static_root)
     except ValueError:
-        return j(handler, {"error": "not found"}, status=404)
+        assets_root = (api_config.REPO_ROOT.parents[1] / "assets").resolve()
+        try:
+            static_file.relative_to(assets_root)
+        except ValueError:
+            return j(handler, {"error": "not found"}, status=404)
     if not static_file.exists() or not static_file.is_file():
         return j(handler, {"error": "not found"}, status=404)
     ext = static_file.suffix.lower()

@@ -4,6 +4,7 @@
 	"description": "A local IDE conversation surface for your persistent Jaeger Gateway.",
 	"version": "0.1.3",
 	"publisher": "jenkins-robotics",
+	"icon": "media/jaeger.png",
 	"engines": {
 		"vscode": "^1.96.0"
 	},
@@ -37,7 +38,11 @@
 		"commands": [
 			{
 				"command": "jaeger.open",
-				"title": "Jaeger: Open Conversation"
+				"title": "Jaeger: Open Sidebar"
+			},
+			{
+				"command": "jaeger.openChatTab",
+				"title": "Jaeger: Open Chat Tab"
 			},
 			{
 				"command": "jaeger.settings",
@@ -64,7 +69,7 @@
 			"activitybar": [
 				{
 					"id": "jaeger",
-					"title": "Jaeger",
+					"title": "Jaeger AI",
 					"icon": "media/jaeger.svg"
 				}
 			]
@@ -74,10 +79,34 @@
 				{
 					"type": "webview",
 					"id": "jaeger.conversation",
-					"name": "Jaeger"
+					"name": "Jaeger AI"
 				}
 			]
 		},
+		"chatParticipants": [
+			{
+				"id": "jaeger.chatParticipant",
+				"name": "jaeger",
+				"fullName": "Jaeger AI",
+				"description": "Jaeger AI conversation and agent workspace",
+				"icon": "media/jaeger.svg",
+				"isDefault": true,
+				"commands": [
+					{
+						"name": "verify",
+						"description": "Run the project verification test suite"
+					},
+					{
+						"name": "status",
+						"description": "Check Jaeger Gateway and agent health"
+					},
+					{
+						"name": "skills",
+						"description": "List loaded skills and capabilities"
+					}
+				]
+			}
+		],
 		"configuration": {
 			"title": "Jaeger",
 			"properties": {

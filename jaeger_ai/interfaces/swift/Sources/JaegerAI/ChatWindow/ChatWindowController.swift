@@ -111,7 +111,7 @@ final class ChatWindowController {
         // controls collapse the same way.
         win.appearance = NSAppearance(named: .darkAqua)
         win.backgroundColor = NSColor(
-            red: 0.043, green: 0.055, blue: 0.078, alpha: 1.0) // Term.canvas
+            red: 14/255.0, green: 16/255.0, blue: 19/255.0, alpha: 1.0) // AetherTheme.bgApp (#0e1013)
         win.isReleasedWhenClosed = false
         win.contentViewController = hosting
         win.center()
