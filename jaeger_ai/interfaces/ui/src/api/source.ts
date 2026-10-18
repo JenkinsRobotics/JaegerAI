@@ -22,6 +22,9 @@ export interface JaegerSource {
   send(sessionId: string, text: string, requestId: string, attachmentIds?: string[]): Promise<TurnReceipt>;
   /** POST /v1/sessions/{id}/attachments: register a workspace file (the gateway sizes and hashes it). */
   addAttachment(sessionId: string, body: { path: string; filename?: string; mime_type?: string }): Promise<{ attachment_id: string }>;
+  /** PROVISIONAL (bytes upload, gateway-side staging): the same endpoint with the file's bytes instead
+   * of a path. Only called when the bytes-upload flag is on (composer.bytesUploadEnabled). */
+  uploadAttachment?(sessionId: string, body: { filename: string; mime_type: string; data_base64: string }): Promise<{ attachment_id: string }>;
   cancel(sessionId: string, requestId?: string): Promise<void>;
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   tasks(): Promise<Task[]>;
