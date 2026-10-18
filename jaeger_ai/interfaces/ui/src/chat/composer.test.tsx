@@ -1,0 +1,81 @@
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, addFiles, fileSize, primaryAction, toAttachments } from "./composer";
+import type { ChatHost, StartTurnRequest } from "./host";
+import { MinimalChat } from "./MinimalChat";
+
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+describe("composer helpers", () => {
+  it("morphs the primary button Stop → Send → Voice chat", () => {
+    expect(primaryAction({ running: true, hasContent: true, voice: true })).toBe("stop");
+    expect(primaryAction({ running: false, hasContent: true, voice: true })).toBe("send");
+    expect(primaryAction({ running: false, hasContent: false, voice: true })).toBe("voice");
+    expect(primaryAction({ running: false, hasContent: false, voice: false })).toBe("send");
+  });
+
+  it("caps attachments by count and size and says what it left out", () => {
+    let n = 0;
+    const id = () => `f${(n += 1)}`;
+    const many = Array.from({ length: MAX_ATTACHMENTS + 2 }, (_, i) => ({ name: `a${i}.txt`, size: 10, type: "text/plain" }));
+    const r = addFiles([], [...many, { name: "big.mov", size: MAX_ATTACHMENT_BYTES + 1, type: "video/quicktime" }], id);
+    expect(r.files).toHaveLength(MAX_ATTACHMENTS);
+    expect(r.note).toBe("1 over 20 MB left out · only 8 files per message");
+    expect(addFiles([], [{ name: "", size: 1, type: "image/png" }], id).files[0].name).toBe("pasted file");
+    expect(toAttachments([{ id: "x", name: "a.bin", size: 1, type: "" }])).toEqual([{ name: "a.bin", mimeType: "application/octet-stream" }]);
+    expect(fileSize(2048)).toBe("2 KB");
+  });
+});
+
+describe("composer (DOM)", () => {
+  let el: HTMLDivElement;
+  let root: Root;
+  const started: StartTurnRequest[] = [];
+  const host = {
+    capabilities: { voice: false },
+    startTurn: vi.fn((req: StartTurnRequest) => { started.push(req); return { cancel() {}, done: new Promise(() => {}) }; }),
+    respondToConfirmation: vi.fn(),
+    sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [] })) },
+    copy: vi.fn(), openExternal: vi.fn(),
+  } as unknown as ChatHost;
+  beforeEach(async () => {
+    el = document.createElement("div");
+    document.body.append(el);
+    root = createRoot(el);
+    await act(async () => { root.render(<MinimalChat host={host} sessionId="s1" />); });
+  });
+  afterEach(() => { act(() => root.unmount()); el.remove(); started.length = 0; });
+
+  it("shows picked files as chips, sends them with the turn and clears them", async () => {
+    const input = el.querySelector<HTMLInputElement>('input[type="file"]')!;
+    expect(input).toBeTruthy();
+    const file = new File(["hello"], "notes.md", { type: "text/markdown" });
+    Object.defineProperty(input, "files", { configurable: true, value: [file] });
+    await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
+    expect(el.querySelector(".jg-chip__name")?.textContent).toBe("notes.md");
+    const send = el.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!;
+    expect(send.disabled).toBe(false); // a file alone is enough to send
+    await act(async () => { send.click(); });
+    expect(started[0].attachments).toEqual([{ name: "notes.md", mimeType: "text/markdown" }]);
+    expect(el.querySelector(".jg-chip")).toBeNull();
+  });
+
+  it("removes a chip and keeps Send disabled with nothing to send", async () => {
+    const input = el.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["x"], "a.txt", { type: "text/plain" })] });
+    await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
+    await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Remove a.txt"]')!.click(); });
+    expect(el.querySelector(".jg-chip")).toBeNull();
+    expect(el.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.disabled).toBe(true);
+  });
+
+  it("auto-grows the message field up to 200 px", async () => {
+    const ta = el.querySelector<HTMLTextAreaElement>("textarea")!;
+    Object.defineProperty(ta, "scrollHeight", { configurable: true, get: () => 340 });
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+    await act(async () => { setter.call(ta, "line\n".repeat(20)); ta.dispatchEvent(new Event("input", { bubbles: true })); });
+    expect(ta.style.height).toBe("200px");
+    expect(ta.style.overflowY).toBe("auto");
+  });
+});

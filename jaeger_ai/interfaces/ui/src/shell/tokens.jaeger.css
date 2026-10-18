@@ -26,6 +26,7 @@
   --jg-color-shadow: #000000;
   --jg-shadow-card: 0 1px 2px color-mix(in srgb, var(--jg-color-shadow) 6%, transparent),
                     0 4px 16px color-mix(in srgb, var(--jg-color-shadow) 6%, transparent);
+  --jg-shadow-control: 0 1px 3px color-mix(in srgb, var(--jg-color-shadow) 12%, transparent);
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -43,6 +44,7 @@
     --jg-color-accent-text: #4d9bff;
     --jg-shadow-card: 0 1px 2px color-mix(in srgb, var(--jg-color-shadow) 40%, transparent),
                       0 4px 16px color-mix(in srgb, var(--jg-color-shadow) 32%, transparent);
+    --jg-shadow-control: none;
   }
 }
 
