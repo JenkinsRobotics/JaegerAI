@@ -96,6 +96,12 @@ final class BridgeTests: XCTestCase {
         XCTAssertTrue(BridgeScript.userScript.contains("data-jaeger-host"))
     }
 
+    func testFilePickPanelMessage() {
+        XCTAssertEqual(FilePickOptions(multiple: true, maxFiles: 8, maxBytes: 20 * 1024 * 1024).panelMessage, "Up to 8 files, 20 MB each")
+        XCTAssertEqual(FilePickOptions(multiple: false, maxBytes: 5 * 1024 * 1024).panelMessage, "Up to 1 file, 5 MB each")
+        XCTAssertEqual(FilePickOptions(multiple: true).panelMessage, "")
+    }
+
     func testFilePickOptions() {
         func parse(_ p: [String: Any]) -> FilePickOptions? { try? FilePickOptions.parse(p).get() }
         XCTAssertEqual(parse([:]), FilePickOptions(multiple: false, maxFiles: 1, maxBytes: nil, accept: []))

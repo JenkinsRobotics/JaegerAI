@@ -297,6 +297,14 @@ public struct FilePickOptions: Equatable, Sendable {
     /// MIME types (`image/png`, `image/*`) or extensions (`.pdf`), lowercased. Empty: anything.
     public var accept: [String]
 
+    /// The open panel's caption, e.g. "Up to 8 files, 20 MB each". Binary units, so the UI's
+    /// 20 * 1024 * 1024 limit reads "20 MB" (decimal would say "21 MB").
+    public var panelMessage: String {
+        guard let maxBytes else { return "" }
+        let size = ByteCountFormatter.string(fromByteCount: Int64(maxBytes), countStyle: .binary)
+        return "Up to \(maxFiles) file\(maxFiles == 1 ? "" : "s"), \(size) each"
+    }
+
     public init(multiple: Bool = false, maxFiles: Int? = nil, maxBytes: Int? = nil, accept: [String] = []) {
         self.multiple = multiple
         self.maxFiles = multiple ? min(maxFiles ?? Self.maxFilesCap, Self.maxFilesCap) : 1

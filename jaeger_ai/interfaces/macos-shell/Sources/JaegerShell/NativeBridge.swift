@@ -246,7 +246,7 @@ extension JaegerShellApplication {
         panel.resolvesAliases = true
         panel.allowsMultipleSelection = options.multiple
         panel.prompt = "Attach"
-        panel.message = options.maxBytes.map { "Up to \(options.maxFiles) file\(options.maxFiles == 1 ? "" : "s"), \(ByteCountFormatter.string(fromByteCount: Int64($0), countStyle: .binary)) each" } ?? ""
+        panel.message = options.panelMessage
         let types = FilePickPanel.contentTypes(options.accept)
         if !types.isEmpty { panel.allowedContentTypes = types }
         filePanelOpen = true
