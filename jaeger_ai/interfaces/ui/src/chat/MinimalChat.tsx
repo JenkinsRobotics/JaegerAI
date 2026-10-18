@@ -1,13 +1,15 @@
 /* Minimal stand-in chat renderer, styled to the Grok Bot Mac target. The
  * shared VS Code-derived widget replaces it through ChatPaneMount.
  * Jenkins Robotics 2026-10-17: tool steps fold into a "Show steps" card, and a
- * pending turn shows an activity-named progress line with a shimmer for as long as it runs. */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+ * pending turn shows an activity-named progress line with a shimmer for as long as it runs. The composer
+ * auto-grows (JS fallback), takes picked or pasted files as chips and morphs its primary button. */
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent } from "react";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { avatarColor } from "../agents/avatarColor";
 import { HandoffMarker } from "../agents/HandoffMarker";
-import { ArrowDownIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
+import { ArrowDownIcon, CloseIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
+import { addFiles, autoGrow, fileSize, primaryAction, toAttachments, type PendingFile } from "./composer";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
@@ -176,7 +178,11 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   const [active, setActive] = useState<TurnHandle | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [listening, setListening] = useState<"dictation" | "voice" | null>(null);
+  const [files, setFiles] = useState<PendingFile[]>([]);
+  const [fileNote, setFileNote] = useState<string>();
   const scroller = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const picker = useRef<HTMLInputElement>(null);
   const stick = useRef(true);
   const voiceHost = "micStart" in host ? (host as ChatHost & VoiceHost) : undefined;
   const [voiceReady, setVoiceReady] = useState(host.capabilities.voice);
@@ -230,19 +236,42 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
 
+  // Auto-grow even where WebKit ignores field-sizing.
+  useLayoutEffect(() => autoGrow(field.current), [draft]);
+
+  const takeFiles = (list: ArrayLike<File> | null | undefined) => {
+    const incoming = Array.from(list ?? []);
+    if (!incoming.length) return;
+    setFiles((current) => {
+      const r = addFiles(current, incoming, () => crypto.randomUUID());
+      setFileNote(r.note);
+      return r.files;
+    });
+  };
+  const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const pasted = event.clipboardData?.files;
+    if (!pasted?.length) return;
+    if (!event.clipboardData.getData("text/plain")) event.preventDefault();
+    takeFiles(pasted);
+  };
+  const removeFile = (id: string) => { setFiles((f) => f.filter((x) => x.id !== id)); setFileNote(undefined); };
+
   const updateTurn = useCallback((turnId: string, fn: (turn: ChatTurn) => ChatTurn) => {
     setSession((s) => (s ? { ...s, turns: s.turns.map((t) => (t.turnId === turnId ? fn(t) : t)) } : s));
   }, []);
 
   const send = (text = draft, speakReply = false) => {
-    const message = text.trim();
+    const attached = speakReply ? [] : files;
+    const message = text.trim() || (attached.length ? `Attached: ${attached.map((f) => f.name).join(", ")}` : "");
     if (!message || !session || active) return;
     const turnId = crypto.randomUUID();
     setDraft("");
+    if (attached.length) { setFiles([]); setFileNote(undefined); }
     stick.current = true;
     setSession({ ...session, turns: [...session.turns, { turnId, message, parts: [], state: "pending", createdAt: Date.now() }] });
     let finished: ChatTurn | undefined;
-    const handle = host.startTurn({ sessionId: session.id, turnId, message }, (part) => updateTurn(turnId, (t) => (finished = { ...t, parts: applyPart(t.parts, part) })));
+    const attachments = attached.length ? toAttachments(attached) : undefined;
+    const handle = host.startTurn({ sessionId: session.id, turnId, message, ...(attachments ? { attachments } : {}) }, (part) => updateTurn(turnId, (t) => (finished = { ...t, parts: applyPart(t.parts, part) })));
     setActive(handle);
     void handle.done.then(({ state }) => {
       updateTurn(turnId, (t) => ({ ...t, state }));
@@ -285,7 +314,8 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   const links: Links = { onCopy: (text) => void host.copy(text), onOpen: (url) => host.openExternal(url) };
   const agentName = (id: string) => (id === agent.id ? agent.name : undefined);
   const voice = voiceReady && Boolean(voiceHost);
-  const hasText = Boolean(draft.trim());
+  const hasText = Boolean(draft.trim()) || files.length > 0;
+  const primary = primaryAction({ running: Boolean(active), hasContent: hasText, voice });
   const tint = { "--jg-agent-color": avatarColor(agent.id) } as CSSProperties;
   return (
     <div className="jg-chat" style={tint}>
@@ -319,16 +349,29 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
         <button type="button" className="jg-jump" aria-label="Scroll to bottom" onClick={jumpToLatest}><ArrowDownIcon /></button>
       )}
       <form className="jg-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
-        <button type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach"><PlusIcon /></button>
-        <textarea className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : `Message ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} aria-label="Message" />
+        {(files.length > 0 || fileNote) && (
+          <div className="jg-composer__chips" role="list" aria-label="Attachments">
+            {files.map((f) => (
+              <span key={f.id} className="jg-chip" role="listitem" title={`${f.name} · ${fileSize(f.size)}`}>
+                <span className="jg-chip__name">{f.name}</span>
+                <span className="jg-chip__size">{fileSize(f.size)}</span>
+                <button type="button" className="jg-chip__remove" aria-label={`Remove ${f.name}`} onClick={() => removeFile(f.id)}><CloseIcon width={12} height={12} /></button>
+              </span>
+            ))}
+            {fileNote && <span className="jg-chip-note" role="status">{fileNote}</span>}
+          </div>
+        )}
+        <input ref={picker} type="file" multiple hidden tabIndex={-1} onChange={(e) => { takeFiles(e.currentTarget.files); e.currentTarget.value = ""; }} />
+        <button type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach files" title="Attach files" onClick={() => picker.current?.click()}><PlusIcon /></button>
+        <textarea ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : `Message ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
         {voice && (
-          <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
-            aria-label={listening === "dictation" ? "Stop dictation" : "Start voice input"} aria-pressed={listening === "dictation"}
+          <button type="button" className={`jg-composer__icon${listening === "dictation" ? " is-listening" : ""}`}
+            aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
             disabled={listening === "voice"} onClick={() => void toggleListening("dictation")}><MicIcon /></button>
         )}
-        {active
+        {primary === "stop"
           ? <button type="button" className="jg-send" aria-label="Stop (⌘Esc)" onClick={stop}><StopIcon /></button>
-          : hasText || !voice
+          : primary === "send"
             ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText}><SendIcon /></button>
             : <button type="button" className={`jg-send${listening === "voice" ? " is-listening" : ""}`}
                 aria-label={listening === "voice" ? "Stop and send" : "Start voice chat"} aria-pressed={listening === "voice"}

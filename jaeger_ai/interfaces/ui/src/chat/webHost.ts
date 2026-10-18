@@ -77,6 +77,11 @@ export class WebHost implements ChatHost {
     const requestId = request.turnId;
     let admitted = false;
     const done = (async (): Promise<{ state: TurnState }> => {
+      // The gateway attaches workspace file paths, which a web page can't supply; say so instead of dropping them.
+      const files = request.attachments ?? [];
+      if (files.length) {
+        onPart({ kind: "warning", message: `Not sent: ${files.map((f) => f.name).join(", ")}. This window can't hand files to Jaeger yet, so only your text went through.` });
+      }
       let receipt;
       try {
         receipt = await this.source.send(request.sessionId, request.message, requestId);

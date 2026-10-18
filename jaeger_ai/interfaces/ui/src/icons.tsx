@@ -14,6 +14,7 @@ export const TasksIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><
 export const AppsIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1.2" /><rect x="9" y="2.5" width="4.5" height="4.5" rx="1.2" /><rect x="2.5" y="9" width="4.5" height="4.5" rx="1.2" /><path d="M11.25 9.2v4.1M9.2 11.25h4.1" /></svg>;
 export const ArrowDownIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" /></svg>;
 export const ChevronIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="m6 4 4 4-4 4" /></svg>;
+export const CloseIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="m4.5 4.5 7 7M11.5 4.5l-7 7" /></svg>;
 export const WaveIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="M3 6.5v3M5.5 4.5v7M8 3v10M10.5 5v6M13 6.5v3" /></svg>;
 /** Neutral app glyphs for the Connect apps pill (D11: no vendor logos yet). */
 export const GlyphCode = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="m6 4.5-3.5 3.5L6 11.5M10 4.5l3.5 3.5-3.5 3.5" /></svg>;
