@@ -465,3 +465,44 @@ def sync_ares_mcp_servers(layout: Any) -> dict[str, Any]:
         "servers": synced_names,
         "inventory": list_servers(layout),
     }
+
+
+_GATEWAY_MCP_LOCK = __import__("threading").Lock()
+_GATEWAY_MCP_LOADED: dict[str, Any] = {}
+
+
+def gateway_server_selected(entry: dict[str, Any]) -> bool:
+    """Which mcp.json servers the Gateway process starts itself.
+
+    ``JAEGER_WITH_MCP=1`` (the existing switch) starts every enabled server;
+    otherwise only rows marked ``"gateway": true`` do, so adding one server
+    (e.g. REA) never starts the others inside the Gateway."""
+    return os.environ.get("JAEGER_WITH_MCP") == "1" or bool(entry.get("gateway"))
+
+
+def load_gateway_servers(layout: Any) -> dict[str, Any]:
+    """Start the Gateway's MCP servers once per process (idempotent, thread-safe).
+
+    The owner ReAct agent is built with ``build_jaeger_agent`` from the global
+    tool registry, so registered ``mcp__<server>__<tool>`` tools appear in its
+    turns (gated servers stay hidden until loaded or allowlisted)."""
+    with _GATEWAY_MCP_LOCK:
+        if _GATEWAY_MCP_LOADED:
+            return dict(_GATEWAY_MCP_LOADED)
+        from jaeger_ai.plugins.mcp import client
+        path = _path(layout)
+        result: dict[str, Any] = {"path": str(path), "servers": [], "errors": {}}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                wanted = [e for e in data.get("servers", []) if e.get("enabled", True) and gateway_server_selected(e)]
+                if wanted:
+                    migrate_inline_secrets(layout)
+                    registry = client.init_from_config(path, layout=layout, only=gateway_server_selected)
+                    result["servers"] = sorted({s.server_name for s in registry.list_tools()})
+                    result["tool_count"] = len(registry.list_tools())
+                    result["errors"] = client.connection_errors()
+            except Exception as exc:  # noqa: BLE001 — a bad server never blocks turns
+                result["errors"] = {"_load": f"{type(exc).__name__}: {exc}"}
+        _GATEWAY_MCP_LOADED.update(result)
+        return dict(result)

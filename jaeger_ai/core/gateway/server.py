@@ -788,6 +788,7 @@ class JaegerGatewayApp:
         self.app[CALLER_AUTH_KEY] = {"auth": None}
         _register_tool_gateway_auth()
         self.app.on_startup.append(self._recover_interrupted)
+        self.app.on_startup.append(self._prewarm_gateway_mcp)
         self.app.on_cleanup.append(self._bounded_shutdown)
         self._setup_routes()
 
@@ -3034,6 +3035,30 @@ class JaegerGatewayApp:
         out["display_name"] = agent.display_name
         return out
 
+    def _load_gateway_mcp(self) -> dict[str, Any]:
+        """Start mcp.json servers marked ``gateway: true`` (once per process)."""
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            from jaeger_ai.core.mcp.service import load_gateway_servers
+            layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+            if layout is None:
+                from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+                layout = InstanceLayout(root=resolve_instance_dir())
+            result = load_gateway_servers(layout)
+            logger.info("gateway MCP: servers=%s tools=%s errors=%s", result.get("servers"),
+                        result.get("tool_count"), list((result.get("errors") or {}).keys()))
+            return result
+        except Exception:  # noqa: BLE001
+            logger.warning("gateway MCP load failed", exc_info=True)
+            return {}
+
+    async def _prewarm_gateway_mcp(self, app: web.Application) -> None:
+        """Opt-in (JAEGER_GATEWAY_MCP_PREWARM=1): connect Gateway MCP servers in
+        the background at startup so the first turn does not wait on npx."""
+        if os.environ.get("JAEGER_GATEWAY_MCP_PREWARM") != "1":
+            return
+        asyncio.get_running_loop().run_in_executor(None, self._load_gateway_mcp)
+
     def _specialist_scope(self, agent: Any, execution: dict[str, Any] | None) -> dict[str, Any] | None:
         """The specialist's tool grant and notes dir for this turn, or None (model-only)."""
         if execution is None:
@@ -3045,6 +3070,8 @@ class JaegerGatewayApp:
         tools = specialist_tools(agent)
         if not tools:
             return None
+        if any(str(t).startswith("mcp__") and "*" in str(t) for t in tools):
+            self._load_gateway_mcp()  # globs expand against the started servers
         try:
             from jaeger_os.core.tools.tool_registry import get_tools
             available = {t.name for t in get_tools()}
