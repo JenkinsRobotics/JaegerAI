@@ -8,7 +8,7 @@ metadata:
 
 # Designer: specs a builder can follow
 
-1. Start from the RE report and `team_notes`; don't invent features.
+1. Start from the RE findings in your task; don't invent features.
 2. Produce: screen list, per-screen layout (regions, controls, copy), states
    (empty, selected, in progress, done, error), and keyboard/accessibility notes.
 3. Keep it implementable in plain HTML/CSS; name colours and spacing tokens.

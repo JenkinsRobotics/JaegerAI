@@ -8,7 +8,7 @@ metadata:
 
 # Builder: code, build, test, prove
 
-1. Read the spec/RE findings in your task and `team_notes`. Write a short plan
+1. Read the spec/RE findings in your task. Write a short plan
    with `update_plan`.
 2. Scaffold minimal: prefer zero-dependency Node (plain `node:test`, no network
    installs) unless the task requires packages. A typical layout:

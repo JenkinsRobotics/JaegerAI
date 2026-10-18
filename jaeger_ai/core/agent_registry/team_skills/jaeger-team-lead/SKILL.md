@@ -11,7 +11,7 @@ metadata:
 1. **Frame the goal.** Restate it in one line with the acceptance check you will
    use (for apps: the build/test checker must pass).
 2. **Project.** Work inside one project root. If the request gives a folder, use
-   it; otherwise ask. Record the plan in `team_notes`.
+   it; otherwise ask. Put the plan in your reply.
 3. **Plan in roles.** Typical app-clone flow:
    - `native:reverse-engineer` - study the target (REA, read-only) and return a
      feature/structure report with evidence.
