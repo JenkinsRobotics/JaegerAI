@@ -5,7 +5,9 @@ import type { HistoryRow, HomePage, HomeSessions } from "../chat/homeSession";
 import { Markdown } from "../chat/Markdown";
 import type { ChatPart } from "../chat/host";
 import { PostMessage, SummaryCard } from "../chat/HomeEntries";
+import { avatarColor } from "./avatarColor";
 import { shortTime } from "./chats";
+import type { CSSProperties } from "react";
 
 const text = (parts: ChatPart[]) => parts.filter((p) => p.kind === "markdownContent").map((p) => (p as { text: string }).text).join("\n\n");
 const noop = () => {};
@@ -29,7 +31,7 @@ export function HistoryPanel({ agentName, agentId, home, onOpenLink = noop, onCl
   };
   const links = { onOpen: onOpenLink, onCopy: noop };
   return (
-    <aside className="jg-details jg-history" aria-label={`${agentName} history`}>
+    <aside className="jg-details jg-history" aria-label={`${agentName} history`} style={{ "--jg-agent-color": avatarColor(agentId) } as CSSProperties}>
       <header className="jg-details__head">
         {open && <button type="button" className="jg-round-button" aria-label="Back to history" onClick={() => setOpen(null)}>‹</button>}
         <div className="jg-details__who">
