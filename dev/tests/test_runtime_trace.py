@@ -137,7 +137,7 @@ def test_audit_2_verification_distinction(tmp_path: Path):
     assert not res_b.is_verified
 
     # Case C: Actually create file on disk, probe verifies ground truth
-    test_file.write_text("server_port=8810", encoding="utf-8")
+    test_file.write_text("server_port=33418", encoding="utf-8")
     res_c = VerificationContract.evaluate_tool_consequence(
         "write_file",
         {"ok": True},
@@ -151,7 +151,7 @@ def test_audit_2_verification_distinction(tmp_path: Path):
     probe_ok = VerificationContract.verify_disk_state(
         test_file,
         must_exist=True,
-        content_predicate=lambda c: "server_port=8810" in c,
+        content_predicate=lambda c: "server_port=33418" in c,
     )
     assert probe_ok.is_verified
 
@@ -416,11 +416,11 @@ def test_audit_9_single_runtime_authority_trace(clean_entity_env: Path, monkeypa
     async def _mock_native_lead(session_id, text, **kwargs):
         return ("Gateway turn executed via native lead", "mcp:127.0.0.1:8811")
     monkeypatch.setattr(gw_app, "_native_lead_turn", _mock_native_lead)
-    gw_store.ensure_session("gw-client-8810")
-    gw_store.admit_request("gw-client-8810", "Gateway client: start server", request_id="gw-req-1")
+    gw_store.ensure_session("gw-client-33418")
+    gw_store.admit_request("gw-client-33418", "Gateway client: start server", request_id="gw-req-1")
 
     asyncio.run(gw_app._execute_turn(
-        "gw-client-8810",
+        "gw-client-33418",
         "turn-gw-1",
         "Gateway client: start server",
         request_id="gw-req-1",
@@ -474,7 +474,7 @@ def test_audit_9_single_runtime_authority_trace(clean_entity_env: Path, monkeypa
     # Verify that NO duplicate human messages exist for any entry point
     all_human_messages = [e for e in runtime.event_store.replay_all() if e.event_type == EventType.HUMAN_MESSAGE.value]
     assert len(all_human_messages) == 3
-    assert {e.session_id for e in all_human_messages} == {"cli-term", "bridge-turn-1", "gw-client-8810"}
+    assert {e.session_id for e in all_human_messages} == {"cli-term", "bridge-turn-1", "gw-client-33418"}
 
     # Verify all events belong to the exact same EntityIdentity
     assert runtime.current_state.identity.entity_id == initial_entity_id

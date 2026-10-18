@@ -137,7 +137,6 @@ KNOWN_ORPHANS = {
     "jaeger_ai.plugins.messaging_daemon",
     "jaeger_ai.core.runtime._shakedown",
     # Consumers (interfaces/studio, interfaces/v4) were deleted.
-    "jaeger_ai.nodes.animation_dev.mscript.mscript_engine",
     # Engine capability with no client surface.
     "jaeger_ai.features.skill_tree.xp_emitter",
     "jaeger_ai.features.personality.persona_state",
@@ -145,11 +144,11 @@ KNOWN_ORPHANS = {
 
 
 def test_gateway_daemon_has_a_cli_route():
-    """`jaeger gateway daemon` must reach the :8810 daemon, not Agentgateway.
+    """`jaeger gateway daemon` must reach the :33418 daemon, not Agentgateway.
 
     These are two different processes and the names are one word apart:
     `jaeger gateway` manages the EXTERNAL Agentgateway (:8811/:8812), while
-    `jaeger gateway daemon` runs the Jaeger Gateway (sessions + SSE, :8810)
+    `jaeger gateway daemon` runs the Jaeger Gateway (sessions + SSE, :33418)
     that the WebUI integrations point clients at.
     """
     from jaeger_ai.cli.entry import _route

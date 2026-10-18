@@ -10,7 +10,6 @@ run, and verify the shared agent stack. Developer-only tooling is indexed in
 | --- | --- |
 | `install.sh` | Public curl bootstrap; invokes the root local installer |
 | `run-jaeger-webui.sh` | Launch the first-party Jaeger WebUI |
-| `run-host-tools-gateway.sh` | Launch the existing host-tools gateway |
 | `run-host-capability-server.py` | Host capability service compatibility launcher |
 | `run-hermes-native-api.py` | Start the Hermes Agent native API from the host checkout |
 | `hermes-native-api-service.py` | Host launchd entry point for the Hermes Agent API |
@@ -36,10 +35,6 @@ using them. Ordinary startup does not require rerunning setup.
 | `agent-mac-check.py` | Host/workspace connectivity diagnostics; write probes are explicit |
 | `verify-agent-webui.py` | Live profile routing and two-turn recall |
 | `verify-native-webui.py` | Live tool events and approval-denial handling |
-| `verify-hermes-native.py` | Direct native Hermes verification |
-| `verify-openclaw-native.py` | Direct native OpenClaw verification |
-| `verify-roundtable-native.py` | Native Roundtable verification |
-| `verify-agent-workspaces.py` | Cross-agent workspace verification |
 | `verify-host-nas.py` | NAS filesystem diagnostics |
 
 Live checks may create labeled sessions, consume model tokens, or perform

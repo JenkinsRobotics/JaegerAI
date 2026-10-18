@@ -149,6 +149,25 @@ def _row_meta(raw: str | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _session_agent(session_id: str, meta: dict[str, Any]) -> str | None:
+    """The agent a session belongs to. A specialist's worker session is created
+    by its first turn, without metadata, so its id names the agent."""
+    if meta.get("agent_id"):
+        return meta["agent_id"]
+    from jaeger_ai.core.agent_registry.specialist_runtime import specialist_agent
+    return specialist_agent(session_id)
+
+
+LIST_PREVIEW_CHARS = 140
+
+
+def _list_preview(content: Any) -> str | None:
+    if content is None:
+        return None
+    text = " ".join(str(content).split())
+    return text if len(text) <= LIST_PREVIEW_CHARS else text[: LIST_PREVIEW_CHARS - 1] + "\u2026"
+
+
 class GatewaySessionStore:
     def __init__(self, path: Path | str | None = None) -> None:
         self.path = Path(path) if path else default_store_path()
@@ -352,6 +371,21 @@ class GatewaySessionStore:
             if "requested_json" not in columns:
                 conn.execute("ALTER TABLE client_requests ADD COLUMN requested_json TEXT NOT NULL DEFAULT '{}'")
             current = 9
+        if current < 10:
+            # Handoffs carry the chat session they were started from, so the
+            # Agents View can place and filter markers without a join per row.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(handoffs)")}
+            if "session_id" not in columns:
+                conn.execute("ALTER TABLE handoffs ADD COLUMN session_id TEXT")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_handoffs_session ON handoffs(session_id)")
+            current = 10
+        if current < 11:
+            # Response parts (reasoning/text/tool/plan), projected from the
+            # turn's events at completion. NULL for older rows and user turns.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
+            if "parts_json" not in columns:
+                conn.execute("ALTER TABLE messages ADD COLUMN parts_json TEXT")
+            current = 11
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -373,14 +407,28 @@ class GatewaySessionStore:
             conn.execute("VACUUM INTO ?", (str(dest_path),))
         return dest_path
 
-    def list_sessions(self, profile: str | None = None, query: str | None = None) -> list[dict[str, Any]]:
+    def list_sessions(self, profile: str | None = None, query: str | None = None,
+                      agent_id: str | None = None) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
-            sql = "SELECT s.*, COUNT(m.id) as message_count FROM sessions s LEFT JOIN messages m ON s.session_id = m.session_id"
+            sql = (
+                "SELECT s.*, COUNT(m.id) as message_count, MAX(m.timestamp) AS last_message_at, "
+                "(SELECT lm.content FROM messages lm WHERE lm.session_id = s.session_id "
+                " ORDER BY lm.timestamp DESC, lm.id DESC LIMIT 1) AS last_content, "
+                "(SELECT MAX(e.event_id) FROM events e WHERE e.session_id = s.session_id) AS last_event_id "
+                "FROM sessions s LEFT JOIN messages m ON s.session_id = m.session_id"
+            )
             params: list[Any] = []
             clauses = []
             if profile:
                 clauses.append("s.profile = ?")
                 params.append(profile)
+            if agent_id:
+                from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
+                prefix = specialist_session(agent_id, "")
+                clauses.append("(json_extract(s.metadata_json, '$.agent_id') = ? "
+                               "OR (json_extract(s.metadata_json, '$.agent_id') IS NULL "
+                               "AND substr(s.session_id, 1, ?) = ?))")
+                params.extend([agent_id, len(prefix), prefix])
             term = str(query or "").strip()
             if term:
                 like = f"%{term}%"
@@ -403,7 +451,11 @@ class GatewaySessionStore:
                     "status": r["status"],
                     "message_count": r["message_count"],
                     "metadata": meta,
-                    "agent_id": meta.get("agent_id"),
+                    "agent_id": _session_agent(r["session_id"], meta),
+                    # Sidebar row without N follow-up reads (Agents View).
+                    "last_message_preview": _list_preview(r["last_content"]),
+                    "last_activity_at": max(float(r["updated_at"] or 0), float(r["last_message_at"] or 0)),
+                    "last_event_id": r["last_event_id"],
                 }
                 if term:
                     row["search_match"] = True
@@ -493,7 +545,7 @@ class GatewaySessionStore:
                 "updated_at": row["updated_at"],
                 "status": row["status"],
                 "metadata": meta,
-                "agent_id": meta.get("agent_id"),
+                "agent_id": _session_agent(row["session_id"], meta),
                 "messages": [
                     {
                         "id": m["id"],
@@ -501,6 +553,7 @@ class GatewaySessionStore:
                         "content": m["content"],
                         "timestamp": m["timestamp"],
                         "tool_calls": json.loads(m["tool_calls_json"] or "[]"),
+                        **({"parts": json.loads(m["parts_json"])} if m["parts_json"] else {}),
                     }
                     for m in messages
                 ],
@@ -625,17 +678,19 @@ class GatewaySessionStore:
         tool_calls: list[dict[str, Any]] | None = None,
         timestamp: float | None = None,
         conn: sqlite3.Connection | None = None,
+        parts: list[dict[str, Any]] | None = None,
     ) -> int:
         now = timestamp or time.time()
         tool_str = json.dumps(tool_calls or [])
+        parts_str = json.dumps(parts) if parts else None
 
         def _write(db: sqlite3.Connection) -> int:
             cursor = db.execute(
                 """
-                INSERT INTO messages (session_id, role, content, timestamp, tool_calls_json)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO messages (session_id, role, content, timestamp, tool_calls_json, parts_json)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, role, content, now, tool_str),
+                (session_id, role, content, now, tool_str, parts_str),
             )
             db.execute(
                 "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
@@ -1227,7 +1282,18 @@ class GatewaySessionStore:
                 (status, json.dumps(result), now, request_id),
             )
             if assistant_text is not None:
-                self.append_message(row["session_id"], "assistant", assistant_text, timestamp=now, conn=conn)
+                from jaeger_ai.core.gateway.turn_parts import PART_EVENTS, project_parts
+                marks = ",".join("?" * len(PART_EVENTS))
+                turn_events = [
+                    {"event": e["event"], "data": json.loads(e["data_json"] or "{}"), "timestamp": e["timestamp"]}
+                    for e in conn.execute(
+                        f"SELECT event, data_json, timestamp FROM events WHERE session_id=? AND event IN ({marks}) "
+                        "AND json_extract(data_json, '$.request_id')=? ORDER BY event_id ASC",
+                        (row["session_id"], *PART_EVENTS, request_id),
+                    )
+                ]
+                self.append_message(row["session_id"], "assistant", assistant_text, timestamp=now, conn=conn,
+                                    parts=project_parts(turn_events) or None)
             sess_status = session_status or ("idle" if status == "completed" else status)
             conn.execute(
                 "UPDATE sessions SET status=?, updated_at=? WHERE session_id=?",
@@ -1588,9 +1654,10 @@ class GatewaySessionStore:
                 INSERT INTO handoffs(
                     id, request_id, from_agent_id, to_agent_id, parent_run_id, child_run_id,
                     task, status, require_approval, approval_id, result_json, metadata_json,
-                    created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    created_at, updated_at, session_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
+                    session_id=COALESCE(handoffs.session_id, excluded.session_id),
                     status=excluded.status,
                     child_run_id=excluded.child_run_id,
                     result_json=excluded.result_json,
@@ -1612,6 +1679,7 @@ class GatewaySessionStore:
                     json.dumps(record.get("metadata") or {}),
                     record.get("created_at") or now,
                     now,
+                    record.get("session_id"),
                 ),
             )
         return self.get_handoff(record["id"]) or record
@@ -1628,11 +1696,66 @@ class GatewaySessionStore:
             ).fetchone()
             return self._handoff_row(row) if row else None
 
-    def list_handoffs(self) -> list[dict[str, Any]]:
+    #: A handoff's chat session: its own column, else the session of the run
+    #: that started it (``parent_run_id`` is a request or turn id).
+    _HANDOFF_SESSION_SQL = (
+        "COALESCE(h.session_id, (SELECT cr.session_id FROM client_requests cr "
+        "WHERE cr.request_id = h.parent_run_id OR cr.turn_id = h.parent_run_id LIMIT 1))"
+    )
+
+    # Agent "seen" markers reuse schema_meta (key ``agent_seen:<id>``): one
+    # small row per agent, no new table.
+    def mark_agent_seen(self, agent_id: str, *, seen_at: float, event_id: int | None = None) -> dict[str, Any]:
+        record = {"agent_id": agent_id, "seen_at": float(seen_at), "event_id": event_id}
+        with self._immediate() as conn:
+            conn.execute(
+                "INSERT INTO schema_meta(key, value) VALUES(?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                (f"agent_seen:{agent_id}", json.dumps(record)),
+            )
+        return record
+
+    def agents_seen(self) -> dict[str, dict[str, Any]]:
         with self._get_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM handoffs ORDER BY created_at DESC"
-            ).fetchall()
+            rows = conn.execute("SELECT value FROM schema_meta WHERE key LIKE 'agent_seen:%'").fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            try:
+                record = json.loads(row["value"])
+            except (TypeError, ValueError):
+                continue
+            out[str(record.get("agent_id"))] = record
+        return out
+
+    def list_handoffs(
+        self,
+        *,
+        agent_id: str | None = None,
+        session_id: str | None = None,
+        since: float | None = None,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Newest first. ``agent_id`` matches either end of the handoff."""
+        sql = f"SELECT h.*, {self._HANDOFF_SESSION_SQL} AS resolved_session_id FROM handoffs h"
+        clauses: list[str] = []
+        params: list[Any] = []
+        if agent_id:
+            clauses.append("(h.to_agent_id = ? OR h.from_agent_id = ?)")
+            params.extend([agent_id, agent_id])
+        if session_id:
+            clauses.append(f"{self._HANDOFF_SESSION_SQL} = ?")
+            params.append(session_id)
+        if since is not None:
+            clauses.append("h.updated_at > ?")
+            params.append(float(since))
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY h.created_at DESC"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(int(limit))
+        with self._get_conn() as conn:
+            rows = conn.execute(sql, params).fetchall()
             return [self._handoff_row(r) for r in rows]
 
     def count_active_handoffs(self, *, parent_run_id: str | None = None) -> int:
@@ -1651,6 +1774,7 @@ class GatewaySessionStore:
             return int(row["n"] if row else 0)
 
     def _handoff_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        keys = row.keys()
         result = json.loads(row["result_json"] or "{}")
         meta = _row_meta(row["metadata_json"])
         return {
@@ -1667,6 +1791,8 @@ class GatewaySessionStore:
             "result": result,
             "result_summary": result.get("summary"),
             "metadata": meta,
+            "session_id": (row["resolved_session_id"] if "resolved_session_id" in keys
+                           else row["session_id"] if "session_id" in keys else None),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
         }

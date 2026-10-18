@@ -3,7 +3,7 @@
 This process does not serve the browser application. The WebUI server owns port
 8790 and calls this service through ``runner-local``.
 
-The Gateway (:8810) is the single store of record and the single event source.
+The Gateway (contract.ports.GATEWAY_URL) is the single store of record and the single event source.
 This service is an auth/transport shim: it owns OIDC/passkeys/remote-access and
 translates the browser's runner protocol onto the Gateway's session API. It
 keeps no session truth of its own — runs are Gateway turns, events are Gateway
@@ -72,10 +72,8 @@ _AGENT_ACTIVATE_ROUTE = re.compile(
 
 def gateway_base_url() -> str:
     """The Gateway is the single store of record; this is where it lives."""
-    return (
-        os.environ.get("JAEGER_GATEWAY_URL")
-        or "http://127.0.0.1:8810"
-    ).rstrip("/")
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    return resolve_gateway_url().rstrip("/")
 
 
 def gateway_request(
@@ -564,7 +562,7 @@ class RunnerBroker:
             return []
         try:
             from urllib.request import Request, urlopen
-            url = f"http://127.0.0.1:8810/v1/sessions/{sid}/attachments"
+            url = f"{gateway_base_url()}/v1/sessions/{sid}/attachments"
             req = Request(url, headers={"Accept": "application/json", **client_headers("webui")})
             with urlopen(req, timeout=4) as resp:
                 data = json.loads(resp.read().decode("utf-8") or "{}")

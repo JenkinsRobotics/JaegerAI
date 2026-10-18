@@ -11,7 +11,6 @@ scripts are indexed separately in [scripts/README.md](../../scripts/README.md).
 | `inspect_release_artifacts.py` | Current CI release-artifact inspection |
 | `generate_agent_contract.py` | Generate/check `jaeger_ai/docs/agent_contract.md` |
 | `dev_env.sh` | Developer environment helper; contains historical layout assumptions |
-| `node_verification.py` | Manual node verification; no external filename caller found in the structural audit |
 | `tts_node_test.py` | Manual TTS node probe |
 | `walk_task1_bridge_confirmation.py` | Manual bridge/confirmation verification |
 | `lilith_demo.py` | Character/UI demonstration |

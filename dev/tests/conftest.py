@@ -136,6 +136,7 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
                             or path.name.endswith(("-shm", "-wal"))
                             or "hermes-webui-state" in path.parts
                             or "hermes-webui-agent" in path.parts
+                            or "webui-agent" in path.parts
                             or "hermes-webui-adapter" in path.parts
                             or "openclaw" in path.parts
                             or "models" in path.parts
@@ -450,7 +451,7 @@ def allow_bridge_attach(bindable_instance_root):
     from it rather than re-deriving one.
     """
     previous = os.environ.pop("JAEGER_NO_ATTACH", None)
-    # Lifting the bridge gate must not also reach the operator Gateway on :8810.
+    # Lifting the bridge gate must not also reach the operator Gateway.
     previous_url = os.environ.get("JAEGER_GATEWAY_URL")
     os.environ["JAEGER_GATEWAY_URL"] = "http://127.0.0.1:9"
     try:

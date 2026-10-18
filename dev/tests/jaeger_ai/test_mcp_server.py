@@ -276,7 +276,8 @@ def test_main_stdio_truthful_error_when_gateway_unavailable(monkeypatch, capsys)
     ret = mcp_server.main(["jaeger-test"])
     assert ret == 1
     stderr = capsys.readouterr().err
-    assert "Neither live bridge nor canonical Jaeger Gateway (127.0.0.1:8810) is running" in stderr
+    from jaeger_ai.interfaces.mcp_server import _canonical_gateway_url
+    assert f"Neither live bridge nor canonical Jaeger Gateway ({_canonical_gateway_url()}) is running" in stderr
     assert "kimi-k2.7-code:cloud" not in stderr
     assert "11434" not in stderr
 
@@ -286,7 +287,7 @@ def test_build_server_routes_chat_through_gateway():
     from jaeger_ai.interfaces.mcp_server import build_server
 
     class DummyGW:
-        base_url = "http://127.0.0.1:8810"
+        base_url = "http://127.0.0.1:33418"
         def turn(self, session, message):
             assert session == "mcp:test_session"
             assert message == "hello gateway"
@@ -301,6 +302,40 @@ def test_build_server_routes_chat_through_gateway():
     chat_fn = server._tool_manager.get_tool("chat").fn
     out = asyncio.run(chat_fn("hello gateway", session_id="test_session"))
     assert out == "reply from gateway"
+
+
+def test_gateway_mode_relays_jaegerd_as_itself(monkeypatch):
+    """A specialist turn relayed by jaegerd keeps jaegerd's identity, session id,
+    request id and grant; as caller 'mcp' the Gateway refused the session (403)."""
+    import jaeger_ai.interfaces.mcp_server as mcp_mod
+    from jaeger_ai.core.gateway.client import TurnResult
+
+    seen = {}
+
+    class Relayed:
+        def __init__(self, base_url, *, caller=None, token=None, **_):
+            seen.update(base_url=base_url, token=token)
+        def submit(self, session, text, *, request_id=None, **choices):
+            seen.update(session=session, request_id=request_id, **choices)
+            return request_id
+        def wait(self, session, rid, **_):
+            return TurnResult(request_id=rid, status="completed", text="ping")
+
+    class DummyGW:
+        base_url = "http://127.0.0.1:33418"
+        def turn(self, *_):
+            raise AssertionError("a relayed turn must not run as the MCP server's own caller")
+
+    monkeypatch.setattr(mcp_mod, "_presented_caller", lambda ctx: ("jaegerd", "jaegerd-token"))
+    monkeypatch.setattr("jaeger_ai.core.gateway.client.GatewayTurnClient", Relayed)
+    server = mcp_mod.build_server(None, "jaeger-test", "gateway", gateway=DummyGW())
+    chat_fn = server._tool_manager.get_tool("chat").fn
+    out = asyncio.run(chat_fn("reply ping", session_id="specialist:native:everyday:r1",
+                              request_id="r1", allowed_tools=["read_file"]))
+    assert out == "ping"
+    assert seen == {"base_url": "http://127.0.0.1:33418", "token": "jaegerd-token",
+                    "session": "specialist:native:everyday:r1", "request_id": "r1",
+                    "allowed_tools": ["read_file"]}
 
 
 def test_mcp_server_never_writes_gateway_approvals_directly():

@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from jaeger_ai.contract.ports import GATEWAY_PORT
+
 from jaeger_ai.core.agent_registry.types import AgentKind, AgentRecord, AgentRole
 
 # Lead stays the primary face; specialists are callable via handoff / call_agent.
@@ -34,9 +36,9 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "display_name": "Gateway",
         "specialty": "gateway",
         "internal": True,
-        "summary": "Spine health, agents catalog, sessions, and approvals on :8810.",
+        "summary": f"Spine health, agents catalog, sessions, and approvals on :{GATEWAY_PORT}.",
         "allowed_tools": ("read_file", "search_files", "terminal", "exec_command", "system_status", "self_check", "list_background", "check_background", "web_search", "update_plan", "get_time", "calculate", "agent_notes"),
-        "keywords": ("gateway", "8810", "sse", "approval", "approvals", "session store", "agents catalog"),
+        "keywords": ("gateway", str(GATEWAY_PORT), "sse", "approval", "approvals", "session store", "agents catalog"),
     },
     {
         "name": "everyday",

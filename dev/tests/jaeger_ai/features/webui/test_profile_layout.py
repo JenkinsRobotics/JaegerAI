@@ -1,50 +1,12 @@
-"""Vendor WebUI home: shared profiles symlink and state.db source column."""
+"""Vendor WebUI home: state.db source column; no legacy Hermes home wiring."""
 
 from __future__ import annotations
 
 import sqlite3
 from pathlib import Path
 
-from jaeger_ai.features.webui.service.profile_layout import (
-    ensure_agent_state_schema,
-    ensure_webui_profile_layout,
-    link_shared_profiles,
-    prepare_webui_home,
-)
-
-
-def test_link_replaces_leftover_real_profiles_directory(tmp_path: Path) -> None:
-    shared = tmp_path / "shared" / "profiles"
-    shared.mkdir(parents=True)
-    (shared / "jaeger").mkdir()
-    agent = tmp_path / "agent"
-    leftover = agent / "profiles"
-    leftover.mkdir(parents=True)
-    (leftover / "stale.txt").write_text("isolated", encoding="utf-8")
-
-    result = link_shared_profiles(shared=shared, agent_home=agent)
-
-    assert result["linked"] is True
-    assert result["replaced"]
-    target = agent / "profiles"
-    assert target.is_symlink()
-    assert target.resolve() == shared.resolve()
-    assert Path(result["replaced"]).is_dir()
-    assert (Path(result["replaced"]) / "stale.txt").read_text(encoding="utf-8") == "isolated"
-
-
-def test_link_is_idempotent_when_already_correct(tmp_path: Path) -> None:
-    shared = tmp_path / "shared" / "profiles"
-    shared.mkdir(parents=True)
-    agent = tmp_path / "agent"
-    agent.mkdir()
-    (agent / "profiles").symlink_to(shared, target_is_directory=True)
-
-    result = link_shared_profiles(shared=shared, agent_home=agent)
-
-    assert result["linked"] is True
-    assert result["replaced"] is None
-    assert (agent / "profiles").is_symlink()
+from jaeger_ai.features.webui.service import profile_layout
+from jaeger_ai.features.webui.service.profile_layout import ensure_agent_state_schema
 
 
 def test_ensure_agent_state_schema_adds_missing_source_column(tmp_path: Path) -> None:
@@ -74,59 +36,6 @@ def test_ensure_agent_state_schema_creates_db_when_missing(tmp_path: Path) -> No
     assert Path(result["path"]).is_file()
 
 
-def test_prepare_webui_home_wires_layout_link_and_schema(tmp_path: Path) -> None:
-    hermes = tmp_path / "hermes"
-    (hermes / "profiles" / "jaeger").mkdir(parents=True)
-    (hermes / "profiles" / "openclaw").mkdir()
-    (hermes / "profiles" / "roundtable").mkdir()
-    agent = tmp_path / "vendor-agent"
-    leftover = agent / "profiles"
-    leftover.mkdir(parents=True)
-
-    result = prepare_webui_home(agent, hermes_home=hermes)
-
-    assert result["state_db"]["source_column"] is True
-    assert result["profiles"]["linked"] is True
-    assert (agent / "profiles").is_symlink()
-    names = result["layout"]["visible_named_profiles"]
-    assert "jaeger" in names
-    assert "openclaw" in names
-    assert "roundtable" in names
-    yaml = (hermes / "profiles" / "jaeger" / "profile.yaml").read_text(encoding="utf-8")
-    assert "display_name: Jaeger" in yaml
-    assert "display_name: Hermes Agent" in (agent / "profile.yaml").read_text(encoding="utf-8")
-
-
-def test_ensure_webui_profile_layout_keeps_named_profiles_visible(tmp_path: Path) -> None:
-    home = tmp_path / ".hermes"
-    (home / "profiles" / "jaeger").mkdir(parents=True)
-    (home / "profiles" / "openclaw").mkdir()
-    result = ensure_webui_profile_layout(home)
-    assert result["archived"] == []
-    assert "jaeger" in result["visible_named_profiles"]
-    assert "openclaw" in result["visible_named_profiles"]
-
-
-def test_prepare_writes_webui_default_and_named_display_names(tmp_path: Path) -> None:
-    hermes = tmp_path / "hermes"
-    (hermes / "profiles" / "jaeger").mkdir(parents=True)
-    (hermes / "profiles" / "openclaw").mkdir()
-    (hermes / "profiles" / "roundtable").mkdir()
-    agent = tmp_path / "webui-agent"
-
-    result = prepare_webui_home(agent, hermes_home=hermes)
-
-    assert result["display_names"]["default"] == "Hermes Agent"
-    assert result["display_names"]["jaeger"] == "Jaeger AI"
-    assert result["display_names"]["openclaw"] == "OpenClaw"
-    assert result["display_names"]["roundtable"] == "Roundtable"
-    agent_yaml = (agent / "profile.yaml").read_text(encoding="utf-8")
-    assert "display_name: Hermes Agent" in agent_yaml
-    assert "display_name: Hermes Agent" in (hermes / "profile.yaml").read_text(encoding="utf-8")
-    assert "display_name: OpenClaw" in (hermes / "profiles" / "openclaw" / "profile.yaml").read_text(encoding="utf-8")
-    assert "display_name: Roundtable" in (agent / "profiles" / "roundtable" / "profile.yaml").read_text(encoding="utf-8")
-
-
 def test_profile_display_name_helper() -> None:
     from jaeger_ai.features.webui.service.profile_layout import profile_display_name
 
@@ -137,17 +46,7 @@ def test_profile_display_name_helper() -> None:
     assert profile_display_name("roundtable") == "Roundtable"
 
 
-def test_prepare_creates_selectable_runtime_profiles_without_cloning_credentials(tmp_path):
-    import yaml
-    agent = tmp_path / 'agent'
-    agent.mkdir()
-    (agent / 'config.yaml').write_text('model:\n  default: example\n  provider: ollama\nsecret: private\n')
-    hermes = tmp_path / 'hermes'
-    prepare_webui_home(agent, hermes_home=hermes)
-    for name in ('jaeger', 'openclaw', 'roundtable'):
-        cfg = yaml.safe_load((agent / 'profiles' / name / 'config.yaml').read_text())
-        assert cfg == {'model': {'default': 'example', 'provider': 'ollama'}}
-    target = agent / 'profiles' / 'openclaw' / 'config.yaml'
-    target.write_text('model: custom\n')
-    prepare_webui_home(agent, hermes_home=hermes)
-    assert target.read_text() == 'model: custom\n'
+def test_legacy_hermes_home_helpers_are_gone() -> None:
+    for name in ("prepare_webui_home", "link_shared_profiles", "ensure_webui_profile_layout",
+                 "ensure_webui_config_yaml", "ensure_webui_env_dotenv", "ensure_profile_state_schemas"):
+        assert not hasattr(profile_layout, name), name

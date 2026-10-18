@@ -25,7 +25,7 @@ def hermes_profile_root() -> Path:
     """The shared Hermes/WebUI profile tree: ``<state root>/hermes``.
 
     ``HERMES_HOME`` is deliberately not consulted. For the host WebUI it names the
-    *agent* home (``hermes-webui-agent``), a different directory; honouring it here made
+    *agent* home (``webui-agent``), a different directory; honouring it here made
     the profile tree and the agent home the same path and linked ``profiles`` to itself.
     The state root already follows ``JAEGER_STATE_DIR`` then ``JAEGER_HOME``.
     """
@@ -35,15 +35,15 @@ def hermes_profile_root() -> Path:
 
 
 def webui_agent_home() -> Path:
-    """Host WebUI agent state (``hermes-webui-agent``)."""
+    """Host WebUI agent state (``<state>/webui-agent``)."""
     state = _state_dir()
     explicit = os.environ.get("JAEGER_WEBUI_AGENT_STATE", "").strip()
     if state is not None:
         if explicit and _inside(Path(explicit), state):
             return Path(explicit).expanduser()
-        return state / "hermes-webui-agent"
+        return state / "webui-agent"
     if explicit:
         return Path(explicit).expanduser()
     from jaeger_ai.core.instance.instance import operator_state_root
 
-    return operator_state_root() / "hermes-webui-agent"
+    return operator_state_root() / "webui-agent"

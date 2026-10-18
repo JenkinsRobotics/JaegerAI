@@ -1,0 +1,130 @@
+/* Sidebar header: traffic-light band (78px), then search and + on the right. */
+.jg-sidebar-header { display: flex; align-items: center; gap: 8px; height: 54px; padding: 0 14px 0 0; }
+.jg-traffic-lights { flex: none; width: var(--jg-traffic-lights); display: flex; gap: 8px; padding-left: 14px; }
+.jg-traffic-lights i { width: 12px; height: 12px; border-radius: 50%; background: color-mix(in srgb, var(--aether-color-text-faint) 45%, transparent); border: 0.5px solid color-mix(in srgb, var(--aether-color-text-faint) 60%, transparent); }
+.jg-sidebar-header__spacer { flex: 1; }
+.jg-round-button {
+  display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; border: 0;
+  background: var(--aether-color-bg-control); color: var(--aether-color-text); cursor: pointer;
+  box-shadow: 0 1px 3px color-mix(in srgb, var(--aether-color-shadow) 14%, transparent);
+}
+.jg-round-button:hover { background: var(--aether-color-bg-hover); }
+:is(.jg-round-button, .jg-agent-row, .jg-supervisor, .jg-nav-entry, .jg-pill, .jg-user-chip):focus-visible {
+  outline: 2px solid var(--aether-color-border-focus); outline-offset: 1px;
+}
+
+/* Round agent avatars: token color + a two-eye face. */
+.jg-avatar {
+  position: relative; flex: none; display: inline-grid; place-items: center; border-radius: 50%;
+  background: var(--jg-avatar-color, var(--aether-color-accent)); overflow: hidden;
+}
+.jg-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.jg-avatar__face { display: flex; gap: 16%; width: 100%; justify-content: center; margin-top: -4%; }
+.jg-avatar__face i { width: 13%; aspect-ratio: 1 / 1.25; border-radius: 50%; background: var(--aether-color-text-on-selected); }
+
+/* Pinned supervisor card. */
+.jg-supervisor-wrap { display: flex; justify-content: center; padding: 8px 0 14px; }
+.jg-supervisor {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; width: 92px; padding: 10px 6px 8px;
+  border: 0; border-radius: 10px; background: color-mix(in srgb, var(--aether-color-text-faint) 22%, transparent);
+  color: var(--aether-color-text); font: inherit; cursor: pointer;
+}
+.jg-supervisor:hover { background: color-mix(in srgb, var(--aether-color-text-faint) 30%, transparent); }
+.jg-supervisor.is-selected { background: color-mix(in srgb, var(--aether-color-text-faint) 34%, transparent); }
+.jg-supervisor__label { max-width: 100%; font-size: var(--jg-font-tiny); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-supervisor-art { position: relative; display: grid; place-items: center; }
+.jg-supervisor-art__dots { display: flex; align-items: center; gap: 6px; }
+.jg-supervisor-art__dots i { width: 12px; height: 12px; border-radius: 50%; background: color-mix(in srgb, var(--aether-color-error) 70%, var(--aether-color-bg-control)); }
+.jg-supervisor-art__dots i:nth-child(2) { width: 15px; height: 15px; background: var(--aether-color-error); }
+.jg-supervisor-art__badge {
+  position: absolute; right: 0; bottom: 2px; display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%;
+  background: var(--aether-color-hardware); color: var(--aether-color-text-on-selected);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aether-color-bg-rail) 90%, transparent);
+}
+
+/* Specialist rows (~56px). */
+.jg-agent-list { display: flex; flex-direction: column; gap: 1px; }
+.jg-agent-row, .jg-nav-entry {
+  display: flex; align-items: center; gap: 11px; width: 100%; border: 0; background: transparent;
+  color: var(--aether-color-text); font: inherit; text-align: left; cursor: pointer; border-radius: 10px;
+}
+.jg-agent-row { min-height: 56px; padding: 7px 8px 7px 10px; }
+.jg-agent-row:hover, .jg-nav-entry:hover { background: color-mix(in srgb, var(--aether-color-text-faint) 14%, transparent); }
+.jg-agent-row.is-selected, .jg-nav-entry.is-selected { background: color-mix(in srgb, var(--aether-color-text-faint) 24%, transparent); }
+.jg-agent-row__text { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
+.jg-agent-row__name { font-size: var(--jg-font-body); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-agent-row__preview { color: var(--aether-color-text-dim); font-size: var(--jg-font-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-unread-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--aether-color-accent); }
+.jg-unread-dot.is-hidden { visibility: hidden; }
+.jg-nav-entry { margin-top: 6px; padding: 6px 10px; gap: 8px; color: var(--aether-color-text-dim); font-size: var(--jg-font-small); }
+.jg-nav-entry.is-selected { color: var(--aether-color-text); }
+
+/* Footer: MJ avatar + wide Connect apps pill. */
+.jg-sidebar-footer { display: flex; align-items: center; gap: 8px; }
+.jg-user-chip {
+  position: relative; flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 50%;
+  border: 0; background: var(--aether-color-bg-control); color: var(--aether-color-text); font: inherit; font-size: var(--jg-font-small);
+  cursor: pointer; box-shadow: 0 1px 3px color-mix(in srgb, var(--aether-color-shadow) 14%, transparent);
+}
+.jg-user-chip__status { position: absolute; right: 0; bottom: 0; width: 8px; height: 8px; border-radius: 50%; box-shadow: 0 0 0 2px var(--aether-color-bg-control); }
+.jg-user-chip__status--ok { background: var(--aether-color-ok); }
+.jg-user-chip__status--warn { background: var(--aether-color-warn); }
+.jg-user-chip__status--error { background: var(--aether-color-error); }
+.jg-pill {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 34px; padding: 0 14px;
+  border-radius: 999px; border: 0; background: var(--aether-color-bg-control); color: var(--aether-color-text);
+  font: inherit; font-size: var(--jg-font-body); cursor: pointer; box-shadow: 0 1px 3px color-mix(in srgb, var(--aether-color-shadow) 14%, transparent);
+}
+.jg-pill:hover { background: var(--aether-color-bg-hover); }
+.jg-pill__glyphs { display: inline-flex; gap: 2px; color: var(--aether-color-text-dim); }
+
+/* Handoff markers: centered small grey text with inline avatars, no lines. */
+.jg-handoff { display: flex; justify-content: center; margin: 10px 0; }
+.jg-handoff__chip {
+  display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 5px; padding: 2px 6px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--aether-color-text-dim); font: inherit; font-size: var(--jg-font-tiny);
+}
+.jg-handoff__chip .jg-avatar { margin-left: 3px; }
+.jg-handoff__name { color: var(--aether-color-text-dim); }
+button.jg-handoff__chip { cursor: pointer; }
+button.jg-handoff__chip:hover { color: var(--aether-color-text); background: color-mix(in srgb, var(--aether-color-text-faint) 12%, transparent); }
+.jg-apps { list-style: none; margin: 0; padding: 0; min-width: 360px; }
+.jg-apps__row { display: flex; align-items: center; gap: var(--aether-space-3); padding: var(--aether-space-2) 0; }
+.jg-avatar__initials { color: var(--aether-color-text-on-selected); font-size: var(--jg-font-tiny); font-weight: var(--aether-font-weight-strong); }
+.jg-handoff__who { display: inline-flex; align-items: center; gap: 4px; }
+
+/* An agent's chats, under its row: every chat keeps a place (Grok Bot). */
+.jg-chat-list { list-style: none; margin: 2px 0 8px; padding: 0 0 0 54px; display: flex; flex-direction: column; gap: 1px; }
+.jg-chat-row {
+  display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 8px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--aether-color-text-dim); font: inherit; font-size: var(--jg-font-small); text-align: left; cursor: pointer;
+}
+.jg-chat-row:hover { background: color-mix(in srgb, var(--aether-color-text-faint) 14%, transparent); color: var(--aether-color-text); }
+.jg-chat-row.is-open { background: color-mix(in srgb, var(--aether-color-text-faint) 24%, transparent); color: var(--aether-color-text); }
+.jg-chat-row:focus-visible { outline: 2px solid var(--aether-color-border-focus); outline-offset: 1px; }
+.jg-chat-row__title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-chat-row__time { flex: none; color: var(--aether-color-text-faint); font-size: var(--jg-font-tiny); }
+.jg-chat-row--more { color: var(--aether-color-text-faint); }
+.jg-chat-row__edit {
+  width: 100%; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--aether-color-border-focus);
+  background: var(--aether-color-bg-control); color: var(--aether-color-text); font: inherit; font-size: var(--jg-font-small);
+}
+.jg-supervisor-wrap + .jg-chat-list { padding-left: 14px; }
+
+/* Details panel (click the agent pill at the top of the chat). */
+.jg-details {
+  flex: none; width: 300px; display: flex; flex-direction: column; gap: 14px; padding: 16px; overflow-y: auto;
+  border-left: 1px solid color-mix(in srgb, var(--aether-color-border) 70%, transparent); background: var(--aether-color-bg-control);
+}
+.jg-details__head { display: flex; align-items: center; gap: 10px; }
+.jg-details__who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--jg-font-small); }
+.jg-details__who strong { font-size: var(--jg-font-body); }
+.jg-details__section h3 { margin: 0 0 6px; font-size: var(--jg-font-tiny); font-weight: var(--aether-font-weight-strong); color: var(--aether-color-text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.jg-details__section p { margin: 0 0 4px; font-size: var(--jg-font-small); }
+.jg-details__row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.jg-details .jg-chat-list { padding-left: 0; }
+
+/* Create agent form. */
+.jg-form { display: flex; flex-direction: column; gap: 12px; min-width: 340px; }
+.jg-form__field { display: flex; flex-direction: column; gap: 4px; font-size: var(--jg-font-small); color: var(--aether-color-text-dim); }
+.jg-form__error { margin: 0; color: var(--aether-color-error); font-size: var(--jg-font-small); }

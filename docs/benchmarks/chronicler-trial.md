@@ -5,7 +5,7 @@
 # Chronicler Trial — evidence contract
 
 This is an integration benchmark, not a declaration of production readiness
-or a general intelligence score. Run through the gateway on :8810 and native
+or a general intelligence score. Run through the gateway on :8810 (port since retired; now :33418) and native
 MCP on :8811. No UI dependency and no change to the Assistant identity.
 
 The trial tests research, uncertainty, representations and persistent memory

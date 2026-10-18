@@ -140,3 +140,34 @@ def test_package_installs_name_the_package(running_app, monkeypatch):
     _GatewayToolConfirmationProvider(running_app, "s", "r").confirm(request)
 
     assert created[0]["prompt"] == "Allow packages.install_package? package=pytest"
+
+
+def test_allow_for_this_session_skips_later_prompts_in_that_session_only(running_app, monkeypatch):
+    running_app.store.ensure_session("s")
+    running_app.store.ensure_session("other")
+    provider = _GatewayToolConfirmationProvider(running_app, "s", "r")
+    original = running_app.store.create_approval
+
+    def answer(**kwargs):
+        row = original(**kwargs)
+        assert kwargs["options"] == ["once", "session", "deny"]
+
+        def _resolve():
+            running_app.store.resolve_approval(kwargs["approval_id"], approved=True, decision="session")
+            running_app.pending_approvals.pop(kwargs["approval_id"]).set_result(True)
+        running_app._loop.call_soon(_resolve)
+        return row
+
+    monkeypatch.setattr(running_app.store, "create_approval", answer)
+    assert provider.confirm(_write_request()) is True
+    assert running_app.store.get_session("s")["metadata"]["session_grants"] == ["files"]
+    monkeypatch.setattr(running_app.store, "create_approval",
+                        lambda **k: (_ for _ in ()).throw(AssertionError("prompted again")))
+    assert provider.confirm(_write_request()) is True
+    forced = _write_request()
+    forced.force_prompt = True
+    monkeypatch.setattr(gateway_server, "APPROVAL_WAIT_S", 0.2)
+    monkeypatch.setattr(running_app.store, "create_approval", original)
+    assert provider.confirm(forced) is False  # policy-required prompts ignore session grants
+    other = _GatewayToolConfirmationProvider(running_app, "other", "r2")
+    assert "files" not in other._session_grants()

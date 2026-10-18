@@ -3943,8 +3943,8 @@ def _run_turn(
 
 
 def _gateway_base() -> str:
-    from jaeger_ai.contract.ports import GATEWAY_PORT, LOOPBACK
-    return (os.environ.get("JAEGER_GATEWAY_URL") or f"http://{LOOPBACK}:{GATEWAY_PORT}").rstrip("/")
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    return resolve_gateway_url().rstrip("/")
 
 
 def _forward_oneshot_to_gateway(

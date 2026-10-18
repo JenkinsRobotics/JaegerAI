@@ -14,13 +14,13 @@ def test_remote_gateway_http_503_is_alive_but_degraded(monkeypatch):
     )
     monkeypatch.setattr(agent_health, "_http_probe", lambda *args, **kwargs: next(responses))
 
-    payload = agent_health._run_remote_probe("http://127.0.0.1:8810")
+    payload = agent_health._run_remote_probe("http://127.0.0.1:33418")
 
     assert payload["alive"] is True
     assert payload["details"] == {
         "state": "degraded",
         "reason": "remote_gateway_http_response",
-        "endpoint": "http://127.0.0.1:8810/health/detailed",
+        "endpoint": "http://127.0.0.1:33418/health/detailed",
         "status_code": 404,
     }
 
@@ -32,7 +32,7 @@ def test_remote_gateway_transport_failure_is_down(monkeypatch):
         lambda *args, **kwargs: (False, None, "URLError", None),
     )
 
-    payload = agent_health._run_remote_probe("http://127.0.0.1:8810")
+    payload = agent_health._run_remote_probe("http://127.0.0.1:33418")
 
     assert payload["alive"] is False
     assert payload["details"]["reason"] == "remote_gateway_unreachable"

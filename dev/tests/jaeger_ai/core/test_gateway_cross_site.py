@@ -48,7 +48,7 @@ async def test_cross_site_fetch_metadata_is_refused(client):
 
 @pytest.mark.asyncio
 async def test_rebound_host_is_refused(client):
-    resp = await client.get("/v1/approvals", headers={"Host": "evil.example:8810"})
+    resp = await client.get("/v1/approvals", headers={"Host": "evil.example:33418"})
     assert resp.status == 421
 
 

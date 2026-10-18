@@ -61,7 +61,7 @@ The Jaeger architecture enforces strict boundary separation across six distinct 
   - Tool arguments proposing destructive actions are intercepted and denied by `PolicyKernel`.
 
 ### 3.4 Remote WebUI & CSRF Defense
-- **Threat:** Malicious web page sends cross-site requests to local Jaeger Gateway (:8810) or WebUI (:8790).
+- **Threat:** Malicious web page sends cross-site requests to local Jaeger Gateway (:33418) or WebUI (:8790).
 - **Mitigation:**
   - Gateway binds loopback `127.0.0.1` by default.
   - WebUI validates Origin / Referer headers against allowed hosts.

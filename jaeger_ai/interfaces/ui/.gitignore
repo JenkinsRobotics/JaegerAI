@@ -1,0 +1,10 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+screenshots/
+*.tsbuildinfo
+.vite/
+
+# The repo root ignores vendor/; this vendored copy of @aether/ui is tracked on purpose.
+!vendor/

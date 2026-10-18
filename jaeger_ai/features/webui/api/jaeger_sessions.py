@@ -1,11 +1,11 @@
-"""Proxy WebUI ``/api/jaeger/sessions*`` to Jaeger Gateway :8810 ``/v1/sessions*``.
+"""Proxy WebUI ``/api/jaeger/sessions*`` to the Jaeger Gateway's ``/v1/sessions*``.
 
 Companion to ``jaeger_agents.py``, which already proxies ``/v1/agents*`` and
 ``/v1/handoffs``. Sessions, the SSE event stream and approvals had no proxy,
 so the browser had no route to the conversation spine at all — it could list
 agents and nothing else.
 
-Browser clients on :8790 cannot reach loopback :8810, so the WebUI process
+Browser clients on :8790 cannot reach the loopback Gateway, so the WebUI process
 proxies server-side. Routes mirror the gateway exactly (audited from
 ``core/gateway/server.py``); nothing is invented:
 
@@ -46,8 +46,14 @@ def gateway_base() -> str:
     return (
         os.environ.get("JAEGER_GATEWAY_URL")
         or os.environ.get("HERMES_WEBUI_GATEWAY_URL")
-        or "http://127.0.0.1:8810"
+        or _resolved_gateway_url()
     ).rstrip("/")
+
+
+def _resolved_gateway_url() -> str:
+    """The Gateway URL from contract.ports (env overrides honoured)."""
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    return resolve_gateway_url()
 
 
 # ── unary proxy ──────────────────────────────────────────────────────
@@ -110,7 +116,7 @@ def _body_bytes(handler) -> bytes:
 # ── SSE streaming proxy ──────────────────────────────────────────────
 
 
-def _proxy_stream(handler, session_id: str, query: str) -> bool:
+def _proxy_stream(handler, session_id: str, query: str, *, upstream_path: str | None = None) -> bool:
     """Pump the gateway's SSE stream straight through to the browser.
 
     Deliberately NOT built on ``_proxy``: that reads the whole body before
@@ -127,7 +133,7 @@ def _proxy_stream(handler, session_id: str, query: str) -> bool:
     and an HTTP status is no longer available. The UI listens for it and
     shows a disconnected state rather than a silently stalled stream.
     """
-    url = f"{gateway_base()}/v1/sessions/{session_id}/stream{query}"
+    url = f"{gateway_base()}{upstream_path or f'/v1/sessions/{session_id}/stream'}{query}"
     req = Request(url, method="GET")
     req.add_header("Accept", "text/event-stream")
     _add_caller_auth(req)
@@ -218,6 +224,11 @@ def route(handler, parsed, method: str) -> bool:
     except Exception:
         pass
 
+    # Global event stream (agents, approvals, tasks, connect-apps): the same
+    # SSE pump as the session stream, no separate proxy.
+    if path == "/api/jaeger/events/stream" and method == "GET":
+        return _proxy_stream(handler, "*", query, upstream_path="/v1/events/stream")
+
     if path in ("/api/jaeger/gateway/health", "/api/jaeger/health"):
         # The gateway serves /health, NOT /v1/health — the latter 404s.
         return _proxy(handler, "GET", "/health")
@@ -299,6 +310,8 @@ def route(handler, parsed, method: str) -> bool:
     if len(parts) == 1:
         if method == "GET":
             return _proxy(handler, "GET", f"/v1/sessions/{session_id}")
+        if method == "PATCH":  # rename / archive / default model
+            return _proxy(handler, "PATCH", f"/v1/sessions/{session_id}", _body_bytes(handler))
         if method == "DELETE":
             return _proxy(handler, "DELETE", f"/v1/sessions/{session_id}")
 

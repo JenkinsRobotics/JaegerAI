@@ -29,15 +29,18 @@ else
     'from jaeger_ai.core.instance.instance import operator_state_root; print(operator_state_root())')" || exit 1
 fi
 
-export HERMES_HOME="${JAEGER_WEBUI_AGENT_STATE:-$jaeger_state_home/hermes-webui-agent}"
+# The vendored WebUI reads HERMES_HOME as its agent home; Jaeger owns that
+# directory under its own state root (never the legacy Hermes homes).
+export HERMES_HOME="${JAEGER_WEBUI_AGENT_STATE:-$jaeger_state_home/webui-agent}"
 export HERMES_WEBUI_STATE_DIR="${JAEGER_WEBUI_STATE_DIR:-$jaeger_state_home/hermes-webui-state}"
-# Loopback unless the owner explicitly re-opens LAN. Tailscale Serve proxies
-# this port; a raw interface bind is not the remote path.
-if [[ "${JAEGER_WEBUI_ALLOW_LAN:-0}" =~ ^(1|true|yes|on)$ ]]; then
-  export HERMES_WEBUI_HOST="${JAEGER_WEBUI_HOST:-${HERMES_WEBUI_HOST:-0.0.0.0}}"
-else
-  export HERMES_WEBUI_HOST="127.0.0.1"
-fi
+# Loopback unless the owner explicitly re-opens LAN (JAEGER_WEBUI_ALLOW_LAN=1).
+# An inherited HERMES_WEBUI_HOST (e.g. 0.0.0.0 exported by a login shell) is
+# ignored otherwise. Tailscale Serve proxies this port; a raw interface bind
+# is not the remote path.
+case "$(printf '%s' "${JAEGER_WEBUI_ALLOW_LAN:-0}" | tr '[:upper:]' '[:lower:]')" in
+  1|true|yes|on) export HERMES_WEBUI_HOST="${JAEGER_WEBUI_HOST:-${HERMES_WEBUI_HOST:-0.0.0.0}}" ;;
+  *) export HERMES_WEBUI_HOST="127.0.0.1" ;;
+esac
 export HERMES_WEBUI_PORT="${JAEGER_WEBUI_PORT:-8790}"
 export HERMES_WEBUI_BOT_NAME="${JAEGER_WEBUI_BOT_NAME:-JaegerAI}"
 export HERMES_WEBUI_DEFAULT_WORKSPACE="${JAEGER_WEBUI_WORKSPACE:-${HOME}/workspace}"
@@ -52,31 +55,23 @@ case "$(printf '%s' "${JAEGER_LEGACY_PATHS:-}" | tr '[:upper:]' '[:lower:]')" in
 esac
 # Health uses JAEGER_GATEWAY_URL. Do not synthesize a global chat gateway
 # override: named profiles own their individual native gateway addresses.
-export JAEGER_GATEWAY_URL="${JAEGER_GATEWAY_URL:-http://127.0.0.1:8810}"
+# Without an explicit URL, resolve it from the port contract at launch: the
+# Gateway URL from contract/ports.py (env overrides honoured).
+if [[ -z "${JAEGER_GATEWAY_URL:-}" ]]; then
+  JAEGER_GATEWAY_URL="$(PYTHONPATH="$repo_root" "$python_exe" -c \
+    'from jaeger_ai.contract.ports import resolve_gateway_url; print(resolve_gateway_url())')"
+fi
+export JAEGER_GATEWAY_URL
 export JAEGER_OLLAMA_URL="${JAEGER_OLLAMA_URL:-http://127.0.0.1:11434}"
 export HERMES_WEBUI_EXTENSION_DIR="$repo_root/jaeger_ai/assets"
 export HERMES_WEBUI_EXTENSION_SCRIPT_URLS=/extensions/jaeger_webui_branding.js
 export HERMES_WEBUI_FOREGROUND=1
 
-# Profile listing/switching imports hermes_cli + agent.* from the external
-# Hermes agent (external checkout via JAEGER_HERMES_AGENT_SRC), which the WebUI discovers on
-# its own. A separate Hermes checkout is used only when named explicitly —
-# never picked up just because ~/GitHub/hermes-agent happens to exist, which
-# made the WebUI's behaviour depend on the machine it ran on.
-hermes_agent_src="${JAEGER_HERMES_AGENT_SRC:-}"
-if [[ -n "$hermes_agent_src" && -d "$hermes_agent_src" ]]; then
-  export HERMES_WEBUI_AGENT_DIR="${HERMES_WEBUI_AGENT_DIR:-$hermes_agent_src}"
-  export PYTHONPATH="${repo_root}:${hermes_agent_src}${PYTHONPATH:+:$PYTHONPATH}"
-else
-  export PYTHONPATH="${repo_root}${PYTHONPATH:+:$PYTHONPATH}"
-fi
+export PYTHONPATH="${repo_root}${PYTHONPATH:+:$PYTHONPATH}"
 
-
-# Shared Hermes profiles + current-schema state.db for the :8790 webui home.
-# Leftover real profile dirs are renamed aside and replaced with a symlink.
-PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}" "$python_exe" -c \
-  "import os; from pathlib import Path; from jaeger_ai.features.webui.service.profile_layout import prepare_webui_home; prepare_webui_home(Path(os.environ['HERMES_HOME']))"
-
+# The sidebar listing needs a current-schema state.db in the agent home.
+"$python_exe" -c \
+  "import os; from pathlib import Path; from jaeger_ai.features.webui.service.profile_layout import ensure_agent_state_schema; ensure_agent_state_schema(Path(os.environ['HERMES_HOME']))"
 
 # Warm the model catalogue in the background before anyone opens the page.
 #

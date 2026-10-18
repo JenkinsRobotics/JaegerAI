@@ -20,6 +20,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+from jaeger_ai.contract.ports import GATEWAY_PORT
+
 from jaeger_ai.core.agent_registry.types import (
     BUILTIN_THIRD_PARTY,
     AgentKind,
@@ -407,7 +409,7 @@ class AgentRegistry:
         return {
             "model": "grok_bot_shape",
             "persistence_spine": "jaeger_gateway",
-            "gateway_port": 8810,
+            "gateway_port": GATEWAY_PORT,
             "fundamentals_fee_gated": False,
             "active": active,
             "lead": lead,
@@ -472,6 +474,16 @@ def create_agent(*args, **kwargs):
 def list_agents(*args, **kwargs):
     """Module-level list_agents — native + third-party catalog."""
     return get_default_registry().list_agents(*args, **kwargs)
+
+
+def with_roster_flags(record) -> dict[str, Any]:
+    """``to_dict`` plus explicit ``hidden`` / ``disabled`` booleans (Agents View roster)."""
+    from jaeger_ai.core.agent_registry.specialists import is_test_agent
+
+    out = record.to_dict()
+    out["hidden"] = bool(is_test_agent(record))
+    out["disabled"] = bool(getattr(record, "disabled", False))
+    return out
 
 
 def _with_hidden(record) -> dict[str, Any]:

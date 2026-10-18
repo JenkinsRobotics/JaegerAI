@@ -66,10 +66,10 @@ def _route(argv: list[str], py: str) -> list[str]:
     if cmd == "a2a":
         return [py, "-m", "jaeger_ai.interfaces.a2a_server", *rest]
     if cmd == "gateway" and rest[:1] == ["daemon"]:
-        # The Jaeger Gateway daemon (:8810) — sessions + SSE, AGENTS.md §3.
+        # The Jaeger Gateway daemon (:33418, contract.ports.GATEWAY_PORT) — sessions + SSE, AGENTS.md §3.
         # Checked BEFORE the Agentgateway branch below: `jaeger gateway`
         # manages the EXTERNAL Agentgateway (:8811/:8812), which is a
-        # different process. Without this route the :8810 daemon had no
+        # different process. Without this route the Gateway daemon had no
         # launcher at all while the WebUI integrations pointed clients at it.
         return [py, "-m", "jaeger_ai.core.gateway.server", *rest[1:]]
     if cmd == "gateway":

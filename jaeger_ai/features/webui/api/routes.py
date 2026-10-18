@@ -8085,11 +8085,8 @@ def _lookup_gateway_session_identity(session_id: str) -> dict:
 
 def _gateway_base_url() -> str:
     """The Gateway is the single store of record; this is where it lives."""
-    import os
-    return (
-        os.environ.get("JAEGER_GATEWAY_URL")
-        or "http://127.0.0.1:8810"
-    ).rstrip("/")
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    return resolve_gateway_url().rstrip("/")
 
 
 def _gateway_delete_session(session_id: str) -> dict:
@@ -11691,10 +11688,10 @@ def _jaeger_gateway_bases() -> list[str]:
         raw = (os.environ.get(key) or "").strip().rstrip("/")
         if raw:
             bases.append(raw)
-    gw_port = os.environ.get("JAEGER_GATEWAY_PORT", "8810")
-    bases.append(f"http://127.0.0.1:{gw_port}")
-    if gw_port != "8810":
-        bases.append("http://127.0.0.1:8810")
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    # The loopback Gateway (contract.ports), after any explicitly configured URL above.
+    implicit = {k: v for k, v in os.environ.items() if k != "JAEGER_GATEWAY_URL"}
+    bases.append(resolve_gateway_url(implicit))
     runner = (
         os.environ.get("HERMES_WEBUI_RUNNER_BASE_URL")
         or os.environ.get("JAEGER_RUNNER_BASE_URL")
@@ -11710,7 +11707,7 @@ def _jaeger_gateway_bases() -> list[str]:
 
 
 def _proxy_jaeger_gateway(handler, method: str, path: str, body: bytes | None = None):
-    """Server-side proxy so browser clients on :8790 reach Gateway :8810."""
+    """Server-side proxy so browser clients on :8790 reach the loopback Gateway."""
     import json as _json
     import http.client
     from urllib.parse import urlparse
@@ -11774,6 +11771,15 @@ def handle_get(handler, parsed) -> bool:
     # See #2226.
     if parsed.path in ("/session/manifest.json", "/session/manifest.webmanifest"):
         return _serve_manifest(handler)
+
+    # New UI build at / (interfaces/ui/dist); the old shell only at /legacy
+    # behind JAEGER_WEBUI_LEGACY=1 (api/ui_shell.py).
+    from api.ui_shell import serve as _serve_ui_shell
+    _shell = _serve_ui_shell(handler, parsed)
+    if _shell is True:
+        return True
+    if _shell == "legacy":
+        parsed = parsed._replace(path="/")
 
     if parsed.path in ("/", "/index.html") or parsed.path.startswith("/session/"):
         try:
@@ -13505,7 +13511,7 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/memory":
         return _handle_memory_read(handler, parsed)
 
-    # ── Jaeger Gateway agents (GET) — Surfaces spine parity with :8810 ──
+    # ── Jaeger Gateway agents (GET) — Surfaces spine parity with the Gateway ──
     if parsed.path in {"/api/agents", "/v1/agents"}:
         qs = ("?" + parsed.query) if parsed.query else ""
         return _proxy_jaeger_gateway(handler, "GET", f"/v1/agents{qs}")
@@ -16664,6 +16670,12 @@ def handle_patch(handler, parsed) -> bool:
     """Handle all PATCH routes. Returns True if handled, False for 404."""
     if not _check_csrf(handler):
         return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
+    try:
+        from api.jaeger_agents import route as jaeger_agents_route
+        if jaeger_agents_route(handler, parsed, "PATCH"):
+            return True
+    except Exception:
+        pass
     proxy_result = _handle_extension_sidecar_proxy(
         handler,
         parsed,

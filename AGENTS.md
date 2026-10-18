@@ -37,7 +37,7 @@ The repository source tree must remain pristine, deterministic, and free of runt
 ## 3. Resilience & Gateway Continuity
 
 * **Gateway Architecture:**
-  * The Jaeger Gateway (`jaeger_ai.core.gateway.server`) runs as an isolated daemon on `127.0.0.1:8810`, launched by **`jaeger gateway daemon`**. It owns persistent SQLite session state and broadcasts SSE multi-client events.
+  * The Jaeger Gateway (`jaeger_ai.core.gateway.server`) runs as an isolated daemon on `127.0.0.1:33418` (loopback only; `JAEGER_GATEWAY_HOST` is the explicit opt-out), launched by **`jaeger gateway daemon`**. The port is one constant, `GATEWAY_PORT` in `jaeger_ai/contract/ports.py` (`JAEGER_GATEWAY_PORT` overrides it). The old port `:8810` is retired (2026-10-17): nothing listens there and no client falls back to it. It owns persistent SQLite session state and broadcasts SSE multi-client events.
   * **`jaeger gateway daemon` and `jaeger gateway` are different processes.** Bare `jaeger gateway` manages the *external* Agentgateway (MCP `:8811`, A2A `:8812`) via `jaeger_ai.features.agentgateway`. Only the `daemon` subcommand runs the Jaeger Gateway. The two are one word apart and are routinely confused.
   * Native macOS apps (`apps/macos`), Web UIs (`apps/web`), and CLI interfaces connect as decoupled clients to the Gateway. **`apps/macos` and `apps/web` are symlinks**, not separate codebases — they alias `jaeger_ai/interfaces/swift` and `jaeger_ai/features/webui`. Treat the targets as authoritative; the aliases exist so `apps/` reads as the client layer.
   * Session state resolves through `operator_state_root()`: `JAEGER_STATE_DIR` → `JAEGER_HOME` → `~/.jaeger`, landing at `<state root>/gateway_sessions.sqlite3`. Anything opening that database directly must use the same resolver — reading `JAEGER_HOME` alone means a sandboxed run silently opens the operator's live store and collides with the daemon's ownership lease.
@@ -55,7 +55,7 @@ exercised; none are aspirational.
 
 | Process | Bind | Launch | Owns |
 |---|---|---|---|
-| Jaeger Gateway | `127.0.0.1:8810` | `jaeger gateway daemon` | sessions, SSE, approvals |
+| Jaeger Gateway | `127.0.0.1:33418` | `jaeger gateway daemon` | sessions, SSE, approvals |
 | Agentgateway (external) | `:8811` MCP, `:8812` A2A | `jaeger gateway start` | external MCP/A2A proxy |
 | Jaeger WebUI | `:8790` | `./scripts/run-jaeger-webui.sh` | browser UI |
 | MCP server | stdio / `--http` | `jaeger mcp` | tool surface |
@@ -65,16 +65,16 @@ exercised; none are aspirational.
 
 * **NDJSON over AF_UNIX** — `<instance>/run/bridge.sock`, via `jaeger bridge`.
   The native app and TUI speak this for turn execution.
-* **REST + SSE** — `:8810`. Sessions and live events. The gateway serves
+* **REST + SSE** — `:33418`. Sessions and live events. The gateway serves
   **`/health`**, not `/v1/health` (the latter 404s).
 
 ### Clients
 
 | Client | Stack | Transport |
 |---|---|---|
-| `jaeger_ai/interfaces/swift` (= `apps/macos`) | SwiftUI, `MenuBarExtra`, `LSUIElement` | REST+SSE `:8810`, AF_UNIX bridge |
-| `jaeger_ai/features/webui` (= `apps/web`) | vendored Python + vanilla JS overlays | server-side proxy → `:8810` |
-| `jaeger_ai/interfaces/ide` | VS Code extension sidebar | REST+SSE `:8810`, native daemon lifecycle |
+| `jaeger_ai/interfaces/swift` (= `apps/macos`) | SwiftUI, `MenuBarExtra`, `LSUIElement` | REST+SSE `:33418`, AF_UNIX bridge |
+| `jaeger_ai/features/webui` (= `apps/web`) | vendored Python + vanilla JS overlays | server-side proxy → `:33418` |
+| `jaeger_ai/interfaces/ide` | VS Code extension sidebar | REST+SSE `:33418`, native daemon lifecycle |
 | `jaeger_ai/interfaces/tui` | `prompt_toolkit` | AF_UNIX bridge |
 | `jaeger_ai/interfaces/pyside6` | Qt + tray | AF_UNIX bridge |
 
@@ -85,7 +85,7 @@ build system. The type-safe client layer is Swift `Decodable`.
 
 | Canonical (Authoritative) | Legacy / Shadow / Alias (Do NOT Edit) | Distinction & Invariant |
 |---|---|---|
-| `jaeger gateway daemon` (`:8810`) | `jaeger gateway` (`:8811`, `:8812`) | `daemon` owns Jaeger sessions & SSE; bare `gateway` is external proxy. |
+| `jaeger gateway daemon` (`:33418`) | `jaeger gateway` (`:8811`, `:8812`) | `daemon` owns Jaeger sessions & SSE; bare `gateway` is external proxy. |
 | `packages/jaeger-agent/` | `jaeger_ai/vendor/` | `jaeger-agent` is live uv workspace; `vendor/` is deleted and forbidden. |
 | `jaeger_ai/interfaces/swift` | `apps/macos` | `apps/macos` is a symlink alias; authoritative code is in `jaeger_ai/`. |
 | `jaeger_ai/features/webui` | `apps/web` | `apps/web` is a symlink alias; authoritative code is in `jaeger_ai/`. |
@@ -95,7 +95,7 @@ build system. The type-safe client layer is Swift `Decodable`.
 ### Run locally & verify
 
 ```bash
-jaeger gateway daemon                       # :8810 — start first
+jaeger gateway daemon                       # :33418 — start first
 ./scripts/run-jaeger-webui.sh               # :8790
 open JaegerAI.app                           # shortcut to the external native build cache
 ./scripts/verify.sh                         # deterministic test & hygiene verification pipeline
@@ -118,7 +118,7 @@ JaegerAI/
 ├── integrations/       # External service and platform adapters
 ├── jaeger              # Single operator entrypoint script (executes ~/.jaeger/venv)
 ├── jaeger_ai/          # Core engine — see docs/architecture/STRUCTURE.md for the full map
-│   ├── core/           # Shared engine: gateway (sessions, :8810), frameworks, models
+│   ├── core/           # Shared engine: gateway (sessions, :33418), frameworks, models
 │   ├── features/       # One folder per feature, each with its own README.md
 │   ├── interfaces/     # Client surfaces ONLY (swift, tui, pyside6, messaging, bridge)
 │   └── assets/         # Icons + the WebUI extension scripts (single mount point)

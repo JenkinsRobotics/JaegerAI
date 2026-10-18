@@ -121,7 +121,7 @@ def endpoints() -> list[Endpoint]:
                  id_col="id", profile_col="profile_name", source_col="source",
                  title_col="title", count_col="message_count",
                  time_col="last_activity_at", default_runtime="hermes"),
-        Endpoint("webui-home", root / "hermes-webui-agent" / "state.db",
+        Endpoint("webui-home", root / "webui-agent" / "state.db",
                  id_col="id", profile_col=None, source_col="source",
                  title_col="title", count_col="message_count",
                  time_col="started_at", default_runtime="hermes"),

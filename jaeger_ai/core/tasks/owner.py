@@ -114,7 +114,9 @@ class GatewayTaskOwner:
             state=TaskState.QUEUED if approved else TaskState.PAUSED, payload=payload,
             notification_policy=NotificationPolicy(recipient_session_id=parent),
             provenance={'request_id': context.get('request_id'), 'authorized': approved,
-                        'source': context.get('source'), 'session_id': parent})
+                        'source': context.get('source'), 'session_id': parent},
+            agent_id=str(context.get('agent_id') or ''), eta=context.get('eta'),
+            runner=str(context.get('runner') or 'native'))
         task, replayed = self.store.admit_task(task)
         if not replayed:
             self.gateway.store.ensure_session(f'task:{tid}', title=goal[:100], profile='jaeger', workspace=workspace,

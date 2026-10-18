@@ -1,22 +1,19 @@
-"""Hermes WebUI profile display helpers and vendor-home preparation.
+"""WebUI profile display helpers and agent-home schema.
 
 Single conversation library (Grok-Bot model): one SI/home chat plus
 specialist threads labeled by profile/role badges — not a second empty UI
-per profile. Display names stay Hermes Agent / Jaeger / OpenClaw /
-Roundtable. The vendor WebUI on :8790 uses an isolated HERMES_HOME; this
-module links that home at the shared ``~/.hermes/profiles`` tree (avoiding
-isolated 0-byte profile state.dbs) and ensures ``state.db`` has the
-``source`` column the sidebar listing requires.
+per profile. The vendor WebUI on :8790 uses a Jaeger-owned agent home
+(``<state>/webui-agent``); this module only ensures its ``state.db`` has
+the ``source`` column the sidebar listing requires. It never links, writes
+or reads the legacy ``~/.hermes`` / ``hermes-webui-agent`` homes.
 """
 
 from __future__ import annotations
 
 import sqlite3
-import time
 from pathlib import Path
 from typing import Any
 
-from jaeger_ai.contract.ports import OLLAMA_OPENAI_URL, OLLAMA_URL
 from jaeger_ai.contract.frameworks import display_name, is_known
 
 from ..adapter.profile_catalog import PROFILES
@@ -80,77 +77,6 @@ def library_model() -> dict[str, Any]:
     }
 
 
-def _write_display_name(profile_home: Path, *, display_name: str) -> None:
-    profile_home.mkdir(parents=True, exist_ok=True)
-    meta = profile_home / "profile.yaml"
-    existing = meta.read_text(encoding="utf-8") if meta.is_file() else ""
-    lines = [ln for ln in existing.splitlines() if not ln.strip().startswith("display_name:")]
-    lines = [ln for ln in lines if not ln.strip().startswith("visible:")]
-    lines.insert(0, f"display_name: {display_name}")
-    meta.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-
-
-def ensure_webui_profile_layout(hermes_home: Path | None = None) -> dict[str, Any]:
-    """Ensure named-profile display names; leave other profiles visible."""
-    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root
-
-    home = (hermes_home or hermes_profile_root()).expanduser()
-    profiles = home / "profiles"
-    profiles.mkdir(parents=True, exist_ok=True)
-    _write_display_name(home, display_name=PROFILE_DISPLAY_NAMES["default"])
-    written: list[str] = ["default"]
-    for folder, label in PROFILE_DISPLAY_NAMES.items():
-        if folder == "default":
-            continue
-        path = profiles / folder
-        if path.is_dir():
-            _write_display_name(path, display_name=label)
-            written.append(folder)
-    visible = sorted(
-        p.name
-        for p in profiles.iterdir()
-        if p.is_dir() and not p.name.startswith(".") and p.name != "default"
-    )
-    return {
-        "hermes_home": str(home),
-        "visible_named_profiles": visible,
-        "display_names": {name: PROFILE_DISPLAY_NAMES.get(name, name) for name in written},
-        "archived": [],
-    }
-
-
-def link_shared_profiles(*, shared: Path, agent_home: Path) -> dict[str, Any]:
-    """Point ``agent_home/profiles`` at the shared Hermes profile tree.
-
-    A leftover real directory is renamed aside, not deleted. That leftover is
-    what produced isolated 0-byte profile ``state.db`` files under the vendor
-    HERMES_HOME; once the symlink is in place the fork writes the shared tree.
-    """
-    agent_home = agent_home.expanduser()
-    shared = shared.expanduser()
-    target = agent_home / "profiles"
-    agent_home.mkdir(parents=True, exist_ok=True)
-    result: dict[str, Any] = {"linked": False, "replaced": None, "shared": str(shared)}
-    if not shared.is_dir():
-        result["error"] = "shared profiles missing"
-        return result
-    if target.is_symlink():
-        try:
-            if target.resolve() == shared.resolve():
-                result["linked"] = True
-                return result
-        except OSError:
-            pass
-        target.unlink()
-    elif target.exists():
-        bak = target.with_name(f"profiles.bak-{int(time.time())}")
-        target.rename(bak)
-        result["replaced"] = str(bak)
-    target.symlink_to(shared, target_is_directory=True)
-    result["linked"] = True
-    return result
-
-
 def ensure_agent_state_schema(agent_home: Path) -> dict[str, Any]:
     """Guarantee ``state.db`` exists with a ``source`` column.
 
@@ -194,185 +120,3 @@ def ensure_agent_state_schema(agent_home: Path) -> dict[str, Any]:
         }
     finally:
         conn.close()
-
-
-def ensure_webui_config_yaml(agent_home: Path) -> dict[str, Any]:
-    """Ensure ``config.yaml`` exists under the WebUI HERMES_HOME with a reachable Ollama URL.
-
-    Missing config leaves gateway_chat / model routing half-configured and is a
-    common overnight break after HERMES_HOME moved from ``~/.jaeger_ai`` to
-    ``~/.jaeger``. Prefer copying an existing home config, then rewrite dead
-    Tailscale / VM host IPs to loopback for the Mac-native WebUI.
-    """
-    agent_home = agent_home.expanduser()
-    agent_home.mkdir(parents=True, exist_ok=True)
-    dst = agent_home / "config.yaml"
-    home = Path.home()
-    candidates = [
-        home / ".jaeger" / "hermes" / "config.yaml",
-        home / ".jaeger_ai" / "hermes-webui-agent" / "config.yaml",
-    ]
-    raw = dst.read_text(encoding="utf-8") if dst.exists() else ""
-    source = str(dst) if raw else None
-    if not raw:
-        for c in candidates:
-            if c.is_file():
-                raw = c.read_text(encoding="utf-8")
-                source = str(c)
-                break
-    if not raw:
-        raw = f"""model:
-  default: kimi-k2.7-code:cloud
-  provider: ollama
-  base_url: {OLLAMA_OPENAI_URL}
-providers:
-  only_configured: false
-webui:
-  host: 127.0.0.1
-  port: 8790
-  session_save_mode: eager
-"""
-        source = "builtin-default"
-    # Rewrite stale hosts to the endpoint owned by the shared contract.
-    locked_ollama = OLLAMA_URL
-    for bad in (
-        "http://100.78.245.49:11434",
-        "http://192.168.65.1:11434",
-    ):
-        raw = raw.replace(bad + "/v1", locked_ollama + "/v1")
-        raw = raw.replace(bad, locked_ollama)
-    if "webui:" not in raw:
-        raw += """
-webui:
-  host: 127.0.0.1
-  port: 8790
-  session_save_mode: eager
-"""
-    dst.write_text(raw, encoding="utf-8")
-    try:
-        dst.chmod(0o600)
-    except OSError:
-        pass
-    return {"path": str(dst), "source": source, "bytes": dst.stat().st_size}
-
-
-def ensure_webui_env_dotenv(profile_home: Path) -> None:
-    """Ensure .env does not poison host-side execution with container-internal Ollama IPs."""
-    env_file = profile_home / ".env"
-    if not env_file.is_file():
-        return
-    try:
-        raw = env_file.read_text(encoding="utf-8")
-        locked_ollama = OLLAMA_URL
-        changed = False
-        for bad in (
-            "http://100.78.245.49:11434",
-            "http://192.168.65.1:11434",
-        ):
-            if bad in raw:
-                raw = raw.replace(bad + "/v1", locked_ollama + "/v1")
-                raw = raw.replace(bad, locked_ollama)
-                changed = True
-        if changed:
-            env_file.write_text(raw, encoding="utf-8")
-    except Exception:
-        pass
-
-
-def ensure_profile_state_schemas(agent_home: Path, shared_profiles: Path | None = None) -> dict[str, Any]:
-    """Ensure every profile ``state.db`` has the ``source`` column WebUI requires."""
-    fixed: list[str] = []
-    roots = [agent_home.expanduser()]
-    if shared_profiles is not None:
-        roots.append(shared_profiles.expanduser())
-    seen: set[Path] = set()
-    for root in roots:
-        dbs = [root / "state.db"]
-        profiles = root / "profiles"
-        if profiles.is_dir():
-            dbs.extend(sorted(profiles.glob("*/state.db")))
-        for db in dbs:
-            try:
-                real = db.resolve()
-            except OSError:
-                real = db
-            if real in seen or not db.exists():
-                continue
-            seen.add(real)
-            before = ensure_agent_state_schema(db.parent)
-            if before.get("added"):
-                fixed.append(str(db))
-    return {"fixed": fixed, "checked": len(seen)}
-
-
-def prepare_webui_home(
-    agent_home: Path | None = None,
-    *,
-    hermes_home: Path | None = None,
-) -> dict[str, Any]:
-    """Ready the :8790 WebUI HERMES_HOME: names, shared profile link, state.db schema.
-
-    ``HERMES_HOME`` for the host WebUI is ``~/.jaeger/hermes-webui-agent``.
-    That directory is the ``default`` profile, so it needs ``profile.yaml`` with
-    ``display_name: Hermes Agent``. Named profiles live under the shared
-    ``~/.hermes/profiles`` tree (symlinked in) so the single-library model never
-    spawns empty second UIs / 0-byte profile state.dbs.
-    """
-    from jaeger_ai.core.runtime.profile_paths import hermes_profile_root, webui_agent_home
-
-    hermes = (hermes_home or hermes_profile_root()).expanduser()
-    agent = (agent_home or webui_agent_home()).expanduser()
-    layout = ensure_webui_profile_layout(hermes)
-    linked = link_shared_profiles(shared=hermes / "profiles", agent_home=agent)
-    # The WebUI HERMES_HOME itself is the default/root profile for :8790.
-    _write_display_name(agent, display_name=PROFILE_DISPLAY_NAMES["default"])
-    # If the symlink is live, refresh labels on named profiles via the shared tree.
-    agent_profiles = agent / "profiles"
-    named_written: dict[str, str] = {"default": PROFILE_DISPLAY_NAMES["default"]}
-    if agent_profiles.is_dir():
-        for folder, label in PROFILE_DISPLAY_NAMES.items():
-            if folder == "default":
-                continue
-            path = agent_profiles / folder
-            if path.is_dir():
-                _write_display_name(path, display_name=label)
-                named_written[folder] = label
-    schema = ensure_agent_state_schema(agent)
-    config = ensure_webui_config_yaml(agent)
-    ensure_webui_env_dotenv(agent)
-    ensure_webui_env_dotenv(hermes)
-    if (hermes / "profiles").is_dir():
-        for p in (hermes / "profiles").iterdir():
-            if p.is_dir():
-                ensure_webui_env_dotenv(p)
-    # Default active profile to jaeger so fresh browser sessions start on Jaeger AI
-    active_profile_file = agent / "active_profile"
-    if not active_profile_file.exists():
-        active_profile_file.write_text("jaeger\n", encoding="utf-8")
-    # A catalog entry must be selectable even on a fresh installation. Seed
-    # only model selection, never another profile's credentials or history.
-    import yaml
-    source = yaml.safe_load((agent / 'config.yaml').read_text()) or {}
-    model = source.get('model') if isinstance(source, dict) else None
-    for name, label in PROFILE_DISPLAY_NAMES.items():
-        if name == 'default':
-            continue
-        path = agent_profiles / name
-        _write_display_name(path, display_name=label)
-        named_written[name] = label
-        target = path / 'config.yaml'
-        if not target.exists():
-            seeded = {key: model[key] for key in ('default', 'provider') if key in model} if isinstance(model, dict) else model
-            target.write_text(yaml.safe_dump({'model': seeded} if seeded else {}))
-            target.chmod(0o600)
-    schemas = ensure_profile_state_schemas(agent, shared_profiles=hermes / "profiles")
-    return {
-        "agent_home": str(agent),
-        "layout": layout,
-        "profiles": linked,
-        "display_names": named_written,
-        "state_db": schema,
-        "config": config,
-        "profile_schemas": schemas,
-        "library": library_model(),
-    }

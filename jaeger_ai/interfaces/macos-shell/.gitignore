@@ -1,0 +1,7 @@
+.build/
+.swiftpm/
+Package.resolved
+*.app
+# the script-only dev launcher is source, not a build product
+!/Jaeger Dev.app/
+.DS_Store

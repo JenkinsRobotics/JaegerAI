@@ -11,7 +11,15 @@ import urllib.request
 from pathlib import Path
 
 ORIGIN = "https://matthews-mac-studio.tail80f206.ts.net:8443"
-GATEWAY = "http://127.0.0.1:8810"
+import sys as _sys
+from pathlib import Path as _Path
+
+_REPO = str(_Path(__file__).resolve().parents[2])
+if _REPO not in _sys.path:
+    _sys.path.insert(0, _REPO)
+from jaeger_ai.contract.ports import GATEWAY_PORT, resolve_gateway_url
+
+GATEWAY = resolve_gateway_url()
 
 
 def _json(method: str, url: str, body: dict | None = None, headers: dict | None = None, timeout: float = 8.0):
@@ -64,11 +72,14 @@ def operator_snapshot() -> dict:
         entity = str(((gw["body"].get("Agent") or {}).get("entity_id")) or "")
     sessions_https = _json("GET", ORIGIN + "/api/jaeger/sessions")
     auth = _json("GET", ORIGIN + "/api/auth/status")
-    gw_tailnet = _json("GET", "http://100.74.2.15:8810/health")
+    gw_tailnet = _json("GET", f"http://100.74.2.15:{GATEWAY_PORT}/health")
     return {
         "entity_id": entity,
         "gateway_loopback": gw.get("status") == 200,
-        "gateway_tailnet_closed": gw_tailnet.get("status") in {0, None} or "error" in gw_tailnet,
+        "gateway_tailnet_closed": all(
+            probe.get("status") in {0, None} or "error" in probe
+            for probe in (gw_tailnet,)
+        ),
         "https_webui": sessions_https.get("status") in {200, 401, 403},
         "unauth_sessions_status": sessions_https.get("status"),
         "auth_enabled": bool((auth.get("body") or {}).get("auth_enabled")) if isinstance(auth.get("body"), dict) else False,

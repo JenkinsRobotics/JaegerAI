@@ -44,8 +44,11 @@ from .session_store import EXECUTION_INPUT_KEYS, GatewaySessionStore, RequestBus
 
 logger = logging.getLogger("jaeger.gateway")
 
-DEFAULT_GATEWAY_PORT = int(os.environ.get("JAEGER_GATEWAY_PORT", str(GATEWAY_PORT)))
-DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST", "127.0.0.1")
+# GATEWAY_PORT already honours JAEGER_GATEWAY_PORT (contract/ports.py).
+DEFAULT_GATEWAY_PORT = GATEWAY_PORT
+# Loopback by default. JAEGER_GATEWAY_HOST is the explicit opt-out for anyone
+# who really needs a wider bind; publish to a tailnet rather than widening it.
+DEFAULT_GATEWAY_HOST = os.environ.get("JAEGER_GATEWAY_HOST") or LOOPBACK
 
 # Locked spine endpoints (docs/spine-acceptance.md M10). Chat does not use :8813.
 LOCKED_BRIDGE_HEALTH_URL = os.environ.get(
@@ -132,6 +135,8 @@ _IMAGE_QUESTION_OPENERS = frozenset({
 #: whichever comes first: this many characters or this many seconds.
 TURN_DELTA_BATCH_CHARS = 96
 TURN_DELTA_BATCH_S = 0.1
+#: Reasoning batches flush on time (TURN_DELTA_BATCH_S) or at this size.
+TURN_REASONING_BATCH_CHARS = 2048
 TOOL_EVENT_NAME_MAX = 80
 TOOL_EVENT_DURATION_MAX_S = 86_400.0
 
@@ -359,6 +364,10 @@ _REQUEST_CALLER: ContextVar[tuple[str, str] | None] = ContextVar("gateway_reques
 _DELEGABLE_ACTORS = frozenset({spec.actor for spec in caller_auth.CALLERS.values()})
 
 
+_BOUND_GATEWAY_PORT: int | None = None
+"""The port :func:`run_gateway_forever` actually bound, once it has."""
+
+
 def _register_tool_gateway_auth() -> None:
     """Give jaeger-agent's ``call_agent`` jaegerd's Gateway credential."""
     import importlib
@@ -368,6 +377,12 @@ def _register_tool_gateway_auth() -> None:
     except ImportError:
         return
     module.set_gateway_auth(lambda: caller_auth.client_headers("jaegerd"))
+    if hasattr(module, "set_gateway_base"):
+        # The tool runs inside this process; it reaches the port we bound.
+        module.set_gateway_base(
+            lambda: os.environ.get("JAEGER_GATEWAY_URL")
+            or f"http://{LOOPBACK}:{_BOUND_GATEWAY_PORT or DEFAULT_GATEWAY_PORT}"
+        )
 
 
 def current_request_actor() -> str | None:
@@ -512,6 +527,8 @@ class _GatewayToolConfirmationProvider:
         # approval card answers it; grants and autonomy shortcuts do not.
         if getattr(request, "force_prompt", False) is True:
             return self._decided(self._prompt(request))
+        if skill_name and skill_name in self._session_grants():
+            return True
         try:
             if self._grants().is_granted(skill_name):
                 return True
@@ -545,6 +562,18 @@ class _GatewayToolConfirmationProvider:
             pass
         return self._decided(self._prompt(request))
 
+    def _session_grants(self) -> set[str]:
+        """Skills the owner allowed "for this session" (session metadata)."""
+        try:
+            meta = (self.app.store.get_session(self.session_id) or {}).get("metadata") or {}
+            return {str(s) for s in meta.get("session_grants") or []}
+        except Exception:  # noqa: BLE001 — unreadable means "ask", never "allow"
+            return set()
+
+    def _grant_for_session(self, skill: str) -> None:
+        grants = sorted(self._session_grants() | {skill})
+        self.app.store.update_metadata(self.session_id, {"session_grants": grants})
+
     def _decided(self, approved: bool) -> bool:
         if not approved and self.request_id not in self.app._owner_unanswered:
             self.app._owner_declined.add(self.request_id)
@@ -569,7 +598,7 @@ class _GatewayToolConfirmationProvider:
             self.app.store.create_approval(
                 kind="tool_confirm",
                 prompt=f"Allow {skill}.{op}? {target}".strip(),
-                options=["once", "deny"],
+                options=APPROVAL_OPTIONS,
                 session_id=self.session_id,
                 request_id=self.request_id,
                 approval_id=aid,
@@ -582,9 +611,13 @@ class _GatewayToolConfirmationProvider:
             )
             self.app.event_bus.publish(self.session_id, "approval.request", {
                 "approval_id": aid,
+                # Same card shape as handoff approvals (see handle_stream_events).
+                "kind": "tool",
+                "prompt": f"Allow {skill}.{op}? {target}".strip(),
                 "tool": f"{skill}.{op}" if skill else op,
                 "target": target,
                 "reason": tier_name,
+                "options": APPROVAL_OPTIONS,
                 "session_id": self.session_id,
                 "request_id": self.request_id,
             })
@@ -612,8 +645,14 @@ class _GatewayToolConfirmationProvider:
                 break
         else:
             approved = bool(box["approved"]) and not (scope is not None and scope.cancelled)
+            decision = (self.app.store.get_approval(aid) or {}).get("decision")
+            if approved and skill and decision == "session" and not getattr(request, "force_prompt", False):
+                try:
+                    self._grant_for_session(skill)
+                except Exception:  # noqa: BLE001 — the call itself stays approved
+                    logger.warning("could not record session grant for %s", skill, exc_info=True)
             if (approved and not getattr(request, "force_prompt", False)
-                    and (self.app.store.get_approval(aid) or {}).get("decision") == "always"):
+                    and decision == "always"):
                 try:
                     self._grants().grant_persistent(skill)
                 except Exception:  # noqa: BLE001 — the call itself stays approved
@@ -628,6 +667,11 @@ class _GatewayToolConfirmationProvider:
             return False
         row = self.app.store.get_approval(aid) or {}
         return row.get("decision") not in {None, "deny", "expired"}
+
+
+#: Tool-confirm card choices. ``session`` = "Allow for this session": recorded
+#: in the session's metadata (``session_grants``), never for force_prompt calls.
+APPROVAL_OPTIONS = ["once", "session", "deny"]
 
 
 def _proactive_notification_payload(
@@ -1238,8 +1282,10 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/frameworks", self.handle_list_frameworks)
         self.app.router.add_post("/v1/frameworks/{id}/grants", self.handle_framework_grant)
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
+        self.app.router.add_get("/v1/agents/summary", self.handle_agents_summary)
         self.app.router.add_get("/v1/agents/{id}", self.handle_get_agent)
         self.app.router.add_post("/v1/agents/{id}/activate", self.handle_activate_agent)
+        self.app.router.add_post("/v1/agents/{id}/seen", self.handle_agent_seen)
         self.app.router.add_post("/v1/agents/{id}/handoff", self.handle_handoff_agent)
         self.app.router.add_get("/v1/handoffs", self.handle_list_handoffs)
         self.app.router.add_get("/v1/sessions", self.handle_list_sessions)
@@ -1265,12 +1311,17 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/sessions/{id}/requests/{request_id}/changes/undo", self.handle_file_changes)
         self.app.router.add_post("/v1/sessions/{id}/handoff", self.handle_session_handoff)
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
+        self.app.router.add_get("/v1/events/stream", self.handle_global_stream)
+        self.app.router.add_get("/v1/connect-apps", self.handle_connect_apps)
+        self.app.router.add_get("/v1/connect-apps/{id}/state", self.handle_connect_app_state)
+        self.app.router.add_post("/v1/connect-apps/{id}/install", self.handle_connect_app_install)
         self.app.router.add_get("/v1/sessions/{id}/events", self.handle_session_events_json)
         self.app.router.add_get("/v1/notifications", self.handle_list_notifications)
         self.app.router.add_get("/v1/presence", self.handle_presence)
         self.app.router.add_get("/v1/requests/{request_id}", self.handle_get_request_any_session)
         self.app.router.add_get("/v1/sessions/{id}/activity", self.handle_activity_history)
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
+        self.app.router.add_get("/v1/handoffs/{id}/messages", self.handle_handoff_messages)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
         self.app.router.add_get("/v1/approvals/{id}", self.handle_get_approval)
@@ -1295,6 +1346,9 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/orchestration/tasks/{id}", self.handle_get_orchestration_task)
         self.app.router.add_post("/v1/orchestration/tasks/{id}/follow-up", self.handle_follow_up_orchestration_task)
         self.app.router.add_post("/v1/orchestration/tasks/{id}/cancel", self.handle_cancel_orchestration_task)
+        # OpenAI-compatible surface for the IDE (GET /v1/models, POST /v1/chat/completions).
+        from jaeger_ai.core.gateway import openai_compat
+        openai_compat.register(self.app)
 
     async def handle_version(self, request: web.Request) -> web.Response:
         """Stable, read-only identity for clients and deployment checks."""
@@ -1379,7 +1433,7 @@ class JaegerGatewayApp:
 
     async def _probe_native_mcp(self, *, timeout_s: float = 3.0) -> dict[str, Any]:
         """Read-only MCP and native-agent readiness; never executes chat."""
-        from jaeger_ai.core.frameworks.jaeger import (
+        from jaeger_ai.core.gateway.native_mcp import (
             MCP_URL, MCP_HOST_HEADER, mcp_api_key,
         )
         headers = {"Accept": "application/json, text/event-stream", "Host": MCP_HOST_HEADER}
@@ -1782,8 +1836,9 @@ class JaegerGatewayApp:
         role = request.query.get("role")
         registry = self._registry()
         if kind or role:
+            from jaeger_ai.core.agent_registry.registry import with_roster_flags
             agents = [
-                a.to_dict()
+                with_roster_flags(a)
                 for a in registry.list_agents(kind=kind or None, role=role or None)
             ]
             payload: dict[str, Any] = {"agents": agents}
@@ -1818,6 +1873,50 @@ class JaegerGatewayApp:
         self.event_bus.publish("*", "agent.created", {"agent": record.to_dict()})
         return web.json_response(record.to_dict(), status=201)
 
+    async def handle_agents_summary(self, request: web.Request) -> web.Response:
+        """GET /v1/agents/summary — per-agent status for the sidebar and Tasks board.
+
+        Computed, never stored: from durable tasks (agent_id/eta/runner),
+        handoffs and the agent's direct-chat sessions. No agent_status table.
+        """
+        from jaeger_ai.core.gateway.agent_summary import summarize_agents
+        registry = self._registry()
+        agents = [a for a in registry.list_agents() if a.role.value in {"lead", "specialist"}]
+        tasks = [t.to_dict() for t in self.task_owner.store.list_tasks()] if self.task_owner else []
+        return web.json_response(summarize_agents(
+            [a.to_dict() for a in agents],
+            tasks=tasks,
+            handoffs=self.store.list_handoffs(limit=500),
+            sessions=self.store.list_sessions(),
+            last_message=self._last_message_preview,
+            seen=self.store.agents_seen(),
+        ))
+
+    async def handle_agent_seen(self, request: web.Request) -> web.Response:
+        """POST /v1/agents/{id}/seen — mark an agent's activity read (summary ``unseen``).
+
+        Body (optional): ``{seen_at?: epoch seconds, event_id?: int}``; defaults to now.
+        """
+        agent_id = request.match_info["id"]
+        if self._registry().get_agent(agent_id) is None:
+            return web.json_response({"error": "Agent not found"}, status=404)
+        try:
+            body = await request.json() if request.can_read_body else {}
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        body = body if isinstance(body, dict) else {}
+        try:
+            seen_at = float(body["seen_at"]) if body.get("seen_at") is not None else time.time()
+            event_id = int(body["event_id"]) if body.get("event_id") is not None else None
+        except (TypeError, ValueError):
+            return web.json_response({"error": "seen_at must be a number and event_id an integer"}, status=400)
+        return web.json_response(self.store.mark_agent_seen(agent_id, seen_at=seen_at, event_id=event_id))
+
+    def _last_message_preview(self, session_id: str) -> str:
+        session = self.store.get_session(session_id) or {}
+        messages = session.get("messages") or []
+        return str(messages[-1].get("content") or "") if messages else ""
+
     async def handle_get_agent(self, request: web.Request) -> web.Response:
         agent_id = request.match_info["id"]
         record = self._registry().get_agent(agent_id)
@@ -1848,6 +1947,12 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Agent not found"}, status=404)
         from_id = str(body.get("from_agent_id") or "native:jaeger").strip()
         require_approval = bool(body.get("require_approval", True))
+        caller = request.get("caller")
+        if not require_approval and getattr(caller, "name", None) == "jaegerd":
+            # The agent asks through jaegerd's credential and cannot waive the
+            # owner's approval itself; only the owner's autonomy=auto does.
+            from jaeger_ai.core.runtime.autonomy import effective_autonomy
+            require_approval = effective_autonomy(self._config_path()) != "auto"
         request_id = str(body.get("request_id") or uuid.uuid4().hex)
         parent_run_id = body.get("parent_run_id") or body.get("parent_request_id")
         parent_chain = list(body.get("parent_chain") or [])
@@ -1889,8 +1994,14 @@ class JaegerGatewayApp:
 
         approval_id = f"approval_{uuid.uuid4().hex[:12]}" if require_approval else None
         handoff_id = f"handoff_{uuid.uuid4().hex[:12]}"
+        origin_session = str(body.get("session_id") or "").strip() or None
+        if origin_session is None and parent_run_id:
+            parent_row = (self.store.get_request(str(parent_run_id))
+                          or self.store.get_request_by_turn(str(parent_run_id)))
+            origin_session = (parent_row or {}).get("session_id")
         record = {
             "id": handoff_id,
+            "session_id": origin_session,
             "request_id": request_id,
             "from_agent_id": from_id,
             "to_agent_id": target.id,
@@ -1924,7 +2035,7 @@ class JaegerGatewayApp:
             )
             loop = asyncio.get_running_loop()
             self.pending_approvals[approval_id] = loop.create_future()
-            self.event_bus.publish("*", "approval.request", {
+            request_payload = {
                 "approval_id": approval_id,
                 "handoff_id": handoff_id,
                 "kind": "handoff",
@@ -1933,15 +2044,89 @@ class JaegerGatewayApp:
                 "task": task,
                 "options": ["once", "deny"],
                 "prompt": f"Allow handoff to {target.display_name}?",
-            })
+            }
+            self.event_bus.publish("*", "approval.request", request_payload)
+            origin = self._origin_turn(saved)
+            if origin:
+                # The approval card shows in the chat that asked for the handoff.
+                self.event_bus.publish(origin[0], "approval.request", {
+                    **request_payload, "title": f"Hand off to {target.display_name}?",
+                    "prompt": task, "request_id": origin[1],
+                })
         else:
             self._running_tasks[request_id] = asyncio.create_task(self._execute_handoff(handoff_id))
-        self.event_bus.publish("*", "agent.handoff", {"handoff": saved})
+        self._publish_handoff("agent.handoff", saved)
         return web.json_response(saved, status=202 if require_approval else 200)
 
+    def _origin_turn(self, record: dict[str, Any]) -> tuple[str, str] | None:
+        """(session_id, request_id) of the chat turn that started a handoff."""
+        session_id = record.get("session_id")
+        parent = str(record.get("parent_run_id") or "")
+        if not session_id or not parent:
+            return None
+        row = self.store.get_request(parent) or self.store.get_request_by_turn(parent)
+        if not row or row.get("session_id") != session_id:
+            return None
+        return session_id, row["request_id"]
+
+    def _publish_handoff(self, event: str, record: dict[str, Any]) -> None:
+        """Publish a handoff globally and on the chat whose turn started it.
+
+        The copy on the origin session carries that turn's ``request_id``, so
+        the chat streams it with the turn and turn_parts persists it as a
+        ``handoff`` part when the turn completes.
+        """
+        self.event_bus.publish("*", event, {"handoff": record})
+        origin = self._origin_turn(record)
+        if origin:
+            self.event_bus.publish(origin[0], event, {"handoff": record, "request_id": origin[1]})
+
     async def handle_list_handoffs(self, request: web.Request) -> web.Response:
-        records = self.store.list_handoffs()
+        """GET /v1/handoffs[?agent_id=&session_id=&since=&limit=] — newest first."""
+        query = request.query
+        try:
+            since = float(query["since"]) if query.get("since") else None
+            limit = int(query["limit"]) if query.get("limit") else None
+        except ValueError:
+            return web.json_response({"error": "since must be epoch seconds and limit an integer"}, status=400)
+        if limit is not None and not 1 <= limit <= 500:
+            return web.json_response({"error": "limit must be between 1 and 500"}, status=400)
+        records = self.store.list_handoffs(
+            agent_id=query.get("agent_id") or None,
+            session_id=query.get("session_id") or None,
+            since=since,
+            limit=limit,
+        )
         return web.json_response({"handoffs": records, "count": len(records)})
+
+    async def handle_handoff_messages(self, request: web.Request) -> web.Response:
+        """GET /v1/handoffs/{id}/messages — the specialist's side of one exchange.
+
+        Hides the ``specialist:<agent>:<request>`` worker-session naming from
+        clients; the exchange panel reads task + messages + summary in one call.
+        """
+        record = self.store.get_handoff(request.match_info["id"])
+        if record is None:
+            return web.json_response({"error": "Handoff not found"}, status=404)
+        from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
+        result = record.get("result") or {}
+        worker = str(result.get("worker_session_id") or "") or specialist_session(
+            record["to_agent_id"], record.get("request_id") or record["id"])
+        session = self.store.get_session(worker) or {}
+        messages = [
+            {key: m.get(key) for key in ("id", "role", "content", "timestamp")}
+            for m in session.get("messages") or []
+        ]
+        return web.json_response({
+            "handoff_id": record["id"],
+            "session_id": record.get("session_id"),
+            "to_agent_id": record["to_agent_id"],
+            "status": record["status"],
+            "task": record["task"],
+            "worker_session_id": worker,
+            "messages": messages,
+            "summary": result.get("summary") or "",
+        })
 
     async def handle_get_handoff(self, request: web.Request) -> web.Response:
         record = self.store.get_handoff(request.match_info["id"])
@@ -1960,12 +2145,13 @@ class JaegerGatewayApp:
                     "result": {"ok": receipt["status"] == "completed", "status": receipt["status"],
                                "summary": reply.get("text") or reply.get("error") or reply.get("halt_reason") or "",
                                "worker_session_id": session, "metadata": {"native_receipt": receipt}}})
-                self.event_bus.publish("*", "agent.handoff.finished", {"handoff": record})
+                self._publish_handoff("agent.handoff.finished", record)
         return web.json_response(record)
 
     async def handle_list_sessions(self, request: web.Request) -> web.Response:
         profile = request.query.get("profile")
-        sessions = self.store.list_sessions(profile=profile, query=request.query.get("q"))
+        sessions = self.store.list_sessions(profile=profile, query=request.query.get("q"),
+                                            agent_id=(request.query.get("agent_id") or "").strip() or None)
         return web.json_response({"sessions": sessions})
 
     async def handle_create_session(self, request: web.Request) -> web.Response:
@@ -2133,8 +2319,26 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Invalid cursor"}, status=400)
         return web.json_response(self.store.activity_history(session_id, after))
 
+    def _session_model_choice(self, model_id: str) -> dict[str, Any] | None:
+        """``{model, provider}`` if ``model_id`` is a reachable /v1/runtime/models entry.
+
+        Accepts a bare model name or a routed ``@provider:model`` id."""
+        from jaeger_ai.contract.model_ids import split_routed_model_id
+        from jaeger_ai.core.runtime.truth import provider_model_inventory
+
+        lane, name = split_routed_model_id(model_id)
+        for provider in provider_model_inventory().get("providers") or []:
+            if not provider.get("reachable") or (lane and provider.get("id") != lane):
+                continue
+            if any(str(m.get("id")) == name for m in provider.get("models") or []):
+                return {"model": name, "provider": provider.get("id")}
+        return None
+
     async def handle_patch_session(self, request: web.Request) -> web.Response:
-        """PATCH /v1/sessions/{id} — the one place title and archive state change."""
+        """PATCH /v1/sessions/{id} — the one place title, archive state and the
+        session's default ``model`` change. ``model`` must be a reachable
+        /v1/runtime/models entry (or null to clear); turns use it unless the
+        turn names its own model."""
         session_id = request.match_info["id"]
         try:
             body = await request.json()
@@ -2149,10 +2353,23 @@ class JaegerGatewayApp:
         archived = body.get("archived")
         if "archived" in body and not isinstance(archived, bool):
             return web.json_response({"error": "archived must be a boolean"}, status=400)
+        model = body.get("model")
+        if "model" in body and model is not None and (not isinstance(model, str) or not model.strip()):
+            return web.json_response({"error": "model must be a non-empty string or null"}, status=400)
 
         session = self.store.get_session(session_id)
         if session is None:
             return web.json_response({"error": "Session not found"}, status=404)
+        if "model" in body:
+            if model is None:
+                choice = {"model": None, "provider": None}
+            else:
+                choice = await asyncio.to_thread(self._session_model_choice, model.strip())
+                if choice is None:
+                    return web.json_response(
+                        {"error": f"Unknown or unreachable model {model.strip()!r} (see /v1/runtime/models)"},
+                        status=400)
+            session = self.store.update_metadata(session_id, choice) or session
         if "title" in body:
             session = self.store.rename_session(session_id, title.strip()[:200])
         if "archived" in body:
@@ -2224,6 +2441,15 @@ class JaegerGatewayApp:
                 "keep_history": keep_history,
             },
         )
+        # The same handoff, globally: the sidebar learns an agent now has a
+        # direct chat without subscribing to every session (D4).
+        self.event_bus.publish("*", "agent.direct_chat", {
+            "session_id": session_id,
+            "agent_id": target.id,
+            "from_agent_id": previous_agent_id,
+            "title": updated.get("title"),
+            "reason": reason,
+        })
         return web.json_response(
             {
                 "session_id": session_id,
@@ -2740,9 +2966,10 @@ class JaegerGatewayApp:
         native_session = mcp_session or "dispatcher"
 
         def _blocking_chat() -> tuple[str, str]:
+            import urllib.error
             from urllib.parse import urlparse
 
-            from jaeger_ai.core.frameworks.jaeger import (
+            from jaeger_ai.core.gateway.native_mcp import (
                 MCPClient,
                 MCP_URL,
                 MCP_HOST_HEADER,
@@ -2784,9 +3011,17 @@ class JaegerGatewayApp:
                         native_session=native_session,
                         status="running",
                     )
-                result = client._execute_call(tool_name, args)
-            if result.get("isError"):
-                raise RuntimeError("MCP chat returned a tool error")
+                try:
+                    result = client._execute_call(tool_name, args)
+                except urllib.error.HTTPError as exc:
+                    if exc.code != 404:
+                        raise
+                    # MCP HTTP restarted and forgot this transport's session;
+                    # a 404 means the call never ran, so reconnect and send once.
+                    client = MCPClient(MCP_URL, key, MCP_HOST_HEADER)
+                    client.initialize()
+                    self._mcp_transport = client
+                    result = client._execute_call(tool_name, args)
             response_text = JaegerGatewayApp._mcp_chat_text(result)
             if not response_text:
                 raise RuntimeError("MCP chat returned empty content")
@@ -3039,7 +3274,34 @@ class JaegerGatewayApp:
             if text:
                 self.event_bus.publish(session_id, "turn.delta", {**ids, "delta": text, "channel": "provisional"})
 
+        reasoning_started: list[float | None] = [None]
+        # Reasoning arrives a few characters at a time; like text deltas it is
+        # coalesced (~TURN_DELTA_BATCH_S) and always flushed before any other
+        # event, so ordering is unchanged.
+        reasoning_pending: list[str] = []
+        reasoning_last = [time.monotonic()]
+
+        def flush_reasoning() -> None:
+            with lock:
+                text = "".join(reasoning_pending)
+                reasoning_pending.clear()
+                reasoning_last[0] = time.monotonic()
+            if text:
+                self.event_bus.publish(session_id, "turn.reasoning", {**ids, "text": text})
+
+        def end_reasoning() -> None:
+            # One ``turn.reasoning.done`` per reasoning run, when the answer,
+            # a tool, or the end of the turn follows it (chat "Thought for Ns").
+            flush_reasoning()
+            with lock:
+                started, reasoning_started[0] = reasoning_started[0], None
+            if started is not None:
+                self.event_bus.publish(session_id, "turn.reasoning.done", {
+                    **ids, "started_at": started,
+                    "duration_ms": max(0, int((time.time() - started) * 1000))})
+
         def on_delta(piece: str) -> None:
+            end_reasoning()
             with lock:
                 pending.append(str(piece))
                 due = sum(map(len, pending)) >= TURN_DELTA_BATCH_CHARS or (
@@ -3050,7 +3312,14 @@ class JaegerGatewayApp:
         def on_reasoning(text: str) -> None:
             flush()
             if text:
-                self.event_bus.publish(session_id, "turn.reasoning", {**ids, "text": str(text)})
+                with lock:
+                    if reasoning_started[0] is None:
+                        reasoning_started[0] = time.time()
+                    reasoning_pending.append(str(text))
+                    due = sum(map(len, reasoning_pending)) >= TURN_REASONING_BATCH_CHARS or (
+                        time.monotonic() - reasoning_last[0] >= TURN_DELTA_BATCH_S)
+                if due:
+                    flush_reasoning()
 
         def on_tool_progress(name: str, phase: str, data: Any) -> None:
             # ``done`` is followed immediately by the richer ``tool_done``
@@ -3059,6 +3328,7 @@ class JaegerGatewayApp:
             if phase != "start":
                 return
             flush()
+            end_reasoning()
             raw_name = str(name or "")
             self.event_bus.publish(session_id, "turn.progress", {**ids, "channel": "progress"})
             activity_id = f"tool_{uuid.uuid4().hex}"
@@ -3113,6 +3383,7 @@ class JaegerGatewayApp:
                     plan_payload["explanation"] = result["explanation"][:500]
             del args, result, error
             flush()
+            end_reasoning()
             raw_name = str(name or "")
             with lock:
                 queued = active_tools.get(raw_name)
@@ -3152,12 +3423,16 @@ class JaegerGatewayApp:
             if plan_payload is not None:
                 self.event_bus.publish(session_id, "turn.plan", {**ids, **plan_payload})
 
+        def finish() -> None:
+            flush()
+            end_reasoning()
+
         return AgentCallbacks(
             stream_delta=on_delta,
             reasoning=on_reasoning,
             tool_progress=on_tool_progress,
             tool_done=on_tool_done,
-        ), flush
+        ), finish
 
     def _owner_react_turn(
         self, prompt: str, *, session_key: str, request_id: str,
@@ -4147,7 +4422,7 @@ class JaegerGatewayApp:
 
     async def _request_native_cancel(self, native_run_id: str, native_session: str) -> bool:
         try:
-            from jaeger_ai.core.frameworks.jaeger import (
+            from jaeger_ai.core.gateway.native_mcp import (
                 MCPClient, MCP_URL, MCP_HOST_HEADER, mcp_api_key,
             )
             def _call() -> bool:
@@ -4303,8 +4578,71 @@ class JaegerGatewayApp:
         Resolve with ``POST /v1/approvals/{approval_id}`` body
         ``{"approved": true|false}`` → emits ``approval.resolved``.
         """
-        session_id = request.match_info["id"]
-        last_event_id = int(request.query.get("last_event_id") or 0)
+        return await self._sse_stream(request, request.match_info["id"])
+
+    def _connect_apps(self):
+        if getattr(self, "_connect_apps_service", None) is None:
+            from jaeger_ai.core.gateway.connect_apps import ConnectApps
+            self._connect_apps_service = ConnectApps()
+        return self._connect_apps_service
+
+    async def handle_connect_apps(self, request: web.Request) -> web.Response:
+        """GET /v1/connect-apps — registry + live (30 s cached, read-only) state."""
+        return web.json_response(await asyncio.to_thread(self._connect_apps().listing))
+
+    async def handle_connect_app_state(self, request: web.Request) -> web.Response:
+        app_id = request.match_info["id"]
+        refresh = request.query.get("refresh") in {"1", "true"}
+        state = await asyncio.to_thread(self._connect_apps().state, app_id, refresh=refresh)
+        if state is None:
+            return web.json_response({"error": "Unknown app"}, status=404)
+        return web.json_response({"id": app_id, "state": state})
+
+    async def handle_connect_app_install(self, request: web.Request) -> web.Response:
+        """POST /v1/connect-apps/{id}/install ``{"confirm": true}`` — owner callers only.
+
+        202 then ``connect_app.updated`` {id, state, audit} on the global stream
+        (the durable event row is the audit record). Fixed argv, shell=False.
+        """
+        from jaeger_ai.core.gateway.connect_apps import OWNER_INSTALL_CALLERS
+        caller = request.get("caller")
+        if getattr(caller, "name", None) not in OWNER_INSTALL_CALLERS:
+            return web.json_response({"error": "Only the owner's apps may install"}, status=403)
+        try:
+            body = await request.json() if request.can_read_body else {}
+        except Exception:
+            body = {}
+        if not isinstance(body, dict) or body.get("confirm") is not True:
+            return web.json_response({"error": "confirm: true is required"}, status=400)
+        app_id = request.match_info["id"]
+        service = self._connect_apps()
+        status, payload, plan = await asyncio.to_thread(service.begin_install, app_id)
+        if plan is None:
+            return web.json_response(payload, status=status)
+        self.event_bus.publish("*", "connect_app.updated", {
+            "id": app_id, "state": {"value": "installing", "checked_at": time.time()}})
+
+        async def _run() -> None:
+            result = await asyncio.to_thread(service.run_install, app_id, plan, caller=caller.name)
+            logger.info("connect-apps install audit: %s", result["audit"])
+            self.event_bus.publish("*", "connect_app.updated", {"id": app_id, **result})
+
+        task = asyncio.create_task(_run())
+        self._connect_install_task = task
+        return web.json_response(payload, status=202)
+
+    async def handle_global_stream(self, request: web.Request) -> web.StreamResponse:
+        """GET /v1/events/stream — global (``*``) events only: agent.*, approvals,
+        task.*, connect_app.updated. Same framing, resume (``last_event_id``) and
+        410 rules as the session stream; session-prefixed callers (mcp/a2a) are
+        refused by the scope middleware (not in PREFIXED_READ_ROUTES)."""
+        return await self._sse_stream(request, "*")
+
+    async def _sse_stream(self, request: web.Request, session_id: str) -> web.StreamResponse:
+        try:
+            last_event_id = int(request.query.get("last_event_id") or request.headers.get("Last-Event-ID") or 0)
+        except ValueError:
+            return web.json_response({"error": "last_event_id must be an integer"}, status=400)
         window = self.event_bus.replay_window(session_id, last_event_id)
         if window.get("cursor_expired"):
             return web.json_response(
@@ -4578,7 +4916,7 @@ class JaegerGatewayApp:
         body = await request.json() if request.can_read_body else {}
         approved = bool(body.get("approved", True))
         decision = str(body.get("decision") or body.get("choice") or ("once" if approved else "deny"))
-        if decision not in {"once", "deny", "always", "allow", "yes"}:
+        if decision not in {"once", "session", "deny", "always", "allow", "yes"}:
             return web.json_response({"error": "Unsupported approval decision"}, status=400)
         approved = decision != "deny"
 
@@ -4703,7 +5041,7 @@ class JaegerGatewayApp:
                     "worker_session_id": result.worker_session_id,
                 },
             })
-            self.event_bus.publish("*", "agent.handoff.finished", {"handoff": saved})
+            self._publish_handoff("agent.handoff.finished", saved)
         except Exception as exc:  # noqa: BLE001 — specialist failure must not kill the gateway
             logger.exception("specialist handoff failed: %s", exc)
             saved = self.store.save_handoff({
@@ -4711,7 +5049,7 @@ class JaegerGatewayApp:
                 "status": "failed",
                 "result": {"ok": False, "status": "failed", "summary": f"{type(exc).__name__}: {exc}"},
             })
-            self.event_bus.publish("*", "agent.handoff.finished", {"handoff": saved})
+            self._publish_handoff("agent.handoff.finished", saved)
         finally:
             self._running_tasks.pop(record.get("request_id") or handoff_id, None)
 
@@ -4725,9 +5063,43 @@ class JaegerGatewayApp:
             raise RuntimeError("Specialist native execution returned no confirmed result")
         return native
 
+    def _task_board_fields(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Validate the Tasks-board fields of a task submission (raises ValueError)."""
+        out: dict[str, Any] = {}
+        registry = None
+        if body.get('agent_id'):
+            registry = self._registry()
+            agent_id = str(body['agent_id']).strip()
+            if registry.get_agent(agent_id) is None:
+                raise ValueError(f'Unknown agent_id {agent_id!r}')
+            out['agent_id'] = agent_id
+        if body.get('eta'):
+            from datetime import datetime
+            eta = str(body['eta']).strip()
+            try:
+                parsed = datetime.fromisoformat(eta)
+            except ValueError as exc:
+                raise ValueError('eta must be ISO 8601') from exc
+            if parsed.tzinfo is None:
+                raise ValueError('eta must carry a UTC offset')
+            out['eta'] = eta
+        if body.get('runner'):
+            runner = str(body['runner']).strip()
+            if runner != 'native':
+                target = runner[len('delegate:'):] if runner.startswith('delegate:') else ''
+                registry = registry or self._registry()
+                if not target or registry.get_agent(target) is None:
+                    raise ValueError("runner must be 'native' or 'delegate:<agent id>'")
+            out['runner'] = runner
+        return out
+
     async def handle_tasks(self, request: web.Request) -> web.Response:
         if request.method == 'GET':
-            return web.json_response({'tasks': [t.to_dict() for t in self.task_owner.store.list_tasks()]})
+            tasks = [t.to_dict() for t in self.task_owner.store.list_tasks()]
+            agent_filter = request.query.get('agent_id')
+            if agent_filter:
+                tasks = [t for t in tasks if t.get('agent_id') == agent_filter]
+            return web.json_response({'tasks': tasks})
         tier = self._current_tier()
         if tier == "chat":
             return web.json_response({'error': 'Task submission is disabled in Chat mode'}, status=403)
@@ -4738,9 +5110,10 @@ class JaegerGatewayApp:
         execution = dict(body.get('execution') or {})
         execution.setdefault('workspace', parent.get('workspace') or '')
         try:
+            board = self._task_board_fields(body)
             result = self.task_owner.submit(str(body.get('goal') or ''),
                 context={'session_id': parent['session_id'], 'source': 'client', 'execution': execution,
-                         'request_id': body.get('request_id')},
+                         'request_id': body.get('request_id'), **board},
                 artifacts=body.get('artifacts'), proposal=bool(body.get('proposal')))
         except ValueError as exc:
             return web.json_response({'error': str(exc)}, status=400)
@@ -4993,6 +5366,8 @@ async def run_gateway_forever(
     await runner.setup()
     site = web.TCPSite(runner, host, port)
     await site.start()
+    global _BOUND_GATEWAY_PORT
+    _BOUND_GATEWAY_PORT = int(port)
     print(f"[jaeger-gateway] Listening on http://{host}:{port}", flush=True)
     if getattr(gateway, "_pending_resume", False):
         try:
@@ -5050,7 +5425,7 @@ def _is_launchd_stack_gateway() -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """``jaeger gateway daemon`` — run the Jaeger Gateway on :8810.
+    """``jaeger gateway daemon`` — run the Jaeger Gateway on :data:`GATEWAY_PORT`.
 
     This is the daemon AGENTS.md §3 describes: persistent SQLite session
     state and SSE multi-client broadcast, with the native app, WebUI and
@@ -5060,7 +5435,7 @@ def main(argv: list[str] | None = None) -> int:
     ``features.gateway``, which manages the *external* Agentgateway on
     :8811/:8812 — a different process entirely — while
     ``jaeger_ai/features/webui/api/jaeger_agents.py`` and
-    ``scripts/run-jaeger-webui.sh`` both pointed clients at :8810 with
+    ``scripts/run-jaeger-webui.sh`` both pointed clients at the Gateway with
     nothing listening. Adding the route is what makes those clients real.
 
     Binds loopback by default; publish to a tailnet rather than widening

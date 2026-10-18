@@ -111,7 +111,7 @@ struct ChatView: View {
                             }
                         }
                         if ChatSurfaceFeatureFlags.useWebUITranscript {
-                            // Embedded WebUI mode: loads the localhost:8810 WebUI in a WKWebView.
+                            // Embedded WebUI mode: loads the local WebUI in a WKWebView.
                             // Kept behind a flag for safety; native SwiftUI messageList remains
                             // the default until embedded-view acceptance passes.
                             WebUIChatContainer()

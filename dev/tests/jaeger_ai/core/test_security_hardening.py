@@ -114,7 +114,7 @@ def test_tool_argument_sanitizer_sandbox_path_traversal(tmp_path: Path):
 def test_csrf_guard_origin_validation():
     # 1. Valid local origins
     assert CsrfGuard.validate_origin_or_referer("http://localhost:8790", None) is True
-    assert CsrfGuard.validate_origin_or_referer("http://127.0.0.1:8810", None) is True
+    assert CsrfGuard.validate_origin_or_referer("http://127.0.0.1:33418", None) is True
     assert CsrfGuard.validate_origin_or_referer(None, "http://localhost:8790/dashboard") is True
 
     # 2. Non-browser client (no origin/referer)

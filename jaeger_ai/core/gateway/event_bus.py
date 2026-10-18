@@ -35,13 +35,18 @@ class ReplayGap(RuntimeError):
 #: contract for a new card/interaction; removing one is a breaking change.
 EVENT_TYPES = frozenset({
     # Turn lifecycle (IDE + WebUI + CLI render these identically).
-    "turn.start", "turn.delta", "turn.reasoning", "turn.progress", "queue.updated",
+    "turn.start", "turn.delta", "turn.reasoning", "turn.reasoning.done", "turn.progress", "queue.updated",
     "turn.plan", "turn.steer", "turn.finish", "turn.failed", "turn.cancelled",
     "turn.unknown", "turn.cancel",
     # Tools and files.
-    "tool.started", "tool.done", "tool.error", "files.changed",
+    # The Gateway publishes tool.completed / tool.failed; tool.done / tool.error
+    # are the older names some clients still accept.
+    "tool.started", "tool.completed", "tool.failed", "tool.done", "tool.error", "files.changed",
     # Session lifecycle (the projection's list is built from these).
     "session.created", "session.updated", "session.deleted",
+    # Owner/auto handoff of a session to an agent; ``agent.direct_chat`` is the
+    # global twin of an owner handoff (Agents View sidebar).
+    "session.handoff", "agent.direct_chat",
     # Approvals — the approval card. ``approval.request`` carries
     # {approval_id, kind, prompt, options, session_id}; resolve via
     # POST /v1/approvals/{id} which emits ``approval.resolved``.
@@ -63,6 +68,10 @@ EVENT_TYPES = frozenset({
     # Durable task projection. The task owner is the authority; these are its
     # stream. ``jaeger.state`` is the presence projection (see contract/presence.py).
     "task.created", "task.updated", "jaeger.state",
+    # Connect Apps panel: {id, state, audit?} on the global stream.
+    "connect_app.updated",
+    # Published by POST /v1/runtime/tier (was emitted but never registered).
+    "runtime.tier.changed",
 })
 
 #: Names that carry a card the WebUI renders interactively. The adapter shim

@@ -1,6 +1,6 @@
 """The WebUI overlay maps browser routes onto the audited gateway routes.
 
-The browser cannot reach loopback :8810, so every session, stream and
+The browser cannot reach loopback :33418, so every session, stream and
 approval call goes through this proxy. If a path maps wrongly the UI fails
 in a way that looks like an empty account rather than a broken route, which
 is the failure mode the console was built to avoid.
@@ -56,6 +56,7 @@ def _route(mod, path, method="GET"):
     ("/api/jaeger/sessions", "POST", ("POST", "/v1/sessions")),
     ("/api/jaeger/sessions/abc", "GET", ("GET", "/v1/sessions/abc")),
     ("/api/jaeger/sessions/abc", "DELETE", ("DELETE", "/v1/sessions/abc")),
+    ("/v1/sessions/abc", "PATCH", ("PATCH", "/v1/sessions/abc")),
     ("/api/jaeger/sessions/abc/turns", "POST", ("POST", "/v1/sessions/abc/turns")),
     ("/api/jaeger/sessions/abc/cancel", "POST", ("POST", "/v1/sessions/abc/cancel")),
     ("/api/jaeger/sessions/abc/reconcile", "POST", ("POST", "/v1/sessions/abc/reconcile")),
@@ -113,3 +114,36 @@ def test_overlay_is_installed_by_the_webui_build():
     root = OVERLAY.parents[4]
     assert OVERLAY.is_file()
     assert (root / "jaeger_ai/assets/jaeger_gateway_console.js").is_file()
+
+
+def test_global_event_stream_uses_the_session_stream_pump(monkeypatch):
+    mod = _load()
+    seen = []
+    monkeypatch.setattr(mod, "_proxy_stream",
+                        lambda h, sid, q, upstream_path=None: seen.append((sid, q, upstream_path)) or True)
+    assert _route(mod, "/api/jaeger/events/stream?last_event_id=5") is True
+    assert seen == [("*", "?last_event_id=5", "/v1/events/stream")]
+
+
+def test_connect_apps_proxy_routes_live_in_the_agents_overlay(monkeypatch):
+    import importlib.util
+    import pathlib
+    import sys as _sys
+
+    root = pathlib.Path(__file__).resolve().parents[4] / "jaeger_ai/features/webui"
+    _sys.path.insert(0, str(root))
+    try:
+        spec = importlib.util.spec_from_file_location("_ja", root / "api/jaeger_agents.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        _sys.path.pop(0)
+    calls = []
+    monkeypatch.setattr(mod, "_proxy", lambda h, m, p, b=None, **k: calls.append((m, p)) or True)
+    monkeypatch.setattr(mod, "_sessions_route", lambda *a: False, raising=False)
+    handler = SimpleNamespace(_json_body_bytes=b'{"confirm": true}')
+    for path, method in (("/api/connect-apps", "GET"), ("/api/connect-apps/vscode/state?refresh=1", "GET"),
+                         ("/api/connect-apps/vscode/install", "POST")):
+        assert mod.route(handler, urlparse(path), method) is True
+    assert calls == [("GET", "/v1/connect-apps"), ("GET", "/v1/connect-apps/vscode/state?refresh=1"),
+                     ("POST", "/v1/connect-apps/vscode/install")]
