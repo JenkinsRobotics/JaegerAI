@@ -126,6 +126,7 @@ export class MockSource implements JaegerSource {
   async createSession(body: { agent_id?: string; title?: string }): Promise<SessionRow> {
     return { session_id: `s-new-${Date.now()}`, agent_id: body.agent_id, title: body.title ?? "New chat", created_at: now() };
   }
+  async uploadAttachment(_sessionId: string, body: { filename: string }) { return { attachment_id: `mock-bytes-${body.filename}` }; }
   async addAttachment(_sessionId: string, body: { path: string }) {
     return { attachment_id: `att_mock_${body.path.split("/").pop()}` };
   }

@@ -14,7 +14,7 @@ import { badge, messageCount, unreadSince } from "./scrollFollow";
 import { WebHost } from "./webHost";
 import type { HomeEntry, HomeSessions } from "./homeSession";
 import { PostMessage, SummaryCard } from "./HomeEntries";
-import { addFiles, autoGrow, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
+import { addFiles, autoGrow, bytesUploadEnabled, readBase64, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
 import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
@@ -342,6 +342,12 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     setFiles((current) => {
       const r = addFiles(current, incoming, () => crypto.randomUUID());
       setFileNote(r.note);
+      // Bytes upload (flag, off by default): read path-less files now so send() stays synchronous.
+      if (bytesUploadEnabled()) {
+        for (const f of r.files) if (f.blob && !f.data && !current.includes(f)) {
+          void readBase64(f.blob).then((data) => setFiles((cur) => cur.map((x) => (x.id === f.id ? { ...x, data } : x))));
+        }
+      }
       return r.files;
     });
   };

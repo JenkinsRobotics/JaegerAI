@@ -93,6 +93,9 @@ export class GatewayClient implements JaegerSource {
   addAttachment(sessionId: string, body: { path: string; filename?: string; mime_type?: string }) {
     return this.json<{ attachment_id: string }>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments`, body);
   }
+  uploadAttachment(sessionId: string, body: { filename: string; mime_type: string; data_base64: string }) {
+    return this.json<{ attachment_id: string }>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments`, body);
+  }
   async cancel(sessionId: string, requestId?: string) {
     await this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, requestId ? { request_id: requestId } : {});
   }

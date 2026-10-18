@@ -3,7 +3,7 @@
  * surface to the caller; there is no silent fallback. */
 import type { JaegerSource } from "../api/source";
 import type { PersistedPart, SessionMessage } from "../api/types";
-import type { RejectedAttachment } from "./composer";
+import { bytesUploadEnabled, type RejectedAttachment } from "./composer";
 import { followTurn } from "./followTurn";
 import type { HomeSessions } from "./homeSession";
 import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, HostKind, StartTurnRequest, TurnHandle, TurnState } from "./host";
@@ -86,6 +86,15 @@ export class WebHost implements ChatHost {
     const rejected: RejectedAttachment[] = [];
     // H8 widens ChatAttachment with path/size; read through the local mirror until it's vendored.
     for (const file of (request.attachments ?? []) as HostAttachment[]) {
+      if (!file.path && file.data && this.source.uploadAttachment && bytesUploadEnabled()) {
+        try {
+          const row = await this.source.uploadAttachment(request.sessionId, { filename: file.name, mime_type: file.mimeType, data_base64: file.data });
+          ids.push(row.attachment_id);
+        } catch (error) {
+          rejected.push({ name: file.name, reason: message(error) });
+        }
+        continue;
+      }
       if (!file.path) { rejected.push({ name: file.name, reason: "no file path from this window" }); continue; }
       try {
         const row = await this.source.addAttachment(request.sessionId, { path: file.path, filename: file.name, mime_type: file.mimeType });
