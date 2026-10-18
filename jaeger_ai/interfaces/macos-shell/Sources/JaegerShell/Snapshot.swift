@@ -97,6 +97,43 @@ final class Snapshotter: NSObject, BridgeHost {
             }
             return
         }
+        // "nsclick:<sel>" / "nsrclick:<sel>" / "nskey:return|escape": REAL NSEvents posted through NSWindow.sendEvent
+        // (the same path a hardware click or key takes inside the app), to tell our input handling apart from
+        // synthetic-event tools. The element's centre comes from getBoundingClientRect.
+        if selector.hasPrefix("nsclick:") || selector.hasPrefix("nsrclick:") || selector.hasPrefix("nskey:") {
+            let record: (Any) -> Void = { [weak self] result in
+                guard let self else { return }
+                var clicks = self.report["clicks"] as? [[String: Any]] ?? []
+                clicks.append(["selector": selector, "clicked": true, "result": String(describing: result)])
+                self.report["clicks"] = clicks
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.click(Array(selectors.dropFirst()), webView: webView) }
+            }
+            guard let window = webView.window else { return record("no window") }
+            if selector.hasPrefix("nskey:") {
+                let name = String(selector.dropFirst(6))
+                let (chars, code): (String, UInt16) = name == "escape" ? ("\u{1b}", 53) : ("\r", 36)
+                for type in [NSEvent.EventType.keyDown, .keyUp] {
+                    if let e = NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                windowNumber: window.windowNumber, context: nil, characters: chars, charactersIgnoringModifiers: chars,
+                                                isARepeat: false, keyCode: code) { window.sendEvent(e) }
+                }
+                return record("key \(name) first=\(String(describing: window.firstResponder.map { type(of: $0) }))")
+            }
+            let right = selector.hasPrefix("nsrclick:")
+            let css = String(selector.dropFirst(right ? 9 : 8))
+            let literal = String(data: (try? JSONSerialization.data(withJSONObject: [css])) ?? Data(), encoding: .utf8) ?? "[\"\"]"
+            webView.evaluateJavaScript("(() => { const e = document.querySelector(\(literal)[0]); if (!e) return null; e.scrollIntoView({ block: \"center\" }); const r = e.getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; })()") { value, _ in
+                guard let xy = value as? [Double], xy.count == 2 else { return record("no element") }
+                let p = webView.convert(NSPoint(x: xy[0], y: xy[1]), to: nil)
+                let (down, up): (NSEvent.EventType, NSEvent.EventType) = right ? (.rightMouseDown, .rightMouseUp) : (.leftMouseDown, .leftMouseUp)
+                for type in [down, up] {
+                    if let e = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                  windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: type == up ? 0 : 1) { window.sendEvent(e) }
+                }
+                record("at \(Int(p.x)),\(Int(p.y)) hit=\(String(describing: window.contentView?.hitTest(p).map { type(of: $0) }))")
+            }
+            return
+        }
         // "eval:<js>" runs page JS in the offscreen web view (e.g. drop a File on the composer); no OS input.
         if selector.hasPrefix("eval:") {
             webView.evaluateJavaScript(String(selector.dropFirst(5))) { [weak self] result, error in
