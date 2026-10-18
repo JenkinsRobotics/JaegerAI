@@ -70,6 +70,12 @@ def _route(mod, path, method="GET"):
     ("/api/jaeger/runtime/capabilities", "GET", ("GET", "/v1/runtime/capabilities")),
     ("/api/jaeger/sessions/abc/attachments", "GET", ("GET", "/v1/sessions/abc/attachments")),
     ("/api/jaeger/sessions/abc/attachments", "POST", ("POST", "/v1/sessions/abc/attachments")),
+    ("/v1/sessions/agent-native%3Ajaeger/messages?limit=50", "GET",
+     ("GET", "/v1/sessions/agent-native%3Ajaeger/messages?limit=50")),
+    ("/api/jaeger/sessions/abc/messages?before=9&limit=20", "GET", ("GET", "/v1/sessions/abc/messages?before=9&limit=20")),
+    ("/v1/sessions/abc/events", "GET", ("GET", "/v1/sessions/abc/events")),
+    ("/v1/sessions/abc/attachments/upload", "POST", ("POST", "/v1/sessions/abc/attachments/upload")),
+    ("/v1/sessions/abc/ide/0123456789ab", "POST", ("POST", "/v1/sessions/abc/ide/0123456789ab")),
 ])
 def test_routes_map_to_audited_gateway_paths(overlay, path, method, expected):
     assert _route(overlay, path, method) is True
