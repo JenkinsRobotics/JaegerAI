@@ -1336,8 +1336,9 @@ class GatewaySessionStore:
         available = {r["attachment_id"]: r for r in rows}
         wanted = choices.get("attachment_ids")
         if wanted is None:
-            # Staged uploads (POST .../attachments/upload) join a turn only when
-            # it names them; omitted attachment_ids means none of them.
+            # Key absent: path-registered attachments ride along as before;
+            # staged uploads (POST .../attachments/upload) never do. Key present
+            # (even []): exactly the listed ids, of either kind (else branch).
             selected = [r["attachment_id"] for r in rows if r["provenance"] != "upload_staged"]
         else:
             unknown = [a for a in wanted if a not in available]
