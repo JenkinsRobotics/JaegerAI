@@ -1314,6 +1314,8 @@ class JaegerGatewayApp:
             await asyncio.sleep(2)
 
     def _setup_routes(self) -> None:
+        from jaeger_ai.features.agent_bridge.routes import register
+        register(self)
         self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_get("/v1/stop", self.handle_stop_status)
         self.app.router.add_post("/v1/stop", self.handle_engage_stop)

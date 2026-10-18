@@ -74,7 +74,11 @@ def test_no_mcp_tool_can_reach_any_bridge_command(cmd):
         args = {}
         for key in props:
             args[key] = cmd if key in {"what", "command"} else payload if key.endswith("json") else ""
-        with pytest.raises(Exception) if tool.name == "bridge_query" else _nullcontext():
+        rejects_invalid_input = tool.name in {
+            "bridge_query", "send_message", "list_messages", "get_thread",
+            "start_goal", "goal_status", "goal_result", "cancel_goal",
+        }
+        with pytest.raises(Exception) if rejects_invalid_input else _nullcontext():
             _call(server, tool.name, args)
     assert bridge.commands == []
 
