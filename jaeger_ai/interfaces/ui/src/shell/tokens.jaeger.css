@@ -34,6 +34,9 @@
   /* An agent's color as a fill under white text: its bubble (darker) and its voice button. */
   --jg-mix-bubble-user: 80%;
   --jg-mix-agent-button: 92%;
+  /* What agent colours are mixed toward (user bubble, send button), and glyphs on a coloured badge. */
+  --jg-color-shade: #000;
+  --jg-color-on-badge: #fff;
   --jg-color-on-accent: #ffffff;
   --jg-color-shadow: #000000;
   --jg-shadow-card: 0 1px 2px color-mix(in srgb, var(--jg-color-shadow) 6%, transparent),
