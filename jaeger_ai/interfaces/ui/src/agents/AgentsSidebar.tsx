@@ -26,6 +26,7 @@ interface Props {
   onArchiveChat: (sessionId: string) => void;
   onSearch: () => void;
   onConnectApps: () => void;
+  onSettings?: () => void;
   onRetry: () => void;
   userInitials: string;
   /** Connection status, shown as a small dot on the user avatar (no tray). */
@@ -37,7 +38,7 @@ interface Props {
 }
 
 /** Sidebar content split into the AppShell slots: top / primary / sections / footer. */
-export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewChatMenu, onRenameChat, onArchiveChat, onSearch, onConnectApps, onRetry, userInitials, status, pins = [], onPin = () => {}, onUnpin = () => {} }: Props) {
+export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewChatMenu, onRenameChat, onArchiveChat, onSearch, onConnectApps, onSettings, onRetry, userInitials, status, pins = [], onPin = () => {}, onUnpin = () => {} }: Props) {
   const { lead, specialists: all } = sidebarRows(state.agents, state.summaries);
   const { pinned, rest: specialists } = splitPinned(all, pins);
   const selectedAgent = selection.type === "agent" ? selection.agentId : undefined;
@@ -94,7 +95,7 @@ export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewCha
     ),
     footer: (
       <div className="jg-sidebar-footer">
-        <button type="button" className="jg-user-chip" aria-label={`Account · ${status.label}`} title={status.label}>
+        <button type="button" className="jg-user-chip" aria-label={`Account · ${status.label}`} title={`${status.label} · Settings (⌘,)`} onClick={onSettings}>
           {userInitials}
           <span className={`jg-user-chip__status jg-user-chip__status--${status.kind}`} />
         </button>

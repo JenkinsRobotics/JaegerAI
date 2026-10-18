@@ -1,0 +1,10 @@
+.jg-settings { display: grid; gap: 10px; min-width: 340px; }
+.jg-settings__heading { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--aether-color-text-muted); }
+.jg-settings__group { border: 0; padding: 0; margin: 0; display: grid; gap: 2px; }
+.jg-settings__label { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.jg-settings__option { display: grid; grid-template-columns: 18px 1fr; column-gap: 8px; align-items: center; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
+.jg-settings__option:hover { background: var(--aether-color-surface-hover, rgba(127, 127, 127, .08)); }
+.jg-settings__option.is-selected { background: var(--aether-color-surface-selected, rgba(127, 127, 127, .12)); }
+.jg-settings__option input { margin: 0; accent-color: var(--aether-color-accent); }
+.jg-settings__name { font-size: 13px; }
+.jg-settings__hint { grid-column: 2; font-size: 12px; color: var(--aether-color-text-muted); }

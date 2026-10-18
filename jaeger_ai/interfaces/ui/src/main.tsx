@@ -6,6 +6,7 @@ import "./shell/tokens.jaeger.css";
 import "./shell/shell.css";
 import "./agents/agents.css";
 import "./chat/chat.css";
+import "./settings/settings.css";
 import "./tasks/tasks.css";
 import "./shell/motion.css";
 import { StrictMode } from "react";
