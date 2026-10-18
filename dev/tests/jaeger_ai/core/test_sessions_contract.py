@@ -172,3 +172,23 @@ async def test_upload_json_multipart_idempotency_and_limit(gw, monkeypatch):
     named = gateway.store.admit_request("u", "see", request_id="r-named",
                                         requested={"attachment_ids": [a["attachment_id"]]})
     assert [x["attachment_id"] for x in named["execution"]["attachments"]] == [a["attachment_id"]]
+
+
+def test_attachment_ids_present_wins_for_both_kinds(tmp_path):
+    store = GatewaySessionStore(tmp_path / "a.sqlite3")
+    store.ensure_session("a")
+    legacy = store.add_attachment("a", {"original_filename": "old.txt", "safe_path": "/x/old.txt",
+                                        "size_bytes": 1, "sha256": "aa"})["attachment_id"]
+    staged = store.add_attachment("a", {"original_filename": "new.txt", "safe_path": "/x/new.txt",
+                                        "size_bytes": 1, "sha256": "bb", "provenance": "upload_staged"})["attachment_id"]
+
+    def admit(rid, **requested):
+        out = store.admit_request("a", "t", request_id=rid, requested=requested or None)
+        with store._get_conn() as conn:
+            conn.execute("UPDATE sessions SET status='idle' WHERE session_id='a'")
+        return [x["attachment_id"] for x in out["execution"]["attachments"]]
+
+    assert admit("absent") == [legacy]                      # key absent: old behaviour
+    assert admit("empty", attachment_ids=[]) == []          # explicit [] wins: nothing
+    assert admit("mixed", attachment_ids=[staged, legacy]) == [staged, legacy]
+    assert admit("only-staged", attachment_ids=[staged]) == [staged]
