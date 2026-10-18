@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Live chat through the main screen's own origin (the same routes GatewayClient uses):
 POST /v1/sessions, GET /v1/sessions/{id}/stream (SSE), POST /v1/sessions/{id}/turns.
-Loopback only; carries no token itself (the dev token proxy behind the UI origin adds it)."""
+Loopback only; carries no token itself (the dev token proxy behind the UI origin adds it).
+Prints the gateway's active runtime model and the model that answered. --expect-fence: fail unless the
+reply contains a fenced code block."""
 import json
 import sys
 import threading
@@ -25,6 +27,9 @@ def call(method, path, body=None):
         return e.code, (e.read() or b"")[:200].decode(errors="replace")
 
 
+status, rt = call("GET", "/v1/runtime/models")
+active = (rt.get("active") if isinstance(rt, dict) else None) or rt
+print(f"GET /v1/runtime/models -> {status} active={str(active)[:160]}")
 status, agents = call("GET", "/v1/agents")
 names = [a.get("name") or a.get("label") or a.get("id") for a in (agents.get("agents", agents) if isinstance(agents, dict) else agents or [])] if status == 200 else agents
 print(f"GET /v1/agents -> {status} {str(names)[:160]}")
@@ -35,6 +40,7 @@ if status >= 300:
     sys.exit(1)
 
 events, reply, done = [], [], threading.Event()
+finish = {}
 
 
 def stream():
@@ -62,6 +68,8 @@ def stream():
                         d = p.get("data", p) if isinstance(p, dict) else {}
                         reply.append(str(d.get("delta") or d.get("text") or d.get("content") or ""))
                     if ev in ("turn.finish", "turn.failed", "turn.cancelled", "turn.unknown", "turn.reconciled"):
+                        if isinstance(p, dict):
+                            finish.update(p.get("data", p) if isinstance(p.get("data", p), dict) else {})
                         if ev != "turn.finish":
                             reply.append(f"[{ev}: {str(p.get('error') or p.get('message') or '')[:200]}]")
                         done.set()
@@ -81,5 +89,13 @@ print(f"POST /v1/sessions/{{id}}/turns -> {status} {str(receipt)[:160]}")
 done.wait(TIMEOUT)
 seen = sorted(set(events))
 print(f"stream events: {seen}")
-print(f"reply after {time.time() - t0:.1f}s: {''.join(reply).strip()[:300]!r}")
-sys.exit(0 if reply and not ''.join(reply).startswith("[") else 1)
+text = ''.join(reply).strip()
+models = {k: v for k, v in finish.items() if "model" in k or k in ("provider", "fallback_used", "fallback")}
+print(f"answered by: {models or 'not reported in turn.finish'}")
+print(f"reply after {time.time() - t0:.1f}s: {text[:600]!r}")
+ok = bool(text) and not text.startswith("[")
+if "--expect-fence" in sys.argv:
+    fenced = "```" in text or "~~~" in text
+    print(f"fenced code block in reply: {fenced}")
+    ok = ok and fenced
+sys.exit(0 if ok else 1)
