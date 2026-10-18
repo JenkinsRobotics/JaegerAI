@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import math
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
@@ -82,7 +83,9 @@ class OfflineTranscriber:
         if not path.is_file():
             raise FileNotFoundError(path)
         started = time.perf_counter()
-        raw_segments = self._model.transcribe(str(path), language=self.language)
+        with _whisper_ready_audio(path) as audio_path:
+            raw_segments = self._model.transcribe(
+                str(audio_path), language=self.language)
         decode_s = time.perf_counter() - started
         segments = tuple(_convert_segment(s) for s in raw_segments)
         audio_s = max((s.end_ms for s in segments), default=0) / 1000.0
@@ -94,6 +97,52 @@ class OfflineTranscriber:
             audio_s=audio_s,
             segments=segments,
         )
+
+
+WHISPER_SAMPLE_RATE = 16_000
+
+
+def wav_is_whisper_ready(path: Path) -> bool:
+    """True for a 16 kHz, 16-bit, mono/stereo WAV that pywhispercpp reads as is.
+
+    pywhispercpp only runs ffmpeg for NON-wav inputs; a ``.wav`` at any other
+    rate (Kokoro writes 24 kHz) raises "WAV file must be 16000 Hz". Anything
+    that is not a ready WAV is normalised through ffmpeg first.
+    """
+    import wave
+
+    if path.suffix.lower() != ".wav":
+        return True  # pywhispercpp converts non-wav media itself via ffmpeg
+    try:
+        with wave.open(str(path), "rb") as handle:
+            return (handle.getframerate() == WHISPER_SAMPLE_RATE
+                    and handle.getsampwidth() == 2
+                    and handle.getnchannels() in (1, 2))
+    except (wave.Error, EOFError):
+        return False
+
+
+@contextmanager
+def _whisper_ready_audio(path: Path):
+    """Yield a path pywhispercpp accepts, resampling a WAV with ffmpeg if needed."""
+    if wav_is_whisper_ready(path):
+        yield path
+        return
+    import shutil
+    import subprocess
+    import tempfile
+
+    if shutil.which("ffmpeg") is None:
+        raise RuntimeError(f"{path} is not 16 kHz 16-bit WAV and ffmpeg is not installed")
+    with tempfile.TemporaryDirectory(prefix="jaeger-stt-") as tmp:
+        target = Path(tmp) / "audio16k.wav"
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-v", "error", "-y", "-i", str(path),
+             "-ac", "1", "-ar", str(WHISPER_SAMPLE_RATE), "-c:a", "pcm_s16le",
+             str(target)],
+            check=True,
+        )
+        yield target
 
 
 def _convert_segment(segment) -> TranscriptSegment:
@@ -120,7 +169,8 @@ def write_transcripts(
     written: list[Path] = []
     for raw_format in formats:
         fmt = raw_format.lower().lstrip(".")
-        path = base.with_suffix(f".{fmt}")
+        # Append, don't replace: with_suffix turned "ep1.narration" into "ep1.txt".
+        path = base.with_name(f"{base.name}.{fmt}")
         if fmt == "txt":
             path.write_text(result.text + "\n", encoding="utf-8")
         elif fmt == "srt":

@@ -31,6 +31,7 @@ _CONSOLE = (
     "skills", "personality",
     "roadmap", "avatar", "prompt", "config",
     "runtime", "backends", "sessions",
+    "channel",
 )
 
 
