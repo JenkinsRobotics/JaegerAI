@@ -310,6 +310,8 @@ def route(handler, parsed, method: str) -> bool:
     if len(parts) == 1:
         if method == "GET":
             return _proxy(handler, "GET", f"/v1/sessions/{session_id}")
+        if method == "PATCH":  # rename / archive / default model
+            return _proxy(handler, "PATCH", f"/v1/sessions/{session_id}", _body_bytes(handler))
         if method == "DELETE":
             return _proxy(handler, "DELETE", f"/v1/sessions/{session_id}")
 

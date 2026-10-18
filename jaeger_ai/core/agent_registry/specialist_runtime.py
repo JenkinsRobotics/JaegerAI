@@ -24,10 +24,21 @@ MAX_FANOUT = 3
 DEFAULT_TIMEOUT_S = 120
 
 
+SPECIALIST_SESSION_PREFIX = "specialist:"
+
+
 def specialist_session(agent_id: str, request_id: str) -> str:
     """Isolated native session. Never the shared dispatcher conversation."""
     safe_agent = "".join(ch if ch.isalnum() or ch in "._-:" else "_" for ch in agent_id)[:80]
-    return f"specialist:{safe_agent}:{request_id[:32]}"
+    return f"{SPECIALIST_SESSION_PREFIX}{safe_agent}:{request_id[:32]}"
+
+
+def specialist_agent(session_id: str) -> str | None:
+    """The agent a :func:`specialist_session` id belongs to, else ``None``."""
+    if not session_id.startswith(SPECIALIST_SESSION_PREFIX):
+        return None
+    agent, _, _ = session_id[len(SPECIALIST_SESSION_PREFIX):].rpartition(":")
+    return agent or None
 
 
 def bounded_prompt(
