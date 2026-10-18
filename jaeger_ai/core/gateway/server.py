@@ -529,6 +529,17 @@ class _GatewayToolConfirmationProvider:
             return self._decided(self._prompt(request))
         if skill_name and skill_name in self._session_grants():
             return True
+        if self._write_or_exec(request) and not self._autonomy_auto():
+            # Gateway-turn policy: writes and code/shell execution get a card
+            # unless a project grant covers the target or the owner granted
+            # this session (above). Persistent per-skill "always" grants and
+            # the commissioning filesystem.write default do NOT apply here.
+            try:
+                if self.app._project_grant_allows(self.session_id, request):
+                    return True
+            except Exception:  # noqa: BLE001 — a grant check that fails means "ask"
+                logger.debug("project grant check failed", exc_info=True)
+            return self._decided(self._prompt(request))
         try:
             if self._grants().is_granted(skill_name):
                 return True
@@ -566,6 +577,26 @@ class _GatewayToolConfirmationProvider:
         except Exception:  # noqa: BLE001 — a grant check that fails means "ask"
             logger.debug("project grant check failed", exc_info=True)
         return self._decided(self._prompt(request))
+
+    _DELETE_TOOLS = frozenset({"delete_file", "remove_file", "delete_path", "delete", "rm"})
+    _EXEC_TOOLS = frozenset({"execute_code", "run_code", "python_exec"})
+
+    def _write_or_exec(self, request: Any) -> bool:
+        names = {str(getattr(request, "operation", "") or "")}
+        app_cls = type(self.app)
+        return bool(names & (app_cls._PROJECT_WRITE_TOOLS | app_cls._PROJECT_SHELL_TOOLS
+                             | self._DELETE_TOOLS | self._EXEC_TOOLS))
+
+    @staticmethod
+    def _autonomy_auto() -> bool:
+        """Owner explicitly saved autonomy "auto" (never the default)."""
+        try:
+            from jaeger_ai.core.entity.runtime import EntityRuntime
+            from jaeger_ai.core.runtime.autonomy import effective_autonomy
+            layout = getattr(EntityRuntime.get_singleton(), "layout", None)
+            return effective_autonomy(getattr(layout, "config_path", None)) == "auto"
+        except Exception:  # noqa: BLE001
+            return False
 
     def _session_grants(self) -> set[str]:
         """Skills the owner allowed "for this session" (session metadata)."""
@@ -651,7 +682,10 @@ class _GatewayToolConfirmationProvider:
         else:
             approved = bool(box["approved"]) and not (scope is not None and scope.cancelled)
             decision = (self.app.store.get_approval(aid) or {}).get("decision")
-            if approved and skill and decision == "session" and not getattr(request, "force_prompt", False):
+            # "always" also covers this session: under the write/exec policy the
+            # persistent grant alone no longer skips the card in other sessions.
+            if (approved and skill and decision in {"session", "always"}
+                    and not getattr(request, "force_prompt", False)):
                 try:
                     self._grant_for_session(skill)
                 except Exception:  # noqa: BLE001 — the call itself stays approved
