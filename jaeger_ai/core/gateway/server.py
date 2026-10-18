@@ -1615,10 +1615,31 @@ class JaegerGatewayApp:
         )
         all_green = required_ok
         status = "ok" if all_green else "unhealthy"
+        git_commit = "unknown"
+        try:
+            import subprocess
+            git_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"],
+                cwd=Path(__file__).resolve().parent,
+                text=True,
+                timeout=2,
+            ).strip()
+        except Exception:
+            pass
+
+        active_model = "unknown"
+        try:
+            from jaeger_ai.core.runtime.truth import _active_model
+            active_model = _active_model(self._instance_root()).get("model") or "unknown"
+        except Exception:
+            pass
+
         payload = {
             "status": status,
             "service": "jaeger-gateway",
             "version": JAEGER_VERSION,
+            "commit": git_commit,
+            "model": active_model,
             "architecture": "openclaw-parity",
             "persistence_spine": True,
             "agents_api": "/v1/agents",
