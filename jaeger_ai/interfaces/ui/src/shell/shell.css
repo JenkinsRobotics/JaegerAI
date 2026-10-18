@@ -1,6 +1,8 @@
 /* Modified from AetherStudio studio/src/studio.css (Apache-2.0, ece0209):
- * the .studio sidebar/body/content frame, tokens only. Tints and translucency
- * are color-mix() over existing --aether-* tokens (no new literals). */
+ * the .studio sidebar/body/content frame, tokens only. Tints are color-mix()
+ * over existing tokens (no new literals). Jenkins Robotics 2026-10-17: solid
+ * surfaces from tokens.jaeger.css (no translucency); band height and
+ * traffic-light reserve come from the native chrome contract. */
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
 body {
@@ -10,10 +12,8 @@ body {
   font-size: var(--jg-font-body);
 }
 :root {
-  /* Chat-scale type, derived from the Aether body size (12px → ~13px). */
-  --jg-font-body: calc(var(--aether-font-size-body) * 1.1);
-  --jg-font-small: var(--aether-font-size-body);
-  --jg-font-tiny: calc(var(--aether-font-size-body) * 0.95);
+  /* Type sizes: tokens.jaeger.css. Top band: the native contract's value in the macOS host. */
+  --jg-band-height: var(--jaeger-native-band-height, 52px);
   --jg-radius-window: 12px;
   --jg-radius-bubble: 18px;
 }
@@ -35,7 +35,7 @@ body {
   height: 100%;
   overflow: hidden;
   border-radius: var(--jg-radius-window);
-  background: var(--aether-color-bg-control);
+  background: var(--jg-color-pane);
   border: 1px solid color-mix(in srgb, var(--aether-color-border) 70%, transparent);
   box-shadow:
     0 24px 60px color-mix(in srgb, var(--aether-color-shadow) 32%, transparent),
@@ -45,31 +45,21 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  /* Translucent sidebar: rail tint over a blur of whatever sits behind. */
-  background: color-mix(in srgb, var(--aether-color-bg-rail) 78%, transparent);
-  -webkit-backdrop-filter: blur(28px) saturate(1.6);
-  backdrop-filter: blur(28px) saturate(1.6);
+  background: var(--aether-color-bg-rail);
 }
 .jg-shell__top { flex: none; }
 .jg-shell__primary { flex: 1; min-height: 0; overflow-y: auto; padding: 0 var(--aether-space-4) var(--aether-space-3); }
 .jg-shell__footer { flex: none; padding: var(--aether-space-4) var(--aether-space-5) var(--aether-space-5); }
-.jg-shell__body { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--aether-color-bg-control); }
+.jg-shell__body { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--jg-color-pane); }
 .jg-shell__content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 /* Native macOS host: the window IS the card. No outer radius, border, shadow
-   or backdrop; the real traffic lights sit in the reserved 78px band. */
+   or backdrop; the real traffic lights sit in the reserved band (native reserve). */
 html[data-aether-native-window] .jg-desktop,
 html[data-jaeger-host="macos"] .jg-desktop { padding: 0; background: transparent; }
 html[data-aether-native-window] .jg-shell,
 html[data-jaeger-host="macos"] .jg-shell { border: 0; border-radius: 0; box-shadow: none; }
-html[data-jaeger-host="macos"] body { background: transparent; }
-/* The shell puts a native sidebar-material view behind the page
- * (NativeChromeContract): let it show through the sidebar; the chat stays solid. */
-html[data-native-vibrancy="sidebar"] .jg-shell { background: transparent; }
-html[data-native-vibrancy="sidebar"] .jg-shell__sidebar {
-  background: color-mix(in srgb, var(--aether-color-bg-rail) 35%, transparent);
-  -webkit-backdrop-filter: none; backdrop-filter: none;
-}
+html[data-jaeger-host="macos"] .jg-shell { --jg-traffic-lights: var(--jaeger-native-traffic-light-reserve, 82px); }
 html[data-jaeger-host="macos"] .jg-traffic-lights i { visibility: hidden; }
 [data-aether-window-drag-region] { -webkit-user-select: none; user-select: none; }
 

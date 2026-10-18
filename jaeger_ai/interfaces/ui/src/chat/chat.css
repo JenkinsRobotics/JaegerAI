@@ -4,7 +4,7 @@
 .jg-chat { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 
 /* Floating agent pill over the scrolling transcript. */
-.jg-chat__band { position: absolute; z-index: 2; top: 0; left: 0; right: 0; height: 54px; display: flex; align-items: center; justify-content: center; pointer-events: none; }
+.jg-chat__band { position: absolute; z-index: 2; top: 0; left: 0; right: 0; height: var(--jg-band-height); display: flex; align-items: center; justify-content: center; pointer-events: none; }
 .jg-agent-pill {
   pointer-events: auto; display: inline-flex; align-items: center; gap: 7px; max-width: 60%; height: 34px; padding: 0 14px 0 8px;
   border-radius: 999px; border: 0; background: var(--aether-color-bg-control); color: var(--aether-color-text);
@@ -26,7 +26,7 @@
 
 .jg-bubble { max-width: 78%; padding: 9px 13px; border-radius: var(--jg-radius-bubble); line-height: 1.45; font-size: var(--jg-font-body); }
 .jg-bubble--user { align-self: flex-end; background: var(--jg-agent-color, var(--aether-color-accent)); color: var(--aether-color-text-on-selected); white-space: pre-wrap; }
-.jg-bubble--assistant { align-self: flex-start; background: var(--aether-color-bg-inset); color: var(--aether-color-text); display: flex; flex-direction: column; gap: 6px; }
+.jg-bubble--assistant { align-self: flex-start; background: var(--jg-color-bubble-assistant); color: var(--aether-color-text); display: flex; flex-direction: column; gap: 6px; }
 .jg-md p { margin: 0 0 8px; }
 .jg-md > :last-child { margin-bottom: 0; }
 .jg-md :is(ul, ol) { margin: 0 0 8px; padding-left: 20px; }
