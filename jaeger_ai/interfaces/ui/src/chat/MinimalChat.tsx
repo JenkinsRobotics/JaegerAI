@@ -19,6 +19,8 @@ import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
+import { useRevealedText } from "./reveal";
+import { useStreamStyle, type StreamStyleParams } from "./streamStyle";
 import { turnAvatarState, type AvatarState } from "../agents/avatarMotion";
 import type { VoiceHost } from "./nativeHost";
 
@@ -32,6 +34,8 @@ type Links = { onCopy: (text: string) => void; onOpen: (url: string) => void };
 const SEPARATOR_GAP_MS = 30 * 60 * 1000;
 /** Auto-scroll only while the reader is this close to the bottom. */
 const STICK_PX = 80;
+/** A scroll within this long after the reader's own input counts as theirs. */
+const USER_INPUT_WINDOW_MS = 250;
 /** Scrolled this close to the top, the next older page loads. */
 const OLDER_PX = 160;
 
@@ -52,10 +56,23 @@ export function needsSeparator(prev: number | undefined, at: number | undefined)
   return new Date(prev).toDateString() !== new Date(at).toDateString() || at - prev > SEPARATOR_GAP_MS;
 }
 
-function BubblePart({ part, links }: { part: ChatPart; links: Links }) {
+/** Streamed reply text, paced and entered per the stream style (reveal.ts). */
+export function RevealMarkdown({ text, live, links, style }: { text: string; live: boolean; links: Links; style: StreamStyleParams }) {
+  const shown = useRevealedText(text, live, style);
+  const enter = style.enter.kind !== "none" && live;
+  const vars = enter ? { "--jg-enter-ms": `${style.enter.durationMs}ms`, "--jg-enter-ease": style.enter.easing, "--jg-enter-y": `${style.enter.translatePx ?? 0}px` } as CSSProperties : undefined;
+  return (
+    <div className={`jg-md${enter ? ` jg-md--enter-${style.enter.kind}` : ""}`} style={vars} data-stream-style={style.id} data-revealing={live && shown.length < text.length ? "" : undefined}>
+      <Markdown text={shown} onCopy={links.onCopy} onOpen={links.onOpen} />
+      {live && style.indicator.kind === "caret" && <span className="jg-caret" aria-hidden="true" />}
+    </div>
+  );
+}
+
+function BubblePart({ part, links, live = false, style }: { part: ChatPart; links: Links; live?: boolean; style: StreamStyleParams }) {
   switch (part.kind) {
     case "markdownContent":
-      return <div className="jg-md"><Markdown text={part.text} onCopy={links.onCopy} onOpen={links.onOpen} /></div>;
+      return <RevealMarkdown text={part.text} live={live} links={links} style={style} />;
     case "thinking":
       return <details className="jg-thinking"><summary>Thought for {seconds(part.durationMs)} s</summary><p>{part.text}</p></details>;
     case "progress":
@@ -298,6 +315,17 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     return () => { live = false; };
   }, [host, session?.agentId]);
 
+  /** Stream style (Settings → Chat): pacing, entrance and scroll-follow. */
+  const streamStyle = useStreamStyle();
+  /** Only the reader's own input releases the follow (the reference: within 250 ms of a wheel, touch, key
+   * or pointer press); our own smooth scrolling never does. */
+  const inputAt = useRef(0);
+  const userScrolled = () => Date.now() - inputAt.current <= USER_INPUT_WINDOW_MS;
+  const follow = (el: HTMLElement) => {
+    const jump = el.scrollHeight - el.clientHeight - el.scrollTop;
+    if (streamStyle.scroll.smooth && jump > 0 && jump <= el.clientHeight && typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    else el.scrollTop = el.scrollHeight;
+  };
   // Follow new content only while the reader is at the bottom; after an older page lands, hold the
   // reader's place instead.
   useLayoutEffect(() => {
@@ -307,21 +335,23 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
       prepend.current = null;
       return;
     }
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
+    if (el && stick.current) follow(el);
   }, [session]);
   // ...also when the column grows on its own (code highlighting lands late, off-screen turns get their real
   // height), which a session change alone doesn't catch.
   useLayoutEffect(() => {
     const el = scroller.current, column = el?.firstElementChild;
     if (!el || !column || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => { if (stick.current) el.scrollTop = el.scrollHeight; });
+    const ro = new ResizeObserver(() => { if (stick.current) follow(el); });
     ro.observe(column);
     return () => ro.disconnect();
   }, []);
+  const markInput = () => { inputAt.current = Date.now(); };
   const onScroll = () => {
     const el = scroller.current;
     if (!el) return;
-    const near = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const near = gap < Math.max(STICK_PX, streamStyle.scroll.thresholdPx) || (stick.current && !userScrolled());
     if (el.scrollTop < OLDER_PX && older && !loadingOlder) loadOlder();
     stick.current = near;
     // Remember how much was there when the reader left, for the unread badge.
@@ -467,7 +497,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
             onSelect={(id) => { setMenuOpen(false); if (id === "history") (host as WebHost).openHistory?.(agent.id); else host.openDetails?.(agent.id); }} />
         </div>
       </div>
-      <div className="jg-chat__scroll" ref={scroller} onScroll={onScroll}>
+      <div className="jg-chat__scroll" ref={scroller} onScroll={onScroll} onWheel={markInput} onTouchMove={markInput} onPointerDown={markInput} onKeyDown={markInput}>
         <div className="jg-chat__column">
           {loadError && <ErrorState title="Couldn't load this chat" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
           {session && !session.turns.length && <p className="jg-chat__empty">What should we work on?</p>}
@@ -497,7 +527,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
                 "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} />
                 : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />
-                : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} />)}</div>)}
+                : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
               {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} agent={agent} state={turnAvatarState(turn)} />}
             </section>
           ))}

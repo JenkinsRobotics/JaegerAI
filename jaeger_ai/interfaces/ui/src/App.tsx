@@ -12,6 +12,7 @@ import { contractHome, fallbackHome, httpGetJson, type HomeSessions } from "./ch
 import { NativeHost } from "./chat/nativeHost";
 import { WebHost } from "./chat/webHost";
 import { ConnectAppsDialog } from "./connect-apps/ConnectAppsDialog";
+import { SettingsDialog } from "./settings/SettingsDialog";
 import { detectHost } from "./platform/host";
 import { onNativeEvent } from "./platform/native";
 import { AppShell } from "./shell/AppShell";
@@ -51,6 +52,7 @@ export function App({ source }: { source: JaegerSource }) {
   const [sessionError, setSessionError] = useState<string>();
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [newChatAnchor, setNewChatAnchor] = useState<HTMLElement | null>(null);
   const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null);
   const [historyAgentId, setHistoryAgentId] = useState<string | null>(null);
@@ -108,6 +110,7 @@ export function App({ source }: { source: JaegerSource }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); setSettingsOpen(true); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newChat(selectedAgentId ?? LEAD_ID); }
     };
     window.addEventListener("keydown", onKey);
@@ -124,6 +127,7 @@ export function App({ source }: { source: JaegerSource }) {
     onArchiveChat: () => {},
     onSearch: () => { /* search lands with /v1/sessions?q= */ },
     onConnectApps: () => setConnectOpen(true),
+    onSettings: () => setSettingsOpen(true),
     onRetry: () => void store.refresh(),
     userInitials: "MJ",
     pins,
@@ -160,6 +164,7 @@ export function App({ source }: { source: JaegerSource }) {
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
         onNewChat={newChat} onCreateAgent={createAgent} />
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </>
   );
 }
