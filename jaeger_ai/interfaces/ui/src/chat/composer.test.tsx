@@ -79,3 +79,23 @@ describe("composer (DOM)", () => {
     expect(ta.style.overflowY).toBe("auto");
   });
 });
+
+describe("jump button (DOM)", () => {
+  it("is always mounted, hidden at the bottom, and the chat root carries --jg-composer-h", async () => {
+    const el = document.createElement("div");
+    document.body.append(el);
+    const root = createRoot(el);
+    const host = {
+      capabilities: { voice: false }, startTurn: vi.fn(), respondToConfirmation: vi.fn(), copy: vi.fn(), openExternal: vi.fn(),
+      sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [] })) },
+    } as unknown as ChatHost;
+    await act(async () => { root.render(<MinimalChat host={host} sessionId="s1" />); });
+    const jump = el.querySelector<HTMLButtonElement>(".jg-jump")!;
+    expect(jump.classList.contains("is-visible")).toBe(false);
+    expect(jump.getAttribute("aria-hidden")).toBe("true");
+    expect(jump.tabIndex).toBe(-1);
+    expect(el.querySelector<HTMLDivElement>(".jg-chat")!.style.getPropertyValue("--jg-composer-h")).toMatch(/^\d+px$/);
+    act(() => root.unmount());
+    el.remove();
+  });
+});

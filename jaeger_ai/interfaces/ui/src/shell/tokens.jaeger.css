@@ -27,6 +27,12 @@
   --jg-shadow-card: 0 1px 2px color-mix(in srgb, var(--jg-color-shadow) 6%, transparent),
                     0 4px 16px color-mix(in srgb, var(--jg-color-shadow) 6%, transparent);
   --jg-shadow-control: 0 1px 3px color-mix(in srgb, var(--jg-color-shadow) 12%, transparent);
+  /* Motion. */
+  --jg-ease-out-quint: cubic-bezier(.16, 1, .3, 1);
+  --jg-ease-out-cubic: cubic-bezier(.215, .61, .355, 1);
+  --jg-dur-fast: 100ms;
+  --jg-dur-base: 150ms;
+  --jg-dur-slow: 200ms;
 }
 @media (prefers-color-scheme: dark) {
   :root {

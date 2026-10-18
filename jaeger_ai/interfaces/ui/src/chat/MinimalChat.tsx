@@ -9,6 +9,7 @@ import { avatarColor } from "../agents/avatarColor";
 import { HandoffMarker } from "../agents/HandoffMarker";
 import { ArrowDownIcon, CloseIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
+import { badge, messageCount, unreadSince } from "./scrollFollow";
 import { addFiles, autoGrow, fileSize, primaryAction, toAttachments, type PendingFile } from "./composer";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
@@ -181,6 +182,9 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   const [files, setFiles] = useState<PendingFile[]>([]);
   const [fileNote, setFileNote] = useState<string>();
   const scroller = useRef<HTMLDivElement>(null);
+  const chatRoot = useRef<HTMLDivElement>(null);
+  const composer = useRef<HTMLFormElement>(null);
+  const unreadBase = useRef<number | null>(null);
   const field = useRef<HTMLTextAreaElement>(null);
   const picker = useRef<HTMLInputElement>(null);
   const stick = useRef(true);
@@ -222,17 +226,42 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     const el = scroller.current;
     if (el && stick.current) el.scrollTop = el.scrollHeight;
   }, [session]);
+  // ...also when the column grows on its own (code highlighting lands late, off-screen turns get their real
+  // height), which a session change alone doesn't catch.
+  useLayoutEffect(() => {
+    const el = scroller.current, column = el?.firstElementChild;
+    if (!el || !column || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => { if (stick.current) el.scrollTop = el.scrollHeight; });
+    ro.observe(column);
+    return () => ro.disconnect();
+  }, []);
   const onScroll = () => {
     const el = scroller.current;
     if (!el) return;
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
     stick.current = near;
+    // Remember how much was there when the reader left, for the unread badge.
+    if (near) unreadBase.current = null;
+    else if (unreadBase.current === null) unreadBase.current = messageCount(session?.turns ?? []);
     setAtBottom(near);
   };
+
+  // Dock the jump button above the composer, whatever its height (chips, multi-line text).
+  useLayoutEffect(() => {
+    const form = composer.current, root = chatRoot.current;
+    if (!form || !root) return;
+    const apply = () => root.style.setProperty("--jg-composer-h", `${Math.round(form.getBoundingClientRect().height)}px`);
+    apply();
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(apply);
+    ro.observe(form);
+    return () => ro.disconnect();
+  }, []);
   const jumpToLatest = () => {
     const el = scroller.current;
     if (!el) return;
     stick.current = true;
+    unreadBase.current = null;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   };
 
@@ -315,10 +344,11 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   const agentName = (id: string) => (id === agent.id ? agent.name : undefined);
   const voice = voiceReady && Boolean(voiceHost);
   const hasText = Boolean(draft.trim()) || files.length > 0;
+  const unread = atBottom ? 0 : unreadSince(unreadBase.current, messageCount(session?.turns ?? []));
   const primary = primaryAction({ running: Boolean(active), hasContent: hasText, voice });
   const tint = { "--jg-agent-color": avatarColor(agent.id) } as CSSProperties;
   return (
-    <div className="jg-chat" style={tint}>
+    <div className="jg-chat" style={tint} ref={chatRoot}>
       <div className="jg-chat__band" data-aether-window-drag-region>
         <button type="button" className="jg-agent-pill" title={`${agent.name} details`} onClick={() => host.openDetails?.(agent.id)}>
           <AgentAvatar id={agent.id} name={agent.name} size={20} />
@@ -345,10 +375,12 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
           ))}
         </div>
       </div>
-      {!atBottom && (
-        <button type="button" className="jg-jump" aria-label="Scroll to bottom" onClick={jumpToLatest}><ArrowDownIcon /></button>
-      )}
-      <form className="jg-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
+      <button type="button" className={`jg-jump${atBottom ? "" : " is-visible"}`} onClick={jumpToLatest}
+        aria-label={unread ? `Scroll to bottom, ${unread} new` : "Scroll to bottom"} aria-hidden={atBottom || undefined} tabIndex={atBottom ? -1 : 0}>
+        <ArrowDownIcon />
+        {unread > 0 && <span className="jg-jump__badge">{badge(unread)}</span>}
+      </button>
+      <form ref={composer} className="jg-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">
             {files.map((f) => (
