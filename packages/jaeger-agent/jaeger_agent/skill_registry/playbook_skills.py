@@ -364,6 +364,43 @@ def discover_playbooks() -> list[PlaybookSkill]:
     return result
 
 
+# Per-run skill scope. A host binds the skill names one agent may load (a
+# specialist's own role skills plus shared ones) for the duration of its run;
+# discovery, use_skill/skill(view) and auto-selection then see only those.
+# None (the default) is the unscoped full catalog.
+import contextlib as _contextlib
+import contextvars as _contextvars
+
+_skill_scope: _contextvars.ContextVar[frozenset[str] | None] = _contextvars.ContextVar(
+    "jaeger_skill_scope", default=None)
+
+
+@_contextlib.contextmanager
+def skill_scope(names: list[str] | tuple[str, ...] | None):
+    token = _skill_scope.set(None if names is None else frozenset(str(n) for n in names))
+    try:
+        yield
+    finally:
+        _skill_scope.reset(token)
+
+
+def bind_skill_scope(names: list[str] | tuple[str, ...] | None) -> _contextvars.Token:
+    """Set the scope for the rest of the current context (an asyncio task or
+    thread); returns the token for an optional reset."""
+    return _skill_scope.set(None if names is None else frozenset(str(n) for n in names))
+
+
+def active_skill_scope() -> frozenset[str] | None:
+    return _skill_scope.get()
+
+
+def _in_scope(skills: list[PlaybookSkill]) -> list[PlaybookSkill]:
+    scope = _skill_scope.get()
+    if scope is None:
+        return skills
+    return [s for s in skills if s.name in scope]
+
+
 def _select_available(
     skills: list[PlaybookSkill], disabled: set[str],
     available_tools: set[str] | None = None,
@@ -373,7 +410,7 @@ def _select_available(
     is given) those whose ``requires_tools`` aren't all present, so a skill
     that needs an absent tool doesn't clutter the index."""
     out = [
-        s for s in skills
+        s for s in _in_scope(skills)
         if _platform_ok(s)
         and s.name not in disabled
         and s.lifecycle in {"core", "deprecated"}
@@ -406,7 +443,7 @@ def callable_playbooks() -> list[PlaybookSkill]:
     """
     disabled = _disabled_playbook_names()
     return [
-        skill for skill in discover_playbooks()
+        skill for skill in _in_scope(discover_playbooks())
         if _platform_ok(skill) and skill.name not in disabled
     ]
 
@@ -515,7 +552,7 @@ def find_playbook(name: str) -> PlaybookSkill | None:
         return None
     disabled = _disabled_playbook_names()
     skills = [
-        s for s in discover_playbooks()
+        s for s in _in_scope(discover_playbooks())
         if _platform_ok(s) and s.name not in disabled
     ]
     for s in skills:
