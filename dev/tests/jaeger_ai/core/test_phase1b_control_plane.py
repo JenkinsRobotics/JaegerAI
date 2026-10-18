@@ -307,8 +307,8 @@ def test_lifecycle_shutdown_bootouts_so_launchd_cannot_resurrect(tmp_path: Path,
 def test_webui_launcher_stays_on_loopback_unless_lan_is_explicit():
     import subprocess
     text = Path("scripts/run-jaeger-webui.sh").read_text(encoding="utf-8")
-    start = text.index('case "$(printf')
-    snippet = text[start:text.index("esac", start) + len("esac")]
+    start = text.index('if [[ "${JAEGER_WEBUI_ALLOW_LAN:-0}"')
+    snippet = text[start:text.index("\nfi", start) + len("\nfi")]
     blocked = subprocess.check_output(
         ["bash", "-c", snippet + '\nprintf %s "$HERMES_WEBUI_HOST"'],
         env={"JAEGER_WEBUI_HOST": "0.0.0.0", "PATH": "/usr/bin:/bin"},
