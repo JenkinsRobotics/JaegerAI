@@ -26,7 +26,7 @@ chosen in this order:
 3. Otherwise `~/.jaeger`.
 
 The Python environment lives in `$JAEGER_VENV` (default `~/.jaeger/venv`).
-`./jaeger`, `run.sh`, `scripts/run-jaeger-webui.sh` and the test runner all
+`./jaeger`, `scripts/run-jaeger-webui.sh` and the test runner all
 use it; none of them falls back to a `.venv` inside the checkout.
 
 **Common mistake.** The one-line installer uses `JAEGER_HOME` to mean *where

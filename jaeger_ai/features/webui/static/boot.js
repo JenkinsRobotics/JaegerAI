@@ -2730,6 +2730,7 @@ const _SKINS=[
   {name:'Neon Paint', value:'neon-paint', colors:['#FF2D95','#00E5FF','#FFB800']},
   {name:'Geist Contrast', value:'geist-contrast', colors:['#000000','#ffffff','#FFF175']},
   {name:'Zeus',     colors:['#FFD700','#FFBF00','#1A1A00']},
+  {name:'Aether',   colors:['#4C9DFF','#171A20','#0E1013']},
   {name:'Verdigris', value:'verdigris', colors:['#C89A5A','#0F1714','#22342C']},
 ];
 const _VALID_THEMES=new Set((_THEMES||[]).map(t=>t.value));
@@ -2750,7 +2751,7 @@ function _normalizeAppearance(theme,skin){
   const rawSkin=typeof skin==='string'?skin.trim().toLowerCase():'';
   const legacy=_LEGACY_THEME_MAP[rawTheme];
   const nextTheme=legacy?legacy.theme:(_VALID_THEMES.has(rawTheme)?rawTheme:'dark');
-  const nextSkin=_VALID_SKINS.has(rawSkin)?rawSkin:(legacy?legacy.skin:'default');
+  const nextSkin=_VALID_SKINS.has(rawSkin)?rawSkin:(legacy?legacy.skin:'aether');
   return {theme:nextTheme,skin:nextSkin};
 }
 
@@ -2838,9 +2839,9 @@ function _applyTheme(name){
 }
 
 function _applySkin(name){
-  const key=(name||'default').toLowerCase();
-  if(key==='default') delete document.documentElement.dataset.skin;
-  else document.documentElement.dataset.skin=key;
+  const raw=(name||'aether').toLowerCase();
+  const key=raw==='default'?'aether':raw;
+  document.documentElement.dataset.skin=key;
   _setResolvedTheme(_resolvedThemeBaseDark);
 }
 

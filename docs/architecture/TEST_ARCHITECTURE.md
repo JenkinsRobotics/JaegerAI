@@ -3,7 +3,7 @@
 
 # JaegerAI Test Architecture & Verification Standards (Workstream 21)
 
-**Branch:** `pinocchio`
+**Branch:** `0.13-dev` (canonical)
 **Classification:** Engineering Specification & Testing Doctrine
 **Status:** Canonical & Enforced
 

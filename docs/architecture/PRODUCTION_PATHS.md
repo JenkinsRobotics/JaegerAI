@@ -1,4 +1,4 @@
-> **Classification:** CURRENT AUTHORITATIVE (what runs on `consolidate/one-gateway`).
+> **Classification:** CURRENT AUTHORITATIVE (canonical runtime path).
 > **Enforced by:** `dev/tests/jaeger_ai/contract/test_single_path_architecture.py` — every claim
 > below marked *(test)* fails that file if it stops being true.
 

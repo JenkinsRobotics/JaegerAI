@@ -27,29 +27,107 @@ if [[ ! -x "${VENV_PY}" || ! -x "${VENV_PYTEST}" ]]; then
   exit 1
 fi
 
-echo "[1/4] Checking Git repository tracking invariants..."
-# Check for forbidden tracked patterns in git
-TRACKED_VIOLATIONS=$(git ls-files | grep -E '(__pycache__|\.pytest_cache|\.venv|jaeger_ai/vendor|hermes_state\.py)' || true)
-if [[ -n "${TRACKED_VIOLATIONS}" ]]; then
-  echo "[-] ERROR: Forbidden paths tracked in git index:"
-  echo "${TRACKED_VIOLATIONS}"
-  exit 1
-fi
-echo "[+] Git tracking is pristine."
+TARGET="${1:-all}"
 
-echo "[2/4] Running CI hygiene tripwires (root allowlist, features READMEs, zero in-repo state)..."
-"${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ci_hygiene.py -q --no-header
-echo "[+] CI hygiene tripwires passed."
+run_git() {
+  echo "[git] Checking Git repository tracking invariants..."
+  TRACKED_VIOLATIONS=$(git ls-files | grep -E '(__pycache__|\.pytest_cache|\.venv|jaeger_ai/vendor|hermes_state\.py)' || true)
+  if [[ -n "${TRACKED_VIOLATIONS}" ]]; then
+    echo "[-] ERROR: Forbidden paths tracked in git index:"
+    echo "${TRACKED_VIOLATIONS}"
+    return 1
+  fi
+  echo "[+] Git tracking is pristine."
+}
 
-echo "[3/4] Running IDE interface unit tests..."
-IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1)
-PASSED_COUNT=$(echo "${IDE_OUTPUT}" | grep -E '^(ℹ|#) pass ' | awk '{print $3}')
-echo "[+] IDE interface tests passed (${PASSED_COUNT} passed)."
+run_hygiene() {
+  echo "[hygiene] Running CI hygiene tripwires (root allowlist, features READMEs, zero in-repo state)..."
+  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ci_hygiene.py -q --no-header
+  echo "[+] CI hygiene tripwires passed."
+}
 
-echo "[4/4] Running core Gateway client, Skill Catalog audit & Tier contract..."
-"${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ide_gateway_client.py dev/tests/jaeger_ai/core/test_skill_catalog_audit.py dev/tests/jaeger_ai/core/test_interaction_tiers.py -q --no-header
-echo "[+] Core Gateway client, Skill Catalog audit & Tier contract passed."
+run_frontend() {
+  echo "=================================================="
+  echo "  [TIER 1: FRONT END] Interfaces & Presentation"
+  echo "=================================================="
+  echo "[front-end:ide] Running IDE interface & webview unit tests..."
+  IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1)
+  PASSED_COUNT=$(echo "${IDE_OUTPUT}" | grep -E '^(ℹ|#) pass ' | awk '{print $3}')
+  echo "[+] IDE interface tests passed (${PASSED_COUNT} passed)."
+  echo "[front-end:webui] Running WebUI packaging and asset overlay tests..."
+  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/features/test_webui_packaging_contract.py dev/tests/jaeger_ai/features/test_webui_overlay_scope.py -q --no-header
+  echo "[+] WebUI front-end asset tests passed."
+}
+
+run_backend() {
+  echo "=================================================="
+  echo "  [TIER 2: BACK END] Core Gateway, Engine & Skills"
+  echo "=================================================="
+  echo "[back-end:gateway] Running Gateway durability, SQLite sessions & event store..."
+  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_gateway_durability.py -q --no-header
+  echo "[+] Gateway session durability tests passed."
+  echo "[back-end:tiers] Running 3-Tier Interaction Contract (Chat, Agent, Jaeger)..."
+  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_interaction_tiers.py -q --no-header
+  echo "[+] Tier contract tests passed."
+  echo "[back-end:skills] Running Skill Catalog and Tool Registry audit..."
+  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_skill_catalog_audit.py -q --no-header
+  echo "[+] Skill Catalog audit passed."
+}
+
+run_wiring() {
+  echo "=================================================="
+  echo "  [TIER 3: WIRING] Integration & Wire Contracts"
+  echo "=================================================="
+  echo "[wiring:ide-gateway] Testing IDE client REST + SSE wire contract with Gateway..."
+  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ide_gateway_client.py -q --no-header
+  echo "[+] IDE-to-Gateway wiring contract passed."
+  echo "[wiring:webui-gateway] Testing WebUI proxy wire contract with Gateway..."
+  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/interfaces/test_webui_gateway_proxy.py -q --no-header
+  echo "[+] WebUI-to-Gateway wiring contract passed."
+}
+
+case "${TARGET}" in
+  frontend|front-end|ui)
+    run_frontend
+    ;;
+  backend|back-end|core)
+    run_backend
+    ;;
+  wiring|integration|wire)
+    run_wiring
+    ;;
+  git)
+    run_git
+    ;;
+  hygiene)
+    run_hygiene
+    ;;
+  ide)
+    echo "[ide] Running IDE interface unit tests..."
+    IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1)
+    PASSED_COUNT=$(echo "${IDE_OUTPUT}" | grep -E '^(ℹ|#) pass ' | awk '{print $3}')
+    echo "[+] IDE interface tests passed (${PASSED_COUNT} passed)."
+    ;;
+  gateway)
+    "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_gateway_durability.py dev/tests/jaeger_ai/core/test_interaction_tiers.py -q --no-header
+    ;;
+  skills)
+    "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_skill_catalog_audit.py -q --no-header
+    ;;
+  all)
+    run_git
+    run_hygiene
+    run_frontend
+    run_backend
+    run_wiring
+    ;;
+  *)
+    echo "Unknown target: ${TARGET}"
+    echo "Usage: ./scripts/verify.sh [frontend | backend | wiring | all | git | hygiene]"
+    exit 1
+    ;;
+esac
 
 echo "=================================================="
-echo "  [SUCCESS] All verification invariants passed!"
+echo "  [SUCCESS] Verification passed for: ${TARGET}!"
 echo "=================================================="

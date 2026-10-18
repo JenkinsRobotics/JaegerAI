@@ -1,0 +1,78 @@
+# JaegerAI — the app manifest (Jaeger App Format 0.1).
+# Structure and supervised nodes live here; behavior knobs live in config.yaml.
+#
+# Adheres to the Jenkins Robotics App Format spec (format 0.1):
+# - Supervised nodes with setup(), tick(), teardown() lifecycles
+# - Multi-surface shell integration
+# - Inproc or ZMQ message bus
+
+[app]
+name = "jaeger-ai"
+version = "0.13.0"
+requires_framework = ">=0.1"
+mode = "fused"
+single_instance = true
+shell_quits_core = false        # menu bar extra / daemon outlives any single window
+
+[bus]
+backend = "inproc"
+
+# ── nodes: Supervised background services ──────────────────────────
+
+[[node]]
+id = "gateway"
+tier = 1
+backend = "thread"
+enabled = true
+restart = "on_failure"
+description = "Core Jaeger Gateway API & WebSocket Event Broker"
+
+[[node]]
+id = "webui"
+tier = 2
+backend = "thread"
+enabled = true
+restart = "on_failure"
+description = "Unified Aether WebUI Server (:8790)"
+
+[[node]]
+id = "camera_insta360"
+tier = 3
+backend = "thread"
+enabled = false
+restart = "never"
+description = "Insta360 PTZ camera tracking and frame capture"
+
+[[node]]
+id = "finance_sync"
+tier = 3
+backend = "thread"
+enabled = false
+restart = "never"
+description = "Background financial data sync and ledger monitor"
+
+[[node]]
+id = "caldav_sync"
+tier = 3
+backend = "thread"
+enabled = false
+restart = "never"
+description = "CalDAV calendar and task synchronizer"
+
+# ── surfaces: Client presentation surfaces ─────────────────────────
+
+[[surface]]
+id = "macos_shell"
+main = true
+description = "Native macOS MenuBarExtra + floating pill + Aether WKWebView shell"
+
+[[surface]]
+id = "webui_surface"
+main = false
+description = "Remote and browser-accessible Aether WebUI"
+
+[[surface]]
+id = "ide_surface"
+main = false
+description = "VS Code thin-client chat participant (@jaeger) and conversation view"
+

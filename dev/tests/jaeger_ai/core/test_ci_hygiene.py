@@ -145,6 +145,7 @@ ALLOWED_ROOT_ITEMS = {
     "CHANGELOG.md",
     "CLAUDE.md",
     "CONTRIBUTING.md",
+    "Install Jaeger AI.command",
     "LICENSE",
     "MANIFEST.in",
     "README.md",
@@ -157,6 +158,7 @@ ALLOWED_ROOT_ITEMS = {
     "install.sh",
     "integrations",
     "jaeger",
+    "jaeger.toml",
     "jaeger_ai",
     "packages",
     "pyproject.toml",
@@ -168,7 +170,7 @@ ALLOWED_ROOT_ITEMS = {
 
 def test_repo_root_strict_allowlist():
     """Fail if an unapproved file or directory appears in the repository root."""
-    actual_items = {p.name for p in REPO_ROOT.iterdir()}
+    actual_items = {p.name for p in REPO_ROOT.iterdir() if p.name != ".DS_Store"}
     unexpected = actual_items - ALLOWED_ROOT_ITEMS
     assert not unexpected, (
         f"Tripwire triggered: unapproved files/directories found in repository root: {sorted(unexpected)}. "

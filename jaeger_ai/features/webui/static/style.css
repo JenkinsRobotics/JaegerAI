@@ -1,3 +1,4 @@
+@import "./tokens.css";
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   /* ── Typography contract ──
      --font-ui: shell chrome, controls, composer, labels, and ordinary UI.
@@ -1334,6 +1335,228 @@
   /* Image lightbox */
   :root.dark[data-skin="verdigris"] .img-lightbox-close:hover{background:rgba(200,154,90,.35);}
   :root.dark[data-skin="verdigris"] .img-lightbox-nav:hover{background:rgba(200,154,90,.40);}
+
+  /* ── Skin: Aether Studio ──
+     Shared design-token language with Aether Studio.
+     Employs cool-neutral dark shell, Aether blue accent (#4c9dff),
+     4px grid rhythm, 6px field / 7px control / 8px button radii,
+     and 1.7px stroke icon grammar on a 24px viewBox.
+     Preserves Jaeger's distinct identity, glyph, and chat hierarchy. */
+  :root[data-skin="aether"]{
+    --bg:var(--aether-color-bg-app, #0e1013);
+    --sidebar:var(--aether-color-bg-shell, #171a20);
+    --surface:var(--aether-color-bg-panel, #171a20);
+    --topbar-bg:var(--aether-color-bg-bar, #171a20);
+    --main-bg:var(--aether-color-bg-app, #0e1013);
+    --border:var(--aether-color-border, #303640);
+    --border2:var(--aether-color-border-control, #3a424d);
+    --border-subtle:rgba(48,54,64,0.6);
+    --border-muted:rgba(48,54,64,0.8);
+    --text:var(--aether-color-text, #e7edf3);
+    --strong:#ffffff;
+    --muted:var(--aether-color-text-dim, #8b96a5);
+    --em:var(--aether-color-text-soft, #cbd5df);
+    --accent:var(--aether-color-accent, #4c9dff);
+    --accent-hover:var(--aether-color-selection-edge, #37a8f4);
+    --accent-bg:rgba(76,157,255,0.12);
+    --accent-bg-strong:rgba(76,157,255,0.22);
+    --accent-text:var(--aether-color-accent, #4c9dff);
+    --blue:var(--aether-color-accent, #4c9dff);
+    --gold:var(--aether-color-warn, #e7a843);
+    --focus-ring:rgba(76,157,255,0.4);
+    --focus-glow:rgba(76,157,255,0.12);
+    --input-bg:var(--aether-color-bg-control, #0f1216);
+    --hover-bg:var(--aether-color-bg-hover, #29313a);
+    --surface-subtle:var(--aether-color-bg-inset, #1e222a);
+    --surface-subtle-hover:var(--aether-color-bg-row-hover, #252c35);
+    --code-bg:var(--aether-color-bg-inset, #1e222a);
+    --code-inline-bg:rgba(76,157,255,0.10);
+    --code-text:var(--aether-color-accent, #4c9dff);
+    --pre-text:var(--aether-color-text, #e7edf3);
+    --error:var(--aether-color-error, #ff5a62);
+    --success:var(--aether-color-ok, #32cf84);
+    --warning:var(--aether-color-warn, #e7a843);
+    --info:var(--aether-color-accent, #4c9dff);
+    --radius-sm:var(--aether-radius-field, 6px);
+    --radius-md:var(--aether-radius-control, 7px);
+    --radius-card:var(--aether-radius-control, 7px);
+    --radius-lg:var(--aether-radius-button, 8px);
+    --font-ui:var(--aether-font-family, -apple-system, BlinkMacSystemFont, "SF Pro Text", Inter, sans-serif);
+    font-family:var(--font-ui);
+  }
+  :root[data-skin="aether"]:not(.dark){
+    --bg:#ececee;
+    --sidebar:#f6f6f7;
+    --surface:#fbfbfc;
+    --topbar-bg:#f6f6f7;
+    --main-bg:#ececee;
+    --border:#d6d8db;
+    --border2:#c8cbd0;
+    --border-subtle:rgba(214,216,219,0.7);
+    --border-muted:rgba(200,203,208,0.8);
+    --text:#1c1e21;
+    --strong:#000000;
+    --muted:#5c6269;
+    --em:#33373c;
+    --accent:#2f7fe0;
+    --accent-hover:#1d5fc4;
+    --accent-bg:rgba(47,127,224,0.10);
+    --accent-bg-strong:rgba(47,127,224,0.18);
+    --accent-text:#2f7fe0;
+    --blue:#2f7fe0;
+    --gold:#e7a843;
+    --input-bg:#ffffff;
+    --hover-bg:#e7e9ec;
+    --surface-subtle:#ececef;
+    --surface-subtle-hover:#eceef1;
+    --code-bg:#ececef;
+    --code-inline-bg:rgba(47,127,224,0.08);
+    --code-text:#2f7fe0;
+    --pre-text:#1c1e21;
+    --error:#ff5a62;
+    --success:#32cf84;
+    --warning:#e7a843;
+    --info:#2f7fe0;
+  }
+  /* Component overrides for Aether skin */
+  :root[data-skin="aether"] .app-titlebar,
+  :root[data-skin="aether"] .topbar{
+    min-height:var(--aether-size-topbar, 56px)!important;
+    background:var(--aether-color-bg-bar, #171a20)!important;
+    border-bottom:1px solid var(--border)!important;
+  }
+  :root[data-skin="aether"] .app-titlebar-title{
+    color:var(--text)!important;
+    font-weight:600!important;
+    letter-spacing:-0.01em;
+  }
+  :root[data-skin="aether"] .app-titlebar{
+    background:#232425!important;
+    border-bottom:1px solid var(--border)!important;
+    box-shadow:0 1px 4px rgba(0,0,0,0.25)!important;
+  }
+  :root[data-skin="aether"] .rail{
+    background:var(--aether-color-bg-rail, #171a20)!important;
+    border-right:1px solid var(--border)!important;
+  }
+  :root[data-skin="aether"] .sidebar{
+    background:linear-gradient(165deg, #273444 0%, #303234 38%, #292b2c 75%, #273442 100%)!important;
+    border-right:1px solid var(--border)!important;
+  }
+  :root[data-skin="aether"] .rightpanel,
+  :root[data-skin="aether"] .workspace-panel{
+    background:var(--aether-color-bg-panel, #171a20)!important;
+    border-left:1px solid var(--border)!important;
+  }
+  :root[data-skin="aether"] .main-content,
+  :root[data-skin="aether"] .messages-shell,
+  :root[data-skin="aether"] .messages{
+    background:var(--aether-color-bg-app, #0e1013)!important;
+  }
+  :root[data-skin="aether"] .rail-btn,
+  :root[data-skin="aether"] .nav-tab{
+    border-radius:var(--aether-radius-row, 6px)!important;
+    transition:background .12s ease,color .12s ease,box-shadow .12s ease;
+  }
+  :root[data-skin="aether"] .rail-btn:hover,
+  :root[data-skin="aether"] .nav-tab:hover{
+    background:rgba(255,255,255,0.06)!important;
+    color:var(--text)!important;
+  }
+  :root[data-skin="aether"] .rail-btn.active,
+  :root[data-skin="aether"] .nav-tab.active{
+    background:var(--accent, #00adb5)!important;
+    color:#ffffff!important;
+    box-shadow:0 2px 8px rgba(0,173,181,0.35)!important;
+  }
+  :root[data-skin="aether"] .session-item{
+    border-radius:var(--aether-radius-row, 6px)!important;
+    min-height:var(--aether-size-row, 36px);
+    transition:background .15s ease,border-color .15s ease;
+  }
+  :root[data-skin="aether"] .session-item:hover{
+    background:rgba(255,255,255,0.05)!important;
+  }
+  :root[data-skin="aether"] .session-item.active{
+    background:#174b72!important;
+    border-color:var(--aether-color-selection-edge, #37a8f4)!important;
+    color:var(--aether-color-text-on-selected, #ffffff)!important;
+    box-shadow:0 2px 8px rgba(0,0,0,0.25)!important;
+  }
+  :root[data-skin="aether"]:not(.dark) .session-item.active{
+    background:#3273d6!important;
+    border-color:#1d5fc4!important;
+    color:#ffffff!important;
+  }
+  :root[data-skin="aether"] .session-item.active .session-title,
+  :root[data-skin="aether"] .session-item.active .session-meta,
+  :root[data-skin="aether"] .session-item.active .session-preview,
+  :root[data-skin="aether"] .session-item.active *{color:inherit!important;}
+  :root[data-skin="aether"] .msg-user .msg-content,
+  :root[data-skin="aether"] .msg.user .msg-bubble{
+    background:#273444!important;
+    border:1px solid #37475a!important;
+    border-radius:14px 14px 3px 14px!important;
+    box-shadow:0 2px 6px rgba(0,0,0,0.18)!important;
+  }
+  :root[data-skin="aether"] .composer-box{
+    background:#1e222a!important;
+    border:1px solid var(--border)!important;
+    border-radius:12px!important;
+    box-shadow:0 4px 16px rgba(0,0,0,0.22)!important;
+  }
+  :root[data-skin="aether"] .new-chat-btn,
+  :root[data-skin="aether"] button.send-btn:not(:disabled),
+  :root[data-skin="aether"] .btn.primary,
+  :root[data-skin="aether"] .app-dialog-btn.confirm,
+  :root[data-skin="aether"] .approval-btn.once,
+  :root[data-skin="aether"] .approval-btn.session{
+    background:var(--accent)!important;
+    border-color:var(--accent)!important;
+    border-radius:var(--aether-radius-button, 8px)!important;
+    color:#ffffff!important;
+    font-weight:var(--aether-font-weight-strong, 650)!important;
+  }
+  :root[data-skin="aether"] .new-chat-btn:hover,
+  :root[data-skin="aether"] button.send-btn:not(:disabled):hover,
+  :root[data-skin="aether"] .btn.primary:hover{
+    background:var(--accent-hover)!important;
+    border-color:var(--accent-hover)!important;
+  }
+  :root[data-skin="aether"] input,
+  :root[data-skin="aether"] textarea,
+  :root[data-skin="aether"] select,
+  :root[data-skin="aether"] .app-dialog-input,
+  :root[data-skin="aether"] .sidebar-search input{
+    border-radius:var(--aether-radius-field, 6px)!important;
+    border:1px solid var(--border2);
+  }
+  :root[data-skin="aether"] input:focus,
+  :root[data-skin="aether"] textarea:focus,
+  :root[data-skin="aether"] select:focus,
+  :root[data-skin="aether"] .composer-box:focus-within{
+    border-color:var(--accent, #00adb5)!important;
+    box-shadow:0 0 0 1px var(--accent, #00adb5),0 4px 16px rgba(0,173,181,0.25)!important;
+    outline:none!important;
+  }
+  :root[data-skin="aether"] .tool-card,
+  :root[data-skin="aether"] .thinking-card{
+    border-radius:var(--aether-radius-control, 7px)!important;
+    border:1px solid var(--border)!important;
+    background:var(--surface-subtle)!important;
+  }
+  :root[data-skin="aether"] .tool-card-running{
+    border-color:var(--accent)!important;
+    background:var(--accent-bg)!important;
+  }
+  :root[data-skin="aether"] .tool-arg-key,
+  :root[data-skin="aether"] .tool-card-more{color:var(--accent);}
+  :root[data-skin="aether"] .tool-card-running-dot{background:var(--accent);}
+  :root[data-skin="aether"] svg{stroke-width:var(--aether-icon-stroke-width, 1.7px);}
+  :root[data-skin="aether"] .skin-pick-btn.active{
+    border-color:var(--accent)!important;
+    box-shadow:0 0 0 1px var(--accent)!important;
+  }
 
   /* #594: app-dialog light mode overrides — base styles use hardcoded dark gradients */
   :root:not(.dark) .app-dialog{
@@ -2973,8 +3196,8 @@
   .pwa-sidebar-edge-guard{display:none;}
 
   @media(min-width:901px){
-    html[data-workspace-panel="closed"] .rightpanel{width:0 !important;min-width:0 !important;opacity:0;transform:translateX(14px);border-left-color:transparent;pointer-events:none;}
-    .layout.workspace-panel-collapsed .rightpanel{width:0 !important;min-width:0 !important;opacity:0;transform:translateX(14px);border-left-color:transparent;pointer-events:none;}
+    html[data-workspace-panel="closed"] .rightpanel{width:0 !important;min-width:0 !important;opacity:0;transform:translateX(0);border-left-color:transparent;pointer-events:none;}
+    .layout.workspace-panel-collapsed .rightpanel{width:0 !important;min-width:0 !important;opacity:0;transform:translateX(0);border-left-color:transparent;pointer-events:none;}
     html[data-workspace-panel="closed"] .workspace-panel-edge-toggle{display:inline-flex;opacity:1;pointer-events:auto;transform:translateY(-50%);}
     html[data-workspace-panel="open"] .workspace-panel-edge-toggle{display:none;}
     /* Keep the center readable before the rails hit their resize floor. */

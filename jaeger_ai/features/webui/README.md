@@ -50,6 +50,12 @@ the old surfaces for diagnosis; it is not a release mode.
 The browser source retains Hermes WebUI lineage and license notices, but the
 implementation is first-party Jaeger source.
 
+## Design System & Aether Skin
+
+WebUI consumes the shared visual design tokens from `jaeger_ai/assets/design-system/tokens.css`.
+The `Aether` skin (`data-skin="aether"`) provides a cool-neutral dark workbench aesthetic matching
+Aether Studio's geometry and rhythm while keeping all Jaeger identity markers and existing product skins intact.
+
 ## Verification
 
 ```bash

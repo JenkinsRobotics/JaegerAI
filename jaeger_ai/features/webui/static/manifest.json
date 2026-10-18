@@ -9,7 +9,7 @@
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
   "background_color": "#0D0D1A",
   "theme_color": "#0D0D1A",
-  "orientation": "portrait-primary",
+  "orientation": "any",
   "categories": ["productivity", "utilities"],
   "shortcuts": [
     {
