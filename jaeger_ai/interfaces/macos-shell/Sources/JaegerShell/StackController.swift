@@ -116,7 +116,7 @@ final class StackController {
 
     private(set) var lease: LeaseBeat?
     var gatewayAlive: Bool { gatewayProc?.isRunning == true }
-    private var headless: Bool { app.verifyMode || app.verifyBridgeMode || app.verifyLeaseMode }
+    private var headless: Bool { app.verifyMode || app.verifyBridgeMode || app.verifyLeaseMode || app.snapshotMode }
 
     /// Dev stack: its isolated JAEGER_STATE_DIR. Production: the same state-dir logic as lifecycle_lease.py.
     var leasePath: String {
