@@ -21,8 +21,11 @@ from pathlib import Path
 from typing import Any
 
 #: Commands a project grant may run without a fresh card (first word, plus the
-#: allowed subcommands). Anything else, any chaining other than ``&&``, any
-#: redirection or substitution, and any absolute path outside the root asks.
+#: allowed subcommands). Segments may be joined with ``&&``, ``||``, ``;`` or
+#: ``|`` and redirected into files inside the root (``> f``, ``2> f``,
+#: ``2>&1``, ``>/dev/null``); every segment must itself be granted. Command
+#: substitution, backticks, process substitution, heredocs, background ``&``,
+#: sudo/push/publish, ``find -exec/-delete`` and any path outside the root ask.
 DEFAULT_COMMANDS: dict[str, tuple[str, ...]] = {
     "npm": ("test", "run", "start", "init", "ls"),
     "node": (),
@@ -30,7 +33,14 @@ DEFAULT_COMMANDS: dict[str, tuple[str, ...]] = {
     "ls": (), "cat": (), "pwd": (), "echo": (), "mkdir": (), "head": (), "tail": (),
     "wc": (), "grep": (), "find": (), "test": (), "true": (),
 }
-_FORBIDDEN = re.compile(r"[;|`<>]|\$\(|\bsudo\b|\bgit\s+push\b|\bgit\s+remote\b|\bnpm\s+publish\b")
+_FORBIDDEN = re.compile(r"`|\$\(|<\(|>\(|<<|\bsudo\b|\bgit\s+push\b|\bgit\s+remote\b|\bnpm\s+publish\b")
+#: fd duplication (2>&1, >&2) and discarding output touch no file.
+_FD_DUP = re.compile(r"(?<![\w/])\d?>&\d\b")
+_DEV_NULL = re.compile(r"(?<![\w/])(?:\d|&)?>>?\s*/dev/null(?![\w/])")
+#: A remaining file redirection: optional fd, operator, target word.
+_REDIRECT = re.compile(r"(?<![\w/])(\d?)(>>|>|<)\s*([^\s|;&<>]+)")
+_SEPARATORS = re.compile(r"&&|\|\||\||;")
+_FIND_ACTIONS = frozenset({"-exec", "-execdir", "-ok", "-okdir", "-delete", "-fprint", "-fls"})
 
 HARD_MAX_DEPTH = 5
 HARD_MAX_FANOUT = 8
@@ -162,9 +172,16 @@ def command_allowed(project: dict[str, Any], command: str) -> tuple[bool, str]:
     if not text:
         return False, "empty command"
     if _FORBIDDEN.search(text):
-        return False, "chaining, redirection, substitution, sudo or push needs a fresh approval"
+        return False, "substitution, heredoc, sudo or push needs a fresh approval"
+    text = _DEV_NULL.sub(" ", _FD_DUP.sub(" ", text))
+    for _fd, _op, target in _REDIRECT.findall(text):
+        if not path_in_project(project, target):
+            return False, f"redirection outside the project root: {target}"
+    text = _REDIRECT.sub(" ", text)
+    if re.search(r"[<>]|(?<!&)&(?!&)", text):
+        return False, "background job or unparsed redirection needs a fresh approval"
     allowed = set((project.get("grants") or {}).get("commands") or [])
-    for segment in text.split("&&"):
+    for segment in _SEPARATORS.split(text):
         try:
             words = shlex.split(segment)
         except ValueError:
@@ -176,6 +193,8 @@ def command_allowed(project: dict[str, Any], command: str) -> tuple[bool, str]:
         head = words[0]
         if head not in allowed or head not in DEFAULT_COMMANDS:
             return False, f"{head!r} is not in the project command grant"
+        if head == "find" and _FIND_ACTIONS.intersection(words[1:]):
+            return False, "find with -exec/-delete needs a fresh approval"
         subs = DEFAULT_COMMANDS[head]
         if subs:
             sub = next((w for w in words[1:] if not w.startswith("-")), "")
