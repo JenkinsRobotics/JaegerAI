@@ -20,7 +20,7 @@ export interface StreamStyleParams {
     /** Estimate the incoming rate and pace to it; ratePerSec becomes the floor. */
     adaptive?: boolean;
   };
-  enter: { kind: "none" | "fade" | "fadeSlide"; durationMs: number; easing: string; translatePx?: number };
+  enter: { kind: "none" | "fade" | "fadeSlide"; durationMs: number; easing: string; translatePx?: number; /** IDE Chat preset (additive): blur(Npx) → 0 with the fade. */ blurPx?: number };
   markdown: { midStream: "live" | "deferBlocks"; partialFence: "plain" | "highlightOnClose" | "live" };
   indicator: { kind: "none" | "caret" | "dots" | "shimmerLine" | "avatar" };
   scroll: { follow: "always" | "whenAtBottom"; thresholdPx: number; smooth: boolean };
@@ -34,7 +34,7 @@ export const STREAM_STYLES: Record<StreamStyleId, StreamStyleParams> = {
   grok: {
     id: "grok",
     reveal: { mode: "words", ratePerSec: 20, tickMs: 50, maxLagChars: 600, catchUp: "snap", adaptive: true },
-    enter: { kind: "fade", durationMs: 200, easing: "ease-out" },
+    enter: { kind: "fade", durationMs: 200, easing: "ease-out", blurPx: 4 },
     markdown: { midStream: "live", partialFence: "live" },
     indicator: { kind: "avatar" },
     scroll: { follow: "whenAtBottom", thresholdPx: 4, smooth: true },

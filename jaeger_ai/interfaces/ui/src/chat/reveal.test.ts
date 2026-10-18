@@ -15,7 +15,7 @@ describe("stream styles", () => {
     expect(resolveStreamStyle(undefined).id).toBe("grok");
     expect(resolveStreamStyle("nope").id).toBe("grok");
     expect(grok.reveal).toMatchObject({ mode: "words", ratePerSec: 20, tickMs: 50, catchUp: "snap", adaptive: true });
-    expect(grok.enter).toEqual({ kind: "fade", durationMs: 200, easing: "ease-out" });
+    expect(grok.enter).toEqual({ kind: "fade", durationMs: 200, easing: "ease-out", blurPx: 4 });
     expect(grok.scroll).toEqual({ follow: "whenAtBottom", thresholdPx: 4, smooth: true });
     expect(grok.markdown.partialFence).toBe("live");
   });
