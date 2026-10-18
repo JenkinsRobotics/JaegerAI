@@ -492,6 +492,55 @@ def register_mcp_tools(names: list[str]) -> None:
     """Record MCP tool names so the lean surface keeps them visible."""
     _MCP_TOOLS.update(n for n in (names or []) if n)
 
+
+# Gated MCP servers (``"tools": {"gated": true}`` in mcp.json). A big server
+# such as REA (~207 tools) stays registered and dispatchable, but its schemas
+# are only sent on a turn whose host allowlist names the tool (a specialist
+# whose standing tools include it) or after ``load_tools("<server>")``. This
+# applies whether or not lean scoping is on: gating is the server owner's
+# explicit choice, not the lean heuristic.
+_MCP_GATED: set[str] = set()
+_MCP_SERVER_TOOLS: dict[str, frozenset[str]] = {}
+
+
+def register_mcp_server_toolset(server: str, names: list[str], *, gated: bool = False) -> None:
+    """Record one connected MCP server's tools; gated servers become a toolset."""
+    key = (server or "").strip().lower()
+    members = frozenset(n for n in (names or []) if n)
+    if not key or not members:
+        return
+    _MCP_SERVER_TOOLS[key] = members
+    _MCP_TOOLS.update(members)
+    if gated:
+        _MCP_GATED.update(members)
+        register_skill_toolset(key, sorted(members), summary=f"MCP server {server} ({len(members)} tools)")
+
+
+def unregister_mcp_server_toolset(server: str) -> None:
+    key = (server or "").strip().lower()
+    members = _MCP_SERVER_TOOLS.pop(key, frozenset())
+    _MCP_GATED.difference_update(members)
+    _MCP_TOOLS.difference_update(members)
+    if members:
+        _SKILL_TOOLSETS.pop(key, None)
+        _SKILL_SUMMARY.pop(key, None)
+        _active.discard(key)
+
+
+def is_gated_tool(name: str) -> bool:
+    return name in _MCP_GATED
+
+
+def _gated_visible(name: str) -> bool:
+    try:
+        from jaeger_agent.tool_executor import active_tool_allowlist
+        allowed = active_tool_allowlist()
+    except Exception:  # noqa: BLE001 — no allowlist machinery: stay hidden
+        allowed = None
+    if allowed is not None and name in allowed:
+        return True
+    return any(name in _members(ts) for ts in _active)
+
 # Active extended toolsets for the session. Core is always implicitly on.
 _active: set[str] = set()
 
@@ -560,6 +609,8 @@ def tool_visible(name: str) -> bool:
     """
     if _untrusted.get():
         return name in UNTRUSTED_SAFE
+    if name in _MCP_GATED:
+        return _gated_visible(name)
     if not _scoping_enabled():
         return True
     return scoped_tool_visible(name)
@@ -575,6 +626,8 @@ def scoped_tool_visible(name: str) -> bool:
     """
     if _untrusted.get():
         return name in UNTRUSTED_SAFE
+    if name in _MCP_GATED:
+        return _gated_visible(name)
     if name in CORE:
         return True
     for ts in _active:

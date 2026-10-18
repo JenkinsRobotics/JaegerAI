@@ -70,6 +70,81 @@ class MCPServerConfig:
     # is the pre-existing behaviour.
     auth: str = ""
     scope: str = ""
+    # Per-server limits for big servers (REA exposes ~207 tools).
+    #   tools_include: exact names or fnmatch globs to keep (empty = all)
+    #   tools_exclude: names/globs to drop after include
+    #   max_tools:     hard cap after filtering (0 = no cap)
+    #   gated:         registered and callable, but hidden from a turn's
+    #                  schema unless that turn's allowlist names the tool or
+    #                  the server's toolset was loaded (``load_tools``)
+    tools_include: list[str] = field(default_factory=list)
+    tools_exclude: list[str] = field(default_factory=list)
+    max_tools: int = 0
+    gated: bool = False
+    connect_timeout_s: float = 20.0
+    call_timeout_s: float = 60.0
+
+
+DEFAULT_CONNECT_TIMEOUT_S = 20.0
+DEFAULT_CALL_TIMEOUT_S = 60.0
+MAX_TIMEOUT_S = 3600.0
+
+
+def _timeout(value: Any, default: float) -> float:
+    """A per-server timeout from mcp.json, bounded to (0, MAX_TIMEOUT_S]."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    if number <= 0:
+        return default
+    return min(number, MAX_TIMEOUT_S)
+
+
+def _name_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if isinstance(item, str) and str(item).strip()]
+
+
+def filter_tool_names(names: list[str], config: "MCPServerConfig") -> list[str]:
+    """Apply a server's include/exclude/max limits, keeping server order."""
+    import fnmatch
+
+    def _match(name: str, patterns: list[str]) -> bool:
+        return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+
+    kept = [n for n in names if not config.tools_include or _match(n, config.tools_include)]
+    kept = [n for n in kept if not _match(n, config.tools_exclude)]
+    if config.max_tools and config.max_tools > 0:
+        kept = kept[: int(config.max_tools)]
+    return kept
+
+
+def server_config_from_entry(entry: dict[str, Any], *, env: dict[str, str] | None = None,
+                             headers: dict[str, str] | None = None) -> "MCPServerConfig":
+    """Build an MCPServerConfig from one mcp.json row (limits + timeouts included)."""
+    tools = entry.get("tools") if isinstance(entry.get("tools"), dict) else {}
+    try:
+        max_tools = max(0, int(tools.get("max") or entry.get("max_tools") or 0))
+    except (TypeError, ValueError):
+        max_tools = 0
+    return MCPServerConfig(
+        name=str(entry.get("name") or "unknown"),
+        command=entry.get("command"),
+        args=list(entry.get("args", []) or []),
+        env=dict(env if env is not None else entry.get("env", {}) or {}),
+        url=entry.get("url"),
+        headers=dict(headers if headers is not None else entry.get("headers", {}) or {}),
+        auth=str(entry.get("auth", "") or ""),
+        scope=str(entry.get("scope", "") or ""),
+        tools_include=_name_list(tools.get("include")),
+        tools_exclude=_name_list(tools.get("exclude")),
+        max_tools=max_tools,
+        gated=bool(tools.get("gated", False)),
+        connect_timeout_s=_timeout(entry.get("connect_timeout_s"), DEFAULT_CONNECT_TIMEOUT_S),
+        call_timeout_s=_timeout(entry.get("call_timeout_s"), DEFAULT_CALL_TIMEOUT_S),
+    )
 
 
 @dataclass
@@ -241,11 +316,15 @@ class MCPRegistry:
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
         return future.result(timeout=timeout)
 
-    def add_server(self, config: MCPServerConfig, *, connect_timeout: float = 20.0) -> list[MCPToolSpec]:
+    def add_server(self, config: MCPServerConfig, *, connect_timeout: float | None = None) -> list[MCPToolSpec]:
         client = _MCPClient(config)
         started = time.perf_counter()
-        tools = self._submit(client.connect(), timeout=connect_timeout)
+        timeout = connect_timeout if connect_timeout is not None else config.connect_timeout_s
+        tools = self._submit(client.connect(), timeout=timeout)
         elapsed = time.perf_counter() - started
+        offered = len(tools)
+        keep = set(filter_tool_names([t.name for t in tools], config))
+        tools = [t for t in tools if t.name in keep]
         specs: list[MCPToolSpec] = []
         for tool in tools:
             qualified = f"mcp:{config.name}/{tool.name}"
@@ -276,14 +355,23 @@ class MCPRegistry:
                 pass
             raise
         self._clients[config.name] = client
-        print(f"[mcp] connected to '{config.name}' in {elapsed:.2f}s — {len(specs)} tool(s)", flush=True)
+        try:
+            from jaeger_agent.skill_registry.toolset_scoping import register_mcp_server_toolset
+            register_mcp_server_toolset(config.name, [s.agent_name for s in specs], gated=config.gated)
+        except Exception:  # noqa: BLE001 — visibility bookkeeping must not drop a connected server
+            pass
+        limited = f" (of {offered} offered)" if offered != len(specs) else ""
+        gated = " gated" if config.gated else ""
+        print(f"[mcp] connected to '{config.name}' in {elapsed:.2f}s — {len(specs)}{gated} tool(s){limited}", flush=True)
         return specs
 
-    def call(self, qualified_name: str, arguments: dict[str, Any], *, timeout: float = 60.0) -> dict[str, Any]:
+    def call(self, qualified_name: str, arguments: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         spec = self._tools.get(qualified_name)
         if spec is None:
             raise ValueError(f"unknown MCP tool: {qualified_name}")
         client = self._clients[spec.server_name]
+        if timeout is None:
+            timeout = client.config.call_timeout_s
         secrets = set(client.config.headers.values())
         secrets.update(
             value
@@ -312,6 +400,12 @@ class MCPRegistry:
         from jaeger_os.core.tools.tool_registry import unregister_tool
         for spec in self._tools.values():
             unregister_tool(spec.agent_name)
+        try:
+            from jaeger_agent.skill_registry.toolset_scoping import unregister_mcp_server_toolset
+            for server in self._clients:
+                unregister_mcp_server_toolset(server)
+        except Exception:  # noqa: BLE001
+            pass
         for client in self._clients.values():
             try:
                 self._submit(client.close(), timeout=5.0)
@@ -373,16 +467,7 @@ def init_from_config(config_path: Path | None = None, *, layout: Any = None) -> 
                 )
                 env = resolve_server_env(layout, entry)
                 headers = resolve_server_headers(layout, entry)
-            config = MCPServerConfig(
-                name=name,
-                command=entry.get("command"),
-                args=entry.get("args", []),
-                env=env,
-                url=entry.get("url"),
-                headers=headers,
-                auth=str(entry.get("auth", "") or ""),
-                scope=str(entry.get("scope", "") or ""),
-            )
+            config = server_config_from_entry(entry, env=env, headers=headers)
             registry.add_server(config)
         except Exception as exc:
             secrets = {
