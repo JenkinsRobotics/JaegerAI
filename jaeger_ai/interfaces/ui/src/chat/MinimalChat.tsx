@@ -162,7 +162,7 @@ export function ProgressLine({ phrase, agent }: { phrase: string; agent?: { id: 
       {agent
         ? <span className="jg-progress-avatar" aria-hidden="true"><AgentAvatar id={agent.id} name={agent.name} size={24} /></span>
         : <span className="jg-progress-dots" aria-hidden="true"><i /><i /><i /></span>}
-      <span className="jg-shimmer">{phrase}</span>
+      <span className="jg-progress-text">{phrase}</span>
     </div>
   );
 }
