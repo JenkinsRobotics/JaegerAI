@@ -1,7 +1,7 @@
 /* Minimal stand-in chat renderer, styled to the Grok Bot Mac target. The
  * shared VS Code-derived widget replaces it through ChatPaneMount.
  * Jenkins Robotics 2026-10-17: tool steps fold into a "Show steps" card, and a
- * pending turn shows an activity-named progress line with a shimmer. */
+ * pending turn shows an activity-named progress line with a shimmer for as long as it runs. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { avatarColor } from "../agents/avatarColor";
@@ -145,20 +145,19 @@ export function segments(parts: ChatPart[]) {
   return out;
 }
 
-/** Activity-named progress line with a shimmer ("Searching the web…"). */
+/** Activity-named progress line ("Searching the web…"): three agent-tinted dots and a shimmer. */
 export function ProgressLine({ phrase }: { phrase: string }) {
   return (
     <div className="jg-progress-line" role="status" aria-live="polite" data-sender="assistant">
+      <span className="jg-progress-dots" aria-hidden="true"><i /><i /><i /></span>
       <span className="jg-shimmer">{phrase}</span>
     </div>
   );
 }
 
-/** A pending turn shows the line until text streams, and again while it works after text. */
+/** The line stays for the whole pending turn, also while text streams. */
 export function showsProgress(turn: ChatTurn): boolean {
-  if (turn.state !== "pending") return false;
-  const last = [...turn.parts].reverse().find((p) => p.kind !== "progress");
-  return !last || last.kind !== "markdownContent" || !last.text;
+  return turn.state === "pending";
 }
 
 const replyText = (turn: ChatTurn) => turn.parts.filter((p) => p.kind === "markdownContent").map((p) => (p as { text: string }).text).join("\n\n");
