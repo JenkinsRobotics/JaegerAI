@@ -60,7 +60,7 @@ html[data-aether-native-window] .jg-desktop,
 html[data-jaeger-host="macos"] .jg-desktop { padding: 0; background: transparent; }
 html[data-aether-native-window] .jg-shell,
 html[data-jaeger-host="macos"] .jg-shell { border: 0; border-radius: 0; box-shadow: none; }
-html[data-jaeger-host="macos"] .jg-shell { --jg-traffic-lights: var(--jaeger-native-traffic-light-reserve, 82px); }
+html[data-jaeger-host="macos"] .jg-shell { --jg-traffic-lights: var(--jaeger-native-traffic-light-reserve, 88px); }
 html[data-jaeger-host="macos"] .jg-traffic-lights i { visibility: hidden; }
 [data-aether-window-drag-region] { -webkit-user-select: none; user-select: none; }
 

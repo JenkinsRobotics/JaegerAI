@@ -27,6 +27,9 @@ public enum NativeChromeContract {
     /// Close button's top-left corner, in window coordinates measured from the top-left.
     public static let trafficLightX: Double = 16
     public static let trafficLightY: Double = 15
+    /// Left edge to left edge of neighbouring buttons. Measured on the reference window: 14 pt lights at
+    /// x 16 / 39 / 62 (AppKit's own spacing is 20 pt).
+    public static let trafficLightPitch: Double = 23
     /// Gap after the zoom button before page content may start.
     public static let trafficLightReserveGap: Double = 12
 
@@ -53,12 +56,12 @@ public enum NativeChromeContract {
         public var maxX: Double { x + width }
     }
 
-    /// Moves the traffic lights as a group so the first (close) sits at (trafficLightX, trafficLightY),
-    /// keeping AppKit's spacing between the buttons.
+    /// Places the traffic lights in a row: close at (trafficLightX, trafficLightY), each next one
+    /// trafficLightPitch further right; sizes stay AppKit's.
     public static func trafficLightTargets(_ frames: [Rect]) -> [Rect] {
-        guard let first = frames.first else { return [] }
-        let dx = trafficLightX - first.x, dy = trafficLightY - first.top
-        return frames.map { Rect(x: $0.x + dx, top: $0.top + dy, width: $0.width, height: $0.height) }
+        frames.enumerated().map { i, f in
+            Rect(x: trafficLightX + Double(i) * trafficLightPitch, top: trafficLightY, width: f.width, height: f.height)
+        }
     }
 
     /// Reserve for the page: right edge of the zoom button plus the gap; 0 when the buttons are hidden.

@@ -39,11 +39,11 @@ final class NativeChromeContractTests: XCTestCase {
                       NativeChromeContract.Rect(x: 27, top: 18, width: 14, height: 16),
                       NativeChromeContract.Rect(x: 47, top: 18, width: 14, height: 16)]
         let t = NativeChromeContract.trafficLightTargets(frames)
-        XCTAssertEqual(t.map(\.x), [16, 36, 56])
+        XCTAssertEqual(t.map(\.x), [16, 39, 62])  // the reference window's 23 pt pitch
         XCTAssertEqual(t.map(\.top), [15, 15, 15])
         XCTAssertEqual(t[2].width, 14)
         XCTAssertEqual(NativeChromeContract.trafficLightTargets([]), [])
-        XCTAssertEqual(NativeChromeContract.trafficLightReserve(zoomMaxX: t[2].maxX), 82)
+        XCTAssertEqual(NativeChromeContract.trafficLightReserve(zoomMaxX: t[2].maxX), 88)
         XCTAssertEqual(NativeChromeContract.trafficLightReserve(zoomMaxX: nil), 0)
     }
 }
