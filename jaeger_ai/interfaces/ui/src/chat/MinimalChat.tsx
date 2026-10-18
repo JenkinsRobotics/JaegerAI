@@ -256,6 +256,21 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     return () => { live = false; };
   }, [host, home, sessionId, attempt]);
 
+  /** Live summaries and posts (message.created / session.summarized) while the chat is open. A
+   * summary reloads the newest page, since it replaces messages already on screen. */
+  useEffect(() => {
+    if (!home?.live || !sessionId) return;
+    const controller = new AbortController();
+    home.live(sessionId, (event) => {
+      if (event.type === "summarized") { setAttempt((n) => n + 1); return; }
+      const p = event.page;
+      p.turns.forEach((t) => loadedTurns.current.add(t.turnId));
+      setEntries((cur) => ({ ...cur, ...p.entries }));
+      setSession((s) => (s && s.id === p.sessionId ? { ...s, turns: [...s.turns.filter((t) => !p.turns.some((n) => n.turnId === t.turnId)), ...p.turns] } : s));
+    }, controller.signal).catch(() => { /* live posts are best-effort; the next load shows them */ });
+    return () => controller.abort();
+  }, [home, sessionId]);
+
   /** Prepend the next older page, keeping what the reader sees in place. */
   const loadOlder = useCallback(() => {
     const el = scroller.current;
@@ -470,7 +485,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
               )}
               {entries[turn.turnId].kind === "summary"
                 ? <SummaryCard entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "summary" }>} links={links} />
-                : <PostMessage entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "post" }>} links={links} onOpenHandoff={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} />}
+                : <PostMessage entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "post" }>} links={links} onOpenHandoff={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} onOpenChat={host instanceof WebHost && host.openChat ? (id) => (host as WebHost).openChat?.(id) : undefined} />}
             </section>
           ) : (
             <section key={turn.turnId} className={`jg-turn${loadedTurns.current.has(turn.turnId) ? "" : " is-new"}`}>

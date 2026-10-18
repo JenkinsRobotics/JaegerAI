@@ -92,7 +92,7 @@ describe("refused attachments", () => {
   it("words the gateway's refusals plainly", () => {
     expect(attachmentError("attachment path escapes workspace")).toBe("Not sent: outside Jaeger's workspace");
     expect(attachmentError("no file path from this window")).toBe("Not sent: use + to attach it from disk");
-    expect(attachmentError("413 Payload Too Large")).toBe("Not sent: 413 Payload Too Large");
+    expect(attachmentError("413 Payload Too Large")).toBe("Too large (25 MB max)");
   });
   it("puts exactly the refused files back as error chips, and never re-sends them", () => {
     const sent = [{ id: "1", name: "a.txt", size: 1, type: "text/plain", path: "/out/a.txt" }, { id: "2", name: "b.txt", size: 1, type: "text/plain", path: "/ws/b.txt" }];

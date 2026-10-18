@@ -3,7 +3,7 @@
  * surface to the caller; there is no silent fallback. */
 import type { JaegerSource } from "../api/source";
 import type { PersistedPart, SessionMessage } from "../api/types";
-import { bytesUploadEnabled, type RejectedAttachment } from "./composer";
+import { bytesUploadEnabled, UPLOAD_MAX_BYTES, UPLOAD_TOO_LARGE, type RejectedAttachment } from "./composer";
 import { followTurn } from "./followTurn";
 import type { HomeSessions } from "./homeSession";
 import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, HostKind, StartTurnRequest, TurnHandle, TurnState } from "./host";
@@ -60,10 +60,14 @@ export class WebHost implements ChatHost {
   openHistory?: (agentId: string) => void;
   /** A home-chat page reports the stream cursor it was read at. */
   noteCursor(sessionId: string, eventId: number) { this.advance(sessionId, eventId); }
+  /** Set by the app: a post's "Open chat" shows that (child) chat read-only. */
+  openChat?: (sessionId: string) => void;
   /** Set by the app: a handoff marker opens the specialist's side of it. */
   openHandoff?: (handoffId: string) => void;
   /** Set by the app: the header pill opens the agent's details panel. */
   openDetails?: (agentId: string) => void;
+  /** Bytes upload route: unknown until first tried; false after a 404/405 (feature-detect). */
+  private bytesUpload?: boolean;
   private agentNames = new Map<string, string>();
   /** Last SSE event id seen per session; the stream never resumes behind it. */
   private readonly cursors = new Map<string, number>();
@@ -86,14 +90,20 @@ export class WebHost implements ChatHost {
     const rejected: RejectedAttachment[] = [];
     // H8 widens ChatAttachment with path/size; read through the local mirror until it's vendored.
     for (const file of (request.attachments ?? []) as HostAttachment[]) {
-      if (!file.path && file.data && this.source.uploadAttachment && bytesUploadEnabled()) {
+      if (!file.path && file.data && this.source.uploadAttachment && bytesUploadEnabled() && this.bytesUpload !== false) {
+        if (Math.floor((file.data.length * 3) / 4) > UPLOAD_MAX_BYTES) { rejected.push({ name: file.name, reason: UPLOAD_TOO_LARGE }); continue; }
         try {
-          const row = await this.source.uploadAttachment(request.sessionId, { filename: file.name, mime_type: file.mimeType, data_base64: file.data });
+          const row = await this.source.uploadAttachment(request.sessionId, { name: file.name, mime: file.mimeType, data_base64: file.data });
+          this.bytesUpload = true;
           ids.push(row.attachment_id);
+          continue;
         } catch (error) {
-          rejected.push({ name: file.name, reason: message(error) });
+          const status = (error as { status?: number }).status;
+          if (status === 413) { rejected.push({ name: file.name, reason: UPLOAD_TOO_LARGE }); continue; }
+          // 404/405: this gateway has no bytes route; remember it and treat the file as path-less.
+          if (status === 404 || status === 405) this.bytesUpload = false;
+          else { rejected.push({ name: file.name, reason: message(error) }); continue; }
         }
-        continue;
       }
       if (!file.path) { rejected.push({ name: file.name, reason: "no file path from this window" }); continue; }
       try {

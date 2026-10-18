@@ -59,9 +59,14 @@ export async function withBytes(files: PendingFile[], enabled = bytesUploadEnabl
 export interface RejectedAttachment { name: string; path?: string; reason: string }
 
 /** Chip wording for a refused attachment: plain language first, the raw reason only as a fallback. */
+/** Bytes upload limit (gateway: 413 above it). */
+export const UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+export const UPLOAD_TOO_LARGE = "Too large (25 MB max)";
+
 export function attachmentError(reason: string): string {
   if (/escapes workspace/i.test(reason)) return "Not sent: outside Jaeger's workspace";
   if (/no file path/i.test(reason)) return "Not sent: use + to attach it from disk";
+  if (/too large|413/i.test(reason)) return UPLOAD_TOO_LARGE;
   return `Not sent: ${reason}`;
 }
 

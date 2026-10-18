@@ -3,52 +3,63 @@
  * handoff and task results arrive as real messages in the chat.
  *
  * MinimalChat and the app only see `HomeSessions`. Three implementations:
- *  - contractHome: the PROVISIONAL gateway contract below (wire types + routes in one place, so the
- *    real contract is a small diff here and nowhere else);
+ *  - contractHome: the gateway contract below (wire types + routes in one place);
  *  - fallbackHome: today's gateway (43438 dev): most recent chat for the agent, else create; pages are
  *    cut client-side from the one session load; no summaries or posts;
- *  - mockHome: contractHome over an in-memory wire fake (dev mock / screenshots). */
+ *  - mockHome: contractHome over an in-memory wire fake + mock stream (dev mock / screenshots). */
 import type { JaegerSource } from "../api/source";
-import type { SessionMessage, SessionRow } from "../api/types";
+import type { GatewayEvent, SessionMessage, SessionRow } from "../api/types";
 import type { ChatSession, ChatTurn } from "./host";
 import { messagesToTurns } from "./webHost";
 
 // ---------------------------------------------------------------------------------------------
-// PROVISIONAL wire contract (diff against the Gateway bot's answer).
+// Wire contract (the Gateway bot's proposal, forwarded 2026-10-18). Routes and shapes live only here.
 // ---------------------------------------------------------------------------------------------
 
-/** GET /v1/agents/{agent_id}/home → the agent's one home chat (created on first call). */
-export interface WireHome { session_id: string; agent_id: string; title?: string; created?: boolean; last_event_id?: number }
+/** GET /v1/agents/{agent_id}/home → the agent's one home chat; `created` is true on the first call. */
+export interface WireHome { session_id: string; agent_id: string; created: boolean }
 
-/** One persisted message. `kind` absent or "message" = an ordinary user/assistant message. */
-export interface WireMessage extends SessionMessage {
+export type WireKind = "message" | "summary" | "handoff_request" | "handoff_result" | "task_result";
+
+/** One persisted message. */
+export interface WireMessage {
   id: string;
-  kind?: "message" | "summary" | "handoff_result" | "task_result";
-  /** kind "summary": stands in for `covers_count` older messages that were summarized. */
-  summary?: { text: string; covers_count: number; from_ts?: number; to_ts?: number };
-  /** kind handoff_result / task_result: who posted it. */
-  sender?: { agent_id: string; name?: string };
-  handoff_id?: string;
-  task_id?: string;
-  title?: string;
-  status?: "done" | "failed" | "cancelled" | string;
-  links?: Array<{ label: string; url: string }>;
+  session_id: string;
+  role: "user" | "assistant" | "system";
+  kind: WireKind;
+  /** The agent that posted it (handoff/task messages), as a plain id. */
+  sender_agent_id?: string | null;
+  /** Epoch seconds (an ISO string is accepted too). */
+  created_at: number | string;
+  content: string;
+  parts?: unknown[];
+  links?: { handoff_id?: string; task_id?: string; child_session_id?: string };
+  /** kind "summary" (role system): `content` summarizes `message_count` older messages. */
+  summary?: { covers_from?: string | number | null; covers_to?: string | number | null; message_count: number };
 }
 
-/** GET /v1/sessions/{id}/messages?limit=N[&before=<cursor>] → newest-last page. */
-export interface WirePage { messages: WireMessage[]; has_more: boolean; before?: string | null; last_event_id?: number }
+/** GET /v1/sessions/{id}/messages?before=<message_id>&limit=50 → newest first; `next_before` is the
+ * cursor for the next older page, null at the start of the chat. */
+export interface WirePage { messages: WireMessage[]; next_before: string | null }
 
-/** GET /v1/agents/{agent_id}/history → the agent's older chats (not the home chat), newest first. */
-export interface WireHistory { sessions: SessionRow[] }
+/** Live events on the session stream (GET /v1/sessions/{id}/stream). */
+export interface WireMessageCreated { session_id: string; message: WireMessage }
+export interface WireSessionSummarized { session_id: string; summary_message_id: string; covers_to?: string | number | null }
 
+export const PAGE_LIMIT = 50;
+export const PAGE_LIMIT_MAX = 200;
 export const HOME_ROUTES = {
   home: (agentId: string) => `/v1/agents/${encodeURIComponent(agentId)}/home`,
   page: (sessionId: string, limit: number, before?: string) =>
-    `/v1/sessions/${encodeURIComponent(sessionId)}/messages?limit=${limit}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
-  history: (agentId: string) => `/v1/agents/${encodeURIComponent(agentId)}/history`,
+    `/v1/sessions/${encodeURIComponent(sessionId)}/messages?${before ? `before=${encodeURIComponent(before)}&` : ""}limit=${Math.min(Math.max(1, limit), PAGE_LIMIT_MAX)}`,
+  /** Older chats: the existing session list (last_message_preview, last_activity_at, last_event_id). */
+  sessions: (agentId: string) => `/v1/sessions?agent_id=${encodeURIComponent(agentId)}`,
 };
-/** Live stream (same session SSE): `message.created` carries a WireMessage (summaries, posts). */
 export const HOME_EVENT_MESSAGE = "message.created";
+export const HOME_EVENT_SUMMARIZED = "session.summarized";
+
+/** What the chat view does with a live event: show a new entry, or reload the newest page. */
+export type HomeLiveEvent = { type: "entry"; page: HomePage } | { type: "summarized"; summaryMessageId: string };
 
 export type GetJson = (path: string) => Promise<unknown>;
 
@@ -59,8 +70,8 @@ export type GetJson = (path: string) => Promise<unknown>;
 export type HomeEntry =
   | { kind: "summary"; id: string; text: string; count: number; fromAt?: number; toAt?: number }
   | {
-    kind: "post"; id: string; post: "handoff" | "task_result"; sender: { id: string; name: string }; text: string;
-    title?: string; status?: string; handoffId?: string; taskId?: string; links: Array<{ label: string; url: string }>; createdAt?: number;
+    kind: "post"; id: string; post: "handoff_request" | "handoff" | "task_result"; sender: { id: string; name: string }; text: string;
+    title?: string; status?: string; handoffId?: string; taskId?: string; childSessionId?: string; createdAt?: number;
   };
 
 /** A slice of a chat, oldest first. Summary and post messages are turns with no user text whose id
@@ -88,52 +99,64 @@ export interface HomeSessions {
   history(agentId: string): Promise<HistoryRow[]>;
   /** A whole older chat, read-only. */
   read(sessionId: string): Promise<HomePage>;
+  /** Live summaries and posts for an open chat (contract/mock only); resolves when `signal` aborts. */
+  live?(sessionId: string, on: (event: HomeLiveEvent) => void, signal: AbortSignal): Promise<void>;
 }
 
 export const ENTRY_PREFIX = "entry:";
 export const entryOf = (page: Pick<HomePage, "entries">, turnId: string): HomeEntry | undefined => page.entries[turnId];
 
-const seconds = (m: Pick<SessionMessage, "timestamp" | "created_at">) => {
-  const s = Number(m.timestamp ?? m.created_at);
-  return Number.isFinite(s) && s > 0 ? s * 1000 : undefined;
-};
+/** created_at / covers_* → epoch ms: numbers are seconds (or ms when huge), strings are ISO dates. */
+export function toMs(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value) && value > 0) return value > 1e12 ? value : value * 1000;
+  if (typeof value === "string" && /\d{4}-\d{2}-\d{2}/.test(value)) { const ms = Date.parse(value); return Number.isFinite(ms) ? ms : undefined; }
+  return undefined;
+}
 
-/** Wire page → UI page. Ordinary messages group into turns as today (messagesToTurns); a summary or
- * post becomes its own entry turn in place. Turn ids come from message ids, so pages never collide. */
+const POST: Record<string, "handoff_request" | "handoff" | "task_result"> = { handoff_request: "handoff_request", handoff_result: "handoff", task_result: "task_result" };
+
+/** One wire message → the SessionMessage shape messagesToTurns already reads. */
+const asSession = (m: WireMessage): SessionMessage => ({
+  ...(m as unknown as SessionMessage), role: m.role, content: m.content, created_at: (toMs(m.created_at) ?? 0) / 1000,
+  request_id: m.role === "user" ? m.id : undefined,
+});
+
+/** Wire page (newest first) → UI page (oldest first). Ordinary messages group into turns as today
+ * (messagesToTurns); a summary or post becomes its own entry turn in place. Turn ids come from
+ * message ids, so pages never collide. */
 export function fromWirePage(sessionId: string, page: WirePage, agentName: (id: string) => string): HomePage {
   const turns: ChatTurn[] = [];
   const entries: Record<string, HomeEntry> = {};
   let run: WireMessage[] = [];
   const flush = () => {
     if (!run.length) return;
-    const ids = run.filter((m) => m.role === "user").map((m) => m.request_id ?? m.id);
-    const mapped = messagesToTurns(run.map((m) => (m.role === "user" ? { ...m, request_id: m.request_id ?? m.id } : m)), agentName);
+    const ids = run.filter((m) => m.role === "user").map((m) => m.id);
+    const mapped = messagesToTurns(run.map(asSession), agentName);
     // A run that opens with a reply gets a synthetic turn; name it after that message.
     mapped.forEach((t) => { if (!ids.includes(t.turnId)) t.turnId = `reply:${run[0].id}`; });
     turns.push(...mapped);
     run = [];
   };
-  for (const m of page.messages) {
+  for (const m of [...page.messages].reverse()) {
     const kind = m.kind ?? "message";
     if (kind === "message") { run.push(m); continue; }
     flush();
     const turnId = ENTRY_PREFIX + m.id;
-    const createdAt = seconds(m);
+    const createdAt = toMs(m.created_at);
     turns.push({ turnId, message: "", parts: [], state: "complete", createdAt });
     if (kind === "summary") {
-      entries[turnId] = { kind: "summary", id: m.id, text: m.summary?.text ?? m.content ?? "", count: m.summary?.covers_count ?? 0,
-        fromAt: m.summary?.from_ts ? m.summary.from_ts * 1000 : undefined, toAt: m.summary?.to_ts ? m.summary.to_ts * 1000 : undefined };
+      entries[turnId] = { kind: "summary", id: m.id, text: m.content ?? "", count: m.summary?.message_count ?? 0,
+        fromAt: toMs(m.summary?.covers_from), toAt: toMs(m.summary?.covers_to) };
     } else {
-      const id = m.sender?.agent_id ?? "";
+      const id = m.sender_agent_id ?? "";
       entries[turnId] = {
-        kind: "post", id: m.id, post: kind === "handoff_result" ? "handoff" : "task_result",
-        sender: { id, name: m.sender?.name || agentName(id) }, text: m.content ?? "", title: m.title, status: m.status,
-        handoffId: m.handoff_id, taskId: m.task_id, links: m.links ?? [], createdAt,
+        kind: "post", id: m.id, post: POST[kind] ?? "task_result", sender: { id, name: agentName(id) }, text: m.content ?? "",
+        handoffId: m.links?.handoff_id, taskId: m.links?.task_id, childSessionId: m.links?.child_session_id, createdAt,
       };
     }
   }
   flush();
-  return { sessionId, turns, entries, before: page.has_more && page.before ? page.before : undefined, lastEventId: page.last_event_id };
+  return { sessionId, turns, entries, before: page.next_before ?? undefined };
 }
 
 const historyRow = (r: SessionRow): HistoryRow => ({
@@ -148,22 +171,34 @@ export interface HomeOptions {
   onCursor?: (sessionId: string, eventId: number) => void;
 }
 
-/** The provisional gateway contract. */
-export function contractHome(getJson: GetJson, opts: HomeOptions = {}): HomeSessions {
+/** Session stream subscription (JaegerSource.stream). */
+export type HomeStream = (sessionId: string, cursor: number | undefined, onEvent: (event: GatewayEvent) => void, signal: AbortSignal) => Promise<void>;
+
+const rowsOf = (data: unknown): SessionRow[] => (Array.isArray(data) ? data : (data as { sessions?: SessionRow[] })?.sessions ?? []) as SessionRow[];
+
+/** The gateway contract. `stream` enables live posts and summaries. */
+export function contractHome(getJson: GetJson, opts: HomeOptions = {}, stream?: HomeStream): HomeSessions {
   const name = opts.agentName ?? ((id: string) => id);
-  const limit = opts.pageSize ?? 30;
-  const page = async (sessionId: string, before?: string) => {
-    const wire = (await getJson(HOME_ROUTES.page(sessionId, limit, before))) as WirePage;
-    const mapped = fromWirePage(sessionId, wire, name);
-    if (!before && typeof mapped.lastEventId === "number") opts.onCursor?.(sessionId, mapped.lastEventId);
-    return mapped;
-  };
+  const limit = opts.pageSize ?? PAGE_LIMIT;
+  const homes = new Map<string, string>(); // agent → home session
+  const agentOf = new Map<string, string>(); // home session → agent
+  const page = async (sessionId: string, before?: string) => fromWirePage(sessionId, (await getJson(HOME_ROUTES.page(sessionId, limit, before))) as WirePage, name);
+  const rows = async (agentId: string) => rowsOf(await getJson(HOME_ROUTES.sessions(agentId)));
   return {
     mode: "contract",
-    home: async (agentId) => ((await getJson(HOME_ROUTES.home(agentId))) as WireHome).session_id,
+    async home(agentId) {
+      const wire = (await getJson(HOME_ROUTES.home(agentId))) as WireHome;
+      homes.set(agentId, wire.session_id);
+      agentOf.set(wire.session_id, agentId);
+      return wire.session_id;
+    },
     page,
-    history: async (agentId) => ((await getJson(HOME_ROUTES.history(agentId))) as WireHistory).sessions.filter((r) => !r.archived).map(historyRow),
-    read: async (sessionId) => {
+    async history(agentId) {
+      const home = homes.get(agentId) ?? (await this.home(agentId));
+      return (await rows(agentId)).filter((r) => !r.archived && r.session_id !== home)
+        .sort((a, b) => (b.last_activity_at ?? 0) - (a.last_activity_at ?? 0)).map(historyRow);
+    },
+    async read(sessionId) {
       // Whole chat: walk pages back to the start.
       let cur = await page(sessionId);
       const all = { ...cur, turns: [...cur.turns], entries: { ...cur.entries } };
@@ -174,6 +209,23 @@ export function contractHome(getJson: GetJson, opts: HomeOptions = {}): HomeSess
       }
       return { ...all, before: undefined };
     },
+    live: stream && (async (sessionId, on, signal) => {
+      // Start at the session's current cursor (from the session list) so nothing old replays.
+      const agentId = agentOf.get(sessionId);
+      const row = agentId ? (await rows(agentId).catch(() => [])).find((r) => r.session_id === sessionId) : undefined;
+      if (typeof row?.last_event_id === "number") opts.onCursor?.(sessionId, row.last_event_id);
+      await stream(sessionId, row?.last_event_id, (event) => {
+        const payload = (event.payload ?? event) as Record<string, unknown>;
+        if (event.event === HOME_EVENT_MESSAGE) {
+          const msg = (payload as unknown as WireMessageCreated).message;
+          // Ordinary messages arrive through the turn stream already; posts and summaries don't.
+          if (msg && msg.session_id === sessionId && msg.kind && msg.kind !== "message") on({ type: "entry", page: fromWirePage(sessionId, { messages: [msg], next_before: null }, name) });
+        } else if (event.event === HOME_EVENT_SUMMARIZED) {
+          const sum = payload as unknown as WireSessionSummarized;
+          if (sum.session_id === sessionId) on({ type: "summarized", summaryMessageId: sum.summary_message_id });
+        }
+      }, signal).catch((error: unknown) => { if (!signal.aborted) throw error; });
+    }),
   };
 }
 

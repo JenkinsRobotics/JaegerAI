@@ -3,7 +3,7 @@
  * proxy), which forwards /v1/* to the gateway and adds the caller token on the
  * server side. The browser never sees or sends a token. */
 import { decodeSSE, type SSEFrame } from "./sse";
-import type { JaegerSource, TurnReceipt } from "./source";
+import type { JaegerSource, TurnReceipt , UploadedAttachment } from "./source";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 export class GatewayError extends Error {
@@ -93,8 +93,9 @@ export class GatewayClient implements JaegerSource {
   addAttachment(sessionId: string, body: { path: string; filename?: string; mime_type?: string }) {
     return this.json<{ attachment_id: string }>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments`, body);
   }
-  uploadAttachment(sessionId: string, body: { filename: string; mime_type: string; data_base64: string }) {
-    return this.json<{ attachment_id: string }>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments`, body);
+  /** Bytes, not a path: JSON {name, mime, data_base64} (the route also takes multipart 'file' + 'name'). */
+  uploadAttachment(sessionId: string, body: { name: string; mime: string; data_base64: string }) {
+    return this.json<UploadedAttachment>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments/upload`, body);
   }
   async cancel(sessionId: string, requestId?: string) {
     await this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, requestId ? { request_id: requestId } : {});

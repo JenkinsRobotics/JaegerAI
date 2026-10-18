@@ -4,6 +4,9 @@ import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, Sessi
 
 /** Everything the screen needs from Jaeger. The live adapter calls the
  * gateway through same-origin paths; the mock adapter replays sample data. */
+/** 201 from the bytes upload route. */
+export interface UploadedAttachment { attachment_id: string; name: string; mime: string; size: number; sha256: string }
+
 export interface JaegerSource {
   readonly kind: "live" | "mock";
   agents(): Promise<Agent[]>;
@@ -24,7 +27,9 @@ export interface JaegerSource {
   addAttachment(sessionId: string, body: { path: string; filename?: string; mime_type?: string }): Promise<{ attachment_id: string }>;
   /** PROVISIONAL (bytes upload, gateway-side staging): the same endpoint with the file's bytes instead
    * of a path. Only called when the bytes-upload flag is on (composer.bytesUploadEnabled). */
-  uploadAttachment?(sessionId: string, body: { filename: string; mime_type: string; data_base64: string }): Promise<{ attachment_id: string }>;
+  /** POST /v1/sessions/{id}/attachments/upload (bytes, 25 MB max): 201 → the stored file. 404/405 = not
+   * supported by this gateway; 413 = too large. */
+  uploadAttachment?(sessionId: string, body: { name: string; mime: string; data_base64: string }): Promise<UploadedAttachment>;
   cancel(sessionId: string, requestId?: string): Promise<void>;
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   tasks(): Promise<Task[]>;
