@@ -102,6 +102,32 @@ def set_project_root(path: Path | str | None) -> None:
     _project_root_var.set(root)
 
 
+# Read confinement for one turn (Gateway sessions). None = reads unconfined
+# (CLI/TUI, the historical behaviour). When set, every ``_resolve_read`` target
+# must realpath inside one of these roots (symlinks resolved first).
+_read_roots_var: ContextVar[tuple[Path, ...] | None] = ContextVar("read_roots", default=None)
+
+
+@contextlib.contextmanager
+def read_confinement(roots: Any):
+    """Confine read/list/search tools to ``roots`` for this context."""
+    clean = tuple(Path(os.path.realpath(str(r))) for r in (roots or []) if r) or None
+    token = _read_roots_var.set(clean)
+    try:
+        yield clean
+    finally:
+        _read_roots_var.reset(token)
+
+
+def active_read_roots() -> tuple[Path, ...] | None:
+    return _read_roots_var.get()
+
+
+def path_within(path: Path | str, roots: Any) -> bool:
+    real = Path(os.path.realpath(str(path)))
+    return any(real == r or r in real.parents for r in roots)
+
+
 @contextlib.contextmanager
 def project_scope(path: Path | str | None):
     """Request-local project; never leak a client's workspace into another turn."""
@@ -469,6 +495,15 @@ def _resolve_read(path: str) -> Path:
                 if cand.exists():
                     full = cand
                     break
+    roots = _read_roots_var.get()
+    if roots is not None:
+        full = Path(os.path.realpath(str(full)))
+        if not path_within(full, roots):
+            raise SandboxError(
+                f"refused — {full} is outside this session's workspace ({roots[0]}). "
+                "Reads are confined to the session folder; ask the operator to open "
+                "that folder as the workspace instead."
+            )
     if "credentials" in full.parts[:-1]:
         raise SandboxError(
             "credentials/ is off-limits to direct reads — "

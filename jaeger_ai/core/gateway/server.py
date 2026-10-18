@@ -3059,6 +3059,26 @@ class JaegerGatewayApp:
         out["display_name"] = agent.display_name
         return out
 
+    @staticmethod
+    def _read_roots(runtime: Any, selection: dict[str, Any]) -> list[str]:
+        """Where a Gateway turn's read/list/search tools may look: the session
+        workspace folder, else the instance workspace; plus the instance skills
+        dir so an agent can read its own SKILL.md references."""
+        layout = getattr(runtime, "layout", None)
+        workspace = str(selection.get("workspace") or "")
+        if not workspace:
+            try:
+                from jaeger_agent.core.workspace import get_effective_workspace_dir
+                workspace = str(get_effective_workspace_dir() or "")
+            except Exception:  # noqa: BLE001
+                workspace = ""
+            workspace = workspace or str(getattr(layout, "workspace_dir", "") or "")
+        roots = [workspace] if workspace else []
+        skills = getattr(layout, "skills_dir", None)
+        if isinstance(skills, (str, Path)):
+            roots.append(str(skills))
+        return roots
+
     def _load_gateway_mcp(self) -> dict[str, Any]:
         """Start mcp.json servers marked ``gateway: true`` (once per process)."""
         try:
@@ -3911,6 +3931,7 @@ class JaegerGatewayApp:
             lane, selected_model = split_routed_model_id(str(selection.get("model") or session.get("model") or ""))
         callbacks, flush = self._turn_stream_callbacks(session_key, request_id)
         from jaeger_agent.tool_executor import tool_allowlist
+        from jaeger_agent.core.workspace import read_confinement
 
         grant = execution.get("allowed_tools") if execution is not None else None
         try:
@@ -3922,7 +3943,8 @@ class JaegerGatewayApp:
             source = "background" if options.get("background") else "user"
             with task_scope(self.task_owner, session_id=session_key, request_id=request_id,
                             execution=selection, user_text=request_row.get("input_text", prompt), source=source), \
-                    tool_allowlist(list(grant) if grant is not None else None):
+                    tool_allowlist(list(grant) if grant is not None else None), \
+                    read_confinement(self._read_roots(runtime, selection)):
                 return runtime.run_subordinate_react(
                     prompt,
                     session_key=session_key,
