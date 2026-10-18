@@ -3,6 +3,7 @@
  * surface to the caller; there is no silent fallback. */
 import type { JaegerSource } from "../api/source";
 import type { PersistedPart, SessionMessage } from "../api/types";
+import type { RejectedAttachment } from "./composer";
 import { followTurn } from "./followTurn";
 import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, HostKind, StartTurnRequest, TurnHandle, TurnState } from "./host";
 import type { HostAttachment, HostCapabilities } from "./hostH8";
@@ -73,21 +74,27 @@ export class WebHost implements ChatHost {
   async getConfig() { return { defaultMode: "agent" }; }
 
   /** POST each picked file to /v1/sessions/{id}/attachments; the ids that registered go with the turn. */
-  private async registerAttachments(sessionId: string, files: HostAttachment[], onPart: (part: ChatPart) => void): Promise<string[]> {
+  private async registerAttachments(request: StartTurnRequest, onPart: (part: ChatPart) => void): Promise<string[]> {
     const ids: string[] = [];
-    const skipped: string[] = [];
-    for (const file of files) {
-      if (!file.path) { skipped.push(`${file.name} (no file path from this window)`); continue; }
+    const rejected: RejectedAttachment[] = [];
+    // H8 widens ChatAttachment with path/size; read through the local mirror until it's vendored.
+    for (const file of (request.attachments ?? []) as HostAttachment[]) {
+      if (!file.path) { rejected.push({ name: file.name, reason: "no file path from this window" }); continue; }
       try {
-        const row = await this.source.addAttachment(sessionId, { path: file.path, filename: file.name, mime_type: file.mimeType });
+        const row = await this.source.addAttachment(request.sessionId, { path: file.path, filename: file.name, mime_type: file.mimeType });
         ids.push(row.attachment_id);
       } catch (error) {
-        skipped.push(`${file.name} (${message(error)})`);
+        rejected.push({ name: file.name, path: file.path, reason: message(error) });
       }
     }
-    if (skipped.length) onPart({ kind: "warning", message: `Not sent: ${skipped.join(", ")}. The rest of your message went through.` });
+    if (rejected.length) {
+      onPart({ kind: "warning", message: `Not sent: ${rejected.map((r) => `${r.name} (${r.reason})`).join(", ")}. The rest of your message went through.` });
+      this.onAttachmentsRejected?.(request.turnId, rejected);
+    }
     return ids;
   }
+  /** The chat view puts refused files back on the composer as error chips. */
+  onAttachmentsRejected?: (turnId: string, rejected: RejectedAttachment[]) => void;
   async listModels() { return []; }
 
   startTurn(request: StartTurnRequest, onPart: (part: ChatPart) => void): TurnHandle {
@@ -97,7 +104,7 @@ export class WebHost implements ChatHost {
     const done = (async (): Promise<{ state: TurnState }> => {
       // The gateway attaches workspace files by path. Host-picked files (H8 `path`) are registered first;
       // pasted or dropped ones have no path, so they're named in a warning instead of silently dropped.
-      const attachmentIds = await this.registerAttachments(request.sessionId, request.attachments ?? [], onPart);
+      const attachmentIds = await this.registerAttachments(request, onPart);
       let receipt;
       try {
         receipt = await this.source.send(request.sessionId, request.message, requestId, attachmentIds);

@@ -60,4 +60,13 @@ describe("WebHost attachments (H8 → gateway)", () => {
     expect(warning?.message).toContain("c.txt (attachment path escapes workspace)");
     expect(warning?.message).not.toContain("d.md");
   });
+
+  it("reports refused files to the chat view, keyed by turn, so their chips can show why", async () => {
+    const r = recording("/outside/c.txt");
+    const host = new WebHost(r.source);
+    const seen: unknown[] = [];
+    host.onAttachmentsRejected = (turnId, rejected) => seen.push({ turnId, rejected });
+    await turn(host, [{ name: "c.txt", mimeType: "text/plain", path: "/outside/c.txt" } as never]);
+    expect(seen).toEqual([{ turnId: "t1", rejected: [{ name: "c.txt", path: "/outside/c.txt", reason: "attachment path escapes workspace" }] }]);
+  });
 });

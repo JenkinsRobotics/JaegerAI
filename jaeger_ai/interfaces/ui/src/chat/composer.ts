@@ -17,7 +17,26 @@ export function primaryAction(o: { running: boolean; hasContent: boolean; voiceC
 export const MAX_ATTACHMENTS = 8;
 export const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 /** `path`/`uri` when the host picker supplied a real file (H8); paste/drag files have neither. */
-export interface PendingFile { id: string; name: string; size: number; type: string; path?: string; uri?: string }
+export interface PendingFile { id: string; name: string; size: number; type: string; path?: string; uri?: string; error?: string }
+
+/** One file the host could not send with a turn, and the raw reason. */
+export interface RejectedAttachment { name: string; path?: string; reason: string }
+
+/** Chip wording for a refused attachment: plain language first, the raw reason only as a fallback. */
+export function attachmentError(reason: string): string {
+  if (/escapes workspace/i.test(reason)) return "Not sent: outside Jaeger's workspace";
+  if (/no file path/i.test(reason)) return "Not sent: use + to attach it from disk";
+  return `Not sent: ${reason}`;
+}
+
+/** Put refused files back in the composer as error chips (the turn itself still went). */
+export function restoreRejected(current: PendingFile[], sent: PendingFile[], rejected: RejectedAttachment[]): PendingFile[] {
+  const back = rejected.flatMap((r) => {
+    const file = sent.find((f) => f.name === r.name && f.path === r.path);
+    return file ? [{ ...file, error: attachmentError(r.reason) }] : [];
+  });
+  return [...current.filter((f) => !back.some((b) => b.id === f.id)), ...back];
+}
 
 /** Add picked or pasted files under the caps; says what was left out. */
 export function addFiles(current: PendingFile[], incoming: Array<{ name: string; size: number; type: string; path?: string; uri?: string }>, makeId: () => string):
@@ -37,7 +56,7 @@ export function addFiles(current: PendingFile[], incoming: Array<{ name: string;
 }
 
 export const toAttachments = (files: PendingFile[]): HostAttachment[] =>
-  files.map((f) => ({ name: f.name, mimeType: f.type || "application/octet-stream", size: f.size, ...(f.path ? { path: f.path, uri: f.uri } : {}) }));
+  files.filter((f) => !f.error).map((f) => ({ name: f.name, mimeType: f.type || "application/octet-stream", size: f.size, ...(f.path ? { path: f.path, uri: f.uri } : {}) }));
 
 /** A host-picked attachment as composer input (size 0 when the host left it out). */
 export const fromHost = (a: HostAttachment) => ({ name: a.name, size: a.size ?? 0, type: a.mimeType, path: a.path, uri: a.uri });

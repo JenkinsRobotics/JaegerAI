@@ -1,7 +1,8 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, addFiles, fileSize, primaryAction, toAttachments } from "./composer";
+import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, addFiles, attachmentError, fileSize, primaryAction, restoreRejected, toAttachments } from "./composer";
+import { WebHost } from "./webHost";
 import type { ChatHost, StartTurnRequest } from "./host";
 import { MinimalChat } from "./MinimalChat";
 
@@ -84,6 +85,45 @@ describe("composer (DOM)", () => {
     await act(async () => { setter.call(ta, "line\n".repeat(20)); ta.dispatchEvent(new Event("input", { bubbles: true })); });
     expect(ta.style.height).toBe("200px");
     expect(ta.style.overflowY).toBe("auto");
+  });
+});
+
+describe("refused attachments", () => {
+  it("words the gateway's refusals plainly", () => {
+    expect(attachmentError("attachment path escapes workspace")).toBe("Not sent: outside Jaeger's workspace");
+    expect(attachmentError("no file path from this window")).toBe("Not sent: use + to attach it from disk");
+    expect(attachmentError("413 Payload Too Large")).toBe("Not sent: 413 Payload Too Large");
+  });
+  it("puts exactly the refused files back as error chips, and never re-sends them", () => {
+    const sent = [{ id: "1", name: "a.txt", size: 1, type: "text/plain", path: "/out/a.txt" }, { id: "2", name: "b.txt", size: 1, type: "text/plain", path: "/ws/b.txt" }];
+    const back = restoreRejected([], sent, [{ name: "a.txt", path: "/out/a.txt", reason: "attachment path escapes workspace" }]);
+    expect(back).toEqual([{ ...sent[0], error: "Not sent: outside Jaeger's workspace" }]);
+    expect(toAttachments(back)).toEqual([]);
+  });
+  it("shows the 'escapes workspace' 400 on that file's chip (DOM)", async () => {
+    const host = Object.assign(Object.create(WebHost.prototype) as WebHost, {
+      capabilities: { voice: false },
+      startTurn: (req: StartTurnRequest) => {
+        host.onAttachmentsRejected?.(req.turnId, [{ name: "secret.txt", reason: "attachment path escapes workspace" }]);
+        return { cancel() {}, done: new Promise(() => {}) };
+      },
+      respondToConfirmation: vi.fn(),
+      sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [] })) },
+      copy: vi.fn(), openExternal: vi.fn(),
+    });
+    const el = document.createElement("div");
+    document.body.append(el);
+    const root = createRoot(el);
+    await act(async () => { root.render(<MinimalChat host={host as unknown as ChatHost} sessionId="s1" />); });
+    const input = el.querySelector<HTMLInputElement>('input[type="file"]')!;
+    Object.defineProperty(input, "files", { configurable: true, value: [new File(["x"], "secret.txt", { type: "text/plain" })] });
+    await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
+    await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click(); });
+    const chip = el.querySelector(".jg-chip.is-error");
+    expect(chip?.querySelector(".jg-chip__name")?.textContent).toBe("secret.txt");
+    expect(chip?.querySelector('[role="alert"]')?.textContent).toBe("Not sent: outside Jaeger's workspace");
+    act(() => root.unmount());
+    el.remove();
   });
 });
 
