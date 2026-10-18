@@ -3069,7 +3069,9 @@ class JaegerGatewayApp:
     def _read_roots(runtime: Any, selection: dict[str, Any]) -> list[str]:
         """Where a Gateway turn's read/list/search tools may look: the session
         workspace folder, else the instance workspace; plus the instance skills
-        dir so an agent can read its own SKILL.md references."""
+        dir so an agent can read its own SKILL.md references, and the
+        instance ``logs/tool_results`` dir where oversized tool results are
+        spilled (the model is told that path and must be able to read it back)."""
         layout = getattr(runtime, "layout", None)
         workspace = str(selection.get("workspace") or "")
         if not workspace:
@@ -3083,6 +3085,9 @@ class JaegerGatewayApp:
         skills = getattr(layout, "skills_dir", None)
         if isinstance(skills, (str, Path)):
             roots.append(str(skills))
+        logs = getattr(layout, "logs_dir", None)
+        if isinstance(logs, (str, Path)):
+            roots.append(str(Path(logs) / "tool_results"))
         return roots
 
     def _load_gateway_mcp(self) -> dict[str, Any]:

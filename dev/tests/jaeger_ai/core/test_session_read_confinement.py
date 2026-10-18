@@ -62,3 +62,24 @@ def test_gateway_read_roots(tmp_path):
     roots = JaegerGatewayApp._read_roots(rt, {"workspace": "/private/tmp/x"})
     assert roots == ["/private/tmp/x", str(tmp_path / "skills")]
     assert JaegerGatewayApp._read_roots(rt, {})[-1] == str(tmp_path / "skills")
+
+
+def test_gateway_read_roots_include_spilled_tool_results(tmp_path):
+    from types import SimpleNamespace
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    layout = SimpleNamespace(workspace_dir=tmp_path / "ws", skills_dir=tmp_path / "skills", logs_dir=tmp_path / "logs")
+    roots = JaegerGatewayApp._read_roots(SimpleNamespace(layout=layout), {"workspace": str(tmp_path / "sess")})
+    assert roots == [str(tmp_path / "sess"), str(tmp_path / "skills"), str(tmp_path / "logs" / "tool_results")]
+    spill = tmp_path / "logs" / "tool_results"
+    spill.mkdir(parents=True)
+    (spill / "big.json").write_text("{}")
+    (tmp_path / "logs" / "other.log").write_text("x")
+    (tmp_path / "sess").mkdir()
+    with read_confinement(roots):
+        assert _resolve_read(str(spill / "big.json"))
+        try:
+            _resolve_read(str(tmp_path / "logs" / "other.log"))
+        except SandboxError:
+            pass
+        else:
+            raise AssertionError("logs dir outside tool_results must stay refused")
