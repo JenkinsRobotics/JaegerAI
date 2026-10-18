@@ -201,3 +201,21 @@ async def test_home_ids_are_canonical(gw):
     b = await (await client.get("/v1/agents/jaeger/home")).json()
     assert a["session_id"] == b["session_id"] == "agent-native:jaeger"
     assert a["agent_id"] == b["agent_id"] == "native:jaeger" and b["created"] is False
+
+
+def test_user_message_carries_attachment_parts_on_reload(tmp_path):
+    from jaeger_ai.core.gateway.session_store import message_dict
+    store = GatewaySessionStore(tmp_path / "p.sqlite3")
+    store.ensure_session("p")
+    att = store.add_attachment("p", {"original_filename": "brief.txt", "safe_path": "/x/brief.txt",
+                                     "mime_type": "text/plain", "size_bytes": 143, "sha256": "cc",
+                                     "provenance": "upload_staged"})["attachment_id"]
+    store.admit_request("p", "read the brief", request_id="r1", requested={"attachment_ids": [att]})
+    with store._get_conn() as conn:
+        conn.execute("UPDATE sessions SET status='idle' WHERE session_id='p'")
+    store.admit_request("p", "no files", request_id="r2", requested={"attachment_ids": []})
+    users = [m for m in store.list_messages("p")["messages"] if m["role"] == "user"]
+    by_text = {m["content"]: m for m in users}
+    assert by_text["read the brief"]["parts"] == [
+        {"type": "attachment", "attachment_id": att, "name": "brief.txt", "mime": "text/plain", "size": 143}]
+    assert by_text["no files"]["parts"] == []

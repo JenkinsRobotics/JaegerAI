@@ -154,6 +154,24 @@ MESSAGE_KINDS = frozenset({"message", "summary", "handoff_request", "handoff_res
 MESSAGES_PAGE_MAX = 200
 
 
+def _attachment_parts(conn: Any, session_id: str, execution: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """``{type:"attachment", attachment_id, name, mime, size}`` for each attachment
+    a turn's admission snapshot selected, so the user message shows them on reload."""
+    ids = [str(a.get("attachment_id")) for a in (execution.get("attachments") or [])
+           if isinstance(a, dict) and a.get("attachment_id")]
+    if not ids:
+        return None
+    rows = {r["attachment_id"]: r for r in conn.execute(
+        f"SELECT attachment_id, original_filename, mime_type, size_bytes FROM attachments "
+        f"WHERE session_id=? AND attachment_id IN ({','.join('?' * len(ids))})",
+        (session_id, *ids),
+    ).fetchall()}
+    return [{"type": "attachment", "attachment_id": a,
+             "name": rows[a]["original_filename"] if a in rows else None,
+             "mime": rows[a]["mime_type"] if a in rows else None,
+             "size": rows[a]["size_bytes"] if a in rows else None} for a in ids]
+
+
 def _part_view(part: Any) -> Any:
     """Tool parts carry ``state`` (the contract name) next to the stored ``status``."""
     if isinstance(part, dict) and part.get("type") in {"tool", "approval"} and "state" not in part:
@@ -1136,7 +1154,8 @@ class GatewaySessionStore:
                 return None
             execution = _row_meta(row["execution_json"])
             visible = execution.get("display_text") or row["input_text"]
-            msg_id = self.append_message(session_id, "user", visible, timestamp=now, conn=conn)
+            msg_id = self.append_message(session_id, "user", visible, timestamp=now, conn=conn,
+                                         parts=_attachment_parts(conn, session_id, execution))
             meta = _row_meta(session["metadata_json"])
             if execution.get("model"):
                 meta["model"] = execution["model"]
@@ -1279,7 +1298,8 @@ class GatewaySessionStore:
                  json.dumps(execution, sort_keys=True), REQUEST_FINGERPRINT_VERSION),
             )
             visible = choices["display_text"] if "display_text" in choices else text
-            msg_id = self.append_message(session_id, "user", visible, timestamp=now, conn=conn)
+            msg_id = self.append_message(session_id, "user", visible, timestamp=now, conn=conn,
+                                         parts=_attachment_parts(conn, session_id, execution))
             conn.execute(
                 "UPDATE sessions SET status='running', metadata_json=?, updated_at=? WHERE session_id=?",
                 (json.dumps(meta), now, session_id),
