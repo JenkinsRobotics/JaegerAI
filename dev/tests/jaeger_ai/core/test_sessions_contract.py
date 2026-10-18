@@ -192,3 +192,12 @@ def test_attachment_ids_present_wins_for_both_kinds(tmp_path):
     assert admit("empty", attachment_ids=[]) == []          # explicit [] wins: nothing
     assert admit("mixed", attachment_ids=[staged, legacy]) == [staged, legacy]
     assert admit("only-staged", attachment_ids=[staged]) == [staged]
+
+
+@pytest.mark.asyncio
+async def test_home_ids_are_canonical(gw):
+    gateway, client = gw
+    a = await (await client.get("/v1/agents/native:jaeger/home")).json()
+    b = await (await client.get("/v1/agents/jaeger/home")).json()
+    assert a["session_id"] == b["session_id"] == "agent-native:jaeger"
+    assert a["agent_id"] == b["agent_id"] == "native:jaeger" and b["created"] is False

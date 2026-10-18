@@ -2138,6 +2138,11 @@ class JaegerGatewayApp:
 
     def _ensure_agent_home(self, agent_id: str, display: str | None = None) -> tuple[str, bool]:
         """Get-or-create the one persistent home chat of an agent. Never archived."""
+        try:  # one agent, one home: the registry's canonical id ("jaeger" -> "native:jaeger")
+            record = self._registry().get_agent(agent_id)
+            agent_id = str(getattr(record, "id", None) or agent_id)
+        except Exception:  # noqa: BLE001
+            pass
         sid = self._agent_home_id(agent_id)
         existing = self.store.get_session(sid)
         meta = {"agent_id": agent_id, "home": True, "agent_pinned": True, "route_checked": True}
@@ -2160,8 +2165,9 @@ class JaegerGatewayApp:
         record = self._registry().get_agent(agent_id)
         if record is None:
             return web.json_response({"error": "Agent not found"}, status=404)
-        sid, created = self._ensure_agent_home(agent_id, getattr(record, "display_name", None))
-        return web.json_response({"session_id": sid, "agent_id": agent_id, "created": created})
+        canonical = str(getattr(record, "id", None) or agent_id)
+        sid, created = self._ensure_agent_home(canonical, getattr(record, "display_name", None))
+        return web.json_response({"session_id": sid, "agent_id": canonical, "created": created})
 
     async def handle_list_messages(self, request: web.Request) -> web.Response:
         """GET /v1/sessions/{id}/messages?before=<message_id>&limit=50 — newest first."""
