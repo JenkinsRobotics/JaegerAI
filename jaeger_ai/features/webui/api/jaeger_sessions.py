@@ -18,6 +18,10 @@ proxies server-side. Routes mirror the gateway exactly (audited from
     POST   /v1/sessions/{id}/reconcile      reconcile after a drop
     GET    /v1/sessions/{id}/requests/{rid} request status
     GET    /v1/sessions/{id}/stream         SSE events  ← streamed, not buffered
+    GET    /v1/sessions/{id}/messages       typed, paged messages (?before=&limit=)
+    GET    /v1/sessions/{id}/events         durable event log
+    POST   /v1/sessions/{id}/attachments/upload  staged upload (JSON/base64 body)
+    POST   /v1/sessions/{id}/ide/{ide_request_id}  answer an ide.request
     POST   /v1/approvals/{id}               resolve an approval
     GET    /v1/approvals                    list pending approvals
     GET    /health                          gateway liveness (NOT /v1/health)
@@ -287,6 +291,19 @@ def route(handler, parsed, method: str) -> bool:
         if method == "POST":
             return _proxy(handler, "POST", f"/v1/sessions/{session_id}/attachments", _body_bytes(handler))
         return False
+
+    # /v1/sessions/{id}/{messages|events} — read routes, query string relayed
+    if len(parts) == 2 and method == "GET" and parts[1] in {"messages", "events"}:
+        return _proxy(handler, "GET", f"/v1/sessions/{session_id}/{parts[1]}{query}")
+
+    # /v1/sessions/{id}/attachments/upload — JSON (base64) body only: this
+    # proxy relays application/json; multipart must go to the Gateway directly.
+    if len(parts) == 3 and parts[1:] == ["attachments", "upload"] and method == "POST":
+        return _proxy(handler, "POST", f"/v1/sessions/{session_id}/attachments/upload", _body_bytes(handler))
+
+    # /v1/sessions/{id}/ide/{ide_request_id} — the IDE's answer to ide.request
+    if len(parts) == 3 and parts[1] == "ide" and method == "POST":
+        return _proxy(handler, "POST", f"/v1/sessions/{session_id}/ide/{parts[2]}", _body_bytes(handler))
 
     # /v1/sessions/{id}/{turns|cancel|reconcile}
     if len(parts) == 2 and method == "POST" and parts[1] in {"turns", "cancel", "reconcile"}:
