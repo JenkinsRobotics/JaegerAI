@@ -56,6 +56,11 @@
 .jg-pinned.is-drop-target { background: color-mix(in srgb, var(--jg-color-accent) 6%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--jg-color-accent) 50%, transparent); }
 .jg-pinned__slot[draggable="true"] { cursor: grab; }
 .jg-agent-list__item[draggable="true"] { -webkit-user-drag: element; }
+/* The list stays a drop target (unpin) even when every specialist is pinned. */
+.jg-agent-list { min-height: 48px; border-radius: 10px; }
+.jg-agent-list.is-drop-target { background: color-mix(in srgb, var(--jg-color-accent) 6%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--jg-color-accent) 50%, transparent); }
+.jg-agent-list__drop-hint { margin: 0; padding: 14px 12px; text-align: center; font-size: var(--jg-font-small); color: var(--jg-color-text-tertiary); }
+.jg-shell.is-rail .jg-agent-list__drop-hint { display: none; }
 .jg-supervisor {
   --jg-supervisor-bg: var(--aether-color-bg-rail);
   display: flex; flex-direction: column; align-items: center; gap: 5px; width: 95px; padding: 10px 6px 6px;
