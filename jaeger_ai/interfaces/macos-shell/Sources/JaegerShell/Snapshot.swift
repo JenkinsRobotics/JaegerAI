@@ -8,7 +8,10 @@
 // Optional `--snapshot-size WxH` (clamped to the window minimum) shoots another window size.
 // Optional, repeatable `--snapshot-click <css selector>` clicks the first match of each selector in order
 // (0.8 s apart) before the shots, e.g. to open another chat or expand a fold; `scrollTop:<selector>` scrolls
-// that element to the top instead. Acts only inside the page.
+// that element to the top instead; `focus:<selector>` focuses it; `type:<selector>|<text>` focuses a text field and
+// sets its value the way typing would (React sees an input event; `\n` in the text is a newline). Acts only
+// inside the page. The report lists every window the process owns (AppKit's list and the window server's list
+// for this PID) after load and after the actions, so stray windows show up by class, size and level.
 // Host actions from the page are recorded, never performed.
 
 import AppKit
@@ -70,6 +73,7 @@ final class Snapshotter: NSObject, BridgeHost {
         guard !loaded else { return }
         loaded = true
         report["url"] = webView.url?.absoluteString ?? "nil"
+        report["windows_after_load"] = Self.windowCensus()
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
             // An off-screen window doesn't run CSS transitions or animations, so a still would freeze mid-fade
             // (or at opacity 0); stills show every transition and animation at its end state.
@@ -78,13 +82,26 @@ final class Snapshotter: NSObject, BridgeHost {
     }
 
     private func click(_ selectors: [String], webView: WKWebView) {
-        guard let selector = selectors.first else { return capture(["light", "dark"], webView: webView) }
+        guard let selector = selectors.first else {
+            report["windows_after_actions"] = Self.windowCensus()
+            return capture(["light", "dark"], webView: webView)
+        }
         let literal = String(data: (try? JSONSerialization.data(withJSONObject: [selector])) ?? Data("[\"\"]".utf8), encoding: .utf8) ?? "[\"\"]"
         // "scrollTop:<selector>" scrolls that element to the top instead of clicking it.
         let js = """
-            (() => { let s = \(literal)[0]; const scroll = s.startsWith('scrollTop:'); if (scroll) s = s.slice(10);
+            (() => { let s = \(literal)[0], text = null; const kind = (s.match(/^(scrollTop|focus|type):/) || [])[1] || 'click';
+              if (kind !== 'click') s = s.slice(kind.length + 1);
+              if (kind === 'type') { const bar = s.indexOf('|'); text = s.slice(bar + 1).replace(/\\\\n/g, '\\n'); s = s.slice(0, bar); }
               const el = document.querySelector(s); if (!el) return false;
-              if (scroll) { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); } else el.click(); return true; })()
+              if (kind === 'scrollTop') { el.scrollTop = 0; el.dispatchEvent(new Event('scroll')); }
+              else if (kind === 'focus') el.focus();
+              else if (kind === 'type') {
+                el.focus();
+                const proto = el instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+                Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, text);
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+              } else el.click();
+              return true; })()
             """
         webView.evaluateJavaScript(js) { [weak self] result, _ in
             guard let self else { return }
@@ -149,10 +166,35 @@ final class Snapshotter: NSObject, BridgeHost {
             viewport: [innerWidth, innerHeight], title: document.title,
             chat_scroll: (() => { const e = document.querySelector('.jg-chat__scroll'); return e ? [e.scrollTop, e.scrollHeight, e.clientHeight, getComputedStyle(e).overflowY] : null; })(),
             jump: (document.querySelector('.jg-jump') || {}).className || null,
+            composer: (() => { const t = document.querySelector('.jg-composer__input'), f = document.querySelector('.jg-composer');
+              if (!t || !f) return null; const r = t.getBoundingClientRect(), cs = getComputedStyle(t);
+              return { lines: t.value ? t.value.split('\\n').length : 0, textarea_height: Math.round(r.height), scroll_height: t.scrollHeight,
+                max_height: cs.maxHeight, overflow_y: cs.overflowY, form_height: Math.round(f.getBoundingClientRect().height),
+                form_bottom_gap: Math.round(innerHeight - f.getBoundingClientRect().bottom), focused: document.activeElement === t }; })(),
             text_sample: (document.body.innerText || '').replace(/\\s+/g, ' ').slice(0, 160)
           });
         })()
         """
+
+    /// Every window this process owns: AppKit's view (class, title, frame, visible, level) and the window
+    /// server's (number, bounds, layer, on screen) for our PID, which also catches windows AppKit's
+    /// subsystems (text input, WebKit) create.
+    static func windowCensus() -> [String: Any] {
+        let appkit: [[String: Any]] = NSApp.windows.map { w in
+            ["class": String(describing: type(of: w)), "bundle": Bundle(for: type(of: w)).bundleURL.lastPathComponent, "title": w.title, "number": w.windowNumber,
+             "frame": [Int(w.frame.minX), Int(w.frame.minY), Int(w.frame.width), Int(w.frame.height)],
+             "visible": w.isVisible, "level": w.level.rawValue, "main": w === NSApp.mainWindow || w.contentView is WKWebView]
+        }
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let info = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]] ?? []
+        let server: [[String: Any]] = info.filter { ($0[kCGWindowOwnerPID as String] as? Int32) == pid }.map { w in
+            let b = w[kCGWindowBounds as String] as? [String: CGFloat] ?? [:]
+            return ["number": w[kCGWindowNumber as String] as? Int ?? -1, "layer": w[kCGWindowLayer as String] as? Int ?? 0,
+                    "onscreen": w[kCGWindowIsOnscreen as String] as? Bool ?? false,
+                    "bounds": [Int(b["X"] ?? 0), Int(b["Y"] ?? 0), Int(b["Width"] ?? 0), Int(b["Height"] ?? 0)]]
+        }
+        return ["appkit": appkit, "server": server]
+    }
 
     static func decode(_ any: Any?) -> Any {
         guard let s = any as? String, let d = s.data(using: .utf8),
