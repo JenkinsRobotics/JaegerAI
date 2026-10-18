@@ -56,7 +56,8 @@ describe("chat column", () => {
     expect(showsProgress(turn([], "cancelled"))).toBe(false);
     const html = renderToStaticMarkup(<ProgressLine phrase="Searching the web…" />);
     expect(html).toContain('role="status"');
-    expect(html).toContain('<span class="jg-shimmer">Searching the web…</span>');
+    expect(html).toContain('<span class="jg-progress-text">Searching the web…</span>');
+    expect(html).not.toContain("jg-shimmer");
     expect(html.match(/<i><\/i>/g)).toHaveLength(3);
     expect(html).toContain('class="jg-progress-dots" aria-hidden="true"');
   });

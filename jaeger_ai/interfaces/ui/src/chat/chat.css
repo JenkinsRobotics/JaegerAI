@@ -109,24 +109,12 @@
 .jg-progress-dots i:nth-child(1) { background: color-mix(in srgb, var(--jg-agent-color, var(--aether-color-accent)) 55%, transparent); }
 .jg-progress-dots i:nth-child(2) { background: var(--jg-agent-color, var(--aether-color-accent)); animation-delay: .15s; }
 .jg-progress-dots i:nth-child(3) { background: color-mix(in srgb, var(--jg-agent-color, var(--aether-color-accent)) 75%, transparent); animation-delay: .3s; }
+/* Plain secondary grey, like the reference (no shimmer); the avatar carries the motion. */
+.jg-progress-text { color: var(--jg-color-text-tertiary); }
 .jg-progress-avatar { display: inline-flex; animation: jg-bob 1.8s ease-in-out infinite; }
 @keyframes jg-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -1.5px; } }
 @keyframes jg-dot { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-2px); } }
-.jg-shimmer {
-  color: transparent;
-  background-image: linear-gradient(90deg,
-    color-mix(in srgb, var(--jg-color-fg) 60%, transparent) 0%,
-    color-mix(in srgb, var(--jg-color-fg) 60%, transparent) 25%,
-    var(--jg-color-fg) 60%,
-    color-mix(in srgb, var(--jg-color-fg) 60%, transparent) 75%,
-    color-mix(in srgb, var(--jg-color-fg) 60%, transparent) 100%);
-  background-size: 200% 100%;
-  -webkit-background-clip: text; background-clip: text;
-  animation: jg-shimmer 1s linear infinite;
-}
-@keyframes jg-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) {
-  .jg-shimmer { animation: none; background: none; color: var(--jg-color-text-secondary); }
   .jg-progress-dots i, .jg-progress-avatar { animation: none; }
 }
 
