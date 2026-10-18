@@ -2,8 +2,11 @@
 """Live chat through the main screen's own origin (the same routes GatewayClient uses):
 POST /v1/sessions, GET /v1/sessions/{id}/stream (SSE), POST /v1/sessions/{id}/turns.
 Loopback only; carries no token itself (the dev token proxy behind the UI origin adds it).
-Prints the gateway's active runtime model and the model that answered. --expect-fence: fail unless the
-reply contains a fenced code block. --trace: print the non-text event sequence (tool, progress)."""
+Prints the gateway's active runtime model and the model that answered. Default text: Scripts/live-prompt.txt (one
+realistic prompt: a long markdown answer with headings, a list, a table, a code fence and >=2 read-only tool calls);
+with it, the run fails unless the reply has a fenced code block AND a table AND the stream shows >=2 completed tools.
+--expect-fence: also require a fence for a custom text. --trace: print the non-text event sequence (tool, progress)."""
+import os
 import json
 import sys
 import threading
@@ -11,9 +14,12 @@ import time
 import urllib.request
 import uuid
 
-ORIGIN = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:18800"
-TEXT = sys.argv[2] if len(sys.argv) > 2 else "Reply with exactly one word: pong"
-TIMEOUT = float(sys.argv[3]) if len(sys.argv) > 3 else 240
+ORIGIN = next((a for a in sys.argv[1:] if not a.startswith("--")), "http://127.0.0.1:18800")
+PROMPT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "live-prompt.txt")
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+DEFAULT_PROMPT = len(ARGS) < 2 or ARGS[1] in ("", "-")
+TEXT = open(PROMPT_FILE).read().strip() if DEFAULT_PROMPT else ARGS[1]
+TIMEOUT = float(ARGS[2]) if len(ARGS) > 2 else 300
 assert ORIGIN.startswith("http://127.0.0.1:"), "loopback only"
 
 
@@ -102,8 +108,13 @@ models = {k: v for k, v in finish.items() if "model" in k or k in ("provider", "
 print(f"answered by: {models or 'not reported in turn.finish'}")
 print(f"reply after {time.time() - t0:.1f}s: {text[:600]!r}")
 ok = bool(text) and not text.startswith("[")
-if "--expect-fence" in sys.argv:
-    fenced = "```" in text or "~~~" in text
-    print(f"fenced code block in reply: {fenced}")
+fenced = "```" in text or "~~~" in text
+table = any(set(line.replace("|", "").replace(":", "").strip()) == {"-"} and line.count("|") >= 2 for line in text.splitlines())
+tools_done = sum(1 for e in events if e in ("tool.completed", "tool.done"))
+headings = sum(1 for line in text.splitlines() if line.startswith("## "))
+print(f"checks: fence={fenced} table={table} tool.completed={tools_done} headings={headings} chars={len(text)}")
+if DEFAULT_PROMPT:
+    ok = ok and fenced and table and tools_done >= 2
+elif "--expect-fence" in sys.argv:
     ok = ok and fenced
 sys.exit(0 if ok else 1)
