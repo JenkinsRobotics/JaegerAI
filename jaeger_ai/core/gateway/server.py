@@ -2304,6 +2304,11 @@ class JaegerGatewayApp:
 
     UPLOAD_MAX_BYTES = 25 * 1024 * 1024
 
+    def _staged_upload_dir(self, session_id: str) -> Path:
+        """This session's staged-upload folder (one per session, hashed id)."""
+        import hashlib
+        return self.store.path.parent / "attachments" / hashlib.sha256(session_id.encode()).hexdigest()[:24]
+
     @staticmethod
     def _upload_view(row: dict[str, Any]) -> dict[str, Any]:
         return {"attachment_id": row["attachment_id"], "name": row.get("original_filename"),
@@ -2330,8 +2335,7 @@ class JaegerGatewayApp:
         limit = self.UPLOAD_MAX_BYTES
         too_big = web.json_response({"error": f"attachment exceeds {limit // (1024 * 1024)} MB"}, status=413)
         att_id = f"att_{uuid.uuid4().hex[:16]}"
-        stage = (self.store.path.parent / "attachments"
-                 / hashlib.sha256(session_id.encode()).hexdigest()[:24] / att_id)
+        stage = self._staged_upload_dir(session_id) / att_id
         stage.mkdir(parents=True, exist_ok=True, mode=0o700)
         tmp = stage / ".upload"
         digest, size = hashlib.sha256(), 0
@@ -3066,7 +3070,7 @@ class JaegerGatewayApp:
         return out
 
     @staticmethod
-    def _read_roots(runtime: Any, selection: dict[str, Any]) -> list[str]:
+    def _read_roots(runtime: Any, selection: dict[str, Any], staged_dir: Any = None) -> list[str]:
         """Where a Gateway turn's read/list/search tools may look: the session
         workspace folder, else the instance workspace; plus the instance skills
         dir so an agent can read its own SKILL.md references, and the
@@ -3088,6 +3092,9 @@ class JaegerGatewayApp:
         logs = getattr(layout, "logs_dir", None)
         if isinstance(logs, (str, Path)):
             roots.append(str(Path(logs) / "tool_results"))
+        if staged_dir:
+            # Only THIS session's staged uploads; other sessions' stay refused.
+            roots.append(str(staged_dir))
         return roots
 
     def _load_gateway_mcp(self) -> dict[str, Any]:
@@ -3955,7 +3962,7 @@ class JaegerGatewayApp:
             with task_scope(self.task_owner, session_id=session_key, request_id=request_id,
                             execution=selection, user_text=request_row.get("input_text", prompt), source=source), \
                     tool_allowlist(list(grant) if grant is not None else None), \
-                    read_confinement(self._read_roots(runtime, selection)):
+                    read_confinement(self._read_roots(runtime, selection, self._staged_upload_dir(session_key))):
                 return runtime.run_subordinate_react(
                     prompt,
                     session_key=session_key,

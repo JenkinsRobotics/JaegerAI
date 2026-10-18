@@ -83,3 +83,26 @@ def test_gateway_read_roots_include_spilled_tool_results(tmp_path):
             pass
         else:
             raise AssertionError("logs dir outside tool_results must stay refused")
+
+
+def test_session_reads_its_own_staged_uploads_only(tmp_path):
+    from types import SimpleNamespace
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    gw = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "s.sqlite3"))
+    mine, other = gw._staged_upload_dir("sess-a"), gw._staged_upload_dir("sess-b")
+    assert mine != other and mine.parent == other.parent
+    for d in (mine, other):
+        (d / "att_1").mkdir(parents=True)
+        (d / "att_1" / "brief.txt").write_text("x")
+    (tmp_path / "ws").mkdir()
+    layout = SimpleNamespace(workspace_dir=tmp_path / "ws", skills_dir=None, logs_dir=None)
+    roots = JaegerGatewayApp._read_roots(SimpleNamespace(layout=layout), {"workspace": str(tmp_path / "ws")}, mine)
+    with read_confinement(roots):
+        assert _resolve_read(str(mine / "att_1" / "brief.txt"))
+        try:
+            _resolve_read(str(other / "att_1" / "brief.txt"))
+        except SandboxError:
+            pass
+        else:
+            raise AssertionError("another session's staged upload must stay refused")
