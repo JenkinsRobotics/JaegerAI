@@ -1,18 +1,18 @@
 #!/usr/bin/env zsh
-# snapshot.sh [tag] — headless light/dark screenshots of the main window against the MOCK main screen:
+# snapshot.sh [tag] [--snapshot-size WxH] — headless light/dark screenshots of the main window against the MOCK main screen:
 # builds the mock UI, starts the loopback test servers (--mock), runs JaegerShell --snapshot /tmp/jaeger-shots
 # (window kept off every display, never activated), stops the servers, and mirrors the PNGs into the gitignored
 # .build/shots/ (prefixed with [tag]) so they can be copied off the Mac. Prints the snapshot JSON summary.
 set -u
 HERE="$(cd "$(dirname "$0")/.." && pwd)"; cd "$HERE"
-TAG="${1:-latest}"
+TAG="${1:-latest}"; shift $(( $# > 0 ? 1 : 0 ))   # remaining args go to JaegerShell (e.g. --snapshot-size 640x760)
 APP=.build/ui-rebuild/JaegerShell.app/Contents/MacOS/JaegerShell
 [[ -x $APP ]] || { echo "build first: Scripts/build-shell.sh"; exit 1; }
 Scripts/build-main-screen.sh --mock | tail -1
 Scripts/test-servers.sh start --mock | tail -1
 rm -rf /tmp/jaeger-shots
 env -u HERMES_WEBUI_HOST -u JAEGER_WEBUI_HOST JAEGER_SHELL_UI_URL='http://127.0.0.1:18800/?host=macos' \
-  $APP --snapshot /tmp/jaeger-shots 2>/tmp/jaeger-snapshot.log > /tmp/jaeger-snapshot.json
+  $APP --snapshot /tmp/jaeger-shots "$@" 2>/tmp/jaeger-snapshot.log > /tmp/jaeger-snapshot.json
 rc=$?
 Scripts/test-servers.sh stop | tail -3
 mkdir -p .build/shots

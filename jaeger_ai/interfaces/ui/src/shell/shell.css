@@ -30,8 +30,9 @@ body {
 .jg-shell {
   --jg-sidebar-width: 280px;
   --jg-traffic-lights: 78px;
+  position: relative;
   display: grid;
-  grid-template-columns: var(--jg-sidebar-width) minmax(0, 1fr);
+  grid-template-columns: var(--jg-sidebar-column, var(--jg-sidebar-width)) minmax(0, 1fr);
   height: 100%;
   overflow: hidden;
   border-radius: var(--jg-radius-window);
@@ -77,3 +78,37 @@ html[data-jaeger-host="macos"] .jg-traffic-lights i { visibility: hidden; }
 .jg-error-state__detail { color: var(--aether-color-text-dim); font-size: var(--jg-font-tiny); word-break: break-word; }
 .jg-main-row { flex: 1; min-height: 0; display: flex; }
 .jg-main-row > .jg-chat-mount, .jg-main-row > .jg-error-state { flex: 1; min-width: 0; }
+
+/* Resizable sidebar (AppShell + sidebarSizing.ts): 6px separator on the sidebar edge. Only a toggle
+   animates; dragging and window resizes are immediate. */
+.jg-shell.is-animating { transition: grid-template-columns 200ms ease; }
+.jg-shell.is-resizing { cursor: col-resize; -webkit-user-select: none; user-select: none; }
+.jg-shell__sidebar { min-width: 0; overflow: hidden; }
+.jg-sidebar-handle {
+  position: absolute; z-index: 5; top: 0; bottom: 0; left: var(--jg-sidebar-column, var(--jg-sidebar-width));
+  width: 6px; margin-left: -3px; cursor: col-resize; touch-action: none; outline: none;
+}
+.jg-sidebar-handle::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: 2.5px; width: 1px; background: transparent;
+  transition: background 120ms ease;
+}
+.jg-sidebar-handle:hover::after, .jg-shell.is-resizing .jg-sidebar-handle::after { background: var(--jg-color-border); }
+.jg-sidebar-handle:focus-visible::after { width: 2px; left: 2px; background: var(--aether-color-border-focus); }
+@media (prefers-reduced-motion: reduce) { .jg-shell.is-animating { transition: none; } }
+
+/* 88px rail: avatars only, centred; header buttons drop under the traffic-light band. */
+.jg-shell.is-rail .jg-sidebar-header { flex-direction: column; align-items: center; height: auto; padding: 0 0 6px; gap: 6px; }
+.jg-shell.is-rail .jg-traffic-lights { align-self: stretch; align-items: center; height: var(--jg-band-height); }
+.jg-shell.is-rail .jg-sidebar-header__spacer,
+.jg-shell.is-rail .jg-agent-row__text,
+.jg-shell.is-rail .jg-chat-list,
+.jg-shell.is-rail .jg-supervisor__label,
+.jg-shell.is-rail .jg-nav-entry > span,
+.jg-shell.is-rail .jg-sidebar-footer .jg-pill { display: none; }
+.jg-shell.is-rail .jg-shell__primary { padding: 0 8px 12px; }
+.jg-shell.is-rail .jg-agent-row { position: relative; justify-content: center; min-height: 52px; padding: 6px 0; }
+.jg-shell.is-rail .jg-unread-dot { position: absolute; top: 8px; right: 12px; }
+.jg-shell.is-rail .jg-supervisor { width: 64px; padding: 6px; }
+.jg-shell.is-rail .jg-supervisor-art { transform: scale(0.72); margin: -8px 0; }
+.jg-shell.is-rail .jg-nav-entry { justify-content: center; }
+.jg-shell.is-rail .jg-shell__footer { display: flex; justify-content: center; padding: 12px 0 16px; }
