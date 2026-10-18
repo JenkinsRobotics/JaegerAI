@@ -75,10 +75,13 @@ export function App({ source }: { source: JaegerSource }) {
     if (!selectedAgentId) return;
     let live = true;
     const agentId = selectedAgentId;
-    const known = explicitSessionId ?? chosen.current.get(agentId);
-    let resolve = known ? Promise.resolve(known) : resolving.current.get(agentId);
+    // A remembered chat is only a hint: it may be archived or gone (another
+    // device, a reset state), so it is checked against the agent's chats.
+    const remembered = explicitSessionId ? undefined : chosen.current.get(agentId);
+    let resolve = explicitSessionId ? Promise.resolve(explicitSessionId) : resolving.current.get(agentId);
     if (!resolve) {
       resolve = source.sessions({ agent_id: agentId }).then((rows) => {
+        if (remembered && rows.some((r) => r.session_id === remembered && !r.archived)) return remembered;
         const thread = rows.find((r) => !r.archived && ((r.message_count ?? 0) > 0 || r.last_message_preview)) ?? rows.find((r) => !r.archived);
         return thread?.session_id ?? source.createSession({ agent_id: agentId }).then((s) => s.session_id);
       }).finally(() => resolving.current.delete(agentId));
