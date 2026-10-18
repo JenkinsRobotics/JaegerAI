@@ -14,6 +14,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _ENV = "JAEGER_LIFECYCLE_LEASE"
+#: ``launchd`` marks a process whose lifecycle launchd owns (set in its plist).
+#: Such a process ignores client (menu-bar) leases: a dev stack or menu bar
+#: that beats the shared lease and then quits must not take it down. Global
+#: Stop still applies. Honored only when launchd is the parent (ppid 1), so a
+#: shell or child that inherits the variable does not escape the lease.
+_OWNER_ENV = "JAEGER_LIFECYCLE_OWNER"
+
+
+def launchd_owned() -> bool:
+    return os.environ.get(_OWNER_ENV, "").strip().lower() == "launchd" and os.getppid() == 1
 # The menu bar beats faster than this. One missed beat suspends; shutdown
 # waits for the longer grace so a brief stall is not a stack teardown.
 SUSPEND_AFTER_S = 5.0
@@ -63,6 +73,8 @@ class LifecycleLease:
         os.replace(temporary, self.path)
 
     def decide(self, *, now: float | None = None) -> LeaseDecision:
+        if launchd_owned():
+            return LeaseDecision(True, "launchd-owned; client lifecycle leases ignored")
         if not self.path.exists():
             return LeaseDecision(True, "no lease issued")
         try:
