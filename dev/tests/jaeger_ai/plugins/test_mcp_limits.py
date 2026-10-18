@@ -122,3 +122,15 @@ def test_gateway_loads_only_marked_servers(tmp_path, monkeypatch):
     monkeypatch.setenv("JAEGER_WITH_MCP", "1")
     assert service.gateway_server_selected({"name": "other"})
     service._GATEWAY_MCP_LOADED.clear()
+
+
+def test_read_only_list_is_parsed_and_matched_by_glob():
+    from jaeger_ai.plugins.mcp.client import is_read_only_tool, server_config_from_entry
+    cfg = server_config_from_entry({"name": "rea", "command": "npx",
+                                    "tools": {"read_only": ["inspect_*", "list_unknowns", "", 3]}})
+    assert cfg.tools_read_only == ["inspect_*", "list_unknowns"]
+    assert is_read_only_tool("inspect_macho", cfg)
+    assert is_read_only_tool("list_unknowns", cfg)
+    assert not is_read_only_tool("install_adb_package", cfg)
+    assert not is_read_only_tool("", cfg)
+    assert server_config_from_entry({"name": "x", "command": "y"}).tools_read_only == []

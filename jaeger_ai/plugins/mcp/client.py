@@ -81,6 +81,11 @@ class MCPServerConfig:
     tools_exclude: list[str] = field(default_factory=list)
     max_tools: int = 0
     gated: bool = False
+    #   tools_read_only: names/globs the owner declares read-only. Only these
+    #                  run without an approval card; every other tool of the
+    #                  server asks through the live confirmation provider.
+    #                  Server annotations (readOnlyHint) are not trusted.
+    tools_read_only: list[str] = field(default_factory=list)
     connect_timeout_s: float = 20.0
     call_timeout_s: float = 60.0
 
@@ -107,12 +112,19 @@ def _name_list(value: Any) -> list[str]:
     return [str(item).strip() for item in value if isinstance(item, str) and str(item).strip()]
 
 
+def _match_any(name: str, patterns: list[str]) -> bool:
+    import fnmatch
+    return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+
+
+def is_read_only_tool(tool_name: str, config: "MCPServerConfig") -> bool:
+    """True only when the owner listed ``tool_name`` under ``tools.read_only``."""
+    return bool(tool_name) and _match_any(tool_name, config.tools_read_only)
+
+
 def filter_tool_names(names: list[str], config: "MCPServerConfig") -> list[str]:
     """Apply a server's include/exclude/max limits, keeping server order."""
-    import fnmatch
-
-    def _match(name: str, patterns: list[str]) -> bool:
-        return any(fnmatch.fnmatchcase(name, pattern) for pattern in patterns)
+    _match = _match_any
 
     kept = [n for n in names if not config.tools_include or _match(n, config.tools_include)]
     kept = [n for n in kept if not _match(n, config.tools_exclude)]
@@ -142,6 +154,7 @@ def server_config_from_entry(entry: dict[str, Any], *, env: dict[str, str] | Non
         tools_exclude=_name_list(tools.get("exclude")),
         max_tools=max_tools,
         gated=bool(tools.get("gated", False)),
+        tools_read_only=_name_list(tools.get("read_only")),
         connect_timeout_s=_timeout(entry.get("connect_timeout_s"), DEFAULT_CONNECT_TIMEOUT_S),
         call_timeout_s=_timeout(entry.get("call_timeout_s"), DEFAULT_CALL_TIMEOUT_S),
     )
@@ -155,6 +168,7 @@ class MCPToolSpec:
     description: str
     input_schema: dict[str, Any]
     agent_name: str = ""
+    read_only: bool = False      # owner-declared (tools.read_only); False = ask
 
 
 def _agent_tool_name(server: str, tool: str) -> str:
@@ -336,6 +350,7 @@ class MCPRegistry:
                 description=tool.description or "",
                 input_schema=schema if isinstance(schema, dict) else {},
                 agent_name=_agent_tool_name(config.name, tool.name),
+                read_only=is_read_only_tool(tool.name, config),
             )
             specs.append(spec)
         registered: list[MCPToolSpec] = []
