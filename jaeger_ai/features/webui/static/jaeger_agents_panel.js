@@ -33,8 +33,8 @@
   }
 
   function sortAgents(list){
-    return (list||[]).filter(visible).sort((x,y)=>
-      ((ORDER[x.role]??2)-(ORDER[y.role]??2))||label(x).localeCompare(label(y)));
+    // Unpinned: no lead-first ordering — every agent sorts alphabetically by label.
+    return (list||[]).filter(visible).sort((x,y)=>label(x).localeCompare(label(y)));
   }
 
   function homeId(a){
