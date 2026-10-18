@@ -6,6 +6,20 @@ import { useEffect, useRef } from "react";
 
 export const POPUP_OPEN_EVENT = "jg:popup-open";
 let seq = 0;
+let openCount = 0;
+let queued: (() => void) | null = null;
+
+/** True while any coordinated popup is open. */
+export function anyPopupOpen(): boolean { return openCount > 0; }
+/** Run `fn` now, or (latest call wins) once the last open popup closes: the chat's auto-follow pauses
+ * while a menu is open so the transcript doesn't scroll out from under it. */
+export function whenNoPopup(fn: () => void): void {
+  if (openCount === 0) fn(); else queued = fn;
+}
+function popupClosed(): void {
+  openCount = Math.max(0, openCount - 1);
+  if (openCount === 0 && queued) { const fn = queued; queued = null; fn(); }
+}
 
 type AnchorLike = Element | { x: number; y: number } | null | undefined;
 
@@ -18,6 +32,7 @@ export function useExclusivePopup(open: boolean, close: () => void, anchor?: Anc
   useEffect(() => {
     if (!open || typeof window === "undefined") return;
     const me = id.current;
+    openCount += 1;
     window.dispatchEvent(new CustomEvent(POPUP_OPEN_EVENT, { detail: me }));
     const onOther = (e: Event) => { if ((e as CustomEvent).detail !== me) closeRef.current(); };
     const onPress = (e: Event) => {
@@ -37,6 +52,7 @@ export function useExclusivePopup(open: boolean, close: () => void, anchor?: Anc
       document.removeEventListener("mousedown", onPress, true);
       document.removeEventListener("pointerdown", onPress, true);
       document.removeEventListener("keydown", onKey, true);
+      popupClosed();
     };
   }, [open]);
 }

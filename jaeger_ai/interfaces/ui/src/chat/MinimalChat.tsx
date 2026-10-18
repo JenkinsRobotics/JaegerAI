@@ -5,6 +5,7 @@
  * auto-grows (JS fallback), takes picked or pasted files as chips and morphs its primary button. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { AppMenu as Menu } from "../popups/AppMenu";
+import { whenNoPopup } from "../popups/coordinator";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { avatarColor } from "../agents/avatarColor";
 import { HandoffMarker } from "../agents/HandoffMarker";
@@ -325,7 +326,9 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
    * or pointer press); our own smooth scrolling never does. */
   const inputAt = useRef(0);
   const userScrolled = () => Date.now() - inputAt.current <= USER_INPUT_WINDOW_MS;
-  const follow = (el: HTMLElement) => {
+  // Auto-follow pauses while a menu is open (it would scroll the target out from under it) and catches up on close.
+  const follow = (el: HTMLElement) => whenNoPopup(() => { if (stick.current) followNow(el); });
+  const followNow = (el: HTMLElement) => {
     const jump = el.scrollHeight - el.clientHeight - el.scrollTop;
     if (streamStyle.scroll.smooth && jump > 0 && jump <= el.clientHeight && typeof el.scrollTo === "function") el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     else el.scrollTop = el.scrollHeight;
