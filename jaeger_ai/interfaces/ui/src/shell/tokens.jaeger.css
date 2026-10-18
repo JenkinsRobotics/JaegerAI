@@ -7,7 +7,7 @@
 :root {
   /* Surfaces. */
   --jg-color-chrome: #fcfcfc;        /* window background / top band (matches the native window) */
-  --jg-color-pane: #ffffff;          /* chat pane */
+  --jg-color-pane: #fcfcfc;          /* chat pane (same as the window) */
   --jg-color-sidebar: #f5f5f5;
   --jg-color-elevated: #ffffff;      /* cards, menus, pills */
   --jg-color-fg: #1c1c1c;
@@ -22,6 +22,18 @@
   --jg-alpha-bubble-assistant: 6%;
   --jg-color-accent: #1680f3;
   --jg-color-accent-text: #1680f3;
+  /* Agent avatar hues (measured on the reference roster; saturated, same in both themes). */
+  --jg-avatar-red: #fb2b3e;
+  --jg-avatar-green: #14c16f;
+  --jg-avatar-purple: #8f59f9;
+  --jg-avatar-pink: #f93498;
+  --jg-avatar-teal: #13b7a2;
+  --jg-avatar-brown: #a06b39;
+  --jg-avatar-blue: #2b7ff6;
+  --jg-avatar-orange: #f7882f;
+  /* An agent's color as a fill under white text: its bubble (darker) and its voice button. */
+  --jg-mix-bubble-user: 80%;
+  --jg-mix-agent-button: 92%;
   --jg-color-on-accent: #ffffff;
   --jg-color-shadow: #000000;
   --jg-shadow-card: 0 1px 2px color-mix(in srgb, var(--jg-color-shadow) 6%, transparent),

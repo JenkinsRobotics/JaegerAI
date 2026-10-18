@@ -1,4 +1,5 @@
-import { GlyphBranch, GlyphCode, GlyphCube, PlusIcon, SearchIcon, TasksIcon } from "../icons";
+import type { SidebarControl } from "../shell/AppShell";
+import { GlyphBranch, GlyphCode, GlyphCube, PlusIcon, SearchIcon, SidebarIcon, TasksIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
 import type { SessionRow } from "../api/types";
 import type { AgentsState } from "./agentsStore";
@@ -39,10 +40,12 @@ export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewCha
       onOpen={(sessionId) => onSelect({ type: "agent", agentId, sessionId })} />
   );
   return {
-    top: (
+    top: (sidebar: SidebarControl) => (
       <div className="jg-sidebar-header" data-aether-window-drag-region>
         <span className="jg-traffic-lights" aria-hidden="true"><i /><i /><i /></span>
         <span className="jg-sidebar-header__spacer" />
+        <button type="button" className="jg-icon-button" aria-label={sidebar.collapsed ? "Show sidebar" : "Hide sidebar"}
+          aria-expanded={!sidebar.collapsed} title={sidebar.collapsed ? "Show sidebar" : "Hide sidebar"} onClick={sidebar.toggle}><SidebarIcon /></button>
         <button type="button" className="jg-round-button" aria-label="Search" title="Search" onClick={onSearch}><SearchIcon /></button>
         <button type="button" className="jg-round-button" aria-label="New chat" aria-haspopup="menu" title="New chat (⌘N)"
           onClick={(e) => onNewChatMenu(e.currentTarget)}><PlusIcon /></button>
@@ -51,7 +54,9 @@ export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewCha
     primary: (
       <>
         {state.error && <ErrorState compact title="Couldn't load agents" error={state.error} onRetry={onRetry} />}
-        {lead && <SupervisorTile row={lead} selected={selectedAgent === lead.agent.id} onSelect={() => onSelect({ type: "agent", agentId: lead.agent.id })} />}
+        {lead && <SupervisorTile row={lead} selected={selectedAgent === lead.agent.id}
+          unread={selectedAgent !== lead.agent.id && isUnread(lead.agent.id, lead.lastActivityAt, state.seen, lead.summary?.unseen)}
+          onSelect={() => onSelect({ type: "agent", agentId: lead.agent.id })} />}
         {lead && chatsFor(lead.agent.id)}
         <nav className="jg-agent-list" aria-label="Specialists">
           {specialists.map((row) => (

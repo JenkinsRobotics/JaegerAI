@@ -8,9 +8,12 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { SIDEBAR, dragTo, keyAdjust, layout, parsePrefs, serializePrefs, toggle, type SidebarPrefs } from "./sidebarSizing";
 
+export interface SidebarControl { collapsed: boolean; toggle: () => void }
+
 interface AppShellProps {
-  /** Sidebar header: traffic-light band, search and + (window drag region). */
-  top: ReactNode;
+  /** Sidebar header: traffic-light band, sidebar toggle, search and + (window drag region). A function
+   * gets the collapse state and the animated toggle (the header's sidebar button). */
+  top: ReactNode | ((sidebar: SidebarControl) => ReactNode);
   /** Pinned supervisor + specialist list. */
   primary: ReactNode;
   /** Secondary entries (Tasks). */
@@ -101,7 +104,7 @@ export function AppShell({ top, primary, sections, footer, children }: AppShellP
     <div className="jg-desktop aether-home-theme">
       <div ref={shellRef} className={className} style={style} data-sidebar={lay.mode}>
         <aside className="jg-shell__sidebar" aria-label="Agents">
-          <div className="jg-shell__top">{top}</div>
+          <div className="jg-shell__top">{typeof top === "function" ? top({ collapsed: lay.mode === "rail", toggle: () => apply(toggle(prefs), true) }) : top}</div>
           <div className="jg-shell__primary">{primary}{sections}</div>
           <div className="jg-shell__footer">{footer}</div>
         </aside>
