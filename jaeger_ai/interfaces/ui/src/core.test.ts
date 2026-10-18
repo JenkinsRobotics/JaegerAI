@@ -59,9 +59,10 @@ describe("agents", () => {
 
 import { AVATAR_PALETTE, avatarColor } from "./agents/avatarColor";
 describe("avatar color", () => {
-  it("is deterministic and drawn from Aether tokens", () => {
+  it("is deterministic and drawn from the Jaeger avatar tokens; the supervisor stays red", () => {
     expect(avatarColor("agent:mac-app")).toBe(avatarColor("agent:mac-app"));
     expect(AVATAR_PALETTE).toContain(avatarColor("x"));
-    expect(avatarColor("x")).toMatch(/^var\(--aether-color-/);
+    expect(avatarColor("x")).toMatch(/^var\(--jg-avatar-/);
+    expect(avatarColor("native:jaeger")).toBe("var(--jg-avatar-red)");
   });
 });

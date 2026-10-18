@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatPart } from "../chat/host";
 import { AgentAvatar } from "./AgentAvatar";
-import { AVATAR_SHAPES, avatarShape } from "./avatarColor";
+import { AVATAR_SHAPES, avatarFace, avatarShape } from "./avatarColor";
 import { HandoffMarker } from "./HandoffMarker";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -12,10 +12,23 @@ import { HandoffMarker } from "./HandoffMarker";
 describe("avatar silhouettes", () => {
   it("picks a stable shape per id, spread over the set, supervisor round", () => {
     expect(avatarShape("agent:swe")).toBe(avatarShape("agent:swe"));
-    expect(avatarShape("native:jaeger")).toBe("circle");
+    expect(avatarShape("native:jaeger")).toBe("squircle");
     const seen = new Set(Array.from({ length: 40 }, (_, i) => avatarShape(`agent:a${i}`)));
     expect(seen.size).toBeGreaterThanOrEqual(4);
     for (const s of seen) expect(AVATAR_SHAPES).toContain(s);
+  });
+
+  it("gives each id a stable face that varies across a roster; the supervisor tilts", () => {
+    expect(avatarFace("agent:swe")).toEqual(avatarFace("agent:swe"));
+    const faces = Array.from({ length: 40 }, (_, i) => avatarFace(`agent:a${i}`));
+    expect(new Set(faces.map((f) => `${f.dx},${f.dy}`)).size).toBeGreaterThanOrEqual(6);
+    expect(faces.some((f) => f.eyes === "wide")).toBe(true);
+    expect(faces.some((f) => f.tilt !== 0)).toBe(true);
+    expect(avatarFace("native:jaeger").spin).toBeLessThan(0);
+    const round = Array.from({ length: 40 }, (_, i) => `agent:a${i}`).filter((id) => avatarShape(id) === "circle");
+    for (const id of round) expect(avatarFace(id).spin).toBe(0);
+    const html = renderToStaticMarkup(<AgentAvatar id="native:jaeger" name="Jaeger" size={54} />);
+    expect(html).toContain("--jg-avatar-spin:-24deg");
   });
 
   it("draws the silhouette with the two-eye face, or a round image", () => {

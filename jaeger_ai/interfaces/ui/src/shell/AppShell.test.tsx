@@ -29,6 +29,20 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 describe("AppShell sidebar", () => {
+  it("hands the header a toggle that collapses to the rail and back", () => {
+    const top = ({ collapsed, toggle }: { collapsed: boolean; toggle: () => void }) => (
+      <button type="button" aria-expanded={!collapsed} onClick={toggle}>sidebar</button>
+    );
+    act(() => { root.render(<AppShell top={top} primary={<div />} footer={<div />}><p>chat</p></AppShell>); });
+    const button = host.querySelector("button")!;
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    act(() => { button.click(); });
+    expect(shell().dataset.sidebar).toBe("rail");
+    expect(button.getAttribute("aria-expanded")).toBe("false");
+    act(() => { button.click(); });
+    expect(shell().dataset.sidebar).toBe("expanded");
+  });
+
   it("starts at 280 with an accessible separator", () => {
     render();
     expect(shell().dataset.sidebar).toBe("expanded");

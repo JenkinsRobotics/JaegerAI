@@ -1,15 +1,21 @@
 /* Sidebar header: the top band (traffic-light reserve), then search and + on the right. */
-.jg-sidebar-header { display: flex; align-items: center; gap: 8px; height: var(--jg-band-height); padding: 0 14px 0 0; }
+.jg-sidebar-header { display: flex; align-items: center; gap: 10px; box-sizing: border-box; height: var(--jg-band-height); padding: 7px 18px 0 0; }
 .jg-traffic-lights { flex: none; width: var(--jg-traffic-lights); display: flex; gap: 8px; padding-left: 14px; }
 .jg-traffic-lights i { width: 12px; height: 12px; border-radius: 50%; background: color-mix(in srgb, var(--aether-color-text-faint) 45%, transparent); border: 0.5px solid color-mix(in srgb, var(--aether-color-text-faint) 60%, transparent); }
 .jg-sidebar-header__spacer { flex: 1; }
 .jg-round-button {
-  display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; border: 0;
+  display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 0;
   background: var(--aether-color-bg-control); color: var(--aether-color-text); cursor: pointer;
   box-shadow: 0 1px 3px color-mix(in srgb, var(--aether-color-shadow) 14%, transparent);
 }
 .jg-round-button:hover { background: var(--aether-color-bg-hover); }
-:is(.jg-round-button, .jg-agent-row, .jg-supervisor, .jg-nav-entry, .jg-pill, .jg-user-chip):focus-visible {
+/* Plain glyph button (sidebar toggle): no fill until hovered. */
+.jg-icon-button {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: -3px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--jg-color-text-secondary); cursor: pointer;
+}
+.jg-icon-button:hover { background: var(--aether-color-bg-hover); color: var(--aether-color-text); }
+:is(.jg-round-button, .jg-icon-button, .jg-agent-row, .jg-supervisor, .jg-nav-entry, .jg-pill, .jg-user-chip):focus-visible {
   outline: 2px solid var(--aether-color-border-focus); outline-offset: 1px;
 }
 
@@ -22,28 +28,34 @@
 .jg-avatar__shape { width: 100%; height: 100%; display: block; }
 .jg-avatar--image { border-radius: 50%; overflow: hidden; background: var(--jg-avatar-color, var(--aether-color-accent)); }
 .jg-avatar img { width: 100%; height: 100%; object-fit: cover; }
-.jg-avatar__face { position: relative; display: flex; gap: 16%; width: 100%; justify-content: center; margin-top: -4%; }
-.jg-avatar--cloud .jg-avatar__face { margin-top: 6%; }
-.jg-avatar__face i { width: 13%; aspect-ratio: 1 / 1.25; border-radius: 50%; background: var(--aether-color-text-on-selected); }
+.jg-avatar__body { position: relative; display: grid; width: 100%; height: 100%; transform: rotate(var(--jg-avatar-spin, 0deg)); }
+.jg-avatar__body > * { grid-area: 1 / 1; }
+/* Two white pill eyes, a little above center, looking their own way (avatarFace). */
+.jg-avatar__face {
+  position: relative; display: flex; align-items: center; justify-content: center; gap: 13%; align-self: center;
+  margin-top: -8%; transform: translate(var(--jg-eye-x, 0), var(--jg-eye-y, 0)) rotate(var(--jg-eye-tilt, 0deg));
+}
+.jg-avatar--cloud .jg-avatar__face { margin-top: 8%; }
+.jg-avatar--pill .jg-avatar__face { margin-top: 0; }
+.jg-avatar__face i { width: 12%; aspect-ratio: 1 / 2.15; border-radius: 999px; background: var(--jg-avatar-eye, #fff); }
+.jg-avatar__face--wide i { width: 21%; aspect-ratio: 1.6 / 1; }
 
 /* Pinned supervisor card. */
-.jg-supervisor-wrap { display: flex; justify-content: center; padding: 8px 0 14px; }
+.jg-supervisor-wrap { display: flex; justify-content: center; padding: 18px 0 14px; }
 .jg-supervisor {
-  display: flex; flex-direction: column; align-items: center; gap: 6px; width: 92px; padding: 10px 6px 8px;
-  border: 0; border-radius: 10px; background: color-mix(in srgb, var(--aether-color-text-faint) 22%, transparent);
+  --jg-supervisor-bg: var(--aether-color-bg-rail);
+  display: flex; flex-direction: column; align-items: center; gap: 5px; width: 95px; padding: 10px 6px 6px;
+  border: 0; border-radius: 10px; background: transparent;
   color: var(--aether-color-text); font: inherit; cursor: pointer;
 }
-.jg-supervisor:hover { background: color-mix(in srgb, var(--aether-color-text-faint) 30%, transparent); }
-.jg-supervisor.is-selected { background: color-mix(in srgb, var(--aether-color-text-faint) 34%, transparent); }
-.jg-supervisor__label { max-width: 100%; font-size: var(--jg-font-tiny); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-supervisor:hover { --jg-supervisor-bg: color-mix(in srgb, var(--aether-color-text) 5%, var(--aether-color-bg-rail)); background: var(--jg-supervisor-bg); }
+.jg-supervisor.is-selected { --jg-supervisor-bg: color-mix(in srgb, var(--aether-color-text) 7%, var(--aether-color-bg-rail)); background: var(--jg-supervisor-bg); }
+.jg-supervisor__label { max-width: 100%; line-height: 16px; font-size: var(--jg-font-tiny); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .jg-supervisor-art { position: relative; display: grid; place-items: center; }
-.jg-supervisor-art__dots { display: flex; align-items: center; gap: 6px; }
-.jg-supervisor-art__dots i { width: 12px; height: 12px; border-radius: 50%; background: color-mix(in srgb, var(--aether-color-error) 70%, var(--aether-color-bg-control)); }
-.jg-supervisor-art__dots i:nth-child(2) { width: 15px; height: 15px; background: var(--aether-color-error); }
-.jg-supervisor-art__badge {
-  position: absolute; right: 0; bottom: 2px; display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%;
-  background: var(--aether-color-hardware); color: var(--aether-color-text-on-selected);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aether-color-bg-rail) 90%, transparent);
+/* Unread: the row dot's blue, ringed in the tile so it reads over the avatar's corner. */
+.jg-supervisor-art__dot {
+  position: absolute; right: 0; bottom: 2px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--jg-color-accent); box-shadow: 0 0 0 2px var(--jg-supervisor-bg, var(--aether-color-bg-rail));
 }
 
 /* Specialist rows: 58px, 36px avatar, 8px gap, radius 10; hover fg 6%, selected fg 8%. */

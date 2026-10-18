@@ -399,7 +399,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
         <button type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach files" title="Attach files" onClick={() => picker.current?.click()}><PlusIcon /></button>
         <textarea ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : `Message ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
         {voice && (
-          <button type="button" className={`jg-composer__icon${listening === "dictation" ? " is-listening" : ""}`}
+          <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
             aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
             disabled={listening === "voice"} onClick={() => void toggleListening("dictation")}><MicIcon /></button>
         )}
