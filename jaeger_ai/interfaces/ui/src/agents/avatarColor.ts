@@ -51,15 +51,22 @@ export function avatarShape(id: string): AvatarShape {
 
 /** A face: where the two eyes look (offsets in % of the avatar), how the pair tilts, the eye
  * form, and a small turn of the whole silhouette, so a roster reads as distinct characters. */
-export interface AvatarFace { dx: number; dy: number; tilt: number; eyes: "tall" | "wide"; spin: number }
+export interface AvatarFace {
+  dx: number; dy: number; tilt: number; eyes: "tall" | "wide"; spin: number;
+  /** Idle motion: where the eyes glance (offsets in %) and when (s), plus the blink period (s). */
+  glance: { dx: number; dy: number; delay: number }; blink: number;
+}
 
 export function avatarFace(id: string, shape: AvatarShape = avatarShape(id)): AvatarFace {
-  if (id === LEAD_AGENT_ID) return { dx: 4, dy: 6, tilt: 0, eyes: "tall", spin: -24 };
+  const glance = { dx: pick(id, "glance-x", [-10, -6, 6, 10]), dy: pick(id, "glance-y", [-6, -3, 3]), delay: draw(id, "glance-t") % 9 };
+  const blink = 4 + (draw(id, "blink") % 4);
+  if (id === LEAD_AGENT_ID) return { dx: 4, dy: 6, tilt: 0, eyes: "tall", spin: -24, glance: { dx: -10, dy: -6, delay: 2 }, blink: 5 };
   return {
     dx: pick(id, "gaze-x", [-12, -6, 0, 0, 4, 10, 16]),
     dy: pick(id, "gaze-y", [-8, -6, -2, 2, 6]),
     tilt: pick(id, "tilt", [0, 0, 0, -24, 18]),
     eyes: pick(id, "eyes", ["tall", "tall", "tall", "tall", "tall", "wide"] as const),
     spin: shape === "circle" ? 0 : pick(id, "spin", [-14, -8, 0, 6, 12]),
+    glance, blink,
   };
 }

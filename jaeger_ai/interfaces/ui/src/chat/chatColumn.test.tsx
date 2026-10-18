@@ -60,4 +60,11 @@ describe("chat column", () => {
     expect(html.match(/<i><\/i>/g)).toHaveLength(3);
     expect(html).toContain('class="jg-progress-dots" aria-hidden="true"');
   });
+
+  it("shows the agent's avatar instead of the dots when it knows the agent", () => {
+    const html = renderToStaticMarkup(<ProgressLine phrase="Working on it" agent={{ id: "native:jaeger", name: "Jaeger" }} />);
+    expect(html).toContain("jg-progress-avatar");
+    expect(html).toContain('data-shape="squircle"');
+    expect(html).not.toContain("jg-progress-dots");
+  });
 });

@@ -109,6 +109,8 @@
 .jg-progress-dots i:nth-child(1) { background: color-mix(in srgb, var(--jg-agent-color, var(--aether-color-accent)) 55%, transparent); }
 .jg-progress-dots i:nth-child(2) { background: var(--jg-agent-color, var(--aether-color-accent)); animation-delay: .15s; }
 .jg-progress-dots i:nth-child(3) { background: color-mix(in srgb, var(--jg-agent-color, var(--aether-color-accent)) 75%, transparent); animation-delay: .3s; }
+.jg-progress-avatar { display: inline-flex; animation: jg-bob 1.8s ease-in-out infinite; }
+@keyframes jg-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -1.5px; } }
 @keyframes jg-dot { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-2px); } }
 .jg-shimmer {
   color: transparent;
@@ -125,7 +127,7 @@
 @keyframes jg-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) {
   .jg-shimmer { animation: none; background: none; color: var(--jg-color-text-secondary); }
-  .jg-progress-dots i { animation: none; }
+  .jg-progress-dots i, .jg-progress-avatar { animation: none; }
 }
 
 /* Tool steps: one elevated summary row, "Show steps" expands the list. */

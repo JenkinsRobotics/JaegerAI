@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { ChatPart } from "../chat/host";
-import { AgentAvatar } from "./AgentAvatar";
+import { AgentAvatar, SupervisorArt } from "./AgentAvatar";
 import { AVATAR_SHAPES, avatarFace, avatarShape } from "./avatarColor";
 import { HandoffMarker } from "./HandoffMarker";
 
@@ -29,6 +29,17 @@ describe("avatar silhouettes", () => {
     for (const id of round) expect(avatarFace(id).spin).toBe(0);
     const html = renderToStaticMarkup(<AgentAvatar id="native:jaeger" name="Jaeger" size={54} />);
     expect(html).toContain("--jg-avatar-spin:-24deg");
+  });
+
+  it("pinned art: unread dot wins, else the supervisor's star; specialists get neither", () => {
+    const art = (props: { unread?: boolean; lead?: boolean }) => renderToStaticMarkup(<SupervisorArt id="native:jaeger" name="Jaeger" {...props} />);
+    expect(art({ lead: true })).toContain("jg-supervisor-art__badge");
+    expect(art({ lead: true, unread: true })).toContain("jg-supervisor-art__dot");
+    expect(art({ lead: true, unread: true })).not.toContain("jg-supervisor-art__badge");
+    expect(art({})).not.toMatch(/__badge|__dot/);
+    const face = renderToStaticMarkup(<AgentAvatar id="agent:swe" name="SWE" size={40} />);
+    expect(face).toMatch(/--jg-glance-x:-?\d/);
+    expect(face).toMatch(/--jg-blink:\d+s/);
   });
 
   it("draws the silhouette with the two-eye face, or a round image", () => {

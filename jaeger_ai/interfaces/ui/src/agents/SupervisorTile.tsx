@@ -8,7 +8,7 @@ export function SupervisorTile({ row, selected, unread = false, onSelect }: { ro
   return (
     <div className="jg-supervisor-wrap">
       <button type="button" className={`jg-supervisor${selected ? " is-selected" : ""}`} aria-current={selected ? "page" : undefined} onClick={onSelect} title={name}>
-        <SupervisorArt id={row.agent.id} name={name} unread={unread} />
+        <SupervisorArt id={row.agent.id} name={name} unread={unread} lead={row.agent.role === "lead"} />
         <span className="jg-supervisor__label">{name}</span>
       </button>
     </div>

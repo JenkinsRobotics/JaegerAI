@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import { StarIcon } from "../icons";
 import { avatarColor, avatarFace, avatarShape, type AvatarShape } from "./avatarColor";
 
 /** Agent avatar: one of a few hand-drawn silhouettes (by a hash of the id) in the agent's color, with a
@@ -19,6 +20,8 @@ export function AgentAvatar({ id, name, src, size = 36 }: { id: string; name: st
     width: size, height: size, "--jg-avatar-color": avatarColor(id),
     "--jg-avatar-spin": `${face.spin}deg`, "--jg-eye-x": `${(face.dx * size) / 100}px`,
     "--jg-eye-y": `${(face.dy * size) / 100}px`, "--jg-eye-tilt": `${face.tilt}deg`,
+    "--jg-glance-x": `${(face.glance.dx * size) / 100}px`, "--jg-glance-y": `${(face.glance.dy * size) / 100}px`,
+    "--jg-glance-delay": `-${face.glance.delay}s`, "--jg-blink": `${face.blink}s`,
   } as CSSProperties;
   return (
     <span className={`jg-avatar jg-avatar--${src ? "image" : shape}`} style={style} aria-hidden="true" title={name} data-shape={src ? undefined : shape}>
@@ -32,12 +35,13 @@ export function AgentAvatar({ id, name, src, size = 36 }: { id: string; name: st
   );
 }
 
-/** The supervisor's pinned art: its own avatar, larger, with the unread dot at the corner. */
-export function SupervisorArt({ id, name, unread = false, size = 54 }: { id: string; name: string; unread?: boolean; size?: number }) {
+/** A pinned tile's art: the agent's avatar, larger. The corner shows the unread dot, else (for the
+ * supervisor) its star badge. */
+export function SupervisorArt({ id, name, unread = false, lead = false, size = 54 }: { id: string; name: string; unread?: boolean; lead?: boolean; size?: number }) {
   return (
     <span className="jg-supervisor-art" style={{ width: size, height: size }} aria-hidden="true">
       <AgentAvatar id={id} name={name} size={size} />
-      {unread && <span className="jg-supervisor-art__dot" />}
+      {unread ? <span className="jg-supervisor-art__dot" /> : lead && <span className="jg-supervisor-art__badge"><StarIcon width={9} height={9} /></span>}
     </span>
   );
 }

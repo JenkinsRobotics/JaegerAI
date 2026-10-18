@@ -39,9 +39,23 @@
 .jg-avatar--pill .jg-avatar__face { margin-top: 0; }
 .jg-avatar__face i { width: 12%; aspect-ratio: 1 / 2.15; border-radius: 999px; background: var(--jg-avatar-eye, #fff); }
 .jg-avatar__face--wide i { width: 21%; aspect-ratio: 1.6 / 1; }
+/* Idle life: an occasional glance and a blink, staggered per agent (avatarFace); still under reduced motion. */
+.jg-avatar__face { animation: jg-glance 11s var(--jg-ease-out-cubic) var(--jg-glance-delay, 0s) infinite; }
+.jg-avatar__face i { animation: jg-blink var(--jg-blink, 5s) linear var(--jg-glance-delay, 0s) infinite; }
+@keyframes jg-glance { 0%, 34%, 70%, 100% { translate: 0 0; } 40%, 64% { translate: var(--jg-glance-x, 0) var(--jg-glance-y, 0); } }
+@keyframes jg-blink { 0%, 95%, 100% { scale: 1 1; } 97.5% { scale: 1 0.12; } }
+@media (prefers-reduced-motion: reduce) { .jg-avatar__face, .jg-avatar__face i { animation: none; } }
 
 /* Pinned supervisor card. */
-.jg-supervisor-wrap { display: flex; justify-content: center; padding: 18px 0 14px; }
+.jg-supervisor-wrap { display: flex; justify-content: center; }
+/* Pinned strip: the supervisor + pinned specialists, centred, wrapping; a drop target for agent rows. */
+.jg-pinned { position: relative; border-radius: 12px; }
+.jg-pinned__grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 18px 0 14px; }
+.jg-pinned.has-pins .jg-supervisor { width: 80px; }
+.jg-pinned.has-pins .jg-supervisor-art { transform: scale(0.84); margin: -4px 0; }
+.jg-pinned.is-drop-target { background: color-mix(in srgb, var(--jg-color-accent) 6%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--jg-color-accent) 50%, transparent); }
+.jg-pinned__slot[draggable="true"] { cursor: grab; }
+.jg-agent-list__item[draggable="true"] { -webkit-user-drag: element; }
 .jg-supervisor {
   --jg-supervisor-bg: var(--aether-color-bg-rail);
   display: flex; flex-direction: column; align-items: center; gap: 5px; width: 95px; padding: 10px 6px 6px;
@@ -52,7 +66,12 @@
 .jg-supervisor.is-selected { --jg-supervisor-bg: color-mix(in srgb, var(--aether-color-text) 7%, var(--aether-color-bg-rail)); background: var(--jg-supervisor-bg); }
 .jg-supervisor__label { max-width: 100%; line-height: 16px; font-size: var(--jg-font-tiny); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .jg-supervisor-art { position: relative; display: grid; place-items: center; }
-/* Unread: the row dot's blue, ringed in the tile so it reads over the avatar's corner. */
+/* Supervisor star (no unread) and unread dot, ringed in the tile so they read over the avatar's corner. */
+.jg-supervisor-art__badge {
+  position: absolute; right: -2px; bottom: 0; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--jg-avatar-orange); color: #fff; box-shadow: 0 0 0 2px var(--jg-supervisor-bg, var(--aether-color-bg-rail));
+}
+/* Unread: the row dot's blue. */
 .jg-supervisor-art__dot {
   position: absolute; right: 0; bottom: 2px; width: 10px; height: 10px; border-radius: 50%;
   background: var(--jg-color-accent); box-shadow: 0 0 0 2px var(--jg-supervisor-bg, var(--aether-color-bg-rail));
@@ -144,7 +163,7 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
   width: 100%; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--aether-color-border-focus);
   background: var(--aether-color-bg-control); color: var(--aether-color-text); font: inherit; font-size: var(--jg-font-small);
 }
-.jg-supervisor-wrap + .jg-chat-list { padding-left: 14px; }
+.jg-pinned .jg-chat-list { padding-left: 14px; }
 
 /* Details panel (click the agent pill at the top of the chat). */
 .jg-details {
