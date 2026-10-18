@@ -85,7 +85,7 @@ done < <(env)
 
 # ── flag parsing ───────────────────────────────────────────────────
 
-MARKER_EXPR='not slow and not integration and not model and not ui and not subprocess'
+MARKER_EXPR='not slow and not integration and not model and not ui and not subprocess and not flaky'
 EXPLICIT=0
 RUN_PACKAGES=1
 RUN_ROOT=1
@@ -102,7 +102,7 @@ while [ $# -gt 0 ]; do
             TIER_NAME="smoke"
             ;;
         --unit)
-            MARKER_EXPR='not slow and not integration and not model and not ui and not subprocess'
+            MARKER_EXPR='not slow and not integration and not model and not ui and not subprocess and not flaky'
             EXPLICIT=1
             RUN_PACKAGES=0
             TIER_NAME="unit"

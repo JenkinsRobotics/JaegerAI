@@ -163,6 +163,7 @@ markers = [
     "model: tests that load a real GGUF / external LLM; minutes-scale.",
     "ui: TUI / rumps tray tests that may render to a terminal or display.",
     "subprocess: tests that spawn a real Python subprocess (boot, daemon, bench).",
+    "flaky: quarantined timing-sensitive test; excluded from the unit tier and included in --full.",
     "smoke: a tiny set tagged so ``pytest -m smoke`` is a 30-second sanity check.",
     "regression: pins a specific bug fix — run on every PR even when narrowing markers.",
     "requires_agent_modules: requires the optional Hermes Agent source checkout.",

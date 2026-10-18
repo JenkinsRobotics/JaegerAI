@@ -13,7 +13,7 @@ const store={}; const listeners={};
 const el=()=>({style:{},dataset:{},appendChild(){},append(){},addEventListener(){},setAttribute(){},
   getContext:()=>new Proxy({},{get:(t,k)=>k==='createRadialGradient'?()=>({addColorStop(){}}):()=>{}})});
 global.localStorage={getItem:k=>k in store?store[k]:null,setItem:(k,v)=>{store[k]=String(v)}};
-global.document={readyState:'complete',createElement:el,body:el(),addEventListener(){},getElementById(){return null;}};
+global.document={readyState:'complete',createElement:el,body:el(),getElementById:()=>null,querySelector:()=>null,querySelectorAll:()=>[],addEventListener(){}};
 global.window=global; global.location={href:'http://127.0.0.1:8790/'}; global.CustomEvent=class{constructor(t,o){this.type=t;this.detail=o&&o.detail}};
 global.dispatchEvent=e=>{(listeners[e.type]||[]).forEach(f=>f(e))};
 global.addEventListener=(t,f)=>{(listeners[t]=listeners[t]||[]).push(f)};
