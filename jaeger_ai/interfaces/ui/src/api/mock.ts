@@ -10,20 +10,20 @@ const now = () => Date.now() / 1000;
 const ago = (minutes: number) => now() - minutes * 60;
 
 export const MOCK_AGENTS: Agent[] = [
-  { id: "native:jaeger", name: "jaeger", display_name: "Jaeger", role: "lead", kind: "native", runner: "native" },
-  { id: "agent:gateway-webui", name: "gateway-webui", display_name: "Jaeger Gateway & WebUI", role: "specialist", kind: "native", runner: "delegate:claude-code" },
-  { id: "agent:mac-app", name: "mac-app", display_name: "Mac App", role: "specialist", kind: "native", runner: "delegate:codex" },
-  { id: "agent:ide-chat", name: "ide-chat", display_name: "IDE Chat", role: "specialist", kind: "native", runner: "delegate:claude-code" },
-  { id: "agent:agents-view", name: "agents-view", display_name: "Agents View", role: "specialist", kind: "native", runner: "native" },
-  { id: "agent:architect-notes", name: "architect-notes", display_name: "Architect & Notes", role: "specialist", kind: "native", runner: "delegate:grok-cli" },
-  { id: "agent:swe", name: "swe", display_name: "SWE", role: "specialist", kind: "native", runner: "delegate:codex" },
-  { id: "agent:system-sweep", name: "system-sweep", display_name: "System Sweep", role: "specialist", kind: "native", runner: "native" },
-  { id: "agent:personality", name: "personality", display_name: "Personality", role: "specialist", kind: "native", runner: "native" },
+  { id: "native:jaeger", name: "jaeger", display_name: "Jaeger", role: "lead", kind: "native", runner: "native", skills: [{ id: "plan", name: "Planning", description: "Breaks a request into steps and picks who does each.", source_path: "skills/plan/SKILL.md" }, { id: "delegate", name: "Delegation", description: "Hands work to specialists and follows it to done.", source_path: "skills/delegate/SKILL.md" }], allowed_tools: ["handoff", "tasks", "web_search"] },
+  { id: "agent:gateway-webui", name: "gateway-webui", display_name: "Jaeger Gateway & WebUI", role: "builder", kind: "native", runner: "delegate:claude-code", skills: [{ id: "code", name: "Code", description: "Edits the gateway and WebUI in its worktree.", source_path: "skills/code/SKILL.md" }, { id: "build-test", name: "Build & test", description: "Runs the build and the test suites.", source_path: "skills/build-test/SKILL.md" }, { id: "checker", name: "Checker", description: "Re-verifies each claim before reporting.", source_path: "skills/checker/SKILL.md" }], allowed_tools: ["shell", "git", "read_file", "write_file"] },
+  { id: "agent:mac-app", name: "mac-app", display_name: "Mac App", role: "builder", kind: "native", runner: "delegate:codex", skills: [{ id: "code", name: "Code", description: "Swift and WebKit changes to the Mac shell.", source_path: "skills/code/SKILL.md" }, { id: "build-test", name: "Build & test", description: "swift build, swift test, headless snapshots.", source_path: "skills/build-test/SKILL.md" }], allowed_tools: ["shell", "git", "read_file", "write_file"] },
+  { id: "agent:ide-chat", name: "ide-chat", display_name: "IDE Chat", role: "builder", kind: "native", runner: "delegate:claude-code", skills: [{ id: "code", name: "Code", description: "Ports the VS Code chat widget.", source_path: "skills/code/SKILL.md" }, { id: "build-test", name: "Build & test", description: "Typecheck and vitest.", source_path: "skills/build-test/SKILL.md" }], allowed_tools: ["shell", "git", "read_file", "write_file"] },
+  { id: "agent:agents-view", name: "agents-view", display_name: "Agents View", role: "designer", kind: "native", runner: "native", skills: [{ id: "ui", name: "UI design", description: "Measures the reference and rebuilds it in Jaeger's own code.", source_path: "skills/ui/SKILL.md" }, { id: "snapshots", name: "Snapshots", description: "Headless light and dark screenshots.", source_path: "skills/snapshots/SKILL.md" }], allowed_tools: ["shell", "read_file", "write_file", "screenshot"] },
+  { id: "agent:architect-notes", name: "architect-notes", display_name: "Architect & Notes", role: "researcher", kind: "native", runner: "delegate:grok-cli", skills: [{ id: "research", name: "Research", description: "Reads the repo and the web and writes up findings.", source_path: "skills/research/SKILL.md" }, { id: "notes", name: "Notes", description: "Keeps the architecture notes current.", source_path: "skills/notes/SKILL.md" }], allowed_tools: ["web_search", "read_file"] },
+  { id: "agent:swe", name: "swe", display_name: "SWE", role: "reverse-engineer", kind: "native", runner: "delegate:codex", skills: [{ id: "rea", name: "REA", description: "Reverse-engineers an app's behaviour from the outside, look-only.", source_path: "skills/rea/SKILL.md" }, { id: "trace", name: "Tracing", description: "Follows a feature through the codebase.", source_path: "skills/trace/SKILL.md" }], allowed_tools: ["shell", "read_file", "otool", "strings"] },
+  { id: "agent:system-sweep", name: "system-sweep", display_name: "System Sweep", role: "reviewer", kind: "native", runner: "native", skills: [{ id: "review", name: "Review", description: "Reads diffs and flags risks before merge.", source_path: "skills/review/SKILL.md" }, { id: "sweep", name: "Sweep", description: "Finds dead code and stale files.", source_path: "skills/sweep/SKILL.md" }], allowed_tools: ["git", "read_file"] },
+  { id: "agent:personality", name: "personality", display_name: "Personality", role: "designer", kind: "native", runner: "native", skills: [{ id: "voice", name: "Voice & tone", description: "Shapes how Jaeger talks.", source_path: "skills/voice/SKILL.md" }], allowed_tools: ["read_file"] },
   { id: "native:gateway", name: "gateway", role: "native", kind: "native", metadata: { internal: true } },
 ];
 
 const summary = (id: string, minutes: number, preview: string, unseen: boolean, status = "idle"): AgentSummary => ({
-  id, display_name: MOCK_AGENTS.find((a) => a.id === id)?.display_name, role: id === "native:jaeger" ? "lead" : "specialist",
+  id, display_name: MOCK_AGENTS.find((a) => a.id === id)?.display_name, role: MOCK_AGENTS.find((a) => a.id === id)?.role,
   status, last_activity_at: ago(minutes), last_preview: preview, last_source: "handoff", session_id: `s-${id}`, unseen,
 });
 

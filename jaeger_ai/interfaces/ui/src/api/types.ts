@@ -1,7 +1,16 @@
 /* Wire types for the Jaeger gateway (core/gateway/server.py). Only the fields
  * this UI reads are typed; everything else passes through untouched. */
 
-export type AgentRole = "lead" | "specialist" | "native" | string;
+/** PROPOSED (Gateway bot, 2026-10-18): specialists carry a working role. */
+export type AgentRole = "lead" | "specialist" | "native" | "reverse-engineer" | "builder" | "reviewer" | "researcher" | "designer" | string;
+
+/** PROPOSED (Gateway bot): one skill an agent has. `source_path` is where it lives on disk (tooltip only). */
+export interface AgentSkill {
+  id: string;
+  name: string;
+  description?: string;
+  source_path?: string;
+}
 /** Who actually runs the agent's work: Jaeger itself or a delegate CLI. */
 export type Runner = "native" | `delegate:${string}` | string;
 
@@ -16,6 +25,10 @@ export interface Agent {
   runner?: Runner;
   avatar_url?: string;
   metadata?: Record<string, unknown>;
+  /** PROPOSED: the agent's skills (GET /v1/agents and the specialist/role responses). */
+  skills?: AgentSkill[];
+  /** Tool allow-list; unchanged on the wire. */
+  allowed_tools?: string[];
 }
 
 export type AgentStatus = "idle" | "working" | "waiting_approval" | "blocked" | "error" | string;

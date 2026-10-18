@@ -2,7 +2,7 @@
  * who the agent is, what it is doing now, and its chats. Read-only. */
 import type { Agent, AgentSummary, SessionRow } from "../api/types";
 import { AgentAvatar } from "./AgentAvatar";
-import { label, runnerLabel } from "./agentsLogic";
+import { label, ROLE_TEXT, runnerLabel } from "./agentsLogic";
 import { activityAt, chatTitle, shortTime } from "./chats";
 
 const STATUS_TEXT: Record<string, string> = {
@@ -30,7 +30,7 @@ export function AgentDetails({ agent, summary, chats, openId, onOpenChat, onNewC
         <AgentAvatar id={agent.id} name={name} src={agent.avatar_url} size={44} />
         <div className="jg-details__who">
           <strong>{name}</strong>
-          <span className="jg-muted">{agent.role === "lead" ? "Lead · coordinates the specialists" : specialty ?? "Specialist"}</span>
+          <span className="jg-muted">{ROLE_TEXT[agent.role ?? ""] ?? specialty ?? "Specialist"}</span>
         </div>
         <button type="button" className="jg-round-button" aria-label="Close details" onClick={onClose}>×</button>
       </header>
@@ -40,6 +40,25 @@ export function AgentDetails({ agent, summary, chats, openId, onOpenChat, onNewC
         {task?.goal && <p className="jg-muted">{task.goal}{task.eta ? ` · ETA ${String(task.eta)}` : ""}</p>}
         {runner && <p className="jg-muted">Runs on {runner}</p>}
       </section>
+      {(agent.skills?.length ?? 0) > 0 && (
+        <section className="jg-details__section" aria-label="Skills">
+          <h3>Skills</h3>
+          <ul className="jg-skill-list">
+            {agent.skills!.map((s) => (
+              <li key={s.id} className="jg-skill" title={s.source_path}>
+                <span className="jg-skill__name">{s.name}</span>
+                {s.description && <span className="jg-skill__desc">{s.description}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {(agent.allowed_tools?.length ?? 0) > 0 && (
+        <section className="jg-details__section" aria-label="Tools">
+          <h3>Tools</h3>
+          <ul className="jg-tool-chips">{agent.allowed_tools!.map((t) => <li key={t} className="jg-tool-chip">{t}</li>)}</ul>
+        </section>
+      )}
       <section className="jg-details__section">
         <div className="jg-details__row">
           <h3>Chats</h3>
