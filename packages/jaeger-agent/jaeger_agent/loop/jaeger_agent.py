@@ -30,7 +30,7 @@ logger = logging.getLogger(__name__)
 from jaeger_agent.adapters.base import ProviderAdapter
 from jaeger_agent.core.cancellation import bind_turn_cancellation, current_cancellation
 from jaeger_agent.loop.callbacks import AgentCallbacks
-from jaeger_agent.loop.interrupt import AgentInterrupted, StaleCallTimeout
+from jaeger_agent.loop.interrupt import AgentInterrupted, StaleCallTimeout, first_progress_grace
 from jaeger_agent.loop import verify_gate
 from jaeger_agent.loop.loop_backstop import (
     MAX_TOOL_CALLS,
@@ -1670,6 +1670,11 @@ class JaegerAgent:
     # adapter-fallback chain react in ~30s instead — set to ``None``
     # to disable and rely on SDK timeouts only.
     stale_call_timeout_s: float | None = 30.0
+    #: Silence allowed before a call's FIRST token (prefill / cold load).
+    #: ``None`` = no extra grace. Local backends set this (see
+    #: ``runtime_bridge.build_jaeger_agent``); between tokens the
+    #: ``stale_call_timeout_s`` no-progress budget still applies.
+    first_progress_timeout_s: float | None = None
 
     # Per-adapter retry caps by error class (Hermes error-classifier
     # pattern, scaled down for a voice agent where long waits are dead
@@ -1756,30 +1761,37 @@ class JaegerAgent:
                     formatted = adapter.format_messages(
                         self.messages, self.tools, self.system_prompt,
                     )
-                    raw = adapter.call(
-                        formatted,
-                        self._interrupt_event,
-                        stale_timeout=self.stale_call_timeout_s,
-                        on_heartbeat=self._on_call_heartbeat,
-                        # Token-level deltas for live consumers (TTS
-                        # sentence-chunking, TUI streaming). None when
-                        # nobody is listening so adapters skip the
-                        # per-chunk callback cost entirely.
-                        on_delta=(
-                            self.callbacks.on_stream_delta
-                            if self.callbacks.stream_delta is not None
-                            else None
-                        ),
-                        # Deliberation, streamed on its own channel as it
-                        # arrives. Without this a surface got the whole answer
-                        # before any of the thinking behind it — see
-                        # _streamed_reasoning below.
-                        on_reasoning=(
-                            self._emit_streamed_reasoning
-                            if self.callbacks.reasoning is not None
-                            else None
-                        ),
-                    )
+                    with first_progress_grace(self.first_progress_timeout_s):
+                        raw = adapter.call(
+                            formatted,
+                            self._interrupt_event,
+                            stale_timeout=self.stale_call_timeout_s,
+                            on_heartbeat=self._on_call_heartbeat,
+                            # Token-level deltas for live consumers (TTS
+                            # sentence-chunking, TUI streaming). None when
+                            # nobody is listening so adapters skip the
+                            # per-chunk callback cost entirely.
+                            on_delta=(
+                                self.callbacks.on_stream_delta
+                                if self.callbacks.stream_delta is not None
+                                else None
+                            ),
+                            # Deliberation, streamed on its own channel as it
+                            # arrives. Without this a surface got the whole answer
+                            # before any of the thinking behind it — see
+                            # _streamed_reasoning below.
+                            on_reasoning=(
+                                self._emit_streamed_reasoning
+                                if self.callbacks.reasoning is not None
+                                else None
+                            ),
+                        )
+                    if self.last_halt_reason == "stalled":
+                        # A stalled attempt recovered on retry/fallback. Left
+                        # set, the post-tool check in ``_run_turn_inner``
+                        # ended the turn as "[halted: stalled]" right after
+                        # the next successful tool call (Oct 9 manager run).
+                        self.last_halt_reason = None
                     if self.last_ttft_s is None:
                         adapter_ttft = getattr(adapter, "last_ttft_s", None)
                         if adapter_ttft:

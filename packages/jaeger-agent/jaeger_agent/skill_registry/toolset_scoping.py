@@ -233,7 +233,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     # A specialist agent's own NOTES.md (bound by the Gateway per turn).
     "agent_notes": frozenset({"agent_notes"}),
     # Other agent frameworks on this Mac (owner grants; see core/frameworks).
-    "frameworks": frozenset({"framework_read", "framework_delegate"}),
+    "frameworks": frozenset({"framework_read", "framework_delegate", "framework_apply_diff"}),
     # Ask the operator's editor: open a file at a line, list Problems, read what is open.
     "ide": frozenset({"ide_context", "ide_open_file", "ide_diagnostics"}),
     "sessions": frozenset({"session_search"}),

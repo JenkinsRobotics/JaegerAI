@@ -197,19 +197,35 @@ def test_build_jaeger_agent_honors_explicit_max_iterations():
     assert agent.max_iterations == 60
 
 
-def test_build_jaeger_agent_picks_120s_stall_for_local_backend():
-    """In-process llama-cpp can have legitimately slow cold-prefill
-    plus a long decode on a 30B Q4. The default stall watchdog must
-    leave headroom (120s) so legitimate work doesn't false-positive
-    while still catching the multi-minute Metal hangs."""
+def test_build_jaeger_agent_picks_progress_aware_grace_for_local_backend():
+    """In-process llama-cpp can have a legitimately slow cold prefill on a
+    30B Q4. That silence gets a pre-first-token grace; once tokens flow,
+    the 120s no-progress budget still catches a multi-minute decode hang."""
     agent = build_jaeger_agent(_FakeLocalClient())
     assert agent.stale_call_timeout_s == 120.0
+    assert agent.first_progress_timeout_s == 600.0
+
+
+@pytest.mark.parametrize("provider,model,grace", [
+    ("ollama", "gemma-4-26b:latest", 600.0),      # the Oct 9 manager-run model
+    ("ollama", "glm-5.3-flash:cloud", None),      # cloud through Ollama: no prefill grace
+    ("openai", "gpt-test", None),
+])
+def test_first_token_grace_only_for_local_models(provider, model, grace):
+    agent = build_jaeger_agent(_FakeExternalClient(provider, model=model))
+    assert agent.stale_call_timeout_s == 120.0
+    assert agent.first_progress_timeout_s == grace
+
+
+def test_first_token_grace_can_be_overridden():
+    agent = build_jaeger_agent(_FakeLocalClient(), first_progress_timeout_s=45.0)
+    assert agent.first_progress_timeout_s == 45.0
 
 
 def test_build_jaeger_agent_honors_explicit_stall_timeout():
     """The caller (main.py reading config) can override the default —
     e.g. a power user who wants to surface stalls in 60s instead of
-    120s. Pin the override path."""
+    the local-model default. Pin the override path."""
     agent = build_jaeger_agent(
         _FakeLocalClient(),
         stale_call_timeout_s=42.0,
