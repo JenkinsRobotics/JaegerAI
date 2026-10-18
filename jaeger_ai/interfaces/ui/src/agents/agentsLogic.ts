@@ -4,12 +4,22 @@ import type { Agent, AgentSummary } from "../api/types";
 
 export const INTERNAL_IDS = new Set(["native:gateway", "native:surfaces", "gateway", "surfaces"]);
 const ROLE_ORDER: Record<string, number> = { lead: 0, specialist: 1, native: 2 };
+/** Working roles a specialist can have (PROPOSED by the Gateway bot), with the pane's one-line description. */
+export const ROLE_TEXT: Record<string, string> = {
+  lead: "Lead · plans and delegates",
+  "reverse-engineer": "Reverse engineer",
+  builder: "Builder · code, build and test",
+  reviewer: "Reviewer",
+  researcher: "Researcher",
+  designer: "Designer · UI",
+};
+const SHOWN_ROLES = new Set(["specialist", "native", ...Object.keys(ROLE_TEXT)]);
 
 export function visible(agent: Agent): boolean {
   if (agent.hidden || agent.metadata?.internal) return false;
   if (INTERNAL_IDS.has(agent.id) || INTERNAL_IDS.has(agent.name)) return false;
   if (agent.kind === "third_party" || agent.id.startsWith("tp:")) return false;
-  return ["lead", "specialist", "native"].includes(agent.role ?? "specialist");
+  return SHOWN_ROLES.has(agent.role ?? "specialist");
 }
 
 export function label(agent: Pick<Agent, "role" | "display_name" | "name">): string {

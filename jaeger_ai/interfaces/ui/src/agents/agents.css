@@ -185,6 +185,12 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-details__section p { margin: 0 0 4px; font-size: var(--jg-font-small); }
 .jg-details__row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .jg-details .jg-chat-list { padding-left: 0; }
+.jg-skill-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.jg-skill { display: flex; flex-direction: column; gap: 1px; font-size: var(--jg-font-small); }
+.jg-skill__name { font-weight: var(--jg-font-weight-medium); color: var(--jg-color-fg); }
+.jg-skill__desc { color: var(--jg-color-text-secondary); line-height: 1.35; }
+.jg-tool-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.jg-tool-chip { padding: 2px 8px; border-radius: 999px; background: var(--jg-color-inset); color: var(--jg-color-text-secondary); font-size: var(--jg-font-tiny); font-family: var(--aether-font-mono, ui-monospace, monospace); }
 
 /* Create agent form. */
 .jg-form { display: flex; flex-direction: column; gap: 12px; min-width: 340px; }
