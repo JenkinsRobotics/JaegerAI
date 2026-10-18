@@ -155,10 +155,13 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
 }
 
 /** Activity-named progress line ("Searching the web…"): three agent-tinted dots and a shimmer. */
-export function ProgressLine({ phrase }: { phrase: string }) {
+/** While a turn runs: the agent's avatar (gently bobbing) + what it's doing; three dots without an agent. */
+export function ProgressLine({ phrase, agent }: { phrase: string; agent?: { id: string; name: string } }) {
   return (
     <div className="jg-progress-line" role="status" aria-live="polite" data-sender="assistant">
-      <span className="jg-progress-dots" aria-hidden="true"><i /><i /><i /></span>
+      {agent
+        ? <span className="jg-progress-avatar" aria-hidden="true"><AgentAvatar id={agent.id} name={agent.name} size={24} /></span>
+        : <span className="jg-progress-dots" aria-hidden="true"><i /><i /><i /></span>}
       <span className="jg-shimmer">{phrase}</span>
     </div>
   );
@@ -390,7 +393,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} />
                 : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} />)}</div>)}
-              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} />}
+              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} agent={agent} />}
             </section>
           ))}
         </div>

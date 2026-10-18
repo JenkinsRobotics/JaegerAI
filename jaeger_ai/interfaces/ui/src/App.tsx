@@ -6,6 +6,7 @@ import { useAgentsStore } from "./agents/agentsStore";
 import { label, visible } from "./agents/agentsLogic";
 import { useAgentChats, visibleChats } from "./agents/chats";
 import { agentSlug, NewChatMenu } from "./agents/NewChatMenu";
+import { loadPins, pin, savePins, unpin } from "./agents/pins";
 import { ChatPane } from "./chat/ChatPane";
 import { NativeHost } from "./chat/nativeHost";
 import { WebHost } from "./chat/webHost";
@@ -48,6 +49,8 @@ export function App({ source }: { source: JaegerSource }) {
   const [newChatAnchor, setNewChatAnchor] = useState<HTMLElement | null>(null);
   const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null);
   const [chatsVersion, setChatsVersion] = useState(0);
+  const [pins, setPins] = useState<string[]>(loadPins);
+  const updatePins = useCallback((next: (cur: string[]) => string[]) => setPins((cur) => { const n = next(cur); savePins(n); return n; }), []);
   const refreshChats = useCallback(() => setChatsVersion((n) => n + 1), []);
 
   const selectedAgentId = selection.type === "agent" ? selection.agentId : undefined;
@@ -164,6 +167,9 @@ export function App({ source }: { source: JaegerSource }) {
     onConnectApps: () => setConnectOpen(true),
     onRetry: () => void store.refresh(),
     userInitials: "MJ",
+    pins,
+    onPin: (agentId, index) => updatePins((cur) => pin(cur, agentId, index)),
+    onUnpin: (agentId) => updatePins((cur) => unpin(cur, agentId)),
     status: source.kind === "mock"
       ? { kind: "warn", label: "Mock data (dev)" }
       : store.error ? { kind: "error", label: "Gateway unreachable" } : { kind: "ok", label: "Connected" },
