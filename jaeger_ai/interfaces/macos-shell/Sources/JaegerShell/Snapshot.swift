@@ -124,7 +124,8 @@ final class Snapshotter: NSObject, BridgeHost {
                     return
                 }
                 let started = Date()
-                webView.takeSnapshot(with: nil) { image, _ in
+                let config = WKSnapshotConfiguration(); config.afterScreenUpdates = true  // else new content never paints offscreen
+                webView.takeSnapshot(with: config) { image, _ in
                     if let image, let tiff = image.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
                        let png = rep.representation(using: .png, properties: [:]) {
                         try? png.write(to: frames.appendingPathComponent(String(format: "f-%03d.png", i)))
