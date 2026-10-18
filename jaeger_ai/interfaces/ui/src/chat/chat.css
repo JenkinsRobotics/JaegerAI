@@ -213,6 +213,9 @@
 .jg-codeblock__shiki pre { margin: 0; padding: 6px 12px 10px; overflow-x: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; line-height: 1.5; }
 .jg-codeblock__shiki code { background: none; padding: 0; }
 
+/* The pill's wrapper (anchors its menu) must not change the band's layout. */
+.jg-agent-pill-wrap { display: contents; }
+
 /* Home chat: summary card, posted results, older-page row (HomeEntries.tsx). */
 .jg-summary { align-self: center; max-width: min(560px, 100%); margin: 6px 0 10px; text-align: center; font-size: var(--jg-font-small); color: var(--jg-color-text-tertiary); }
 .jg-summary__line { display: inline-flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px; }
