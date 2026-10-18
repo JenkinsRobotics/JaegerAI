@@ -139,6 +139,13 @@ export class MockSource implements JaegerSource {
     this.emit(sessionId, { event: "turn.cancelled", request_id: requestId, payload: {} });
   }
   async approve() { /* mock: accepted */ }
+  async updateSession() { /* mock: accepted */ }
+  async createAgent(body: { name: string; display_name?: string }) {
+    return { id: `native:${body.name}`, name: body.name, display_name: body.display_name, role: "specialist", kind: "jaeger_native" };
+  }
+  async handoffExchange(handoffId: string) {
+    return { handoff_id: handoffId, to_agent_id: "agent:gateway-webui", worker_session_id: "s-gateway-webui" };
+  }
   async tasks() { return MOCK_TASKS; }
   async handoffs(): Promise<Handoff[]> {
     return [{ id: "h2", from_agent_id: "native:jaeger", to_agent_id: "agent:gateway-webui", status: "completed", task: "Ship /v1/agents/summary", updated_at: ago(14) }];

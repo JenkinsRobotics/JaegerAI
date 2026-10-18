@@ -92,3 +92,39 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-apps__row { display: flex; align-items: center; gap: var(--aether-space-3); padding: var(--aether-space-2) 0; }
 .jg-avatar__initials { color: var(--aether-color-text-on-selected); font-size: var(--jg-font-tiny); font-weight: var(--aether-font-weight-strong); }
 .jg-handoff__who { display: inline-flex; align-items: center; gap: 4px; }
+
+/* An agent's chats, under its row: every chat keeps a place (Grok Bot). */
+.jg-chat-list { list-style: none; margin: 2px 0 8px; padding: 0 0 0 54px; display: flex; flex-direction: column; gap: 1px; }
+.jg-chat-row {
+  display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 8px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--aether-color-text-dim); font: inherit; font-size: var(--jg-font-small); text-align: left; cursor: pointer;
+}
+.jg-chat-row:hover { background: color-mix(in srgb, var(--aether-color-text-faint) 14%, transparent); color: var(--aether-color-text); }
+.jg-chat-row.is-open { background: color-mix(in srgb, var(--aether-color-text-faint) 24%, transparent); color: var(--aether-color-text); }
+.jg-chat-row:focus-visible { outline: 2px solid var(--aether-color-border-focus); outline-offset: 1px; }
+.jg-chat-row__title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-chat-row__time { flex: none; color: var(--aether-color-text-faint); font-size: var(--jg-font-tiny); }
+.jg-chat-row--more { color: var(--aether-color-text-faint); }
+.jg-chat-row__edit {
+  width: 100%; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--aether-color-border-focus);
+  background: var(--aether-color-bg-control); color: var(--aether-color-text); font: inherit; font-size: var(--jg-font-small);
+}
+.jg-supervisor-wrap + .jg-chat-list { padding-left: 14px; }
+
+/* Details panel (click the agent pill at the top of the chat). */
+.jg-details {
+  flex: none; width: 300px; display: flex; flex-direction: column; gap: 14px; padding: 16px; overflow-y: auto;
+  border-left: 1px solid color-mix(in srgb, var(--aether-color-border) 70%, transparent); background: var(--aether-color-bg-control);
+}
+.jg-details__head { display: flex; align-items: center; gap: 10px; }
+.jg-details__who { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--jg-font-small); }
+.jg-details__who strong { font-size: var(--jg-font-body); }
+.jg-details__section h3 { margin: 0 0 6px; font-size: var(--jg-font-tiny); font-weight: var(--aether-font-weight-strong); color: var(--aether-color-text-faint); text-transform: uppercase; letter-spacing: 0.04em; }
+.jg-details__section p { margin: 0 0 4px; font-size: var(--jg-font-small); }
+.jg-details__row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+.jg-details .jg-chat-list { padding-left: 0; }
+
+/* Create agent form. */
+.jg-form { display: flex; flex-direction: column; gap: 12px; min-width: 340px; }
+.jg-form__field { display: flex; flex-direction: column; gap: 4px; font-size: var(--jg-font-small); color: var(--aether-color-text-dim); }
+.jg-form__error { margin: 0; color: var(--aether-color-error); font-size: var(--jg-font-small); }

@@ -51,8 +51,10 @@ const message = (error: unknown) => String((error as Error)?.message ?? error);
 export class WebHost implements ChatHost {
   readonly kind: HostKind = "web";
   capabilities = { voice: false };
-  /** Set by the app: opens the exchange panel for a handoff marker. */
+  /** Set by the app: a handoff marker opens the specialist's side of it. */
   openHandoff?: (handoffId: string) => void;
+  /** Set by the app: the header pill opens the agent's details panel. */
+  openDetails?: (agentId: string) => void;
   private agentNames = new Map<string, string>();
   /** Last SSE event id seen per session; the stream never resumes behind it. */
   private readonly cursors = new Map<string, number>();

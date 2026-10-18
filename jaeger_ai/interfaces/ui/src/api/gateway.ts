@@ -4,7 +4,7 @@
  * server side. The browser never sees or sends a token. */
 import { decodeSSE, type SSEFrame } from "./sse";
 import type { JaegerSource, TurnReceipt } from "./source";
-import type { Agent, AgentSummary, GatewayEvent, Handoff, SessionDetail, SessionRow, Task } from "./types";
+import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 export class GatewayError extends Error {
   constructor(message: string, readonly status: number, readonly body?: unknown) {
@@ -76,6 +76,15 @@ export class GatewayClient implements JaegerSource {
   session(id: string) { return this.json<SessionDetail>(`/v1/sessions/${encodeURIComponent(id)}`); }
   createSession(body: { agent_id?: string; title?: string }) {
     return this.json<SessionRow>("/v1/sessions", { session_id: crypto.randomUUID(), source: "webui", title: body.title ?? "New chat", ...body });
+  }
+  async updateSession(id: string, body: { title?: string; archived?: boolean }) {
+    await this.json(`/v1/sessions/${encodeURIComponent(id)}`, body, "PATCH");
+  }
+  createAgent(body: { name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }) {
+    return this.json<Agent>("/v1/agents", { kind: "jaeger_native", role: "specialist", ...body });
+  }
+  handoffExchange(handoffId: string) {
+    return this.json<HandoffExchange>(`/api/handoffs/${encodeURIComponent(handoffId)}/messages`);
   }
   send(sessionId: string, text: string, requestId: string) {
     return this.json<TurnReceipt>(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`, { text, request_id: requestId });
