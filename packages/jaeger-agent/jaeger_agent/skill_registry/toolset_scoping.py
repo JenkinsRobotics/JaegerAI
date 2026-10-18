@@ -196,7 +196,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "code": frozenset({
         # ``execute_code`` is in CORE; heavy/risky code surfaces load
         # on intent (terminal, ssh, venv, dep install).
-        "run_in_venv", "terminal", "remote_terminal",
+        "run_in_venv", "terminal", "remote_terminal", "run_build_check",
         "install_package", "list_venv_packages",
         # Long-running command sessions (start, poll/type, kill).
         "exec_command", "write_stdin", "kill_command",
@@ -314,7 +314,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "system_control": frozenset({"system_control"}),
     "media_control": frozenset({"media_control", "now_playing"}),
     "ocr": frozenset({"ocr_file"}),
-    "delegates": frozenset({"list_delegate_runtimes", "call_agent", "get_agent_result"}),
+    "delegates": frozenset({"list_delegate_runtimes", "call_agent", "get_agent_result", "run_team"}),
     "finance": frozenset({
         "finance_summary", "finance_audit", "finance_transactions",
         "finance_inbox", "finance_sync", "finance_briefing",

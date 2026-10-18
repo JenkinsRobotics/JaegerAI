@@ -65,7 +65,7 @@ EVENT_TYPES = frozenset({
     # IDE bridge + attachments + agent lifecycle.
     "ide.request", "attachment.added",
     "agent.created", "agent.activated", "agent.handoff", "agent.handoff.finished",
-    "agent.skills",
+    "agent.skills", "project.created", "project.checked",
     # Durable task projection. The task owner is the authority; these are its
     # stream. ``jaeger.state`` is the presence projection (see contract/presence.py).
     "task.created", "task.updated", "jaeger.state",

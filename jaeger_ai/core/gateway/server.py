@@ -560,6 +560,11 @@ class _GatewayToolConfirmationProvider:
                 return True
         except Exception:
             pass
+        try:
+            if self.app._project_grant_allows(self.session_id, request):
+                return True
+        except Exception:  # noqa: BLE001 — a grant check that fails means "ask"
+            logger.debug("project grant check failed", exc_info=True)
         return self._decided(self._prompt(request))
 
     def _session_grants(self) -> set[str]:
@@ -729,6 +734,8 @@ class JaegerGatewayApp:
         self.store = store or GatewaySessionStore()
         from .file_changes import FileChanges
         self.file_changes = FileChanges(self.store.path.parent / "turn-file-changes")
+        from jaeger_ai.core.agent_registry.projects import ProjectStore
+        self.projects = ProjectStore(self.store.path.parent / "projects.json")
         self.event_bus = event_bus or GatewayEventBus(store=self.store)
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
@@ -1288,6 +1295,10 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/agents/{id}/seen", self.handle_agent_seen)
         self.app.router.add_post("/v1/agents/{id}/handoff", self.handle_handoff_agent)
         self.app.router.add_get("/v1/handoffs", self.handle_list_handoffs)
+        self.app.router.add_get("/v1/projects", self.handle_list_projects)
+        self.app.router.add_post("/v1/projects", self.handle_create_project)
+        self.app.router.add_get("/v1/projects/{id}", self.handle_get_project)
+        self.app.router.add_post("/v1/projects/{id}/check", self.handle_project_check)
         self.app.router.add_get("/v1/sessions", self.handle_list_sessions)
         self.app.router.add_post("/v1/sessions", self.handle_create_session)
         self.app.router.add_get("/v1/sessions/{id}", self.handle_get_session)
@@ -1964,6 +1975,28 @@ class JaegerGatewayApp:
             return web.json_response({"error": "allowed_tools must be a list of tool names"}, status=400)
         if "dispatcher" in permitted_context.lower() and "dispatcher transcript" in permitted_context.lower():
             return web.json_response({"error": "dispatcher transcript is not permitted specialist context"}, status=403)
+        # Project: shared root, team membership, limits and the owner's
+        # handoff grant. Without a project_id the origin chat's project is used.
+        from jaeger_ai.core.agent_registry.projects import default_limits
+        project_id = str(body.get("project_id") or "").strip() or None
+        hint_session = str(body.get("session_id") or "").strip() or None
+        if project_id is None and hint_session:
+            project_id = ((self.store.get_session(hint_session) or {}).get("metadata") or {}).get("project_id") or None
+        project = self.projects.get(project_id) if project_id else None
+        if project_id and project is None:
+            return web.json_response({"error": f"Project not found: {project_id}"}, status=404)
+        if project and project.get("team") and target.id not in project["team"]:
+            return web.json_response({"error": f"{target.id} is not on project {project['name']}'s team"}, status=403)
+        workspace = project["root"] if project else (str(body.get("workspace") or "").strip() or None)
+        if workspace and not os.path.isabs(workspace):
+            return web.json_response({"error": "workspace must be an absolute path"}, status=400)
+        limits = dict(project["limits"]) if project else default_limits()
+        timeout_s = max(1, min(timeout_s, int(limits["child_timeout_s"])))
+        approved_by = None
+        if require_approval and project and (project.get("grants") or {}).get("handoffs"):
+            # The owner approved this team when creating the project.
+            require_approval = False
+            approved_by = "project_grant"
 
         existing = self.store.get_handoff_by_request(request_id)
         if existing:
@@ -1988,6 +2021,8 @@ class JaegerGatewayApp:
             parent_chain=parent_chain,
             depth=depth,
             active_children=self.store.count_active_handoffs(parent_run_id=str(parent_run_id) if parent_run_id else None),
+            max_depth=int(limits["max_depth"]),
+            max_fanout=int(limits["max_fanout"]),
         )
         if limit_error:
             return web.json_response({"error": limit_error, "ok": False, "status": "rejected"}, status=409)
@@ -2021,6 +2056,12 @@ class JaegerGatewayApp:
                 "timeout_seconds": timeout_s,
                 "parent_chain": [*parent_chain, from_id],
                 "delegation_depth": depth + 1,
+                "project_id": project["id"] if project else None,
+                "project_name": project["name"] if project else None,
+                "workspace": workspace,
+                "max_child_timeout_s": int(limits["child_timeout_s"]),
+                "approved_by": approved_by,
+                "wake_lead": bool(body.get("wake_lead", project is not None)),
             },
         }
         saved = self.store.save_handoff(record)
@@ -5087,6 +5128,8 @@ class JaegerGatewayApp:
                 task=record["task"],
                 permitted_context=str(meta.get("permitted_context") or ""),
                 allowed_tools=frozenset(str(x) for x in allowed) if allowed else None,
+                workspace=meta.get("workspace") or None,
+                project_name=meta.get("project_name") or None,
             )
             timeout = int(meta.get("timeout_seconds") or DEFAULT_TIMEOUT_S)
             runs = InMemoryRunStore()
@@ -5113,6 +5156,14 @@ class JaegerGatewayApp:
                     "to_agent_id": record["to_agent_id"],
                     "handoff_id": record["id"],
                     "from_agent_id": record["from_agent_id"],
+                    "max_child_timeout_s": int(meta.get("max_child_timeout_s") or 1800),
+                    "chat_kwargs": {
+                        "workspace": meta.get("workspace") or None,
+                        "agent_id": record["to_agent_id"],
+                        "project_id": meta.get("project_id") or None,
+                        "parent_session_id": record.get("session_id"),
+                        "handoff_id": record["id"],
+                    },
                 },
             )
             result = await executor.execute(runtime.runtime_id, request)
@@ -5144,14 +5195,145 @@ class JaegerGatewayApp:
             self._running_tasks.pop(record.get("request_id") or handoff_id, None)
 
     async def _specialist_chat(self, session_id: str, text: str, *, request_id: str,
-                               allowed_tools: list[str]) -> tuple[str, str]:
+                               allowed_tools: list[str] | None = None,
+                               workspace: str | None = None, agent_id: str | None = None,
+                               project_id: str | None = None, parent_session_id: str | None = None,
+                               handoff_id: str | None = None) -> tuple[str, str]:
+        """Run a handoff child as a real Gateway turn in this process.
+
+        It used to relay to the native MCP server on :8792, which is a
+        different process (on a test gateway, the live one). The child is now
+        an admitted request on its own session, executed by the same
+        ``_execute_turn`` path as a chat turn: the specialist's standing tools
+        (``allowed_tools=None``) or the granted subset, its own skills, its
+        notes, the project root as the bound workspace, approvals parked on
+        that child turn, and a durable receipt in client_requests."""
         import hashlib
-        native_id = hashlib.sha256(("handoff:" + request_id).encode()).hexdigest()
-        native = await self._native_lead_turn("specialist", text, mcp_session=session_id,
-                                              request_id=native_id, allowed_tools=allowed_tools)
-        if native is None:
-            raise RuntimeError("Specialist native execution returned no confirmed result")
-        return native
+        from jaeger_ai.core.agent_registry.specialist_runtime import specialist_agent
+
+        child_rid = hashlib.sha256(("handoff:" + request_id).encode()).hexdigest()[:32]
+        meta = {
+            "agent_id": agent_id or specialist_agent(session_id), "agent_pinned": True,
+            "route_checked": True, "handoff_child": True, "handoff_id": handoff_id,
+            "parent_session_id": parent_session_id, "project_id": project_id,
+        }
+        self.store.ensure_session(
+            session_id, title=f"Handoff {handoff_id}" if handoff_id else "Specialist task",
+            profile="jaeger", workspace=workspace or "",
+            metadata={k: v for k, v in meta.items() if v is not None},
+        )
+        requested: dict[str, Any] = {"interaction_tier": self._current_tier(), "is_subordinate": True}
+        if allowed_tools is not None:
+            requested["allowed_tools"] = list(allowed_tools)
+        if workspace:
+            requested["workspace"] = workspace
+        admitted = self.store.admit_request(session_id, text, request_id=child_rid, requested=requested)
+        self._start_admitted_turn(admitted, session_id, text)
+        rid = admitted["request_id"]
+        task = self._running_tasks.get(rid)
+        if task is not None:
+            await task
+        row = self.store.get_request(rid) or {}
+        result = row.get("result") or {}
+        if row.get("status") != "completed":
+            raise RuntimeError(f"specialist turn {row.get('status')}: {result.get('error') or 'no result'}")
+        return str(result.get("output") or ""), f"{result.get('backend') or 'owner-react'}:{result.get('model') or ''}"
+
+    # ── Projects ─────────────────────────────────────────────────────────
+
+    def _project_for_session(self, session_id: str) -> dict[str, Any] | None:
+        meta = (self.store.get_session(session_id) or {}).get("metadata") or {}
+        pid = meta.get("project_id")
+        return self.projects.get(pid) if pid else None
+
+    _PROJECT_SHELL_TOOLS = frozenset({"terminal", "run_shell", "exec_command"})
+    _PROJECT_WRITE_TOOLS = frozenset({"write_file", "file_write", "append_file", "patch", "edit_file",
+                                      "move_file", "copy_file", "make_directory", "mkdir"})
+    _PROJECT_PATH_KEYS = ("path", "file_path", "dest", "destination", "src", "source", "target", "new_path")
+
+    def _project_grant_allows(self, session_id: str, request: Any) -> bool:
+        """Owner's project grant: writes and listed commands inside the root.
+
+        Only consulted after grants/autonomy said "ask", and never for a
+        PolicyKernel forced prompt. Every allowed call is still executed
+        through the ledger and logged here."""
+        project = self._project_for_session(session_id)
+        if not project:
+            return False
+        from jaeger_ai.core.agent_registry.projects import command_allowed, path_in_project
+        names = {str(getattr(request, "skill", "") or ""), str(getattr(request, "operation", "") or "")}
+        args = getattr(request, "arguments", None) or {}
+        grants = project.get("grants") or {}
+        allowed, why = False, ""
+        if names & self._PROJECT_SHELL_TOOLS:
+            cmd = str(args.get("command") or args.get("cmd") or "")
+            workdir = args.get("workdir")
+            if workdir and not path_in_project(project, str(workdir)):
+                allowed, why = False, "workdir outside project"
+            else:
+                allowed, why = command_allowed(project, cmd)
+        elif names & self._PROJECT_WRITE_TOOLS and grants.get("writes"):
+            paths = [str(args[k]) for k in self._PROJECT_PATH_KEYS if args.get(k)]
+            allowed = bool(paths) and all(path_in_project(project, p) for p in paths)
+            why = "write inside project root" if allowed else "path outside project root"
+        elif "run_build_check" in names:
+            root = str(args.get("root") or project["root"])
+            allowed, why = path_in_project(project, root), "build check inside project root"
+        if allowed:
+            logger.info("project grant %s allowed %s %s (%s)", project["id"], sorted(n for n in names if n),
+                        _approval_target(request), why)
+        return allowed
+
+    async def handle_list_projects(self, request: web.Request) -> web.Response:
+        return web.json_response({"projects": self.projects.list()})
+
+    async def handle_get_project(self, request: web.Request) -> web.Response:
+        project = self.projects.get(request.match_info["id"])
+        if project is None:
+            return web.json_response({"error": "Project not found"}, status=404)
+        return web.json_response(project)
+
+    async def handle_create_project(self, request: web.Request) -> web.Response:
+        """POST /v1/projects {name, root, team?, grants?, limits?, bind_session_id?}."""
+        from jaeger_ai.core.agent_registry.projects import ProjectError
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        known = {a.id for a in self._registry().list_agents()}
+        try:
+            project = self.projects.create(
+                name=body.get("name"), root=body.get("root"), team=body.get("team"),
+                grants=body.get("grants"), limits=body.get("limits"), known_agents=known,
+            )
+        except (ProjectError, TypeError, ValueError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        bind = str(body.get("bind_session_id") or "").strip()
+        if bind:
+            if self.store.get_session(bind) is None:
+                return web.json_response({"error": "bind_session_id not found", "project": project}, status=404)
+            self.store.update_metadata(bind, {"project_id": project["id"], "workspace": project["root"]})
+        self.event_bus.publish("*", "project.created", {"project": project, "bound_session_id": bind or None})
+        return web.json_response(project, status=201)
+
+    async def handle_project_check(self, request: web.Request) -> web.Response:
+        """POST /v1/projects/{id}/check {commands?, expect_files?, timeout_s?} — the
+        build/test checker, run by the Gateway itself so a pass is recorded."""
+        project = self.projects.get(request.match_info["id"])
+        if project is None:
+            return web.json_response({"error": "Project not found"}, status=404)
+        body = await request.json() if request.can_read_body else {}
+        commands = body.get("commands") or ["npm test"]
+        files = body.get("expect_files") or []
+        if not isinstance(commands, list) or not isinstance(files, list):
+            return web.json_response({"error": "commands and expect_files must be lists"}, status=400)
+        from jaeger_agent.tools.build_check import check_project
+        result = await asyncio.to_thread(check_project, project["root"], [str(c) for c in commands],
+                                         [str(f) for f in files], float(body.get("timeout_s") or 300))
+        result["project_id"] = project["id"]
+        result["checked_at"] = time.time()
+        self.event_bus.publish("*", "project.checked", {"project_id": project["id"], "result": result})
+        return web.json_response(result)
 
     def _task_board_fields(self, body: dict[str, Any]) -> dict[str, Any]:
         """Validate the Tasks-board fields of a task submission (raises ValueError)."""
