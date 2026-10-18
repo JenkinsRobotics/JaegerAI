@@ -71,7 +71,8 @@ final class Snapshotter: NSObject, BridgeHost {
         loaded = true
         report["url"] = webView.url?.absoluteString ?? "nil"
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
-            // An off-screen window doesn't run CSS transitions, so a still would freeze mid-fade; turn them off.
+            // An off-screen window doesn't run CSS transitions or animations, so a still would freeze mid-fade
+            // (or at opacity 0); stills show every transition and animation at its end state.
             webView.evaluateJavaScript(Self.stillsCSS) { _, _ in self?.click(Self.requestedClicks(), webView: webView) }
         }
     }
@@ -131,7 +132,8 @@ final class Snapshotter: NSObject, BridgeHost {
 
     static let stillsCSS = """
         (() => { const s = document.createElement('style'); s.dataset.snapshot = 'stills';
-          s.textContent = '*, *::before, *::after { transition: none !important; }'; document.head.append(s); return true; })()
+          s.textContent = '*, *::before, *::after { transition: none !important; animation-duration: 0s !important; animation-iteration-count: 1 !important; animation-delay: 0s !important; }';
+          document.head.append(s); return true; })()
         """
 
     static let probeJS = """
