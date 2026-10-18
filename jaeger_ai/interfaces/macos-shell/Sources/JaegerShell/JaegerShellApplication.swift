@@ -246,7 +246,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         bridge.install(in: configuration)
         self.bridge = bridge
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = ShellWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         webView.uiDelegate = self
         webView.allowsMagnification = false
@@ -578,4 +578,12 @@ enum JaegerShellMain {
         application.setActivationPolicy(.accessory)
         application.run()
     }
+}
+
+
+/// The main web view acts on the first click into an inactive Jaeger window, like Grok Bot (Electron) does.
+/// Stock WKWebView declines first mouse, so that click only activated the window: Send, menus and outside-click
+/// dismissal never saw it (proved headlessly with --snapshot nsclick: real NSEvents, no DOM events until this).
+final class ShellWebView: WKWebView {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
