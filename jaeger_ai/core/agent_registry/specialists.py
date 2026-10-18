@@ -21,6 +21,32 @@ LEAD_DISPLAY = "Jaeger"
 _OLD_LEAD_DISPLAY = "Assistant"  # pre-2026-10-09 default; migrated once
 _TEST_AGENT = re.compile(r"(?i)(^|[-_])(test|probe|bench|tmp)([-_]|$)|onboarding-.*test|\.bak\.")
 
+
+#: REA tools the reverse-engineer may call: static, local, read-only analysis.
+#: Nothing here launches or attaches to a process, drives a device or GUI, or
+#: writes an artifact (extract_artifact, export_evidence_bundle, close_binary,
+#: capture_*/observe_*/frida/gdb/rizin/adb are deliberately absent). The same
+#: names are the server's ``tools.read_only`` list in mcp.json, so these run
+#: without a card; any other REA tool asks (plugins/mcp/client.py).
+REA_READ_ONLY_TOOLS: tuple[str, ...] = (
+    "open_binary", "binary_session", "binary_overview", "inspect_artifact",
+    "inspect_binary_layout", "inspect_analysis_view",
+    "analyze_javascript_application", "trace_application_feature",
+    "trace_javascript_semantics", "compare_javascript_export_shapes", "trace_feature",
+    "inspect_electron_fuses", "inspect_macho", "inspect_signature", "inspect_plist",
+    "list_architectures", "demangle_swift", "decode_interface_builder",
+    "inspect_keyed_archive", "inspect_asset_catalog", "trace_dylib_resolution",
+    "list_strings", "search_strings", "list_procedures", "search_procedures",
+    "list_segments", "list_names", "procedure_info", "procedure_assembly",
+    "procedure_pseudo_code", "procedure_callers", "procedure_callees",
+    "procedure_references", "xrefs", "get_call_graph", "analyze_function",
+    "read_bytes", "search_bytes", "inspect_android_package", "inspect_pe_resources",
+    "inspect_go_binary", "inspect_rust_binary", "inspect_sqlite_database",
+    "project_apple_application_graph", "project_android_application_graph",
+    "get_evidence_bundle", "list_unknowns", "evaluate_reconstruction_coverage",
+    "verify_unknown_resolution", "compare_artifacts",
+)
+
 STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
     {
         "name": "surfaces",
@@ -56,7 +82,7 @@ STANDING_SPECIALISTS: tuple[dict[str, Any], ...] = (
         "specialty": "reverse-engineering",
         "team_role": "reverse-engineer",
         "summary": "Studies shipped apps read-only with REA and reports structure and features with evidence.",
-        "allowed_tools": ("mcp__rea__*", "read_file", "search_files", "web_search", "web_extract", "update_plan", "get_time", "agent_notes", "use_skill", "skill"),
+        "allowed_tools": (*(f"mcp__rea__{n}" for n in REA_READ_ONLY_TOOLS), "read_file", "search_files", "web_search", "web_extract", "update_plan", "get_time", "agent_notes", "use_skill", "skill"),
         "skills": ("reverse-engineer-anything", "jaeger-reverse-engineer"),
         "keywords": (),
     },

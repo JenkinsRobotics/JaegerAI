@@ -76,3 +76,15 @@ def test_skills_block_lists_only_own_skills(monkeypatch, tmp_path):
     assert block.startswith("[Your skills]")
     assert "jaeger-builder:" in block and "jaeger-team-handbook:" in block
     assert "jaeger-reviewer" not in block
+
+
+def test_reverse_engineer_rea_grant_is_an_explicit_read_only_list():
+    from jaeger_ai.core.agent_registry.specialists import REA_READ_ONLY_TOOLS, STANDING_SPECIALISTS
+    re_def = next(s for s in STANDING_SPECIALISTS if s["name"] == "reverse-engineer")
+    rea = [t for t in re_def["allowed_tools"] if t.startswith("mcp__rea__")]
+    assert rea == [f"mcp__rea__{n}" for n in REA_READ_ONLY_TOOLS]
+    assert not any(ch in t for t in re_def["allowed_tools"] for ch in "*?[")
+    mutating = ("install_", "uninstall_", "push_", "start_", "stop_", "set_", "unset_", "capture_",
+                "observe_", "instrument_", "load_frida", "resume_frida", "gdb_", "rizin", "cutter",
+                "annotate_", "close_", "export_", "extract_", "record_", "update_", "import_")
+    assert not [n for n in REA_READ_ONLY_TOOLS if n.startswith(mutating)]
