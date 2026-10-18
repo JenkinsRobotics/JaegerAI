@@ -36,6 +36,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     let verifyMode = CommandLine.arguments.contains("--verify-launch")
     let verifyBridgeMode = CommandLine.arguments.contains("--verify-bridge")
     let verifyLeaseMode = CommandLine.arguments.contains("--verify-lease")
+    let verifyLeasePolicyMode = CommandLine.arguments.contains("--verify-lease-policy")
     private var leaseVerifier: LeaseVerifier?
     /// `--snapshot <dir>`: headless light/dark PNGs of the main window (Snapshot.swift).
     let snapshotDir: String? = {
@@ -85,6 +86,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             shellLog("[shell][stack] dev mode unavailable: \(error.message)")
         }
         shellLog("[shell][stack] \(stack.summary)")
+        if verifyLeasePolicyMode { LeasePolicyCheck.run(app: self); return }  // headless, no window
         if verifyLeaseMode {
             // Headless: no menu, status item, hotkey or window; dev stack only.
             let verifier = LeaseVerifier(app: self)

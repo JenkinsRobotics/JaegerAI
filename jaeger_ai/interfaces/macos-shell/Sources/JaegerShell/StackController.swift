@@ -115,18 +115,25 @@ final class StackController {
     // MARK: lifecycle lease (lifecycle_lease.py contract; LeaseBeat is the ported LifecycleLeaseBeat)
 
     private(set) var lease: LeaseBeat?
+    /// LeasePolicy: only the installed app holds the lease by default; JAEGER_SHELL_NO_LEASE=1 always disables it.
+    let leasePolicy = LeasePolicy.decide(env: ProcessInfo.processInfo.environment, bundlePath: Bundle.main.bundleURL.path)
+    private func leaseDisabled(_ site: String) {
+        shellLog("[shell][lease] disabled (reason=\(leasePolicy.reason)) at \(site)")
+    }
     var gatewayAlive: Bool { gatewayProc?.isRunning == true }
-    private var headless: Bool { app.verifyMode || app.verifyBridgeMode || app.verifyLeaseMode || app.snapshotMode }
+    private var headless: Bool { app.verifyMode || app.verifyBridgeMode || app.verifyLeaseMode || app.verifyLeasePolicyMode || app.snapshotMode }
 
     /// Dev stack: its isolated JAEGER_STATE_DIR. Production: the same state-dir logic as lifecycle_lease.py.
-    var leasePath: String {
+    /// nil when the lease is disabled: no lease path is even resolved.
+    var leasePath: String? {
+        guard leasePolicy.isEnabled else { return nil }
         if let dev { return LeaseContract.path(stateDir: dev.stateDir) }
         return LeaseContract.path(env: ProcessInfo.processInfo.environment, home: NSHomeDirectory())
     }
 
     @discardableResult
     func acquireLease(_ reason: String) -> String? {
-        let path = leasePath
+        guard leasePolicy.isEnabled, let path = leasePath else { leaseDisabled("acquire (\(reason))"); return "lease_disabled" }
         if headless && path == LeaseContract.realOperatorPath(home: NSHomeDirectory()) {
             shellLog("[shell][lease] refused: a headless check never touches the operator lease")
             return "refused_operator_lease_in_headless_check"
@@ -143,6 +150,7 @@ final class StackController {
     /// Default retire removes the lease (no shutdown); `.expire` only in dev builds.
     @discardableResult
     func retireLease(_ reason: String, mode requested: LeaseRetire? = nil) -> [String: Any] {
+        guard leasePolicy.isEnabled else { return ["retired": false, "reason": "lease disabled"] }
         guard let lease else { return ["retired": false, "reason": "no lease held"] }
         let configured = requested ?? LeaseRetire.resolve(env: ProcessInfo.processInfo.environment, isDevBuild: ShellEnvironment.isDevBuild)
         var result = lease.retire(LeaseRetire.allowed(configured, isDevBuild: ShellEnvironment.isDevBuild))
@@ -153,8 +161,10 @@ final class StackController {
     }
 
     /// Launch: hold the lease when the production stack is already running (never in headless checks).
-    func acquireLeaseIfStackRunning() {
-        guard !headless, dev == nil, mode == .production else { return }
+    /// `allowHeadless` only for --verify-lease-policy (temp JAEGER_LIFECYCLE_LEASE, isolated gateway).
+    func acquireLeaseIfStackRunning(allowHeadless: Bool = false) {
+        guard leasePolicy.isEnabled else { return leaseDisabled("launch") }
+        guard !headless || allowHeadless, dev == nil, mode == .production else { return }
         ShellEnvironment.probe(ShellEnvironment.gateway().origin.string + "/health") { [weak self] state in
             guard state == "running" else { return shellLog("[shell][lease] stack not running at launch (\(state)); no lease") }
             self?.acquireLease("stack running at launch")
