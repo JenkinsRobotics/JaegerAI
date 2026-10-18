@@ -19,6 +19,7 @@ import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
+import { turnAvatarState, type AvatarState } from "../agents/avatarMotion";
 import type { VoiceHost } from "./nativeHost";
 
 const seconds = (ms?: number) => Math.max(1, Math.round((ms ?? 0) / 1000));
@@ -163,11 +164,11 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
 
 /** Activity-named progress line ("Searching the web…"): three agent-tinted dots and a shimmer. */
 /** While a turn runs: the agent's avatar (gently bobbing) + what it's doing; three dots without an agent. */
-export function ProgressLine({ phrase, agent }: { phrase: string; agent?: { id: string; name: string } }) {
+export function ProgressLine({ phrase, agent, state = "thinking" }: { phrase: string; agent?: { id: string; name: string }; state?: AvatarState }) {
   return (
     <div className="jg-progress-line" role="status" aria-live="polite" data-sender="assistant">
       {agent
-        ? <span className="jg-progress-avatar" aria-hidden="true"><AgentAvatar id={agent.id} name={agent.name} size={24} /></span>
+        ? <span className="jg-progress-avatar" aria-hidden="true"><AgentAvatar id={agent.id} name={agent.name} size={24} state={state} /></span>
         : <span className="jg-progress-dots" aria-hidden="true"><i /><i /><i /></span>}
       <span className="jg-progress-text">{phrase}</span>
     </div>
@@ -482,7 +483,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} />
                 : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} />)}</div>)}
-              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} agent={agent} />}
+              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} agent={agent} state={turnAvatarState(turn)} />}
             </section>
           ))}
         </div>

@@ -1,6 +1,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { StarIcon } from "../icons";
 import { avatarColor, avatarFace, avatarShape, type AvatarShape } from "./avatarColor";
+import type { AvatarState } from "./avatarMotion";
 
 /** Agent avatar: one of a few hand-drawn silhouettes (by a hash of the id) in the agent's color, with a
  * two-eye face that looks its own way; or the agent's image, clipped round. Silhouettes are Jaeger originals. */
@@ -16,12 +17,15 @@ const SHAPES: Record<AvatarShape, ReactNode> = {
 /** The lead squircle's tilt drifts slowly (observed in the reference: about -25° at one point,
  * about -8° half an hour later). One sweep takes LEAD_DRIFT_SECONDS; the phase comes from the wall
  * clock so a remount or reload never snaps it back. */
+/** States that draw an activity mark over the avatar (dots, an orbiting dot, a gathering ring). */
+const OVERLAY: Partial<Record<AvatarState, string>> = { thinking: "dots", waiting: "orbit", spawning: "gather" };
+
 export const LEAD_DRIFT_SECONDS = 1200;
 export function leadDriftPhase(now = Date.now()): number {
   return Math.round((now / 1000) % (LEAD_DRIFT_SECONDS * 2));
 }
 
-export function AgentAvatar({ id, name, src, size = 36 }: { id: string; name: string; src?: string; size?: number }) {
+export function AgentAvatar({ id, name, src, size = 36, state }: { id: string; name: string; src?: string; size?: number; state?: AvatarState }) {
   const shape = avatarShape(id);
   const face = avatarFace(id, shape);
   const style = {
@@ -33,23 +37,24 @@ export function AgentAvatar({ id, name, src, size = 36 }: { id: string; name: st
     ...(shape === "squircle" ? { "--jg-drift-delay": `-${leadDriftPhase()}s` } : {}),
   } as CSSProperties;
   return (
-    <span className={`jg-avatar jg-avatar--${src ? "image" : shape}`} style={style} aria-hidden="true" title={name} data-shape={src ? undefined : shape}>
+    <span className={`jg-avatar jg-avatar--${src ? "image" : shape}`} style={style} aria-hidden="true" title={name} data-shape={src ? undefined : shape} data-state={state && state !== "idle" ? state : undefined}>
       {src ? <img src={src} alt="" /> : (
         <span className="jg-avatar__body">
           <svg className="jg-avatar__shape" viewBox="0 0 36 36" fill="currentColor" aria-hidden="true">{SHAPES[shape]}</svg>
           <span className={`jg-avatar__face jg-avatar__face--${face.eyes}`}><i /><i /></span>
         </span>
       )}
+      {state && OVERLAY[state] && <span className={`jg-avatar__fx jg-avatar__fx--${OVERLAY[state]}`}><i /><i /><i /></span>}
     </span>
   );
 }
 
 /** A pinned tile's art: the agent's avatar, larger. The corner shows the unread dot, else (for the
  * supervisor) its star badge. */
-export function SupervisorArt({ id, name, unread = false, lead = false, size = 54 }: { id: string; name: string; unread?: boolean; lead?: boolean; size?: number }) {
+export function SupervisorArt({ id, name, unread = false, lead = false, size = 54, state }: { id: string; name: string; unread?: boolean; lead?: boolean; size?: number; state?: AvatarState }) {
   return (
     <span className="jg-supervisor-art" style={{ width: size, height: size }} aria-hidden="true">
-      <AgentAvatar id={id} name={name} size={size} />
+      <AgentAvatar id={id} name={name} size={size} state={state} />
       {unread ? <span className="jg-supervisor-art__dot" /> : lead && <span className="jg-supervisor-art__badge"><StarIcon width={9} height={9} /></span>}
     </span>
   );
