@@ -7,7 +7,7 @@ import { HandoffMarker } from "../agents/HandoffMarker";
 import { ArrowDownIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
-import { MiniMarkdown } from "./miniMarkdown";
+import { Markdown } from "./Markdown";
 import type { VoiceHost } from "./nativeHost";
 
 const seconds = (ms?: number) => Math.max(1, Math.round((ms ?? 0) / 1000));
@@ -40,7 +40,7 @@ export function needsSeparator(prev: number | undefined, at: number | undefined)
 function BubblePart({ part, links }: { part: ChatPart; links: Links }) {
   switch (part.kind) {
     case "markdownContent":
-      return <div className="jg-md"><MiniMarkdown text={part.text} onCopy={links.onCopy} onOpen={links.onOpen} /></div>;
+      return <div className="jg-md"><Markdown text={part.text} onCopy={links.onCopy} onOpen={links.onOpen} /></div>;
     case "thinking":
       return <details className="jg-thinking"><summary>Thought for {seconds(part.durationMs)} s</summary><p>{part.text}</p></details>;
     case "progress":
