@@ -1,0 +1,6 @@
+I'm new to this project and want a proper briefing. Use only your read-only tools: first search_files to find the project's README and one main source file, then read_file on both (no shell commands, no edits). Then write the briefing in markdown with:
+- a "##" heading for each section: Overview, How it's organised, Getting started, Risks and open questions;
+- a bulleted list of the main components you found;
+- a table with three of those components (columns: Component | What it does | Key file);
+- one fenced code block with a typical command or a short snippet taken from what you read.
+Write it for a developer joining tomorrow: five to seven paragraphs in total, concrete, and quote file names where it helps.
