@@ -8,7 +8,7 @@ import { avatarColor } from "../agents/avatarColor";
 import { HandoffMarker } from "../agents/HandoffMarker";
 import { ArrowDownIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
-import { activityPhrase, stepsSummary, type ToolPart } from "./activity";
+import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
 import type { VoiceHost } from "./nativeHost";
@@ -60,11 +60,11 @@ function BubblePart({ part, links }: { part: ChatPart; links: Links }) {
 }
 
 function ToolLine({ part }: { part: ToolPart }) {
-  const verb = part.state === "completed" ? "Ran" : part.state === "cancelled" ? "Stopped" : part.state === "waitingForConfirmation" ? "Run" : "Running";
+  const { verb, target, mono } = stepLine(part);
   return (
     <div className={`jg-tool jg-tool--${part.state}`}>
       <span className="jg-tool__verb">{verb}</span>{" "}
-      <code>{part.toolName}</code>
+      {mono ? <code className="jg-tool__target">{target}</code> : <span className="jg-tool__target">{target}</span>}
     </div>
   );
 }
@@ -115,16 +115,20 @@ function Card({ part, onDecide }: { part: CardPart; onDecide: Decide }) {
   );
 }
 
-/** Split a response into bubbles, cards, tool-step folds and centered markers.
+/** Split a response into bubbles, cards, centered markers and one steps fold.
  * Back-to-back "Messaged" markers fold into one "Messaged X and Y", like the
- * target; consecutive tool calls fold into one steps card. */
-export function segments(parts: ChatPart[]) {
+ * target. While the turn runs its tools show only as the progress line; after,
+ * they all fold into ONE summary row below the reply. A tool still marked
+ * running in an ended turn counts as stopped. */
+export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete") {
   const out: Array<{ marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] } | { steps: ToolPart[] }> = [];
+  const steps: ToolPart[] = [];
+  const ended = state === "complete" || state === "failed" || state === "cancelled";
   for (const part of parts) {
     const last = out[out.length - 1];
     if (part.kind === "toolInvocation") {
-      if (last && "steps" in last) last.steps.push(part);
-      else out.push({ steps: [part] });
+      if (state === "pending") continue;
+      steps.push(ended && (part.state === "executing" || part.state === "streaming") ? { ...part, state: "cancelled" } : part);
     } else if (part.kind === "progress") {
       continue; // live only: the progress line
     } else if (part.kind === "handoff") {
@@ -142,6 +146,7 @@ export function segments(parts: ChatPart[]) {
       else out.push({ bubble: [part] });
     }
   }
+  if (steps.length) out.push({ steps });
   return out;
 }
 
@@ -300,7 +305,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
                 <div className="jg-separator" role="separator">{separatorLabel(turn.createdAt!)}</div>
               )}
               {turn.message && <div className="jg-bubble jg-bubble--user" data-sender="user">{turn.message}</div>}
-              {segments(turn.parts).map((seg, i) =>
+              {segments(turn.parts, turn.state).map((seg, i) =>
                 "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} />
                 : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />

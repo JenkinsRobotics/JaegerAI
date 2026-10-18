@@ -8,13 +8,31 @@ const tool = (callId: string, toolName: string, state: "completed" | "executing"
 const turn = (parts: ChatPart[], state: ChatTurn["state"] = "pending"): ChatTurn => ({ turnId: "t1", message: "hi", parts, state });
 
 describe("chat column", () => {
-  it("folds consecutive tool calls into one steps segment between bubbles", () => {
-    const segs = segments([
-      { kind: "thinking", text: "plan" }, tool("a", "shell"), tool("b", "read_file"), tool("c", "bash"),
+  it("folds every tool call of a finished turn into ONE steps row below the reply", () => {
+    const parts: ChatPart[] = [
+      { kind: "thinking", text: "plan" }, tool("a", "shell"), { kind: "markdownContent", text: "Looking" }, tool("b", "read_file"), tool("c", "bash"),
       { kind: "progress", message: "Checking" }, { kind: "markdownContent", text: "done" },
-    ]);
-    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["bubble", "steps", "bubble"]);
-    expect("steps" in segs[1] && segs[1].steps.map((t) => t.callId)).toEqual(["a", "b", "c"]);
+    ];
+    const segs = segments(parts, "complete");
+    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["bubble", "bubble", "steps"]);
+    expect("steps" in segs[2] && segs[2].steps.map((t) => t.callId)).toEqual(["a", "b", "c"]);
+    // While running: no tool rows at all, the progress line speaks for them.
+    expect(segments(parts, "pending").some((s) => "steps" in s)).toBe(false);
+    // A tool left running in an ended turn reads as stopped.
+    const stopped = segments([tool("x", "shell", "executing")], "cancelled");
+    expect("steps" in stopped[0] && stopped[0].steps[0].state).toBe("cancelled");
+  });
+
+  it("lists each step as verb + target, mono for paths and commands", () => {
+    const steps = [
+      { ...tool("a", "read_file"), input: { path: "src/app.tsx" } },
+      { ...tool("b", "web_search"), input: { query: "swift ui shimmer" } },
+      tool("c", "npm run build"),
+    ] as Extract<ChatPart, { kind: "toolInvocation" }>[];
+    const html = renderToStaticMarkup(<StepsFold tools={steps} defaultOpen />);
+    expect(html).toContain('<span class="jg-tool__verb">Read</span> <code class="jg-tool__target">src/app.tsx</code>');
+    expect(html).toContain('<span class="jg-tool__verb">Searched</span> <span class="jg-tool__target">swift ui shimmer</span>');
+    expect(html).toContain('<span class="jg-tool__verb">Ran</span> <code class="jg-tool__target">npm run build</code>');
   });
 
   it("renders the steps fold collapsed with a summary, expanded on demand", () => {

@@ -14,6 +14,7 @@ describe("activity", () => {
     expect(toolCategory("npm run build")).toBe("shell");
     expect(toolCategory("read_file")).toBe("read");
     expect(toolCategory("search_files")).toBe("read");
+    expect(toolCategory("list_skill_dir")).toBe("read");
     expect(toolCategory("write_file")).toBe("edit");
     expect(toolCategory("edit_file")).toBe("edit");
     expect(toolCategory("call_agent")).toBe("agent");
@@ -66,5 +67,6 @@ describe("activity", () => {
       tool("read_file", "completed", "r2"), tool("terminal", "completed", "s3")])).toBe("Ran 3 commands · Read 2 files");
     expect(stepsSummary([tool("web_search")])).toBe("Searched the web");
     expect(stepsSummary([tool("write_file"), tool("shell", "executing", "s")])).toBe("Edited 1 file · Ran 1 command · 1 running");
+    expect(stepsSummary([tool("npm run build"), tool("git commit", "waitingForConfirmation", "g")])).toBe("Ran 1 command · 1 waiting for your OK");
   });
 });
