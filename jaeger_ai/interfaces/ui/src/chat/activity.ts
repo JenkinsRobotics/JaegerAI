@@ -24,38 +24,73 @@ const RUNNING: Record<ToolCategory, string> = {
   web: "Reading a page…",
   shell: "Running commands…",
   read: "Reading files…",
-  edit: "Editing files…",
+  edit: "Writing to a file…",
   agent: "Checking with another agent…",
-  other: "Working on it…",
+  other: "Waiting on results…",
 };
 
 const THINKING = ["Thinking…", "Working it out…", "Putting it together…"] as const;
+const WORKING = ["Working on it…", "Making headway…", "Getting there…", "Sorting it out…", "Plugging away…"] as const;
+export const CODING = "Writing code…";
+export const NEEDS_INPUT = "Needs your OK";
 
-/** Stable per turn, so the phrase does not flicker between renders. */
-export function thinkingPhrase(turnId: string): string {
+function pick<T extends readonly string[]>(list: T, seed: string): T[number] {
   let h = 0;
-  for (let i = 0; i < turnId.length; i += 1) h = (h * 31 + turnId.charCodeAt(i)) >>> 0;
-  return THINKING[h % THINKING.length];
+  for (let i = 0; i < seed.length; i += 1) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
+  return list[h % list.length];
 }
 
-const isLive = (p: ToolPart) => p.state === "streaming" || p.state === "executing" || p.state === "waitingForConfirmation";
+/** Stable per turn, so the phrase does not flicker between renders. */
+export const thinkingPhrase = (turnId: string): string => pick(THINKING, turnId);
+/** Generic "still busy" phrase, also stable per turn. */
+export const workingPhrase = (turnId: string): string => pick(WORKING, `w:${turnId}`);
 
-/** The progress line for a pending turn. */
+const isLive = (p: ToolPart) => p.state === "streaming" || p.state === "executing" || p.state === "waitingForConfirmation";
+const CODE_FILE = /\.(tsx?|jsx?|mjs|cjs|py|swift|rs|go|rb|java|kt|c|cc|cpp|h|hpp|cs|sh|zsh|css|scss|html|sql|lua|php)$/i;
+
+/** The file, command, URL or query a step works on, when its input names one. */
+export function toolTarget(part: Pick<ToolPart, "toolName" | "input">): string | undefined {
+  const input = part.input;
+  if (typeof input === "string") return input.trim() || undefined;
+  if (!input || typeof input !== "object") return /\s/.test(part.toolName.trim()) ? part.toolName.trim() : undefined;
+  const o = input as Record<string, unknown>;
+  for (const key of ["path", "file_path", "file", "filename", "target", "command", "cmd", "url", "query", "q", "pattern", "agent", "agent_id"]) {
+    const v = o[key];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (Array.isArray(v) && v.length && v.every((x) => typeof x === "string")) return v.join(" ");
+  }
+  return undefined;
+}
+
+/** An unclosed ``` or ~~~ fence: the reply is writing code right now. */
+export function inOpenFence(text: string): boolean {
+  let open = false;
+  for (const line of text.split("\n")) if (/^\s{0,3}(```|~~~)/.test(line)) open = !open;
+  return open;
+}
+
+/** The progress line for a pending turn, from its latest part. */
 export function activityPhrase(turn: Pick<ChatTurn, "turnId" | "parts">, agentName?: (id: string) => string | undefined): string {
   const parts = turn.parts;
   if (parts.some((p) => p.kind === "confirmation") || parts.some((p) => p.kind === "toolInvocation" && p.state === "waitingForConfirmation")) {
-    return "Waiting for your OK";
+    return NEEDS_INPUT;
   }
   for (let i = parts.length - 1; i >= 0; i -= 1) {
     const p = parts[i];
-    if (p.kind === "toolInvocation" && isLive(p)) return RUNNING[toolCategory(p.toolName)];
+    if (p.kind === "toolInvocation" && isLive(p)) {
+      const category = toolCategory(p.toolName);
+      if (category === "edit" && CODE_FILE.test(toolTarget(p) ?? "")) return CODING;
+      return RUNNING[category];
+    }
     if (p.kind === "handoff" && p.direction === "to") {
       // Still out with that agent unless it already came back.
       const back = parts.slice(i + 1).some((q) => q.kind === "handoff" && q.direction === "from" && q.handoffId === p.handoffId);
       if (!back) return `Checking with ${agentName?.(p.agentId) ?? p.agentName}…`;
     }
     if (p.kind === "progress" && p.message) return p.message.endsWith("…") ? p.message : `${p.message}…`;
-    if (p.kind === "markdownContent" && p.text) break;
+    if (p.kind === "thinking") return p.durationMs === undefined ? thinkingPhrase(turn.turnId) : workingPhrase(turn.turnId);
+    if (p.kind === "markdownContent" && p.text) return inOpenFence(p.text) ? CODING : workingPhrase(turn.turnId);
+    if (p.kind === "toolInvocation" || p.kind === "handoff") return workingPhrase(turn.turnId);
   }
   return thinkingPhrase(turn.turnId);
 }
