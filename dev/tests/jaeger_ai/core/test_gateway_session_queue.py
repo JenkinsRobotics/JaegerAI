@@ -38,7 +38,7 @@ def test_durable_queue_survives_store_restart_and_preserves_order(tmp_path: Path
     store = GatewaySessionStore(path)
     store.enqueue_request("session", "first", request_id="q1")
     second = store.enqueue_request("session", "second", request_id="q2", requested={"model": "glm"})
-    assert store.schema_version() == 11
+    assert store.schema_version() == 12
     assert [row["request_id"] for row in store.list_queue("session")] == ["q1", "q2"]
     assert second["execution"]["model"] == "glm"
 
@@ -104,7 +104,7 @@ def test_queue_add_publishes_durable_projection_and_starts_when_idle(tmp_path: P
     assert payload["status"] == "running"
     assert started == [{"sid": "session", "rid": "q1", "text": "follow-up work"}]
     events = app.event_bus.get_replay_events("session")
-    assert [event.event for event in events] == ["turn.start", "queue.updated"]
+    assert [event.event for event in events if event.event != "message.created"] == ["turn.start", "queue.updated"]
     assert events[-1].data["items"] == []
     assert app.store.get_request("q1")["status"] == "admitted"
 
@@ -161,5 +161,5 @@ def test_terminal_outcome_drains_the_next_queue_item_once(tmp_path: Path):
     assert started == ["q1"]
     assert app.store.get_request("q1")["status"] == "admitted"
     assert app.store.list_queue("session") == []
-    events = [event.event for event in app.event_bus.get_replay_events("session")]
+    events = [event.event for event in app.event_bus.get_replay_events("session") if event.event != "message.created"]
     assert events == ["turn.start", "turn.finish", "turn.start", "queue.updated"]

@@ -79,7 +79,8 @@ def test_handoffs_stream_on_the_origin_turn_and_persist_as_parts(tmp_path):
     gateway._publish_handoff("agent.handoff.finished", {**record, "status": "completed"})
     on_chat = [e for e in _events(gateway) if e["event"].startswith("agent.handoff") and e["session_id"] == "s1"]
     assert [e["data"]["request_id"] for e in on_chat] == ["r1", "r1"]
-    assert sum(e["session_id"] == "*" for e in _events(gateway)) == 2  # global copies are unchanged
+    assert sum(e["session_id"] == "*" and e["event"].startswith("agent.handoff")
+               for e in _events(gateway)) == 2  # global copies are unchanged
 
     store.complete_request("r1", status="completed", result={}, assistant_text="Research says hi")
     parts = store.get_session("s1")["messages"][-1]["parts"]

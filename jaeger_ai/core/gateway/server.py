@@ -736,6 +736,7 @@ class JaegerGatewayApp:
         self.file_changes = FileChanges(self.store.path.parent / "turn-file-changes")
         from jaeger_ai.core.agent_registry.projects import ProjectStore
         self.projects = ProjectStore(self.store.path.parent / "projects.json")
+        self._summarizing: dict[str, asyncio.Task] = {}
         self.event_bus = event_bus or GatewayEventBus(store=self.store)
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
@@ -1291,6 +1292,7 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
         self.app.router.add_get("/v1/agents/summary", self.handle_agents_summary)
         self.app.router.add_get("/v1/agents/{id}", self.handle_get_agent)
+        self.app.router.add_get("/v1/agents/{id}/home", self.handle_agent_home)
         self.app.router.add_post("/v1/agents/{id}/activate", self.handle_activate_agent)
         self.app.router.add_post("/v1/agents/{id}/seen", self.handle_agent_seen)
         self.app.router.add_post("/v1/agents/{id}/handoff", self.handle_handoff_agent)
@@ -1322,6 +1324,7 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/sessions/{id}/requests/{request_id}/changes/undo", self.handle_file_changes)
         self.app.router.add_post("/v1/sessions/{id}/handoff", self.handle_session_handoff)
         self.app.router.add_get("/v1/sessions/{id}/stream", self.handle_stream_events)
+        self.app.router.add_get("/v1/sessions/{id}/messages", self.handle_list_messages)
         self.app.router.add_get("/v1/events/stream", self.handle_global_stream)
         self.app.router.add_get("/v1/connect-apps", self.handle_connect_apps)
         self.app.router.add_get("/v1/connect-apps/{id}/state", self.handle_connect_app_state)
@@ -1347,6 +1350,7 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/runtime/tier", self.handle_set_tier)
         self.app.router.add_get("/v1/sessions/{id}/attachments", self.handle_list_attachments)
         self.app.router.add_post("/v1/sessions/{id}/attachments", self.handle_add_attachment)
+        self.app.router.add_post("/v1/sessions/{id}/attachments/upload", self.handle_upload_attachment)
         self.app.router.add_get("/v1/tasks", self.handle_tasks)
         self.app.router.add_post("/v1/tasks", self.handle_tasks)
         self.app.router.add_get("/v1/tasks/{id}", self.handle_task)
@@ -2121,6 +2125,283 @@ class JaegerGatewayApp:
         origin = self._origin_turn(record)
         if origin:
             self.event_bus.publish(origin[0], event, {"handoff": record, "request_id": origin[1]})
+        if event == "agent.handoff.finished":
+            self._post_handoff_result(record)
+
+    # ── Sessions contract: home chats, typed messages, rolling summary ──
+
+    @staticmethod
+    def _agent_home_id(agent_id: str) -> str:
+        # Same id the WebUI agents panel already uses for an agent's home chat.
+        return f"agent-{agent_id}"
+
+    def _ensure_agent_home(self, agent_id: str, display: str | None = None) -> tuple[str, bool]:
+        """Get-or-create the one persistent home chat of an agent. Never archived."""
+        sid = self._agent_home_id(agent_id)
+        existing = self.store.get_session(sid)
+        meta = {"agent_id": agent_id, "home": True, "agent_pinned": True, "route_checked": True}
+        if existing is None:
+            self.store.ensure_session(sid, title=display or agent_id, profile="jaeger", metadata=meta)
+            return sid, True
+        emeta = existing.get("metadata") or {}
+        if not emeta.get("home") or emeta.get("agent_id") != agent_id:
+            self.store.update_metadata(sid, meta)
+        if emeta.get("archived"):
+            try:
+                self.store.set_session_archived(sid, False)
+            except Exception:  # noqa: BLE001
+                logger.warning("could not unarchive home session %s", sid, exc_info=True)
+        return sid, False
+
+    async def handle_agent_home(self, request: web.Request) -> web.Response:
+        """GET /v1/agents/{id}/home — idempotent get-or-create of the agent's home chat."""
+        agent_id = request.match_info["id"]
+        record = self._registry().get_agent(agent_id)
+        if record is None:
+            return web.json_response({"error": "Agent not found"}, status=404)
+        sid, created = self._ensure_agent_home(agent_id, getattr(record, "display_name", None))
+        return web.json_response({"session_id": sid, "agent_id": agent_id, "created": created})
+
+    async def handle_list_messages(self, request: web.Request) -> web.Response:
+        """GET /v1/sessions/{id}/messages?before=<message_id>&limit=50 — newest first."""
+        session_id = request.match_info["id"]
+        try:
+            before = int(request.query["before"]) if request.query.get("before") else None
+            limit = int(request.query.get("limit") or 50)
+        except ValueError:
+            return web.json_response({"error": "before and limit must be integers"}, status=400)
+        if not 1 <= limit <= 200:
+            return web.json_response({"error": "limit must be between 1 and 200"}, status=400)
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        return web.json_response(self.store.list_messages(session_id, before=before, limit=limit))
+
+    def _post_handoff_request(self, record: dict[str, Any]) -> None:
+        """The task, as a message in the specialist's home chat."""
+        try:
+            target = self._registry().get_agent(record["to_agent_id"])
+            home, _ = self._ensure_agent_home(record["to_agent_id"], getattr(target, "display_name", None))
+            self.store.append_message(
+                home, "user", str(record.get("task") or ""), kind="handoff_request",
+                sender_agent_id=record.get("from_agent_id"),
+                links={"handoff_id": record["id"], "origin_session_id": record.get("session_id")})
+        except Exception:  # noqa: BLE001 — a transcript copy never fails the handoff
+            logger.warning("handoff_request message not posted for %s", record.get("id"), exc_info=True)
+
+    def _post_handoff_result(self, record: dict[str, Any]) -> None:
+        """The specialist's result, as an assistant message from that specialist in
+        the chat that asked for it and in the specialist's home chat."""
+        result = record.get("result") or {}
+        status = str(record.get("status") or result.get("status") or "")
+        text = str(result.get("summary") or "").strip() or f"Handoff {status or 'finished'}."
+        agent_id = record.get("to_agent_id")
+        links = {"handoff_id": record.get("id"), "child_session_id": result.get("worker_session_id")}
+        part = {"type": "handoff", "direction": "from", "handoff_id": record.get("id"),
+                "agent_id": agent_id, "status": status}
+        targets = []
+        if record.get("session_id") and self.store.get_session(record["session_id"]) is not None:
+            targets.append(record["session_id"])
+        try:
+            home, _ = self._ensure_agent_home(agent_id)
+            if home not in targets:
+                targets.append(home)
+        except Exception:  # noqa: BLE001
+            logger.warning("no home session for %s", agent_id, exc_info=True)
+        for sid in targets:
+            try:
+                self.store.append_message(sid, "assistant", text, kind="handoff_result",
+                                          sender_agent_id=agent_id, links=links, parts=[part],
+                                          meta={"status": status})
+            except Exception:  # noqa: BLE001
+                logger.warning("handoff_result message not posted to %s", sid, exc_info=True)
+
+    SUMMARY_TRIGGER = int(os.environ.get("JAEGER_SUMMARY_TRIGGER", "24") or 24)
+    SUMMARY_KEEP = int(os.environ.get("JAEGER_SUMMARY_KEEP", "12") or 12)
+    _SUMMARY_SYSTEM = (
+        "You maintain the running summary of one conversation so it can continue after "
+        "older messages leave the context window. Merge the previous summary (if any) with "
+        "the new messages. Keep: the user's first request and goals in their own words, "
+        "names, numbers, codes, file paths, decisions, results, open tasks and preferences. "
+        "Drop small talk. Plain text, at most 350 words, no preamble."
+    )
+
+    def _schedule_summary(self, session_id: str) -> None:
+        if not session_id or session_id in self._summarizing:
+            return
+        try:
+            task = asyncio.get_running_loop().create_task(self._maybe_summarize(session_id))
+        except RuntimeError:
+            return
+        self._summarizing[session_id] = task
+        task.add_done_callback(lambda _t, sid=session_id: self._summarizing.pop(sid, None))
+
+    async def _summary_text(self, prompt: str) -> tuple[str, str]:
+        models = [m for m in (os.environ.get("JAEGER_SUMMARY_MODEL") or DEFAULT_OLLAMA_MODEL,
+                              os.environ.get("JAEGER_SUMMARY_FALLBACK_MODEL")) if m]
+        last: Exception | None = None
+        for model in models:
+            try:
+                text = await self._ollama_chat(prompt, model=model, system_prompt=self._SUMMARY_SYSTEM)
+                if text and text.strip():
+                    return text.strip(), model
+            except Exception as exc:  # noqa: BLE001 — try the fallback model
+                last = exc
+                logger.warning("summary model %s failed: %s", model, exc)
+        raise RuntimeError(f"no summary model answered: {last}")
+
+    async def _maybe_summarize(self, session_id: str, *, force: bool = False) -> dict[str, Any] | None:
+        """Fold older messages into one cumulative summary message instead of
+        dropping them. Originals stay in the table and stay pageable."""
+        try:
+            session = self.store.get_session(session_id)
+            if session is None:
+                return None
+            meta = session.get("metadata") or {}
+            upto = int(meta.get("summary_upto_message_id") or 0)
+            rows = [m for m in self.store.messages_after(session_id, upto)
+                    if m.get("kind") != "summary" and m.get("role") in {"user", "assistant"}]
+            if len(rows) <= self.SUMMARY_TRIGGER and not force:
+                return None
+            block = rows[:-self.SUMMARY_KEEP] if len(rows) > self.SUMMARY_KEEP else ([] if not force else rows)
+            if not block:
+                return None
+            lines, used = [], 0
+            for m in block:
+                who = m.get("sender_agent_id") or m.get("role")
+                line = f"[#{m['id']} {who}] {str(m.get('content') or '')[:1500]}"
+                used += len(line)
+                if used > 40_000:
+                    break
+                lines.append(line)
+            prev = str(meta.get("summary_text") or "").strip()
+            prompt = ((f"Previous summary:\n{prev}\n\n" if prev else "")
+                      + "New messages to fold in:\n" + "\n".join(lines))
+            text, model = await self._summary_text(prompt)
+            covers_from = int(meta.get("summary_covers_from") or block[0]["id"])
+            covers_to = int(block[-1]["id"])
+            count = int(meta.get("summary_message_count") or 0) + len(block)
+            summary = {"covers_from": covers_from, "covers_to": covers_to, "message_count": count}
+            mid = self.store.append_message(session_id, "system", text, kind="summary",
+                                            meta={"summary": summary, "model": model})
+            self.store.update_metadata(session_id, {
+                "summary_upto_message_id": covers_to, "summary_covers_from": covers_from,
+                "summary_message_count": count, "summary_message_id": mid, "summary_text": text})
+            payload = {"session_id": session_id, "summary_message_id": mid, "covers_to": covers_to}
+            self.event_bus.publish(session_id, "session.summarized", payload)
+            self.event_bus.publish("*", "session.summarized", payload)
+            logger.info("session %s summarized through #%s (%s msgs) with %s", session_id, covers_to, count, model)
+            return {**payload, "summary": summary, "model": model}
+        except Exception:  # noqa: BLE001 — summary is best effort; history is never dropped
+            logger.warning("summary failed for %s", session_id, exc_info=True)
+            return None
+
+    UPLOAD_MAX_BYTES = 25 * 1024 * 1024
+
+    @staticmethod
+    def _upload_view(row: dict[str, Any]) -> dict[str, Any]:
+        return {"attachment_id": row["attachment_id"], "name": row.get("original_filename"),
+                "mime": row.get("mime_type"), "size": row.get("size_bytes"), "sha256": row.get("sha256")}
+
+    async def handle_upload_attachment(self, request: web.Request) -> web.Response:
+        """POST /v1/sessions/{id}/attachments/upload — stage bytes gateway-side.
+
+        multipart ``file`` (+ ``name``) or JSON ``{name, mime, data_base64}``.
+        25 MB per file (413 over). ``Idempotency-Key`` replays the same attachment.
+        Staged uploads join a turn only when its ``attachment_ids`` names them."""
+        import base64
+        import hashlib
+        import mimetypes
+
+        session_id = request.match_info["id"]
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
+        idem = (request.headers.get("Idempotency-Key") or "").strip()[:200]
+        if idem:
+            for row in self.store.list_attachments(session_id):
+                if (row.get("metadata") or {}).get("idempotency_key") == idem:
+                    return web.json_response({**self._upload_view(row), "replayed": True}, status=201)
+        limit = self.UPLOAD_MAX_BYTES
+        too_big = web.json_response({"error": f"attachment exceeds {limit // (1024 * 1024)} MB"}, status=413)
+        att_id = f"att_{uuid.uuid4().hex[:16]}"
+        stage = (self.store.path.parent / "attachments"
+                 / hashlib.sha256(session_id.encode()).hexdigest()[:24] / att_id)
+        stage.mkdir(parents=True, exist_ok=True, mode=0o700)
+        tmp = stage / ".upload"
+        digest, size = hashlib.sha256(), 0
+        name, mime = "", ""
+        ctype = request.content_type or ""
+        try:
+            if ctype.startswith("multipart/"):
+                if request.content_length and request.content_length > limit + 1024 * 1024:
+                    return too_big
+                reader = await request.multipart()
+                got_file = False
+                while True:
+                    part = await reader.next()
+                    if part is None:
+                        break
+                    if part.name == "file" and not got_file:
+                        got_file = True
+                        name = name or (part.filename or "")
+                        mime = part.headers.get("Content-Type", "") or mime
+                        with tmp.open("wb") as out:
+                            while True:
+                                chunk = await part.read_chunk(1024 * 1024)
+                                if not chunk:
+                                    break
+                                size += len(chunk)
+                                if size > limit:
+                                    return too_big
+                                digest.update(chunk)
+                                out.write(chunk)
+                    elif part.name == "name":
+                        name = (await part.text()).strip() or name
+                    elif part.name == "mime":
+                        mime = (await part.text()).strip() or mime
+                if not got_file:
+                    return web.json_response({"error": "multipart field 'file' is required"}, status=400)
+            elif ctype in {"application/json", ""}:
+                cap = limit * 4 // 3 + 64 * 1024
+                if request.content_length and request.content_length > cap:
+                    return too_big
+                raw = await request.content.read(cap + 1)
+                if len(raw) > cap:
+                    return too_big
+                try:
+                    body = json.loads(raw or b"{}")
+                    data = base64.b64decode(str(body.get("data_base64") or ""), validate=True)
+                except (ValueError, TypeError) as exc:
+                    return web.json_response({"error": f"invalid JSON upload: {exc}"}, status=400)
+                if not data:
+                    return web.json_response({"error": "data_base64 is required"}, status=400)
+                if len(data) > limit:
+                    return too_big
+                name, mime = str(body.get("name") or ""), str(body.get("mime") or "")
+                size = len(data)
+                digest.update(data)
+                tmp.write_bytes(data)
+            else:
+                return web.json_response({"error": "use multipart/form-data or application/json"}, status=415)
+            safe = re.sub(r"[^A-Za-z0-9._ -]", "_", Path(name or "upload.bin").name).strip(" .")[:200] or "upload.bin"
+            mime = mime or mimetypes.guess_type(safe)[0] or "application/octet-stream"
+            final = stage / safe
+            tmp.replace(final)
+            os.chmod(final, 0o600)
+        finally:
+            if tmp.exists():
+                tmp.unlink()
+                try:
+                    stage.rmdir()
+                except OSError:
+                    pass
+        row = self.store.add_attachment(session_id, {
+            "attachment_id": att_id, "original_filename": safe, "stored_filename": safe,
+            "safe_path": str(final), "mime_type": mime, "size_bytes": size,
+            "sha256": digest.hexdigest(), "provenance": "upload_staged",
+            "metadata": {"staged": True, **({"idempotency_key": idem} if idem else {})},
+        })
+        self.event_bus.publish(session_id, "attachment.added", {"attachment": row})
+        return web.json_response(self._upload_view(row), status=201)
 
     async def handle_list_handoffs(self, request: web.Request) -> web.Response:
         """GET /v1/handoffs[?agent_id=&session_id=&since=&limit=] — newest first."""
@@ -3711,10 +3992,13 @@ class JaegerGatewayApp:
         from jaeger_agent.tool_executor import caller_identity
 
         actor = (execution or {}).get("caller")
-        with caller_identity(actor if isinstance(actor, str) and actor.strip() else None):
-            await self._execute_turn_inner(
-                session_id, turn_id, text, request_id=request_id, execution=execution,
-            )
+        try:
+            with caller_identity(actor if isinstance(actor, str) and actor.strip() else None):
+                await self._execute_turn_inner(
+                    session_id, turn_id, text, request_id=request_id, execution=execution,
+                )
+        finally:
+            self._schedule_summary(session_id)
 
     async def _execute_turn_inner(
         self,
@@ -5141,6 +5425,7 @@ class JaegerGatewayApp:
                 relation="delegate",
             )
             self.store.save_handoff({**record, "status": "running", "child_run_id": child.id})
+            self._post_handoff_request(record)
             runtime = NativeSpecialistRuntime(self._specialist_chat)
             delegates = DelegateRegistry()
             delegates.register(runtime, replace=True)

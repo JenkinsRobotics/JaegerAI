@@ -102,6 +102,7 @@ TURN_ROUTES = frozenset({
     ("POST", "/v1/sessions/{id}/requests/{request_id}/steer"),
     ("POST", "/v1/sessions/{id}/reconcile"),
     ("POST", "/v1/sessions/{id}/attachments"),
+    ("POST", "/v1/sessions/{id}/attachments/upload"),
     ("POST", "/v1/sessions/{id}/feedback"),
     ("POST", "/v1/sessions/{id}/branch"),
     ("POST", "/v1/sessions/{id}/retry"),
@@ -116,6 +117,7 @@ PREFIXED_READ_ROUTES = frozenset({
     "/v1/sessions/{id}", "/v1/sessions/{id}/stream", "/v1/sessions/{id}/events",
     "/v1/sessions/{id}/requests/{request_id}", "/v1/sessions/{id}/queue",
     "/v1/sessions/{id}/attachments", "/v1/sessions/{id}/activity", "/v1/stop",
+    "/v1/sessions/{id}/messages",
     # Status of one approval; the handler limits it to the caller's sessions.
     "/v1/approvals/{id}",
 })

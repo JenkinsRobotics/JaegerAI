@@ -20,7 +20,7 @@ def test_completed_receipt_cannot_be_overwritten(tmp_path):
     assert late["replayed"] is True
     reopened = GatewaySessionStore(store.path)
     assert [m["content"] for m in reopened.get_session("s")["messages"]] == ["work", "done"]
-    assert [e["event"] for e in reopened.replay_events("s")["events"]] == ["turn.start", "turn.finish"]
+    assert [e["event"] for e in reopened.replay_events("s")["events"] if e["event"] != "message.created"] == ["turn.start", "turn.finish"]
 
 
 def test_terminal_event_failure_rolls_back_receipt_and_transcript(tmp_path, monkeypatch):
@@ -151,7 +151,7 @@ async def test_confirmed_native_halt_is_failed_not_unknown(tmp_path, monkeypatch
         "reply": {"halt_reason": "repeated_tool_failure"}})
     await app._execute_turn("s", row["turn_id"], "research", request_id="halt")
     assert store.get_request("halt")["status"] == "failed"
-    assert [e.event for e in app.event_bus.get_replay_events("s") if e.event != "jaeger.state"] == ["turn.start", "turn.failed"]
+    assert [e.event for e in app.event_bus.get_replay_events("s") if e.event not in {"jaeger.state", "message.created"}] == ["turn.start", "turn.failed"]
 
 
 def test_handoff_terminal_result_is_immutable(tmp_path):
