@@ -243,6 +243,7 @@ def list_servers(layout: Any) -> dict[str, Any]:
                        ("error" if name in errors else
                         ("active" if active_tools else "configured"))),
             "error": errors.get(name), "tool_count": len(active_tools),
+            **{key: raw[key] for key in _LIMIT_KEYS if key in raw},
         })
     return {"ok": True, "owner": "jaeger", "servers": rows,
             "total": len(rows), "toggle_supported": True,
@@ -295,6 +296,46 @@ def list_tools(layout: Any) -> dict[str, Any]:
             "unavailable_servers": unavailable, "connection_errors": errors}
 
 
+_LIMIT_KEYS = ("tools", "connect_timeout_s", "call_timeout_s")
+
+
+def _limits(payload: dict[str, Any], existing: dict[str, Any]) -> dict[str, Any]:
+    """Per-server tool limits and timeouts (validated; kept when not resent)."""
+    out: dict[str, Any] = {}
+    tools = payload["tools"] if "tools" in payload else existing.get("tools")
+    if tools is not None:
+        if not isinstance(tools, dict):
+            raise MCPServiceError("tools must be an object: {include?, exclude?, max?, gated?}")
+        unknown = set(tools) - {"include", "exclude", "max", "gated"}
+        if unknown:
+            raise MCPServiceError(f"unknown tools keys: {sorted(unknown)}")
+        clean: dict[str, Any] = {}
+        for key in ("include", "exclude"):
+            if key in tools:
+                value = tools[key]
+                if not isinstance(value, list) or not all(isinstance(x, str) and x.strip() for x in value):
+                    raise MCPServiceError(f"tools.{key} must be a list of tool names or globs")
+                clean[key] = [x.strip() for x in value]
+        if "max" in tools:
+            if not isinstance(tools["max"], int) or isinstance(tools["max"], bool) or tools["max"] < 0:
+                raise MCPServiceError("tools.max must be a non-negative integer")
+            clean["max"] = tools["max"]
+        if "gated" in tools:
+            if not isinstance(tools["gated"], bool):
+                raise MCPServiceError("tools.gated must be a boolean")
+            clean["gated"] = tools["gated"]
+        if clean:
+            out["tools"] = clean
+    for key in ("connect_timeout_s", "call_timeout_s"):
+        value = payload[key] if key in payload else existing.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 3600:
+            raise MCPServiceError(f"{key} must be a number of seconds in (0, 3600]")
+        out[key] = value
+    return out
+
+
 def configure_server(layout: Any, name: Any, payload: Any) -> dict[str, Any]:
     name = _name(name)
     if not isinstance(payload, dict):
@@ -321,6 +362,7 @@ def configure_server(layout: Any, name: Any, payload: Any) -> dict[str, Any]:
         env = _mapping(payload.get("env"), existing.get("env"), field="env")
         row = {"name": name, "command": command, "args": args, "env": env,
                "enabled": enabled}
+    row.update(_limits(payload, existing))
     data["servers"] = [x for x in data["servers"] if not isinstance(x, dict) or x.get("name") != name] + [row]
     _migrate_inline_secrets(layout, data)
     _write(layout, data)
