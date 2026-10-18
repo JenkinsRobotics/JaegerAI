@@ -3,14 +3,15 @@
  * Jenkins Robotics 2026-10-17: tool steps fold into a "Show steps" card, and a
  * pending turn shows an activity-named progress line with a shimmer for as long as it runs. The composer
  * auto-grows (JS fallback), takes picked or pasted files as chips and morphs its primary button. */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type KeyboardEvent } from "react";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { avatarColor } from "../agents/avatarColor";
 import { HandoffMarker } from "../agents/HandoffMarker";
 import { ArrowDownIcon, CloseIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
 import { badge, messageCount, unreadSince } from "./scrollFollow";
-import { addFiles, autoGrow, fileSize, primaryAction, toAttachments, type PendingFile } from "./composer";
+import { addFiles, autoGrow, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, toAttachments, type PendingFile } from "./composer";
+import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
@@ -191,12 +192,13 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   const picker = useRef<HTMLInputElement>(null);
   const stick = useRef(true);
   const voiceHost = "micStart" in host ? (host as ChatHost & VoiceHost) : undefined;
-  const [voiceReady, setVoiceReady] = useState(host.capabilities.voice);
+  const [caps, setCaps] = useState<HostCapabilities>(() => capabilitiesOf(host));
+  const [dropping, setDropping] = useState(false);
 
   // Ask the shell for mic + tts once per host; re-render when it answers.
   useEffect(() => {
     let live = true;
-    if (voiceHost) void voiceHost.probeCapabilities().then((c) => { if (live) setVoiceReady(c.voice); });
+    if (voiceHost) void voiceHost.probeCapabilities().then((c) => { if (live) setCaps(c); });
     return () => { live = false; };
   }, [voiceHost]);
 
@@ -270,7 +272,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   // Auto-grow even where WebKit ignores field-sizing.
   useLayoutEffect(() => autoGrow(field.current), [draft]);
 
-  const takeFiles = (list: ArrayLike<File> | null | undefined) => {
+  const takeFiles = (list: ArrayLike<File | { name: string; size: number; type: string; path?: string; uri?: string }> | null | undefined) => {
     const incoming = Array.from(list ?? []);
     if (!incoming.length) return;
     setFiles((current) => {
@@ -285,6 +287,21 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     if (!event.clipboardData.getData("text/plain")) event.preventDefault();
     takeFiles(pasted);
   };
+  /** + : the host's native picker when it has one (H8 pickFiles), else the page's file input. */
+  const attach = () => {
+    const pick = filePicker(host);
+    if (!pick) { picker.current?.click(); return; }
+    const room = Math.max(1, MAX_ATTACHMENTS - files.length);
+    pick({ multiple: true, maxFiles: room, maxBytes: MAX_ATTACHMENT_BYTES }).then(
+      (picked) => takeFiles(picked.map(fromHost)),
+      () => picker.current?.click(),
+    );
+  };
+  /** Files dragged onto the chat become chips, like paste. */
+  const dragHasFiles = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes("Files");
+  const onDragOver = (e: DragEvent<HTMLDivElement>) => { if (!dragHasFiles(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "copy"; setDropping(true); };
+  const onDragLeave = (e: DragEvent<HTMLDivElement>) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDropping(false); };
+  const onDrop = (e: DragEvent<HTMLDivElement>) => { if (!dragHasFiles(e)) return; e.preventDefault(); setDropping(false); takeFiles(e.dataTransfer.files); };
   const removeFile = (id: string) => { setFiles((f) => f.filter((x) => x.id !== id)); setFileNote(undefined); };
 
   const updateTurn = useCallback((turnId: string, fn: (turn: ChatTurn) => ChatTurn) => {
@@ -344,13 +361,14 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
 
   const links: Links = { onCopy: (text) => void host.copy(text), onOpen: (url) => host.openExternal(url) };
   const agentName = (id: string) => (id === agent.id ? agent.name : undefined);
-  const voice = voiceReady && Boolean(voiceHost);
+  const dictation = Boolean(voiceHost) && Boolean(caps.dictation ?? caps.voice);
+  const voiceChat = Boolean(voiceHost) && Boolean(caps.voiceChat ?? caps.voice);
   const hasText = Boolean(draft.trim()) || files.length > 0;
   const unread = atBottom ? 0 : unreadSince(unreadBase.current, messageCount(session?.turns ?? []));
-  const primary = primaryAction({ running: Boolean(active), hasContent: hasText, voice });
+  const primary = primaryAction({ running: Boolean(active), hasContent: hasText, voiceChat, dictation });
   const tint = { "--jg-agent-color": avatarColor(agent.id) } as CSSProperties;
   return (
-    <div className="jg-chat" style={tint} ref={chatRoot}>
+    <div className={`jg-chat${dropping ? " is-dropping" : ""}`} style={tint} ref={chatRoot} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <div className="jg-chat__band" data-aether-window-drag-region>
         <button type="button" className="jg-agent-pill" title={`${agent.name} details`} onClick={() => host.openDetails?.(agent.id)}>
           <AgentAvatar id={agent.id} name={agent.name} size={20} />
@@ -396,9 +414,9 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
           </div>
         )}
         <input ref={picker} type="file" multiple hidden tabIndex={-1} onChange={(e) => { takeFiles(e.currentTarget.files); e.currentTarget.value = ""; }} />
-        <button type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach files" title="Attach files" onClick={() => picker.current?.click()}><PlusIcon /></button>
+        <button type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach files" title="Attach files" onClick={attach}><PlusIcon /></button>
         <textarea ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : `Message ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
-        {voice && (
+        {dictation && primary !== "dictate" && (
           <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
             aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
             disabled={listening === "voice"} onClick={() => void toggleListening("dictation")}><MicIcon /></button>
@@ -407,6 +425,10 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
           ? <button type="button" className="jg-send" aria-label="Stop (⌘Esc)" onClick={stop}><StopIcon /></button>
           : primary === "send"
             ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText}><SendIcon /></button>
+            : primary === "dictate"
+              ? <button type="button" className={`jg-send${listening === "dictation" ? " is-listening" : ""}`}
+                  aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
+                  onClick={() => void toggleListening("dictation")}><MicIcon /></button>
             : <button type="button" className={`jg-send${listening === "voice" ? " is-listening" : ""}`}
                 aria-label={listening === "voice" ? "Stop and send" : "Start voice chat"} aria-pressed={listening === "voice"}
                 disabled={listening === "dictation"} onClick={() => void toggleListening("voice")}><WaveIcon /></button>}
