@@ -27,7 +27,7 @@ export interface PendingFile { id: string; name: string; size: number; type: str
  * localStorage `jaeger.ui.bytes-upload` = "1" turns it on for testing. */
 export const BYTES_UPLOAD_FLAG = "jaeger.ui.bytes-upload";
 export function bytesUploadEnabled(): boolean {
-  try { return localStorage.getItem(BYTES_UPLOAD_FLAG) === "1"; } catch { return false; }
+  try { return localStorage.getItem(BYTES_UPLOAD_FLAG) !== "0"; } catch { return true; }
 }
 
 /** A file's bytes as base64 (no data: prefix). */

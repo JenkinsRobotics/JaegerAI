@@ -23,7 +23,8 @@ export type WireKind = "message" | "summary" | "handoff_request" | "handoff_resu
 
 /** One persisted message. */
 export interface WireMessage {
-  id: string;
+  /** An integer on 417d8a0c; kept as string | number so ids never compare across types. */
+  id: number | string;
   session_id: string;
   role: "user" | "assistant" | "system";
   kind: WireKind;
@@ -40,11 +41,11 @@ export interface WireMessage {
 
 /** GET /v1/sessions/{id}/messages?before=<message_id>&limit=50 → newest first; `next_before` is the
  * cursor for the next older page, null at the start of the chat. */
-export interface WirePage { messages: WireMessage[]; next_before: string | null }
+export interface WirePage { messages: WireMessage[]; next_before: number | string | null }
 
 /** Live events on the session stream (GET /v1/sessions/{id}/stream). */
 export interface WireMessageCreated { session_id: string; message: WireMessage }
-export interface WireSessionSummarized { session_id: string; summary_message_id: string; covers_to?: string | number | null }
+export interface WireSessionSummarized { session_id: string; summary_message_id: number | string; covers_to?: string | number | null }
 
 export const PAGE_LIMIT = 50;
 export const PAGE_LIMIT_MAX = 200;
@@ -118,7 +119,7 @@ const POST: Record<string, "handoff_request" | "handoff" | "task_result"> = { ha
 /** One wire message → the SessionMessage shape messagesToTurns already reads. */
 const asSession = (m: WireMessage): SessionMessage => ({
   ...(m as unknown as SessionMessage), role: m.role, content: m.content, created_at: (toMs(m.created_at) ?? 0) / 1000,
-  request_id: m.role === "user" ? m.id : undefined,
+  request_id: m.role === "user" ? String(m.id) : undefined,
 });
 
 /** Wire page (newest first) → UI page (oldest first). Ordinary messages group into turns as today
@@ -130,7 +131,7 @@ export function fromWirePage(sessionId: string, page: WirePage, agentName: (id: 
   let run: WireMessage[] = [];
   const flush = () => {
     if (!run.length) return;
-    const ids = run.filter((m) => m.role === "user").map((m) => m.id);
+    const ids = run.filter((m) => m.role === "user").map((m) => String(m.id));
     const mapped = messagesToTurns(run.map(asSession), agentName);
     // A run that opens with a reply gets a synthetic turn; name it after that message.
     mapped.forEach((t) => { if (!ids.includes(t.turnId)) t.turnId = `reply:${run[0].id}`; });
@@ -145,18 +146,18 @@ export function fromWirePage(sessionId: string, page: WirePage, agentName: (id: 
     const createdAt = toMs(m.created_at);
     turns.push({ turnId, message: "", parts: [], state: "complete", createdAt });
     if (kind === "summary") {
-      entries[turnId] = { kind: "summary", id: m.id, text: m.content ?? "", count: m.summary?.message_count ?? 0,
+      entries[turnId] = { kind: "summary", id: String(m.id), text: m.content ?? "", count: m.summary?.message_count ?? 0,
         fromAt: toMs(m.summary?.covers_from), toAt: toMs(m.summary?.covers_to) };
     } else {
       const id = m.sender_agent_id ?? "";
       entries[turnId] = {
-        kind: "post", id: m.id, post: POST[kind] ?? "task_result", sender: { id, name: agentName(id) }, text: m.content ?? "",
+        kind: "post", id: String(m.id), post: POST[kind] ?? "task_result", sender: { id, name: agentName(id) }, text: m.content ?? "",
         handoffId: m.links?.handoff_id, taskId: m.links?.task_id, childSessionId: m.links?.child_session_id, createdAt,
       };
     }
   }
   flush();
-  return { sessionId, turns, entries, before: page.next_before ?? undefined };
+  return { sessionId, turns, entries, before: page.next_before != null ? String(page.next_before) : undefined };
 }
 
 const historyRow = (r: SessionRow): HistoryRow => ({
@@ -222,7 +223,7 @@ export function contractHome(getJson: GetJson, opts: HomeOptions = {}, stream?: 
           if (msg && msg.session_id === sessionId && msg.kind && msg.kind !== "message") on({ type: "entry", page: fromWirePage(sessionId, { messages: [msg], next_before: null }, name) });
         } else if (event.event === HOME_EVENT_SUMMARIZED) {
           const sum = payload as unknown as WireSessionSummarized;
-          if (sum.session_id === sessionId) on({ type: "summarized", summaryMessageId: sum.summary_message_id });
+          if (sum.session_id === sessionId) on({ type: "summarized", summaryMessageId: String(sum.summary_message_id) });
         }
       }, signal).catch((error: unknown) => { if (!signal.aborted) throw error; });
     }),

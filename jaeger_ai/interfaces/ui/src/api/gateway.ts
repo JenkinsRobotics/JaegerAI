@@ -38,13 +38,13 @@ export class GatewayClient implements JaegerSource {
   readonly kind = "live" as const;
   constructor(private readonly base = "") {}
 
-  async json<T>(path: string, body?: unknown, method?: string): Promise<T> {
+  async json<T>(path: string, body?: unknown, method?: string, extraHeaders?: Record<string, string>): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
       const response = await fetch(`${this.base}${path}`, {
         method: method ?? (body === undefined ? "GET" : "POST"),
-        headers: body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" },
+        headers: { ...(body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" }), ...extraHeaders },
         body: body === undefined ? undefined : JSON.stringify(body),
         credentials: "same-origin",
         signal: controller.signal,
@@ -94,8 +94,10 @@ export class GatewayClient implements JaegerSource {
     return this.json<{ attachment_id: string }>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments`, body);
   }
   /** Bytes, not a path: JSON {name, mime, data_base64} (the route also takes multipart 'file' + 'name'). */
-  uploadAttachment(sessionId: string, body: { name: string; mime: string; data_base64: string }) {
-    return this.json<UploadedAttachment>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments/upload`, body);
+  /** idempotencyKey: one per file, so a retried upload replays the same attachment instead of staging a second. */
+  uploadAttachment(sessionId: string, body: { name: string; mime: string; data_base64: string }, idempotencyKey?: string) {
+    return this.json<UploadedAttachment>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments/upload`, body, undefined,
+      idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined);
   }
   async cancel(sessionId: string, requestId?: string) {
     await this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, requestId ? { request_id: requestId } : {});
