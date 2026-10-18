@@ -707,6 +707,8 @@ class FallbackModel(BaseModel):
     ]
     model: str = Field(..., min_length=1, max_length=256)
     base_url: str = ""
+    temperature: float | None = Field(None, ge=0.0, le=2.0)
+    top_p: float | None = Field(None, ge=0.0, le=1.0)
 
 
 class WebhookConfig(BaseModel):
@@ -827,6 +829,16 @@ class ExternalModelConfig(BaseModel):
                     "sends the field. A step that ends with its whole "
                     "budget spent thinking is retried once with reasoning "
                     "off.",
+    )
+    temperature: float | None = Field(
+        None, ge=0.0, le=2.0,
+        json_schema_extra=_setting("model", restart=True, advanced=True),
+        description="Sampling temperature sent to the provider. None = don't send (provider default).",
+    )
+    top_p: float | None = Field(
+        None, ge=0.0, le=1.0,
+        json_schema_extra=_setting("model", restart=True, advanced=True),
+        description="Nucleus sampling top_p sent to the provider. None = don't send (provider default).",
     )
     fallback: list[FallbackModel] = Field(
         default_factory=list,

@@ -187,3 +187,20 @@ def test_merge_consecutive_collapses_same_role():
 def test_validate_cli_provider_needs_no_api_key():
     ext = ExternalModelConfig(enabled=True, provider="cli", model="claude")
     assert validate_external_provider(ext, api_key="") == ""
+
+
+def test_external_model_sampling_parameters_schema():
+    ext = ExternalModelConfig(
+        enabled=True, provider="ollama", model="glm-5.3-flash:cloud",
+        temperature=1.0, top_p=0.95,
+        fallback=[{"provider": "ollama", "model": "qwen3:4b", "temperature": 0.7, "top_p": 0.8}],
+    )
+    assert ext.temperature == 1.0
+    assert ext.top_p == 0.95
+    assert ext.fallback[0].temperature == 0.7
+    assert ext.fallback[0].top_p == 0.8
+
+    # Default is None
+    default_ext = ExternalModelConfig()
+    assert default_ext.temperature is None
+    assert default_ext.top_p is None
