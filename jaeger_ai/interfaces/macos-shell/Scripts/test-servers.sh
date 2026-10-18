@@ -7,7 +7,10 @@
 # Isolated state: ~/.cache/jaeger/ui-rebuild-test-state. Inherited 0.0.0.0 vars unset.
 set -u
 REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
-ST="$HOME/.cache/jaeger/ui-rebuild-test-state"
+ST="${JAEGER_TEST_STATE_DIR:-$HOME/.cache/jaeger/ui-rebuild-test-state}"
+# JAEGER_TEST_GATEWAY_ROOT: run the gateway from another source tree (e.g. a `git archive` of a peer branch in
+# .build/), read-only; default is this worktree.
+GW_ROOT="${JAEGER_TEST_GATEWAY_ROOT:-$REPO}"
 GW_PORT=${JAEGER_TEST_GATEWAY_PORT:-43438}; UI_PORT=18800; PX_PORT=18801
 UI_DIR="$REPO/jaeger_ai/interfaces/ui"; UI_DIST="$HOME/.cache/jaeger/ui-rebuild-mainscreen/dist"
 [[ "${2:-}" == "--mock" ]] && UI_DIST="$HOME/.cache/jaeger/ui-rebuild-mainscreen/dist-mock"
@@ -22,7 +25,7 @@ start)
   echo "inherited 0.0.0.0 vars unset: ${UNSET[*]:-none}"
   mkdir -p "$ST"
   # JAEGER_TEST_HEADLESS=1: no background producers (no webhook listener on 8793, no sensors).
-  env "${UNSET[@]}" -u JAEGER_LIFECYCLE_LEASE JAEGER_STATE_DIR="$ST" JAEGER_CALLER_TOKEN_DIR="$TOKENS" JAEGER_TEST_HEADLESS=1 PYTHONPATH="$REPO" PYTHONDONTWRITEBYTECODE=1 \
+  env "${UNSET[@]}" -u JAEGER_LIFECYCLE_LEASE JAEGER_STATE_DIR="$ST" JAEGER_CALLER_TOKEN_DIR="$TOKENS" JAEGER_TEST_HEADLESS=1 PYTHONPATH="$GW_ROOT" PYTHONDONTWRITEBYTECODE=1 \
     nohup "$HOME/.jaeger/venv/bin/python" -m jaeger_ai.core.gateway.server --host 127.0.0.1 --port $GW_PORT \
     > $PIDS-gateway.log 2>&1 &
   echo $! > $PIDS-gateway.pid

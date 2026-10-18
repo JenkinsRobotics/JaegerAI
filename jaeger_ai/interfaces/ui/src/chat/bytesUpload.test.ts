@@ -6,12 +6,12 @@ import { WebHost } from "./webHost";
 
 afterEach(() => localStorage.clear());
 
-describe("bytes upload prep (flag, off by default)", () => {
+describe("bytes upload (on by default since 417d8a0c; flag \"0\" opts out)", () => {
   const pasted = () => new File(["hello"], "note.txt", { type: "text/plain" });
-  it("is off unless the flag is set", () => {
-    expect(bytesUploadEnabled()).toBe(false);
-    localStorage.setItem(BYTES_UPLOAD_FLAG, "1");
+  it("is on unless the flag is \"0\"", () => {
     expect(bytesUploadEnabled()).toBe(true);
+    localStorage.setItem(BYTES_UPLOAD_FLAG, "0");
+    expect(bytesUploadEnabled()).toBe(false);
   });
   it("reads a file as base64", async () => {
     expect(await readBase64(pasted())).toBe(btoa("hello"));
@@ -45,7 +45,8 @@ describe("bytes upload prep (flag, off by default)", () => {
     await host.startTurn({ sessionId: "s1", turnId: "t1", message: "m", attachments: [{ name: "note.txt", mimeType: "text/plain", data: btoa("hello") }] }, (p) => parts.push(p)).done;
     return parts;
   };
-  it("WebHost uploads the bytes only with the flag on", async () => {
+  it("WebHost uploads the bytes unless opted out", async () => {
+    localStorage.setItem(BYTES_UPLOAD_FLAG, "0");
     const off = source();
     const parts = await turn(new WebHost(off.s));
     expect(off.uploads).toEqual([]);

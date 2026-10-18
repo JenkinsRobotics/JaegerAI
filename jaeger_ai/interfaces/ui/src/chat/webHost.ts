@@ -6,10 +6,23 @@ import type { PersistedPart, SessionMessage } from "../api/types";
 import { bytesUploadEnabled, UPLOAD_MAX_BYTES, UPLOAD_TOO_LARGE, type RejectedAttachment } from "./composer";
 import { followTurn } from "./followTurn";
 import type { HomeSessions } from "./homeSession";
-import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, HostKind, StartTurnRequest, TurnHandle, TurnState } from "./host";
+import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, HostKind, StartTurnRequest, ToolInvocationState, TurnHandle, TurnState } from "./host";
 import type { HostAttachment, HostCapabilities } from "./hostH8";
 
 const KEY = (id: string) => `jaeger.ui.session.${id}`;
+
+const toolState = (s?: string): ToolInvocationState => s === "done" ? "completed" : s === "error" ? "cancelled" : "executing";
+const idempotencyKey = () => globalThis.crypto?.randomUUID?.() ?? `up-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+/** A pending approval holds its tool: matched on tool + target (call_id is usually null). */
+function holdApprovedTools(source: PersistedPart[], parts: ChatPart[]) {
+  for (const a of source) {
+    if (a.type !== "approval" || (a.state ?? a.status) !== "pending") continue;
+    const tool = parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.toolName === a.tool
+      && p.state === "executing" && (!a.target || JSON.stringify(p.input ?? "").includes(a.target)));
+    if (tool) tool.state = "waitingForConfirmation";
+  }
+}
 
 function persistedToPart(p: PersistedPart, agentName: (id: string) => string): ChatPart | null {
   switch (p.type) {
@@ -17,8 +30,12 @@ function persistedToPart(p: PersistedPart, agentName: (id: string) => string): C
     case "reasoning": return { kind: "thinking", text: p.text ?? "", durationMs: p.duration_ms };
     case "tool": return {
       kind: "toolInvocation", callId: String(p.call_id ?? ""), toolName: String(p.tool ?? "tool"), input: p.input ?? null,
-      state: p.status === "done" ? "completed" : p.status === "error" ? "cancelled" : "executing", output: p.output,
+      state: toolState(p.state ?? p.status), output: p.output,
     };
+    // Pending: the card. Decided: the tool part carries the outcome; no card.
+    case "approval": return (p.state ?? p.status) === "pending"
+      ? { kind: "confirmation", callId: p.approval_id, title: p.tool ? `Run ${p.tool}?` : "Approval needed", message: p.target ?? "" }
+      : null;
     case "handoff": {
       const agentId = String(p.agent_id ?? "");
       return { kind: "handoff", handoffId: String(p.handoff_id ?? ""), agentId, agentName: p.agent_name || agentName(agentId), count: 1, direction: p.direction };
@@ -36,13 +53,14 @@ export function messagesToTurns(messages: SessionMessage[] = [], agentName: (id:
   const turns: ChatSession["turns"] = [];
   for (const m of messages) {
     if (m.role === "user") {
-      turns.push({ turnId: m.request_id ?? `t${turns.length}`, message: m.content ?? "", parts: [], state: "complete", createdAt: epochMs(m) });
+      turns.push({ turnId: m.request_id != null ? String(m.request_id) : `t${turns.length}`, message: m.content ?? "", parts: [], state: "complete", createdAt: epochMs(m) });
     } else if (m.role === "assistant") {
       // A reply with no user turn before it (proactive note, relayed report) still shows.
       if (!turns.length) turns.push({ turnId: `t${turns.length}`, message: "", parts: [], state: "complete", createdAt: epochMs(m) });
       const parts = m.parts?.length
         ? m.parts.map((p) => persistedToPart(p, agentName)).filter((p): p is ChatPart => p !== null)
         : [{ kind: "markdownContent" as const, text: m.content ?? "" }];
+      if (m.parts?.length) holdApprovedTools(m.parts, parts);
       turns[turns.length - 1].parts.push(...parts);
     }
   }
@@ -90,10 +108,11 @@ export class WebHost implements ChatHost {
     const rejected: RejectedAttachment[] = [];
     // H8 widens ChatAttachment with path/size; read through the local mirror until it's vendored.
     for (const file of (request.attachments ?? []) as HostAttachment[]) {
-      if (!file.path && file.data && this.source.uploadAttachment && bytesUploadEnabled() && this.bytesUpload !== false) {
+      // Bytes first (the upload route, 417d8a0c), path as the fallback for gateways without it (404/405).
+      if (file.data && this.source.uploadAttachment && bytesUploadEnabled() && this.bytesUpload !== false) {
         if (Math.floor((file.data.length * 3) / 4) > UPLOAD_MAX_BYTES) { rejected.push({ name: file.name, reason: UPLOAD_TOO_LARGE }); continue; }
         try {
-          const row = await this.source.uploadAttachment(request.sessionId, { name: file.name, mime: file.mimeType, data_base64: file.data });
+          const row = await this.source.uploadAttachment(request.sessionId, { name: file.name, mime: file.mimeType, data_base64: file.data }, idempotencyKey());
           this.bytesUpload = true;
           ids.push(row.attachment_id);
           continue;
