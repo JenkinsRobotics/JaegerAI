@@ -2127,8 +2127,16 @@ class JaegerAgent:
             return copy.deepcopy(self._read_result_cache[prep["sig"]])
         try:
             tool_def = prep["tool_def"]
-            if tool_def is None:
+            if tool_def is None and not str(name or "").strip():
                 content: Any = {
+                    "ok": False,
+                    "error": ("tool call has no tool name — nothing ran. Call a tool by its exact "
+                              "name, or answer in plain text."),
+                    "error_type": "missing_tool_name",
+                    "retryable": True,
+                }
+            elif tool_def is None:
+                content = {
                     "ok": False,
                     "error": f"unknown tool {name!r}",
                     "error_type": "unknown_tool",
