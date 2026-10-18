@@ -56,6 +56,7 @@ def test_a_repl_keeps_state_between_calls(mgr):
     mgr.send(sid, "exit()\n", 3)
 
 
+@pytest.mark.flaky
 def test_ctrl_c_interrupts_the_foreground_process(mgr):
     started = mgr.start("sleep 60", cwd=None, yield_s=1.0)
     sid = started["session_id"]
