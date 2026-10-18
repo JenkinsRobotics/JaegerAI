@@ -1,0 +1,34 @@
+/* Motion pass (Jenkins Robotics, 2026-10-17, original). CSS only, in our files: vendor styles are untouched;
+ * the individual `scale` / `translate` properties are used so existing `transform`s keep working.
+ * Durations and easing come from tokens.jaeger.css. Reduced motion turns all of it off. */
+
+/* New messages: fade in and rise 4px. Only turns that arrive after the chat loaded (.is-new). */
+@keyframes jg-enter { from { opacity: 0; translate: 0 4px; } }
+.jg-turn.is-new [data-sender] { animation: jg-enter var(--jg-dur-base) var(--jg-ease-out-quint) both; }
+
+/* Press: buttons dip to 98%. */
+:is(.jg-send, .jg-composer__icon, .jg-action, .jg-agent-pill, .jg-jump, .jg-round-button, .jg-pill, .jg-user-chip,
+    .jg-chip__remove, .jg-handoff__count, .jg-steps__summary, .aui-button, .aui-icon-button) {
+  transition-property: scale, background-color, color, box-shadow, opacity, transform;
+  transition-duration: var(--jg-dur-fast);
+  transition-timing-function: var(--jg-ease-out-cubic);
+}
+:is(.jg-send, .jg-composer__icon, .jg-action, .jg-agent-pill, .jg-jump, .jg-round-button, .jg-pill, .jg-user-chip,
+    .jg-chip__remove, .jg-handoff__count, .jg-steps__summary, .aui-button, .aui-icon-button):active:not(:disabled) { scale: .98; }
+/* The jump button keeps its own fade/slide timing. */
+.jg-jump { transition-duration: var(--jg-dur-base); transition-timing-function: var(--jg-ease-out-quint); }
+
+/* Menus, popovers and dialogs: fade and grow from 98%. */
+@keyframes jg-pop { from { opacity: 0; scale: .98; } }
+@keyframes jg-fade { from { opacity: 0; } }
+:is(.aui-menu, .jg-handoff__menu, .aui-dialog) { animation: jg-pop var(--jg-dur-base) var(--jg-ease-out-quint) both; transform-origin: top center; }
+.aui-dialog { transform-origin: center; }
+.aui-dialog-scrim { animation: jg-fade var(--jg-dur-base) var(--jg-ease-out-cubic) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .jg-turn.is-new [data-sender], :is(.aui-menu, .jg-handoff__menu, .aui-dialog, .aui-dialog-scrim) { animation: none; }
+  :is(.jg-send, .jg-composer__icon, .jg-action, .jg-agent-pill, .jg-jump, .jg-round-button, .jg-pill, .jg-user-chip,
+      .jg-chip__remove, .jg-handoff__count, .jg-steps__summary, .aui-button, .aui-icon-button) { transition: none; }
+  :is(.jg-send, .jg-composer__icon, .jg-action, .jg-agent-pill, .jg-jump, .jg-round-button, .jg-pill, .jg-user-chip,
+      .jg-chip__remove, .jg-handoff__count, .jg-steps__summary, .aui-button, .aui-icon-button):active { scale: none; }
+}
