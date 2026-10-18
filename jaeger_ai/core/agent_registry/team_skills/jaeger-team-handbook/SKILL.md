@@ -3,7 +3,7 @@ name: jaeger-team-handbook
 description: Shared rules for every Jaeger team agent - project root, team notes, evidence, and how results flow back to the lead.
 metadata:
   role: shared
-  version: "1"
+  version: "2"
 ---
 
 # Team handbook (every agent)
@@ -21,3 +21,10 @@ metadata:
   open issues, next step.
 - **Stay in your lane.** If the task needs another role (design, build, review,
   research, reverse engineering), say so in the result instead of improvising it.
+- **Approval policy (Gateway turns).** Writes (write_file, patch, delete) and
+  execution (execute_code, terminal/shell) raise an approval card unless the target
+  is inside an active project root covered by its project grant, or the owner
+  already granted this session (or allowed this one call). Standing "always"
+  grants do not skip the card. Read-only tools (read_file, search_files,
+  list_skill_dir, read-only REA tools) run without a card inside the session
+  workspace. On a read-only request, do not write notes or run code at all.
