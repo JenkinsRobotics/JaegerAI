@@ -60,7 +60,7 @@ export function needsSeparator(prev: number | undefined, at: number | undefined)
 export function RevealMarkdown({ text, live, links, style }: { text: string; live: boolean; links: Links; style: StreamStyleParams }) {
   const shown = useRevealedText(text, live, style);
   const enter = style.enter.kind !== "none" && live;
-  const vars = enter ? { "--jg-enter-ms": `${style.enter.durationMs}ms`, "--jg-enter-ease": style.enter.easing, "--jg-enter-y": `${style.enter.translatePx ?? 0}px` } as CSSProperties : undefined;
+  const vars = enter ? { "--jg-enter-ms": `${style.enter.durationMs}ms`, "--jg-enter-ease": style.enter.easing, "--jg-enter-y": `${style.enter.translatePx ?? 0}px`, "--jg-enter-blur": `${style.enter.blurPx ?? 0}px` } as CSSProperties : undefined;
   return (
     <div className={`jg-md${enter ? ` jg-md--enter-${style.enter.kind}` : ""}`} style={vars} data-stream-style={style.id} data-revealing={live && shown.length < text.length ? "" : undefined}>
       <Markdown text={shown} onCopy={links.onCopy} onOpen={links.onOpen} />
