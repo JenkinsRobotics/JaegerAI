@@ -15,7 +15,8 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Iterator
+import threading
+from typing import Any, Callable, Iterator
 
 
 SCHEMA_VERSION = 9
@@ -149,6 +150,60 @@ def _row_meta(raw: str | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+MESSAGE_KINDS = frozenset({"message", "summary", "handoff_request", "handoff_result", "task_result"})
+MESSAGES_PAGE_MAX = 200
+
+
+def _part_view(part: Any) -> Any:
+    """Tool parts carry ``state`` (the contract name) next to the stored ``status``."""
+    if isinstance(part, dict) and part.get("type") in {"tool", "approval"} and "state" not in part:
+        return {**part, "state": part.get("status")}
+    return part
+
+
+def message_dict(m: Any, session_id: str | None = None) -> dict[str, Any]:
+    """One transcript row in the sessions-contract shape (plus the legacy keys)."""
+    keys = m.keys() if hasattr(m, "keys") else []
+    get = (lambda k, d=None: m[k] if k in keys else d)
+    links = _row_meta(get("links_json"))
+    extra = _row_meta(get("meta_json"))
+    parts = json.loads(get("parts_json")) if get("parts_json") else []
+    out: dict[str, Any] = {
+        "id": get("id"),
+        "session_id": get("session_id") or session_id,
+        "role": get("role"),
+        "kind": get("kind") or "message",
+        "sender_agent_id": get("sender_agent_id"),
+        "created_at": get("timestamp"),
+        "timestamp": get("timestamp"),
+        "content": get("content") or "",
+        "parts": [_part_view(p) for p in parts],
+        "tool_calls": json.loads(get("tool_calls_json") or "[]"),
+        "links": links,
+    }
+    if out["kind"] == "summary" and isinstance(extra.get("summary"), dict):
+        out["summary"] = extra["summary"]
+    return out
+
+
+def _typed_fields(m: Any) -> dict[str, Any]:
+    """Contract fields added to the legacy message rows only when set, so
+    plain chat rows keep their established shape."""
+    keys = m.keys()
+    out: dict[str, Any] = {}
+    kind = m["kind"] if "kind" in keys else None
+    if kind and kind != "message":
+        out["kind"] = kind
+        extra = _row_meta(m["meta_json"])
+        if kind == "summary" and isinstance(extra.get("summary"), dict):
+            out["summary"] = extra["summary"]
+    if "sender_agent_id" in keys and m["sender_agent_id"]:
+        out["sender_agent_id"] = m["sender_agent_id"]
+    if "links_json" in keys and m["links_json"]:
+        out["links"] = _row_meta(m["links_json"])
+    return out
+
+
 def _session_agent(session_id: str, meta: dict[str, Any]) -> str | None:
     """The agent a session belongs to. A specialist's worker session is created
     by its first turn, without metadata, so its id names the agent."""
@@ -171,7 +226,28 @@ def _list_preview(content: Any) -> str | None:
 class GatewaySessionStore:
     def __init__(self, path: Path | str | None = None) -> None:
         self.path = Path(path) if path else default_store_path()
+        #: Called with each event record the store writes itself (message.created),
+        #: after its transaction commits. The event bus attaches its fanout here.
+        self.event_listener: Callable[[dict[str, Any]], Any] | None = None
+        self._pending_events = threading.local()
         self._init_db()
+
+    def _queue_event(self, record: dict[str, Any]) -> None:
+        pending = getattr(self._pending_events, "items", None)
+        if pending is None:
+            pending = self._pending_events.items = []
+        pending.append(record)
+
+    def _flush_events(self) -> None:
+        pending = getattr(self._pending_events, "items", None) or []
+        self._pending_events.items = []
+        listener = self.event_listener
+        for record in pending:
+            if listener is not None:
+                try:
+                    listener(record)
+                except Exception:  # noqa: BLE001 — a wake-up must never fail a write
+                    pass
 
     def _get_conn(self) -> sqlite3.Connection:
         conn = sqlite3.connect(str(self.path), timeout=10.0)
@@ -194,9 +270,11 @@ class GatewaySessionStore:
             conn.execute("COMMIT")
         except Exception:
             conn.execute("ROLLBACK")
+            self._pending_events.items = []
             raise
         finally:
             conn.close()
+        self._flush_events()
 
     def _init_db(self) -> None:
         with self._get_conn() as conn:
@@ -386,6 +464,17 @@ class GatewaySessionStore:
             if "parts_json" not in columns:
                 conn.execute("ALTER TABLE messages ADD COLUMN parts_json TEXT")
             current = 11
+        if current < 12:
+            # Sessions contract: typed messages (summary / handoff_request /
+            # handoff_result / task_result), who sent them, and links to the
+            # handoff/task/child session they report on.
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(messages)")}
+            for col, ddl in (("kind", "TEXT NOT NULL DEFAULT 'message'"), ("sender_agent_id", "TEXT"),
+                             ("links_json", "TEXT"), ("meta_json", "TEXT")):
+                if col not in columns:
+                    conn.execute(f"ALTER TABLE messages ADD COLUMN {col} {ddl}")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_session_id ON messages(session_id, id)")
+            current = 12
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -554,6 +643,7 @@ class GatewaySessionStore:
                         "timestamp": m["timestamp"],
                         "tool_calls": json.loads(m["tool_calls_json"] or "[]"),
                         **({"parts": json.loads(m["parts_json"])} if m["parts_json"] else {}),
+                        **_typed_fields(m),
                     }
                     for m in messages
                 ],
@@ -620,6 +710,7 @@ class GatewaySessionStore:
                 str(message.get("content") or ""),
                 tool_calls=message.get("tool_calls") or [],
                 timestamp=message.get("timestamp"),
+                emit=False,
             )
         return self.get_session(branch_id) or branch
 
@@ -679,29 +770,75 @@ class GatewaySessionStore:
         timestamp: float | None = None,
         conn: sqlite3.Connection | None = None,
         parts: list[dict[str, Any]] | None = None,
+        kind: str = "message",
+        sender_agent_id: str | None = None,
+        links: dict[str, Any] | None = None,
+        meta: dict[str, Any] | None = None,
+        emit: bool = True,
     ) -> int:
+        """Append one transcript row and, unless ``emit`` is false, publish
+        ``message.created {session_id, message}`` on the session and global
+        streams once the row's transaction commits."""
+        if kind not in MESSAGE_KINDS:
+            raise ValueError(f"unknown message kind: {kind!r}")
         now = timestamp or time.time()
         tool_str = json.dumps(tool_calls or [])
         parts_str = json.dumps(parts) if parts else None
+        links_str = json.dumps({k: v for k, v in links.items() if v is not None}) if links else None
+        meta_str = json.dumps(meta) if meta else None
 
         def _write(db: sqlite3.Connection) -> int:
             cursor = db.execute(
                 """
-                INSERT INTO messages (session_id, role, content, timestamp, tool_calls_json, parts_json)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO messages (session_id, role, content, timestamp, tool_calls_json, parts_json,
+                                      kind, sender_agent_id, links_json, meta_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (session_id, role, content, now, tool_str, parts_str),
+                (session_id, role, content, now, tool_str, parts_str, kind, sender_agent_id, links_str, meta_str),
             )
             db.execute(
                 "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
                 (now, session_id),
             )
-            return cursor.lastrowid or 0
+            msg_id = cursor.lastrowid or 0
+            if emit:
+                row = db.execute("SELECT * FROM messages WHERE id = ?", (msg_id,)).fetchone()
+                payload = {"session_id": session_id, "message": message_dict(row, session_id)}
+                self._queue_event(self._insert_event(db, session_id, "message.created", payload, now))
+                self._queue_event(self._insert_event(db, "*", "message.created", payload, now))
+            return msg_id
 
         if conn is not None:
             return _write(conn)
         with self._get_conn() as owned:
-            return _write(owned)
+            msg_id = _write(owned)
+        self._flush_events()
+        return msg_id
+
+    def list_messages(self, session_id: str, *, before: int | None = None,
+                      limit: int = 50) -> dict[str, Any]:
+        """Newest first. ``next_before`` pages to older rows; null at the start."""
+        limit = max(1, min(int(limit or 50), MESSAGES_PAGE_MAX))
+        with self._get_conn() as conn:
+            if before is not None:
+                rows = conn.execute(
+                    "SELECT * FROM messages WHERE session_id=? AND id<? ORDER BY id DESC LIMIT ?",
+                    (session_id, int(before), limit + 1)).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM messages WHERE session_id=? ORDER BY id DESC LIMIT ?",
+                    (session_id, limit + 1)).fetchall()
+        more = len(rows) > limit
+        rows = rows[:limit]
+        return {"messages": [message_dict(r, session_id) for r in rows],
+                "next_before": rows[-1]["id"] if more and rows else None}
+
+    def messages_after(self, session_id: str, after_id: int = 0) -> list[dict[str, Any]]:
+        """Oldest first, every row with id > ``after_id`` (summarizer input)."""
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT * FROM messages WHERE session_id=? AND id>? ORDER BY id ASC",
+                                (session_id, int(after_id or 0))).fetchall()
+        return [message_dict(r, session_id) for r in rows]
 
     def delete_session(self, session_id: str) -> bool:
         with self._get_conn() as conn:
@@ -1192,14 +1329,16 @@ class GatewaySessionStore:
             model = meta.get("model")
             provider = choices.get("provider") or meta.get("provider")
         rows = conn.execute(
-            "SELECT attachment_id, sha256, size_bytes FROM attachments "
+            "SELECT attachment_id, sha256, size_bytes, provenance FROM attachments "
             "WHERE session_id=? ORDER BY created_at",
             (session_id,),
         ).fetchall()
         available = {r["attachment_id"]: r for r in rows}
         wanted = choices.get("attachment_ids")
         if wanted is None:
-            selected = [r["attachment_id"] for r in rows]
+            # Staged uploads (POST .../attachments/upload) join a turn only when
+            # it names them; omitted attachment_ids means none of them.
+            selected = [r["attachment_id"] for r in rows if r["provenance"] != "upload_staged"]
         else:
             unknown = [a for a in wanted if a not in available]
             if unknown:
@@ -1292,8 +1431,17 @@ class GatewaySessionStore:
                         (row["session_id"], *PART_EVENTS, request_id),
                     )
                 ]
+                turn_parts = project_parts(turn_events)
+                for appr in conn.execute(
+                    "SELECT approval_id, kind, status, decision, metadata_json FROM approvals "
+                    "WHERE request_id=? ORDER BY created_at", (request_id,)):
+                    ameta = _row_meta(appr["metadata_json"])
+                    turn_parts.append({"type": "approval", "approval_id": appr["approval_id"],
+                                       "call_id": ameta.get("call_id"), "tool": ameta.get("tool"),
+                                       "target": ameta.get("target"), "status": appr["status"],
+                                       "decision": appr["decision"]})
                 self.append_message(row["session_id"], "assistant", assistant_text, timestamp=now, conn=conn,
-                                    parts=project_parts(turn_events) or None)
+                                    parts=turn_parts or None)
             sess_status = session_status or ("idle" if status == "completed" else status)
             conn.execute(
                 "UPDATE sessions SET status=?, updated_at=? WHERE session_id=?",
@@ -1861,7 +2009,8 @@ class GatewaySessionStore:
             return out
 
 
-    def deliver_task_result(self, task_id: str, session_id: str, text: str, status: str) -> dict:
+    def deliver_task_result(self, task_id: str, session_id: str, text: str, status: str,
+                            sender_agent_id: str | None = None) -> dict:
         """Atomic owner-only delivery to the originating conversation, exactly once."""
         key = json.dumps(['durable_task', task_id])
         with self._immediate() as conn:
@@ -1871,13 +2020,19 @@ class GatewaySessionStore:
             if not conn.execute('SELECT 1 FROM sessions WHERE session_id=?', (session_id,)).fetchone():
                 raise ValueError('Originating session no longer exists; task result remains durable')
             now = time.time()
-            cursor = conn.execute("INSERT INTO messages(session_id,role,content,timestamp) VALUES(?,'assistant',?,?)",
-                                  (session_id, text, now))
+            cursor = conn.execute(
+                "INSERT INTO messages(session_id,role,content,timestamp,kind,sender_agent_id,links_json) "
+                "VALUES(?,'assistant',?,?,'task_result',?,?)",
+                (session_id, text, now, sender_agent_id, json.dumps({'task_id': task_id})))
             conn.execute('UPDATE sessions SET updated_at=? WHERE session_id=?', (now, session_id))
+            msg_row = conn.execute('SELECT * FROM messages WHERE id=?', (cursor.lastrowid,)).fetchone()
+            message = message_dict(msg_row, session_id)
             event = self._insert_event(conn, session_id, 'message.created', {
                 'session_id': session_id, 'message_id': cursor.lastrowid, 'role': 'assistant',
                 'text': text, 'content': text, 'task_id': task_id, 'status': status,
-                'source': 'durable_task', 'initiated_by': 'agent'}, now)
+                'source': 'durable_task', 'initiated_by': 'agent', 'message': message}, now)
+            self._queue_event(self._insert_event(conn, '*', 'message.created',
+                                                 {'session_id': session_id, 'message': message}, now))
             receipt = {'task_id': task_id, 'event': event, 'message_id': cursor.lastrowid}
             conn.execute('INSERT INTO background_deliveries VALUES(?,?,?)',
                          (key, input_fingerprint(text), json.dumps(receipt)))

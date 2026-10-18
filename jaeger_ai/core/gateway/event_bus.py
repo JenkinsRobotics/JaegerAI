@@ -66,6 +66,8 @@ EVENT_TYPES = frozenset({
     "ide.request", "attachment.added",
     "agent.created", "agent.activated", "agent.handoff", "agent.handoff.finished",
     "agent.skills", "project.created", "project.checked",
+    # Sessions contract: every transcript row, and rolling summaries.
+    "message.created", "session.summarized",
     # Durable task projection. The task owner is the authority; these are its
     # stream. ``jaeger.state`` is the presence projection (see contract/presence.py).
     "task.created", "task.updated", "jaeger.state",
@@ -114,9 +116,13 @@ class GatewayEventBus:
         self._buffer: deque[GatewayEvent] = deque(maxlen=ring_buffer_size)
         self._subscribers: dict[asyncio.Event, tuple[str, asyncio.AbstractEventLoop]] = {}
         self.store = store
+        if store is not None:
+            store.event_listener = self.fanout
 
     def attach_store(self, store: GatewaySessionStore) -> None:
         self.store = store
+        if store is not None:
+            store.event_listener = self.fanout
 
     def publish(self, session_id: str, event: str, data: dict[str, Any]) -> GatewayEvent:
         if self.store is not None:

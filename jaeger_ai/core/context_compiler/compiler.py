@@ -59,6 +59,21 @@ class ContextCompiler:
         rows = [row for row in (messages or []) if isinstance(row, dict)]
         if current_user_is_last and rows and str(rows[-1].get("role") or "") == "user":
             rows = rows[:-1]
+        # Rolling summary: the newest summary row stands in for every row it
+        # covers; older summaries are superseded (each one is cumulative).
+        summary_row = None
+        for row in rows:
+            if row.get("kind") == "summary":
+                summary_row = row
+        summary_item: dict[str, str] | None = None
+        if summary_row is not None:
+            covers_to = int(((summary_row.get("summary") or {}).get("covers_to")) or 0)
+            rows = [r for r in rows if r.get("kind") != "summary"
+                    and not (isinstance(r.get("id"), int) and r["id"] <= covers_to)]
+            text = str(summary_row.get("content") or "").strip()
+            if text:
+                summary_item = {"role": "system",
+                                "content": "Summary of the earlier conversation: " + text[:6000]}
         limit = max(0, int(max_messages))
         if limit == 0:
             return ""
@@ -66,6 +81,12 @@ class ContextCompiler:
         char_limit = max(0, int(max_chars))
         if char_limit < 2:
             return ""
+        if summary_item is not None:
+            budget = len(json.dumps([summary_item], ensure_ascii=True)) + 1
+            if budget < char_limit // 2:
+                char_limit -= budget
+            else:
+                summary_item = None
 
         def encode(items: list[dict[str, str]]) -> str:
             # Escaping angle brackets keeps a quoted transcript value from
@@ -104,6 +125,8 @@ class ContextCompiler:
                 selected = [{"role": role, "content": content[-low:]}, *selected]
                 break
             break
+        if summary_item is not None:
+            selected = [summary_item, *selected]
         return encode(selected) if selected else ""
 
     def select(
