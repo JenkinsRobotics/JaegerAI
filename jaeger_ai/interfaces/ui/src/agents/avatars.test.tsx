@@ -90,3 +90,12 @@ describe("handoff with 3+ recipients", () => {
     el.remove();
   });
 });
+
+describe("lead tilt drift", () => {
+  it("takes its phase from the wall clock, wrapping every two sweeps", async () => {
+    const { leadDriftPhase, LEAD_DRIFT_SECONDS } = await import("./AgentAvatar");
+    expect(leadDriftPhase(0)).toBe(0);
+    expect(leadDriftPhase(90_000)).toBe(90);
+    expect(leadDriftPhase(LEAD_DRIFT_SECONDS * 2 * 1000 + 5000)).toBe(5);
+  });
+});
