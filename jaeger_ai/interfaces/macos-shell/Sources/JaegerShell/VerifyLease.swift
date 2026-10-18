@@ -39,7 +39,7 @@ final class LeaseVerifier {
         guard let dev = app.stack.dev else {
             return finish("dev_stack_unavailable: needs a dev build, JAEGER_SHELL_STACK_MODE=dev and JAEGER_SHELL_DEV_ROOT")
         }
-        report["lease_path"] = app.stack.leasePath
+        report["lease_path"] = app.stack.leasePath ?? "(disabled)"
         report["state_dir"] = dev.stateDir
         report["gateway"] = dev.gatewayOrigin.string
         report["contract"] = ["suspend_after_s": LeaseContract.suspendAfter, "shutdown_grace_s": LeaseContract.shutdownGrace,
@@ -60,8 +60,8 @@ final class LeaseVerifier {
                         self.report["retire_expire"] = self.app.stack.retireLease("verify: retire the old way (beat_at 0)", mode: .expire)
                         self.sample("after_expire", count: 12, stopWhenGatewayGone: true) {
                             // the expired lease is a test artifact in the isolated state dir; don't leave it behind
-                            try? FileManager.default.removeItem(atPath: self.app.stack.leasePath)
-                            self.report["expired_test_lease_removed"] = !FileManager.default.fileExists(atPath: self.app.stack.leasePath)
+                            if let p = self.app.stack.leasePath { try? FileManager.default.removeItem(atPath: p) }
+                            self.report["expired_test_lease_removed"] = !FileManager.default.fileExists(atPath: self.app.stack.leasePath ?? "/nonexistent")
                             self.stopAndFinish(error: nil)
                         }
                     }
@@ -73,7 +73,7 @@ final class LeaseVerifier {
     private func sample(_ phase: String, count: Int, stopWhenGatewayGone: Bool = false, then: @escaping () -> Void) {
         var rows: [[String: Any]] = []
         func tick(_ i: Int) {
-            let path = app.stack.leasePath
+            let path = app.stack.leasePath ?? ""
             let text = try? String(contentsOfFile: path, encoding: .utf8)
             let now = Date().timeIntervalSince1970
             let alive = app.stack.gatewayAlive
