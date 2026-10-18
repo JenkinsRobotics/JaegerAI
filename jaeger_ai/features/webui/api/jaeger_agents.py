@@ -1,6 +1,6 @@
-"""Proxy WebUI /api/agents* to Jaeger Gateway :8810 /v1/agents*.
+"""Proxy WebUI /api/agents* to the Jaeger Gateway's /v1/agents*.
 
-Browser clients on :8790 cannot reliably reach loopback :8810; the WebUI
+Browser clients on :8790 cannot reliably reach the loopback Gateway; the WebUI
 process proxies server-side. Chat spine is Gateway — not ARES :8813.
 """
 from __future__ import annotations
@@ -14,7 +14,7 @@ from urllib.request import Request, urlopen
 def runner_base() -> str:
     """The Jaeger runner (:8791), which owns per-framework execution.
 
-    Distinct from :func:`gateway_base` (:8810). The session index lives on the
+    Distinct from :func:`gateway_base` (the Gateway). The session index lives on the
     runner because that is the process holding the framework adapters; sending
     it to the gateway would 404, and the two ports are one digit apart.
     """
@@ -29,8 +29,14 @@ def gateway_base() -> str:
     return (
         os.environ.get("JAEGER_GATEWAY_URL")
         or os.environ.get("HERMES_WEBUI_GATEWAY_URL")
-        or "http://127.0.0.1:8810"
+        or _resolved_gateway_url()
     ).rstrip("/")
+
+
+def _resolved_gateway_url() -> str:
+    """The Gateway URL from contract.ports (env overrides honoured)."""
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    return resolve_gateway_url()
 
 
 def _proxy(handler, method: str, path: str, body: bytes | None = None,
@@ -295,6 +301,17 @@ def route(handler, parsed, method: str) -> bool:
             raw = json.dumps(read_body(handler) or {}).encode("utf-8")
         return _proxy(handler, "POST", "/v1/agents", raw)
 
+    if method == "POST" and path.endswith("/seen") and (
+        path.startswith("/api/agents/") or path.startswith("/v1/agents/")
+    ):
+        suffix = path.split("/agents/", 1)[-1]
+        raw = getattr(handler, "_json_body_bytes", None)
+        if raw is None:
+            from api.helpers import read_body
+
+            raw = json.dumps(read_body(handler) or {}).encode("utf-8")
+        return _proxy(handler, "POST", f"/v1/agents/{suffix}", raw)
+
     if method == "POST" and path.endswith("/activate") and (
         path.startswith("/api/agents/") or path.startswith("/v1/agents/")
     ):
@@ -344,7 +361,55 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path == "/api/jaeger/presence":
         return _proxy(handler, "GET", "/v1/presence")
 
+    # Durable tasks (Tasks board, Mac host): GET list (?agent_id=, ...), POST create.
+    if path in {"/api/tasks", "/v1/tasks"} and method in {"GET", "POST"}:
+        qs = f"?{parsed.query}" if parsed.query else ""
+        if method == "GET":
+            return _proxy(handler, "GET", f"/v1/tasks{qs}")
+        raw = getattr(handler, "_json_body_bytes", None)
+        if raw is None:
+            from api.helpers import read_body
+
+            raw = json.dumps(read_body(handler) or {}).encode("utf-8")
+        return _proxy(handler, "POST", "/v1/tasks", raw)
+    if method == "GET" and (path.startswith("/api/tasks/") or path.startswith("/v1/tasks/")):
+        from urllib.parse import quote
+
+        return _proxy(handler, "GET", f"/v1/tasks/{quote(path.split('/tasks/', 1)[1], safe='')}")
+
+    # Connect Apps (Agents View panel). The install body is relayed as-is;
+    # the Gateway enforces confirm:true and the owner-caller rule.
+    if path == "/api/connect-apps" and method == "GET":
+        return _proxy(handler, "GET", "/v1/connect-apps")
+    if path.startswith("/api/connect-apps/"):
+        rest = path[len("/api/connect-apps/"):].split("/")
+        if len(rest) == 2 and rest[0]:
+            from urllib.parse import quote
+
+            app = quote(rest[0], safe="")
+            if rest[1] == "state" and method == "GET":
+                qs = f"?{parsed.query}" if parsed.query else ""
+                return _proxy(handler, "GET", f"/v1/connect-apps/{app}/state{qs}")
+            if rest[1] == "install" and method == "POST":
+                raw = getattr(handler, "_json_body_bytes", None)
+                if raw is None:
+                    from api.helpers import read_body
+
+                    raw = json.dumps(read_body(handler) or {}).encode("utf-8")
+                return _proxy(handler, "POST", f"/v1/connect-apps/{app}/install", raw)
+
     if method == "GET" and path in {"/api/handoffs", "/v1/handoffs"}:
-        return _proxy(handler, "GET", "/v1/handoffs")
+        qs = ("?" + parsed.query) if parsed.query else ""
+        return _proxy(handler, "GET", f"/v1/handoffs{qs}")
+
+    # One handoff, or its exchange (task + specialist messages + summary).
+    if method == "GET" and path.startswith("/api/handoffs/"):
+        from urllib.parse import quote
+        rest = path[len("/api/handoffs/"):].strip("/").split("/")
+        if len(rest) == 1 and rest[0]:
+            return _proxy(handler, "GET", f"/v1/handoffs/{quote(rest[0], safe='')}")
+        if len(rest) == 2 and rest[0] and rest[1] == "messages":
+            return _proxy(handler, "GET", f"/v1/handoffs/{quote(rest[0], safe='')}/messages")
+        return False
 
     return False

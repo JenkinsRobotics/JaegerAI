@@ -9,7 +9,7 @@ files, two answers. Anyone grepping the name found both.
 These are **defaults**. Almost every service takes an override (a CLI flag, an
 env var, an instance setting); this module says what the number is when nobody
 overrode it, so a reader has one place to look instead of a grep that returns
-twenty-six hits for ``8810``.
+twenty-six hits for a bare port number.
 
 Animation-bridge and JP01 hardware ports are NOT here. They belong to the
 engine, not the app, and live in :mod:`jaeger_os.contract.ports` — importing
@@ -19,7 +19,7 @@ them from there is correct, and re-declaring them here is what created the
 from __future__ import annotations
 
 import os
-from typing import Final
+from typing import Final, Mapping
 
 LOOPBACK: Final = "127.0.0.1"
 """Bind address for everything that must not leave the machine."""
@@ -29,10 +29,14 @@ CONTAINER_HOST: Final = os.environ.get("JAEGER_CONTAINER_HOST", "192.168.64.1")
 
 # ── the chat spine ───────────────────────────────────────────────────────
 
-GATEWAY_PORT: Final = 8810
+GATEWAY_PORT: Final = int(os.environ.get("JAEGER_GATEWAY_PORT") or 33418)
 """Jaeger Gateway — sessions, SSE events, approvals. Started by
 ``jaeger gateway daemon``. The one every client connects to.
-Serves ``/health``, *not* ``/v1/health``."""
+Serves ``/health``, *not* ``/v1/health``. ``JAEGER_GATEWAY_PORT`` overrides it.
+The pre-2026-10-17 port is retired: there is no fallback to it."""
+
+GATEWAY_URL: Final = f"http://{LOOPBACK}:{GATEWAY_PORT}"
+"""Where clients look for the Gateway first. Loopback only."""
 
 WEBUI_PORT: Final = 8790
 """The first-party Jaeger WebUI. What a person opens."""
@@ -104,6 +108,26 @@ HERMES_NATIVE_API_PORT: Final = 8645
 DISPATCHER_SIDECAR_PORT: Final = 8646
 """Token-authenticated loopback proxy the Dispatcher board talks to."""
 
+
+# ── Gateway discovery ──────────────────────────────────────────────────────
+
+
+def resolve_gateway_url(environ: Mapping[str, str] | None = None) -> str:
+    """The Gateway base URL: an explicit ``JAEGER_GATEWAY_URL``, else loopback
+    on ``JAEGER_GATEWAY_PORT`` (default :data:`GATEWAY_PORT`). No probing and
+    no fallback port."""
+    env = os.environ if environ is None else environ
+    explicit = str(env.get("JAEGER_GATEWAY_URL") or "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    return f"http://{LOOPBACK}:{int(env.get('JAEGER_GATEWAY_PORT') or GATEWAY_PORT)}"
+
+
+def is_gateway_port(port: int | None) -> bool:
+    """True for the Gateway's port."""
+    return port is not None and int(port) == GATEWAY_PORT
+
+
 __all__ = [
     "A2A_GATEWAY_PORT",
     "A2A_GATEWAY_URL",
@@ -113,6 +137,7 @@ __all__ = [
     "CONTAINER_HOST",
     "DISPATCHER_SIDECAR_PORT",
     "GATEWAY_PORT",
+    "GATEWAY_URL",
     "HERMES_NATIVE_API_PORT",
     "LOOPBACK",
     "MCP_GATEWAY_PORT",
@@ -126,4 +151,6 @@ __all__ = [
     "OLLAMA_URL",
     "WEBUI_ADAPTER_PORT",
     "WEBUI_PORT",
+    "is_gateway_port",
+    "resolve_gateway_url",
 ]

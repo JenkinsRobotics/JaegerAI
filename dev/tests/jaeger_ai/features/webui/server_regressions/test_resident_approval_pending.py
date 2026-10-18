@@ -67,7 +67,7 @@ def test_gateway_store_pending_maps_tool_target_reason(monkeypatch):
         def read(self):
             return json.dumps(payload).encode()
 
-    monkeypatch.setattr("api.jaeger_sessions.gateway_base", lambda: "http://127.0.0.1:8810")
+    monkeypatch.setattr("api.jaeger_sessions.gateway_base", lambda: "http://127.0.0.1:33418")
     monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: _Resp())
     pending = routes._gateway_store_pending("gw-sess")
     assert pending["approval_id"] == "approval_abc"
@@ -98,7 +98,7 @@ def test_gateway_store_pending_ignores_other_sessions(monkeypatch):
                 }]
             }).encode()
 
-    monkeypatch.setattr("api.jaeger_sessions.gateway_base", lambda: "http://127.0.0.1:8810")
+    monkeypatch.setattr("api.jaeger_sessions.gateway_base", lambda: "http://127.0.0.1:33418")
     monkeypatch.setattr("urllib.request.urlopen", lambda *_a, **_k: _Resp())
     assert routes._gateway_store_pending("gw-sess") is None
 

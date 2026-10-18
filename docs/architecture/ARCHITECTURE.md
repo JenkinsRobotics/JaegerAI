@@ -42,7 +42,7 @@ CLIENTS
   Mac (SwiftUI) | WebUI | CLI | TUI | Phone PWA | future Vision / robot
         │
         ▼
-CONTROL PLANE / GATEWAY     127.0.0.1:8810
+CONTROL PLANE / GATEWAY     127.0.0.1:33418
   auth, sessions, SSE, run control, approvals,
   attachment HTTP, capability/model inventory projection
         │
@@ -55,7 +55,7 @@ PERSISTENT ENTITY RUNTIME   EntityRuntime (OWNER, resident=true)
 
 | Role | Owner | Bind | Status |
 | :--- | :--- | :--- | :--- |
-| Control plane | `jaeger_ai.core.gateway.server` | `127.0.0.1:8810` | **IMPLEMENTED** |
+| Control plane | `jaeger_ai.core.gateway.server` | `127.0.0.1:33418` | **IMPLEMENTED** |
 | Entity execution | `jaeger_ai.core.entity.runtime.EntityRuntime` | in Gateway process | **IMPLEMENTED** |
 | Subordinate ReAct | `packages/jaeger-agent` `JaegerAgent` | injected | **IMPLEMENTED** |
 | WebUI client | `jaeger_ai.features.webui` | `127.0.0.1:8790` | **IMPLEMENTED** |

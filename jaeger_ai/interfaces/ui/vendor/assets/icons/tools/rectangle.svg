@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <g stroke="var(--tool-blue,#198fdf)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round">
+<path d="M5 7H27V25H5Z" fill="var(--tool-blue,#198fdf)" fill-opacity=".12"/>
+<path d="M5 14V7H12" stroke="var(--tool-orange,#e99343)" stroke-width="2.8"/>
+<rect x="3" y="5" width="4" height="4" fill="var(--tool-paper,#eff6fb)" stroke="var(--tool-orange,#e99343)" stroke-width="1.5"/><rect x="25" y="23" width="4" height="4" fill="var(--tool-paper,#eff6fb)" stroke="var(--tool-blue,#198fdf)" stroke-width="1.5"/>
+  </g>
+</svg>

@@ -126,7 +126,7 @@
 					"type": "string",
 					"default": "",
 					"scope": "machine",
-					"description": "Gateway URL for this device (e.g. \"http://127.0.0.1:8810\" or Tailscale host \"http://home-mac.ts.net:8810\"). Per-device connection setting; not synced across devices."
+					"description": "Gateway URL for this device (e.g. \"http://127.0.0.1:33418\" or Tailscale host \"http://home-mac.ts.net:33418\"). Empty = the local Gateway on its contract port. Per-device connection setting; not synced across devices."
 				},
 				"jaeger.callerToken": {
 					"type": "string",

@@ -1,0 +1,32 @@
+{
+  "name": "jaeger-ui",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Jaeger main screen: agents sidebar and chat, in the AetherStudio design language.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "node scripts/check-theme-literals.mjs && tsc --noEmit && vite build && node scripts/check-no-mock.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "check:theme": "node scripts/check-theme-literals.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "shots": "node scripts/screenshots.mjs",
+    "check:no-mock": "node scripts/check-no-mock.mjs"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "jsdom": "^26.0.0",
+    "playwright": "^1.55.0",
+    "typescript": "~5.9.2",
+    "vite": "^7.1.0",
+    "vitest": "^3.2.0"
+  }
+}

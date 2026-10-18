@@ -212,7 +212,7 @@ def test_create_runtime_fails_closed_when_no_owner_is_available(monkeypatch):
 
 
 def test_gateway_client_targets_the_request_scoped_steering_route(monkeypatch):
-    client = GatewayTurnClient("http://127.0.0.1:8810")
+    client = GatewayTurnClient("http://127.0.0.1:33418")
     captured = []
     monkeypatch.setattr(
         client,

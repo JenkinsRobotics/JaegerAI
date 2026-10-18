@@ -135,7 +135,7 @@ test('composer uses the saved default and preserves an unavailable explicit choi
   assert.equal(submit().model, 'config', 'the saved default must be used without opening the picker');
   const override = nodes.get('model-list').children.find(item => item.dataset.value === 'ollama-cloud::fixture-override:cloud');
   override.onclick();
-  receive({ models: { providers: [] }, endpoint: 'http://fixture-new-owner.local:8810' });
+  receive({ models: { providers: [] }, endpoint: 'http://fixture-new-owner.local:33418' });
   assert.equal(submit().model, 'ollama-cloud::fixture-override:cloud', 'a catalog change must never silently select a fallback');
   assert.match(nodes.get('model-display').textContent, /fixture-override:cloud.*Unavailable/);
 });

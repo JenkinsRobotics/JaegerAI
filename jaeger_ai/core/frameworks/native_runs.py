@@ -484,7 +484,8 @@ def _jaeger_gateway_turn(run, session_id: str) -> dict | None:
     import urllib.error
     import urllib.request
 
-    gw = (os.environ.get("JAEGER_GATEWAY_URL") or f"http://127.0.0.1:{os.environ.get('JAEGER_GATEWAY_PORT', '8810')}").rstrip("/")
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    gw = resolve_gateway_url().rstrip("/")
     from jaeger_ai.core.gateway.caller_auth import client_headers
     # Native framework runs are Jaeger's own relayed work: the least-privileged
     # ``jaegerd`` caller (read/turn; it cannot approve or administer).

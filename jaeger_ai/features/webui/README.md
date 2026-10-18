@@ -11,14 +11,16 @@ execution, entity identity, durable sessions, tools, approvals, or memory.
 ```text
 Browser (:8790)
   → WebUI HTTP/SSE server
-  → Jaeger Gateway (:8810)
+  → Jaeger Gateway (:33418)
   → resident EntityRuntime / JaegerAgent
   → durable Gateway session, request, approval, and event records
 ```
 
 The public launcher is `scripts/run-jaeger-webui.sh`. It resolves state through
-`operator_state_root()`, starts the browser server on `:8790`, and sets
-`JAEGER_GATEWAY_URL` to `http://127.0.0.1:8810`.
+`operator_state_root()`, starts the browser server on `:8790`, and, when
+`JAEGER_GATEWAY_URL` is unset, resolves it at launch from
+`jaeger_ai/contract/ports.py`: `http://127.0.0.1:33418` (the old `:8810` is
+retired; there is no fallback).
 
 The browser’s chat route is `/api/chat/start`, but that route is a WebUI
 adapter/proxy. Its current default is the Gateway:

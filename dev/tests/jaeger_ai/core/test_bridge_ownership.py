@@ -189,7 +189,7 @@ def test_gateway_owner_replays_warm_readiness_to_later_attach_client(instance_ro
     waits for a transition which happened before it connected.
     """
     class _Gateway:
-        base_url = "http://127.0.0.1:8810"
+        base_url = "http://127.0.0.1:33418"
         probes = 0
 
         def probe(self):
@@ -225,7 +225,7 @@ def test_gateway_owner_initial_failure_exits_without_publishing_socket(instance_
     from jaeger_ai.core.gateway.client import GatewayUnavailable
 
     class _Gateway:
-        base_url = "http://127.0.0.1:8810"
+        base_url = "http://127.0.0.1:33418"
         available = False
 
         def probe(self):

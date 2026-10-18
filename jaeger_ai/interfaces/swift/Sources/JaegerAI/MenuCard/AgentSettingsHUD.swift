@@ -1042,9 +1042,9 @@ private struct AresPage: View {
                 RoundedRectangle(cornerRadius: 12).stroke(HUD.stroke, lineWidth: 1)
             ))
 
-            // Gateway :8810 persistence spine — list agents without rewriting the app.
+            // Gateway persistence spine — list agents without rewriting the app.
             VStack(alignment: .leading, spacing: 12) {
-                Text("GATEWAY AGENTS (:8810)")
+                Text("GATEWAY AGENTS (:\(GatewayEndpoint.currentPort))")
                     .font(.system(size: 11, weight: .bold))
                     .tracking(2)
                     .foregroundStyle(HUD.inkDim)
@@ -1110,7 +1110,7 @@ private struct AresPage: View {
             } catch {
                 gatewayOnline = false
                 gatewayAgents = []
-                gatewayNote = "GatewayClient ready; start `jaeger gateway` / host service on :8810 to populate."
+                gatewayNote = "GatewayClient ready; start `jaeger gateway` / host service on :\(GatewayEndpoint.currentPort) to populate."
             }
         }
     }

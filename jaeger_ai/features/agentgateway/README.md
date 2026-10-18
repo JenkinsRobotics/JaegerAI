@@ -5,7 +5,7 @@ to outside programs over two standard protocols: MCP on port **8811** and A2A on
 port **8812**.
 
 **This is not the Jaeger Gateway.** The Jaeger Gateway is a different process
-(`jaeger_ai/core/gateway/`, port 8810) that owns chat sessions. This folder only
+(`jaeger_ai/core/gateway/`, port 33418) that owns chat sessions. This folder only
 manages the third-party binary. The two used to both be called "gateway", which
 is why this one was renamed.
 

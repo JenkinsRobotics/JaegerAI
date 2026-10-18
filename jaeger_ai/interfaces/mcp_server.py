@@ -42,6 +42,12 @@ TurnFn = Callable[..., dict]
 MCP_HTTP_HOST = LOOPBACK
 
 
+def _canonical_gateway_url() -> str:
+    """Where the canonical Gateway is (contract.ports), sans scheme."""
+    from jaeger_ai.contract.ports import resolve_gateway_url
+    return resolve_gateway_url().split("://", 1)[-1].rstrip("/")
+
+
 def _off_event_loop(fn):
     """Keep the MCP transport responsive while synchronous bridge work waits."""
     @functools.wraps(fn)
@@ -354,7 +360,17 @@ def build_server(client: Any, instance: str, model: str | None,
                 gateway_token=relay_token, relay_caller=relay_caller,
             )
         if gateway is not None:
-            res = gateway.turn(session, message)
+            if relay_token:
+                # Same rule as the bridge path: the Gateway runs the turn as the
+                # caller that proved itself here (jaegerd keeps its specialist
+                # session ids), with its request identity and tool grant.
+                from jaeger_ai.core.gateway.client import GatewayTurnClient
+                relayed = GatewayTurnClient(gateway.base_url, caller="mcp", token=relay_token)
+                submitted_at = time.time()
+                rid = relayed.submit(session, message, request_id=request_id or None, allowed_tools=allowed_tools)
+                res = relayed.wait(session, rid, submitted_at=submitted_at)
+            else:
+                res = gateway.turn(session, message)
             if not res.ok:
                 raise RuntimeError(f"Gateway turn failed: {res.error or res.status}")
             return res.text
@@ -405,7 +421,7 @@ def build_server(client: Any, instance: str, model: str | None,
             info.setdefault("model", model or "unknown")
             info["instance"] = instance
         elif gateway is not None:
-            info["gateway"] = getattr(gateway, "base_url", "http://127.0.0.1:8810")
+            info["gateway"] = getattr(gateway, "base_url", None) or _canonical_gateway_url()
             info["transport"] = "gateway"
         return info
 
@@ -645,7 +661,7 @@ def main(argv: list[str] | None = None) -> int:
             pass
 
         print(
-            f"[jaeger-mcp] Neither live bridge nor canonical Jaeger Gateway (127.0.0.1:8810) is available for {instance}. "
+            f"[jaeger-mcp] Neither live bridge nor canonical Jaeger Gateway ({_canonical_gateway_url()}) is available for {instance}. "
             "Start the Gateway with 'jaeger gateway daemon'.",
             file=sys.stderr,
         )
@@ -684,7 +700,7 @@ def main(argv: list[str] | None = None) -> int:
     # Neither bridge nor gateway is running. Truthfully report the Gateway is unavailable,
     # rather than attempting to boot an in-process model that crashes on uninstalled Ollama.
     print(
-        f"[jaeger-mcp] Neither live bridge nor canonical Jaeger Gateway (127.0.0.1:8810) is running for {instance}. "
+        f"[jaeger-mcp] Neither live bridge nor canonical Jaeger Gateway ({_canonical_gateway_url()}) is running for {instance}. "
         "Start the Gateway with 'jaeger gateway daemon'.",
         file=sys.stderr,
     )

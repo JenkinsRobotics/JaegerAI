@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from jaeger_ai.contract.ports import GATEWAY_URL
+
 REPO = Path(__file__).resolve().parents[4]
 SUITE = REPO / "dev/tests/acceptance/test_webui_runtime_truth.py"
 
@@ -25,7 +27,7 @@ def isolated_environment(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("key", ["JAEGER_WEBUI_URL", "JAEGER_GATEWAY_URL"])
 @pytest.mark.parametrize("url", [
-    "", "http://127.0.0.1:8810", "http://localhost:8790",
+    "", GATEWAY_URL, "http://localhost:8790",
     "https://127.0.0.1:18810", "http://example.com:18810",
     "http://localhost", "http://user:password@localhost:18810",
     "http://localhost:18810/api", "http://localhost:18810?target=live",

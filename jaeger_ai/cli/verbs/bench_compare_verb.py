@@ -180,9 +180,10 @@ def _cmd_bench_compare_argv(argv: list[str]) -> int:
     # allocator, spawn/fork after complex allocation can crash the child
     # in ``_malloc_fork_child``. ``MallocNanoZone=0`` selects the older
     # allocator that survives; ``OBJC_DISABLE_INITIALIZE_FORK_SAFETY``
-    # quiets the Metal/Obj-C fork guard.
-    env.setdefault("MallocNanoZone", "0")
-    env.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
+    # quiets the Metal/Obj-C fork guard. Both are forced: an inherited
+    # MallocNanoZone=1 (some launchers export it) would re-enable the crash.
+    env["MallocNanoZone"] = "0"
+    env["OBJC_DISABLE_INITIALIZE_FORK_SAFETY"] = "YES"
 
     cmd = [sys.executable, str(bench_script), "--models", ",".join(selected)]
     if args.tags:

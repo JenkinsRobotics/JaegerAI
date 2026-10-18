@@ -18,9 +18,31 @@ from urllib.request import Request, urlopen
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 
-def _gateway_base() -> str:
-    return (os.environ.get("JAEGER_GATEWAY_URL") or "http://127.0.0.1:8810").rstrip("/")
+#: Supplies the Gateway base URL. Like the credential below, the Gateway
+#: registers it at startup (``set_gateway_base``) so the port lives in one
+#: place (``jaeger_ai/contract/ports.py``); jaeger-agent never imports product
+#: code. ``JAEGER_GATEWAY_URL`` still wins when set.
+_GATEWAY_BASE: Callable[[], str] | None = None
 
+
+def set_gateway_base(provider: Callable[[], str] | None) -> None:
+    global _GATEWAY_BASE
+    _GATEWAY_BASE = provider
+
+
+def _gateway_base() -> str:
+    explicit = (os.environ.get("JAEGER_GATEWAY_URL") or "").strip()
+    if explicit:
+        return explicit.rstrip("/")
+    if _GATEWAY_BASE is not None:
+        return str(_GATEWAY_BASE() or "").rstrip("/")
+    return ""
+
+
+#: How long a handoff waits for the owner's approval decision before the
+#: tool reports ``pending_approval`` and the turn moves on.
+APPROVAL_WAIT_S = 300.0
+APPROVAL_POLL_S = 0.5
 
 #: Supplies jaegerd's Gateway caller credential. The Gateway registers it at
 #: startup (``set_gateway_auth``); jaeger-agent never imports product code or
@@ -50,7 +72,10 @@ def _caller_headers() -> dict[str, str]:
 
 
 def _request_json(method: str, path: str, body: dict[str, Any] | None = None, timeout: float = 10) -> tuple[int, dict[str, Any]]:
-    url = f"{_gateway_base()}{path}"
+    base = _gateway_base()
+    if not base:
+        return 503, {"error": "gateway URL not configured (set JAEGER_GATEWAY_URL)", "http_status": 503}
+    url = f"{base}{path}"
     raw = json.dumps(body or {}).encode("utf-8") if body is not None else None
     req = Request(url, data=raw, method=method)
     req.add_header("Accept", "application/json")
@@ -93,7 +118,9 @@ def call_agent(
 
     Uses Gateway ``POST /v1/agents/{id}/handoff``. Approval, timeout, cancel
     and specialist failure are explicit. This is not complete until a child
-    run result is persisted.
+    run result is persisted. ``require_approval=False`` is honoured only when
+    the owner's autonomy is ``auto``; otherwise the owner approves in the chat,
+    and retrying with it off does not skip that.
     """
     target = (agent_id or "").strip()
     work = (task or "").strip()
@@ -124,6 +151,10 @@ def call_agent(
 
     rid = (request_id or "").strip() or uuid.uuid4().hex
     tools = [part.strip() for part in str(allowed_tools or "").split(",") if part.strip()]
+    # The Gateway-owned turn this tool runs in, so the handoff (its markers and
+    # approval card) belongs to that chat. Set by the host, never by the model.
+    from jaeger_agent.task_port import current_task_context
+    turn = current_task_context() or {}
     status, payload = _request_json(
         "POST",
         f"/v1/agents/{target}/handoff",
@@ -132,7 +163,8 @@ def call_agent(
             "from_agent_id": from_agent_id or "native:jaeger",
             "require_approval": bool(require_approval),
             "request_id": rid,
-            "parent_run_id": parent_run_id or None,
+            "parent_run_id": parent_run_id or turn.get("request_id") or None,
+            "session_id": turn.get("session_id") or None,
             "permitted_context": permitted_context,
             "timeout_seconds": int(timeout_seconds),
             "allowed_tools": tools,
@@ -142,16 +174,24 @@ def call_agent(
     if status >= 400 or payload.get("error"):
         return {"ok": False, "status": payload.get("status") or "failed", **payload}
     handoff_id = payload.get("id")
-    if payload.get("status") == "pending_approval":
+    current = payload
+    # Keep the turn open while the owner decides on the approval card in the
+    # chat, so the lead can relay the specialist's reply in the same turn.
+    approval_deadline = time.monotonic() + APPROVAL_WAIT_S
+    while current.get("status") == "pending_approval" and time.monotonic() < approval_deadline:
+        time.sleep(APPROVAL_POLL_S)
+        _, current = _request_json("GET", f"/v1/handoffs/{handoff_id}", timeout=10)
+        if current.get("error"):
+            return {"ok": False, "status": "failed", **current, "request_id": rid}
+    if current.get("status") == "pending_approval":
         return {
             "ok": False,
             "status": "pending_approval",
             "error": "Specialist is waiting for an explicit approval decision",
-            "handoff": payload,
+            "handoff": current,
             "request_id": rid,
         }
     deadline = time.monotonic() + max(1, int(timeout_seconds))
-    current = payload
     if native_parent and current.get("status") in {"admitted", "running"}:
         return {"ok": True, "completed": False, "status": current["status"],
                 "handoff_id": handoff_id, "request_id": rid,

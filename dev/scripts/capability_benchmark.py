@@ -32,6 +32,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from jaeger_ai.contract.ports import GATEWAY_PORT as _DEFAULT_GATEWAY_PORT
 from jaeger_ai.core.frameworks.native_runs import Runs, TERMINAL, jaeger_turn
 from jaeger_ai.core.frameworks.hermes_native import hermes_turn
 from jaeger_ai.core.frameworks.openclaw_native import openclaw_turn
@@ -359,11 +360,11 @@ def build_no_skip_catalog(workspaces_root: Path) -> list[TestCase]:
         turns=[
             TurnSpec(
                 prompt="In this repository, where is the constant GATEWAY_PORT defined and what is its integer value?",
-                expected_substr=["8810"],
+                expected_substr=[str(_DEFAULT_GATEWAY_PORT)],
                 custom_eval=lambda res, ws: (
-                    "8810" in res["text"] and ("ports.py" in res["text"] or "contract" in res["text"]),
-                    STATUS_PASS if "8810" in res["text"] else STATUS_FAIL_AGENT,
-                    "Found GATEWAY_PORT = 8810"
+                    str(_DEFAULT_GATEWAY_PORT) in res["text"] and ("ports.py" in res["text"] or "contract" in res["text"]),
+                    STATUS_PASS if str(_DEFAULT_GATEWAY_PORT) in res["text"] else STATUS_FAIL_AGENT,
+                    f"Found GATEWAY_PORT default {_DEFAULT_GATEWAY_PORT}"
                 )
             )
         ]

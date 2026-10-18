@@ -167,7 +167,7 @@ over Tailscale to your persistent Jaeger Gateway running on your home server/Mac
 
 1. **Install extension:** Install the Jaeger VSIX via **Extensions: Install from VSIX…**.
 2. **Configure Gateway URL:** Set `jaeger.gatewayUrl` in Settings to your server's Tailscale
-   address (e.g. `http://home-mac.ts.net:8810` or `http://100.x.y.z:8810`). This setting has
+   address (e.g. `http://home-mac.ts.net:33418` or `http://100.x.y.z:33418`). This setting has
    `application` scope and is retained per-device (not synced).
 3. **Configure Caller Token:** Run **Jaeger: Set Caller Token** from the Command Palette.
    Paste the token from `jaeger auth status` on your server. This token is saved in OS

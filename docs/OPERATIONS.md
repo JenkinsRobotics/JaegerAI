@@ -113,7 +113,7 @@ model afterwards cannot change a request already in progress. Reusing a
 
 ```bash
 jaeger doctor                              # dependencies, permissions, install health
-curl -s http://127.0.0.1:8810/health       # Gateway (note: /health, not /v1/health)
+curl -s http://127.0.0.1:33418/health       # Gateway (note: /health, not /v1/health)
 jaeger onboarding status --json            # first-boot state
 ```
 

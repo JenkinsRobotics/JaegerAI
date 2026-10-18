@@ -111,7 +111,7 @@ The runner unsets credential-shaped environment variables so a unit test cannot 
 | `dev/tests/jaeger_ai/**` unmarked | UNIT | Majority of the tree. Fast, isolated via `JAEGER_STATE_DIR`. |
 | `dev/tests/jaeger_ai/core/test_*` for WS 2–20 modules | UNIT / INTEGRATION | New kernel modules. Many construct classes in tmp dirs; they do not prove Gateway production wiring unless listed under `--production-path`. |
 | `dev/tests/test_upaa_production_runtime.py` | PRODUCTION-PATH | Isolated UPAA loop. Not a live operator-stack test. |
-| `dev/tests/acceptance/` | ACCEPTANCE | Live WebUI runtime truth. Requires Gateway `:8810` and WebUI `:8790`. |
+| `dev/tests/acceptance/` | ACCEPTANCE | Live WebUI runtime truth. Requires Gateway `:33418` and WebUI `:8790`. |
 | `packages/jaeger-agent/tests/` | UNIT / INTEGRATION | Separate pytest process. |
 | `packages/jaeger-os/dev/tests/` | UNIT / INTEGRATION | Separate pytest process (process singletons). |
 | `packages/jaeger-agent/tests/security/` | SECURITY | Shell-hook veto and related negatives. |

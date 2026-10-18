@@ -12,7 +12,9 @@ const { parseProviderModel, selectableModels, providerModelValue, modelSelection
 const commands = require('./commands');
 const execFileAsync = util.promisify(execFile);
 
-let contract = { gatewayUrl: 'http://127.0.0.1:8810' };
+// Packaged builds get contract.json (gatewayUrl) generated from
+// jaeger_ai/contract/ports.py; this is only the unpackaged default.
+let contract = { gatewayUrl: 'http://127.0.0.1:33418' };
 try { contract = require('./contract.json'); } catch (_) {}
 
 // Sniffed from the extension, not the filesystem: this list only decides

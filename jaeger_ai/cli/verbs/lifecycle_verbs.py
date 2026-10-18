@@ -24,12 +24,17 @@ from jaeger_ai.cli._common import swift_app_bundle
 from typing import Any, Sequence
 from urllib.parse import urlsplit
 
-from jaeger_ai.contract.ports import OLLAMA_PORT, OLLAMA_URL
+from jaeger_ai.contract.ports import (
+    GATEWAY_PORT,
+    OLLAMA_PORT,
+    OLLAMA_URL,
+    resolve_gateway_url,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 SERVICES_ORDERED = (
-    ("com.jenkinsrobotics.jaeger-gateway", "Jaeger Gateway", 8810),
+    ("com.jenkinsrobotics.jaeger-gateway", "Jaeger Gateway", GATEWAY_PORT),
     # The bridge uses a Unix socket; :8791 may belong to the legacy webhook
     # service, so an open HTTP port is not evidence of bridge readiness.
     ("com.jenkinsrobotics.jaeger-bridge", "Jaeger Bridge", None),
@@ -198,6 +203,9 @@ def _service_port_open(
         return _is_port_open(port) or _is_port_open(port, "192.168.64.1")
     if label == "com.jenkinsrobotics.hermes-native-api":
         return _is_port_open(port, "127.0.0.1")
+    if label == "com.jenkinsrobotics.jaeger-gateway":
+        url = resolve_gateway_url()
+        return _is_port_open(urlsplit(url).port or port, urlsplit(url).hostname or "127.0.0.1")
     return _is_port_open(port)
 
 
@@ -509,12 +517,14 @@ def _wait_runtime_ready(*, timeout_s: float = 45.0) -> bool:
     """Boot gate: process fork is not success; EntityRuntime + Gateway must be READY."""
     import urllib.request
     deadline = time.time() + timeout_s
-    url = "http://127.0.0.1:8810/v1/runtime/status"
     last = ""
     while time.time() < deadline:
-        if not _is_port_open(8810):
+        base = resolve_gateway_url()
+        target = urlsplit(base)
+        if not _is_port_open(target.port or GATEWAY_PORT, target.hostname or "127.0.0.1"):
             time.sleep(0.4)
             continue
+        url = f"{base}/v1/runtime/status"
         try:
             from jaeger_ai.core.gateway.caller_auth import client_headers
             req = urllib.request.Request(url, headers=client_headers("cli"))
