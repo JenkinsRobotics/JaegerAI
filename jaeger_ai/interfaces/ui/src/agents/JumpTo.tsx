@@ -2,6 +2,7 @@
  * button is "Search Bots"), scoped to what Jaeger has: Bots and a few actions. Type to filter, ↑/↓ to move,
  * Enter to open, Esc or a click outside to close. Empty: No matches for "<query>" (Grok's string). */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useExclusivePopup } from "../popups/coordinator";
 import type { Agent } from "../api/types";
 import { AgentAvatar } from "./AgentAvatar";
 import { label } from "./agentsLogic";
@@ -15,6 +16,7 @@ export function JumpTo({ open, agents, actions, onAgent, onClose }: {
   const [query, setQuery] = useState("");
   const [index, setIndex] = useState(0);
   const input = useRef<HTMLInputElement>(null);
+  useExclusivePopup(open, onClose);
   useEffect(() => { if (open) { setQuery(""); setIndex(0); requestAnimationFrame(() => input.current?.focus()); } }, [open]);
   const rows = useMemo<Row[]>(() => {
     const q = query.trim().toLowerCase();

@@ -77,3 +77,20 @@ describe("composer + and message menus", () => {
     expect(el.querySelector<HTMLTextAreaElement>(".jg-composer__input")!.value).toBe("> Hi! Done.\n\n");
   });
 });
+
+describe("native-shell popup bug (menus piled up)", () => {
+  it("message menu, then + menu: only one stays open; a mousedown outside closes it", async () => {
+    const host = { capabilities: { voice: false }, startTurn: vi.fn(), respondToConfirmation: vi.fn(), copy: vi.fn(), openExternal: vi.fn(),
+      sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [{ turnId: "t1", message: "hi", parts: [{ kind: "markdownContent", text: "Hello" }], state: "complete" }] })) } };
+    await act(async () => { root.render(<MinimalChat host={host as never} sessionId="s1" />); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
+    const menus = () => [...document.querySelectorAll('[role="menu"]')].map((m) => m.getAttribute("aria-label"));
+    await act(async () => { el.querySelector(".jg-bubble--assistant")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })); });
+    expect(menus()).toEqual(["Message actions"]);
+    const plus = el.querySelector<HTMLButtonElement>('button[aria-label="Attach file"]')!;
+    await act(async () => { plus.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); plus.click(); });
+    expect(menus()).toEqual(["Composer actions"]);
+    await act(async () => { el.querySelector(".jg-composer__input")!.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); });
+    expect(menus()).toEqual([]);
+  });
+});
