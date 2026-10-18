@@ -6,7 +6,8 @@
 // navigation + WKContentRuleList; inline "not running" page instead of alert+quit; minimal main
 // menu (Quit, Edit, Reload); developer extras only in DEBUG; menu-bar (accessory) app with a
 // status item, window hides on close; --verify-launch self-check; global hotkey (JaegerHotkey);
-// `jaeger` JS⇄native bridge (NativeBridge) + headless --verify-bridge; gated visible --visible-check.
+// `jaeger` JS⇄native bridge (NativeBridge) + headless --verify-bridge; gated visible --visible-check;
+// solid 1040×760 window with the WKWebView as content (NativeChrome); headless --snapshot <dir>.
 
 import AppKit
 import JaegerShellCore
@@ -36,6 +37,14 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     let verifyBridgeMode = CommandLine.arguments.contains("--verify-bridge")
     let verifyLeaseMode = CommandLine.arguments.contains("--verify-lease")
     private var leaseVerifier: LeaseVerifier?
+    /// `--snapshot <dir>`: headless light/dark PNGs of the main window (Snapshot.swift).
+    let snapshotDir: String? = {
+        let a = CommandLine.arguments
+        guard let i = a.firstIndex(of: "--snapshot"), i + 1 < a.count else { return nil }
+        return a[i + 1]
+    }()
+    var snapshotMode: Bool { snapshotDir != nil }
+    private var snapshotter: Snapshotter?
     private(set) var bridge: NativeBridge?
     private var bridgeVerifier: BridgeVerifier?
     private var visibleChecker: VisibleChecker?
@@ -59,7 +68,12 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         if let override = start.override { shellLog("[shell][override] accepted \(override)") }
         shellLog("[shell] start_url=\(start.url.absoluteString)")
         appearanceObservation = NSApp.observe(\.effectiveAppearance) { [weak self] _, _ in
-            DispatchQueue.main.async { self?.sendAppearanceChanged() }
+            DispatchQueue.main.async {
+                if let self, let window = self.window, let webView = self.webView {
+                    NativeChrome.applyAppearance(window, webView: webView)
+                }
+                self?.sendAppearanceChanged()
+            }
         }
         let gw = ShellEnvironment.gateway()
         if let rejected = gw.rejected { shellLog("[shell][override] gateway rejected \(rejected)") }
@@ -74,6 +88,15 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             let verifier = LeaseVerifier(app: self)
             leaseVerifier = verifier
             verifier.run()
+            return
+        }
+        if let snapshotDir {
+            // Headless: no menu, status item, hotkey or activation; the window sits off every display.
+            let snapshotter = Snapshotter(app: self, dir: snapshotDir)
+            self.snapshotter = snapshotter
+            _ = makeWindow()
+            snapshotter.start()
+            installRulesThenLoad()
             return
         }
         if verifyBridgeMode {
@@ -139,12 +162,27 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         return false
     }
 
+    // AppKit re-lays out the standard buttons on these; put them back at the contract inset.
+    func windowDidResize(_ notification: Notification) { relayoutChrome() }
+    func windowDidBecomeKey(_ notification: Notification) { relayoutChrome() }
+    func windowDidResignKey(_ notification: Notification) { relayoutChrome() }
+    func windowDidEnterFullScreen(_ notification: Notification) { relayoutChrome(push: true) }
+    func windowDidExitFullScreen(_ notification: Notification) { relayoutChrome(push: true) }
+
+    private func relayoutChrome(push: Bool = false) {
+        guard let window else { return }
+        NativeChrome.layoutTrafficLights(window)
+        if push, let webView { NativeChrome.push(window, to: webView) }
+    }
+
     var appearanceName: String {
         NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? "dark" : "light"
     }
 
     /// `appearance.changed` for the new UI's NativeHost.onThemeChanged.
-    func sendAppearanceChanged() { bridge?.send(["type": "appearance.changed", "appearance": appearanceName]) }
+    func sendAppearanceChanged(_ name: String? = nil) {
+        bridge?.send(["type": "appearance.changed", "appearance": name ?? appearanceName])
+    }
 
     func hideWindow() {
         window?.orderOut(nil)
@@ -155,9 +193,12 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     private func emitVerifyReport() {
         let info = Bundle.main.infoDictionary ?? [:]
         let lsui = (info["LSUIElement"] as? Bool) == true
+        let chrome = window.map { NativeChrome.report($0, webView: webView) } ?? [:]
+        let chromeOK = (chrome["ok"] as? Bool) == true
         let report: [String: Any] = [
             "ok": lsui && NSApp.activationPolicy() == .accessory && (statusController?.isPresent ?? false)
-                && window != nil && start.origin.host == "127.0.0.1",
+                && window != nil && start.origin.host == "127.0.0.1" && chromeOK,
+            "chrome": chrome,
             "bundle_id": Bundle.main.bundleIdentifier ?? NSNull(),
             "bundle_version": info["CFBundleVersion"] ?? NSNull(),
             "dev_build": ShellEnvironment.isDevBuild,
@@ -198,7 +239,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         #endif
         windowChrome.allowedOrigin = start.origin
         windowChrome.install(in: configuration)
-        let host: BridgeHost = bridgeVerifier ?? self
+        let host: BridgeHost = bridgeVerifier ?? snapshotter ?? self
         let bridge = NativeBridge(allowed: start.origin, host: host, label: "main")
         bridge.install(in: configuration)
         self.bridge = bridge
@@ -210,8 +251,10 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         self.webView = webView
         bridge.webView = webView
 
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1024, height: 720),
+        let windowClass: NSWindow.Type = snapshotMode ? OffscreenSnapshotWindow.self : NSWindow.self
+        let window = windowClass.init(
+            contentRect: NSRect(x: 0, y: 0, width: NativeChromeContract.defaultWidth,
+                                height: NativeChromeContract.defaultHeight),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -220,16 +263,17 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         window.isReleasedWhenClosed = false
         window.delegate = self
         windowChrome.attach(to: window)
-        window.setFrameAutosaveName("JaegerShellMainWindow")
         NativeChrome.apply(to: window, webView: webView)
         NativeChrome.installUserScript(NativeChrome.metrics(window), in: webView)
         window.center()
+        // Headless checks keep the default size and never write the user's saved frame.
+        if !(snapshotMode || verifyMode || verifyBridgeMode) { window.setFrameAutosaveName("JaegerShellMainWindow") }
         self.window = window
         return window
     }
 
     func showWindow() {
-        if verifyBridgeMode { return }  // never show a window in the headless check
+        if verifyBridgeMode || snapshotMode { return }  // never show a window in the headless checks
         let window = self.window ?? makeWindow()
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -315,6 +359,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             shellLog("[shell] loaded \(webView.url?.absoluteString ?? "nil")")
             bridgeVerifier?.pageLoaded(webView)
             visibleChecker?.pageLoaded(webView)
+            snapshotter?.pageLoaded(webView)
         }
     }
 
