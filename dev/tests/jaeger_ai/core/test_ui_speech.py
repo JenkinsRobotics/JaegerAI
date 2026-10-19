@@ -410,3 +410,25 @@ def test_stop_in_node_to_engine_entry_gap_survives_kokoro_startup(monkeypatch):
     next_ack = [m for m in bus.published if isinstance(m, topics.SpokenAck)
                 and m.correlation_id == "next"]
     assert len(next_ack) == 1 and next_ack[0].ok is True
+
+
+def test_node_terminal_receipt_rejects_success_from_engine_after_stop(monkeypatch):
+    bus, audio, node = _real_node(monkeypatch, block=True)
+
+    def returns_success_despite_stop(text, **kwargs):
+        audio.started.set()
+        assert audio.release.wait(2)
+        return {"spoken": True}
+
+    monkeypatch.setattr(audio, "speak", returns_success_despite_stop)
+    bus.publish(topics.SpeechCommand(text="legacy engine", correlation_id="terminal-ui"))
+    worker = threading.Thread(target=node.tick)
+    worker.start()
+    assert audio.started.wait(2)
+    bus.publish(topics.SpeechStop(correlation_id="terminal-ui"))
+    worker.join(2)
+    assert not worker.is_alive()
+    receipts = [m for m in bus.published if isinstance(m, topics.SpokenAck)]
+    assert len(receipts) == 1
+    assert receipts[0].ok is False
+    assert receipts[0].reason == "interrupted"

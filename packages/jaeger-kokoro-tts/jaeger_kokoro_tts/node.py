@@ -380,14 +380,18 @@ class TTSNode(Node):
                 ))
             except Exception:  # noqa: BLE001
                 pass
-        ok = bool(result.get("spoken", False))
+        # Stop may arrive after the engine's return but before this node
+        # releases active ownership. Do not turn that cancellation into a
+        # successful receipt, including engines with best-effort stop only.
+        interrupted = cancel_event.is_set()
+        ok = bool(result.get("spoken", False)) and not interrupted
         # Prefer the synthesizer's elapsed if it gives one (more
         # accurate — includes synth time, not just playback) but
         # fall back to wall-clock so the brain always gets a number.
         duration_s = float(
             result.get("elapsed_s") or (time.perf_counter() - t0)
         )
-        reason = result.get("reason") if not ok else None
+        reason = "interrupted" if interrupted else (result.get("reason") if not ok else None)
         self._publish_ack(msg, ok=ok, duration_s=duration_s, reason=reason)
 
     def _speak(
