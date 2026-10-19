@@ -230,7 +230,7 @@ JAEGER_PYTHON_BASE="$("$BUILD_PYTHON" -c 'import sys; print(sys.base_prefix)')"
 JAEGER_PYTHON_SITE="$("$BUILD_PYTHON" -c 'import sysconfig; print(sysconfig.get_path("purelib"))')"
 /usr/libexec/PlistBuddy -c "Add :JaegerPythonHome string $JAEGER_PYTHON_BASE" \
     -c "Add :JaegerPythonSite string $JAEGER_PYTHON_SITE" \
-    -c "Add :JaegerLauncher string $(dirname "$BUILD_PYTHON")/jaeger" \
+    -c "Add :JaegerLauncher string $REPO_ROOT/jaeger" \
     -c "Add :JaegerInstallRoot string $REPO_ROOT" \
     -c "Add :JaegerVenv string $(dirname "$(dirname "$BUILD_PYTHON")")" \
     "$APP_BUNDLE/Contents/Info.plist"

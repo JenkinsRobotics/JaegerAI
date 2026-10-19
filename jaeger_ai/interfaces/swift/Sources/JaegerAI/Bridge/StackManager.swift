@@ -83,6 +83,7 @@ final class StackManager: Sendable {
             let errorPipe = Pipe()
             process.executableURL = URL(fileURLWithPath: BridgeProcess.jaegerPath())
             process.arguments = arguments
+            process.environment = BridgeProcess.launchEnvironment(base: ProcessInfo.processInfo.environment)
             process.standardInput = FileHandle.nullDevice
             process.standardOutput = outputPipe
             process.standardError = errorPipe

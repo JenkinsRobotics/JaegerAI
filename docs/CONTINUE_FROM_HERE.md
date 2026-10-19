@@ -1,10 +1,12 @@
 # Continue from here — current Jaeger continuation state
 
 **Classification:** CURRENT AUTHORITATIVE
-**Branch:** `0.13-dev`
-**Current commit:** tag `0.13.0` (source head `9b361d68`)
-**Date:** 2026-09-28
-**Branch rule:** work on `0.13-dev`; do not modify or merge `master` unless the operator explicitly asks.
+**Branch:** `master` — operator-authorized canonical integration, 2026-10-19.
+**Current work:** [Mac app integration and completion](integration/MAC_APP_COMPLETION.md).
+**Branch rule:** continue the Mac app in the canonical checkout; preserve external
+worktrees and unfinished work. Leave the accepted IDE alone. Coordinate live
+Gateway/app interruptions. The release notes below retain their historical dates;
+they are not current installation or live acceptance evidence.
 
 This is the single execution entry point for humans and coding agents. Re-read the current source before acting.
 
