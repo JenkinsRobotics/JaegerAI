@@ -357,6 +357,8 @@ actor BridgeProcess {
         readyCont = nil
     }
 
+    private var activeTurnID: String?
+
     /// Send one turn and await the agent's reply. ``session`` keeps each
     /// window/conversation isolated on the Python side (sessions.db).
     func runTurn(
@@ -372,10 +374,14 @@ actor BridgeProcess {
         guard process != nil else {
             return TurnResult(text: "", error: "agent bridge not running")
         }
-        let request = Self.chatRequest(text: text, session: session,
+        var request = Self.chatRequest(text: text, session: session,
                                        agenticTools: agenticTools,
                                        images: imageDataURIs + (imageDataURI.map { [$0] } ?? []),
                                        speakReplies: speakReplies)
+        let turnID = UUID().uuidString
+        request["turn_id"] = turnID
+        activeTurnID = turnID
+        defer { if activeTurnID == turnID { activeTurnID = nil } }
         let timeout = Task {
             try? await Task.sleep(for: Self.turnTimeout)
             await self.expireTurn()
@@ -405,7 +411,8 @@ actor BridgeProcess {
     /// Fire-and-forget ``cancel`` — the stdin thread on the Python side
     /// stays responsive while a turn is blocked in inference or a tool.
     func cancelTurn() {
-        write(["op": "cancel"])
+        guard let activeTurnID else { return }
+        write(["op": "cancel", "turn_id": activeTurnID])
     }
 
     /// Fire-and-forget ``steer`` into the active agent.

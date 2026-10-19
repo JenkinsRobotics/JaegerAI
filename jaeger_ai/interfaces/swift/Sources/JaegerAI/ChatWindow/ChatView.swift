@@ -105,9 +105,10 @@ struct ChatView: View {
                 switch tabState.currentTab {
                 case .chat:
                     VStack(spacing: 0) {
-                        if chat.isSending {
-                            ChatRunStatusView(startedAt: turnStartedAt ?? chat.messages.last?.timestamp ?? .now) {
-                                Task { await chat.send("/stop") }
+                        if chat.hasActiveTurn || chat.stopNotice != nil {
+                            ChatRunStatusView(startedAt: turnStartedAt ?? chat.messages.last?.timestamp ?? .now,
+                                              status: chat.turnControlLabel, canStop: chat.canStopTurn) {
+                                Task { await chat.stopCurrentTurn() }
                             }
                         }
                         if ChatSurfaceFeatureFlags.useWebUITranscript {
@@ -142,6 +143,12 @@ struct ChatView: View {
         }
         .frame(minWidth: 640, minHeight: 520)
         .background(tabState.currentTab == .chat ? ChatPresentation.canvas : Term.canvas)
+        .task(id: chat.sessionKey) {
+            while !Task.isCancelled {
+                await chat.refreshTurnControl()
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            }
+        }
         .onAppear {
             drainPendingPillPrompt()
             PillBridge.shared.isAgentBusy = chat.isSending
@@ -922,11 +929,12 @@ struct ChatView: View {
             agentName: activeAgentName, modelName: currentModelLabel,
             mode: chat.operatingMode, connected: agent.isConnected,
             canSend: canSend, isSending: chat.isSending,
+            canStop: chat.canStopTurn,
             isRecording: voice.isRecording, isTranscribing: chat.isTranscribing,
             level: voice.levelMeter, queuedMessages: chat.pendingSends.map(\.display),
             agenticTools: $chat.agenticTools,
             onSend: sendCurrent,
-            onStop: { Task { await chat.send("/stop") } },
+            onStop: { Task { await chat.stopCurrentTurn() } },
             onAttach: pickAttachments,
             onSelectModel: { chat.showModelPicker = true },
             onSelectMode: { chat.setOperatingMode($0) },

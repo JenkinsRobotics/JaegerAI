@@ -109,6 +109,9 @@ final class AmbientLoop: ObservableObject {
     /// Guards against a cancel racing the next turn: every turn gets an
     /// epoch, and events from a superseded epoch are dropped rather than
     /// spoken over the new one.
+    private var activeRequestID: String?
+    private var acceptedRequestID: String?
+    private var stopOnAcceptance: Set<String> = []
     private var epoch = 0
 
     /// Speak-first: proactive feed watcher, its cursor, and event ids
@@ -177,7 +180,19 @@ final class AmbientLoop: ObservableObject {
         lastError = nil
 
         do {
-            try await gateway.sendTurn(sessionID: sessionID, text: text)
+            let requestID = UUID().uuidString
+            activeRequestID = requestID
+            acceptedRequestID = nil
+            let accepted = try await gateway.sendTurn(sessionID: sessionID, text: text, requestID: requestID)
+            activeRequestID = accepted.request_id
+            acceptedRequestID = accepted.request_id
+            if stopOnAcceptance.remove(requestID) != nil {
+                // Stop raced admission. The original cancel was deferred,
+                // so this is the one cancellation, never an uncertain resend.
+                let receipt = try await gateway.cancelTurn(sessionID: sessionID, requestID: accepted.request_id)
+                lastError = receipt.stopLabel
+                return
+            }
         } catch {
             // 409 = a turn is already running. Surface it; retrying blindly
             // would stack turns the operator never asked for.
@@ -235,7 +250,12 @@ final class AmbientLoop: ObservableObject {
             state = .idle
 
         case "turn.cancelled":
+            lastError = "Cancelled — backend turn settled"
             state = .idle
+
+        case "turn.unknown":
+            lastError = "Outcome unknown — external work may still be running"
+            state = .interrupted
 
         case "notification.proactive":
             guard let notification = event.proactiveNotification else { return }
@@ -329,12 +349,17 @@ final class AmbientLoop: ObservableObject {
         streamTask?.cancel()
         streamTask = nil
 
-        if let sessionID {
-            Task { [gateway] in
-                // Best effort: the operator has already been obeyed
-                // locally, so a failure here is logged, not surfaced as a
-                // user-facing error.
-                try? await gateway.cancelTurn(sessionID: sessionID)
+        if let requestID = activeRequestID, acceptedRequestID != requestID {
+            stopOnAcceptance.insert(requestID)
+            lastError = "Stop will be requested when submission acceptance is known"
+        } else if let sessionID, let requestID = activeRequestID {
+            Task { [gateway, weak self] in
+                do {
+                    let receipt = try await gateway.cancelTurn(sessionID: sessionID, requestID: requestID)
+                    self?.lastError = receipt.stopLabel
+                } catch {
+                    self?.lastError = "Stop unconfirmed: " + error.localizedDescription
+                }
             }
         }
         state = .listening
