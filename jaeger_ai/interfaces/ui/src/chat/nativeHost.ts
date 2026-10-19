@@ -2,28 +2,39 @@
  * through the same-origin gateway proxy (WebHost). OS actions go through
  * window.jaegerNative, with web fallbacks when the bridge is absent. */
 import type { JaegerSource } from "../api/source";
-import { nativeBridge, onNativeEvent, postNative, probeVoice } from "../platform/native";
+import { nativeBridge, onNativeEvent, postNative, probeSpeech } from "../platform/native";
+import type { HostAttachment, HostCapabilities, PickFilesHost, PickFilesOptions } from "./hostH8";
 import type { HostKind } from "./host";
 import { WebHost } from "./webHost";
 
 /** Shell voice: dictation in, speech out. Only the macOS shell provides it. */
 export interface VoiceHost {
-  probeCapabilities(): Promise<{ voice: boolean }>;
+  probeCapabilities(): Promise<HostCapabilities>;
   micStart(): Promise<void>;
   micStop(): Promise<string>;
   speak(text: string): void;
   stopSpeaking(): void;
 }
 
-export class NativeHost extends WebHost implements VoiceHost {
+export class NativeHost extends WebHost implements VoiceHost, PickFilesHost {
   override readonly kind: HostKind = "native";
+  override capabilities: HostCapabilities = { voice: false, pickFiles: Boolean(nativeBridge()) };
 
   constructor(source: JaegerSource) { super(source); }
 
-  /** Voice needs a shell mic and tts that are not not_implemented. */
+  /** Dictation and voice chat are separate: a Mac with a mic but no voices can still dictate. */
   async probeCapabilities() {
-    this.capabilities = { voice: await probeVoice() };
+    const { dictation, voiceChat } = await probeSpeech();
+    this.capabilities = { voice: dictation || voiceChat, dictation, voiceChat, pickFiles: Boolean(nativeBridge()) };
     return this.capabilities;
+  }
+
+  /** H8 pickFiles: the shell's NSOpenPanel (files.pick). [] on cancel; rejects when the shell can't. */
+  async pickFiles(options: PickFilesOptions): Promise<HostAttachment[]> {
+    const bridge = nativeBridge();
+    if (!bridge) throw new Error("no native bridge");
+    const reply = (await bridge.post("files.pick", options)) as { files?: HostAttachment[] } | undefined;
+    return (reply?.files ?? []).map((f) => ({ name: f.name, mimeType: f.mimeType, path: f.path, uri: f.uri, size: f.size }));
   }
 
   /** Dictation: start recording, or stop and resolve with the transcript. */

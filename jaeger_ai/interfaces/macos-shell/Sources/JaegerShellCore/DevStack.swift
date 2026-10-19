@@ -108,6 +108,8 @@ public struct DevStackConfig: Equatable, Sendable {
     public func gatewayCommand(home: String) -> ChildCommand {
         var env = baseEnvironment(home: home)
         env["JAEGER_STATE_DIR"] = stateDir
+        // Explicit token dir: caller_auth then never falls back to the operator's Keychain items.
+        env["JAEGER_CALLER_TOKEN_DIR"] = stateDir + "/caller_tokens"
         env["JAEGER_TEST_HEADLESS"] = "1"
         env["PYTHONPATH"] = root
         env["PYTHONDONTWRITEBYTECODE"] = "1"

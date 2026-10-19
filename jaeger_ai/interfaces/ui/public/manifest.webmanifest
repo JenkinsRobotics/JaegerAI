@@ -1,0 +1,14 @@
+{
+  "name": "Jaeger",
+  "short_name": "Jaeger",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "icons": [
+    { "src": "/jaeger-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "/jaeger-icon-180.png", "sizes": "180x180", "type": "image/png" },
+    { "src": "/jaeger-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

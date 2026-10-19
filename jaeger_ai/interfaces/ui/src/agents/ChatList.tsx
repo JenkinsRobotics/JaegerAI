@@ -1,6 +1,7 @@
 /* The selected agent's chats, under its row (Grok Bot: every chat keeps a
  * place in the sidebar). Right-click: Rename chat / Archive chat. */
-import { Menu, type MenuItem } from "@aether/ui";
+import { type MenuItem } from "@aether/ui";
+import { AppMenu as Menu } from "../popups/AppMenu";
 import { useState, type KeyboardEvent } from "react";
 import type { SessionRow } from "../api/types";
 import { activityAt, chatTitle, shortTime } from "./chats";

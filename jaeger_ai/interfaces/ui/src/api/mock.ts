@@ -1,8 +1,12 @@
+import type { AgentActions } from "./agentActions";
 /* Typed mock adapter. DEV ONLY: loaded through a dynamic import that
  * production builds drop (see api/index.ts). Sample roster, previews,
  * tasks, and transcripts with every ChatPart kind and each handoff marker
  * shape. send() replays a scripted gateway event sequence over stream(). */
+import { longAnswerScript } from "./mockLongAnswer";
 import type { ChatSession } from "../chat/host";
+import type { HomeOptions } from "../chat/homeSession";
+import { mockHome } from "./mockHome";
 import type { JaegerSource } from "./source";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, SessionDetail, SessionRow, Task } from "./types";
 
@@ -10,20 +14,20 @@ const now = () => Date.now() / 1000;
 const ago = (minutes: number) => now() - minutes * 60;
 
 export const MOCK_AGENTS: Agent[] = [
-  { id: "native:jaeger", name: "jaeger", display_name: "Jaeger", role: "lead", kind: "native", runner: "native" },
-  { id: "agent:gateway-webui", name: "gateway-webui", display_name: "Jaeger Gateway & WebUI", role: "specialist", kind: "native", runner: "delegate:claude-code" },
-  { id: "agent:mac-app", name: "mac-app", display_name: "Mac App", role: "specialist", kind: "native", runner: "delegate:codex" },
-  { id: "agent:ide-chat", name: "ide-chat", display_name: "IDE Chat", role: "specialist", kind: "native", runner: "delegate:claude-code" },
-  { id: "agent:agents-view", name: "agents-view", display_name: "Agents View", role: "specialist", kind: "native", runner: "native" },
-  { id: "agent:architect-notes", name: "architect-notes", display_name: "Architect & Notes", role: "specialist", kind: "native", runner: "delegate:grok-cli" },
-  { id: "agent:swe", name: "swe", display_name: "SWE", role: "specialist", kind: "native", runner: "delegate:codex" },
-  { id: "agent:system-sweep", name: "system-sweep", display_name: "System Sweep", role: "specialist", kind: "native", runner: "native" },
-  { id: "agent:personality", name: "personality", display_name: "Personality", role: "specialist", kind: "native", runner: "native" },
+  { id: "native:jaeger", name: "jaeger", display_name: "Jaeger", role: "lead", kind: "native", runner: "native", skills: [{ id: "plan", name: "Planning", description: "Breaks a request into steps and picks who does each.", source_path: "skills/plan/SKILL.md" }, { id: "delegate", name: "Delegation", description: "Hands work to specialists and follows it to done.", source_path: "skills/delegate/SKILL.md" }], allowed_tools: ["handoff", "tasks", "web_search"] },
+  { id: "agent:gateway-webui", name: "gateway-webui", display_name: "Jaeger Gateway & WebUI", role: "builder", kind: "native", runner: "delegate:claude-code", skills: [{ id: "code", name: "Code", description: "Edits the gateway and WebUI in its worktree.", source_path: "skills/code/SKILL.md" }, { id: "build-test", name: "Build & test", description: "Runs the build and the test suites.", source_path: "skills/build-test/SKILL.md" }, { id: "checker", name: "Checker", description: "Re-verifies each claim before reporting.", source_path: "skills/checker/SKILL.md" }], allowed_tools: ["shell", "git", "read_file", "write_file"] },
+  { id: "agent:mac-app", name: "mac-app", display_name: "Mac App", role: "builder", kind: "native", runner: "delegate:codex", skills: [{ id: "code", name: "Code", description: "Swift and WebKit changes to the Mac shell.", source_path: "skills/code/SKILL.md" }, { id: "build-test", name: "Build & test", description: "swift build, swift test, headless snapshots.", source_path: "skills/build-test/SKILL.md" }], allowed_tools: ["shell", "git", "read_file", "write_file"] },
+  { id: "agent:ide-chat", name: "ide-chat", display_name: "IDE Chat", role: "builder", kind: "native", runner: "delegate:claude-code", skills: [{ id: "code", name: "Code", description: "Ports the VS Code chat widget.", source_path: "skills/code/SKILL.md" }, { id: "build-test", name: "Build & test", description: "Typecheck and vitest.", source_path: "skills/build-test/SKILL.md" }], allowed_tools: ["shell", "git", "read_file", "write_file"] },
+  { id: "agent:agents-view", name: "agents-view", display_name: "Agents View", role: "designer", kind: "native", runner: "native", skills: [{ id: "ui", name: "UI design", description: "Measures the reference and rebuilds it in Jaeger's own code.", source_path: "skills/ui/SKILL.md" }, { id: "snapshots", name: "Snapshots", description: "Headless light and dark screenshots.", source_path: "skills/snapshots/SKILL.md" }], allowed_tools: ["shell", "read_file", "write_file", "screenshot"] },
+  { id: "agent:architect-notes", name: "architect-notes", display_name: "Architect & Notes", role: "researcher", kind: "native", runner: "delegate:grok-cli", skills: [{ id: "research", name: "Research", description: "Reads the repo and the web and writes up findings.", source_path: "skills/research/SKILL.md" }, { id: "notes", name: "Notes", description: "Keeps the architecture notes current.", source_path: "skills/notes/SKILL.md" }], allowed_tools: ["web_search", "read_file"] },
+  { id: "agent:swe", name: "swe", display_name: "SWE", role: "reverse-engineer", kind: "native", runner: "delegate:codex", skills: [{ id: "rea", name: "REA", description: "Reverse-engineers an app's behaviour from the outside, look-only.", source_path: "skills/rea/SKILL.md" }, { id: "trace", name: "Tracing", description: "Follows a feature through the codebase.", source_path: "skills/trace/SKILL.md" }], allowed_tools: ["shell", "read_file", "otool", "strings"] },
+  { id: "agent:system-sweep", name: "system-sweep", display_name: "System Sweep", role: "reviewer", kind: "native", runner: "native", skills: [{ id: "review", name: "Review", description: "Reads diffs and flags risks before merge.", source_path: "skills/review/SKILL.md" }, { id: "sweep", name: "Sweep", description: "Finds dead code and stale files.", source_path: "skills/sweep/SKILL.md" }], allowed_tools: ["git", "read_file"] },
+  { id: "agent:personality", name: "personality", display_name: "Personality", role: "designer", kind: "native", runner: "native", skills: [{ id: "voice", name: "Voice & tone", description: "Shapes how Jaeger talks.", source_path: "skills/voice/SKILL.md" }], allowed_tools: ["read_file"] },
   { id: "native:gateway", name: "gateway", role: "native", kind: "native", metadata: { internal: true } },
 ];
 
 const summary = (id: string, minutes: number, preview: string, unseen: boolean, status = "idle"): AgentSummary => ({
-  id, display_name: MOCK_AGENTS.find((a) => a.id === id)?.display_name, role: id === "native:jaeger" ? "lead" : "specialist",
+  id, display_name: MOCK_AGENTS.find((a) => a.id === id)?.display_name, role: MOCK_AGENTS.find((a) => a.id === id)?.role,
   status, last_activity_at: ago(minutes), last_preview: preview, last_source: "handoff", session_id: `s-${id}`, unseen,
 });
 
@@ -64,7 +68,7 @@ export const MOCK_TRANSCRIPTS: Record<string, ChatSession> = {
           { kind: "question", callId: "q1", title: "Archive the stale owner file and restart the gateway?", options: [{ id: "yes", label: "Yes, archive it and restart" }, { id: "no", label: "Not now" }], chosenId: "yes" },
           { kind: "handoff", handoffId: "h0", agentId: "agent:agents-view", agentName: name("agent:agents-view"), count: 1, direction: "from" },
           { kind: "markdownContent", text: "Archiving it and restarting the gateway now." },
-          { kind: "handoff", handoffId: "h1", agentId: "agent:gateway-webui", agentName: name("agent:gateway-webui"), count: 1, direction: "to", agents: [ref("agent:gateway-webui"), ref("agent:mac-app")] },
+          { kind: "handoff", handoffId: "h1", agentId: "agent:gateway-webui", agentName: name("agent:gateway-webui"), count: 1, direction: "to", agents: [ref("agent:gateway-webui"), ref("agent:mac-app"), ref("agent:swe")] },
           { kind: "markdownContent", text: "I'll confirm once the gateway has stayed up and passed its checks, and the new Mac app will be set up to keep it running." },
           { kind: "markdownContent", text: "The new main screen now really talks to Jaeger. In a test, it asked Jaeger to reply \"pong\" and got \"Thought for 8 s, pong\" back, a second message streamed fine, and the stop button worked.\n\nYou can try it in your browser right now at **Jaeger main screen (test)**. It's only reachable from your own Mac. Replies take about 20 seconds because the test uses a small local model." },
           { kind: "handoff", handoffId: "h2", agentId: "agent:gateway-webui", agentName: name("agent:gateway-webui"), count: 4, direction: "to" },
@@ -92,7 +96,7 @@ export const MOCK_TRANSCRIPTS: Record<string, ChatSession> = {
   },
 };
 
-const turnScript = (sessionId: string, text: string): Array<[number, GatewayEvent]> => [
+const turnScript = (sessionId: string, text: string): Array<[number, GatewayEvent]> => text.startsWith("I'm new to this project") ? longAnswerScript(sessionId) : [
   [150, { event: "turn.start", session_id: sessionId }],
   [250, { event: "turn.reasoning", payload: { text: "Reading the request.", duration_ms: 1_000 } }],
   [200, { event: "turn.progress", payload: { message: "Looking at the roster" } }],
@@ -108,7 +112,40 @@ export class MockSource implements JaegerSource {
   private eventId = 1000;
   private timers: ReturnType<typeof setTimeout>[] = [];
 
-  async agents() { return MOCK_AGENTS; }
+  /** ?agentspec=1: the agents payload carries the proposed agent-menu fields, so the new items show (dev only). */
+  private spec = typeof location !== "undefined" && new URLSearchParams(location.search).has("agentspec");
+  private patches = new Map<string, Partial<Agent>>();
+  private deleted = new Set<string>();
+  readonly calls: Array<[string, ...unknown[]]> = [];
+  private global = new Set<(event: GatewayEvent) => void>();
+  private emitGlobal(event: string, payload: Record<string, unknown>) { for (const f of this.global) f({ event, payload } as GatewayEvent); }
+  /** Spec mode only (?agentspec=1): the global stream carries agent.* / section.* after each action. */
+  globalEvents = (onEvent: (event: GatewayEvent) => void, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+    if (!this.spec) { reject(Object.assign(new Error("events 404"), { status: 404 })); return; }
+    this.global.add(onEvent);
+    signal.addEventListener("abort", () => { this.global.delete(onEvent); resolve(); });
+  });
+  private sectionList: Array<{ id: string; name: string }> = [];
+  async agents(): Promise<Agent[]> {
+    const list = MOCK_AGENTS.filter((a) => !this.deleted.has(a.id));
+    if (!this.spec) return list;
+    return list.map((a, i) => ({ pinned: false, pin_order: null, hidden: false, section_id: null, unread_count: i % 2, last_read_message_id: null,
+      primary: a.role === "lead", last_message: null, ...a, ...this.patches.get(a.id) }) as Agent).filter((a) => !a.hidden);
+  }
+  readonly agentActions: AgentActions = {
+    markRead: async (id, m) => { this.calls.push(["read", id, m]); this.patches.set(id, { ...this.patches.get(id), unread_count: 0 }); this.emitGlobal("agent.unread", { agent_id: id, unread_count: 0 }); },
+    patchAgent: async (id, body) => { this.calls.push(["patch", id, body]); this.patches.set(id, { ...this.patches.get(id), ...body }); this.emitGlobal("agent.updated", { agent_id: id }); },
+    sections: async () => this.sectionList,
+    createSection: async (name) => { this.calls.push(["section", name]); const sec = { id: `sec-${name}`, name }; this.sectionList.push(sec); this.emitGlobal("section.updated", sec); return sec; },
+    duplicate: async (id, name) => { this.calls.push(["duplicate", id, name]); const a = MOCK_AGENTS.find((x) => x.id === id)!; return { ...a, id: `${id}-copy`, display_name: `${a.display_name} copy` }; },
+    remove: async (id) => {
+      this.calls.push(["delete", id]);
+      if (id === "native:jaeger" || MOCK_AGENTS.find((a) => a.id === id)?.role === "lead") throw Object.assign(new Error("protected_agent"), { status: 409 });
+      this.deleted.add(id);
+      this.emitGlobal("agent.deleted", { agent_id: id });
+    },
+    template: async (id) => { this.calls.push(["template", id]); const a = MOCK_AGENTS.find((x) => x.id === id); return { name: a?.name, display_name: a?.display_name, skills: a?.skills ?? [] }; },
+  };
   async agentsSummary() { return MOCK_SUMMARY; }
   async sessions(query: { agent_id?: string } = {}): Promise<SessionRow[]> {
     return MOCK_SUMMARY.filter((s) => !query.agent_id || s.id === query.agent_id).map((s) => ({
@@ -120,10 +157,17 @@ export class MockSource implements JaegerSource {
     return { session_id: id, title: MOCK_TRANSCRIPTS[id]?.title ?? name(id.replace(/^s-/, "")), messages: [], last_event_id: this.eventId };
   }
   transcript(id: string) { return MOCK_TRANSCRIPTS[id]; }
+  homeSessions(opts: HomeOptions) { return mockHome(this, opts); }
   async createSession(body: { agent_id?: string; title?: string }): Promise<SessionRow> {
     return { session_id: `s-new-${Date.now()}`, agent_id: body.agent_id, title: body.title ?? "New chat", created_at: now() };
   }
-  async send(sessionId: string, text: string, requestId: string) {
+  async uploadAttachment(_sessionId: string, body: { name: string; mime: string; data_base64: string }, _idempotencyKey?: string) {
+    return { attachment_id: `mock-bytes-${body.name}`, name: body.name, mime: body.mime, size: Math.floor((body.data_base64.length * 3) / 4), sha256: "mock" };
+  }
+  async addAttachment(_sessionId: string, body: { path: string }) {
+    return { attachment_id: `att_mock_${body.path.split("/").pop()}` };
+  }
+  async send(sessionId: string, text: string, requestId: string, _attachmentIds: string[] = []) {
     const start = this.eventId + 1;
     let delay = 0;
     turnScript(sessionId, text).forEach(([wait, event], index) => {
@@ -157,7 +201,8 @@ export class MockSource implements JaegerSource {
     set.add(onEvent);
     return new Promise((resolve) => signal.addEventListener("abort", () => { set.delete(onEvent); resolve(); }, { once: true }));
   }
-  private emit(sessionId: string, event: GatewayEvent) {
+  /** Dev/test: announce an event on a session stream (mockPost uses it for home-chat posts). */
+  emit(sessionId: string, event: GatewayEvent) {
     this.eventId += 1;
     const framed = { ...event, event_id: this.eventId };
     const log = this.log.get(sessionId) ?? [];

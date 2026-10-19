@@ -1,9 +1,10 @@
+import type { AgentActions, Section } from "./agentActions";
 /* Typed port of jaeger_ai/interfaces/ide/gateway.js for the browser.
  * Same-origin only: the page is served by the Jaeger WebUI (or the Vite dev
  * proxy), which forwards /v1/* to the gateway and adds the caller token on the
  * server side. The browser never sees or sends a token. */
 import { decodeSSE, type SSEFrame } from "./sse";
-import type { JaegerSource, TurnReceipt } from "./source";
+import type { JaegerSource, TurnReceipt , UploadedAttachment } from "./source";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 export class GatewayError extends Error {
@@ -38,13 +39,13 @@ export class GatewayClient implements JaegerSource {
   readonly kind = "live" as const;
   constructor(private readonly base = "") {}
 
-  async json<T>(path: string, body?: unknown, method?: string): Promise<T> {
+  async json<T>(path: string, body?: unknown, method?: string, extraHeaders?: Record<string, string>): Promise<T> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
       const response = await fetch(`${this.base}${path}`, {
         method: method ?? (body === undefined ? "GET" : "POST"),
-        headers: body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" },
+        headers: { ...(body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" }), ...extraHeaders },
         body: body === undefined ? undefined : JSON.stringify(body),
         credentials: "same-origin",
         signal: controller.signal,
@@ -83,11 +84,30 @@ export class GatewayClient implements JaegerSource {
   createAgent(body: { name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }) {
     return this.json<Agent>("/v1/agents", { kind: "jaeger_native", role: "specialist", ...body });
   }
+  readonly agentActions: AgentActions = {
+    markRead: async (id, messageId) => { await this.json(`/v1/agents/${encodeURIComponent(id)}/read`, { message_id: messageId }); },
+    patchAgent: async (id, body) => { await this.json(`/v1/agents/${encodeURIComponent(id)}`, body, "PATCH"); },
+    sections: async () => { const d = await this.json<{ sections?: Section[] } | Section[]>("/v1/sections"); return Array.isArray(d) ? d : d.sections ?? []; },
+    createSection: (name) => this.json<Section>("/v1/sections", { name }),
+    duplicate: (id, name) => this.json<Agent>(`/v1/agents/${encodeURIComponent(id)}/duplicate`, name ? { name } : {}),
+    remove: async (id) => { await this.json(`/v1/agents/${encodeURIComponent(id)}`, undefined, "DELETE"); },
+    template: (id) => this.json<unknown>(`/v1/agents/${encodeURIComponent(id)}/template`),
+  };
   handoffExchange(handoffId: string) {
     return this.json<HandoffExchange>(`/api/handoffs/${encodeURIComponent(handoffId)}/messages`);
   }
-  send(sessionId: string, text: string, requestId: string) {
-    return this.json<TurnReceipt>(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`, { text, request_id: requestId });
+  /** attachment_ids is always sent: left out, the gateway would attach every file the chat ever had. */
+  send(sessionId: string, text: string, requestId: string, attachmentIds: string[] = []) {
+    return this.json<TurnReceipt>(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`, { text, request_id: requestId, attachment_ids: attachmentIds });
+  }
+  addAttachment(sessionId: string, body: { path: string; filename?: string; mime_type?: string }) {
+    return this.json<{ attachment_id: string }>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments`, body);
+  }
+  /** Bytes, not a path: JSON {name, mime, data_base64} (the route also takes multipart 'file' + 'name'). */
+  /** idempotencyKey: one per file, so a retried upload replays the same attachment instead of staging a second. */
+  uploadAttachment(sessionId: string, body: { name: string; mime: string; data_base64: string }, idempotencyKey?: string) {
+    return this.json<UploadedAttachment>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments/upload`, body, undefined,
+      idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined);
   }
   async cancel(sessionId: string, requestId?: string) {
     await this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, requestId ? { request_id: requestId } : {});
@@ -103,6 +123,12 @@ export class GatewayClient implements JaegerSource {
     const qs = query.session_id ? `?session_id=${encodeURIComponent(query.session_id)}` : "";
     const data = await this.json<{ handoffs?: Handoff[] } | Handoff[]>(`/api/handoffs${qs}`);
     return Array.isArray(data) ? data : data.handoffs ?? [];
+  }
+
+  async globalEvents(onEvent: (event: GatewayEvent) => void, signal: AbortSignal) {
+    const response = await fetch(`${this.base}/v1/events`, { headers: { Accept: "text/event-stream" }, credentials: "same-origin", signal });
+    if (!response.ok || !response.body) throw new GatewayError(`events ${response.status}`, response.status, undefined);
+    for await (const frame of decodeSSE(response.body, signal)) onEvent(normalizeFrame(frame));
   }
 
   async stream(sessionId: string, cursor: number | undefined, onEvent: (event: GatewayEvent) => void, signal: AbortSignal) {

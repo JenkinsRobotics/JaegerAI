@@ -99,17 +99,80 @@ final class StackController {
     func start(done: @escaping BridgeDone) {
         if let dev { return startDev(dev, done: done) }
         if mode == .dev { return done(nil, "dev_stack_unavailable: \(devError?.message ?? "?")") }
-        runProduction(StackCLI.upArguments, done: done)
+        runProduction(StackCLI.upArguments) { [weak self] result, error in
+            if error == nil { self?.acquireLease("stack up") }
+            done(result, error)
+        }
     }
 
     func stop(done: @escaping BridgeDone) {
-        if dev != nil { return stopDev(done: done) }
+        if dev != nil { retireLease("dev stack stop"); return stopDev(done: done) }
         if mode == .dev { return done(nil, "dev_stack_unavailable: \(devError?.message ?? "?")") }
+        retireLease("stack down")
         runProduction(StackCLI.downArguments, done: done)
     }
 
+    // MARK: lifecycle lease (lifecycle_lease.py contract; LeaseBeat is the ported LifecycleLeaseBeat)
+
+    private(set) var lease: LeaseBeat?
+    /// LeasePolicy: only the installed app holds the lease by default; JAEGER_SHELL_NO_LEASE=1 always disables it.
+    let leasePolicy = LeasePolicy.decide(env: ProcessInfo.processInfo.environment, bundlePath: Bundle.main.bundleURL.path)
+    private func leaseDisabled(_ site: String) {
+        shellLog("[shell][lease] disabled (reason=\(leasePolicy.reason)) at \(site)")
+    }
+    var gatewayAlive: Bool { gatewayProc?.isRunning == true }
+    private var headless: Bool { app.verifyMode || app.verifyBridgeMode || app.verifyLeaseMode || app.verifyLeasePolicyMode || app.snapshotMode }
+
+    /// Dev stack: its isolated JAEGER_STATE_DIR. Production: the same state-dir logic as lifecycle_lease.py.
+    /// nil when the lease is disabled: no lease path is even resolved.
+    var leasePath: String? {
+        guard leasePolicy.isEnabled else { return nil }
+        if let dev { return LeaseContract.path(stateDir: dev.stateDir) }
+        return LeaseContract.path(env: ProcessInfo.processInfo.environment, home: NSHomeDirectory())
+    }
+
+    @discardableResult
+    func acquireLease(_ reason: String) -> String? {
+        guard leasePolicy.isEnabled, let path = leasePath else { leaseDisabled("acquire (\(reason))"); return "lease_disabled" }
+        if headless && path == LeaseContract.realOperatorPath(home: NSHomeDirectory()) {
+            shellLog("[shell][lease] refused: a headless check never touches the operator lease")
+            return "refused_operator_lease_in_headless_check"
+        }
+        if mode == .dev && dev == nil { return "dev_stack_unavailable" }
+        if lease?.isRunning == true { return nil }
+        let beat = LeaseBeat(path: path)
+        beat.start()
+        lease = beat
+        shellLog("[shell][lease] acquired (\(reason)) every \(Int(LeaseContract.beatInterval))s at \(path)")
+        return nil
+    }
+
+    /// Default retire removes the lease (no shutdown); `.expire` only in dev builds.
+    @discardableResult
+    func retireLease(_ reason: String, mode requested: LeaseRetire? = nil) -> [String: Any] {
+        guard leasePolicy.isEnabled else { return ["retired": false, "reason": "lease disabled"] }
+        guard let lease else { return ["retired": false, "reason": "no lease held"] }
+        let configured = requested ?? LeaseRetire.resolve(env: ProcessInfo.processInfo.environment, isDevBuild: ShellEnvironment.isDevBuild)
+        var result = lease.retire(LeaseRetire.allowed(configured, isDevBuild: ShellEnvironment.isDevBuild))
+        self.lease = nil
+        result["retired"] = true
+        shellLog("[shell][lease] retired (\(reason)): \(result)")
+        return result
+    }
+
+    /// Launch: hold the lease when the production stack is already running (never in headless checks).
+    /// `allowHeadless` only for --verify-lease-policy (temp JAEGER_LIFECYCLE_LEASE, isolated gateway).
+    func acquireLeaseIfStackRunning(allowHeadless: Bool = false) {
+        guard leasePolicy.isEnabled else { return leaseDisabled("launch") }
+        guard !headless || allowHeadless, dev == nil, mode == .production else { return }
+        ShellEnvironment.probe(ShellEnvironment.gateway().origin.string + "/health") { [weak self] state in
+            guard state == "running" else { return shellLog("[shell][lease] stack not running at launch (\(state)); no lease") }
+            self?.acquireLease("stack running at launch")
+        }
+    }
+
     private func runProduction(_ arguments: [String], done: @escaping BridgeDone) {
-        guard !(app.verifyMode || app.verifyBridgeMode) else { return done(nil, "production_stack_disabled_in_verify") }
+        guard !headless else { return done(nil, "production_stack_disabled_in_verify") }
         guard let launcher = ShellEnvironment.launcherPath() else { return done(nil, "no_launcher") }
         guard !busy else { return done(nil, "busy") }
         busy = true
@@ -159,6 +222,14 @@ final class StackController {
             return done(nil, "main_screen_not_built: run Scripts/build-main-screen.sh")
         }
         busy = true
+        // A lease left in the isolated dev state dir (e.g. an expired one) would make the new dev gateway shut
+        // down before the first beat. Dev state dir only; never the operator lease.
+        let staleLease = LeaseContract.path(stateDir: dev.stateDir)
+        if staleLease != LeaseContract.realOperatorPath(home: NSHomeDirectory()),
+           FileManager.default.fileExists(atPath: staleLease) {
+            try? FileManager.default.removeItem(atPath: staleLease)
+            shellLog("[shell][lease] removed a leftover dev lease at \(staleLease)")
+        }
         let home = NSHomeDirectory()
         let gateway: Process
         do { gateway = try launch(dev.gatewayCommand(home: home), log: "/tmp/jaeger-uirebuild-dev-gateway.log") } catch {
@@ -185,6 +256,7 @@ final class StackController {
                 }
                 self.busy = false
                 shellLog("[shell][stack] dev stack running (gateway pid \(gateway.processIdentifier), main screen pid \(ui.processIdentifier))")
+                self.acquireLease("dev stack started")
                 self.status { done($0, nil) }
             }
         }

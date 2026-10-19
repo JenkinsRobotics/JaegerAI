@@ -1,60 +1,103 @@
-/* Sidebar header: traffic-light band (78px), then search and + on the right. */
-.jg-sidebar-header { display: flex; align-items: center; gap: 8px; height: 54px; padding: 0 14px 0 0; }
+/* Sidebar header: the top band (traffic-light reserve), then search and + on the right. */
+.jg-sidebar-header { display: flex; align-items: center; gap: 10px; box-sizing: border-box; height: var(--jg-band-height); padding: 7px 18px 0 0; }
 .jg-traffic-lights { flex: none; width: var(--jg-traffic-lights); display: flex; gap: 8px; padding-left: 14px; }
 .jg-traffic-lights i { width: 12px; height: 12px; border-radius: 50%; background: color-mix(in srgb, var(--aether-color-text-faint) 45%, transparent); border: 0.5px solid color-mix(in srgb, var(--aether-color-text-faint) 60%, transparent); }
 .jg-sidebar-header__spacer { flex: 1; }
 .jg-round-button {
-  display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; border: 0;
+  display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 0;
   background: var(--aether-color-bg-control); color: var(--aether-color-text); cursor: pointer;
   box-shadow: 0 1px 3px color-mix(in srgb, var(--aether-color-shadow) 14%, transparent);
 }
 .jg-round-button:hover { background: var(--aether-color-bg-hover); }
-:is(.jg-round-button, .jg-agent-row, .jg-supervisor, .jg-nav-entry, .jg-pill, .jg-user-chip):focus-visible {
+/* Plain glyph button (sidebar toggle): no fill until hovered. */
+.jg-icon-button {
+  display: inline-grid; place-items: center; width: 28px; height: 28px; margin-right: -3px; border: 0; border-radius: 8px;
+  background: transparent; color: var(--jg-color-text-secondary); cursor: pointer;
+}
+.jg-icon-button:hover { background: var(--aether-color-bg-hover); color: var(--aether-color-text); }
+:is(.jg-round-button, .jg-icon-button, .jg-agent-row, .jg-supervisor, .jg-nav-entry, .jg-pill, .jg-user-chip):focus-visible {
   outline: 2px solid var(--aether-color-border-focus); outline-offset: 1px;
 }
 
-/* Round agent avatars: token color + a two-eye face. */
+/* Agent avatars: a silhouette in the agent's color + a two-eye face (or the agent's image, round). */
 .jg-avatar {
-  position: relative; flex: none; display: inline-grid; place-items: center; border-radius: 50%;
-  background: var(--jg-avatar-color, var(--aether-color-accent)); overflow: hidden;
+  position: relative; flex: none; display: inline-grid; place-items: center;
+  color: var(--jg-avatar-color, var(--aether-color-accent));
 }
+.jg-avatar > * { grid-area: 1 / 1; }
+.jg-avatar__shape { width: 100%; height: 100%; display: block; }
+.jg-avatar--image { border-radius: 50%; overflow: hidden; background: var(--jg-avatar-color, var(--aether-color-accent)); }
 .jg-avatar img { width: 100%; height: 100%; object-fit: cover; }
-.jg-avatar__face { display: flex; gap: 16%; width: 100%; justify-content: center; margin-top: -4%; }
-.jg-avatar__face i { width: 13%; aspect-ratio: 1 / 1.25; border-radius: 50%; background: var(--aether-color-text-on-selected); }
+.jg-avatar__body { position: relative; display: grid; width: 100%; height: 100%; transform: rotate(var(--jg-avatar-spin, 0deg)); }
+.jg-avatar__body > * { grid-area: 1 / 1; }
+/* Two white pill eyes, a little above center, looking their own way (avatarFace). */
+.jg-avatar__face {
+  position: relative; display: flex; align-items: center; justify-content: center; gap: 13%; align-self: center;
+  margin-top: -8%; transform: translate(var(--jg-eye-x, 0), var(--jg-eye-y, 0)) rotate(var(--jg-eye-tilt, 0deg));
+}
+.jg-avatar--cloud .jg-avatar__face { margin-top: 8%; }
+.jg-avatar--pill .jg-avatar__face { margin-top: 0; }
+.jg-avatar__face i { width: 12%; aspect-ratio: 1 / 2.15; border-radius: 999px; background: var(--jg-avatar-eye, #fff); }
+.jg-avatar__face--wide i { width: 21%; aspect-ratio: 1.6 / 1; }
+/* Idle life: an occasional glance and a blink, staggered per agent (avatarFace); still under reduced motion. */
+.jg-avatar__face { animation: jg-glance 11s var(--jg-ease-out-cubic) var(--jg-glance-delay, 0s) infinite; }
+.jg-avatar__face i { animation: jg-blink var(--jg-blink, 5s) linear var(--jg-glance-delay, 0s) infinite; }
+@keyframes jg-glance { 0%, 34%, 70%, 100% { translate: 0 0; } 40%, 64% { translate: var(--jg-glance-x, 0) var(--jg-glance-y, 0); } }
+@keyframes jg-blink { 0%, 95%, 100% { scale: 1 1; } 97.5% { scale: 1 0.12; } }
+/* Lead tilt drift: base spin (-24deg) plus 0..18deg, one sweep per 20 min, eased at the ends. */
+.jg-avatar--squircle .jg-avatar__body { animation: jg-lead-drift 1200s ease-in-out var(--jg-drift-delay, 0s) infinite alternate; }
+@keyframes jg-lead-drift { from { rotate: 0deg; } to { rotate: 18deg; } }
+@media (prefers-reduced-motion: reduce) { .jg-avatar__face, .jg-avatar__face i, .jg-avatar--squircle .jg-avatar__body { animation: none; } }
 
 /* Pinned supervisor card. */
-.jg-supervisor-wrap { display: flex; justify-content: center; padding: 8px 0 14px; }
+.jg-supervisor-wrap { display: flex; justify-content: center; }
+/* Pinned strip: the supervisor + pinned specialists, centred, wrapping; a drop target for agent rows. */
+.jg-pinned { position: relative; border-radius: 12px; }
+.jg-pinned__grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; padding: 18px 0 14px; }
+.jg-pinned.has-pins .jg-supervisor { width: 80px; }
+.jg-pinned.has-pins .jg-supervisor-art { transform: scale(0.84); margin: -4px 0; }
+.jg-pinned.is-drop-target { background: color-mix(in srgb, var(--jg-color-accent) 6%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--jg-color-accent) 50%, transparent); }
+.jg-pinned__slot[draggable="true"] { cursor: grab; }
+.jg-agent-list__item[draggable="true"] { -webkit-user-drag: element; }
+/* The list stays a drop target (unpin) even when every specialist is pinned. */
+.jg-agent-list { min-height: 48px; border-radius: 10px; }
+.jg-agent-list.is-drop-target { background: color-mix(in srgb, var(--jg-color-accent) 6%, transparent); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--jg-color-accent) 50%, transparent); }
+.jg-agent-list__drop-hint { margin: 0; padding: 14px 12px; text-align: center; font-size: var(--jg-font-small); color: var(--jg-color-text-tertiary); }
+.jg-shell.is-rail .jg-agent-list__drop-hint { display: none; }
 .jg-supervisor {
-  display: flex; flex-direction: column; align-items: center; gap: 6px; width: 92px; padding: 10px 6px 8px;
-  border: 0; border-radius: 10px; background: color-mix(in srgb, var(--aether-color-text-faint) 22%, transparent);
+  --jg-supervisor-bg: var(--aether-color-bg-rail);
+  display: flex; flex-direction: column; align-items: center; gap: 5px; width: 95px; padding: 10px 6px 6px;
+  border: 0; border-radius: 10px; background: transparent;
   color: var(--aether-color-text); font: inherit; cursor: pointer;
 }
-.jg-supervisor:hover { background: color-mix(in srgb, var(--aether-color-text-faint) 30%, transparent); }
-.jg-supervisor.is-selected { background: color-mix(in srgb, var(--aether-color-text-faint) 34%, transparent); }
-.jg-supervisor__label { max-width: 100%; font-size: var(--jg-font-tiny); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-supervisor:hover { --jg-supervisor-bg: color-mix(in srgb, var(--aether-color-text) 5%, var(--aether-color-bg-rail)); background: var(--jg-supervisor-bg); }
+.jg-supervisor.is-selected { --jg-supervisor-bg: color-mix(in srgb, var(--aether-color-text) 7%, var(--aether-color-bg-rail)); background: var(--jg-supervisor-bg); }
+.jg-supervisor__label { max-width: 100%; line-height: 16px; font-size: var(--jg-font-tiny); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .jg-supervisor-art { position: relative; display: grid; place-items: center; }
-.jg-supervisor-art__dots { display: flex; align-items: center; gap: 6px; }
-.jg-supervisor-art__dots i { width: 12px; height: 12px; border-radius: 50%; background: color-mix(in srgb, var(--aether-color-error) 70%, var(--aether-color-bg-control)); }
-.jg-supervisor-art__dots i:nth-child(2) { width: 15px; height: 15px; background: var(--aether-color-error); }
+/* Supervisor star (no unread) and unread dot, ringed in the tile so they read over the avatar's corner. */
 .jg-supervisor-art__badge {
-  position: absolute; right: 0; bottom: 2px; display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%;
-  background: var(--aether-color-hardware); color: var(--aether-color-text-on-selected);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--aether-color-bg-rail) 90%, transparent);
+  position: absolute; right: -2px; bottom: 0; display: grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--jg-avatar-orange); color: var(--jg-color-on-badge); box-shadow: 0 0 0 2px var(--jg-supervisor-bg, var(--aether-color-bg-rail));
+}
+/* Unread: the row dot's blue. */
+.jg-supervisor-art__dot {
+  position: absolute; right: 0; bottom: 2px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--jg-color-accent); box-shadow: 0 0 0 2px var(--jg-supervisor-bg, var(--aether-color-bg-rail));
 }
 
-/* Specialist rows (~56px). */
+/* Specialist rows: 58px, 36px avatar, 8px gap, radius 10; hover fg 6%, selected fg 8%. */
 .jg-agent-list { display: flex; flex-direction: column; gap: 1px; }
 .jg-agent-row, .jg-nav-entry {
-  display: flex; align-items: center; gap: 11px; width: 100%; border: 0; background: transparent;
+  display: flex; align-items: center; gap: 8px; width: 100%; border: 0; background: transparent;
   color: var(--aether-color-text); font: inherit; text-align: left; cursor: pointer; border-radius: 10px;
 }
-.jg-agent-row { min-height: 56px; padding: 7px 8px 7px 10px; }
-.jg-agent-row:hover, .jg-nav-entry:hover { background: color-mix(in srgb, var(--aether-color-text-faint) 14%, transparent); }
-.jg-agent-row.is-selected, .jg-nav-entry.is-selected { background: color-mix(in srgb, var(--aether-color-text-faint) 24%, transparent); }
+.jg-agent-row { min-height: 58px; box-sizing: border-box; padding: 7px 8px 7px 10px; }
+.jg-agent-row:hover, .jg-nav-entry:hover { background: var(--jg-color-hover); }
+.jg-agent-row.is-selected, .jg-nav-entry.is-selected { background: var(--jg-color-active); }
 .jg-agent-row__text { display: flex; flex-direction: column; min-width: 0; flex: 1; gap: 2px; }
-.jg-agent-row__name { font-size: var(--jg-font-body); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.jg-agent-row__preview { color: var(--aether-color-text-dim); font-size: var(--jg-font-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.jg-unread-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--aether-color-accent); }
+.jg-agent-row__name { font-size: var(--jg-font-body); font-weight: var(--jg-font-weight-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-agent-row__preview { color: var(--jg-color-text-secondary); font-size: var(--jg-font-small); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-unread-dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--jg-color-accent); }
 .jg-unread-dot.is-hidden { visibility: hidden; }
 .jg-nav-entry { margin-top: 6px; padding: 6px 10px; gap: 8px; color: var(--aether-color-text-dim); font-size: var(--jg-font-small); }
 .jg-nav-entry.is-selected { color: var(--aether-color-text); }
@@ -84,7 +127,7 @@
   display: inline-flex; align-items: center; flex-wrap: wrap; justify-content: center; gap: 5px; padding: 2px 6px;
   border: 0; border-radius: 8px; background: transparent; color: var(--aether-color-text-dim); font: inherit; font-size: var(--jg-font-tiny);
 }
-.jg-handoff__chip .jg-avatar { margin-left: 3px; }
+.jg-handoff__who .jg-avatar { margin-left: 3px; }
 .jg-handoff__name { color: var(--aether-color-text-dim); }
 button.jg-handoff__chip { cursor: pointer; }
 button.jg-handoff__chip:hover { color: var(--aether-color-text); background: color-mix(in srgb, var(--aether-color-text-faint) 12%, transparent); }
@@ -92,6 +135,25 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-apps__row { display: flex; align-items: center; gap: var(--aether-space-3); padding: var(--aether-space-2) 0; }
 .jg-avatar__initials { color: var(--aether-color-text-on-selected); font-size: var(--jg-font-tiny); font-weight: var(--aether-font-weight-strong); }
 .jg-handoff__who { display: inline-flex; align-items: center; gap: 4px; }
+/* 3+ recipients: overlapping 18px avatars and a count chip that lists them. */
+.jg-handoff__group { position: relative; display: inline-flex; align-items: center; gap: 6px; }
+.jg-handoff__stack { display: inline-flex; align-items: center; }
+.jg-handoff__stack .jg-avatar { margin-left: -6px; filter: drop-shadow(0 0 0.75px var(--jg-color-pane)) drop-shadow(0 0 0.75px var(--jg-color-pane)); }
+.jg-handoff__stack .jg-avatar:first-child { margin-left: 0; }
+.jg-handoff__count {
+  display: inline-grid; place-items: center; min-width: 20px; height: 18px; box-sizing: border-box; padding: 0 6px; border: 0; border-radius: 9px;
+  background: var(--jg-color-hover); color: var(--jg-color-text-secondary); font: inherit; font-size: var(--jg-font-tiny); font-weight: 600; cursor: pointer;
+}
+.jg-handoff__count:hover, .jg-handoff__count[aria-expanded="true"] { background: var(--jg-color-active); color: var(--jg-color-fg); }
+.jg-handoff__count:focus-visible { outline: 2px solid var(--aether-color-border-focus); outline-offset: 1px; }
+.jg-handoff__menu {
+  position: absolute; z-index: 5; top: calc(100% + 6px); left: 50%; transform: translateX(-50%); min-width: 200px; width: max-content; max-width: 320px; padding: 6px;
+  border-radius: 12px; background: var(--jg-color-elevated); box-shadow: var(--jg-shadow-card), 0 0 0 0.5px var(--aether-color-border);
+  text-align: left; color: var(--jg-color-fg);
+}
+.jg-handoff__menu-title { padding: 4px 8px 6px; font-size: var(--jg-font-tiny); color: var(--jg-color-text-tertiary); }
+.jg-handoff__menu ul { list-style: none; margin: 0; padding: 0; }
+.jg-handoff__menu li { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 6px; font-size: var(--jg-font-small); white-space: nowrap; }
 
 /* An agent's chats, under its row: every chat keeps a place (Grok Bot). */
 .jg-chat-list { list-style: none; margin: 2px 0 8px; padding: 0 0 0 54px; display: flex; flex-direction: column; gap: 1px; }
@@ -99,8 +161,8 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
   display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 5px 8px; border: 0; border-radius: 8px;
   background: transparent; color: var(--aether-color-text-dim); font: inherit; font-size: var(--jg-font-small); text-align: left; cursor: pointer;
 }
-.jg-chat-row:hover { background: color-mix(in srgb, var(--aether-color-text-faint) 14%, transparent); color: var(--aether-color-text); }
-.jg-chat-row.is-open { background: color-mix(in srgb, var(--aether-color-text-faint) 24%, transparent); color: var(--aether-color-text); }
+.jg-chat-row:hover { background: var(--jg-color-hover); color: var(--aether-color-text); }
+.jg-chat-row.is-open { background: var(--jg-color-active); color: var(--aether-color-text); }
 .jg-chat-row:focus-visible { outline: 2px solid var(--aether-color-border-focus); outline-offset: 1px; }
 .jg-chat-row__title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .jg-chat-row__time { flex: none; color: var(--aether-color-text-faint); font-size: var(--jg-font-tiny); }
@@ -109,7 +171,7 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
   width: 100%; padding: 4px 8px; border-radius: 8px; border: 1px solid var(--aether-color-border-focus);
   background: var(--aether-color-bg-control); color: var(--aether-color-text); font: inherit; font-size: var(--jg-font-small);
 }
-.jg-supervisor-wrap + .jg-chat-list { padding-left: 14px; }
+.jg-pinned .jg-chat-list { padding-left: 14px; }
 
 /* Details panel (click the agent pill at the top of the chat). */
 .jg-details {
@@ -123,8 +185,114 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-details__section p { margin: 0 0 4px; font-size: var(--jg-font-small); }
 .jg-details__row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .jg-details .jg-chat-list { padding-left: 0; }
+.jg-skill-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.jg-skill { display: flex; flex-direction: column; gap: 1px; font-size: var(--jg-font-small); }
+.jg-skill__name { font-weight: var(--jg-font-weight-medium); color: var(--jg-color-fg); }
+.jg-skill__desc { color: var(--jg-color-text-secondary); line-height: 1.35; }
+.jg-tool-chips { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.jg-tool-chip { padding: 2px 8px; border-radius: 999px; background: var(--jg-color-inset); color: var(--jg-color-text-secondary); font-size: var(--jg-font-tiny); font-family: var(--aether-font-mono, ui-monospace, monospace); }
 
 /* Create agent form. */
 .jg-form { display: flex; flex-direction: column; gap: 12px; min-width: 340px; }
 .jg-form__field { display: flex; flex-direction: column; gap: 4px; font-size: var(--jg-font-small); color: var(--aether-color-text-dim); }
 .jg-form__error { margin: 0; color: var(--aether-color-error); font-size: var(--jg-font-small); }
+.jg-handoff__open { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.jg-handoff__open:hover { color: var(--aether-color-text); text-decoration: underline; }
+/* History panel (HistoryPanel.tsx): older chats, read-only. */
+.jg-history__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.jg-history__row { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.jg-history__row:hover { background: var(--aether-color-bg-hover); }
+.jg-history__title { font-size: var(--jg-font-small); font-weight: var(--jg-font-weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-history__time { font-size: var(--jg-font-tiny); color: var(--jg-color-text-tertiary); }
+.jg-history__preview { grid-column: 1 / -1; font-size: var(--jg-font-small); color: var(--jg-color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-history__view { display: flex; flex-direction: column; gap: 8px; overflow-y: auto; min-height: 0; }
+.jg-history__turn { display: flex; flex-direction: column; gap: 6px; }
+.jg-history__turn .jg-bubble--user { align-self: flex-end; max-width: 85%; }
+.jg-history__turn .jg-bubble--assistant { align-self: flex-start; max-width: 92%; }
+
+/* Avatar life states (spec: avatar-motion.md). Motion sits on the outer element so it composes with the
+ * body's base spin and the lead drift; faces change through the eyes only. Timings follow the reference:
+ * blink .26s, expression morph .28s ease (.4,.06,.18,1). */
+.jg-avatar { --jg-morph-ease: cubic-bezier(.4, .06, .18, 1); position: relative; }
+.jg-avatar__face i { transition: scale .28s var(--jg-morph-ease), translate .28s var(--jg-morph-ease), rotate .28s var(--jg-morph-ease), border-radius .28s var(--jg-morph-ease); }
+.jg-avatar[data-state="working"] { animation: jg-av-working 8s cubic-bezier(.42, 0, .58, 1) infinite; }
+.jg-avatar[data-state="streaming"] { animation: jg-av-streaming 2.6s cubic-bezier(.42, 0, .58, 1) infinite; }
+.jg-avatar[data-state="thinking"] .jg-avatar__face { animation-duration: 4s; }
+.jg-avatar[data-state="blocked"] { animation: jg-av-shake 2.12s cubic-bezier(.42, 0, .58, 1) infinite; }
+.jg-avatar[data-state="finished"] { animation: jg-av-squash 1.8s var(--jg-morph-ease) 1; }
+.jg-avatar[data-state="notifying"] { animation: jg-av-squash 1.8s var(--jg-morph-ease) 1; }
+.jg-avatar[data-state="failed"] { animation: jg-av-droop 3s var(--jg-morph-ease) 1 both; }
+.jg-avatar[data-state="spawning"] { animation: jg-av-arrive .62s var(--jg-morph-ease) 1 both; }
+/* Faces: happy = smiling arcs, surprised = bigger eyes, confused = one eye squints, sad = eyes sink. */
+.jg-avatar[data-state="finished"] .jg-avatar__face i { scale: 1.15 .55; border-radius: 999px 999px 40% 40%; }
+.jg-avatar[data-state="notifying"] .jg-avatar__face i, .jg-avatar[data-state="working"] .jg-avatar__face i:first-child { scale: 1.18; }
+.jg-avatar[data-state="blocked"] .jg-avatar__face i:last-child { scale: 1 .45; }
+.jg-avatar[data-state="failed"] .jg-avatar__face i { translate: 0 22%; scale: 1 .7; }
+.jg-avatar[data-state="failed"] .jg-avatar__face i:first-child { rotate: -14deg; }
+.jg-avatar[data-state="failed"] .jg-avatar__face i:last-child { rotate: 14deg; }
+@keyframes jg-av-working {
+  0%, 100% { transform: none; } 12% { transform: rotate(-8deg) translate(-4%, 2%); } 26% { transform: rotate(6deg) translate(3%, -2%); }
+  40% { transform: rotate(0deg); } 58% { transform: rotate(360deg); } 70% { transform: rotate(363deg) translateY(-3%); } 84% { transform: rotate(357deg); }
+}
+@keyframes jg-av-streaming { 0%, 100% { transform: rotate(-6deg) translateX(-4%); } 50% { transform: rotate(7deg) translate(4%, -2%); } }
+@keyframes jg-av-shake { 0%, 60%, 100% { transform: none; } 12% { transform: translateX(-6%) rotate(-7deg); } 24% { transform: translateX(6%) rotate(8deg); } 36% { transform: translateX(-4%) rotate(-5deg); } 48% { transform: translateX(2%) rotate(2deg); } }
+@keyframes jg-av-squash { 0%, 100% { transform: none; } 18% { transform: scale(1.12, .88); } 40% { transform: translateY(-14%) scale(.93, 1.09); } 62% { transform: scale(1.06, .95); } 80% { transform: scale(.98, 1.02); } }
+@keyframes jg-av-droop { 0% { transform: none; } 25%, 75% { transform: translateY(8%) scale(1, .94) rotate(-4deg); } 100% { transform: none; } }
+@keyframes jg-av-arrive { 0% { transform: scale(.6); opacity: 0; } 60% { transform: scale(1.08); opacity: 1; } 100% { transform: none; } }
+/* Activity marks drawn over the corner: three dots (thinking), an orbiting dot (waiting), a gathering ring (spawning). */
+.jg-avatar__fx { position: absolute; inset: 0; pointer-events: none; }
+.jg-avatar__fx i { position: absolute; display: block; border-radius: 50%; background: var(--jg-avatar-color, var(--aether-color-accent)); box-shadow: 0 0 0 1.5px var(--aether-color-surface, #fff); }
+.jg-avatar__fx--dots { inset: auto -14% -6% auto; width: 52%; height: 20%; display: flex; gap: 8%; align-items: center; }
+.jg-avatar__fx--dots i { position: static; flex: 1; aspect-ratio: 1; animation: jg-av-dot 1.2s cubic-bezier(.42, 0, .58, 1) infinite; }
+.jg-avatar__fx--dots i:nth-child(2) { animation-delay: .15s; } .jg-avatar__fx--dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes jg-av-dot { 0%, 60%, 100% { translate: 0 0; opacity: .45; } 30% { translate: 0 -45%; opacity: 1; } }
+.jg-avatar__fx--orbit { animation: jg-av-orbit 1.6s linear infinite; }
+.jg-avatar__fx--orbit i { width: 18%; height: 18%; top: -9%; left: 41%; }
+.jg-avatar__fx--orbit i + i { display: none; }
+@keyframes jg-av-orbit { to { rotate: 360deg; } }
+.jg-avatar__fx--gather i { inset: -30%; background: none; box-shadow: none; border: 1.5px solid var(--jg-avatar-color, var(--aether-color-accent)); animation: jg-av-gather 2s var(--jg-morph-ease) 1 both; }
+.jg-avatar__fx--gather i:nth-child(2) { animation-delay: .25s; } .jg-avatar__fx--gather i:nth-child(3) { display: none; }
+@keyframes jg-av-gather { 0% { scale: 1.2; opacity: 0; } 30% { opacity: .8; } 100% { scale: .72; opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .jg-avatar[data-state], .jg-avatar__fx, .jg-avatar__fx i { animation: none !important; }
+  .jg-avatar__fx--gather { display: none; }
+}
+
+/* Agent context menu (agents/AgentContextMenu.tsx), from parity2/agent-menu/ref (Grok Bot iOS). */
+.jg-amenu__scrim { position: fixed; inset: 0; z-index: 80; background: var(--jg-menu-scrim);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); }
+.jg-amenu { position: fixed; width: 310px; display: grid; gap: 16px; }
+.jg-amenu__preview { border-radius: 24px; overflow: hidden; background: var(--jg-menu-preview); color: var(--jg-menu-fg); box-shadow: 0 10px 40px var(--jg-menu-shadow); }
+.jg-amenu__head { display: flex; align-items: center; gap: 10px; padding: 14px 16px; font-size: 17px; border-bottom: 1px solid var(--jg-menu-line); }
+.jg-amenu__bubble { margin: 14px 16px 16px; padding: 12px 14px; border-radius: 18px; background: var(--jg-menu-bubble); font-size: 17px; line-height: 1.4;
+  display: -webkit-box; -webkit-line-clamp: 6; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; }
+.jg-amenu__stack { position: relative; width: 242px; }
+.jg-amenu__card { display: grid; padding: 6px 0; border-radius: 22px; color: var(--jg-menu-fg); background: var(--jg-menu-card);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4); backdrop-filter: blur(24px) saturate(1.4); box-shadow: 0 10px 40px var(--jg-menu-shadow); transition: opacity .18s ease; }
+.jg-amenu__card.is-dimmed { opacity: .45; pointer-events: none; }
+.jg-amenu__more { position: absolute; left: 0; right: 0; bottom: -150px; }
+.jg-amenu__item { display: flex; align-items: center; gap: 14px; min-height: 44px; padding: 0 20px; border: 0; background: none; color: inherit; font: inherit; font-size: 17px; text-align: left; }
+.jg-amenu__item:hover, .jg-amenu__item:focus-visible { background: var(--jg-menu-hover); outline: none; }
+.jg-amenu__item.is-danger { color: var(--jg-danger); }
+.jg-amenu__item.is-title { font-weight: 600; }
+.jg-amenu__item .jg-icon { width: 22px; }
+.jg-amenu__chev { margin-left: auto; opacity: .8; }
+.jg-amenu__sep { height: 1px; margin: 4px 20px; background: var(--jg-menu-sep); }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__item { min-height: 34px; font-size: 14px; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__bubble { font-size: 14px; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__head { font-size: 14px; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__more { bottom: -110px; }
+.jg-aprompt { position: fixed; left: 50%; top: 30%; transform: translateX(-50%); width: min(320px, calc(100vw - 32px)); padding: 18px; border-radius: 18px;
+  background: var(--jg-menu-bubble); color: var(--jg-menu-fg); display: grid; gap: 10px; box-shadow: 0 10px 40px var(--jg-menu-shadow); }
+.jg-aprompt h3 { margin: 0; font-size: 17px; }
+.jg-aprompt p { margin: 0; font-size: 14px; color: var(--jg-menu-dim); }
+.jg-aprompt input { font: inherit; font-size: 16px; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--jg-menu-input-line); background: var(--jg-menu-input); color: inherit; }
+.jg-aprompt__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.jg-aprompt__actions button { min-height: 36px; padding: 0 14px; border-radius: 10px; border: 0; font: inherit; background: var(--jg-menu-button); color: inherit; }
+.jg-aprompt__actions .is-danger { background: var(--jg-danger-fill); color: var(--jg-p-on-color); }
+.jg-aprompt__actions .is-primary { background: var(--jg-p-blue); color: var(--jg-p-on-color); }
+.jg-toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 90px); transform: translateX(-50%); z-index: 90; padding: 8px 14px;
+  border-radius: 18px; background: var(--jg-menu-toast); color: var(--jg-p-on-color); font-size: 14px; box-shadow: 0 6px 24px var(--jg-menu-shadow); }
+.jg-agent-section { padding: 12px 14px 4px; font-size: 12px; font-weight: 600; color: var(--aether-color-text-muted); }
+/* No iOS long-press callout / text selection on agent rows: the long-press opens our agent menu instead. */
+.jg-agent-row, .jg-agent-list__item, .jg-prow, .jg-plead { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }

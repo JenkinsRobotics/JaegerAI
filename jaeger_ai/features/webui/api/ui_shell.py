@@ -9,7 +9,9 @@ build on disk, ``/`` keeps serving the old shell so nothing goes blank.
 While a build is active, ``/sw.js`` and ``/static/sw.js`` answer a kill-switch
 worker so browsers (iOS home-screen installs especially) drop the old shell's
 service worker and its caches, and the PWA manifest under ``/static/`` keeps
-its ``application/manifest+json`` type. Without a build nothing here changes.
+its ``application/manifest+json`` type. Regular files at the build root
+(icons, ``manifest.webmanifest``) are served too, and ``/manifest.json`` maps
+to the build's manifest. Without a build nothing here changes.
 """
 from __future__ import annotations
 
@@ -102,6 +104,21 @@ def _serve_static_manifest(handler, path: str) -> bool:
     return _send(handler, target, "no-cache", "application/manifest+json; charset=utf-8")
 
 
+def _root_file(root: Path, path: str) -> Path | None:
+    """A regular file directly in the build root, or None. One path segment,
+    no dotfiles, no HTML (index.html is only ever served as ``/``)."""
+    name = path[1:]
+    if not name or "/" in name or "\\" in name or name.startswith(".") or name.lower().endswith((".html", ".htm")):
+        return None
+    target = (root / name).resolve()
+    if target.parent != root or not target.is_file():
+        return None
+    index = root / "index.html"
+    if index.is_file() and target.samefile(index):
+        return None
+    return target
+
+
 def _not_found(handler) -> bool:
     body = b'{"error": "not found"}'
     handler.send_response(404)
@@ -135,6 +152,11 @@ def serve(handler, parsed) -> bool | str:
         if not target.is_file():
             return _not_found(handler)
         return _send(handler, target, "public, max-age=31536000, immutable")
+    if path == "/manifest.json" and (root / "manifest.webmanifest").is_file():
+        return _send(handler, root / "manifest.webmanifest", "no-cache")
+    target = _root_file(root, path)
+    if target is not None:
+        return _send(handler, target, "no-cache")
     return False
 
 

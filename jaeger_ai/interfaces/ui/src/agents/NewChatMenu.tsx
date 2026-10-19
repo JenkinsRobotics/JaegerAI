@@ -1,6 +1,7 @@
 /* The + button (Grok Bot "New chat"): a fresh chat with any agent, or a new
  * agent. A fresh chat never replaces an old one; both stay in the sidebar. */
-import { Dialog, Menu, TextField, type MenuItem } from "@aether/ui";
+import { Dialog, TextField, type MenuItem } from "@aether/ui";
+import { AppMenu as Menu } from "../popups/AppMenu";
 import { useState } from "react";
 import type { Agent } from "../api/types";
 import { label } from "./agentsLogic";

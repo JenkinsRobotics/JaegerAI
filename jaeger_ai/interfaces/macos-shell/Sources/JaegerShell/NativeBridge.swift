@@ -5,6 +5,7 @@
 import AppKit
 import JaegerShellCore
 import ServiceManagement
+import UniformTypeIdentifiers
 import UserNotifications
 import WebKit
 
@@ -31,6 +32,7 @@ protocol BridgeHost: AnyObject {
     func bridgeCopy(_ text: String)
     func bridgeMicStatus() -> [String: Any]
     func bridgeTTSStatus() -> [String: Any]
+    func bridgePickFiles(_ options: FilePickOptions, done: @escaping BridgeDone)
 }
 
 /// Breaks the WKUserContentController → handler retain cycle.
@@ -122,6 +124,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case .clipboardWrite(let text): host.bridgeCopy(text); reply(id, ["copied": text.count])
         case .micStatus: reply(id, host.bridgeMicStatus())
         case .ttsStatus: reply(id, host.bridgeTTSStatus())
+        case .filesPick(let options): host.bridgePickFiles(options) { [weak self] result, error in self?.finish(id, result, error) }
         case .notImplemented(let type): replyError(id, "not_implemented: \(type)")
         }
     }
@@ -231,4 +234,63 @@ extension JaegerShellApplication {
     }
     func bridgeMicStatus() -> [String: Any] { VoiceController.micStatus(recording: voiceController?.isRecording ?? false) }
     func bridgeTTSStatus() -> [String: Any] { VoiceController.ttsStatus(speaking: voiceController?.tts.isSpeaking ?? false) }
+}
+
+// MARK: files.pick — NSOpenPanel for the composer's +. Only what the user picks is returned.
+extension JaegerShellApplication {
+    func bridgePickFiles(_ options: FilePickOptions, done: @escaping BridgeDone) {
+        guard !filePanelOpen else { done(nil, "picker_busy"); return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.resolvesAliases = true
+        panel.allowsMultipleSelection = options.multiple
+        panel.prompt = "Attach"
+        panel.message = options.panelMessage
+        let types = FilePickPanel.contentTypes(options.accept)
+        if !types.isEmpty { panel.allowedContentTypes = types }
+        filePanelOpen = true
+        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            self?.filePanelOpen = false
+            guard response == .OK else { done(["files": []], nil); return }
+            let picked = panel.urls.map(FilePickPanel.describe)
+            let kept = FilePick.select(picked, options)
+            shellLog("[shell][files] picked \(picked.count), returned \(kept.count)")
+            done(["files": kept.map(\.reply), "dropped": picked.count - kept.count], nil)
+        }
+        if let window = mainWindow, window.isVisible { panel.beginSheetModal(for: window, completionHandler: finish) }
+        else { panel.begin(completionHandler: finish) }
+    }
+}
+
+enum FilePickPanel {
+    /// `accept` → panel types; any rule that has no type leaves the panel open to everything (the
+    /// result is still filtered by FilePick.select).
+    static func contentTypes(_ accept: [String]) -> [UTType] {
+        var types: [UTType] = []
+        for rule in accept {
+            let type: UTType?
+            if rule.hasPrefix(".") { type = UTType(filenameExtension: String(rule.dropFirst())) }
+            else if rule.hasSuffix("/*") {
+                switch rule {
+                case "image/*": type = .image
+                case "audio/*": type = .audio
+                case "video/*": type = .movie
+                case "text/*": type = .text
+                default: type = nil
+                }
+            } else { type = UTType(mimeType: rule) }
+            guard let type else { return [] }
+            types.append(type)
+        }
+        return types
+    }
+
+    static func describe(_ url: URL) -> PickedFile {
+        let resolved = url.resolvingSymlinksInPath()
+        let values = try? resolved.resourceValues(forKeys: [.fileSizeKey, .isRegularFileKey])
+        let mime = UTType(filenameExtension: resolved.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+        return PickedFile(path: resolved.path, name: resolved.lastPathComponent, size: values?.fileSize ?? 0,
+                          mimeType: mime, isRegularFile: values?.isRegularFile ?? false)
+    }
 }

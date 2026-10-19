@@ -106,6 +106,7 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
     func bridgeCopy(_ text: String) { calls.append("clipboard.write \(text.count) chars (recorded, clipboard untouched)") }
     func bridgeMicStatus() -> [String: Any] { calls.append("mic.status"); return VoiceController.micStatus(recording: false) }
     func bridgeTTSStatus() -> [String: Any] { calls.append("tts.status"); return VoiceController.ttsStatus(speaking: false) }
+    func bridgePickFiles(_ options: FilePickOptions, done: @escaping BridgeDone) { calls.append("files.pick (cancelled)"); done(["files": []], nil) }
 
     // MARK: flow
     func pageLoaded(_ webView: WKWebView) {

@@ -6,6 +6,8 @@ set -eu
 REPO="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 UI="$REPO/jaeger_ai/interfaces/ui"
 OUT="$HOME/.cache/jaeger/ui-rebuild-mainscreen/dist"
+# --mock: the screenshot build (VITE_JAEGER_MOCK=1 keeps the UI's own mock data), in a separate folder.
+if [[ "${1:-}" == "--mock" ]]; then OUT="$HOME/.cache/jaeger/ui-rebuild-mainscreen/dist-mock"; export VITE_JAEGER_MOCK=1; fi
 NODE="${JAEGER_SHELL_DEV_NODE:-$(command -v node || echo /opt/homebrew/bin/node)}"
 [[ -x "$NODE" ]] || { echo "node not found"; exit 1; }
 [[ -f "$UI/node_modules/vite/bin/vite.js" ]] || { echo "UI deps missing in $UI/node_modules (not installed by this script)"; exit 1; }
