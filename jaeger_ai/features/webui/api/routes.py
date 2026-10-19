@@ -11743,6 +11743,9 @@ def _proxy_jaeger_gateway(handler, method: str, path: str, body: bytes | None = 
 
 def handle_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
+    from api.native_panel_context import check_profile as check_native_panel_profile
+    if (parsed.path.startswith("/api/crons") or parsed.path.startswith("/api/kanban/")) and not check_native_panel_profile(handler):
+        return True
     try:
         from api.jaeger_agents import route as jaeger_agents_route
         if jaeger_agents_route(handler, parsed, "GET"):
@@ -13346,6 +13349,11 @@ def handle_get(handler, parsed) -> bool:
     # Cron reads are active-profile-scoped by default. The list route now
     # aggregates per visible profile home so the UI can surface hidden-row
     # counts and, when opted in, read-only foreign rows.
+    if parsed.path == "/api/native/context":
+        from api.native_panel_context import context as native_panel_context
+        j(handler, native_panel_context(handler))
+        return True
+
     if parsed.path == "/api/crons":
         forwarded = _runner_schedule_forward(handler, "list", query=parsed.query)
         if forwarded is not None:
