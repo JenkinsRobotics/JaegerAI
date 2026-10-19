@@ -220,6 +220,8 @@ final class ChatViewModel: ObservableObject {
             controlReadAvailable = true
             controlledSessionStatus = session.status
             controlledRequest = session.latest_request
+            recoveredApprovalState.observeControl(session: selected, request: controlledRequest,
+                stopRequested: controlledRequest.map { stopRequestedIDs.contains($0.request_id) } ?? false)
             if let request = controlledRequest, request.status == "cancelling" ||
                 request.status == "cancelled" || request.status == "execution_unknown" {
                 if !resumedAfterStopIDs.contains(request.request_id) { queuePausedByStop = true }
@@ -284,6 +286,7 @@ final class ChatViewModel: ObservableObject {
             }
             guard current.canCancel else { stopNotice = current.stopLabel; return }
             stopRequestedIDs.insert(target.request_id)
+            recoveredApprovalState.clear()
             stopNotice = "Requesting cancellation…"
             let receipt = try await controlGateway.cancelTurn(sessionID: target.session_id, requestID: target.request_id)
             guard selected == sessionKey, controlledRequest?.request_id == target.request_id else { return }
@@ -350,6 +353,7 @@ final class ChatViewModel: ObservableObject {
     /// the reply the operator asked for is always the last thing in the
     /// turn. Held as an id rather than an index because activity rows
     /// inserted above it shift its position on nearly every event.
+    let recoveredApprovalState = RecoveredApprovalState()
     private var selectionGeneration = UUID()
     private var localTurnSession: String?
     private var recoveryTask: Task<Void, Never>?
@@ -1047,6 +1051,7 @@ final class ChatViewModel: ObservableObject {
     /// Start a separate native chat without evicting the Dispatcher or any
     /// previously loaded conversation. History remains available for return.
     func newChat() async {
+        recoveredApprovalState.clear()
         conversationError = nil
         selectionGeneration = UUID()
         recoveryTask?.cancel()
@@ -1101,6 +1106,7 @@ final class ChatViewModel: ObservableObject {
         defer { if generation == selectionGeneration { isSwitchingSession = false } }
         if id == "dispatcher" {
             sessionKey = id
+            recoveredApprovalState.clear()
             isSending = false
             answerID = nil
             recoveryNotice = nil
@@ -1125,6 +1131,7 @@ final class ChatViewModel: ObservableObject {
                 if result.ok, let json = result.json,
                    let turns = try? JSONDecoder().decode([SessionTurn].self, from: json), !turns.isEmpty {
                     sessionKey = id
+                    recoveredApprovalState.clear()
                     isSending = localTurnSession == id
                     answerID = nil
                     controlledRequest = nil
@@ -1143,6 +1150,12 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func applyRecovery(_ snapshot: GatewayClient.ConversationSnapshot) {
+        if let request = snapshot.latest_request, stopRequestedIDs.contains(request.request_id) {
+            recoveredApprovalState.clear()
+        } else {
+            recoveredApprovalState.bind(session: snapshot.session_id, request: snapshot.latest_request,
+                                        profile: snapshot.profile, context: snapshot.activity_context ?? [])
+        }
         var existing = messages
         messages = snapshot.messages.map { row in
             let author: ChatMessage.Author = row.role == "user" ? .user : (row.role == "assistant" ? .assistant : .system)
@@ -1195,6 +1208,9 @@ final class ChatViewModel: ObservableObject {
                               self?.sessionKey == session, self?.localTurnSession != session else { return }
                         guard event.eventID > cursor else { continue }
                         cursor = event.eventID
+                        if event.event == "approval.resolved" || event.event == "approval.request" {
+                            await self?.recoveredApprovalState.refresh()
+                        }
                         guard event.sessionID == session else { continue }
                         if event.event == "turn.start" || event.isTerminal {
                             if ["turn.cancelled", "turn.unknown"].contains(event.event) { self?.queuePausedByStop = true }

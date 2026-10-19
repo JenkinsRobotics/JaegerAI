@@ -1376,6 +1376,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_get("/v1/handoffs/{id}/messages", self.handle_handoff_messages)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
+        self.app.router.add_post("/v1/approvals/{id}/decision", self.handle_resolve_approval)
         self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
         self.app.router.add_get("/v1/approvals/{id}", self.handle_get_approval)
         self.app.router.add_get("/v1/runtime/frameworks", self.handle_runtime_frameworks)
@@ -5279,6 +5280,9 @@ class JaegerGatewayApp:
 
     async def handle_list_approvals(self, request: web.Request) -> web.Response:
         pending = self.store.list_pending_approvals()
+        for field in ("session_id", "request_id"):
+            if request.query.get(field):
+                pending = [item for item in pending if item.get(field) == request.query[field]]
         return web.json_response({"approvals": pending})
 
     async def handle_get_approval(self, request: web.Request) -> web.Response:
@@ -5532,15 +5536,24 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Unsupported approval decision"}, status=400)
         approved = decision != "deny"
 
-        resolved = self.store.resolve_approval(approval_id, approved=approved, decision=decision)
-        future = self.pending_approvals.pop(approval_id, None)
-        if resolved is None and future is None:
+        if getattr(request, "path", "").endswith("/decision") and not all(
+                body.get(key) for key in ("expected_session_id", "expected_request_id", "expected_profile")):
+            return web.json_response({"error": "Scoped approval context is required"}, status=400)
+        for key in ("expected_session_id", "expected_request_id", "expected_profile"):
+            if key in body and (not isinstance(body[key], str) or not body[key].strip()):
+                return web.json_response({"error": "Invalid approval context"}, status=400)
+        resolved = self.store.resolve_approval(
+            approval_id, approved=approved, decision=decision,
+            **{key: body[key] for key in ("expected_session_id", "expected_request_id", "expected_profile") if key in body},
+        )
+        if resolved is None:
             existing = self.store.get_approval(approval_id) or {}
             if existing.get("decision") == "cancelled":
                 return web.json_response(
                     {"error": "Request was cancelled; approval no longer applies"}, status=409,
                 )
-            return web.json_response({"error": "Approval not found"}, status=404)
+            return web.json_response({"error": "Approval is stale, expired, or its permission context changed"}, status=409 if existing else 404)
+        future = self.pending_approvals.pop(approval_id, None)
         if future is not None and not future.done():
             future.set_result(approved)
 

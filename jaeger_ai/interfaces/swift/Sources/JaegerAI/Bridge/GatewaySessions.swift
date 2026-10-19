@@ -57,6 +57,12 @@ extension GatewayClient {
     }
 
     struct ConversationSnapshot: Decodable {
+        struct Activity: Decodable {
+            let event: String; let tool: String?; let text: String?; let phase: String?
+            let status: String?; let child_run_id: String?; let task_id: String?
+        }
+        let profile: String?
+        let activity_context: [Activity]?
         struct Message: Decodable { let role: String; let content: String; let timestamp: Double }
         let session_id: String
         let status: String?
