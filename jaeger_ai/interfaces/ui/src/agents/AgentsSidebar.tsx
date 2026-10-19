@@ -38,10 +38,11 @@ interface Props {
   /** Agent right-click: "Show info" and "Chat history". */
   onInfo?: (agentId: string) => void;
   onHistory?: (agentId: string) => void;
+  onMarkRead?: (agentId: string) => void;
 }
 
 /** Sidebar content split into the AppShell slots: top / primary / sections / footer. */
-export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewChatMenu, onRenameChat, onArchiveChat, onSearch, onConnectApps, onSettings, onRetry, userInitials, status, pins = [], onPin = () => {}, onUnpin = () => {}, onInfo, onHistory }: Props) {
+export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewChatMenu, onRenameChat, onArchiveChat, onSearch, onConnectApps, onSettings, onRetry, userInitials, status, pins = [], onPin = () => {}, onUnpin = () => {}, onInfo, onHistory, onMarkRead }: Props) {
   const { lead, specialists: all } = sidebarRows(state.agents, state.summaries);
   const { pinned, rest: specialists } = splitPinned(all, pins);
   const selectedAgent = selection.type === "agent" ? selection.agentId : undefined;
@@ -73,7 +74,7 @@ export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewCha
             {pinned.map((row) => <div key={row.agent.id}>{chatsFor(row.agent.id)}</div>)}
           </PinnedArea>
         )}
-        <SpecialistList dragType={AGENT_DRAG_TYPE} onPin={onPin} onUnpin={onUnpin} onInfo={onInfo} onHistory={onHistory} emptyDropHint={!specialists.length && pinned.length > 0}>
+        <SpecialistList dragType={AGENT_DRAG_TYPE} onPin={onPin} onUnpin={onUnpin} onInfo={onInfo} onHistory={onHistory} onMarkRead={onMarkRead} emptyDropHint={!specialists.length && pinned.length > 0}>
           {specialists.map((row) => (
             <div key={row.agent.id} className="jg-agent-list__item" draggable
               onDragStart={(e) => { e.dataTransfer.setData(AGENT_DRAG_TYPE, row.agent.id); e.dataTransfer.effectAllowed = "move"; }}

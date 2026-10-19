@@ -51,3 +51,20 @@ describe("SpecialistList drop zone", () => {
     host.remove();
   });
 });
+
+describe("Agent actions menu", () => {
+  it("offers Pin, Mark as read, Show info, Chat history, Copy agent ID with icons; Mark as read calls back with the id", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    const onMarkRead = vi.fn();
+    act(() => { root.render(<SpecialistList dragType={AGENT_DRAG_TYPE} onPin={() => {}} onUnpin={() => {}} onInfo={() => {}} onHistory={() => {}} onMarkRead={onMarkRead}>{[<div key="a" data-agent-id="native:builder">Builder</div>]}</SpecialistList>); });
+    act(() => { host.querySelector("[data-agent-id]")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })); });
+    const items = [...document.querySelectorAll('[role="menuitem"]')];
+    expect(items.map((i) => i.textContent!.replace(/[\uE000-\uF8FF]/g, "").trim())).toEqual(["Pin to top", "Mark as read", "Show info", "Chat history", "Copy agent ID"]);
+    expect(items.every((i) => i.querySelector(".jg-icon"))).toBe(true);
+    act(() => { (items[1] as HTMLElement).click(); });
+    expect(onMarkRead).toHaveBeenCalledWith("native:builder");
+    act(() => root.unmount());
+  });
+});

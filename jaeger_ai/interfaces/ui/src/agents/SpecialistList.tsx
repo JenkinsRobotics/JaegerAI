@@ -3,17 +3,22 @@
 import { type MenuItem } from "@aether/ui";
 import { AppMenu as Menu } from "../popups/AppMenu";
 import { useState, type DragEvent, type MouseEvent, type ReactNode } from "react";
+import { Icon } from "../icons/Icon";
 
-// Grok's Bot actions, scoped to what Jaeger has (Pin, plus the info pane and older chats).
+// Grok's Bot actions, scoped to what Jaeger has: Pin, Mark as read (per-device seen mark), the info pane, older
+// chats, Copy agent ID. Grok's open agent menu was never captured: its order/extra items need the phase-B capture.
+// Rename / Delete / Hide aren't offered: the gateway has no endpoint for them yet.
 const ROW_MENU: MenuItem[] = [
-  { id: "pin", label: "Pin to top" },
-  { id: "info", label: "Show info", separatorBefore: true },
-  { id: "history", label: "Chat history" },
+  { id: "pin", label: "Pin to top", icon: <Icon name="pin" size={14} /> },
+  { id: "read", label: "Mark as read", icon: <Icon name="mail-read" size={14} /> },
+  { id: "info", label: "Show info", icon: <Icon name="info" size={14} />, separatorBefore: true },
+  { id: "history", label: "Chat history", icon: <Icon name="history" size={14} /> },
+  { id: "copy-id", label: "Copy agent ID", icon: <Icon name="copy" size={14} />, separatorBefore: true },
 ];
 
-export function SpecialistList({ dragType, onPin, onUnpin, onInfo, onHistory, emptyDropHint = false, children }: {
+export function SpecialistList({ dragType, onPin, onUnpin, onInfo, onHistory, onMarkRead, emptyDropHint = false, children }: {
   dragType: string; onPin: (agentId: string) => void; onUnpin: (agentId: string) => void;
-  onInfo?: (agentId: string) => void; onHistory?: (agentId: string) => void;
+  onInfo?: (agentId: string) => void; onHistory?: (agentId: string) => void; onMarkRead?: (agentId: string) => void;
   /** Every specialist is pinned: keep a visible zone so a tile can still be dragged back. */
   emptyDropHint?: boolean; children: ReactNode;
 }) {
@@ -33,9 +38,10 @@ export function SpecialistList({ dragType, onPin, onUnpin, onInfo, onHistory, em
       onDrop={(e) => { if (!carries(e)) return; e.preventDefault(); setOver(false); const id = e.dataTransfer.getData(dragType); if (id) onUnpin(id); }}>
       {children}
       {emptyDropHint && <p className="jg-agent-list__drop-hint">Drag a pinned agent here to unpin it</p>}
-      <Menu open={Boolean(menu)} anchor={menu ? { x: menu.x, y: menu.y } : null} items={ROW_MENU.filter((i) => (i.id !== "info" || onInfo) && (i.id !== "history" || onHistory))} ariaLabel="Agent actions"
+      <Menu open={Boolean(menu)} anchor={menu ? { x: menu.x, y: menu.y } : null} items={ROW_MENU.filter((i) => (i.id !== "info" || onInfo) && (i.id !== "history" || onHistory) && (i.id !== "read" || onMarkRead))} ariaLabel="Agent actions"
         onClose={() => setMenu(null)} onSelect={(action) => {
-          if (menu) (action === "info" ? onInfo : action === "history" ? onHistory : onPin)?.(menu.id);
+          if (menu && action === "copy-id") void navigator.clipboard?.writeText(menu.id).catch(() => {});
+          else if (menu) (action === "info" ? onInfo : action === "history" ? onHistory : action === "read" ? onMarkRead : onPin)?.(menu.id);
           setMenu(null);
         }} />
     </nav>

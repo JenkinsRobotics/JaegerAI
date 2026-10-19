@@ -140,6 +140,7 @@ export function App({ source }: { source: JaegerSource }) {
     onUnpin: (agentId) => updatePins((cur) => unpin(cur, agentId)),
     onInfo: (agentId) => { setSelection({ type: "agent", agentId }); host.openDetails?.(agentId); },
     onHistory: (agentId) => host.openHistory?.(agentId),
+    onMarkRead: (agentId) => store.seeAgent(agentId),
     status: source.kind === "mock"
       ? { kind: "warn", label: "Mock data (dev)" }
       : store.error ? { kind: "error", label: "Gateway unreachable" } : { kind: "ok", label: "Connected" },
