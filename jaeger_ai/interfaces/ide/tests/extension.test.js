@@ -451,7 +451,7 @@ test('discovered Ollama Cloud default persists and reaches immediate and queued 
 test('routed catalog ID is decoded once before default admission', async () => {
   const model = 'fixture-routed:cloud';
   const wired = await connectedWire(cloudCatalog(`@ollama-cloud:${model}`));
-  chooseItem = items => items.find(item => item.label === `@ollama-cloud:${model}`);
+  chooseItem = items => items.find(item => item.label === model);
   await registeredCommands.get('jaeger.selectModel')();
   await wired.send({ type: 'send', text: 'synthetic turn', model: 'config', ideContext: false });
   assert.deepEqual({ provider: wired.gateway.sent.provider, model: wired.gateway.sent.model },
@@ -666,4 +666,44 @@ test('deleted symlink backing files fail closed for selection diagnostics and op
     assert.equal(gateway.sent.options.ide.active_file, undefined);
     assert.equal(gateway.sent.options.ide.selection, undefined);
   } finally { wired?.dispose(); f.close(); }
+});
+
+test('permission picker reads Gateway state and applies only the chosen supported mode', async () => {
+  const wired = wireExtension();
+  try {
+    await wired.send({ type: 'ready' });
+    const gw = wired.gateway.instance; let saved;
+    gw.autonomy = async () => ({ autonomy: 'scoped', options: ['ask', 'scoped', 'auto'] });
+    gw.setAutonomy = async mode => { saved = mode; return { autonomy: mode, options: ['ask', 'scoped', 'auto'] }; };
+    chooseItem = items => items.find(item => item.mode === 'ask');
+    await wired.send({ type: 'gatewayPermissions' });
+    assert.equal(saved, 'ask');
+    assert.ok(wired.posted.some(item => item.autonomy?.mode === 'ask'));
+    chooseItem = () => undefined;
+    saved = undefined;
+    await wired.send({ type: 'gatewayPermissions' });
+    assert.equal(saved, undefined);
+  } finally { wired.dispose(); }
+});
+
+test('Local execution menu chooses a workspace without changing Gateway permissions', async () => {
+  const wired = wireExtension();
+  try {
+    await wired.send({ type: 'ready' });
+    chooseItem = items => items.find(item => item.action === 'workspace');
+    await wired.send({ type: 'executionLocation' });
+    assert.ok(wired.posted.some(item => item.selectedWorkspace === '/workspace/two'));
+  } finally { wired.dispose(); }
+});
+
+test('Gateway model refresh reloads the catalog instead of keeping the first snapshot forever', async () => {
+  const wired = wireExtension();
+  try {
+    await wired.send({ type: 'ready' });
+    const gw = wired.gateway.instance; let reads = 0;
+    gw.models = async () => { reads++; return { providers: [{ id: 'changed', reachable: true, models: [{ id: 'new-model' }] }] }; };
+    await wired.send({ type: 'refreshModels' });
+    assert.equal(reads, 1);
+    assert.ok(wired.posted.some(item => item.models?.providers?.[0]?.id === 'changed'));
+  } finally { wired.dispose(); }
 });

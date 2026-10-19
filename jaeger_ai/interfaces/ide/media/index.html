@@ -78,12 +78,21 @@
     <button id="worktree" class="execution-location" type="button" title="Select an existing git worktree"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="7" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 6h4a6 6 0 0 1 6 6v-3"/></svg><span>Worktree</span></button>
     <span class="send-hint">Enter to send · Shift+Enter for newline</span>
   </div>
-  <dialog id="model-menu" aria-label="Choose model">
+  <dialog id="model-menu" aria-label="Gateway models and settings">
     <div class="model-menu-header">
       <input type="search" id="model-search" placeholder="Search models…" aria-label="Search models">
       <button type="button" id="model-menu-close" aria-label="Close"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
     </div>
-    <div class="model-list" id="model-list" role="listbox" aria-label="Models"></div>
+    <div class="model-group-label">Model for the next message</div>
+    <div class="model-list" id="model-list" role="group" aria-label="Gateway models"></div>
+    <section class="gateway-settings" aria-label="Gateway settings">
+      <div class="model-group-label">Gateway settings</div>
+      <div id="gateway-endpoint" class="model-provider-status"></div>
+      <button id="gateway-permissions" type="button">Permissions</button>
+      <button id="gateway-agency" type="button">Agency</button>
+      <button id="gateway-connection" type="button">Connection settings…</button>
+      <button id="gateway-refresh" type="button">Refresh models and settings</button>
+    </section>
   </dialog>
 </footer>
 <script type="module" nonce="{{NONCE}}">

@@ -247,3 +247,22 @@ test('real controller snapshots with feedback maps update connectivity and compo
   receive({ connected: false, status: 'Unavailable', feedback: { '4': 'up' } });
   assert.equal(nodes.get('send').disabled, true);
 });
+
+test('Gateway picker refreshes real catalog and exposes settings; Local and permissions have distinct actions', () => {
+  const { nodes, listeners, messages } = bootView();
+  const receive = data => listeners.find(item => item.name === 'message').callback({ data });
+  nodes.get('model-menu').showModal = () => {};
+  receive({ connected: true, status: 'Connected', endpoint: 'http://127.0.0.1:33418', feedback: {},
+    models: { providers: [{ id: 'fixture', reachable: true, models: [{ id: 'model-a', available: true }] }] },
+    autonomy: { mode: 'scoped', options: ['ask', 'scoped', 'auto'] }, tier: { current: 'agent' } });
+  nodes.get('model-trigger').onclick();
+  assert.equal(messages.at(-1).type, 'refreshModels');
+  assert.equal(nodes.get('gateway-endpoint').textContent, 'http://127.0.0.1:33418');
+  assert.match(nodes.get('gateway-permissions').textContent, /scoped/);
+  assert.ok(nodes.get('model-list').children.some(item => item.dataset?.value === 'fixture::model-a'));
+  nodes.get('workspace').onclick(); assert.equal(messages.at(-1).type, 'executionLocation');
+  nodes.get('permissions').onclick(); assert.equal(messages.at(-1).type, 'gatewayPermissions');
+  assert.equal(nodes.get('permissions-label').textContent, 'Scoped permissions');
+  receive({ models: { providers: [] }, modelsError: 'catalog unavailable' });
+  assert.ok(nodes.get('model-list').children.some(item => /catalog unavailable/.test(item.textContent)));
+});
