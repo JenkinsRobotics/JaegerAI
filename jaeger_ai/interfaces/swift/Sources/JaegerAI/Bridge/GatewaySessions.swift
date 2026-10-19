@@ -38,9 +38,37 @@ protocol VoiceGatewayClient: Sendable {
     func listNotifications(since: Int, limit: Int) async throws -> GatewayClient.ProactiveFeed
 }
 
+@MainActor
+protocol ChatRecoveryClient {
+    func createConversation(id: String) async throws
+    func conversationSnapshot(id: String) async throws -> GatewayClient.ConversationSnapshot
+    func streamEvents(sessionID: String, lastEventID: Int) -> AsyncThrowingStream<GatewayClient.StreamEvent, Error>
+}
+
+extension GatewayClient: ChatRecoveryClient {}
+
 extension GatewayClient: SessionControlClient, VoiceGatewayClient {}
 
 extension GatewayClient {
+
+    func createConversation(id: String) async throws {
+        _ = try await request(path: "v1/sessions", method: "POST",
+                              jsonBody: ["session_id": id, "title": "New Conversation", "profile": "jaeger", "source": "native"])
+    }
+
+    struct ConversationSnapshot: Decodable {
+        struct Message: Decodable { let role: String; let content: String; let timestamp: Double }
+        let session_id: String
+        let status: String?
+        let messages: [Message]
+        let latest_request: RequestState?
+        let event_cursor: Int
+        let partial_text: String
+    }
+    func conversationSnapshot(id: String) async throws -> ConversationSnapshot {
+        let data = try await request(path: "v1/sessions/\(id)?view=conversation")
+        return try JSONDecoder().decode(ConversationSnapshot.self, from: data)
+    }
 
     // MARK: - Wire types
 
