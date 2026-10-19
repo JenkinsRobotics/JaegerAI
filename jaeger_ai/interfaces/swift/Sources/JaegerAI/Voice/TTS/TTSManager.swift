@@ -21,6 +21,7 @@ import os
 final class TTSManager: ObservableObject {
     static let shared = TTSManager()
 
+    /// Owned speech is queued or awaiting settlement; not a microphone/audio-device measurement.
     @Published private(set) var isSpeaking: Bool = false
     @Published private(set) var lastError: String?
 
@@ -59,11 +60,8 @@ final class TTSManager: ObservableObject {
 
     /// Move to a new acoustic stage, flushing cleanly.
     ///
-    /// Stops any in-flight utterance at a word boundary rather than
-    /// ``.immediate``: cutting mid-phoneme produces the click the handoff
-    /// must not have. The synth is left idle before the next utterance is
-    /// built, so the new voice starts from silence instead of splicing
-    /// onto a half-drained buffer.
+    /// Cancels old demand before enqueueing the new stage. The shared drain
+    /// waits for the old request to settle and the Stop dispatch to return.
     func enterVoiceStage(_ stage: VoiceStage) {
         guard stage != voiceStage else { return }
         stop()
@@ -80,34 +78,77 @@ final class TTSManager: ObservableObject {
     /// override could rotate this to a different backend.
     var activeBackend: TTSBackend { appleSpeech }
 
-    /// Speak ``text``.  Strips Markdown first so the synthesizer
-    /// doesn't read asterisks aloud.  Routes to the agent's Kokoro
-    /// voice over the bridge when connected + configured (the
-    /// default); falls back to the local Apple synth otherwise.
-    /// No-op if ``autoSpeakEnabled`` is false (the call site passes
-    /// the operator-preference check in; this method respects it).
+    // One drain owns every utterance, including speakAndWait. An epoch
+    // invalidates cancelled work; late acknowledgements cannot alter a new run.
+    private struct Utterance {
+        let body: String
+        let rate: Float?
+        let epoch: UInt64
+        let completion: CheckedContinuation<Bool, Never>?
+    }
+    private var pending: [Utterance] = []
+    private var epoch: UInt64 = 0
+    private var draining = false
+    private var stopBarrier: Task<Void, Never>?
+
+    // Test seams avoid microphones, synthesizers and live bridge traffic.
+    enum SpeechResult { case spoken, failed(String) }
+    private let speechOverride: (@MainActor (String, Float?) async -> SpeechResult)?
+    private let stopOverride: (@MainActor () async -> Void)?
+
+    init(
+        speech: (@MainActor (String, Float?) async -> SpeechResult)? = nil,
+        stopSpeech: (@MainActor () async -> Void)? = nil
+    ) {
+        speechOverride = speech
+        stopOverride = stopSpeech
+    }
+
+    /// Enqueue explicit speech. Auto-speak preference belongs to the caller.
     func speak(_ text: String) {
         let body = TTSText.plainForSpeech(text)
-        NSLog("[TTSManager] speak called — input=\(text.count) chars, afterStrip=\(body.count) chars")
-        guard !body.isEmpty else {
-            NSLog("[TTSManager] body empty after markdown strip — skipping")
-            return
-        }
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            self.lastError = nil
-            self.isSpeaking = true
-            switch await self.speakViaFramework(body) {
-            case .spoken:
-                self.isSpeaking = false
-            case .useApple(let reason):
-                self.lastError = reason
-                self.speakLocally(body)
-            case .failed(let reason):
-                self.lastError = reason
-                self.isSpeaking = false
+        guard !body.isEmpty else { return }
+        enqueue(body, rate: nil, completion: nil)
+    }
+
+    private func enqueue(
+        _ body: String, rate: Float?, completion: CheckedContinuation<Bool, Never>?
+    ) {
+        pending.append(Utterance(body: body, rate: rate, epoch: epoch, completion: completion))
+        isSpeaking = true
+        guard !draining else { return }
+        draining = true
+        Task { @MainActor in await drain() }
+    }
+
+    private func drain() async {
+        while !pending.isEmpty {
+            let item = pending.removeFirst()
+            // A delayed Stop must finish dispatch before a newer utterance.
+            await stopBarrier?.value
+            guard item.epoch == epoch else {
+                item.completion?.resume(returning: false)
+                continue
             }
+            lastError = nil
+            let result: SpeechResult
+            if let speechOverride {
+                result = await speechOverride(item.body, item.rate)
+            } else {
+                result = await performSpeech(item.body, rate: item.rate, epoch: item.epoch)
+            }
+            let current = item.epoch == epoch
+            var completed = false
+            if current {
+                switch result {
+                case .spoken: completed = true
+                case .failed(let reason): lastError = reason
+                }
+            }
+            item.completion?.resume(returning: completed)
         }
+        draining = false
+        isSpeaking = false
     }
 
     private enum FrameworkResult {
@@ -116,12 +157,12 @@ final class TTSManager: ObservableObject {
         case failed(String)
     }
 
-    /// Route interface speech through JaegerOS's TTS slot. The bridge waits
-    /// for the real SpokenAck, so `isSpeaking` and the setup handoff describe
-    /// playback rather than merely saying that a background thread started.
+    /// Route interface speech through JaegerOS's TTS slot and await SpokenAck.
+    /// A failed/timed-out request cannot certify physical playback termination.
     private func speakViaFramework(
         _ body: String,
-        rate overrideRate: Float? = nil
+        rate overrideRate: Float? = nil,
+        epoch expectedEpoch: UInt64
     ) async -> FrameworkResult {
         let bridge = AgentBridge.shared
         guard bridge.isConnected else {
@@ -134,6 +175,7 @@ final class TTSManager: ObservableObject {
         // restart.  An unreadable config defaults to kokoro: the bridge is
         // up, so prefer the agent's real voice.
         let cfg = await bridge.query("config")
+        guard expectedEpoch == epoch else { return .failed("Speech cancelled before submission.") }
         if cfg.ok, let json = cfg.json,
            let obj = (try? JSONSerialization.jsonObject(with: json)) as? [String: Any],
            let engine = obj["speech_engine"] as? String,
@@ -164,56 +206,46 @@ final class TTSManager: ObservableObject {
         return .spoken
     }
 
-    /// Speak one complete utterance before returning. Used at the setup →
-    /// agent handoff so the Kokoro voice pack never changes mid-sentence.
+    /// Await this queued utterance, not merely its submission to the bridge.
     func speakAndWait(_ text: String, rate: Float? = nil) async -> Bool {
         let body = TTSText.plainForSpeech(text)
         guard !body.isEmpty else { return false }
-        lastError = nil
-        isSpeaking = true
-        switch await speakViaFramework(body, rate: rate) {
-        case .spoken:
-            isSpeaking = false
-            return true
-        case .failed(let reason):
-            lastError = reason
-            isSpeaking = false
-            return false
-        case .useApple(let reason):
-            lastError = reason
+        return await withCheckedContinuation { completion in
+            enqueue(body, rate: rate, completion: completion)
+        }
+    }
+
+    private func performSpeech(_ body: String, rate: Float?, epoch: UInt64) async -> SpeechResult {
+        switch await speakViaFramework(body, rate: rate, epoch: epoch) {
+        case .spoken: return .spoken
+        case .failed(let reason): return .failed(reason)
+        case .useApple:
+            guard epoch == self.epoch else { return .failed("Speech cancelled before submission.") }
             let completed = await withCheckedContinuation { continuation in
                 appleSpeech.speak(text: body) { completed in
                     continuation.resume(returning: completed)
                 }
             }
-            isSpeaking = false
-            return completed
+            return completed ? .spoken : .failed("System speech did not complete playback.")
         }
     }
 
-    /// Local synthesis via the Apple backend — the "apple" engine and the
-    /// no-bridge fallback.
-    private func speakLocally(_ body: String) {
-        log.info("speak via \(self.appleSpeech.displayName, privacy: .public) — \(body.count) chars")
-        isSpeaking = true
-        appleSpeech.speak(text: body) { [weak self] _ in
-            // Backend already hops to main before firing — we mirror
-            // its isSpeaking transition into ours.  Same pattern
-            // STTManager uses; MainActor.assumeIsolated is the
-            // ergonomic way to tell the compiler about the main-
-            // queue contract the backend documented.
-            MainActor.assumeIsolated {
-                self?.isSpeaking = false
+    /// Cancel queued demand immediately. Keep active ownership until its
+    /// completion/timeout; requesting Stop does not confirm device silence.
+    func stop() {
+        epoch &+= 1
+        for item in pending { item.completion?.resume(returning: false) }
+        pending.removeAll()
+        appleSpeech.stop()
+        let previous = stopBarrier
+        stopBarrier = Task { @MainActor in
+            await previous?.value
+            if let stopOverride {
+                await stopOverride()
+            } else if AgentBridge.shared.isConnected {
+                _ = await AgentBridge.shared.command("stop_speech")
             }
         }
-    }
-
-    func stop() {
-        appleSpeech.stop()
-        isSpeaking = false
-        guard AgentBridge.shared.isConnected else { return }
-        Task {
-            _ = await AgentBridge.shared.command("stop_speech")
-        }
+        if !draining { isSpeaking = false }
     }
 }
