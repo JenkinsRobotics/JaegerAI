@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JaegerSource } from "./api/source";
+import { AgentManagement } from "./agents/AgentManagement";
 import { AgentDetails } from "./agents/AgentDetails";
 import { agentsSidebarSlots, type Selection } from "./agents/AgentsSidebar";
 import { useAgentsStore } from "./agents/agentsStore";
 import { label, visible } from "./agents/agentsLogic";
 import { agentSlug, NewChatMenu } from "./agents/NewChatMenu";
-import { loadPins, pin, savePins, unpin } from "./agents/pins";
+import { loadPins, pin, savePins, unpin, MAX_PINS } from "./agents/pins";
 import { HistoryPanel } from "./agents/HistoryPanel";
 import { ChatPane } from "./chat/ChatPane";
 import { autoHome, contractHome, fallbackHome, httpGetJson, type HomeSessions } from "./chat/homeSession";
@@ -51,7 +52,7 @@ export function App({ source }: { source: JaegerSource }) {
   const phone = usePhone();
   const [phoneView, setPhoneView] = useState<"list" | "chat">("list");
   const [agentMenu, setAgentMenu] = useState<{ agentId: string; x: number; y: number } | null>(null);
-  const [agentPrompt, setAgentPrompt] = useState<{ kind: "delete" | "section" | "duplicate"; agent: Agent } | null>(null);
+  const [agentPrompt, setAgentPrompt] = useState<{ kind: "rename" | "delete" | "section" | "duplicate"; agent: Agent } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(null), 2600); return () => clearTimeout(t); }, [notice]);
   // Grok-style sessions: one home chat per agent, history read-only.
@@ -82,8 +83,27 @@ export function App({ source }: { source: JaegerSource }) {
   const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null);
   const [historyAgentId, setHistoryAgentId] = useState<string | null>(null);
   const [historySessionId, setHistorySessionId] = useState<string>();
+  const [managementBusy, setManagementBusy] = useState(false);
+  const pinQueue = useRef(Promise.resolve());
   const [pins, setPins] = useState<string[]>(loadPins);
-  const updatePins = useCallback((next: (cur: string[]) => string[]) => setPins((cur) => { const n = next(cur); savePins(n); return n; }), []);
+  // Poll/SSE projections are authoritative on supporting servers; never upload local pins implicitly.
+  const sharedPins = Boolean(source.agentActions?.savePins) && store.agents.some((a) => a.ui_actions?.pin);
+  const projectedPins = store.agents.filter((a) => a.pinned).sort((a, b) => (a.pin_order ?? 0) - (b.pin_order ?? 0)).map((a) => a.id);
+  const devicePins = loadPins().filter((id) => store.agents.some((a) => a.id === id && a.ui_actions?.pin));
+  const pinSignature = JSON.stringify(projectedPins);
+  useEffect(() => { if (sharedPins) setPins(JSON.parse(pinSignature) as string[]); }, [sharedPins, pinSignature]);
+  const updatePins = useCallback((next: (cur: string[]) => string[]) => {
+    if (!sharedPins || !source.agentActions?.savePins) {
+      setPins((cur) => { const n = next(cur); savePins(n); return n; });
+      return;
+    }
+    pinQueue.current = pinQueue.current.then(async () => {
+      const fresh = await source.agents();
+      const current = fresh.filter((a) => a.pinned).sort((a, b) => (a.pin_order ?? 0) - (b.pin_order ?? 0)).map((a) => a.id);
+      await source.agentActions!.savePins!(next(current), current);
+      await store.refresh();
+    }).catch(async (error: unknown) => { setNotice(`Couldn't save pins: ${message(error)}`); await store.refresh(); });
+  }, [sharedPins, source, store.refresh]);
 
   const selectedAgentId = selection.type === "agent" ? selection.agentId : undefined;
   const explicitSessionId = selection.type === "agent" ? selection.sessionId : undefined;
@@ -146,7 +166,7 @@ export function App({ source }: { source: JaegerSource }) {
   const actions = source.agentActions;
   const caps = agentCaps(agentMenu ? store.agents.filter((a) => a.id === agentMenu.agentId) : store.agents, actions);
   const copy = (text: string, done: string) => host.copy(text).then(() => setNotice(done), () => setNotice("Couldn't copy"));
-  const fail = (what: string) => (error: unknown) => setNotice((error as { status?: number })?.status === 409 ? "This agent is protected and can't be deleted" : `Couldn't ${what}: ${message(error)}`);
+  const fail = (what: string) => (error: unknown) => setNotice(`Couldn't ${what}: ${message(error)}`);
   const onAgentAction = (action: AgentMenuAction, agent: Agent) => {
     switch (action) {
       case "open": setSelection({ type: "agent", agentId: agent.id }); setDetailsAgentId(null); setHistoryAgentId(null); setPhoneView("chat"); return;
@@ -156,22 +176,31 @@ export function App({ source }: { source: JaegerSource }) {
         if (caps.read && actions) void actions.markRead(agent.id, agent.last_message?.id ?? null).then(() => { store.seeAgent(agent.id); return store.refresh(); }, fail("mark it read"));
         else store.seeAgent(agent.id);
         return;
-      case "pin": case "unpin": {
-        const on = action === "pin";
-        updatePins((cur) => (on ? pin(cur, agent.id) : unpin(cur, agent.id)));
-        if (caps.pin && actions) void actions.patchAgent(agent.id, { pinned: on }).then(() => store.refresh(), fail(on ? "pin it" : "unpin it"));
-        return;
-      }
-      case "hide": if (actions) void actions.patchAgent(agent.id, { hidden: true }).then(() => { setNotice(`${label(agent)} hidden`); return store.refresh(); }, fail("hide it")); return;
+      case "rename": setAgentPrompt({ kind: "rename", agent }); return;
+      case "pin": case "unpin":
+        updatePins((cur) => action === "pin" ? pin(cur, agent.id) : unpin(cur, agent.id)); return;
+      case "hide": void changePresentation(agent, { archived: true }); return;
       case "template": if (actions) void actions.template(agent.id).then((t) => copy(JSON.stringify(t, null, 2), "Template copied"), fail("get the template")); return;
       case "copy-id": void copy(agent.id, "ID copied"); return;
       case "section": case "duplicate": case "delete": setAgentPrompt({ kind: action, agent }); return;
     }
   };
+  const changePresentation = async (agent: Agent, patch: { display_name?: string | null; archived?: boolean }) => {
+    if (!actions || managementBusy) return;
+    setManagementBusy(true);
+    try {
+      await actions.patchAgent(agent.id, patch);
+      await store.refresh();
+      setNotice(patch.archived === true ? `${label(agent)} archived; its work and history are kept` : patch.archived === false ? `${label(agent)} restored` : 'Display name updated');
+    } catch (error) { fail('update agent presentation')(error); }
+    finally { setManagementBusy(false); }
+  };
   const onPromptDone = (ok: boolean, value?: string) => {
     const p = agentPrompt; setAgentPrompt(null);
     if (!ok || !p || !actions) return;
-    if (p.kind === "delete") {
+    if (p.kind === "rename") {
+      void changePresentation(p.agent, { display_name: value! });
+    } else if (p.kind === "delete") {
       void actions.remove(p.agent.id).then(async () => {
         setNotice(`${label(p.agent)} deleted`);
         if (selectedAgentId === p.agent.id) { setSelection({ type: "agent", agentId: LEAD_ID }); setPhoneView("list"); }
@@ -250,6 +279,7 @@ export function App({ source }: { source: JaegerSource }) {
           preview={menuAgent.last_message?.preview ?? store.summaries.find((x) => x.id === menuAgent.id)?.last_preview ?? ""}
           onAction={onAgentAction} onClose={() => setAgentMenu(null)} />
       )}
+      {agentPrompt?.kind === "rename" && <AgentPrompt title={`Rename ${label(agentPrompt.agent)}`} confirm="Save display name" input={{ placeholder: "Display name", value: label(agentPrompt.agent) }} message="Presentation only. Agent ID, role, tools, context and conversations stay the same." onDone={onPromptDone} />}
       {agentPrompt?.kind === "delete" && <AgentPrompt title={`Delete ${label(agentPrompt.agent)}?`} danger confirm="Delete"
         message="It leaves the sidebar. Its home chat and history are kept and can be restored." onDone={onPromptDone} />}
       {agentPrompt?.kind === "section" && <AgentPrompt title="New Section" confirm="Create" input={{ placeholder: "Section name" }}
@@ -260,7 +290,7 @@ export function App({ source }: { source: JaegerSource }) {
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
         onNewChat={newChat} onCreateAgent={createAgent} />
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} agentsPanel={<AgentManagement agents={store.agents} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived })} />} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
         onAgent={(agentId) => { setSelection({ type: "agent", agentId }); if (phone) setPhoneView("chat"); }}

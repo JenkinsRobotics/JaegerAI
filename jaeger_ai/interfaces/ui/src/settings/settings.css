@@ -78,3 +78,8 @@
   .jg-sheet__row { flex-wrap: wrap; padding: 8px 0; gap: 8px; }
   .jg-sheet__value { white-space: normal; overflow-wrap: anywhere; }
 }
+
+.jg-agent-management-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.jg-agent-management-actions button { font: inherit; padding: 5px 8px; }
+[aria-label="Manage agents"] .jg-sheet__card { margin-bottom: 10px; }
+[aria-label="Manage agents"] small { overflow-wrap: anywhere; }

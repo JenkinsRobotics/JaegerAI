@@ -2,7 +2,7 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `master` — operator-authorized canonical integration, 2026-10-19.
-**Current work:** [Mac source completion](integration/MAC_APP_COMPLETION.md), bounded agent menu + appearance/text sizing checkpoint.
+**Current work:** [Mac source completion](integration/MAC_APP_COMPLETION.md), bounded persistent display aliases, reversible archive/restore and shared operator pins checkpoint.
 **Branch rule:** one owner; canonical `interfaces/macos-shell` + `interfaces/ui` and required backend only. Source work authorized; runtime migration pending. No app/service start, stop, restart, install or switching; no credentials, authentication, permissions or persistent-access changes. No broad feature expansion or repeated broad suites. The [legacy cleanup record](integration/SCOPED_CLEANUP.md) remains cumulative recovery evidence. Never restore legacy frontends or automatic fallbacks.
 
 This is the single execution entry point for humans and coding agents. Re-read the current source before acting.

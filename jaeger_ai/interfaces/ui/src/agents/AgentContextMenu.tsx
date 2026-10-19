@@ -14,7 +14,7 @@ import { Icon, type IconName } from "../icons/Icon";
 import { AgentAvatar } from "./AgentAvatar";
 import { label } from "./agentsLogic";
 
-export type AgentMenuAction = "open" | "profile" | "history" | "read" | "pin" | "unpin" | "section" | "template" | "hide" | "copy-id" | "duplicate" | "delete";
+export type AgentMenuAction = "rename" | "open" | "profile" | "history" | "read" | "pin" | "unpin" | "section" | "template" | "hide" | "copy-id" | "duplicate" | "delete";
 type Item = { id: AgentMenuAction; label: string; icon: IconName; danger?: boolean };
 
 export function agentMenuItems(agent: Agent, caps: AgentCaps, pinned: boolean): { main: Item[]; more: Item[] } {
@@ -22,11 +22,12 @@ export function agentMenuItems(agent: Agent, caps: AgentCaps, pinned: boolean): 
     { id: "open", label: "Open chat", icon: "comment-discussion" },
     { id: "profile", label: "Agent profile", icon: "info" },
     { id: "history", label: "Conversation history", icon: "history" },
+    ...(caps.rename ? [{ id: "rename" as const, label: "Rename display name", icon: "edit" as IconName }] : []),
     { id: "read", label: caps.read ? "Mark Read" : "Mark Read on this device", icon: "pass" },
-    pinned ? { id: "unpin", label: "Unpin on this device", icon: "pin" } : { id: "pin", label: "Pin on this device", icon: "pin" },
+    ...(!isProtected(agent) ? [{ id: pinned ? "unpin" as const : "pin" as const, label: caps.pin ? (pinned ? "Unpin" : "Pin") : (pinned ? "Unpin on this device" : "Pin on this device"), icon: "pin" as IconName }] : []),
     ...(caps.sections ? [{ id: "section" as const, label: "New Section", icon: "new-folder" as IconName }] : []),
     ...(caps.template ? [{ id: "template" as const, label: "Share as Template", icon: "share" as IconName }] : []),
-    ...(caps.hide && !isProtected(agent) ? [{ id: "hide" as const, label: "Hide", icon: "eye-closed" as IconName, danger: true }] : []),
+    ...(caps.hide && !isProtected(agent) ? [{ id: "hide" as const, label: "Archive", icon: "eye-closed" as IconName, danger: true }] : []),
   ];
   const more: Item[] = [
     { id: "copy-id", label: "Copy ID", icon: "copy" },

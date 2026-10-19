@@ -9,7 +9,7 @@ import { AgentContextMenu, AgentPrompt, agentMenuItems } from "./AgentContextMen
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(() => { document.body.innerHTML = ""; });
 const gw = { id: "agent:gw", name: "gw", display_name: "Jaeger Gateway & WebUI", role: "builder" } as Agent;
-const ALL = { read: true, pin: true, hide: true, sections: true, duplicate: true, remove: true, template: true };
+const ALL = { rename: true, read: true, pin: true, hide: true, sections: true, duplicate: true, remove: true, template: true };
 const labels = (sel: string) => [...document.querySelectorAll(`${sel} [role="menuitem"]`)].map((b) => b.textContent!.replace(/[\uE000-\uF8FF]/g, "").trim());
 function mount(node: React.ReactNode) { const el = document.createElement("div"); document.body.append(el); const root = createRoot(el); act(() => root.render(node)); return root; }
 
@@ -27,8 +27,8 @@ describe("AgentContextMenu", () => {
     const onAction = vi.fn();
     mount(<AgentContextMenu agent={gw} preview="The iPhone fix is tested" at={{ x: 10, y: 10 }} phone caps={ALL} pinned={false} onAction={onAction} onClose={() => {}} />);
     expect(document.querySelector(".jg-amenu__bubble")!.textContent).toBe("The iPhone fix is tested");
-    expect(labels('[aria-label="Jaeger Gateway & WebUI actions"]')).toEqual(["Open chat", "Agent profile", "Conversation history", "Mark Read", "Pin on this device", "New Section", "Share as Template", "Hide", "More"]);
-    expect(document.querySelector(".is-danger")!.textContent).toContain("Hide");
+    expect(labels('[aria-label="Jaeger Gateway & WebUI actions"]')).toEqual(["Open chat", "Agent profile", "Conversation history", "Rename display name", "Mark Read", "Pin", "New Section", "Share as Template", "Archive", "More"]);
+    expect(document.querySelector(".is-danger")!.textContent).toContain("Archive");
     act(() => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((b) => b.textContent!.includes("More"))!.click());
     expect(labels('[aria-label="More"]')).toEqual(["More", "Copy ID", "Duplicate", "Delete"]);
     expect(document.querySelector(".jg-amenu__card.is-dimmed")).toBeTruthy();
@@ -43,8 +43,8 @@ describe("AgentContextMenu", () => {
   it("never offers Hide or Delete for protected agents (primary, native:jaeger)", () => {
     for (const a of [{ ...gw, primary: true }, { ...gw, id: "native:jaeger" }]) {
       const { main, more } = agentMenuItems(a, ALL, true);
-      expect(main.map((i) => i.label)).not.toContain("Hide");
-      expect(main.map((i) => i.label)).toContain("Unpin on this device");
+      expect(main.map((i) => i.label)).not.toContain("Archive");
+      expect(main.map((i) => i.label)).not.toContain("Unpin");
       expect(more.map((i) => i.label)).not.toContain("Delete");
     }
   });
