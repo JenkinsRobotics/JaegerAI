@@ -6,12 +6,14 @@ import threading
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from jaeger_kokoro_tts.engine import KokoroTTS
 
 
 class _RecordingPlayer:
     device_name = "bus:/act/speaker/pcm"
+    amplitude = 0.0
 
     def __init__(self) -> None:
         self.enqueued: list[np.ndarray] = []
@@ -123,3 +125,57 @@ def test_stop_during_synthesis_does_not_publish_late_audio(monkeypatch):
     assert result["reason"] == "interrupted"
     assert player.cancelled is True
     assert player.enqueued == []
+
+
+@pytest.mark.parametrize("drain_result", [True, False])
+def test_stop_during_drain_never_acknowledges_completed_playback(monkeypatch, drain_result):
+    from jaeger_kokoro_tts.node import TTSNode
+    from jaeger_os.contract import topics
+
+    entered, release = threading.Event(), threading.Event()
+
+    class Player(_RecordingPlayer):
+        def wait_until_drained(self):
+            entered.set()
+            assert release.wait(2)
+            return drain_result
+
+        def cancel(self):
+            super().cancel()
+            release.set()
+
+        def reset(self):
+            raise AssertionError("cancellation was misclassified as a drain failure")
+
+    class Bus:
+        def __init__(self):
+            self.messages = []
+
+        def publish(self, message):
+            self.messages.append(message)
+
+    bus, player = Bus(), Player()
+    engine = KokoroTTS(bus=bus)
+    engine._player = player
+    monkeypatch.setattr(engine, "_ensure_player", lambda: player)
+
+    def pipeline(text, **kwargs):
+        yield SimpleNamespace(audio=np.ones(4, dtype=np.float32))
+
+    monkeypatch.setattr(engine, "_ensure_pipeline", lambda: pipeline)
+    node = TTSNode(bus=bus, synthesizer=engine, warm_on_start=False,
+                   install_signal_handlers=False)
+    node._on_speech_command(topics.SpeechCommand(text="drain pending", correlation_id="drain-ui"))
+    worker = threading.Thread(target=node.tick)
+    worker.start()
+    assert entered.wait(2)
+    node._on_speech_stop(topics.SpeechStop(correlation_id="drain-ui"))
+    worker.join(2)
+    assert not worker.is_alive()
+    assert player.cancelled is True
+    assert len(player.enqueued) == 1  # PCM was queued before interruption.
+    receipts = [m for m in bus.messages if isinstance(m, topics.SpokenAck)]
+    assert len(receipts) == 1
+    assert receipts[0].correlation_id == "drain-ui"
+    assert receipts[0].ok is False
+    assert receipts[0].reason == "interrupted"

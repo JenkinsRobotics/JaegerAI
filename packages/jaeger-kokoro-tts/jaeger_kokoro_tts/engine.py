@@ -640,6 +640,7 @@ class KokoroTTS:
         voice: str | None = None,
         rate: float = 1.0,
         correlation_id: str | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         """Synthesize speech with Kokoro and play through the persistent
         sounddevice output.  Supports minimal SSML: <speak>,
@@ -656,7 +657,8 @@ class KokoroTTS:
 
         ``voice`` and ``rate`` are request-local overrides. The configured
         pipeline language remains fixed, so the voice must be compatible
-        with that language.
+        with that language. ``cancel_event`` is an optional request-owned
+        token; an already-set token prevents player/model startup.
         """
         import numpy as np
 
@@ -679,9 +681,13 @@ class KokoroTTS:
                 "reason": "rate must be between 0.5 and 2.0",
             }
 
-        # A new event keeps a late stop for one request from cancelling the
-        # next request in the node's queue.
-        self._cancel = threading.Event()
+        # The node creates this token before entering the engine. Adopting it
+        # preserves Stop during that handoff; never clear/replace a supplied
+        # event. Standalone calls still receive a fresh request-local token.
+        cancellation = cancel_event if cancel_event is not None else threading.Event()
+        self._cancel = cancellation
+        if cancellation.is_set():
+            return {"spoken": False, "reason": "interrupted", "text": cleaned, "samples": 0}
 
         started = time.perf_counter()
         try:
@@ -693,6 +699,8 @@ class KokoroTTS:
                 "reason": f"player open failed: {exc}",
                 "text": cleaned,
             }
+        if cancellation.is_set():
+            return {"spoken": False, "reason": "interrupted", "text": cleaned, "samples": 0}
         try:
             pipe = self._ensure_pipeline()
         except Exception as exc:  # noqa: BLE001
@@ -712,7 +720,7 @@ class KokoroTTS:
         def _enqueue_chunk(chunk_24k: np.ndarray) -> None:
             """Queue one chunk and mirror it to direct-path AEC."""
             nonlocal queued_samples
-            if chunk_24k.size == 0 or self._cancel.is_set():
+            if chunk_24k.size == 0 or cancellation.is_set():
                 return
             # On the bus path the driver writes its own reference from
             # what it actually plays; writing one here as well would
@@ -738,9 +746,9 @@ class KokoroTTS:
                     cleaned,
                     voice=voice,
                     rate=rate,
-                    cancel_event=self._cancel,
+                    cancel_event=cancellation,
                 )
-                if rendered is not None and not self._cancel.is_set():
+                if rendered is not None and not cancellation.is_set():
                     _enqueue_chunk(
                         np.asarray(rendered, dtype=np.float32))
             elif has_ssml:
@@ -749,7 +757,7 @@ class KokoroTTS:
                         for r in pipe(
                             value, voice=voice or self._pipeline_voice(), speed=rate,
                         ):
-                            if self._cancel.is_set():
+                            if cancellation.is_set():
                                 break
                             if r.audio is None:
                                 continue
@@ -763,7 +771,7 @@ class KokoroTTS:
                 for r in pipe(
                     cleaned, voice=voice or self._pipeline_voice(), speed=rate,
                 ):
-                    if self._cancel.is_set():
+                    if cancellation.is_set():
                         break
                     if r.audio is None:
                         continue
@@ -775,7 +783,7 @@ class KokoroTTS:
                 "text": cleaned,
             }
 
-        if self._cancel.is_set():
+        if cancellation.is_set():
             return {
                 "spoken": False,
                 "reason": "interrupted",
@@ -793,7 +801,17 @@ class KokoroTTS:
         # Signal end-of-message and block until the audio thread has
         # actually played everything we enqueued.
         player.mark_end()
-        if not player.wait_until_drained():
+        drained = player.wait_until_drained()
+        # cancel() may unblock drain with True (or False). Drain completion
+        # alone is not evidence that an interrupted utterance played fully.
+        if cancellation.is_set():
+            return {
+                "spoken": False,
+                "reason": "interrupted",
+                "text": cleaned,
+                "samples": queued_samples,
+            }
+        if not drained:
             try:
                 player.reset()
             except Exception:  # noqa: BLE001
