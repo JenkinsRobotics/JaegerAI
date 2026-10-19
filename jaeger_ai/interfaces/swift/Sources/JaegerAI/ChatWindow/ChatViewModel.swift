@@ -248,6 +248,7 @@ final class ChatViewModel: ObservableObject {
     func requestStopCurrentTurn() {
         let selected = sessionKey
         let displayed = controlledRequest
+        recoveredApprovalState.invalidateForStop(session: selected, requestID: displayed?.request_id)
         if selected == "dispatcher" { controlDispatcher("cancel"); return }
         Task { await stopTurn(displayed: displayed, selected: selected) }
     }
@@ -255,6 +256,7 @@ final class ChatViewModel: ObservableObject {
     func stopCurrentTurn() async {
         let selected = sessionKey
         let displayed = controlledRequest
+        recoveredApprovalState.invalidateForStop(session: selected, requestID: displayed?.request_id)
         if selected == "dispatcher" { controlDispatcher("cancel"); return }
         await stopTurn(displayed: displayed, selected: selected)
     }
@@ -353,7 +355,7 @@ final class ChatViewModel: ObservableObject {
     /// the reply the operator asked for is always the last thing in the
     /// turn. Held as an id rather than an index because activity rows
     /// inserted above it shift its position on nearly every event.
-    let recoveredApprovalState = RecoveredApprovalState()
+    let recoveredApprovalState: RecoveredApprovalState
     private var selectionGeneration = UUID()
     private var localTurnSession: String?
     private var recoveryTask: Task<Void, Never>?
@@ -635,8 +637,10 @@ final class ChatViewModel: ObservableObject {
          controlGateway: any SessionControlClient = GatewayClient.fromEnvironment(),
          startBackgroundObservers: Bool = true,
          dispatcherClient: (any DispatcherConversationClient)? = nil,
-         recoveryGateway: any ChatRecoveryClient = GatewayClient.fromEnvironment()) {
+         recoveryGateway: any ChatRecoveryClient = GatewayClient.fromEnvironment(),
+         recoveredApprovalState: RecoveredApprovalState? = nil) {
         self.agent = agent
+        self.recoveredApprovalState = recoveredApprovalState ?? RecoveredApprovalState()
         self.sessionKey = sessionKey
         self.recoveryGateway = recoveryGateway
         self.controlGateway = controlGateway

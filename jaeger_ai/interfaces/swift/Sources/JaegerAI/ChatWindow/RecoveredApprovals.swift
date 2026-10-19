@@ -46,6 +46,8 @@ final class RecoveredApprovalState: ObservableObject {
     @Published private(set) var busy = false
     @Published private(set) var context: [GatewayClient.ConversationSnapshot.Activity] = []
     private var identity: String?
+    private var epoch = UUID()
+    private var stoppedRequests: Set<String> = []
     private var session = "", request = "", profile = ""
     private var uncertain: Set<String> = []
     private var active = false
@@ -54,10 +56,10 @@ final class RecoveredApprovalState: ObservableObject {
     init(client: any RecoveredApprovalClient = GatewayClient.fromEnvironment()) { self.client = client }
     func bind(session: String, request: GatewayClient.RequestState?, profile: String?, context: [GatewayClient.ConversationSnapshot.Activity] = []) {
         let next = session + "/" + (request?.request_id ?? "") + "/" + (profile ?? "")
-        if identity != next { cards = []; notice = nil }
+        if identity != next { epoch = UUID(); cards = []; notice = nil }
         identity = next
         self.session = session; self.request = request?.request_id ?? ""; self.profile = profile ?? ""
-        active = ["admitted", "running", "awaiting_approval"].contains(request?.status ?? "") && !self.profile.isEmpty
+        active = ["admitted", "running", "awaiting_approval"].contains(request?.status ?? "") && !self.profile.isEmpty && !stoppedRequests.contains(session + "/" + self.request)
         self.context = context
         if !active {
             cards = []
@@ -71,7 +73,12 @@ final class RecoveredApprovalState: ObservableObject {
         if stopRequested || self.session != session || self.request != request?.request_id ||
             !["admitted", "running", "awaiting_approval"].contains(request?.status ?? "") { clear() }
     }
+    func invalidateForStop(session: String, requestID: String?) {
+        if let requestID { stoppedRequests.insert(session + "/" + requestID) }
+        clear() // synchronous epoch invalidation also rejects suspended preflights
+    }
     func clear() {
+        epoch = UUID()
         identity = nil; active = false; cards = []; context = []; notice = nil
     }
     func canDecide(_ card: RecoveredApproval) -> Bool {
@@ -82,25 +89,25 @@ final class RecoveredApprovalState: ObservableObject {
     }
     func refresh() async {
         guard active else { return }
-        let captured = identity, selected = session, rid = request
+        let captured = epoch, selected = session, rid = request
         do {
             let pending = try await client.pendingApprovals(session:selected, request:rid)
-            guard captured == identity, active else { return }
+            guard captured == epoch, active else { return }
             cards = pending.filter(matches)
         } catch {
-            guard captured == identity else { return }
+            guard captured == epoch else { return }
             notice = "Pending approvals could not be refreshed. " + error.localizedDescription
         }
     }
     func decide(_ card: RecoveredApproval, choice: String) async {
         guard canDecide(card), card.options.contains(choice), Self.labels[choice] != nil else { return }
-        let captured = identity, selected = session, rid = request, boundProfile = profile
+        let captured = epoch, selected = session, rid = request, boundProfile = profile
         busy = true
         defer { busy = false }
         var submitted = false
         do {
             let fresh = try await client.approval(id:card.id)
-            guard captured == identity, active else { return }
+            guard captured == epoch, active else { return }
             guard matches(fresh), fresh.options.contains(choice), fresh.prompt == card.prompt else {
                 notice = "This approval expired, was resolved, or changed. No decision was sent."
                 await refresh(); return
@@ -108,7 +115,7 @@ final class RecoveredApprovalState: ObservableObject {
             uncertain.insert(card.id) // no duplicate POST after an uncertain result
             submitted = true
             let receipt = try await client.decideApproval(id:card.id, choice:choice, session:selected, request:rid, profile:boundProfile)
-            guard captured == identity else { return }
+            guard captured == epoch else { return }
             guard receipt.resolved, receipt.approval_id == card.id, receipt.decision == choice else {
                 notice = "Decision outcome unconfirmed. Refresh observes status; this decision will not be resent."
                 await refresh(); return
@@ -116,7 +123,7 @@ final class RecoveredApprovalState: ObservableObject {
             notice = "Decision recorded — waiting for the runtime; this is not proof the tool completed."
             await refresh()
         } catch {
-            guard captured == identity else { return }
+            guard captured == epoch else { return }
             if submitted, let failure = error as? GatewayClient.Failure, [403,404,409].contains(failure.statusCode ?? 0) {
                 notice = "Approval denied or stale; no permission was granted by this response. " + error.localizedDescription
             } else {
