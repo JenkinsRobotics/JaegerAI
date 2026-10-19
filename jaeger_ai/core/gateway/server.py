@@ -627,6 +627,7 @@ class _GatewayToolConfirmationProvider:
         tier_name = getattr(getattr(request, "tier", None), "name", str(getattr(request, "tier", "")))
         aid = f"approval_{uuid.uuid4().hex[:12]}"
         box: dict[str, Any] = {"done": threading.Event(), "approved": False}
+        origin = self.app._approval_origin(self.session_id)
 
         def _arm() -> None:
             fut = loop.create_future()
@@ -643,9 +644,10 @@ class _GatewayToolConfirmationProvider:
                     "target": target,
                     "summary": summary,
                     "reason": tier_name,
+                    **({"origin": origin} if origin else {}),
                 },
             )
-            self.app.event_bus.publish(self.session_id, "approval.request", {
+            self.app._publish_approval_request(self.session_id, origin, {
                 "approval_id": aid,
                 # Same card shape as handoff approvals (see handle_stream_events).
                 "kind": "tool",
@@ -5261,8 +5263,50 @@ class JaegerGatewayApp:
 
         return response
 
+    def _approval_origin(self, session_id: str | None) -> dict[str, Any] | None:
+        """Where a card filed under a child session (``task:<id>`` worker,
+        specialist) belongs: ``{task_id, child_session_id, agent_id,
+        parent_session_id}``, or None for a top-level chat."""
+        if not session_id:
+            return None
+        try:
+            session = self.store.get_session(session_id) or {}
+        except Exception:  # noqa: BLE001 — no origin is the safe answer
+            return None
+        meta = session.get("metadata") or {}
+        parent = str(meta.get("parent_session_id") or "")
+        if not parent or parent == session_id:
+            return None
+        return {
+            "task_id": meta.get("task_id"),
+            "child_session_id": session_id,
+            "agent_id": session.get("agent_id") or meta.get("agent_id") or "native:jaeger",
+            "parent_session_id": parent,
+        }
+
+    def _publish_approval_request(self, session_id: str, origin: dict[str, Any] | None,
+                                  payload: dict[str, Any]) -> None:
+        """approval.request on the card's own stream and, for a child card, on
+        the parent chat's stream too (same approval_id, with ``origin``)."""
+        if origin:
+            payload = {**payload, "origin": origin}
+        self.event_bus.publish(session_id, "approval.request", payload)
+        if origin and origin.get("parent_session_id"):
+            self.event_bus.publish(origin["parent_session_id"], "approval.request", payload)
+
+    @staticmethod
+    def _with_origin(row: dict[str, Any]) -> dict[str, Any]:
+        origin = (row.get("metadata") or {}).get("origin")
+        return {**row, "origin": origin} if origin else row
+
     async def handle_list_approvals(self, request: web.Request) -> web.Response:
-        pending = self.store.list_pending_approvals()
+        """Pending approvals. ``?session_id=`` keeps that chat's cards plus the
+        cards its background workers / specialists filed under child sessions."""
+        pending = [self._with_origin(row) for row in self.store.list_pending_approvals()]
+        sid = (request.query.get("session_id") or "").strip()
+        if sid:
+            pending = [row for row in pending if row.get("session_id") == sid
+                       or ((row.get("origin") or {}).get("parent_session_id") == sid)]
         return web.json_response({"approvals": pending})
 
     async def handle_get_approval(self, request: web.Request) -> web.Response:
@@ -5562,6 +5606,11 @@ class JaegerGatewayApp:
             "decision": decision,
             "handoff": handoff_row,
         }
+        row_origin = ((resolved or {}).get("metadata") or {}).get("origin")
+        if resolved is not None:
+            payload["session_id"] = resolved.get("session_id")
+        if row_origin:
+            payload["origin"] = row_origin
         self.event_bus.publish("*", "approval.resolved", payload)
         return web.json_response(payload)
 
