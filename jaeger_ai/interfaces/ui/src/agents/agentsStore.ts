@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
 import type { JaegerSource } from "../api/source";
-import type { Agent, AgentSummary } from "../api/types";
+import type { Agent, AgentSummary, GatewayEvent } from "../api/types";
+import type { Section } from "../api/agentActions";
 import { loadSeen, markSeen } from "./unread";
 
 export interface AgentsState {
   agents: Agent[];
   summaries: AgentSummary[];
+  /** Server sections (GET /v1/sections), only fetched when agents carry section_id; empty otherwise. */
+  sections?: Section[];
   seen: Record<string, number>;
   loading: boolean;
   /** Set when the last refresh failed. Agents keep the last REAL roster (or
@@ -15,19 +18,20 @@ export interface AgentsState {
 
 const POLL_MS = 15_000;
 
-export async function loadRoster(source: Pick<JaegerSource, "agents" | "agentsSummary">) {
+export async function loadRoster(source: Pick<JaegerSource, "agents" | "agentsSummary"> & Partial<Pick<JaegerSource, "agentActions">>) {
   const [agents, summaries] = await Promise.all([source.agents(), source.agentsSummary()]);
-  return { agents, summaries };
+  const sections = source.agentActions && agents.some((a) => "section_id" in a) ? await source.agentActions.sections().catch(() => []) : [];
+  return { agents, summaries, sections };
 }
 
 export function useAgentsStore(source: JaegerSource) {
-  const [state, setState] = useState<AgentsState>({ agents: [], summaries: [], seen: loadSeen(), loading: true });
+  const [state, setState] = useState<AgentsState>({ agents: [], summaries: [], sections: [], seen: loadSeen(), loading: true });
 
   const refresh = useCallback(async () => {
     setState((s) => ({ ...s, loading: true }));
     try {
-      const { agents, summaries } = await loadRoster(source);
-      setState((s) => ({ ...s, agents, summaries, loading: false, error: undefined }));
+      const { agents, summaries, sections } = await loadRoster(source);
+      setState((s) => ({ ...s, agents, summaries, sections, loading: false, error: undefined }));
     } catch (error) {
       setState((s) => ({ ...s, loading: false, error: String((error as Error)?.message ?? error) }));
     }
@@ -39,6 +43,29 @@ export function useAgentsStore(source: JaegerSource) {
     return () => clearInterval(timer);
   }, [refresh]);
 
+  // Live roster: agent.* / section.* refresh (debounced); agent.unread patches the agent in place. Polling above
+  // stays as the fallback (and covers a gateway without the global stream).
+  useEffect(() => {
+    if (!source.globalEvents) return;
+    const abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const soon = () => { clearTimeout(timer); timer = setTimeout(() => void refresh(), 250); };
+    void source.globalEvents((event) => onRosterEvent(event, soon, setState), abort.signal).catch(() => { /* no global stream: poll */ });
+    return () => { abort.abort(); clearTimeout(timer); };
+  }, [source, refresh]);
+
   const seeAgent = useCallback((agentId: string) => setState((s) => ({ ...s, seen: markSeen(agentId) })), []);
   return { ...state, refresh, seeAgent };
+}
+
+/** Apply one global event to the roster: agent.unread in place, other agent.* / section.* via refresh. */
+export function onRosterEvent(event: GatewayEvent, refresh: () => void, setState: (f: (s: AgentsState) => AgentsState) => void) {
+  const name = event.event ?? "";
+  if (name === "agent.unread") {
+    const p = (event.payload ?? {}) as { agent_id?: string; unread_count?: number; last_message?: Agent["last_message"] };
+    if (!p.agent_id) return;
+    setState((s) => ({ ...s, agents: s.agents.map((a) => (a.id === p.agent_id ? { ...a, unread_count: p.unread_count ?? a.unread_count, last_message: p.last_message ?? a.last_message } : a)) }));
+    return;
+  }
+  if (name.startsWith("agent.") || name.startsWith("section.")) refresh();
 }

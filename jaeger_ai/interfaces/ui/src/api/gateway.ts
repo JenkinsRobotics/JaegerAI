@@ -125,6 +125,12 @@ export class GatewayClient implements JaegerSource {
     return Array.isArray(data) ? data : data.handoffs ?? [];
   }
 
+  async globalEvents(onEvent: (event: GatewayEvent) => void, signal: AbortSignal) {
+    const response = await fetch(`${this.base}/v1/events`, { headers: { Accept: "text/event-stream" }, credentials: "same-origin", signal });
+    if (!response.ok || !response.body) throw new GatewayError(`events ${response.status}`, response.status, undefined);
+    for await (const frame of decodeSSE(response.body, signal)) onEvent(normalizeFrame(frame));
+  }
+
   async stream(sessionId: string, cursor: number | undefined, onEvent: (event: GatewayEvent) => void, signal: AbortSignal) {
     const qs = cursor ? `?last_event_id=${cursor}` : "";
     const response = await fetch(`${this.base}/v1/sessions/${encodeURIComponent(sessionId)}/stream${qs}`, {

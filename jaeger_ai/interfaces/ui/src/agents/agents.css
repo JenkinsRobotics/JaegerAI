@@ -293,3 +293,6 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-aprompt__actions .is-primary { background: var(--jg-p-blue); color: var(--jg-p-on-color); }
 .jg-toast { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 90px); transform: translateX(-50%); z-index: 90; padding: 8px 14px;
   border-radius: 18px; background: var(--jg-menu-toast); color: var(--jg-p-on-color); font-size: 14px; box-shadow: 0 6px 24px var(--jg-menu-shadow); }
+.jg-agent-section { padding: 12px 14px 4px; font-size: 12px; font-weight: 600; color: var(--aether-color-text-muted); }
+/* No iOS long-press callout / text selection on agent rows: the long-press opens our agent menu instead. */
+.jg-agent-row, .jg-agent-list__item, .jg-prow, .jg-plead { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }

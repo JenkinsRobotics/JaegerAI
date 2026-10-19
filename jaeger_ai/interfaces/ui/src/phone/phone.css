@@ -62,3 +62,4 @@ html.jg-phone button, html.jg-phone [role="menuitem"] { min-height: 44px; }
 html.jg-phone .jg-composer button, html.jg-phone .jg-prow__art * { min-height: 0; }
 html.jg-phone .jg-phone-list .jg-prow { min-height: 78px; }
 html.jg-phone .jg-handoff, html.jg-phone .jg-handoff__name, html.jg-phone .jg-handoff__who, html.jg-phone .jg-progress-text { color: var(--jg-p-dim); font-size: 15px; }
+.jg-psection { margin: 14px 18px 2px; font-size: 13px; font-weight: 600; color: var(--jg-p-dim); text-transform: none; }

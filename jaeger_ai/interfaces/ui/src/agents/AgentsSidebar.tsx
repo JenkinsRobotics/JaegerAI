@@ -3,6 +3,7 @@ import { GlyphBranch, GlyphCode, GlyphCube, PlusIcon, SearchIcon, SidebarIcon, T
 import { ErrorState } from "../shell/ErrorState";
 import type { SessionRow } from "../api/types";
 import type { AgentsState } from "./agentsStore";
+import { groupRows } from "./sections";
 import { AgentRow } from "./AgentRow";
 import { sidebarRows } from "./agentsLogic";
 import { ChatList } from "./ChatList";
@@ -76,7 +77,9 @@ export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewCha
           </PinnedArea>
         )}
         <SpecialistList dragType={AGENT_DRAG_TYPE} onPin={onPin} onUnpin={onUnpin} onInfo={onInfo} onHistory={onHistory} onMarkRead={onMarkRead} onAgentMenu={onAgentMenu} emptyDropHint={!specialists.length && pinned.length > 0}>
-          {specialists.map((row) => (
+          {groupRows(specialists, state.sections ?? [], { pinnedGroup: false }).map((g) => [
+            g.title && <div key={`h:${g.id}`} className="jg-agent-section" role="heading" aria-level={3}>{g.title}</div>,
+            ...g.rows.map((row) => (
             <div key={row.agent.id} className="jg-agent-list__item" draggable
               onDragStart={(e) => { e.dataTransfer.setData(AGENT_DRAG_TYPE, row.agent.id); e.dataTransfer.effectAllowed = "move"; }}
               data-agent-id={row.agent.id}>
@@ -88,7 +91,7 @@ export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewCha
               />
               {chatsFor(row.agent.id)}
             </div>
-          ))}
+          ))])}
           {!state.loading && !state.error && !all.length && <p className="jg-muted jg-pad">No specialists yet.</p>}
         </SpecialistList>
       </>
