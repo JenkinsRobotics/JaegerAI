@@ -328,3 +328,85 @@ def test_real_node_scoped_stop_before_say_delivery_does_not_revive_speech(monkey
     receipts = [m for m in bus.published if isinstance(m, topics.SpokenAck)]
     assert len(receipts) == 1 and receipts[0].ok is False
     assert audio.stop_count == 0
+
+
+def test_stop_in_node_to_engine_entry_gap_survives_kokoro_startup(monkeypatch):
+    """Pause after node cancellation check, before Kokoro adopts its token."""
+    from types import SimpleNamespace
+
+    import numpy as np
+    from jaeger_kokoro_tts.engine import KokoroTTS
+    from jaeger_kokoro_tts.node import TTSNode
+
+    entry, resume = threading.Event(), threading.Event()
+
+    class PausedEngine(KokoroTTS):
+        def speak(self, text, **kwargs):
+            if text == "cancel at entry":
+                entry.set()
+                assert resume.wait(2)
+            return super().speak(text, **kwargs)
+
+    class Player:
+        device_name = "fake audio"
+
+        def __init__(self):
+            self.samples = []
+            self.begun = []
+
+        def begin(self, correlation_id):
+            self.begun.append(correlation_id)
+
+        def enqueue(self, audio):
+            self.samples.append(audio)
+
+        def mark_end(self):
+            pass
+
+        def wait_until_drained(self):
+            return True
+
+    bus, player = _NodeBus(), Player()
+    engine = PausedEngine(bus=bus)
+    node = TTSNode(bus=bus, synthesizer=engine, warm_on_start=False,
+                   install_signal_handlers=False)
+    bus.node = node
+    monkeypatch.setattr(engine, "_ensure_player", lambda: player)
+
+    def pipeline(text, **kwargs):
+        yield SimpleNamespace(audio=np.ones(4, dtype=np.float32))
+
+    monkeypatch.setattr(engine, "_ensure_pipeline", lambda: pipeline)
+    bus.publish(topics.SpeechCommand(text="cancel at entry", correlation_id="entry-ui"))
+    worker = threading.Thread(target=node.tick)
+    worker.start()
+    assert entry.wait(2)
+    # If playback held the claim lock, this thread could not finish until
+    # entry was resumed. It must deliver Stop while engine entry is paused.
+    stopper = threading.Thread(target=lambda: bus.publish(
+        topics.SpeechStop(correlation_id="entry-ui")))
+    stopper.start()
+    stopper.join(1)
+    try:
+        assert not stopper.is_alive()
+        assert node._active_cancel.is_set()
+    finally:
+        resume.set()
+        worker.join(2)
+        stopper.join(2)
+    assert not worker.is_alive()
+    assert player.begun == []
+    assert player.samples == []
+    receipts = [m for m in bus.published if isinstance(m, topics.SpokenAck)
+                and m.correlation_id == "entry-ui"]
+    assert len(receipts) == 1
+    assert receipts[0].ok is False
+    assert receipts[0].reason == "interrupted"
+    # The cancelled token is request-local; another producer still plays.
+    bus.publish(topics.SpeechCommand(text="next producer", correlation_id="next"))
+    node.tick()
+    assert player.begun == ["next"]
+    assert len(player.samples) == 1
+    next_ack = [m for m in bus.published if isinstance(m, topics.SpokenAck)
+                and m.correlation_id == "next"]
+    assert len(next_ack) == 1 and next_ack[0].ok is True
