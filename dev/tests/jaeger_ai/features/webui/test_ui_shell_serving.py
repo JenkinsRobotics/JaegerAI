@@ -115,3 +115,34 @@ def test_without_a_build_sw_and_manifest_stay_legacy(tmp_path, monkeypatch):
     mod = _load()
     for path in ("/sw.js", "/static/sw.js", "/static/manifest.json"):
         assert _get(mod, path)[0] is False
+
+
+def test_build_root_files_are_served_with_their_types(dist):
+    (dist / "jaeger-icon.svg").write_text("<svg/>")
+    (dist / "jaeger-icon-180.png").write_bytes(b"\x89PNG")
+    (dist / "manifest.webmanifest").write_text('{"name": "Jaeger"}')
+    (dist / ".env").write_text("SECRET=1")
+    (dist / "copy.html").write_text("<html>")
+    (dist / "alias").symlink_to(dist / "index.html")
+    (dist.parent / "outside.png").write_bytes(b"no")
+    (dist / "out.png").symlink_to(dist.parent / "outside.png")
+    mod = _load()
+    for path, ctype in (("/jaeger-icon.svg", "image/svg+xml"), ("/jaeger-icon-180.png", "image/png"),
+                        ("/manifest.webmanifest", "application/manifest+json"),
+                        ("/manifest.json", "application/manifest+json")):
+        out, h = _get(mod, path)
+        assert out is True and h.status == 200 and h.headers["Content-Type"].startswith(ctype), path
+    assert b'"Jaeger"' in _get(mod, "/manifest.json")[1].wfile.getvalue()
+    for path in ("/.env", "/copy.html", "/alias", "/out.png", "/assets", "/../secret.txt", "/missing.png"):
+        assert _get(mod, path)[0] is False, path
+
+
+def test_manifest_json_falls_through_without_a_build_manifest(dist):
+    assert _get(_load(), "/manifest.json")[0] is False
+
+
+def test_without_a_build_root_files_stay_legacy(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAEGER_WEBUI_UI_DIST", str(tmp_path / "missing"))
+    mod = _load()
+    for path in ("/manifest.webmanifest", "/manifest.json", "/jaeger-icon.svg"):
+        assert _get(mod, path)[0] is False
