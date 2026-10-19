@@ -160,6 +160,27 @@ final class StackController {
         return result
     }
 
+    /// Explicit foreground ownership only; no service invocation and no Gateway health prerequisite.
+    func acquireForegroundOwnership() -> String? {
+        guard !headless, mode == .production, leasePolicy.isEnabled else {
+            return "foreground_production_lease_policy_required"
+        }
+        let env = ProcessInfo.processInfo.environment
+        // Require an explicit state root so shell and the later Gateway command agree.
+        guard let root = env["JAEGER_STATE_DIR"], root.hasPrefix("/"),
+              env[LeaseContract.envKey] == nil, let path = leasePath else {
+            return "explicit_absolute_JAEGER_STATE_DIR_required_without_lease_override"
+        }
+        let stopPath = env["JAEGER_GLOBAL_STOP_PATH"] ?? root + "/control/global-stop.json"
+        let beat = LeaseBeat(path: path)
+        do {
+            try beat.startForeground(stopPath: stopPath)
+            lease = beat
+            shellLog("[shell][lease] foreground ownership acquired before Gateway startup at \(path); no services started")
+            return nil
+        } catch { return String(describing: error) }
+    }
+
     /// Launch: hold the lease when the production stack is already running (never in headless checks).
     /// `allowHeadless` only for --verify-lease-policy (temp JAEGER_LIFECYCLE_LEASE, isolated gateway).
     func acquireLeaseIfStackRunning(allowHeadless: Bool = false) {

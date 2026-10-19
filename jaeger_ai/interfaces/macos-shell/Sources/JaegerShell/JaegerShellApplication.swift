@@ -135,7 +135,17 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         showWindow()
         installRulesThenLoad()
         statusController?.refreshIcon()
-        stack.acquireLeaseIfStackRunning()
+        if CommandLine.arguments.contains(ForegroundLease.argument) {
+            if let error = stack.acquireForegroundOwnership() {
+                shellLog("[shell][lease] foreground startup refused: \(error)")
+                let alert = NSAlert()
+                alert.messageText = "Lifecycle ownership was not acquired"
+                alert.informativeText = error + "\nNo services were started."
+                alert.runModal()
+            }
+        } else {
+            stack.acquireLeaseIfStackRunning()
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
