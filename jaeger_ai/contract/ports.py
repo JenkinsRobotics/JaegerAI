@@ -58,6 +58,9 @@ MCP_GATEWAY_URL: Final = os.environ.get(
 MCP_HTTP_PORT: Final = 8792
 """Jaeger's own loopback MCP backend; Agentgateway proxies to it."""
 
+MCP_EVENTS_PORT: Final = 8797
+"""Optional ARES-only MCP Events facade; config may override its port."""
+
 MCP_HTTP_PATH: Final = "/mcp"
 """Canonical streamable-HTTP MCP route."""
 
@@ -129,6 +132,7 @@ def is_gateway_port(port: int | None) -> bool:
 
 
 __all__ = [
+    "MCP_EVENTS_PORT",
     "A2A_GATEWAY_PORT",
     "A2A_GATEWAY_URL",
     "A2A_CONTAINER_GATEWAY_URL",
