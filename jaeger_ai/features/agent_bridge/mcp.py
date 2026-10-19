@@ -79,9 +79,10 @@ def register(mcp, client_for_context):
         rea_tools: list[str] | None = None,
         ctx: Context | None = None,
     ) -> dict:
-        """Request text-only analysis through Gateway admission; no tool execution.
+        """Request workspace file work through normal Gateway authority/approvals.
 
-        No tools are granted. REA pass-through is an incomplete acceptance
+        Only supported native file tools are granted. Shell/exec and tools without
+        bounded resource contracts are unavailable. REA is an incomplete acceptance
         item: unknown/mutating names are denied; known REA names fail closed
         until caller/thread/workspace handle confinement is implemented.
         """
@@ -101,13 +102,13 @@ def register(mcp, client_for_context):
     @mcp.tool()
     @_off_event_loop
     def goal_status(id: str, ctx: Context | None = None) -> dict:
-        """Read text-only progress; this endpoint never reports verified tool execution."""
+        """Read progress; only the canonical task owner can verify execution."""
         return call(ctx, "GET", f"/v1/agent-goals/{key(id)}")
 
     @mcp.tool()
     @_off_event_loop
     def goal_result(id: str, ctx: Context | None = None) -> dict:
-        """Retrieve text-only output; a model claim is not verified execution."""
+        """Retrieve goal output; a model claim is not verified execution."""
         return call(ctx, "GET", f"/v1/agent-goals/{key(id)}")
 
     @mcp.tool()

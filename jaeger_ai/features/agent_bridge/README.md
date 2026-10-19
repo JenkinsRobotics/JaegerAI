@@ -1,136 +1,158 @@
-# Local agent bridge — Part 1 incomplete, Part 3 implemented
+# Agent bridge — Phase 2
 
-**Acceptance status:** authenticated messaging and an explicitly text-only goal
-interface are implemented and locally tested. Tool execution is not promised. The proposal's explicit `rea_*` pass-through is
-**not implemented**. Goal tool grants were not an equivalent replacement.
-All nonempty REA grants now fail closed (501 for exact allowlisted names; 403 for
-unknown/mutating names). Full Parts 1 and 3 completion must not be claimed.
-See [REVIEW.md](REVIEW.md) for the security review and
-[REA_FEASIBILITY.md](REA_FEASIBILITY.md) for the inspected installed API, concrete
-limitations, and private-provider prerequisite.
+Base: `1ab5e31221fdf93e0447f2e872d227be752ff0c3`. Phase 2 keeps the authenticated
+inbox and dedicated `ares`/`grokbot` callers, adds a durable webhook outbox, and
+enables a bounded native-file goal toolset through the ordinary Gateway owner,
+PolicyKernel, executor and approval cards. It does not enable shared-target REA.
 
-This opt-out feature adds an authenticated local inbox and delegates goals to
-Jaeger's existing Gateway admission, request receipts, PolicyKernel, approvals,
-and cancellation owner. It creates no execution engine. A delivered `task`
-message is inert data; only the explicit `start_goal` operation admits a text-only turn.
+| Scope | Implementation / acceptance |
+| --- | --- |
+| Authenticated local inbox and MCP/REST | Retained from Phase 1; caller/thread/goal isolation remains enforced. |
+| Webhook outbox | Implemented and tested with an isolated fake receiver. Real HTTPS endpoint/Grok acceptance is deferred. |
+| Tool-enabled goals | Seven existing native file tools, subject to workspace confinement and existing owner approvals. Full lead catalog and privileged exec are not exposed. |
+| Direct REA | No tools supported. All 50 exact allowlisted names remain explicitly unavailable pending private provider/resource confinement. |
 
-## Interfaces
+## Local interfaces and identity
 
-The existing `jaeger mcp` stdio service exposes `send_message`, `list_messages`,
+The existing `jaeger mcp` service exposes `send_message`, `list_messages`,
 `get_thread`, `start_goal`, `goal_status`, `goal_result`, and `cancel_goal`.
-Dedicated `ares` and `grokbot` callers have only `read` + `turn`, separate
-`ares:`/`grokbot:` session prefixes, and untrusted `mcp:ares`/`mcp:grokbot` actors.
-They cannot approve, administer, or impersonate the other client. HTTP MCP
-relays the caller matched by its existing bearer credential. For stdio, set
-`JAEGER_MCP_TOKEN_FILE` to an existing absolute, caller-owned private (0600)
-credential file. Its actual token is validated through `caller_auth`; a name,
-filename or `JAEGER_MCP_CALLER` flag cannot establish identity. Symlinks and
-non-private files are denied. No token is generated. Without a token file,
-only the existing generic `mcp` credential is used: do not configure ARES or
-GrokBot that way, since generic MCP clients share that generic identity.
+Loopback REST uses the same implementations:
 
-Gateway routes (loopback peers only, existing bearer authentication required):
+| Method | Route |
+| --- | --- |
+| POST / GET | `/v1/agent-messages` |
+| GET | `/v1/agent-threads/{thread}` |
+| POST | `/v1/agent-goals` |
+| GET | `/v1/agent-goals/{id}` |
+| POST | `/v1/agent-goals/{id}/cancel` |
 
-| Method | Route | Meaning |
-| --- | --- | --- |
-| POST | `/v1/agent-messages` | Deliver message data |
-| GET | `/v1/agent-messages?after=0&limit=50` | Participant-scoped inbox/sent messages |
-| GET | `/v1/agent-threads/{thread}?after=0&limit=50` | Participant-scoped thread |
-| POST | `/v1/agent-goals` | Start/replay authorized text-only analysis |
-| GET | `/v1/agent-goals/{id}` | Canonical progress/result with thread ID |
-| POST | `/v1/agent-goals/{id}/cancel` | Request canonical cancellation |
+Dedicated `ares` and `grokbot` credentials confer only `read` + `turn`, separate
+session prefixes, and untrusted `mcp:ares` / `mcp:grokbot` actors. They cannot
+approve, administer or impersonate another caller. HTTP relays the authenticated
+bearer token. Stdio binds `JAEGER_MCP_TOKEN_FILE` to an existing absolute,
+owner-private regular credential file and validates the actual token. A caller
+label or filename is not authorization. Generic `mcp` clients continue to share
+the generic identity; clients must not reuse another caller's credential.
 
-Message input: `id`, `thread`, `to`, `kind` (`task`, `status`, `result`,
+Message fields are `id`, `thread`, `to`, `kind` (`task`, `status`, `result`,
 `question`, `answer`), `title`, `body`, optional `refs` and `status_line`.
-The server derives `from` and `created_at`; supplying either is rejected.
-Identifiers contain 1–96 ASCII letters, digits, underscores or hyphens.
-Text byte limits: title 256, body 16384, status line 512; at most 16 references
-of 512 bytes each. Request bodies are capped at 32768 bytes, including chunked
-requests. Pagination accepts limit 1–100 and nonnegative sequence cursors.
-The first message fixes the two thread participants; subsequent messages cannot
-add another participant. Any existing caller may address another existing caller.
-There is no group delivery or unread state. Callers see only their own goal rows;
-a thread recipient does not acquire authority over the sender's execution.
+The server owns `from` and `created_at`. First delivery fixes two thread
+participants. Only they can read/reply; a recipient cannot inspect/cancel the
+sender's goals. IDs are caller-unique; thread IDs are globally unique and should
+be random. Cursor pagination accepts nonnegative `after` and limit 1–100.
+There are no group deliveries or unread markers. Messages are inert data;
+storing a `task` message never admits tool execution.
 
-`start_goal(goal, workspace_folder, thread, id, rea_tools=[])` requires an
-existing accessible message thread and a per-caller workspace grant. IDs make
-retries durable and idempotent; reuse with changed content returns 409. Goal
-progress and result use the same thread ID, via the canonical request receipt.
-They do not automatically synthesize a second inbox message. The tool grant
-is deliberately empty. Responses always include `execution_mode: "text_only"`
-and `execution_verified: false`. Canonical request completion is projected as
-`status: "text_only_completed"` with `request_status: "completed"`; it means a
-text response completed, never that a file was written or a task verified.
-Status/result expose text only and discard model-supplied verification/receipt
-fields. Goal cancellation uses the same truthful projection. The existing
-27772caf write/exec approval policy is unchanged. Usable tool delegation remains
-unqualified and is not enabled by this patch. `rea_tools` is retained as a reserved input: the existing 50 exact names
-in `core/agent_registry/specialists.py::REA_READ_ONLY_TOOLS` are validated, but
-**every nonempty grant is refused** pending REA handle confinement. Unknown or
-mutating names return 403; known names return 501 before goal admission. No
-`rea_*` raw or delegated tool execution is exposed by the new bridge.
+## Durable webhook outbox
 
-Schema migration 13 in `GatewaySessionStore` adds inbox, thread, goal-to-request
-mapping, and content-free audit tables to the **session database**. Opening an
-isolated store applies it idempotently; this task does not migrate the live store.
-Authenticated requests share a persistent 60-per-minute bucket per caller across
-all bridge endpoints, including reads. Audit rows contain caller, operation,
-outcome and time, never bodies or tokens. An admitted attempt and a subsequent
-validation failure have separate audit rows; both consume the bucket. Existing
-auth middleware rejects missing/wrong tokens before bridge handlers run.
+Schema migration **14** adds `agent_webhook_outbox` in the session database.
+Each new message to `grokbot` inserts one outbox row in the **same transaction**
+as its thread/message. Duplicate delivery IDs do not create another row. Oversize
+wire bodies roll back the entire message transaction. Migration does not backfill
+historical messages or activate delivery by itself.
 
-## Proposed later setup — requires separate approval
+The explicit JSON projection contains message fields only: no attachments,
+credentials, configured URL or downloaded references. Serialized UTF-8 must be
+at most **16 KiB**, including the complete envelope; message field limits alone
+do not guarantee it fits. The existing redactor masks recognized secret patterns
+before persistence. It cannot identify arbitrary, encoded or project secrets.
+Never put secrets in messages or identifiers.
 
-No production setup is performed by this patch. Later operator-approved changes:
+Delivery is off unless the bridge is enabled, `JAEGER_AGENT_WEBHOOK_HOST` is a
+valid exact lowercase DNS host, and both credential entries exist. The read-only
+credential provider uses Keychain service `ai.jaeger.bridge.webhook`, accounts
+`grokbot-url` and `grokbot-key`. It creates no entries. The URL and key remain in
+memory only and are never stored in the database, logs or exception messages.
+No credential provider was invoked against the live Keychain in this task.
 
-1. Review/land the patch and back up the live session database before the normal
-   Gateway start applies migration 13. Select a production maintenance window.
-2. Provision/verify **separate** `ares` and `grokbot` credentials through the
-   existing `caller_auth` workflow and approved credential storage. This task
-   creates only test fixture tokens, no production credentials. Bind each local
-   stdio client to its own approved private credential file via
-   `JAEGER_MCP_TOKEN_FILE`, or its own HTTP bearer token. Never reuse a generic
-   `mcp`, owner or `jaegerd` token. Any clients sharing one credential still share
-   its identity/rate bucket; the filesystem owner's own processes are not an OS
-   sandbox boundary. No Grok access is configured here.
-3. Set a narrowly scoped Gateway environment grant, for example
-   `JAEGER_AGENT_WORKSPACES='{"ares":["/absolute/approved/ares"],"grokbot":["/absolute/approved/grok"]}'`.
-   Omitted, malformed or unmatched grants deny goal admission. Paths resolve
-   symlinks before containment checks. Do not grant `/` or a whole home tree.
-4. Register the installed local `jaeger mcp` executable with the **local Codex
-   app/CLI** using its supported MCP configuration. This cloud conversation is
-   not a local MCP client and gains no such connection from this patch.
-5. Complete and separately qualify the missing REA pass-through first, including
-   caller/thread/workspace ownership of opaque handles and canonical approvals.
-   Verify REA's existing connection and owner permissions separately. Do not
-   broaden its read-only list, mutate Apple Notes, or run real acceptance as part
-   of configuration review.
+Production transport accepts verified HTTPS only, default port 443, exact host
+match, no userinfo, fragments, ambiguous host spelling or redirects. It does not
+inherit proxies or accept a custom insecure TLS context. The request uses
+`Authorization: Bearer <key>`, JSON content type and a stable
+`Idempotency-Key` of `<sender>:<message-id>` because IDs are caller-unique.
+Tests rewrite to a task-owned loopback receiver only inside an injected test
+transport, after the unchanged production URL validator has accepted a fake
+HTTPS configuration. No external webhook is contacted by tests.
 
-`JAEGER_AGENT_BRIDGE=0` disables every bridge operation (including reads) at
-request time. It stops new bridge admission, not already running canonical
-requests; use normal cancellation/Global Stop for existing work. No launchd,
-network exposure, proxy, webhook, A2A, email, outbound outbox, or Grok setup is
-included. No push, deployment, or MCP registration is performed.
+Rows progress through `pending` → leased `sending` → `delivered` or `failed`.
+A 2xx acknowledgement alone marks delivery; enqueue success does not. Each
+attempt has a 10-second timeout, a 60-second lease and a unique claim token.
+At most five claimed attempts are made with exponential backoff capped at
+300 seconds. Expired leases recover after a crash; stale workers cannot
+acknowledge a newer lease. Shutdown cancels only this worker and leaves a
+recoverable lease. SQLite failures keep queued work durable without logging it.
 
-## Security limits and evidence
+Semantics are **at least once**, not exactly once: the receiver can accept a
+request before the sender loses its response or crashes. The receiver must
+apply the stable idempotency key. `delivered` means HTTP acknowledgement, not
+proof that Grok executed a task or returned a result. Terminal failure requires
+operator review; do not blindly create a new ID, since a prior uncertain
+attempt may already have reached the receiver.
 
-The shared existing redactor masks recognized secret patterns before message
-persistence/return and goal admission/result return. It cannot identify arbitrary
-secrets, encoded secrets, sensitive project information, or all credentials.
-Do not paste secrets. Reference text is not fetched. Message contents never
-become tool grants, approvals, identities, or configuration. Workspace grants
-bound admission; normal runtime policy remains essential. REA handles have no
-bridge confinement yet, so nonempty REA grants are refused. This is not an OS
-sandbox against the Mac's owner.
+`JAEGER_AGENT_BRIDGE=0` blocks new bridge operations and new send attempts.
+An already-started HTTP request cannot be retracted; it remains bounded by the
+request timeout. The switch does not terminate canonical goals; normal
+cancellation/Global Stop owns them. Goal tool path guards also recheck the bridge
+switch before dispatch, including after an approval wait.
 
-`dev/tests/jaeger_ai/core/test_agent_bridge.py` uses temporary stores, caller
-fixture tokens, an ephemeral loopback Gateway, a deterministic delegate, and a
-real MCP stdio subprocess. It proves transport, storage, admission, identity,
-denials, redaction, pagination, rate limits and lifecycle contracts. It does not
-prove live-provider execution, Grok round-trip/webhook delivery, secret-detection
-perfection, installed-client setup, or real REA analysis. No model downloads or
-paid provider calls are needed. Only task-owned test processes are cleaned up.
+## Policy-controlled goal tools
 
-The required identity/outcome review fixes and their current test commands are
-recorded in [REVIEW_FIXES.md](REVIEW_FIXES.md). Earlier review documents describe
-previous snapshots; this README and REVIEW_FIXES.md describe the committed result.
+`start_goal(goal, workspace_folder, thread, id, rea_tools=[])` still requires a
+participant-accessible thread, an existing absolute workspace and a matching
+per-caller `JAEGER_AGENT_WORKSPACES` grant. Symlinks resolve before containment
+checks. IDs make retries durable; changed content with the same ID returns 409.
+
+The grant comes from the lead's existing native-file catalog, limited to tools
+with bounded path contracts: `read_file`, `write_file`, `append_file`, `patch`,
+`delete_file`, `move_file`, `copy_file`. No parallel tool engine or new approval
+authority is created. Host-bound confinement comes from the authenticated,
+durable goal admission, not a model flag. Paths are checked against that goal's
+workspace before policy, after hook/approval changes and in the native resolver
+at file access. Directory/special-file cases that cannot be bounded fail closed.
+This is not an OS sandbox against concurrent filesystem changes by the Mac owner.
+
+The existing 27772caf write/exec card behavior is preserved. Writes can wait for
+an authenticated owner principal; ARES/GrokBot cannot resolve those cards. Denial
+or cancellation cannot become an approved write. Privileged shell/code remain
+denied to outside callers by the existing kernel. Other external or unscoped
+lead tools are unsupported in bridge goals; this is a deliberate incomplete
+portion of the requested full lead toolset, not an authorization workaround.
+
+Responses report `execution_mode: "policy_controlled_tools"`. A completed model
+response is `completed_unverified` unless the canonical durable task owner has
+independently verified the exact matching request/session; model-supplied receipt,
+task-state or verification claims never set `execution_verified`. Cancelled,
+failed and running states remain explicit. A real file effect and independently
+verified task completion are different claims.
+
+All nonempty `rea_tools` grants remain blocked: unknown/mutating names return
+403, known names return 501 before admission. [PHASE2_REA.md](PHASE2_REA.md)
+lists the precise unsupported set and prerequisite; no shared live REA process
+or Hopper context is used.
+
+## Later operator setup — separate final approval/action
+
+1. Review and land this commit; back up the session database before a separately
+   approved Gateway maintenance window applies migration 14. No deployment occurs
+   in this task. Old messages are not automatically forwarded.
+2. Review any queued messages before activating outbound delivery. Select one
+   approved HTTPS endpoint and exact host. URL/key provisioning is a **separate
+   final step** Matthew performs in secure Keychain entry: generic-password
+   service `ai.jaeger.bridge.webhook`, accounts `grokbot-url` and `grokbot-key`.
+   Do not put values in shell history, source, command arguments, logs or chats.
+3. In the separately approved Gateway environment, set
+   `JAEGER_AGENT_WEBHOOK_HOST=hooks.example.com` using the actual approved host.
+   No wildcard, IP literal, custom port or redirect is accepted. Provisioned
+   credentials plus this host enable future sends after normal startup; this
+   task does not alter launchd, network settings or the running Gateway.
+4. Preserve separately provisioned `ares`/`grokbot` credentials and narrow
+   `JAEGER_AGENT_WORKSPACES` entries. No token, Keychain, registration or Codex
+   setup is created/changed here. The local Codex integration is distinct from
+   this cloud conversation.
+5. Qualify the real endpoint's idempotency and 2xx behavior separately before
+   claiming Grok round-trip acceptance. Private REA provider isolation remains
+   a separate prerequisite. No webhook, email fallback or A2A setup is performed.
+
+Validation details and exact commands are recorded in
+[PHASE2_VALIDATION.md](PHASE2_VALIDATION.md). Earlier `REVIEW*` documents describe
+Phase 1 snapshots and are retained as history.

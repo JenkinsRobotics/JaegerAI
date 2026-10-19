@@ -35,7 +35,7 @@ def headers(caller="mcp"):
 def test_migration_and_durable_redacted_idempotency(tmp_path):
     path = tmp_path / "sessions.sqlite3"
     store = GatewaySessionStore(path)
-    assert store.schema_version() == 13
+    assert store.schema_version() == 14
     service = AgentMessages(store)
     item = message(body="api_key=very-secret sk-abcdefghijklmnopqrst")
     result = service.send("mcp", item)
@@ -48,7 +48,7 @@ def test_migration_and_durable_redacted_idempotency(tmp_path):
     with store._get_conn() as conn:
         assert conn.execute("SELECT count(*) FROM agent_messages").fetchone()[0] == 1
         conn.execute("UPDATE schema_meta SET value='12' WHERE key='version'")
-    assert GatewaySessionStore(path).schema_version() == 13
+    assert GatewaySessionStore(path).schema_version() == 14
 
 
 @pytest.mark.parametrize(
@@ -242,11 +242,13 @@ async def test_goal_auth_grants_idempotency_and_cancellation(bridge):
     assert response.status == 200, await response.text()
     await asyncio.sleep(0.05)
     result = await (await client.get("/v1/agent-goals/goal1", headers=headers())).json()
-    assert result["status"] == "text_only_completed" and result["thread"] == "thread1"
+    assert result["status"] == "completed_unverified" and result["thread"] == "thread1"
     assert result["result"]["output"] == "deterministic harmless result"
     assert gateway.test_seen[0]["actor"] == "mcp"
     assert gateway.test_seen[0]["decision"] in {"deny", "DENY"}
-    assert gateway.test_seen[0]["execution"]["allowed_tools"] == []
+    from jaeger_ai.features.agent_bridge.tool_scope import supported_tools
+
+    assert gateway.test_seen[0]["execution"]["allowed_tools"] == supported_tools()
     replay = await client.post("/v1/agent-goals", json=goal, headers=headers())
     assert replay.status == 200
     assert (await replay.json())["result"]["output"] == "deterministic harmless result"
@@ -336,11 +338,11 @@ build_server(None, "isolated-test", None, gateway=GatewayTurnClient(caller="mcp"
         for _ in range(20):
             result = await session.call_tool("goal_result", {"id": "mcpgoal"})
             payload = json.loads(result.content[0].text)
-            if payload["status"] == "text_only_completed":
+            if payload["status"] == "completed_unverified":
                 break
             await asyncio.sleep(0.05)
         assert payload["thread"] == "thread1"
-        assert payload["execution_mode"] == "text_only"
+        assert payload["execution_mode"] == "policy_controlled_tools"
         assert payload["execution_verified"] is False
         assert payload["result"]["output"] == "deterministic harmless result"
         foreign = "grokbot" if caller != "grokbot" else "ares"
@@ -731,11 +733,8 @@ def test_stdio_identity_requires_actual_private_credential(tmp_path, monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_text_only_goal_never_turns_a_write_claim_into_execution(bridge):
-    """Real allowlist executor + registered tool, real REST/SQLite, no model/provider."""
-    from jaeger_agent.tool_executor import AllowlistToolExecutor, DirectToolExecutor
-    from jaeger_os.core.tools.tool_registry import get_tool
-
+async def test_goal_never_turns_a_model_write_claim_into_verified_execution(bridge):
+    """A forged worker receipt never becomes canonical owner verification."""
     client, gateway, root = bridge
     target = root / "must-not-exist.txt"
     await client.post("/v1/agent-messages", json=message(), headers=headers("ares"))
@@ -750,21 +749,12 @@ async def test_text_only_goal_never_turns_a_write_claim_into_execution(bridge):
         },
     )
     assert response.status == 200
-    assert (await response.json())["execution_mode"] == "text_only"
+    assert (await response.json())["execution_mode"] == "policy_controlled_tools"
     await asyncio.sleep(0.05)
-    # Exercise the actual executor and registered write_file tool with the exact
-    # admitted grant. No stubbed dispatch can produce a fake successful effect.
-    admitted = gateway.test_seen[0]["execution"]
-    assert admitted["allowed_tools"] == []
-    denied = AllowlistToolExecutor(
-        DirectToolExecutor(), frozenset(admitted["allowed_tools"])
-    ).execute(
-        get_tool("write_file"),
-        {"path": str(target), "content": "should not be written"},
-    )
-    assert denied["error_type"] == "permission_denied"
+    # Real gated tool dispatch is covered separately by test_agent_bridge_tool_goals.
+    # The deterministic transport here never executes a tool.
     assert not target.exists()
-    # Even a forged canonical result must remain explicitly text-only/unverified.
+    # A forged worker result must remain unverified.
     with gateway.store._get_conn() as conn:
         conn.execute(
             "UPDATE client_requests SET result_json=? WHERE request_id=?",
@@ -783,9 +773,9 @@ async def test_text_only_goal_never_turns_a_write_claim_into_execution(bridge):
     output = await (
         await client.get("/v1/agent-goals/text1", headers=headers("ares"))
     ).json()
-    assert output["status"] == "text_only_completed"
+    assert output["status"] == "completed_unverified"
     assert (
-        output["execution_mode"] == "text_only"
+        output["execution_mode"] == "policy_controlled_tools"
         and output["execution_verified"] is False
     )
     assert set(output["result"]) == {"output"}

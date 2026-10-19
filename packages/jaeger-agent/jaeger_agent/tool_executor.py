@@ -202,6 +202,20 @@ class HookedToolExecutor:
         args = dict(arguments)
         from jaeger_agent import shell_hooks
 
+        # An authenticated bridge goal uses the same authority/executor stack,
+        # with an additional host-bound resource ceiling (never model flags).
+        def confine(values):
+            if not _jaeger_ai_installed():
+                return dict(values)
+            from jaeger_ai.features.agent_bridge.tool_scope import confined_arguments
+            return confined_arguments(tool, values)
+
+        try:
+            args = confine(args)
+        except Exception:
+            return {"ok": False, "error": "Bridge goal resource denied",
+                    "error_type": "permission_denied", "retryable": False}
+
         # Hooks are evaluated exactly once, inside AuthorityLayer. A second
         # fire here duplicated every pre_tool_call (live Phase 4: 2x per tool).
         # Fallback below covers the no-authority import path only.
@@ -323,6 +337,14 @@ class HookedToolExecutor:
                     "error_type": "blocked_by_hook",
                     "retryable": False,
                 }
+
+        # Approval can take arbitrarily long; recheck symlinks, kill switch and
+        # operator-hook rewrites immediately before real dispatch.
+        try:
+            args = confine(args)
+        except Exception:
+            return {"ok": False, "error": "Bridge goal resource denied",
+                    "error_type": "permission_denied", "retryable": False}
 
         call_id = f"call-{int(time.time()*1000)}"
         t0 = time.time()

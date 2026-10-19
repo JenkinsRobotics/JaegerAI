@@ -119,6 +119,30 @@ def read_confinement(roots: Any):
         _read_roots_var.reset(token)
 
 
+# Host resource ceilings are callbacks bound per request; no model argument
+# installs one. Resolvers call it inside tool bodies, after permission prompts.
+_path_guard_var: ContextVar[Any] = ContextVar("workspace_path_guard", default=None)
+
+
+@contextlib.contextmanager
+def path_guard(check):
+    token = _path_guard_var.set(check)
+    try:
+        yield
+    finally:
+        _path_guard_var.reset(token)
+
+
+def _guard_path(path: str) -> str:
+    guard = _path_guard_var.get()
+    if guard is None:
+        return path
+    try:
+        return guard(path)
+    except Exception as exc:
+        raise SandboxError("Request workspace resource denied") from exc
+
+
 def active_read_roots() -> tuple[Path, ...] | None:
     return _read_roots_var.get()
 
@@ -374,6 +398,7 @@ def _resolve_write(path: str) -> Path:
     Returns the absolute path; raises :class:`SandboxError` on any
     boundary violation. Caller does the actual write.
     """
+    path = _guard_path(path)
     layout = _require_layout()
     if not path:
         raise SandboxError("path must be non-empty")
@@ -462,6 +487,7 @@ def _resolve_read(path: str) -> Path:
     reads the repo naturally), then falls back to the **instance root**
     (so a workspace-relative path like ``skills/foo.py`` still resolves
     even when cwd isn't the instance)."""
+    path = _guard_path(path)
     if not path:
         raise SandboxError("path must be non-empty")
     p = Path(path).expanduser()

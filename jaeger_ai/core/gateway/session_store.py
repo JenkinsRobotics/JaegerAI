@@ -19,7 +19,7 @@ import threading
 from typing import Any, Callable, Iterator
 
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 MAX_RETAINED_EVENTS = 5000
 REQUEST_ID_MAX = 128
 MAX_QUEUE_PER_SESSION = 100
@@ -497,6 +497,10 @@ class GatewaySessionStore:
             from jaeger_ai.features.agent_bridge.service import migrate
             migrate(conn)
             current = 13
+        if current < 14:
+            from jaeger_ai.features.agent_bridge.outbox import migrate as migrate_outbox
+            migrate_outbox(conn)
+            current = 14
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
