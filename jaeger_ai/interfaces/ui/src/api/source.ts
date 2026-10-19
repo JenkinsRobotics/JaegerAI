@@ -1,8 +1,14 @@
+import type { HomeOptions, HomeSessions } from "../chat/homeSession";
 import type { ChatSession } from "../chat/host";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 /** Everything the screen needs from Jaeger. The live adapter calls the
  * gateway through same-origin paths; the mock adapter replays sample data. */
+/** 201 from the bytes upload route. */
+export interface UploadedAttachment { attachment_id: string; name: string; mime: string; size: number; sha256: string }
+
+import type { AgentActions } from "./agentActions";
+
 export interface JaegerSource {
   readonly kind: "live" | "mock";
   agents(): Promise<Agent[]>;
@@ -13,20 +19,34 @@ export interface JaegerSource {
   /** PATCH /v1/sessions/{id}: rename or archive a chat. */
   updateSession(id: string, body: { title?: string; archived?: boolean }): Promise<void>;
   /** POST /v1/agents: a new specialist the lead can hand work to. */
+  /** Agent context-menu actions (agentActions.ts); optional, gated by agentCaps. */
+  agentActions?: AgentActions;
   createAgent(body: { name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }): Promise<Agent>;
   /** The specialist's side of one hand-off: its worker session and messages. */
   handoffExchange(handoffId: string): Promise<HandoffExchange>;
   /** POST /v1/sessions/{id}/turns. `start_event_id` is the durable cursor of
    * this turn's turn.start (stream from start_event_id - 1). */
-  send(sessionId: string, text: string, requestId: string): Promise<TurnReceipt>;
+  send(sessionId: string, text: string, requestId: string, attachmentIds?: string[]): Promise<TurnReceipt>;
+  /** POST /v1/sessions/{id}/attachments: register a workspace file (the gateway sizes and hashes it). */
+  addAttachment(sessionId: string, body: { path: string; filename?: string; mime_type?: string }): Promise<{ attachment_id: string }>;
+  /** PROVISIONAL (bytes upload, gateway-side staging): the same endpoint with the file's bytes instead
+   * of a path. Only called when the bytes-upload flag is on (composer.bytesUploadEnabled). */
+  /** POST /v1/sessions/{id}/attachments/upload (bytes, 25 MB max): 201 → the stored file. 404/405 = not
+   * supported by this gateway; 413 = too large. */
+  uploadAttachment?(sessionId: string, body: { name: string; mime: string; data_base64: string }, idempotencyKey?: string): Promise<UploadedAttachment>;
   cancel(sessionId: string, requestId?: string): Promise<void>;
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   tasks(): Promise<Task[]>;
   handoffs(query?: { session_id?: string }): Promise<Handoff[]>;
+  /** Its own home-chat implementation, when the source has one (dev mock only). */
+  homeSessions?(opts: HomeOptions): HomeSessions;
   /** Rich transcript, when the source has one (dev mock only). */
   transcript?(sessionId: string): ChatSession | undefined;
   /** Session SSE (`/v1/sessions/{id}/stream?last_event_id=<cursor>`). Resolves
    * when the stream ends or `signal` aborts; throws GatewayError on HTTP errors. */
+  /** PROPOSED global event stream (agent.updated/created/deleted, section.updated/deleted, agent.unread); the
+   * channel is not in the spec yet (GET /v1/events assumed). Optional: without it the roster polls. */
+  globalEvents?(onEvent: (event: GatewayEvent) => void, signal: AbortSignal): Promise<void>;
   stream(sessionId: string, cursor: number | undefined, onEvent: (event: GatewayEvent) => void, signal: AbortSignal): Promise<void>;
 }
 

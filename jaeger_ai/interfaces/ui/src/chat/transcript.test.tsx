@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { mapEvent } from "./eventMap";
 import type { ChatPart } from "./host";
 import { needsSeparator, segments, separatorLabel } from "./MinimalChat";
-import { MiniMarkdown } from "./miniMarkdown";
+import { Markdown } from "./Markdown";
 import { messagesToTurns } from "./webHost";
 
 describe("history (persisted parts)", () => {
@@ -64,9 +64,9 @@ describe("transcript layout", () => {
 describe("markdown", () => {
   it("renders numbered lists, fenced code with Copy, and only http(s) links", () => {
     const html = renderToStaticMarkup(
-      <MiniMarkdown onCopy={() => {}} text={"1. one\n2. two\n\n```sh\necho hi\n\nls\n```\n\nSee [docs](https://example.com) or [x](javascript:alert(1))"} />,
+      <Markdown onCopy={() => {}} text={"1. one\n2. two\n\n```sh\necho hi\n\nls\n```\n\nSee [docs](https://example.com) or [x](javascript:alert(1))"} />,
     );
-    expect(html).toContain("<ol><li>one</li><li>two</li></ol>");
+    expect(html.replace(/\n/g, "")).toContain("<ol><li>one</li><li>two</li></ol>");
     expect(html).toContain("<pre><code>echo hi\n\nls</code></pre>");
     expect(html).toContain('aria-label="Copy code"');
     expect(html).toContain('href="https://example.com"');

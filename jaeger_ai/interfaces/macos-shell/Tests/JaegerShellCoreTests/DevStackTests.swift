@@ -30,6 +30,7 @@ final class DevStackTests: XCTestCase {
         XCTAssertEqual(g.arguments, ["-m", "jaeger_ai.core.gateway.server", "--host", "127.0.0.1", "--port", "43428"])
         XCTAssertEqual(g.environment["JAEGER_TEST_HEADLESS"], "1")
         XCTAssertEqual(g.environment["JAEGER_STATE_DIR"], c.stateDir)
+        XCTAssertEqual(g.environment["JAEGER_CALLER_TOKEN_DIR"], c.stateDir + "/caller_tokens")  // never the Keychain
         XCTAssertEqual(g.environment["PYTHONPATH"], root)
         XCTAssertEqual(g.workingDirectory, root)
         XCTAssertFalse(g.environment.values.contains { $0.contains("0.0.0.0") })
