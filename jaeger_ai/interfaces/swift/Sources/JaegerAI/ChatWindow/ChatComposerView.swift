@@ -12,6 +12,7 @@ struct ChatComposerView: View {
     let connected: Bool
     let canSend: Bool
     let isSending: Bool
+    var canStop: Bool = false
     let isRecording: Bool
     let isTranscribing: Bool
     let level: Float
@@ -114,7 +115,7 @@ struct ChatComposerView: View {
                     iconButton("waveform", label: "Voice conversation", action: onVoice)
                         .disabled(!connected || isTranscribing)
 
-                    if isSending {
+                    if canStop {
                         iconButton("stop.circle.fill", label: "Stop current task", action: onStop)
                     }
                     Button(action: { if canSend { onSend() } }) {

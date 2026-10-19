@@ -316,6 +316,9 @@ final class AgentBridge: ObservableObject {
             imageDataURIs: imageDataURIs, speakReplies: speakReplies
         )
         if let error = result.error, !error.isEmpty {
+            if error.lowercased().contains("cancel") || error.lowercased().contains("unknown") {
+                return result // Preserve cancellation/uncertainty instead of calling it a stall.
+            }
             // A stall/timeout is a recoverable turn failure, not a
             // dead bridge. Surface it in the transcript so the
             // operator can send the next message instead of seeing
