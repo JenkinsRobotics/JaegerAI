@@ -163,6 +163,9 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var stopNotice: String?
     @Published private(set) var isStopping = false
     private var controlRefreshing = false
+    private var controlRefreshingSession: String?
+    private var controlRefreshWaiters: [CheckedContinuation<Bool, Never>] = []
+    private var controlledSessionStatus: String?
     private var controlReadAvailable = false
     @Published private(set) var queuePausedByStop = false
     private var stopRequestedIDs: Set<String> = []
@@ -176,26 +179,46 @@ final class ChatViewModel: ObservableObject {
 
     var canStopTurn: Bool {
         if isStopping { return false }
-        if sessionKey == "dispatcher" { return dispatcherRun?.active == true }
+        if sessionKey == "dispatcher" {
+            guard let run = dispatcherRun else { return false }
+            return run.active == true && run.status != "cancelling" &&
+                !stopRequestedIDs.contains("dispatcher:" + run.run_id)
+        }
         guard controlReadAvailable, let request = controlledRequest, request.session_id == sessionKey else { return false }
         return request.canCancel && !stopRequestedIDs.contains(request.request_id)
     }
 
     var turnControlLabel: String {
-        stopNotice ?? controlledRequest?.stopLabel ?? (isSending ? "Finding current request…" : "")
+        if sessionKey == "dispatcher" { return dispatcherStatus }
+        return stopNotice ?? controlledRequest?.stopLabel ?? (isSending ? "Finding current request…" : "")
     }
 
     /// The server is the authority even when this window did not send the turn.
     @discardableResult
     func refreshTurnControl() async -> Bool {
-        guard sessionKey != "dispatcher", !controlRefreshing else { return false }
-        controlRefreshing = true
-        defer { controlRefreshing = false }
+        if sessionKey == "dispatcher" { return await refreshDispatcher() }
         let selected = sessionKey
+        if controlRefreshing {
+            let observedSession = controlRefreshingSession
+            let succeeded = await withCheckedContinuation { controlRefreshWaiters.append($0) }
+            guard selected == sessionKey else { return false }
+            if observedSession != selected { return await refreshTurnControl() }
+            return succeeded
+        }
+        controlRefreshing = true
+        controlRefreshingSession = selected
+        var succeeded = false
+        defer {
+            controlRefreshing = false
+            let waiters = controlRefreshWaiters
+            controlRefreshWaiters.removeAll()
+            for waiter in waiters { waiter.resume(returning: succeeded) }
+        }
         do {
             let session = try await controlGateway.getSessionControl(id: selected)
             guard selected == sessionKey else { return false }
             controlReadAvailable = true
+            controlledSessionStatus = session.status
             controlledRequest = session.latest_request
             if let request = controlledRequest, request.status == "cancelling" ||
                 request.status == "cancelled" || request.status == "execution_unknown" {
@@ -209,6 +232,7 @@ final class ChatViewModel: ObservableObject {
             if session.status == "running" && controlledRequest == nil {
                 stopNotice = "Current request identity unavailable — update Gateway before using scoped Stop"
             }
+            succeeded = true
             return true
         } catch {
             guard selected == sessionKey else { return false }
@@ -271,9 +295,25 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    private var queueControlAvailable: Bool {
+        sessionKey == "dispatcher" ? dispatcherConnected : controlReadAvailable
+    }
+
+    private var queueOutcomeUnknown: Bool {
+        if sessionKey == "dispatcher" {
+            guard let run = dispatcherRun else { return uncertainDispatcherRequest != nil }
+            return uncertainDispatcherRequest != nil || run.execution_unknown == true ||
+                ["interrupted", "execution_unknown", "unknown"].contains(run.status) ||
+                (run.active != true && !["completed", "failed", "cancelled"].contains(run.status))
+        }
+        if let request = controlledRequest,
+           !request.isActive && !["completed", "failed", "cancelled"].contains(request.status) { return true }
+        return controlledRequest?.status == "execution_unknown" || controlledSessionStatus == "execution_unknown" ||
+            (controlledRequest == nil && ["running", "cancelling"].contains(controlledSessionStatus ?? ""))
+    }
+
     var canResumeQueue: Bool {
-        queuePausedByStop && !hasActiveTurn && controlReadAvailable &&
-            controlledRequest?.status != "execution_unknown" &&
+        queuePausedByStop && !hasActiveTurn && queueControlAvailable && !queueOutcomeUnknown &&
             pendingSends.contains { $0.sessionID == sessionKey }
     }
 
@@ -281,7 +321,11 @@ final class ChatViewModel: ObservableObject {
     func resumeQueuedMessages() async {
         guard await refreshTurnControl() else { return }
         guard canResumeQueue else { return }
-        if let requestID = controlledRequest?.request_id { resumedAfterStopIDs.insert(requestID) }
+        if sessionKey == "dispatcher", let run = dispatcherRun {
+            resumedAfterStopIDs.insert("dispatcher:" + run.run_id)
+        } else if let requestID = controlledRequest?.request_id {
+            resumedAfterStopIDs.insert(requestID)
+        }
         queuePausedByStop = false
         await drainQueuedMessages()
     }
@@ -289,7 +333,7 @@ final class ChatViewModel: ObservableObject {
     func drainQueuedMessages() async {
         while !Task.isCancelled {
             guard await refreshTurnControl() else { return }
-            guard !queuePausedByStop, !hasActiveTurn, controlReadAvailable,
+            guard !Task.isCancelled, !queuePausedByStop, !hasActiveTurn, queueControlAvailable, !queueOutcomeUnknown,
                   let index = pendingSends.firstIndex(where: { $0.sessionID == sessionKey }) else { return }
             let next = pendingSends.remove(at: index)
             _ = await runTurn(next.prompt, appendUserBubble: false, displayText: next.display,
@@ -408,14 +452,17 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var dispatcherApproval: BridgeRequest?
     @Published private(set) var dispatcherReports: [DispatcherClient.Report] = []
     @Published private(set) var dispatcherRun: DispatcherClient.Run?
-    private var dispatcherClient: DispatcherClient?
+    private var dispatcherClient: (any DispatcherConversationClient)?
+    private let dispatcherClientOverride: (any DispatcherConversationClient)?
     private var messageIDs: [String: UUID] = [:]
     private var answeringApprovalID: String?
     private var dispatcherSending = false
     private var uncertainDispatcherRequest: (text: String, id: String)?
     private var dispatcherRefreshing = false
+    private var dispatcherRefreshWaiters: [CheckedContinuation<Bool, Never>] = []
 
-    private func connectedDispatcher() async throws -> DispatcherClient {
+    private func connectedDispatcher() async throws -> any DispatcherConversationClient {
+        if let dispatcherClientOverride { return dispatcherClientOverride }
         if !agent.isConnected { await agent.tryConnect() }
         if let client = dispatcherClient { return client }
         let result = await agent.query("dispatcher_connection")
@@ -430,15 +477,30 @@ final class ChatViewModel: ObservableObject {
         return client
     }
 
-    func refreshDispatcher() async {
-        guard sessionKey == "dispatcher", !dispatcherRefreshing else { return }
+    @discardableResult
+    func refreshDispatcher() async -> Bool {
+        guard sessionKey == "dispatcher" else { return false }
+        if dispatcherRefreshing {
+            let succeeded = await withCheckedContinuation { dispatcherRefreshWaiters.append($0) }
+            return succeeded && sessionKey == "dispatcher"
+        }
         dispatcherRefreshing = true
-        defer { dispatcherRefreshing = false }
+        var succeeded = false
+        defer {
+            dispatcherRefreshing = false
+            let waiters = dispatcherRefreshWaiters
+            dispatcherRefreshWaiters.removeAll()
+            for waiter in waiters { waiter.resume(returning: succeeded) }
+        }
         do {
             let client = try await connectedDispatcher()
             let snapshot = try await client.snapshot()
-            guard sessionKey == "dispatcher" else { return }
+            guard sessionKey == "dispatcher" else { return false }
             dispatcherRun = snapshot.run
+            if let run = snapshot.run,
+               ["cancelling", "cancelled", "interrupted", "execution_unknown"].contains(run.status) || run.execution_unknown == true {
+                if !resumedAfterStopIDs.contains("dispatcher:" + run.run_id) { queuePausedByStop = true }
+            }
             dispatcherReports = snapshot.reports ?? []
             dispatcherConnected = true
             if let run = snapshot.run, run.status != "completed" {
@@ -460,16 +522,26 @@ final class ChatViewModel: ObservableObject {
                 dispatcherApproval = BridgeRequest(id: request.approval_id, kind: "approval",
                                                    prompt: request.description, options: request.choices)
             } else { dispatcherApproval = nil }
+            succeeded = true
+            return true
         } catch {
-            guard sessionKey == "dispatcher" else { return }
+            guard sessionKey == "dispatcher" else { return false }
             dispatcherClient = nil
             dispatcherConnected = false
             dispatcherStatus = "Connection unavailable — \(error.localizedDescription)"
+            return false
         }
     }
 
     func controlDispatcher(_ action: String, approval: BridgeRequest? = nil, choice: String? = nil) {
         guard let run = dispatcherRun else { return }
+        if action == "cancel" {
+            queuePausedByStop = true
+            TTSManager.shared.stop()
+            let key = "dispatcher:" + run.run_id
+            guard !stopRequestedIDs.contains(key) else { return }
+            stopRequestedIDs.insert(key)
+        }
         if let approval, action == "approval" {
             guard answeringApprovalID != approval.id else { return }
             answeringApprovalID = approval.id
@@ -547,10 +619,12 @@ final class ChatViewModel: ObservableObject {
 
     init(agent: AgentBridge, sessionKey: String = ChatViewModel.mintSessionKey(),
          controlGateway: any SessionControlClient = GatewayClient.fromEnvironment(),
-         startBackgroundObservers: Bool = true) {
+         startBackgroundObservers: Bool = true,
+         dispatcherClient: (any DispatcherConversationClient)? = nil) {
         self.agent = agent
         self.sessionKey = sessionKey
         self.controlGateway = controlGateway
+        self.dispatcherClientOverride = dispatcherClient
         guard startBackgroundObservers else { return }
         // Subscribe to agent events so we can show thinking + tool
         // chips inline as the agent works.  Captures a weak self so
@@ -814,7 +888,7 @@ final class ChatViewModel: ObservableObject {
             return
         }
         let succeeded = await runTurn(prompt, appendUserBubble: true, displayText: display, images: images, useTools: agenticTools)
-        if sessionKey == "dispatcher" && !succeeded { pendingSends.removeAll(); return }
+        if sessionKey == "dispatcher" && !succeeded { queuePausedByStop = true; return }
         await drainQueuedMessages()
     }
 

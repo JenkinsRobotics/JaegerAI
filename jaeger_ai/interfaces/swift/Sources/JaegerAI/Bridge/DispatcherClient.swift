@@ -1,5 +1,14 @@
 import Foundation
 
+@MainActor
+protocol DispatcherConversationClient: Sendable {
+    func snapshot() async throws -> DispatcherClient.Snapshot
+    func send(_ text: String, requestID: String) async throws -> DispatcherClient.Run
+    func request(_ action: String, body: [String: String]?) async throws -> Data
+}
+
+extension DispatcherClient: DispatcherConversationClient {}
+
 /// Both desktop and WebUI observe and control this same durable conversation.
 struct DispatcherClient: Sendable {
     let baseURL: URL
