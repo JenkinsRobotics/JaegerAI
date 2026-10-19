@@ -16,9 +16,8 @@ def test_first_party_webui_source_is_complete() -> None:
         "api/jaeger_sessions.py",
         "api/jaeger_conversation.py",
         "api/jaeger_ollama.py",
-        "static/index.html",
-        "static/boot.js",
-        "static/messages.js",
+        "api/ui_shell.py",
+        "static/login.js",
         "HERMES_WEBUI_LICENSE",
     )
     missing = [relative for relative in required if not (FEATURE / relative).is_file()]

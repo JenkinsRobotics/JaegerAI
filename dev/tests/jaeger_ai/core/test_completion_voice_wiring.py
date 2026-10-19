@@ -61,18 +61,6 @@ def test_webui_url_ignores_obsolete_container_runtime(monkeypatch):
     assert ui.browser_url() == 'http://127.0.0.1:8790/'
 
 
-def test_tray_global_lifecycle_does_not_pass_unsupported_instance(monkeypatch):
-    from jaeger_ai.interfaces.pyside6.tray import macos
-    calls = []
-    monkeypatch.setattr(macos, '_jaeger_executable', lambda: ['jaeger'])
-    monkeypatch.setattr(macos, '_spawn', lambda args: calls.append(args))
-    actions = macos._make_actions('lilith')
-    actions.start()
-    actions.stop()
-    actions.restart()
-    actions.open_gui()
-    assert calls == [['jaeger', 'start'], ['jaeger', 'stop'], ['jaeger', 'restart'], ['jaeger', 'start']]
-
 
 def test_accessibility_backend_uses_framework_dependency_resolver(monkeypatch):
     import sys

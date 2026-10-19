@@ -82,7 +82,7 @@ def test_webui_catalog_shape():
 
 
 def test_composer_has_no_hardcoded_orphan_models():
-    html = Path("jaeger_ai/features/webui/static/index.html").read_text(encoding="utf-8")
+    html = "\n".join(p.read_text() for p in Path("jaeger_ai/interfaces/ui/src/chat").glob("*.tsx") if not p.name.endswith(".test.tsx"))
     assert "openai/gpt-4o" not in html
     assert "anthropic/claude-sonnet" not in html
     assert 'optgroup label="Other"' not in html

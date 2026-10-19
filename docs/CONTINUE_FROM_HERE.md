@@ -4,7 +4,7 @@
 **Branch:** `master` — operator-authorized canonical integration, 2026-10-19.
 **Current work:** [Scoped legacy cleanup](integration/SCOPED_CLEANUP.md).
 **Branch rule:** cleanup only. Canonical Mac: `interfaces/macos-shell`; shared UI:
-`interfaces/ui`. No feature implementation or overlapping coder. Preserve running
+`interfaces/ui`. Legacy SwiftUI/Qt/Hermes frontend source is archived outside the repo; never restore an automatic fallback. Known ambient/camera/avatar/share presentation gaps are in the cleanup record. No feature implementation or overlapping coder. Preserve running
 apps/services, data and credentials. The release notes below retain historical dates;
 they are not current installation or live acceptance evidence.
 
@@ -114,7 +114,7 @@ The model is replaceable cognition. The client is not the entity. A tool returni
 | Human actionable turns default to the resident ReAct/tool loop, not a model-only bypass | `core/gateway/server.py::_execute_turn`; `core/entity/runtime.py::run_subordinate_react`; `packages/jaeger-agent/jaeger_agent/loop/jaeger_agent.py::run_turn`; `test_runtime_truth.py`; `test_control_plane_consolidation.py`; `test_gateway_single_terminal.py` | Source and production-path tests |
 | Explicit image-question and text-only/specialist lanes exist at the Gateway boundary | `server.py::_execute_turn`; `test_gateway_single_terminal.py` | Source and unit tests; they are not silent fallbacks |
 | Recent Chromium qualification exists for multi-turn, long output, cancellation, reload, and narrow viewport | `test_gateway_owned_process_contract.py::test_owned_browser_multiturn_render_cancel_and_reload` | Owned-process Chromium with a scripted provider; not live-provider or physical-phone proof |
-| Swift/macOS source, external build path, and test suite exist | `interfaces/swift/Package.swift`; `Scripts/build-app.sh`; `Tests/JaegerAITests`; `test_external_swift_build.py` | Source and Swift tests; installed-app/GUI remains unqualified |
+| Swift/macOS source, external build path, and test suite exist | `interfaces/macos-shell/Package.swift`; `Scripts/build-shell.sh`; `Tests/JaegerShellCoreTests`; `test_external_swift_build.py` | Source and Swift tests; installed-app/GUI remains unqualified |
 | Gateway-owned live steering exists and the IDE uses it for the active ReAct request; an honest no-agent 409 returns `false` instead of creating a local queue | `/v1/sessions/{id}/requests/{request_id}/steer`; `core/entity/runtime.py::run_subordinate_react(on_agent=...)`; `interfaces/ide/gateway.js::steer`; `interfaces/ide/conversation.js::steer`; `test_gateway_live_steering.py`; `interfaces/ide/tests/steering.test.js` | Unit tests; still needs live-provider and real IDE-worker acceptance |
 | Gateway owns the durable session queue; the IDE exposes `Queue next`, edit, reorder, pause/resume, and delete without owning a second task store | `/v1/sessions/{id}/queue*`; `core/gateway/session_store.py::enqueue_request/promote_next_queue_item`; `interfaces/ide/gateway.js`; `interfaces/ide/media/view.js`; `test_gateway_session_queue.py`; `interfaces/ide/tests/queue.test.js` | Source and unit tests; not live-provider or installed-host qualified |
 | Gateway-enforced plan-only turns exist: the IDE Plan toggle and `/plan` command grant only `update_plan`, so file, shell, and browser tools are not admitted | `allowed_tools=["update_plan"]`; `packages/jaeger-agent/jaeger_agent/tools/plan.py`; `interfaces/ide/media/view.js`; `interfaces/ide/extension.js`; `test_gateway_admission_snapshot.py::test_plan_only_grant_is_frozen_and_replayable`; `interfaces/ide/tests/plan.test.js` | Source and unit tests; still needs live-provider and installed-host acceptance |
@@ -222,7 +222,7 @@ One live-provider conversation, streaming Stop/cancel, tool approval/effect, Web
 ### P2-9 — Physical microphone/speaker voice qualification
 
 - **Problem:** Voice source and tests exist, but physical input/output, audible latency, stop, and failure states are unqualified.
-- **Current evidence:** `features/voice`; `interfaces/swift/Voice`; `AmbientLoop.swift`; `test_voice_session.py`; `AmbientLoopTests.swift`.
+- **Current evidence:** `features/voice`; `interfaces/macos-shell/Sources/JaegerShell/Voice`; `test_voice_session.py`. Ambient/barge-in frontend remains unavailable; old evidence is archived.
 - **Affected files/owners:** VoiceSession; Swift STT/TTS; `AmbientLoop`; `VoiceRecorder`; `TTSManager`.
 - **Acceptance test:** Complete at least 10 physical spoken exchanges, measure speech-end to first audible answer, verify contextual follow-up, mic denial, playback failure, Stop/retry, no self-transcription, and no double playback.
 - **Priority:** P2.
@@ -231,7 +231,7 @@ One live-provider conversation, streaming Stop/cancel, tool approval/effect, Web
 ### P2-10 — Truthful runtime presence states
 
 - **Problem:** Presence UI exists, but live connected/listening/working/speaking/error state transitions are not qualified.
-- **Current evidence:** `AmbientLoop.swift`; `Avatar/VoiceOrbView.swift`; `AvatarWindows.swift`; `interfaces/swift/README.md`.
+- **Current evidence:** Old SwiftUI avatar/ambient evidence is archived; no equivalent new-shell implementation is claimed.
 - **Affected files/owners:** Swift ambient state; Gateway event stream; voice/audio state; Mac UI.
 - **Acceptance test:** Observe actual state transitions with working and unavailable audio/Gateway, verify no busy animation after completion, no fake microphone state, and explicit errors when audio or Gateway is unavailable.
 - **Priority:** P2.
@@ -259,7 +259,7 @@ One live-provider conversation, streaming Stop/cancel, tool approval/effect, Web
 ### P4-13 — Final installable artifact qualification
 
 - **Problem:** External Swift build and packaging paths exist, but no final `.app`/VSIX/WebUI artifact set has passed a clean golden journey.
-- **Current evidence:** `interfaces/swift/Scripts/build-app.sh`; `interfaces/ide/package_extension.py`; `scripts/run-jaeger-webui.sh`; `test_external_swift_build.py`.
+- **Current evidence:** `interfaces/macos-shell/Scripts/build-shell.sh`; `interfaces/ide/package_extension.py`; `scripts/run-jaeger-webui.sh`; `test_external_swift_build.py`.
 - **Affected files/owners:** Swift build script; IDE packaging; WebUI launcher; installer; `jaeger` launcher.
 - **Acceptance test:** Build final external artifacts from a clean state, install/activate them without touching live operator state, run the golden live-provider journey and relevant regressions, record rollback steps, and verify no runtime state in the repository.
 - **Priority:** P4.

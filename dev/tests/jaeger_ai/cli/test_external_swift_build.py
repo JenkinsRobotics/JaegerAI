@@ -2,7 +2,7 @@
 
 Verifies:
   - Default path is outside the repo checkout (fully resolved)
-  - JAEGER_SWIFT_BUILD override is honoured (including tilde)
+  - JAEGER_MAC_BUILD override is honoured (including tilde)
   - In-repo override is rejected (including symlink-to-repo)
   - Dangerous broad roots are rejected
   - Path with spaces is handled
@@ -22,23 +22,23 @@ import pytest
 # The actual build script location (used for shell-boundary tests).
 _SCRIPT = (
     Path(__file__).resolve().parents[4]
-    / "jaeger_ai" / "interfaces" / "swift" / "Scripts" / "build-app.sh"
+    / "jaeger_ai" / "interfaces" / "macos-shell" / "Scripts" / "build-shell.sh"
 )
 
 
-# ── _common.swift_build_dir / swift_app_bundle ─────────────────────────────
+# ── _common.mac_shell_build_dir / mac_app_bundle ─────────────────────────────
 
 
 def test_default_build_dir_is_outside_repo(tmp_path, monkeypatch):
-    monkeypatch.delenv("JAEGER_SWIFT_BUILD", raising=False)
-    from jaeger_ai.cli._common import swift_build_dir
+    monkeypatch.delenv("JAEGER_MAC_BUILD", raising=False)
+    from jaeger_ai.cli._common import mac_shell_build_dir
 
     repo = tmp_path / "checkout"
     repo.mkdir()
     (repo / "jaeger_ai").mkdir()
     (repo / "jaeger_ai" / "__init__.py").write_text("")
 
-    result = swift_build_dir(repo)
+    result = mac_shell_build_dir(repo)
     repo_real = repo.resolve()
     assert not str(result).startswith(str(repo_real) + "/"), (
         f"default build dir {result} must not be inside repo {repo_real}"
@@ -47,105 +47,105 @@ def test_default_build_dir_is_outside_repo(tmp_path, monkeypatch):
 
 def test_default_build_dir_is_fully_resolved(tmp_path, monkeypatch):
     """Default path must be fully resolved (no trailing symlink segments)."""
-    monkeypatch.delenv("JAEGER_SWIFT_BUILD", raising=False)
-    from jaeger_ai.cli._common import swift_build_dir
+    monkeypatch.delenv("JAEGER_MAC_BUILD", raising=False)
+    from jaeger_ai.cli._common import mac_shell_build_dir
 
     repo = tmp_path / "checkout"
     repo.mkdir()
-    result = swift_build_dir(repo)
+    result = mac_shell_build_dir(repo)
     assert result == result.resolve()
 
 
 def test_env_override_is_used(tmp_path, monkeypatch):
-    from jaeger_ai.cli._common import swift_build_dir
+    from jaeger_ai.cli._common import mac_shell_build_dir
 
     repo = tmp_path / "checkout"
     repo.mkdir()
     external = tmp_path / "external" / "build"
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", str(external))
+    monkeypatch.setenv("JAEGER_MAC_BUILD", str(external))
 
-    result = swift_build_dir(repo)
+    result = mac_shell_build_dir(repo)
     assert result == external.resolve()
 
 
 def test_tilde_override_is_expanded(tmp_path, monkeypatch):
-    """JAEGER_SWIFT_BUILD with a tilde prefix must be expanded, not passed raw."""
-    from jaeger_ai.cli._common import swift_build_dir
+    """JAEGER_MAC_BUILD with a tilde prefix must be expanded, not passed raw."""
+    from jaeger_ai.cli._common import mac_shell_build_dir
 
     repo = tmp_path / "checkout"
     repo.mkdir()
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", "~/.jaeger/test-tilde-build")
+    monkeypatch.setenv("JAEGER_MAC_BUILD", "~/.jaeger/test-tilde-build")
 
-    result = swift_build_dir(repo)
+    result = mac_shell_build_dir(repo)
     assert "~" not in str(result), f"tilde not expanded in {result}"
     assert result.is_absolute()
 
 
 def test_in_repo_override_is_rejected(tmp_path, monkeypatch):
-    from jaeger_ai.cli._common import swift_build_dir
+    from jaeger_ai.cli._common import mac_shell_build_dir
 
     repo = tmp_path / "checkout"
     repo.mkdir()
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", str(repo / "nested" / "build"))
+    monkeypatch.setenv("JAEGER_MAC_BUILD", str(repo / "nested" / "build"))
 
-    with pytest.raises(ValueError, match="inside the checkout"):
-        swift_build_dir(repo)
+    with pytest.raises(ValueError, match="outside the repository"):
+        mac_shell_build_dir(repo)
 
 
 def test_dangerous_root_slash_is_rejected(tmp_path, monkeypatch):
-    from jaeger_ai.cli._common import swift_build_dir
+    from jaeger_ai.cli._common import mac_shell_build_dir
 
     repo = tmp_path / "checkout"
     repo.mkdir()
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", "/")
+    monkeypatch.setenv("JAEGER_MAC_BUILD", "/")
 
-    with pytest.raises(ValueError, match="dangerous broad root"):
-        swift_build_dir(repo)
+    with pytest.raises(ValueError, match="dedicated build directory"):
+        mac_shell_build_dir(repo)
 
 
 def test_dangerous_root_applications_is_rejected(tmp_path, monkeypatch):
-    from jaeger_ai.cli._common import swift_build_dir
+    from jaeger_ai.cli._common import mac_shell_build_dir
 
     repo = tmp_path / "checkout"
     repo.mkdir()
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", "/Applications")
+    monkeypatch.setenv("JAEGER_MAC_BUILD", "/Applications")
 
-    with pytest.raises(ValueError, match="dangerous broad root"):
-        swift_build_dir(repo)
+    with pytest.raises(ValueError, match="dedicated build directory"):
+        mac_shell_build_dir(repo)
 
 
 def test_path_with_spaces_is_handled(tmp_path, monkeypatch):
-    from jaeger_ai.cli._common import swift_app_bundle
+    from jaeger_ai.cli._common import mac_app_bundle
 
     repo = tmp_path / "checkout"
     repo.mkdir()
     external = tmp_path / "my build dir" / "apps"
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", str(external))
+    monkeypatch.setenv("JAEGER_MAC_BUILD", str(external))
 
-    bundle = swift_app_bundle(repo)
-    assert bundle.name == "JaegerAI.app"
+    bundle = mac_app_bundle(repo)
+    assert bundle.name == "JaegerShell.app"
     assert " " in str(bundle)
 
 
-def test_swift_app_bundle_is_under_build_dir(tmp_path, monkeypatch):
-    from jaeger_ai.cli._common import swift_app_bundle, swift_build_dir
+def test_mac_app_bundle_is_under_build_dir(tmp_path, monkeypatch):
+    from jaeger_ai.cli._common import mac_app_bundle, mac_shell_build_dir
 
     repo = tmp_path / "checkout"
     repo.mkdir()
     external = tmp_path / "external"
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", str(external))
+    monkeypatch.setenv("JAEGER_MAC_BUILD", str(external))
 
-    build = swift_build_dir(repo)
-    bundle = swift_app_bundle(repo)
-    assert bundle == build / "JaegerAI.app"
+    build = mac_shell_build_dir(repo)
+    bundle = mac_app_bundle(repo)
+    assert bundle == build / "JaegerShell.app"
 
 
 # ── symlink resolution: override that symlinks back into repo is rejected ───
 
 
 def test_symlink_to_repo_is_rejected(tmp_path, monkeypatch):
-    """A JAEGER_SWIFT_BUILD that is a symlink pointing into the repo is rejected."""
-    from jaeger_ai.cli._common import swift_build_dir
+    """A JAEGER_MAC_BUILD that is a symlink pointing into the repo is rejected."""
+    from jaeger_ai.cli._common import mac_shell_build_dir
 
     repo = tmp_path / "checkout"
     repo.mkdir()
@@ -154,9 +154,9 @@ def test_symlink_to_repo_is_rejected(tmp_path, monkeypatch):
     link = tmp_path / "sneaky-link"
     link.symlink_to(inside)
 
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", str(link))
-    with pytest.raises(ValueError, match="inside the checkout"):
-        swift_build_dir(repo)
+    monkeypatch.setenv("JAEGER_MAC_BUILD", str(link))
+    with pytest.raises(ValueError, match="outside the repository"):
+        mac_shell_build_dir(repo)
 
 
 # ── lifecycle_verbs._find_app_bundle does not surface in-repo .build ────────
@@ -182,7 +182,7 @@ def test_find_app_bundle_returns_none_when_nothing_exists(tmp_path, monkeypatch)
     so the test runs on every host regardless of installed software."""
     from jaeger_ai.cli.verbs import lifecycle_verbs as lv
 
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", str(tmp_path / "nowhere"))
+    monkeypatch.setenv("JAEGER_MAC_BUILD", str(tmp_path / "nowhere"))
     monkeypatch.setattr(lv, "REPO_ROOT", tmp_path / "checkout")
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "fakehome"))
     monkeypatch.setattr(Path, "exists", lambda self: False)
@@ -255,46 +255,46 @@ def test_update_verb_rebuild_fails_on_bad_override(tmp_path, monkeypatch, capsys
 def _run_build_script(env_override: dict[str, str]) -> subprocess.CompletedProcess:
     env = {**os.environ, **env_override}
     return subprocess.run(
-        ["bash", str(_SCRIPT), "--print-build-dir"],
+        ["bash", str(_SCRIPT.with_name("build-root.sh"))],
         capture_output=True, text=True, env=env, timeout=15, check=False,
     )
 
 
 @pytest.mark.skipif(not _SCRIPT.exists(), reason="build-app.sh not in tree")
 def test_shell_rejects_in_repo_build_dir(tmp_path):
-    """Script must exit non-zero with 'inside the checkout' when JAEGER_SWIFT_BUILD
-    resolves inside the checkout."""
+    """Script must exit non-zero with 'outside the repository' when JAEGER_MAC_BUILD
+    resolves outside the repository."""
     repo = _SCRIPT.parents[4]
-    result = _run_build_script({"JAEGER_SWIFT_BUILD": str(repo / "inside_build")})
+    result = _run_build_script({"JAEGER_MAC_BUILD": str(repo / "inside_build")})
     assert result.returncode != 0
-    assert "inside the checkout" in result.stderr
+    assert "outside the repository" in result.stderr
 
 
 @pytest.mark.skipif(not _SCRIPT.exists(), reason="build-app.sh not in tree")
 def test_shell_rejects_symlink_to_repo(tmp_path):
-    """Script must exit non-zero when JAEGER_SWIFT_BUILD is a symlink pointing
-    inside the checkout."""
+    """Script must exit non-zero when JAEGER_MAC_BUILD is a symlink pointing
+    outside the repository."""
     repo = _SCRIPT.parents[4]
     link = tmp_path / "sneaky"
     link.symlink_to(repo / "jaeger_ai")
-    result = _run_build_script({"JAEGER_SWIFT_BUILD": str(link)})
+    result = _run_build_script({"JAEGER_MAC_BUILD": str(link)})
     assert result.returncode != 0
-    assert "inside the checkout" in result.stderr
+    assert "outside the repository" in result.stderr
 
 
 @pytest.mark.skipif(not _SCRIPT.exists(), reason="build-app.sh not in tree")
 def test_shell_rejects_dangerous_root(tmp_path):
     """Script must exit non-zero for dangerous broad root /."""
-    result = _run_build_script({"JAEGER_SWIFT_BUILD": "/"})
+    result = _run_build_script({"JAEGER_MAC_BUILD": "/"})
     assert result.returncode != 0
-    assert "dangerous" in result.stderr
+    assert "dedicated build directory" in result.stderr
 
 
 @pytest.mark.skipif(not _SCRIPT.exists(), reason="build-app.sh not in tree")
 def test_shell_accepts_path_with_spaces(tmp_path):
     """Read-only resolution must succeed without starting Swift or creating output."""
     ext = tmp_path / "my build dir" / "swift-build"
-    result = _run_build_script({"JAEGER_SWIFT_BUILD": str(ext)})
+    result = _run_build_script({"JAEGER_MAC_BUILD": str(ext)})
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(ext.resolve())
     assert not ext.exists()
@@ -302,9 +302,9 @@ def test_shell_accepts_path_with_spaces(tmp_path):
 
 @pytest.mark.skipif(not _SCRIPT.exists(), reason="build-app.sh not in tree")
 def test_shell_accepts_tilde_override(tmp_path):
-    """Tilde in JAEGER_SWIFT_BUILD should be expanded and accepted (not inside repo,
+    """Tilde in JAEGER_MAC_BUILD should be expanded and accepted (not inside repo,
     not a dangerous root)."""
-    result = _run_build_script({"JAEGER_SWIFT_BUILD": "~/.jaeger/test-shell-build"})
+    result = _run_build_script({"JAEGER_MAC_BUILD": "~/.jaeger/test-shell-build"})
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == str(Path("~/.jaeger/test-shell-build").expanduser().resolve())
 
@@ -334,7 +334,7 @@ def test_real_build_invocation_uses_external_scratch_without_running_swift(tmp_p
     swift.write_text("#!/bin/sh\nprintf '%s\\n' \"$@\"\nexit 91\n")
     swift.chmod(0o755)
     output = tmp_path / "build with spaces"
-    env = {**os.environ, "JAEGER_SWIFT_BUILD": str(output),
+    env = {**os.environ, "JAEGER_MAC_BUILD": str(output),
            "PATH": f"{fake_bin}:{os.environ['PATH']}"}
     # The script itself must enforce import purity, independent of the runner.
     env.pop("PYTHONDONTWRITEBYTECODE", None)
@@ -344,12 +344,12 @@ def test_real_build_invocation_uses_external_scratch_without_running_swift(tmp_p
               repo / "jaeger_ai" / "cli" / "__pycache__"]
     before = {str(p): p.stat().st_mtime_ns for directory in caches
               for p in directory.glob("*.pyc")}
-    result = subprocess.run(["bash", str(_SCRIPT), "--dev"], env=env,
+    result = subprocess.run(["bash", str(_SCRIPT)], env=env,
                             capture_output=True, text=True, timeout=15, check=False)
     assert result.returncode == 91, result.stderr
-    assert ["--scratch-path", str(output.resolve())] == result.stdout.splitlines()[-2:]
+    assert ["--scratch-path", str(output.resolve() / "scratch")] == result.stdout.splitlines()[-2:]
     assert output.is_dir()
-    assert not (output / "JaegerAI.app").exists()
+    assert not (output / "JaegerShell.app").exists()
     after = {str(p): p.stat().st_mtime_ns for directory in caches
              for p in directory.glob("*.pyc")}
     assert after == before
@@ -359,7 +359,7 @@ def test_lifecycle_launch_passes_checkout_to_external_app(tmp_path, monkeypatch)
     from jaeger_ai.cli.verbs import lifecycle_verbs as lv
 
     repo = tmp_path / "checkout with spaces"
-    bundle = tmp_path / "external" / "JaegerAI.app"
+    bundle = tmp_path / "external" / "JaegerShell.app"
     monkeypatch.setattr(lv, "REPO_ROOT", repo)
     calls = []
     monkeypatch.setattr(lv, "_command", lambda cmd: calls.append(cmd)
@@ -378,12 +378,12 @@ def test_invalid_build_override_does_not_launch_another_installed_app(tmp_path, 
     assert "Invalid Mac build configuration" in capsys.readouterr().err
 
 
-# ── swift_app_is_stale freshness tests ──────────────────────────────────────
+# ── mac_app_is_stale freshness tests ──────────────────────────────────────
 
 
 def _make_fake_bundle(base: Path) -> Path:
-    bundle = base / "JaegerAI.app"
-    exe = bundle / "Contents" / "MacOS" / "JaegerAI"
+    bundle = base / "JaegerShell.app"
+    exe = bundle / "Contents" / "MacOS" / "JaegerShell"
     exe.parent.mkdir(parents=True)
     exe.write_bytes(b"\x7fELF")
     (bundle / "Contents" / "Resources").mkdir(parents=True, exist_ok=True)
@@ -394,7 +394,7 @@ def _make_fake_repo(base: Path) -> Path:
     repo = base / "repo"
     repo.mkdir()
     (repo / ".git").mkdir()
-    swift_dir = repo / "jaeger_ai" / "interfaces" / "swift"
+    swift_dir = repo / "jaeger_ai" / "interfaces" / "macos-shell"
     swift_dir.mkdir(parents=True)
     (swift_dir / "Package.swift").write_text("// swift-tools-version:5.9\n")
     sources = swift_dir / "Sources"
@@ -404,117 +404,117 @@ def _make_fake_repo(base: Path) -> Path:
 
 
 def _stamp(bundle: Path, repo: Path) -> None:
-    from jaeger_ai.cli._common import _swift_source_fingerprint
-    fp = _swift_source_fingerprint(repo)
+    from jaeger_ai.cli._common import mac_source_fingerprint
+    fp = mac_source_fingerprint(repo)
     (bundle / "Contents" / "Resources" / "build-source-hash").write_text(fp + "\n")
 
 
 def test_stale_missing_executable(tmp_path):
-    from jaeger_ai.cli._common import swift_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     repo = _make_fake_repo(tmp_path)
-    bundle = tmp_path / "JaegerAI.app"
+    bundle = tmp_path / "JaegerShell.app"
     bundle.mkdir()
-    assert swift_app_is_stale(repo, bundle) is True
+    assert mac_app_is_stale(repo, bundle) is True
 
 
 def test_stale_legacy_bundle_no_stamp(tmp_path):
     """Bundle with executable but no build-source-hash (old build) → stale."""
-    from jaeger_ai.cli._common import swift_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     repo = _make_fake_repo(tmp_path)
     bundle = _make_fake_bundle(tmp_path)
-    assert swift_app_is_stale(repo, bundle) is True
+    assert mac_app_is_stale(repo, bundle) is True
 
 
 def test_stale_legacy_bundle_has_only_build_commit(tmp_path):
     """Bundle with build-commit but no build-source-hash (pre-fingerprint build) → stale."""
-    from jaeger_ai.cli._common import swift_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     repo = _make_fake_repo(tmp_path)
     bundle = _make_fake_bundle(tmp_path)
     (bundle / "Contents" / "Resources" / "build-commit").write_text("abc1234\n")
-    assert swift_app_is_stale(repo, bundle) is True
+    assert mac_app_is_stale(repo, bundle) is True
 
 
 def test_stale_empty_stamp(tmp_path):
     """Bundle with an empty build-source-hash (failed stamp write) → stale."""
-    from jaeger_ai.cli._common import swift_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     repo = _make_fake_repo(tmp_path)
     bundle = _make_fake_bundle(tmp_path)
     (bundle / "Contents" / "Resources" / "build-source-hash").write_text("  \n")
-    assert swift_app_is_stale(repo, bundle) is True
+    assert mac_app_is_stale(repo, bundle) is True
 
 
 def test_fresh_after_unchanged_build(tmp_path):
     """Freshly stamped bundle, nothing changed → fresh."""
-    from jaeger_ai.cli._common import swift_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     repo = _make_fake_repo(tmp_path)
     bundle = _make_fake_bundle(tmp_path)
     _stamp(bundle, repo)
-    assert swift_app_is_stale(repo, bundle) is False
+    assert mac_app_is_stale(repo, bundle) is False
 
 
 def test_fresh_repeated_call_unchanged(tmp_path):
     """Calling stale-check twice on an unchanged tree → fresh both times."""
-    from jaeger_ai.cli._common import swift_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     repo = _make_fake_repo(tmp_path)
     bundle = _make_fake_bundle(tmp_path)
     _stamp(bundle, repo)
-    assert swift_app_is_stale(repo, bundle) is False
-    assert swift_app_is_stale(repo, bundle) is False
+    assert mac_app_is_stale(repo, bundle) is False
+    assert mac_app_is_stale(repo, bundle) is False
 
 
 def test_stale_after_tracked_file_edited(tmp_path):
     """Editing a source file after stamping → stale."""
-    from jaeger_ai.cli._common import swift_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     repo = _make_fake_repo(tmp_path)
     bundle = _make_fake_bundle(tmp_path)
     _stamp(bundle, repo)
-    (repo / "jaeger_ai" / "interfaces" / "swift" / "Sources" / "main.swift").write_text(
+    (repo / "jaeger_ai" / "interfaces" / "macos-shell" / "Sources" / "main.swift").write_text(
         "import Foundation\nlet x = 1\n"
     )
-    assert swift_app_is_stale(repo, bundle) is True
+    assert mac_app_is_stale(repo, bundle) is True
 
 
 def test_stale_after_untracked_file_added(tmp_path):
     """Adding an untracked file to the Swift tree → stale."""
-    from jaeger_ai.cli._common import swift_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     repo = _make_fake_repo(tmp_path)
     bundle = _make_fake_bundle(tmp_path)
     _stamp(bundle, repo)
-    (repo / "jaeger_ai" / "interfaces" / "swift" / "Sources" / "NewFeature.swift").write_text(
+    (repo / "jaeger_ai" / "interfaces" / "macos-shell" / "Sources" / "NewFeature.swift").write_text(
         "class NewFeature {}\n"
     )
-    assert swift_app_is_stale(repo, bundle) is True
+    assert mac_app_is_stale(repo, bundle) is True
 
 
 def test_stale_after_file_removed(tmp_path):
     """Removing a source file after stamping → stale."""
-    from jaeger_ai.cli._common import swift_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     repo = _make_fake_repo(tmp_path)
     bundle = _make_fake_bundle(tmp_path)
     _stamp(bundle, repo)
-    (repo / "jaeger_ai" / "interfaces" / "swift" / "Sources" / "main.swift").unlink()
-    assert swift_app_is_stale(repo, bundle) is True
+    (repo / "jaeger_ai" / "interfaces" / "macos-shell" / "Sources" / "main.swift").unlink()
+    assert mac_app_is_stale(repo, bundle) is True
 
 
 def test_stale_after_file_renamed(tmp_path):
     """Renaming a source file after stamping → stale."""
-    from jaeger_ai.cli._common import swift_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     repo = _make_fake_repo(tmp_path)
     bundle = _make_fake_bundle(tmp_path)
     _stamp(bundle, repo)
-    old = repo / "jaeger_ai" / "interfaces" / "swift" / "Sources" / "main.swift"
+    old = repo / "jaeger_ai" / "interfaces" / "macos-shell" / "Sources" / "main.swift"
     old.rename(old.parent / "app.swift")
-    assert swift_app_is_stale(repo, bundle) is True
+    assert mac_app_is_stale(repo, bundle) is True
 
 
 def test_fresh_no_git_dir(tmp_path):
-    """No .git present (tarball install) → always fresh, no fingerprint needed."""
-    from jaeger_ai.cli._common import swift_app_is_stale
+    """Missing source stamp remains stale even in a tarball install."""
+    from jaeger_ai.cli._common import mac_app_is_stale
     repo = tmp_path / "repo"
     repo.mkdir()
     # Intentionally no .git
     bundle = _make_fake_bundle(tmp_path)
-    assert swift_app_is_stale(repo, bundle) is False
+    assert mac_app_is_stale(repo, bundle) is True
 
 
 def test_stale_during_build_simulation(tmp_path):
@@ -524,18 +524,18 @@ def test_stale_during_build_simulation(tmp_path):
     modified (source B). The bundle was compiled from A but the tree is now B
     — should be stale.
     """
-    from jaeger_ai.cli._common import swift_app_is_stale, _swift_source_fingerprint
+    from jaeger_ai.cli._common import mac_app_is_stale, mac_source_fingerprint
     repo = _make_fake_repo(tmp_path)
     bundle = _make_fake_bundle(tmp_path)
 
     # Pre-build fingerprint (what build-app.sh writes before swift build)
-    pre_build_fp = _swift_source_fingerprint(repo)
+    pre_build_fp = mac_source_fingerprint(repo)
     (bundle / "Contents" / "Resources" / "build-source-hash").write_text(pre_build_fp + "\n")
 
     # Source changes arrive mid-build
-    (repo / "jaeger_ai" / "interfaces" / "swift" / "Sources" / "main.swift").write_text(
+    (repo / "jaeger_ai" / "interfaces" / "macos-shell" / "Sources" / "main.swift").write_text(
         "// changed during build\nimport Foundation\n"
     )
 
     # The built artifact reflects the pre-build source, but tree is now different
-    assert swift_app_is_stale(repo, bundle) is True
+    assert mac_app_is_stale(repo, bundle) is True

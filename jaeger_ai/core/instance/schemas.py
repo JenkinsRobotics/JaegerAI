@@ -1029,10 +1029,9 @@ class InteractionConfig(BaseModel):
         "swift",
         json_schema_extra=_setting("interaction"),
         description=(
-            "Windowed-app UI toolkit. 'swift' = the native SwiftUI app "
-            "(interfaces/swift/); 'pyside6' = the Qt app. launch.py builds+runs "
-            "the Swift app when set to 'swift', falling back to PySide6 if the "
-            "Swift build/binary is unavailable."
+            "Windowed Mac app: interfaces/macos-shell with interfaces/ui. "
+            "The historical swift/pyside6 configuration values are accepted "
+            "for existing configs; both select the canonical shell, with no legacy fallback."
         ),
     )
 

@@ -3,17 +3,12 @@
     {
       "id": "jaeger-stream-continuity",
       "name": "Jaeger Stream Continuity",
-      "scripts": [
-        "jaeger_stream_continuity.js"
-      ]
+      "scripts": []
     },
     {
       "id": "jaeger-dispatcher",
       "name": "Jaeger Dispatcher and Focus",
-      "scripts": [
-        "jaeger_webui_branding.js",
-        "jaeger_dispatcher.js"
-      ],
+      "scripts": [],
       "sidecar": {
         "type": "loopback",
         "origin": "http://127.0.0.1:8646",
@@ -24,9 +19,7 @@
     {
       "id": "jaeger-gateway-console",
       "name": "Jaeger Gateway Console",
-      "scripts": [
-        "jaeger_gateway_console.js"
-      ]
+      "scripts": []
     }
   ]
 }

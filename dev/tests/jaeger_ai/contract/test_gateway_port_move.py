@@ -80,8 +80,8 @@ def test_retired_port_appears_nowhere_in_code():
 
 
 def test_gateway_port_mirrors_agree_with_the_contract():
-    swift = (REPO / "jaeger_ai/interfaces/swift/Sources/JaegerAI/Bridge/GatewayClient.swift").read_text()
-    assert re.search(rf"static let currentPort = {ports.GATEWAY_PORT}\b", swift)
+    swift = (REPO / "jaeger_ai/interfaces/macos-shell/Sources/JaegerShellCore/StartURL.swift").read_text()
+    assert re.search(rf"defaultGateway = LoopbackOrigin\(port: {ports.GATEWAY_PORT}\b", swift)
     assert "legacyPort" not in swift and "LEGACY_FALLBACK" not in swift
     extension = (REPO / "jaeger_ai/interfaces/ide/extension.js").read_text()
     assert f"gatewayUrl: '{ports.GATEWAY_URL}'" in extension

@@ -4488,7 +4488,7 @@ def run_for_voice(
     # Persist the turn so conversations survive app close + are listable.
     # ``preview`` (first user line, set by SessionStore.record) already
     # serves as the History list's title fallback — see
-    # interfaces/pyside6/rich_tui/window.py's ``_list_sessions`` — so
+    # the terminal history projection — so
     # there's no separate "first-turn set_title" call here; a distinct
     # OPERATOR-editable title is a future rename affordance, not this one.
     try:
@@ -5781,7 +5781,7 @@ def _mac_app_binary() -> "Path | None":
 
 
 def _launch_mac_app(binary: "Path", instance_name: str) -> int:
-    """Launch the built JaegerAI.app DETACHED (0.7.2): the app gets its
+    """Launch the canonical JaegerShell.app detached: the app gets its
     own session and a log file, ``./jaeger`` returns immediately, and
     the terminal window can be closed without killing the agent.
     ``JAEGER_ATTACH=1`` keeps the pre-0.7.2 behaviour — stdout in the
@@ -5824,23 +5824,6 @@ def _launch_mac_app(binary: "Path", instance_name: str) -> int:
           file=sys.stderr, flush=True)
     return 0
 
-
-def _windowed_available() -> bool:
-    """Whether the Pattern-1 windowed app can run here. Needs PySide6 and a
-    display. Honours ``JAEGER_NO_GUI`` and ``QT_QPA_PLATFORM=offscreen`` as
-    headless escape hatches (``--tui`` is handled separately). macOS / Windows
-    GUI sessions are assumed to have a display; Linux needs X11 / Wayland."""
-    if (os.environ.get("JAEGER_NO_GUI")
-            or os.environ.get("QT_QPA_PLATFORM") == "offscreen"):
-        return False
-    try:
-        import PySide6  # noqa: F401
-    except Exception:  # noqa: BLE001 — PySide6 optional / absent
-        return False
-    if sys.platform.startswith("linux"):
-        return bool(os.environ.get("DISPLAY")
-                    or os.environ.get("WAYLAND_DISPLAY"))
-    return True
 
 
 def main() -> int:
@@ -6124,28 +6107,11 @@ def _main_dispatch() -> int:
                 return voice_main()
             finally:
                 sys.argv = _orig_argv
-        # 0.6: SWIFT-FIRST — the windowed surface is JaegerAI.app (splash,
-        # menu-bar tray, fast-ready bridge). Bare ``jaeger`` launches the
-        # built app: the dev bundle in a checkout, /Applications when
-        # installed. Falls back to the PySide6 shell, then the TUI. (This
-        # routing lived in the deleted launch.py and never made it into the
-        # product path — bare ``./jaeger`` was still booting the old Qt
-        # shell in-process, with no splash.)
-        # ``JAEGER_NO_GUI`` is the headless escape hatch (SSH boxes,
-        # CI): never spawn a GUI app; fall through to the TUI below.
+        # Native shell only; headless use attaches through the terminal client.
         swift_app = (None if os.environ.get("JAEGER_NO_GUI")
                      else _mac_app_binary())
         if swift_app is not None:
             return _launch_mac_app(swift_app, instance_name)
-        # PySide6 fallback (no built Swift app). It boots its own in-process brain, so
-        # it is an isolated legacy path; otherwise bare ``jaeger`` falls through to the
-        # TUI, which attaches to the Gateway. ``--tui`` (above) opts in explicitly.
-        from jaeger_ai.contract.legacy_paths import legacy_paths_enabled as _legacy_gui
-        if _legacy_gui() and _windowed_available():
-            if args.instance:
-                os.environ["JAEGER_INSTANCE_NAME"] = args.instance
-            from .core.windowed import main as windowed_main
-            return windowed_main()
         from .interfaces.tui.__main__ import main as tui_main
         tui_argv: list[str] = []
         if args.instance:

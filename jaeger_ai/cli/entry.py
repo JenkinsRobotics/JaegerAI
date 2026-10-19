@@ -58,7 +58,7 @@ def _route(argv: list[str], py: str) -> list[str]:
     if cmd == "stack":
         return [py, "-m", "jaeger_ai.core.runtime.stack", *rest]
     if cmd == "multimodal":
-        return [py, "-m", "jaeger_ai.interfaces.pyside6.multimodal", *rest]
+        return [py, "-m", "jaeger_ai.interfaces.native_multimodal", *rest]
     if cmd == "bridge":
         return [py, "-m", "jaeger_ai.interfaces.bridge", *rest]
     if cmd == "mcp":

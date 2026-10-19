@@ -66,7 +66,7 @@ def test_multimodal_routes_to_the_dedicated_face():
     assert route(["multimodal", "--check"]) == [
         PY,
         "-m",
-        "jaeger_ai.interfaces.pyside6.multimodal",
+        "jaeger_ai.interfaces.native_multimodal",
         "--check",
     ]
 

@@ -113,7 +113,7 @@ on top:
   (`jaeger_ai/interfaces/tui/`, the 0.1.0-lineage terminal surface,
   preserved alongside newer surfaces per standing convention), voice
   (via the `kokoro_tts`/`whisper_stt` engine-module extras), and the
-  frozen PySide6 shipping set. All faces are clients of one protocol.
+  canonical Mac host and shared UI. All faces are clients of one protocol.
 - **The client protocol** — `jaeger_ai/contract` (vendored from
   JaegerAI) + `jaeger_ai/interfaces/client.py` (`JaegerClient`), a
   versioned NDJSON wire contract any surface — including third-party
@@ -154,7 +154,7 @@ The current native host is `jaeger_ai/interfaces/macos-shell`, loading the share
 jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh`; output is
 `~/.cache/jaeger/macos-shell/JaegerShell.app` (`JAEGER_MAC_BUILD` overrides it).
 This is currently a development bundle; production installation is deferred.
-No old SwiftUI app is selected as a fallback. Retained legacy dependencies and
+No old SwiftUI app is selected as a fallback. Archived implementations and remaining runtime
 the recoverable Desktop archive are documented in
 [scoped cleanup](docs/integration/SCOPED_CLEANUP.md).
 

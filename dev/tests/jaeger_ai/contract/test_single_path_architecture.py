@@ -200,7 +200,7 @@ def test_only_the_identity_tool_renames_jaeger_at_runtime():
 _IDENTITY_YAML_WRITERS = {
     "jaeger_ai/core/instance/setup_wizard.py", "jaeger_ai/core/instance/onboarding_setup.py",
     "jaeger_ai/core/instance/first_boot.py", "jaeger_ai/interfaces/bridge.py",
-    "jaeger_ai/interfaces/pyside6/settings/window.py", "jaeger_ai/main.py",
+    "jaeger_ai/main.py",
     "jaeger_ai/core/runtime/_shakedown.py", "packages/jaeger-agent/jaeger_agent/tools/identity_tools.py",
 }
 
@@ -315,8 +315,7 @@ def test_the_gateway_routes_operational_turns_through_the_task_owner():
 
 # ── 8. avatars and embodiment are adapters ──────────────────────────────────
 
-_AVATAR_ROOTS = ("jaeger_ai/interfaces/avatar", "jaeger_ai/interfaces/avatar_chat",
-                 "jaeger_ai/interfaces/avatar_player")
+_AVATAR_ROOTS = ("jaeger_ai/interfaces/avatar",)
 _AVATAR_FORBIDDEN = (
     "jaeger_ai.core.tasks", "jaeger_ai.core.entity", "jaeger_ai.core.authority",
     "jaeger_ai.core.gateway.session_store", "jaeger_ai.core.gateway.server",

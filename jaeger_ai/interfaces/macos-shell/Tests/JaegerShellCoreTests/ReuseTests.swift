@@ -5,20 +5,16 @@ final class ReuseTests: XCTestCase {
     let home = "/Users/t"
     let bundle = "/Users/t/.jaeger/apps/swift-build/ui-rebuild/JaegerShell.app"
 
-    func testLauncherOrder() {
+    func testLauncherPinsBuildSource() {
         let c = LauncherResolver.candidates(env: ["JAEGER_VENV": "/v"], plistLauncher: "~/bin/jaeger", bundlePath: bundle, home: home)
-        XCTAssertEqual(c[0], "/Users/t/bin/jaeger")
-        XCTAssertTrue(c.firstIndex(of: "/Users/t/GitHub/JaegerAI/jaeger")! < c.firstIndex(of: "/v/bin/jaeger")!)
-        XCTAssertEqual(c[1], "/Users/t/.jaeger/apps/swift-build/ui-rebuild/jaeger")
-        XCTAssertTrue(c.contains("/Users/t/GitHub/JaegerAI/jaeger"))
-        XCTAssertEqual(c.last, "/usr/local/bin/jaeger")
+        XCTAssertEqual(c, ["/Users/t/bin/jaeger"])
+        XCTAssertNil(LauncherResolver.resolve(env: ["JAEGER_VENV": "/v"], plistLauncher: "/missing/jaeger", bundlePath: bundle, home: home, isExecutable: { $0 == "/v/bin/jaeger" }))
     }
 
-    func testLauncherRequiresExecutable() {
+    func testLauncherRequiresCanonicalExecutable() {
         XCTAssertNil(LauncherResolver.resolve(env: [:], plistLauncher: nil, bundlePath: bundle, home: home, isExecutable: { _ in false }))
-        let hit = LauncherResolver.resolve(env: [:], plistLauncher: nil, bundlePath: bundle, home: home,
-                                           isExecutable: { $0 == "/Users/t/.jaeger/venv/bin/jaeger" })
-        XCTAssertEqual(hit, "/Users/t/.jaeger/venv/bin/jaeger")
+        XCTAssertNil(LauncherResolver.resolve(env: [:], plistLauncher: nil, bundlePath: bundle, home: home, isExecutable: { $0 == "/Users/t/.jaeger/venv/bin/jaeger" }))
+        XCTAssertEqual(LauncherResolver.resolve(env: [:], plistLauncher: nil, bundlePath: bundle, home: home, isExecutable: { $0 == "/Users/t/GitHub/JaegerAI/jaeger" }), "/Users/t/GitHub/JaegerAI/jaeger")
     }
 
     func testStackActionDecode() throws {

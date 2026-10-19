@@ -116,10 +116,11 @@ def test_agents_overlay_chains_to_sessions():
     assert "from api.jaeger_sessions import route" in src
 
 
-def test_overlay_is_installed_by_the_webui_build():
+def test_backend_proxy_remains_without_the_retired_console_frontend():
     root = OVERLAY.parents[4]
     assert OVERLAY.is_file()
-    assert (root / "jaeger_ai/assets/jaeger_gateway_console.js").is_file()
+    assert not (root / "jaeger_ai/assets/jaeger_gateway_console.js").exists()
+    assert (root / "jaeger_ai/interfaces/ui/src").is_dir()
 
 
 def test_global_event_stream_uses_the_session_stream_pump(monkeypatch):

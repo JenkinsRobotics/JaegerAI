@@ -256,8 +256,7 @@ def _rebuild_mac_shell(home: Path, *, only_if_stale: bool = False) -> None:
 def jaeger_exe() -> Path:
     """The install's ``jaeger`` launcher — the venv console script if
     present, else the wrapper script at the install root. Shared by the
-    PySide6 update dialog (``interfaces/pyside6/widgets/update_banner.py``)
-    and the app-bridge ``run_update`` command below, so both spawn the SAME
+    CLI and the app-bridge ``run_update`` command below, so both spawn the SAME
     executable a hand-typed ``jaeger update`` would run."""
     from jaeger_ai.core.instance.instance import install_root
     home = install_root()

@@ -1,4 +1,4 @@
-"""The WebUI serves the new UI build at / and the old shell only at /legacy."""
+"""The WebUI serves only the canonical shared UI; legacy routes never select old code."""
 from __future__ import annotations
 
 import importlib.util
@@ -38,6 +38,7 @@ class _Handler:
 def dist(tmp_path, monkeypatch):
     (tmp_path / "assets").mkdir()
     (tmp_path / "index.html").write_text('<script src="./assets/app.js"></script>')
+    (tmp_path / 'manifest.webmanifest').write_text('{"name":"Jaeger AI"}')
     (tmp_path / "assets" / "app.js").write_text("console.log(1)")
     (tmp_path.parent / "secret.txt").write_text("no")
     monkeypatch.setenv("JAEGER_WEBUI_UI_DIST", str(tmp_path))
@@ -66,12 +67,12 @@ def test_legacy_only_behind_flag(dist, monkeypatch):
     out, h = _get(mod, "/legacy")
     assert out is True and h.status == 404
     monkeypatch.setenv("JAEGER_WEBUI_LEGACY", "1")
-    assert _get(mod, "/legacy")[0] == "legacy"
+    assert _get(mod, "/legacy")[1].status == 404
 
 
-def test_without_a_build_root_falls_through_to_the_old_shell(tmp_path, monkeypatch):
+def test_without_a_build_root_reports_missing_build(tmp_path, monkeypatch):
     monkeypatch.setenv("JAEGER_WEBUI_UI_DIST", str(tmp_path / "missing"))
-    assert _get(_load(), "/")[0] is False
+    assert _get(_load(), "/")[1].status == 503
 
 
 def test_run_script_defaults_to_loopback():
@@ -138,6 +139,7 @@ def test_build_root_files_are_served_with_their_types(dist):
 
 
 def test_manifest_json_falls_through_without_a_build_manifest(dist):
+    (dist / "manifest.webmanifest").unlink()
     assert _get(_load(), "/manifest.json")[0] is False
 
 

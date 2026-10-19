@@ -11,7 +11,7 @@
 | :--- | :--- | :--- |
 | **Edit the current Mac host** | [`jaeger_ai/interfaces/macos-shell/`](../../jaeger_ai/interfaces/macos-shell/) | AppKit/WKWebView host; builds outside source |
 | **Edit the current shared frontend** | [`jaeger_ai/interfaces/ui/`](../../jaeger_ai/interfaces/ui/) | React/TypeScript; shared Mac/browser surface |
-| **Edit retained WebUI backend/proxy** | [`jaeger_ai/features/webui/`](../../jaeger_ai/features/webui/) | Required authenticated proxy and legacy browser routes |
+| **Edit retained WebUI backend/proxy** | [`jaeger_ai/features/webui/`](../../jaeger_ai/features/webui/) | Required authenticated proxy, backend APIs and login |
 | **Edit the Web UI's look & branding** | [`jaeger_ai/assets/`](../../jaeger_ai/assets/) | `jaeger_webui_branding.js` — **the only copy**; see below |
 | **Edit the Task Dispatcher & Kanban board** | [`jaeger_ai/features/dispatcher/`](../../jaeger_ai/features/dispatcher/) | `store.py`, `router.py`, `sidecar.py` (board UI: `jaeger_ai/assets/jaeger_dispatcher.js`) |
 | **Edit Roundtable (multi-agent debate & consensus)** | [`jaeger_ai/features/roundtable/`](../../jaeger_ai/features/roundtable/) | `policy.py` (rules), `service.py` (engine), `roundtable.py` (streaming) |
@@ -108,10 +108,11 @@ JaegerAI/
 │   │   └── …                   # 26 in total — open any one and read its README
 │   ├── cli/                    # 💻 Command-line verbs (`start`, `stop`, `webui`, …)
 │   ├── interfaces/             # 🔌 Client surfaces ONLY — how a human or peer connects
-│   │   ├── swift/              # Native macOS app
+│   │   ├── macos-shell/        # Canonical native Mac host
+│   │   ├── ui/                 # Shared app frontend
 │   │   ├── ide/                # VS Code / IDE extension webview & server client
 │   │   ├── tui/                # Terminal UI
-│   │   ├── pyside6/            # Qt desktop UI
+│   │   ├── native_multimodal/  # Reused socket adapter/device diagnostics
 │   │   ├── avatar/             # Avatar window surfaces
 │   │   └── bridge.py           # The NDJSON socket the native clients speak
 │   ├── nodes/                  # 🧩 Manifest-driven modules (each with module.yaml)
