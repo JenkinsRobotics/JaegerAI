@@ -71,3 +71,26 @@ with subprocess return code -6/SIGABRT and empty stderr. A same-profile
 `/usr/bin/true` diagnostic failed identically. It did not establish private REA
 acceptance. No unconstrained provider was launched as a fallback. No live keys,
 registration/configuration, shared provider or network settings were used.
+
+
+## Full OWNER-path write acceptance and routing fix
+
+The stronger test exposed a real regression: unpinned root goals could auto-route
+to the Gateway specialist and lose write_file. Root admission now pins the
+existing lead. See [OWNER_PATH_ACCEPTANCE.md](OWNER_PATH_ACCEPTANCE.md) for the
+exact unchanged execution path and all fixture boundaries.
+
+Three real OWNER-runtime approval lifecycle cases passed: owner-approved native
+write plus readback and canonical `completed_verified`; denial with blocked task
+and no file; cancellation with no file and rejected late approval. Socket
+connections are restricted to the task-owned test HTTP port. Model transport
+and peripheral capability inventory are fixtures; Gateway/EntityRuntime
+execution, policy, native file tools, run stores and TaskOwner remain real.
+
+Final combined bridge/outbox/REA-denial/tool/team/OWNER/handoff/specialist/project
+regressions: **150 passed**, 99 warnings, 13.26 seconds. Smoke: **170 passed**,
+6480 deselected. Security: **188 passed**, 12 warnings. Repository verify **all
+passed**; Ruff and diff checks passed. Logs use
+`/tmp/jaeger-agent-bridge-2-checks/owner-` prefixes; `owner-final.xml` includes
+per-case runtime stack, actor/run IDs, actual file SHA-256 and verification state.
+Reported live deployment counts were not substituted for these results.
