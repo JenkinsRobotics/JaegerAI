@@ -56,6 +56,8 @@ class Events:
         )
         self.max_subscriptions = max_subscriptions
         self.lock = asyncio.Lock()
+        self.delivery_lock = asyncio.Lock()
+        self.inflight = {}
         # Successful challenge cache is bounded and intentionally not persistent.
         self.verified = {}
 
@@ -184,9 +186,10 @@ class Events:
             self.authorize(principal)
             # Secret adapter failure leaves subscription unactivated.
             self.secrets.put(sid, bundle)
+            self.store.cleaned(sid)  # a new generation owns this account now
             with self.store.conn() as c:
                 c.execute(
-                    "INSERT INTO subscriptions VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET expires=excluded.expires, verified=excluded.verified, auth_until=excluded.auth_until",
+                    "INSERT INTO subscriptions(id,owner,url,arguments,expires,verified,created,auth_until,generation) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET expires=excluded.expires, verified=excluded.verified, auth_until=excluded.auth_until",
                     (
                         sid,
                         principal.subject,
@@ -196,6 +199,7 @@ class Events:
                         now,
                         old["created"] if old else now,
                         principal.expires,
+                        old["generation"] if old else secrets.token_hex(16),
                     ),
                 )
             self.store.audit("subscribe", "verified", now, sid)
@@ -210,31 +214,40 @@ class Events:
         self.authorize(principal)
         sid, _, _ = self.identity(principal.subject, params)
         async with self.lock:
+            task = self.inflight.get(sid)
+            if task is not None:
+                task.cancel()
             with self.store.conn() as c:
+                c.execute(
+                    "INSERT OR IGNORE INTO secret_cleanup SELECT id,owner FROM subscriptions WHERE id=? AND owner=?",
+                    (sid, principal.subject),
+                )
                 c.execute(
                     "DELETE FROM subscriptions WHERE id=? AND owner=?",
                     (sid, principal.subject),
                 )
                 c.execute("DELETE FROM deliveries WHERE subscription=?", (sid,))
             self.secrets.delete(sid)
+            self.store.cleaned(sid)
             self.store.audit("unsubscribe", "revoked", self.clock(), sid)
         return {}
 
     async def disconnect(self, owner):
         # Local operator/IdP revocation integration; never exposed as an MCP tool.
         async with self.lock:
-            with self.store.conn() as c:
-                ids = [
-                    r[0]
-                    for r in c.execute(
-                        "SELECT id FROM subscriptions WHERE owner=?", (owner,)
-                    )
-                ]
-            self.store.revoke(owner)  # deny first, even when key deletion fails
-            for sid in ids:
-                self.secrets.delete(sid)
+            self.store.revoke(owner)  # deny first; cleanup survives failures/restarts
+            for account in self.store.cleanup_accounts(owner):
+                task = self.inflight.get(account)
+                if task is not None:
+                    task.cancel()
+            await self.cleanup_secrets(owner)
             self.verified.clear()
             self.store.audit("disconnect", "revoked", self.clock())
+
+    async def cleanup_secrets(self, owner=None):
+        for account in self.store.cleanup_accounts(owner):
+            self.secrets.delete(account)
+            self.store.cleaned(account)
 
     async def ingest(self, message):
         if message.get("to") != "ares" or message.get("from") == "ares":
@@ -283,7 +296,7 @@ class Events:
                         continue
                     day_start = int(now // 86400) * 86400
                     counts = c.execute(
-                        "SELECT sum(created>=?),sum(created>? AND subscription=?),sum(created>? AND subscription=? AND thread=?) FROM deliveries WHERE state!='limited'",
+                        "SELECT sum(at>=?),sum(at>? AND subscription=?),sum(at>? AND subscription=? AND thread=?) FROM event_budget",
                         (
                             day_start,
                             now - 60,
@@ -298,6 +311,11 @@ class Events:
                         or (counts[1] or 0) >= self.per_subscription
                         or (counts[2] or 0) >= self.per_thread
                     )
+                    if not limited:
+                        c.execute(
+                            "INSERT OR IGNORE INTO event_budget VALUES(?,?,?,?)",
+                            (sub["id"], event_id, message["thread"], now),
+                        )
                     c.execute(
                         "INSERT INTO deliveries(subscription,event,thread,body,state,due,created) VALUES(?,?,?,?,?,?,?)",
                         (
@@ -315,93 +333,141 @@ class Events:
                         ("limited" if limited else "pending", sub["id"], now),
                     )
 
-    async def deliver(self):
-        # Serial single-process worker: crash after POST/before ACK can redeliver
-        # the same eventId. Receivers must deduplicate, as Standard Webhooks expects.
-        async with self.lock:
-            now = self.clock()
-            with self.store.conn() as c:
-                rows = c.execute(
-                    "SELECT d.*,s.url,s.owner,s.arguments,s.expires,s.auth_until FROM deliveries d JOIN subscriptions s ON s.id=d.subscription WHERE d.state='pending' AND d.due<=? ORDER BY d.created LIMIT 50",
-                    (now,),
-                ).fetchall()
-            for row in rows:
-                now = self.clock()
-                sid = row["subscription"]
-                state, status = "pending", 0
+    async def _attempt(self, row):
+        """One cancellable callback; no lifecycle lock spans an awaited operation."""
+        try:
+            await self.gateway.get_thread(row["thread"], 0, 1)
+            bundle = self.secrets.get(row["subscription"])
+            async with self.lock:
+                with self.store.conn() as c:
+                    live = c.execute(
+                        "SELECT 1 FROM subscriptions s JOIN deliveries d ON s.id=d.subscription "
+                        "WHERE s.id=? AND s.generation=? AND d.event=? AND d.state='pending' "
+                        "AND s.expires>? AND s.auth_until>? AND s.owner NOT IN (SELECT owner FROM revoked)",
+                        (
+                            row["subscription"],
+                            row["generation"],
+                            row["event"],
+                            self.clock(),
+                            self.clock(),
+                        ),
+                    ).fetchone()
+                if live is None:
+                    return "revoked", 0
+            status, _ = await self.post(
+                row["subscription"], row["url"], bundle, row["body"], row["event"]
+            )
+            if 200 <= status < 300:
+                return "delivered", status
+            if status in (410, 413) or not (status in (408, 429) or status >= 500):
+                return "failed", status
+            return "pending", status
+        except PermissionError:
+            return "revoked", 0
+        except Exception:  # noqa: BLE001 — bounded retries, secret-free audit
+            return "pending", 0
+
+    async def deliver(self, limit=4):
+        # One worker, one fresh row at a time. Lifecycle operations can revoke and
+        # cancel the in-flight task without waiting for an entire callback batch.
+        async with self.delivery_lock:
+            for _ in range(limit):
+                async with self.lock:
+                    with self.store.conn() as c:
+                        row = c.execute(
+                            "SELECT d.*,s.url,s.owner,s.generation FROM deliveries d "
+                            "JOIN subscriptions s ON s.id=d.subscription "
+                            "WHERE d.state='pending' AND d.due<=? ORDER BY d.created,d.event LIMIT 1",
+                            (self.clock(),),
+                        ).fetchone()
+                    if row is None:
+                        break
+                    sid = row["subscription"]
+                    task = asyncio.create_task(self._attempt(row))
+                    self.inflight[sid] = task
+                try:
+                    result = (await asyncio.gather(task, return_exceptions=True))[0]
+                finally:
+                    async with self.lock:
+                        if self.inflight.get(sid) is task:
+                            self.inflight.pop(sid, None)
+                if isinstance(result, BaseException):
+                    # Revocation removed/retired the row. Never resurrect it.
+                    continue
+                state, status = result
                 attempts = row["attempts"] + 1
-                if (
-                    row["expires"] <= now
-                    or row["auth_until"] <= now
-                    or self.store.revoked(row["owner"])
-                ):
-                    state = "revoked"
-                else:
-                    try:
-                        # Recheck Gateway thread access immediately before every attempt.
-                        await self.gateway.get_thread(row["thread"], 0, 1)
-                        bundle = self.secrets.get(sid)
-                        status, _ = await self.post(
-                            sid, row["url"], bundle, row["body"], row["event"]
-                        )
-                        if 200 <= status < 300:
-                            state = "delivered"
-                        elif status in (410, 413) or not (
-                            status in (408, 429) or status >= 500
-                        ):
-                            state = "failed"
-                    except PermissionError:
-                        state = "revoked"
-                    except Exception:  # noqa: BLE001 — bounded retries, secret-free audit
-                        # No exception text/URLs/secrets in audit. Retrying errors
-                        # is bounded; a revoked resource never reaches transport.
-                        status = 0
                 if attempts >= 5 and state == "pending":
                     state = "failed"
-                with self.store.conn() as c:
-                    c.execute(
-                        "UPDATE deliveries SET attempts=?,state=?,due=? WHERE subscription=? AND event=?",
-                        (
-                            attempts,
-                            state,
-                            self.clock() + min(300, 2**attempts),
-                            sid,
-                            row["event"],
-                        ),
-                    )
-                self.store.audit("deliver", state, self.clock(), sid)
-                if status == 410:
+                async with self.lock:
                     with self.store.conn() as c:
-                        c.execute("DELETE FROM subscriptions WHERE id=?", (sid,))
+                        c.execute("BEGIN IMMEDIATE")
+                        current = c.execute(
+                            "SELECT 1 FROM subscriptions WHERE id=? AND generation=?",
+                            (sid, row["generation"]),
+                        ).fetchone()
+                        if current is None:
+                            continue
                         c.execute(
-                            "UPDATE deliveries SET state='revoked' WHERE subscription=? AND state='pending'",
-                            (sid,),
+                            "UPDATE deliveries SET attempts=?,state=?,due=? WHERE subscription=? AND event=? AND state='pending'",
+                            (
+                                attempts,
+                                state,
+                                self.clock() + min(300, 2**attempts),
+                                sid,
+                                row["event"],
+                            ),
                         )
-                    self.secrets.delete(sid)
+                        if status == 410:
+                            c.execute(
+                                "INSERT OR IGNORE INTO secret_cleanup VALUES(?,?)",
+                                (sid, row["owner"]),
+                            )
+                            c.execute(
+                                "DELETE FROM subscriptions WHERE id=? AND generation=?",
+                                (sid, row["generation"]),
+                            )
+                            c.execute(
+                                "UPDATE deliveries SET state='revoked' WHERE subscription=? AND state='pending'",
+                                (sid,),
+                            )
+                    self.store.audit("deliver", state, self.clock(), sid)
+            await self.cleanup_secrets()
 
     async def poll(self):
-        # Poll internal Gateway only, not the ChatGPT Events protocol. No global
-        # Gateway DB access and no live provider calls. No replay promised upstream.
-        with self.store.conn() as c:
-            row = c.execute(
-                "SELECT at,page FROM watermark WHERE singleton=1"
-            ).fetchone()
-            since = row[0] if row else self.clock()
-        started = self.clock()
-        after = row[1] if row else 0
-        checkpoint = after
-        while True:
-            page = await self.gateway.list_messages(after, 100)
-            for message in page["messages"]:
-                if message["created_at"] >= since:
+        # Two pages/tick: bounded historical progress, at most 12 list requests
+        # per minute at the normal 10s cadence. Save every completed page. The
+        # per-subscription creation time rejects historical messages, so advancing
+        # a partially scanned inbox never skips a later matching message by time.
+        try:
+            async with self.lock:
+                for sid in self.store.prune(self.clock()):
+                    task = self.inflight.get(sid)
+                    if task is not None:
+                        task.cancel()
+            with self.store.conn() as c:
+                row = c.execute(
+                    "SELECT page FROM watermark WHERE singleton=1"
+                ).fetchone()
+            after = row[0] if row else 0
+            for _ in range(2):
+                page = await self.gateway.list_messages(after, 100)
+                for message in page["messages"]:
                     await self.ingest(message)
-            after = page.get("next_after")
-            if after is None:
-                break
-            checkpoint = after
-        with self.store.conn() as c:
-            c.execute(
-                "INSERT INTO watermark VALUES(1,?,?) ON CONFLICT(singleton) DO UPDATE SET at=excluded.at,page=excluded.page",
-                (started, checkpoint),
-            )
-        await self.deliver()
+                next_after = page.get("next_after")
+                if next_after is not None and (
+                    type(next_after) is not int or next_after <= after
+                ):
+                    raise ValueError("Invalid Gateway pagination")
+                checkpoint = after if next_after is None else next_after
+                with self.store.conn() as c:
+                    c.execute(
+                        "INSERT INTO watermark VALUES(1,?,?) ON CONFLICT(singleton) DO UPDATE SET at=excluded.at,page=excluded.page",
+                        (self.clock(), checkpoint),
+                    )
+                if next_after is None:
+                    break
+                after = next_after
+        finally:
+            # An inbox 429/outage must never starve already queued deliveries.
+            await self.deliver()
+            await self.cleanup_secrets()

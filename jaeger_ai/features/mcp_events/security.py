@@ -159,6 +159,7 @@ class PublicHTTPS:
                 aiohttp.ClientSession(
                     connector=connector,
                     trust_env=False,
+                    auto_decompress=False,
                     timeout=aiohttp.ClientTimeout(total=10),
                 ) as client,
                 client.post(
@@ -175,7 +176,7 @@ class PublicHTTPS:
 
 
 class KeychainSecrets:
-    """Explicit runtime adapter, never used by tests. No automatic provisioning.
+    """Explicit native runtime adapter; tests replace its backend.
 
     Stores one JSON key bundle per subscription. Caller must separately approve
     production Keychain setup. Values are never included in exceptions/logs.
@@ -277,10 +278,71 @@ class OAuthVerifier:
                 claims.get("scope"), str
             ):
                 raise ValueError
-            if claims.get("token_use", "access") != "access":
+            if (
+                claims.get("token_use", "access") != "access"
+                or "events" in claims
+                or jwt.get_unverified_header(header[7:]).get("typ") == "logout+jwt"
+            ):
                 raise ValueError
             return Principal(
                 claims["sub"], frozenset(claims["scope"].split()), claims["exp"]
             )
         except (jwt.PyJWTError, ValueError, TypeError):
             raise PermissionError("Invalid OAuth authorization") from None
+
+
+class LogoutVerifier:
+    """OpenID Connect Back-Channel Logout 1.0, account-wide single-owner profile.
+
+    Separate client audience and explicit logout+jwt typing prevent confusing
+    logout tokens with access tokens. Only sub-based account-wide logout is
+    accepted: this facade does not maintain browser/session-ID mappings.
+    """
+
+    EVENT = "http://schemas.openid.net/event/backchannel-logout"
+
+    def __init__(self, issuer, client_id, public_key, subject, *, max_age=120):
+        if not isinstance(client_id, str) or not client_id or client_id == issuer:
+            raise ValueError("Explicit logout client audience required")
+        self.issuer, self.client_id = issuer, client_id
+        self.public_key, self.subject, self.max_age = public_key, subject, max_age
+
+    def verify(self, value):
+        import time
+
+        if not isinstance(value, str) or not value or len(value) > 16384:
+            raise PermissionError("Invalid logout authorization")
+        try:
+            claims = jwt.decode(
+                value,
+                self.public_key,
+                algorithms=["RS256"],
+                issuer=self.issuer,
+                audience=self.client_id,
+                options={
+                    "require": ["iss", "aud", "iat", "exp", "jti", "sub", "events"]
+                },
+            )
+            events = claims["events"]
+            if (
+                jwt.get_unverified_header(value).get("typ") != "logout+jwt"
+                or claims["sub"] != self.subject
+                or "nonce" in claims
+                or "sid" in claims
+                or not isinstance(claims["jti"], str)
+                or not 1 <= len(claims["jti"]) <= 256
+                or not isinstance(events, dict)
+                or not isinstance(events.get(self.EVENT), dict)
+                or type(claims["iat"]) is not int
+                or type(claims["exp"]) is not int
+                or claims["exp"] <= claims["iat"]
+                or time.time() - claims["iat"] > self.max_age
+                or claims["exp"] - claims["iat"] > self.max_age
+            ):
+                raise ValueError
+            receipt = hashlib.sha256(
+                (self.issuer + "\0" + claims["jti"]).encode()
+            ).hexdigest()
+            return claims["sub"], receipt
+        except (jwt.PyJWTError, ValueError, TypeError):
+            raise PermissionError("Invalid logout authorization") from None
