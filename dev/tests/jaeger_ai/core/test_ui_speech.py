@@ -129,14 +129,29 @@ def test_stop_publication_failure_is_visible(monkeypatch):
     assert result["spoken"] is False
 
 
-def test_timeout_reports_unknown_and_releases_subscription(monkeypatch):
+def test_timeout_retains_ownership_until_matching_receipt(monkeypatch):
     bus, speech = _setup(monkeypatch)
     speech.timeout_s = 0.01
     result = speech.speak("hello", voice="am_adam")
     assert result["execution_unknown"] is True
     assert result["acknowledged"] is False
-    assert not bus.callbacks
+    assert bus.callbacks
+    assert speech.active_correlation_id == bus.commands[0].correlation_id
+    blocked = speech.speak("must not submit", voice="am_adam")
+    assert blocked["execution_unknown"] is True
+    assert len(bus.commands) == 1
+    stopped = speech.stop()
+    assert stopped["stopped"] is False
+    assert stopped["execution_unknown"] is True
+    assert stopped["correlation_id"] == result["correlation_id"]
+    # No receipt: repeated Stop still cannot report idle/success.
+    assert speech.stop()["stopped"] is False
+    bus.ack(topics.SpeechCommand(text="other", correlation_id="unrelated"))
+    assert speech.active_correlation_id == result["correlation_id"]
+    bus.ack(bus.commands[0], ok=False)
     assert speech.active_correlation_id is None
+    assert not bus.callbacks
+    assert speech.stop()["active"] is False
 
 
 def test_stop_during_prepare_prevents_later_publication(monkeypatch):
@@ -187,3 +202,129 @@ def test_stop_does_not_cancel_another_lane_on_shared_bus(monkeypatch):
     first_worker.join(2)
     assert first["cancelled"] is True
     assert not bus.callbacks
+
+
+class _NodeBus(_Bus):
+    """Synchronous fake transport; the real node owns queue/Stop/ack code."""
+    node = None
+
+    def publish(self, message):
+        super().publish(message)
+        if isinstance(message, topics.SpeechCommand):
+            self.node._on_speech_command(message)
+        elif isinstance(message, topics.SpeechStop):
+            self.node._on_speech_stop(message)
+        elif isinstance(message, topics.SpokenAck):
+            for callback in list(self.callbacks):
+                callback(message)
+
+
+class _Audio:
+    def __init__(self, *, block=False):
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.calls = []
+        self.stop_count = 0
+        self.block = block
+
+    def speak(self, text, **kwargs):
+        self.calls.append(text)
+        self.started.set()
+        if self.block:
+            assert self.release.wait(2)
+        return {"spoken": self.stop_count == 0,
+                "reason": "fake playback interrupted" if self.stop_count else None}
+
+    def stop(self):
+        self.stop_count += 1
+        self.release.set()
+
+
+def _real_node(monkeypatch, *, block=False):
+    from jaeger_kokoro_tts.node import TTSNode
+
+    bus, audio = _NodeBus(), _Audio(block=block)
+    node = TTSNode(bus=bus, synthesizer=audio, warm_on_start=False,
+                   install_signal_handlers=False)
+    bus.node = node
+    monkeypatch.setattr(runtime, "ensure_tts_node", lambda: node)
+    monkeypatch.setattr(runtime, "get_bus", lambda: bus)
+    return bus, audio, node
+
+
+def test_real_node_cancels_queued_ui_before_first_tick(monkeypatch):
+    bus, audio, node = _real_node(monkeypatch)
+    speech = UISpeech(timeout_s=0.01)
+    unknown = speech.speak("cancel before first tick", voice="am_adam")
+    assert unknown["execution_unknown"] is True
+    stopped = speech.stop()
+    assert stopped["stop_requested"] is True
+    assert speech.active_correlation_id is None  # node issued matching negative ack
+    node.tick()
+    assert audio.calls == []
+    assert audio.stop_count == 0
+    receipts = [m for m in bus.published if isinstance(m, topics.SpokenAck)]
+    assert len(receipts) == 1
+    assert receipts[0].ok is False
+    assert receipts[0].correlation_id == unknown["correlation_id"]
+
+
+def test_real_node_queued_ui_stop_preserves_other_active_and_queue_order(monkeypatch):
+    bus, audio, node = _real_node(monkeypatch, block=True)
+    bus.publish(topics.SpeechCommand(text="other active", correlation_id="other"))
+    worker = threading.Thread(target=node.tick)
+    worker.start()
+    assert audio.started.wait(2)
+    bus.publish(topics.SpeechCommand(text="keep first", correlation_id="keep-1"))
+    speech = UISpeech(timeout_s=0.01)
+    unknown = speech.speak("discard UI", voice="am_adam")
+    bus.publish(topics.SpeechCommand(text="keep second", correlation_id="keep-2"))
+    speech.stop()
+    assert speech.active_correlation_id is None
+    assert node._active_correlation_id == "other"
+    assert audio.stop_count == 0
+    assert worker.is_alive()
+    audio.release.set()
+    worker.join(2)
+    assert not worker.is_alive()
+    audio.block = False
+    node.tick()
+    node.tick()
+    assert audio.calls == ["other active", "keep first", "keep second"]
+    receipts = [m for m in bus.published if isinstance(m, topics.SpokenAck)
+                and m.correlation_id == unknown["correlation_id"]]
+    assert len(receipts) == 1 and receipts[0].ok is False
+
+
+def test_real_node_timeout_then_stop_targets_active_request(monkeypatch):
+    bus, audio, node = _real_node(monkeypatch, block=True)
+    speech = UISpeech(timeout_s=0.01)
+    result = {}
+    caller = _speak(speech, "active UI", result)
+    bus.wait_commands(1)
+    worker = threading.Thread(target=node.tick)
+    worker.start()
+    assert audio.started.wait(2)
+    caller.join(2)
+    assert result["execution_unknown"] is True
+    assert speech.speak("blocked", voice="am_adam")["execution_unknown"] is True
+    assert len(bus.commands) == 1
+    stopped = speech.stop()
+    assert stopped["stopped"] is False  # publication alone is never confirmation
+    assert stopped["correlation_id"] == result["correlation_id"]
+    worker.join(2)
+    assert not worker.is_alive()
+    assert audio.stop_count == 1
+    assert speech.active_correlation_id is None
+    assert not bus.callbacks
+
+
+def test_real_node_scoped_stop_before_say_delivery_does_not_revive_speech(monkeypatch):
+    bus, audio, node = _real_node(monkeypatch)
+    bus.publish(topics.SpeechStop(correlation_id="late-ui"))
+    bus.publish(topics.SpeechCommand(text="late say", correlation_id="late-ui"))
+    node.tick()
+    assert audio.calls == []
+    receipts = [m for m in bus.published if isinstance(m, topics.SpokenAck)]
+    assert len(receipts) == 1 and receipts[0].ok is False
+    assert audio.stop_count == 0
