@@ -25,3 +25,9 @@ Four focused Swift fixtures cover foreign-card filtering/offered options, expire
 Expiry follows the existing backend's stored status/timeout lifecycle; no client deadline is invented where the record has none. Unknown custom choice types are not rendered as invented decisions. This slice handles permissions bound to the selected Gateway request; it does not guess ownership of unrelated child-session or legacy approvals. Rich historical tool/reasoning cards, attachments, voice/avatar, scheduler writes and board execution remain outside this follow-up. Source re-review and coordinated deployment approval are pending.
 
 Evidence logs: `/tmp/jaeger-recovered-approval-tests.log` and `/tmp/jaeger-recovered-approval-python.log`.
+
+## Stop-entry review follow-up
+
+Stop now invalidates recovered approval actions synchronously in both the UI callback and async public entry, before scheduling or awaiting the control refresh. An approval epoch rejects any pending list/detail response captured before that intent; the exact session/request is locally blocked from rebinding an actionable card while Stop remains unsettled. A new request identity is separate. No earlier-submitted backend operation is represented as undone.
+
+A suspended-control-refresh fixture starts an approval preflight, clicks Stop, verifies the card is disabled without yielding, attempts another click and a stale bind while Stop waits, then releases both waits. Zero approval POSTs occur and the exact cancellation is dispatched. Five approval checks plus ten existing Stop checks passed (15 total); app target rebuilt. Evidence: `/tmp/jaeger-stop-approval-race-tests.log`. No backend change or live permission action in this follow-up.
