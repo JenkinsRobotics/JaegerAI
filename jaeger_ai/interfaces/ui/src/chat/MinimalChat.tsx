@@ -20,6 +20,7 @@ import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
+import { MessageMenu, Reactions, type MessageAction } from "./MessageMenu";
 import { useRevealedText } from "./reveal";
 import { useStreamStyle, type StreamStyleParams } from "./streamStyle";
 import { turnAvatarState, type AvatarState } from "../agents/avatarMotion";
@@ -241,7 +242,9 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
   /** Grok's "Composer actions" (the + button) and "Message actions" (right-click a bubble) menus. */
   const plus = useRef<HTMLButtonElement>(null);
   const [composerMenu, setComposerMenu] = useState(false);
-  const [messageMenu, setMessageMenu] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [messageMenu, setMessageMenu] = useState<{ x: number; y: number; text: string; turnId?: string } | null>(null);
+  /** Local-only reactions per turn (the gateway has no reactions yet). */
+  const [reactions, setReactions] = useState<Record<string, string[]>>({});
   const picker = useRef<HTMLInputElement>(null);
   const stick = useRef(true);
   const voiceHost = "micStart" in host ? (host as ChatHost & VoiceHost) : undefined;
@@ -424,12 +427,18 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     const bubble = (e.target as HTMLElement).closest<HTMLElement>(".jg-bubble");
     if (!bubble) return;
     e.preventDefault();
-    setMessageMenu({ x: e.clientX, y: e.clientY, text: (bubble.innerText ?? bubble.textContent ?? "").trim() });
+    setMessageMenu({ x: e.clientX, y: e.clientY, text: (bubble.innerText ?? bubble.textContent ?? "").trim(), turnId: bubble.closest<HTMLElement>("[data-turn-id]")?.dataset.turnId });
   };
-  const onMessageAction = (action: string) => {
+  const onMessageAction = (action: MessageAction) => {
     const text = messageMenu?.text ?? "";
+    const turnId = messageMenu?.turnId;
     setMessageMenu(null);
     if (action === "copy") void navigator.clipboard?.writeText(text).catch(() => {});
+    if (action === "copy-id" && turnId) void navigator.clipboard?.writeText(turnId).catch(() => {});
+    if (action.startsWith("react:") && turnId) {
+      const emoji = action.slice(6);
+      setReactions((r) => ({ ...r, [turnId]: r[turnId]?.includes(emoji) ? r[turnId] : [...(r[turnId] ?? []), emoji] }));
+    }
     if (action === "reply") {
       const quote = text.split("\n").filter(Boolean).slice(0, 3).map((l) => `> ${l}`).join("\n");
       setDraft((d) => `${quote}\n\n${d}`);
@@ -541,7 +550,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
                 : <PostMessage entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "post" }>} links={links} onOpenHandoff={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} onOpenChat={host instanceof WebHost && host.openChat ? (id) => (host as WebHost).openChat?.(id) : undefined} />}
             </section>
           ) : (
-            <section key={turn.turnId} className={`jg-turn${loadedTurns.current.has(turn.turnId) ? "" : " is-new"}`}>
+            <section key={turn.turnId} data-turn-id={turn.turnId} className={`jg-turn${loadedTurns.current.has(turn.turnId) ? "" : " is-new"}`}>
               {needsSeparator(session.turns[index - 1]?.createdAt, turn.createdAt) && (
                 <div className="jg-separator" role="separator">{separatorLabel(turn.createdAt!)}</div>
               )}
@@ -551,6 +560,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} />
                 : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
+              <Reactions emojis={reactions[turn.turnId] ?? []} onRemove={(e) => setReactions((r) => ({ ...r, [turn.turnId]: (r[turn.turnId] ?? []).filter((x) => x !== e) }))} />
               {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} agent={agent} state={turnAvatarState(turn)} />}
             </section>
           ))}
@@ -561,8 +571,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
         <ArrowDownIcon />
         {unread > 0 && <span className="jg-jump__badge">{badge(unread)}</span>}
       </button>
-      <Menu open={Boolean(messageMenu)} anchor={messageMenu ? { x: messageMenu.x, y: messageMenu.y } : null} ariaLabel="Message actions"
-        items={[{ id: "copy", label: "Copy" }, { id: "reply", label: "Reply" }]} onClose={() => setMessageMenu(null)} onSelect={onMessageAction} />
+      <MessageMenu at={messageMenu ? { x: messageMenu.x, y: messageMenu.y } : null} requestId={messageMenu?.turnId} onAction={onMessageAction} onClose={() => setMessageMenu(null)} />
       <form ref={composer} className="jg-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">

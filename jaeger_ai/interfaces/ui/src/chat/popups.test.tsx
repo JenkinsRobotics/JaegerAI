@@ -70,7 +70,7 @@ describe("composer + and message menus", () => {
     await act(async () => { attach.click(); });
     expect(click).toHaveBeenCalled();
   });
-  it("right-click on a bubble offers Copy and Reply; Reply quotes it into the composer", async () => {
+  it("right-click on a bubble: Grok's reaction row + Reply, Copy, Copy request ID; Reply quotes it; a reaction shows under the turn", async () => {
     const host = { capabilities: { voice: false }, startTurn: vi.fn(), respondToConfirmation: vi.fn(), copy: vi.fn(), openExternal: vi.fn(),
       sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [{ turnId: "t1", message: "hello there", parts: [{ kind: "markdownContent", text: "Hi! **Done.**" }], state: "complete" }] })) } };
     await act(async () => { root.render(<MinimalChat host={host as never} sessionId="s1" />); });
@@ -78,10 +78,16 @@ describe("composer + and message menus", () => {
     const bubble = el.querySelector(".jg-bubble--assistant")!;
     Object.defineProperty(bubble, "innerText", { configurable: true, get: () => "Hi! Done." });
     await act(async () => { bubble.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })); });
-    expect(items()).toEqual(["Copy", "Reply"]);
+    const labels = items().map((t) => (t ?? "").replace(/[\uE000-\uF8FF]/g, "").trim()).filter((t) => /[A-Za-z]/.test(t));
+    expect(labels).toEqual(["Reply", "Copy", "Copy request ID"]);
+    expect(document.querySelectorAll('[aria-label^="React "]').length).toBe(5);
     const reply = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((n) => n.textContent?.includes("Reply"))!;
     await act(async () => { reply.click(); });
     expect(el.querySelector<HTMLTextAreaElement>(".jg-composer__input")!.value).toBe("> Hi! Done.\n\n");
+    await act(async () => { bubble.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })); });
+    await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="React 👍"]')!.click(); });
+    expect(document.querySelector('[data-turn-id="t1"] .jg-reaction')?.textContent).toBe("👍");
+    expect(document.querySelector('[role="menu"]')).toBeNull();
   });
 });
 
