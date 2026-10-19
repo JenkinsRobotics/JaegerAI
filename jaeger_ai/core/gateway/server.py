@@ -2638,7 +2638,20 @@ class JaegerGatewayApp:
             return web.json_response({"error": "Session not found"}, status=404)
         # Surfaces chrome polls GET without SSE — stamp role/display_name
         # after handoff so the UI can render the active agent identity.
-        return web.json_response(self._enrich_session_agent(session))
+        payload = self._enrich_session_agent(session)
+        # Recovery clients need a scoped control identity even when they did
+        # not submit this turn. Do not expose input/output through this field.
+        latest = self.store.latest_request(session_id)
+        payload["latest_request"] = ({
+            key: latest.get(key) for key in (
+                "session_id", "request_id", "turn_id", "status", "updated_at", "finished_at",
+            )
+        } if latest else None)
+        if request.query.get("view") == "control":
+            return web.json_response({key: payload.get(key) for key in (
+                "session_id", "status", "latest_request",
+            )})
+        return web.json_response(payload)
 
     async def handle_branch_session(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]

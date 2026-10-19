@@ -159,6 +159,96 @@ final class ChatViewModel: ObservableObject {
     /// composer's send button disables on this so the operator can't
     /// double-fire while we wait for the agent to reply.
     @Published private(set) var isSending: Bool = false
+    @Published private(set) var controlledRequest: GatewayClient.RequestState?
+    @Published private(set) var stopNotice: String?
+    @Published private(set) var isStopping = false
+    private var controlRefreshing = false
+    private var controlReadAvailable = false
+    private var queuePausedByStop = false
+    private var stopRequestedIDs: Set<String> = []
+    private let controlGateway: GatewayClient = .fromEnvironment()
+
+    var hasActiveTurn: Bool {
+        isSending || (controlledRequest?.session_id == sessionKey && controlledRequest?.isActive == true) ||
+            (sessionKey == "dispatcher" && dispatcherRun?.active == true)
+    }
+
+    var canStopTurn: Bool {
+        if isStopping { return false }
+        if sessionKey == "dispatcher" { return dispatcherRun?.active == true }
+        guard controlReadAvailable, let request = controlledRequest, request.session_id == sessionKey else { return false }
+        return request.canCancel && !stopRequestedIDs.contains(request.request_id)
+    }
+
+    var turnControlLabel: String {
+        stopNotice ?? controlledRequest?.stopLabel ?? (isSending ? "Finding current request…" : "")
+    }
+
+    /// The server is the authority even when this window did not send the turn.
+    func refreshTurnControl() async {
+        guard sessionKey != "dispatcher", !controlRefreshing else { return }
+        controlRefreshing = true
+        defer { controlRefreshing = false }
+        let selected = sessionKey
+        do {
+            let session = try await controlGateway.getSessionControl(id: selected)
+            guard selected == sessionKey else { return }
+            controlReadAvailable = true
+            controlledRequest = session.latest_request
+            if let request = controlledRequest, request.status == "cancelling" ||
+                request.status == "cancelled" || request.status == "execution_unknown" {
+                stopNotice = request.stopLabel
+            } else if let request = controlledRequest, request.isActive, stopRequestedIDs.contains(request.request_id) {
+                stopNotice = "Stop unconfirmed — waiting for backend observation; cancellation will not be resent"
+            } else if !isStopping {
+                stopNotice = nil
+            }
+            if session.status == "running" && controlledRequest == nil {
+                stopNotice = "Current request identity unavailable — update Gateway before using scoped Stop"
+            }
+        } catch {
+            guard selected == sessionKey else { return }
+            controlReadAvailable = false
+            stopNotice = "Stop status unavailable — work may still be running. " + error.localizedDescription
+        }
+    }
+
+    func stopCurrentTurn() async {
+        guard !isStopping else { return }
+        TTSManager.shared.stop()
+        queuePausedByStop = true // Keep queued text; do not auto-start another turn after Stop.
+        if sessionKey == "dispatcher" {
+            controlDispatcher("cancel")
+            return
+        }
+        let requestedSession = sessionKey
+        isStopping = true
+        defer { isStopping = false }
+        await refreshTurnControl()
+        guard requestedSession == sessionKey, controlReadAvailable else { return }
+        guard let target = controlledRequest, target.session_id == sessionKey, target.canCancel else {
+            stopNotice = controlledRequest?.stopLabel ?? "Cannot stop: no authoritative active request identity. Refresh to recover it."
+            return
+        }
+        guard !stopRequestedIDs.contains(target.request_id) else {
+            stopNotice = "Stop already requested — refresh to observe the outcome"
+            return
+        }
+        let selected = sessionKey
+        stopRequestedIDs.insert(target.request_id)
+        stopNotice = "Requesting cancellation…"
+        do {
+            let receipt = try await controlGateway.cancelTurn(sessionID: selected, requestID: target.request_id)
+            guard selected == sessionKey else { return }
+            controlledRequest = receipt
+            stopNotice = receipt.stopLabel
+        } catch {
+            guard selected == sessionKey else { return }
+            // No retry: a lost response may follow a delivered cancellation.
+            stopNotice = "Stop unconfirmed — refresh to observe this request. " + error.localizedDescription
+        }
+    }
+
 
     /// The answer row of the turn currently running.
     ///
@@ -645,9 +735,7 @@ final class ChatViewModel: ObservableObject {
             return
         case .stop:
             TTSManager.shared.stop()
-            if sessionKey == "dispatcher" { controlDispatcher("cancel") }
-            else { agent.cancelTurn() }
-            appendSystem("stop requested")
+            await stopCurrentTurn()
             return
         case .steer(let guidance):
             agent.steer(guidance)
@@ -671,9 +759,10 @@ final class ChatViewModel: ObservableObject {
                 author: .user, timestamp: Date(), text: display))
             return
         }
+        queuePausedByStop = false
         let succeeded = await runTurn(prompt, appendUserBubble: true, displayText: display, images: images, useTools: agenticTools)
         if sessionKey == "dispatcher" && !succeeded { pendingSends.removeAll(); return }
-        while !pendingSends.isEmpty {
+        while !pendingSends.isEmpty && !queuePausedByStop {
             let next = pendingSends.removeFirst()
             _ = await runTurn(next.prompt, appendUserBubble: false, displayText: next.display, images: next.images, useTools: next.agenticTools)
         }
@@ -740,9 +829,11 @@ final class ChatViewModel: ObservableObject {
             let replyText = reply.text
 
             if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
-                messages[i].text = replyText
+                messages[i].text = Self.settledReplyText(partial: messages[i].text, reply: replyText,
+                                                        interrupted: queuePausedByStop || reply.error != nil)
                 messages[i].isStreaming = false
-                if let s = reply.elapsedS {
+                if queuePausedByStop { messages[i].meta = turnControlLabel }
+                if !queuePausedByStop, let s = reply.elapsedS {
                     messages[i].meta = "replied in " + Self.fmtSeconds(s)
                 }
                 // Prefer turn payload identity; else Gateway active agent.
@@ -769,7 +860,7 @@ final class ChatViewModel: ObservableObject {
             // TTSManager so the synthesizer doesn't read literal
             // asterisks.  Skipped for empty replies.
             NSLog("[ChatViewModel] reply received — autoSpeak=\(TTSManager.shared.autoSpeakEnabled) replyLen=\(replyText.count)")
-            if TTSManager.shared.autoSpeakEnabled, !replyText.isEmpty {
+            if !queuePausedByStop, TTSManager.shared.autoSpeakEnabled, !replyText.isEmpty {
                 NSLog("[ChatViewModel] dispatching to TTSManager.speak")
                 TTSManager.shared.speak(replyText)
             } else {
@@ -778,12 +869,17 @@ final class ChatViewModel: ObservableObject {
             return true
         } catch {
             if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
-                messages[i].text =
-                    "⚠ agent error: \(error.localizedDescription)"
+                messages[i].text = Self.settledReplyText(partial: messages[i].text,
+                    reply: "⚠ agent error: \(error.localizedDescription)", interrupted: true)
+                messages[i].meta = error.localizedDescription
                 messages[i].isStreaming = false
             }
             return false
         }
+    }
+
+    nonisolated static func settledReplyText(partial: String, reply: String, interrupted: Bool) -> String {
+        interrupted && !partial.isEmpty ? partial : reply
     }
 
     // MARK: - New Chat / History
@@ -794,6 +890,9 @@ final class ChatViewModel: ObservableObject {
         isSwitchingSession = true
         defer { isSwitchingSession = false }
         sessionKey = Self.mintSessionKey()
+        controlledRequest = nil
+        stopNotice = nil
+        controlReadAvailable = false
         dispatcherApproval = nil
         messages.removeAll()
         contextUsage = nil
@@ -829,6 +928,8 @@ final class ChatViewModel: ObservableObject {
               let turns = try? JSONDecoder().decode([SessionTurn].self, from: json)
         else { return false }
         sessionKey = id
+        controlledRequest = nil
+        stopNotice = nil
         messages = Self.rebuildMessages(from: turns)
         contextUsage = nil
         return true

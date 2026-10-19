@@ -28,6 +28,33 @@ extension GatewayClient {
 
     // MARK: - Wire types
 
+    struct RequestState: Decodable, Sendable {
+        let session_id: String
+        let request_id: String
+        let status: String
+        var turn_id: String? = nil
+        var updated_at: Double? = nil
+        var finished_at: Double? = nil
+        var cancel_requested: Bool? = nil
+        var cancellation_confirmed: Bool? = nil
+
+        var isActive: Bool {
+            ["admitted", "running", "awaiting_approval", "cancelling"].contains(status)
+        }
+        var canCancel: Bool { isActive && status != "cancelling" }
+        var stopLabel: String {
+            switch status {
+            case "cancelling": return "Cancelling — waiting for backend confirmation"
+            case "cancelled": return "Cancelled — backend turn settled"
+            case "execution_unknown": return "Outcome unknown — work may still be running; reconcile before resending"
+            case "completed": return "Completed"
+            case "failed": return "Failed"
+            case "awaiting_approval": return "Waiting for approval"
+            default: return isActive ? "Working" : "Unknown state: " + status
+            }
+        }
+    }
+
     struct Session: Decodable, Identifiable, Sendable {
         let session_id: String
         let title: String?
@@ -35,6 +62,7 @@ extension GatewayClient {
         let workspace: String?
         let status: String?
         let agent_id: String?
+        var latest_request: RequestState? = nil
 
         var id: String { session_id }
         var displayTitle: String { title ?? "Untitled" }
@@ -73,7 +101,7 @@ extension GatewayClient {
         }
 
         var isTerminal: Bool {
-            ["turn.finish", "turn.failed", "turn.cancelled"].contains(event)
+            ["turn.finish", "turn.failed", "turn.cancelled", "turn.unknown"].contains(event)
         }
 
         struct ProactiveNotification: Sendable {
@@ -116,6 +144,12 @@ extension GatewayClient {
             path: "v1/sessions", method: "POST",
             jsonBody: ["title": title, "profile": profile]
         )
+        return try JSONDecoder().decode(Session.self, from: data)
+    }
+
+    /// Bounded control projection, without downloading transcript contents on every poll.
+    func getSessionControl(id: String) async throws -> Session {
+        let data = try await request(path: "v1/sessions/\(id)?view=control")
         return try JSONDecoder().decode(Session.self, from: data)
     }
 
@@ -171,10 +205,21 @@ extension GatewayClient {
         return try JSONDecoder().decode(ProactiveFeed.self, from: data)
     }
 
+    static func cancellationBody(requestID: String) throws -> [String: String] {
+        guard !requestID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw Failure(message: "Cannot stop a turn without its request identity")
+        }
+        return ["request_id": requestID]
+    }
+
     @discardableResult
-    func cancelTurn(sessionID: String) async throws -> Bool {
-        _ = try await request(path: "v1/sessions/\(sessionID)/cancel", method: "POST")
-        return true
+    func cancelTurn(sessionID: String, requestID: String) async throws -> RequestState {
+        guard !requestID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw Failure(message: "Cannot stop a turn without its request identity")
+        }
+        let data = try await request(path: "v1/sessions/\(sessionID)/cancel", method: "POST",
+                                     jsonBody: Self.cancellationBody(requestID: requestID))
+        return try JSONDecoder().decode(RequestState.self, from: data)
     }
 
     @discardableResult
