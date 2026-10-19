@@ -1,0 +1,159 @@
+/* Jaeger design tokens (Jenkins Robotics, 2026-10-17, original). Values follow the measured Grok Bot desktop
+ * window (Jaeger-Mac-App-Improvement-Guide.md): neutral grays, one foreground with text tiers as opacities,
+ * 14px / 420 / 22px type. No third-party code, fonts or assets: the system font is used.
+ * Light by default; dark follows the system (prefers-color-scheme), like the native window background.
+ * Loaded after the Aether CSS: the --aether-* colors are remapped onto these, so Aether widgets and the
+ * existing component CSS pick them up without new literals. */
+:root {
+  /* Surfaces. */
+  --jg-color-chrome: #fcfcfc;        /* window background / top band (matches the native window) */
+  --jg-color-pane: #fcfcfc;          /* chat pane (same as the window) */
+  --jg-color-sidebar: #f5f5f5;
+  --jg-color-elevated: #ffffff;      /* cards, menus, pills */
+  --jg-color-fg: #1c1c1c;
+  /* Opacity tiers of the foreground. */
+  --jg-alpha-text-secondary: 68%;
+  --jg-alpha-text-tertiary: 56%;
+  --jg-alpha-text-quaternary: 40%;
+  --jg-alpha-border: 12%;
+  --jg-alpha-border-tertiary: 8%;
+  --jg-alpha-hover: 6%;
+  --jg-alpha-active: 8%;
+  --jg-alpha-bubble-assistant: 6%;
+  --jg-color-accent: #1680f3;
+  --jg-color-accent-text: #1680f3;
+  /* Agent avatar hues (measured on the reference roster; saturated, same in both themes). */
+  --jg-avatar-red: #fb2b3e;
+  --jg-avatar-green: #14c16f;
+  --jg-avatar-purple: #8f59f9;
+  --jg-avatar-pink: #f93498;
+  --jg-avatar-teal: #13b7a2;
+  --jg-avatar-brown: #a06b39;
+  --jg-avatar-blue: #2b7ff6;
+  --jg-avatar-orange: #f7882f;
+  /* An agent's color as a fill under white text: its bubble (darker) and its voice button. */
+  --jg-mix-bubble-user: 80%;
+  --jg-mix-agent-button: 92%;
+  /* What agent colours are mixed toward (user bubble, send button), and glyphs on a coloured badge. */
+  --jg-color-shade: #000;
+  --jg-color-on-badge: #fff;
+  --jg-color-on-accent: #ffffff;
+  --jg-color-shadow: #000000;
+  --jg-shadow-card: 0 1px 2px color-mix(in srgb, var(--jg-color-shadow) 6%, transparent),
+                    0 4px 16px color-mix(in srgb, var(--jg-color-shadow) 6%, transparent);
+  --jg-shadow-control: 0 1px 3px color-mix(in srgb, var(--jg-color-shadow) 12%, transparent);
+  /* Motion. */
+  --jg-ease-out-quint: cubic-bezier(.16, 1, .3, 1);
+  --jg-ease-out-cubic: cubic-bezier(.215, .61, .355, 1);
+  --jg-dur-fast: 100ms;
+  --jg-dur-base: 150ms;
+  --jg-dur-slow: 200ms;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --jg-color-chrome: #121212;
+    --jg-color-pane: #161616;
+    --jg-color-sidebar: #0e0e0e;
+    --jg-color-elevated: #1f1f1f;
+    --jg-color-fg: #f5f5f5;
+    --jg-alpha-text-secondary: 66%;
+    --jg-alpha-text-tertiary: 54%;
+    --jg-alpha-text-quaternary: 38%;
+    --jg-alpha-border: 10%;
+    --jg-alpha-border-tertiary: 6%;
+    --jg-alpha-bubble-assistant: 4%;
+    --jg-color-accent-text: #4d9bff;
+    --jg-shadow-card: 0 1px 2px color-mix(in srgb, var(--jg-color-shadow) 40%, transparent),
+                      0 4px 16px color-mix(in srgb, var(--jg-color-shadow) 32%, transparent);
+    --jg-shadow-control: none;
+  }
+}
+
+/* Derived colors and type: declared where they are used so they re-resolve per theme. */
+:root,
+:root.aether-light-theme,
+:root .aether-home-theme,
+:root.aether-light-theme .aether-home-theme {
+  --jg-color-text: var(--jg-color-fg);
+  --jg-color-text-secondary: color-mix(in srgb, var(--jg-color-fg) var(--jg-alpha-text-secondary), transparent);
+  --jg-color-text-tertiary: color-mix(in srgb, var(--jg-color-fg) var(--jg-alpha-text-tertiary), transparent);
+  --jg-color-text-quaternary: color-mix(in srgb, var(--jg-color-fg) var(--jg-alpha-text-quaternary), transparent);
+  --jg-color-border: color-mix(in srgb, var(--jg-color-fg) var(--jg-alpha-border), transparent);
+  --jg-color-border-tertiary: color-mix(in srgb, var(--jg-color-fg) var(--jg-alpha-border-tertiary), transparent);
+  --jg-color-hover: color-mix(in srgb, var(--jg-color-fg) var(--jg-alpha-hover), transparent);
+  --jg-color-active: color-mix(in srgb, var(--jg-color-fg) var(--jg-alpha-active), transparent);
+  --jg-color-bubble-assistant: color-mix(in srgb, var(--jg-color-fg) var(--jg-alpha-bubble-assistant), transparent);
+  /* Opaque mixes for surfaces that must not show through. */
+  --jg-color-inset: color-mix(in srgb, var(--jg-color-fg) 5%, var(--jg-color-pane));
+  --jg-color-control-hover: color-mix(in srgb, var(--jg-color-fg) 6%, var(--jg-color-elevated));
+
+  --jg-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --jg-font-size-base: 14px;
+  --jg-font-weight-base: 420;
+  --jg-font-weight-medium: 560;
+  --jg-line-height-base: 22px;
+  --jg-font-body: var(--jg-font-size-base);
+  --jg-font-small: 13px;
+  --jg-font-tiny: 12px;
+
+  /* Aether colors → Jaeger neutrals (ok / warn / error and the CAD hues stay Aether's). */
+  --aether-color-bg-app: var(--jg-color-chrome);
+  --aether-color-bg-shell: var(--jg-color-chrome);
+  --aether-color-bg-bar: var(--jg-color-chrome);
+  --aether-color-bg-panel: var(--jg-color-pane);
+  --aether-color-bg-rail: var(--jg-color-sidebar);
+  --aether-color-bg-inset: var(--jg-color-inset);
+  --aether-color-bg-control: var(--jg-color-elevated);
+  --aether-color-bg-control-hover: var(--jg-color-control-hover);
+  --aether-color-bg-hover: var(--jg-color-hover);
+  --aether-color-bg-row-hover: var(--jg-color-hover);
+  --aether-color-bg-selected: var(--jg-color-accent);
+  --aether-color-text-on-selected: var(--jg-color-on-accent);
+  --aether-color-border: var(--jg-color-border);
+  --aether-color-border-control: var(--jg-color-border);
+  --aether-color-border-control-hover: color-mix(in srgb, var(--jg-color-fg) 24%, transparent);
+  --aether-color-border-focus: var(--jg-color-accent);
+  --aether-color-text: var(--jg-color-text);
+  --aether-color-text-soft: color-mix(in srgb, var(--jg-color-fg) 84%, transparent);
+  --aether-color-text-dim: var(--jg-color-text-secondary);
+  --aether-color-text-faint: var(--jg-color-text-tertiary);
+  --aether-color-accent: var(--jg-color-accent);
+  --aether-color-accent-strong: var(--jg-color-accent);
+  --aether-color-accent-icon: var(--jg-color-accent-text);
+  --aether-color-selection-edge: var(--jg-color-accent);
+  --aether-color-shadow: var(--jg-color-shadow);
+  --aether-font-family: var(--jg-font-family);
+  color-scheme: light dark;
+}
+
+body {
+  font-family: var(--jg-font-family);
+  font-size: var(--jg-font-size-base);
+  font-weight: var(--jg-font-weight-base);
+  line-height: var(--jg-line-height-base);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Phone layout (phone/phone.css) and the agent context menu (agents/AgentContextMenu.tsx), from the Grok Bot iOS
+ * refs: dark unless Aether's light appearance is on. */
+:root {
+  --jg-p-bg: #121212; --jg-p-fg: #f2f2f2; --jg-p-dim: #8e8e93; --jg-p-raised: #262626; --jg-p-button: #2c2c2e; --jg-p-me: #3a3a3c;
+  --jg-p-blue: #2f6fea; --jg-p-green: #34c759; --jg-p-orange: #f5a623; --jg-p-on-color: #ffffff;
+  --jg-p-voice-bg: #ffffff; --jg-p-voice-fg: #000000;
+  --jg-menu-scrim: rgba(0, 0, 0, .35); --jg-menu-shadow: rgba(0, 0, 0, .35); --jg-menu-fg: #f2f2f2; --jg-menu-dim: #aeaeb2;
+  --jg-menu-preview: #1c1c1e; --jg-menu-bubble: #2c2c2e; --jg-menu-card: rgba(58, 58, 60, .72); --jg-menu-line: rgba(255, 255, 255, .08);
+  --jg-menu-hover: rgba(255, 255, 255, .08); --jg-menu-sep: rgba(255, 255, 255, .12); --jg-menu-input: #1c1c1e; --jg-menu-input-line: rgba(255, 255, 255, .15);
+  --jg-menu-button: rgba(255, 255, 255, .1); --jg-menu-toast: rgba(44, 44, 46, .95);
+  --jg-danger: #ff5a5f; --jg-danger-fill: #e5484d;
+  --jg-scrim: rgba(0, 0, 0, .55);
+}
+:root.aether-light-theme {
+  --jg-p-bg: #ffffff; --jg-p-fg: #111111; --jg-p-dim: #6e6e73; --jg-p-raised: #f0f0f2; --jg-p-button: #ececef; --jg-p-me: #d1d1d6;
+  --jg-p-voice-bg: #111111; --jg-p-voice-fg: #ffffff;
+  --jg-menu-scrim: rgba(0, 0, 0, .18); --jg-menu-shadow: rgba(0, 0, 0, .18); --jg-menu-fg: #111111; --jg-menu-dim: #6e6e73;
+  --jg-menu-preview: #ffffff; --jg-menu-bubble: #f0f0f2; --jg-menu-card: rgba(250, 250, 250, .8); --jg-menu-line: rgba(0, 0, 0, .08);
+  --jg-menu-hover: rgba(0, 0, 0, .06); --jg-menu-sep: rgba(0, 0, 0, .1); --jg-menu-input: #ffffff; --jg-menu-input-line: rgba(0, 0, 0, .15);
+  --jg-menu-button: rgba(0, 0, 0, .06); --jg-menu-toast: rgba(44, 44, 46, .95);
+  --jg-danger: #e5484d; --jg-danger-fill: #e5484d;
+  --jg-scrim: rgba(0, 0, 0, .5);   /* measured: Grok dims 245 → 122 */
+}

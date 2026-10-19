@@ -1,7 +1,16 @@
 /* Wire types for the Jaeger gateway (core/gateway/server.py). Only the fields
  * this UI reads are typed; everything else passes through untouched. */
 
-export type AgentRole = "lead" | "specialist" | "native" | string;
+/** PROPOSED (Gateway bot, 2026-10-18): specialists carry a working role. */
+export type AgentRole = "lead" | "specialist" | "native" | "reverse-engineer" | "builder" | "reviewer" | "researcher" | "designer" | string;
+
+/** PROPOSED (Gateway bot): one skill an agent has. `source_path` is where it lives on disk (tooltip only). */
+export interface AgentSkill {
+  id: string;
+  name: string;
+  description?: string;
+  source_path?: string;
+}
 /** Who actually runs the agent's work: Jaeger itself or a delegate CLI. */
 export type Runner = "native" | `delegate:${string}` | string;
 
@@ -16,6 +25,18 @@ export interface Agent {
   runner?: Runner;
   avatar_url?: string;
   metadata?: Record<string, unknown>;
+  /** PROPOSED: the agent's skills (GET /v1/agents and the specialist/role responses). */
+  skills?: AgentSkill[];
+  /** PROPOSED (agent-menu spec sent to the Gateway bot): optional; absent on today's gateway. */
+  pinned?: boolean;
+  pin_order?: number | null;
+  section_id?: string | null;
+  unread_count?: number;
+  last_read_message_id?: string | null;
+  primary?: boolean;
+  last_message?: { id: string; created_at: string | number; kind?: string; preview?: string; author?: string } | null;
+  /** Tool allow-list; unchanged on the wire. */
+  allowed_tools?: string[];
 }
 
 export type AgentStatus = "idle" | "working" | "waiting_approval" | "blocked" | "error" | string;
@@ -53,7 +74,9 @@ export interface SessionRow {
 export type PersistedPart =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string; duration_ms?: number }
-  | { type: "tool"; call_id?: string; tool?: string; status?: "running" | "done" | "error"; input?: unknown; output?: unknown }
+  | { type: "tool"; call_id?: string | null; tool?: string; status?: "running" | "done" | "error"; state?: "running" | "done" | "error"; input?: unknown; output?: unknown }
+  /** 417d8a0c: an approval the turn asked for. call_id is usually null, so it matches its tool on tool+target. */
+  | { type: "approval"; approval_id: string; call_id?: string | null; tool?: string; target?: string; status?: string; state?: string; decision?: string | null }
   | { type: "plan"; [key: string]: unknown }
   | { type: "handoff"; direction: "to" | "from"; handoff_id?: string; agent_id?: string; agent_name?: string; status?: string };
 

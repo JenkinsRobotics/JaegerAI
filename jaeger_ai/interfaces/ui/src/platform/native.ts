@@ -39,9 +39,21 @@ const notImplemented = (reply: unknown) =>
 /** mic and tts count as available only when the shell answers with something
  * other than not_implemented. */
 export async function probeVoice(): Promise<boolean> {
-  if (!nativeBridge()) return false;
-  const [mic, tts] = await Promise.all([postNative("mic.status"), postNative("tts.status")]);
-  return !notImplemented(mic) && !notImplemented(tts);
+  const { dictation, voiceChat } = await probeSpeech();
+  return dictation || voiceChat;
+}
+
+type MicStatus = { available?: boolean; permission?: string; speech_permission?: string };
+type TtsStatus = { available?: boolean };
+
+/** Dictation needs a mic (input present, mic + speech permission not denied); voice chat also needs a
+ * voice to speak with. A shell that predates these fields counts as having both once it answers. */
+export async function probeSpeech(): Promise<{ dictation: boolean; voiceChat: boolean }> {
+  if (!nativeBridge()) return { dictation: false, voiceChat: false };
+  const [mic, tts] = await Promise.all([postNative<MicStatus>("mic.status"), postNative<TtsStatus>("tts.status")]);
+  const micOk = !notImplemented(mic) && mic?.available !== false && mic?.permission !== "denied" && mic?.speech_permission !== "denied";
+  const ttsOk = !notImplemented(tts) && tts?.available !== false;
+  return { dictation: micOk, voiceChat: micOk && ttsOk };
 }
 
 export function onNativeEvent(cb: (detail: NativeEventDetail) => void): () => void {
