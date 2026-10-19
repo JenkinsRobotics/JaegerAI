@@ -171,7 +171,7 @@ export function App({ source }: { source: JaegerSource }) {
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
         onNewChat={newChat} onCreateAgent={createAgent} />
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={host.capabilities} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
         onAgent={(agentId) => setSelection({ type: "agent", agentId })}
