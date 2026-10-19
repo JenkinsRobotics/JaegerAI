@@ -13841,6 +13841,10 @@ def _resolve_new_session_workspace(body, visible_prev_session_id):
 
 def handle_post(handler, parsed) -> bool:
     """Handle all POST routes. Returns True if handled, False for 404."""
+    if parsed.path.startswith("/api/crons/"):
+        from api.native_panel_context import check_profile
+        if not check_profile(handler):
+            return True
     if not _csrf_exempt_path(parsed.path) and not _check_csrf(handler):
         return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
     try:
