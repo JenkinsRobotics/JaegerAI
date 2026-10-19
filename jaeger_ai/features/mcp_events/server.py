@@ -80,12 +80,15 @@ def required(method, params):
 
 
 class Facade:
-    def __init__(self, events, verifier, *, resource, issuer):
+    def __init__(self, events, verifier, *, resource, issuer, logout_verifier=None):
         self.events, self.verifier = events, verifier
         self.resource, self.issuer = resource.rstrip("/"), issuer
+        self.logout_verifier = logout_verifier
         self.app = web.Application(client_max_size=32768)
         self.app.router.add_get("/.well-known/oauth-protected-resource", self.metadata)
         self.app.router.add_post("/mcp", self.rpc)
+        if logout_verifier is not None:
+            self.app.router.add_post("/oauth/backchannel-logout", self.logout)
 
     async def metadata(self, request):
         return web.json_response(
@@ -95,6 +98,31 @@ class Facade:
                 "scopes_supported": SCOPES,
             }
         )
+
+    async def logout(self, request):
+        # This endpoint authenticates its body with a pinned issuer-signed logout
+        # JWT, not an anonymous webhook or a shared API key. Never an MCP tool.
+        headers = {"Cache-Control": "no-store"}
+        try:
+            if (
+                request.headers.get("Origin")
+                or request.content_type != "application/x-www-form-urlencoded"
+            ):
+                raise ValueError("Invalid logout request")
+            form = await request.post()
+            if len(form.getall("logout_token", [])) != 1:
+                raise ValueError("One logout token required")
+            owner, receipt = self.logout_verifier.verify(form["logout_token"])
+            await self.events.disconnect(owner)
+            self.events.store.record_logout(receipt, self.events.clock())
+            return web.Response(status=200, headers=headers)
+        except web.HTTPRequestEntityTooLarge:
+            raise
+        except Exception:  # noqa: BLE001 — no tokens or native Keychain errors in responses
+            self.events.store.audit("logout", "rejected", self.events.clock())
+            return web.json_response(
+                {"error": "invalid_request"}, status=400, headers=headers
+            )
 
     async def rpc(self, request):
         challenge = f'Bearer resource_metadata="{self.resource}/.well-known/oauth-protected-resource", scope="messages:read events:read"'
@@ -299,7 +327,7 @@ def run(config):
     from jaeger_ai.contract.ports import MCP_EVENTS_PORT
 
     from .gateway import AresGateway
-    from .security import KeychainSecrets, OAuthVerifier
+    from .security import KeychainSecrets, LogoutVerifier, OAuthVerifier
     from .service import Events
     from .store import Store
 
@@ -309,8 +337,17 @@ def run(config):
         Path(config["public_key_file"]).read_text(),
         config["subject"],
     )
-    verifier.check_metadata(
-        json.loads(Path(config["authorization_server_metadata_file"]).read_text())
+    metadata = json.loads(
+        Path(config["authorization_server_metadata_file"]).read_text()
+    )
+    verifier.check_metadata(metadata)
+    if metadata.get("backchannel_logout_supported") is not True:
+        raise ValueError("Configured provider must support back-channel logout")
+    logout_verifier = LogoutVerifier(
+        config["issuer"],
+        config["logout_client_id"],
+        Path(config["logout_public_key_file"]).read_text(),
+        config["subject"],
     )
     events = Events(
         Store(config["state_file"]),
@@ -318,7 +355,11 @@ def run(config):
         AresGateway(config["gateway_url"]),
     )
     facade = Facade(
-        events, verifier, resource=config["resource"], issuer=config["issuer"]
+        events,
+        verifier,
+        resource=config["resource"],
+        issuer=config["issuer"],
+        logout_verifier=logout_verifier,
     )
 
     async def worker(app):

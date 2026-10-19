@@ -67,12 +67,34 @@ the owner, removes subscriptions/outbox rows, and deletes signing-key bundles.
 The explicit local operator command is `python -B -m jaeger_ai.features.mcp_events
 /absolute/public-config.json --disconnect`; do not execute it without approval for
 that runtime instance. It opens no listener and makes no Gateway or network calls.
-**IdP/ChatGPT disconnect notification wiring is not configured.** A deployment must
-connect trusted revocation notifications to this local operation, or provide a
-reviewed operator disconnect mechanism. There is no unauthenticated revocation
-webhook. Without this integration, immediate remote disconnect is not proven;
-expiry is the fail-closed bound. A POST already in flight at local revocation
-may complete; future attempts are denied. Clearing a denylist requires explicit operator work.
+The production factory now requires an IdP advertising back-channel logout and
+explicit `logout_client_id` / `logout_public_key_file`. It wires
+`POST /oauth/backchannel-logout` to a pinned RS256 OpenID Connect Back-Channel
+Logout verifier and then to durable `Events.disconnect`. This authenticated route
+is separate from the three MCP tools. It requires an issuer-signed `logout+jwt`,
+the configured logout-client audience, matching owner, bounded `iat`/`exp`, `jti`,
+the standard logout event, and no `nonce`. Only account-wide `sub` logout is
+supported; session-only `sid` logout is rejected. It does not accept access tokens
+or shared static keys. Access-token verification separately rejects logout tokens.
+Successful duplicate logout is idempotent; no raw logout token is persisted.
+Native key-deletion failures leave a durable cleanup job while access is already
+denied. Jobs retry on subsequent worker polls/restarts.
+
+**External integration is still a qualification blocker, not merely a test that
+has not run.** No real IdP/client has been chosen or configured to send these
+logout tokens to this receiver. Its account/subject/client mapping must be reviewed
+against the actual provider. Register this receiver with an approved existing
+provider/application only after separate approval. ChatGPT plugin unlink is not
+known to produce this OIDC signal. The supported protocol unsubscribe is implemented,
+but a direct ChatGPT unlink → IdP account/logout relationship remains unestablished.
+Do not claim instant host disconnect coverage until the actual lifecycle signal is
+confirmed. Expiry and local operator revocation remain fail-closed bounds. The
+separate ARES Gateway credential cannot establish OAuth connection liveness.
+
+The original patch has no IdP receiver; the revised implementation adds this
+standard authenticated entry point. It does not invent an OpenAI disconnect event
+or provide a fake authorization server. S256 metadata checking is a configuration
+check, not an implementation or proof of authorization-code/PKCE enforcement.
 
 ## Storage, delivery, limits
 
@@ -103,7 +125,7 @@ switch permits private callback destinations in production.
 Requests are capped at 32 KiB; webhook bodies and responses at 256 KiB. Summary
 preview is 240 characters, title 256 characters. A ten-second total deadline covers
 DNS/connect/TLS/response. At most five attempts use 2/4/8/16/32-second exponential
-backoff (the ten-second worker cadence can delay these). Only network failures,
+backoff (the ten-second worker cadence and bounded batch can delay these). Only network failures,
 408, 429 and 5xx retry; 410 deletes the subscription, 413 abandons the event. IDs
 and exact bodies remain stable across attempts, with fresh signing timestamps.
 `webhook-id` equals `eventId`. HMAC-SHA256 follows Standard Webhooks' byte format.
@@ -115,10 +137,17 @@ replayed. ARES's outgoing messages never enqueue events. Persistent per-subscrip
 event keys prevent repeats from Gateway polling; a crash after receiver ACK and
 before local ACK can still redeliver the same event ID, so the receiver must dedupe.
 There is no protocol replay cursor (`cursor: null`). The worker polls only Gateway
-inbox REST data every ten seconds and checkpoints completed pages; it never opens
+inbox REST data every ten seconds, at most two pages per tick, and persists each
+completed page before the next request. At most four delivery attempts run per tick,
+even after a poll failure. Cancellation uses a separate lifecycle lock, cancels the
+in-flight task, and checks the current subscription generation before sending or
+applying a result. A 410 cannot revive prefetched rows or an identical resubscription; it never opens
 the Gateway database. New subscriptions do not replay old messages. Durable pending
-summaries survive process reconstruction. Storage retention/compaction is not yet
-implemented; budget and reviewed retention are deployment prerequisites for long use.
+summaries survive process reconstruction. On each poll, expired subscriptions and their outbox tombstones retire, signing-key
+cleanup is queued, and terminal summary bodies are erased. Audit/logout receipts
+expire after seven days; budget entries expire after two days. Daily admissions are
+stored separately so unsubscribe cannot reset the cap. No automatic SQLite VACUUM
+is performed; disk high-water sizing remains an operational choice.
 Audit rows contain only fixed categories, times and hashed subscription handles,
 never keys, tokens, callback URLs, bodies or exception text.
 
@@ -138,9 +167,15 @@ chosen together with the eventual connection/IdP owner.
   "issuer": "https://identity.example.invalid",
   "subject": "<verified Matthew IdP subject>",
   "public_key_file": "<absolute pinned RS256 public PEM path>",
-  "authorization_server_metadata_file": "<absolute reviewed public metadata JSON path>"
+  "authorization_server_metadata_file": "<absolute reviewed public metadata JSON path>",
+  "logout_client_id": "<approved provider client audience for account logout>",
+  "logout_public_key_file": "<absolute pinned provider logout-signing public PEM path>"
 }
 ```
+
+No logout endpoint is registered externally by this code. A private IdP may reach
+the private receiver; a public IdP may require separately approved callback ingress.
+Secure MCP Tunnel is not assumed to transport arbitrary IdP logout requests.
 
 The bind host is fixed `127.0.0.1`; only the port is configurable. No inbound proxy
 may reach the general MCP port or Gateway. OAuth discovery for an `/mcp` resource
@@ -167,13 +202,14 @@ Do not switch to public ingress merely because these questions remain open.
 ### Alternatives only after explicit approval
 
 Tailscale Funnel: propose HTTPS 443 on a dedicated approved Funnel hostname,
-forwarding only `/mcp` and OAuth resource metadata to loopback 8797. Require exact
+forwarding only `/mcp`, OAuth resource metadata and the authenticated
+`/oauth/backchannel-logout` route to loopback 8797. Require exact
 path allowlisting in a local reverse proxy (Funnel alone may expose all paths),
 TLS, disabled request-body/header logging, existing OAuth checks, and no forwarding
 of Gateway or general MCP. No tailnet ACL, Tailscale state, DNS or Funnel command
 was changed. Current account policy/CLI behavior needs inspection at approval time.
 
-Cloudflare: propose a named approved tunnel with ingress rules only for the two
+Cloudflare: propose a named approved tunnel with ingress rules only for the three
 facade paths to `http://127.0.0.1:8797`, followed by catch-all HTTP 404. Keep application
 OAuth; interactive Cloudflare Access login cannot be assumed compatible with MCP.
 A dedicated DNS hostname, proxy restrictions, tunnel credentials and path behavior
@@ -202,6 +238,7 @@ rate-limited events. No setup or rollback action has been executed.
 ## Sources checked 2026-10-19
 
 - [Official MCP Events integration](https://developers.openai.com/plugins/build/mcp-events)
+- [OpenID Back-Channel Logout](https://openid.net/specs/openid-connect-backchannel-1_0.html)
 - [Official plugin authentication](https://developers.openai.com/plugins/build/auth)
 - [MCP 2026-07-28 HTTP transport](https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http)
 - [MCP request metadata](https://modelcontextprotocol.io/specification/2026-07-28/basic/index)
@@ -228,3 +265,17 @@ The E2E test hosts a real isolated Gateway and facade on ephemeral loopback port
 with Gateway background startup disabled. Only the receiver uses injected simulated
 transport. Separate tests exercise the real destination validator and connector
 pinning with synthetic DNS answers; no public webhook or provider is called.
+
+
+## Qualification classification
+
+| Piece | Code status | Outstanding qualification |
+| --- | --- | --- |
+| OAuth resource verification | Implemented, signature/issuer/audience/time/subject/scope negatives tested | Actual provider tokens/key lifecycle |
+| Authorization/consent/code exchange/S256 PKCE | External authorization-server component; deliberately no local stub or substitute | Provider selection, policy/client/resource/redirect setup and enforcement proof are missing external prerequisites |
+| Account revocation receiver | Implemented signed OIDC route to durable denylist, callback cancellation and retryable key cleanup | Actual IdP sender/client/subject mapping and private reachability are not configured |
+| ChatGPT disconnect semantics | MCP unsubscribe implemented; no invented host unlink API | Concrete unlink signal to this server/IdP remains unknown; qualification blocked |
+| Native Keychain | Explicit maintained macOS backend implemented; backend mocked in unit tests | Optional dependency install and native acceptance require approval |
+| HTTPS callback pinning/signing | Production implementation plus validator/pinning/tamper tests | Real remote TLS and ChatGPT callback acceptance |
+| Restart and isolation | Real SQLite and fresh-process test secret reload; real temporary Gateway HTTP E2E | Operator-state deployment is intentionally not exercised |
+| Tunnel/account/exact dot wake | Document-only connection plan | Eligibility, setup and actual wake are unverified |

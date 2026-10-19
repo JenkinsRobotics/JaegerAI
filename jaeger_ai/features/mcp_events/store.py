@@ -30,6 +30,11 @@ class Store:
               arguments TEXT NOT NULL, expires REAL NOT NULL, verified REAL NOT NULL,
               created REAL NOT NULL, auth_until REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS revoked (owner TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS secret_cleanup (account TEXT PRIMARY KEY, owner TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS logout_receipts (receipt TEXT PRIMARY KEY, at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS event_budget (
+              subscription TEXT NOT NULL, event TEXT NOT NULL, thread TEXT NOT NULL, at REAL NOT NULL,
+              PRIMARY KEY(subscription,event));
             CREATE TABLE IF NOT EXISTS deliveries (
               subscription TEXT NOT NULL, event TEXT NOT NULL, thread TEXT NOT NULL,
               body BLOB NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
@@ -40,6 +45,21 @@ class Store:
               subscription TEXT, at REAL NOT NULL);
             CREATE TABLE IF NOT EXISTS watermark (singleton INTEGER PRIMARY KEY, at REAL NOT NULL, page INTEGER NOT NULL);
             """)
+            c.execute(
+                "INSERT OR IGNORE INTO event_budget SELECT subscription,event,thread,created FROM deliveries WHERE state!='limited' AND created>=strftime('%s','now')-172800"
+            )
+            columns = {r[1] for r in c.execute("PRAGMA table_info(subscriptions)")}
+            if "generation" not in columns:
+                import secrets
+
+                c.execute(
+                    "ALTER TABLE subscriptions ADD COLUMN generation TEXT NOT NULL DEFAULT ''"
+                )
+                for row in c.execute("SELECT id FROM subscriptions").fetchall():
+                    c.execute(
+                        "UPDATE subscriptions SET generation=? WHERE id=?",
+                        (secrets.token_hex(16), row[0]),
+                    )
 
     @contextmanager
     def conn(self):
@@ -84,9 +104,61 @@ class Store:
 
     def revoke(self, owner):
         with self.conn() as c:
+            c.execute("BEGIN IMMEDIATE")
             c.execute("INSERT OR IGNORE INTO revoked VALUES(?)", (owner,))
+            c.execute(
+                "INSERT OR IGNORE INTO secret_cleanup SELECT id,owner FROM subscriptions WHERE owner=?",
+                (owner,),
+            )
             c.execute(
                 "DELETE FROM deliveries WHERE subscription IN (SELECT id FROM subscriptions WHERE owner=?)",
                 (owner,),
             )
             c.execute("DELETE FROM subscriptions WHERE owner=?", (owner,))
+
+    def cleanup_accounts(self, owner=None):
+        with self.conn() as c:
+            query = "SELECT account FROM secret_cleanup" + (
+                " WHERE owner=?" if owner is not None else ""
+            )
+            return [
+                r[0] for r in c.execute(query, (owner,) if owner is not None else ())
+            ]
+
+    def cleaned(self, account):
+        with self.conn() as c:
+            c.execute("DELETE FROM secret_cleanup WHERE account=?", (account,))
+
+    def record_logout(self, receipt, now):
+        with self.conn() as c:
+            c.execute(
+                "INSERT OR IGNORE INTO logout_receipts VALUES(?,?)", (receipt, now)
+            )
+
+    def prune(self, now):
+        """Retain dedup tombstones until expiry; budgets outlive unsubscribe."""
+        with self.conn() as c:
+            c.execute("BEGIN IMMEDIATE")
+            expired = [
+                r[0]
+                for r in c.execute(
+                    "SELECT id FROM subscriptions WHERE expires<=? OR auth_until<=?",
+                    (now, now),
+                )
+            ]
+            c.execute(
+                "INSERT OR IGNORE INTO secret_cleanup SELECT id,owner FROM subscriptions WHERE expires<=? OR auth_until<=?",
+                (now, now),
+            )
+            c.execute(
+                "DELETE FROM subscriptions WHERE expires<=? OR auth_until<=?",
+                (now, now),
+            )
+            c.execute(
+                "DELETE FROM deliveries WHERE subscription NOT IN (SELECT id FROM subscriptions)"
+            )
+            c.execute("UPDATE deliveries SET body=x'' WHERE state!='pending'")
+            c.execute("DELETE FROM event_budget WHERE at<?", (now - 172800,))
+            c.execute("DELETE FROM audit WHERE at<?", (now - 604800,))
+            c.execute("DELETE FROM logout_receipts WHERE at<?", (now - 604800,))
+            return expired
