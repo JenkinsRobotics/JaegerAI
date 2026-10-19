@@ -17,6 +17,7 @@ let chooseItem = items => items[0];
 let catalog = { providers: [] };
 const mockVscode = {
   ConfigurationTarget: { Global: 1 },
+  RelativePattern: class { constructor(base, pattern) { this.base = base; this.pattern = pattern; } },
   languages: { getDiagnostics: () => [] },
   window: {
     createOutputChannel: () => ({ appendLine: () => {}, show: () => {}, dispose: () => {} }),
@@ -172,7 +173,7 @@ test('native chat participant uses one Gateway-owned session across turns', asyn
     return { start_event_id: 1, status: 'running' };
   };
   gateway.events = async function* () {
-    yield { event_id: 1, event: 'turn.delta', data: { request_id: gateway.sent.request_id, delta: 'partial' } };
+    yield { event_id: 1, event: 'turn.delta', data: { request_id: gateway.sent.request_id, delta: 'Jaeger ' } };
     yield { event_id: 2, event: 'turn.finish', data: { request_id: gateway.sent.request_id } };
   };
   gateway.receipt = async () => ({ status: 'completed', result: { output: 'Jaeger answer' } });
@@ -190,7 +191,52 @@ test('native chat participant uses one Gateway-owned session across turns', asyn
   assert.equal(gateway.sent.sessionId, sessionId);
   assert.equal(gateway.sent.text, 'Follow-up');
   assert.equal(second.metadata.jaegerSessionId, sessionId);
-  assert.deepEqual(responses, ['Jaeger answer', 'Jaeger answer']);
+  assert.deepEqual(responses, ['Jaeger ', 'answer', 'Jaeger ', 'answer']);
+});
+
+test('native chat answers editor requests once through the shared panel bridge', async () => {
+  const wired = wireExtension();
+  wired.send({ type: 'ready' });
+  await waitFor(() => wired.gateway.instance !== undefined);
+  const handler = chatParticipants.get('jaeger.chatParticipant');
+  const gateway = wired.gateway.instance;
+  gateway.create = async body => ({ session_id: body.session_id });
+  gateway.send = async (sessionId, body) => {
+    gateway.sent = { sessionId, ...body };
+    return { start_event_id: 1, status: 'running' };
+  };
+  const answers = [];
+  gateway.ideResult = async (sid, id, body) => {
+    answers.push({ sid, id, body });
+    if (id === 'expired') throw new Error('Another client already answered');
+  };
+  gateway.events = async function* () {
+    const sid = gateway.sent.sessionId, rid = gateway.sent.request_id;
+    const request = (event_id, id, kind, extra = {}) => ({
+      event_id, event: 'ide.request', session_id: sid,
+      data: { request_id: rid, ide_request_id: id, kind, args: {} }, ...extra,
+    });
+    yield request(1, 'foreign-session', 'context', { session_id: 'other-session' });
+    yield request(2, 'foreign-turn', 'context', { data: { request_id: 'other-turn', ide_request_id: 'foreign-turn', kind: 'context' } });
+    yield request(3, 'context', 'context');
+    yield request(3, 'context', 'context'); // replay must not reopen an editor
+    yield request(4, 'unsupported', 'unsupported');
+    yield request(5, 'expired', 'diagnostics');
+    yield request(6, undefined, 'context');
+    yield { event_id: 7, event: 'turn.finish', data: { request_id: rid } };
+  };
+  gateway.receipt = async () => ({ status: 'completed', result: { output: 'Done' } });
+  gateway.session = async sessionId => ({ session_id: sessionId, messages: [] });
+  const responses = [];
+  const result = await handler({ prompt: 'Inspect the editor' }, { history: [] },
+    { markdown: text => responses.push(text), progress() {} },
+    { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) });
+  assert.deepEqual(answers.map(a => a.id), ['context', 'unsupported', 'expired']);
+  assert.ok(answers.every(a => a.sid === result.metadata.jaegerSessionId));
+  assert.deepEqual(answers[0].body, { ok: true, result: { workspace_folders: ['/workspace/one'] } });
+  assert.deepEqual(answers[1].body, { ok: false, error: 'Unsupported IDE request: unsupported' });
+  assert.deepEqual(answers[2].body, { ok: true, result: { count: 0, diagnostics: [], truncated: false } });
+  assert.deepEqual(responses, ['Done'], 'an expired editor request must not fail the turn');
 });
 
 test('explicit workspace selection reaches the Gateway admission body', async () => {
@@ -430,3 +476,194 @@ for (const [name, modelCatalog, selection] of [
     wired.dispose();
   });
 }
+
+test('native chat approval action opens the owning existing conversation', async () => {
+  const wired = wireExtension(); await wired.send({ type: 'ready' });
+  const gateway = wired.gateway.instance;
+  gateway.create = async body => ({ session_id: body.session_id });
+  gateway.send = async (sid, body) => { gateway.sent = { sid, ...body }; return { status: 'running', start_event_id: 1 }; };
+  gateway.events = async function* () {
+    yield { event_id: 1, event: 'approval.request', data: { request_id: gateway.sent.request_id, approval_id: 'a' } };
+    yield { event_id: 2, event: 'turn.finish', data: { request_id: gateway.sent.request_id } };
+  };
+  gateway.receipt = async () => ({ status: 'completed', result: { output: 'Done' } });
+  const buttons = [], progress = [], opened = [];
+  const result = await chatParticipants.get('jaeger.chatParticipant')({ prompt: 'Inspect' }, { history: [] },
+    { markdown() {}, progress: text => progress.push(text), button: button => buttons.push(button) },
+    { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) });
+  assert.match(progress.join('\n'), /Waiting for your approval/);
+  assert.equal(buttons[0].command, 'jaeger.openSession');
+  assert.deepEqual(buttons[0].arguments, [result.metadata.jaegerSessionId]);
+  gateway.session = async id => { opened.push(id); return { session_id: id, status: 'idle', messages: [] }; };
+  await registeredCommands.get(buttons[0].command)(...buttons[0].arguments);
+  assert.ok(opened.includes(result.metadata.jaegerSessionId), JSON.stringify(wired.posted.filter(x => x.error)));
+});
+
+test('native chat cancellation during admission is sent once after acceptance and remains unconfirmed', async () => {
+  const wired = wireExtension(); await wired.send({ type: 'ready' });
+  const gateway = wired.gateway.instance;
+  let cancelCallback, accepted = false; const cancellations = [], text = [];
+  gateway.create = async body => ({ session_id: body.session_id });
+  gateway.send = async (sid, body) => { cancelCallback(); accepted = true; return { status: 'running', start_event_id: 1 }; };
+  gateway.cancel = async (...args) => { assert.equal(accepted, true); cancellations.push(args); };
+  gateway.receipt = async () => ({ status: 'running' });
+  gateway.events = async function* () { assert.fail('an aborted observer should not open a stream'); };
+  const result = await chatParticipants.get('jaeger.chatParticipant')({ prompt: 'Inspect' }, { history: [] },
+    { markdown: value => text.push(value), progress() {}, button() {} },
+    { isCancellationRequested: false, onCancellationRequested: cb => { cancelCallback = cb; return { dispose() {} }; } });
+  assert.equal(cancellations.length, 1);
+  assert.deepEqual(cancellations[0], [result.metadata.jaegerSessionId, result.metadata.jaegerRequestId]);
+  assert.match(text.join(''), /Cancellation requested.*not confirmed/s);
+});
+
+test('selected workspace controls automatic admission context and mention search root', async () => {
+  jaegerModelSetting = '';
+  const wired = wireExtension(); await wired.send({ type: 'ready' });
+  await wired.send({ type: 'selectWorkspace' });
+  await wired.send({ type: 'select', id: 'context-session' });
+  mockVscode.window.activeTextEditor = { document: { uri: { scheme: 'file', fsPath: '/workspace/one/private.py' }, getText() { assert.fail('outside selection must not be read'); } },
+    selection: { isEmpty: false, start: { line: 0 }, end: { line: 1 }, active: { line: 1 } } };
+  const oldFind = mockVscode.workspace.findFiles;
+  let searched;
+  mockVscode.workspace.findFiles = async pattern => { searched = pattern; return [{ fsPath: '/workspace/two/main.py' }]; };
+  try {
+    await wired.send({ type: 'send', text: 'Inspect', model: '' });
+    assert.deepEqual(wired.gateway.sent.options.ide, { workspace_folders: ['/workspace/two'] });
+    await wired.send({ type: 'mentionFile' });
+    assert.equal(searched.base, '/workspace/two');
+  } finally { mockVscode.window.activeTextEditor = undefined; mockVscode.workspace.findFiles = oldFind; }
+});
+
+test('native chat preserves request identity after an uncertain admission instead of inviting a resend', async () => {
+  const wired = wireExtension(); await wired.send({ type: 'ready' });
+  const gateway = wired.gateway.instance; let sends = 0; const text = [], buttons = [];
+  gateway.create = async body => ({ session_id: body.session_id });
+  gateway.send = async () => { sends++; throw new Error('connection reset after POST'); };
+  const result = await chatParticipants.get('jaeger.chatParticipant')({ prompt: 'Inspect' }, { history: [] },
+    { markdown: value => text.push(value), progress() {}, button: value => buttons.push(value) },
+    { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) });
+  assert.equal(sends, 1);
+  assert.ok(result.metadata.jaegerRequestId);
+  assert.match(text.join(''), /outcome is not confirmed/);
+  assert.deepEqual(buttons[0].arguments, [result.metadata.jaegerSessionId]);
+});
+
+function workspaceFixture() {
+  const fs = require('node:fs'), os = require('node:os');
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'jaeger-context-regression-')));
+  const a = path.join(scratch, 'a'), b = path.join(scratch, 'b');
+  fs.mkdirSync(a); fs.mkdirSync(b);
+  const fileA = path.join(a, 'a.py'), fileB = path.join(b, 'b.py');
+  fs.writeFileSync(fileA, 'A selection'); fs.writeFileSync(fileB, 'B private selection');
+  const oldFolders = mockVscode.workspace.workspaceFolders, oldPick = mockVscode.window.showWorkspaceFolderPick;
+  const oldEditor = mockVscode.window.activeTextEditor, oldDiagnostics = mockVscode.languages.getDiagnostics;
+  mockVscode.workspace.workspaceFolders = [a, b].map(fsPath => ({ uri: { fsPath } }));
+  mockVscode.window.showWorkspaceFolderPick = async () => ({ uri: { fsPath: b } });
+  const editor = (file, text, scheme = 'file') => ({
+    document: { uri: { scheme, fsPath: file }, languageId: 'python', getText: typeof text === 'function' ? text : () => text },
+    selection: { isEmpty: false, start: { line: 0 }, end: { line: 1 }, active: { line: 1 } },
+  });
+  return { fs, a, b, fileA, fileB, editor, close() {
+    mockVscode.workspace.workspaceFolders = oldFolders; mockVscode.window.showWorkspaceFolderPick = oldPick;
+    mockVscode.window.activeTextEditor = oldEditor; mockVscode.languages.getDiagnostics = oldDiagnostics;
+    fs.rmSync(scratch, { recursive: true, force: true });
+  } };
+}
+
+const nativeTestStream = () => ({ markdown() {}, progress() {}, button() {} });
+const nativeTestToken = { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) };
+
+test('native workspace snapshot stays in A when session creation awaits and the editor switches to B', async () => {
+  const f = workspaceFixture(); let wired;
+  try {
+    jaegerModelSetting = '';
+    mockVscode.window.activeTextEditor = f.editor(f.fileA, 'A selection');
+    wired = wireExtension(); await wired.send({ type: 'ready' });
+    const gateway = wired.gateway.instance;
+    let releaseCreate, notifyCreate;
+    const started = new Promise(resolve => { notifyCreate = resolve; });
+    gateway.create = async body => {
+      assert.equal(body.workspace, f.a); notifyCreate();
+      await new Promise(resolve => { releaseCreate = resolve; });
+      return { session_id: body.session_id };
+    };
+    gateway.send = async (sid, body) => { gateway.sent = body; return { status: 'completed' }; };
+    gateway.receipt = async () => ({ status: 'completed', result: { output: 'Done' } });
+    const turn = chatParticipants.get('jaeger.chatParticipant')({ prompt: 'Inspect A' }, { history: [] }, nativeTestStream(), nativeTestToken);
+    await started;
+    await wired.send({ type: 'selectWorkspace' });
+    mockVscode.window.activeTextEditor = f.editor(f.fileB, 'B private selection');
+    releaseCreate(); await turn;
+    assert.equal(gateway.sent.workspace, f.a);
+    assert.deepEqual(gateway.sent.options.ide.workspace_folders, [f.a]);
+    assert.equal(gateway.sent.options.ide.active_file, 'a.py');
+    assert.equal(gateway.sent.options.ide.selection.text, 'A selection');
+    assert.doesNotMatch(JSON.stringify(gateway.sent), /B private selection|b\.py/);
+  } finally { wired?.dispose(); f.close(); }
+});
+
+test('queued workspace snapshot stays in A while queue admission awaits a switch to B', async () => {
+  const f = workspaceFixture(); let wired;
+  try {
+    jaegerModelSetting = '';
+    mockVscode.window.activeTextEditor = f.editor(f.fileA, 'A selection');
+    wired = wireExtension(); await wired.send({ type: 'ready' }); await wired.send({ type: 'select', id: 'queue-context' });
+    const gateway = wired.gateway.instance;
+    let releaseQueue, notifyQueue, queuedBody;
+    const started = new Promise(resolve => { notifyQueue = resolve; });
+    gateway.queueAdd = async (sid, body) => {
+      queuedBody = body; notifyQueue();
+      await new Promise(resolve => { releaseQueue = resolve; });
+      return { status: 'queued' };
+    };
+    const queued = wired.send({ type: 'queue', text: 'Inspect A later', model: '' });
+    await started;
+    await wired.send({ type: 'selectWorkspace' });
+    mockVscode.window.activeTextEditor = f.editor(f.fileB, 'B private selection');
+    releaseQueue(); await queued;
+    assert.equal(queuedBody.workspace, f.a);
+    assert.equal(queuedBody.options.ide.selection.text, 'A selection');
+    assert.deepEqual(queuedBody.options.ide.workspace_folders, [f.a]);
+    assert.doesNotMatch(JSON.stringify(queuedBody), /B private selection|b\.py/);
+  } finally { wired?.dispose(); f.close(); }
+});
+
+test('deleted symlink backing files fail closed for selection diagnostics and opens; untitled text is omitted', async () => {
+  const f = workspaceFixture(); let wired;
+  try {
+    const link = path.join(f.a, 'outside'); f.fs.symlinkSync(f.b, link, 'dir');
+    const vanished = path.join(f.b, 'vanished.py'); f.fs.writeFileSync(vanished, 'private');
+    const bufferPath = path.join(link, 'vanished.py'); f.fs.unlinkSync(vanished);
+    let selectionReads = 0;
+    mockVscode.window.activeTextEditor = f.editor(bufferPath, () => { selectionReads++; return 'private removed-file buffer'; });
+    mockVscode.languages.getDiagnostics = () => [[{ scheme: 'file', fsPath: bufferPath }, [
+      { severity: 0, range: { start: { line: 0 } }, message: 'private diagnostic text' },
+    ]]];
+    jaegerModelSetting = '';
+    wired = wireExtension(); await wired.send({ type: 'ready' });
+    const gateway = wired.gateway.instance, answers = [];
+    gateway.create = async body => ({ session_id: body.session_id });
+    gateway.send = async (sid, body) => { gateway.sent = body; return { status: 'running', start_event_id: 1 }; };
+    gateway.ideResult = async (sid, id, body) => { answers.push({ id, body }); };
+    gateway.events = async function* () {
+      for (const [i, kind] of ['context', 'diagnostics', 'open_file'].entries()) {
+        yield { event_id: i + 1, event: 'ide.request', data: { request_id: gateway.sent.request_id,
+          ide_request_id: kind, kind, args: { path: bufferPath } } };
+      }
+      yield { event_id: 4, event: 'turn.finish', data: { request_id: gateway.sent.request_id } };
+    };
+    gateway.receipt = async () => ({ status: 'completed', result: { output: 'Done' } });
+    const handler = chatParticipants.get('jaeger.chatParticipant');
+    await handler({ prompt: 'Inspect editor' }, { history: [] }, nativeTestStream(), nativeTestToken);
+    assert.equal(selectionReads, 0, 'unresolved symlink-backed buffer must never be read');
+    assert.equal(gateway.sent.options.ide.selection, undefined);
+    assert.equal(answers.find(a => a.id === 'context').body.result.active_file, undefined);
+    assert.deepEqual(answers.find(a => a.id === 'diagnostics').body.result, { count: 0, diagnostics: [], truncated: false });
+    assert.deepEqual(answers.find(a => a.id === 'open_file').body, { ok: false, error: 'Editor request is outside the selected workspace.' });
+    assert.doesNotMatch(JSON.stringify([gateway.sent, answers]), /private removed-file buffer|private diagnostic text/);
+    mockVscode.window.activeTextEditor = f.editor('Untitled-1', () => { assert.fail('untitled text must not be read automatically'); }, 'untitled');
+    await handler({ prompt: 'Inspect again' }, { history: [] }, nativeTestStream(), nativeTestToken);
+    assert.equal(gateway.sent.options.ide.active_file, undefined);
+    assert.equal(gateway.sent.options.ide.selection, undefined);
+  } finally { wired?.dispose(); f.close(); }
+});

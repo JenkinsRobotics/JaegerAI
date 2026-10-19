@@ -1,4 +1,6 @@
 'use strict';
+const path = require('node:path');
+const fs = require('node:fs');
 // Extension-host side of the slash commands: turns Gateway data into the small
 // text the panel shows, and a conversation into Markdown. Pure functions so they
 // can be tested without VS Code.
@@ -142,8 +144,24 @@ function exportMarkdown(session) {
 // it can be tested without VS Code: the host passes plain data in, this bounds it.
 const IDE_LIMITS = { selection: 4000, openFiles: 12, folders: 5, path: 400 };
 
-function buildIdeContext({ folders = [], active = null, openPaths = [] } = {}) {
-  const roots = folders.map(String).filter(Boolean);
+function isWorkspacePath(file, root, canonicalPath = fs.realpathSync) {
+  if (!root || !file) return false;
+  try {
+    const relative = path.relative(canonicalPath(root), canonicalPath(file));
+    return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+  } catch {
+    // An unresolved file/root has no proven canonical containment. Never use a
+    // lexical fallback for a deleted buffer beneath a symlink or inaccessible path.
+    return false;
+  }
+}
+
+function buildIdeContext({ folders = [], active = null, openPaths = [], selectedRoot = '', canonicalPath = fs.realpathSync } = {}) {
+  const roots = (selectedRoot ? [selectedRoot] : folders).map(String).filter(Boolean);
+  if (selectedRoot) {
+    if (active?.path && !isWorkspacePath(active.path, selectedRoot, canonicalPath)) active = null;
+    openPaths = openPaths.filter(file => isWorkspacePath(file, selectedRoot, canonicalPath));
+  }
   const relative = file => {
     const value = String(file || '');
     const root = roots.find(r => value === r || value.startsWith(r.endsWith('/') ? r : `${r}/`));
@@ -172,4 +190,20 @@ function buildIdeContext({ folders = [], active = null, openPaths = [] } = {}) {
   return Object.keys(context).length ? context : null;
 }
 
-module.exports = { statusLines, skillLines, taskLines, diagnosticsLines, workerLines, exportMarkdown, slug, clip, buildIdeContext, parseWorktrees, worktreeLines, IDE_LIMITS };
+// Exclusions contain identifiers only; text is always freshly scoped by the host.
+function filterIdeContext(context, exclusions = []) {
+  if (!context) return null;
+  const excluded = new Set(Array.isArray(exclusions) ? exclusions.filter(value => typeof value === 'string').slice(0, 32) : []);
+  const result = { ...context };
+  if (context.selection) result.selection = { ...context.selection };
+  if (excluded.has(`file:${context.active_file}`)) {
+    for (const key of ['active_file', 'language', 'cursor_line', 'selection']) delete result[key];
+  } else if (excluded.has(`selection:${context.active_file}`)) delete result.selection;
+  if (context.open_files) {
+    result.open_files = context.open_files.filter(file => !excluded.has(`file:${file}`));
+    if (!result.open_files.length) delete result.open_files;
+  }
+  return result;
+}
+
+module.exports = { filterIdeContext, isWorkspacePath, statusLines, skillLines, taskLines, diagnosticsLines, workerLines, exportMarkdown, slug, clip, buildIdeContext, parseWorktrees, worktreeLines, IDE_LIMITS };

@@ -1404,3 +1404,7 @@ textarea#prompt::placeholder {
     max-width: 80px;
   }
 }
+
+/* Context choices apply to the next send/queued turn, never the admitted one. */
+.context-toggle.excluded { opacity: .65; border-style: dashed; text-decoration: line-through; }
+.context-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }

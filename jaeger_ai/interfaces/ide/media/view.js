@@ -23,11 +23,12 @@ window.JaegerPostMessage = post;
 window.JaegerTranscriptRows = transcriptRows;
 
 let ideContextOn = api.getState()?.ideContext !== false;
+const contextExclusions = new Set(api.getState()?.contextExclusions || []);
 let mode = api.getState()?.mode || 'manual';
 let planModeOn = mode === 'plan';
 let deepThinkOn = Boolean(api.getState()?.deepThink);
 let modelChoice = api.getState()?.modelChoice ?? 'config';
-const persistView = () => api.setState({ drafts, ideContext: ideContextOn, mode, planMode: planModeOn, deepThink: deepThinkOn, chatSearch, modelChoice });
+const persistView = () => api.setState({ drafts, ideContext: ideContextOn, contextExclusions: [...contextExclusions], mode, planMode: planModeOn, deepThink: deepThinkOn, chatSearch, modelChoice });
 function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
 function resizePrompt() {
   const prompt = $('prompt');
@@ -567,13 +568,28 @@ function renderContextChips() {
     node.title = title; node.textContent = label;
     return node;
   };
-  if (context.active_file) chips.push(chip(context.active_file, `Active file: ${context.active_file}`));
-  if (context.selection) {
+  const contextChip = (key, label, description) => {
+    const node = document.createElement('button'); node.type = 'button';
+    const excluded = contextExclusions.has(key);
+    node.className = 'context-chip context-toggle' + (excluded || !ideContextOn ? ' excluded' : '');
+    node.dataset.contextKey = key;
+    node.textContent = `${label} ${excluded ? '+' : '×'}`;
+    node.title = !ideContextOn ? 'IDE context is off for the next message' : `${excluded ? 'Include' : 'Remove'} ${description} for the next message`;
+    node.setAttribute('aria-label', node.title); node.setAttribute('aria-pressed', String(!excluded && ideContextOn));
+    node.disabled = !ideContextOn;
+    node.onclick = () => {
+      if (contextExclusions.has(key)) contextExclusions.delete(key); else contextExclusions.add(key);
+      persistView(); renderContextChips();
+    };
+    return node;
+  };
+  if (context.active_file) chips.push(contextChip(`file:${context.active_file}`, context.active_file, 'active file and its selection'));
+  if (context.selection && !contextExclusions.has(`file:${context.active_file}`)) {
     const start = context.selection.start_line || context.selection.end_line || 1;
     const end = context.selection.end_line || start;
-    chips.push(chip(start === end ? `Line ${start}` : `Lines ${start}–${end}`, 'Selection included in IDE context'));
+    chips.push(contextChip(`selection:${context.active_file}`, start === end ? `Line ${start}` : `Lines ${start}–${end}`, 'selected text'));
   }
-  if (context.open_files?.length) chips.push(chip(`${context.open_files.length} open files`, context.open_files.join(', ')));
+  for (const file of context.open_files || []) chips.push(contextChip(`file:${file}`, file, 'open-file context'));
   if (diagnostics) {
     const problems = document.createElement('button');
     problems.type = 'button';
@@ -996,7 +1012,7 @@ function setMode(value) {
   persistView(); renderComposerBar();
 }
 
-$('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); };
+$('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); renderContextChips(); };
 $('composer-controls-toggle').onclick = () => setComposerExpanded(!composerExpanded);
 setComposerExpanded(false);
 $('workspace').onclick = () => post('selectWorkspace');
@@ -1018,7 +1034,7 @@ $('mode-manual').onclick = () => setMode('manual');
 $('queue-next').onclick = () => {
   const text = $('prompt').value;
   if (!text.trim() || $('queue-next').hidden) return;
-  post('queue', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn, deepThink: deepThinkOn });
+  post('queue', { text, model: modelChoice, ideContext: ideContextOn, contextExclusions: [...contextExclusions], planOnly: planModeOn, deepThink: deepThinkOn });
   $('prompt').value = ''; resizePrompt(); saveDraft(); eligibility(); slashDismissed = false; renderSlashMenu();
 };
 
@@ -1075,7 +1091,7 @@ function runSlash(command, args) {
     case 'model': return openModelMenu();
     case 'workspace': return post('selectWorkspace');
     case 'worktree': return post('selectWorktree');
-    case 'plan': return args.trim() ? post('send', { text: args, model: modelChoice, ideContext: ideContextOn, planOnly: true }) : undefined;
+    case 'plan': return args.trim() ? post('send', { text: args, model: modelChoice, ideContext: ideContextOn, contextExclusions: [...contextExclusions], planOnly: true }) : undefined;
     case 'diagnostics': return post('info', { what: 'diagnostics' });
     case 'diff': return post('reviewChanges');
     case 'review': return post('reviewChanges');
@@ -1114,7 +1130,7 @@ $('composer').onsubmit = event => {
     }
     if (state.busy) { post('steer', { text }); $('prompt').value = ''; resizePrompt(); saveDraft(); eligibility(); return; }
     submittedDraftSession = draftSession;
-    post('send', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn, deepThink: deepThinkOn });
+    post('send', { text, model: modelChoice, ideContext: ideContextOn, contextExclusions: [...contextExclusions], planOnly: planModeOn, deepThink: deepThinkOn });
   }
 };
 $('prompt').oninput = () => { resizePrompt(); saveDraft(); eligibility(); slashDismissed = false; slashIndex = 0; renderSlashMenu(); };

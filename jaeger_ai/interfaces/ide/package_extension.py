@@ -65,7 +65,7 @@ def main() -> None:
         parser.error("output-root must be outside the repository")
     output.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix="jaeger-ide-", dir=output))
-    for name in ("package.json", "extension.js", "gateway.js", "conversation.js", "commands.js",
+    for name in ("package.json", "extension.js", "gateway.js", "conversation.js", "commands.js", "native-turn.js",
                  "README.md", "VERIFICATION.md", "THIRD_PARTY_NOTICES.md"):
         shutil.copy2(source / name, stage / name)
     # Editors and patch tools may leave rejected/backup files beside live
@@ -89,6 +89,22 @@ def main() -> None:
     (stage / "contract.json").write_text(json.dumps({
         "gatewayUrl": f"http://{constants['LOOPBACK']}:{constants['GATEWAY_PORT']}",
     }) + "\n")
+    # Hash the staged bytes, including generated contract and pinned renderer.
+    hashes = {str(p.relative_to(stage)): hashlib.sha256(p.read_bytes()).hexdigest()
+              for p in sorted(stage.rglob("*")) if p.is_file()}
+    content_hash = hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest()
+    try:
+        revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True, timeout=5).strip()
+        dirty = bool(subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=normal", "--",
+                                             str(source), "jaeger_ai/contract/ports.py", _SMD_SOURCE],
+                                            cwd=repo, text=True, timeout=5).strip())
+    except (OSError, subprocess.SubprocessError):
+        revision, dirty = "unavailable", None
+    (stage / "build.json").write_text(json.dumps({
+        "version": json.loads((stage / "package.json").read_text())["version"],
+        "sourceRevision": revision, "sourceDirty": dirty,
+        "contentSha256": content_hash, "files": hashes,
+    }, sort_keys=True, indent=2) + "\n")
     print(f"STAGE={stage}", flush=True)
     if not args.stage_only:
         # The version lives in package.json only; the file name follows it.

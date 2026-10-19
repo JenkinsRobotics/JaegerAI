@@ -85,3 +85,28 @@ test('the IDE projects context chips from the existing ideContext contract', () 
   assert.match(extension, /postContext\(\)/);
   assert.match(extension, /ideContext\(\), diagnostics: diagnosticsSnapshot\(\)\.count/);
 });
+
+test('selected workspace omits other roots, traversal, and canonical symlink escapes from automatic context', () => {
+  const canonicalPath = file => file === '/selected/link/secret.py' ? '/outside/secret.py' : path.resolve(file);
+  const context = commands.buildIdeContext({ folders: ['/other', '/selected'], selectedRoot: '/selected', canonicalPath,
+    active: { path: '/other/private.py', selectionText: 'private selection' },
+    openPaths: ['/selected/a.py', '/selected/../outside/secret.py', '/selected/link/secret.py', '/selected-other/a.py', '/other/b.py'] });
+  assert.deepEqual(context, { workspace_folders: ['/selected'], open_files: ['a.py'] });
+  assert.equal(commands.isWorkspacePath('/selected/a.py', '/selected', canonicalPath), true);
+  assert.equal(commands.isWorkspacePath('/selected/link/secret.py', '/selected', canonicalPath), false);
+  assert.equal(commands.isWorkspacePath('/selected/a.py', '', canonicalPath), false);
+  assert.equal(commands.isWorkspacePath('/selected/a.py', '/selected', () => { throw new Error('unresolved'); }), false);
+});
+
+test('context exclusions remove text and file metadata without mutating the scoped snapshot', () => {
+  const context = { workspace_folders: ['/w'], active_file: 'a.py', language: 'python', cursor_line: 2,
+    selection: { text: 'private', start_line: 1 }, open_files: ['b.py', 'c.py'] };
+  const filtered = commands.filterIdeContext(context, ['selection:a.py', 'file:b.py']);
+  assert.equal(filtered.selection, undefined);
+  assert.deepEqual(filtered.open_files, ['c.py']);
+  assert.equal(context.selection.text, 'private');
+  const removed = commands.filterIdeContext(context, ['file:a.py']);
+  assert.equal(removed.active_file, undefined); assert.equal(removed.selection, undefined);
+  assert.equal(removed.language, undefined); assert.equal(removed.cursor_line, undefined);
+  assert.equal(commands.filterIdeContext(null, []), null);
+});
