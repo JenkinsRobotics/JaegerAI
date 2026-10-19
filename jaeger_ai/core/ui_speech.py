@@ -25,11 +25,34 @@ class UISpeech:
         self._epoch = 0
         self._active_bus: Any = None
         self._active_correlation_id: str | None = None
+        # Keep exactly one timed-out request subscribed until its matching
+        # receipt can be reconciled by the next status/Stop/speak call.
+        self._unresolved: tuple[Any, Any, list[Any]] | None = None
 
     @property
     def active_correlation_id(self) -> str | None:
         with self._lock:
+            self._reconcile_locked()
             return self._active_correlation_id
+
+    def _reconcile_locked(self) -> None:
+        if self._unresolved is None:
+            return
+        bus, callback, receipts = self._unresolved
+        if not receipts:
+            return
+        bus.unsubscribe(receipts[0].topic, callback)
+        self._unresolved = None
+        self._active = None
+        self._active_correlation_id = None
+        self._active_bus = None
+        self._lock.notify_all()
+
+    def _unknown_result(self) -> dict[str, Any]:
+        return {"spoken": False, "acknowledged": False,
+                "execution_unknown": True,
+                "correlation_id": self._active_correlation_id,
+                "reason": "Previous UI speech has no matching receipt; new speech blocked"}
 
     def speak(self, text: str, *, voice: str = "", rate: float = 1.0) -> dict[str, Any]:
         """Speak through the configured JaegerOS TTS module and await its ack."""
@@ -47,11 +70,17 @@ class UISpeech:
         # TTS queue, so Stop can discard this lane without a global stop.
         ticket = object()
         with self._lock:
+            self._reconcile_locked()
+            if self._unresolved is not None:
+                return self._unknown_result()
             epoch = self._epoch
             self._pending.append(ticket)
             self._lock.notify_all()
-            self._lock.wait_for(lambda: epoch != self._epoch or (
+            self._lock.wait_for(lambda: self._unresolved is not None or epoch != self._epoch or (
                 self._active is None and self._pending[0] is ticket))
+            if self._unresolved is not None and epoch == self._epoch:
+                self._pending.remove(ticket)
+                return self._unknown_result()
             if epoch != self._epoch:
                 return {"spoken": False, "cancelled": True,
                         "reason": "interface speech cancelled before submission"}
@@ -91,9 +120,14 @@ class UISpeech:
                 self._active_bus = bus
                 bus.publish(command)
             if not acknowledged.wait(self.timeout_s):
-                return {"spoken": False, "acknowledged": False,
-                        "execution_unknown": True, "correlation_id": correlation_id,
-                        "reason": f"TTS node timeout after {self.timeout_s:g}s"}
+                with self._lock:
+                    # A late ack may have arrived at the timeout boundary.
+                    if not received:
+                        self._unresolved = (bus, on_ack, received)
+                        self._lock.notify_all()
+                        return {"spoken": False, "acknowledged": False,
+                                "execution_unknown": True, "correlation_id": correlation_id,
+                                "reason": f"TTS node timeout after {self.timeout_s:g}s"}
             ack = received[0]
             with self._lock:
                 cancelled = epoch != self._epoch
@@ -106,15 +140,18 @@ class UISpeech:
                 "correlation_id": correlation_id,
             }
         finally:
-            try:
-                if subscribed:
-                    bus.unsubscribe(topics.ACT_SPEECH_SPOKEN, on_ack)
-            finally:
-                with self._lock:
-                    self._active = None
-                    self._active_correlation_id = None
-                    self._active_bus = None
-                    self._lock.notify_all()
+            with self._lock:
+                # A concurrent status call may already have reconciled a late
+                # receipt. Only the still-owning invocation cleans this lease.
+                if self._active is ticket and self._unresolved is None:
+                    try:
+                        if subscribed:
+                            bus.unsubscribe(topics.ACT_SPEECH_SPOKEN, on_ack)
+                    finally:
+                        self._active = None
+                        self._active_correlation_id = None
+                        self._active_bus = None
+                        self._lock.notify_all()
 
     def stop(self) -> dict[str, Any]:
         """Discard pending lane work and request a scoped active stop.
@@ -125,6 +162,7 @@ class UISpeech:
         from jaeger_os.contract import topics
 
         with self._lock:
+            self._reconcile_locked()
             self._epoch += 1
             discarded = len(self._pending)
             self._pending.clear()
@@ -143,9 +181,11 @@ class UISpeech:
             except Exception as exc:
                 return {"stopped": False, "active": True,
                         "stop_requested": False, "discarded": discarded,
+                        "execution_unknown": self._unresolved is not None,
                         "correlation_id": correlation_id, "error": str(exc)}
             return {"stopped": False, "active": True,
                     "stop_requested": True, "acknowledged": False,
+                    "execution_unknown": self._unresolved is not None,
                     "discarded": discarded, "correlation_id": correlation_id}
 
 

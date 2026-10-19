@@ -25,6 +25,7 @@ right away rather than waiting for a timeout.
 
 from __future__ import annotations
 
+from collections import deque
 import inspect
 import queue
 import threading
@@ -91,6 +92,11 @@ class TTSNode(Node):
         self._pending: "queue.Queue[topics.SpeechCommand]" = queue.Queue(
             maxsize=queue_maxsize,
         )
+        # Serialize queue removal/reinsertion with node claiming a request.
+        self._speech_lock = threading.Condition(threading.RLock())
+        # Say/Stop have different subscriber workers. Remember recent scoped
+        # stops so reversed delivery cannot revive a just-cancelled request.
+        self._cancelled_correlations: deque[str] = deque(maxlen=256)
         self._queue_maxsize = int(queue_maxsize)
         self._max_text_chars = int(max_text_chars)
         self._warm_on_start = bool(warm_on_start)
@@ -129,10 +135,11 @@ class TTSNode(Node):
         """Drain one queued speech request per tick.  Synthesis runs
         synchronously on this thread; the next tick won't start until
         the current speech finishes playing."""
-        try:
-            msg = self._pending.get(timeout=0.1)
-        except queue.Empty:
-            return
+        with self._speech_lock:
+            if not self._speech_lock.wait_for(lambda: not self._pending.empty(), 0.1):
+                return
+            msg = self._pending.get_nowait()
+            self._active_correlation_id = msg.correlation_id
         self._handle(msg)
 
     def teardown(self) -> None:
@@ -236,14 +243,20 @@ class TTSNode(Node):
                 duration_s=0.0,
             )
             return
-        try:
-            self._pending.put_nowait(msg)
-        except queue.Full:
-            # Immediate-fail ack so the brain's tool sees rejection.
-            self._rejected += 1
-            self._publish_ack(
-                msg, ok=False, reason="TTS queue full", duration_s=0.0,
-            )
+        with self._speech_lock:
+            if msg.correlation_id and msg.correlation_id in self._cancelled_correlations:
+                self._publish_ack(msg, ok=False, duration_s=0.0,
+                                  reason="interrupted before admission by speech_stop")
+                return
+            try:
+                self._pending.put_nowait(msg)
+                self._speech_lock.notify_all()
+            except queue.Full:
+                # Immediate-fail ack so the brain's tool sees rejection.
+                self._rejected += 1
+                self._publish_ack(
+                    msg, ok=False, reason="TTS queue full", duration_s=0.0,
+                )
 
     def _on_speech_stop(self, msg: topics.TopicMessage) -> None:
         """Barge-in primitive: the voice loop (or any other coordinator)
@@ -261,55 +274,50 @@ class TTSNode(Node):
             f"TTS node got unexpected topic on speech_stop subscription: "
             f"{msg.topic}"
         )
-        if (
-            msg.correlation_id
-            and self._active_correlation_id
-            and msg.correlation_id != self._active_correlation_id
-        ):
-            self._log(
-                "speech_stop ignored for stale correlation_id "
-                f"{msg.correlation_id}"
-            )
-            return
-        if msg.correlation_id and self._active_correlation_id is None:
-            self._log(
-                "speech_stop ignored because no matching speech is active"
-            )
-            return
-        stop = getattr(self.synthesizer, "stop", None)
-        if not callable(stop):
-            self._log(
-                "speech_stop received but synthesizer has no stop(); "
-                "ignoring"
-            )
-            return
-        try:
-            stop()
-        except Exception as exc:  # noqa: BLE001
-            self._log(f"synthesizer stop() raised: "
-                      f"{type(exc).__name__}: {exc}")
-
-        # Drain any pending queued commands that match this stop so queued
-        # streaming sentences don't continue playing after an interruption.
-        remaining: list[topics.SpeechCommand] = []
-        while True:
-            try:
-                cmd = self._pending.get_nowait()
+        with self._speech_lock:
+            if msg.correlation_id and msg.correlation_id not in self._cancelled_correlations:
+                self._cancelled_correlations.append(msg.correlation_id)
+            # A scoped request may be queued behind another producer, or
+            # before the first tick. Remove it regardless of active identity.
+            # Holding the claim lock preserves unrelated queue order/capacity.
+            remaining: list[topics.SpeechCommand] = []
+            while True:
+                try:
+                    cmd = self._pending.get_nowait()
+                except queue.Empty:
+                    break
                 if not msg.correlation_id or cmd.correlation_id == msg.correlation_id:
-                    self._publish_ack(cmd, ok=False, duration_s=0.0, reason="interrupted by speech_stop")
+                    self._publish_ack(cmd, ok=False, duration_s=0.0,
+                                      reason="interrupted before playback by speech_stop")
                 else:
                     remaining.append(cmd)
-            except queue.Empty:
-                break
-        for cmd in remaining:
-            try:
+            for cmd in remaining:
                 self._pending.put_nowait(cmd)
-            except queue.Full:
-                break
+
+            # Only the matching active producer may touch the synthesizer.
+            # Blank IDs retain the pre-existing explicit global-stop contract.
+            if msg.correlation_id and msg.correlation_id != self._active_correlation_id:
+                return
+            if self._active_correlation_id is None:
+                return
+            stop = getattr(self.synthesizer, "stop", None)
+            if not callable(stop):
+                self._log("speech_stop received but synthesizer has no stop(); ignoring")
+                return
+            try:
+                stop()
+            except Exception as exc:  # noqa: BLE001
+                self._log(f"synthesizer stop() raised: {type(exc).__name__}: {exc}")
 
     def _handle(self, msg: topics.SpeechCommand) -> None:
         t0 = time.perf_counter()
-        self._active_correlation_id = msg.correlation_id
+        with self._speech_lock:
+            if msg.correlation_id and msg.correlation_id in self._cancelled_correlations:
+                self._active_correlation_id = None
+                self._publish_ack(msg, ok=False, duration_s=0.0,
+                                  reason="interrupted before playback by speech_stop")
+                return
+            self._active_correlation_id = msg.correlation_id
         # Publish measured speech amplitude while playback runs.
         amp_stop = threading.Event()
         cid_for_chunks = msg.correlation_id or ""
@@ -329,7 +337,11 @@ class TTSNode(Node):
         if voice_overridden:
             self.synthesizer.voice = msg.voice
         try:
-            result = self._speak(msg)
+            with self._speech_lock:
+                cancelled = bool(msg.correlation_id and
+                                 msg.correlation_id in self._cancelled_correlations)
+            result = ({"spoken": False, "reason": "interrupted before playback by speech_stop"}
+                      if cancelled else self._speak(msg))
         except Exception as exc:  # noqa: BLE001
             self._log(f"speak() raised: {type(exc).__name__}: {exc}")
             self._publish_ack(
@@ -343,7 +355,8 @@ class TTSNode(Node):
                 self.synthesizer.voice = previous_voice
             amp_stop.set()
             amp_thread.join(timeout=0.5)
-            self._active_correlation_id = None
+            with self._speech_lock:
+                self._active_correlation_id = None
             # Always close the mouth, including inference exceptions and
             # cancellation paths.
             try:
