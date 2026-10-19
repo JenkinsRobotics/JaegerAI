@@ -105,6 +105,12 @@ struct ChatView: View {
                 switch tabState.currentTab {
                 case .chat:
                     VStack(spacing: 0) {
+                        if let error = chat.conversationError {
+                            Text(error).font(.caption).foregroundColor(.orange).padding(8)
+                        }
+                        if let notice = chat.recoveryNotice {
+                            Text(notice).font(.caption).foregroundColor(.orange).padding(8)
+                        }
                         if chat.hasActiveTurn || chat.stopNotice != nil {
                             ChatRunStatusView(startedAt: turnStartedAt ?? chat.messages.last?.timestamp ?? .now,
                                               status: chat.turnControlLabel, canStop: chat.canStopTurn) {
@@ -560,7 +566,7 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .help("New Chat")
-            .disabled(chat.isSwitchingSession || chat.isSending)
+            .disabled(chat.isSwitchingSession)
 
             Button(action: openHistory) {
                 Image(systemName: "clock.arrow.circlepath")
@@ -569,7 +575,7 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .help("History")
-            .disabled(chat.isSwitchingSession || chat.isSending)
+            .disabled(chat.isSwitchingSession)
             .popover(isPresented: $showHistory, arrowEdge: .bottom) {
                 historyList
             }
@@ -1245,8 +1251,12 @@ struct ChatView: View {
 
     private func openWebChat() {
         Task {
-            let url = (try? await WebUIEndpoint.resolve()) ?? URL(string: "http://127.0.0.1:8790/")!
-            NSWorkspace.shared.open(url)
+            do {
+                let url = try await WebUIEndpoint.resolve(instance: AgentBridge.shared.status?.instance ?? AgentBridge.explicitInstance)
+                NSWorkspace.shared.open(url)
+            } catch {
+                NSAlert(error: error).runModal()
+            }
         }
     }
 

@@ -313,7 +313,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     var canResumeQueue: Bool {
-        queuePausedByStop && !hasActiveTurn && queueControlAvailable && !queueOutcomeUnknown &&
+        queuePausedByStop && localTurnSession == nil && !hasActiveTurn && queueControlAvailable && !queueOutcomeUnknown &&
             pendingSends.contains { $0.sessionID == sessionKey }
     }
 
@@ -333,7 +333,7 @@ final class ChatViewModel: ObservableObject {
     func drainQueuedMessages() async {
         while !Task.isCancelled {
             guard await refreshTurnControl() else { return }
-            guard !Task.isCancelled, !queuePausedByStop, !hasActiveTurn, queueControlAvailable, !queueOutcomeUnknown,
+            guard !Task.isCancelled, localTurnSession == nil, !queuePausedByStop, !hasActiveTurn, queueControlAvailable, !queueOutcomeUnknown,
                   let index = pendingSends.firstIndex(where: { $0.sessionID == sessionKey }) else { return }
             let next = pendingSends.remove(at: index)
             _ = await runTurn(next.prompt, appendUserBubble: false, displayText: next.display,
@@ -350,6 +350,13 @@ final class ChatViewModel: ObservableObject {
     /// the reply the operator asked for is always the last thing in the
     /// turn. Held as an id rather than an index because activity rows
     /// inserted above it shift its position on nearly every event.
+    private var selectionGeneration = UUID()
+    private var localTurnSession: String?
+    private var recoveryTask: Task<Void, Never>?
+    private let recoveryGateway: any ChatRecoveryClient
+    @Published private(set) var recoveryNotice: String?
+    @Published private(set) var conversationError: String?
+
     private var answerID: UUID?
 
     /// 0.8.1 item 9: messages typed while a turn is already in flight.
@@ -563,7 +570,10 @@ final class ChatViewModel: ObservableObject {
         guard !dispatcherSending else { return false }
         dispatcherSending = true
         isSending = true
-        defer { dispatcherSending = false; isSending = false }
+        defer {
+            dispatcherSending = false
+            if sessionKey == "dispatcher", localTurnSession == nil { isSending = false }
+        }
         let requestID = uncertainDispatcherRequest?.text == text
             ? uncertainDispatcherRequest!.id
             : UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
@@ -586,7 +596,7 @@ final class ChatViewModel: ObservableObject {
                 try await Task.sleep(for: .seconds(1))
             } while sessionKey == "dispatcher"
             let completed = dispatcherRun?.status == "completed"
-            if completed, TTSManager.shared.autoSpeakEnabled,
+            if completed, sessionKey == "dispatcher", TTSManager.shared.autoSpeakEnabled,
                let output = dispatcherRun?.output, !output.isEmpty {
                 TTSManager.shared.speak(output)
             }
@@ -620,9 +630,11 @@ final class ChatViewModel: ObservableObject {
     init(agent: AgentBridge, sessionKey: String = ChatViewModel.mintSessionKey(),
          controlGateway: any SessionControlClient = GatewayClient.fromEnvironment(),
          startBackgroundObservers: Bool = true,
-         dispatcherClient: (any DispatcherConversationClient)? = nil) {
+         dispatcherClient: (any DispatcherConversationClient)? = nil,
+         recoveryGateway: any ChatRecoveryClient = GatewayClient.fromEnvironment()) {
         self.agent = agent
         self.sessionKey = sessionKey
+        self.recoveryGateway = recoveryGateway
         self.controlGateway = controlGateway
         self.dispatcherClientOverride = dispatcherClient
         guard startBackgroundObservers else { return }
@@ -770,6 +782,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     deinit {
+        recoveryTask?.cancel()
         if let token = eventToken {
             // ``deinit`` can't be @MainActor; agent's removeListener
             // is.  Dispatch back to main so we don't tear down on a
@@ -795,7 +808,7 @@ final class ChatViewModel: ObservableObject {
     /// names get pretty chips; unknowns fall through silently (they
     /// still show up in NSLog for diagnostics).
     private func handle(event: Event) {
-        guard sessionKey != "dispatcher" else { return }
+        guard sessionKey != "dispatcher", localTurnSession == sessionKey, isSending else { return }
         switch event.name {
         case "subscribed":
             // The "we're listening now" handshake.  Don't display.
@@ -881,13 +894,16 @@ final class ChatViewModel: ObservableObject {
 
     /// Queue behind an in-flight turn, or run immediately.
     private func enqueueOrRun(_ prompt: String, display: String, images: [String]) async {
-        if hasActiveTurn {
+        if hasActiveTurn || localTurnSession != nil {
+            if let localTurnSession, localTurnSession != sessionKey { queuePausedByStop = true }
             pendingSends.append(PendingSend(sessionID: sessionKey, prompt: prompt, display: display, images: images, agenticTools: agenticTools))
             messages.append(ChatMessage(
                 author: .user, timestamp: Date(), text: display))
             return
         }
+        let selected = sessionKey
         let succeeded = await runTurn(prompt, appendUserBubble: true, displayText: display, images: images, useTools: agenticTools)
+        guard selected == sessionKey else { return }
         if sessionKey == "dispatcher" && !succeeded { queuePausedByStop = true; return }
         await drainQueuedMessages()
     }
@@ -911,8 +927,31 @@ final class ChatViewModel: ObservableObject {
     private func runTurn(_ trimmed: String, appendUserBubble: Bool,
                          displayText: String? = nil, images: [String] = [],
                          useTools: Bool? = nil) async -> Bool {
+        let selected = sessionKey
+        let generation = selectionGeneration
         let toolsEnabled = useTools ?? agenticTools
+        let ownsNativeTurn = selected != "dispatcher" || !images.isEmpty || !toolsEnabled
+        if ownsNativeTurn {
+            guard localTurnSession == nil else { return false }
+            localTurnSession = selected
+            isSending = true
+            recoveryTask?.cancel()
+        }
+        defer {
+            if ownsNativeTurn {
+                localTurnSession = nil
+                if selected == sessionKey {
+                    isSending = false
+                    answerID = nil
+                    TranscriptFeed.closeStreaming(in: &messages)
+                    startRecovery(session: selected, generation: selectionGeneration)
+                } else if pendingSends.contains(where: { $0.sessionID == sessionKey }) {
+                    queuePausedByStop = true // switching never implicitly starts retained work
+                }
+            }
+        }
         if !displayConfigLoaded { await loadDisplayConfig() }
+        guard selected == sessionKey, generation == selectionGeneration else { return false }
         if sessionKey == "dispatcher" && images.isEmpty && toolsEnabled {
             // A failed/cancelled/uncertain Dispatcher turn was still handled
             // by that authority. Never route the same prompt to native chat.
@@ -937,19 +976,13 @@ final class ChatViewModel: ObservableObject {
         messages.append(placeholder)
         answerID = placeholder.id
 
-        isSending = true
-        defer {
-            isSending = false
-            answerID = nil
-            TranscriptFeed.closeStreaming(in: &messages)
-        }
-
         do {
             let reply = try await agent.sendChat(text: trimmed,
-                                                 session: sessionKey,
+                                                 session: selected,
                                                  agenticTools: toolsEnabled,
                                                  imageDataURIs: images,
                                                  speakReplies: TTSManager.shared.autoSpeakEnabled)
+            guard selected == sessionKey, generation == selectionGeneration else { return reply.error == nil }
             let replyText = reply.text
 
             if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
@@ -969,11 +1002,13 @@ final class ChatViewModel: ObservableObject {
                         role = active.resolvedRole
                     }
                 }
-                if let dn, !dn.isEmpty {
+                guard selected == sessionKey, generation == selectionGeneration else { return reply.error == nil }
+                if let dn, !dn.isEmpty, let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
                     messages[i].displayName = dn
                     messages[i].agentRole = role
                 }
             }
+            guard selected == sessionKey, generation == selectionGeneration else { return reply.error == nil }
             if let used = reply.ctxUsed, let mx = reply.ctxMax {
                 contextUsage = (used, mx)
             }
@@ -992,6 +1027,7 @@ final class ChatViewModel: ObservableObject {
             }
             return true
         } catch {
+            guard selected == sessionKey, generation == selectionGeneration else { return false }
             if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
                 messages[i].text = Self.settledReplyText(partial: messages[i].text,
                     reply: "⚠ agent error: \(error.localizedDescription)", interrupted: true)
@@ -1011,15 +1047,33 @@ final class ChatViewModel: ObservableObject {
     /// Start a separate native chat without evicting the Dispatcher or any
     /// previously loaded conversation. History remains available for return.
     func newChat() async {
+        conversationError = nil
+        selectionGeneration = UUID()
+        recoveryTask?.cancel()
+        recoveryNotice = nil
+        isSending = false
+        answerID = nil
         isSwitchingSession = true
-        defer { isSwitchingSession = false }
-        sessionKey = Self.mintSessionKey()
+        let generation = selectionGeneration
+        defer { if generation == selectionGeneration { isSwitchingSession = false } }
+        let selected = Self.mintSessionKey()
+        sessionKey = selected
         controlledRequest = nil
         stopNotice = nil
         controlReadAvailable = false
         dispatcherApproval = nil
         messages.removeAll()
         contextUsage = nil
+        do {
+            try await recoveryGateway.createConversation(id: selected)
+            guard generation == selectionGeneration, sessionKey == selected else { return }
+            controlReadAvailable = true
+            controlledSessionStatus = "idle"
+            startRecovery(session: selected, generation: generation)
+        } catch {
+            guard generation == selectionGeneration, sessionKey == selected else { return }
+            recoveryNotice = "New conversation could not be confirmed. Refresh before resuming queued work. " + error.localizedDescription
+        }
     }
 
     /// The History list's rows — recent conversations, most-active first.
@@ -1039,24 +1093,132 @@ final class ChatViewModel: ObservableObject {
     /// untouched) on a bridge failure.
     @discardableResult
     func loadSession(_ id: String) async -> Bool {
+        conversationError = nil
+        let generation = UUID()
+        selectionGeneration = generation
+        recoveryTask?.cancel()
+        isSwitchingSession = true
+        defer { if generation == selectionGeneration { isSwitchingSession = false } }
         if id == "dispatcher" {
             sessionKey = id
+            isSending = false
+            answerID = nil
+            recoveryNotice = nil
             await refreshDispatcher()
-            return true
+            return generation == selectionGeneration
         }
-        guard id != sessionKey else { return true }   // already viewing it
-        isSwitchingSession = true
-        defer { isSwitchingSession = false }
-        let result = await agent.query("load_session", args: ["id": id])
-        guard result.ok, let json = result.json,
-              let turns = try? JSONDecoder().decode([SessionTurn].self, from: json)
-        else { return false }
-        sessionKey = id
-        controlledRequest = nil
-        stopNotice = nil
-        messages = Self.rebuildMessages(from: turns)
+        do {
+            let snapshot = try await recoveryGateway.conversationSnapshot(id: id)
+            guard generation == selectionGeneration, snapshot.session_id == id else { return false }
+            sessionKey = id
+            isSending = localTurnSession == id
+            answerID = nil
+            applyRecovery(snapshot)
+            startRecovery(session: id, generation: generation)
+            return true
+        } catch {
+            guard generation == selectionGeneration else { return false }
+            if (error as? GatewayClient.Failure)?.statusCode == 404 {
+                // Older local-only history remains viewable; never execute a resume as fallback.
+                let result = await agent.query("load_session", args: ["id": id, "resume": false])
+                guard generation == selectionGeneration else { return false }
+                if result.ok, let json = result.json,
+                   let turns = try? JSONDecoder().decode([SessionTurn].self, from: json), !turns.isEmpty {
+                    sessionKey = id
+                    isSending = localTurnSession == id
+                    answerID = nil
+                    controlledRequest = nil
+                    controlReadAvailable = false
+                    controlledSessionStatus = nil
+                    stopNotice = nil
+                    messages = Self.rebuildMessages(from: turns)
+                    recoveryNotice = "Saved local history — no Gateway live request is available for this conversation."
+                    return true
+                }
+            }
+            conversationError = "Conversation could not be recovered. " + error.localizedDescription
+            startRecovery(session: sessionKey, generation: generation)
+            return false // retain the currently visible transcript
+        }
+    }
+
+    private func applyRecovery(_ snapshot: GatewayClient.ConversationSnapshot) {
+        var existing = messages
+        messages = snapshot.messages.map { row in
+            let author: ChatMessage.Author = row.role == "user" ? .user : (row.role == "assistant" ? .assistant : .system)
+            // Preserve already rendered activity/identity when canonical text agrees.
+            if let index = existing.firstIndex(where: { $0.author == author && $0.text == row.content }) {
+                var preserved = existing.remove(at: index)
+                preserved.isStreaming = false
+                return preserved
+            }
+            return ChatMessage(author: author, timestamp: Date(timeIntervalSince1970: row.timestamp), text: row.content)
+        }
+        controlledRequest = snapshot.latest_request
+        controlledSessionStatus = snapshot.status
+        controlReadAvailable = true
+        if let request = snapshot.latest_request,
+           ["cancelling", "cancelled", "execution_unknown"].contains(request.status) {
+            if !resumedAfterStopIDs.contains(request.request_id) { queuePausedByStop = true }
+            stopNotice = request.stopLabel
+        } else if let request = snapshot.latest_request, request.isActive, stopRequestedIDs.contains(request.request_id) {
+            stopNotice = "Stop unconfirmed — waiting for backend observation; cancellation will not be resent"
+        } else { stopNotice = nil }
+        answerID = nil
+        if !snapshot.partial_text.isEmpty || snapshot.latest_request?.isActive == true {
+            let answer = ChatMessage(author: .assistant, timestamp: .now, text: snapshot.partial_text,
+                                     isStreaming: snapshot.latest_request?.isActive == true)
+            messages.append(answer)
+            answerID = answer.id
+        }
+        for pending in pendingSends where pending.sessionID == sessionKey {
+            messages.append(ChatMessage(author: .user, timestamp: .now, text: pending.display))
+        }
         contextUsage = nil
-        return true
+        recoveryNotice = nil
+    }
+
+    private func startRecovery(session: String, generation: UUID) {
+        recoveryTask?.cancel()
+        guard session != "dispatcher", localTurnSession != session else { return }
+        let gateway = recoveryGateway
+        recoveryTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    let snapshot = try await gateway.conversationSnapshot(id: session)
+                    guard !Task.isCancelled, self?.selectionGeneration == generation,
+                          self?.sessionKey == session, self?.localTurnSession != session else { return }
+                    self?.applyRecovery(snapshot)
+                    var cursor = snapshot.event_cursor
+                    for try await event in gateway.streamEvents(sessionID: session, lastEventID: cursor) {
+                        guard !Task.isCancelled, self?.selectionGeneration == generation,
+                              self?.sessionKey == session, self?.localTurnSession != session else { return }
+                        guard event.eventID > cursor else { continue }
+                        cursor = event.eventID
+                        guard event.sessionID == session else { continue }
+                        if event.event == "turn.start" || event.isTerminal {
+                            if ["turn.cancelled", "turn.unknown"].contains(event.event) { self?.queuePausedByStop = true }
+                            let refreshed = try await gateway.conversationSnapshot(id: session)
+                            guard !Task.isCancelled, self?.selectionGeneration == generation,
+                                  self?.sessionKey == session, self?.localTurnSession != session else { return }
+                            self?.applyRecovery(refreshed)
+                            cursor = max(cursor, refreshed.event_cursor)
+                        } else if event.event == "turn.delta",
+                                  let object = try? JSONSerialization.jsonObject(with: event.data) as? [String: Any],
+                                  object["request_id"] as? String == self?.controlledRequest?.request_id,
+                                  let delta = object["delta"] as? String,
+                                  let model = self {
+                            TranscriptFeed.appendAnswerDelta(delta, to: &model.messages, answerID: model.answerID)
+                        }
+                    }
+                    self?.recoveryNotice = "Live connection closed — reconnecting; work was not resubmitted."
+                } catch {
+                    guard !Task.isCancelled, self?.selectionGeneration == generation else { return }
+                    self?.recoveryNotice = "Live connection unavailable — reconnecting; work was not resubmitted. " + error.localizedDescription
+                }
+                do { try await Task.sleep(for: .seconds(2)) } catch { return }
+            }
+        }
     }
 
     /// Pure turn-list -> transcript mapping, split out so it's testable
