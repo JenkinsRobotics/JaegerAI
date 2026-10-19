@@ -80,3 +80,38 @@ def test_run_script_defaults_to_loopback():
     # An inherited HERMES_WEBUI_HOST must not re-open LAN on its own.
     head = script.split('JAEGER_WEBUI_ALLOW_LAN:-0', 1)[0]
     assert 'if [[ -n "${HERMES_WEBUI_HOST:-}" ]]' not in head
+
+
+def test_old_service_worker_is_replaced_by_a_kill_switch(dist):
+    mod = _load()
+    for path in ("/sw.js", "/static/sw.js"):
+        out, h = _get(mod, path)
+        body = h.wfile.getvalue().decode()
+        assert out is True and h.status == 200
+        assert h.headers["Content-Type"].startswith("text/javascript")
+        assert h.headers["Cache-Control"] == "no-cache, no-store"
+        assert h.headers["Clear-Site-Data"] == '"cache"'
+        for needle in ("skipWaiting", "caches.keys", "caches.delete", "clients.claim",
+                       "registration.unregister", "navigate"):
+            assert needle in body, needle
+        assert "SHELL_ASSETS" not in body and "hermes-shell" not in body
+    _, h = _get(mod, "/")
+    assert h.headers["Cache-Control"] == "no-cache, no-store"
+    _, h = _get(mod, "/index.html")
+    assert h.headers["Cache-Control"] == "no-cache, no-store"
+
+
+def test_static_manifest_keeps_the_pwa_type(dist):
+    mod = _load()
+    out, h = _get(mod, "/static/manifest.json")
+    assert out is True and h.status == 200
+    assert h.headers["Content-Type"].startswith("application/manifest+json")
+    assert b'"name"' in h.wfile.getvalue()
+    assert _get(mod, "/static/../../etc/passwd.webmanifest")[1].status == 404
+
+
+def test_without_a_build_sw_and_manifest_stay_legacy(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAEGER_WEBUI_UI_DIST", str(tmp_path / "missing"))
+    mod = _load()
+    for path in ("/sw.js", "/static/sw.js", "/static/manifest.json"):
+        assert _get(mod, path)[0] is False
