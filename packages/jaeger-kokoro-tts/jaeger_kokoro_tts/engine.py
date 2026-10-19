@@ -801,7 +801,17 @@ class KokoroTTS:
         # Signal end-of-message and block until the audio thread has
         # actually played everything we enqueued.
         player.mark_end()
-        if not player.wait_until_drained():
+        drained = player.wait_until_drained()
+        # cancel() may unblock drain with True (or False). Drain completion
+        # alone is not evidence that an interrupted utterance played fully.
+        if cancellation.is_set():
+            return {
+                "spoken": False,
+                "reason": "interrupted",
+                "text": cleaned,
+                "samples": queued_samples,
+            }
+        if not drained:
             try:
                 player.reset()
             except Exception:  # noqa: BLE001
