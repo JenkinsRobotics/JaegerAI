@@ -20,6 +20,7 @@ import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
+import { ApprovalCard } from "./ApprovalCard";
 import { MessageMenu, Reactions, type MessageAction } from "./MessageMenu";
 import { useRevealedText } from "./reveal";
 import { useStreamStyle, type StreamStyleParams } from "./streamStyle";
@@ -118,7 +119,7 @@ export function StepsFold({ tools, defaultOpen = false }: { tools: ToolPart[]; d
   );
 }
 
-function Card({ part, onDecide }: { part: CardPart; onDecide: Decide }) {
+function Card({ part, onDecide, tool, decided }: { part: CardPart; onDecide: Decide; tool?: { toolName: string; input: unknown }; decided?: "approve" | "deny" }) {
   if (part.kind === "question") {
     return (
       <div className="jg-card-widget" role="group" aria-label={part.title} data-sender="assistant">
@@ -134,16 +135,7 @@ function Card({ part, onDecide }: { part: CardPart; onDecide: Decide }) {
       </div>
     );
   }
-  return (
-    <div className="jg-card-widget" role="group" aria-label={part.title} data-sender="assistant">
-      <div className="jg-card-widget__title">{part.title}</div>
-      <div className="jg-card-widget__message">{part.message}</div>
-      <div className="jg-confirm__actions">
-        <button type="button" className="jg-action jg-action--primary" onClick={() => onDecide(part.callId, "approve")}>Allow</button>
-        <button type="button" className="jg-action" onClick={() => onDecide(part.callId, "deny")}>Deny</button>
-      </div>
-    </div>
-  );
+  return <ApprovalCard title={part.title} message={part.message} toolName={tool?.toolName} input={tool?.input} decided={decided} onDecide={(d) => onDecide(part.callId, d)} />;
 }
 
 /** Split a response into bubbles, cards, centered markers and one steps fold.
@@ -498,11 +490,15 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); }
   };
 
+  /** Decisions made here; only ever set by a click on Allow once / Deny once (never automatically). */
+  const [decisions, setDecisions] = useState<Record<string, "approve" | "deny">>({});
   const decide = (turnId: string): Decide => (callId, decision) => {
+    if (decisions[callId]) return;
+    setDecisions((d) => ({ ...d, [callId]: decision }));
     void host.respondToConfirmation(turnId, callId, decision);
     updateTurn(turnId, (t) => ({
       ...t,
-      parts: t.parts.filter((p) => !(p.kind === "confirmation" && p.callId === callId)).map((p) =>
+      parts: t.parts.map((p) =>
         p.kind === "toolInvocation" && p.callId === callId ? { ...p, state: decision === "approve" ? "executing" : "cancelled" } : p),
     }));
   };
@@ -557,7 +553,8 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
               {turn.message && <div className="jg-bubble jg-bubble--user" data-sender="user">{turn.message}</div>}
               {segments(turn.parts, turn.state).map((seg, i) =>
                 "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
-                : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} />
+                : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} decided={decisions[seg.card.callId]}
+                  tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
                 : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
               <Reactions emojis={reactions[turn.turnId] ?? []} onRemove={(e) => setReactions((r) => ({ ...r, [turn.turnId]: (r[turn.turnId] ?? []).filter((x) => x !== e) }))} />
