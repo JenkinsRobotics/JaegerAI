@@ -37,17 +37,20 @@ enum ChatPresentation {
 
 struct ChatRunStatusView: View {
     let startedAt: Date
+    var status: String = "Working"
+    var canStop: Bool = true
     let onStop: () -> Void
 
     var body: some View {
         HStack(spacing: 10) {
             ProgressView().controlSize(.small)
-            Text("Working")
+            Text(status)
             Text(startedAt, style: .timer).monospacedDigit()
             Spacer()
             Button("Stop", systemImage: "stop.fill", action: onStop)
                 .buttonStyle(.plain)
                 .accessibilityLabel("Stop current task")
+                .disabled(!canStop)
         }
         .font(.system(size: 12))
         .foregroundStyle(Term.inkDim)

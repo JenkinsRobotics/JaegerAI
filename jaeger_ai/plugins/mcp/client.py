@@ -17,6 +17,7 @@ pay zero cost.
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import TimeoutError as FutureTimeout
 import json
 import logging
 import os
@@ -349,9 +350,28 @@ class MCPRegistry:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
-    def _submit(self, coro: Any, timeout: float) -> Any:
+    def _submit(self, coro: Any, timeout: float, *, cancellation: threading.Event | None = None) -> Any:
+        if cancellation is not None and cancellation.is_set():
+            coro.close()
+            raise RuntimeError("MCP call cancelled before dispatch")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result(timeout=timeout)
+        deadline = time.monotonic() + timeout
+        while True:
+            if cancellation is not None and cancellation.is_set():
+                # Cancel this SDK request, never the shared server/transport.
+                # Remote cancellation is best effort; leave the effect ledger
+                # claim pending rather than reporting that the effect stopped.
+                future.cancel()
+                raise RuntimeError("MCP call interrupted; remote outcome unconfirmed; do not retry")
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                future.cancel()
+                raise RuntimeError("MCP call timed out; remote outcome unconfirmed; do not retry")
+            try:
+                return future.result(timeout=min(0.1, remaining))
+            except FutureTimeout:
+                if future.done():
+                    raise
 
     def add_server(self, config: MCPServerConfig, *, connect_timeout: float | None = None) -> list[MCPToolSpec]:
         client = _MCPClient(config)
@@ -416,15 +436,14 @@ class MCPRegistry:
             for key, value in client.config.env.items()
             if _SECRET_NAME.search(key)
         )
+        from jaeger_agent.core.cancellation import current_cancellation
         try:
-            result = self._submit(client.call(spec.tool_name, arguments), timeout=timeout)
+            result = self._submit(client.call(spec.tool_name, arguments), timeout=timeout,
+                                  cancellation=current_cancellation())
         except Exception as exc:
-            # Resilient retry for transient pipe/IPC timeouts during heavy batch tasks
-            try:
-                time.sleep(0.1)
-                result = self._submit(client.call(spec.tool_name, arguments), timeout=timeout)
-            except Exception as retry_exc:
-                raise RuntimeError(_redact_known_secrets(str(retry_exc), secrets)) from None
+            # A lost response can follow a real external effect. Never replay
+            # it automatically, including after cancellation or timeout.
+            raise RuntimeError(_redact_known_secrets(str(exc), secrets)) from None
         payload = _result_to_dict(result)
         return _redact_known_secrets(payload, secrets)
 
