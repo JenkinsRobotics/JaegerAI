@@ -126,7 +126,10 @@ Requests are capped at 32 KiB; webhook bodies and responses at 256 KiB. Summary
 preview is 240 characters, title 256 characters. A ten-second total deadline covers
 DNS/connect/TLS/response. At most five attempts use 2/4/8/16/32-second exponential
 backoff (the ten-second worker cadence and bounded batch can delay these). Only network failures,
-408, 429 and 5xx retry; 410 deletes the subscription, 413 abandons the event. IDs
+408, 429 and 5xx retry; 410 deletes the subscription, 413 abandons the event.
+For 410/413, the transport uses headers immediately and never reads the response
+body. Oversized/truncated/stalled bodies, cleanup errors and enclosing-deadline
+cancellation cannot convert an observed terminal status into a retry. IDs
 and exact bodies remain stable across attempts, with fresh signing timestamps.
 `webhook-id` equals `eventId`. HMAC-SHA256 follows Standard Webhooks' byte format.
 

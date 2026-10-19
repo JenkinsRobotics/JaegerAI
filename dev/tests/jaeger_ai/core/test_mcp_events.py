@@ -1440,3 +1440,102 @@ def test_production_factory_wires_logout_and_blocks_missing_provider_prerequisit
         with pytest.raises(ValueError):
             server.run(config)
     assert len(captured) == 1  # no listener reached for invalid provider profiles
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [410, 413])
+@pytest.mark.parametrize(
+    "body_failure",
+    [
+        "oversized",
+        "truncated",
+        "timeout",
+        "cleanup_error",
+        "cleanup_timeout",
+        "cleanup_cancelled",
+        "outer_timeout",
+    ],
+)
+async def test_review_terminal_status_survives_hostile_body_and_cleanup(
+    setup, monkeypatch, status, body_failure
+):
+    import asyncio
+    import socket
+
+    import aiohttp
+
+    events, principal, params, now, _receiver = setup
+    await events.subscribe(principal, params)
+    await events.ingest(message(now[0]))
+    calls, body_reads = [], []
+
+    async def public_dns(*_args, **_kwargs):
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))]
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "getaddrinfo", public_dns)
+
+    class Content:
+        async def readexactly(self, maximum):
+            body_reads.append(True)
+            if body_failure == "oversized":
+                return b"x" * maximum
+            if body_failure == "truncated":
+                raise aiohttp.ClientPayloadError("test truncated terminal body")
+            raise TimeoutError("test stalled terminal body")
+
+    class Response:
+        content = Content()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            if body_failure == "cleanup_error":
+                raise OSError("test close failure after terminal headers")
+            if body_failure == "cleanup_timeout":
+                raise TimeoutError("test close timeout after terminal headers")
+            if body_failure == "cleanup_cancelled":
+                raise asyncio.CancelledError
+            if body_failure == "outer_timeout":
+                await asyncio.sleep(1)
+
+    Response.status = status
+
+    class Connector:
+        def __init__(self, **_kwargs):
+            pass
+
+    class Session:
+        def __init__(self, **_kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            pass
+
+        def post(self, *_args, **_kwargs):
+            calls.append(status)
+            return Response()
+
+    monkeypatch.setattr(aiohttp, "TCPConnector", Connector)
+    monkeypatch.setattr(aiohttp, "ClientSession", Session)
+    events.transport = PublicHTTPS()
+    if body_failure == "outer_timeout":
+        original_timeout = asyncio.timeout
+        monkeypatch.setattr(asyncio, "timeout", lambda _delay: original_timeout(0.01))
+    for _ in range(5):
+        await events.deliver()
+        now[0] += 65
+    assert calls == [status]
+    assert not body_reads  # terminal response bodies are never consumed
+    with events.store.conn() as c:
+        assert tuple(c.execute("SELECT attempts,state FROM deliveries").fetchone()) == (
+            1,
+            "failed",
+        )
+        assert c.execute("SELECT count(*) FROM subscriptions").fetchone()[0] == (
+            0 if status == 410 else 1
+        )
+    assert bool(events.secrets.values) is (status == 413)
