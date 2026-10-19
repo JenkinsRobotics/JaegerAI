@@ -173,6 +173,7 @@ export function App({ source }: { source: JaegerSource }) {
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
+        summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
         onAgent={(agentId) => setSelection({ type: "agent", agentId })}
         actions={[
           { id: "new", label: "New chat", shortcut: "⌘N", run: () => newChat(selectedAgentId ?? LEAD_ID) },
