@@ -6,6 +6,7 @@
  * from the left edge returns to the list. Data is the real roster/summaries; the preview type comes from the
  * gateway's last_source (handoff / task / chat) and falls back to no icon. */
 import { useRef, type ReactNode, type TouchEvent } from "react";
+import type React from "react";
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { label, sidebarRows, type SidebarRow } from "../agents/agentsLogic";
 import { isUnread } from "../agents/unread";
@@ -36,9 +37,31 @@ export function rowView(r: SidebarRow, seen: Record<string, number>) {
 const ACTIVE = new Set(["working", "running", "busy", "thinking"]);
 
 
-export function PhoneList({ state, userInitials, onOpen, onSearch, onNew, onSettings, statusOk }: {
+/** Long-press (500ms, < 10px movement) → onLong(x, y); the click that follows is swallowed. Also right-click. */
+function useLongPress(onLong?: (x: number, y: number) => void) {
+  const t = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const at = useRef<{ x: number; y: number } | null>(null);
+  const fired = useRef(false);
+  if (!onLong) return {};
+  const cancel = () => { clearTimeout(t.current); at.current = null; };
+  return {
+    onTouchStart: (e: TouchEvent) => { const p = e.touches[0]; fired.current = false; at.current = { x: p.clientX, y: p.clientY };
+      t.current = setTimeout(() => { fired.current = true; onLong(p.clientX, p.clientY); }, 500); },
+    onTouchMove: (e: TouchEvent) => { const p = e.touches[0]; if (at.current && Math.hypot(p.clientX - at.current.x, p.clientY - at.current.y) > 10) cancel(); },
+    onTouchEnd: cancel, onTouchCancel: cancel,
+    onClickCapture: (e: React.MouseEvent) => { if (fired.current) { e.preventDefault(); e.stopPropagation(); fired.current = false; } },
+    onContextMenu: (e: React.MouseEvent) => { e.preventDefault(); cancel(); onLong(e.clientX, e.clientY); },
+  };
+}
+
+function Pressable({ onLong, children, ...rest }: { onLong?: (x: number, y: number) => void; children: ReactNode } & React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return <button type="button" {...rest} {...useLongPress(onLong)}>{children}</button>;
+}
+
+export function PhoneList({ state, userInitials, onOpen, onSearch, onNew, onSettings, statusOk, onAgentMenu }: {
   state: Pick<AgentsState, "agents" | "summaries" | "seen">; userInitials: string; statusOk: boolean;
   onOpen: (agentId: string) => void; onSearch: () => void; onNew: (anchor: HTMLElement) => void; onSettings: () => void;
+  onAgentMenu?: (agentId: string, x: number, y: number) => void;
 }) {
   const rows = sidebarRows(state.agents, state.summaries);
   const all = [...(rows.lead ? [rows.lead] : []), ...rows.specialists];
@@ -59,20 +82,20 @@ export function PhoneList({ state, userInitials, onOpen, onSearch, onNew, onSett
         <button type="button" className="jg-pround" aria-label="New chat" onClick={(e) => onNew(e.currentTarget)}><Icon name="add" size={18} /></button>
       </header>
       {lead && (
-        <button type="button" className="jg-plead" onClick={() => onOpen(lead.agent.id)} aria-label={`Open ${label(lead.agent)}`}>
+        <Pressable className="jg-plead" onClick={() => onOpen(lead.agent.id)} aria-label={`Open ${label(lead.agent)}`} onLong={onAgentMenu && ((x, y) => onAgentMenu(lead.agent.id, x, y))}>
           <span className="jg-plead__art">
             <AgentAvatar id={lead.agent.id} name={label(lead.agent)} src={lead.agent.avatar_url} size={110} />
             <span className="jg-plead__badge" aria-hidden><Icon name="star-full" size={11} /></span>
           </span>
           <span className="jg-plead__name">{label(lead.agent)}</span>
-        </button>
+        </Pressable>
       )}
       <nav className="jg-prows" aria-label="Agents">
         {specialists.map((r) => {
           const v = rowView(r, state.seen); const u = v.unread;
           const name = label(r.agent);
           return (
-            <button key={r.agent.id} type="button" className={`jg-prow${u ? " is-unread" : ""}`} onClick={() => onOpen(r.agent.id)}>
+            <Pressable key={r.agent.id} className={`jg-prow${u ? " is-unread" : ""}`} data-agent-id={r.agent.id} onClick={() => onOpen(r.agent.id)} onLong={onAgentMenu && ((x, y) => onAgentMenu(r.agent.id, x, y))}>
               <span className="jg-prow__art">
                 <AgentAvatar id={r.agent.id} name={name} src={r.agent.avatar_url} size={48} />
                 {r.summary?.status && ACTIVE.has(String(r.summary.status)) && <span className="jg-prow__active" aria-label="Active" />}
@@ -84,7 +107,7 @@ export function PhoneList({ state, userInitials, onOpen, onSearch, onNew, onSett
                   {u && <span className="jg-prow__dot" aria-label="Unread" />}
                 </span>
               </span>
-            </button>
+            </Pressable>
           );
         })}
       </nav>

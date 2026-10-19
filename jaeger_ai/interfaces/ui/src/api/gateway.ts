@@ -1,3 +1,4 @@
+import type { AgentActions, Section } from "./agentActions";
 /* Typed port of jaeger_ai/interfaces/ide/gateway.js for the browser.
  * Same-origin only: the page is served by the Jaeger WebUI (or the Vite dev
  * proxy), which forwards /v1/* to the gateway and adds the caller token on the
@@ -83,6 +84,15 @@ export class GatewayClient implements JaegerSource {
   createAgent(body: { name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }) {
     return this.json<Agent>("/v1/agents", { kind: "jaeger_native", role: "specialist", ...body });
   }
+  readonly agentActions: AgentActions = {
+    markRead: async (id, messageId) => { await this.json(`/v1/agents/${encodeURIComponent(id)}/read`, { message_id: messageId }); },
+    patchAgent: async (id, body) => { await this.json(`/v1/agents/${encodeURIComponent(id)}`, body, "PATCH"); },
+    sections: async () => { const d = await this.json<{ sections?: Section[] } | Section[]>("/v1/sections"); return Array.isArray(d) ? d : d.sections ?? []; },
+    createSection: (name) => this.json<Section>("/v1/sections", { name }),
+    duplicate: (id, name) => this.json<Agent>(`/v1/agents/${encodeURIComponent(id)}/duplicate`, name ? { name } : {}),
+    remove: async (id) => { await this.json(`/v1/agents/${encodeURIComponent(id)}`, undefined, "DELETE"); },
+    template: (id) => this.json<unknown>(`/v1/agents/${encodeURIComponent(id)}/template`),
+  };
   handoffExchange(handoffId: string) {
     return this.json<HandoffExchange>(`/api/handoffs/${encodeURIComponent(handoffId)}/messages`);
   }

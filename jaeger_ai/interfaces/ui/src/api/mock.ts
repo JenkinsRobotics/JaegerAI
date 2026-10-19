@@ -1,3 +1,4 @@
+import type { AgentActions } from "./agentActions";
 /* Typed mock adapter. DEV ONLY: loaded through a dynamic import that
  * production builds drop (see api/index.ts). Sample roster, previews,
  * tasks, and transcripts with every ChatPart kind and each handoff marker
@@ -111,7 +112,30 @@ export class MockSource implements JaegerSource {
   private eventId = 1000;
   private timers: ReturnType<typeof setTimeout>[] = [];
 
-  async agents() { return MOCK_AGENTS; }
+  /** ?agentspec=1: the agents payload carries the proposed agent-menu fields, so the new items show (dev only). */
+  private spec = typeof location !== "undefined" && new URLSearchParams(location.search).has("agentspec");
+  private patches = new Map<string, Partial<Agent>>();
+  private deleted = new Set<string>();
+  readonly calls: Array<[string, ...unknown[]]> = [];
+  async agents(): Promise<Agent[]> {
+    const list = MOCK_AGENTS.filter((a) => !this.deleted.has(a.id));
+    if (!this.spec) return list;
+    return list.map((a, i) => ({ pinned: false, pin_order: null, hidden: false, section_id: null, unread_count: i % 2, last_read_message_id: null,
+      primary: a.role === "lead", last_message: null, ...a, ...this.patches.get(a.id) }) as Agent).filter((a) => !a.hidden);
+  }
+  readonly agentActions: AgentActions = {
+    markRead: async (id, m) => { this.calls.push(["read", id, m]); this.patches.set(id, { ...this.patches.get(id), unread_count: 0 }); },
+    patchAgent: async (id, body) => { this.calls.push(["patch", id, body]); this.patches.set(id, { ...this.patches.get(id), ...body }); },
+    sections: async () => [],
+    createSection: async (name) => { this.calls.push(["section", name]); return { id: `sec-${name}`, name }; },
+    duplicate: async (id, name) => { this.calls.push(["duplicate", id, name]); const a = MOCK_AGENTS.find((x) => x.id === id)!; return { ...a, id: `${id}-copy`, display_name: `${a.display_name} copy` }; },
+    remove: async (id) => {
+      this.calls.push(["delete", id]);
+      if (id === "native:jaeger" || MOCK_AGENTS.find((a) => a.id === id)?.role === "lead") throw Object.assign(new Error("protected_agent"), { status: 409 });
+      this.deleted.add(id);
+    },
+    template: async (id) => { this.calls.push(["template", id]); const a = MOCK_AGENTS.find((x) => x.id === id); return { name: a?.name, display_name: a?.display_name, skills: a?.skills ?? [] }; },
+  };
   async agentsSummary() { return MOCK_SUMMARY; }
   async sessions(query: { agent_id?: string } = {}): Promise<SessionRow[]> {
     return MOCK_SUMMARY.filter((s) => !query.agent_id || s.id === query.agent_id).map((s) => ({

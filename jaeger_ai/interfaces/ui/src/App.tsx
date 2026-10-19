@@ -21,6 +21,9 @@ import { ErrorState } from "./shell/ErrorState";
 import { TasksBoard } from "./tasks/TasksBoard";
 import { PhoneChat, PhoneList } from "./phone/PhoneShell";
 import { usePhone } from "./phone/usePhone";
+import { AgentContextMenu, AgentPrompt, type AgentMenuAction } from "./agents/AgentContextMenu";
+import { agentCaps } from "./api/agentActions";
+import type { Agent } from "./api/types";
 import "./phone/phone.css";
 
 const LEAD_ID = "native:jaeger";
@@ -46,6 +49,10 @@ export function App({ source }: { source: JaegerSource }) {
   const store = useAgentsStore(source);
   const phone = usePhone();
   const [phoneView, setPhoneView] = useState<"list" | "chat">("list");
+  const [agentMenu, setAgentMenu] = useState<{ agentId: string; x: number; y: number } | null>(null);
+  const [agentPrompt, setAgentPrompt] = useState<{ kind: "delete" | "section" | "duplicate"; agent: Agent } | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(null), 2600); return () => clearTimeout(t); }, [notice]);
   // Grok-style sessions: one home chat per agent, history read-only.
   const names = useRef<(id: string) => string>((id) => id);
   const home: HomeSessions = useMemo(() => {
@@ -127,6 +134,46 @@ export function App({ source }: { source: JaegerSource }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [newChat, selectedAgentId]);
 
+  const actions = source.agentActions;
+  const caps = agentCaps(store.agents, actions);
+  const copy = (text: string, done: string) => navigator.clipboard?.writeText(text).then(() => setNotice(done), () => setNotice("Couldn't copy"));
+  const fail = (what: string) => (error: unknown) => setNotice((error as { status?: number })?.status === 409 ? "This agent is protected and can't be deleted" : `Couldn't ${what}: ${message(error)}`);
+  const onAgentAction = (action: AgentMenuAction, agent: Agent) => {
+    switch (action) {
+      case "read":
+        store.seeAgent(agent.id);
+        if (caps.read && actions) void actions.markRead(agent.id, agent.last_message?.id ?? null).then(() => store.refresh(), fail("mark it read"));
+        return;
+      case "pin": case "unpin": {
+        const on = action === "pin";
+        updatePins((cur) => (on ? pin(cur, agent.id) : unpin(cur, agent.id)));
+        if (caps.pin && actions) void actions.patchAgent(agent.id, { pinned: on }).then(() => store.refresh(), fail(on ? "pin it" : "unpin it"));
+        return;
+      }
+      case "hide": if (actions) void actions.patchAgent(agent.id, { hidden: true }).then(() => { setNotice(`${label(agent)} hidden`); return store.refresh(); }, fail("hide it")); return;
+      case "template": if (actions) void actions.template(agent.id).then((t) => copy(JSON.stringify(t, null, 2), "Template copied"), fail("get the template")); return;
+      case "copy-id": void copy(agent.id, "ID copied"); return;
+      case "section": case "duplicate": case "delete": setAgentPrompt({ kind: action, agent }); return;
+    }
+  };
+  const onPromptDone = (ok: boolean, value?: string) => {
+    const p = agentPrompt; setAgentPrompt(null);
+    if (!ok || !p || !actions) return;
+    if (p.kind === "delete") {
+      void actions.remove(p.agent.id).then(async () => {
+        setNotice(`${label(p.agent)} deleted`);
+        if (selectedAgentId === p.agent.id) { setSelection({ type: "agent", agentId: LEAD_ID }); setPhoneView("list"); }
+        await store.refresh();
+      }, fail("delete it"));
+    } else if (p.kind === "section") {
+      void actions.createSection(value!).then((sec) => actions.patchAgent(p.agent.id, { section_id: sec.id })).then(() => store.refresh(), fail("create the section"));
+    } else {
+      void actions.duplicate(p.agent.id, value || undefined).then(async (a) => { await store.refresh(); setNotice(`${label(a)} created`); }, fail("duplicate it"));
+    }
+  };
+  const menuAgent = agentMenu ? store.agents.find((a) => a.id === agentMenu.agentId) : undefined;
+  const openAgentMenu = (agentId: string, x: number, y: number) => setAgentMenu({ agentId, x, y });
+
   const slots = agentsSidebarSlots({
     state: store,
     selection: selection.type === "agent" ? { ...selection, sessionId } : selection,
@@ -146,6 +193,7 @@ export function App({ source }: { source: JaegerSource }) {
     onInfo: (agentId) => { setSelection({ type: "agent", agentId }); host.openDetails?.(agentId); },
     onHistory: (agentId) => host.openHistory?.(agentId),
     onMarkRead: (agentId) => store.seeAgent(agentId),
+    onAgentMenu: openAgentMenu,
     status: source.kind === "mock"
       ? { kind: "warn", label: "Mock data (dev)" }
       : store.error ? { kind: "error", label: "Gateway unreachable" } : { kind: "ok", label: "Connected" },
@@ -162,7 +210,7 @@ export function App({ source }: { source: JaegerSource }) {
       ? <PhoneChat agentId={phoneAgent?.id ?? LEAD_ID} agentName={phoneAgent ? label(phoneAgent) : "Jaeger"} avatarUrl={phoneAgent?.avatar_url}
           onBack={() => { setPhoneView("list"); void store.refresh(); }} onInfo={() => host.openDetails?.(phoneAgent?.id ?? LEAD_ID)}>{chatBody}</PhoneChat>
       : <PhoneList state={store} userInitials="MJ" statusOk={!store.error} onOpen={(agentId) => { setSelection({ type: "agent", agentId }); setPhoneView("chat"); }}
-          onSearch={() => setJumpOpen(true)} onNew={setNewChatAnchor} onSettings={() => setSettingsOpen(true)} />)
+          onSearch={() => setJumpOpen(true)} onNew={setNewChatAnchor} onSettings={() => setSettingsOpen(true)} onAgentMenu={openAgentMenu} />)
     : null;
   return (
     <>
@@ -185,6 +233,18 @@ export function App({ source }: { source: JaegerSource }) {
             </div>
           )}
       </AppShell>}
+      {menuAgent && agentMenu && (
+        <AgentContextMenu agent={menuAgent} at={agentMenu} phone={phone} caps={caps} pinned={pins.includes(menuAgent.id)}
+          preview={menuAgent.last_message?.preview ?? store.summaries.find((x) => x.id === menuAgent.id)?.last_preview ?? ""}
+          onAction={onAgentAction} onClose={() => setAgentMenu(null)} />
+      )}
+      {agentPrompt?.kind === "delete" && <AgentPrompt title={`Delete ${label(agentPrompt.agent)}?`} danger confirm="Delete"
+        message="It leaves the sidebar. Its home chat and history are kept and can be restored." onDone={onPromptDone} />}
+      {agentPrompt?.kind === "section" && <AgentPrompt title="New Section" confirm="Create" input={{ placeholder: "Section name" }}
+        message={`${label(agentPrompt.agent)} moves into it.`} onDone={onPromptDone} />}
+      {agentPrompt?.kind === "duplicate" && <AgentPrompt title={`Duplicate ${label(agentPrompt.agent)}`} confirm="Duplicate"
+        input={{ placeholder: "Name", value: `${label(agentPrompt.agent)} copy` }} onDone={onPromptDone} />}
+      {notice && <div className="jg-toast" role="status">{notice}</div>}
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
         onNewChat={newChat} onCreateAgent={createAgent} />
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
