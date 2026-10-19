@@ -51,6 +51,7 @@ class Synthesizer(Protocol):
         voice: str | None = None,
         rate: float = 1.0,
         correlation_id: str | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> dict[str, Any]:
         """Synthesize + play ``text``; block until playback finishes.
         Returns a dict with at least ``spoken: bool``; may also carry
@@ -106,6 +107,7 @@ class TTSNode(Node):
         # A SpeechStop carrying a different id is stale and must not cut a
         # newer utterance that happened to start after the operator's stop.
         self._active_correlation_id: str | None = None
+        self._active_cancel: threading.Event | None = None
         self._requests = 0
         self._completed = 0
         self._failed = 0
@@ -140,6 +142,7 @@ class TTSNode(Node):
                 return
             msg = self._pending.get_nowait()
             self._active_correlation_id = msg.correlation_id
+            self._active_cancel = threading.Event()
         self._handle(msg)
 
     def teardown(self) -> None:
@@ -300,6 +303,10 @@ class TTSNode(Node):
                 return
             if self._active_correlation_id is None:
                 return
+            # This request owns its token before engine entry. Engine startup
+            # must adopt it instead of resetting an earlier Stop.
+            if self._active_cancel is not None:
+                self._active_cancel.set()
             stop = getattr(self.synthesizer, "stop", None)
             if not callable(stop):
                 self._log("speech_stop received but synthesizer has no stop(); ignoring")
@@ -314,10 +321,14 @@ class TTSNode(Node):
         with self._speech_lock:
             if msg.correlation_id and msg.correlation_id in self._cancelled_correlations:
                 self._active_correlation_id = None
+                self._active_cancel = None
                 self._publish_ack(msg, ok=False, duration_s=0.0,
                                   reason="interrupted before playback by speech_stop")
                 return
+            if self._active_correlation_id != msg.correlation_id or self._active_cancel is None:
+                self._active_cancel = threading.Event()
             self._active_correlation_id = msg.correlation_id
+            cancel_event = self._active_cancel
         # Publish measured speech amplitude while playback runs.
         amp_stop = threading.Event()
         cid_for_chunks = msg.correlation_id or ""
@@ -341,7 +352,7 @@ class TTSNode(Node):
                 cancelled = bool(msg.correlation_id and
                                  msg.correlation_id in self._cancelled_correlations)
             result = ({"spoken": False, "reason": "interrupted before playback by speech_stop"}
-                      if cancelled else self._speak(msg))
+                      if cancelled else self._speak(msg, cancel_event=cancel_event))
         except Exception as exc:  # noqa: BLE001
             self._log(f"speak() raised: {type(exc).__name__}: {exc}")
             self._publish_ack(
@@ -357,6 +368,7 @@ class TTSNode(Node):
             amp_thread.join(timeout=0.5)
             with self._speech_lock:
                 self._active_correlation_id = None
+                self._active_cancel = None
             # Always close the mouth, including inference exceptions and
             # cancellation paths.
             try:
@@ -378,11 +390,15 @@ class TTSNode(Node):
         reason = result.get("reason") if not ok else None
         self._publish_ack(msg, ok=ok, duration_s=duration_s, reason=reason)
 
-    def _speak(self, msg: topics.SpeechCommand) -> dict[str, Any]:
+    def _speak(
+        self, msg: topics.SpeechCommand, *, cancel_event: threading.Event
+    ) -> dict[str, Any]:
         """Call the standard synthesizer API while tolerating old adapters.
 
         ``Synthesizer`` now supports request-local voice, speed, and
-        correlation. Signature inspection keeps simple third-party engines
+        correlation and a request-owned cancellation token. Engines lacking
+        the token retain best-effort stop only. Signature inspection keeps
+        simple third-party engines
         that still implement only ``speak(text)`` usable without catching a
         real ``TypeError`` raised from inside their inference code.
         """
@@ -396,6 +412,7 @@ class TTSNode(Node):
             "voice": msg.voice or None,
             "rate": float(msg.rate),
             "correlation_id": msg.correlation_id,
+            "cancel_event": cancel_event,
         }
         kwargs = {
             key: value for key, value in values.items()
