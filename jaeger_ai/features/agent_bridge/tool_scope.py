@@ -18,6 +18,7 @@ PATH_ARGUMENTS = {
     "copy_file": ("src", "dst"),
     "move_file": ("src", "dst"),
 }
+TEAM_TOOLS = {"call_agent", "run_team", "get_agent_result"}
 _scope = ContextVar("agent_bridge_goal_scope", default=None)
 
 
@@ -29,31 +30,32 @@ def supported_tools():
     return sorted(
         tool.name
         for tool in get_tools()
-        if tool.name in PATH_ARGUMENTS
-        and tool.fn.__module__ == "jaeger_agent.tools.files"
+        if (
+            tool.name in PATH_ARGUMENTS
+            and tool.fn.__module__ == "jaeger_agent.tools.files"
+        )
+        or (
+            tool.name in TEAM_TOOLS
+            and tool.fn.__module__ == "jaeger_agent.tools.call_agent"
+        )
     )
 
 
 @contextmanager
 def goal_scope(gateway, session_id, request_id, execution):
     """Bind only a durable bridge admission matching the actual caller/session."""
-    with gateway.store._get_conn() as conn:
-        row = conn.execute(
-            "SELECT caller FROM agent_goals WHERE session=? AND request_id=?",
-            (session_id, request_id),
-        ).fetchone()
-    if row is None:
+    from .delegation import checked_execution, origin
+
+    binding = origin(gateway, session_id, request_id)
+    if binding is None:
         yield
         return
-    from jaeger_ai.core.gateway.caller_auth import CALLERS
-
-    from .routes import workspace
-
-    caller = CALLERS[row["caller"]]
-    if caller.actor != (execution or {}).get("caller"):
-        raise PermissionError("Bridge goal caller mismatch")
-    root = workspace(caller.name, (execution or {}).get("workspace"))
-    token = _scope.set((caller.actor, root))
+    actor, root = checked_execution(gateway, binding)
+    if actor != (execution or {}).get("caller") or root != (execution or {}).get(
+        "workspace"
+    ):
+        raise PermissionError("Bridge goal caller/workspace mismatch")
+    token = _scope.set((actor, root, gateway, binding, session_id, request_id))
     from jaeger_agent.core.workspace import path_guard
 
     try:
@@ -73,7 +75,10 @@ def confined_path(raw):
     if scope is None:
         return raw
     enabled()
-    actor, folder = scope
+    actor, folder, gateway, binding, *_ = scope
+    from .delegation import checked_execution
+
+    checked_execution(gateway, binding)
     if actor != active_caller_identity():
         raise PermissionError("Bridge goal caller mismatch")
     root = Path(folder).resolve(strict=True)
@@ -97,6 +102,30 @@ def confined_arguments(tool, arguments):
     if tool.name not in supported_tools():
         raise PermissionError("Tool is outside the bridge goal grant")
     args = dict(arguments)
+    if tool.name in TEAM_TOOLS:
+        _actor, _, gateway, binding, _session_id, request_id = _scope.get()
+        from .delegation import checked_execution
+
+        checked_execution(gateway, binding)
+        if tool.name == "get_agent_result":
+            handoff = gateway.store.get_handoff(args.get("handoff_id")) or {}
+            if (handoff.get("metadata") or {}).get("bridge_origin") != binding:
+                raise PermissionError("Handoff belongs to another goal")
+        elif tool.name == "call_agent":
+            args.update(
+                parent_run_id=request_id,
+                from_agent_id="native:jaeger",
+                require_approval=True,
+            )
+            # task_scope supplies session_id; the REST handler independently
+            # checks it against the durable parent, workspace and actor.
+            if args.get("project_id"):
+                raise PermissionError(
+                    "Bridge handoff cannot select an unrelated project"
+                )
+        elif args.get("project_id"):
+            raise PermissionError("Bridge handoff cannot select an unrelated project")
+        return args
     for name in PATH_ARGUMENTS[tool.name]:
         args[name] = confined_path(args.get(name))
     return args

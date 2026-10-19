@@ -2,14 +2,14 @@
 
 Base: `1ab5e31221fdf93e0447f2e872d227be752ff0c3`. Phase 2 keeps the authenticated
 inbox and dedicated `ares`/`grokbot` callers, adds a durable webhook outbox, and
-enables a bounded native-file goal toolset through the ordinary Gateway owner,
+enables native-file goals and canonical Gateway team dispatch through its ordinary owner,
 PolicyKernel, executor and approval cards. It does not enable shared-target REA.
 
 | Scope | Implementation / acceptance |
 | --- | --- |
 | Authenticated local inbox and MCP/REST | Retained from Phase 1; caller/thread/goal isolation remains enforced. |
 | Webhook outbox | Implemented and tested with an isolated fake receiver. Real HTTPS endpoint/Grok acceptance is deferred. |
-| Tool-enabled goals | Seven existing native file tools, subject to workspace confinement and existing owner approvals. Full lead catalog and privileged exec are not exposed. |
+| Tool-enabled goals | Seven existing native file tools plus canonical call_agent/run_team/get_agent_result, subject to inherited workspace confinement and existing owner approvals. Full lead catalog and privileged exec remain incomplete. |
 | Direct REA | No tools supported. All 50 exact allowlisted names remain explicitly unavailable pending private provider/resource confinement. |
 
 ## Local interfaces and identity
@@ -110,6 +110,20 @@ durable goal admission, not a model flag. Paths are checked against that goal's
 workspace before policy, after hook/approval changes and in the native resolver
 at file access. Directory/special-file cases that cannot be bounded fail closed.
 This is not an OS sandbox against concurrent filesystem changes by the Mac owner.
+
+`call_agent`, `run_team` and `get_agent_result` use the existing Gateway handoff
+and NativeSpecialistRuntime path. No parallel team dispatcher is added. Each
+handoff records its authenticated actor and root bridge admission; canonical
+specialist sessions inherit that identity, workspace and tool ceiling even when
+an owner approval starts the child later. The specialist's standing catalog is
+intersected with that ceiling. An empty child grant cannot restore unrestricted
+tools. Handoff IDs/results cannot be reused across goals. Parent cancellation
+cancels matching pending/running handoffs and closes child approvals. Handoff
+approval never waives per-tool approvals. Only the owner can approve either.
+
+The seven-file grant is not claimed to be the lead's full normal catalog.
+[FOLLOWUP_INTEGRATION.md](FOLLOWUP_INTEGRATION.md) identifies the exact remaining
+catalog/policy contracts and concrete REA qualification result.
 
 The existing 27772caf write/exec card behavior is preserved. Writes can wait for
 an authenticated owner principal; ARES/GrokBot cannot resolve those cards. Denial

@@ -1,4 +1,4 @@
-# Isolated validation checkpoint
+# Phase 2 validation record
 
 Worktree: `agent-bridge-2`, branch `feat/agent-bridge-2`, base
 `1ab5e31221fdf93e0447f2e872d227be752ff0c3`.
@@ -37,3 +37,37 @@ No changes were deployed. The current Phase 2 authorization supersedes the old
 Phase 1 outbox exclusion. No credentials, launchd, network settings, live session
 data or MCP registration were changed. All Keychain calls in tests are mocked;
 the production credential adapter was not run against the live Keychain.
+
+
+## Canonical team follow-up
+
+The original `f66270c4` patch/manifest are preserved unchanged. The follow-up
+uses canonical call_agent/run_team, durable originating actor/root binding,
+standing specialist catalog intersection, per-tool owner approvals, bounded
+workspace/result access, cancellation, host-derived ancestry and frozen retry
+grants. [FOLLOWUP_INTEGRATION.md](FOLLOWUP_INTEGRATION.md) distinguishes this
+implemented path from the unfinished full normal catalog and direct REA.
+
+Validation (all isolated temporary state/fixture credentials):
+
+- Combined bridge, outbox, REA-denial, team, existing handoff, specialist and
+  project regressions: **147 passed**, 96 warnings, 12.78 seconds.
+- Final team/handoff regression after origin handling refinement: **19 passed**,
+  18 warnings, 3.71 seconds. Includes seven new team/retry tests.
+- Smoke: **170 passed**, 6477 deselected, 15.84 seconds.
+- Security tier: **188 passed**, 12 warnings, 10.47 seconds.
+- `./scripts/verify.sh`: **all passed**.
+- Ruff check and format: **six changed bridge/test modules passed**;
+  `git diff --check` passed.
+
+Logs: `/tmp/jaeger-agent-bridge-2-checks/followup-{focused,team-final,smoke,security,verify}.log`.
+The tests use actual local HTTP handoff/child admission, NativeSpecialistRuntime,
+a scripted-model JaegerAgent test harness, standing-tool intersection and native
+file tools. They prove real file effects after owner approvals, not paid provider
+or full production EntityRuntime/model acceptance.
+
+The separate private REA sandbox qualification **failed before MCP initialization**
+with subprocess return code -6/SIGABRT and empty stderr. A same-profile
+`/usr/bin/true` diagnostic failed identically. It did not establish private REA
+acceptance. No unconstrained provider was launched as a fallback. No live keys,
+registration/configuration, shared provider or network settings were used.

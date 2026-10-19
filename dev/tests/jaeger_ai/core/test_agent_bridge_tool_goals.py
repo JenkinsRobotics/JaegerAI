@@ -270,6 +270,9 @@ def test_model_fields_never_verify_and_exact_supported_catalog():
     )
     assert output["execution_verified"] is False
     assert set(supported_tools()) == {
+        "call_agent",
+        "run_team",
+        "get_agent_result",
         "read_file",
         "write_file",
         "append_file",
