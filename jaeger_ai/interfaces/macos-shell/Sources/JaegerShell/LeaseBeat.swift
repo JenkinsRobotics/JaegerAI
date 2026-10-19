@@ -16,8 +16,16 @@ final class LeaseBeat: @unchecked Sendable {
     private var activity: NSObjectProtocol?
     private var history: [Double] = []
     private var lastError: String?
+    private var foreground: ForegroundLease?
 
     init(path: String) { self.path = path }
+
+    func startForeground(stopPath: String) throws {
+        let owner = ForegroundLease(path: path, stopPath: stopPath)
+        try owner.acquire()
+        foreground = owner
+        start()
+    }
 
     var isRunning: Bool { queue.sync { timer != nil } }
     var beats: [Double] { queue.sync { history } }
@@ -46,6 +54,12 @@ final class LeaseBeat: @unchecked Sendable {
             if let activity { ProcessInfo.processInfo.endActivity(activity) }
             activity = nil
             var result: [String: Any] = ["mode": mode.rawValue, "beats": history.count]
+            if let foreground {
+                foreground.relinquish()
+                self.foreground = nil
+                result["preserved_last_heartbeat"] = true
+                return result
+            }
             switch mode {
             case .remove:
                 do {
@@ -70,6 +84,16 @@ final class LeaseBeat: @unchecked Sendable {
 
     /// On `queue` only.
     private func write(beatAt: TimeInterval?) {
+        if let foreground {
+            do {
+                try foreground.heartbeat()
+                history.append(Date().timeIntervalSince1970)
+            } catch {
+                lastError = String(describing: error)
+                shellLog("[shell][lease] foreground heartbeat refused: \(error)")
+            }
+            return
+        }
         let url = URL(fileURLWithPath: path)
         let temporary = path + ".shell.tmp"
         let stamp = beatAt ?? Date().timeIntervalSince1970
