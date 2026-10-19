@@ -118,7 +118,8 @@ def test_ci_and_local_share_the_isolated_runner():
     assert "python -m pytest" not in ci, "CI must call dev/scripts/run_tests.sh, not raw pytest"
     assert "dev/scripts/run_tests.sh --unit" in ci
     assert "dev/scripts/run_tests.sh --package" in ci
-    assert "--scratch-path" in ci and "--skip DispatcherLiveTests" in ci
+    assert "--scratch-path" in ci and "--package-path jaeger_ai/interfaces/macos-shell" in ci
+    assert "--package-path jaeger_ai/interfaces/swift " not in ci
     assert "dist/all" not in ci, "build output belongs outside the checkout"
 
 

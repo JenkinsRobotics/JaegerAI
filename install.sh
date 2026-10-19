@@ -169,10 +169,10 @@ if [[ "$PRODUCT_MODE" -eq 0 ]]; then
   # (git clone + ./install.sh, or a repeat run inside one). Build the
   # dev shell so the first thing a developer sees works.
   if command -v swift >/dev/null 2>&1; then
-    echo; echo "building JaegerAI.app (debug)…"
-    "$REPO_ROOT/jaeger_ai/interfaces/swift/Scripts/build-app.sh" --dev >/dev/null \
-      && echo "✓ JaegerAI.app ready (symlinked at repo root)" \
-      || echo "⚠ Swift app build failed — run Scripts/build-app.sh --dev later"
+    echo; echo "building canonical JaegerShell.app (debug)…"
+    bash "$REPO_ROOT/jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh" >/dev/null \
+      && echo "✓ Canonical JaegerShell.app ready in the external Mac build directory" \
+      || echo "⚠ Mac shell build failed — inspect interfaces/macos-shell/Scripts/build-shell.sh"
   fi
   echo
   echo "Next steps:"
@@ -185,15 +185,13 @@ else
   # PRODUCT app; it's what `./jaeger` launches. No Swift toolchain
   # (Linux/headless) → terminal remains the surface, quietly.
   if command -v swift >/dev/null 2>&1; then
-    echo; echo "building JaegerAI.app (first build takes a minute)…"
-    "$REPO_ROOT/jaeger_ai/interfaces/swift/Scripts/build-app.sh" --release >/dev/null \
-      && echo "✓ JaegerAI.app ready" \
+    echo; echo "building canonical JaegerShell.app (development target)…"
+    bash "$REPO_ROOT/jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh" >/dev/null \
+      && echo "✓ Canonical development Mac shell ready; production installation remains deferred" \
       || echo "⚠ Swift app build failed — ./jaeger falls back to the terminal"
   fi
   if [[ "$(uname -s)" == "Darwin" ]]; then
-    echo; echo "installing Jaeger AI in Applications/Launchpad…"
-    "$REPO_ROOT/jaeger" launcher install \
-      || echo "⚠ App launcher install failed — retry with: ./jaeger launcher install"
+    echo "Mac production installation is deferred; no old SwiftUI app is installed automatically."
   fi
   echo
   echo "Next steps:"

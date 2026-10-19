@@ -149,12 +149,14 @@ under `~/.jaeger`, or the configured state directory.
 For the one-line installer, `JAEGER_INSTALL_ROOT` selects the source checkout;
 `JAEGER_STATE_DIR` (then `JAEGER_HOME`) selects operator state.
 
-Native builds use `~/.cache/jaeger/swift/<checkout-id>/`;
-`JAEGER_SWIFT_BUILD_DIR` overrides that location. The builder creates a
-`JaegerAI.app` shortcut at the checkout root and uses the same `JAEGER_VENV`
-as the installer. A release build requires the OS utility model and Kokoro
-assets in their configured caches. The locally built app depends on that
-Python installation; copying the app alone to another Mac is unsupported.
+The current native host is `jaeger_ai/interfaces/macos-shell`, loading the shared
+`jaeger_ai/interfaces/ui` frontend. Build with `bash
+jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh`; output is
+`~/.cache/jaeger/macos-shell/JaegerShell.app` (`JAEGER_MAC_BUILD` overrides it).
+This is currently a development bundle; production installation is deferred.
+No old SwiftUI app is selected as a fallback. Retained legacy dependencies and
+the recoverable Desktop archive are documented in
+[scoped cleanup](docs/integration/SCOPED_CLEANUP.md).
 
 The supported install is the repository installer above (or the one-line
 installer in [`scripts/install.sh`](scripts/install.sh)). It creates an

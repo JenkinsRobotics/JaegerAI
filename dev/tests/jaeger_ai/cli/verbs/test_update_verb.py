@@ -435,11 +435,11 @@ def test_update_download_force_reinstalls_even_if_deps_unchanged(tmp_path, monke
 # ── Swift app rebuild after product swap (0.7.3) ───────────────────
 
 
-def _swift_layout(home: Path) -> Path:
+def _shell_layout(home: Path) -> Path:
     """A fake built app + build script under HOME; returns the script."""
-    swift = home / "jaeger_ai" / "interfaces" / "swift"
+    swift = home / "jaeger_ai" / "interfaces" / "macos-shell"
     (swift / ".build" / "JaegerAI.app").mkdir(parents=True)
-    script = swift / "Scripts" / "build-app.sh"
+    script = swift / "Scripts" / "build-shell.sh"
     script.parent.mkdir(parents=True)
     script.write_text("#!/bin/bash\nexit 0\n")
     return script
@@ -449,7 +449,7 @@ def test_update_download_rebuilds_swift_app(tmp_path, monkeypatch):
     home = tmp_path
     (home / "jaeger_ai").mkdir()
     (home / "requirements.txt").write_text("same")
-    _swift_layout(home)
+    _shell_layout(home)
 
     def fake_extract(tarball, staging):
         (staging / "jaeger_ai").mkdir(parents=True)
@@ -460,22 +460,22 @@ def test_update_download_rebuilds_swift_app(tmp_path, monkeypatch):
                         lambda repo, ref, dest: dest.write_bytes(b""))
     monkeypatch.setattr(U, "_extract_product", fake_extract)
     rebuilds: list = []
-    monkeypatch.setattr(U, "_rebuild_swift_app", lambda h: rebuilds.append(h))
+    monkeypatch.setattr(U, "_rebuild_mac_shell", lambda h: rebuilds.append(h))
     assert U._update_download(home, ref="9.9.9") == 0
     assert rebuilds == [home]   # rebuild runs on the swapped-in install
 
 
-def test_rebuild_swift_app_skips_when_never_built(tmp_path, monkeypatch, capsys):
+def test_rebuild_mac_shell_skips_when_never_built(tmp_path, monkeypatch, capsys):
     calls: list = []
     monkeypatch.setattr(U.subprocess, "run",
                         lambda *a, **k: calls.append(a))
-    U._rebuild_swift_app(tmp_path)      # no .build/JaegerAI.app → no-op
+    U._rebuild_mac_shell(tmp_path)      # no .build/JaegerAI.app → no-op
     assert calls == []
     assert capsys.readouterr().err == ""
 
 
-def test_rebuild_swift_app_runs_build_script(tmp_path, monkeypatch, capsys):
-    script = _swift_layout(tmp_path)
+def test_rebuild_mac_shell_runs_build_script(tmp_path, monkeypatch, capsys):
+    script = _shell_layout(tmp_path)
     ran: list = []
 
     class _R:
@@ -483,18 +483,18 @@ def test_rebuild_swift_app_runs_build_script(tmp_path, monkeypatch, capsys):
 
     monkeypatch.setattr(U.shutil, "which", lambda name: "/usr/bin/swift")
     monkeypatch.setattr(U.subprocess, "run", lambda argv, **k: ran.append(argv) or _R())
-    U._rebuild_swift_app(tmp_path)
-    assert ran == [["bash", str(script), "--release"]]
-    assert "ready" in capsys.readouterr().out
+    U._rebuild_mac_shell(tmp_path)
+    assert ran == [["bash", str(script)]]
+    assert "exited 0" in capsys.readouterr().out
 
 
-def test_rebuild_swift_app_builds_when_app_missing(tmp_path, monkeypatch, capsys):
+def test_rebuild_mac_shell_builds_when_app_missing(tmp_path, monkeypatch, capsys):
     """A failed install-time build must not exempt a station forever:
     script present + app absent -> BUILD (this was the 'never even
     installed' half of the deployed-station bug)."""
     import shutil as _sh
-    script = _swift_layout(tmp_path)
-    _sh.rmtree(tmp_path / "jaeger_ai" / "interfaces" / "swift" / ".build")
+    script = _shell_layout(tmp_path)
+    _sh.rmtree(tmp_path / "jaeger_ai" / "interfaces" / "macos-shell" / ".build")
     ran: list = []
 
     class _R:
@@ -502,15 +502,15 @@ def test_rebuild_swift_app_builds_when_app_missing(tmp_path, monkeypatch, capsys
 
     monkeypatch.setattr(U.shutil, "which", lambda name: "/usr/bin/swift")
     monkeypatch.setattr(U.subprocess, "run", lambda argv, **k: ran.append(argv) or _R())
-    U._rebuild_swift_app(tmp_path)
-    assert ran == [["bash", str(script), "--release"]]
-    assert "building" in capsys.readouterr().out
+    U._rebuild_mac_shell(tmp_path)
+    assert ran == [["bash", str(script)]]
+    assert "build exited 0" in capsys.readouterr().out
 
 
-def test_rebuild_swift_app_dev_checkout_builds_dev_flavor(tmp_path, monkeypatch):
+def test_rebuild_mac_shell_dev_checkout_builds_dev_flavor(tmp_path, monkeypatch):
     """Flavor follows the install: dev/ present -> debug build via --dev
     (mirrors install.sh); same JaegerAI.app bundle either way."""
-    script = _swift_layout(tmp_path)
+    script = _shell_layout(tmp_path)
     (tmp_path / "dev").mkdir()
     ran: list = []
 
@@ -519,25 +519,25 @@ def test_rebuild_swift_app_dev_checkout_builds_dev_flavor(tmp_path, monkeypatch)
 
     monkeypatch.setattr(U.shutil, "which", lambda name: "/usr/bin/swift")
     monkeypatch.setattr(U.subprocess, "run", lambda argv, **k: ran.append(argv) or _R())
-    U._rebuild_swift_app(tmp_path)
-    assert ran == [["bash", str(script), "--dev"]]
+    U._rebuild_mac_shell(tmp_path)
+    assert ran == [["bash", str(script)]]
 
 
-def test_rebuild_swift_app_only_if_stale_skips_fresh(tmp_path, monkeypatch):
-    _swift_layout(tmp_path)
+def test_rebuild_mac_shell_only_if_stale_skips_fresh(tmp_path, monkeypatch):
+    _shell_layout(tmp_path)
     from jaeger_ai.cli import _common
-    monkeypatch.setattr(_common, "swift_app_is_stale", lambda repo, bundle: False)
+    monkeypatch.setattr(_common, "mac_app_is_stale", lambda repo, bundle: False)
     ran: list = []
     monkeypatch.setattr(U.subprocess, "run", lambda *a, **k: ran.append(a))
-    U._rebuild_swift_app(tmp_path, only_if_stale=True)
+    U._rebuild_mac_shell(tmp_path, only_if_stale=True)
     assert ran == []
 
 
-def test_rebuild_swift_app_warns_without_toolchain(tmp_path, monkeypatch, capsys):
-    _swift_layout(tmp_path)
+def test_rebuild_mac_shell_warns_without_toolchain(tmp_path, monkeypatch, capsys):
+    _shell_layout(tmp_path)
     monkeypatch.setattr(U.shutil, "which", lambda name: None)
-    U._rebuild_swift_app(tmp_path)
-    assert "NOT (re)built" in capsys.readouterr().err
+    U._rebuild_mac_shell(tmp_path)
+    assert "was not built" in capsys.readouterr().err
 
 
 def test_swift_app_is_stale_basics(tmp_path):

@@ -1,5 +1,9 @@
 # Mac app integration and completion
 
+**Historical checkpoint, superseded by scoped cleanup.** Current native source is
+`interfaces/macos-shell` plus `interfaces/ui`. Do not resume this feature work or
+select the older SwiftUI client from this document. See [current cleanup](SCOPED_CLEANUP.md).
+
 Owner: one implementation owner in the canonical `~/GitHub/JaegerAI` checkout.
 Updated: 2026-10-19. IDE is held unchanged for this work.
 

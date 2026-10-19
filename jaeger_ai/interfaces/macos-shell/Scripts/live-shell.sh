@@ -8,7 +8,7 @@
 set -u
 HERE="$(cd "$(dirname "$0")/.." && pwd)"; cd "$HERE"
 REPO="$(git rev-parse --show-toplevel)"
-APP=.build/ui-rebuild/JaegerShell.app/Contents/MacOS/JaegerShell
+APP="$(bash "$(dirname "$0")/build-root.sh")/JaegerShell.app/Contents/MacOS/JaegerShell"
 PIDF=/tmp/jaeger-live-shell.pid
 case "${1:-}" in
 start)

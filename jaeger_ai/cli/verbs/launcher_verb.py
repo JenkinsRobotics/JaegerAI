@@ -19,7 +19,6 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from jaeger_ai.cli._common import swift_app_bundle
 
 _APP_NAME = "Jaeger AI.app"
 _LEGACY_APP_NAMES = ("Jaeger.app",)
@@ -143,28 +142,12 @@ def _install_native_bundle(source: Path, app: Path, backup_root: Path) -> Path |
 
 
 def _macos_install() -> int:
-    home = _install_root()
-    app = _app_dir()
-    swift = home / "jaeger_ai/interfaces/swift"
-    try:
-        subprocess.run(["bash", str(swift / "Scripts/build-app.sh"), "--dev"], check=True)
-        source = swift_app_bundle(home)
-        subprocess.run([str(source / "Contents/MacOS/JaegerAI"), "--verify-launch"], check=True)
-        from jaeger_ai.core.instance.instance import operator_state_root
-        backup = _install_native_bundle(source, app, operator_state_root() / "launcher-backups")
-    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-        print(f"[launcher] install failed: {exc}", file=sys.stderr)
-        return 1
-    # Best-effort: register with LaunchServices so it shows immediately in
-    # Spotlight / Launchpad without a re-login.
-    subprocess.run([_LSREGISTER, "-f", str(app)], capture_output=True, check=False)
-    print(f"[launcher] installed {app}")
-    print(f"[launcher] agent launcher: {home / 'jaeger'}")
-    if backup is not None:
-        print(f"[launcher] previous launcher saved: {backup}")
-    print("[launcher] open it from Launchpad / Applications, or `jaeger "
-          "launcher remove` to delete.")
-    return 0
+    # The canonical shell currently has a development bundle identity. Do not
+    # install an older SwiftUI target or silently change its security identity.
+    print("[launcher] Installation is deferred: macos-shell has a development bundle identity. "
+          "Build it with jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh. "
+          "Production signing/installation needs a separate reviewed step.", file=sys.stderr)
+    return 1
 
 
 def _macos_remove() -> int:

@@ -5772,31 +5772,15 @@ def run_daemon(*, instance_name: str | None = None,
     return gateway_main([])
 
 
-def _swift_app_binary() -> "Path | None":
-    """The built app's inner binary, or None. One bundle since
-    2026-07-14 — ``jaeger`` launches JaegerAI.app on the default
-    instance; ``jaeger dev`` (cli/devtools) launches the SAME bundle
-    pinned to jaeger-dev via its environment. Running the inner binary
-    (not ``open``) keeps stdout attached for terminal users."""
-    from pathlib import Path as _P
-    from jaeger_ai.cli._common import swift_app_bundle
+def _mac_app_binary() -> "Path | None":
+    """Select only the canonical macos-shell build; never an older installed app."""
+    from jaeger_ai.cli._common import mac_app_bundle
     from jaeger_ai.core.instance.instance import install_root
-    built = swift_app_bundle(install_root())
-    candidates = [
-        _P("/Applications/JaegerAI.app"),
-        _P("/Applications/Jaeger AI.app"),
-        _P.home() / "Applications/Jaeger AI.app",
-        _P.home() / "Applications/JaegerAI.app",
-        built,
-    ]
-    for app in candidates:
-        binary = app / "Contents" / "MacOS" / "JaegerAI"
-        if binary.exists():
-            return binary
-    return None
+    binary = mac_app_bundle(install_root()) / "Contents/MacOS/JaegerShell"
+    return binary if binary.is_file() else None
 
 
-def _launch_swift_app(binary: "Path", instance_name: str) -> int:
+def _launch_mac_app(binary: "Path", instance_name: str) -> int:
     """Launch the built JaegerAI.app DETACHED (0.7.2): the app gets its
     own session and a log file, ``./jaeger`` returns immediately, and
     the terminal window can be closed without killing the agent.
@@ -6063,10 +6047,10 @@ def _main_dispatch() -> int:
     # ``JAEGER_NO_GUI``, no built app, or a one-shot prompt.
     if not layout.exists():
         _bare = not " ".join(args.prompt).strip()
-        _app = (_swift_app_binary()
+        _app = (_mac_app_binary()
                 if _bare and not os.environ.get("JAEGER_NO_GUI") else None)
         if _app is not None:
-            return _launch_swift_app(_app, instance_name)
+            return _launch_mac_app(_app, instance_name)
         layout = run_wizard(force=False, instance_name=instance_name)
 
     # Manifest gate. On version mismatch try the migration runner; only
@@ -6150,9 +6134,9 @@ def _main_dispatch() -> int:
         # ``JAEGER_NO_GUI`` is the headless escape hatch (SSH boxes,
         # CI): never spawn a GUI app; fall through to the TUI below.
         swift_app = (None if os.environ.get("JAEGER_NO_GUI")
-                     else _swift_app_binary())
+                     else _mac_app_binary())
         if swift_app is not None:
-            return _launch_swift_app(swift_app, instance_name)
+            return _launch_mac_app(swift_app, instance_name)
         # PySide6 fallback (no built Swift app). It boots its own in-process brain, so
         # it is an isolated legacy path; otherwise bare ``jaeger`` falls through to the
         # TUI, which attaches to the Gateway. ``--tui`` (above) opts in explicitly.

@@ -1,3 +1,12 @@
+# Legacy SwiftUI source — retained blocker
+
+Current Mac work belongs to `jaeger_ai/interfaces/macos-shell` and
+`jaeger_ai/interfaces/ui`. This tree is not an automatic build/launch fallback.
+It remains only for the embedded multimodal host and deferred voice behavior;
+see `docs/integration/SCOPED_CLEANUP.md`. A full recovery copy is on Desktop.
+
+---
+
 > **Classification:** CURRENT REFERENCE.
 > **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../../../docs/CONTINUE_FROM_HERE.md)
 

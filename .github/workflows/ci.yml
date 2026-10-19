@@ -113,19 +113,16 @@ jobs:
           # llama_cpp.LlamaDiskCache; see SECURITY.md for the threat model.
           pip-audit --local --skip-editable --ignore-vuln PYSEC-2026-2447
   swift:
-    name: Native Swift
+    name: Canonical Mac shell
     runs-on: macos-15
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Build and test native app
-        # External scratch path (no in-tree .build); DispatcherLiveTests drive
-        # launchctl against operator services and stay unqualified until they
-        # are migrated to an owned fixture.
+        # Canonical shell only; external scratch, no app/service launch.
         run: |
-          swift test --package-path jaeger_ai/interfaces/swift \
-            --scratch-path "$RUNNER_TEMP/swift-build" \
-            --skip DispatcherLiveTests
+          swift test --package-path jaeger_ai/interfaces/macos-shell \
+            --scratch-path "$RUNNER_TEMP/macos-shell-build"
   release-artifacts:
     name: Build and inspect distributions
     runs-on: ubuntu-latest

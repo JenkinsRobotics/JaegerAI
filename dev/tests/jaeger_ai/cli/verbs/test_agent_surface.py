@@ -33,9 +33,9 @@ def test_agent_create_gui_first(monkeypatch, tmp_path):
     import jaeger_ai.main as M
 
     monkeypatch.delenv("JAEGER_NO_GUI", raising=False)
-    monkeypatch.setattr(M, "_swift_app_binary", lambda: Path("/fake/app"))
+    monkeypatch.setattr(M, "_mac_app_binary", lambda: Path("/fake/app"))
     seen: dict = {}
-    monkeypatch.setattr(M, "_launch_swift_app",
+    monkeypatch.setattr(M, "_launch_mac_app",
                         lambda app, name: seen.update(name=name) or 0)
     monkeypatch.setattr(inst, "resolve_instance_dir",
                         lambda name: tmp_path / name)   # never exists

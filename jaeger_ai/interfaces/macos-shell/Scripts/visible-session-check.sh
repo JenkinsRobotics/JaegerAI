@@ -8,7 +8,7 @@
 # Test servers: gateway 127.0.0.1:43428, main screen 127.0.0.1:18800 (Scripts/test-servers.sh; never 43418).
 set -u
 HERE=${0:A:h}
-APP=${0:A:h:h}/.build/ui-rebuild/JaegerShell.app
+APP="$(bash "${0:A:h}/build-root.sh")/JaegerShell.app"
 BIN=$APP/Contents/MacOS/JaegerShell
 BID=com.jenkinsrobotics.JaegerAI.uirebuild
 STATE=$HOME/.cache/jaeger/ui-rebuild-test-state

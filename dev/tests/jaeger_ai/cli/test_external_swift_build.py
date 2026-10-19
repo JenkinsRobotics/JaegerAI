@@ -166,9 +166,10 @@ def test_find_app_bundle_prefers_external_over_repo_build(tmp_path, monkeypatch)
     """_find_app_bundle must return the external bundle when present."""
     from jaeger_ai.cli.verbs import lifecycle_verbs as lv
 
-    external = tmp_path / "external" / "JaegerAI.app"
-    external.mkdir(parents=True)
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", str(tmp_path / "external"))
+    external = tmp_path / "external" / "JaegerShell.app"
+    (external / "Contents/MacOS").mkdir(parents=True)
+    (external / "Contents/MacOS/JaegerShell").write_text("shell")
+    monkeypatch.setenv("JAEGER_MAC_BUILD", str(tmp_path / "external"))
     monkeypatch.setattr(lv, "REPO_ROOT", tmp_path / "checkout")
 
     result = lv._find_app_bundle()
@@ -194,16 +195,16 @@ def test_find_app_bundle_returns_none_when_nothing_exists(tmp_path, monkeypatch)
 
 
 def test_update_verb_rebuild_uses_external_path(tmp_path, monkeypatch):
-    """_rebuild_swift_app calls build-app.sh; the bundle it checks for staleness
+    """_rebuild_mac_shell calls build-shell.sh; the bundle it checks for staleness
     must be the external path, not the in-repo .build."""
     from jaeger_ai.cli.verbs import update_verb as U
 
     external = tmp_path / "ext-build"
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", str(external))
+    monkeypatch.setenv("JAEGER_MAC_BUILD", str(external))
 
     home = tmp_path / "home"
-    (home / "jaeger_ai" / "interfaces" / "swift" / "Scripts").mkdir(parents=True)
-    (home / "jaeger_ai" / "interfaces" / "swift" / "Scripts" / "build-app.sh").write_text("#!/bin/bash\n")
+    (home / "jaeger_ai" / "interfaces" / "macos-shell" / "Scripts").mkdir(parents=True)
+    (home / "jaeger_ai" / "interfaces" / "macos-shell" / "Scripts" / "build-shell.sh").write_text("#!/bin/bash\n")
 
     calls = []
     monkeypatch.setattr(
@@ -212,24 +213,24 @@ def test_update_verb_rebuild_uses_external_path(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(U.shutil, "which", lambda name: "/usr/bin/swift" if name == "swift" else None)
 
-    U._rebuild_swift_app(home)
-    assert calls, "expected build-app.sh to be invoked"
-    assert all("build-app.sh" in str(c) for c in calls)
+    U._rebuild_mac_shell(home)
+    assert calls, "expected build-shell.sh to be invoked"
+    assert all("build-shell.sh" in str(c) for c in calls)
     for cmd in calls:
         assert ".build" not in " ".join(str(a) for a in cmd)
 
 
 def test_update_verb_rebuild_fails_on_bad_override(tmp_path, monkeypatch, capsys):
-    """_rebuild_swift_app must print an error and not call build-app.sh when
-    JAEGER_SWIFT_BUILD is a bad override (not silently fall back)."""
+    """_rebuild_mac_shell must print an error and not call build-shell.sh when
+    JAEGER_MAC_BUILD is a bad override (not silently fall back)."""
     from jaeger_ai.cli.verbs import update_verb as U
 
     home = tmp_path / "home"
-    (home / "jaeger_ai" / "interfaces" / "swift" / "Scripts").mkdir(parents=True)
-    script = home / "jaeger_ai" / "interfaces" / "swift" / "Scripts" / "build-app.sh"
+    (home / "jaeger_ai" / "interfaces" / "macos-shell" / "Scripts").mkdir(parents=True)
+    script = home / "jaeger_ai" / "interfaces" / "macos-shell" / "Scripts" / "build-shell.sh"
     script.write_text("#!/bin/bash\n")
-    # Point JAEGER_SWIFT_BUILD inside `home` (which IS the repo root argument).
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", str(home / "inside"))
+    # Point JAEGER_MAC_BUILD inside `home` (which IS the repo root argument).
+    monkeypatch.setenv("JAEGER_MAC_BUILD", str(home / "inside"))
 
     calls = []
     monkeypatch.setattr(
@@ -237,11 +238,11 @@ def test_update_verb_rebuild_fails_on_bad_override(tmp_path, monkeypatch, capsys
         lambda cmd, **kw: calls.append(cmd) or __import__("subprocess").CompletedProcess(cmd, 0),
     )
 
-    U._rebuild_swift_app(home)
-    # build-app.sh must NOT have been called.
-    assert not calls, f"build-app.sh must not be called on bad override; got {calls}"
+    U._rebuild_mac_shell(home)
+    # build-shell.sh must NOT have been called.
+    assert not calls, f"build-shell.sh must not be called on bad override; got {calls}"
     captured = capsys.readouterr()
-    assert "JAEGER_SWIFT_BUILD" in captured.err or "JAEGER_SWIFT_BUILD" in captured.out
+    assert "JAEGER_MAC_BUILD" in captured.err or "JAEGER_MAC_BUILD" in captured.out
 
 
 # ── shell-boundary tests (invoke the real build-app.sh via bash) ─────────────
@@ -371,10 +372,10 @@ def test_invalid_build_override_does_not_launch_another_installed_app(tmp_path, 
     from jaeger_ai.cli.verbs import lifecycle_verbs as lv
 
     monkeypatch.setattr(lv, "REPO_ROOT", tmp_path)
-    monkeypatch.setenv("JAEGER_SWIFT_BUILD", str(tmp_path / "inside"))
+    monkeypatch.setenv("JAEGER_MAC_BUILD", str(tmp_path / "inside"))
     monkeypatch.setattr(Path, "exists", lambda self: True)
     assert lv._find_app_bundle() is None
-    assert "Invalid Swift build configuration" in capsys.readouterr().err
+    assert "Invalid Mac build configuration" in capsys.readouterr().err
 
 
 # ── swift_app_is_stale freshness tests ──────────────────────────────────────

@@ -110,6 +110,44 @@ def kv(label: str, value: str, *, label_width: int = 20) -> str:
     return f"  {label.ljust(label_width)} {value}"
 
 
+def mac_shell_build_dir(repo: Path) -> Path:
+    """External build home for the canonical macos-shell target."""
+    raw = os.environ.get("JAEGER_MAC_BUILD", "").strip()
+    target = Path(raw).expanduser().resolve() if raw else (Path.home() / ".cache/jaeger/macos-shell").resolve()
+    source = Path(repo).resolve()
+    if target == source or source in target.parents:
+        raise ValueError("JAEGER_MAC_BUILD must be outside the repository")
+    if target in {Path('/'), Path('/Applications'), Path('/tmp'), Path.home().resolve()}:
+        raise ValueError("JAEGER_MAC_BUILD must be a dedicated build directory")
+    return target
+
+
+def mac_app_bundle(repo: Path) -> Path:
+    return mac_shell_build_dir(repo) / "JaegerShell.app"
+
+
+def mac_app_is_stale(repo: Path, bundle: Path) -> bool:
+    if not (bundle / "Contents/MacOS/JaegerShell").is_file():
+        return True
+    try:
+        return (bundle / "Contents/Resources/build-source-hash").read_text().strip() != mac_source_fingerprint(repo)
+    except OSError:
+        return True
+
+
+def mac_source_fingerprint(repo: Path) -> str:
+    import hashlib
+    digest = hashlib.sha256()
+    for relative in ("jaeger_ai/interfaces/macos-shell", "jaeger_ai/interfaces/ui"):
+        for root, directories, files in os.walk(Path(repo) / relative):
+            directories[:] = sorted(d for d in directories if d not in {".build", "node_modules", "dist", "Jaeger Dev.app"})
+            for name in sorted(files):
+                path = Path(root) / name
+                digest.update(str(path.relative_to(repo)).encode())
+                digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
 def swift_build_dir(repo: Path) -> Path:
     """Canonical external SwiftPM build root. All callers must use this.
 

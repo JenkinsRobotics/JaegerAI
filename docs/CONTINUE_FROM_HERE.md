@@ -2,10 +2,10 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `master` — operator-authorized canonical integration, 2026-10-19.
-**Current work:** [Mac app integration and completion](integration/MAC_APP_COMPLETION.md).
-**Branch rule:** continue the Mac app in the canonical checkout; preserve external
-worktrees and unfinished work. Leave the accepted IDE alone. Coordinate live
-Gateway/app interruptions. The release notes below retain their historical dates;
+**Current work:** [Scoped legacy cleanup](integration/SCOPED_CLEANUP.md).
+**Branch rule:** cleanup only. Canonical Mac: `interfaces/macos-shell`; shared UI:
+`interfaces/ui`. No feature implementation or overlapping coder. Preserve running
+apps/services, data and credentials. The release notes below retain historical dates;
 they are not current installation or live acceptance evidence.
 
 This is the single execution entry point for humans and coding agents. Re-read the current source before acting.
