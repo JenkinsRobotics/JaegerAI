@@ -20,7 +20,7 @@ public struct TasksView: View {
                 Button("New schedule") { editing = nil; name = ""; prompt = ""; schedule = "0 9 * * *"; showEditor = true }.disabled(busy)
                 Button("Refresh") { Task { await refresh() } }.disabled(busy)
             }
-            Text("Jaeger scheduler · Times use this Mac’s time zone").font(.caption).foregroundColor(.secondary)
+            Text("Jaeger scheduler · Cron times use the Gateway host’s time zone").font(.caption).foregroundColor(.secondary)
             if busy { ProgressView() }
             if let error { Text(error).foregroundColor(.orange).textSelection(.enabled) }
             if !busy && jobs.isEmpty && error == nil { Text("No scheduled jobs.") }
@@ -29,6 +29,8 @@ public struct TasksView: View {
                     Text(job.name ?? job.id).font(.headline)
                     Text(job.prompt ?? "").lineLimit(3)
                     Text("\(job.schedule_display ?? "") · \(job.state ?? "unknown")").font(.caption)
+                    if let next = job.next_run_at { Text("Next scheduled: " + next).font(.caption) }
+                    if let last = job.last_run_at { Text("Last fired: " + last + " · inspect History for outcome").font(.caption) }
                     HStack {
                         Button("Edit") { editing = job; name = job.id; prompt = job.prompt ?? ""; schedule = job.schedule_display ?? ""; showEditor = true }
                         Button(job.enabled == false ? "Resume schedule" : "Pause schedule") { Task { await act(job.enabled == false ? "resume" : "pause", ["job_id": job.id]) } }
@@ -49,7 +51,12 @@ public struct TasksView: View {
                 if history.tasks.isEmpty && history.requests.isEmpty { Text("No recorded executions.") }
             }
             Text("Run once submits work to Jaeger. Accepted or queued work is not a completed result; tool approvals still apply.").font(.caption).foregroundColor(.secondary)
-        }.padding(20).task { await refresh() }
+        }.padding(20).task {
+            while !Task.isCancelled {
+                await refresh(clearError: false)
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            }
+        }
         .confirmationDialog("Run this schedule once?", isPresented: Binding(get: { confirmation != nil }, set: { if !$0 { confirmation = nil } })) {
             if let job = confirmation { Button("Run once") { Task { await act("run", ["job_id": job.id]) } } }
         }

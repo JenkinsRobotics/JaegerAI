@@ -14,5 +14,9 @@ final class NativePanelTests: XCTestCase {
         XCTAssertFalse(task.editable)
         XCTAssertEqual(task.run_history.first?.status, "failed")
         XCTAssertEqual(task.error, "Tool failed")
+        XCTAssertTrue(task.hasKnownBoardState)
+        let unknown = try JSONDecoder().decode(NativeTask.self, from: Data(#"{"task_id":"u","goal":"Unknown work","state":"execution_unknown","agent_id":"worker","runner":"delegate:worker","updated_at":1,"run_history":[]}"#.utf8))
+        XCTAssertFalse(unknown.hasKnownBoardState)
+        XCTAssertFalse(unknown.editable)
     }
 }

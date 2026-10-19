@@ -60,6 +60,7 @@ extension GatewayClient {
         struct Activity: Decodable {
             let event: String; let tool: String?; let text: String?; let phase: String?
             let status: String?; let child_run_id: String?; let task_id: String?
+            let parent_run_id: String?; let from_agent_id: String?; let to_agent_id: String?
         }
         let profile: String?
         let activity_context: [Activity]?
@@ -87,6 +88,7 @@ extension GatewayClient {
         var finished_at: Double? = nil
         var cancel_requested: Bool? = nil
         var cancellation_confirmed: Bool? = nil
+        var error: String? = nil
 
         var isActive: Bool {
             ["admitted", "running", "awaiting_approval", "cancelling"].contains(status)
@@ -94,6 +96,7 @@ extension GatewayClient {
         var canCancel: Bool { isActive && status != "cancelling" }
         var stopLabel: String {
             switch status {
+            case "failed": return "Turn failed" + (error.map { ": " + $0 } ?? " — inspect activity for details")
             case "cancelling": return "Cancelling — waiting for backend confirmation"
             case "cancelled": return "Cancelled — backend turn settled"
             case "execution_unknown": return "Outcome unknown — work may still be running; reconcile before resending"

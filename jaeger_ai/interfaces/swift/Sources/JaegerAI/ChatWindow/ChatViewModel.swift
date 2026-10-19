@@ -219,7 +219,11 @@ final class ChatViewModel: ObservableObject {
             guard selected == sessionKey else { return false }
             controlReadAvailable = true
             controlledSessionStatus = session.status
-            controlledRequest = session.latest_request
+            var observed = session.latest_request
+            if observed?.request_id == controlledRequest?.request_id, observed?.error == nil {
+                observed?.error = controlledRequest?.error
+            }
+            controlledRequest = observed
             recoveredApprovalState.observeControl(session: selected, request: controlledRequest,
                 stopRequested: controlledRequest.map { stopRequestedIDs.contains($0.request_id) } ?? false)
             if let request = controlledRequest, request.status == "cancelling" ||
@@ -229,7 +233,7 @@ final class ChatViewModel: ObservableObject {
             } else if let request = controlledRequest, request.isActive, stopRequestedIDs.contains(request.request_id) {
                 stopNotice = "Stop unconfirmed — waiting for backend observation; cancellation will not be resent"
             } else if !isStopping {
-                stopNotice = nil
+                stopNotice = controlledRequest?.status == "failed" ? controlledRequest?.stopLabel : nil
             }
             if session.status == "running" && controlledRequest == nil {
                 stopNotice = "Current request identity unavailable — update Gateway before using scoped Stop"
@@ -239,9 +243,25 @@ final class ChatViewModel: ObservableObject {
         } catch {
             guard selected == sessionKey else { return false }
             controlReadAvailable = false
+            if let failure = error as? GatewayClient.Failure, failure.statusCode == 404,
+               !isSending, controlledRequest == nil, messages.isEmpty {
+                stopNotice = nil // A new unsent conversation has no request to stop.
+                return false
+            }
             stopNotice = "Stop status unavailable — work may still be running. " + error.localizedDescription
             return false
         }
+    }
+
+    /// The bridge owns local text streaming; read its Gateway activity without
+    /// replacing that transcript or extending the Stop preflight.
+    func refreshConversationActivity() async {
+        let selected = sessionKey, generation = selectionGeneration
+        guard localTurnSession == selected else { return }
+        guard let snapshot = try? await recoveryGateway.conversationSnapshot(id: selected),
+              selected == sessionKey, generation == selectionGeneration,
+              localTurnSession == selected, snapshot.session_id == selected else { return }
+        conversationActivity = snapshot.activity_context ?? []
     }
 
     /// Capture the displayed target synchronously in the button callback.
@@ -361,6 +381,7 @@ final class ChatViewModel: ObservableObject {
     private var recoveryTask: Task<Void, Never>?
     private let recoveryGateway: any ChatRecoveryClient
     @Published private(set) var recoveryNotice: String?
+    @Published private(set) var conversationActivity: [GatewayClient.ConversationSnapshot.Activity] = []
     @Published private(set) var conversationError: String?
 
     private var answerID: UUID?
@@ -952,6 +973,7 @@ final class ChatViewModel: ObservableObject {
             localTurnSession = selected
             isSending = true
             recoveryTask?.cancel()
+            conversationActivity = []
         }
         defer {
             if ownsNativeTurn {
@@ -1035,13 +1057,13 @@ final class ChatViewModel: ObservableObject {
             // TTSManager so the synthesizer doesn't read literal
             // asterisks.  Skipped for empty replies.
             NSLog("[ChatViewModel] reply received — autoSpeak=\(TTSManager.shared.autoSpeakEnabled) replyLen=\(replyText.count)")
-            if !queuePausedByStop, TTSManager.shared.autoSpeakEnabled, !replyText.isEmpty {
+            if !queuePausedByStop, reply.error == nil, TTSManager.shared.autoSpeakEnabled, !replyText.isEmpty {
                 NSLog("[ChatViewModel] dispatching to TTSManager.speak")
                 TTSManager.shared.speak(replyText)
             } else {
                 NSLog("[ChatViewModel] TTS skipped — autoSpeak=\(TTSManager.shared.autoSpeakEnabled) empty=\(replyText.isEmpty)")
             }
-            return true
+            return reply.error == nil
         } catch {
             guard selected == sessionKey, generation == selectionGeneration else { return false }
             if let i = messages.firstIndex(where: { $0.id == placeholder.id }) {
@@ -1063,6 +1085,7 @@ final class ChatViewModel: ObservableObject {
     /// Start a separate native chat without evicting the Dispatcher or any
     /// previously loaded conversation. History remains available for return.
     func newChat() async {
+        conversationActivity = []
         recoveredApprovalState.clear()
         conversationError = nil
         selectionGeneration = UUID()
@@ -1117,6 +1140,7 @@ final class ChatViewModel: ObservableObject {
         isSwitchingSession = true
         defer { if generation == selectionGeneration { isSwitchingSession = false } }
         if id == "dispatcher" {
+            conversationActivity = []
             sessionKey = id
             recoveredApprovalState.clear()
             isSending = false
@@ -1162,6 +1186,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func applyRecovery(_ snapshot: GatewayClient.ConversationSnapshot) {
+        conversationActivity = snapshot.activity_context ?? []
         if let request = snapshot.latest_request, stopRequestedIDs.contains(request.request_id) {
             recoveredApprovalState.clear()
         } else {
@@ -1188,7 +1213,7 @@ final class ChatViewModel: ObservableObject {
             stopNotice = request.stopLabel
         } else if let request = snapshot.latest_request, request.isActive, stopRequestedIDs.contains(request.request_id) {
             stopNotice = "Stop unconfirmed — waiting for backend observation; cancellation will not be resent"
-        } else { stopNotice = nil }
+        } else { stopNotice = snapshot.latest_request?.status == "failed" ? snapshot.latest_request?.stopLabel : nil }
         answerID = nil
         if !snapshot.partial_text.isEmpty || snapshot.latest_request?.isActive == true {
             let answer = ChatMessage(author: .assistant, timestamp: .now, text: snapshot.partial_text,
@@ -1224,6 +1249,17 @@ final class ChatViewModel: ObservableObject {
                             await self?.recoveredApprovalState.refresh()
                         }
                         guard event.sessionID == session else { continue }
+                        if event.event.hasPrefix("tool.") || event.event == "agent.handoff" || event.event.hasPrefix("agent.handoff.") {
+                            if let object = try? JSONSerialization.jsonObject(with: event.data) as? [String: Any],
+                               object["request_id"] as? String == self?.controlledRequest?.request_id,
+                               let data = try? JSONSerialization.data(withJSONObject: ((object["handoff"] as? [String: Any]) ?? object).merging(["event": event.event]) { _, new in new }),
+                               let activity = try? JSONDecoder().decode(GatewayClient.ConversationSnapshot.Activity.self, from: data) {
+                                self?.conversationActivity.append(activity)
+                                if let count = self?.conversationActivity.count, count > 50 {
+                                    self?.conversationActivity.removeFirst(count - 50)
+                                }
+                            }
+                        }
                         if event.event == "turn.start" || event.isTerminal {
                             if ["turn.cancelled", "turn.unknown"].contains(event.event) { self?.queuePausedByStop = true }
                             let refreshed = try await gateway.conversationSnapshot(id: session)

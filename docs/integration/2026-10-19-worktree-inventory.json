@@ -1,0 +1,187 @@
+{
+  "checkedAt": "2026-10-19T21:32:15.556040+00:00",
+  "canonicalHead": "5f7a0e6af5cfbb9a1357bd55f520393f6e491b3e",
+  "worktrees": [
+    {
+      "path": "/Users/matthewjenkins/GitHub/JaegerAI",
+      "head": "5f7a0e6af5cfbb9a1357bd55f520393f6e491b3e",
+      "cherryAgainstCanonical": [],
+      "unfinishedFiles": []
+    },
+    {
+      "path": "/private/tmp/mcpev-wt",
+      "head": "3153b72485bbca79545aa5eaa8265a507366286f",
+      "cherryAgainstCanonical": [
+        "+ abbcb3fe2dfea4fcc27e1e17f9df2a37e1cbf7cf",
+        "+ 8b4059adb9bc91d03fdad2ecb11b8bf16e2a8768",
+        "+ 3153b72485bbca79545aa5eaa8265a507366286f"
+      ],
+      "unfinishedFiles": [],
+      "preservedRef": "refs/heads/preserved/20261019/mcpev-wt",
+      "preservedCommit": "3153b72485bbca79545aa5eaa8265a507366286f"
+    },
+    {
+      "path": "/Users/matthewjenkins/Documents/Codex/2026-10-18/task-2/agent-bridge",
+      "head": "1ab5e31221fdf93e0447f2e872d227be752ff0c3",
+      "cherryAgainstCanonical": [],
+      "unfinishedFiles": [],
+      "preservedRef": "refs/heads/preserved/20261019/agent-bridge",
+      "preservedCommit": "1ab5e31221fdf93e0447f2e872d227be752ff0c3"
+    },
+    {
+      "path": "/Users/matthewjenkins/Documents/Codex/2026-10-18/task-2/agent-bridge-2",
+      "head": "5e25eed2d0ee2093c1cc67dc86904ef2e0c21b12",
+      "cherryAgainstCanonical": [],
+      "unfinishedFiles": [],
+      "preservedRef": "refs/heads/preserved/20261019/agent-bridge-2",
+      "preservedCommit": "5e25eed2d0ee2093c1cc67dc86904ef2e0c21b12"
+    },
+    {
+      "path": "/Users/matthewjenkins/Documents/Codex/2026-10-18/task-4/mcp-events",
+      "head": "3153b72485bbca79545aa5eaa8265a507366286f",
+      "cherryAgainstCanonical": [
+        "+ abbcb3fe2dfea4fcc27e1e17f9df2a37e1cbf7cf",
+        "+ 8b4059adb9bc91d03fdad2ecb11b8bf16e2a8768",
+        "+ 3153b72485bbca79545aa5eaa8265a507366286f"
+      ],
+      "unfinishedFiles": [],
+      "preservedRef": "refs/heads/preserved/20261019/mcp-events",
+      "preservedCommit": "3153b72485bbca79545aa5eaa8265a507366286f"
+    },
+    {
+      "path": "/Users/matthewjenkins/Documents/Codex/2026-10-19/task-2/jaeger-ide-fix",
+      "head": "f34449e556c2e5778c95be8724836b616a01ca9b",
+      "cherryAgainstCanonical": [],
+      "unfinishedFiles": [
+        {
+          "path": "jaeger_ai/interfaces/ide/README.md",
+          "status": " M",
+          "matchesCanonical": true,
+          "sha256": "3cb2c7d07663fa9c6434456c2e12859c2796cae6bc1f8ad34ada839935e9f01f"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/commands.js",
+          "status": " M",
+          "matchesCanonical": true,
+          "sha256": "649e0f676678a4df89129e8339065b160d7df5cda3c98308e24e65a6ca4d6bf3"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/conversation.js",
+          "status": " M",
+          "matchesCanonical": false,
+          "sha256": "32c670faaf3f43b7769efebd72c5b9358579a328456a734ea22df3f353484571"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/extension.js",
+          "status": " M",
+          "matchesCanonical": false,
+          "sha256": "799cd5944797afd83c42b7be9d989bcedecdeb5e555cd6d462e7417009588636"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/media/view.css",
+          "status": " M",
+          "matchesCanonical": false,
+          "sha256": "c2eaa7c75b822aefd47a1843ff2cef92e36275884a9cdfd877dc39fe36567f06"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/media/view.js",
+          "status": " M",
+          "matchesCanonical": false,
+          "sha256": "4552a47eaf5f2547906b015a8d58849d47dffe050b863b6173123276a0a4faff"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/package.json",
+          "status": " M",
+          "matchesCanonical": false,
+          "sha256": "d8c06b8f329b2a0c16b3ab4f0d32eef5115a98595cbf9051fb8d8dabdf6a99f6"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/package_extension.py",
+          "status": " M",
+          "matchesCanonical": true,
+          "sha256": "0ed717166e5bf5369be24fabd0a1cebec64e95e17075adee2b36d7c093b383a5"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/tests/browser-boot.test.js",
+          "status": " M",
+          "matchesCanonical": false,
+          "sha256": "93c168df4e2876fadd29eb011ee7656dfd5b2e05a4ba22837a81a1e4412d9130"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/tests/context.test.js",
+          "status": " M",
+          "matchesCanonical": false,
+          "sha256": "4b3ee881f6ccdc171ff50337d13c9ed681178be3275cb1e49040bf2e94243d2a"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/tests/extension.test.js",
+          "status": " M",
+          "matchesCanonical": false,
+          "sha256": "d990da9772b96c48e4db870767fc8e993681340cda625317a6fb1e711b055d9a"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/tests/packaging.test.js",
+          "status": " M",
+          "matchesCanonical": true,
+          "sha256": "6e018efada7251beedc1e9fb5e8a706e8a2e6ee75fcd37b486c200d988403863"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/native-turn.js",
+          "status": "??",
+          "matchesCanonical": true,
+          "sha256": "cd0417659a946817d23a1a1a42a587633922d68dd9241465bd4a785bd36219dc"
+        },
+        {
+          "path": "jaeger_ai/interfaces/ide/tests/native-turn.test.js",
+          "status": "??",
+          "matchesCanonical": true,
+          "sha256": "8e7e5c355cfaa110b99ee4c83871ee85b785f13985c28de414a112b3b525005c"
+        }
+      ],
+      "preservedRef": "refs/heads/preserved/20261019/jaeger-ide-fix",
+      "preservedCommit": "da172b0b73ef061470faa01ad7dec9ffaf8bfb38"
+    },
+    {
+      "path": "/Users/matthewjenkins/Documents/Codex/2026-10-19/task-3/mac-combined-candidate-source",
+      "head": "f829f73d5d52687a2631da38b10c6159a40378c0",
+      "cherryAgainstCanonical": [
+        "- 89114bef8ecab387baec575c8f87d19d2f39dedd",
+        "- a847274ce44a91f14c63fcc1c541592d9837dc27",
+        "- 6aa0ba9916ec245ab1c73f8641acfbec8be1e49c",
+        "- f829f73d5d52687a2631da38b10c6159a40378c0"
+      ],
+      "unfinishedFiles": [],
+      "preservedRef": "refs/heads/preserved/20261019/mac-combined-candidate-source",
+      "preservedCommit": "f829f73d5d52687a2631da38b10c6159a40378c0"
+    },
+    {
+      "path": "/Users/matthewjenkins/Documents/Codex/2026-10-19/task-3/native-panels",
+      "head": "d921b7792facfddb70fdea651d3cf705dcee288f",
+      "cherryAgainstCanonical": [],
+      "unfinishedFiles": [],
+      "preservedRef": "refs/heads/preserved/20261019/native-panels",
+      "preservedCommit": "d921b7792facfddb70fdea651d3cf705dcee288f"
+    },
+    {
+      "path": "/Users/matthewjenkins/Documents/Codex/2026-10-19/task-3/stop-only-candidate-source",
+      "head": "7422d70786cffa422c73ca4b830ab72947f15c27",
+      "cherryAgainstCanonical": [
+        "- 81f0286a96dc5571456d381d3d7a20cd942ffeb7",
+        "- 671891548568aa2292f29dc5ee7f4f94e11fcce7",
+        "- 791479cf3322e2e744d1d5b29fb8281d697c9c21",
+        "- 7422d70786cffa422c73ca4b830ab72947f15c27"
+      ],
+      "unfinishedFiles": [],
+      "preservedRef": "refs/heads/preserved/20261019/stop-only-candidate-source",
+      "preservedCommit": "7422d70786cffa422c73ca4b830ab72947f15c27"
+    },
+    {
+      "path": "/Users/matthewjenkins/Documents/Codex/2026-10-19/task/speech-ownership",
+      "head": "7dcbaf4afd168f57eb016db267cbdd1325d53443",
+      "cherryAgainstCanonical": [],
+      "unfinishedFiles": [],
+      "preservedRef": "refs/heads/preserved/20261019/speech-ownership",
+      "preservedCommit": "7dcbaf4afd168f57eb016db267cbdd1325d53443"
+    }
+  ]
+}

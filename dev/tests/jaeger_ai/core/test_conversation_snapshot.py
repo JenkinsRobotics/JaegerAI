@@ -27,6 +27,16 @@ def test_terminal_final_answer_does_not_duplicate_streamed_text(tmp_path):
     assert snapshot["latest_request"]["status"] == "completed"
 
 
+def test_failed_turn_retains_error_in_recovery_without_fabricating_an_answer(tmp_path):
+    store = GatewaySessionStore(tmp_path / "gateway.sqlite3")
+    store.admit_request("s", "question", request_id="r")
+    store.complete_request("r", status="failed", result={"error": "Provider unavailable"})
+    snapshot = store.get_session("s", conversation=True)
+    assert snapshot["latest_request"]["error"] == "Provider unavailable"
+    assert snapshot["latest_request"]["status"] == "failed"
+    assert not any(m["role"] == "assistant" for m in snapshot["messages"])
+
+
 def test_unknown_retains_partial_even_after_replay_retention(tmp_path):
     store = GatewaySessionStore(tmp_path / "gateway.sqlite3")
     store.admit_request("s", "question", request_id="r")
@@ -80,3 +90,15 @@ def test_recovery_context_is_request_scoped_and_excludes_tool_arguments(tmp_path
     context = store.get_session("s", conversation=True)["activity_context"]
     assert context == [{"event":"tool.started", "tool":"fixture", "text":"Started"},
                        {"event":"agent.handoff.finished", "child_run_id":"child", "status":"completed"}]
+
+
+def test_recovery_projects_real_nested_handoff_identity_without_private_payload(tmp_path):
+    store = GatewaySessionStore(tmp_path / "gateway.sqlite3")
+    store.admit_request("s", "question", request_id="r")
+    store.append_event("s", "agent.handoff", {"request_id": "wrong", "handoff": {"status": "WRONG"}})
+    store.append_event("s", "agent.handoff", {"request_id": "r", "handoff": {
+        "parent_run_id": "r", "from_agent_id": "native:jaeger", "to_agent_id": "worker",
+        "child_run_id": "child", "status": "execution_unknown", "task": "private prompt", "result": {"secret": "private"}}})
+    assert store.get_session("s", conversation=True)["activity_context"] == [{
+        "event": "agent.handoff", "parent_run_id": "r", "from_agent_id": "native:jaeger",
+        "to_agent_id": "worker", "child_run_id": "child", "status": "execution_unknown"}]

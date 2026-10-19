@@ -5,14 +5,23 @@ struct CronRow: Decodable, Identifiable {
     let id: String; let name: String?; let schedule_display: String?
     let enabled: Bool?; let state: String?; let last_status: String?
     let prompt: String?; let deliver: String?
+    let next_run_at: String?; let last_run_at: String?
 }
 struct NativeTask: Decodable, Identifiable {
+    struct Provenance: Decodable { let authorized: Bool? }
     struct Run: Decodable { let run_id: String; let status: String; let error: String? }
     let task_id: String; let goal: String; let state: String
     let agent_id: String; let runner: String; let eta: String?
     let error: String?; let run_history: [Run]; let updated_at: Double
+    let provenance: Provenance?
     var id: String { task_id }
-    var editable: Bool { state == "paused" && run_history.isEmpty }
+    var editable: Bool { state == "paused" && run_history.isEmpty && provenance?.authorized == false }
+    static let boardColumns: [(String, [String])] = [
+        ("Proposed / paused", ["paused"]), ("Queued", ["queued"]), ("Running", ["running"]),
+        ("Needs attention", ["needs_owner", "blocked", "failed"]),
+        ("Finished", ["completed", "completed_verified", "cancelled"])
+    ]
+    var hasKnownBoardState: Bool { Self.boardColumns.contains { $0.1.contains(state) } }
 }
 struct NativeTasks: Decodable { let tasks: [NativeTask] }
 struct CronHistory: Decodable {

@@ -36,6 +36,46 @@ private final class RecoveryFixture: ChatRecoveryClient {
 
 final class ChatRecoveryTests: XCTestCase {
     @MainActor
+    func testDelegationIsVisibleWithoutApprovalAndOldRequestIsIgnored() async throws {
+        let gateway = RecoveryFixture(); try gateway.snapshot("s")
+        let attached = expectation(description: "activity stream attached")
+        gateway.onStream = { attached.fulfill() }
+        let model = ChatViewModel(agent: AgentBridge(), startBackgroundObservers: false, recoveryGateway: gateway)
+        _ = await model.loadSession("s")
+        await fulfillment(of: [attached], timeout: 1)
+        for (cursor, request) in [(11, "wrong"), (12, "r")] {
+            let body: [String: Any] = ["request_id": request, "handoff": [
+                "from_agent_id": "native:jaeger", "to_agent_id": "worker", "parent_run_id": "r",
+                "child_run_id": "child", "status": "execution_unknown"]]
+            gateway.streams["s"]?.yield(.init(eventID: cursor, sessionID: "s", event: "agent.handoff.finished",
+                data: try JSONSerialization.data(withJSONObject: body), timestamp: nil))
+        }
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(model.conversationActivity.count, 1)
+        XCTAssertEqual(model.conversationActivity.first?.status, "execution_unknown")
+        XCTAssertEqual(model.conversationActivity.first?.to_agent_id, "worker")
+        XCTAssertEqual(model.conversationActivity.first?.child_run_id, "child")
+        gateway.onStream = nil
+        await model.newChat()
+        XCTAssertTrue(model.conversationActivity.isEmpty)
+    }
+
+    @MainActor
+    func testFailedRecoveryRemainsVisibleAfterTranscriptReplacement() async throws {
+        let gateway = RecoveryFixture(); try gateway.snapshot("failed", partial: "", status: "failed")
+        let attached = expectation(description: "failed recovery attached")
+        gateway.onStream = { attached.fulfill() }
+        let model = ChatViewModel(agent: AgentBridge(), startBackgroundObservers: false, recoveryGateway: gateway)
+        _ = await model.loadSession("failed")
+        await fulfillment(of: [attached], timeout: 1)
+        XCTAssertTrue(model.turnControlLabel.contains("failed"))
+        XCTAssertFalse(model.hasActiveTurn)
+        XCTAssertFalse(model.canStopTurn)
+        gateway.onStream = nil
+        await model.newChat()
+    }
+
+    @MainActor
     func testLatestConversationSelectionWinsDelayedHistoryRead() async throws {
         let gateway = RecoveryFixture()
         try gateway.snapshot("old"); try gateway.snapshot("new")

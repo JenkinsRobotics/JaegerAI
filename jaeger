@@ -42,6 +42,9 @@ fi
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPYCACHEPREFIX="${HOME}/.cache/jaeger/pycache"
 export JAEGER_INSTALL_ROOT="$REPO_ROOT"
+# A GUI child usually starts outside the checkout. Bind this source launcher
+# to its own package instead of silently importing an older installed wheel.
+export PYTHONPATH="$REPO_ROOT${PYTHONPATH:+:$PYTHONPATH}"
 
 # Accessory/menu-bar Process() often inherits a closed stdin. CPython 3.12
 # then fatals in init_sys_streams (EBADF) before any Python code runs.

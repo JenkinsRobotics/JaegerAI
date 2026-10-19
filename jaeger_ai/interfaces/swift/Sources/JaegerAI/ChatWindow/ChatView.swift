@@ -106,6 +106,23 @@ struct ChatView: View {
                 case .chat:
                     VStack(spacing: 0) {
                         RecoveredApprovalCards(state: chat.recoveredApprovalState)
+                        if !chat.conversationActivity.isEmpty {
+                            DisclosureGroup("Tool and delegated activity · \(chat.conversationActivity.count) recent events") {
+                                ScrollView {
+                                    VStack(alignment: .leading, spacing: 6) {
+                                        ForEach(Array(chat.conversationActivity.enumerated()), id: \.offset) { _, item in
+                                            Text([item.event, item.tool, item.phase, item.status, item.text,
+                                                  item.from_agent_id.map { "From: " + $0 }, item.to_agent_id.map { "To: " + $0 },
+                                                  item.parent_run_id.map { "Parent: " + $0 },
+                                                  item.child_run_id.map { "Child: " + $0 },
+                                                  item.task_id.map { "Task: " + $0 }].compactMap { $0 }.joined(separator: " · "))
+                                                .font(.caption).textSelection(.enabled)
+                                        }
+                                    }.frame(maxWidth: .infinity, alignment: .leading)
+                                }.frame(maxHeight: 160)
+                                Text("Activity is runtime-reported; a finished worker is not proof of verified task completion.").font(.caption2).foregroundStyle(.secondary)
+                            }.padding(10)
+                        }
                         if let error = tts.lastError {
                             Text("Speech: \(error)").font(.caption).foregroundColor(.orange).padding(8)
                         }
@@ -159,6 +176,7 @@ struct ChatView: View {
         .task(id: chat.sessionKey) {
             while !Task.isCancelled {
                 await chat.refreshTurnControl()
+                await chat.refreshConversationActivity()
                 do { try await Task.sleep(for: .seconds(2)) } catch { return }
             }
         }
@@ -713,6 +731,12 @@ struct ChatView: View {
 
             // High-resolution Voice Orb View
             VoiceOrbView(agent: agent)
+                .overlay(alignment: .bottom) {
+                    if voice.isRecording {
+                        Text("Microphone level: \(Int(voice.levelMeter * 100))%")
+                            .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }
                 .frame(width: 300, height: 300)
                 .background(
                     Circle()
@@ -728,6 +752,9 @@ struct ChatView: View {
 
             // Audio & Mic Controls
             HStack(spacing: 16) {
+                if tts.isSpeaking || tts.playbackUnknown {
+                    Button("Stop speech", systemImage: "stop.fill") { tts.stop() }
+                }
                 // Mic button
                 Button {
                     toggleDictation()

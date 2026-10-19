@@ -9,11 +9,9 @@ public struct KanbanView: View {
     @State private var editing: NativeTask?
     @State private var goal = ""
     @State private var run: NativeTask?
-    private let columns: [(String, [String])] = [
-        ("Proposed", ["paused"]), ("Queued", ["queued"]), ("Running", ["running"]),
-        ("Needs attention", ["needs_owner", "blocked", "failed"]),
-        ("Finished", ["completed", "completed_verified", "cancelled"])
-    ]
+    private var columns: [(String, [String])] {
+        NativeTask.boardColumns + [("Other / unknown", Array(Set(tasks.filter { !$0.hasKnownBoardState }.map(\.state))).sorted())]
+    }
     public init() {}
     public var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -56,7 +54,12 @@ public struct KanbanView: View {
                 }
             }.disabled(busy)
             Text("These are Gateway-owned tasks. Only verified completion counts as verified work. Proposed tasks run only after approval; uncertain work is not retried here.").font(.caption).foregroundColor(.secondary)
-        }.padding(20).task { await refresh() }
+        }.padding(20).task {
+            while !Task.isCancelled {
+                await refresh(clearError: false)
+                do { try await Task.sleep(for: .seconds(3)) } catch { return }
+            }
+        }
         .confirmationDialog("Approve and queue this task?", isPresented: Binding(get: { run != nil }, set: { if !$0 { run = nil } })) {
             if let task = run { Button("Approve & queue") { Task { await action("v1/tasks/\(task.id)/approve", ["expected_updated_at": task.updated_at]) } } }
         }

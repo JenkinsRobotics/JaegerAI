@@ -44,11 +44,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             splash.complete("interface", detail: "Native shell ready", progress: 0.22)
 
             splash.start("stack", "Jaeger stack",
-                         detail: "Bringing host services up (Gateway, Ollama, Agent bridge, WebUI)…",
+                         detail: "Checking existing host services…",
                          progress: 0.24)
             do {
-                if NativeLifecyclePolicy.managesServices { _ = try await StackManager.shared.up() }
-                splash.complete("stack", detail: "Host services online", progress: 0.32)
+                if NativeLifecyclePolicy.managesServices {
+                    let services = try await StackManager.shared.status()
+                    let unavailable = services.filter { !$0.ready }.map(\.name)
+                    if !unavailable.isEmpty {
+                        throw NSError(domain: "JaegerStack", code: 1, userInfo: [NSLocalizedDescriptionKey:
+                            "Services unavailable: " + unavailable.joined(separator: ", ") + ". Use explicit service controls to start them."])
+                    }
+                }
+                splash.complete("stack", detail: "Connected to existing services", progress: 0.32)
             } catch {
                 NSLog("[AppDelegate] stack up failed: \(error)")
                 splash.fail("stack", detail: error.localizedDescription, progress: 0.32)
@@ -251,7 +258,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MultimodalWindowController.shared.stopForApplicationQuit()
         Task { @MainActor in
             await AgentBridge.shared.shutdownForQuit()
-            if NativeLifecyclePolicy.managesServices { _ = try? await StackManager.shared.down() }
+            // The Gateway is independent of this client. Quitting a window
+            // must not terminate shared services or other clients' work.
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

@@ -689,6 +689,8 @@ class GatewaySessionStore:
                 payload["latest_request"] = ({key: latest.get(key) for key in (
                     "session_id", "request_id", "turn_id", "status", "updated_at", "finished_at",
                 )} if latest else None)
+                if latest and isinstance(latest.get("result", {}).get("error"), str):
+                    payload["latest_request"]["error"] = latest["result"]["error"][:4096]
                 payload["event_cursor"] = conn.execute(
                     "SELECT COALESCE(MAX(event_id), 0) FROM events WHERE session_id IN (?, '*')",
                     (session_id,),
@@ -712,16 +714,19 @@ class GatewaySessionStore:
                 if latest:
                     for event in conn.execute(
                         "SELECT event, data_json FROM activity_history WHERE session_id=? "
-                        "AND (event LIKE 'tool.%' OR event LIKE 'agent.handoff.%') ORDER BY event_id",
+                        "AND (event LIKE 'tool.%' OR event='agent.handoff' OR event LIKE 'agent.handoff.%') ORDER BY event_id",
                         (session_id,),
                     ):
                         data = json.loads(event["data_json"] or "{}")
                         if data.get("request_id") == latest["request_id"]:
+                            # Handoff events carry their record under `handoff`.
+                            # Project identity/status only; never expose tool arguments or worker output here.
+                            detail = data.get("handoff") if isinstance(data.get("handoff"), dict) else data
                             context.append({"event": event["event"], **{
-                                key: data[key] for key in ("tool", "text", "phase", "status", "child_run_id", "task_id")
-                                if isinstance(data.get(key), str)
+                                key: detail[key] for key in ("tool", "text", "phase", "status", "child_run_id", "task_id", "parent_run_id", "from_agent_id", "to_agent_id")
+                                if isinstance(detail.get(key), str)
                             }})
-                payload["activity_context"] = context[-8:]
+                payload["activity_context"] = context[-50:]
             return payload
 
     def ensure_session(
