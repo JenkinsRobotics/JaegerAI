@@ -31,6 +31,8 @@ from __future__ import annotations
 
 import sys
 import threading
+import time
+import math
 from typing import Any
 
 import numpy as np
@@ -79,6 +81,8 @@ class BusPlayer:
         # actually finished.
         self._correlation_id: str | None = None
         self.last_error: str | None = None
+        self._amplitude = 0.0
+        self._amplitude_at = 0.0
 
     # ── lifecycle ────────────────────────────────────────────────
 
@@ -90,6 +94,10 @@ class BusPlayer:
         self.bus.subscribe(topics.ACT_SPEAKER_STATE, self._on_speaker_state)
         self._subscribed = True
         self._open = True
+
+    @property
+    def amplitude(self) -> float:
+        return self._amplitude if time.monotonic() - self._amplitude_at < 0.25 else 0.0
 
     def is_open(self) -> bool:
         return self._open
@@ -121,6 +129,8 @@ class BusPlayer:
         callers that do not need request/reply correlation.
         """
         self._correlation_id = correlation_id
+        self._amplitude = 0.0
+        self._amplitude_at = 0.0
         self.last_error = None
         self._ended.clear()
         self._sent_samples = 0
@@ -167,7 +177,8 @@ class BusPlayer:
             ))
         except Exception as exc:  # noqa: BLE001
             log("kokoro", f"speaker stop failed: {exc}", level="warn")
-        self._idle.set()
+        self._amplitude = 0.0
+        # The driver, not publication of Stop, acknowledges the output boundary.
         self._sent_samples = 0
 
     def wait_until_drained(self, timeout: float = 60.0) -> bool:
@@ -203,6 +214,9 @@ class BusPlayer:
         if getattr(msg, "correlation_id", None) != self._correlation_id:
             return
         state = getattr(msg, "state", "")
+        value = float(getattr(msg, "amplitude", 0.0))
+        self._amplitude = min(1.0, max(0.0, value)) if state == "playing" and math.isfinite(value) else 0.0
+        self._amplitude_at = time.monotonic()
         if state == "error":
             self.last_error = getattr(msg, "error", None) or "speaker error"
             self._idle.set()

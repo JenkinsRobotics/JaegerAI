@@ -57,14 +57,7 @@ button:focus-visible, select:focus-visible, textarea:focus-visible {
 
 /* Header */
 .app-header {
-  height: 42px;
-  flex: 0 0 42px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0 12px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  height: 34px; flex: 0 0 34px; display: flex; align-items: center; gap: 4px; padding: 0 12px;
 }
 
 .app-name {
@@ -283,7 +276,7 @@ main {
   min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px var(--pad) 24px;
+  padding: 16px 12px 24px;
   scrollbar-gutter: stable;
 }
 
@@ -297,18 +290,11 @@ main {
 }
 
 .message {
-  line-height: 1.6;
-  font-size: 13px;
-  margin-bottom: 18px;
+  line-height: 1.5; font-size: var(--vscode-chat-font-size-body-m, 13px); margin-bottom: 24px;
 }
 
 .speaker {
-  font-size: 11px;
-  color: var(--muted);
-  margin: 0 0 6px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  font-size: 13px; color: var(--vscode-foreground); margin: 0 0 16px; display: flex; align-items: center; gap: 8px;
 }
 
 .role-name {
@@ -338,18 +324,18 @@ main {
 
 /* User Message Bubble */
 .user .speaker {
-  justify-content: flex-end;
-  margin-right: 4px;
+  display: none;
 }
 
 .user .content {
+  background-color: var(--vscode-chat-requestBubbleBackground, #262626);
+  border-radius: var(--vscode-cornerRadius-medium, 6px);
+  padding: 8px 12px;
+  max-width: 90%;
   margin-left: auto;
-  width: max-content;
-  max-width: 85%;
-  padding: 10px 14px;
-  border-radius: 12px 12px 3px 12px;
-  background: var(--message);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  width: fit-content;
+  margin-bottom: var(--vscode-spacing-size60, 6px);
+  position: relative;
 }
 
 /* Assistant Message */
@@ -502,6 +488,7 @@ details.reasoning .content {
   min-height: 220px;
   display: grid;
   place-content: center;
+  grid-template-columns: minmax(0, 1fr);
   justify-items: center;
   text-align: center;
   gap: 8px;
@@ -517,14 +504,14 @@ details.reasoning .content {
 .empty h2 {
   margin: 4px 0 0;
   color: var(--vscode-foreground, #ddd);
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
 }
 
 .empty p {
   max-width: 260px;
   margin: 0;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
 }
 
@@ -534,11 +521,7 @@ details.reasoning .content {
 
 /* Footer & Unified Composer Card (Copilot / Claude Style) */
 footer {
-  flex: 0 0 auto;
-  position: relative;
-  padding: 8px var(--pad) 10px;
-  background: var(--vscode-sideBar-background, #181818);
-  border-top: 1px solid color-mix(in srgb, var(--line) 40%, transparent);
+  flex: 0 0 auto; position: relative; padding: 8px 12px 8px; background: var(--vscode-sideBar-background, #181818);
 }
 
 #staged {
@@ -576,15 +559,15 @@ footer {
 
 /* The Integrated Composer Card */
 form#composer {
-  position: relative;
-  padding: 8px 10px 8px;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
-  display: flex;
-  flex-direction: column;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-sizing: border-box;
+  cursor: text;
+  background-color: var(--vscode-input-background, transparent);
+  border: var(--vscode-strokeThickness, 1px) solid var(--vscode-input-border, #3c3c3c);
+  border-radius: var(--vscode-cornerRadius-large, 8px);
+  padding: 0 6px 6px 6px;
+  width: 100%; position: relative;
+  display: flex; flex-direction: column;
+  transition: box-shadow 350ms ease;
 }
 
 form#composer:focus-within {
@@ -593,19 +576,7 @@ form#composer:focus-within {
 }
 
 textarea#prompt {
-  display: block;
-  width: 100%;
-  resize: none;
-  min-height: 38px;
-  max-height: 200px;
-  padding: 2px 4px 6px;
-  background: transparent;
-  border: 0;
-  line-height: 1.5;
-  font-family: var(--vscode-font-family, system-ui);
-  font-size: 13px;
-  color: var(--vscode-input-foreground, #ddd);
-  overflow-y: auto;
+  display: block; width: 100%; resize: none; min-height: 52px; max-height: 200px; padding: 14px 6px 8px; background: transparent; border: 0; line-height: 1.5; font: inherit; color: var(--vscode-input-foreground); overflow-y: auto;
 }
 
 textarea#prompt::placeholder {
@@ -614,24 +585,15 @@ textarea#prompt::placeholder {
 
 /* Bottom Bar of Composer */
 .composer-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding-top: 6px;
-  min-width: 0;
-  border-top: 1px solid color-mix(in srgb, var(--line) 35%, transparent);
+  display: flex; align-items: center; gap: 2px; min-width: 0; padding-top: 0;
 }
 
 .bar-left, .bar-right {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
+  display: flex; align-items: center; gap: 2px; min-width: 0;
 }
 
 .bar-left {
-  flex: 0 0 auto;
+  flex: 0 1 auto;
 }
 
 .bar-right {
@@ -643,8 +605,8 @@ textarea#prompt::placeholder {
 .bar-icon {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
+  width: 22px;
+  height: 22px;
   padding: 0;
   border-radius: 6px;
   color: var(--muted);
@@ -663,19 +625,7 @@ textarea#prompt::placeholder {
 
 /* Mode Control Pill / Toggle */
 .composer-control-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 26px;
-  padding: 0 8px;
-  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--hover) 80%, transparent);
-  color: var(--vscode-foreground, #ddd);
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-  transition: all 0.15s ease;
+  display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 4px; background: transparent; font-size: 12px; white-space: nowrap;
 }
 
 .composer-control-toggle:hover {
@@ -690,13 +640,14 @@ textarea#prompt::placeholder {
 
 /* Model Pill Trigger */
 .pill {
+  background: transparent;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 26px;
-  padding: 0 8px;
-  border-radius: 6px;
-  font-size: 11px;
+  height: 22px;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 12px;
   color: var(--muted);
   white-space: nowrap;
   position: relative;
@@ -713,8 +664,8 @@ textarea#prompt::placeholder {
 }
 
 .model-pill {
-  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent);
-  background: color-mix(in srgb, var(--hover) 80%, transparent);
+  border: 0;
+  background: transparent;
   cursor: pointer;
   max-width: 170px;
 }
@@ -739,15 +690,7 @@ textarea#prompt::placeholder {
 
 /* Send & Stop Buttons */
 .send-button {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border-radius: 50%;
-  background: var(--vscode-button-background, #007fd4);
-  color: var(--vscode-button-foreground, #ffffff);
-  transition: transform 0.1s ease, background-color 0.15s ease;
+  display: grid; place-items: center; flex: 0 0 22px; width: 22px; height: 22px; padding: 0; border-radius: 4px; background: transparent; color: var(--vscode-icon-foreground);
 }
 
 .send-button:hover:not(:disabled) {
@@ -1404,3 +1347,67 @@ textarea#prompt::placeholder {
     max-width: 80px;
   }
 }
+
+/* Context choices apply to the next send/queued turn, never the admitted one. */
+.context-toggle.excluded { opacity: .65; border-style: dashed; text-decoration: line-through; }
+.context-toggle:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 2px; }
+
+/* Adapted from Microsoft VS Code 1.142 chat.css (MIT), input and request
+   styles. Source lineage and copyright: THIRD_PARTY_NOTICES.md. */
+[hidden] { display: none !important; }
+body:not(.has-conversation) .app-header { display: none; }
+.header-actions, #session-tabs { display: none; }
+.speaker-avatar { width: 24px; height: 24px; object-fit: contain; }
+.user .message-actions { height: 20px; opacity: 0; }
+.user:hover .message-actions, .user:focus-within .message-actions { opacity: 1; }
+.assistant .message-actions { justify-content: flex-start; gap: 4px; }
+.composer-bar .bar-left, .composer-bar .bar-right { gap: 2px; flex-wrap: nowrap; }
+.composer-bar .bar-left { flex-shrink: 0; }
+.composer-bar .bar-right { flex: 1 1 0; margin-left: 0; }
+#mention { display: none; }
+#model-trigger { padding: 0 4px; gap: 4px; min-width: 0; max-width: 135px; }
+#model-display { overflow: hidden; text-overflow: ellipsis; }
+#model-trigger .chev { display: none; }
+#send { margin-left: auto; }
+#stop { flex-shrink: 0; }
+.execution-row { justify-content: flex-start; gap: 8px; }
+.execution-location { padding: 0 2px; font-size: 12px; }
+
+.send-hint { display: none; }
+.suggestion-chip { display: none; }
+.chat-home:not(:has(.chat-row)):not(:has(.chat-empty)) { display: none; }
+
+.welcome-instructions { max-width: 280px; margin: 0; font-size: 13px; line-height: 1.5; color: var(--muted); }
+.welcome-instructions button { color: var(--vscode-textLink-foreground); padding: 0; }
+
+/* Original Codicon artwork; see the CC BY 4.0 attribution in notices. */
+.codicon-asset { display: inline-block; flex: 0 0 16px; width: 16px; height: 16px; background-color: currentColor; mask: var(--codicon-image) center / contain no-repeat; }
+.icon-agent { --codicon-image: url('./codicons/agent.svg'); }
+.icon-copilot { --codicon-image: url('./codicons/copilot.svg'); }
+.icon-vm { --codicon-image: url('./codicons/vm.svg'); }
+.icon-shield { --codicon-image: url('./codicons/shield.svg'); }
+.icon-send { --codicon-image: url('./codicons/send.svg'); }
+.empty .welcome-instructions { width: 100%; max-width: 320px; margin-top: 0; }
+
+/* Chat's anchored action-widget layout, adapted for Gateway-owned controls. */
+#composer-options {
+  position: absolute; bottom: 42px; left: 6px; right: 6px; z-index: 8;
+  max-height: min(320px, 55vh); overflow-y: auto; padding: 4px;
+  border: 1px solid var(--vscode-widget-border, #454545);
+  border-radius: var(--vscode-cornerRadius-medium, 6px);
+  background: var(--vscode-menu-background, #252526);
+  color: var(--vscode-menu-foreground, #ccc);
+  box-shadow: var(--vscode-shadow-lg, 0 4px 16px #0006);
+}
+#composer-options .options-label { display: none; }
+#composer-options .options-flow { display: flex; flex-direction: column; align-items: stretch; gap: 4px; }
+#composer-options #mode-switch, #composer-options #autonomy-subswitch {
+  display: flex; flex-direction: column; align-items: stretch; border: 0; background: transparent;
+}
+#composer-options #autonomy-subswitch { border-top: 1px solid var(--vscode-menu-separatorBackground, #454545); padding-top: 4px; }
+#composer-options .mode-option { display: flex; align-items: center; justify-content: flex-start; min-height: 24px; padding: 4px 8px; border: 0; background: transparent; border-radius: 4px; font-size: 13px; }
+#composer-options .mode-option::before { content: ''; width: 20px; }
+#composer-options .mode-option[aria-checked='true']::before, #composer-options .mode-option[aria-pressed='true']::before { content: '✓'; }
+#composer-options .mode-option:hover, #composer-options .mode-option:focus-visible { background: var(--vscode-menu-selectionBackground); color: var(--vscode-menu-selectionForeground); }
+
+.timeline-row.empty > .empty { width: 100%; }

@@ -728,7 +728,13 @@ final class ChatViewModel: ObservableObject {
     /// Notes uses for voice dictation, lower stakes than auto-
     /// submitting to the agent.  A system bubble notes capture
     /// duration + which backend ran for telemetry.
+    private var transcriptionGeneration = 0
+
     func stopVoice(autoSend: Bool = false) {
+        transcriptionGeneration += 1
+        let transcription = transcriptionGeneration
+        let selected = sessionKey
+        let generation = selectionGeneration
         voice.stopRecording()
         guard let captured = voice.takeCapturedAudio() else { return }
         let sampleRate = captured.format.sampleRate
@@ -764,7 +770,9 @@ final class ChatViewModel: ObservableObject {
                 ],
                 timeout: .seconds(90)
             )
+            guard transcription == self.transcriptionGeneration else { return }
             self.isTranscribing = false
+            guard selected == self.sessionKey, generation == self.selectionGeneration else { return }
             guard result.ok, let data = result.json,
                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let text = object["text"] as? String, !text.isEmpty else {

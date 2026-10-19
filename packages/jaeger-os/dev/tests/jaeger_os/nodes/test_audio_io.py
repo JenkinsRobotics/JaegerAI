@@ -741,3 +741,41 @@ def test_playback_only_driver_enables_capture_without_replacing_speaker(bus):
     assert node._input_retry_at > 0
     assert node._out_stream is speaker and speaker.started
     node.teardown()
+
+
+def test_playback_levels_follow_consumed_samples_not_the_last_queued_producer(bus):
+    node = _node(bus, capture=False)
+    got = []
+    node.publish = got.append
+    for cid, value in (("speech", 0.25), ("chime", 0.8)):
+        node._on_speaker_frame(topics.AudioOutFrame(samples=np.full(100, value, dtype=np.float32).tobytes(),
+                                                   sample_rate=node._playback_rate, correlation_id=cid))
+    got.clear()
+    output = node._next_playback(100)
+    levels = [m for m in got if isinstance(m, topics.SpeakerState)]
+    assert np.allclose(output, 0.25)
+    assert len(levels) == 1 and levels[0].correlation_id == "speech"
+    assert levels[0].amplitude == pytest.approx(0.25)
+    got.clear()
+    node._next_playback(50)  # Partial consumption retains the second producer's identity.
+    assert got[0].correlation_id == "chime" and got[0].amplitude == pytest.approx(0.8)
+    got.clear()
+    node._next_playback(50)
+    assert got[0].correlation_id == "chime"
+    assert not node._out_correlations
+
+
+def test_scoped_stop_preserves_other_producer_and_waits_for_output_boundary(bus):
+    node = _node(bus, capture=False)
+    got = []; node.publish = got.append
+    for cid, value in (("voice", 0.25), ("notification", 0.75)):
+        node._on_speaker_frame(topics.AudioOutFrame(samples=np.full(100, value, dtype=np.float32).tobytes(),
+                                                   sample_rate=node._playback_rate, correlation_id=cid))
+    got.clear()
+    node._on_speaker_stop(topics.SpeakerStop(correlation_id="voice"))
+    assert not got  # A Stop request alone cannot acknowledge the device boundary.
+    output = np.zeros((100, 1), dtype=np.float32)
+    node._fill_playback(output, 100, None, None)
+    assert np.allclose(output, 0.75)
+    assert any(m.state == "idle" and m.correlation_id == "voice" for m in got)
+    assert not node._output_flush_requested

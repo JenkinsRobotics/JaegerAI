@@ -47,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                          detail: "Bringing host services up (Gateway, Ollama, Agent bridge, WebUI)…",
                          progress: 0.24)
             do {
-                _ = try await StackManager.shared.up()
+                if NativeLifecyclePolicy.managesServices { _ = try await StackManager.shared.up() }
                 splash.complete("stack", detail: "Host services online", progress: 0.32)
             } catch {
                 NSLog("[AppDelegate] stack up failed: \(error)")
@@ -251,7 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         MultimodalWindowController.shared.stopForApplicationQuit()
         Task { @MainActor in
             await AgentBridge.shared.shutdownForQuit()
-            _ = try? await StackManager.shared.down()
+            if NativeLifecyclePolicy.managesServices { _ = try? await StackManager.shared.down() }
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater

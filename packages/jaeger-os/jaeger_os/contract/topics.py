@@ -332,11 +332,8 @@ class TtsChunk(TopicMessage):
     node during ``synthesizer.speak()``; drives lip-sync on the
     AnimationNode side.
 
-    0.5.0 ships with a sin-wave amplitude proxy — the chunks fire
-    at a fixed rate while synthesis is in progress, with amplitude
-    oscillating to simulate mouth movement.  0.5.x will replace
-    this with real RMS sampling from Kokoro's audio buffer once
-    the synthesizer exposes a streaming callback.
+    The TTS node samples the synthesizer's measured output RMS. Missing
+    telemetry means zero amplitude; synthesis time is not playback.
 
     Amplitude is normalised to ``[0.0, 1.0]``.  Subscribers that
     want decibels or raw samples should request a different topic
@@ -427,6 +424,7 @@ class SpeakerState(TopicMessage):
     finishing from someone else's.
     """
     topic: str = ACT_SPEAKER_STATE
+    amplitude: float = 0.0          # output RMS for this correlation, never synthetic
     state: str = "idle"            # "playing" | "idle" | "error"
     queued_ms: int = 0             # audio still to play
     underruns: int = 0             # cumulative; a rising count is a

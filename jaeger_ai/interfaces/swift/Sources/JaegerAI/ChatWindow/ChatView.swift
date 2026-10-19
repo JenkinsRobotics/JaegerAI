@@ -106,6 +106,12 @@ struct ChatView: View {
                 case .chat:
                     VStack(spacing: 0) {
                         RecoveredApprovalCards(state: chat.recoveredApprovalState)
+                        if let error = tts.lastError {
+                            Text("Speech: \(error)").font(.caption).foregroundColor(.orange).padding(8)
+                        }
+                        if tts.playbackUnknown {
+                            Text("Speech playback outcome unknown. Stop speech and wait for its receipt before trying again.").font(.caption).foregroundColor(.orange).padding(8)
+                        }
                         if let error = chat.conversationError {
                             Text(error).font(.caption).foregroundColor(.orange).padding(8)
                         }
@@ -690,7 +696,10 @@ struct ChatView: View {
                     .foregroundColor(Term.ink)
 
                 let statusLabel: String = {
-                    if tts.isSpeaking { return "Speaking aloud…" }
+                    if tts.playbackUnknown { return "Playback outcome unknown" }
+                    if tts.measuredAmplitude > 0.001 { return "Speaking aloud…" }
+                    if tts.systemSpeechActive { return "System speech active · audio level unavailable" }
+                    if tts.isSpeaking { return "Preparing speech…" }
                     if agent.isBusy { return "Thinking…" }
                     if chat.isRequestingMicrophone { return "Requesting microphone access…" }
                     if voice.isRecording { return "Listening for speech…" }

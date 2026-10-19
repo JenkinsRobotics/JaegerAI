@@ -130,6 +130,31 @@ class GatewayTaskOwner:
         return {'ok': True, 'task_id': tid, 'status': task.state.value, 'replayed': replayed,
                 'session_id': f'task:{tid}', 'authorized': task.provenance.get('authorized', False)}
 
+    def edit_proposal(self, task_id: str, *, goal: str, expected_updated_at: float) -> dict:
+        """Edit only an unstarted, unapproved proposal, under the owner's transaction."""
+        if not goal.strip():
+            raise ValueError("Task objective is required")
+        def update(task):
+            if task.state is not TaskState.PAUSED or task.provenance.get("authorized") or task.run_history:
+                raise ValueError("Only an unstarted proposal can be edited")
+            if task.updated_at != expected_updated_at:
+                raise ValueError("Task changed; refresh before editing")
+            task.goal = goal.strip()
+        task = self.store.update_task(task_id, update)
+        parent = task.notification_policy.recipient_session_id
+        # Editing invalidates the old decision surface. A stale card must never
+        # approve an objective the user has not seen.
+        for row in self.gateway.store.list_pending_approvals():
+            if (row.get("metadata") or {}).get("task_id") == task_id:
+                self.gateway.store.resolve_approval(row["approval_id"], approved=False, decision="deny")
+                self.gateway.event_bus.publish(parent, "approval.resolved", {"approval_id": row["approval_id"], "approved": False, "reason": "proposal edited"})
+        approval = self.gateway.store.create_approval(kind="background_task",
+            prompt=f"Run proposed background task: {task.goal}", options=["once", "deny"],
+            session_id=parent, metadata={"task_id": task_id})
+        self.gateway.event_bus.publish(parent, "approval.request", approval)
+        self.gateway.event_bus.publish(parent, "task.updated", {"task": task.to_dict()})
+        return task.to_dict()
+
     def resolve(self, task_id: str, approved: bool) -> None:
         def update(task):
             if task.is_terminal:

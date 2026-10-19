@@ -13,15 +13,16 @@ class _Bus:
         self.commands = []
         self.published = []
         self.callbacks = []
+        self.chunk_callbacks = []
         self.changed = threading.Condition()
         self.fail_stop = False
 
     def subscribe(self, topic, callback):
-        assert topic == topics.ACT_SPEECH_SPOKEN
-        self.callbacks.append(callback)
+        assert topic in (topics.ACT_SPEECH_SPOKEN, topics.ACT_SPEECH_CHUNK)
+        (self.callbacks if topic == topics.ACT_SPEECH_SPOKEN else self.chunk_callbacks).append(callback)
 
     def unsubscribe(self, topic, callback):
-        self.callbacks.remove(callback)
+        (self.callbacks if topic == topics.ACT_SPEECH_SPOKEN else self.chunk_callbacks).remove(callback)
 
     def publish(self, message):
         if isinstance(message, topics.SpeechStop) and self.fail_stop:
@@ -432,3 +433,25 @@ def test_node_terminal_receipt_rejects_success_from_engine_after_stop(monkeypatc
     assert len(receipts) == 1
     assert receipts[0].ok is False
     assert receipts[0].reason == "interrupted"
+
+
+def test_ui_playback_telemetry_is_correlated_measured_and_expires(monkeypatch):
+    bus, speech = _setup(monkeypatch)
+    result = {}
+    worker = _speak(speech, "measured", result)
+    bus.wait_commands(1)
+    command = bus.commands[0]
+    assert speech.status()["amplitude"] == 0
+    for callback in bus.chunk_callbacks:
+        callback(topics.TtsChunk(amplitude=0.8, correlation_id="foreign"))
+    assert speech.status()["amplitude"] == 0
+    for callback in bus.chunk_callbacks:
+        callback(topics.TtsChunk(amplitude=0.42, correlation_id=command.correlation_id))
+    assert speech.status()["amplitude"] == 0.42
+    assert speech.status()["measured"]
+    speech._sample_at -= 1
+    assert speech.status()["amplitude"] == 0
+    bus.ack(command)
+    worker.join(2)
+    assert not speech.status()["active"]
+    assert not bus.chunk_callbacks

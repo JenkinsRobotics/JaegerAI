@@ -46,6 +46,7 @@ function element() {
     close() {},
     matches() { return false; },
     setAttribute() {},
+    removeAttribute() {},
     requestSubmit() {},
   };
 }
@@ -217,3 +218,32 @@ test('renderChats populates chat-list from state.sessions', () => {
   assert.deepEqual(titles, ['First Conversation', 'Second Conversation']);
 });
 
+
+test('removable context chips send exclusions for both immediate and queued turns', () => {
+  const { nodes, listeners, messages } = bootView();
+  const receive = data => listeners.find(item => item.name === 'message').callback({ data });
+  receive({ connected: true, busy: false, session: { session_id: 'chip-test', messages: [] }, ideContext: { active_file: 'a.py', selection: { start_line: 1, end_line: 2 }, open_files: ['b.py'] } });
+  const chip = key => nodes.get('context-chips').children.find(item => item.dataset?.contextKey === key);
+  chip('selection:a.py').onclick(); chip('file:b.py').onclick();
+  nodes.get('prompt').value = 'Inspect'; nodes.get('prompt').oninput();
+  nodes.get('composer').onsubmit({ preventDefault() {} });
+  assert.deepEqual(Array.from(messages.at(-1).contextExclusions), ['selection:a.py', 'file:b.py']);
+  receive({ busy: true }); nodes.get('prompt').value = 'Next'; nodes.get('prompt').oninput();
+  nodes.get('queue-next').onclick();
+  assert.equal(messages.findLast(item => item.type === 'queue').type, 'queue');
+  assert.deepEqual(Array.from(messages.at(-1).contextExclusions), ['selection:a.py', 'file:b.py']);
+  chip('selection:a.py').onclick();
+  assert.match(chip('selection:a.py').title, /Remove/);
+});
+
+
+test('real controller snapshots with feedback maps update connectivity and composer', () => {
+  const { nodes, listeners } = bootView();
+  const receive = data => listeners.find(item => item.name === 'message').callback({ data });
+  receive({ connected: true, status: 'Connected', busy: false, feedback: {}, sessions: [], approvals: [] });
+  assert.equal(nodes.get('attach').disabled, false);
+  nodes.get('prompt').value = 'A harmless test'; nodes.get('prompt').oninput();
+  assert.equal(nodes.get('send').disabled, false);
+  receive({ connected: false, status: 'Unavailable', feedback: { '4': 'up' } });
+  assert.equal(nodes.get('send').disabled, true);
+});

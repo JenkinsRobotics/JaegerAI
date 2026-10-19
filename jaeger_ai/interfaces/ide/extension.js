@@ -8,12 +8,15 @@ const path = require('node:path');
 const os = require('node:os');
 const { Gateway } = require('./gateway');
 const { Conversation } = require('./conversation');
+const { observeNativeTurn, renderNativeOutcome } = require('./native-turn');
 const { parseProviderModel, selectableModels, providerModelValue, modelSelectionAvailable } = require('./media/presentation');
 const commands = require('./commands');
 const execFileAsync = util.promisify(execFile);
 
 // Packaged builds get contract.json (gatewayUrl) generated from
 // jaeger_ai/contract/ports.py; this is only the unpackaged default.
+let build = { sourceRevision: 'unpackaged', contentSha256: 'unavailable' };
+try { build = require('./build.json'); } catch (_) {}
 let contract = { gatewayUrl: 'http://127.0.0.1:33418' };
 try { contract = require('./contract.json'); } catch (_) {}
 
@@ -33,7 +36,7 @@ const MIME_BY_EXTENSION = {
 
 function activate(context) {
   const output = vscode.window.createOutputChannel('Jaeger'); context.subscriptions.push(output);
-  let view, controller, lastViewState = null;
+  let view, controller, lastViewState = null, viewReady = false, requestedSession = '';
   const postToView = message => {
     if (message && typeof message === 'object' && ('connected' in message || 'status' in message)) lastViewState = message;
     return view?.webview.postMessage(message);
@@ -97,13 +100,16 @@ function activate(context) {
   }
   // What the agent's ide_* tools can ask of the editor. Reads are bounded; opening a
   // file only changes what the operator is looking at.
-  const ideCall = async (kind, args) => {
+  const contextRoot = () => selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+  const canonicalPath = file => fs.realpathSync(file);
+  const ideCall = async (kind, args, root = contextRoot()) => {
     const roots = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
-    const absolute = file => (path.isAbsolute(file) ? file : path.join(roots[0] || '', file));
+    const absolute = file => (path.isAbsolute(file) ? file : path.join(root, file));
     const shown = file => { const root = roots.find(r => file.startsWith(r + path.sep)); return root ? file.slice(root.length + 1) : file; };
-    if (kind === 'context') return ideContext() || { note: 'Nothing is open in the editor' };
+    if (kind === 'context') return ideContext(root) || { note: 'Nothing is open in the editor' };
     if (kind === 'open_file') {
       const file = absolute(String(args.path || ''));
+      if (!commands.isWorkspacePath(file, root, canonicalPath)) throw new Error('Editor request is outside the selected workspace.');
       const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)), { preview: false });
       const line = Number(args.line) > 0 ? Number(args.line) - 1 : -1;
       if (line >= 0) {
@@ -113,15 +119,15 @@ function activate(context) {
       }
       return { opened: shown(file), line: line >= 0 ? line + 1 : null };
     }
-    if (kind === 'diagnostics') return diagnosticsSnapshot(args.path ? absolute(String(args.path)) : '');
+    if (kind === 'diagnostics') return diagnosticsSnapshot(args.path ? absolute(String(args.path)) : '', root);
     throw new Error(`Unsupported IDE request: ${kind}`);
   };
-  const diagnosticsSnapshot = (only = '') => {
+  const diagnosticsSnapshot = (only = '', root = contextRoot()) => {
     const roots = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
     const levels = ['error', 'warning', 'info', 'hint'];
     const found = [];
     for (const [uri, list] of vscode.languages.getDiagnostics()) {
-      if (uri.scheme !== 'file' || (only && uri.fsPath !== only)) continue;
+      if (uri.scheme !== 'file' || (only && uri.fsPath !== only) || !commands.isWorkspacePath(uri.fsPath, root, canonicalPath)) continue;
       const shownPath = (() => { const root = roots.find(r => uri.fsPath.startsWith(r + path.sep)); return root ? uri.fsPath.slice(root.length + 1) : uri.fsPath; })();
       for (const item of list) found.push({ path: shownPath, severity: levels[item.severity] || 'info',
         line: item.range.start.line + 1, message: String(item.message).slice(0, 300), source: item.source || '' });
@@ -129,13 +135,18 @@ function activate(context) {
     found.sort((a, b) => levels.indexOf(a.severity) - levels.indexOf(b.severity));
     return { count: found.length, diagnostics: found.slice(0, 60), truncated: found.length > 60 };
   };
-  const ideContext = () => {
-    const editor = vscode.window.activeTextEditor;
+  const ideContext = (root = contextRoot()) => {
+    if (!root) return null;
+    // Untitled documents and unresolved/deleted backing files never contribute text.
+    const activeEditor = vscode.window.activeTextEditor;
+    const editor = activeEditor?.document.uri.scheme === 'file' && commands.isWorkspacePath(activeEditor.document.uri.fsPath, root, canonicalPath) ? activeEditor : null;
     const chosen = editor && !editor.selection.isEmpty ? editor.selection : null;
     const fileTabs = (vscode.window.tabGroups?.all || []).flatMap(group => group.tabs)
       .map(tab => tab.input?.uri).filter(uri => uri?.scheme === 'file').map(uri => uri.fsPath);
     return commands.buildIdeContext({
       folders: (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath),
+      selectedRoot: root,
+      canonicalPath,
       active: editor && editor.document.uri.scheme === 'file' ? {
         path: editor.document.uri.fsPath, language: editor.document.languageId,
         selectionText: chosen ? editor.document.getText(chosen).slice(0, 4001) : '',
@@ -146,8 +157,9 @@ function activate(context) {
     });
   };
   const computeDynamicSuggestions = async () => {
-    const root = selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    const editor = vscode.window.activeTextEditor;
+    const root = contextRoot();
+    const activeEditor = vscode.window.activeTextEditor;
+    const editor = activeEditor?.document.uri.scheme === 'file' && commands.isWorkspacePath(activeEditor.document.uri.fsPath, root, canonicalPath) ? activeEditor : null;
     const chosen = editor && !editor.selection.isEmpty ? editor.selection : null;
     const activeDoc = editor?.document;
     const isRealFile = activeDoc && activeDoc.uri?.scheme === 'file';
@@ -440,7 +452,7 @@ function activate(context) {
       view?.webview.postMessage({ error: 'Open a workspace folder before mentioning a file.' });
       return;
     }
-    const files = await vscode.workspace.findFiles('**/*', '**/node_modules/**', 200);
+    const files = await vscode.workspace.findFiles(new vscode.RelativePattern(root, '**/*'), '**/node_modules/**', 200);
     const items = files.map(uri => {
       const filePath = uri.fsPath;
       const relative = path.relative(root, filePath);
@@ -611,6 +623,7 @@ function activate(context) {
   const provider = {
     resolveWebviewView(resolved) {
       view = resolved;
+      viewReady = false;
       const media = vscode.Uri.joinPath(context.extensionUri, 'media');
       view.webview.options = { enableScripts: true, localResourceRoots: [media] };
       const nonce = randomBytes(24).toString('hex');
@@ -664,6 +677,7 @@ function activate(context) {
           output.appendLine(`[debug] secure caller token available=${Boolean(storedToken)}`);
           if (storedToken) currentCallerToken = storedToken;
           selected = createController();
+          if (requestedSession) selected = requestedSession;
           // Replay the latest control state after the webview's listener has
           // installed. This covers retained/reloaded webviews that miss a
           // postMessage during the HTML/script boot window.
@@ -675,6 +689,9 @@ function activate(context) {
           postContext();
           if (userSetting('autoStartGateway') === true) await ensureGatewayDaemon(controller.gateway);
           await controller.refresh(selected);
+          if (requestedSession && requestedSession !== selected) await controller.refresh(requestedSession, true);
+          requestedSession = '';
+          viewReady = true;
           output.appendLine(`[debug] initial refresh settled; connected=${controller.state.connected}; status=${controller.state.status}; error=${controller.state.error || '(none)'}`);
           // The refresh callback may publish several states while a retained
           // webview is still attaching. Replay the final state after refresh,
@@ -724,7 +741,7 @@ function activate(context) {
           return;
         }
         if (!controller) return;
-        if (message.type === 'home') return controller.refresh(null);
+        if (message.type === 'home') { postToView({ showHistory: true }); return controller.refresh(null); }
         if (message.type === 'refresh') { void refreshChanges(); return controller.refresh(undefined, true); }
         if (message.type === 'searchChats' && typeof message.query === 'string') return controller.searchSessions(message.query);
         if (message.type === 'select' && typeof message.id === 'string') {
@@ -740,6 +757,7 @@ function activate(context) {
           return controller.closeSession(message.id);
         }
         if (message.type === 'new') {
+          postToView({ showHistory: false });
           await controller.newSession('New conversation', selectedWorkspace);
         }
         if (message.type === 'send' && typeof message.text === 'string') {
@@ -747,7 +765,9 @@ function activate(context) {
           validateModelSelection(model, provider);
           const allowedTools = message.planOnly ? ['update_plan'] : null;
           const options = message.deepThink ? { deep_think: true, reasoning_effort: 'high' } : null;
-          const sent = controller.send(message.text, model, provider, selectedWorkspace, message.ideContext === false ? null : ideContext(), allowedTools, options);
+          const workspace = contextRoot();
+          const ide = message.ideContext === false ? null : commands.filterIdeContext(ideContext(workspace), message.contextExclusions);
+          const sent = controller.send(message.text, model, provider, workspace, ide, allowedTools, options);
           postContext();
           return sent;
         }
@@ -756,7 +776,9 @@ function activate(context) {
           validateModelSelection(model, provider);
           const allowedTools = message.planOnly ? ['update_plan'] : null;
           const options = message.deepThink ? { deep_think: true, reasoning_effort: 'high' } : null;
-          const queued = controller.queue(message.text, model, provider, selectedWorkspace, message.ideContext === false ? null : ideContext(), allowedTools, options);
+          const workspace = contextRoot();
+          const ide = message.ideContext === false ? null : commands.filterIdeContext(ideContext(workspace), message.contextExclusions);
+          const queued = controller.queue(message.text, model, provider, workspace, ide, allowedTools, options);
           postContext();
           return queued;
         }
@@ -1011,6 +1033,22 @@ function activate(context) {
         }
       }
     }),
+    vscode.commands.registerCommand('jaeger.newConversation', () => report(async () => {
+      await vscode.commands.executeCommand('jaeger.conversation.focus');
+      postToView({ showHistory: false });
+      if (controller) await controller.newSession('New conversation', selectedWorkspace);
+    })),
+    vscode.commands.registerCommand('jaeger.refreshConversation', () => report(async () => { if (controller) await controller.refresh(undefined, true); })),
+    vscode.commands.registerCommand('jaeger.showHistory', () => report(async () => { postToView({ showHistory: true }); if (controller) await controller.refresh(null); })),
+    vscode.commands.registerCommand('jaeger.openSession', sessionId => report(async () => {
+      if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 200) throw new Error('Invalid conversation identifier.');
+      requestedSession = sessionId;
+      await vscode.commands.executeCommand('jaeger.conversation.focus');
+      if (viewReady && controller) {
+        await controller.refresh(sessionId, true);
+        requestedSession = '';
+      }
+    })),
     vscode.commands.registerCommand('jaeger.openChatTab', async () => {
       if (typeof vscode.commands?.executeCommand === 'function') {
         try {
@@ -1123,7 +1161,9 @@ function activate(context) {
       output.show(true);
     }),
     vscode.commands.registerCommand('jaeger.diagnostics', () => report(async () => {
-      const gw = gatewayClient(), version = await gw.json('/version');
+      output.appendLine(JSON.stringify({ extensionVersion: context.extension?.packageJSON?.version || require('./package.json').version, build }, null, 2));
+      output.show(true);
+      const gw = gatewayClient(), version = await gw.json('/version').catch(error => ({ error: error.message }));
       const tokenPresent = Boolean(gw.auth().Authorization);
       let isLoopback = false;
       try { isLoopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(new URL(gw.url).hostname); } catch (_) {}
@@ -1148,6 +1188,8 @@ function activate(context) {
         capabilitiesSummary = { error: err.message };
       }
       output.appendLine(JSON.stringify({
+        extensionVersion: context.extension?.packageJSON?.version || require('./package.json').version,
+        build,
         endpoint: gw.url,
         connectionType: isLoopback ? 'local-loopback' : 'remote-tailscale',
         clientArchitecture: 'thin-ide-client (no local models loaded)',
@@ -1180,15 +1222,19 @@ function activate(context) {
     // Register Microsoft VS Code native Chat Participant (@jaeger) if supported by host
     ...(typeof vscode.chat?.createChatParticipant === 'function' ? [
       vscode.chat.createChatParticipant('jaeger.chatParticipant', async (request, chatContext, stream, token) => {
-        let sessionId = '';
+        let sessionId = '', requestId = '';
         let cancellation;
         const requestAbort = new AbortController();
         try {
+          const workspace = contextRoot();
+          const ide = request.command ? null : ideContext(workspace);
+          const model = parseProviderModel(configuredModel());
+          const storedToken = await getStoredCallerToken();
+          if (storedToken) currentCallerToken = storedToken;
           const gw = controller?.gateway || gatewayClient();
           const history = Array.isArray(chatContext?.history) ? chatContext.history : [];
           sessionId = [...history].reverse().find(turn => turn?.result?.metadata?.jaegerSessionId)
             ?.result.metadata.jaegerSessionId || '';
-          const workspace = selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
           if (request.command === 'verify') {
             stream.progress('Running verification test suite...');
             const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -1239,52 +1285,45 @@ function activate(context) {
             });
             sessionId = created.session_id;
           }
-          const requestId = randomUUID();
-          const selectedModel = parseProviderModel(configuredModel());
-          const ide = ideContext();
+          requestId = randomUUID();
           stream.progress('Connecting to Jaeger...');
-          cancellation = token?.onCancellationRequested?.(() => {
-            void gw.cancel(sessionId, requestId).catch(error => output.appendLine(`[jaeger] Chat cancellation failed: ${error.message}`));
-          });
+          let cancelRequested = false, admittedRequest = false, cancelSent = false;
+          const requestCancel = () => {
+            cancelRequested = true;
+            requestAbort.abort();
+            if (!admittedRequest || cancelSent) return;
+            cancelSent = true;
+            void gw.cancel(sessionId, requestId).catch(error => output.appendLine(`[jaeger] Chat cancellation not confirmed: ${error.message}`));
+          };
+          cancellation = token?.onCancellationRequested?.(requestCancel);
           const admitted = await gw.send(sessionId, {
             text: prompt, request_id: requestId, workspace,
-            ...(selectedModel.model ? { model: selectedModel.model, ...(selectedModel.provider ? { provider: selectedModel.provider } : {}) } : {}),
+            ...(model.model ? { model: model.model, ...(model.provider ? { provider: model.provider } : {}) } : {}),
             ...(ide ? { options: { ide } } : {}),
           });
-          if (token?.isCancellationRequested) void gw.cancel(sessionId, requestId).catch(() => {});
-          stream.progress('Jaeger is working...');
-          let cursor = Math.max(0, Number(admitted.start_event_id || 1) - 1);
-          const terminalStatuses = ['completed', 'failed', 'cancelled', 'execution_unknown'];
-          let settled = terminalStatuses.includes(admitted.status);
-          if (!settled) {
-            for await (const event of gw.events(sessionId, cursor, requestAbort.signal)) {
-              if (event.event_id) cursor = Math.max(cursor, Number(event.event_id));
-              const data = event.data || {};
-              if (data.request_id !== requestId) continue;
-              if (event.event === 'turn.progress') stream.progress(String(data.text || 'Jaeger is working...'));
-              else if (event.event === 'tool.started') stream.progress(`Jaeger is using ${String(data.tool || 'a tool')}...`);
-              if (['turn.finish', 'turn.failed', 'turn.cancelled', 'turn.unknown', 'turn.reconciled'].includes(event.event)) {
-                settled = true;
-                break;
-              }
-            }
-          }
-          const receipt = await gw.receipt(sessionId, requestId);
-          if (!terminalStatuses.includes(receipt.status)) {
-            throw new Error(`Jaeger accepted the request, but its terminal status is not available yet (request ${requestId}).`);
-          }
-          if (receipt.status !== 'completed') {
-            stream.markdown(`Jaeger request ${receipt.status}: ${String(receipt.result?.error || 'No completed answer was returned.')}`);
-            return { metadata: { jaegerSessionId: sessionId, jaegerRequestId: requestId } };
-          }
-          const session = await gw.session(sessionId);
-          const assistantMessage = [...(session.messages || [])].reverse().find(message => message.role === 'assistant');
-          const answer = String(receipt.result?.output || receipt.result?.text || assistantMessage?.content || 'Jaeger completed the request.');
-          stream.markdown(answer);
+          admittedRequest = true;
+          if (cancelRequested || token?.isCancellationRequested) requestCancel();
+          stream.progress(cancelRequested ? 'Cancellation requested · Checking Gateway outcome...' : 'Jaeger is working...');
+          const openConversation = () => stream.button?.({ command: 'jaeger.openSession', title: 'Open Jaeger conversation', arguments: [sessionId] });
+          const outcome = await observeNativeTurn({
+            gateway: gw, sessionId, requestId, admitted, signal: requestAbort.signal,
+            stream, ideHandler: (kind, args) => ideCall(kind, args, workspace),
+            onApproval: () => {
+              stream.progress('Waiting for your approval in the Jaeger conversation panel');
+              openConversation();
+            },
+          });
+          renderNativeOutcome(stream, outcome, cancelRequested);
+          if (!outcome.receipt || !['completed', 'failed', 'cancelled', 'execution_unknown'].includes(outcome.receipt.status)) openConversation();
           return { metadata: { jaegerSessionId: sessionId, jaegerRequestId: requestId } };
+
         } catch (err) {
           stream.markdown('**Jaeger Gateway Error:** ' + err.message);
-          return sessionId ? { metadata: { jaegerSessionId: sessionId } } : undefined;
+          if (requestId) {
+            stream.markdown('\n\nThe execution outcome is not confirmed. Check this conversation before resending the task.');
+            stream.button?.({ command: 'jaeger.openSession', title: 'Open Jaeger conversation', arguments: [sessionId] });
+          }
+          return sessionId ? { metadata: { jaegerSessionId: sessionId, ...(requestId ? { jaegerRequestId: requestId } : {}) } } : undefined;
         } finally {
           cancellation?.dispose();
           requestAbort.abort();

@@ -23,11 +23,12 @@ window.JaegerPostMessage = post;
 window.JaegerTranscriptRows = transcriptRows;
 
 let ideContextOn = api.getState()?.ideContext !== false;
+const contextExclusions = new Set(api.getState()?.contextExclusions || []);
 let mode = api.getState()?.mode || 'manual';
 let planModeOn = mode === 'plan';
 let deepThinkOn = Boolean(api.getState()?.deepThink);
 let modelChoice = api.getState()?.modelChoice ?? 'config';
-const persistView = () => api.setState({ drafts, ideContext: ideContextOn, mode, planMode: planModeOn, deepThink: deepThinkOn, chatSearch, modelChoice });
+const persistView = () => api.setState({ drafts, ideContext: ideContextOn, contextExclusions: [...contextExclusions], mode, planMode: planModeOn, deepThink: deepThinkOn, chatSearch, modelChoice });
 function saveDraft() { drafts[draftSession] = $('prompt').value; persistView(); }
 function resizePrompt() {
   const prompt = $('prompt');
@@ -90,6 +91,7 @@ function message(role, text, meta = {}) {
   const node = document.createElement('article'); node.className = role === 'user' ? 'user message' : 'assistant message';
   const label = document.createElement('div'); label.className = 'speaker';
   const name = document.createElement('span'); name.className = 'role-name'; name.textContent = role === 'user' ? 'You' : 'Jaeger';
+  if (role !== 'user') { const avatar = document.createElement('img'); avatar.src = $('logo-source').src; avatar.alt = ''; avatar.className = 'speaker-avatar'; label.append(avatar); }
   label.append(name);
   const content = document.createElement('div'); content.className = 'content';
   if (role === 'user') content.textContent = text;
@@ -381,9 +383,14 @@ function updateTimelineRow(node, row) {
     content = document.createElement('section'); content.className = 'empty';
     const logo = document.createElement('img'); logo.src = $('logo-source').src || '';
     logo.alt = '';
-    const name = document.createElement('h2'); name.textContent = 'Build with Jaeger';
-    const hint = document.createElement('p'); hint.textContent = 'Ask about the workspace, plan a change, or delegate a task.';
-    content.append(logo, name, hint);
+    const name = document.createElement('h2'); name.textContent = 'Build with Agent';
+    const hint = document.createElement('p'); hint.textContent = 'AI responses may be inaccurate';
+    const instructions = document.createElement('p'); instructions.className = 'welcome-instructions';
+    const generate = document.createElement('button'); generate.type = 'button'; generate.textContent = 'Generate Agent Instructions';
+    generate.onclick = () => { $('prompt').value = 'Inspect this workspace and draft agent instructions for this project.'; resizePrompt(); saveDraft(); eligibility(); $('prompt').focus(); };
+    const explanation = document.createElement('span'); explanation.textContent = ' to onboard AI onto your codebase.';
+    instructions.append(generate, explanation);
+    content.append(logo, name, hint, instructions);
   } else {
     content = document.createElement('div'); content.className = 'subtle';
     content.textContent = row.detail || row.status || '';
@@ -567,13 +574,28 @@ function renderContextChips() {
     node.title = title; node.textContent = label;
     return node;
   };
-  if (context.active_file) chips.push(chip(context.active_file, `Active file: ${context.active_file}`));
-  if (context.selection) {
+  const contextChip = (key, label, description) => {
+    const node = document.createElement('button'); node.type = 'button';
+    const excluded = contextExclusions.has(key);
+    node.className = 'context-chip context-toggle' + (excluded || !ideContextOn ? ' excluded' : '');
+    node.dataset.contextKey = key;
+    node.textContent = `${label} ${excluded ? '+' : '×'}`;
+    node.title = !ideContextOn ? 'IDE context is off for the next message' : `${excluded ? 'Include' : 'Remove'} ${description} for the next message`;
+    node.setAttribute('aria-label', node.title); node.setAttribute('aria-pressed', String(!excluded && ideContextOn));
+    node.disabled = !ideContextOn;
+    node.onclick = () => {
+      if (contextExclusions.has(key)) contextExclusions.delete(key); else contextExclusions.add(key);
+      persistView(); renderContextChips();
+    };
+    return node;
+  };
+  if (context.active_file) chips.push(contextChip(`file:${context.active_file}`, context.active_file, 'active file and its selection'));
+  if (context.selection && !contextExclusions.has(`file:${context.active_file}`)) {
     const start = context.selection.start_line || context.selection.end_line || 1;
     const end = context.selection.end_line || start;
-    chips.push(chip(start === end ? `Line ${start}` : `Lines ${start}–${end}`, 'Selection included in IDE context'));
+    chips.push(contextChip(`selection:${context.active_file}`, start === end ? `Line ${start}` : `Lines ${start}–${end}`, 'selected text'));
   }
-  if (context.open_files?.length) chips.push(chip(`${context.open_files.length} open files`, context.open_files.join(', ')));
+  for (const file of context.open_files || []) chips.push(contextChip(`file:${file}`, file, 'open-file context'));
   if (diagnostics) {
     const problems = document.createElement('button');
     problems.type = 'button';
@@ -671,6 +693,7 @@ function renderChats() {
   }
   container.replaceChildren(...nodes);
   const hasConversation = Boolean((state.session?.messages || []).length || state.busy);
+  $('chat-home').hidden = !state.showHistory;
   $('chat-home').className = `chat-home${hasConversation ? ' in-conversation' : ''}`;
 }
 
@@ -694,11 +717,12 @@ function renderBackgroundTasks() {
 }
 
 function render() {
+  document.body?.classList.toggle('has-conversation', Boolean(state.session?.messages?.length || state.busy));
   $('status').textContent = state.error || !state.connected || /Cancellation|approval|Submitting/.test(state.status || '') ? (state.status || '') : '';
   const inChat = Boolean(state.session);
   $('chat-heading').textContent = inChat ? state.session.title || 'New chat' : 'Chats';
   $('back').hidden = !inChat;
-  $('prompt').placeholder = inChat ? 'Ask for follow-up changes' : 'Ask Jaeger anything';
+  $('prompt').placeholder = inChat ? 'Describe what to build' : 'Describe what to build';
   $('error').hidden = !state.error; $('error').textContent = state.error || '';
   const sid = state.session?.session_id || '';
   if (draftSession !== sid) { saveDraft(); draftSession = sid; $('prompt').value = drafts[sid] || ''; resizePrompt(); state.preview = null; state.changes = null; }
@@ -719,9 +743,18 @@ function render() {
   for (const approval of state.approvals || []) {
     const card = document.createElement('section'); card.className = 'approval';
     const text = document.createElement('p'); text.textContent = approval.prompt || approval.tool || 'Approval requested'; card.append(text);
+    const details = document.createElement('pre');
+    const metadata = approval.metadata || {};
+    const origin = approval.origin;
+    details.textContent = [metadata.summary, metadata.target, metadata.command,
+      approval.session_id ? `Conversation: ${approval.session_id}` : '',
+      approval.request_id ? `Request: ${approval.request_id}` : '',
+      origin ? `Worker: ${origin.agent_id || origin.task_id || origin.child_session_id}` : ''].filter(Boolean).join('\n').slice(0, 4000);
+    if (details.textContent) card.append(details);
     for (const [title, approved] of [['Allow once', true], ['Deny', false]]) {
       const button = document.createElement('button'); button.textContent = title;
-      button.onclick = () => post('approve', { id: approval.approval_id || approval.id, approved }); card.append(button);
+      button.disabled = state.stopping || !state.connected;
+      button.onclick = () => { if (state.stopping || !state.connected) return; post('approve', { id: approval.approval_id || approval.id, approved }); }; card.append(button);
     }
     $('approvals').append(card);
   }
@@ -813,7 +846,7 @@ const stateQueue = createFrameQueue(batch => {
     resizePrompt(); saveDraft(); eligibility(); prompt.focus();
     return;
   }
-  if (data.feedback) {
+  if (data.feedback?.messageId !== undefined) {
     const messageId = data.feedback.messageId;
     state.feedback = { ...(state.feedback || {}), [String(messageId)]: data.feedback.rating };
     render();
@@ -892,7 +925,7 @@ function renderComposerBar() {
     : state.busy ? 'Steer current turn' : 'Send message';
   $('send').setAttribute('aria-label', $('send').title);
   const workspaceLabel = state.selectedWorkspace ? state.selectedWorkspace.split('/').filter(Boolean).at(-1) : 'Work locally';
-  if ($('workspace-label')) $('workspace-label').textContent = workspaceLabel;
+  if ($('workspace-label')) $('workspace-label').textContent = 'Local';
   if ($('workspace')) {
     $('workspace').hidden = false;
     $('workspace').title = state.selectedWorkspace || 'Choose the workspace Jaeger should use';
@@ -927,7 +960,7 @@ function renderComposerBar() {
     prompt.placeholder = 'Steer active turn (type instruction & press Enter)…';
     sendBtn.classList.add('steering');
   } else {
-    prompt.placeholder = 'Ask Jaeger anything, or type / for commands';
+    prompt.placeholder = 'Describe what to build';
     sendBtn.classList.remove('steering');
   }
 
@@ -947,7 +980,8 @@ function renderComposerBar() {
   }
   $('ide-context').setAttribute('aria-pressed', String(ideContextOn));
   const summary = document.querySelector('.control-summary');
-  if (summary) summary.textContent = `${selectedTier()[0].toUpperCase()}${selectedTier().slice(1)} · ${selectedMode() === 'plan' ? 'Plan' : selectedMode() === 'auto' ? 'Auto' : 'Manual'}${ideContextOn ? ' · IDE' : ''}`;
+  if ($('permissions-label')) $('permissions-label').textContent = selectedMode() === 'auto' ? 'Auto permissions' : selectedMode() === 'plan' ? 'Plan only' : 'Default permissions';
+  if (summary) summary.textContent = `${selectedTier()[0].toUpperCase()}${selectedTier().slice(1)}`;
 }
 
 function setComposerExpanded(open) {
@@ -961,14 +995,14 @@ function setComposerExpanded(open) {
   if (!form || !options || !flow || !barLeft || !barRight || !execution) return;
   const advanced = ['mode-switch', 'autonomy-subswitch', 'jaeger-autonomous-indicator', 'ide-context', 'queue-next', 'worktree'];
   if (composerExpanded) {
-    for (const id of [...advanced, 'model-trigger', 'workspace']) { const node = $(id); if (node) flow.append(node); }
+    for (const id of advanced) { const node = $(id); if (node) flow.append(node); }
     options.hidden = false;
   } else {
     for (const id of advanced) { const node = $(id); if (node) flow.append(node); }
     const model = $('model-trigger');
     if (model) barRight.insertBefore(model, $('stop'));
     const workspace = $('workspace');
-    if (workspace) execution.insertBefore(workspace, execution.querySelector('.send-hint'));
+    if (workspace) execution.insertBefore(workspace, $('permissions') || execution.querySelector('.send-hint'));
     options.hidden = true;
   }
   form.classList.toggle('composer-expanded', composerExpanded);
@@ -996,9 +1030,16 @@ function setMode(value) {
   persistView(); renderComposerBar();
 }
 
-$('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); };
+if ($('permissions')) $('permissions').onclick = () => setComposerExpanded(!composerExpanded);
+$('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); renderContextChips(); };
 $('composer-controls-toggle').onclick = () => setComposerExpanded(!composerExpanded);
 setComposerExpanded(false);
+window.addEventListener('pointerdown', event => {
+  if (composerExpanded && !event.target?.closest?.('#composer-options, #composer-controls-toggle, #permissions')) setComposerExpanded(false);
+});
+window.addEventListener('keydown', event => {
+  if (composerExpanded && event.key === 'Escape') { setComposerExpanded(false); $('composer-controls-toggle').focus(); event.preventDefault(); }
+});
 $('workspace').onclick = () => post('selectWorkspace');
 $('worktree').onclick = () => post('selectWorktree');
 if ($('jaeger-autonomous-indicator')) $('jaeger-autonomous-indicator').onclick = () => post('info', { what: 'cognitiveRouting' });
@@ -1018,7 +1059,7 @@ $('mode-manual').onclick = () => setMode('manual');
 $('queue-next').onclick = () => {
   const text = $('prompt').value;
   if (!text.trim() || $('queue-next').hidden) return;
-  post('queue', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn, deepThink: deepThinkOn });
+  post('queue', { text, model: modelChoice, ideContext: ideContextOn, contextExclusions: [...contextExclusions], planOnly: planModeOn, deepThink: deepThinkOn });
   $('prompt').value = ''; resizePrompt(); saveDraft(); eligibility(); slashDismissed = false; renderSlashMenu();
 };
 
@@ -1075,7 +1116,7 @@ function runSlash(command, args) {
     case 'model': return openModelMenu();
     case 'workspace': return post('selectWorkspace');
     case 'worktree': return post('selectWorktree');
-    case 'plan': return args.trim() ? post('send', { text: args, model: modelChoice, ideContext: ideContextOn, planOnly: true }) : undefined;
+    case 'plan': return args.trim() ? post('send', { text: args, model: modelChoice, ideContext: ideContextOn, contextExclusions: [...contextExclusions], planOnly: true }) : undefined;
     case 'diagnostics': return post('info', { what: 'diagnostics' });
     case 'diff': return post('reviewChanges');
     case 'review': return post('reviewChanges');
@@ -1114,7 +1155,7 @@ $('composer').onsubmit = event => {
     }
     if (state.busy) { post('steer', { text }); $('prompt').value = ''; resizePrompt(); saveDraft(); eligibility(); return; }
     submittedDraftSession = draftSession;
-    post('send', { text, model: modelChoice, ideContext: ideContextOn, planOnly: planModeOn, deepThink: deepThinkOn });
+    post('send', { text, model: modelChoice, ideContext: ideContextOn, contextExclusions: [...contextExclusions], planOnly: planModeOn, deepThink: deepThinkOn });
   }
 };
 $('prompt').oninput = () => { resizePrompt(); saveDraft(); eligibility(); slashDismissed = false; slashIndex = 0; renderSlashMenu(); };

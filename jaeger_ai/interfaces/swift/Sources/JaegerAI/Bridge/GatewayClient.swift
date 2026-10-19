@@ -21,6 +21,16 @@ enum GatewayCallerToken {
     }
 
     private static func read() -> String? {
+        // An isolated attach-only test uses its own caller credentials. Never
+        // fall through to the operator Keychain when an isolated directory is set.
+        let env = ProcessInfo.processInfo.environment
+        if env["JAEGER_NATIVE_CLIENT_ONLY"] == "1", let directory = env["JAEGER_CALLER_TOKEN_DIR"] {
+            guard directory.hasPrefix("/"),
+                  let value = try? String(contentsOf: URL(fileURLWithPath: directory).appendingPathComponent("menubar.token"), encoding: .utf8)
+            else { return nil }
+            let token = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return token.isEmpty ? nil : token
+        }
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/security")
         process.arguments = ["find-generic-password", "-s", service, "-a", caller, "-w"]
@@ -222,7 +232,8 @@ struct GatewayClient: Sendable {
     func request(
         path: String,
         method: String = "GET",
-        jsonBody: [String: Any]? = nil
+        jsonBody: [String: Any]? = nil,
+        jsonData: Data? = nil
     ) async throws -> Data {
         let url: URL
         if path.contains("?") {
@@ -239,7 +250,10 @@ struct GatewayClient: Sendable {
         request.cachePolicy = .reloadIgnoringLocalCacheData
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         GatewayCallerToken.authorize(&request)
-        if let jsonBody {
+        if let jsonData {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = jsonData
+        } else if let jsonBody {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONSerialization.data(withJSONObject: jsonBody)
         }

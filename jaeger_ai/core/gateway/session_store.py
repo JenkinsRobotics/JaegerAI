@@ -320,6 +320,8 @@ class GatewaySessionStore:
 
                 CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, timestamp);
             """)
+            conn.execute("CREATE TABLE IF NOT EXISTS control_operations (operation_id TEXT PRIMARY KEY, "
+                         "fingerprint TEXT NOT NULL, status TEXT NOT NULL, receipt_json TEXT, created_at REAL NOT NULL)")
             self._migrate(conn)
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
@@ -2129,3 +2131,28 @@ class GatewaySessionStore:
             conn.execute('INSERT INTO background_deliveries VALUES(?,?,?)',
                          (key, input_fingerprint(text), json.dumps(receipt)))
             return {**receipt, 'replayed': False}
+
+    def control_operation(self, operation_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM control_operations WHERE operation_id=?", (operation_id,)).fetchone()
+        if row is None:
+            return None
+        return {"operation_id": operation_id, "status": row["status"],
+                "receipt": json.loads(row["receipt_json"]) if row["receipt_json"] else None}
+
+    def reserve_control_operation(self, operation_id: str, payload: dict[str, Any]) -> bool:
+        fingerprint = input_fingerprint(json.dumps(payload, sort_keys=True))
+        with self._immediate() as conn:
+            old = conn.execute("SELECT fingerprint FROM control_operations WHERE operation_id=?", (operation_id,)).fetchone()
+            if old:
+                if old["fingerprint"] != fingerprint:
+                    raise ValueError("Operation identity already belongs to a different action")
+                return False
+            conn.execute("INSERT INTO control_operations VALUES(?,?,'execution_unknown',NULL,?)",
+                         (operation_id, fingerprint, time.time()))
+            return True
+
+    def finish_control_operation(self, operation_id: str, receipt: dict[str, Any]) -> None:
+        with self._immediate() as conn:
+            conn.execute("UPDATE control_operations SET status='settled', receipt_json=? WHERE operation_id=?",
+                         (json.dumps(receipt), operation_id))

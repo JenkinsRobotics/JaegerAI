@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from collections import deque
 import threading
+import time
+import math
 import uuid
 from typing import Any
 
@@ -27,7 +29,9 @@ class UISpeech:
         self._active_correlation_id: str | None = None
         # Keep exactly one timed-out request subscribed until its matching
         # receipt can be reconciled by the next status/Stop/speak call.
-        self._unresolved: tuple[Any, Any, list[Any]] | None = None
+        self._unresolved: tuple[Any, Any, list[Any], Any] | None = None
+        self._amplitude = 0.0
+        self._sample_at = 0.0
 
     @property
     def active_correlation_id(self) -> str | None:
@@ -38,15 +42,28 @@ class UISpeech:
     def _reconcile_locked(self) -> None:
         if self._unresolved is None:
             return
-        bus, callback, receipts = self._unresolved
+        bus, callback, receipts, chunk_callback = self._unresolved
         if not receipts:
             return
         bus.unsubscribe(receipts[0].topic, callback)
+        from jaeger_os.contract import topics
+        bus.unsubscribe(topics.ACT_SPEECH_CHUNK, chunk_callback)
         self._unresolved = None
         self._active = None
         self._active_correlation_id = None
         self._active_bus = None
         self._lock.notify_all()
+
+    def status(self) -> dict[str, Any]:
+        """Measured output only; missing/stale samples mean silence, never a proxy."""
+        with self._lock:
+            self._reconcile_locked()
+            fresh = self._active_correlation_id is not None and time.monotonic() - self._sample_at < 0.25
+            return {"active": self._active is not None,
+                    "correlation_id": self._active_correlation_id,
+                    "amplitude": self._amplitude if fresh else 0.0,
+                    "measured": fresh,
+                    "execution_unknown": self._unresolved is not None}
 
     def _unknown_result(self) -> dict[str, Any]:
         return {"spoken": False, "acknowledged": False,
@@ -98,6 +115,16 @@ class UISpeech:
                 received.append(message)
                 acknowledged.set()
 
+        def on_chunk(message: Any) -> None:
+            if message.correlation_id != correlation_id:
+                return
+            value = float(message.amplitude)
+            with self._lock:
+                if self._active_correlation_id != correlation_id:
+                    return
+                self._amplitude = max(0.0, min(1.0, value)) if math.isfinite(value) and not message.is_final else 0.0
+                self._sample_at = time.monotonic()
+
         try:
             runtime.ensure_tts_node()
             bus = runtime.get_bus()
@@ -115,6 +142,9 @@ class UISpeech:
                     return {"spoken": False, "cancelled": True,
                             "reason": "interface speech cancelled before submission"}
                 bus.subscribe(topics.ACT_SPEECH_SPOKEN, on_ack)
+                bus.subscribe(topics.ACT_SPEECH_CHUNK, on_chunk)
+                self._amplitude = 0.0
+                self._sample_at = 0.0
                 subscribed = True
                 self._active_correlation_id = correlation_id
                 self._active_bus = bus
@@ -123,7 +153,7 @@ class UISpeech:
                 with self._lock:
                     # A late ack may have arrived at the timeout boundary.
                     if not received:
-                        self._unresolved = (bus, on_ack, received)
+                        self._unresolved = (bus, on_ack, received, on_chunk)
                         self._lock.notify_all()
                         return {"spoken": False, "acknowledged": False,
                                 "execution_unknown": True, "correlation_id": correlation_id,
@@ -147,6 +177,7 @@ class UISpeech:
                     try:
                         if subscribed:
                             bus.unsubscribe(topics.ACT_SPEECH_SPOKEN, on_ack)
+                            bus.unsubscribe(topics.ACT_SPEECH_CHUNK, on_chunk)
                     finally:
                         self._active = None
                         self._active_correlation_id = None

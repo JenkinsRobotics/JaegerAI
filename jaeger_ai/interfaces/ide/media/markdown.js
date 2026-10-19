@@ -52,6 +52,8 @@ function splitFencedText(raw) {
 // value is dropped (the element loses that attribute, so a plain <a>/<img>
 // with no destination) rather than substituted or thrown — a malformed reply
 // degrades to inert markup, not a rendering error.
+const approvedImages = new Set();
+
 function safeRenderer(smd, el) {
   const renderer = smd.default_renderer(el);
   const setAttr = renderer.set_attr;
@@ -59,6 +61,21 @@ function safeRenderer(smd, el) {
     const isHref = attr === smd.HREF;
     const isSrc = attr === smd.SRC;
     if ((isHref || isSrc) && !isSafeMarkdownUrl(value, { image: isSrc })) return;
+    if (isSrc && parseUrl(value)?.protocol === 'https:' && !approvedImages.has(value)) {
+      const image = data.nodes?.[data.index];
+      if (!image?.parentNode) return;
+      const button = image.ownerDocument.createElement('button');
+      button.type = 'button'; button.className = 'remote-image-consent';
+      button.textContent = `Load image from ${parseUrl(value).hostname}`;
+      button.title = value;
+      image.hidden = true;
+      button.onclick = () => {
+        if (approvedImages.size >= 256) approvedImages.clear();
+        approvedImages.add(value); image.src = value; image.hidden = false; button.remove();
+      };
+      image.parentNode.insertBefore(button, image);
+      return;
+    }
     setAttr(data, attr, value);
   };
   return renderer;

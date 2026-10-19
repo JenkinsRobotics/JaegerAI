@@ -23,6 +23,10 @@ final class TTSManager: ObservableObject {
 
     /// Owned speech is queued or awaiting settlement; not a microphone/audio-device measurement.
     @Published private(set) var isSpeaking: Bool = false
+    @Published private(set) var measuredAmplitude: Double = 0
+    @Published private(set) var playbackUnknown = false
+    @Published private(set) var systemSpeechActive = false
+    private var telemetryTask: Task<Void, Never>?
     @Published private(set) var lastError: String?
 
     /// Operator preference — when off, the auto-speak path in
@@ -118,6 +122,18 @@ final class TTSManager: ObservableObject {
         isSpeaking = true
         guard !draining else { return }
         draining = true
+        if speechOverride == nil {
+            telemetryTask = Task { @MainActor [weak self] in
+                while let self, self.draining, !Task.isCancelled {
+                    let result = await AgentBridge.shared.query("speech_status")
+                    if Task.isCancelled { break }
+                    let object = result.json.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                    self.measuredAmplitude = (object?["measured"] as? Bool == true) ? min(1, max(0, object?["amplitude"] as? Double ?? 0)) : 0
+                    self.playbackUnknown = object?["execution_unknown"] as? Bool ?? false
+                    try? await Task.sleep(for: .milliseconds(70))
+                }
+            }
+        }
         Task { @MainActor in await drain() }
     }
 
@@ -148,6 +164,8 @@ final class TTSManager: ObservableObject {
             item.completion?.resume(returning: completed)
         }
         draining = false
+        telemetryTask?.cancel(); telemetryTask = nil
+        measuredAmplitude = 0
         isSpeaking = false
     }
 
@@ -221,11 +239,13 @@ final class TTSManager: ObservableObject {
         case .failed(let reason): return .failed(reason)
         case .useApple:
             guard epoch == self.epoch else { return .failed("Speech cancelled before submission.") }
+            systemSpeechActive = true
             let completed = await withCheckedContinuation { continuation in
                 appleSpeech.speak(text: body) { completed in
                     continuation.resume(returning: completed)
                 }
             }
+            systemSpeechActive = false
             return completed ? .spoken : .failed("System speech did not complete playback.")
         }
     }
@@ -233,6 +253,8 @@ final class TTSManager: ObservableObject {
     /// Cancel queued demand immediately. Keep active ownership until its
     /// completion/timeout; requesting Stop does not confirm device silence.
     func stop() {
+        measuredAmplitude = 0
+        systemSpeechActive = false
         epoch &+= 1
         for item in pending { item.completion?.resume(returning: false) }
         pending.removeAll()

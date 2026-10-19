@@ -432,7 +432,10 @@ class TTSNode(Node):
         """Publish real output RMS at 30 Hz; missing telemetry means silence."""
         interval_s = 1.0 / 30.0
         while not stop_event.is_set():
-            amplitude = max(0.0, min(1.0, float(getattr(self.synthesizer, "amplitude", 0.0))))
+            try:
+                amplitude = max(0.0, min(1.0, float(getattr(self.synthesizer, "amplitude", 0.0))))
+            except (AttributeError, TypeError, ValueError):
+                amplitude = 0.0
             try:
                 self.publish(topics.TtsChunk(
                     amplitude=amplitude,

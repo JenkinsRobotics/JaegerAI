@@ -119,3 +119,19 @@ __all__ = [
     "pause_job",
     "resume_job",
 ]
+
+
+def update_job(name: str, *, prompt: str, schedule: str) -> dict[str, Any]:
+    """Edit one existing schedule atomically without resurrecting or unpausing it."""
+    from datetime import datetime, timezone
+    from croniter import croniter
+    from jaeger_agent.memory import sqlite_store
+    if not prompt.strip() or not croniter.is_valid(schedule):
+        raise ValueError("A prompt and valid cron expression are required")
+    next_fire = croniter(schedule, datetime.now().astimezone()).get_next(datetime).astimezone(timezone.utc).isoformat(timespec="seconds")
+    with sqlite_store.writer() as conn:
+        changed = conn.execute("UPDATE schedules SET cron=?, prompt=?, next_fire_at=? WHERE schedule_id=? AND status IN ('active','paused')",
+                               (schedule, prompt.strip(), next_fire, name)).rowcount
+        if not changed:
+            raise ValueError("Schedule not found or no longer editable")
+    return {"updated": True, "name": name}
