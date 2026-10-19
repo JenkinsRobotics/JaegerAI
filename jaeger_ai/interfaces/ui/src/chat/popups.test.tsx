@@ -21,7 +21,7 @@ describe("⌘K Jump to", () => {
   it("filters Bots and actions, moves with arrows and opens with Enter", async () => {
     const onAgent = vi.fn(); const run = vi.fn(); const onClose = vi.fn();
     await act(async () => { root.render(<JumpTo open agents={agents} actions={[{ id: "settings", label: "Settings", run }]} onAgent={onAgent} onClose={onClose} />); });
-    const input = document.querySelector<HTMLInputElement>('input[aria-label="Jump to"]')!;
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Search"]')!;
     expect([...document.querySelectorAll('[role="option"]')].length).toBe(3);
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "des"); input.dispatchEvent(new Event("input", { bubbles: true })); });
     expect([...document.querySelectorAll('[role="option"]')].map((o) => o.textContent)).toEqual([expect.stringMatching(/designer/i)]);
@@ -29,10 +29,17 @@ describe("⌘K Jump to", () => {
     expect(onAgent).toHaveBeenCalledWith("native:designer");
     expect(onClose).toHaveBeenCalled();
   });
+  it("shows each bot's one-line description and an unread dot (Grok's Search rows)", async () => {
+    const summaries = [{ id: "native:builder", last_preview: "Building the release", last_activity_at: 100, unseen: true }] as never;
+    await act(async () => { root.render(<JumpTo open agents={agents} actions={[]} summaries={summaries} seen={{}} onAgent={vi.fn()} onClose={vi.fn()} />); });
+    expect(document.body.textContent).toContain("Building the release");
+    expect(document.querySelectorAll('[aria-label="Unread"]').length).toBe(1);
+    expect(document.querySelector('input[aria-label="Search"]')!.getAttribute("placeholder")).toBe("Search");
+  });
   it("says No matches for a query with no hits, and Esc closes", async () => {
     const onClose = vi.fn();
     await act(async () => { root.render(<JumpTo open agents={agents} actions={[]} onAgent={vi.fn()} onClose={onClose} />); });
-    const input = document.querySelector<HTMLInputElement>('input[aria-label="Jump to"]')!;
+    const input = document.querySelector<HTMLInputElement>('input[aria-label="Search"]')!;
     await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "zzz"); input.dispatchEvent(new Event("input", { bubbles: true })); });
     expect(document.body.textContent).toContain('No matches for "zzz"');
     await key(input, "Escape");
