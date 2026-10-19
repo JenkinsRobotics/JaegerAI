@@ -27,6 +27,14 @@ export interface Agent {
   metadata?: Record<string, unknown>;
   /** PROPOSED: the agent's skills (GET /v1/agents and the specialist/role responses). */
   skills?: AgentSkill[];
+  /** PROPOSED (agent-menu spec sent to the Gateway bot): optional; absent on today's gateway. */
+  pinned?: boolean;
+  pin_order?: number | null;
+  section_id?: string | null;
+  unread_count?: number;
+  last_read_message_id?: string | null;
+  primary?: boolean;
+  last_message?: { id: string; created_at: string | number; kind?: string; preview?: string; author?: string } | null;
   /** Tool allow-list; unchanged on the wire. */
   allowed_tools?: string[];
 }
