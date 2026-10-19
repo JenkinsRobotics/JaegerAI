@@ -1,10 +1,6 @@
-/* Agent context-menu actions, exactly the spec sent to the Gateway bot (2026-10-19):
- *   POST /v1/agents/{id}/read {message_id|null} · PATCH /v1/agents/{id} {pinned}|{hidden}|{section_id}|{enabled}
- *   GET/POST /v1/sections · PATCH/DELETE /v1/sections/{id} · POST /v1/agents/{id}/duplicate {name?} → 201 agent
- *   DELETE /v1/agents/{id} → 204 (soft delete; 409 protected_agent for the primary and native:jaeger)
- *   GET /v1/agents/{id}/template
- * Capabilities are read from the agents payload: today's gateway sends none of the new fields, so every new item
- * is hidden there (Mark Read and Pin fall back to the device-local seen mark and pins). */
+/* Agent menu capability negotiation. Only explicit ui_actions from the server enable
+ * remote actions; absent/false is unavailable. Device-local pins/seen marks are separate.
+ * Canonical Gateway currently supports read through POST /v1/agents/{id}/seen only. */
 import type { Agent } from "./types";
 
 export interface Section { id: string; name: string; order?: number }
@@ -23,13 +19,11 @@ export interface AgentActions {
 export interface AgentCaps { read: boolean; pin: boolean; hide: boolean; sections: boolean; duplicate: boolean; remove: boolean; template: boolean }
 export const NO_CAPS: AgentCaps = { read: false, pin: false, hide: false, sections: false, duplicate: false, remove: false, template: false };
 
-/** Which server-backed items this gateway supports, from the fields its GET /v1/agents items carry. */
+/** Intersection of explicit actions for the selected agents; no identity-field guessing. */
 export function agentCaps(agents: Agent[], actions?: AgentActions): AgentCaps {
   if (!actions || !agents.length) return NO_CAPS;
-  const has = (k: keyof Agent) => agents.some((a) => k in a);
-  const spec = has("primary") && has("unread_count");
-  return { read: has("unread_count"), pin: has("pinned"), hide: has("hidden") && spec, sections: has("section_id"), duplicate: spec, remove: spec, template: spec };
+  return Object.fromEntries(Object.keys(NO_CAPS).map((key) => [key, agents.every((a) => a.ui_actions?.[key as keyof AgentCaps] === true)])) as unknown as AgentCaps;
 }
 
 /** The primary agent and native:jaeger are protected (409 protected_agent): never offer Delete for them. */
-export const isProtected = (a: Pick<Agent, "id" | "primary">) => Boolean(a.primary) || a.id === "native:jaeger";
+export const isProtected = (a: Pick<Agent, "id" | "primary" | "role">) => Boolean(a.primary) || a.role === "lead" || a.id === "native:jaeger";

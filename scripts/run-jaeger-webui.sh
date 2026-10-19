@@ -64,7 +64,6 @@ fi
 export JAEGER_GATEWAY_URL
 export JAEGER_OLLAMA_URL="${JAEGER_OLLAMA_URL:-http://127.0.0.1:11434}"
 export HERMES_WEBUI_EXTENSION_DIR="$repo_root/jaeger_ai/assets"
-export HERMES_WEBUI_EXTENSION_SCRIPT_URLS=/extensions/jaeger_webui_branding.js
 export HERMES_WEBUI_FOREGROUND=1
 
 export PYTHONPATH="${repo_root}${PYTHONPATH:+:$PYTHONPATH}"

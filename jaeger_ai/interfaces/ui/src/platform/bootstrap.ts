@@ -7,3 +7,7 @@ applyHostAttributes(detectHost());
 try {
   if (!localStorage.getItem("aether-appearance")) localStorage.setItem("aether-appearance", "light");
 } catch { /* storage unavailable: Aether falls back to System */ }
+
+import { applyTextSize, storedTextSize } from "../settings/textSize";
+applyTextSize(storedTextSize(), false);
+window.addEventListener("storage", (event) => { if (event.key === "jaeger.ui.text-size" || event.key === null) applyTextSize(storedTextSize(), false); });

@@ -47,12 +47,17 @@ type MicStatus = { available?: boolean; permission?: string; speech_permission?:
 type TtsStatus = { available?: boolean };
 
 /** Dictation needs a mic (input present, mic + speech permission not denied); voice chat also needs a
- * voice to speak with. A shell that predates these fields counts as having both once it answers. */
+ * voice to speak with. Unknown/older status payloads do not imply availability. */
 export async function probeSpeech(): Promise<{ dictation: boolean; voiceChat: boolean }> {
   if (!nativeBridge()) return { dictation: false, voiceChat: false };
   const [mic, tts] = await Promise.all([postNative<MicStatus>("mic.status"), postNative<TtsStatus>("tts.status")]);
-  const micOk = !notImplemented(mic) && mic?.available !== false && mic?.permission !== "denied" && mic?.speech_permission !== "denied";
-  const ttsOk = !notImplemented(tts) && tts?.available !== false;
+  return speechAvailability(mic, tts);
+}
+
+/** Pure status projection: unknown fields never imply a working voice path. */
+export function speechAvailability(mic: MicStatus | undefined, tts: TtsStatus | undefined) {
+  const micOk = !notImplemented(mic) && mic?.available === true && mic?.permission !== "denied" && mic?.speech_permission !== "denied";
+  const ttsOk = !notImplemented(tts) && tts?.available === true;
   return { dictation: micOk, voiceChat: micOk && ttsOk };
 }
 

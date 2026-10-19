@@ -22,6 +22,7 @@ import { TasksBoard } from "./tasks/TasksBoard";
 import { PhoneChat, PhoneList } from "./phone/PhoneShell";
 import { usePhone } from "./phone/usePhone";
 import { AgentContextMenu, AgentPrompt, type AgentMenuAction } from "./agents/AgentContextMenu";
+import { capabilitiesOf, type HostCapabilities } from "./chat/hostH8";
 import { agentCaps } from "./api/agentActions";
 import type { Agent } from "./api/types";
 import "./phone/phone.css";
@@ -68,6 +69,14 @@ export function App({ source }: { source: JaegerSource }) {
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [connectOpen, setConnectOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsCaps, setSettingsCaps] = useState<HostCapabilities>(() => capabilitiesOf(host));
+  useEffect(() => {
+    if (!settingsOpen) return;
+    let live = true;
+    setSettingsCaps(capabilitiesOf(host));
+    if (host instanceof NativeHost) void host.probeCapabilities().then((caps) => { if (live) setSettingsCaps({ ...caps }); }).catch(() => { if (live) setSettingsCaps({ voice: false }); });
+    return () => { live = false; };
+  }, [host, settingsOpen]);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [newChatAnchor, setNewChatAnchor] = useState<HTMLElement | null>(null);
   const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null);
@@ -135,14 +144,17 @@ export function App({ source }: { source: JaegerSource }) {
   }, [newChat, selectedAgentId]);
 
   const actions = source.agentActions;
-  const caps = agentCaps(store.agents, actions);
-  const copy = (text: string, done: string) => navigator.clipboard?.writeText(text).then(() => setNotice(done), () => setNotice("Couldn't copy"));
+  const caps = agentCaps(agentMenu ? store.agents.filter((a) => a.id === agentMenu.agentId) : store.agents, actions);
+  const copy = (text: string, done: string) => host.copy(text).then(() => setNotice(done), () => setNotice("Couldn't copy"));
   const fail = (what: string) => (error: unknown) => setNotice((error as { status?: number })?.status === 409 ? "This agent is protected and can't be deleted" : `Couldn't ${what}: ${message(error)}`);
   const onAgentAction = (action: AgentMenuAction, agent: Agent) => {
     switch (action) {
+      case "open": setSelection({ type: "agent", agentId: agent.id }); setDetailsAgentId(null); setHistoryAgentId(null); setPhoneView("chat"); return;
+      case "profile": setHistoryAgentId(null); setDetailsAgentId(agent.id); return;
+      case "history": setDetailsAgentId(null); setHistorySessionId(undefined); setHistoryAgentId(agent.id); return;
       case "read":
-        store.seeAgent(agent.id);
-        if (caps.read && actions) void actions.markRead(agent.id, agent.last_message?.id ?? null).then(() => store.refresh(), fail("mark it read"));
+        if (caps.read && actions) void actions.markRead(agent.id, agent.last_message?.id ?? null).then(() => { store.seeAgent(agent.id); return store.refresh(); }, fail("mark it read"));
+        else store.seeAgent(agent.id);
         return;
       case "pin": case "unpin": {
         const on = action === "pin";
@@ -248,7 +260,7 @@ export function App({ source }: { source: JaegerSource }) {
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
         onNewChat={newChat} onCreateAgent={createAgent} />
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={host.capabilities} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
         onAgent={(agentId) => { setSelection({ type: "agent", agentId }); if (phone) setPhoneView("chat"); }}

@@ -1,12 +1,12 @@
 .jg-settings { display: grid; gap: 10px; min-width: 340px; }
 .jg-settings__heading { margin: 0; font-size: 11px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; color: var(--aether-color-text-muted); }
 .jg-settings__group { border: 0; padding: 0; margin: 0; display: grid; gap: 2px; }
-.jg-settings__label { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.jg-settings__label { font-size: var(--jg-font-small); font-weight: 600; margin-bottom: 6px; }
 .jg-settings__option { display: grid; grid-template-columns: 18px 1fr; column-gap: 8px; align-items: center; padding: 7px 8px; border-radius: 8px; cursor: pointer; }
 .jg-settings__option:hover { background: var(--aether-color-surface-hover, rgba(127, 127, 127, .08)); }
 .jg-settings__option.is-selected { background: var(--aether-color-surface-selected, rgba(127, 127, 127, .12)); }
 .jg-settings__option input { margin: 0; accent-color: var(--aether-color-accent); }
-.jg-settings__name { font-size: 13px; }
+.jg-settings__name { font-size: var(--jg-font-small); }
 .jg-settings__hint { grid-column: 2; font-size: 12px; color: var(--aether-color-text-muted); }
 
 /* ⌘K Search (agents/JumpTo.tsx): measured from final-check/grok-cmdk.png — a ~545px panel ~19% from the top over a
@@ -20,7 +20,7 @@
 .jg-palette__search-icon { opacity: .55; }
 .jg-palette__input { flex: 1; min-width: 0; border: 0; outline: none; padding: 15px 0 14px; font: inherit; font-size: 15px; background: transparent; color: inherit; }
 .jg-palette__list { overflow-y: auto; padding: 8px; }
-.jg-palette__row { display: flex; align-items: center; gap: 12px; padding: 4px 10px; min-height: 34px; border-radius: 10px; cursor: default; font-size: 13.5px; }
+.jg-palette__row { display: flex; align-items: center; gap: 12px; padding: 4px 10px; min-height: 34px; border-radius: 10px; cursor: default; font-size: var(--jg-font-small); }
 .jg-palette__row.has-desc { min-height: 43px; }
 .jg-palette__row.is-active { background: color-mix(in srgb, currentColor 7%, transparent); }
 .jg-palette__text { flex: 1; min-width: 0; display: grid; gap: 0; line-height: 1.3; }
@@ -42,7 +42,7 @@
 .jg-sheet__nav { width: 200px; flex: none; padding: 16px 12px; display: grid; align-content: start; gap: 2px;
   border-right: 1px solid color-mix(in srgb, currentColor 7%, transparent); }
 .jg-sheet__tab { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 10px; border: 0; border-radius: 8px;
-  background: none; color: inherit; font: inherit; font-size: 13.5px; text-align: left; cursor: default; }
+  background: none; color: inherit; font: inherit; font-size: var(--jg-font-small); text-align: left; cursor: default; }
 .jg-sheet__tab .jg-icon { opacity: .75; }
 .jg-sheet__tab:hover { background: color-mix(in srgb, currentColor 5%, transparent); }
 .jg-sheet__tab.is-active { background: color-mix(in srgb, currentColor 8%, transparent); }
@@ -54,11 +54,11 @@
 .jg-sheet__section { margin-bottom: 22px; }
 .jg-sheet__section-title { margin: 0 0 8px; font-size: 12.5px; font-weight: 400; color: var(--aether-color-text-muted); }
 .jg-sheet__card { display: grid; padding: 4px 14px; border-radius: 12px; border: 1px solid color-mix(in srgb, currentColor 7%, transparent); }
-.jg-sheet__row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; font-size: 13.5px; }
-.jg-sheet__row-label { display: grid; gap: 2px; font-size: 13.5px; }
+.jg-sheet__row { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 48px; font-size: var(--jg-font-small); }
+.jg-sheet__row-label { display: grid; gap: 2px; font-size: var(--jg-font-small); }
 .jg-sheet__hint { font-size: 12px; color: var(--aether-color-text-muted); }
-.jg-sheet__value { font-size: 13px; color: var(--aether-color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.jg-sheet__select { font: inherit; font-size: 13px; height: 30px; padding: 0 8px; border-radius: 8px; color: inherit;
+.jg-sheet__value { font-size: var(--jg-font-small); color: var(--aether-color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-sheet__select { font: inherit; font-size: var(--jg-font-small); height: 30px; padding: 0 8px; border-radius: 8px; color: inherit;
   border: 1px solid color-mix(in srgb, currentColor 12%, transparent); background: var(--aui-color-surface-raised, transparent); }
 .jg-sheet__radios { border: 0; margin: 0; padding: 10px 0 6px; display: grid; gap: 2px; }
 .jg-sheet__radios legend { float: left; width: 100%; margin-bottom: 6px; }
@@ -68,3 +68,13 @@
 .jg-switch.is-on { background: var(--aether-color-accent); }
 .jg-switch.is-on span { transform: translateX(14px); }
 @media (prefers-reduced-motion: reduce) { .jg-switch span { transition: none; } }
+
+@media (max-width: 680px), (max-height: 500px) {
+  .jg-sheet__scrim { padding: 8px; }
+  .jg-sheet { flex-direction: column; }
+  .jg-sheet__nav { width: auto; display: flex; overflow-x: auto; padding: 8px; border-right: 0; flex-shrink: 0; }
+  .jg-sheet__tab { flex-shrink: 0; }
+  .jg-sheet__page { padding: 22px 16px; }
+  .jg-sheet__row { flex-wrap: wrap; padding: 8px 0; gap: 8px; }
+  .jg-sheet__value { white-space: normal; overflow-wrap: anywhere; }
+}

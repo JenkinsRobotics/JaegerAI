@@ -476,11 +476,17 @@ def list_agents(*args, **kwargs):
     return get_default_registry().list_agents(*args, **kwargs)
 
 
+def _agent_menu_actions() -> dict[str, bool]:
+    """Supported presentation actions, not caller authorization or new grants."""
+    return {"read": True}
+
+
 def with_roster_flags(record) -> dict[str, Any]:
-    """``to_dict`` plus explicit ``hidden`` / ``disabled`` booleans (Agents View roster)."""
+    """Roster projection: hidden/disabled flags and explicit supported menu actions."""
     from jaeger_ai.core.agent_registry.specialists import is_test_agent
 
     out = record.to_dict()
+    out["ui_actions"] = _agent_menu_actions()
     out["hidden"] = bool(is_test_agent(record))
     out["disabled"] = bool(getattr(record, "disabled", False))
     return out
@@ -490,6 +496,7 @@ def _with_hidden(record) -> dict[str, Any]:
     from jaeger_ai.core.agent_registry.specialists import is_test_agent
 
     out = record.to_dict()
+    out["ui_actions"] = _agent_menu_actions()
     if is_test_agent(record):
         out["hidden"] = True
     return out

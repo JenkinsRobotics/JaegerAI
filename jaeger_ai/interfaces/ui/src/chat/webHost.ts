@@ -204,7 +204,7 @@ export class WebHost implements ChatHost {
   };
 
   openExternal(url: string) { window.open(url, "_blank", "noopener"); }
-  async copy(text: string) { await navigator.clipboard?.writeText(text); }
+  async copy(text: string) { if (!navigator.clipboard) throw new Error("Clipboard unavailable on this device"); await navigator.clipboard.writeText(text); }
   async listAgents(): Promise<ChatAgentRef[]> {
     return (await this.source.agents()).map((a) => ({ id: a.id, name: a.display_name ?? a.name }));
   }
