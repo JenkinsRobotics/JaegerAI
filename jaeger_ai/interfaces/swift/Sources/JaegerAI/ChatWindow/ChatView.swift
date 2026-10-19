@@ -108,7 +108,7 @@ struct ChatView: View {
                         if chat.hasActiveTurn || chat.stopNotice != nil {
                             ChatRunStatusView(startedAt: turnStartedAt ?? chat.messages.last?.timestamp ?? .now,
                                               status: chat.turnControlLabel, canStop: chat.canStopTurn) {
-                                Task { await chat.stopCurrentTurn() }
+                                chat.requestStopCurrentTurn()
                             }
                         }
                         if ChatSurfaceFeatureFlags.useWebUITranscript {
@@ -934,7 +934,7 @@ struct ChatView: View {
             level: voice.levelMeter, queuedMessages: chat.pendingSends.map(\.display),
             agenticTools: $chat.agenticTools,
             onSend: sendCurrent,
-            onStop: { Task { await chat.stopCurrentTurn() } },
+            onStop: { chat.requestStopCurrentTurn() },
             onAttach: pickAttachments,
             onSelectModel: { chat.showModelPicker = true },
             onSelectMode: { chat.setOperatingMode($0) },
@@ -1048,6 +1048,12 @@ struct ChatView: View {
 
             if chat.isSending {
                 ProgressView().controlSize(.mini)
+            }
+
+            if chat.queuePausedByStop && !chat.pendingSends.isEmpty {
+                Button("Resume queued messages") { Task { await chat.resumeQueuedMessages() } }
+                    .disabled(!chat.canResumeQueue)
+                    .help("Resume this session's retained messages after the backend has settled. Unknown outcomes require reconciliation first.")
             }
 
             if !chat.pendingSends.isEmpty {
