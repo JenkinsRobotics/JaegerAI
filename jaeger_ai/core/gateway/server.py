@@ -2633,12 +2633,15 @@ class JaegerGatewayApp:
 
     async def handle_get_session(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
-        session = self.store.get_session(session_id)
+        conversation = request.query.get("view") == "conversation"
+        session = self.store.get_session(session_id, conversation=True) if conversation else self.store.get_session(session_id)
         if not session:
             return web.json_response({"error": "Session not found"}, status=404)
         # Surfaces chrome polls GET without SSE — stamp role/display_name
         # after handoff so the UI can render the active agent identity.
         payload = self._enrich_session_agent(session)
+        if conversation:
+            return web.json_response(payload)
         # Recovery clients need a scoped control identity even when they did
         # not submit this turn. Do not expose input/output through this field.
         latest = self.store.latest_request(session_id)

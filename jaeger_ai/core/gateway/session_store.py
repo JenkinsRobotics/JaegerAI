@@ -641,8 +641,10 @@ class GatewaySessionStore:
                 "alive": pid_is_alive(int(row["owner_pid"])),
             }
 
-    def get_session(self, session_id: str) -> dict[str, Any] | None:
+    def get_session(self, session_id: str, *, conversation: bool = False) -> dict[str, Any] | None:
         with self._get_conn() as conn:
+            if conversation:
+                conn.execute("BEGIN")  # one read snapshot: transcript, receipt and replay cursor
             row = conn.execute("SELECT * FROM sessions WHERE session_id = ?", (session_id,)).fetchone()
             if not row:
                 return None
@@ -651,7 +653,7 @@ class GatewaySessionStore:
                 (session_id,),
             ).fetchall()
             meta = _row_meta(row["metadata_json"])
-            return {
+            payload = {
                 "session_id": row["session_id"],
                 "title": row["title"],
                 "profile": row["profile"],
@@ -674,6 +676,37 @@ class GatewaySessionStore:
                     for m in messages
                 ],
             }
+
+            if conversation:
+                request_row = conn.execute(
+                    "SELECT * FROM client_requests WHERE session_id=? "
+                    "AND status NOT IN ('queued', 'paused') ORDER BY created_at DESC LIMIT 1",
+                    (session_id,),
+                ).fetchone()
+                latest = self._request_row(request_row) if request_row else None
+                payload["latest_request"] = ({key: latest.get(key) for key in (
+                    "session_id", "request_id", "turn_id", "status", "updated_at", "finished_at",
+                )} if latest else None)
+                payload["event_cursor"] = conn.execute(
+                    "SELECT COALESCE(MAX(event_id), 0) FROM events WHERE session_id IN (?, '*')",
+                    (session_id,),
+                ).fetchone()[0]
+                partial = []
+                # A terminal assistant message already contains the final text.
+                has_answer = latest and any(
+                    m["role"] == "assistant" and m["timestamp"] >= latest["created_at"]
+                    for m in messages
+                )
+                if latest and not has_answer:
+                    for event in conn.execute(
+                        "SELECT data_json FROM activity_history WHERE session_id=? AND event='turn.delta' ORDER BY event_id",
+                        (session_id,),
+                    ):
+                        data = json.loads(event["data_json"] or "{}")
+                        if data.get("request_id") == latest["request_id"] and isinstance(data.get("delta"), str):
+                            partial.append(data["delta"])
+                payload["partial_text"] = "".join(partial)
+            return payload
 
     def ensure_session(
         self,
