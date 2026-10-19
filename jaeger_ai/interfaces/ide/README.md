@@ -174,3 +174,24 @@ over Tailscale to your persistent Jaeger Gateway running on your home server/Mac
    SecretStorage via `context.secrets` and is never written to plaintext settings or synced.
 4. **Choose default model:** Run **Jaeger: Select Default Model** or click the model picker
    in the footer to choose from the server's available models (including Ollama Cloud models).
+
+
+## 0.1.4 candidate: native chat and build identity
+
+Native `@jaeger` chat streams answer deltas, reconnects observation from its last
+cursor without resending the task, and distinguishes a cancellation request from
+a confirmed cancelled receipt. Pending approvals provide an **Open Jaeger
+conversation** button for the existing panel's approval controls. The native
+participant and panel use the same editor-request responder.
+
+Automatic editor context and diagnostics are restricted to the selected workspace;
+agent-requested file opens outside that canonical root are refused. Explicit file
+mentions search the selected workspace/worktree, including one outside the open
+VS Code folders. Existing selected-file/selection chips show the resulting context.
+
+**Jaeger: Connection Diagnostics** prints the local extension version and packaged
+build identity before checking the Gateway. `build.json` records the source
+revision, whether source inputs were dirty, and hashes of the staged files; an
+unpackaged checkout identifies itself as unpackaged. Version 0.1.4 distinguishes
+this candidate from the installed 0.1.3 build. Packaging alone does not install or
+reload an extension.

@@ -217,3 +217,20 @@ test('renderChats populates chat-list from state.sessions', () => {
   assert.deepEqual(titles, ['First Conversation', 'Second Conversation']);
 });
 
+
+test('removable context chips send exclusions for both immediate and queued turns', () => {
+  const { nodes, listeners, messages } = bootView();
+  const receive = data => listeners.find(item => item.name === 'message').callback({ data });
+  receive({ connected: true, busy: false, ideContext: { active_file: 'a.py', selection: { start_line: 1, end_line: 2 }, open_files: ['b.py'] } });
+  const chip = key => nodes.get('context-chips').children.find(item => item.dataset?.contextKey === key);
+  chip('selection:a.py').onclick(); chip('file:b.py').onclick();
+  nodes.get('prompt').value = 'Inspect'; nodes.get('prompt').oninput();
+  nodes.get('composer').onsubmit({ preventDefault() {} });
+  assert.deepEqual(Array.from(messages.at(-1).contextExclusions), ['selection:a.py', 'file:b.py']);
+  receive({ busy: true }); nodes.get('prompt').value = 'Next'; nodes.get('prompt').oninput();
+  nodes.get('queue-next').onclick();
+  assert.equal(messages.at(-1).type, 'queue');
+  assert.deepEqual(Array.from(messages.at(-1).contextExclusions), ['selection:a.py', 'file:b.py']);
+  chip('selection:a.py').onclick();
+  assert.match(chip('selection:a.py').title, /Remove/);
+});

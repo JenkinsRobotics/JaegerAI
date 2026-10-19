@@ -500,12 +500,7 @@ class Conversation {
   }
   // ``ideHandler`` is supplied by the extension host (it owns the VS Code API).
   async answerIde(sid, request) {
-    if (!this.ideHandler || !request?.ide_request_id) return;
-    let body;
-    try { body = { ok: true, result: await this.ideHandler(request.kind, request.args || {}) }; }
-    catch (error) { body = { ok: false, error: String(error?.message || error) }; }
-    try { await this.gateway.ideResult(sid, request.ide_request_id, body); }
-    catch { /* another window answered first, or the request expired */ }
+    return answerIdeRequest(this.gateway, this.ideHandler, sid, request);
   }
   async cancel() {
     if (this.pendingTask) {
@@ -747,7 +742,17 @@ class Conversation {
   }
   dispose() { clearTimeout(this.reconnectTimer); this.disposed = true; ++this.epoch; this.observer?.abort(); }
 }
+// Both the panel and native chat answer the same Gateway editor requests.
+async function answerIdeRequest(gateway, handler, sid, request) {
+  if (!handler || !request?.ide_request_id) return;
+  let body;
+  try { body = { ok: true, result: await handler(request.kind, request.args || {}) }; }
+  catch (error) { body = { ok: false, error: String(error?.message || error) }; }
+  try { await gateway.ideResult(sid, request.ide_request_id, body); }
+  catch { /* another window answered first, or the request expired */ }
+}
+
 module.exports = {
-  Conversation, COMPLETED_TIMELINE_SESSION_LIMIT, COMPLETED_TIMELINE_ROW_LIMIT,
+  answerIdeRequest, Conversation, COMPLETED_TIMELINE_SESSION_LIMIT, COMPLETED_TIMELINE_ROW_LIMIT,
   COMPLETED_TIMELINE_TEXT_LIMIT,
 };
