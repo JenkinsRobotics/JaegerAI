@@ -164,9 +164,10 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var isStopping = false
     private var controlRefreshing = false
     private var controlReadAvailable = false
-    private var queuePausedByStop = false
+    @Published private(set) var queuePausedByStop = false
     private var stopRequestedIDs: Set<String> = []
-    private let controlGateway: GatewayClient = .fromEnvironment()
+    private var resumedAfterStopIDs: Set<String> = []
+    private let controlGateway: any SessionControlClient
 
     var hasActiveTurn: Bool {
         isSending || (controlledRequest?.session_id == sessionKey && controlledRequest?.isActive == true) ||
@@ -185,18 +186,20 @@ final class ChatViewModel: ObservableObject {
     }
 
     /// The server is the authority even when this window did not send the turn.
-    func refreshTurnControl() async {
-        guard sessionKey != "dispatcher", !controlRefreshing else { return }
+    @discardableResult
+    func refreshTurnControl() async -> Bool {
+        guard sessionKey != "dispatcher", !controlRefreshing else { return false }
         controlRefreshing = true
         defer { controlRefreshing = false }
         let selected = sessionKey
         do {
             let session = try await controlGateway.getSessionControl(id: selected)
-            guard selected == sessionKey else { return }
+            guard selected == sessionKey else { return false }
             controlReadAvailable = true
             controlledRequest = session.latest_request
             if let request = controlledRequest, request.status == "cancelling" ||
                 request.status == "cancelled" || request.status == "execution_unknown" {
+                if !resumedAfterStopIDs.contains(request.request_id) { queuePausedByStop = true }
                 stopNotice = request.stopLabel
             } else if let request = controlledRequest, request.isActive, stopRequestedIDs.contains(request.request_id) {
                 stopNotice = "Stop unconfirmed — waiting for backend observation; cancellation will not be resent"
@@ -206,48 +209,94 @@ final class ChatViewModel: ObservableObject {
             if session.status == "running" && controlledRequest == nil {
                 stopNotice = "Current request identity unavailable — update Gateway before using scoped Stop"
             }
+            return true
         } catch {
-            guard selected == sessionKey else { return }
+            guard selected == sessionKey else { return false }
             controlReadAvailable = false
             stopNotice = "Stop status unavailable — work may still be running. " + error.localizedDescription
+            return false
         }
     }
 
+    /// Capture the displayed target synchronously in the button callback.
+    func requestStopCurrentTurn() {
+        let selected = sessionKey
+        let displayed = controlledRequest
+        if selected == "dispatcher" { controlDispatcher("cancel"); return }
+        Task { await stopTurn(displayed: displayed, selected: selected) }
+    }
+
     func stopCurrentTurn() async {
-        guard !isStopping else { return }
+        let selected = sessionKey
+        let displayed = controlledRequest
+        if selected == "dispatcher" { controlDispatcher("cancel"); return }
+        await stopTurn(displayed: displayed, selected: selected)
+    }
+
+    private func stopTurn(displayed: GatewayClient.RequestState?, selected: String) async {
+        guard !isStopping, selected == sessionKey else { return }
         TTSManager.shared.stop()
-        queuePausedByStop = true // Keep queued text; do not auto-start another turn after Stop.
-        if sessionKey == "dispatcher" {
-            controlDispatcher("cancel")
-            return
-        }
-        let requestedSession = sessionKey
-        isStopping = true
-        defer { isStopping = false }
-        await refreshTurnControl()
-        guard requestedSession == sessionKey, controlReadAvailable else { return }
-        guard let target = controlledRequest, target.session_id == sessionKey, target.canCancel else {
-            stopNotice = controlledRequest?.stopLabel ?? "Cannot stop: no authoritative active request identity. Refresh to recover it."
+        queuePausedByStop = true
+        guard let target = displayed, target.session_id == selected, target.canCancel else {
+            stopNotice = displayed?.stopLabel ?? "Cannot stop: no authoritative displayed request identity"
             return
         }
         guard !stopRequestedIDs.contains(target.request_id) else {
             stopNotice = "Stop already requested — refresh to observe the outcome"
             return
         }
-        let selected = sessionKey
-        stopRequestedIDs.insert(target.request_id)
-        stopNotice = "Requesting cancellation…"
+        isStopping = true
+        defer { isStopping = false }
         do {
-            let receipt = try await controlGateway.cancelTurn(sessionID: selected, requestID: target.request_id)
+            let observed = try await controlGateway.getSessionControl(id: selected)
             guard selected == sessionKey else { return }
+            controlledRequest = observed.latest_request
+            controlReadAvailable = true
+            guard let current = observed.latest_request,
+                  current.session_id == target.session_id,
+                  current.request_id == target.request_id else {
+                stopNotice = "Displayed request changed — successor was not stopped"
+                return
+            }
+            guard current.canCancel else { stopNotice = current.stopLabel; return }
+            stopRequestedIDs.insert(target.request_id)
+            stopNotice = "Requesting cancellation…"
+            let receipt = try await controlGateway.cancelTurn(sessionID: target.session_id, requestID: target.request_id)
+            guard selected == sessionKey, controlledRequest?.request_id == target.request_id else { return }
             controlledRequest = receipt
             stopNotice = receipt.stopLabel
         } catch {
-            guard selected == sessionKey else { return }
-            // No retry: a lost response may follow a delivered cancellation.
+            guard selected == sessionKey, controlledRequest?.request_id == target.request_id else { return }
             stopNotice = "Stop unconfirmed — refresh to observe this request. " + error.localizedDescription
         }
     }
+
+    var canResumeQueue: Bool {
+        queuePausedByStop && !hasActiveTurn && controlReadAvailable &&
+            controlledRequest?.status != "execution_unknown" &&
+            pendingSends.contains { $0.sessionID == sessionKey }
+    }
+
+    /// Only this explicit action resumes retained follow-ups after Stop.
+    func resumeQueuedMessages() async {
+        guard await refreshTurnControl() else { return }
+        guard canResumeQueue else { return }
+        if let requestID = controlledRequest?.request_id { resumedAfterStopIDs.insert(requestID) }
+        queuePausedByStop = false
+        await drainQueuedMessages()
+    }
+
+    func drainQueuedMessages() async {
+        while !Task.isCancelled {
+            guard await refreshTurnControl() else { return }
+            guard !queuePausedByStop, !hasActiveTurn, controlReadAvailable,
+                  let index = pendingSends.firstIndex(where: { $0.sessionID == sessionKey }) else { return }
+            let next = pendingSends.remove(at: index)
+            _ = await runTurn(next.prompt, appendUserBubble: false, displayText: next.display,
+                              images: next.images, useTools: next.agenticTools)
+        }
+    }
+
 
 
     /// The answer row of the turn currently running.
@@ -270,6 +319,7 @@ final class ChatViewModel: ObservableObject {
     /// ``guard !isSending else { return }``) without touching the
     /// bridge's concurrency model. ``count`` lets a view show "queued".
     struct PendingSend {
+        let sessionID: String
         let prompt: String
         let display: String
         let images: [String]
@@ -495,9 +545,13 @@ final class ChatViewModel: ObservableObject {
             .lowercased().prefix(8).description
     }
 
-    init(agent: AgentBridge, sessionKey: String = ChatViewModel.mintSessionKey()) {
+    init(agent: AgentBridge, sessionKey: String = ChatViewModel.mintSessionKey(),
+         controlGateway: any SessionControlClient = GatewayClient.fromEnvironment(),
+         startBackgroundObservers: Bool = true) {
         self.agent = agent
         self.sessionKey = sessionKey
+        self.controlGateway = controlGateway
+        guard startBackgroundObservers else { return }
         // Subscribe to agent events so we can show thinking + tool
         // chips inline as the agent works.  Captures a weak self so
         // we don't pin the view model alive past the chat window's
@@ -753,19 +807,15 @@ final class ChatViewModel: ObservableObject {
 
     /// Queue behind an in-flight turn, or run immediately.
     private func enqueueOrRun(_ prompt: String, display: String, images: [String]) async {
-        if isSending {
-            pendingSends.append(PendingSend(prompt: prompt, display: display, images: images, agenticTools: agenticTools))
+        if hasActiveTurn {
+            pendingSends.append(PendingSend(sessionID: sessionKey, prompt: prompt, display: display, images: images, agenticTools: agenticTools))
             messages.append(ChatMessage(
                 author: .user, timestamp: Date(), text: display))
             return
         }
-        queuePausedByStop = false
         let succeeded = await runTurn(prompt, appendUserBubble: true, displayText: display, images: images, useTools: agenticTools)
         if sessionKey == "dispatcher" && !succeeded { pendingSends.removeAll(); return }
-        while !pendingSends.isEmpty && !queuePausedByStop {
-            let next = pendingSends.removeFirst()
-            _ = await runTurn(next.prompt, appendUserBubble: false, displayText: next.display, images: next.images, useTools: next.agenticTools)
-        }
+        await drainQueuedMessages()
     }
 
     /// Direct ``/model use <provider> <name>`` — no picker, no catalogue.
