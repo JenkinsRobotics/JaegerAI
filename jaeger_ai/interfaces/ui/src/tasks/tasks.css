@@ -8,7 +8,7 @@
 .jg-card--needs_owner, .jg-card--blocked { border-color: color-mix(in srgb, var(--aether-color-warn) 55%, transparent); }
 .jg-card--failed { border-color: color-mix(in srgb, var(--aether-color-error) 55%, transparent); }
 .jg-tag { padding: 0 var(--aether-space-2); border-radius: 999px; border: 1px solid var(--aether-color-border); }
-.jg-tasks__band { flex: none; height: 54px; display: flex; align-items: center; justify-content: center; }
+.jg-tasks__band { flex: none; height: var(--jg-band-height); display: flex; align-items: center; justify-content: center; }
 .jg-title-pill {
   display: inline-flex; align-items: center; height: 34px; padding: 0 16px; border-radius: 999px; background: var(--aether-color-bg-control);
   font-size: var(--jg-font-body); font-weight: 500;

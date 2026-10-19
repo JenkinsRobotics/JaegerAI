@@ -1,0 +1,4 @@
+/* VS Code codicons (MIT, microsoft/vscode d956e8a6): see codicons/LICENSE. */
+@font-face { font-family: "jg-codicon"; font-display: block; src: url("./codicons/codicon.ttf") format("truetype"); }
+.jg-icon { font-family: "jg-codicon"; font-style: normal; font-weight: normal; line-height: 1; display: inline-flex;
+  align-items: center; justify-content: center; width: 1em; height: 1em; flex: none; -webkit-font-smoothing: antialiased; user-select: none; }

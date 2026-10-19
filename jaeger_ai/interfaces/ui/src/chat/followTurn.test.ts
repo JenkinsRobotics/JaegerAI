@@ -97,7 +97,7 @@ describe("WebHost.startTurn", () => {
     kind: "live",
     agents: async () => [], agentsSummary: async () => [], sessions: async () => [],
     session: async (id) => ({ session_id: id, last_event_id: 40 }), createSession: async () => ({ session_id: "s" }),
-    send: async () => receipt, cancel: async () => {}, approve: async () => {}, tasks: async () => [], handoffs: async () => [],
+    send: async () => receipt, addAttachment: async () => ({ attachment_id: "att_x" }), cancel: async () => {}, approve: async () => {}, tasks: async () => [], handoffs: async () => [],
     updateSession: async () => {}, createAgent: async (b) => ({ id: b.name, name: b.name }),
     handoffExchange: async (id) => ({ handoff_id: id, to_agent_id: "a", worker_session_id: "w" }),
     stream: async (_s, cursor, onEvent) => { seen.push(cursor); events.forEach(onEvent); },
