@@ -13,6 +13,7 @@ import { isUnread } from "../agents/unread";
 import { Icon, type IconName } from "../icons/Icon";
 import type { AgentsState } from "../agents/agentsStore";
 import { rowTime } from "./usePhone";
+import { groupRows } from "../agents/sections";
 
 const SOURCE_ICON: Record<string, IconName> = { chat: "comment", message: "comment", handoff: "arrow-right", sent: "arrow-right", task: "checklist" };
 
@@ -59,7 +60,7 @@ function Pressable({ onLong, children, ...rest }: { onLong?: (x: number, y: numb
 }
 
 export function PhoneList({ state, userInitials, onOpen, onSearch, onNew, onSettings, statusOk, onAgentMenu }: {
-  state: Pick<AgentsState, "agents" | "summaries" | "seen">; userInitials: string; statusOk: boolean;
+  state: Pick<AgentsState, "agents" | "summaries" | "seen"> & { sections?: AgentsState["sections"] }; userInitials: string; statusOk: boolean;
   onOpen: (agentId: string) => void; onSearch: () => void; onNew: (anchor: HTMLElement) => void; onSettings: () => void;
   onAgentMenu?: (agentId: string, x: number, y: number) => void;
 }) {
@@ -91,7 +92,9 @@ export function PhoneList({ state, userInitials, onOpen, onSearch, onNew, onSett
         </Pressable>
       )}
       <nav className="jg-prows" aria-label="Agents">
-        {specialists.map((r) => {
+        {groupRows(specialists, state.sections ?? []).map((g) => [
+          g.title && <h2 key={`h:${g.id}`} className="jg-psection">{g.title}</h2>,
+          ...g.rows.map((r) => {
           const v = rowView(r, state.seen); const u = v.unread;
           const name = label(r.agent);
           return (
@@ -109,7 +112,7 @@ export function PhoneList({ state, userInitials, onOpen, onSearch, onNew, onSett
               </span>
             </Pressable>
           );
-        })}
+        })])}
       </nav>
       {unreadCount > 0 && (
         <button type="button" className="jg-punread" onClick={jump}><Icon name="chevron-down" size={14} />{unreadCount} unread</button>

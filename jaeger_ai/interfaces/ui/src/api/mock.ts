@@ -117,6 +117,15 @@ export class MockSource implements JaegerSource {
   private patches = new Map<string, Partial<Agent>>();
   private deleted = new Set<string>();
   readonly calls: Array<[string, ...unknown[]]> = [];
+  private global = new Set<(event: GatewayEvent) => void>();
+  private emitGlobal(event: string, payload: Record<string, unknown>) { for (const f of this.global) f({ event, payload } as GatewayEvent); }
+  /** Spec mode only (?agentspec=1): the global stream carries agent.* / section.* after each action. */
+  globalEvents = (onEvent: (event: GatewayEvent) => void, signal: AbortSignal) => new Promise<void>((resolve, reject) => {
+    if (!this.spec) { reject(Object.assign(new Error("events 404"), { status: 404 })); return; }
+    this.global.add(onEvent);
+    signal.addEventListener("abort", () => { this.global.delete(onEvent); resolve(); });
+  });
+  private sectionList: Array<{ id: string; name: string }> = [];
   async agents(): Promise<Agent[]> {
     const list = MOCK_AGENTS.filter((a) => !this.deleted.has(a.id));
     if (!this.spec) return list;
@@ -124,15 +133,16 @@ export class MockSource implements JaegerSource {
       primary: a.role === "lead", last_message: null, ...a, ...this.patches.get(a.id) }) as Agent).filter((a) => !a.hidden);
   }
   readonly agentActions: AgentActions = {
-    markRead: async (id, m) => { this.calls.push(["read", id, m]); this.patches.set(id, { ...this.patches.get(id), unread_count: 0 }); },
-    patchAgent: async (id, body) => { this.calls.push(["patch", id, body]); this.patches.set(id, { ...this.patches.get(id), ...body }); },
-    sections: async () => [],
-    createSection: async (name) => { this.calls.push(["section", name]); return { id: `sec-${name}`, name }; },
+    markRead: async (id, m) => { this.calls.push(["read", id, m]); this.patches.set(id, { ...this.patches.get(id), unread_count: 0 }); this.emitGlobal("agent.unread", { agent_id: id, unread_count: 0 }); },
+    patchAgent: async (id, body) => { this.calls.push(["patch", id, body]); this.patches.set(id, { ...this.patches.get(id), ...body }); this.emitGlobal("agent.updated", { agent_id: id }); },
+    sections: async () => this.sectionList,
+    createSection: async (name) => { this.calls.push(["section", name]); const sec = { id: `sec-${name}`, name }; this.sectionList.push(sec); this.emitGlobal("section.updated", sec); return sec; },
     duplicate: async (id, name) => { this.calls.push(["duplicate", id, name]); const a = MOCK_AGENTS.find((x) => x.id === id)!; return { ...a, id: `${id}-copy`, display_name: `${a.display_name} copy` }; },
     remove: async (id) => {
       this.calls.push(["delete", id]);
       if (id === "native:jaeger" || MOCK_AGENTS.find((a) => a.id === id)?.role === "lead") throw Object.assign(new Error("protected_agent"), { status: 409 });
       this.deleted.add(id);
+      this.emitGlobal("agent.deleted", { agent_id: id });
     },
     template: async (id) => { this.calls.push(["template", id]); const a = MOCK_AGENTS.find((x) => x.id === id); return { name: a?.name, display_name: a?.display_name, skills: a?.skills ?? [] }; },
   };
