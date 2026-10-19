@@ -138,41 +138,55 @@ class PublicHTTPS:
     """
 
     async def post(self, url, body, headers):
-        host = callback_url(url)
-        async with asyncio.timeout(10):
-            records = await asyncio.get_running_loop().getaddrinfo(
-                host,
-                443,
-                family=socket.AF_UNSPEC,
-                type=socket.SOCK_STREAM,
-                proto=socket.IPPROTO_TCP,
-            )
-            addresses = sorted({(r[0], public_ip(r[4][0])) for r in records})
-            if not addresses:
-                raise ValueError("No public destination")
-            connector = aiohttp.TCPConnector(
-                resolver=PinnedResolver(host, addresses),
-                use_dns_cache=False,
-                force_close=True,
-            )
-            async with (
-                aiohttp.ClientSession(
-                    connector=connector,
-                    trust_env=False,
-                    auto_decompress=False,
-                    timeout=aiohttp.ClientTimeout(total=10),
-                ) as client,
-                client.post(
-                    url, data=body, headers=headers, allow_redirects=False
-                ) as response,
-            ):
-                try:
-                    raw = await response.content.readexactly(MAX_BYTES + 1)
-                except asyncio.IncompleteReadError as exc:
-                    raw = exc.partial
-                if len(raw) > MAX_BYTES:
-                    raise ValueError("Response too large")
-                return response.status, raw
+        terminal_status = None
+        try:
+            host = callback_url(url)
+            async with asyncio.timeout(10):
+                records = await asyncio.get_running_loop().getaddrinfo(
+                    host,
+                    443,
+                    family=socket.AF_UNSPEC,
+                    type=socket.SOCK_STREAM,
+                    proto=socket.IPPROTO_TCP,
+                )
+                addresses = sorted({(r[0], public_ip(r[4][0])) for r in records})
+                if not addresses:
+                    raise ValueError("No public destination")
+                connector = aiohttp.TCPConnector(
+                    resolver=PinnedResolver(host, addresses),
+                    use_dns_cache=False,
+                    force_close=True,
+                )
+                async with (
+                    aiohttp.ClientSession(
+                        connector=connector,
+                        trust_env=False,
+                        auto_decompress=False,
+                        timeout=aiohttp.ClientTimeout(total=10),
+                    ) as client,
+                    client.post(
+                        url, data=body, headers=headers, allow_redirects=False
+                    ) as response,
+                ):
+                    if response.status in (410, 413):
+                        # No body is needed for terminal delivery decisions. Do
+                        # not let oversized/truncated/stalled bodies change them.
+                        terminal_status = response.status
+                        return terminal_status, b""
+                    try:
+                        raw = await response.content.readexactly(MAX_BYTES + 1)
+                    except asyncio.IncompleteReadError as exc:
+                        raw = exc.partial
+                    if len(raw) > MAX_BYTES:
+                        raise ValueError("Response too large")
+                    return response.status, raw
+        except (Exception, asyncio.CancelledError):
+            # The enclosing Events deadline can cancel connection cleanup before
+            # this transport's deadline fires. Preserve a terminal status already
+            # observed; cancellation before response headers still propagates.
+            if terminal_status is not None:
+                return terminal_status, b""
+            raise
 
 
 class KeychainSecrets:
