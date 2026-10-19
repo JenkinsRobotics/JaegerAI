@@ -39,7 +39,7 @@ The repository source tree must remain pristine, deterministic, and free of runt
 * **Gateway Architecture:**
   * The Jaeger Gateway (`jaeger_ai.core.gateway.server`) runs as an isolated daemon on `127.0.0.1:33418` (loopback only; `JAEGER_GATEWAY_HOST` is the explicit opt-out), launched by **`jaeger gateway daemon`**. The port is one constant, `GATEWAY_PORT` in `jaeger_ai/contract/ports.py` (`JAEGER_GATEWAY_PORT` overrides it). The old port `:8810` is retired (2026-10-17): nothing listens there and no client falls back to it. It owns persistent SQLite session state and broadcasts SSE multi-client events.
   * **`jaeger gateway daemon` and `jaeger gateway` are different processes.** Bare `jaeger gateway` manages the *external* Agentgateway (MCP `:8811`, A2A `:8812`) via `jaeger_ai.features.agentgateway`. Only the `daemon` subcommand runs the Jaeger Gateway. The two are one word apart and are routinely confused.
-  * Current Mac client: `jaeger_ai/interfaces/macos-shell`; shared frontend: `jaeger_ai/interfaces/ui`. `apps/macos` and `apps/web` alias those canonical paths. `features/webui` remains a required authenticated backend/proxy. The old `interfaces/swift` source is retained only behind the explicit cleanup blockers in `docs/integration/SCOPED_CLEANUP.md`; never select it for normal Mac development/build/launch.
+  * Current Mac client: `jaeger_ai/interfaces/macos-shell`; shared frontend: `jaeger_ai/interfaces/ui`. `apps/macos` and `apps/web` alias those canonical paths. `features/webui` remains a required authenticated backend/proxy. The old SwiftUI/Qt desktop frontends are archived outside the repo; no automatic fallback is permitted. See `docs/integration/SCOPED_CLEANUP.md`.
   * Session state resolves through `operator_state_root()`: `JAEGER_STATE_DIR` → `JAEGER_HOME` → `~/.jaeger`, landing at `<state root>/gateway_sessions.sqlite3`. Anything opening that database directly must use the same resolver — reading `JAEGER_HOME` alone means a sandboxed run silently opens the operator's live store and collides with the daemon's ownership lease.
 * **Tool Call Resilience:**
   * All model-generated tool calls must pass through `jaeger_ai.core.runtime.tool_repair` to automatically recover from malformed JSON, markdown fences, Python literals, or single quotes without failing the user's turn.
@@ -74,10 +74,9 @@ exercised; none are aspirational.
 |---|---|---|
 | `jaeger_ai/interfaces/macos-shell` (= `apps/macos`) | AppKit + WKWebView native host | shared UI → Gateway |
 | `jaeger_ai/interfaces/ui` (= `apps/web`) | React + TypeScript shared frontend | Gateway / authenticated WebUI proxy |
-| `jaeger_ai/features/webui` | retained Python backend and legacy browser surface | server-side proxy → `:33418` |
+| `jaeger_ai/features/webui` | retained Python backend/proxy and login | server-side proxy → `:33418` |
 | `jaeger_ai/interfaces/ide` | VS Code extension sidebar | REST+SSE `:33418`, native daemon lifecycle |
 | `jaeger_ai/interfaces/tui` | `prompt_toolkit` | AF_UNIX bridge |
-| `jaeger_ai/interfaces/pyside6` | Qt + tray | AF_UNIX bridge |
 
 The canonical shared frontend uses React, TypeScript and Vite. The native
 shell is Swift/AppKit; preserve its existing bundle identity and permission boundaries.
@@ -121,7 +120,7 @@ JaegerAI/
 ├── jaeger_ai/          # Core engine — see docs/architecture/STRUCTURE.md for the full map
 │   ├── core/           # Shared engine: gateway (sessions, :33418), frameworks, models
 │   ├── features/       # One folder per feature, each with its own README.md
-│   ├── interfaces/     # Client surfaces ONLY (swift, tui, pyside6, messaging, bridge)
+│   ├── interfaces/     # Client surfaces ONLY (macos-shell, ui, ide, tui, bridge)
 │   └── assets/         # Icons + the WebUI extension scripts (single mount point)
 ├── packages/           # Monorepo standalone packages (jaeger-os, jaeger-agent, etc.)
 └── scripts/            # Host and deployment scripts

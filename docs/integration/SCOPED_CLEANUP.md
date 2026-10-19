@@ -1,86 +1,55 @@
-# Scoped legacy cleanup — 2026-10-19
+# Legacy frontend cleanup — 2026-10-19
 
-Current instruction: cleanup only, one code owner. No feature work, service
-restart, worker resume, credential change, or permanent data deletion.
+Current authorization: archive all superseded frontend implementations. No running process migration, install, restart, permissions/security changes, userdata or credential changes. Sole code owner. This supersedes the earlier decision to retain the whole SwiftUI source for voice dependencies.
 
-Canonical paths remain `jaeger_ai/interfaces/macos-shell` (native host) and
-`jaeger_ai/interfaces/ui` (shared frontend). `apps/macos` and `apps/web` now alias
-those paths. The new shell's Package.swift imports only its own Core target;
-REUSE.md records the already ported pieces and the deliberately deferred pieces.
-
-## Recovery archive
+## Recoverable archive
 
 `/Users/matthewjenkins/Desktop/JaegerAI-Legacy-Archive-2026-10-19-150651`
 
-`manifest.json` records original/destination paths, content hashes, revisions,
-protected running bundles, and worktree dispositions. `JaegerAI-history.bundle`
-contains the repository refs/history and was verified with `git bundle verify`.
-`metadata/` preserves staged/unstaged binary patches, untracked files and worktree
-administration. `snapshots/` contains the retained legacy Swift source before edits.
-Nothing in the archive is an active linked worktree. Do not run its archived
-launchers or source; restore explicitly into a new reviewed location if needed.
+`manifest.json`: original/destination paths, source revisions, SHA-256 file hashes and symlink targets. `JaegerAI-history.bundle` and `JaegerAI-before-frontend-removal.bundle`: Git history/refs before each cleanup phase. Metadata preserves dirty/staged patches, untracked source and disconnected worktree administration. Old source is outside the canonical repo; no archived `.git` pointer is active. No history was rewritten. Restore through a reviewed checkout and patches; never blindly restore old pointer files or run archived launchers.
 
-## Disposition and evidence
+## Removed implementations
 
-| Item | Evidence / action |
-| --- | --- |
-| Eight inactive external worktrees | `git worktree move` used first; HEAD checked, Git administration/changes preserved, pointer archived, then only the expected missing-pointer registrations pruned. Archived trees have no `.git` pointer. |
-| Inactive Mac bundles | Relocated, with per-file SHA-256 verification. Running bundle excluded. No installed/running app was replaced. |
-| Inert old VSIX packages | Archived from scratch directories; final clean 0.1.6 package retained. Installed extensions untouched; version 0.2.0 is not presumed working. |
-| Historical `try-typing.sh`, `snapshot.sh`, `verify-input-live.sh` | Archived from the newer shell's Scripts directory. They pin old worktree revisions or write screenshots inside source; current build/live entrypoints retained. |
-| Automatic Mac selection/build | Main, agent-create, dev, update and lifecycle launch lookup select only the canonical JaegerShell target. Old installed JaegerAI.app locations are no longer automatic fallbacks. |
-| Build output | New shell and script-only Jaeger Dev launcher share one external build root: `~/.cache/jaeger/macos-shell`, overridden by validated `JAEGER_MAC_BUILD`. Running shell replacement is refused; previous builds are moved aside rather than erased. |
-| Native production install | Explicitly deferred. New shell currently uses a development bundle identity. Cleanup must not install the old SwiftUI product or silently substitute a new security identity. |
+- Entire `jaeger_ai/interfaces/swift`: old SwiftUI application, voice/avatar/chat windows, tests, build/install scripts, resources and entitlements.
+- Entire `interfaces/pyside6`, `avatar_chat`, `avatar_player`: superseded Qt desktop/chat/avatar presentation and its retired tests; `core/windowed.py` and old Qt app manifests and the device probe that imported their retired window.
+- Old Hermes WebUI frontend: `features/webui/static` application assets and old JS overlays in `assets`. Backend login JavaScript remains required by existing authentication. Backend API/proxy, auth, model/audio services, session state and license remain.
+- Removed legacy Swift build/freshness helpers, package-data entries, Qt automatic routing, old shell renderer and `/legacy` opt-in. Missing canonical UI build now gives 503, never an old app. `/legacy` gives 404 even with the former enabling variable.
+- Previous phase: 14 inactive bundles, 12 inert VSIX packages, eight safely disconnected external worktrees, five historical proof scripts. Installed IDE extensions untouched and not qualified by version number.
 
-## Retained blockers — do not remove or launch automatically
+Canonical `interfaces/macos-shell` and `interfaces/ui` stay in place; `apps/macos` and `apps/web` alias them. Normal build, update and launcher paths select the shell. The shell pins its build-stamped repo CLI; a missing wrapper fails rather than selecting an installed or scratch CLI. Unbundled development uses only the explicitly configured/default canonical repo. Historical config values `swift`/`pyside6` remain accepted for existing config files; both select the canonical shell, not old implementations.
 
-1. `jaeger_ai/interfaces/swift` remains in source, with a full Desktop snapshot.
-   The old app's build also owns the embedded `JaegerMultimodal` host/privacy
-   resources; newer shell REUSE.md defers ambient voice/barge-in and the
-   AgentBridge-bound speech path. Removing it now would strand still-required
-   behavior. Porting/retiring that behavior is separate feature scope. Ordinary
-   launch/install/update paths no longer select this target.
-2. `jaeger_ai/features/webui` remains required. Shared UI Vite configuration routes
-   `/v1` and `/api` through its authenticated proxy; backend routes also own existing
-   scheduler/board integrations. Do not remove this backend as an old frontend.
-3. Running legacy Mac app PID 59466:
-   `~/.jaeger/scratch/mac-integration-20261019/swift/JaegerAI.app`.
-   It was not moved/stopped. Its existing lifecycle lease affects the Gateway;
-   migration requires separately coordinated app/service scope.
-4. Worktree `~/Documents/Codex/2026-10-19/task-3/native-panels` remains registered:
-   a running isolated Gateway references it. It was not moved or stopped.
-5. Installed VS Code/Antigravity Jaeger extensions remain in place. Their hosts
-   are running and profile selections differ. Cleanup does not prove which
-   version is loaded, change profiles, or grant a reload/restart.
+## Specifically reused components
 
-The prior Mac completion/assessment effort is superseded by this cleanup scope.
-No current app-feature completion or visual/function parity is claimed.
+Already independently ported into `macos-shell`: Apple Speech STT/TTS, microphone recorder, STT contracts, voice catalog, speech text sanitation, audio math, hotkey/status item, stack CLI adapter and lifecycle policy. Provenance remains in `macos-shell/REUSE.md`; old paths there are historical attribution, not imports.
 
-## Restore
+This cleanup extracted only `remote_runtime.py` (attached multimodal socket adapter) and `preflight.py` (model/device diagnostics) into `interfaces/native_multimodal`. No Qt window, tray, application host or alternate runtime owner was copied there. The adapter remains independently testable, but is not wired into the new shell. Diagnostics use existing device libraries. `jaeger multimodal --check` remains available; requesting the retired window fails explicitly.
 
-Use `manifest.json` to locate a relocated bundle/file and move it back only after
-checking the destination and active processes. For a worktree, create a new
-reviewed checkout at its recorded HEAD from `JaegerAI-history.bundle`; use its
-staged/unstaged patches and archived file tree to recover uncommitted work. Do not
-copy old `.git` pointer files back blindly. Git history has not been rewritten.
+The pure 17-line turn-duration formatter was retained at `interfaces/ide/media/turn-duration.js` because the IDE symlink previously pointed into the archived WebUI. It is a required utility, not a legacy frontend.
 
-## Validation
+No additional old Swift component is required to compile the new shell. The old `JaegerMultimodal` executable was an embedded Python host plus signing/privacy packaging, not a reusable Swift library. Its original resources/entitlements are archived; none were applied to the new development identity.
 
-Focused launch/update/install selection tests and newer shell Core tests are run
-against this change. Build script syntax, external output resolution, archive
-hashes, disconnected-worktree state, alias targets, and unchanged running process
-identities are checked. Final results are recorded after verification. Canonical
-`scripts/verify.sh` is attempted; live-state guard failures are reported rather
-than stopping shared services to obtain a green result.
+## Known unavailable behavior — not completion claims
 
-Current focused evidence: 93 Python selection/update/install tests passed; 56
-newer-shell Core tests passed; the canonical shell build script completed and
-signed its development bundle at the external output path. The bundle was not
-launched or installed. The shell compiler emits existing Swift Sendable warnings;
-these are not new cleanup features or runtime acceptance evidence.
+- Native ambient voice, barge-in, old avatar/orb windows, and camera/video multimodal presentation are absent from the new shell. Shared backend capabilities remain, but a backend or adapter test does not prove frontend integration.
+- Legacy public share-page presentation is archived. Its route returns an explicit 503 until a canonical shared-UI implementation exists. Backend share data/API is retained.
+- New shell retains its development bundle identity. Production installation and native permission behavior remain unqualified; no permission, identity or signing-policy change was made.
+- No visual/functional parity or live-device acceptance is claimed by these cleanup checks.
 
-Archive tally: 14 inactive Mac bundles, 12 inert VSIX packages, five historical
-proof scripts and eight disconnected external worktrees, plus preserved alias
-records and a legacy Swift source snapshot. Installed IDE versions were not moved.
+## Runtime migration — separate scope, no action taken
 
-Final canonical `./scripts/verify.sh` passed all checks, including the WebUI-to-Gateway wiring contract. Nine CI hygiene and six lifecycle checks also passed. The shell launcher now prefers the build-stamped canonical repo wrapper over an installed venv CLI, avoiding stale installed source selection; JAEGER_VENV still selects the wrapper interpreter. No app or service was started or restarted.
+1. PID **59466** remains at `~/.jaeger/scratch/mac-integration-20261019/swift/JaegerAI.app`; build commit `5f7a0e6af5cfbb9a1357bd55f520393f6e491b3e`, repo environment points to canonical JaegerAI. It was not moved/stopped. It owns the old menu-bar lifecycle relationship; quitting it can affect Gateway continuity. A coordinated migration must account for lease retirement, independently hosted Gateway continuity, new shell development identity and real voice/permission gaps before replacing it.
+2. PID **8931** runs `native-panels/dev/tests/fixtures/gateway_contract_worker.py` using isolated state `~/.jaeger/scratch/second-pass-20261019/ui-fixture`, listening on loopback **56061/56062**. Its registered worktree remains in place. Source plus dirty patches now also have a disconnected, read-only Desktop snapshot. Moving/removing that worktree requires separately authorized fixture migration/shutdown with its isolated state preserved.
+3. No listener was present on loopback 8790 at final read-only inspection. The canonical shell defaults to that authenticated WebUI backend; a later runtime migration must arrange that backend before visible app acceptance. No service was started here.
+4. Production Gateway PID 59577 and all other services remain untouched. No queued/paused worker was resumed.
+
+## Build and verification record
+
+Canonical UI now builds from an external snapshot with matching lockfile dependencies; no `node_modules` or output is generated in source. Prior output is preserved. WebUI serves `~/.cache/jaeger/ui-rebuild-mainscreen/dist` (explicit `JAEGER_WEBUI_UI_DIST` override remains). New shell builds externally under `~/.cache/jaeger/macos-shell`.
+
+Actual shared UI typecheck/theme/Vite/no-mock build passed; native shell build and 56 Core tests passed. Focused launcher, archive absence, backend UI routing and multimodal adapter checks are recorded after final verification below. No build was installed/launched. Existing compiler warnings are not runtime acceptance.
+
+Focused validation: 129 architecture/entrypoint/adapter/UI-routing checks, 65 additional runtime-model/update/branding checks, two launcher/proxy boundary checks, and the theme guard passed. All 174 shared UI tests and 56 shell Core tests passed. Every one of the 293 removed tracked paths was compared byte-for-byte against its pre-removal Git version in the archive; no dangling active source symlink remains. Source fingerprint matches the built canonical shell.
+
+Evidence logs are preserved under the Desktop archive at `metadata/frontend-cleanup-verification/`. The final all-target runner is repeated unchanged after an earlier run finished its checks but hit a shell read-offset error when its script was edited during execution; that earlier runner exit is not claimed as a pass.
+
+Final unchanged `./scripts/verify.sh` completed successfully for **all** targets, including 219 IDE tests, canonical UI routing/absence guards and both owned-Gateway wiring contracts. The source-pinned launcher change separately passed all 56 shell Core tests; installed/system CLI fallback is no longer eligible. No live app acceptance is inferred.

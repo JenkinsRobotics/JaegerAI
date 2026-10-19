@@ -6,7 +6,7 @@ Reads the single source of truth:
 
 Verifies consistency with:
   jaeger_ai/assets/design-system/tokens.css
-  jaeger_ai/interfaces/swift/Sources/JaegerAI/Theme/AetherTheme.swift
+  jaeger_ai/interfaces/ui/scripts/check-theme-literals.mjs
 """
 
 from __future__ import annotations
@@ -14,11 +14,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import sys
+import subprocess
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TOKEN_JSON = REPO_ROOT / "jaeger_ai" / "assets" / "design-system" / "aether-default.json"
 TOKEN_CSS = REPO_ROOT / "jaeger_ai" / "assets" / "design-system" / "tokens.css"
-SWIFT_THEME = REPO_ROOT / "jaeger_ai" / "interfaces" / "swift" / "Sources" / "JaegerAI" / "Theme" / "AetherTheme.swift"
 
 
 def check_tokens() -> bool:
@@ -28,10 +28,6 @@ def check_tokens() -> bool:
     if not TOKEN_CSS.is_file():
         print(f"[-] ERROR: Missing {TOKEN_CSS}")
         return False
-    if not SWIFT_THEME.is_file():
-        print(f"[-] ERROR: Missing {SWIFT_THEME}")
-        return False
-
     with open(TOKEN_JSON, "r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -49,14 +45,11 @@ def check_tokens() -> bool:
             print(f"[-] ERROR: Token '--aether-{col}' not found in {TOKEN_CSS}")
             return False
 
-    swift_text = SWIFT_THEME.read_text(encoding="utf-8")
-    required_swift_symbols = ["bgApp", "bgShell", "border", "text", "accent", "radiusControl", "radiusButton", "radiusField"]
-    for sym in required_swift_symbols:
-        if sym not in swift_text:
-            print(f"[-] ERROR: Symbol '{sym}' not found in {SWIFT_THEME}")
-            return False
-
-    print("[+] Design system tokens verified across JSON, CSS, and Swift bridges.")
+    ui = REPO_ROOT / "jaeger_ai/interfaces/ui"
+    result = subprocess.run(["node", "scripts/check-theme-literals.mjs"], cwd=ui, check=False)
+    if result.returncode:
+        return False
+    print("[+] Design tokens and canonical shared UI theme rules verified.")
     return True
 
 

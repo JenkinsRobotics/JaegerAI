@@ -678,10 +678,7 @@ def cmd_boot(env: dict[str, str], *, no_voice: bool) -> int:
 
 
 def cmd_boot_windowed(env: dict[str, str], dev: bool = False) -> int:
-    """Exec into the windowed-app shell — PySide6 menu-bar tray + chat
-    window. The agent + model load INSIDE that process, on the main
-    thread (Metal-safe), before the window appears — so expect a short
-    load on boot, same as the TUI."""
+    """Build and launch the canonical native shell with shared UI."""
     if not VENV_PY.exists():
         fail(f".venv not at {VENV_PY} — run ./install.sh first")
         return 1
@@ -689,37 +686,14 @@ def cmd_boot_windowed(env: dict[str, str], dev: bool = False) -> int:
         fail(f"dev instance not found at {DEV_INSTANCE}")
         say("run ./run.sh setup jaeger-dev to create it", prefix="launch")
         return 1
-    # Toolkit routing: Swift native app (default) vs the PySide6 shell.
-    if _ui_toolkit() == "swift":
-        rc = _boot_mac_shell(env, dev=dev)
-        if rc is not None:
-            return rc
-        fail("Canonical Mac shell unavailable. Build interfaces/macos-shell; no legacy GUI was selected.")
-        return 1
-    say("launching the windowed app — menu-bar tray + chat window "
-        "(the model loads on boot)…", prefix="launch")
-    sys.stdout.flush()
-    os.execvpe(
-        str(VENV_PY),
-        [str(VENV_PY), "-m", "jaeger_ai.core.windowed"],
-        env,
-    )
-    fail("could not exec the windowed app")
+    rc = _boot_mac_shell(env, dev=dev)
+    if rc is not None:
+        return rc
+    fail("Canonical Mac shell unavailable. Build interfaces/macos-shell; no legacy GUI was selected.")
     return 1
 
 
 MAC_SHELL_DIR = REPO / "jaeger_ai" / "interfaces" / "macos-shell"
-
-
-def _ui_toolkit() -> str:
-    """Read interaction.ui from the dev instance config (default 'swift')."""
-    try:
-        from jaeger_ai.core.instance.instance import InstanceLayout
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
-        cfg = load_yaml(InstanceLayout(root=DEV_INSTANCE).config_path, Config)
-        return cfg.interaction.ui
-    except Exception:  # noqa: BLE001
-        return "swift"
 
 
 def _boot_mac_shell(env: dict[str, str], dev: bool = False) -> int | None:
@@ -779,7 +753,7 @@ def cmd_update() -> int:
     try:
         _dev_bundle = mac_app_bundle(REPO)
     except ValueError as _e:
-        fail(f"invalid JAEGER_SWIFT_BUILD: {_e}")
+        fail(f"invalid JAEGER_MAC_BUILD: {_e}")
         return 1
     if mac_app_is_stale(REPO, _dev_bundle):
         say("Canonical Mac shell lags the tree — rebuilding JaegerShell.app…",

@@ -1,24 +1,10 @@
-"""Serving glue for the new UI build (jaeger_ai/interfaces/ui/dist).
-
-``/`` and ``/index.html`` serve the new main screen and ``/assets/*`` its
-hashed bundle (built with base ``./``). The old WebUI shell moves to
-``/legacy`` and is only served when ``JAEGER_WEBUI_LEGACY=1``. Without a
-build on disk, ``/`` keeps serving the old shell so nothing goes blank.
-``JAEGER_WEBUI_UI_DIST`` overrides the build directory.
-
-While a build is active, ``/sw.js`` and ``/static/sw.js`` answer a kill-switch
-worker so browsers (iOS home-screen installs especially) drop the old shell's
-service worker and its caches, and the PWA manifest under ``/static/`` keeps
-its ``application/manifest+json`` type. Regular files at the build root
-(icons, ``manifest.webmanifest``) are served too, and ``/manifest.json`` maps
-to the build's manifest. Without a build nothing here changes.
-"""
+"""Serve only the canonical shared UI. A missing build never selects an old frontend."""
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
-_DIST_DEFAULT = Path(__file__).resolve().parents[3] / "interfaces" / "ui" / "dist"
+_DIST_DEFAULT = Path.home() / ".cache/jaeger/ui-rebuild-mainscreen/dist"
 _MIME = {
     ".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8",
     ".html": "text/html; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png",
@@ -51,10 +37,6 @@ def dist_root() -> Path | None:
     return root.resolve() if (root / "index.html").is_file() else None
 
 
-def legacy_enabled() -> bool:
-    return str(os.environ.get("JAEGER_WEBUI_LEGACY") or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def _send(handler, path: Path, cache: str, ctype: str | None = None) -> bool:
     body = path.read_bytes()
     handler.send_response(200)
@@ -84,24 +66,14 @@ def _send_kill_switch(handler) -> bool:
     return True
 
 
-def _static_root() -> Path:
-    try:
-        from api import config as api_config  # the WebUI's own static root
-        return Path(api_config.get_static_root()).resolve()
-    except Exception:  # noqa: BLE001 — standalone import (tests) uses the package copy
-        return _STATIC_DEFAULT.resolve()
-
-
 def _serve_static_manifest(handler, path: str) -> bool:
-    root = _static_root()
-    target = (root / path[len("/static/"):]).resolve()
-    try:
-        target.relative_to(root)
-    except ValueError:
+    root = dist_root()
+    if root is None or path not in ("/static/manifest.json", "/static/manifest.webmanifest"):
         return _not_found(handler)
-    if not target.is_file():
+    manifest = root / "manifest.webmanifest"
+    if not manifest.is_file():
         return _not_found(handler)
-    return _send(handler, target, "no-cache", "application/manifest+json; charset=utf-8")
+    return _send(handler, manifest, "no-cache", "application/manifest+json; charset=utf-8")
 
 
 def _root_file(root: Path, path: str) -> Path | None:
@@ -129,15 +101,24 @@ def _not_found(handler) -> bool:
     return True
 
 
-def serve(handler, parsed) -> bool | str:
-    """True = handled; "legacy" = caller renders the old shell; False = not ours."""
+def serve(handler, parsed) -> bool:
+    """True means handled; False leaves backend API routing unchanged."""
     path = parsed.path or "/"
     if path == "/legacy" or path.startswith("/legacy/"):
-        return "legacy" if legacy_enabled() else _not_found(handler)
+        return _not_found(handler)
     root = dist_root()
     if root is None:
+        if path in ("/", "/index.html") or path.startswith("/session/"):
+            body = b'{"error":"Canonical shared UI build missing. Build interfaces/ui and set JAEGER_WEBUI_UI_DIST."}'
+            handler.send_response(503)
+            handler.send_header("Content-Type", "application/json")
+            handler.send_header("Content-Length", str(len(body)))
+            handler.send_header("Cache-Control", _NO_STORE)
+            handler.end_headers()
+            handler.wfile.write(body)
+            return True
         return False
-    if path in ("/", "/index.html"):
+    if path in ("/", "/index.html") or (path.startswith("/session/") and path.count("/") == 2):
         return _send(handler, root / "index.html", _NO_STORE)
     if path in ("/sw.js", "/static/sw.js"):
         return _send_kill_switch(handler)
@@ -160,4 +141,4 @@ def serve(handler, parsed) -> bool | str:
     return False
 
 
-__all__ = ["KILL_SWITCH_SW", "dist_root", "legacy_enabled", "serve"]
+__all__ = ["KILL_SWITCH_SW", "dist_root", "serve"]

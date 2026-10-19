@@ -54,8 +54,8 @@ run_frontend() {
   IDE_OUTPUT=$(node --test jaeger_ai/interfaces/ide/tests/*.test.js 2>&1)
   PASSED_COUNT=$(echo "${IDE_OUTPUT}" | grep -E '^(ℹ|#) pass ' | awk '{print $3}')
   echo "[+] IDE interface tests passed (${PASSED_COUNT} passed)."
-  echo "[front-end:webui] Running WebUI packaging and asset overlay tests..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/features/test_webui_packaging_contract.py dev/tests/jaeger_ai/features/test_webui_overlay_scope.py -q --no-header
+  echo "[front-end:webui] Running WebUI backend packaging and canonical UI routing tests..."
+  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/features/test_webui_packaging_contract.py dev/tests/jaeger_ai/features/webui/test_ui_shell_serving.py dev/tests/jaeger_ai/features/test_no_legacy_frontends.py -q --no-header
   echo "[+] WebUI front-end asset tests passed."
 }
 

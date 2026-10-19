@@ -540,16 +540,16 @@ def test_rebuild_mac_shell_warns_without_toolchain(tmp_path, monkeypatch, capsys
     assert "was not built" in capsys.readouterr().err
 
 
-def test_swift_app_is_stale_basics(tmp_path):
+def test_mac_app_is_stale_basics(tmp_path):
     """Missing executable -> stale; no .git (tarball install) -> never stale
     (that path rebuilds explicitly after every product swap)."""
-    from jaeger_ai.cli._common import swift_app_is_stale
-    bundle = tmp_path / "JaegerAI.app"
-    assert swift_app_is_stale(tmp_path, bundle) is True   # no exe
-    exe = bundle / "Contents" / "MacOS" / "JaegerAI"
+    from jaeger_ai.cli._common import mac_app_is_stale
+    bundle = tmp_path / "JaegerShell.app"
+    assert mac_app_is_stale(tmp_path, bundle) is True   # no exe
+    exe = bundle / "Contents" / "MacOS" / "JaegerShell"
     exe.parent.mkdir(parents=True)
     exe.write_text("")
-    assert swift_app_is_stale(tmp_path, bundle) is False  # exe, but no .git
+    assert mac_app_is_stale(tmp_path, bundle) is True  # no source stamp
 
 
 # ── app-bridge run_update (0.8 in-app updates) ──────────────────────

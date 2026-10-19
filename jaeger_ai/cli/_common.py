@@ -117,7 +117,7 @@ def mac_shell_build_dir(repo: Path) -> Path:
     source = Path(repo).resolve()
     if target == source or source in target.parents:
         raise ValueError("JAEGER_MAC_BUILD must be outside the repository")
-    if target in {Path('/'), Path('/Applications'), Path('/tmp'), Path.home().resolve()}:
+    if target in {p.resolve() for p in (Path('/'), Path('/Applications'), Path('/tmp'), Path.home())}:
         raise ValueError("JAEGER_MAC_BUILD must be a dedicated build directory")
     return target
 
@@ -146,90 +146,3 @@ def mac_source_fingerprint(repo: Path) -> str:
                 digest.update(str(path.relative_to(repo)).encode())
                 digest.update(path.read_bytes())
     return digest.hexdigest()
-
-
-def swift_build_dir(repo: Path) -> Path:
-    """Canonical external SwiftPM build root. All callers must use this.
-
-    Resolution order:
-      1. ``JAEGER_SWIFT_BUILD`` env var
-      2. ``~/.jaeger/apps/swift-build`` (default)
-
-    Rejects paths that resolve inside the repo checkout and rejects
-    dangerous broad roots (``/``, ``/Applications``, ``~``, ``/tmp``).
-    Raises ``ValueError`` on an invalid override so the caller can report it.
-    """
-    raw = os.environ.get("JAEGER_SWIFT_BUILD", "").strip()
-    if raw:
-        p = Path(raw).expanduser().resolve()
-    else:
-        p = (Path.home() / ".jaeger" / "apps" / "swift-build").resolve()
-    repo_real = Path(repo).resolve()
-    if p == repo_real or repo_real in p.parents:
-        raise ValueError(
-            f"JAEGER_SWIFT_BUILD ({p}) resolves inside the checkout ({repo_real}); "
-            "set it to an external directory"
-        )
-    # Reject dangerous broad roots.
-    for danger in (Path("/"), Path("/Applications"), Path("/tmp"), Path.home()):
-        if p == danger.resolve():
-            raise ValueError(
-                f"JAEGER_SWIFT_BUILD ({p}) is a dangerous broad root; "
-                "choose a dedicated subdirectory"
-            )
-    return p
-
-
-def swift_app_bundle(repo: Path) -> Path:
-    """Path to the JaegerAI.app produced by build-app.sh (always external)."""
-    return swift_build_dir(repo) / "JaegerAI.app"
-
-
-def _swift_source_fingerprint(repo: Path) -> str:
-    """SHA-256 of all build inputs under jaeger_ai/interfaces/swift/.
-
-    Walks the tree deterministically, hashing relative paths and file
-    contents. Excludes .build/ scratch. Works on dirty, untracked, and
-    newly-deleted files. Returns '' if the source directory does not exist.
-    """
-    import hashlib
-
-    swift_dir = (Path(repo) / "jaeger_ai" / "interfaces" / "swift").resolve()
-    if not swift_dir.is_dir():
-        return ""
-    h = hashlib.sha256()
-    for root, dirs, files in os.walk(str(swift_dir)):
-        dirs[:] = sorted(d for d in dirs if d not in (".build",))
-        root_path = Path(root)
-        for fname in sorted(files):
-            fpath = root_path / fname
-            h.update(str(fpath.relative_to(swift_dir)).encode())
-            try:
-                h.update(fpath.read_bytes())
-            except OSError:
-                pass
-    return h.hexdigest()
-
-
-def swift_app_is_stale(repo: Path, bundle: Path) -> bool:
-    """True when the built Swift app predates the current Swift sources.
-
-    Reads Contents/Resources/build-source-hash written by build-app.sh —
-    a SHA-256 over jaeger_ai/interfaces/swift/ captured before the build
-    started. Covers uncommitted, dirty, and untracked source changes that
-    a git-diff-only check would miss. Missing executable or missing stamp
-    (legacy build / failed stamp) → stale. No .git (tarball install) → False.
-    """
-    exe = bundle / "Contents" / "MacOS" / "JaegerAI"
-    if not exe.exists():
-        return True
-    if not (repo / ".git").exists():
-        return False
-    stamp = bundle / "Contents" / "Resources" / "build-source-hash"
-    try:
-        stored = stamp.read_text().strip()
-    except OSError:
-        stored = ""
-    if not stored:
-        return True
-    return _swift_source_fingerprint(repo) != stored

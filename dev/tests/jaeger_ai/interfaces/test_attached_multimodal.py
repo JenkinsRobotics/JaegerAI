@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 from jaeger_ai.interfaces import bridge
-from jaeger_ai.interfaces.pyside6.multimodal.remote_runtime import AttachedAgentRuntime
+from jaeger_ai.interfaces.native_multimodal.remote_runtime import AttachedAgentRuntime
 
 
 class _Runtime:

@@ -11592,25 +11592,20 @@ def _handle_health_restart(handler) -> bool:
 
 
 def _serve_manifest(handler) -> bool:
-    """Serve static/manifest.json with the correct PWA Content-Type.
-
-    Shared by the root (/manifest.json, /manifest.webmanifest) and
-    session-prefixed (/session/manifest.json, /session/manifest.webmanifest)
-    routes so Firefox Android can fetch the manifest when installing from
-    a /session/<id> page.  See #2226.
-    """
-    static_root = api_config.get_static_root()
-    manifest_path = (static_root / "manifest.json").resolve()
-    if manifest_path.exists():
-        data = manifest_path.read_bytes()
-        handler.send_response(200)
-        handler.send_header("Content-Type", "application/manifest+json; charset=utf-8")
-        handler.send_header("Cache-Control", "no-store")
-        handler.send_header("Content-Length", str(len(data)))
-        handler.end_headers()
-        handler.wfile.write(data)
-        return True
-    return j(handler, {"error": "not found"}, status=404)
+    """Serve the canonical shared UI manifest, never an archived static file."""
+    from api.ui_shell import dist_root
+    root = dist_root()
+    manifest = root / "manifest.webmanifest" if root else None
+    if manifest is None or not manifest.is_file():
+        return j(handler, {"error": "not found"}, status=404)
+    data = manifest.read_bytes()
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/manifest+json; charset=utf-8")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
+    return True
 
 
 def _saved_prompts_path() -> "Path":
@@ -11635,50 +11630,6 @@ def _save_saved_prompts(prompts: list) -> None:
     p = _saved_prompts_path()
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(prompts, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-# In-process cache for the app-shell template. The `/`, `/index.html`, and
-# `/session/<id>` routes are the hottest navigations and each re-read the
-# ~190 KB static/index.html from disk and re-ran the two process-constant
-# substitutions (__WEBUI_VERSION__, __MAX_UPLOAD_BYTES__) on every request.
-# Those values are fixed for the process lifetime, so we cache the partially
-# rendered template here, keyed by (size, nanosecond mtime) exactly like
-# _STATIC_CACHE so a redeploy is picked up without a restart. The two values
-# that genuinely vary per request — the per-session CSRF token and the runtime
-# extension tags (inject_extension_tags) — are still applied on each request
-# against the cached base, so caching changes no observable output.
-_INDEX_SHELL_CACHE: dict = {}
-_INDEX_SHELL_CACHE_LOCK = threading.Lock()
-
-
-def _render_index_shell_base() -> str:
-    """Return static/index.html with the process-constant tokens substituted.
-
-    Cached and invalidated on (size, mtime_ns) change. The CSRF token and
-    extension-tag injection are intentionally NOT applied here — they vary per
-    request and are applied by the caller against this base string.
-    """
-    from api.updates import WEBUI_VERSION
-
-    index_path = api_config.get_index_html_path()
-    st = index_path.stat()
-    sig = (index_path, st.st_size, st.st_mtime_ns)
-    with _INDEX_SHELL_CACHE_LOCK:
-        cached = _INDEX_SHELL_CACHE.get("base")
-        if cached and cached[0] == sig:
-            return cached[1]
-    from urllib.parse import quote
-
-    version_token = quote(WEBUI_VERSION, safe="")
-    base = (
-        index_path.read_text(encoding="utf-8")
-        .replace("__WEBUI_VERSION__", version_token)
-        .replace("__MAX_UPLOAD_BYTES__", str(MAX_UPLOAD_BYTES))
-    )
-    with _INDEX_SHELL_CACHE_LOCK:
-        _INDEX_SHELL_CACHE["base"] = (sig, base)
-    return base
-
 
 
 def _jaeger_gateway_bases() -> list[str]:
@@ -11773,58 +11724,15 @@ def handle_get(handler, parsed) -> bool:
     # the manifest, and Firefox falls back to a generated letter icon.
     # See #2226.
     if parsed.path in ("/session/manifest.json", "/session/manifest.webmanifest"):
-        return _serve_manifest(handler)
+        from api.ui_shell import serve
+        return serve(handler, parsed._replace(path="/manifest.json"))
 
-    # New UI build at / (interfaces/ui/dist); the old shell only at /legacy
-    # behind JAEGER_WEBUI_LEGACY=1 (api/ui_shell.py).
+    # Canonical shared UI only; no legacy shell or source fallback.
     from api.ui_shell import serve as _serve_ui_shell
-    _shell = _serve_ui_shell(handler, parsed)
-    if _shell is True:
+    if _serve_ui_shell(handler, parsed):
         return True
-    if _shell == "legacy":
-        parsed = parsed._replace(path="/")
-
-    if parsed.path in ("/", "/index.html") or parsed.path.startswith("/session/"):
-        try:
-            from api.extensions import inject_extension_tags
-
-            csrf_token = ""
-            try:
-                from api.auth import csrf_token_for_session, is_auth_enabled, parse_cookie, verify_session
-
-                if is_auth_enabled():
-                    cookie_val = parse_cookie(handler)
-                    if not cookie_val:
-                        cookie_val = getattr(handler, "_trusted_auth_session_cookie_value", None)
-                    if cookie_val and verify_session(cookie_val):
-                        csrf_token = csrf_token_for_session(cookie_val) or ""
-            except Exception:
-                csrf_token = ""
-
-            # The disk read + process-constant token substitutions are cached;
-            # only the per-session CSRF token and per-request extension tags are
-            # applied here (see _render_index_shell_base).
-            html = _render_index_shell_base().replace(
-                "__CSRF_TOKEN_JSON__", json.dumps(csrf_token)
-            )
-            return t(
-                handler,
-                inject_extension_tags(html),
-                content_type="text/html; charset=utf-8",
-            )
-        except Exception as exc:
-            return _serve_shell_unavailable(handler, exc)
-
     if parsed.path == "/share" or parsed.path.startswith("/share/"):
-        share_path = (Path(__file__).parent.parent / "static" / "share.html").resolve()
-        return t(
-            handler,
-            share_path.read_text(encoding="utf-8"),
-            content_type="text/html; charset=utf-8",
-            extra_headers={
-                "X-Robots-Tag": "noindex, nofollow",
-            },
-        )
+        return j(handler, {"error": "Legacy share presentation archived; shared UI replacement unavailable"}, status=503)
 
     if parsed.path == "/login":
         return handle_login_page(handler, parsed, load_settings_fn=load_settings, render_html_fn=t)

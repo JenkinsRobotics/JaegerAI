@@ -253,13 +253,12 @@ def _swift_lease(path: Path, beat_at: float) -> None:
     path.write_text('{"beat_at": %.6f, "owner": "menubar"}\n' % beat_at, encoding="utf-8")
 
 
-def test_menu_bar_quit_stops_the_lease_before_stack_down():
-    source = Path("jaeger_ai/interfaces/swift/Sources/JaegerAI/AppDelegate.swift").read_text(encoding="utf-8")
-    body = source.split("func applicationShouldTerminate(", 1)[1].split("private var shutdownStarted", 1)[0]
-    assert body.index("LifecycleLeaseBeat.retire()") < body.index("StackManager.shared.down()")
-    writer = Path("jaeger_ai/interfaces/swift/Sources/JaegerAI/Bridge/StackManager.swift").read_text(encoding="utf-8")
-    assert r'{\"beat_at\": %.6f, \"owner\": \"menubar\"}' in writer
-    assert "write(beatAt: 0)" in writer
+def test_menu_bar_quit_releases_lease_before_stack_shutdown():
+    source = Path("jaeger_ai/interfaces/macos-shell/Sources/JaegerShell/JaegerShellApplication.swift").read_text()
+    assert source.index('stack.retireLease("app quit")') < source.index("stack.shutdown()")
+    policy = Path("jaeger_ai/interfaces/macos-shell/Sources/JaegerShellCore/LifecycleLease.swift").read_text()
+    assert "case remove" in policy
+    assert "isDevBuild ? requested : .remove" in policy
 
 
 def test_quit_retirement_lease_blocks_resurrection(tmp_path: Path, monkeypatch):
@@ -307,8 +306,8 @@ def test_lifecycle_shutdown_bootouts_so_launchd_cannot_resurrect(tmp_path: Path,
 def test_webui_launcher_stays_on_loopback_unless_lan_is_explicit():
     import subprocess
     text = Path("scripts/run-jaeger-webui.sh").read_text(encoding="utf-8")
-    start = text.index('if [[ "${JAEGER_WEBUI_ALLOW_LAN:-0}"')
-    snippet = text[start:text.index("\nfi", start) + len("\nfi")]
+    start = text.index("case \"$(printf '%s' \"${JAEGER_WEBUI_ALLOW_LAN:-0}\"")
+    snippet = text[start:text.index("\nesac", start) + len("\nesac")]
     blocked = subprocess.check_output(
         ["bash", "-c", snippet + '\nprintf %s "$HERMES_WEBUI_HOST"'],
         env={"JAEGER_WEBUI_HOST": "0.0.0.0", "PATH": "/usr/bin:/bin"},

@@ -83,7 +83,7 @@ dependencies = {file = ["requirements.txt"]}
 include = ["jaeger_ai*"]
 exclude = ["jaeger_ai.__pycache__", "jaeger_ai.*.__pycache__"]
 # Much of JaegerAI intentionally uses PEP 420 namespace directories (notably
-# core/, core/instance/, pyside6/, and nodes/). Disabling namespace discovery
+# core/, core/instance/, and nodes/). Disabling namespace discovery
 # made editable installs work while silently omitting those modules from a
 # built wheel.
 namespaces = true
@@ -113,8 +113,6 @@ jaeger_ai = [
     "interfaces/ui/package.json", "interfaces/ui/package-lock.json", "interfaces/ui/index.html",
     "interfaces/ui/tsconfig.json", "interfaces/ui/vite.config.ts", "interfaces/ui/src/**/*",
     "interfaces/ui/public/**/*", "interfaces/ui/vendor/**/*", "interfaces/ui/scripts/**/*",
-    "interfaces/swift/Package.swift", "interfaces/swift/Sources/**/*.swift",
-    "interfaces/swift/Resources/**/*", "interfaces/swift/Scripts/*.sh",
     "interfaces/avatar/Package.swift", "interfaces/avatar/Sources/**/*.swift",
     "interfaces/avatar/Resources/**/*",
 ]
