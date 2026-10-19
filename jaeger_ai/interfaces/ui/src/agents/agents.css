@@ -296,3 +296,6 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-agent-section { padding: 12px 14px 4px; font-size: 12px; font-weight: 600; color: var(--aether-color-text-muted); }
 /* No iOS long-press callout / text selection on agent rows: the long-press opens our agent menu instead. */
 .jg-agent-row, .jg-agent-list__item, .jg-prow, .jg-plead { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+
+.jg-amenu { max-height: calc(100dvh - 16px); max-width: calc(100vw - 16px); overflow-y: auto; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__item, .jg-amenu__scrim:not(.is-phone) .jg-amenu__bubble, .jg-amenu__scrim:not(.is-phone) .jg-amenu__head { font-size: var(--jg-font-body); }

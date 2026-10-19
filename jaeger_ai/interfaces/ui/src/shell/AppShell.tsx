@@ -8,6 +8,8 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
 import { SIDEBAR, dragTo, keyAdjust, layout, parsePrefs, serializePrefs, toggle, type SidebarPrefs } from "./sidebarSizing";
 
+import { currentTextSize, TEXT_SIZE_EVENT } from "../settings/textSize";
+
 export interface SidebarControl { collapsed: boolean; toggle: () => void }
 
 interface AppShellProps {
@@ -56,7 +58,9 @@ export function AppShell({ top, primary, sections, footer, children }: AppShellP
     return () => window.clearTimeout(t);
   }, [animating]);
 
-  const lay = layout(prefs, shellWidth);
+  const [textSize, setTextSize] = useState(currentTextSize);
+  useEffect(() => { const sync = () => setTextSize(currentTextSize()); window.addEventListener(TEXT_SIZE_EVENT, sync); return () => window.removeEventListener(TEXT_SIZE_EVENT, sync); }, []);
+  const lay = layout(prefs, shellWidth * Math.min(1, 14 / textSize));
 
   /** Only a toggle animates (never a drag or a window resize). */
   const apply = useCallback((next: SidebarPrefs, animate: boolean) => {

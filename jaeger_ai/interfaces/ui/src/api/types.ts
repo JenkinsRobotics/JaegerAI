@@ -15,6 +15,8 @@ export interface AgentSkill {
 export type Runner = "native" | `delegate:${string}` | string;
 
 export interface Agent {
+  /** Explicit server-supported menu actions; omitted/false means unavailable. */
+  ui_actions?: Partial<import("./agentActions").AgentCaps>;
   id: string;
   name: string;
   display_name?: string;

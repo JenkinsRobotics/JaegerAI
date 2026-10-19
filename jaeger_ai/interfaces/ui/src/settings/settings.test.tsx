@@ -61,3 +61,14 @@ describe("RevealMarkdown", () => {
     expect(el.querySelector(".jg-caret")).toBeTruthy();
   });
 });
+
+
+it("text size control updates the live typography and remembers the device choice", async () => {
+  await mount(<SettingsDialog open onClose={() => {}} />);
+  const control = document.querySelector<HTMLSelectElement>('select[aria-label="Text size"]')!;
+  await act(async () => { control.value = "20"; control.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(localStorage.getItem("jaeger.ui.text-size")).toBe("20");
+  expect(document.documentElement.style.getPropertyValue("--jg-font-size-base")).toBe("20px");
+  expect(control.value).toBe("20");
+  document.documentElement.removeAttribute("style");
+});

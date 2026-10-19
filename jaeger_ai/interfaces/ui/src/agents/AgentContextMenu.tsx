@@ -3,8 +3,9 @@
  * message in a grey bubble clamped with …) sits above a translucent menu: Mark Read, Pin, New Section, Share as
  * Template, Hide (red), More ›. More expands in place: the first menu dims and a second card overlaps its lower
  * part with Copy ID, Duplicate, Delete (red). Grok's "Ask Siri" is iOS-only and is dropped.
- * Items without a backing API (agentCaps) are hidden; Mark Read and Pin then use the local seen mark and pins.
- * Delete always asks first (soft delete on the gateway) and is never offered for protected agents. */
+ * Server actions require explicit ui_actions; canonical Gateway advertises seen/read only.
+ * Local read marks and pins are labeled per-device. Delete is offered only by an advertising server,
+ * asks first, and is never offered for protected agents. */
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Agent } from "../api/types";
 import { isProtected, type AgentCaps } from "../api/agentActions";
@@ -13,13 +14,16 @@ import { Icon, type IconName } from "../icons/Icon";
 import { AgentAvatar } from "./AgentAvatar";
 import { label } from "./agentsLogic";
 
-export type AgentMenuAction = "read" | "pin" | "unpin" | "section" | "template" | "hide" | "copy-id" | "duplicate" | "delete";
+export type AgentMenuAction = "open" | "profile" | "history" | "read" | "pin" | "unpin" | "section" | "template" | "hide" | "copy-id" | "duplicate" | "delete";
 type Item = { id: AgentMenuAction; label: string; icon: IconName; danger?: boolean };
 
 export function agentMenuItems(agent: Agent, caps: AgentCaps, pinned: boolean): { main: Item[]; more: Item[] } {
   const main: Item[] = [
-    { id: "read", label: "Mark Read", icon: "pass" },
-    pinned ? { id: "unpin", label: "Unpin", icon: "pin" } : { id: "pin", label: "Pin", icon: "pin" },
+    { id: "open", label: "Open chat", icon: "comment-discussion" },
+    { id: "profile", label: "Agent profile", icon: "info" },
+    { id: "history", label: "Conversation history", icon: "history" },
+    { id: "read", label: caps.read ? "Mark Read" : "Mark Read on this device", icon: "pass" },
+    pinned ? { id: "unpin", label: "Unpin on this device", icon: "pin" } : { id: "pin", label: "Pin on this device", icon: "pin" },
     ...(caps.sections ? [{ id: "section" as const, label: "New Section", icon: "new-folder" as IconName }] : []),
     ...(caps.template ? [{ id: "template" as const, label: "Share as Template", icon: "share" as IconName }] : []),
     ...(caps.hide && !isProtected(agent) ? [{ id: "hide" as const, label: "Hide", icon: "eye-closed" as IconName, danger: true }] : []),
@@ -45,7 +49,7 @@ export function AgentContextMenu({ agent, preview, at, phone, caps, pinned, onAc
     if (!r) return;
     if (phone) { setPos({ left: Math.max(12, (innerWidth - r.width) / 2), top: Math.max(12, Math.min(96, innerHeight - r.height - 12)) }); return; }
     setPos({ left: Math.max(8, Math.min(at.x, innerWidth - r.width - 8)), top: Math.max(8, Math.min(at.y - 40, innerHeight - r.height - 8)) });
-  }, [at, phone]);
+  }, [at, phone, more]);
   const { main, more: moreItems } = agentMenuItems(agent, caps, pinned);
   const name = label(agent);
   const pick = (id: AgentMenuAction) => { onClose(); onAction(id, agent); };

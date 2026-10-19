@@ -18,7 +18,7 @@ describe("agent capabilities (spec fields on GET /v1/agents)", () => {
     expect(agentCaps([gw], {} as AgentActions)).toEqual(NO_CAPS);
   });
   it("a gateway on the spec: every item", () => {
-    expect(agentCaps([{ ...gw, primary: false, unread_count: 0, pinned: false, hidden: false, section_id: null }], {} as AgentActions)).toEqual(ALL);
+    expect(agentCaps([{ ...gw, ui_actions: ALL }], {} as AgentActions)).toEqual(ALL);
   });
 });
 
@@ -27,7 +27,7 @@ describe("AgentContextMenu", () => {
     const onAction = vi.fn();
     mount(<AgentContextMenu agent={gw} preview="The iPhone fix is tested" at={{ x: 10, y: 10 }} phone caps={ALL} pinned={false} onAction={onAction} onClose={() => {}} />);
     expect(document.querySelector(".jg-amenu__bubble")!.textContent).toBe("The iPhone fix is tested");
-    expect(labels('[aria-label="Jaeger Gateway & WebUI actions"]')).toEqual(["Mark Read", "Pin", "New Section", "Share as Template", "Hide", "More"]);
+    expect(labels('[aria-label="Jaeger Gateway & WebUI actions"]')).toEqual(["Open chat", "Agent profile", "Conversation history", "Mark Read", "Pin on this device", "New Section", "Share as Template", "Hide", "More"]);
     expect(document.querySelector(".is-danger")!.textContent).toContain("Hide");
     act(() => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((b) => b.textContent!.includes("More"))!.click());
     expect(labels('[aria-label="More"]')).toEqual(["More", "Copy ID", "Duplicate", "Delete"]);
@@ -37,14 +37,14 @@ describe("AgentContextMenu", () => {
   });
   it("today's gateway: only Mark Read (local), Pin (local) and More → Copy ID", () => {
     const { main, more } = agentMenuItems(gw, NO_CAPS, false);
-    expect(main.map((i) => i.label)).toEqual(["Mark Read", "Pin"]);
+    expect(main.map((i) => i.label)).toEqual(["Open chat", "Agent profile", "Conversation history", "Mark Read on this device", "Pin on this device"]);
     expect(more.map((i) => i.label)).toEqual(["Copy ID"]);
   });
   it("never offers Hide or Delete for protected agents (primary, native:jaeger)", () => {
     for (const a of [{ ...gw, primary: true }, { ...gw, id: "native:jaeger" }]) {
       const { main, more } = agentMenuItems(a, ALL, true);
       expect(main.map((i) => i.label)).not.toContain("Hide");
-      expect(main.map((i) => i.label)).toContain("Unpin");
+      expect(main.map((i) => i.label)).toContain("Unpin on this device");
       expect(more.map((i) => i.label)).not.toContain("Delete");
     }
   });

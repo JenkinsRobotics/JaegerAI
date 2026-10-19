@@ -2,11 +2,8 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `master` — operator-authorized canonical integration, 2026-10-19.
-**Current work:** [Scoped legacy cleanup](integration/SCOPED_CLEANUP.md).
-**Branch rule:** cleanup only. Canonical Mac: `interfaces/macos-shell`; shared UI:
-`interfaces/ui`. Legacy SwiftUI/Qt/Hermes frontend source is archived outside the repo; never restore an automatic fallback. Known ambient/camera/avatar/share presentation gaps are in the cleanup record. No feature implementation or overlapping coder. Preserve running
-apps/services, data and credentials. The release notes below retain historical dates;
-they are not current installation or live acceptance evidence.
+**Current work:** [Mac source completion](integration/MAC_APP_COMPLETION.md), bounded agent menu + appearance/text sizing checkpoint.
+**Branch rule:** one owner; canonical `interfaces/macos-shell` + `interfaces/ui` and required backend only. Source work authorized; runtime migration pending. No app/service start, stop, restart, install or switching; no credentials, authentication, permissions or persistent-access changes. No broad feature expansion or repeated broad suites. The [legacy cleanup record](integration/SCOPED_CLEANUP.md) remains cumulative recovery evidence. Never restore legacy frontends or automatic fallbacks.
 
 This is the single execution entry point for humans and coding agents. Re-read the current source before acting.
 

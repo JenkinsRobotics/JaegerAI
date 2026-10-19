@@ -1,3 +1,4 @@
+import { applyTextSize } from "../settings/textSize";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -81,4 +82,16 @@ describe("AppShell sidebar", () => {
     setWindowWidth(1040);
     expect(shell().dataset.sidebar).toBe("expanded");
   });
+});
+
+
+it("auto-collapses for larger text and restores the sidebar when the window grows", () => {
+  setWindowWidth(900); render();
+  expect(shell().classList.contains("is-rail")).toBe(false);
+  act(() => { applyTextSize(20); });
+  expect(shell().classList.contains("is-rail")).toBe(true);
+  setWindowWidth(1400);
+  expect(shell().classList.contains("is-rail")).toBe(false);
+  expect(JSON.parse(localStorage.getItem(SIDEBAR.storageKey)!).isCollapsed).toBe(false);
+  act(() => { applyTextSize(14); });
 });
