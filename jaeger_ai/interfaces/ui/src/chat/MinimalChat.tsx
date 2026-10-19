@@ -20,7 +20,7 @@ import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
-import { ApprovalCard } from "./ApprovalCard";
+import { ApprovalCard, QuestionCard } from "./ApprovalCard";
 import { MessageMenu, Reactions, type MessageAction } from "./MessageMenu";
 import { useRevealedText } from "./reveal";
 import { useStreamStyle, type StreamStyleParams } from "./streamStyle";
@@ -120,21 +120,7 @@ export function StepsFold({ tools, defaultOpen = false }: { tools: ToolPart[]; d
 }
 
 function Card({ part, onDecide, tool, decided }: { part: CardPart; onDecide: Decide; tool?: { toolName: string; input: unknown }; decided?: "approve" | "deny" }) {
-  if (part.kind === "question") {
-    return (
-      <div className="jg-card-widget" role="group" aria-label={part.title} data-sender="assistant">
-        <div className="jg-card-widget__title">{part.title}</div>
-        <ul className="jg-options">
-          {part.options.map((o, i) => (
-            <li key={o.id} className={`jg-option${o.id === part.chosenId ? " is-chosen" : ""}`} aria-current={o.id === part.chosenId ? "true" : undefined}>
-              <span className="jg-option__key">{String.fromCharCode(65 + i)}</span>
-              <span>{o.label}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
+  if (part.kind === "question") return <QuestionCard title={part.title} options={part.options} chosenId={part.chosenId} />;
   return <ApprovalCard title={part.title} message={part.message} toolName={tool?.toolName} input={tool?.input} decided={decided} onDecide={(d) => onDecide(part.callId, d)} />;
 }
 
