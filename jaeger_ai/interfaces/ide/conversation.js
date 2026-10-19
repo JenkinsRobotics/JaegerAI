@@ -259,17 +259,19 @@ class Conversation {
   async loadTasks(epoch = this.epoch) {
     if (typeof this.gateway.tasks !== 'function') return;
     const result = await this.gateway.tasks();
-    if (epoch === this.epoch) this.state.backgroundTasks = (result.tasks || [])
-      .filter(task => task.notification_policy?.recipient_session_id === this.state.session?.session_id
-        && !['completed', 'cancelled'].includes(task.state));
+    const sid = this.state.session?.session_id;
+    if (epoch === this.epoch) this.state.backgroundTasks = sid ? (result.tasks || [])
+      .filter(task => task.notification_policy?.recipient_session_id === sid
+        && !['completed', 'cancelled'].includes(task.state)) : [];
   }
   async cancelBackgroundTask(id) {
     await this.gateway.cancelTask(id); await this.loadTasks(); this.emit();
   }
   async loadApprovals(epoch = this.epoch) {
     const result = await this.gateway.approvals();
-    if (epoch === this.epoch) this.state.approvals = (result.approvals || [])
-      .filter(a => a.session_id === this.state.session?.session_id || a.origin?.parent_session_id === this.state.session?.session_id);
+    const sid = this.state.session?.session_id;
+    if (epoch === this.epoch) this.state.approvals = sid ? (result.approvals || [])
+      .filter(a => a.session_id === sid || a.origin?.parent_session_id === sid) : [];
   }
   async loadWorkers(epoch = this.epoch) {
     if (this.workersLoaded || typeof this.gateway.orchestrationWorkers !== 'function') return;

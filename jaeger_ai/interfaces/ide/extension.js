@@ -49,14 +49,14 @@ function activate(context) {
       const gw = controller?.gateway || gatewayClient();
       const result = mode ? await gw.setAutonomy(mode) : await gw.autonomy();
       view?.webview.postMessage({ autonomy: { mode: result.autonomy, options: result.options } });
-    } catch (error) { if (mode) throw error; /* reading is best-effort: the pill just stays unknown */ }
+    } catch (error) { view?.webview.postMessage({ autonomy: { mode: null, options: [], error: error.message } }); if (mode) throw error; }
   };
   const sendTier = async tier => {
     try {
       const gw = controller?.gateway || gatewayClient();
       const result = tier ? await gw.setTier(tier) : await gw.tier();
       view?.webview.postMessage({ tier: { current: result.tier, options: result.options } });
-    } catch (error) { if (tier) throw error; /* reading is best-effort */ }
+    } catch (error) { view?.webview.postMessage({ tier: { current: null, options: [], error: error.message } }); if (tier) throw error; }
   };
   const runTestSuite = async () => {
     const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -402,13 +402,77 @@ function activate(context) {
     return selectedWorkspace;
   };
   const selectWorkspace = async () => {
+    const key = workspaceStorageKey();
     const picked = await vscode.window.showWorkspaceFolderPick({
       placeHolder: 'Choose the workspace Jaeger should use',
     });
     if (!picked) return;
+    if (key !== workspaceStorageKey()) throw new Error('Gateway connection changed. Choose the workspace again.');
     selectedWorkspace = picked.uri.fsPath;
     await context.workspaceState.update(workspaceStorageKey(), selectedWorkspace);
     view?.webview.postMessage({ selectedWorkspace });
+    postContext();
+  };
+  const openPermissions = async () => {
+    const gw = controller?.gateway || gatewayClient();
+    const current = await gw.autonomy();
+    const modes = {
+      ask: ['Ask before actions', 'Ask before outward, hardware, or destructive actions.'],
+      scoped: ['Scoped permissions', 'Use existing grants; ask before actions outside their scope.'],
+      auto: ['Automatic permissions', 'Automatically approve actions for admin sessions.'],
+    };
+    const items = (current.options || []).filter(mode => modes[mode]).map(mode => ({
+      label: `${mode === current.autonomy ? '$(check) ' : ''}${modes[mode][0]}`,
+      description: mode === current.autonomy ? 'Current Gateway setting' : '',
+      detail: modes[mode][1], mode,
+    }));
+    if (!items.length) throw new Error('The Gateway did not report any editable permission modes.');
+    const picked = await vscode.window.showQuickPick(items, { title: 'Gateway permissions', placeHolder: 'Applies to the connected Gateway instance and its clients' });
+    if (!picked || picked.mode === current.autonomy) { await sendAutonomy(); return; }
+    const ranks = { ask: 0, scoped: 1, auto: 2 };
+    if (ranks[picked.mode] > (ranks[current.autonomy] ?? 0)) {
+      const confirmed = await vscode.window.showWarningMessage(
+        `${modes[picked.mode][0]} changes approval behavior for the connected Gateway instance, including other clients. ${modes[picked.mode][1]}`,
+        { modal: true }, 'Apply permissions');
+      if (confirmed !== 'Apply permissions') return;
+    }
+    if (gw.url !== new URL(endpoint()).origin) throw new Error('Gateway connection changed. Open permissions again.');
+    await sendAutonomy(picked.mode);
+  };
+  const openAgency = async () => {
+    const gw = controller?.gateway || gatewayClient();
+    const current = await gw.tier();
+    const items = (current.options || []).map(option => typeof option === 'string' ? option : option.id || option.tier).filter(Boolean)
+      .map(tier => ({ label: `${tier === current.tier ? '$(check) ' : ''}${tier}`, tier }));
+    const picked = await vscode.window.showQuickPick(items, { title: 'Gateway agency', placeHolder: 'Choose the interaction tier for this Gateway instance' });
+    if (gw.url !== new URL(endpoint()).origin) throw new Error('Gateway connection changed. Open agency settings again.');
+    if (picked && picked.tier !== current.tier) await sendTier(picked.tier);
+  };
+  const openExecutionMenu = async () => {
+    const gw = controller?.gateway || gatewayClient();
+    const items = [
+      { label: '$(folder-opened) Choose open workspace', description: selectedWorkspace || 'No workspace selected', action: 'workspace' },
+      { label: '$(folder) Browse for workspace…', action: 'browse' },
+      { label: '$(git-branch) Choose existing worktree…', action: 'worktree' },
+      { label: '$(settings-gear) Gateway connection settings…', description: gw.url, action: 'connection' },
+    ];
+    const picked = await vscode.window.showQuickPick(items, { title: 'Execution location', placeHolder: `Gateway: ${gw.url} · Workspace: ${selectedWorkspace || 'none'}` });
+    if (!picked) return;
+    if (gw.url !== new URL(endpoint()).origin) throw new Error('Gateway connection changed. Choose the execution location again.');
+    if (picked.action === 'workspace') return selectWorkspace();
+    if (picked.action === 'worktree') return selectWorktree();
+    if (picked.action === 'connection') return settings();
+    if (picked.action === 'browse') {
+      const folders = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: 'Use workspace' });
+      if (!folders?.length) return;
+      if (gw.url !== new URL(endpoint()).origin) throw new Error('Gateway connection changed. Choose the workspace again.');
+      const folder = fs.realpathSync(folders[0].fsPath);
+      if (!fs.statSync(folder).isDirectory()) throw new Error('Choose an existing workspace directory.');
+      selectedWorkspace = folder;
+      await context.workspaceState.update(workspaceStorageKey(), selectedWorkspace);
+      view?.webview.postMessage({ selectedWorkspace });
+      postContext();
+    }
   };
   const listWorktrees = async () => {
     const root = selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
@@ -600,7 +664,7 @@ function activate(context) {
     controller = undefined;
     postToView({ connected: false, busy: false, session: null, sessions: [], text: '',
       reasoning: '', activity: [], approvals: [], staged: [], models: null, modelsError: null,
-      status: 'Connecting…', error: '', queue: [], openSessionIds: [], selectedWorkspace: restoreWorkspace(), configuredModel: configuredModel() });
+      status: 'Connecting…', error: '', autonomy: null, tier: null, queue: [], openSessionIds: [], selectedWorkspace: restoreWorkspace(), configuredModel: configuredModel() });
     const key = storageKey(), restored = context.workspaceState.get(key, {});
     const gw = gatewayClient();
     controller = new Conversation(gw, state => {
@@ -645,6 +709,14 @@ function activate(context) {
       let selected;
       const messageSubscription = view.webview.onDidReceiveMessage(message => report(async () => {
         if (!message || typeof message.type !== 'string') return;
+        if (message.type === 'gatewayPermissions') return openPermissions();
+        if (message.type === 'gatewayAgency') return openAgency();
+        if (message.type === 'executionLocation') return openExecutionMenu();
+        if (message.type === 'refreshModels') {
+          if (controller) { controller.modelsLoaded = false; await controller.loadModels(); controller.emit(); }
+          await Promise.all([sendAutonomy(), sendTier()]);
+          return;
+        }
         if (message.type === 'settings') return settings();
         if (message.type === 'editDraft' && typeof message.text === 'string') {
           const answer = await vscode.window.showWarningMessage('Replace your current draft with this message?', { modal: true }, 'Replace draft');

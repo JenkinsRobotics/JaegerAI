@@ -173,6 +173,7 @@ function selectableModels(catalog) {
   const addRow = (provider, id) => {
     provider = String(provider || '').trim();
     id = String(id || '').trim();
+    if (id.startsWith('@')) { const routed = parseProviderModel(id); provider = routed.provider || provider; id = routed.model; }
     if (!id) return;
     const key = `${provider}::${id}`;
     if (seen.has(key)) return;

@@ -426,9 +426,10 @@ function renderModelItems() {
   const groups = groupSelectableModels(rows);
   const items = [];
   const addItem = (value, label) => {
-    const item = document.createElement('div');
+    const item = document.createElement('button');
+    item.type = 'button';
     item.className = 'model-item';
-    item.setAttribute('role', 'option');
+    item.setAttribute('aria-pressed', String(value === modelChoice));
     item.dataset.value = value;
     item.dataset.label = label.toLowerCase();
     item.textContent = label;
@@ -452,6 +453,18 @@ function renderModelItems() {
     items.push(heading);
     for (const row of models) addItem(providerModelValue(row.provider, row.id), `${row.provider} · ${row.id}`);
   }
+  if (state.modelsError || !rows.length) {
+    const notice = document.createElement('div'); notice.className = 'model-catalog-notice';
+    notice.setAttribute('role', 'status');
+    notice.textContent = state.modelsError ? `Could not load Gateway models: ${state.modelsError}` : state.models ? 'No available models were reported by this Gateway.' : 'Loading Gateway models…';
+    items.push(notice);
+    for (const provider of state.models?.providers || []) {
+      if (provider.reachable) continue;
+      const reason = document.createElement('div'); reason.className = 'model-provider-status';
+      reason.textContent = `${provider.display_name || provider.id}: ${provider.reason || 'Unavailable'}`;
+      items.push(reason);
+    }
+  }
   list.replaceChildren(...items);
   const selection = modelChoice === 'config' ? state.configuredModel : modelChoice;
   const unavailable = Boolean(selection) && (Boolean(state.modelsError) || Boolean(state.models) && !modelSelectionAvailable(selection, state.models));
@@ -471,10 +484,21 @@ function renderModels() {
   renderModelItems();
 }
 
+function renderGatewaySettings() {
+  const endpoint = $('gateway-endpoint');
+  if (endpoint) endpoint.textContent = state.endpoint || 'Connecting to Gateway…';
+  if ($('gateway-permissions')) $('gateway-permissions').textContent = `Permissions · ${state.autonomy?.mode || 'Unavailable'}`;
+  if ($('gateway-agency')) $('gateway-agency').textContent = `Agency · ${state.tier?.current || 'Unavailable'}`;
+}
+for (const [id, action] of [['gateway-permissions', 'gatewayPermissions'], ['gateway-agency', 'gatewayAgency'], ['gateway-connection', 'settings'], ['gateway-refresh', 'refreshModels']]) {
+  if ($(id)) $(id).onclick = () => { if (action !== 'refreshModels') $('model-menu').close(); post(action); };
+}
 function openModelMenu() {
+  post('refreshModels');
   if (typeof $('model-menu')?.showModal !== 'function') return;
   renderModels();
   $('model-search').value = '';
+  renderGatewaySettings();
   $('model-list').querySelectorAll('.model-item').forEach(el => { el.hidden = false; });
   $('model-menu').showModal();
 }
@@ -925,7 +949,7 @@ function renderComposerBar() {
     : state.busy ? 'Steer current turn' : 'Send message';
   $('send').setAttribute('aria-label', $('send').title);
   const workspaceLabel = state.selectedWorkspace ? state.selectedWorkspace.split('/').filter(Boolean).at(-1) : 'Work locally';
-  if ($('workspace-label')) $('workspace-label').textContent = 'Local';
+  if ($('workspace-label')) { let local = true; try { local = ['127.0.0.1', 'localhost', '[::1]'].includes(new URL(state.endpoint).hostname); } catch {} $('workspace-label').textContent = local ? 'Local' : 'Remote'; }
   if ($('workspace')) {
     $('workspace').hidden = false;
     $('workspace').title = state.selectedWorkspace || 'Choose the workspace Jaeger should use';
@@ -980,7 +1004,9 @@ function renderComposerBar() {
   }
   $('ide-context').setAttribute('aria-pressed', String(ideContextOn));
   const summary = document.querySelector('.control-summary');
-  if ($('permissions-label')) $('permissions-label').textContent = selectedMode() === 'auto' ? 'Auto permissions' : selectedMode() === 'plan' ? 'Plan only' : 'Default permissions';
+  if ($('permissions-label')) $('permissions-label').textContent = ({ ask: 'Ask before actions', scoped: 'Scoped permissions', auto: 'Auto permissions' })[state.autonomy?.mode] || (state.autonomy?.error ? 'Permissions unavailable' : 'Loading permissions…');
+  if ($('permissions')) $('permissions').title = state.autonomy?.error || `Gateway instance permissions: ${state.autonomy?.mode || 'loading'}`;
+  renderGatewaySettings();
   if (summary) summary.textContent = `${selectedTier()[0].toUpperCase()}${selectedTier().slice(1)}`;
 }
 
@@ -1030,7 +1056,7 @@ function setMode(value) {
   persistView(); renderComposerBar();
 }
 
-if ($('permissions')) $('permissions').onclick = () => setComposerExpanded(!composerExpanded);
+if ($('permissions')) $('permissions').onclick = () => post('gatewayPermissions');
 $('ide-context').onclick = () => { ideContextOn = !ideContextOn; persistView(); renderComposerBar(); renderContextChips(); };
 $('composer-controls-toggle').onclick = () => setComposerExpanded(!composerExpanded);
 setComposerExpanded(false);
@@ -1040,7 +1066,7 @@ window.addEventListener('pointerdown', event => {
 window.addEventListener('keydown', event => {
   if (composerExpanded && event.key === 'Escape') { setComposerExpanded(false); $('composer-controls-toggle').focus(); event.preventDefault(); }
 });
-$('workspace').onclick = () => post('selectWorkspace');
+$('workspace').onclick = () => post('executionLocation');
 $('worktree').onclick = () => post('selectWorktree');
 if ($('jaeger-autonomous-indicator')) $('jaeger-autonomous-indicator').onclick = () => post('info', { what: 'cognitiveRouting' });
 if ($('tier-chat')) $('tier-chat').onclick = () => setTier('chat');

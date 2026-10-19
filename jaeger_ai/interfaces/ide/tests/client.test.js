@@ -715,3 +715,17 @@ test('panel and native observers share one editor side effect', async () => {
   assert.equal(replies.length, 2);
   assert.deepEqual(replies[0], replies[1]);
 });
+
+test('no selected conversation cannot inherit unscoped tasks or foreign approvals', async () => {
+  const { gateway, client } = fixture();
+  gateway.tasks = async () => ({ tasks: [{ task_id: 'foreign', state: 'running' }, { task_id: 'ours', state: 'running', notification_policy: { recipient_session_id: 'one' } }] });
+  gateway.approvals = async () => ({ approvals: [{ approval_id: 'foreign', session_id: 'other' }, { approval_id: 'ours', session_id: 'one' }, { approval_id: 'child', session_id: 'worker', origin: { parent_session_id: 'one' } }] });
+  try {
+    await client.refresh(null);
+    assert.deepEqual(client.state.backgroundTasks, []);
+    assert.deepEqual(client.state.approvals, []);
+    await client.refresh('one');
+    assert.deepEqual(client.state.backgroundTasks.map(x => x.task_id), ['ours']);
+    assert.deepEqual(client.state.approvals.map(x => x.approval_id), ['ours', 'child']);
+  } finally { client.dispose(); }
+});

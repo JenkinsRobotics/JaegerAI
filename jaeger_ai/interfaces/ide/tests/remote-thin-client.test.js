@@ -138,7 +138,7 @@ test('selectableModels dynamically extracts Ollama Cloud models without hardcode
   const rowsB = selectableModels(catalogB);
   assert.equal(rowsB.length, 1);
   assert.equal(rowsB[0].provider, 'ollama-cloud');
-  assert.equal(rowsB[0].id, '@ollama-cloud:dynamic-model-xyz');
+  assert.equal(rowsB[0].id, 'dynamic-model-xyz');
 });
 
 // ── 3. Explicit unavailable/auth error surfacing ───────────────────────────

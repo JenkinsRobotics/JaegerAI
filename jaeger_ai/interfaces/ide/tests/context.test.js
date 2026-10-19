@@ -110,3 +110,10 @@ test('context exclusions remove text and file metadata without mutating the scop
   assert.equal(removed.language, undefined); assert.equal(removed.cursor_line, undefined);
   assert.equal(commands.filterIdeContext(null, []), null);
 });
+
+test('routed Gateway catalog ids remain one provider/model selection', () => {
+  const { selectableModels, parseProviderModel, providerModelValue } = require('../media/presentation');
+  const rows = selectableModels({ groups: [{ provider_id: 'ollama-cloud', status: 'online', models: [{ id: '@ollama-cloud:model:cloud' }] }] });
+  assert.deepEqual(rows, [{ provider: 'ollama-cloud', id: 'model:cloud' }]);
+  assert.deepEqual(parseProviderModel(providerModelValue(rows[0].provider, rows[0].id)), { provider: 'ollama-cloud', model: 'model:cloud' });
+});

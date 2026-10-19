@@ -1411,3 +1411,9 @@ body:not(.has-conversation) .app-header { display: none; }
 #composer-options .mode-option:hover, #composer-options .mode-option:focus-visible { background: var(--vscode-menu-selectionBackground); color: var(--vscode-menu-selectionForeground); }
 
 .timeline-row.empty > .empty { width: 100%; }
+
+.model-item { display: block; width: 100%; text-align: left; color: inherit; }
+.model-catalog-notice, .model-provider-status { padding: 6px 8px; font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.gateway-settings { border-top: 1px solid var(--line); padding-top: 6px; margin-top: 6px; }
+.gateway-settings > button { display: block; width: 100%; padding: 6px 8px; text-align: left; border-radius: 4px; }
+.gateway-settings > button:hover { background: var(--hover); }
