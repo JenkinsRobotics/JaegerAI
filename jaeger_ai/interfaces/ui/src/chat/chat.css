@@ -275,3 +275,14 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 .jg-approval__actions kbd { font: inherit; font-size: 11px; opacity: .55; margin-left: 4px; }
 .jg-approval.is-decided { display: flex; align-items: center; gap: 8px; padding: 6px 12px; font-size: 13px; color: var(--aether-color-text-muted); background: none; }
 .jg-approval__inline { font: 12px var(--aether-font-mono, ui-monospace, monospace); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.jg-question__options { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; }
+.jg-question__option { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border-radius: 10px; font-size: 14px;
+  border: 1px solid color-mix(in srgb, currentColor 8%, transparent); color: var(--aether-color-text-dim); }
+.jg-question__option.is-chosen { color: var(--aether-color-text); border-color: color-mix(in srgb, var(--aether-color-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--aether-color-accent) 8%, transparent); }
+.jg-question__key { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; font-size: 11px; flex: none;
+  background: color-mix(in srgb, currentColor 10%, transparent); }
+.jg-question__option.is-chosen .jg-question__key { background: var(--aether-color-accent); color: var(--aether-color-text-on-selected); }
+.jg-question__label { flex: 1; min-width: 0; }
+.jg-question__check { color: var(--aether-color-accent); }
+.jg-question__foot { margin-top: 10px; font-size: 12px; color: var(--aether-color-text-muted); }

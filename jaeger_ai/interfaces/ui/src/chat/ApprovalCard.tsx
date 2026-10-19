@@ -51,3 +51,26 @@ export function ApprovalCard({ title, message, toolName, input, decided, onDecid
     </div>
   );
 }
+
+/** An agent's question, in the approval card's shape: question icon + title, lettered options, the chosen one
+ * checked and highlighted, and an "Answered" footer once a choice exists (the gateway records the answer). */
+export function QuestionCard({ title, options, chosenId }: { title: string; options: Array<{ id: string; label: string }>; chosenId?: string }) {
+  return (
+    <div className="jg-approval jg-question" role="group" aria-label={title} data-sender="assistant">
+      <div className="jg-approval__head"><Icon name="question" size={15} /><span className="jg-approval__title">{title}</span></div>
+      <ul className="jg-question__options">
+        {options.map((o, i) => {
+          const chosen = o.id === chosenId;
+          return (
+            <li key={o.id} className={`jg-question__option${chosen ? " is-chosen" : ""}`} aria-current={chosen ? "true" : undefined}>
+              <span className="jg-question__key">{String.fromCharCode(65 + i)}</span>
+              <span className="jg-question__label">{o.label}</span>
+              {chosen && <Icon name="check" size={14} className="jg-question__check" />}
+            </li>
+          );
+        })}
+      </ul>
+      {chosenId && <div className="jg-question__foot">Answered</div>}
+    </div>
+  );
+}

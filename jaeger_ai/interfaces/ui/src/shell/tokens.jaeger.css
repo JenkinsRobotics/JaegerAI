@@ -145,6 +145,7 @@ body {
   --jg-menu-hover: rgba(255, 255, 255, .08); --jg-menu-sep: rgba(255, 255, 255, .12); --jg-menu-input: #1c1c1e; --jg-menu-input-line: rgba(255, 255, 255, .15);
   --jg-menu-button: rgba(255, 255, 255, .1); --jg-menu-toast: rgba(44, 44, 46, .95);
   --jg-danger: #ff5a5f; --jg-danger-fill: #e5484d;
+  --jg-scrim: rgba(0, 0, 0, .55);
 }
 :root.aether-light-theme {
   --jg-p-bg: #ffffff; --jg-p-fg: #111111; --jg-p-dim: #6e6e73; --jg-p-raised: #f0f0f2; --jg-p-button: #ececef; --jg-p-me: #d1d1d6;
@@ -154,4 +155,5 @@ body {
   --jg-menu-hover: rgba(0, 0, 0, .06); --jg-menu-sep: rgba(0, 0, 0, .1); --jg-menu-input: #ffffff; --jg-menu-input-line: rgba(0, 0, 0, .15);
   --jg-menu-button: rgba(0, 0, 0, .06); --jg-menu-toast: rgba(44, 44, 46, .95);
   --jg-danger: #e5484d; --jg-danger-fill: #e5484d;
+  --jg-scrim: rgba(0, 0, 0, .5);   /* measured: Grok dims 245 → 122 */
 }
