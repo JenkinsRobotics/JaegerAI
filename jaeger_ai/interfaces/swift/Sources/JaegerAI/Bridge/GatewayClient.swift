@@ -99,7 +99,25 @@ struct GatewayClient: Sendable {
 
     struct Failure: Error, LocalizedError {
         let message: String
+        var statusCode: Int? = nil
         var errorDescription: String? { message }
+    }
+
+    struct RuntimeSkill: Decodable, Identifiable, Sendable {
+        let name: String
+        let category: String
+        let description: String
+        let lifecycle: String
+        var id: String { category + "/" + name }
+    }
+
+    struct RuntimeSkills: Decodable, Sendable {
+        let skills: [RuntimeSkill]
+    }
+
+    func runtimeSkills() async throws -> [RuntimeSkill] {
+        let data = try await request(path: "v1/runtime/skills")
+        return try JSONDecoder().decode(RuntimeSkills.self, from: data).skills
     }
 
     struct Agent: Decodable, Identifiable, Sendable {
@@ -228,7 +246,7 @@ struct GatewayClient: Sendable {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            throw Failure(message: object?["error"] as? String ?? "Gateway request failed (\(path))")
+            throw Failure(message: object?["error"] as? String ?? "Gateway request failed (\(path))", statusCode: (response as? HTTPURLResponse)?.statusCode)
         }
         return data
     }
