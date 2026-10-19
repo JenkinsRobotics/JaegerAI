@@ -24,6 +24,22 @@
 
 import Foundation
 
+@MainActor
+protocol SessionControlClient: Sendable {
+    func getSessionControl(id: String) async throws -> GatewayClient.Session
+    func cancelTurn(sessionID: String, requestID: String) async throws -> GatewayClient.RequestState
+}
+
+@MainActor
+protocol VoiceGatewayClient: Sendable {
+    func sendTurn(sessionID: String, text: String, requestID: String?) async throws -> GatewayClient.TurnAccepted
+    func cancelTurn(sessionID: String, requestID: String) async throws -> GatewayClient.RequestState
+    func streamEvents(sessionID: String, lastEventID: Int) -> AsyncThrowingStream<GatewayClient.StreamEvent, Error>
+    func listNotifications(since: Int, limit: Int) async throws -> GatewayClient.ProactiveFeed
+}
+
+extension GatewayClient: SessionControlClient, VoiceGatewayClient {}
+
 extension GatewayClient {
 
     // MARK: - Wire types

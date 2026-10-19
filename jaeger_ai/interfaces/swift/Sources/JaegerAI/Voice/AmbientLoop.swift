@@ -97,7 +97,7 @@ final class AmbientLoop: ObservableObject {
     @Published private(set) var lastError: String?
     @Published private(set) var transcriptTail: String = ""
 
-    private let gateway: GatewayClient
+    private let gateway: any VoiceGatewayClient
     private let tts: TTSManager
     private let detector: SpeechEnergyDetector
 
@@ -112,6 +112,7 @@ final class AmbientLoop: ObservableObject {
     private var activeRequestID: String?
     private var acceptedRequestID: String?
     private var stopOnAcceptance: Set<String> = []
+    private(set) var cancellationOutcomes: [String: String] = [:]
     private var epoch = 0
 
     /// Speak-first: proactive feed watcher, its cursor, and event ids
@@ -120,7 +121,7 @@ final class AmbientLoop: ObservableObject {
     private var feedCursor: Int?
     private var spokenProactiveIDs: Set<Int> = []
 
-    init(gateway: GatewayClient, tts: TTSManager, detector: SpeechEnergyDetector) {
+    init(gateway: any VoiceGatewayClient, tts: TTSManager, detector: SpeechEnergyDetector) {
         self.gateway = gateway
         self.tts = tts
         self.detector = detector
@@ -159,6 +160,9 @@ final class AmbientLoop: ObservableObject {
     // MARK: - Session
 
     func attach(sessionID: String) {
+        epoch += 1
+        activeRequestID = nil
+        acceptedRequestID = nil
         self.sessionID = sessionID
         lastEventID = 0
         state = .idle
@@ -179,23 +183,34 @@ final class AmbientLoop: ObservableObject {
         state = .thinking
         lastError = nil
 
+        let requestID = UUID().uuidString
+        activeRequestID = requestID
+        acceptedRequestID = nil
         do {
-            let requestID = UUID().uuidString
-            activeRequestID = requestID
-            acceptedRequestID = nil
             let accepted = try await gateway.sendTurn(sessionID: sessionID, text: text, requestID: requestID)
-            activeRequestID = accepted.request_id
-            acceptedRequestID = accepted.request_id
-            if stopOnAcceptance.remove(requestID) != nil {
-                // Stop raced admission. The original cancel was deferred,
-                // so this is the one cancellation, never an uncertain resend.
-                let receipt = try await gateway.cancelTurn(sessionID: sessionID, requestID: accepted.request_id)
-                lastError = receipt.stopLabel
+            let stopWasRequested = stopOnAcceptance.remove(requestID) != nil
+            guard accepted.session_id == sessionID, accepted.request_id == requestID else {
+                if thisEpoch == epoch { lastError = "Admission identity mismatch — outcome unconfirmed" }
+                return
+            }
+            guard thisEpoch == epoch, self.sessionID == sessionID else {
+                // An old response must never replace the newer turn identity,
+                // start its stream, or overwrite its state/error. A prior Stop
+                // applies only to the old request captured before admission.
+                if stopWasRequested {
+                    await cancelCaptured(sessionID: sessionID, requestID: requestID, presentationEpoch: nil)
+                }
+                return
+            }
+            activeRequestID = requestID
+            acceptedRequestID = requestID
+            if stopWasRequested {
+                await cancelCaptured(sessionID: sessionID, requestID: requestID, presentationEpoch: thisEpoch)
                 return
             }
         } catch {
-            // 409 = a turn is already running. Surface it; retrying blindly
-            // would stack turns the operator never asked for.
+            stopOnAcceptance.remove(requestID)
+            guard thisEpoch == epoch, self.sessionID == sessionID else { return }
             lastError = "Send failed: \(error.localizedDescription)"
             state = .idle
             return
@@ -288,7 +303,7 @@ final class AmbientLoop: ObservableObject {
 
     func pollProactiveFeed() async {
         let since = feedCursor ?? 0
-        guard let feed = try? await gateway.listNotifications(since: since) else {
+        guard let feed = try? await gateway.listNotifications(since: since, limit: 10) else {
             return   // gateway down or Stop: stay quiet, try next tick
         }
         guard feedCursor != nil else {
@@ -353,16 +368,25 @@ final class AmbientLoop: ObservableObject {
             stopOnAcceptance.insert(requestID)
             lastError = "Stop will be requested when submission acceptance is known"
         } else if let sessionID, let requestID = activeRequestID {
-            Task { [gateway, weak self] in
-                do {
-                    let receipt = try await gateway.cancelTurn(sessionID: sessionID, requestID: requestID)
-                    self?.lastError = receipt.stopLabel
-                } catch {
-                    self?.lastError = "Stop unconfirmed: " + error.localizedDescription
-                }
+            let presentationEpoch = epoch
+            Task { [weak self] in
+                await self?.cancelCaptured(sessionID: sessionID, requestID: requestID, presentationEpoch: presentationEpoch)
             }
         }
         state = .listening
+    }
+
+    private func cancelCaptured(sessionID: String, requestID: String, presentationEpoch: Int?) async {
+        let outcome: String
+        do {
+            outcome = try await gateway.cancelTurn(sessionID: sessionID, requestID: requestID).stopLabel
+        } catch {
+            outcome = "Stop unconfirmed: " + error.localizedDescription
+        }
+        cancellationOutcomes[requestID] = outcome
+        guard let presentationEpoch, presentationEpoch == epoch,
+              self.sessionID == sessionID, activeRequestID == requestID else { return }
+        lastError = outcome
     }
 
     func handleSpeechEnded() {
@@ -376,6 +400,7 @@ final class AmbientLoop: ObservableObject {
     }
 
     func stop() {
+        epoch += 1
         streamTask?.cancel()
         streamTask = nil
         tts.stop()
