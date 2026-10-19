@@ -105,6 +105,7 @@ struct ChatView: View {
                 switch tabState.currentTab {
                 case .chat:
                     VStack(spacing: 0) {
+                        RecoveredApprovalCards(state: chat.recoveredApprovalState)
                         if let error = chat.conversationError {
                             Text(error).font(.caption).foregroundColor(.orange).padding(8)
                         }

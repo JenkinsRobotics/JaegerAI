@@ -706,6 +706,20 @@ class GatewaySessionStore:
                         if data.get("request_id") == latest["request_id"] and isinstance(data.get("delta"), str):
                             partial.append(data["delta"])
                 payload["partial_text"] = "".join(partial)
+                context = []
+                if latest:
+                    for event in conn.execute(
+                        "SELECT event, data_json FROM activity_history WHERE session_id=? "
+                        "AND (event LIKE 'tool.%' OR event LIKE 'agent.handoff.%') ORDER BY event_id",
+                        (session_id,),
+                    ):
+                        data = json.loads(event["data_json"] or "{}")
+                        if data.get("request_id") == latest["request_id"]:
+                            context.append({"event": event["event"], **{
+                                key: data[key] for key in ("tool", "text", "phase", "status", "child_run_id", "task_id")
+                                if isinstance(data.get(key), str)
+                            }})
+                payload["activity_context"] = context[-8:]
             return payload
 
     def ensure_session(
@@ -1818,6 +1832,9 @@ class GatewaySessionStore:
         *,
         approved: bool,
         decision: str | None = None,
+        expected_session_id: str | None = None,
+        expected_request_id: str | None = None,
+        expected_profile: str | None = None,
     ) -> dict[str, Any] | None:
         """First writer wins. Duplicate or stale ids return None."""
         now = time.time()
@@ -1828,6 +1845,19 @@ class GatewaySessionStore:
             ).fetchone()
             if row is None or row["status"] != "pending":
                 return None
+            if any(value is not None for value in (expected_session_id, expected_request_id, expected_profile)):
+                # Native recovered decisions bind to the exact still-live permission context.
+                if not all((expected_session_id, expected_request_id, expected_profile)):
+                    return None
+                if row["session_id"] != expected_session_id or row["request_id"] != expected_request_id:
+                    return None
+                session = conn.execute("SELECT profile FROM sessions WHERE session_id=?", (expected_session_id,)).fetchone()
+                request = conn.execute("SELECT session_id, status FROM client_requests WHERE request_id=?", (expected_request_id,)).fetchone()
+                if (not session or session["profile"] != expected_profile or not request
+                        or request["session_id"] != expected_session_id
+                        or request["status"] not in ("admitted", "running", "awaiting_approval")
+                        or choice not in json.loads(row["options_json"] or "[]")):
+                    return None
             conn.execute(
                 "UPDATE approvals SET status='resolved', decision=?, resolved_at=? WHERE approval_id=?",
                 (choice, now, approval_id),

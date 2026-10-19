@@ -69,3 +69,14 @@ def test_concurrent_write_cannot_land_between_history_and_cursor(tmp_path, monke
     after = store.get_session("s", conversation=True)
     assert any(m["content"] == "Concurrent answer" for m in after["messages"])
     assert after["event_cursor"] > before["event_cursor"]
+
+
+def test_recovery_context_is_request_scoped_and_excludes_tool_arguments(tmp_path):
+    store = GatewaySessionStore(tmp_path / "gateway.sqlite3")
+    store.admit_request("s", "question", request_id="r")
+    store.append_event("s", "tool.started", {"request_id":"other", "tool":"wrong"})
+    store.append_event("s", "tool.started", {"request_id":"r", "tool":"fixture", "text":"Started", "args":{"secret":"never display"}})
+    store.append_event("s", "agent.handoff.finished", {"request_id":"r", "child_run_id":"child", "status":"completed"})
+    context = store.get_session("s", conversation=True)["activity_context"]
+    assert context == [{"event":"tool.started", "tool":"fixture", "text":"Started"},
+                       {"event":"agent.handoff.finished", "child_run_id":"child", "status":"completed"}]

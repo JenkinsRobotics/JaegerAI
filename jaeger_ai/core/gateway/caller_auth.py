@@ -114,7 +114,7 @@ TURN_ROUTES = frozenset({
     ("POST", "/v1/sessions/{id}/branch"),
     ("POST", "/v1/sessions/{id}/retry"),
 })
-APPROVE_ROUTES = frozenset({("POST", "/v1/approvals/{id}"), ("POST", "/v1/tasks/{id}/approve")})
+APPROVE_ROUTES = frozenset({("POST", "/v1/approvals/{id}"), ("POST", "/v1/approvals/{id}/decision"), ("POST", "/v1/tasks/{id}/approve")})
 IDE_ROUTES = frozenset({("POST", "/v1/sessions/{id}/ide/{ide_request_id}")})
 STOP_ROUTES = frozenset({("POST", "/v1/stop")})
 #: Lead → specialist handoff (``call_agent``): owners and jaegerd, never outside callers.

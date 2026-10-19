@@ -32,6 +32,6 @@ Four Swift recovery fixtures cover delayed selection, duplicate/wrong-request de
 
 ## Remaining limits
 
-Recovered attachment currently rebuilds text and request status, not historical reasoning/tool/approval cards, attachments, structured message parts or context-usage accounting. Existing canonical activity is not deleted; those richer native projections remain separate work. A pending approval may be visible as request status without its actionable card in the recovered view; approval authority and existing presenters are unchanged. Recovered turns are not automatically spoken.
+Recovered attachment now includes existing pending approval cards and a minimal persisted tool/child status projection; see `NATIVE_RECOVERED_APPROVALS.md`. Historical reasoning/full tool cards, attachments, structured message parts and context-usage accounting remain separate work. Existing canonical activity is not deleted. Recovered turns are not automatically spoken.
 
 Legacy local-only histories have no Gateway live cursor until a Gateway session exists. Native sends still share one bridge in-flight continuation; this change retains/pauses messages in another selected conversation rather than introducing concurrent execution. SSE retry uses a fixed two-second read-only interval. Installed-app, live-provider and cross-client acceptance remain unverified. These source changes require re-review and an explicitly approved backend/native rollout; they are not installed fixes.
