@@ -8,7 +8,10 @@
 import SwiftUI
 
 public struct SkillsView: View {
-    @State private var skills = SkillItem.sampleCatalog
+    @State private var skills: [GatewayClient.RuntimeSkill] = []
+    @State private var loading = false
+    @State private var loadError: String?
+    @State private var loaded = false
     @State private var searchText = ""
     @State private var selectedCategory: String? = nil
 
@@ -18,7 +21,7 @@ public struct SkillsView: View {
         Array(Set(skills.map(\.category))).sorted()
     }
 
-    private var filteredSkills: [SkillItem] {
+    private var filteredSkills: [GatewayClient.RuntimeSkill] {
         skills.filter { skill in
             let matchesCategory = selectedCategory == nil || skill.category == selectedCategory
             let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -57,7 +60,13 @@ public struct SkillsView: View {
                 .background(Color.white.opacity(0.06))
                 .cornerRadius(6)
 
-                Text("\(skills.count) installed")
+                Button { Task { await refresh() } } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .disabled(loading)
+                .help("Refresh Gateway skill catalog")
+
+                Text("\(skills.count) available")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundColor(Term.inkDim)
             }
@@ -81,6 +90,16 @@ public struct SkillsView: View {
 
             Rectangle().fill(Color.white.opacity(0.04)).frame(height: 1)
 
+            if loading {
+                ProgressView("Loading Gateway skills…").padding()
+            } else if let loadError {
+                Text(loadError).foregroundColor(.orange).padding()
+            } else if loaded && skills.isEmpty {
+                Text("The Gateway returned no skills.").foregroundColor(Term.inkDim).padding()
+            } else if loaded && filteredSkills.isEmpty {
+                Text("No skills match these filters.").foregroundColor(Term.inkDim).padding()
+            }
+
             // Skill Grid
             ScrollView {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 14)], spacing: 14) {
@@ -90,6 +109,38 @@ public struct SkillsView: View {
                 }
                 .padding(16)
             }
+        }
+        .task { await refresh() }
+    }
+
+    @MainActor
+    private func refresh() async {
+        guard !loading else { return }
+        loading = true
+        loadError = nil
+        // Do not keep another endpoint's or an earlier request's catalog visible.
+        skills = []
+        defer { loading = false }
+        do {
+            let client = GatewayClient(baseURL: GatewayEndpoint.resolve(ProcessInfo.processInfo.environment))
+            skills = try await client.runtimeSkills()
+            loaded = true
+            if let category = selectedCategory, !categories.contains(category) {
+                selectedCategory = nil
+            }
+        } catch let error as GatewayClient.Failure where error.statusCode == 404 || error.statusCode == 501 {
+            loaded = false
+            loadError = "This Gateway does not support the runtime skills catalog."
+        } catch let error as GatewayClient.Failure where error.statusCode == 401 || error.statusCode == 403 {
+            loaded = false
+            loadError = "Gateway access denied. Check the Mac app caller authorization, then refresh."
+        } catch is CancellationError {
+            loaded = false
+        } catch let error as URLError where error.code == .cancelled {
+            loaded = false
+        } catch {
+            loaded = false
+            loadError = "Gateway catalog unavailable. Check the connection and caller authorization, then refresh. " + error.localizedDescription
         }
     }
 
@@ -109,20 +160,20 @@ public struct SkillsView: View {
         .buttonStyle(.plain)
     }
 
-    private func skillCard(_ skill: SkillItem) -> some View {
+    private func skillCard(_ skill: GatewayClient.RuntimeSkill) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(skill.category.uppercased())
                     .font(.system(size: 9, weight: .bold, design: .monospaced))
-                    .foregroundColor(skill.categoryColor)
+                    .foregroundColor(Color.orange)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
-                    .background(skill.categoryColor.opacity(0.15))
+                    .background(Color.orange.opacity(0.15))
                     .cornerRadius(4)
 
                 Spacer()
 
-                Text("\(skill.toolCount) tools")
+                Text(skill.lifecycle)
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(Term.inkDim)
             }
