@@ -70,3 +70,25 @@ reused here yet: it ships dozens of font files and its packaging/licensing
 footprint needs its own review. Chat replies render as Markdown without math
 typesetting until that review happens. This is a scoping decision, not a
 missing feature hidden from the operator.
+
+
+## Microsoft VS Code Chat styles
+
+The request bubble and input container rules in `media/view.css` adapt
+Microsoft VS Code 1.142.0 `src/vs/workbench/contrib/chat/browser/widget/media/chat.css`,
+preserved in `dev/prototypes/ide-donors/vscode-chat-1.142.0`.
+Copyright (c) Microsoft Corporation. All rights reserved. Licensed under MIT
+(the MIT license text in this file applies). Selectors and platform-token
+fallbacks are adapted for Jaeger's webview. The host's built-in Chat code,
+provider and settings are not changed.
+
+
+## Microsoft Codicons
+
+`media/codicons/*.svg` are unmodified Microsoft Codicons artwork, copyright
+Microsoft Corporation and contributors, from microsoft/vscode-codicons commit
+8853e0b1b0e2058b099fde515d5f1f478db2f8e1. Source:
+https://github.com/microsoft/vscode-codicons/tree/8853e0b1b0e2058b099fde515d5f1f478db2f8e1/src/icons
+Licensed under Creative Commons Attribution 4.0 International:
+https://creativecommons.org/licenses/by/4.0/
+Full license: `media/codicons/LICENSE.txt`. Assets are recolored with CSS masks.

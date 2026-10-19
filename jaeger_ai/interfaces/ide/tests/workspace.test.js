@@ -15,7 +15,8 @@ test('the IDE exposes a real workspace picker control', () => {
   assert.match(view, /post\('selectWorkspace'\)/);
   assert.match(view, /selectedWorkspace/);
   assert.match(extension, /showWorkspaceFolderPick/);
-  assert.match(extension, /selectedWorkspace, message\.ideContext === false/);
+  assert.match(extension, /const workspace = contextRoot\(\)/);
+  assert.match(extension, /filterIdeContext\(ideContext\(workspace\)/);
 });
 
 test('/workspace opens the real workspace picker', () => {
@@ -29,5 +30,5 @@ test('workspace selection is persisted per Gateway endpoint and used for queued 
   const extension = read('extension.js');
   assert.match(extension, /workspaceStorageKey = \(\) => `workspace:\$\{endpoint\(\)\}`/);
   assert.match(extension, /context\.workspaceState\.update\(workspaceStorageKey\(\), selectedWorkspace\)/);
-  assert.match(extension, /controller\.queue\(message\.text, model, provider, selectedWorkspace/);
+  assert.match(extension, /controller\.queue\(message\.text, model, provider, workspace/);
 });

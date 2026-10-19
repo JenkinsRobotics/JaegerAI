@@ -2,7 +2,7 @@
 	"name": "jaeger-ide",
 	"displayName": "Jaeger",
 	"description": "A local IDE conversation surface for your persistent Jaeger Gateway.",
-	"version": "0.1.3",
+	"version": "0.1.5",
 	"publisher": "jenkins-robotics",
 	"icon": "media/jaeger.png",
 	"engines": {
@@ -24,7 +24,9 @@
 		"media/**",
 		"README.md",
 		"VERIFICATION.md",
-		"THIRD_PARTY_NOTICES.md"
+		"THIRD_PARTY_NOTICES.md",
+		"native-turn.js",
+		"build.json"
 	],
 	"activationEvents": [
 		"onView:jaeger.conversation"
@@ -63,6 +65,25 @@
 			{
 				"command": "jaeger.onboarding",
 				"title": "Jaeger: New Device Setup Guide"
+			},
+			{
+				"command": "jaeger.openSession",
+				"title": "Jaeger: Open Conversation by ID"
+			},
+			{
+				"command": "jaeger.newConversation",
+				"title": "Jaeger: New Chat",
+				"icon": "$(add)"
+			},
+			{
+				"command": "jaeger.refreshConversation",
+				"title": "Jaeger: Refresh Conversation",
+				"icon": "$(refresh)"
+			},
+			{
+				"command": "jaeger.showHistory",
+				"title": "Jaeger: Show Conversations",
+				"icon": "$(history)"
 			}
 		],
 		"viewsContainers": {
@@ -90,7 +111,6 @@
 				"fullName": "Jaeger AI",
 				"description": "Jaeger AI conversation and agent workspace",
 				"icon": "media/jaeger.svg",
-				"isDefault": true,
 				"commands": [
 					{
 						"name": "verify",
@@ -141,6 +161,30 @@
 					"description": "Default provider/model for new turns (\"provider::model\" or \"@provider:model\"). Eligible for Settings Sync when user-settings sync is enabled and this key is not excluded. Validated against the connected Gateway catalog; empty preserves the server/Gateway default."
 				}
 			}
+		},
+		"menus": {
+			"view/title": [
+				{
+					"command": "jaeger.newConversation",
+					"when": "view == jaeger.conversation",
+					"group": "navigation@1"
+				},
+				{
+					"command": "jaeger.showHistory",
+					"when": "view == jaeger.conversation",
+					"group": "navigation@2"
+				},
+				{
+					"command": "jaeger.settings",
+					"when": "view == jaeger.conversation",
+					"group": "2_settings@1"
+				},
+				{
+					"command": "jaeger.refreshConversation",
+					"when": "view == jaeger.conversation",
+					"group": "2_settings@2"
+				}
+			]
 		}
 	}
 }

@@ -1318,6 +1318,8 @@ class JaegerGatewayApp:
             await asyncio.sleep(2)
 
     def _setup_routes(self) -> None:
+        from .native_controls import register as register_native_controls
+        register_native_controls(self)
         from jaeger_ai.features.agent_bridge.routes import register
         register(self)
         self.app.router.add_get("/health", self.handle_health)
@@ -1396,6 +1398,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/tasks", self.handle_tasks)
         self.app.router.add_post("/v1/tasks", self.handle_tasks)
         self.app.router.add_get("/v1/tasks/{id}", self.handle_task)
+        self.app.router.add_patch("/v1/tasks/{id}", self.handle_task_edit)
         self.app.router.add_post("/v1/tasks/{id}/cancel", self.handle_task_cancel)
         self.app.router.add_post("/v1/tasks/{id}/approve", self.handle_task_approve)
         self.app.router.add_get("/v1/orchestration/workers", self.handle_list_orchestration_workers)
@@ -5944,6 +5947,17 @@ class JaegerGatewayApp:
         task = self.task_owner.store.get_task(request.match_info['id'])
         return web.json_response(task.to_dict() if task else {'error': 'Task not found'}, status=200 if task else 404)
 
+    async def handle_task_edit(self, request: web.Request) -> web.Response:
+        try:
+            body = await request.json()
+            task = self.task_owner.edit_proposal(request.match_info["id"],
+                goal=str(body.get("goal") or ""), expected_updated_at=float(body["expected_updated_at"]))
+            return web.json_response(task)
+        except KeyError:
+            return web.json_response({"error": "Task or version not found"}, status=404)
+        except (TypeError, ValueError) as exc:
+            return web.json_response({"error": str(exc)}, status=409)
+
     async def handle_task_approve(self, request: web.Request) -> web.Response:
         task_id = request.match_info['id']
         task = self.task_owner.store.get_task(task_id)
@@ -5951,6 +5965,10 @@ class JaegerGatewayApp:
             return web.json_response({'error': 'Task not found'}, status=404)
         if task.provenance.get('authorized'):
             return web.json_response({'task_id': task_id, 'status': task.state.value})
+        if request.can_read_body:
+            body = await request.json()
+            if "expected_updated_at" in body and body["expected_updated_at"] != task.updated_at:
+                return web.json_response({"error": "Task changed; refresh before approving"}, status=409)
         self.task_owner.resolve(task_id, True)
         for approval in self.store.list_pending_approvals():
             if (approval.get('metadata') or {}).get('task_id') == task_id:

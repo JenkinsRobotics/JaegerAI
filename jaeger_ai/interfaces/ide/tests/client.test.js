@@ -680,3 +680,38 @@ test('background work appears during a foreground stream and survives session re
     assert.ok(gateway.sent.request_id);
   } finally { client.dispose(); release(); }
 });
+
+test('Stop disables approvals before the cancel response and across reconnect', async () => {
+  const { gateway, client } = fixture();
+  client.state.session = gateway.row;
+  client.state.connected = true;
+  client.state.approvals = [{ approval_id: 'a1', session_id: 'one' }];
+  client.pending.one = { requestId: 'r1' };
+  client.observer = new AbortController();
+  let release;
+  gateway.cancel = () => new Promise(resolve => { release = resolve; });
+  let approvals = 0; gateway.approve = async () => { approvals++; };
+  const stopping = client.cancel();
+  await assert.rejects(client.approve('a1', true), /Stopping/);
+  assert.equal(client.pending.one.stopping, true);
+  assert.equal(approvals, 0);
+  await waitFor(() => release);
+  release({ cancellation_confirmed: false });
+  await stopping;
+  const restored = new Conversation(gateway, () => {}, async () => {}, { pending: client.pending });
+  restored.state.session = gateway.row; restored.state.approvals = client.state.approvals;
+  await assert.rejects(restored.approve('a1', true), /Stopping/);
+  client.dispose(); restored.dispose();
+});
+
+test('panel and native observers share one editor side effect', async () => {
+  const { answerIdeRequest } = require('../conversation');
+  let calls = 0; const replies = [];
+  const gateway = { async ideResult(sid, id, body) { replies.push({ sid, id, body }); } };
+  const handler = async () => { calls++; await new Promise(resolve => setImmediate(resolve)); return { opened: true }; };
+  const request = { ide_request_id: 'one-editor-action', kind: 'open_file' };
+  await Promise.all([answerIdeRequest(gateway, handler, 'same-session', request), answerIdeRequest(gateway, handler, 'same-session', request)]);
+  assert.equal(calls, 1);
+  assert.equal(replies.length, 2);
+  assert.deepEqual(replies[0], replies[1]);
+});

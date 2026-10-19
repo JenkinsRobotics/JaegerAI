@@ -77,6 +77,7 @@ class Conversation {
     this.publish({ ...this.state, openSessionIds: this.openSessionIds, staged: this.staged,
       workTurns: this.workBySession[this.state.session?.session_id] || [],
       updateKind,
+      stopping: Boolean(this.pending[this.state.session?.session_id]?.stopping || this.pendingTask?.stopping),
       canCancel: Boolean(this.pending[this.state.session?.session_id] || this.pendingTask) });
     delete this.state.changes; // one-shot change event; authoritative refresh may follow
   }
@@ -150,13 +151,14 @@ class Conversation {
       this.emit();
       const session = selected ? await this.gateway.session(selected) : null;
       if (epoch !== this.epoch) return;
+      const previousSession = this.state.session?.session_id;
       this.state.session = session;
       if (session && !this.openSessionIds.includes(session.session_id)) {
         this.openSessionIds = [...this.openSessionIds, session.session_id];
       }
       // A conversation switch drops this client's staged (unsent) attachments —
       // they were picked for the previous conversation, not this one.
-      this.stagedGen++; this.staged = [];
+      if (previousSession !== session?.session_id) { this.stagedGen++; this.staged = []; }
       this.restoreCompletedTimeline(session?.session_id);
       if (session && this.gateway.activity) await this.loadHistory(selected, epoch);
       if (session) await this.loadQueue(selected, epoch);
@@ -267,7 +269,7 @@ class Conversation {
   async loadApprovals(epoch = this.epoch) {
     const result = await this.gateway.approvals();
     if (epoch === this.epoch) this.state.approvals = (result.approvals || [])
-      .filter(a => a.session_id === this.state.session?.session_id);
+      .filter(a => a.session_id === this.state.session?.session_id || a.origin?.parent_session_id === this.state.session?.session_id);
   }
   async loadWorkers(epoch = this.epoch) {
     if (this.workersLoaded || typeof this.gateway.orchestrationWorkers !== 'function') return;
@@ -500,22 +502,23 @@ class Conversation {
   }
   // ``ideHandler`` is supplied by the extension host (it owns the VS Code API).
   async answerIde(sid, request) {
-    if (!this.ideHandler || !request?.ide_request_id) return;
-    let body;
-    try { body = { ok: true, result: await this.ideHandler(request.kind, request.args || {}) }; }
-    catch (error) { body = { ok: false, error: String(error?.message || error) }; }
-    try { await this.gateway.ideResult(sid, request.ide_request_id, body); }
-    catch { /* another window answered first, or the request expired */ }
+    return answerIdeRequest(this.gateway, this.ideHandler, sid, request);
   }
   async cancel() {
     if (this.pendingTask) {
       const tid = this.pendingTask.taskId;
+      this.pendingTask.stopping = true;
+      this.state.status = 'Cancellation requested'; this.emit();
+      await this.persist();
       await this.gateway.orchestrationCancel(tid);
       this.state.status = 'Cancellation requested'; this.emit();
       return;
     }
     const sid = this.state.session?.session_id, rid = this.pending[sid]?.requestId;
     if (!rid) throw new Error('This client has no request ID to cancel. Use the originating client.');
+    this.pending[sid].stopping = true;
+    this.state.status = 'Cancellation requested · waiting for owner'; this.emit();
+    await this.persist();
     await this.gateway.cancel(sid, rid);
     this.state.status = 'Cancellation requested · waiting for owner'; this.emit();
     if (!this.observer || this.observer.signal.aborted) await this.refresh(sid);
@@ -742,12 +745,31 @@ class Conversation {
     this.emit();
   }
   async approve(id, approved) {
+    if (this.pending[this.state.session?.session_id]?.stopping || this.pendingTask?.stopping) throw new Error('Stopping this request; approval actions are disabled.');
     if (!this.state.approvals.some(a => a.approval_id === id || a.id === id)) throw new Error('Approval is no longer pending in this conversation.');
     await this.gateway.approve(id, approved); await this.loadApprovals(); this.emit();
   }
   dispose() { clearTimeout(this.reconnectTimer); this.disposed = true; ++this.epoch; this.observer?.abort(); }
 }
+// Both the panel and native chat answer the same Gateway editor requests.
+const editorRequests = new WeakMap();
+async function answerIdeRequest(gateway, handler, sid, request) {
+  if (!handler || !request?.ide_request_id) return;
+  let pending = editorRequests.get(gateway);
+  if (!pending) { pending = new Map(); editorRequests.set(gateway, pending); }
+  const key = `${sid}:${request.ide_request_id}`;
+  if (!pending.has(key)) {
+    // Both views can observe one request. Run its editor side effect once.
+    pending.set(key, Promise.resolve().then(() => handler(request.kind, request.args || {}))
+      .then(result => ({ ok: true, result }), error => ({ ok: false, error: String(error?.message || error) })));
+    if (pending.size > 512) pending.delete(pending.keys().next().value);
+  }
+  const body = await pending.get(key);
+  try { await gateway.ideResult(sid, request.ide_request_id, body); }
+  catch { /* another window answered first, or the request expired */ }
+}
+
 module.exports = {
-  Conversation, COMPLETED_TIMELINE_SESSION_LIMIT, COMPLETED_TIMELINE_ROW_LIMIT,
+  answerIdeRequest, Conversation, COMPLETED_TIMELINE_SESSION_LIMIT, COMPLETED_TIMELINE_ROW_LIMIT,
   COMPLETED_TIMELINE_TEXT_LIMIT,
 };

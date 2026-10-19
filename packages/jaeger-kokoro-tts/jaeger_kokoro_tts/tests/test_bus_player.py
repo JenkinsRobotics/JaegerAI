@@ -205,8 +205,9 @@ def test_cancel_tells_the_driver_to_drop_queued_audio(bus):
         p.enqueue(np.zeros(48000, dtype=np.float32))
         p.cancel()
         assert _wait(lambda: stops), "barge-in never reached the driver"
-        assert p.wait_until_drained(timeout=1), \
-            "cancel must leave the player idle, not waiting"
+        assert not p.wait_until_drained(timeout=0.01), "publication is not device acknowledgement"
+        bus.publish(topics.SpeakerState(state="idle", correlation_id=stops[0].correlation_id))
+        assert p.wait_until_drained(timeout=1)
     finally:
         p.close()
 
@@ -239,5 +240,21 @@ def test_it_reports_a_bus_destination_not_a_device(bus):
     try:
         assert "speaker" in p.device_name
         assert p.device_index is None
+    finally:
+        p.close()
+
+
+def test_output_level_is_scoped_to_the_utterance_and_expires(bus):
+    p = _player(bus)
+    try:
+        p.begin("speech-a")
+        p._on_speaker_state(topics.SpeakerState(state="playing", amplitude=0.8, correlation_id="chime"))
+        assert p.amplitude == 0
+        p._on_speaker_state(topics.SpeakerState(state="playing", amplitude=0.3, correlation_id="speech-a"))
+        assert p.amplitude == 0.3
+        p._amplitude_at -= 1
+        assert p.amplitude == 0
+        p._on_speaker_state(topics.SpeakerState(state="idle", correlation_id="speech-a"))
+        assert p.amplitude == 0
     finally:
         p.close()

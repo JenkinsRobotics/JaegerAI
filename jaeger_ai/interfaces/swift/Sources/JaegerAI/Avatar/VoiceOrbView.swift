@@ -2,22 +2,9 @@
 //  VoiceOrbView.swift
 //  JaegerAI / Avatar
 //
-//  The agent's face inside a reactive voice-spectrum ring — the Swift twin of
-//  the PySide6 ``avatar_player/voice_orb.py``. Three states:
-//    * speaking (TTS active)   → the ring's bars react (proxy envelope; Apple
-//                                TTS exposes no amplitude tap, matching the
-//                                PySide6 proxy fallback — real amplitude over
-//                                the bridge is the noted follow-up)
-//    * thinking (agent busy)   → a travelling wave-gradient around the ring
-//    * idle                    → a slow breathing ring
-//  Colours run cyan (left) → pink (right), like the reference orb.
-//
-//  Rendering: TimelineView + Canvas, no timers. The schedule drops to 20 fps
-//  while idle (breathing needs no more) and runs at display rate only while
-//  speaking/thinking. State switches crossfade over ~0.35 s — the Canvas is
-//  stateless, so instead of the Qt orb's per-bar exponential smoothing we
-//  blend the previous state's procedural target into the new one.
-//
+//  Voice ring: measured output RMS during playback, quiet while synthesis is
+//  pending, and separate decorative idle/thinking animation. No synthetic
+//  waveform is presented as an audio measurement.
 
 import AppKit
 import SwiftUI
@@ -45,7 +32,8 @@ struct VoiceOrbView: View {
 
     /// Live state off the bridge: TTS beats busy beats idle.
     private var current: OrbState {
-        if tts.isSpeaking { return .speaking }
+        if tts.measuredAmplitude > 0.001 { return .speaking }
+        if tts.isSpeaking { return .thinking }
         if agent.isBusy { return .thinking }
         return .idle
     }
@@ -65,7 +53,7 @@ struct VoiceOrbView: View {
         }
         .onChange(of: agent.status?.iconPath) { _, path in loadFace(path) }
         .onAppear { loadFace(agent.status?.iconPath) }
-        .accessibilityLabel(Text("Voice orb — \(label(for: state))"))
+        .accessibilityLabel(Text("Voice orb — \(label(for: state)); measured playback level"))
     }
 
     private func label(for state: OrbState) -> String {
@@ -140,10 +128,7 @@ struct VoiceOrbView: View {
     private func barValue(a: Double, phase: Double, state: OrbState) -> Double {
         switch state {
         case .speaking:
-            // Proxy waveform while Apple TTS plays (no amplitude tap).
-            let env = 0.30 + 0.70 * abs(sin(a * .pi * 10 + phase * 1.4))
-            let level = 0.55 + 0.35 * sin(phase * 3.1)
-            return max(0, level) * env
+            return tts.measuredAmplitude
         case .thinking:
             return 0.20 + 0.16 * (0.5 + 0.5 * sin(a * .pi * 6 + phase))
         case .idle:

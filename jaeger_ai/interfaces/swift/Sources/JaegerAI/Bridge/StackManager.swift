@@ -46,6 +46,10 @@ struct StackActionReply: Decodable, Sendable {
     let services: [StackServiceStatus]?
 }
 
+enum NativeLifecyclePolicy {
+    static var managesServices: Bool { ProcessInfo.processInfo.environment["JAEGER_NATIVE_CLIENT_ONLY"] != "1" }
+}
+
 final class StackManager: Sendable {
     static let shared = StackManager()
 
@@ -111,6 +115,7 @@ enum LifecycleLeaseBeat {
     private static let interval: TimeInterval = 5
 
     static func start() {
+        guard NativeLifecyclePolicy.managesServices else { return }
         queue.sync {
             guard timer == nil else { return }
             write()
@@ -134,6 +139,7 @@ enum LifecycleLeaseBeat {
     /// privileged work, so the last beat is an already-expired menu-bar lease.
     /// Launchd KeepAlive cannot treat that as a live owner.
     static func retire() {
+        guard NativeLifecyclePolicy.managesServices else { return }
         queue.sync {
             timer?.setEventHandler {}
             timer?.cancel()

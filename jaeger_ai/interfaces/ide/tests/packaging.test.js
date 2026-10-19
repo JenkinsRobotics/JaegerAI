@@ -7,7 +7,7 @@ const test = require('node:test');
 const root = path.join(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const packager = fs.readFileSync(path.join(root, 'package_extension.py'), 'utf8');
-const hostModules = ['extension.js', 'conversation.js', 'gateway.js', 'commands.js'];
+const hostModules = ['extension.js', 'conversation.js', 'gateway.js', 'commands.js', 'native-turn.js'];
 
 // A local require that is missing from the shipped file list only fails once the
 // extension is installed (activation throws), so it is checked here.
@@ -16,7 +16,7 @@ test('every module the extension host requires ships in the package', () => {
   for (const file of hostModules) {
     const source = fs.readFileSync(path.join(root, file), 'utf8');
     for (const [, target] of source.matchAll(/require\('\.\/([\w-]+)(?:\.js)?'\)/g)) {
-      if (target !== 'contract') required.add(`${target}.js`); // contract.json is generated at build time
+      if (!['contract', 'build'].includes(target)) required.add(`${target}.js`); // contract.json is generated at build time
     }
   }
   assert.ok(required.has('commands.js'), 'sanity: the host requires commands.js');

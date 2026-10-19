@@ -139,6 +139,8 @@ class AudioIONode(Node):
         self._out_lock = threading.Lock()
         self._stream_lock = threading.Lock()
         self._out_pending: list[np.ndarray] = []
+        self._out_correlations: dict[int, str | None] = {}
+        self._scoped_stops: set[str] = set()
         self._output_idle_at = 0.0
 
         self._frames_captured = 0
@@ -658,6 +660,7 @@ class AudioIONode(Node):
 
         with self._out_lock:
             self._out_pending.append(playable)
+            self._out_correlations[id(playable)] = msg.correlation_id
             self._last_correlation = msg.correlation_id
             if msg.correlation_id not in self._playback_correlations:
                 self._playback_correlations.append(msg.correlation_id)
@@ -679,8 +682,26 @@ class AudioIONode(Node):
         the sentence already handed to the device. That half-second is
         what makes an assistant feel deaf when you talk over it.
         """
+        correlation = getattr(msg, "correlation_id", None)
+        if correlation:
+            with self._out_lock:
+                kept = []
+                for chunk in self._out_pending:
+                    if self._out_correlations.get(id(chunk)) == correlation:
+                        self._out_correlations.pop(id(chunk), None)
+                    else:
+                        kept.append(chunk)
+                self._out_pending = kept
+                self._playback_correlations = [cid for cid in self._playback_correlations if cid != correlation]
+                self._scoped_stops.add(correlation)
+            # Do not flush the shared device: it may contain other producers.
+            # The next output callback acknowledges the scoped queue boundary.
+            if self._out_stream is None:
+                self._settle_scoped_stops()
+            return
         with self._out_lock:
             self._out_pending.clear()
+            self._out_correlations.clear()
         self._output_flush_requested = self._out_stream is not None
         # The echo reference describes audio that will now never be
         # played. Leaving it would have the canceller subtracting a
@@ -691,6 +712,12 @@ class AudioIONode(Node):
             pass
         self._output_idle_at = time.monotonic()
         self._announce_playback(False)
+
+    def _settle_scoped_stops(self) -> None:
+        with self._out_lock:
+            stopped, self._scoped_stops = self._scoped_stops, set()
+        for correlation in stopped:
+            self.publish(topics.SpeakerState(state="idle", correlation_id=correlation, node_id=self.name))
 
     def _announce_playback(self, playing: bool) -> None:
         if playing == self._playing:
@@ -725,6 +752,7 @@ class AudioIONode(Node):
         self._output_idle_at = time.monotonic()
         with self._out_lock:
             self._out_pending.clear()
+            self._out_correlations.clear()
             correlations = self._playback_correlations or [
                 self._last_correlation
             ]
@@ -779,16 +807,29 @@ class AudioIONode(Node):
         """Pop exactly ``want`` samples, zero-padded on underrun."""
         out = np.zeros(want, dtype=np.float32)
         filled = 0
+        energy: dict[str, float] = {}
         with self._out_lock:
             while filled < want and self._out_pending:
                 head = self._out_pending[0]
                 take = min(want - filled, head.size)
+                correlation = self._out_correlations.pop(id(head), None)
+                if correlation:
+                    energy[correlation] = energy.get(correlation, 0.0) + float(np.sum(np.square(head[:take], dtype=np.float64)))
                 out[filled:filled + take] = head[:take]
                 filled += take
                 if take == head.size:
                     self._out_pending.pop(0)
                 else:
-                    self._out_pending[0] = head[take:]
+                    remainder = head[take:]
+                    self._out_pending[0] = remainder
+                    self._out_correlations[id(remainder)] = correlation
+        for correlation, squared in energy.items():
+            try:
+                level = float(np.sqrt(squared / max(1, want)))
+                self.publish(topics.SpeakerState(state="playing", amplitude=min(1.0, level) if np.isfinite(level) else 0.0,
+                                                 correlation_id=correlation, node_id=self.name))
+            except Exception:  # noqa: BLE001 — telemetry must never interrupt the audio callback
+                pass
         if filled:
             self._frames_played += 1
         return out
@@ -796,6 +837,7 @@ class AudioIONode(Node):
     def _fill_playback(self, outdata, frames, time_info, status) -> None:
         self._last_playback_callback_at = time.monotonic()
         outdata[:, 0] = self._next_playback(frames)
+        self._settle_scoped_stops()
         self._maybe_announce_drained()
 
     def _maybe_announce_drained(self) -> None:
@@ -820,6 +862,7 @@ class AudioIONode(Node):
             self._underruns += 1
             print(f"[{self.name}] speaker {status}", file=sys.stderr)
         outdata[:, 0] = self._next_playback(frames)
+        self._settle_scoped_stops()
         self._maybe_announce_drained()
 
 

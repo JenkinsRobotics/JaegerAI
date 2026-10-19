@@ -358,7 +358,7 @@ _LAYERS = ("hexaco", "special", "expression", "domains")
 # 13: ``model_picker`` query — Hermes-style two-stage catalog for the
 # windowed ``/model`` overlay (clickable, not a transcript dump).
 # 14: native turn receipts support observation/reconciliation without replay.
-INTEGRATION_CONTRACT_VERSION = 22
+INTEGRATION_CONTRACT_VERSION = 23
 BRIDGE_QUERIES = (
     "contract", "identity", "characters", "character", "character_card",
     "config",
@@ -369,7 +369,7 @@ BRIDGE_QUERIES = (
     "search_sessions", "check_update",
     "list_skills", "get_skill", "list_mcp_servers", "list_tools",
     "list_credentials", "skill_usage",
-    "board", "heartbeat", "cron", "list_schedules", "turn_status", "dispatcher_memory",
+    "board", "heartbeat", "cron", "list_schedules", "turn_status", "dispatcher_memory", "speech_status",
     "dispatcher_connection", "dispatcher_conversation", "reasoning_status", "background_messages",
     "first_boot", "hardware_bench", "hardware_bench_start", "hardware_bench_status",
 )
@@ -4490,6 +4490,10 @@ def main(argv: list[str] | None = None, *, own_process: bool = False) -> int:
                     continue
                 target = ctx.boot if ctx.boot is not None else _LayoutOnly(ctx.layout)
                 if op == "query":
+                    if req.get("what") == "speech_status":
+                        data = ctx.ui_speech.status() if ctx.ui_speech is not None else {"active": False, "amplitude": 0.0, "measured": False, "execution_unknown": False}
+                        _emit(proto, protocol.result_frame(req.get("id"), data=data))
+                        continue
                     try:
                         data = _query(
                             req.get("what") or "", req.get("args") or {}, target
