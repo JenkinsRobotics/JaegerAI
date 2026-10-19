@@ -3,9 +3,8 @@
  * (--jg-vvh, set from visualViewport) with 100dvh as the fallback, so the composer rides above the keyboard. */
 html.jg-phone, html.jg-phone body { height: var(--jg-vvh, 100dvh); overflow: hidden; overscroll-behavior: none; }
 html.jg-phone body { margin: 0; background: var(--jg-p-bg); -webkit-tap-highlight-color: transparent; -webkit-text-size-adjust: 100%; }
-html.jg-phone { --jg-p-bg: #121212; --jg-p-fg: #f2f2f2; --jg-p-dim: #8e8e93; --jg-p-raised: #262626; --jg-p-button: #2c2c2e;
-  --jg-p-blue: #2f6fea; --jg-p-green: #34c759; --jg-p-orange: #f5a623; color-scheme: dark; }
-html.jg-phone.aether-light-theme { --jg-p-bg: #ffffff; --jg-p-fg: #111; --jg-p-dim: #6e6e73; --jg-p-raised: #f0f0f2; --jg-p-button: #ececef; color-scheme: light; }
+html.jg-phone { color-scheme: dark; }
+html.jg-phone.aether-light-theme { color-scheme: light; }
 .jg-phone-screen { position: fixed; inset: 0; height: var(--jg-vvh, 100dvh); background: var(--jg-p-bg); color: var(--jg-p-fg);
   font-family: -apple-system, system-ui, sans-serif; }
 .jg-phone-list { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: env(safe-area-inset-top) 0 calc(env(safe-area-inset-bottom) + 80px); }
@@ -13,12 +12,12 @@ html.jg-phone.aether-light-theme { --jg-p-bg: #ffffff; --jg-p-fg: #111; --jg-p-d
   background: var(--jg-p-button); color: var(--jg-p-fg); }
 .jg-ptop { display: flex; align-items: center; gap: 8px; padding: 12px 16px 0 18px; }
 .jg-ptop__spacer { flex: 1; }
-.jg-pme { position: relative; font-size: 14px; font-weight: 600; background: #3a3a3c; }
+.jg-pme { position: relative; font-size: 14px; font-weight: 600; background: var(--jg-p-me); }
 .jg-pme__dot { position: absolute; right: 0; bottom: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--jg-p-blue); box-shadow: 0 0 0 2px var(--jg-p-bg); }
 .jg-plead { display: grid; justify-items: center; gap: 6px; margin: -8px auto 18px; border: 0; background: none; color: var(--jg-p-dim); padding: 0; max-width: 140px; }
 .jg-plead__art { position: relative; }
 .jg-plead__badge { position: absolute; right: 2px; bottom: 2px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
-  background: var(--jg-p-orange); color: #fff; box-shadow: 0 0 0 2px var(--jg-p-bg); }
+  background: var(--jg-p-orange); color: var(--jg-p-on-color); box-shadow: 0 0 0 2px var(--jg-p-bg); }
 .jg-plead__name { font-size: 14px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .jg-prows { display: grid; }
 .jg-prow { display: flex; align-items: center; gap: 12px; min-height: 78px; padding: 0 14px 0 18px; border: 0; background: none; color: inherit; text-align: left; font: inherit; }
@@ -33,7 +32,7 @@ html.jg-phone.aether-light-theme { --jg-p-bg: #ffffff; --jg-p-fg: #111; --jg-p-d
 .jg-prow__type { margin-right: 5px; vertical-align: -1px; }
 .jg-prow__dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--jg-p-blue); }
 .jg-punread { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 64px); z-index: 5;
-  display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px; border: 0; border-radius: 18px; background: var(--jg-p-blue); color: #fff; font-size: 15px; }
+  display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px; border: 0; border-radius: 18px; background: var(--jg-p-blue); color: var(--jg-p-on-color); font-size: 15px; }
 
 /* Chat screen: floating translucent bar over the scrolling conversation. */
 .jg-phone-chat { display: flex; flex-direction: column; }
@@ -58,7 +57,7 @@ html.jg-phone .jg-composer__icon--filled[aria-label="Attach file"] { width: 44px
 html.jg-phone .jg-composer__input { min-height: 44px; padding: 11px 92px 11px 16px; border-radius: 22px; background: var(--jg-p-raised); color: var(--jg-p-fg); font-size: 17px; box-sizing: border-box; }
 html.jg-phone .jg-composer__input::placeholder { color: var(--jg-p-dim); }
 html.jg-phone .jg-composer .jg-composer__icon--filled:not([aria-label="Attach file"]) { position: absolute; right: 62px; width: 36px; height: 36px; background: none; color: var(--jg-p-dim); }
-html.jg-phone .jg-send { position: absolute; right: 22px; width: 36px; height: 36px; border-radius: 50%; background: #fff; color: #000; }
+html.jg-phone .jg-send { position: absolute; right: 22px; width: 36px; height: 36px; border-radius: 50%; background: var(--jg-p-voice-bg); color: var(--jg-p-voice-fg); }
 html.jg-phone button, html.jg-phone [role="menuitem"] { min-height: 44px; }
 html.jg-phone .jg-composer button, html.jg-phone .jg-prow__art * { min-height: 0; }
 html.jg-phone .jg-phone-list .jg-prow { min-height: 78px; }

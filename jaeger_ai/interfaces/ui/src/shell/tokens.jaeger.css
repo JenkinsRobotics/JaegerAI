@@ -133,3 +133,25 @@ body {
   line-height: var(--jg-line-height-base);
   -webkit-font-smoothing: antialiased;
 }
+
+/* Phone layout (phone/phone.css) and the agent context menu (agents/AgentContextMenu.tsx), from the Grok Bot iOS
+ * refs: dark unless Aether's light appearance is on. */
+:root {
+  --jg-p-bg: #121212; --jg-p-fg: #f2f2f2; --jg-p-dim: #8e8e93; --jg-p-raised: #262626; --jg-p-button: #2c2c2e; --jg-p-me: #3a3a3c;
+  --jg-p-blue: #2f6fea; --jg-p-green: #34c759; --jg-p-orange: #f5a623; --jg-p-on-color: #ffffff;
+  --jg-p-voice-bg: #ffffff; --jg-p-voice-fg: #000000;
+  --jg-menu-scrim: rgba(0, 0, 0, .35); --jg-menu-shadow: rgba(0, 0, 0, .35); --jg-menu-fg: #f2f2f2; --jg-menu-dim: #aeaeb2;
+  --jg-menu-preview: #1c1c1e; --jg-menu-bubble: #2c2c2e; --jg-menu-card: rgba(58, 58, 60, .72); --jg-menu-line: rgba(255, 255, 255, .08);
+  --jg-menu-hover: rgba(255, 255, 255, .08); --jg-menu-sep: rgba(255, 255, 255, .12); --jg-menu-input: #1c1c1e; --jg-menu-input-line: rgba(255, 255, 255, .15);
+  --jg-menu-button: rgba(255, 255, 255, .1); --jg-menu-toast: rgba(44, 44, 46, .95);
+  --jg-danger: #ff5a5f; --jg-danger-fill: #e5484d;
+}
+:root.aether-light-theme {
+  --jg-p-bg: #ffffff; --jg-p-fg: #111111; --jg-p-dim: #6e6e73; --jg-p-raised: #f0f0f2; --jg-p-button: #ececef; --jg-p-me: #d1d1d6;
+  --jg-p-voice-bg: #111111; --jg-p-voice-fg: #ffffff;
+  --jg-menu-scrim: rgba(0, 0, 0, .18); --jg-menu-shadow: rgba(0, 0, 0, .18); --jg-menu-fg: #111111; --jg-menu-dim: #6e6e73;
+  --jg-menu-preview: #ffffff; --jg-menu-bubble: #f0f0f2; --jg-menu-card: rgba(250, 250, 250, .8); --jg-menu-line: rgba(0, 0, 0, .08);
+  --jg-menu-hover: rgba(0, 0, 0, .06); --jg-menu-sep: rgba(0, 0, 0, .1); --jg-menu-input: #ffffff; --jg-menu-input-line: rgba(0, 0, 0, .15);
+  --jg-menu-button: rgba(0, 0, 0, .06); --jg-menu-toast: rgba(44, 44, 46, .95);
+  --jg-danger: #e5484d; --jg-danger-fill: #e5484d;
+}
