@@ -19,6 +19,9 @@ import { onNativeEvent } from "./platform/native";
 import { AppShell } from "./shell/AppShell";
 import { ErrorState } from "./shell/ErrorState";
 import { TasksBoard } from "./tasks/TasksBoard";
+import { PhoneChat, PhoneList } from "./phone/PhoneShell";
+import { usePhone } from "./phone/usePhone";
+import "./phone/phone.css";
 
 const LEAD_ID = "native:jaeger";
 
@@ -41,6 +44,8 @@ export function App({ source }: { source: JaegerSource }) {
     return created;
   }, [source, hostKind]);
   const store = useAgentsStore(source);
+  const phone = usePhone();
+  const [phoneView, setPhoneView] = useState<"list" | "chat">("list");
   // Grok-style sessions: one home chat per agent, history read-only.
   const names = useRef<(id: string) => string>((id) => id);
   const home: HomeSessions = useMemo(() => {
@@ -148,9 +153,20 @@ export function App({ source }: { source: JaegerSource }) {
 
   const detailsAgent = store.agents.find((a) => a.id === detailsAgentId);
   const historyAgent = store.agents.find((a) => a.id === historyAgentId);
+  const chatBody = sessionError
+    ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
+    : <ChatPane host={host} sessionId={sessionId} />;
+  const phoneAgent = store.agents.find((a) => a.id === (selectedAgentId ?? LEAD_ID));
+  const main = phone
+    ? (phoneView === "chat"
+      ? <PhoneChat agentId={phoneAgent?.id ?? LEAD_ID} agentName={phoneAgent ? label(phoneAgent) : "Jaeger"} avatarUrl={phoneAgent?.avatar_url}
+          onBack={() => { setPhoneView("list"); void store.refresh(); }} onInfo={() => host.openDetails?.(phoneAgent?.id ?? LEAD_ID)}>{chatBody}</PhoneChat>
+      : <PhoneList state={store} userInitials="MJ" statusOk={!store.error} onOpen={(agentId) => { setSelection({ type: "agent", agentId }); setPhoneView("chat"); }}
+          onSearch={() => setJumpOpen(true)} onNew={setNewChatAnchor} onSettings={() => setSettingsOpen(true)} />)
+    : null;
   return (
     <>
-      <AppShell top={slots.top} primary={slots.primary} sections={slots.sections} footer={slots.footer}>
+      {phone ? main : <AppShell top={slots.top} primary={slots.primary} sections={slots.sections} footer={slots.footer}>
         {selection.type === "tasks"
           ? <TasksBoard source={source} agents={store.agents} />
           : (
@@ -168,14 +184,14 @@ export function App({ source }: { source: JaegerSource }) {
               )}
             </div>
           )}
-      </AppShell>
+      </AppShell>}
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
         onNewChat={newChat} onCreateAgent={createAgent} />
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={host.capabilities} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
-        onAgent={(agentId) => setSelection({ type: "agent", agentId })}
+        onAgent={(agentId) => { setSelection({ type: "agent", agentId }); if (phone) setPhoneView("chat"); }}
         actions={[
           { id: "new", label: "New chat", shortcut: "⌘N", run: () => newChat(selectedAgentId ?? LEAD_ID) },
           { id: "history", label: "Chat history", run: () => host.openHistory?.(selectedAgentId ?? LEAD_ID) },

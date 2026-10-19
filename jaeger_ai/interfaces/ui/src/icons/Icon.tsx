@@ -45,6 +45,13 @@ export const CODICON = {
   "pass": 0xeba4,
   "error": 0xea87,
   "warning": 0xea6c,
+  "comment": 0xea6b,
+  "ellipsis": 0xea7c,
+  "arrow-right": 0xea9c,
+  "checklist": 0xeab3,
+  "chevron-down": 0xeab4,
+  "chevron-left": 0xeab5,
+  "star-full": 0xeb59,
 } as const;
 export type IconName = keyof typeof CODICON;
 
