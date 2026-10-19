@@ -825,6 +825,8 @@ class JaegerGatewayApp:
         self.app.on_startup.append(self._prewarm_gateway_mcp)
         self.app.on_cleanup.append(self._bounded_shutdown)
         self._setup_routes()
+        from jaeger_ai.features.agent_bridge.outbox import attach as attach_agent_outbox
+        attach_agent_outbox(self)
 
     async def _recover_interrupted(self, app: web.Application) -> None:
         self._loop = asyncio.get_running_loop()
@@ -4118,9 +4120,12 @@ class JaegerGatewayApp:
         """
         from jaeger_agent.tool_executor import caller_identity
 
+        from jaeger_ai.features.agent_bridge.tool_scope import goal_scope
+
         actor = (execution or {}).get("caller")
         try:
-            with caller_identity(actor if isinstance(actor, str) and actor.strip() else None):
+            with caller_identity(actor if isinstance(actor, str) and actor.strip() else None), \
+                    goal_scope(self, session_id, request_id, execution):
                 await self._execute_turn_inner(
                     session_id, turn_id, text, request_id=request_id, execution=execution,
                 )

@@ -16,6 +16,7 @@ from jaeger_ai.core.redaction import redact_value
 
 from .outcomes import project_goal
 from .service import AgentMessages, BridgeError, enabled, key
+from .tool_scope import supported_tools
 
 
 class TurnRequest(dict):
@@ -155,12 +156,13 @@ def register(gateway):
                 "REA pass-through incomplete: caller/thread/workspace handle confinement unavailable",
                 501,
             )
-        # Ordinary goals keep the normal authority path and an empty tool grant.
+        # Use existing native tools through ordinary authority/approval dispatch.
+        # Tools without a bounded resource contract remain unsupported.
         turn = {
             "text": redact_value(goal),
             "request_id": f"agent-{caller}-{goal_id}",
             "workspace": folder,
-            "allowed_tools": [f"mcp__rea__{tool}" for tool in tools],
+            "allowed_tools": supported_tools(),
         }
         digest = hashlib.sha256(
             json.dumps({**turn, "text": goal}, sort_keys=True).encode()
@@ -188,7 +190,13 @@ def register(gateway):
         if response.status != 200:
             return response
         return web.json_response(
-            project_goal(goal_id, thread, json.loads(response.body))
+            project_goal(
+                goal_id,
+                thread,
+                gateway.store.get_request(turn["request_id"])
+                or json.loads(response.body),
+                gateway=gateway,
+            )
         )
 
     def goal_row(caller, goal_id):
@@ -206,7 +214,9 @@ def register(gateway):
     async def status(request, caller):
         row = goal_row(caller, request.match_info["goal_id"])
         receipt = gateway.store.get_request(row["request_id"])
-        return web.json_response(project_goal(row["id"], row["thread"], receipt))
+        return web.json_response(
+            project_goal(row["id"], row["thread"], receipt, gateway=gateway)
+        )
 
     @wrap("cancel_goal")
     async def cancel(request, caller):
@@ -219,7 +229,7 @@ def register(gateway):
         canonical = json.loads(response.body)
         return web.json_response(
             {
-                **project_goal(row["id"], row["thread"], canonical),
+                **project_goal(row["id"], row["thread"], canonical, gateway=gateway),
                 **{
                     name: canonical[name]
                     for name in (

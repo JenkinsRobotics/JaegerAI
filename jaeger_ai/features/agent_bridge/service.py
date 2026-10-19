@@ -178,6 +178,13 @@ class AgentMessages:
                     safe["created_at"],
                 ),
             )
+            from .outbox import OutboxPayloadError, enqueue
+
+            try:
+                enqueue(conn, safe)
+            except OutboxPayloadError:
+                # Context-manager rollback includes the thread/message rows.
+                raise BridgeError("Webhook message exceeds 16 KiB", 413) from None
             return safe
 
     def list(self, caller, *, thread=None, after=0, limit=50):
