@@ -81,7 +81,8 @@ def register(mcp, client_for_context):
     ) -> dict:
         """Request workspace file work through normal Gateway authority/approvals.
 
-        Only supported native file tools are granted. Shell/exec and tools without
+        Canonical team dispatch and supported native file tools are granted.
+        Children inherit caller/workspace confinement. Shell/exec and tools without
         bounded resource contracts are unavailable. REA is an incomplete acceptance
         item: unknown/mutating names are denied; known REA names fail closed
         until caller/thread/workspace handle confinement is implemented.

@@ -2041,6 +2041,32 @@ class JaegerGatewayApp:
             require_approval = False
             approved_by = "project_grant"
 
+        # Preserve the authenticated actor and a durable bridge root across
+        # approval/restart; a child must not become an internal owner turn.
+        from jaeger_ai.features.agent_bridge.delegation import prepare_handoff
+        from jaeger_ai.features.agent_bridge.service import BridgeError
+        actor = current_request_actor()
+        try:
+            bridge_origin, allowed_tools = prepare_handoff(
+                self, actor, body, workspace, allowed_tools,
+            )
+        except (BridgeError, PermissionError) as exc:
+            return web.json_response({"error": str(exc)}, status=403)
+        if bridge_origin is not None:
+            require_approval = True
+            approved_by = None
+            parent_session = self.store.get_session(str(body.get("session_id") or "")) or {}
+            parent_meta = parent_session.get("metadata") or {}
+            parent_handoff = (self.store.get_handoff(parent_meta["handoff_id"])
+                              if parent_meta.get("handoff_id") else None)
+            # Root goals cannot forge a chain through editable session metadata.
+            is_root = parent_run_id == bridge_origin["request_id"]
+            parent_chain = ([] if is_root else list(
+                ((parent_handoff or {}).get("metadata") or {}).get("parent_chain") or []
+            ))
+            depth = len(parent_chain)
+            from_id = "native:jaeger" if is_root else str(parent_meta.get("agent_id") or "")
+
         existing = self.store.get_handoff_by_request(request_id)
         if existing:
             prior = existing.get("metadata") or {}
@@ -2049,6 +2075,9 @@ class JaegerGatewayApp:
                 or existing.get("parent_run_id") != parent_run_id
                 or existing["require_approval"] != require_approval
                 or prior.get("permitted_context", "") != permitted_context
+                or ("caller_actor" in prior and prior["caller_actor"] != actor)
+                or prior.get("bridge_origin") != bridge_origin
+                or (bridge_origin is not None and prior.get("workspace") != workspace)
                 or sorted(prior.get("allowed_tools") or []) != sorted(allowed_tools)
                 or prior.get("timeout_seconds", 120) != timeout_s):
                 return web.json_response(
@@ -2091,6 +2120,8 @@ class JaegerGatewayApp:
             "approval_id": approval_id,
             "result": {},
             "metadata": {
+                "caller_actor": actor,
+                "bridge_origin": bridge_origin,
                 "target_display": target.display_name,
                 "target_role": (target.metadata or {}).get("role"),
                 "specialty": (target.metadata or {}).get("specialty"),
@@ -5603,6 +5634,8 @@ class JaegerGatewayApp:
             )
             result = await executor.execute(runtime.runtime_id, request)
             status = "execution_unknown" if result.metadata.get("execution_unknown") else result.status
+            if (self.store.get_handoff(handoff_id) or {}).get("status") == "cancelled":
+                status = "cancelled"
             ok = status == "completed"
             saved = self.store.save_handoff({
                 **record,
@@ -5658,6 +5691,11 @@ class JaegerGatewayApp:
             metadata={k: v for k, v in meta.items() if v is not None},
         )
         requested: dict[str, Any] = {"interaction_tier": self._current_tier(), "is_subordinate": True}
+        # Approved handoffs execute later, often in an owner's HTTP context.
+        # Identity comes from durable admission, never from that later context.
+        handoff = self.store.get_handoff(handoff_id) if handoff_id else None
+        if handoff is not None:
+            requested["caller"] = (handoff.get("metadata") or {}).get("caller_actor")
         if allowed_tools is not None:
             requested["allowed_tools"] = list(allowed_tools)
         if workspace:

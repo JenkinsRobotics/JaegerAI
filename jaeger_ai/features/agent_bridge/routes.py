@@ -177,6 +177,17 @@ def register(gateway):
                     "SELECT * FROM agent_goals WHERE caller=? AND id=?",
                     (caller, goal_id),
                 ).fetchone()
+                if prior:
+                    # A catalog upgrade must not widen or conflict with an
+                    # already admitted retry. Its original grant stays frozen.
+                    receipt = gateway.store.get_request(prior["request_id"])
+                    if receipt is not None:
+                        turn["allowed_tools"] = (receipt.get("execution") or {}).get(
+                            "allowed_tools"
+                        )
+                        digest = hashlib.sha256(
+                            json.dumps({**turn, "text": goal}, sort_keys=True).encode()
+                        ).hexdigest()
                 if prior and (prior["digest"] != digest or prior["thread"] != thread):
                     raise BridgeError("Goal id reused with different content", 409)
                 conn.execute(
@@ -226,6 +237,16 @@ def register(gateway):
         )
         if response.status != 200:
             return response
+        from .delegation import cancel_handoffs
+
+        await cancel_handoffs(
+            gateway,
+            {
+                "caller": caller,
+                "session": row["session"],
+                "request_id": row["request_id"],
+            },
+        )
         canonical = json.loads(response.body)
         return web.json_response(
             {

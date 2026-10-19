@@ -71,3 +71,32 @@ Exact unsupported tools:
 - `evaluate_reconstruction_coverage`
 - `verify_unknown_resolution`
 - `compare_artifacts`
+
+
+## Follow-up: private process versus live-access prerequisites
+
+A private launcher, per-goal lifecycle, input path validation, and nested handle
+ownership are feasible Jaeger code work; they do not require live credentials,
+shared registration changes, or new host permissions. These are missing adapter
+implementation, not a reason to ask for Keychain access.
+
+The cached package accepts `REA_ANALYSIS_PROVIDER=native-macos` and explicit
+`open_binary.provider_id`. It also accepts `snapshot_path`; other operations
+accept explicit paths or retained evidence IDs. Isolation therefore needs both
+private ambient state and a resource boundary. A plain process per goal fixes
+shared target selection but does not restrict that process's filesystem.
+
+An actual qualification attempt used the already-cached 6.5.0 package, explicit
+native-macos selection, private temporary HOME/state, copied `/usr/bin/true`
+analysis fixture, and a default-deny filesystem/network sandbox. MCP initialization
+failed because the subprocess exited with **SIGABRT (-6), empty stderr**. The same
+profile failed identically for `/usr/bin/true` before REA was involved. No target
+program was executed by REA, no shared provider was used, and no attempt was made
+to retry outside confinement. This is an unsuccessful qualification, not a proof
+of cross-client provider isolation or a claim about why the host aborted.
+
+Minimum prerequisite for production acceptance: demonstrate a working private
+resource confinement mechanism for the selected provider, or supply/refactor a
+provider that enforces workspace roots across explicit paths, derived resources
+and evidence. Neither requires live keys/network activation. Mock provider tests
+alone cannot qualify the real provider boundary. All 50 names stay fail closed.
