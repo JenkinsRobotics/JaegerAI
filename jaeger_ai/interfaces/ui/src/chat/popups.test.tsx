@@ -52,7 +52,7 @@ describe("agent right-click", () => {
     const onInfo = vi.fn();
     await act(async () => { root.render(<SpecialistList dragType="x" onPin={vi.fn()} onUnpin={vi.fn()} onInfo={onInfo} onHistory={vi.fn()}><div data-agent-id="native:builder">Builder</div></SpecialistList>); });
     await act(async () => { el.querySelector("[data-agent-id]")!.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 10, clientY: 10 })); });
-    expect(items()).toEqual(["Pin to top", "Show info", "Chat history"]);
+    expect(items().map((t) => (t ?? "").replace(/[\uE000-\uF8FF]/g, "").trim())).toEqual(["Pin to top", "Show info", "Chat history", "Copy agent ID"]);
   });
 });
 
