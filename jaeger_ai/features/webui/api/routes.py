@@ -19414,15 +19414,18 @@ def _webui_gateway_auth() -> dict:
     return client_headers("webui")
 
 
-def _gateway_store_pending(sid: str) -> dict | None:
-    """Map a Gateway session-store approval onto the stock WebUI card."""
+def _gateway_store_rows(sid: str) -> list[dict] | None:
+    """Pending Gateway approvals for this chat, including the cards its
+    background workers / specialists filed under child sessions (``origin``).
+    None when the Gateway cannot be asked."""
+    from urllib.parse import quote
     from urllib.request import urlopen
 
     from api.jaeger_sessions import gateway_base
 
     try:
         req = Request(
-            gateway_base() + "/v1/approvals",
+            gateway_base() + "/v1/approvals?session_id=" + quote(str(sid or ""), safe=""),
             headers={"Accept": "application/json", **_webui_gateway_auth()},
             method="GET",
         )
@@ -19433,11 +19436,23 @@ def _gateway_store_pending(sid: str) -> dict | None:
     rows = data.get("approvals") if isinstance(data, dict) else None
     if not isinstance(rows, list):
         return None
+    return [row for row in rows if isinstance(row, dict) and _gateway_row_belongs(row, sid)]
+
+
+def _gateway_row_belongs(row: dict, sid: str) -> bool:
+    """The card is this chat's own, or a child card whose origin names it."""
+    if str(row.get("session_id") or "") == sid:
+        return True
+    origin = row.get("origin") if isinstance(row.get("origin"), dict) else {}
+    return bool(sid) and str(origin.get("parent_session_id") or "") == sid
+
+
+def _gateway_store_pending(sid: str) -> dict | None:
+    """Map a Gateway session-store approval onto the stock WebUI card."""
+    rows = _gateway_store_rows(sid)
+    if not rows:
+        return None
     for row in rows:
-        if not isinstance(row, dict):
-            continue
-        if str(row.get("session_id") or "") != sid:
-            continue
         if str(row.get("status") or "pending") not in {"pending", ""}:
             continue
         meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
@@ -19459,6 +19474,7 @@ def _gateway_store_pending(sid: str) -> dict | None:
             "risk_level": reason or "write",
             "session_id": sid,
             "options": row.get("options") or ["once", "deny"],
+            **({"origin": row["origin"]} if isinstance(row.get("origin"), dict) else {}),
             "_jaeger_gateway_store": True,
         }
     return None
@@ -19506,6 +19522,7 @@ def _runner_local_resolve(sid: str, approval_id: str, choice: str) -> bool | Non
 
 
 def _gateway_store_resolve(approval_id: str, choice: str) -> bool | None:
+    from urllib.parse import quote
     from urllib.request import urlopen
 
     from api.jaeger_sessions import gateway_base
@@ -19513,14 +19530,16 @@ def _gateway_store_resolve(approval_id: str, choice: str) -> bool | None:
     aid = str(approval_id or "").strip()
     if not aid:
         return None
-    decision = "deny" if str(choice) == "deny" else "once"
+    decision = str(choice) if str(choice) in {"once", "session", "always", "deny"} else "once"
     body = json.dumps({"approved": decision != "deny", "decision": decision}).encode("utf-8")
     try:
         req = Request(
-            gateway_base() + "/v1/approvals/" + aid,
+            gateway_base() + "/v1/approvals/" + quote(aid, safe=""),
             data=body,
             method="POST",
-            headers={"Content-Type": "application/json", "Accept": "application/json"},
+            # The Gateway refuses unauthenticated callers; the WebUI answers as itself.
+            headers={"Content-Type": "application/json", "Accept": "application/json",
+                     **_webui_gateway_auth()},
         )
         with urlopen(req, timeout=8) as resp:
             if 200 <= int(getattr(resp, "status", 200)) < 300:
@@ -24738,6 +24757,21 @@ def _session_has_pending_approval(sid: str) -> bool:
         return bool(gw_queue)
 
 
+def _respond_gateway_store_approval(sid: str, approval_id: str, choice: str) -> tuple[dict, int] | None:
+    """Answer a pending Gateway approval by id when it belongs to this chat
+    (or to one of its child sessions). None = not a Gateway card here."""
+    rows = _gateway_store_rows(sid)
+    if not rows or not any(str(r.get("approval_id") or "") == approval_id for r in rows):
+        return None
+    ok = _gateway_store_resolve(approval_id, choice)
+    if ok:
+        logger.info("approval %s resolved on the Gateway (%s) for session %s", approval_id, choice, sid)
+        return {"ok": True, "choice": choice, "approval_id": approval_id, "relayed": True,
+                "via": "gateway_approvals"}, 200
+    return {"ok": False, "choice": choice, "code": "gateway_approval_relay_failed",
+            "error": "The Gateway did not accept the approval response."}, 502
+
+
 def _handle_approval_respond(handler, body):
     sid = body.get("session_id", "")
     if not sid:
@@ -24749,6 +24783,15 @@ def _handle_approval_respond(handler, body):
     enable_yolo = body.get("yolo") is True
     requested_run_id = str(body.get("run_id") or "").strip()
     requested_mirror_token = str(body.get("mirror_token") or "").strip()
+
+    # Jaeger Gateway cards (tool confirms, handoffs, background workers'
+    # child cards) are Gateway records keyed by approval_id. They never had a
+    # Runs-API run behind them, so the run relay below can only answer 409
+    # gateway_run_unavailable for them. Resolve them by id instead.
+    if approval_id and not enable_yolo:
+        gateway_answer = _respond_gateway_store_approval(sid, approval_id, choice)
+        if gateway_answer is not None:
+            return j(handler, gateway_answer[0], status=gateway_answer[1])
 
     if enable_yolo:
         payload, status = _enable_session_yolo_and_release_pending(
