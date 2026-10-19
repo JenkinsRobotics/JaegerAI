@@ -1,7 +1,7 @@
 import Foundation
 import WebKit
 
-struct PanelContext: Decodable { let profile: String; let auth_enabled: Bool }
+struct PanelContext: Decodable { let profile: String; let auth_enabled: Bool; let csrf_token: String? }
 struct CronCatalog: Decodable {
     let jobs: [CronRow]; let cron_unavailable: Bool?; let other_profile_count: Int?
 }
@@ -15,6 +15,7 @@ struct CronHistory: Decodable {
 struct CronRow: Decodable, Identifiable {
     let id: String; let name: String?; let schedule_display: String?
     let enabled: Bool?; let state: String?; let last_status: String?
+    let prompt: String?; let deliver: String?
 }
 struct BoardCatalog: Decodable {
     struct Board: Decodable, Identifiable {
@@ -52,12 +53,31 @@ final class NativePanelClient {
         context = try await get("/api/native/context")
     }
     func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
+        try await perform(path, query:query, method:"GET", body:nil)
+    }
+    struct MutationReceipt: Decodable { let ok: Bool?; let job: CronRow?; let job_id: String? }
+    func mutateSchedule(_ action: String, body: [String: Any]) async throws -> MutationReceipt {
+        guard ["create", "update", "pause", "resume", "delete"].contains(action) else { throw failure("Unsupported scheduler action") }
+        return try await perform("/api/crons/" + action, query:[], method:"POST", body:body)
+    }
+    private func perform<T: Decodable>(_ path: String, query: [URLQueryItem], method: String, body: [String: Any]?) async throws -> T {
         guard let base else { throw failure("WebUI disconnected. Refresh to connect.") }
         var parts = URLComponents(url: base, resolvingAgainstBaseURL: false)!
         parts.path = path; parts.queryItems = query.isEmpty ? nil : query; parts.fragment = nil
         guard let url = parts.url else { throw failure("Invalid WebUI address.") }
         var request = URLRequest(url: url)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpMethod = method
+        if let body {
+            guard let context else { throw failure("Refresh before changing a schedule.") }
+            if context.auth_enabled && (context.csrf_token?.isEmpty ?? true) { throw failure("Sign in and refresh before changing a schedule.") }
+            request.httpBody = try JSONSerialization.data(withJSONObject:body)
+            request.setValue("application/json", forHTTPHeaderField:"Content-Type")
+            if let token = context.csrf_token { request.setValue(token, forHTTPHeaderField:"X-Hermes-CSRF-Token") }
+            var origin = URLComponents(url:base,resolvingAgainstBaseURL:false)!
+            origin.path = ""; origin.query = nil; origin.fragment = nil
+            request.setValue(origin.string, forHTTPHeaderField:"Origin")
+        }
         let matching = Self.matchingCookies(cookies, for: url)
         for (key, value) in HTTPCookie.requestHeaderFields(with: matching) { request.setValue(value, forHTTPHeaderField: key) }
         if let context { request.setValue(context.profile, forHTTPHeaderField: "X-Jaeger-Expected-Profile") }

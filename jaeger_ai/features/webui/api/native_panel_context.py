@@ -1,4 +1,4 @@
-"""Read-only native panel context inside the existing WebUI auth boundary."""
+"""Native panel context inside the existing WebUI authentication boundary."""
 from __future__ import annotations
 
 
@@ -18,5 +18,7 @@ def check_profile(handler) -> bool:
 
 
 def context(handler) -> dict:
-    from api.auth import is_auth_enabled
-    return {"profile": active_profile(), "auth_enabled": is_auth_enabled()}
+    from api.auth import is_auth_enabled, parse_cookie, verify_session, csrf_token_for_session
+    cookie = parse_cookie(handler) or getattr(handler, "_trusted_auth_session_cookie_value", None)
+    csrf = csrf_token_for_session(cookie) if cookie and verify_session(cookie) else None
+    return {"profile": active_profile(), "auth_enabled": is_auth_enabled(), "csrf_token": csrf}
