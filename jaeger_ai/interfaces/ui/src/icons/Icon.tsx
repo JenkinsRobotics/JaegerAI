@@ -52,6 +52,9 @@ export const CODICON = {
   "chevron-down": 0xeab4,
   "chevron-left": 0xeab5,
   "star-full": 0xeb59,
+  "new-folder": 0xea80,
+  "share": 0xec25,
+  "diff-added": 0xeadc,
 } as const;
 export type IconName = keyof typeof CODICON;
 

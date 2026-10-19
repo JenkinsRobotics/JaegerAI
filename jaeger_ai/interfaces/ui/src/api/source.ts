@@ -7,6 +7,8 @@ import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, Sessi
 /** 201 from the bytes upload route. */
 export interface UploadedAttachment { attachment_id: string; name: string; mime: string; size: number; sha256: string }
 
+import type { AgentActions } from "./agentActions";
+
 export interface JaegerSource {
   readonly kind: "live" | "mock";
   agents(): Promise<Agent[]>;
@@ -17,6 +19,8 @@ export interface JaegerSource {
   /** PATCH /v1/sessions/{id}: rename or archive a chat. */
   updateSession(id: string, body: { title?: string; archived?: boolean }): Promise<void>;
   /** POST /v1/agents: a new specialist the lead can hand work to. */
+  /** Agent context-menu actions (agentActions.ts); optional, gated by agentCaps. */
+  agentActions?: AgentActions;
   createAgent(body: { name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }): Promise<Agent>;
   /** The specialist's side of one hand-off: its worker session and messages. */
   handoffExchange(handoffId: string): Promise<HandoffExchange>;
