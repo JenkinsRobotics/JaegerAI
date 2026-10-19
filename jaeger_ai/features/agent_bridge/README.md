@@ -102,6 +102,11 @@ participant-accessible thread, an existing absolute workspace and a matching
 per-caller `JAEGER_AGENT_WORKSPACES` grant. Symlinks resolve before containment
 checks. IDs make retries durable; changed content with the same ID returns 409.
 
+Root bridge sessions are pinned to the existing lead, so keyword triage cannot
+silently switch the goal to a specialist with a smaller catalog.
+[OWNER_PATH_ACCEPTANCE.md](OWNER_PATH_ACCEPTANCE.md) records the actual isolated
+Gateway → EntityRuntime OWNER → approval → native write/readback proof.
+
 The grant comes from the lead's existing native-file catalog, limited to tools
 with bounded path contracts: `read_file`, `write_file`, `append_file`, `patch`,
 `delete_file`, `move_file`, `copy_file`. No parallel tool engine or new approval

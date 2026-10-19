@@ -11,7 +11,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from jaeger_ai.core.agent_registry.specialists import REA_READ_ONLY_TOOLS
+from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID, REA_READ_ONLY_TOOLS
 from jaeger_ai.core.redaction import redact_value
 
 from .outcomes import project_goal
@@ -194,7 +194,18 @@ def register(gateway):
                     "INSERT OR IGNORE INTO agent_goals VALUES(?,?,?,?,?,?)",
                     (caller, goal_id, thread, session, turn["request_id"], digest),
                 )
-            gateway.store.ensure_session(session, title="Agent goal", workspace=folder)
+            # Bridge delegation requests the lead's tools, not keyword-based
+            # triage into a narrower specialist catalog.
+            gateway.store.ensure_session(
+                session,
+                title="Agent goal",
+                workspace=folder,
+                metadata={
+                    "agent_id": LEAD_AGENT_ID,
+                    "agent_pinned": True,
+                    "route_checked": True,
+                },
+            )
             response = await gateway.handle_send_turn(
                 TurnRequest(request, session, turn)
             )
