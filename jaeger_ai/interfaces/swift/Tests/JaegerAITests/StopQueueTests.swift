@@ -22,6 +22,7 @@ private final class QueueControlFixture: SessionControlClient {
 private final class QueueDispatcherFixture: DispatcherConversationClient {
     var run = QueueDispatcherFixture.run("A", status: "running")
     var sent: [String] = []
+    var nextSendStatus = "completed"
     static func run(_ id: String, status: String) -> DispatcherClient.Run {
         .init(tools: nil, run_id: id, status: status, error: nil, output: "",
               active: status == "running", execution_unknown: status == "execution_unknown", created_at: nil, approvals: nil)
@@ -31,7 +32,7 @@ private final class QueueDispatcherFixture: DispatcherConversationClient {
     }
     func send(_ text: String, requestID: String) async throws -> DispatcherClient.Run {
         sent.append(text)
-        run = Self.run(requestID, status: "completed")
+        run = Self.run(requestID, status: nextSendStatus)
         return run
     }
     func request(_ action: String, body: [String: String]?) async throws -> Data {
@@ -86,6 +87,20 @@ final class StopQueueTests: XCTestCase {
         XCTAssertEqual(dispatcher.sent, ["dispatcher follow-up"])
         XCTAssertEqual(model.pendingSends.count, 0)
         XCTAssertEqual(control.reads, 0)
+    }
+
+    @MainActor
+    func testCancelledDispatcherSubmissionDoesNotFallBackToNative() async {
+        let dispatcher = QueueDispatcherFixture()
+        dispatcher.run = QueueDispatcherFixture.run("old", status: "completed")
+        dispatcher.nextSendStatus = "cancelled"
+        let model = ChatViewModel(agent: AgentBridge(), sessionKey: "dispatcher", controlGateway: QueueControlFixture(),
+                                  startBackgroundObservers: false, dispatcherClient: dispatcher)
+        await model.refreshTurnControl()
+        await model.send("one scoped submission")
+        XCTAssertEqual(dispatcher.sent, ["one scoped submission"])
+        XCTAssertTrue(model.messages.isEmpty, "Native fallback would append a second local user/answer pair")
+        XCTAssertTrue(model.queuePausedByStop)
     }
 
     @MainActor
