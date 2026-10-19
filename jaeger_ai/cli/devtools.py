@@ -2,7 +2,7 @@
 """jaeger_ai.cli.devtools — the developer toolbox behind `jaeger --dev`.
 
 Replaces the old repo-root launch.py (removed 2026-07-05): the windowed
-dev shell is the repo's JaegerAI.app run in the dev STATE (`jaeger --dev`
+dev shell is the canonical JaegerShell.app run in the dev STATE (`jaeger --dev`
 builds + runs it pinned to the jaeger-dev instance — one bundle, one TCC
 permission grant, since 2026-07-14); this module keeps the dev TUI +
 utility verbs.
@@ -21,7 +21,7 @@ The in-process TUI loads the plugin stack directly:
    - Gemma 4 + updated registry                         (core/models/)
    - bench infra (writer/aggregator dir fix)            (core/bench/)
 
-   ./launch                   boot the windowed JaegerAI app
+   ./launch                   boot the canonical Mac shell
    ./launch --tui             boot the in-process TUI in this terminal
    ./launch --tui --no-voice   ... skipping voice startup
    ./launch --stop             kill a lingering TUI singleton
@@ -69,7 +69,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from jaeger_ai.cli._common import swift_app_bundle
+from jaeger_ai.cli._common import mac_app_bundle
 
 from jaeger_ai.core.instance.instance import operator_state_root
 
@@ -691,10 +691,11 @@ def cmd_boot_windowed(env: dict[str, str], dev: bool = False) -> int:
         return 1
     # Toolkit routing: Swift native app (default) vs the PySide6 shell.
     if _ui_toolkit() == "swift":
-        rc = _boot_swift(env, dev=dev)
+        rc = _boot_mac_shell(env, dev=dev)
         if rc is not None:
             return rc
-        warn("Swift app unavailable — falling back to the PySide6 shell")
+        fail("Canonical Mac shell unavailable. Build interfaces/macos-shell; no legacy GUI was selected.")
+        return 1
     say("launching the windowed app — menu-bar tray + chat window "
         "(the model loads on boot)…", prefix="launch")
     sys.stdout.flush()
@@ -707,7 +708,7 @@ def cmd_boot_windowed(env: dict[str, str], dev: bool = False) -> int:
     return 1
 
 
-SWIFT_DIR = REPO / "jaeger_ai" / "interfaces" / "swift"
+MAC_SHELL_DIR = REPO / "jaeger_ai" / "interfaces" / "macos-shell"
 
 
 def _ui_toolkit() -> str:
@@ -721,55 +722,26 @@ def _ui_toolkit() -> str:
         return "swift"
 
 
-def _boot_swift(env: dict[str, str], dev: bool = False) -> int | None:
-    """Run the native Swift app. Returns an exit code once it finishes, or
-    None to signal 'unavailable → fall back to PySide6'.
-
-    Packaged-app-first (Phase 2): a bare ``./launch`` RUNS the repo's
-    built JaegerAI.app and only builds when nothing is built yet;
-    ``./launch --dev`` forces a rebuild. ONE app since 2026-07-14 —
-    dev is a launch state, not a separate bundle: this launcher pins
-    the jaeger-dev instance via JAEGER_INSTANCE_NAME in ``env``, so the
-    same bundle (same TCC identity, one permission grant) serves both
-    dev and product.
-
-    The app self-locates the repo's ``jaeger`` launcher by walking up
-    from its own bundle path, so no PATH injection is needed."""
-    if not (SWIFT_DIR / "Package.swift").exists():
-        return None
-    from jaeger_ai.cli._common import swift_app_bundle
+def _boot_mac_shell(env: dict[str, str], dev: bool = False) -> int | None:
+    """Build/run only macos-shell. Never fall back to an old Mac bundle."""
+    from jaeger_ai.cli._common import mac_app_bundle, mac_app_is_stale
+    package = REPO / "jaeger_ai/interfaces/macos-shell"
     try:
-        bundle = swift_app_bundle(REPO)
+        bundle = mac_app_bundle(REPO)
     except ValueError as exc:
-        fail(f"invalid JAEGER_SWIFT_BUILD: {exc}")
-        return 1
-    bundle_bin = bundle / "Contents" / "MacOS" / "JaegerAI"
-    # Rebuild when forced, missing, OR stale (build-commit stamp older than
-    # the Swift tree) — the stale case is what keeps a station that pulls by
-    # hand from launching an app that lags the core it talks to.
-    from jaeger_ai.cli._common import swift_app_is_stale
-    if dev or swift_app_is_stale(REPO, bundle):
+        fail(str(exc)); return 1
+    if dev or mac_app_is_stale(REPO, bundle):
         if not shutil.which("swift"):
-            if not bundle_bin.exists():
-                return None
-            warn("swift toolchain missing — launching the existing (stale) app")
-        else:
-            say("building JaegerAI.app (Scripts/build-app.sh --dev)…",
-                prefix="launch")
-            build = subprocess.run(
-                [str(SWIFT_DIR / "Scripts" / "build-app.sh"), "--dev"],
-                cwd=str(SWIFT_DIR))
-            if build.returncode != 0:
-                warn("swift app build failed")
-                return None
-    if not bundle_bin.exists():
+            warn("Swift toolchain missing; canonical Mac shell is unavailable")
+            return None
+        result = subprocess.run(["bash", str(package / "Scripts/build-shell.sh")], cwd=REPO)
+        if result.returncode:
+            return result.returncode
+    binary = bundle / "Contents/MacOS/JaegerShell"
+    if not binary.is_file():
         return None
-    say("launching JaegerAI (jaeger-dev instance) — menu-bar tray + chat window…",
-        prefix="launch")
-    sys.stdout.flush()
-    launch_env = dict(env)
-    launch_env["JAEGER_REPO"] = str(REPO)
-    return subprocess.run([str(bundle_bin)], env=launch_env).returncode
+    launch_env = dict(env); launch_env["JAEGER_REPO"] = str(REPO)
+    return subprocess.run([str(binary)], env=launch_env).returncode
 
 
 # ─── main ─────────────────────────────────────────────────────────────
@@ -803,17 +775,16 @@ def cmd_update() -> int:
     # Staleness beats "what did THIS pull change": the bundle's build-commit
     # stamp catches pulls done by hand outside this command and rebuilds that
     # failed last time — a diff-keyed check misses both.
-    from jaeger_ai.cli._common import swift_app_bundle, swift_app_is_stale
+    from jaeger_ai.cli._common import mac_app_bundle, mac_app_is_stale
     try:
-        _dev_bundle = swift_app_bundle(REPO)
+        _dev_bundle = mac_app_bundle(REPO)
     except ValueError as _e:
         fail(f"invalid JAEGER_SWIFT_BUILD: {_e}")
         return 1
-    if swift_app_is_stale(REPO, _dev_bundle):
-        say("Swift app lags the tree — rebuilding JaegerAI.app…",
+    if mac_app_is_stale(REPO, _dev_bundle):
+        say("Canonical Mac shell lags the tree — rebuilding JaegerShell.app…",
             prefix="update")
-        subprocess.run([str(REPO / "jaeger_ai/interfaces/swift/Scripts/build-app.sh"),
-                        "--dev"])
+        subprocess.run(["bash", str(REPO / "jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh")])
     ok("up to date — run `jaeger dev --health` to verify")
     return 0
 
@@ -833,7 +804,7 @@ def main() -> int:
                         help="tell the TUI to skip voice startup")
     parser.add_argument("--tui", action="store_true",
                         help="boot the CLI/TUI in-process agent (Pattern 0). "
-                             "A bare ./launch boots the windowed JaegerAI app.")
+                             "A bare ./launch boots the canonical Mac shell.")
     parser.add_argument("--update", action="store_true",
                         help="git pull + reinstall deps + rebuild the dev app as needed")
     parser.add_argument("--dev", action="store_true",

@@ -9,7 +9,9 @@
 
 | I want to... | Where do I look? | Key files |
 | :--- | :--- | :--- |
-| **Edit the Web UI (chat page, profiles, adapter)** | [`jaeger_ai/features/webui/`](../../jaeger_ai/features/webui/) | `adapter/server.py`, `service/profile_layout.py` |
+| **Edit the current Mac host** | [`jaeger_ai/interfaces/macos-shell/`](../../jaeger_ai/interfaces/macos-shell/) | AppKit/WKWebView host; builds outside source |
+| **Edit the current shared frontend** | [`jaeger_ai/interfaces/ui/`](../../jaeger_ai/interfaces/ui/) | React/TypeScript; shared Mac/browser surface |
+| **Edit retained WebUI backend/proxy** | [`jaeger_ai/features/webui/`](../../jaeger_ai/features/webui/) | Required authenticated proxy and legacy browser routes |
 | **Edit the Web UI's look & branding** | [`jaeger_ai/assets/`](../../jaeger_ai/assets/) | `jaeger_webui_branding.js` — **the only copy**; see below |
 | **Edit the Task Dispatcher & Kanban board** | [`jaeger_ai/features/dispatcher/`](../../jaeger_ai/features/dispatcher/) | `store.py`, `router.py`, `sidecar.py` (board UI: `jaeger_ai/assets/jaeger_dispatcher.js`) |
 | **Edit Roundtable (multi-agent debate & consensus)** | [`jaeger_ai/features/roundtable/`](../../jaeger_ai/features/roundtable/) | `policy.py` (rules), `service.py` (engine), `roundtable.py` (streaming) |
@@ -77,8 +79,8 @@ contract.
 ```text
 JaegerAI/
 ├── apps/                       # 📱 Client aliases — SYMLINKS to the real dirs below
-│   ├── macos/                  # → jaeger_ai/interfaces/swift
-│   └── web/                    # → jaeger_ai/features/webui
+│   ├── macos/                  # → jaeger_ai/interfaces/macos-shell
+│   └── web/                    # → jaeger_ai/interfaces/ui
 ├── packages/                   # 📦 Standalone Python packages, each testing itself
 │   ├── jaeger-agent/           # The agent loop and model adapters
 │   ├── jaeger-os/              # OS abstractions, permissions, daemon logic

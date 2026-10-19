@@ -32,7 +32,6 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from jaeger_ai.cli._common import swift_app_bundle
 from typing import Any
 
 
@@ -226,7 +225,7 @@ def _update_download(home: Path, *, ref: str | None = None,
                 return rc
         else:
             print("[jaeger update] dependencies unchanged — skipped reinstall.")
-        _rebuild_swift_app(home)
+        _rebuild_mac_shell(home)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     verb = "reinstalled" if force else "now at"
@@ -234,49 +233,24 @@ def _update_download(home: Path, *, ref: str | None = None,
     return 0
 
 
-def _rebuild_swift_app(home: Path, *, only_if_stale: bool = False) -> None:
-    """(Re)build the station's Swift app after an update. The .app bundle
-    is a BUILD ARTIFACT, not a product file — the release tarball can't
-    carry it, so without a rebuild the app silently lags the core it
-    talks to. A MISSING bundle is built too (a failed install-time build
-    must not exempt the station from ever getting the app); only a missing
-    Swift toolchain (Linux/headless) skips, loudly. ``only_if_stale``
-    consults the bundle's build-commit stamp (git installs) and skips the
-    rebuild when the Swift tree hasn't changed since the app was built.
-
-    Flavor follows the install: a dev checkout (``dev/`` present) builds
-    debug (``--dev``); a clean product install builds ``--release``. Same
-    JaegerAI.app either way (one bundle since 2026-07-14 — dev is a launch
-    state, not a separate app) — mirrors install.sh."""
-    swift_dir = home / "jaeger_ai" / "interfaces" / "swift"
-    script = swift_dir / "Scripts" / "build-app.sh"
-    if not script.exists():
+def _rebuild_mac_shell(home: Path, *, only_if_stale: bool = False) -> None:
+    """Build the canonical shared-UI shell without installing or starting it."""
+    from jaeger_ai.cli._common import mac_app_bundle, mac_app_is_stale
+    script = home / "jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh"
+    if not script.is_file():
         return
-    flag = "--dev" if (home / "dev").exists() else "--release"
-    from jaeger_ai.cli._common import swift_app_bundle, swift_app_is_stale
     try:
-        built = swift_app_bundle(home)
-    except ValueError as exc:
-        print(f"[jaeger update] ⚠ skipping Swift rebuild: {exc}", file=sys.stderr)
-        return
-    if only_if_stale:
-        if not swift_app_is_stale(home, built):
+        bundle = mac_app_bundle(home)
+        if only_if_stale and not mac_app_is_stale(home, bundle):
             return
-    if shutil.which("swift") is None:
-        print(f"[jaeger update] ⚠ swift toolchain missing — JaegerAI.app NOT "
-              "(re)built and now lags the core; build when available:",
-              file=sys.stderr)
-        print(f"                 bash {script} {flag}", file=sys.stderr)
+    except ValueError as exc:
+        print(f"[jaeger update] Mac build configuration invalid: {exc}", file=sys.stderr)
         return
-    verb = "rebuilding" if built.exists() else "building"
-    print(f"[jaeger update] {verb} JaegerAI.app…")
-    rc = subprocess.run(["bash", str(script), flag],
-                        stdout=subprocess.DEVNULL).returncode
-    if rc == 0:
-        print(f"[jaeger update] ✓ JaegerAI.app ready")
-    else:
-        print(f"[jaeger update] ⚠ app build exited {rc} — rerun: "
-              f"bash {script} {flag}", file=sys.stderr)
+    if shutil.which("swift") is None:
+        print("[jaeger update] Swift unavailable; canonical Mac shell was not built", file=sys.stderr)
+        return
+    result = subprocess.run(["bash", str(script)], stdout=subprocess.DEVNULL)
+    print(f"[jaeger update] canonical Mac shell build exited {result.returncode}")
 
 
 def jaeger_exe() -> Path:
@@ -345,7 +319,7 @@ def _do_rollback(home: Path) -> int:
     restored = _restore(home, prev, items)
     print(f"[jaeger update] rolled back {len(restored)} item(s).")
     _reinstall_deps(home)
-    _rebuild_swift_app(home)   # the built app must match the restored core
+    _rebuild_mac_shell(home)   # the built app must match the restored core
     shutil.rmtree(prev, ignore_errors=True)
     print("[jaeger update] restart `jaeger` to apply the rolled-back version.")
     return 0
@@ -376,7 +350,7 @@ def _update_editable(*, ref: str | None = None) -> int:
     # The .app is a build artifact the pull can't deliver — rebuild whenever
     # the Swift tree moved past the built bundle's stamp (also catches pulls
     # done by hand and installs whose first build failed → missing app).
-    _rebuild_swift_app(repo, only_if_stale=True)
+    _rebuild_mac_shell(repo, only_if_stale=True)
     return rc
 
 

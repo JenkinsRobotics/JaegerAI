@@ -20,7 +20,6 @@ import sys
 import time
 from pathlib import Path
 
-from jaeger_ai.cli._common import swift_app_bundle
 from typing import Any, Sequence
 from urllib.parse import urlsplit
 
@@ -129,28 +128,14 @@ def _find_app_pids() -> list[int]:
 
 
 def _find_app_bundle() -> Path | None:
-    """Find an external JaegerAI.app bundle, then well-known install locations.
-
-    The in-repo .build path is NOT checked here — build output is external
-    by design (JAEGER_SWIFT_BUILD / ~/.jaeger/apps/swift-build).
-    """
-    from jaeger_ai.cli._common import swift_app_bundle
-    candidates: list[Path] = []
+    """Only the canonical shared-UI shell is eligible for automatic launch."""
+    from jaeger_ai.cli._common import mac_app_bundle
     try:
-        candidates.append(swift_app_bundle(REPO_ROOT))
+        candidate = mac_app_bundle(REPO_ROOT)
     except ValueError as exc:
-        print(f"Invalid Swift build configuration: {exc}", file=sys.stderr)
+        print(f"Invalid Mac build configuration: {exc}", file=sys.stderr)
         return None
-    candidates += [
-        Path.home() / "Applications" / "JaegerAI.app",
-        Path("/Applications/JaegerAI.app"),
-        Path("/Applications/Jaeger AI.app"),
-        Path.home() / "Applications" / "Jaeger AI.app",
-    ]
-    for c in candidates:
-        if c.exists():
-            return c
-    return None
+    return candidate if (candidate / "Contents/MacOS/JaegerShell").is_file() else None
 
 
 def _open_app_bundle(bundle: Path) -> subprocess.CompletedProcess:
@@ -446,7 +431,9 @@ def _cmd_start_argv(argv: Sequence[str]) -> int:
     if not args.no_app:
         app_pids = _find_app_pids()
         if app_pids:
-            print(f"  Already running: Desktop App (PID: {', '.join(str(p) for p in app_pids)})")
+            print(f"  Legacy SwiftUI app still running (PID: {', '.join(str(p) for p in app_pids)}). "
+                  "Coordinate migration before launching the canonical shell.")
+            failures.append("legacy desktop app requires coordinated migration")
         else:
             bundle = _find_app_bundle()
             if bundle and args.dry_run:

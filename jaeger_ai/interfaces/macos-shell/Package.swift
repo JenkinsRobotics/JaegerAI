@@ -2,7 +2,7 @@
 //
 // JaegerShell: thin native macOS shell around the shared Jaeger web UI.
 // Donor: AetherStudio @ ece0209 (see NOTICE). Debug builds only, via
-// Scripts/build-shell.sh, into .build/ui-rebuild (gitignored, inside this package).
+// Scripts/build-shell.sh, into the canonical external Mac build directory.
 
 import PackageDescription
 

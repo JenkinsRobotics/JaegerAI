@@ -253,15 +253,15 @@ def _cmd_agent_argv(argv: list[str]) -> int:
             from jaeger_ai.core.instance.instance import (
                 InstanceLayout, default_instance_name, resolve_instance_dir,
             )
-            from jaeger_ai.main import _launch_swift_app, _swift_app_binary
+            from jaeger_ai.main import _launch_mac_app, _mac_app_binary
             name = default_instance_name()
             if "--name" in rest and rest.index("--name") + 1 < len(rest):
                 name = rest[rest.index("--name") + 1]
-            app = _swift_app_binary()
+            app = _mac_app_binary()
             if (app is not None
                     and not InstanceLayout(
                         root=resolve_instance_dir(name)).exists()):
-                return _launch_swift_app(app, name)
+                return _launch_mac_app(app, name)
         return _cmd_setup_argv(rest)
     if verb in ("list", "use", "inspect", "delete", "clear"):
         return _cmd_instance_argv(argv)   # argv[0] is the verb

@@ -8,7 +8,6 @@ import Foundation
 public enum LauncherResolver {
     public static func candidates(env: [String: String], plistLauncher: String?, bundlePath: String, home: String) -> [String] {
         var out: [String] = []
-        if let venv = env["JAEGER_VENV"], !venv.isEmpty { out.append((venv as NSString).appendingPathComponent("bin/jaeger")) }
         if let configured = plistLauncher, !configured.isEmpty {
             out.append(configured.hasPrefix("~/") ? (home as NSString).appendingPathComponent(String(configured.dropFirst(2))) : configured)
         }
@@ -20,6 +19,7 @@ public enum LauncherResolver {
         }
         let repo = env["JAEGER_REPO"].flatMap { $0.isEmpty ? nil : $0 } ?? (home as NSString).appendingPathComponent("GitHub/JaegerAI")
         out.append((repo as NSString).appendingPathComponent("jaeger"))
+        if let venv = env["JAEGER_VENV"], !venv.isEmpty { out.append((venv as NSString).appendingPathComponent("bin/jaeger")) }
         out.append((home as NSString).appendingPathComponent(".jaeger/venv/bin/jaeger"))
         out += ["/opt/homebrew/bin/jaeger", "/usr/local/bin/jaeger"]
         return out

@@ -7,9 +7,9 @@ final class ReuseTests: XCTestCase {
 
     func testLauncherOrder() {
         let c = LauncherResolver.candidates(env: ["JAEGER_VENV": "/v"], plistLauncher: "~/bin/jaeger", bundlePath: bundle, home: home)
-        XCTAssertEqual(c[0], "/v/bin/jaeger")
-        XCTAssertEqual(c[1], "/Users/t/bin/jaeger")
-        XCTAssertEqual(c[2], "/Users/t/.jaeger/apps/swift-build/ui-rebuild/jaeger")
+        XCTAssertEqual(c[0], "/Users/t/bin/jaeger")
+        XCTAssertTrue(c.firstIndex(of: "/Users/t/GitHub/JaegerAI/jaeger")! < c.firstIndex(of: "/v/bin/jaeger")!)
+        XCTAssertEqual(c[1], "/Users/t/.jaeger/apps/swift-build/ui-rebuild/jaeger")
         XCTAssertTrue(c.contains("/Users/t/GitHub/JaegerAI/jaeger"))
         XCTAssertEqual(c.last, "/usr/local/bin/jaeger")
     }

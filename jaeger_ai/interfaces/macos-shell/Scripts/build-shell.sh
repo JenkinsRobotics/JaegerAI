@@ -2,21 +2,17 @@
 #
 # build-shell.sh — assemble the JaegerShell dev app (debug only).
 #
-#   Output:    <macos-shell>/.build/ui-rebuild/JaegerShell.app   (fixed, gitignored, no override)
+#   Output:    ~/.cache/jaeger/macos-shell/JaegerShell.app (JAEGER_MAC_BUILD overrides)
 #   Bundle ID: com.jenkinsrobotics.JaegerAI.uirebuild                   (asserted)
 #
 # It never builds release, never installs, never touches JaegerAI.app (either
-# location), launchd, ~/.jaeger (refused as a build root) or the venv. Takes no arguments.
+# location), launchd or the venv. Takes no arguments; never installs or launches.
 set -euo pipefail
 [[ $# -eq 0 ]] || { echo "build-shell.sh takes no arguments (debug only)" >&2; exit 2; }
 
 PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO="$(git -C "$PKG" rev-parse --show-toplevel)"
-ROOT="$PKG/.build/ui-rebuild"
-# Guards: never under ~/.jaeger; only inside this package's gitignored .build folder.
-case "$ROOT/" in "$HOME/.jaeger/"*) echo "build root under ~/.jaeger is refused" >&2; exit 1 ;; esac
-case "$ROOT/" in "$PKG/.build/"*) ;; *) echo "build root must be inside $PKG/.build" >&2; exit 1 ;; esac
-git -C "$PKG" check-ignore -q "$ROOT" || { echo "build root is not gitignored" >&2; exit 1; }
+ROOT="$(bash "$PKG/Scripts/build-root.sh")"
 SCRATCH="$ROOT/scratch"
 APP="$ROOT/JaegerShell.app"
 WANT_ID="com.jenkinsrobotics.JaegerAI.uirebuild"
@@ -38,6 +34,7 @@ VER="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$REPO/jaeger_ai/__init__.py")"
 SHA="$(git -C "$REPO" rev-parse --short HEAD)"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VER:-0.0.0}" \
     -c "Set :CFBundleVersion ${VER:-0.0.0}+$SHA" "$STAGE/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c "Add :JaegerLauncher string $REPO/jaeger" "$STAGE/Contents/Info.plist"
 cp "$BIN/JaegerShell" "$STAGE/Contents/MacOS/JaegerShell"
 
 # Loose resources (status-bar icons etc.) go straight into Contents/Resources.
@@ -59,9 +56,20 @@ cp "$A/jaeger_app_icon.png"     "$ICONSET/icon_512x512@2x.png"
 iconutil -c icns -o "$STAGE/Contents/Resources/AppIcon.icns" "$ICONSET"
 
 git -C "$REPO" rev-parse HEAD > "$STAGE/Contents/Resources/build-commit"
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$REPO" python3 -B - "$REPO" <<'PY' > "$STAGE/Contents/Resources/build-source-hash"
+from pathlib import Path
+from jaeger_ai.cli._common import mac_source_fingerprint
+import sys
+print(mac_source_fingerprint(Path(sys.argv[1])))
+PY
 codesign --force --sign - "$STAGE"
 codesign --verify --deep --strict "$STAGE"
 
-rm -rf "$APP"          # the only path this script ever replaces
+if [[ -e "$APP" ]]; then
+    /usr/bin/pgrep -f "^$APP/Contents/MacOS/JaegerShell" >/dev/null && { echo "Refusing to replace a running shell" >&2; exit 1; }
+    PREVIOUS="$ROOT/previous/$(date +%Y%m%d-%H%M%S)-$$"
+    mkdir -p "$PREVIOUS"
+    mv "$APP" "$PREVIOUS/JaegerShell.app"
+fi
 mv "$STAGE" "$APP"
 echo "$APP"

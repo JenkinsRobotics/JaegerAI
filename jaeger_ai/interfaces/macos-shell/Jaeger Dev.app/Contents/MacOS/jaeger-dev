@@ -3,7 +3,7 @@
 #
 # Opening "Jaeger Dev.app":
 #   1. JaegerShell (dev build) already running → skip the rebuild, activate it.
-#   2. Otherwise run an incremental debug build (Scripts/build-shell.sh → .build/ui-rebuild,
+#   2. Otherwise run an incremental debug build (Scripts/build-shell.sh → external Mac build root,
 #      bundle id com.jenkinsrobotics.JaegerAI.uirebuild), then open the built JaegerShell.app.
 #      With no overrides it loads the new UI from the gateway at http://127.0.0.1:33418/?host=macos.
 #   3. Build failure → dialog naming the log (~/Library/Logs/JaegerDev/build.log).
@@ -27,12 +27,12 @@ esac
 BUNDLE="${0:A:h:h:h}"            # …/macos-shell/Jaeger Dev.app
 PKG="${BUNDLE:h}"                # …/macos-shell
 BUILD="$PKG/Scripts/build-shell.sh"
-APP="$PKG/.build/ui-rebuild/JaegerShell.app"
+BUILD_ROOT="$(bash "$PKG/Scripts/build-root.sh")" || exit 1
+APP="$BUILD_ROOT/JaegerShell.app"
 EXE="$APP/Contents/MacOS/JaegerShell"
 LOGDIR="$HOME/Library/Logs/JaegerDev"
 LOG="$LOGDIR/build.log"
 
-case "$APP/" in "$HOME/.jaeger/"*|/Applications/*) print -u2 "refusing app path $APP"; exit 1 ;; esac
 [[ -x "$BUILD" ]] || { print -u2 "missing $BUILD"; exit 1; }
 
 say() { print -r -- "[jaeger-dev] $*"; }
