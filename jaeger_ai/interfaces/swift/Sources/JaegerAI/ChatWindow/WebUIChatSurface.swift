@@ -46,15 +46,14 @@ final class WebUIChatController: ObservableObject {
         lastError = nil
         isLoading = true
         do {
-            let resolved = try await WebUIEndpoint.resolve()
+            let resolved = try await WebUIEndpoint.resolve(instance: AgentBridge.shared.status?.instance ?? AgentBridge.explicitInstance)
             url = resolved
-            applyCookie(for: resolved)
+            await applyCookie(for: resolved)
             webView?.load(URLRequest(url: resolved))
         } catch {
-            let fallback = URL(string: "http://127.0.0.1:8790/")!
-            url = fallback
-            applyCookie(for: fallback)
-            webView?.load(URLRequest(url: fallback))
+            url = nil
+            isLoading = false
+            lastError = error.localizedDescription
         }
     }
 
@@ -81,7 +80,6 @@ final class WebUIChatController: ObservableObject {
 
     fileprivate func webViewDidFinish() {
         isLoading = false
-        applyCookie(for: url ?? webView?.url)
         Task {
             if pendingNewChat {
                 pendingNewChat = false
@@ -99,19 +97,16 @@ final class WebUIChatController: ObservableObject {
         lastError = message
     }
 
-    private func applyCookie(for url: URL?) {
+    private func applyCookie(for url: URL?) async {
         guard let url, let store = webView?.configuration.websiteDataStore.httpCookieStore else { return }
         let host = url.host ?? ""
-        store.getAllCookies { cookies in
-            let hasProfile = cookies.contains {
-                $0.name == "hermes_profile" && ($0.domain == host || $0.domain == ".\(host)")
-            }
-            // Seed Jaeger only when the WebUI has no profile cookie yet.
-            // Overwriting on every navigation pinned the chip to Jaeger and
-            // left Roundtable sessions unable to send or switch away.
-            guard !hasProfile, let cookie = Self.profileCookie(for: url) else { return }
-            store.setCookie(cookie)
+        let cookies = await store.allCookies()
+        let hasProfile = cookies.contains {
+            $0.name == "hermes_profile" && ($0.domain == host || $0.domain == ".\(host)")
         }
+        // Complete first-navigation profile seeding before the request is sent.
+        guard !hasProfile, let cookie = Self.profileCookie(for: url) else { return }
+        await store.setCookie(cookie)
     }
 
     private func injectPrompt(_ text: String) async -> Bool {
@@ -212,7 +207,7 @@ struct WebUIChatContainer: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(AetherTheme.bgApp.opacity(0.85))
-            } else if let err = controller.lastError, controller.webViewHasNoPage {
+            } else if let err = controller.lastError {
                 VStack(spacing: 12) {
                     Text("Jaeger WebUI is not reachable")
                         .font(.system(size: 14, weight: .semibold))
