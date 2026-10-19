@@ -1333,6 +1333,8 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/frameworks", self.handle_list_frameworks)
         self.app.router.add_post("/v1/frameworks/{id}/grants", self.handle_framework_grant)
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
+        self.app.router.add_post("/v1/agents/pins", self.handle_agent_pins)
+        self.app.router.add_patch("/v1/agents/{id}", self.handle_agent_presentation)
         self.app.router.add_get("/v1/agents/summary", self.handle_agents_summary)
         self.app.router.add_get("/v1/agents/{id}", self.handle_get_agent)
         self.app.router.add_get("/v1/agents/{id}/home", self.handle_agent_home)
@@ -1909,6 +1911,49 @@ class JaegerGatewayApp:
             return web.json_response(payload)
         return web.json_response(self._with_skills(registry.to_catalog()))
 
+    async def handle_agent_presentation(self, request: web.Request) -> web.Response:
+        """Admin-scoped cosmetic update; never rewrites registry definitions or sessions."""
+        from jaeger_ai.core.gateway.agent_presentation import validate_patch, protected, can_rename
+        agent_id = request.match_info['id']
+        record = self._registry().get_agent(agent_id)
+        if record is None or record.id != agent_id:
+            return web.json_response({'error': 'Agent not found'}, status=404)
+        try:
+            patch = validate_patch(await request.json())
+            if 'display_name' in patch and not can_rename(record.to_dict()):
+                return web.json_response({'error': 'protected_agent'}, status=409)
+            if protected(record.to_dict()) and (patch.get('archived') is True or patch.get('pinned') is True):
+                return web.json_response({'error': 'protected_agent'}, status=409)
+            prefs = self.store.patch_agent_presentation(record.id, patch)
+        except (ValueError, TypeError) as exc:
+            return web.json_response({'error': str(exc)}, status=400)
+        self.event_bus.publish('*', 'agent.updated', {'agent_id': record.id, 'presentation': prefs})
+        return web.json_response(self._with_skills(record.to_dict()))
+
+    async def handle_agent_pins(self, request: web.Request) -> web.Response:
+        """Admin-scoped ordered pins for the existing single local operator."""
+        from jaeger_ai.core.gateway.agent_presentation import MAX_AGENT_PINS, protected, PresentationConflict
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or set(body) != {'agent_ids', 'expected_agent_ids'}:
+                raise ValueError('agent_ids and expected_agent_ids are required; owner/profile is not client-selectable')
+            ids = body['agent_ids']
+            if not isinstance(ids, list) or len(ids) > MAX_AGENT_PINS or any(not isinstance(i, str) or not i for i in ids) or len(set(ids)) != len(ids):
+                raise ValueError(f'agent_ids must be a unique list of at most {MAX_AGENT_PINS} agent IDs')
+            for agent_id in ids:
+                record = self._registry().get_agent(agent_id)
+                if record is None or record.id != agent_id:
+                    return web.json_response({'error': 'Agent not found'}, status=404)
+                if protected(record.to_dict()):
+                    return web.json_response({'error': 'protected_agent'}, status=409)
+            self.store.set_agent_pins(ids, body['expected_agent_ids'])
+        except PresentationConflict as exc:
+            return web.json_response({'error': str(exc)}, status=409)
+        except (ValueError, TypeError) as exc:
+            return web.json_response({'error': str(exc)}, status=400)
+        self.event_bus.publish('*', 'agent.updated', {'pins': ids})
+        return web.json_response({'agent_ids': ids})
+
     async def handle_create_agent(self, request: web.Request) -> web.Response:
         body = await request.json() if request.can_read_body else {}
         name = str(body.get("name") or "").strip()
@@ -1940,11 +1985,13 @@ class JaegerGatewayApp:
         handoffs and the agent's direct-chat sessions. No agent_status table.
         """
         from jaeger_ai.core.gateway.agent_summary import summarize_agents
+        from jaeger_ai.core.gateway.agent_presentation import project
         registry = self._registry()
         agents = [a for a in registry.list_agents() if a.role.value in {"lead", "specialist"}]
         tasks = [t.to_dict() for t in self.task_owner.store.list_tasks()] if self.task_owner else []
+        presentation = self.store.agent_presentation()
         return web.json_response(summarize_agents(
-            [a.to_dict() for a in agents],
+            [project(a.to_dict(), presentation) for a in agents],
             tasks=tasks,
             handoffs=self.store.list_handoffs(limit=500),
             sessions=self.store.list_sessions(),
@@ -1982,7 +2029,7 @@ class JaegerGatewayApp:
         record = self._registry().get_agent(agent_id)
         if record is None:
             return web.json_response({"error": "Agent not found"}, status=404)
-        return web.json_response({**record.to_dict(), "skills": self._agent_skill_cards(record)})
+        return web.json_response(self._with_skills(record.to_dict()))
 
     async def handle_activate_agent(self, request: web.Request) -> web.Response:
         """Switch active agent — never fee-gated (fundamentals stay open)."""
@@ -3262,13 +3309,21 @@ class JaegerGatewayApp:
         """Add ``skills: [{id, name, description, source_path}]`` to agent dicts."""
         from jaeger_ai.core.agent_registry.types import AgentRecord
 
+        from jaeger_ai.core.gateway.agent_presentation import project
+        presentation = self.store.agent_presentation()
+        from jaeger_ai.core.gateway.caller_auth import CALLERS
+        caller = _REQUEST_CALLER.get()
+        spec = CALLERS.get(caller[0]) if caller else None
+        writable = bool(spec and 'admin' in spec.scopes)
+
         def one(row: Any) -> Any:
             if not isinstance(row, dict) or not row.get("id"):
                 return row
+            view = project(row, presentation, writable=writable)
             try:
-                return {**row, "skills": self._agent_skill_cards(AgentRecord.from_dict(row))}
+                return {**view, "skills": self._agent_skill_cards(AgentRecord.from_dict(row))}
             except Exception:  # noqa: BLE001
-                return row
+                return view
 
         if isinstance(payload, list):
             return [one(r) for r in payload]

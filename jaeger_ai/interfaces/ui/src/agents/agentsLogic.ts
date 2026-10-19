@@ -16,14 +16,14 @@ export const ROLE_TEXT: Record<string, string> = {
 const SHOWN_ROLES = new Set(["specialist", "native", ...Object.keys(ROLE_TEXT)]);
 
 export function visible(agent: Agent): boolean {
-  if (agent.hidden || agent.metadata?.internal) return false;
+  if (agent.hidden || agent.archived || agent.metadata?.internal) return false;
   if (INTERNAL_IDS.has(agent.id) || INTERNAL_IDS.has(agent.name)) return false;
   if (agent.kind === "third_party" || agent.id.startsWith("tp:")) return false;
   return SHOWN_ROLES.has(agent.role ?? "specialist");
 }
 
 export function label(agent: Pick<Agent, "role" | "display_name" | "name">): string {
-  if (agent.role === "lead") return "Jaeger";
+  if (agent.role === "lead") return agent.display_name || "Jaeger";
   return agent.display_name || agent.name;
 }
 

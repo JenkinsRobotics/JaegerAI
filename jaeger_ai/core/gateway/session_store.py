@@ -1962,6 +1962,63 @@ class GatewaySessionStore:
             )
         return record
 
+    # Operator-local presentation metadata shares the existing store/transaction owner.
+    def agent_presentation(self) -> dict[str, dict[str, Any]]:
+        with self._get_conn() as conn:
+            return self._read_agent_presentation(conn)
+
+    @staticmethod
+    def _read_agent_presentation(conn) -> dict[str, dict[str, Any]]:
+        row = conn.execute("SELECT value FROM schema_meta WHERE key = 'agent_presentation:operator'").fetchone()
+        data = json.loads(row["value"]) if row else {}
+        if not isinstance(data, dict) or any(not isinstance(v, dict) for v in data.values()):
+            raise ValueError("Invalid operator presentation metadata; preserved without overwriting")
+        return data
+
+    @staticmethod
+    def _write_agent_presentation(conn, data) -> None:
+        conn.execute("INSERT INTO schema_meta(key,value) VALUES('agent_presentation:operator',?) "
+                     "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(data),))
+
+    def patch_agent_presentation(self, agent_id: str, body: dict[str, Any]) -> dict[str, Any]:
+        from jaeger_ai.core.gateway.agent_presentation import validate_patch, MAX_AGENT_PINS
+        patch = validate_patch(body)
+        with self._immediate() as conn:
+            data = self._read_agent_presentation(conn)
+            prefs = dict(data.get(agent_id, {}))
+            if patch.get('pinned') is True and not prefs.get('pinned'):
+                if sum(v.get('pinned') is True for v in data.values()) >= MAX_AGENT_PINS:
+                    raise ValueError(f'At most {MAX_AGENT_PINS} agents can be pinned; unpin an agent first')
+                prefs['pin_order'] = max((v.get('pin_order', -1) for v in data.values()), default=-1) + 1
+            for key, value in patch.items():
+                if value is None:
+                    prefs.pop(key, None)
+                else:
+                    prefs[key] = value
+            if prefs.get('pinned') is False:
+                prefs.pop('pin_order', None)
+            data[agent_id] = prefs
+            self._write_agent_presentation(conn, data)
+            return prefs
+
+    def set_agent_pins(self, ids: list[str], expected_ids: list[str]) -> None:
+        from jaeger_ai.core.gateway.agent_presentation import MAX_AGENT_PINS, PresentationConflict
+        if not isinstance(expected_ids, list) or any(not isinstance(i, str) for i in expected_ids) or len(set(expected_ids)) != len(expected_ids):
+            raise ValueError("expected_agent_ids must be a unique list of agent IDs")
+        if not isinstance(ids, list) or len(ids) > MAX_AGENT_PINS or any(not isinstance(i, str) or not i for i in ids) or len(set(ids)) != len(ids):
+            raise ValueError(f'agent_ids must be a unique list of at most {MAX_AGENT_PINS} agent IDs')
+        with self._immediate() as conn:
+            data = self._read_agent_presentation(conn)
+            current = sorted((key for key, prefs in data.items() if prefs.get('pinned') is True), key=lambda key: data[key].get('pin_order', 0))
+            if current != expected_ids:
+                raise PresentationConflict('Pins changed on another client; refresh and retry')
+            for key, prefs in data.items():
+                prefs['pinned'] = key in ids
+                prefs.pop('pin_order', None)
+            for index, agent_id in enumerate(ids):
+                data.setdefault(agent_id, {}).update(pinned=True, pin_order=index)
+            self._write_agent_presentation(conn, data)
+
     def agents_seen(self) -> dict[str, dict[str, Any]]:
         with self._get_conn() as conn:
             rows = conn.execute("SELECT value FROM schema_meta WHERE key LIKE 'agent_seen:%'").fetchall()

@@ -14,3 +14,11 @@ it("Mark Read uses the existing validated seen route without changing agent iden
   await client.agentActions.markRead("native:jaeger", null);
   expect(json).toHaveBeenCalledWith("/v1/agents/native%3Ajaeger/seen", {});
 });
+it("sends only cosmetic patches and includes pin concurrency preconditions", async () => {
+  const client = new GatewayClient();
+  const json = vi.spyOn(client, "json").mockResolvedValue({});
+  await client.agentActions.patchAgent("agent:builder", { display_name: "New label", archived: false });
+  expect(json).toHaveBeenCalledWith("/v1/agents/agent%3Abuilder", { display_name: "New label", archived: false }, "PATCH");
+  await client.agentActions.savePins!(["b", "a"], ["a", "b"]);
+  expect(json).toHaveBeenCalledWith("/v1/agents/pins", { agent_ids: ["b", "a"], expected_agent_ids: ["a", "b"] });
+});

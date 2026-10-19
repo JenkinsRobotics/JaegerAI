@@ -30,9 +30,10 @@ export function applyAppearance(mode: Appearance) {
   document.documentElement.dataset.appearance = mode;
 }
 
-type Tab = "general" | "voice" | "connection" | "about";
+type Tab = "agents" | "general" | "voice" | "connection" | "about";
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: "general", label: "General", icon: "settings-gear" },
+  { id: "agents", label: "Agents", icon: "account" },
   { id: "voice", label: "Voice", icon: "mic" },
   { id: "connection", label: "Connection", icon: "server" },
   { id: "about", label: "About", icon: "info" },
@@ -48,8 +49,8 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   return <button type="button" role="switch" aria-label={label} aria-checked={checked} className={`jg-switch${checked ? " is-on" : ""}`} onClick={() => onChange(!checked)}><span /></button>;
 }
 
-export function SettingsDialog({ open, onClose, capabilities, gateway }: {
-  open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string;
+export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPanel }: {
+  open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode;
 }) {
   const [tab, setTab] = useState<Tab>("general");
   const [appearance, setAppearance] = useState<Appearance>(storedAppearance);
@@ -113,6 +114,7 @@ export function SettingsDialog({ open, onClose, capabilities, gateway }: {
               </Row>
             </Section>
           </>}
+          {tab === "agents" && (agentsPanel ?? <p>Agent management is not available from this host.</p>)}
           {tab === "voice" && <Section title="This device">
             <Row label="Dictation"><span className="jg-sheet__value">{yes(capabilities?.dictation ?? (capabilities?.voice === false ? false : undefined))}</span></Row>
             <Row label="Spoken turns" hint="Tap to record, then stop to send and hear a reply; not hands-free listening."><span className="jg-sheet__value">{yes(capabilities?.voiceChat ?? (capabilities?.voice === false ? false : undefined))}</span></Row>

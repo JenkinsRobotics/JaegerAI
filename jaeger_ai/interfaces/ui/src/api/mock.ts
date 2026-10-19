@@ -134,7 +134,15 @@ export class MockSource implements JaegerSource {
   }
   readonly agentActions: AgentActions = {
     markRead: async (id, m) => { this.calls.push(["read", id, m]); this.patches.set(id, { ...this.patches.get(id), unread_count: 0 }); this.emitGlobal("agent.unread", { agent_id: id, unread_count: 0 }); },
-    patchAgent: async (id, body) => { this.calls.push(["patch", id, body]); this.patches.set(id, { ...this.patches.get(id), ...body }); this.emitGlobal("agent.updated", { agent_id: id }); },
+    patchAgent: async (id, body) => {
+      this.calls.push(["patch", id, body]);
+      const { display_name, ...rest } = body;
+      const next = { ...this.patches.get(id), ...rest };
+      if (display_name === null) delete next.display_name;
+      else if (display_name !== undefined) next.display_name = display_name;
+      this.patches.set(id, next);
+      this.emitGlobal("agent.updated", { agent_id: id });
+    },
     sections: async () => this.sectionList,
     createSection: async (name) => { this.calls.push(["section", name]); const sec = { id: `sec-${name}`, name }; this.sectionList.push(sec); this.emitGlobal("section.updated", sec); return sec; },
     duplicate: async (id, name) => { this.calls.push(["duplicate", id, name]); const a = MOCK_AGENTS.find((x) => x.id === id)!; return { ...a, id: `${id}-copy`, display_name: `${a.display_name} copy` }; },

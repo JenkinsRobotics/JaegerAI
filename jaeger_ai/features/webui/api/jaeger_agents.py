@@ -293,6 +293,17 @@ def route(handler, parsed, method: str) -> bool:
             return _proxy(handler, "GET", f"/v1/agents/{suffix}")
         return False
 
+    if (method == "PATCH" and (path.startswith('/v1/agents/') or path.startswith('/api/agents/')) and '/' not in path.split('/agents/', 1)[-1]) or (method == 'POST' and path in {'/v1/agents/pins', '/api/agents/pins'}):
+        from api.native_panel_context import check_profile
+        if not check_profile(handler):
+            return True
+        suffix = path.split('/agents/', 1)[-1]
+        raw = getattr(handler, '_json_body_bytes', None)
+        if raw is None:
+            from api.helpers import read_body
+            raw = json.dumps(read_body(handler)).encode('utf-8')
+        return _proxy(handler, method, f'/v1/agents/{suffix}', raw)
+
     if method == "POST" and path in {"/api/agents", "/v1/agents"}:
         raw = getattr(handler, "_json_body_bytes", None)
         if raw is None:
