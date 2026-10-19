@@ -592,8 +592,8 @@ final class ChatViewModel: ObservableObject {
             }
             return completed
         } catch {
-            NSLog("[ChatViewModel] sendDispatcher failed (\(error.localizedDescription)) — falling back to local agent")
-            dispatcherStatus = "Dispatcher gateway unavailable — routing locally"
+            NSLog("[ChatViewModel] sendDispatcher failed (\(error.localizedDescription)) — no resubmission")
+            dispatcherStatus = "Dispatcher unavailable — submission outcome unconfirmed; reconnect to observe it. " + error.localizedDescription
             return false
         }
     }
@@ -914,9 +914,9 @@ final class ChatViewModel: ObservableObject {
         let toolsEnabled = useTools ?? agenticTools
         if !displayConfigLoaded { await loadDisplayConfig() }
         if sessionKey == "dispatcher" && images.isEmpty && toolsEnabled {
-            let handled = await sendDispatcher(trimmed)
-            if handled { return true }
-            NSLog("[ChatViewModel] Dispatcher gateway unavailable; continuing with native agent turn for session \(sessionKey)")
+            // A failed/cancelled/uncertain Dispatcher turn was still handled
+            // by that authority. Never route the same prompt to native chat.
+            return await sendDispatcher(trimmed)
         }
 
         let turnStarted = Date()
