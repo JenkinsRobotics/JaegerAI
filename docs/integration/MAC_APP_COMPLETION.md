@@ -525,3 +525,20 @@ remains unavailable. Requested operator show existing window asynchronously; no
 answer yet. No native reload/relaunch/service restart, no real-agent actions.
 Do NOT claim correct-owner visual acceptance. Serving passing candidate is safe
 without reloading a hidden potentially-drafted window; hashes recorded separately.
+
+
+**Served corrective checkpoint:** feature/source commit
+`32a73e9555272c8bca760ad603c788a2b58fe852`; external candidate served without
+service restart or native reload. HTML and referenced assets byte-match build.
+JS index-BkVTmgXu.js SHA256
+`bfdb74649553ace3d27646b38d84fcec4ad86ac9ac5180f7c6e9f963ea5de634`;
+CSS index-Bc8iuwag.css SHA256
+`e51228eb01791e209419ea7695967e926d1735ac5f596ddd875bcd2e843c141c`.
+Full manifest `primary-correction-deployed.json` beside focused logs. Only shell
+12591 remains; Gateway12599/WebUI12608 unchanged, health200, legitimate heartbeat
+age0.11s; unknown request hash unchanged. Old served dist retained under
+`previous/primary-correction-1792458933/dist`. NOT native acceptance: cannot assert
+that12591 has loaded these new bytes or that every visual row/icon matches Grok.
+Exact owner AX access and readable reference/current capture remain the concrete
+blockers. Operator window-show question remains unanswered. No new worker/credential,
+real primary/pin/unread mutation, draft submission or lease manipulation.
