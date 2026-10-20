@@ -2,7 +2,7 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `master` — operator-authorized canonical integration, 2026-10-19.
-**Duplicate-instance qualification (2026-10-19):** Stale shell12099 safely closed; only intended owner12591 remains, services/heartbeat/hashes healthy. Earlier CUA popup captures were not PID-proven. Correct-owner window17223 is not onscreen; exact-path CUA binding times out and macOS window-ID selection is unsupported. Showing/retesting that exact window remains blocked; do not relaunch it or claim owner-specific visual acceptance.
+**Current corrective checkpoint (2026-10-19):** UI source `32a73e95` served with hash verification. Primary corner badge now follows only persisted-primary projection in row/tile/header, independent of execution lead/pin/unread. Desktop popup corrected from shipped REA rendering metrics and read/unread glyph/state callsites; ordinary Make primary stays in management. Focused UI23/backend20/build passed; NOT live acceptance. Only owner12591 remains. Exact-path CUA still times out; reference capture unreadable. No correct-owner reload, row/icon visual-match or latest-bytes-in12591 claim. See latest [completion record](integration/MAC_APP_COMPLETION.md); operator asked to show existing window, without launching another copy.
 
 **Popup correction (2026-10-19):** UI `9f1082a2` served and live-retested: single-line replacement, full-width hover, ordinary supported Rename Bot. Grok live labels compared; exact Grok pixel comparison remains blocked by distorted capture. Services/shell unchanged.
 
