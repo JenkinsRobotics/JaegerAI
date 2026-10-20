@@ -183,14 +183,23 @@ export function contractHome(getJson: GetJson, opts: HomeOptions = {}, stream?: 
   const limit = opts.pageSize ?? PAGE_LIMIT;
   const homes = new Map<string, string>(); // agent → home session
   const agentOf = new Map<string, string>(); // home session → agent
-  const page = async (sessionId: string, before?: string) => fromWirePage(sessionId, (await getJson(HOME_ROUTES.page(sessionId, limit, before))) as WirePage, name);
+  const page = async (sessionId: string, before?: string) => {
+    // Message pages carry content, not the identity of the conversation owner.
+    // Preserve the canonical home binding; explicit worker/history links use
+    // the existing session contract rather than falling back to the lead.
+    if (!agentOf.has(sessionId)) {
+      const detail = await getJson(`/v1/sessions/${encodeURIComponent(sessionId)}`) as SessionRow;
+      if (detail.agent_id) agentOf.set(sessionId, detail.agent_id);
+    }
+    return { ...fromWirePage(sessionId, (await getJson(HOME_ROUTES.page(sessionId, limit, before))) as WirePage, name), agentId: agentOf.get(sessionId) };
+  };
   const rows = async (agentId: string) => rowsOf(await getJson(HOME_ROUTES.sessions(agentId)));
   return {
     mode: "contract",
     async home(agentId) {
       const wire = (await getJson(HOME_ROUTES.home(agentId))) as WireHome;
       homes.set(agentId, wire.session_id);
-      agentOf.set(wire.session_id, agentId);
+      agentOf.set(wire.session_id, wire.agent_id);
       return wire.session_id;
     },
     page,
