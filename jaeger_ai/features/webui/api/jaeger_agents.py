@@ -281,6 +281,15 @@ def route(handler, parsed, method: str) -> bool:
         qs = ("?" + parsed.query) if parsed.query else ""
         return _proxy(handler, "GET", f"/v1/profile-sessions{qs}", base=runner_base())
 
+    if path == '/v1/sections' and method in {'GET', 'POST'}:
+        if method == 'POST':
+            from api.native_panel_context import check_profile
+            if not check_profile(handler):
+                return True
+            from api.jaeger_sessions import _body_bytes
+            return _proxy(handler, method, path, _body_bytes(handler))
+        return _proxy(handler, method, path)
+
     if method == "GET" and path in {"/api/agents", "/v1/agents"}:
         qs = ("?" + parsed.query) if parsed.query else ""
         return _proxy(handler, "GET", f"/v1/agents{qs}")

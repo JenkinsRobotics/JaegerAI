@@ -214,7 +214,7 @@ export function App({ source }: { source: JaegerSource }) {
     } catch (error) { fail("replace the primary bot")(error); await store.refresh(); }
     finally { setManagementBusy(false); }
   };
-  const changePresentation = async (agent: Agent, patch: { display_name?: string | null; archived?: boolean; icon_preset?: string | null }) => {
+  const changePresentation = async (agent: Agent, patch: { deleted?: boolean; display_name?: string | null; archived?: boolean; icon_preset?: string | null }) => {
     if (!actions || managementBusy) return;
     setManagementBusy(true);
     try {
@@ -325,7 +325,7 @@ export function App({ source }: { source: JaegerSource }) {
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
         onNewChat={newChat} onCreateAgent={createAgent} />
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} agentsPanel={<AgentManagement onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived })} />} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} agentsPanel={<AgentManagement onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived, ...(!archived ? { deleted: false } : {}) })} />} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
         onAgent={(agentId) => { newChat(agentId); if (phone) setPhoneView("chat"); }}

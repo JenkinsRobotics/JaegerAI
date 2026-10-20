@@ -998,3 +998,35 @@ health and hash proof; this is its final browser acceptance addendum. Native1259
 window untouched. Pixel motion/star color still unprovable from distorted images;
 no pixel/native certification. Voice/media remain paused. No suite rerun needed
 for documentation-only acceptance recording.
+
+## Ordinary-bot reference popup correction — 2026-10-19
+
+New user screenshot specifies ordinary menu: Pin/Unpin; Move to new section;
+Mark as Unread/verified inverse; separator; Rename Bot; separator; Copy conversation
+ID; separator; Hide from sidebar; Delete(red). User explicitly chose recoverable
+Delete, preserving conversations. Updated ordinary branch order/groups, original
+folder-plus/trash SVG glyphs, red danger styling, narrower194px minimum desktop
+menu,14px body type/32px rows and inset separators. Primary branch unchanged.
+No More/Profile/History controls appended; those remain in Settings/management.
+State-dependent pin/read labels retained, not hardcoded to screenshot state.
+
+Move to new section now uses real GET/POST sections and section_id presentation
+PATCH, existing operator schema_meta storage/transactions, bounded validated names
+and membership. Delete uses PATCH deleted=true (not DELETE); distinct recoverable
+Deleted bots Settings group with Restore. IDs/home sessions/context/history/tools/
+roles/background work unchanged. Atomic store rejects deleting current primary,
+and selecting a deleted bot as primary until restored. System protection and
+existing admin/profile guards retained; no new grants, auth or permissions.
+Corrupt presentation/section metadata preserved rather than overwritten. No new
+runtime state table, identity authority or legacy frontend. Existing sections
+renderer and typed actions reused. Menu actions are capability-gated honestly.
+
+Focused backend19 passed (4 existing aiohttp warnings), UI7 passed; type/theme/
+production build/no-mock passed, existing Vite size advisory only. Backend fixtures
+prove section durability, reversible delete/restore, same home/context and unchanged
+registry definitions, owner scopes/primary/system guards and validation. UI checks
+cover ordinary exact labels/groups/red danger contract, primary unchanged, management
+and primary-flow interactions. Tests used disposable state; no operator mutation.
+Fixture paused for backend isolation guard; production still untouched at this
+source checkpoint. Passing UI candidate frozen externally under regular-menu-20261019/dist.
+Actual serving/route checks and safe rollout recorded below; no pixel/native claim.

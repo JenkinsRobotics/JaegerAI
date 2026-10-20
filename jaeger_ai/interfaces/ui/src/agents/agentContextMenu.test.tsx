@@ -24,6 +24,10 @@ describe("scoped Mac agent popup", () => {
     const other = { ...bot, primary: false };
     expect(agentMenuItems(other, caps, false, true).main.map((i) => i.label)).toEqual(["Pin", "Mark as Unread", "Rename Bot", "Copy conversation ID", "Hide from sidebar"]);
     expect(agentMenuItems(other, NO_CAPS, false, true).main.map((i) => i.label)).toEqual(["Copy conversation ID"]);
+    const full = agentMenuItems(other, { ...caps, sections: true, remove: true }, false, true).main;
+    expect(full.map(i => i.label)).toEqual(["Pin", "Move to new section", "Mark as Unread", "Rename Bot", "Copy conversation ID", "Hide from sidebar", "Delete"]);
+    expect(full.filter(i => i.separator).map(i => i.id)).toEqual(["rename", "copy-id", "hide"]);
+    expect(full.at(-1)).toMatchObject({ id: "delete", danger: true });
     expect(agentCaps([other], {} as never)).toEqual(NO_CAPS);
   });
   it("renders actual separators and dispatches the chosen ID without a hidden More menu", () => {

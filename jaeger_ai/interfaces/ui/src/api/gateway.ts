@@ -93,7 +93,7 @@ export class GatewayClient implements JaegerSource {
     sections: async () => { const d = await this.json<{ sections?: Section[] } | Section[]>("/v1/sections"); return Array.isArray(d) ? d : d.sections ?? []; },
     createSection: (name) => this.json<Section>("/v1/sections", { name }),
     duplicate: (id, name) => this.json<Agent>(`/v1/agents/${encodeURIComponent(id)}/duplicate`, name ? { name } : {}),
-    remove: async (id) => { await this.json(`/v1/agents/${encodeURIComponent(id)}`, undefined, "DELETE"); },
+    remove: async (id) => { await this.json(`/v1/agents/${encodeURIComponent(id)}`, { deleted: true }, "PATCH"); },
     template: (id) => this.json<unknown>(`/v1/agents/${encodeURIComponent(id)}/template`),
   };
   replyHandoff(handoffId: string, task: string, requestId: string) {

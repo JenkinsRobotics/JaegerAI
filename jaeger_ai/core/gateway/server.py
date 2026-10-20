@@ -1305,6 +1305,8 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/frameworks", self.handle_list_frameworks)
         self.app.router.add_post("/v1/frameworks/{id}/grants", self.handle_framework_grant)
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
+        self.app.router.add_get("/v1/sections", self.handle_agent_sections)
+        self.app.router.add_post("/v1/sections", self.handle_agent_sections)
         self.app.router.add_post("/v1/agents/pins", self.handle_agent_pins)
         self.app.router.add_get("/v1/agents/primary", self.handle_agent_primary)
         self.app.router.add_post("/v1/agents/primary", self.handle_agent_primary)
@@ -1910,6 +1912,19 @@ class JaegerGatewayApp:
         self.event_bus.publish('*', 'agent.updated', {'primary_agent_id': record.id})
         return web.json_response({'agent_id': record.id})
 
+    async def handle_agent_sections(self, request: web.Request) -> web.Response:
+        if request.method == 'GET':
+            return web.json_response({'sections': self.store.agent_sections()})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or set(body) != {'name'}:
+                raise ValueError('Only section name accepted')
+            section = self.store.create_agent_section(body['name'])
+        except (ValueError, TypeError) as exc:
+            return web.json_response({'error': str(exc)}, status=400)
+        self.event_bus.publish('*', 'agent.updated', {'section_id': section['id']})
+        return web.json_response(section, status=201)
+
     async def handle_agent_presentation(self, request: web.Request) -> web.Response:
         """Admin-scoped cosmetic update; never rewrites registry definitions or sessions."""
         from jaeger_ai.core.gateway.agent_presentation import validate_patch, protected, can_rename
@@ -1921,7 +1936,7 @@ class JaegerGatewayApp:
             patch = validate_patch(await request.json())
             if {'display_name', 'icon_preset'} & patch.keys() and not can_rename(record.to_dict()):
                 return web.json_response({'error': 'protected_agent'}, status=409)
-            if protected(record.to_dict()) and (patch.get('archived') is True or patch.get('pinned') is True):
+            if protected(record.to_dict()) and (patch.get('archived') is True or patch.get('pinned') is True or patch.get('deleted') is True or 'section_id' in patch):
                 return web.json_response({'error': 'protected_agent'}, status=409)
             prefs = self.store.patch_agent_presentation(record.id, patch)
         except (ValueError, TypeError) as exc:
