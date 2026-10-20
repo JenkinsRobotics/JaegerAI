@@ -320,3 +320,53 @@ served-build switch or live-agent mutation was performed. New routes, new native
 menu/picker and sustained replacement ownership remain unverified live. Next:
 recover/check the old window draft, then perform the already-authorized coordinated
 shell ownership replacement and exact managed-service reloads.
+
+
+## 2026-10-19 — fixed sidebar/primary rollout running
+
+Supersedes the draft-access blocker above. Matthew supplied fresh read-only UI
+evidence: current composer empty, no attachments, REA plan already sent; the
+composer has one in-memory draft, not a hidden per-chat draft store. Existing
+local binding was unavailable in this tool session, but this evidence supported
+coordinated replacement without submitting/discarding text.
+
+- Built/signature-verified newer shell externally; running bundle
+  `~/.cache/jaeger/verification/agent-primary-20261019/native-shell/JaegerShell.app`,
+  **0.13.0+3a347be8**, commit `3a347be8976a44de640097aca3a874bef37f4fb4`
+  (includes feature commit `11272d91`; later change was documentation only).
+  Source fingerprint remains
+  `391d7c3e85fe1b9258e97a7a129055d9b5a1c56609959c980b0e2789b34aac4f`.
+- Exact old shell4604 terminated; old bundle preserved. Waited for its real last
+  heartbeat to age beyond grace, then launched **PID12591** using supported
+  `--own-production-lifecycle`, explicit production state and lease opt-in.
+  Legitimate heartbeat acquired before exact managed Gateway/WebUI job reloads.
+  No lease deletion/forgery, owner override, Global Stop change or job edit.
+- **Gateway12599**, loopback `http://127.0.0.1:33418`; **WebUI12608**,
+  loopback `http://127.0.0.1:8790`. Both healthy after over 100 seconds;
+  heartbeat owner menubar/PID12591, sampled age1.33 seconds.
+- Authenticated primary GET200, new primary invalid-body validation400, new
+  advertised primary/unread capabilities present. Existing auth rejects unauthenticated
+  primary POST401; WebUI authenticated proxy reaches new primary validation400.
+  Nonexistent owned-namespace seen request returns structured404 without writing.
+- Served native-origin HTML matches candidate exactly; both JS and CSS assets
+  match candidate hashes. JS `index-CxQLOkm3.js` SHA256
+  `3dec7ea6cc7220c9d69565f4caeb0f680c8e466f8ba287e78af7d15686de5990`;
+  all hashes, process commands, source fingerprint and route checks in external
+  `runtime-verification.json`; build logs and passing scoped source logs retained.
+  Prior served dist preserved under external cache `previous/primary-rollout-*`.
+- Native window initially loaded during service restart and showed connection
+  failure; after listeners were healthy, one authorized Cmd-R loaded the fixed UI.
+  Visible empty composer, retained sent transcript, Jaeger Primary badge.
+  Primary popup: Pin / Mark as Unread / Copy conversation ID / Hide from sidebar /
+  Replace with different Bot. Picker: Choose a primary Bot, existing candidate
+  selector and disabled Make primary until selection; cancelled without submission.
+  Builder popup additionally proves nonprimary Make primary; dismissed unchanged.
+- No real-agent primary/pin/hide/explicit-unread action submitted. Normal opening
+  of Jaeger updates its read marker (observed sole recent agent.updated payload:
+  native:jaeger read_marker); aggregate metadata hash therefore changed and is
+  NOT claimed byte-identical. Existing execution_unknown row hash unchanged,
+  startup explicitly preserves it without replay; Global Stop file hash unchanged.
+- No credentials, network/auth policy, unrelated service configuration or old
+  fallback changed. New bundle left open. This proves scoped rollout/menu/picker,
+  not full Grok parity, live primary mutation/cross-device persistence, successful
+  model turn, Stop/approval or voice acceptance. Those earlier limits remain.
