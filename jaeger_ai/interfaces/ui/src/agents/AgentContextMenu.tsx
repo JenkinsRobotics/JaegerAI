@@ -15,9 +15,10 @@ export function agentMenuItems(agent: Agent, caps: AgentCaps, pinned: boolean, a
   return { main: [
     ...(caps.pin ? [{ id: pinned ? "unpin" as const : "pin" as const, label: pinned ? "Unpin" : "Pin", icon: "pin" as IconName }] : []),
     ...(caps.unread ? [{ id: "unread" as const, label: "Mark as Unread", icon: "mail-read" as IconName }] : []),
+    ...(!agent.primary && caps.rename ? [{ id: "rename" as const, label: "Rename Bot", icon: "edit" as IconName }] : []),
     { id: "copy-id", label: "Copy conversation ID", icon: "copy", separator: true },
     ...(caps.hide ? [{ id: "hide" as const, label: "Hide from sidebar", icon: "eye-closed" as IconName, separator: true }] : []),
-    ...(agent.primary && alternative ? [{ id: "replace-primary" as const, label: "Replace with different Bot", icon: "reply" as IconName }] : []),
+    ...(agent.primary && caps.primary && alternative ? [{ id: "replace-primary" as const, label: "Replace with different Bot", icon: "reply" as IconName }] : []),
     ...(!agent.primary && caps.primary ? [{ id: "make-primary" as const, label: "Make primary", icon: "star-full" as IconName }] : []),
   ], more: [] };
 }
@@ -41,7 +42,7 @@ export function AgentContextMenu({ agent, preview, at, phone, caps, pinned, alte
   const row = (it: Item) => <div key={it.id}>
     {it.separator && <div className="jg-amenu__sep" role="separator" />}
     <button type="button" role="menuitem" className="jg-amenu__item" onClick={() => pick(it.id)}>
-      <Icon name={it.icon} size={18} /><span>{it.label}</span>
+      {it.id === "replace-primary" ? <svg className="jg-amenu__swap" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M3 5h12m-3-3 3 3-3 3M15 13H3m3-3-3 3 3 3" /></svg> : <Icon name={it.icon} size={18} />}<span>{it.label}</span>
     </button>
   </div>;
   return (
