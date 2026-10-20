@@ -611,3 +611,31 @@ Successful follow-up model execution/result roundtrip not exercised; only admiss
 and durable message/result fixtures. Native Settings/dialog/icon visuals and
 correct-process popup acceptance remain unverified. Voice/media/large avatars
 not implemented or tested in this pass. Runtime rollout evidence follows.
+
+
+**Bounded rollout result:** source commit
+`61f08ff71ce1363e91911b09b46eca460b1a1dcf`. Exact existing Gateway and WebUI
+launch jobs reloaded after preflight; shell12591 and bundle0.13.0+3a347be8 unchanged.
+New Gateway19707 on loopback33418 and WebUI19711 on loopback8790 healthy beyond
+15s grace (over80s at final process sample), legitimate12591 heartbeat age1.72s.
+New authenticated catalog exposes icon_choices/ui_actions.icon; direct and WebUI
+proxy follow-up on nonexistent owned fixture returns409, unauthenticated route401.
+No real handoff, icon, primary, unread or message mutation used for runtime checks.
+
+Served HTML/JS/CSS match passing candidate byte-for-byte. JS index-DkqErgZz.js
+SHA256 `8fb3f5b8fd6a31ef6f4aa69c6096ea2a1965b827185a0766dbb611e5e7da061e`;
+CSS index-BijpUMNE.css SHA256
+`9608489256be019316ad15e41b6797a3cdd0914fe42f3aa2f4700bc02a3b8518`.
+Full external `continuity-runtime.json`; old dist preserved under
+`previous/continuity-1792460841/dist`. One unknown client request hash/count
+unchanged; all unknown/pending handoff rows, presentation/primary metadata and
+Global Stop hash unchanged. Startup explicitly reports preserving unknown without
+replay. No unrelated jobs, shell restart, launchd edit, network/token/auth changes.
+
+Read-only exact12591 bundle-path CUA retry still timed out. No native reload or
+draft interaction; cannot assert this window loaded new bytes or certify visible
+Settings/icon/follow-up/popup behavior. Backend and serving-chain evidence is
+current; native acceptance remains blocked. Automatic arbitrary peer inbox/replies,
+external bridge roundtrip and successful new follow-up model/result execution
+remain unimplemented/unverified as distinguished above. Voice/media and large
+avatar scope remains paused, not removed or silently replaced.
