@@ -2,6 +2,8 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `master` — operator-authorized canonical integration, 2026-10-19.
+**Popup correction (2026-10-19):** UI `9f1082a2` served and live-retested: single-line replacement, full-width hover, ordinary supported Rename Bot. Grok live labels compared; exact Grok pixel comparison remains blocked by distorted capture. Services/shell unchanged.
+
 **Sidebar/primary rollout (2026-10-19):** Feature commit `11272d91` deployed in newer shell `0.13.0+3a347be8`, PID12591; canonical Gateway12599/WebUI12608 healthy. Served asset hashes and authenticated new routes verified; native menu/picker observed without submitting agent changes. See latest [Mac completion record](integration/MAC_APP_COMPLETION.md). Prior draft-access blocker resolved by fresh empty-composer evidence; prior full-feature acceptance limits remain.
 
 **Current work:** [Mac source completion](integration/MAC_APP_COMPLETION.md), canonical Gateway33418/WebUI8790 and newer shell are running; lifecycle/replay, specialist identity, terminal-answer and confirmed-Stop fixes committed. Visible retests await draft-safe window coordination; no competing coder/runtime owner.
