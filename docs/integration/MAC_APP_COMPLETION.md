@@ -714,3 +714,9 @@ automatic. Crash-gap recovery is on inbox/goal read, not a new autonomous worker
 No native messaging/popup/dialog visual acceptance: tool inventory lacks Jaeger,
 known exact lookup unsupported/timed out; no native input/reload risking draft.
 Existing unknown request remains unresolved, not retried. Voice/media remain paused.
+
+Focused hygiene scan found two pre-existing ignored bytecode files:
+jaeger_ai/__pycache__/__init__.cpython-312.pyc (mtime2026-10-18 10:20:36)
+and dev/__pycache__/bytecode_guard.cpython-312-pytest-9.1.1.pyc
+(mtime2026-10-17 20:58:58). Not produced by this pass; left untouched rather than
+expanding into unrelated cleanup. Tracked working tree clean after evidence commit.
