@@ -220,3 +220,36 @@ async def test_global_stream_replays_only_global_events_and_respects_scopes(tmp_
         assert (await client.get("/v1/events/stream")).status in (401, 403)
     async with TestClient(TestServer(gateway.app)) as client:
         assert (await client.get("/v1/events/stream")).status == 401
+
+
+@pytest.mark.parametrize('status,expected', [
+    ('admitted','queued'), ('queued','queued'), ('running','working'),
+    ('awaiting_approval','waiting_approval'), ('cancelling','blocked'),
+    ('completed','idle'), ('execution_unknown','idle'),
+])
+def test_direct_chat_receipt_is_authoritative_motion_signal(status, expected):
+    # Historical/unknown receipts do not fabricate current working animation.
+    result = summarize_agents(
+        [{'id':'native:owned','role':'specialist'}], tasks=[], handoffs=[],
+        sessions=[{'session_id':'owned-home','agent_id':'native:owned'}],
+        requests=[{'request_id':'owned-request','session_id':'owned-home','status':status},
+                  {'session_id':'foreign-home','status':'running'}],
+    )
+    assert result['agents'][0]['status'] == expected
+    assert agent_status({'status':'pending_approval'}, [], [{'status':'running'}]) == 'waiting_approval'
+
+
+@pytest.mark.asyncio
+async def test_summary_route_reads_active_receipt_then_returns_idle(gateway):
+    app, client = gateway
+    aid=next(a.id for a in app._registry().list_agents() if a.role.value=='specialist')
+    app.store.ensure_session('owned-live-chat',metadata={'agent_id':aid})
+    app.store.admit_request('owned-live-chat','owned local input',request_id='owned-live-request')
+    app.store.mark_request_status('owned-live-request','running')
+    before=app.store.get_request('owned-live-request')
+    data=await (await client.get('/v1/agents/summary')).json()
+    assert next(a for a in data['agents'] if a['id']==aid)['status']=='working'
+    assert app.store.get_request('owned-live-request')==before  # projection never dispatches
+    app.store.complete_request('owned-live-request',status='completed',result={'output':'done'})
+    data=await (await client.get('/v1/agents/summary')).json()
+    assert next(a for a in data['agents'] if a['id']==aid)['status']=='idle'

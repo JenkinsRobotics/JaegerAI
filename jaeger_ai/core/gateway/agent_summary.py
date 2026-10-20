@@ -31,8 +31,12 @@ def _preview(text: Any) -> str:
     return flat if len(flat) <= PREVIEW_CHARS else flat[: PREVIEW_CHARS - 1] + "…"
 
 
-def agent_status(handoff: dict[str, Any] | None, active_tasks: Iterable[dict[str, Any]]) -> str:
+def agent_status(handoff: dict[str, Any] | None, active_tasks: Iterable[dict[str, Any]], active_requests: Iterable[dict[str, Any]] = ()) -> str:
     signals = {_TASK_STATUS.get(str(t.get("state") or "")) for t in active_tasks}
+    signals.update({
+        "admitted": "queued", "queued": "queued", "running": "working",
+        "awaiting_approval": "waiting_approval", "cancelling": "blocked",
+    }.get(str(r.get("status") or "")) for r in active_requests)
     if handoff is not None:
         signals.add(_HANDOFF_STATUS.get(str(handoff.get("status") or "")))
     for status in _PRIORITY:
@@ -49,6 +53,7 @@ def summarize_agents(
     sessions: list[dict[str, Any]],
     last_message: Callable[[str], str] | None = None,
     seen: dict[str, dict[str, Any]] | None = None,
+    requests: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     rows = []
     for agent in agents:
@@ -59,6 +64,8 @@ def summarize_agents(
         active = [t for t in own_tasks if t.get("state") in _TASK_STATUS]
         task = max(active or own_tasks, key=lambda t: t.get("updated_at") or 0, default=None)
         chats = [s for s in sessions if s.get("agent_id") == aid]
+        own_sessions = {s["session_id"] for s in chats}
+        live_requests = [r for r in (requests or []) if r.get("session_id") in own_sessions]
         chat = max(chats, key=lambda s: s.get("updated_at") or 0, default=None)
 
         candidates: list[tuple[float, str, str | None]] = []
@@ -78,7 +85,7 @@ def summarize_agents(
             "id": aid,
             "display_name": agent.get("display_name"),
             "role": agent.get("role"),
-            "status": agent_status(handoff, active),
+            "status": agent_status(handoff, active, live_requests),
             "last_activity_at": latest[0] if latest else None,
             "last_preview": _preview(latest[1]) if latest else "",
             "last_source": latest[2] if latest else None,
