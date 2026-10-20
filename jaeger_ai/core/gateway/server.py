@@ -801,7 +801,7 @@ class JaegerGatewayApp:
         self._mcp_tool_names: frozenset[str] = frozenset()
         self._owns_store = False
         self._owner_task: asyncio.Task | None = None
-        self._pending_resume = False
+        self._pending_recovery_report = False
         self._loop: asyncio.AbstractEventLoop | None = None
         self._lifecycle_shutdown = asyncio.Event()
         self._background_producers: Any = None
