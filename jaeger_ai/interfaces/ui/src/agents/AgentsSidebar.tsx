@@ -47,8 +47,7 @@ interface Props {
 export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewChatMenu, onRenameChat, onArchiveChat, onSearch, onConnectApps, onSettings, onRetry, userInitials, status, pins = [], onPin = () => {}, onUnpin = () => {}, onInfo, onHistory, onMarkRead, onAgentMenu }: Props) {
   const { lead: primary, specialists: all } = sidebarRows(state.agents, state.summaries);
   const rows = primary ? [primary, ...all] : all;
-  const legacy = state.agents.every((a) => a.primary === undefined);
-  const { pinned: pinnedRows, rest: specialists } = splitPinned(rows, legacy && primary ? [primary.agent.id, ...pins] : pins);
+  const { pinned: pinnedRows, rest: specialists } = splitPinned(rows, pins);
   const lead = pinnedRows.find((r) => r.agent.id === primary?.agent.id);
   const pinned = pinnedRows.filter((r) => r.agent.id !== lead?.agent.id);
   const selectedAgent = selection.type === "agent" ? selection.agentId : undefined;

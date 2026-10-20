@@ -55,7 +55,7 @@ export function sidebarRows(agents: Agent[], summaries: AgentSummary[]): { lead?
   const byId = new Map(summaries.map((s) => [s.id, s]));
   const rows = sortAgents(agents.filter(visible)).map((agent) => ({ agent, summary: byId.get(agent.id), lastActivityAt: byId.get(agent.id)?.last_activity_at ?? 0 }));
   return {
-    lead: rows.find((r) => r.agent.primary) ?? rows.find((r) => r.agent.primary === undefined && r.agent.role === "lead"),
-    specialists: rows.filter((r) => !r.agent.primary && !(r.agent.primary === undefined && r.agent.role === "lead")).sort((a, b) => b.lastActivityAt - a.lastActivityAt),
+    lead: rows.find((r) => r.agent.primary === true),
+    specialists: rows.filter((r) => r.agent.primary !== true).sort((a, b) => b.lastActivityAt - a.lastActivityAt),
   };
 }

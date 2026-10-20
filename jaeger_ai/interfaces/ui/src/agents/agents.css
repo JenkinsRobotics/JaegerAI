@@ -307,3 +307,18 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-amenu__scrim:not(.is-phone) .jg-amenu__item { width: 100%; white-space: nowrap; }
 .jg-amenu__scrim:not(.is-phone) .jg-amenu__item span { overflow: hidden; text-overflow: ellipsis; }
 .jg-amenu__swap { flex-shrink: 0; width: 22px; }
+
+/* Primary is an identity marker, independent of activity, pinning or execution role. */
+.jg-primary-badge { position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; background: var(--jg-primary-yellow); color: var(--jg-color-on-badge); box-shadow: 0 0 0 2px var(--aether-color-bg-rail); z-index: 2; }
+.jg-agent-row .jg-primary-badge { width: 10px; height: 10px; }
+.jg-agent-row .jg-primary-badge svg { width: 5px; height: 5px; }
+.jg-agent-pill .jg-primary-badge { width: 8px; height: 8px; }
+.jg-agent-pill .jg-primary-badge svg { width: 5px; height: 5px; }
+/* Shipped reference desktop menu metrics: 30px rows, 13px type, 12px outer / 6px row corners. */
+.jg-amenu__scrim:not(.is-phone):has(.jg-amenu) { background: transparent; backdrop-filter: none; -webkit-backdrop-filter: none; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__card { padding: 6px; border-radius: 12px; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__item { min-height: 30px; padding: 6px 8px; gap: 4px; border-radius: 6px; font-size: calc(var(--jg-font-body) * 13 / 14); line-height: 18px; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__sep { margin: 4px -6px; }
+
+.jg-supervisor-art.is-primary .jg-supervisor-art__dot { top: -2px; bottom: auto; }
+.jg-amenu__glyph { flex: none; width: 18px; height: 18px; }

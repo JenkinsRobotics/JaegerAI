@@ -13,7 +13,7 @@ const flush = async (fn: () => void = () => {}) => act(async () => { fn(); await
 
 it("replaces only primary, preserves open draft/history, copies exact home, hides/restores and defaults to persisted primary on remount", async () => {
   const caps = { primary: true, unread: true, read: true, rename: true, pin: true, hide: true };
-  const a: Agent = { id: "native:fixture-a", name: "Fixture A", role: "lead", primary: true, ui_actions: caps };
+  const a: Agent = { id: "native:fixture-a", name: "Fixture A", role: "specialist", primary: true, ui_actions: caps };
   const b: Agent = { id: "native:fixture-b", name: "Fixture B", role: "specialist", primary: false, ui_actions: caps };
   const rows = [a, b]; let pins: string[] = []; const unread: Record<string, boolean> = {};
   const source = new MockSource();
@@ -54,25 +54,40 @@ it("replaces only primary, preserves open draft/history, copies exact home, hide
     await flush(() => { const choose = el.querySelector<HTMLSelectElement>('[aria-label="Primary bot candidate"]')!; choose.value = b.id; choose.dispatchEvent(new Event('change', { bubbles: true })); });
     await click('Make primary');
     expect(setPrimary).toHaveBeenCalledWith(b.id, a.id);
-    expect(a.role).toBe('lead'); expect(b.role).toBe('specialist'); expect(b.pinned).toBe(true);
+    const starIds = () => [...new Set([...el.querySelectorAll<HTMLElement>('[data-primary-agent-id]')].map((n) => n.dataset.primaryAgentId))];
+    expect(starIds()).toEqual([b.id]);
+    expect(a.role).toBe('specialist'); expect(b.role).toBe('specialist'); expect(b.pinned).toBe(true);
     expect(el.querySelector('textarea')).toBe(field); expect(field.value).toBe('owned unsent draft'); expect(field.placeholder).toBe('Message Fixture A');
-    await context('Fixture A'); await click('Copy conversation ID');
+    await context('Fixture A');
+    expect(el.querySelector('[role=menu]')?.textContent).toContain('Rename Bot');
+    expect(el.querySelector('[role=menu]')?.textContent).not.toContain('Replace with different Bot');
+    await click('Copy conversation ID');
     expect(clipboard).toHaveBeenCalledWith(`actual-conversation-${a.id}`);
     await context('Fixture B'); await click('Unpin');
-    expect(b.pinned).toBe(false); expect(b.primary).toBe(true);
+    expect(b.pinned).toBe(false); expect(b.primary).toBe(true); expect(starIds()).toEqual([b.id]);
     expect(el.querySelector('.jg-pinned')?.textContent ?? '').not.toContain('Fixture B');
     expect(el.querySelector('[data-agent-id="native:fixture-b"]')?.textContent).toContain('Fixture B');
     await context('Fixture B'); await click('Pin'); expect(b.pinned).toBe(true);
+    setPrimary.mockRejectedValueOnce(new Error('owned primary save rejected'));
+    await context('Fixture B'); await click('Replace with different Bot');
+    await flush(() => { const choose = el.querySelector<HTMLSelectElement>('[aria-label="Primary bot candidate"]')!; choose.value = a.id; choose.dispatchEvent(new Event('change', { bubbles: true })); });
+    await click('Make primary');
+    expect(b.primary).toBe(true); expect(starIds()).toEqual([b.id]);
+    expect(el.textContent).toContain('owned primary save rejected'); await click('Cancel');
     await context('Fixture B'); await click('Mark as Unread');
-    expect(unread[b.id]).toBe(true);
+    expect(unread[b.id]).toBe(true); expect(starIds()).toEqual([b.id]);
+    await context('Fixture B'); expect(el.querySelector('[role=menu]')?.textContent).toContain('Mark as Read');
+    await click('Mark as Read'); expect(unread[b.id]).toBe(false); expect(starIds()).toEqual([b.id]);
+    await context('Fixture B'); await click('Mark as Unread');
     await context('Fixture B'); await click('Hide from sidebar');
     expect(b.primary).toBe(true); expect(b.archived).toBe(true);
     await flush(() => el.querySelector<HTMLButtonElement>('[aria-label^="Account"]')!.click()); await click('Agents');
     expect(el.textContent).toContain('Primary'); await click('Restore');
-    expect(b.archived).toBe(false); expect(b.primary).toBe(true); expect(field.value).toBe('owned unsent draft');
+    expect(b.archived).toBe(false); expect(b.primary).toBe(true); expect(starIds()).toEqual([b.id]); expect(field.value).toBe('owned unsent draft');
     await flush(() => root.unmount()); root = createRoot(el);
     await flush(() => root.render(<App source={source} />)); await flush();
     expect(el.querySelector<HTMLTextAreaElement>('textarea')!.placeholder).toBe('Message Fixture B');
+    expect(starIds()).toEqual([b.id]);
     expect(markRead).toHaveBeenCalledWith(b.id, null); expect(unread[b.id]).toBe(false);
   } finally {
     await flush(() => root.unmount()); el.remove();

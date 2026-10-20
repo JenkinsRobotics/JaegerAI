@@ -25,7 +25,7 @@ export function leadDriftPhase(now = Date.now()): number {
   return Math.round((now / 1000) % (LEAD_DRIFT_SECONDS * 2));
 }
 
-export function AgentAvatar({ id, name, src, size = 36, state }: { id: string; name: string; src?: string; size?: number; state?: AvatarState }) {
+export function AgentAvatar({ id, name, src, size = 36, state, primary = false }: { primary?: boolean; id: string; name: string; src?: string; size?: number; state?: AvatarState }) {
   const shape = avatarShape(id);
   const face = avatarFace(id, shape);
   const style = {
@@ -37,25 +37,25 @@ export function AgentAvatar({ id, name, src, size = 36, state }: { id: string; n
     ...(shape === "squircle" ? { "--jg-drift-delay": `-${leadDriftPhase()}s` } : {}),
   } as CSSProperties;
   return (
-    <span className={`jg-avatar jg-avatar--${src ? "image" : shape}`} style={style} aria-hidden="true" title={name} data-shape={src ? undefined : shape} data-state={state && state !== "idle" ? state : undefined}>
+    <span className={`jg-avatar jg-avatar--${src ? "image" : shape}`} style={style} title={name} data-shape={src ? undefined : shape} data-state={state && state !== "idle" ? state : undefined}>
       {src ? <img src={src} alt="" /> : (
         <span className="jg-avatar__body">
           <svg className="jg-avatar__shape" viewBox="0 0 36 36" fill="currentColor" aria-hidden="true">{SHAPES[shape]}</svg>
           <span className={`jg-avatar__face jg-avatar__face--${face.eyes}`}><i /><i /></span>
         </span>
       )}
+      {primary && <span className="jg-primary-badge" role="img" aria-label="Primary bot" data-primary-agent-id={id}><StarIcon width={8} height={8} /></span>}
       {state && OVERLAY[state] && <span className={`jg-avatar__fx jg-avatar__fx--${OVERLAY[state]}`}><i /><i /><i /></span>}
     </span>
   );
 }
 
-/** A pinned tile's art: the agent's avatar, larger. The corner shows the unread dot, else (for the
- * supervisor) its star badge. */
-export function SupervisorArt({ id, name, unread = false, lead = false, size = 54, state }: { id: string; name: string; unread?: boolean; lead?: boolean; size?: number; state?: AvatarState }) {
+/** Pinned art retains the primary marker independently of the unread dot. */
+export function SupervisorArt({ id, name, unread = false, primary = false, size = 54, state }: { id: string; name: string; unread?: boolean; primary?: boolean; size?: number; state?: AvatarState }) {
   return (
-    <span className="jg-supervisor-art" style={{ width: size, height: size }} aria-hidden="true">
-      <AgentAvatar id={id} name={name} size={size} state={state} />
-      {unread ? <span className="jg-supervisor-art__dot" /> : lead && <span className="jg-supervisor-art__badge"><StarIcon width={9} height={9} /></span>}
+    <span className={`jg-supervisor-art${primary ? " is-primary" : ""}`} style={{ width: size, height: size }}>
+      <AgentAvatar id={id} name={name} size={size} state={state} primary={primary} />
+      {unread && <span className="jg-supervisor-art__dot" />}
     </span>
   );
 }

@@ -1,3 +1,4 @@
+import type { Agent } from "../api/types";
 /* Minimal stand-in chat renderer, styled to the Grok Bot Mac target. The
  * shared VS Code-derived widget replaces it through ChatPaneMount.
  * Jenkins Robotics 2026-10-17: tool steps fold into a "Show steps" card, and a
@@ -179,7 +180,7 @@ export function showsProgress(turn: ChatTurn): boolean {
 
 const replyText = (turn: ChatTurn) => turn.parts.filter((p) => p.kind === "markdownContent").map((p) => (p as { text: string }).text).join("\n\n");
 
-export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: string }) {
+export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessionId?: string; agents?: Agent[] }) {
   const [session, setSession] = useState<ChatSession | null>(null);
   /** Home chat (Grok-style): summary + posted-result entries, and the cursor for the next older page. */
   const home: HomeSessions | undefined = host instanceof WebHost ? host.home : undefined;
@@ -503,7 +504,7 @@ export function MinimalChat({ host, sessionId }: { host: ChatHost; sessionId?: s
         <div className="jg-agent-pill-wrap">
           <button ref={pill} type="button" className="jg-agent-pill" title={`${agent.name}`} aria-haspopup="menu" aria-expanded={menuOpen}
             onClick={() => (host instanceof WebHost && host.openHistory ? setMenuOpen((o) => !o) : host.openDetails?.(agent.id))}>
-            <AgentAvatar id={agent.id} name={agent.name} size={20} />
+            <AgentAvatar id={agent.id} name={agent.name} size={20} primary={agents?.some((a) => a.id === agent.id && a.primary === true)} />
             <span>{agent.name}</span>
           </button>
           <Menu open={menuOpen} anchor={menuOpen ? pill.current : null} ariaLabel={`${agent.name} menu`} onClose={() => setMenuOpen(false)}

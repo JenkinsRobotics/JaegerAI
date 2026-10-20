@@ -31,6 +31,7 @@
   --jg-avatar-brown: #a06b39;
   --jg-avatar-blue: #2b7ff6;
   --jg-avatar-orange: #f7882f;
+  --jg-primary-yellow: #f59312;
   /* An agent's color as a fill under white text: its bubble (darker) and its voice button. */
   --jg-mix-bubble-user: 80%;
   --jg-mix-agent-button: 92%;
