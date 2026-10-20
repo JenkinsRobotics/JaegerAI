@@ -57,6 +57,7 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
   const sleep = opts.sleep ?? defaultSleep;
   let cursor = opts.cursor;
   let attempt = 0;
+  let answer = "";
 
   while (!opts.signal.aborted) {
     const local = new AbortController();
@@ -76,7 +77,20 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
         }
         if (!belongsToTurn(event, opts.requestId, opts.turnId)) return;
         const mapped = mapEvent(event, opts.agentName);
-        mapped?.parts.forEach(opts.onPart);
+        mapped?.parts.forEach((part) => {
+          if (part.kind === "markdownContent") answer += part.text;
+          opts.onPart(part);
+        });
+        // Text-only execution may emit no text deltas; its durable terminal
+        // receipt is the answer. Append only a missing suffix, never duplicate
+        // a streamed answer on finish/reconnect.
+        if (event.event === "turn.finish" || event.event === "turn.reconciled") {
+          const output = event.payload?.output;
+          if (typeof output === "string" && output.startsWith(answer) && output.length > answer.length) {
+            opts.onPart({ kind: "markdownContent", text: output.slice(answer.length) });
+            answer = output;
+          }
+        }
         if (mapped?.state) { terminal = mapped.state; local.abort(); }
       }, local.signal);
     } catch (error) {
