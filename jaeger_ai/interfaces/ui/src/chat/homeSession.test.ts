@@ -144,3 +144,26 @@ describe("fallbackHome (today's gateway)", () => {
     expect((await home.history("a")).map((r) => r.sessionId)).toEqual(["x"]);
   });
 });
+
+
+describe("contract page owner identity", () => {
+  it("preserves canonical specialist identity across newest and older pages", async () => {
+    const get = vi.fn(async (path: string) => path.includes("/home")
+      ? { session_id: "specialist-home", agent_id: "native:specialist", created: false }
+      : { messages: [], next_before: null });
+    const home = contractHome(get);
+    const id = await home.home("specialist");
+    expect((await home.page(id)).agentId).toBe("native:specialist");
+    expect((await home.page(id, "older")).agentId).toBe("native:specialist");
+    expect(get).toHaveBeenCalledTimes(3);
+  });
+  it("resolves explicit worker sessions through session identity and caches the binding", async () => {
+    const get = vi.fn(async (path: string) => path === "/v1/sessions/worker"
+      ? { session_id: "worker", agent_id: "native:worker" }
+      : { messages: [], next_before: null });
+    const home = contractHome(get);
+    expect((await home.page("worker")).agentId).toBe("native:worker");
+    expect((await home.page("worker", "older")).agentId).toBe("native:worker");
+    expect(get.mock.calls.filter(([p]) => p === "/v1/sessions/worker")).toHaveLength(1);
+  });
+});

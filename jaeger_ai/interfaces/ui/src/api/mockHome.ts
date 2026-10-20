@@ -61,6 +61,11 @@ export function mockHomeWire(pageSize = 4): GetJson {
     const home = url.pathname.match(/^\/v1\/agents\/([^/]+)\/home$/);
     if (home) { const agent = decodeURIComponent(home[1]); return { session_id: `s-${agent}`, agent_id: agent, created: !MOCK_MESSAGES[`s-${agent}`] }; }
     if (url.pathname === "/v1/sessions") return { sessions: MOCK_SESSIONS[url.searchParams.get("agent_id") ?? ""] ?? [] };
+    const detail = url.pathname.match(/^\/v1\/sessions\/([^/]+)$/);
+    if (detail) {
+      const row = Object.values(MOCK_SESSIONS).flat().find((r) => r.session_id === decodeURIComponent(detail[1]));
+      if (row) return row;
+    }
     const page = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/messages$/);
     if (page) {
       const all = [...(MOCK_MESSAGES[decodeURIComponent(page[1])] ?? [])].reverse(); // newest first
