@@ -430,3 +430,32 @@ comparison still blocked by distorted234px capture; no exact parity claim.
 No new backend code, permission changes, runtime authority or conversation
 navigation changes. Backend20 passing from feature checkpoint remains source
 evidence, not a newly rerun suite in this UI-only correction.
+
+
+## 2026-10-19 — duplicate shell resolved; correct-owner UI acceptance blocked
+
+New process/window inspection proves stale PID12099 at
+`verification/mac-agent-management-20261019-163701/native-shell/JaegerShell.app`
+owned Jaeger window17202, while intended lifecycle owner12591 at
+`verification/agent-primary-20261019/native-shell/JaegerShell.app` owned window17223.
+Same bundle ID/title did not establish UI process identity. Earlier live popup
+captures could have targeted12099: they prove shared-UI rendering in a shell,
+NOT confirmed rendering by12591. This qualifies earlier process-attributed claims.
+
+Matthew supplied fresh stale-instance empty composer/no attachments observation;
+no draft interaction followed. Verified exact12099 executable then sent SIGTERM
+only to12099. It exited; only12591 remains. Bundle files retained. Owner12591,
+Gateway12599 and WebUI12608 unchanged; heartbeat remains menubar/PID12591, age1.71s.
+No lease action, service restart, app relaunch, real-agent action or unknown replay.
+Both health endpoints200; HTML/JS/CSS still match9f1082a2 candidate hashes; unknown
+request row hash unchanged. External `duplicate-instance-resolution.json`.
+
+Precise remaining blocker: CUA exact intended bundle-path lookup times out even
+after clearing this tool session's stale bindings. Direct verified window17223
+targeting is rejected as unsupported on macOS. No ambiguous name/bundle-ID lookup
+used. Final window-server read reports12591/window17223 exists but is not onscreen.
+Cannot show that window or harmlessly retest its popup through current permitted
+UI tool. Do not claim correct-owner loaded9f1082a2 pixels, focus or hover acceptance.
+No restart workaround attempted: explicit latest scope leaves12591 untouched.
+Next action: recover exact12591 window access/show (without launching a duplicate),
+then verify its loaded popup. Source fixes and served hashes remain verified.
