@@ -416,6 +416,20 @@ def route(handler, parsed, method: str) -> bool:
         qs = ("?" + parsed.query) if parsed.query else ""
         return _proxy(handler, "GET", f"/v1/handoffs{qs}")
 
+    if method == "POST" and path.startswith("/api/handoffs/") and path.endswith("/reply"):
+        from urllib.parse import quote
+        from api.native_panel_context import check_profile
+        if not check_profile(handler):
+            return True
+        rest = path[len("/api/handoffs/"):].split("/")
+        if len(rest) != 2:
+            return False
+        raw = getattr(handler, "_json_body_bytes", None)
+        if raw is None:
+            from api.helpers import read_body
+            raw = json.dumps(read_body(handler) or {}).encode("utf-8")
+        return _proxy(handler, "POST", f"/v1/handoffs/{quote(rest[0], safe='')}/reply", raw)
+
     # One handoff, or its exchange (task + specialist messages + summary).
     if method == "GET" and path.startswith("/api/handoffs/"):
         from urllib.parse import quote

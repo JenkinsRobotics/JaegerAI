@@ -1,3 +1,4 @@
+import { HandoffReplyDialog } from "./agents/HandoffReplyDialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JaegerSource } from "./api/source";
 import { PrimaryPicker } from "./agents/PrimaryPicker";
@@ -53,6 +54,7 @@ export function App({ source }: { source: JaegerSource }) {
   const phone = usePhone();
   const [phoneView, setPhoneView] = useState<"list" | "chat">("list");
   const [agentMenu, setAgentMenu] = useState<{ agentId: string; x: number; y: number } | null>(null);
+  const [replyHandoffId, setReplyHandoffId] = useState<string | null>(null);
   const [agentPrompt, setAgentPrompt] = useState<{ kind: "rename" | "delete" | "section" | "duplicate"; agent: Agent } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => { if (!notice) return; const t = setTimeout(() => setNotice(null), 2600); return () => clearTimeout(t); }, [notice]);
@@ -155,6 +157,7 @@ export function App({ source }: { source: JaegerSource }) {
   useEffect(() => {
     host.setAgentNames(new Map(store.agents.map((a) => [a.id, label(a)])));
     host.openHandoff = openHandoff;
+    host.openHandoffReply = source.replyHandoff ? (id) => setReplyHandoffId(id) : undefined;
     host.openDetails = (agentId: string) => { setHistoryAgentId(null); setDetailsAgentId(agentId); };
     host.openHistory = (agentId: string) => { setDetailsAgentId(null); setHistorySessionId(undefined); setHistoryAgentId(agentId); };
     host.openChat = (sessionId: string) => { setDetailsAgentId(null); setHistorySessionId(sessionId); setHistoryAgentId(selectedAgentId ?? defaultAgentId); };
@@ -211,13 +214,13 @@ export function App({ source }: { source: JaegerSource }) {
     } catch (error) { fail("replace the primary bot")(error); await store.refresh(); }
     finally { setManagementBusy(false); }
   };
-  const changePresentation = async (agent: Agent, patch: { display_name?: string | null; archived?: boolean }) => {
+  const changePresentation = async (agent: Agent, patch: { display_name?: string | null; archived?: boolean; icon_preset?: string | null }) => {
     if (!actions || managementBusy) return;
     setManagementBusy(true);
     try {
       await actions.patchAgent(agent.id, patch);
       await store.refresh();
-      setNotice(patch.archived === true ? `${label(agent)} archived; its work and history are kept` : patch.archived === false ? `${label(agent)} restored` : 'Display name updated');
+      setNotice(patch.archived === true ? `${label(agent)} archived; its work and history are kept` : patch.archived === false ? `${label(agent)} restored` : 'icon_preset' in patch ? 'Sidebar icon updated' : 'Display name updated');
     } catch (error) { fail('update agent presentation')(error); }
     finally { setManagementBusy(false); }
   };
@@ -310,6 +313,7 @@ export function App({ source }: { source: JaegerSource }) {
       )}
       {primaryPicker && <PrimaryPicker agents={store.agents.filter((a) => a.ui_actions?.primary && a.id !== primaryPicker.expectedId && visible(a))} busy={managementBusy}
         onPick={(id) => void changePrimary(id, primaryPicker.expectedId)} onClose={() => { if (!managementBusy) setPrimaryPicker(null); }} />}
+      {replyHandoffId && source.replyHandoff && <HandoffReplyDialog handoffId={replyHandoffId} send={(id, task, rid) => source.replyHandoff!(id, task, rid)} onClose={() => setReplyHandoffId(null)} />}
       {agentPrompt?.kind === "rename" && <AgentPrompt title={`Rename ${label(agentPrompt.agent)}`} confirm="Save display name" input={{ placeholder: "Display name", value: label(agentPrompt.agent) }} message="Presentation only. Agent ID, role, tools, context and conversations stay the same." onDone={onPromptDone} />}
       {agentPrompt?.kind === "delete" && <AgentPrompt title={`Delete ${label(agentPrompt.agent)}?`} danger confirm="Delete"
         message="It leaves the sidebar. Its home chat and history are kept and can be restored." onDone={onPromptDone} />}
@@ -321,7 +325,7 @@ export function App({ source }: { source: JaegerSource }) {
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
         onNewChat={newChat} onCreateAgent={createAgent} />
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} agentsPanel={<AgentManagement agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived })} />} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} agentsPanel={<AgentManagement onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived })} />} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
         onAgent={(agentId) => { newChat(agentId); if (phone) setPhoneView("chat"); }}

@@ -14,16 +14,16 @@ PREVIEW_CHARS = 140
 #: Handoff and task states mapped onto the board's status vocabulary.
 _HANDOFF_STATUS = {
     "pending_approval": "waiting_approval",
-    "admitted": "working", "approved": "working", "running": "working",
+    "admitted": "queued", "approved": "queued", "running": "working",
     "failed": "error", "execution_unknown": "error", "rejected": "error",
 }
 _TASK_STATUS = {
-    "queued": "working", "running": "working",
+    "queued": "queued", "running": "working",
     "needs_owner": "waiting_approval", "paused": "waiting_approval",
     "blocked": "blocked", "failed": "error",
 }
 #: Most urgent first; the summary reports the most urgent live signal.
-_PRIORITY = ("waiting_approval", "blocked", "error", "working")
+_PRIORITY = ("waiting_approval", "blocked", "error", "working", "queued")
 
 
 def _preview(text: Any) -> str:

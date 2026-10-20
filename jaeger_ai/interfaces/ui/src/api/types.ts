@@ -28,6 +28,8 @@ export interface Agent {
   disabled?: boolean;
   runner?: Runner;
   avatar_url?: string;
+  icon_preset?: string | null;
+  icon_choices?: string[];
   metadata?: Record<string, unknown>;
   /** PROPOSED: the agent's skills (GET /v1/agents and the specialist/role responses). */
   skills?: AgentSkill[];
@@ -127,6 +129,10 @@ export interface Handoff {
 
 /** GET /v1/handoffs/{id}/messages (proxied as /api/handoffs/{id}/messages). */
 export interface HandoffExchange {
+  thread_handoff_id?: string;
+  reply_to_handoff_id?: string | null;
+  from_agent_id?: string;
+  request_id?: string | null;
   handoff_id: string;
   session_id?: string | null;
   to_agent_id: string;

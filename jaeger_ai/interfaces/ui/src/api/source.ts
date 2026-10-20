@@ -23,6 +23,7 @@ export interface JaegerSource {
   agentActions?: AgentActions;
   createAgent(body: { name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }): Promise<Agent>;
   /** The specialist's side of one hand-off: its worker session and messages. */
+  replyHandoff?(handoffId: string, task: string, requestId: string): Promise<Handoff>;
   handoffExchange(handoffId: string): Promise<HandoffExchange>;
   /** POST /v1/sessions/{id}/turns. `start_event_id` is the durable cursor of
    * this turn's turn.start (stream from start_event_id - 1). */

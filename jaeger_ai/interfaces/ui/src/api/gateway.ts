@@ -96,6 +96,9 @@ export class GatewayClient implements JaegerSource {
     remove: async (id) => { await this.json(`/v1/agents/${encodeURIComponent(id)}`, undefined, "DELETE"); },
     template: (id) => this.json<unknown>(`/v1/agents/${encodeURIComponent(id)}/template`),
   };
+  replyHandoff(handoffId: string, task: string, requestId: string) {
+    return this.json<Handoff>(`/api/handoffs/${encodeURIComponent(handoffId)}/reply`, { task, request_id: requestId });
+  }
   handoffExchange(handoffId: string) {
     return this.json<HandoffExchange>(`/api/handoffs/${encodeURIComponent(handoffId)}/messages`);
   }

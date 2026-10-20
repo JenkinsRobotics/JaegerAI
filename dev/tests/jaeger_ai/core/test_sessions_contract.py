@@ -107,7 +107,7 @@ async def test_handoff_result_posted_as_specialist_message(gw):
     origin = gateway.store.list_messages("origin")["messages"]
     assert origin[0]["kind"] == "handoff_result" and origin[0]["role"] == "assistant"
     assert origin[0]["sender_agent_id"] == "native:builder"
-    assert origin[0]["links"] == {"handoff_id": "h_1", "child_session_id": "specialist:builder:abc"}
+    assert origin[0]["links"] == {"handoff_id": "h_1", "child_session_id": "specialist:builder:abc", "origin_session_id": "origin", "thread_handoff_id": "h_1"}
     home = gateway.store.list_messages("agent-native:builder")["messages"]
     assert [m["kind"] for m in home] == ["handoff_result", "handoff_request"]
 

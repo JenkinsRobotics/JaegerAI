@@ -51,8 +51,8 @@ export function turnAvatarState(turn: Pick<ChatTurn, "parts">): AvatarState {
   const parts = turn.parts;
   if (parts.some((p) => p.kind === "confirmation" || (p.kind === "toolInvocation" && p.state === "waitingForConfirmation"))) return "waiting";
   const last = parts[parts.length - 1];
-  if (!last) return "thinking";
-  if (last.kind === "thinking") return last.durationMs === undefined ? "thinking" : "working";
+  if (!last) return "idle";
+  if (last.kind === "thinking") return last.durationMs === undefined ? "thinking" : "idle";
   if (last.kind === "markdownContent") return "streaming";
-  return "working";
+  return last.kind === "toolInvocation" && last.state === "executing" ? "working" : "idle";
 }

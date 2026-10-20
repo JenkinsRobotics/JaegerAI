@@ -81,6 +81,7 @@ export class WebHost implements ChatHost {
   /** Set by the app: a post's "Open chat" shows that (child) chat read-only. */
   openChat?: (sessionId: string) => void;
   /** Set by the app: a handoff marker opens the specialist's side of it. */
+  openHandoffReply?: (handoffId: string) => void;
   openHandoff?: (handoffId: string) => void;
   /** Set by the app: the header pill opens the agent's details panel. */
   openDetails?: (agentId: string) => void;

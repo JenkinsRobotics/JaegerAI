@@ -48,10 +48,11 @@ describe("avatar states", () => {
   });
 
   it("derives the in-chat avatar state from the turn", () => {
-    expect(turnAvatarState({ parts: [] })).toBe("thinking");
+    expect(turnAvatarState({ parts: [] })).toBe("idle");
+    expect(turnAvatarState({ parts: [{ kind: "toolInvocation", callId: "owned", toolName: "read", input: {}, state: "completed" }] })).toBe("idle");
     expect(turnAvatarState({ parts: [{ kind: "thinking", text: "" } as never] })).toBe("thinking");
     expect(turnAvatarState({ parts: [{ kind: "markdownContent", text: "Hi" } as never] })).toBe("streaming");
-    expect(turnAvatarState({ parts: [{ kind: "toolInvocation", toolName: "read", state: "running" } as never] })).toBe("working");
+    expect(turnAvatarState({ parts: [{ kind: "toolInvocation", callId: "owned", toolName: "read", input: {}, state: "executing" }] })).toBe("working");
     expect(turnAvatarState({ parts: [{ kind: "toolInvocation", toolName: "shell", state: "waitingForConfirmation" } as never] })).toBe("waiting");
   });
 

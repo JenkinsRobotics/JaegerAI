@@ -99,7 +99,11 @@ def test_webui_proxy_preserves_existing_profile_precondition(monkeypatch):
     calls.clear()
     context.check_profile = lambda handler: False
     assert jaeger_agents.route(handler, urlparse('/v1/agents/pins'), 'POST')
+    assert jaeger_agents.route(handler, urlparse('/api/handoffs/owned/reply'), 'POST')
     assert calls == []
+    context.check_profile = lambda handler: True
+    assert jaeger_agents.route(handler, urlparse('/api/handoffs/owned/reply'), 'POST')
+    assert calls == [('POST', '/v1/handoffs/owned/reply', handler._json_body_bytes)]
 
 
 def test_ordered_pin_handler_validates_ids_and_preserves_other_clients_changes(tmp_path):

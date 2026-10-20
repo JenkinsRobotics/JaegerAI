@@ -167,3 +167,8 @@ describe("contract page owner identity", () => {
     expect(get.mock.calls.filter(([p]) => p === "/v1/sessions/worker")).toHaveLength(1);
   });
 });
+
+it("retains durable exchange correlation and terminal status across paged home reload", () => {
+  const ui = fromWirePage('owned-home', { next_before: null, messages: [W({ id: 'owned-result', kind: 'handoff_result', status: 'completed', sender_agent_id: 'native:owned', content: 'owned result', links: { handoff_id: 'child', thread_handoff_id: 'root', reply_to_handoff_id: 'parent', origin_session_id: 'owned-home' } })] }, String);
+  expect(ui.entries[ENTRY_PREFIX+'owned-result']).toMatchObject({ handoffId: 'child', threadId: 'root', replyTo: 'parent', originSessionId: 'owned-home', status: 'completed' });
+});

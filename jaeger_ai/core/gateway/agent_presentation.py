@@ -9,11 +9,12 @@ import unicodedata
 from typing import Any
 
 MAX_AGENT_PINS = 8
+ICON_PRESETS = ("robot", "robot-square", "robot-shield")
 
 
 def validate_patch(body: Any) -> dict[str, Any]:
-    if not isinstance(body, dict) or not body or set(body) - {'display_name', 'archived', 'pinned'}:
-        raise ValueError('Only display_name, archived and pinned presentation fields are accepted')
+    if not isinstance(body, dict) or not body or set(body) - {'display_name', 'archived', 'pinned', 'icon_preset'}:
+        raise ValueError('Only display_name, archived, pinned and icon_preset presentation fields are accepted')
     out = dict(body)
     if 'display_name' in out and out['display_name'] is not None:
         if not isinstance(out['display_name'], str):
@@ -22,6 +23,8 @@ def validate_patch(body: Any) -> dict[str, Any]:
         if not 1 <= len(name) <= 80 or any(unicodedata.category(c).startswith('C') or unicodedata.category(c) in {'Zl', 'Zp'} for c in name):
             raise ValueError('display_name must have 1–80 visible characters on one line')
         out['display_name'] = name
+    if 'icon_preset' in out and out['icon_preset'] is not None and out['icon_preset'] not in ICON_PRESETS:
+        raise ValueError('Unsupported icon preset')
     for key in ('archived', 'pinned'):
         if key in out and not isinstance(out[key], bool):
             raise ValueError(f'{key} must be a boolean')
@@ -54,8 +57,9 @@ def project(row: dict[str, Any], saved: dict[str, dict[str, Any]], *, writable: 
     archived = prefs.get('archived') is True and not guarded
     out = {**row, 'primary': row['id'] == primary_id, 'archived': archived, 'hidden': bool(row.get('hidden')) or archived,
            'pinned': prefs.get('pinned') is True and not guarded,
-           'pin_order': prefs.get('pin_order'), 'presentation': {k: prefs[k] for k in ('display_name', 'archived', 'pinned', 'pin_order') if k in prefs},
-           'ui_actions': {'read': writable, 'rename': writable and can_rename(row), 'hide': writable and not guarded, 'pin': writable and not guarded, 'unread': writable and not guarded, 'primary': writable and primary_eligible({**row, 'archived': archived})}}
+           'icon_preset': prefs.get('icon_preset'), 'icon_choices': list(ICON_PRESETS),
+           'pin_order': prefs.get('pin_order'), 'presentation': {k: prefs[k] for k in ('display_name', 'archived', 'pinned', 'pin_order', 'icon_preset') if k in prefs},
+           'ui_actions': {'icon': writable and can_rename(row), 'read': writable, 'rename': writable and can_rename(row), 'hide': writable and not guarded, 'pin': writable and not guarded, 'unread': writable and not guarded, 'primary': writable and primary_eligible({**row, 'archived': archived})}}
     if isinstance(prefs.get('display_name'), str):
         out['display_name'] = prefs['display_name']
     return out
