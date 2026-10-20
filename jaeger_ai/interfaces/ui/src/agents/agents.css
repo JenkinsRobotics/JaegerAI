@@ -142,7 +142,7 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-handoff__stack .jg-avatar:first-child { margin-left: 0; }
 .jg-handoff__count {
   display: inline-grid; place-items: center; min-width: 20px; height: 18px; box-sizing: border-box; padding: 0 6px; border: 0; border-radius: 9px;
-  background: var(--jg-color-hover); color: var(--jg-color-text-secondary); font: inherit; font-size: var(--jg-font-tiny); font-weight: 600; cursor: pointer;
+  background: transparent; color: inherit; font: inherit; font-weight: normal; cursor: pointer;
 }
 .jg-handoff__count:hover, .jg-handoff__count[aria-expanded="true"] { background: var(--jg-color-active); color: var(--jg-color-fg); }
 .jg-handoff__count:focus-visible { outline: 2px solid var(--aether-color-border-focus); outline-offset: 1px; }

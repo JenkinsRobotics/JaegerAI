@@ -139,3 +139,25 @@ def test_reasoning_pieces_are_coalesced_and_flushed_before_other_events(tmp_path
         names.index("turn.delta") > names.index("turn.reasoning.done")
     first_delta = names.index("turn.delta")
     assert set(names[:first_delta]) >= {"turn.reasoning", "turn.reasoning.done"}
+
+
+def test_sent_marker_requires_durable_recipient_post(tmp_path, monkeypatch):
+    from jaeger_ai.core.gateway.turn_parts import project_parts
+    gateway = _gateway(tmp_path)
+    record = {"id": "handoff_delivery", "session_id": "s1", "parent_run_id": "r1",
+              "from_agent_id": "native:jaeger", "to_agent_id": "native:builder",
+              "task": "Owned fixture message", "status": "admitted"}
+    gateway.store.admit_request("s1", "ask builder", request_id="r1")
+    gateway._publish_handoff("agent.handoff", record)
+    assert project_parts(_events(gateway))[0]["status"] == "admitted"
+    gateway._post_handoff_request(record)
+    parts = project_parts(_events(gateway))
+    assert [p["status"] for p in parts] == ["delivered"]
+    messages = gateway.store.get_session("agent-native:builder")["messages"]
+    assert len(messages) == 1 and messages[0]["content"] == record["task"]
+    assert messages[0]["links"]["handoff_id"] == record["id"]
+    # Failed transcript persistence cannot publish a success notification.
+    monkeypatch.setattr(gateway.store, "append_handoff_post_once", lambda *a, **k: (_ for _ in ()).throw(OSError("fixture unavailable")))
+    before = len(_events(gateway))
+    gateway._post_handoff_request({**record, "id": "handoff_failed_delivery"})
+    assert len(_events(gateway)) == before

@@ -25,7 +25,7 @@ export type ChatPart =
    * one highlighted. */
   | { kind: "question"; callId: string; title: string; options: Array<{ id: string; label: string }>; chosenId?: string }
   /** Centered hand-off marker. `agents` set means a grouped "Messaged X and Y". */
-  | { kind: "handoff"; handoffId: string; agentId: string; agentName: string; count: number; direction: "to" | "from"; agents?: Array<{ id: string; name: string }> };
+  | { kind: "handoff"; status?: string; handoffId: string; agentId: string; agentName: string; count: number; direction: "to" | "from"; agents?: Array<{ id: string; name: string }> };
 
 export type ChatPartKind = ChatPart["kind"];
 
@@ -115,6 +115,10 @@ export type ChatPaneMount = (el: HTMLElement, host: ChatHost, opts: ChatPaneOpti
 
 /** Apply the onPart contract to a part list. */
 export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
+  if (part.kind === "handoff") {
+    const index = parts.findIndex((p) => p.kind === "handoff" && p.handoffId === part.handoffId && p.direction === part.direction);
+    if (index >= 0) return parts.map((p, i) => i === index && !(p.kind === "handoff" && p.status === "delivered" && part.status !== "delivered") ? part : p);
+  }
   const last = parts[parts.length - 1];
   if ((part.kind === "markdownContent" || part.kind === "thinking") && last?.kind === part.kind) {
     return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text } as ChatPart];

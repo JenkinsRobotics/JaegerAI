@@ -38,7 +38,7 @@ function persistedToPart(p: PersistedPart, agentName: (id: string) => string): C
       : null;
     case "handoff": {
       const agentId = String(p.agent_id ?? "");
-      return { kind: "handoff", handoffId: String(p.handoff_id ?? ""), agentId, agentName: p.agent_name || agentName(agentId), count: 1, direction: p.direction };
+      return { kind: "handoff", status: p.status ?? "unverified", handoffId: String(p.handoff_id ?? ""), agentId, agentName: p.agent_name || agentName(agentId), count: 1, direction: p.direction };
     }
     default: return null;
   }
