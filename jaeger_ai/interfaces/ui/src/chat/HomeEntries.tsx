@@ -29,7 +29,7 @@ export function SummaryCard({ entry, links, defaultOpen = false }: { entry: Summ
   );
 }
 
-const STATUS: Record<string, string> = { done: "Done", failed: "Failed", cancelled: "Cancelled" };
+const STATUS: Record<string, string> = { completed: "Completed", pending_approval: "Awaiting approval", admitted: "Queued", running: "Working", execution_unknown: "Outcome unknown", done: "Done", failed: "Failed", cancelled: "Cancelled" };
 const WHAT: Record<Post["post"], string> = { handoff_request: "Handoff request", handoff: "Handoff result", task_result: "Task result" };
 export function postChipText(entry: Post): string {
   const what = WHAT[entry.post];
@@ -37,18 +37,19 @@ export function postChipText(entry: Post): string {
 }
 
 /** A message another agent posted into this chat: avatar + name, its text, the handoff/task line, links. */
-export function PostMessage({ entry, links, onOpenHandoff, onOpenChat }: { entry: Post; links: Open; onOpenHandoff?: (handoffId: string) => void; onOpenChat?: (sessionId: string) => void }) {
+export function PostMessage({ entry, links, onOpenHandoff, onOpenChat, onReply }: { entry: Post; links: Open; onReply?: (handoffId: string) => void; onOpenHandoff?: (handoffId: string) => void; onOpenChat?: (sessionId: string) => void }) {
   const chip = postChipText(entry);
   const canOpen = entry.post !== "task_result" && entry.handoffId && onOpenHandoff;
   return (
     <article className={`jg-post jg-post--${entry.post}${entry.status ? ` is-${entry.status}` : ""}`} data-sender="post" aria-label={`${entry.sender.name}: ${chip}`}>
       <header className="jg-post__who">
-        <AgentAvatar id={entry.sender.id} name={entry.sender.name} size={20} state={entry.status === "failed" ? "failed" : entry.post === "handoff_request" ? undefined : "spawning"} />
+        <AgentAvatar id={entry.sender.id} name={entry.sender.name} size={20} />
         <span className="jg-post__name">{entry.sender.name}</span>
       </header>
       <div className="jg-bubble jg-bubble--assistant jg-post__body">
         <Markdown text={entry.text} onOpen={links.onOpen} onCopy={links.onCopy} />
-        <div className="jg-post__meta">
+        <div className="jg-post__meta" data-thread-id={entry.threadId} data-reply-to={entry.replyTo}>
+          {onReply && entry.handoffId && entry.post === "handoff" && ["completed", "failed", "cancelled", "rejected"].includes(entry.status ?? "") && <button type="button" onClick={() => onReply(entry.handoffId!)}>Follow up</button>}
           {canOpen
             ? <button type="button" className="jg-post__chip" onClick={() => onOpenHandoff!(entry.handoffId!)}>{chip}</button>
             : <span className="jg-post__chip">{chip}</span>}

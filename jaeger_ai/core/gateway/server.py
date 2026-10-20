@@ -1355,6 +1355,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/sessions/{id}/activity", self.handle_activity_history)
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_get("/v1/handoffs/{id}/messages", self.handle_handoff_messages)
+        self.app.router.add_post("/v1/handoffs/{id}/reply", self.handle_handoff_reply)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_post("/v1/approvals/{id}/decision", self.handle_resolve_approval)
         self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
@@ -1918,7 +1919,7 @@ class JaegerGatewayApp:
             return web.json_response({'error': 'Agent not found'}, status=404)
         try:
             patch = validate_patch(await request.json())
-            if 'display_name' in patch and not can_rename(record.to_dict()):
+            if {'display_name', 'icon_preset'} & patch.keys() and not can_rename(record.to_dict()):
                 return web.json_response({'error': 'protected_agent'}, status=409)
             if protected(record.to_dict()) and (patch.get('archived') is True or patch.get('pinned') is True):
                 return web.json_response({'error': 'protected_agent'}, status=409)
@@ -2064,6 +2065,16 @@ class JaegerGatewayApp:
             # owner's approval itself; only the owner's autonomy=auto does.
             from jaeger_ai.core.runtime.autonomy import effective_autonomy
             require_approval = effective_autonomy(self._config_path()) != "auto"
+        reply_parent = None
+        if body.get("reply_to_handoff_id"):
+            if not isinstance(body["reply_to_handoff_id"], str):
+                return web.json_response({"error": "reply_to_handoff_id must be text"}, status=400)
+            from jaeger_ai.core.gateway.handoff_reply import reply_context, ReplyConflict
+            try:
+                reply_parent = reply_context(self.store, body["reply_to_handoff_id"], source=from_id, target=target.id, session=body.get("session_id"))
+            except ReplyConflict as exc:
+                return web.json_response({"error": str(exc)}, status=409)
+            require_approval = True
         request_id = str(body.get("request_id") or uuid.uuid4().hex)
         parent_run_id = body.get("parent_run_id") or body.get("parent_request_id")
         parent_chain = list(body.get("parent_chain") or [])
@@ -2093,7 +2104,7 @@ class JaegerGatewayApp:
         limits = dict(project["limits"]) if project else default_limits()
         timeout_s = max(1, min(timeout_s, int(limits["child_timeout_s"])))
         approved_by = None
-        if require_approval and project and (project.get("grants") or {}).get("handoffs"):
+        if require_approval and not reply_parent and project and (project.get("grants") or {}).get("handoffs"):
             # The owner approved this team when creating the project.
             require_approval = False
             approved_by = "project_grant"
@@ -2136,7 +2147,8 @@ class JaegerGatewayApp:
                 or prior.get("bridge_origin") != bridge_origin
                 or (bridge_origin is not None and prior.get("workspace") != workspace)
                 or sorted(prior.get("allowed_tools") or []) != sorted(allowed_tools)
-                or prior.get("timeout_seconds", 120) != timeout_s):
+                or prior.get("timeout_seconds", 120) != timeout_s
+                or prior.get("reply_to_handoff_id") != (reply_parent["id"] if reply_parent else None)):
                 return web.json_response(
                     {"error": "Request identity was already used for different input"},
                     status=409,
@@ -2177,6 +2189,8 @@ class JaegerGatewayApp:
             "approval_id": approval_id,
             "result": {},
             "metadata": {
+                "reply_to_handoff_id": reply_parent["id"] if reply_parent else None,
+                "thread_handoff_id": ((reply_parent.get("metadata") or {}).get("thread_handoff_id") or reply_parent["id"]) if reply_parent else handoff_id,
                 "caller_actor": actor,
                 "bridge_origin": bridge_origin,
                 "target_display": target.display_name,
@@ -2314,10 +2328,10 @@ class JaegerGatewayApp:
         try:
             target = self._registry().get_agent(record["to_agent_id"])
             home, _ = self._ensure_agent_home(record["to_agent_id"], getattr(target, "display_name", None))
-            self.store.append_message(
+            self.store.append_handoff_post_once(
                 home, "user", str(record.get("task") or ""), kind="handoff_request",
                 sender_agent_id=record.get("from_agent_id"),
-                links={"handoff_id": record["id"], "origin_session_id": record.get("session_id")})
+                links={"handoff_id": record["id"], "origin_session_id": record.get("session_id"), "thread_handoff_id": (record.get("metadata") or {}).get("thread_handoff_id") or record["id"], "reply_to_handoff_id": (record.get("metadata") or {}).get("reply_to_handoff_id")}, meta={"status": record.get("status")})
         except Exception:  # noqa: BLE001 — a transcript copy never fails the handoff
             logger.warning("handoff_request message not posted for %s", record.get("id"), exc_info=True)
 
@@ -2328,7 +2342,7 @@ class JaegerGatewayApp:
         status = str(record.get("status") or result.get("status") or "")
         text = str(result.get("summary") or "").strip() or f"Handoff {status or 'finished'}."
         agent_id = record.get("to_agent_id")
-        links = {"handoff_id": record.get("id"), "child_session_id": result.get("worker_session_id")}
+        links = {"handoff_id": record.get("id"), "child_session_id": result.get("worker_session_id"), "origin_session_id": record.get("session_id"), "thread_handoff_id": (record.get("metadata") or {}).get("thread_handoff_id") or record["id"], "reply_to_handoff_id": (record.get("metadata") or {}).get("reply_to_handoff_id")}
         part = {"type": "handoff", "direction": "from", "handoff_id": record.get("id"),
                 "agent_id": agent_id, "status": status}
         targets = []
@@ -2342,7 +2356,7 @@ class JaegerGatewayApp:
             logger.warning("no home session for %s", agent_id, exc_info=True)
         for sid in targets:
             try:
-                self.store.append_message(sid, "assistant", text, kind="handoff_result",
+                self.store.append_handoff_post_once(sid, "assistant", text, kind="handoff_result",
                                           sender_agent_id=agent_id, links=links, parts=[part],
                                           meta={"status": status})
             except Exception:  # noqa: BLE001
@@ -2558,6 +2572,22 @@ class JaegerGatewayApp:
         )
         return web.json_response({"handoffs": records, "count": len(records)})
 
+    async def handle_handoff_reply(self, request: web.Request) -> web.Response:
+        """Explicit owner follow-up, always through existing handoff approval/admission."""
+        from jaeger_ai.core.gateway.handoff_reply import reply_payload, ReplyConflict
+        try:
+            target, payload = reply_payload(self.store, request.match_info["id"], await request.json())
+        except ReplyConflict as exc:
+            return web.json_response({"error": str(exc)}, status=409)
+        except (ValueError, TypeError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        class FollowupRequest(dict):
+            can_read_body = True
+            match_info = {"id": target}
+            async def json(self):
+                return payload
+        return await self.handle_handoff_agent(FollowupRequest(request))
+
     async def handle_handoff_messages(self, request: web.Request) -> web.Response:
         """GET /v1/handoffs/{id}/messages — the specialist's side of one exchange.
 
@@ -2578,6 +2608,10 @@ class JaegerGatewayApp:
         ]
         return web.json_response({
             "handoff_id": record["id"],
+            "thread_handoff_id": (record.get("metadata") or {}).get("thread_handoff_id") or record["id"],
+            "reply_to_handoff_id": (record.get("metadata") or {}).get("reply_to_handoff_id"),
+            "from_agent_id": record["from_agent_id"],
+            "request_id": record.get("request_id"),
             "session_id": record.get("session_id"),
             "to_agent_id": record["to_agent_id"],
             "status": record["status"],

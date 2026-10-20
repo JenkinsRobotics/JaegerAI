@@ -4,7 +4,7 @@
 import type { Agent } from "./types";
 
 export interface Section { id: string; name: string; order?: number }
-export interface AgentPatch { display_name?: string | null; archived?: boolean; pinned?: boolean; hidden?: boolean; section_id?: string | null; enabled?: boolean }
+export interface AgentPatch { icon_preset?: string | null; display_name?: string | null; archived?: boolean; pinned?: boolean; hidden?: boolean; section_id?: string | null; enabled?: boolean }
 
 export interface AgentActions {
   setPrimary?(agentId: string, expectedId: string): Promise<void>;
@@ -19,8 +19,8 @@ export interface AgentActions {
   template(agentId: string): Promise<unknown>;
 }
 
-export interface AgentCaps { primary?: boolean; unread?: boolean; rename: boolean; read: boolean; pin: boolean; hide: boolean; sections: boolean; duplicate: boolean; remove: boolean; template: boolean }
-export const NO_CAPS: AgentCaps = { primary: false, unread: false, rename: false, read: false, pin: false, hide: false, sections: false, duplicate: false, remove: false, template: false };
+export interface AgentCaps { icon?: boolean; primary?: boolean; unread?: boolean; rename: boolean; read: boolean; pin: boolean; hide: boolean; sections: boolean; duplicate: boolean; remove: boolean; template: boolean }
+export const NO_CAPS: AgentCaps = { icon: false, primary: false, unread: false, rename: false, read: false, pin: false, hide: false, sections: false, duplicate: false, remove: false, template: false };
 
 /** Intersection of explicit actions for the selected agents; no identity-field guessing. */
 export function agentCaps(agents: Agent[], actions?: AgentActions): AgentCaps {

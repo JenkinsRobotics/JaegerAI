@@ -99,6 +99,7 @@ export interface ChatHost {
   /** For @ mentions. */
   listAgents?(): Promise<ChatAgentRef[]>;
   onSessionEvent?(cb: (event: { sessionId: string; type: string }) => void): () => void;
+  openHandoffReply?(handoffId: string): void;
   openHandoff?(handoffId: string): void;
   /** PROPOSED addition: the chat header's agent pill opens that agent's details. */
   openDetails?(agentId: string): void;

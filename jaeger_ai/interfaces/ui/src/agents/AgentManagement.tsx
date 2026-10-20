@@ -2,7 +2,8 @@
 import type { Agent } from "../api/types";
 import { label } from "./agentsLogic";
 
-export function AgentManagement({ agents, busy, onRename, onArchive, onResetName, onPin, onImportPins, onPrimary, onProfile, onHistory }: {
+export function AgentManagement({ agents, busy, onRename, onArchive, onResetName, onPin, onImportPins, onPrimary, onProfile, onHistory, onIcon }: {
+  onIcon?: (agent: Agent, preset: string | null) => void;
   onPrimary?: (agent: Agent) => void; onProfile?: (agent: Agent) => void; onHistory?: (agent: Agent) => void;
   agents: Agent[]; busy?: boolean; onImportPins?: () => void; onRename: (agent: Agent) => void;
   onArchive: (agent: Agent, archived: boolean) => void; onPin: (agent: Agent, pinned: boolean) => void; onResetName: (agent: Agent) => void;
@@ -17,6 +18,7 @@ export function AgentManagement({ agents, busy, onRename, onArchive, onResetName
     {managed.map((agent) => <div className="jg-sheet__card" key={agent.id}>
       <div className="jg-sheet__row"><span className="jg-sheet__row-label"><strong>{label(agent)}</strong><small>{agent.id}{agent.primary ? " · Primary" : ""}{agent.archived ? " · Hidden" : ""}</small></span>
         <div className="jg-agent-management-actions">
+          {onIcon && agent.ui_actions?.icon && <label>Sidebar icon<select aria-label={`Icon for ${label(agent)}`} value={agent.icon_preset ?? ""} disabled={busy} onChange={(e) => onIcon(agent, e.target.value || null)}><option value="">Original avatar</option>{agent.icon_choices?.map((id) => <option key={id} value={id}>{id.replaceAll('-', ' ')}</option>)}</select></label>}
           {onProfile && <button type="button" onClick={() => onProfile(agent)}>Profile</button>}
           {onHistory && <button type="button" onClick={() => onHistory(agent)}>History</button>}
           {onPrimary && !agent.primary && agent.ui_actions?.primary && <button type="button" disabled={busy} onClick={() => onPrimary(agent)}>Make primary</button>}

@@ -542,3 +542,72 @@ that12591 has loaded these new bytes or that every visual row/icon matches Grok.
 Exact owner AX access and readable reference/current capture remain the concrete
 blockers. Operator window-show question remains unanswered. No new worker/credential,
 real primary/pin/unread mutation, draft submission or lease manipulation.
+
+
+## 2026-10-19 — bounded continuity, exchange follow-up and small icons
+
+Scope: voice/camera/video/large-avatar work paused. Existing popup32a73e95 and
+evidenceb57bb845 retained; correct-owner native visual acceptance still blocked.
+Plan derived from canonical code, not Grok backend assumptions: home-session
+contract/paged inline history already exists; TaskOwner/handoffs and typed message
+rows own progress/results; AgentMessages bridge is caller-scoped inert data.
+Reuse these, no new identity/session/runtime/message authority. REA analysis and
+inventory under Documents/Codex/2026-10-19/task provide client reference only.
+Grok inline history and setMainAgent+pin do not imply client history transfer.
+
+Implemented slices:
+- Validated icon_preset stored in existing agent_presentation:operator. Backend
+  advertises original robot/robot-square/robot-shield choices; Settings/Agents
+  selects/restores original avatar through existing admin/profile-protected PATCH.
+  Registry ID, role, grants, context, primary/pin/unread independent. Sidebar and
+  header consume same acknowledged projection; no real-agent icon changed in tests.
+- Task queued/handoff admitted/approved project to queued, not working. Row exposes
+  actual state. Only thinking/streaming/executing states can animate small icons;
+  waiting/blocked/idle/error/queued and historical handoff/results remain static.
+  Reduced motion retained. Empty pending turn says Waiting for progress and has
+  no running icon; tool motion uses typed executing state, not guessed running.
+- Existing message status now survives durable API projection and home-page
+  adapter; task result status persisted alongside its row. Home result entries
+  preserve origin conversation, root thread and reply-to handoff IDs. Inline
+  older-history paging retained; no session navigator introduced. Handoff transcript
+  delivery uses existing background_deliveries receipts/atomic store to dedupe
+  repeated delivery and preserve existing pre-upgrade posts; conflicting text
+  fails for reconciliation rather than silently overwriting history.
+- POST /v1/handoffs/{id}/reply + existing WebUI proxy, typed adapter and inline
+  Follow up dialog. This is an explicit operator-requested follow-up, not forged
+  autonomous peer chat. Same canonical participants/conversation/project/workspace,
+  same tool ceiling, earlier task/result as permitted exchange data; stable new
+  request ID and durable reply/root correlation. Reuses normal handoff admission
+  and ALWAYS creates a fresh approval, even when parent needed none/project has
+  a standing handoff grant. Incoming bridge/message data cannot invoke this path.
+  Active/unknown exchanges reject follow-up; no replay. Repeating the same request
+  returns existing handoff; changed payload conflicts. UI reports only acknowledged
+  pending-approval status and preserves draft/error on transport failure.
+
+Focused verification: UI38 passed across8 files, including icon Settings wiring,
+inline wire correlation, failed-send draft/stable-key retry, rejected primary and
+ordering regression; production theme/type/no-mock build passed (size advisory).
+Backend61 passed: real isolated REST follow-up202 pending approval, idempotency,
+SQLite reopen/correlation/tools/registry/history unchanged; unknown/active403/409
+protection, admin/prefixed scope, existing profile proxy guard, one-time posts,
+small icon persistence and queued status. Isolated local fixtures only; no paid
+model/provider, external agent, operator primary/unread/pin or credential mutation.
+External logs: agent-primary-20261019/continuity-ui.log, continuity-backend.log,
+continuity-build.log. Test fixes distinguish newly additive contract fields from
+actual defects; receipt column assignment and proxy quote binding were repaired
+before qualification. No broad suite used.
+
+Runtime preflight: sole shell12591, Gateway12599/WebUI12608 exact canonical managed
+jobs; fresh legitimate lease. Requests have no queued/running entries; durable
+tasks have no queued/running entries. One existing execution_unknown request,
+ten unknown handoffs and one pending handoff approval must remain unchanged.
+Only required Gateway/WebUI reload and external dist switch authorized; native
+window/draft will not be reloaded while exact-process access is unavailable.
+
+Limits: follow-up is approved task exchange, not arbitrary native peer-to-peer
+free-form messaging or an automatic reply engine; caller-scoped bridge semantics
+unchanged. No claim of external bridge delivery or autonomous messaging parity.
+Successful follow-up model execution/result roundtrip not exercised; only admission
+and durable message/result fixtures. Native Settings/dialog/icon visuals and
+correct-process popup acceptance remain unverified. Voice/media/large avatars
+not implemented or tested in this pass. Runtime rollout evidence follows.

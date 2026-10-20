@@ -33,8 +33,9 @@ export interface WireMessage {
   /** Epoch seconds (an ISO string is accepted too). */
   created_at: number | string;
   content: string;
+  status?: string;
   parts?: unknown[];
-  links?: { handoff_id?: string; task_id?: string; child_session_id?: string };
+  links?: { handoff_id?: string; task_id?: string; child_session_id?: string; origin_session_id?: string; thread_handoff_id?: string; reply_to_handoff_id?: string };
   /** kind "summary" (role system): `content` summarizes `message_count` older messages. */
   summary?: { covers_from?: string | number | null; covers_to?: string | number | null; message_count: number };
 }
@@ -72,7 +73,7 @@ export type HomeEntry =
   | { kind: "summary"; id: string; text: string; count: number; fromAt?: number; toAt?: number }
   | {
     kind: "post"; id: string; post: "handoff_request" | "handoff" | "task_result"; sender: { id: string; name: string }; text: string;
-    title?: string; status?: string; handoffId?: string; taskId?: string; childSessionId?: string; createdAt?: number;
+    title?: string; status?: string; threadId?: string; replyTo?: string; originSessionId?: string; handoffId?: string; taskId?: string; childSessionId?: string; createdAt?: number;
   };
 
 /** A slice of a chat, oldest first. Summary and post messages are turns with no user text whose id
@@ -152,7 +153,7 @@ export function fromWirePage(sessionId: string, page: WirePage, agentName: (id: 
       const id = m.sender_agent_id ?? "";
       entries[turnId] = {
         kind: "post", id: String(m.id), post: POST[kind] ?? "task_result", sender: { id, name: agentName(id) }, text: m.content ?? "",
-        handoffId: m.links?.handoff_id, taskId: m.links?.task_id, childSessionId: m.links?.child_session_id, createdAt,
+        status: m.status, threadId: m.links?.thread_handoff_id ?? m.links?.handoff_id, replyTo: m.links?.reply_to_handoff_id, originSessionId: m.links?.origin_session_id, handoffId: m.links?.handoff_id, taskId: m.links?.task_id, childSessionId: m.links?.child_session_id, createdAt,
       };
     }
   }

@@ -504,7 +504,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         <div className="jg-agent-pill-wrap">
           <button ref={pill} type="button" className="jg-agent-pill" title={`${agent.name}`} aria-haspopup="menu" aria-expanded={menuOpen}
             onClick={() => (host instanceof WebHost && host.openHistory ? setMenuOpen((o) => !o) : host.openDetails?.(agent.id))}>
-            <AgentAvatar id={agent.id} name={agent.name} size={20} primary={agents?.some((a) => a.id === agent.id && a.primary === true)} />
+            <AgentAvatar id={agent.id} name={agent.name} size={20} preset={agents?.find((a) => a.id === agent.id)?.icon_preset} primary={agents?.some((a) => a.id === agent.id && a.primary === true)} />
             <span>{agent.name}</span>
           </button>
           <Menu open={menuOpen} anchor={menuOpen ? pill.current : null} ariaLabel={`${agent.name} menu`} onClose={() => setMenuOpen(false)}
@@ -530,7 +530,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
               )}
               {entries[turn.turnId].kind === "summary"
                 ? <SummaryCard entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "summary" }>} links={links} />
-                : <PostMessage entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "post" }>} links={links} onOpenHandoff={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} onOpenChat={host instanceof WebHost && host.openChat ? (id) => (host as WebHost).openChat?.(id) : undefined} />}
+                : <PostMessage onReply={host.openHandoffReply ? (id) => host.openHandoffReply?.(id) : undefined} entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "post" }>} links={links} onOpenHandoff={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} onOpenChat={host instanceof WebHost && host.openChat ? (id) => (host as WebHost).openChat?.(id) : undefined} />}
             </section>
           ) : (
             <section key={turn.turnId} data-turn-id={turn.turnId} className={`jg-turn${loadedTurns.current.has(turn.turnId) ? "" : " is-new"}`}>
@@ -545,7 +545,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
                 : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
               <Reactions emojis={reactions[turn.turnId] ?? []} onRemove={(e) => setReactions((r) => ({ ...r, [turn.turnId]: (r[turn.turnId] ?? []).filter((x) => x !== e) }))} />
-              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} agent={agent} state={turnAvatarState(turn)} />}
+              {showsProgress(turn) && <ProgressLine phrase={turn.parts.length ? activityPhrase(turn, agentName) : "Waiting for progress…"} agent={agent} state={turnAvatarState(turn)} />}
             </section>
           ))}
         </div>

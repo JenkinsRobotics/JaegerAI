@@ -8,12 +8,13 @@ import type { Agent } from "../api/types";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 it("renames, archives, restores and pins the same agent through acknowledged backend actions", async () => {
   localStorage.clear();
-  const worker: Agent = { id: "agent:worker", name: "worker", kind: "jaeger_native", role: "specialist", display_name: "Worker", archived: false, pinned: false, ui_actions: { read: true, rename: true, hide: true, pin: true } };
+  const worker: Agent = { id: "agent:worker", name: "worker", kind: "jaeger_native", role: "specialist", display_name: "Worker", archived: false, pinned: false, icon_choices: ["robot", "robot-square", "robot-shield"], ui_actions: { icon: true, read: true, rename: true, hide: true, pin: true } };
   const lead: Agent = { id: "native:jaeger", name: "jaeger", role: "lead", display_name: "Jaeger", ui_actions: { rename: true } };
   const source = new MockSource();
   vi.spyOn(source, "agents").mockImplementation(async () => [{ ...lead }, { ...worker }]);
-  const patch = vi.fn(async (id: string, body: { display_name?: string | null; archived?: boolean }) => {
+  const patch = vi.fn(async (id: string, body: { display_name?: string | null; archived?: boolean; icon_preset?: string | null }) => {
     expect(id).toBe(worker.id);
+    if (body.icon_preset !== undefined) worker.icon_preset = body.icon_preset;
     if (body.display_name !== undefined) worker.display_name = body.display_name ?? "Worker";
     if (body.archived !== undefined) { worker.archived = body.archived; worker.hidden = body.archived; }
   });
@@ -26,6 +27,9 @@ it("renames, archives, restores and pins the same agent through acknowledged bac
   try {
     await flush(() => root.render(<App source={source} />));
     await settings(); await clickText("Agents");
+    await flush(() => { const select = el.querySelector<HTMLSelectElement>('[aria-label="Icon for Worker"]')!; select.value = 'robot-shield'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    expect(patch).toHaveBeenCalledWith(worker.id, { icon_preset: 'robot-shield' });
+    expect(worker.icon_preset).toBe('robot-shield');
     await flush(() => { [...el.querySelectorAll<HTMLElement>('[aria-label="Manage agents"] .jg-sheet__card')].find((r) => r.textContent!.includes(worker.id))!.querySelectorAll<HTMLButtonElement>('button').forEach((b) => { if (b.textContent === 'Rename') b.click(); }); });
     await flush(() => {
       const input = el.querySelector<HTMLInputElement>('input[aria-label="Display name"]')!;

@@ -34,7 +34,7 @@ def test_task_round_trips_board_fields_and_defaults_old_rows():
     ({"status": "pending_approval"}, [{"state": "running"}], "waiting_approval"),
     ({"status": "completed"}, [{"state": "blocked"}], "blocked"),
     ({"status": "execution_unknown"}, [], "error"),
-    (None, [{"state": "queued"}], "working"),
+    (None, [{"state": "queued"}], "queued"),
 ])
 def test_agent_status(handoff, tasks, expected):
     assert agent_status(handoff, tasks) == expected
@@ -127,7 +127,7 @@ async def test_agent_seen_route_persists_and_validates(tmp_path):
     async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as client:
         resp = await client.post(f"/v1/agents/{agent_id}/seen", json={"seen_at": 42, "event_id": 7})
         assert resp.status == 200
-        assert (await resp.json()) == {"agent_id": agent_id, "seen_at": 42.0, "event_id": 7}
+        assert (await resp.json()) == {"agent_id": agent_id, "seen_at": 42.0, "event_id": 7, "unread": False}
         assert gateway.store.agents_seen()[agent_id]["seen_at"] == 42.0
         assert (await client.post("/v1/agents/nope/seen", json={})).status == 404
         assert (await client.post(f"/v1/agents/{agent_id}/seen", json={"seen_at": "x"})).status == 400

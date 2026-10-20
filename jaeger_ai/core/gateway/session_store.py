@@ -199,6 +199,8 @@ def message_dict(m: Any, session_id: str | None = None) -> dict[str, Any]:
         "tool_calls": json.loads(get("tool_calls_json") or "[]"),
         "links": links,
     }
+    if isinstance(extra.get("status"), str):
+        out["status"] = extra["status"]
     if out["kind"] == "summary" and isinstance(extra.get("summary"), dict):
         out["summary"] = extra["summary"]
     return out
@@ -213,6 +215,8 @@ def _typed_fields(m: Any) -> dict[str, Any]:
     if kind and kind != "message":
         out["kind"] = kind
         extra = _row_meta(m["meta_json"])
+        if isinstance(extra.get("status"), str):
+            out["status"] = extra["status"]
         if kind == "summary" and isinstance(extra.get("summary"), dict):
             out["summary"] = extra["summary"]
     if "sender_agent_id" in keys and m["sender_agent_id"]:
@@ -2198,6 +2202,27 @@ class GatewaySessionStore:
             return out
 
 
+    def append_handoff_post_once(self, session_id: str, role: str, text: str, *, kind: str, sender_agent_id: str | None, links: dict, meta: dict, parts=None) -> int:
+        """Transcript delivery only; reuse the durable delivery receipt/transaction owner."""
+        if kind not in {'handoff_request', 'handoff_result'} or not links.get('handoff_id'):
+            raise ValueError('A handoff post requires its durable exchange ID')
+        key = json.dumps(['handoff_post', links['handoff_id'], session_id, kind, meta.get('status')])
+        with self._immediate() as conn:
+            old = conn.execute('SELECT digest,receipt_json FROM background_deliveries WHERE delivery_key=?', (key,)).fetchone()
+            digest = input_fingerprint(json.dumps({'role': role, 'text': text, 'sender': sender_agent_id, 'links': links, 'meta': meta}, sort_keys=True))
+            if old:
+                if old['digest'] != digest:
+                    raise ValueError('Handoff post identity reused with different content')
+                return json.loads(old['receipt_json'])['message_id']
+            if not conn.execute('SELECT 1 FROM sessions WHERE session_id=?', (session_id,)).fetchone():
+                raise ValueError('Original conversation unavailable')
+            existing = conn.execute("SELECT id,content FROM messages WHERE session_id=? AND kind=? AND json_extract(links_json,'$.handoff_id')=? AND json_extract(meta_json,'$.status') IS ? ORDER BY id LIMIT 1", (session_id, kind, links['handoff_id'], meta.get('status'))).fetchone()
+            if existing and existing['content'] != text:
+                raise ValueError('Existing handoff post has different content; preserve it for reconciliation')
+            mid = existing['id'] if existing else self.append_message(session_id, role, text, kind=kind, sender_agent_id=sender_agent_id, links=links, meta=meta, parts=parts, conn=conn)
+            conn.execute('INSERT INTO background_deliveries(delivery_key,digest,receipt_json) VALUES(?,?,?)', (key, digest, json.dumps({'message_id': mid})))
+            return mid
+
     def deliver_task_result(self, task_id: str, session_id: str, text: str, status: str,
                             sender_agent_id: str | None = None) -> dict:
         """Atomic owner-only delivery to the originating conversation, exactly once."""
@@ -2210,9 +2235,9 @@ class GatewaySessionStore:
                 raise ValueError('Originating session no longer exists; task result remains durable')
             now = time.time()
             cursor = conn.execute(
-                "INSERT INTO messages(session_id,role,content,timestamp,kind,sender_agent_id,links_json) "
-                "VALUES(?,'assistant',?,?,'task_result',?,?)",
-                (session_id, text, now, sender_agent_id, json.dumps({'task_id': task_id})))
+                "INSERT INTO messages(session_id,role,content,timestamp,kind,sender_agent_id,links_json,meta_json) "
+                "VALUES(?,'assistant',?,?,'task_result',?,?,?)",
+                (session_id, text, now, sender_agent_id, json.dumps({'task_id': task_id, 'origin_session_id': session_id}), json.dumps({'status': status})))
             conn.execute('UPDATE sessions SET updated_at=? WHERE session_id=?', (now, session_id))
             msg_row = conn.execute('SELECT * FROM messages WHERE id=?', (cursor.lastrowid,)).fetchone()
             message = message_dict(msg_row, session_id)
