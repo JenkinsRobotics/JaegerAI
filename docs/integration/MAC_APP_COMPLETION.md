@@ -895,3 +895,62 @@ existing inline pending handoff and explicitly decide; no repeat Follow up neede
 Actual card visibility/decision/result and motion remain browser acceptance steps,
 not inferred from tests or asset hashes. Existing icon/history/primary AX acceptance
 stands; pixel/native/voice limits unchanged. No further fixture restart planned.
+
+## Activity/approval production rollout and Safari continuity checkpoint — 2026-10-19
+
+Coordinator's additional Safari58310 observations: reload displayed approved
+handoff request + completed correlated result. Fresh Alpha prompt "SLOW-STREAM
+isolated browser motion acceptance fresh request." submitted ONCE; Waiting for
+progress→incremental Streaming token chunks with Stop. Switched Beta during work,
+returned Alpha: completed output retained in the same continuous feed; empty-
+composer Send disabled/idle restored. No duplicate submission. This establishes
+browser-visible streaming/background continuity/result behavior with the scripted
+local model, separate from backend fixtures. No pixel animation/star-color claim
+from tiny distorted screenshots; no native12591 acceptance inferred. Existing
+icon/history/primary AX evidence stands. Final current inline card decision
+acceptance remains a distinct coordinator check; fixture kept running unchanged.
+
+Production preflight: exact existing launch jobs own Gateway21888:33418 and
+WebUI19711:8790, canonical cwd and canonical workspace package PYTHONPATH already
+configured. No launchd edit, dependency install or security/network/auth change
+needed. No active/cancelling/admitted request, running handoff or queued/running
+task. Three pending approvals (two background_task, one handoff), no live tool
+confirmation waiter. Fresh legitimate menubar12591 lease; Global Stop unchanged.
+Saved before/preflight hashes include unknown request1, unknown/pending handoffs,
+all pending approvals, presentation/primary, sessions and complete message store.
+
+Deployed passing activity source d2e96265 plus approval source0fb7ab8c (current
+committed source). No source edits after focused qualification: summary25 pass,
+approval backend17/UI9 pass, type/theme/prod build/no-mock pass. No expensive suite
+rerun. Passing fixture UI dist copied into canonical external production dist;
+previous build recoverable at ~/.cache/jaeger/ui-rebuild-mainscreen/previous/
+activity-approval-1792463586/dist. Reloaded ONLY exact Gateway/WebUI launch jobs.
+New Gateway25800 on127.0.0.1:33418 and WebUI25804 on127.0.0.1:8790 healthy in
+repeated samples beyond90s; real owner12591 heartbeat age0.81s at stable check.
+Sole shell12591 exact agent-primary external bundle0.13.0+3a347be8 retained; no
+native input/window reload/relaunch or duplicate launch. Native in-memory page's
+new frontend-byte acceptance is unverified; serving new bytes does not establish
+that an unreloaded WK page loaded them. Existing window can be shown through its
+menu-bar control without relaunching/discarding any draft; not attempted here.
+
+Loaded-contract proof, not GitHEAD/health inference: existing production handoff
+approval projection now includes task (before false, after true). Production
+WebUI nonexistent-session approval query now correctly returns0 (before3 due to
+dropped query). Pending approval count3 unchanged. Current source file SHA256s
+for server.py/agent_summary.py/jaeger_sessions.py match committed source and are
+recorded with process identities in external runtime.json. Managed jobs already
+use canonical package paths; the fixture's earlier stale installed-package issue
+was not imported into production. No provider/external-agent turn used to probe.
+
+Production HTML/all served assets match passing candidate byte-for-byte:
+index-Vd-L-tPZ.js SHA256 c515389372634df87660ea2d899377bddcd2d9174ac754fef88ec3d5bbd1535f;
+index-BijpUMNE.css SHA2569608489256be019316ad15e41b6797a3cdd0914fe42f3aa2f4700bc02a3b8518.
+All protected hashes match before/after/stable: unknown request1, unknown/pending
+handoffs, all3 pending approvals, presentation/primary, sessions, transcripts,
+Global Stop. No unknown replay, approval resolution, real-agent mutation or native
+draft interaction. No active work after restart. Fixture PID25226/58310+58305
+unchanged/healthy, separate UI dist unchanged, retained for final card acceptance.
+External evidence: ~/.cache/jaeger/verification/activity-approval-production-20261019/
+(before/preflight/after/stable, contracts-before/after/stable, deployment/runtime,
+browser-checkpoint.json). Residual: pixel/native visible acceptance, external peer
+acceptance and broader paused voice/media remain unverified/outside this rollout.
