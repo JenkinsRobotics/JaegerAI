@@ -954,3 +954,13 @@ External evidence: ~/.cache/jaeger/verification/activity-approval-production-202
 (before/preflight/after/stable, contracts-before/after/stable, deployment/runtime,
 browser-checkpoint.json). Residual: pixel/native visible acceptance, external peer
 acceptance and broader paused voice/media remain unverified/outside this rollout.
+
+Final read-only fixture corroboration after coordinator checkpoint: the exact
+coordinator approval_256248f9a08f is now resolved with decisiononce; linked
+handoff_de3ba2e52f16 is completed. Metadata retains thread/reply parent
+browser-fixture-parent; exactly1 origin handoff_result post in Alpha. Fresh
+SLOW-STREAM prompt has exactly1 matching request, completed. These durable facts
+corroborate coordinator's reported approved request/result and nonduplicate stream;
+no decision or execution call was sent by this production rollout. Saved
+browser-approved-result.json/browser-checkpoint.json. This updates earlier pending
+checkpoint evidence without inferring pixel/native presentation acceptance.
