@@ -203,3 +203,22 @@ def test_activity_history_survives_replay_retention_and_pages(tmp_path, monkeypa
     assert first["has_more"] and not second["has_more"]
     assert [e["data"]["delta"] for e in first["events"] + second["events"]] == [str(i) for i in range(520)]
     assert len(store.replay_events("one")["events"]) < 520
+
+
+@pytest.mark.asyncio
+async def test_startup_preserves_unknown_requests_without_replay(tmp_path):
+    store = GatewaySessionStore(tmp_path / "sessions.db")
+    store.admit_request("uncertain", "must never replay", request_id="uncertain-request")
+    store.mark_request_status("uncertain-request", "execution_unknown")
+    before = store.get_request("uncertain-request")
+    history = store.get_session("uncertain")["messages"]
+    app = JaegerGatewayApp(store=store)
+    # A startup recovery report must not bind a run or dispatch any execution.
+    async def forbidden(*args, **kwargs):
+        pytest.fail("unknown execution was redispatched")
+    app._execute_turn = forbidden
+    app._preserve_unknown_requests()
+    await asyncio.sleep(0)
+    assert not app._running_tasks
+    assert store.get_request("uncertain-request") == before
+    assert store.get_session("uncertain")["messages"] == history

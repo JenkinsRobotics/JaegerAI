@@ -915,7 +915,7 @@ class JaegerGatewayApp:
                 except Exception as exc:
                     logger.debug("Gateway sensor supervisor skipped: %s", exc)
                 self._owner_task = asyncio.create_task(self._owner_maintenance_loop(rt))
-                self._pending_resume = True
+                self._pending_recovery_report = True
         except Exception as exc:
             logger.debug("Gateway EntityRuntime attach skipped: %s", exc)
         if runtime_for_producers is not None and getattr(runtime_for_producers, "layout", None) is not None:
@@ -1267,45 +1267,16 @@ class JaegerGatewayApp:
                 )
             )
 
-    def _resume_safe_unknown_requests(self, runtime: Any) -> None:
-        """Continue execution_unknown turns whose runs RecoveryManager resumed.
+    def _preserve_unknown_requests(self) -> None:
+        """Startup observes uncertain outcomes; it never redispatches their input.
 
-        Pending EffectLedger rows stay BLOCKED. A request with no native_run_id
-        is re-dispatched only when no effect is indeterminate.
+        A recoverable native checkpoint or an empty pending-effect list does
+        not establish whether the original request already caused an effect.
+        Keep the original request/session/history for explicit reconciliation.
         """
-        report = getattr(runtime, "_recovery_report", None)
-        resumed = set(getattr(report, "resumed", None) or [])
-        pending_keys = list(getattr(report, "pending_effects", None) or [])
-        pending_run_ids = set()
-        for key in pending_keys:
-            # Effect keys are `{run_id}:{tool}:{payload}`.
-            pending_run_ids.add(str(key).split(":", 1)[0])
-        try:
-            unknown = self.store.list_requests(status="execution_unknown")
-        except Exception:
-            return
-        for req in unknown:
-            rid = str(req.get("request_id") or "")
-            sid = str(req.get("session_id") or "")
-            turn_id = str(req.get("turn_id") or "")
-            text = str(req.get("input_text") or "")
-            native = str(req.get("native_run_id") or "")
-            if not rid or not sid or not text:
-                continue
-            if native and native in pending_run_ids:
-                logger.warning("Request %s stays blocked; pending effects on run %s", rid, native)
-                continue
-            if not native and pending_keys:
-                logger.warning("Request %s stays blocked; indeterminate effects present", rid)
-                continue
-            if rid in self._running_tasks:
-                continue
-            logger.info("Re-dispatching recovered request %s run=%s", rid, native or "unbound")
-            self._cancellations.register(rid)
-            self._running_tasks[rid] = asyncio.create_task(
-                self._execute_turn(sid, turn_id, text, request_id=rid,
-                                   execution=_admitted_execution(req))
-            )
+        unknown = self.store.list_requests(status="execution_unknown")
+        if unknown:
+            logger.warning("Preserving %d execution_unknown requests without replay", len(unknown))
 
     async def _background_loop(self) -> None:
         while True:
@@ -6263,13 +6234,12 @@ async def run_gateway_forever(
     global _BOUND_GATEWAY_PORT
     _BOUND_GATEWAY_PORT = int(port)
     print(f"[jaeger-gateway] Listening on http://{host}:{port}", flush=True)
-    if getattr(gateway, "_pending_resume", False):
+    if getattr(gateway, "_pending_recovery_report", False):
         try:
-            from jaeger_ai.core.entity.runtime import EntityRuntime
-            gateway._resume_safe_unknown_requests(EntityRuntime.get_singleton())
+            gateway._preserve_unknown_requests()
         except Exception:
-            logger.debug("post-listen resume skipped", exc_info=True)
-        gateway._pending_resume = False
+            logger.debug("post-listen recovery report skipped", exc_info=True)
+        gateway._pending_recovery_report = False
     try:
         while not gateway._lifecycle_shutdown.is_set():
             try:
