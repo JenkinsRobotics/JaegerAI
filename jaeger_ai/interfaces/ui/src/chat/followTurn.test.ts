@@ -121,3 +121,15 @@ describe("WebHost.startTurn", () => {
     expect(done.state).toBe("complete");
   });
 });
+
+
+describe("durable terminal answer", () => {
+  it.each(["", "MAC-", "MAC-CONTINUITY-OK"])("shows the receipt answer after streamed prefix %j without duplication", async (prefix) => {
+    const parts: ChatPart[] = [];
+    const events = [ev(10, "turn.delta", "r", { delta: prefix }), ev(11, "turn.finish", "r", { output: "MAC-CONTINUITY-OK", status: "completed" })];
+    const result = await followTurn({ source: { stream: replayAll(events) }, sessionId: "fixture", requestId: "r", cursor: 9,
+      signal: new AbortController().signal, onPart: (p) => parts.push(p), sleep: noSleep });
+    expect(result.state).toBe("complete");
+    expect(parts.filter((p) => p.kind === "markdownContent").map((p) => p.text).join("")).toBe("MAC-CONTINUITY-OK");
+  });
+});
