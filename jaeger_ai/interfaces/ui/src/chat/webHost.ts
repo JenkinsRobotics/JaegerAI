@@ -195,6 +195,8 @@ export class WebHost implements ChatHost {
     };
   }
 
+  pendingApprovals = (sessionId: string) => this.source.pendingApprovals?.(sessionId) ?? Promise.resolve([]);
+
   async respondToConfirmation(turnId: string, callId: string, decision: "approve" | "deny") {
     await this.source.approve(turnId, callId, decision === "approve");
   }

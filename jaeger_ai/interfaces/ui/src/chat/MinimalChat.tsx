@@ -21,6 +21,7 @@ import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
+import { SessionApprovals } from "./SessionApprovals";
 import { ApprovalCard, QuestionCard } from "./ApprovalCard";
 import { MessageMenu, Reactions, type MessageAction } from "./MessageMenu";
 import { useRevealedText } from "./reveal";
@@ -548,6 +549,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
               {showsProgress(turn) && <ProgressLine phrase={turn.parts.length ? activityPhrase(turn, agentName) : "Waiting for progress…"} agent={agent} state={turnAvatarState(turn)} />}
             </section>
           ))}
+          {sessionId && host instanceof WebHost && <SessionApprovals key={sessionId} sessionId={sessionId} host={host} />}
         </div>
       </div>
       <button type="button" className={`jg-jump${atBottom ? "" : " is-visible"}`} onClick={jumpToLatest}

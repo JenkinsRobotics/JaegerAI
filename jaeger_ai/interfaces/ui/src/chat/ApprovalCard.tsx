@@ -23,7 +23,7 @@ export function ApprovalCard({ title, message, toolName, input, decided, onDecid
 }) {
   const tool = toolName ?? /^Run (.+)\?$/.exec(title)?.[1];
   const shell = Boolean(tool && SHELL_TOOLS.test(tool));
-  const heading = shell ? "Approve terminal command" : "Approve tool call";
+  const heading = /hand.?off/i.test(title) ? title : shell ? "Approve terminal command" : "Approve tool call";
   const subject = approvalSubject(input, message);
   if (decided) {
     return (

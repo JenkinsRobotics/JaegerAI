@@ -837,3 +837,35 @@ Gateway21888/WebUI19711 untouched; protected-state hashes still match pre-fixtur
 baseline and legitimate12591 heartbeat fresh. Source working-state fix is NOT yet
 loaded into production Gateway21888. Source and fixture backend evidence are now
 current; coordinator visual checks are the next action. Voice/media remain paused.
+
+## Standalone follow-up approval visibility repair — 2026-10-19
+
+Fresh coordinator Safari58310 evidence: Beta primary persisted; a unique composer
+submission rejected by the preserved unknown reconciliation guard, not retried.
+Alpha Follow up submitted once; saved pending handoff_de3ba2e52f16 /
+approval_256248f9a08f for exact task "Isolated browser follow-up acceptance: return a
+short correlated result." No visible decision card; no unsent browser draft.
+
+Inspected durable records: still pending, no execution. Two producer/adapter gaps:
+standalone handoff approvals omitted session_id; home live stream handled posts,
+not standalone approval recovery outside an active turn. Repair binds new
+approvals to saved origin_session. Existing unbound rows are enriched read-only
+from metadata.handoff_id→durable handoff (session/task), with no row rewrite.
+Existing GET approvals?session_id filtering reused; WebUI now preserves that query.
+Typed adapter exposes optional pendingApprovals; inline SessionApprovals after
+latest transcript restores/polls session-scoped pending handoff cards, using the
+existing owner decision endpoint only after explicit Allow once/Deny once. Failed
+saves keep the card/error, busy guard prevents repeated clicks, successful-ID
+tracking prevents stale polling from resurrecting a decided card. No auto-approval,
+new credential/grant or permissions change. No IDE source changed. Existing active
+turn tool cards remain separate; this slice handles standalone handoff approvals.
+
+Focused backend17 passed (15 existing aiohttp warnings), UI9 passed, type/theme/
+production build/no-mock passed; Vite large-chunk advisory only. Build initially
+caught an unused test import; removed before passing final checks. Fixture paused
+for backend isolation guard; production processes never paused. UI built only in
+external ui-source/dist, never canonical production dist. Current coordinator
+approval deliberately left pending for actual browser decision/acceptance.
+Beta unknown home history/guard remains intact. Use Alpha or a separate fixture
+lane for new explicit requests; no retry or reconciliation invented. Fixture-only
+rollout evidence follows; native/pixel acceptance and voice/media limits unchanged.

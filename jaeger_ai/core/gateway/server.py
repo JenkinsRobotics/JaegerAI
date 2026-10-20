@@ -2216,6 +2216,7 @@ class JaegerGatewayApp:
             self.store.create_approval(
                 approval_id=approval_id,
                 kind="handoff",
+                session_id=origin_session,
                 prompt=f"Allow handoff to {target.display_name}?",
                 options=["once", "deny"],
                 request_id=request_id,
@@ -5415,8 +5416,13 @@ class JaegerGatewayApp:
         if origin and origin.get("parent_session_id"):
             self.event_bus.publish(origin["parent_session_id"], "approval.request", payload)
 
-    @staticmethod
-    def _with_origin(row: dict[str, Any]) -> dict[str, Any]:
+    def _with_origin(self, row: dict[str, Any]) -> dict[str, Any]:
+        # Old standalone handoffs predate the session binding. Read the saved
+        # handoff, never request data, to recover presentation without mutation.
+        if row.get("kind") == "handoff":
+            handoff = self.store.get_handoff((row.get("metadata") or {}).get("handoff_id") or "")
+            if handoff:
+                row = {**row, "session_id": handoff.get("session_id"), "task": handoff.get("task")}
         origin = (row.get("metadata") or {}).get("origin")
         return {**row, "origin": origin} if origin else row
 

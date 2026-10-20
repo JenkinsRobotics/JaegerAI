@@ -1,0 +1,27 @@
+import { act } from "react";
+import { createRoot } from "react-dom/client";
+import { expect, it, vi } from "vitest";
+import { SessionApprovals } from "./SessionApprovals";
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+it("restores only this chat's pending handoff; decisions remain explicit and failed saves stay visible", async () => {
+  const host = {
+    pendingApprovals: vi.fn().mockResolvedValue([
+      { approval_id: "own", session_id: "home", kind: "handoff", status: "pending", prompt: "Allow handoff to Beta?", task: "exact bounded task" },
+      { approval_id: "foreign", session_id: "other", kind: "handoff", status: "pending", prompt: "foreign" },
+      { approval_id: "tool", session_id: "home", kind: "tool", status: "pending", prompt: "other active turn" },
+    ]),
+    respondToConfirmation: vi.fn().mockRejectedValueOnce(new Error("Save rejected")).mockResolvedValue(undefined),
+  };
+  const el=document.createElement("div"); const root=createRoot(el);
+  await act(async () => root.render(<SessionApprovals sessionId="home" host={host}/>));
+  expect(el.textContent).toContain("Allow handoff to Beta?"); expect(el.textContent).toContain("exact bounded task");
+  expect(el.textContent).not.toContain("foreign"); expect(host.respondToConfirmation).not.toHaveBeenCalled();
+  const allow=()=>Array.from(el.querySelectorAll("button")).find(b=>b.textContent==="Allow once")!;
+  await act(async () => allow().click());
+  expect(el.textContent).toContain("Save rejected"); expect(el.textContent).toContain("Allow once");
+  await act(async () => allow().click());
+  expect(host.respondToConfirmation).toHaveBeenLastCalledWith("home","own","approve");
+  expect(el.textContent).not.toContain("Allow once");
+  await act(async () => root.unmount());
+});
