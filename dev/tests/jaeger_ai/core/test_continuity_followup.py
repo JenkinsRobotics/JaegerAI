@@ -115,3 +115,26 @@ async def test_approved_followup_executes_correlated_child_and_posts_result(gw, 
     repeat = await client.post('/v1/handoffs/owned-thread/reply', json={'task': 'return local answer', 'request_id': 'successful-followup'})
     assert repeat.status == 200 and (await repeat.json())['id'] == child['id']
     assert len(seen) == 1
+
+
+@pytest.mark.asyncio
+async def test_standalone_followup_pending_approval_is_session_scoped_and_recovers_old_rows(gw):
+    app, client = gw
+    app.store.ensure_session('owned-home')
+    parent(app.store)
+    child=await (await client.post('/v1/handoffs/owned-thread/reply',json={'task':'explicit bounded followup','request_id':'visible-followup'})).json()
+    approval=app.store.get_approval(child['approval_id'])
+    assert approval['session_id']=='owned-home'
+    data=await (await client.get('/v1/approvals?session_id=owned-home')).json()
+    assert data['approvals'][0]['approval_id']==approval['approval_id']
+    assert data['approvals'][0]['task']=='explicit bounded followup'
+    # Backward recovery is read-only, from durable handoff correlation.
+    with app.store._get_conn() as conn:
+        conn.execute('UPDATE approvals SET session_id=NULL WHERE approval_id=?',(approval['approval_id'],))
+    data=await (await client.get('/v1/approvals?session_id=owned-home')).json()
+    assert data['approvals'][0]['session_id']=='owned-home'
+    assert app.store.get_approval(approval['approval_id'])['session_id'] is None
+    assert (await (await client.get('/v1/approvals?session_id=foreign-home')).json())['approvals']==[]
+    assert (await client.get('/v1/approvals?session_id=owned-home',headers=client_headers('ares'))).status==403
+    assert app.store.get_handoff(child['id'])['status']=='pending_approval'
+    assert not app._running_tasks

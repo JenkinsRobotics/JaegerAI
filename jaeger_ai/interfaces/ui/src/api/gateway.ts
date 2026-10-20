@@ -4,7 +4,7 @@ import type { AgentActions, Section } from "./agentActions";
  * proxy), which forwards /v1/* to the gateway and adds the caller token on the
  * server side. The browser never sees or sends a token. */
 import { decodeSSE, type SSEFrame } from "./sse";
-import type { JaegerSource, TurnReceipt , UploadedAttachment } from "./source";
+import type { JaegerSource, PendingApproval, TurnReceipt , UploadedAttachment } from "./source";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 export class GatewayError extends Error {
@@ -117,6 +117,10 @@ export class GatewayClient implements JaegerSource {
   }
   async cancel(sessionId: string, requestId?: string) {
     await this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, requestId ? { request_id: requestId } : {});
+  }
+  async pendingApprovals(sessionId: string): Promise<PendingApproval[]> {
+    const data = await this.json<{ approvals: PendingApproval[] }>(`/v1/approvals?session_id=${encodeURIComponent(sessionId)}`);
+    return data.approvals;
   }
   async approve(_sessionId: string, approvalId: string, approved: boolean) {
     await this.json(`/v1/approvals/${encodeURIComponent(approvalId)}`, { approved });

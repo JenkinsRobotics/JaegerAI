@@ -9,6 +9,11 @@ export interface UploadedAttachment { attachment_id: string; name: string; mime:
 
 import type { AgentActions } from "./agentActions";
 
+export interface PendingApproval {
+  approval_id: string; session_id?: string; kind: string; prompt: string;
+  task?: string; status: string;
+}
+
 export interface JaegerSource {
   readonly kind: "live" | "mock";
   agents(): Promise<Agent[]>;
@@ -36,6 +41,7 @@ export interface JaegerSource {
    * supported by this gateway; 413 = too large. */
   uploadAttachment?(sessionId: string, body: { name: string; mime: string; data_base64: string }, idempotencyKey?: string): Promise<UploadedAttachment>;
   cancel(sessionId: string, requestId?: string): Promise<void>;
+  pendingApprovals?(sessionId: string): Promise<PendingApproval[]>;
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   tasks(): Promise<Task[]>;
   handoffs(query?: { session_id?: string }): Promise<Handoff[]>;

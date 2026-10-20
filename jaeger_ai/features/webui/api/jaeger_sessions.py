@@ -250,7 +250,7 @@ def route(handler, parsed, method: str) -> bool:
         return _proxy(handler, "GET", "/v1/runtime/capabilities")
 
     if method == "GET" and path in ("/api/jaeger/approvals", "/v1/approvals"):
-        return _proxy(handler, "GET", "/v1/approvals")
+        return _proxy(handler, "GET", "/v1/approvals" + query)
 
     if method == "POST" and path.startswith("/api/jaeger/approvals/"):
         approval_id = path.rsplit("/", 1)[-1]
