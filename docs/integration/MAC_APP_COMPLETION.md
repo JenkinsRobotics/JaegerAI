@@ -869,3 +869,29 @@ approval deliberately left pending for actual browser decision/acceptance.
 Beta unknown home history/guard remains intact. Use Alpha or a separate fixture
 lane for new explicit requests; no retry or reconciliation invented. Fixture-only
 rollout evidence follows; native/pixel acceptance and voice/media limits unchanged.
+
+**Approval fixture rollout:** source `0fb7ab8c`; fixture PID25226 on the same
+58310/58305 loopback URLs, canonical workspace package imports preserved. Fixture
+alone now serves passing external ui-source/dist. New served index-Vd-L-tPZ.js
+SHA256 c515389372634df87660ea2d899377bddcd2d9174ac754fef88ec3d5bbd1535f;
+CSS index-BijpUMNE.css unchanged9608489256be019316ad15e41b6797a3cdd0914fe42f3aa2f4700bc02a3b8518.
+HTML/all assets match passing build byte-for-byte. Browser proxy GET
+/v1/approvals?session_id=agent-native%3Aeveryday returns approval_256248f9a08f,
+exact saved task, kindhandoff, statuspending and recovered Alpha session. Foreign
+session query returns empty. Existing stored row remains sessionNULL and pending;
+read-only recovery proved. No coordinator approval decision sent.
+
+Distinct browser-owned-approval-lane-check completed once through real canonical
+owner-react pipeline with BROWSER-FIXTURE-LANE-READY; allowed_tools=[]; no replay.
+Both diagnostic unknowns preserved unchanged. Beta home stays reconciliation-
+guarded intentionally; rejected unique user submission was not retried or moved.
+Use Alpha or separately owned lane for fresh work. Saved approval-before.json,
+approval-ui.log/backend.log/build.log, approval-runtime.json and updated manifest
+under external browser-acceptance-20261019 evidence folder. Production protected
+request/handoff/presentation/GlobalStop hashes and served old index-DkqErgZz.js
+unchanged; production processes/native window/drafts untouched. Backend/UI repair
+not production deployed. Next: coordinator refresh58310 once, select Alpha, review
+existing inline pending handoff and explicitly decide; no repeat Follow up needed.
+Actual card visibility/decision/result and motion remain browser acceptance steps,
+not inferred from tests or asset hashes. Existing icon/history/primary AX acceptance
+stands; pixel/native/voice limits unchanged. No further fixture restart planned.
