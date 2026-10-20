@@ -686,3 +686,31 @@ Rollout preflight: sole production shell12591, Gateway19707:33418 and WebUI19711
 fresh legitimate lease, no active request/handoff, unknown request1 preserved.
 Only exact Gateway launch-job reload is needed; no shell/WebUI/assets switch.
 Runtime outcome and source commit recorded below after verification.
+
+**Peer closure rollout:** source `0a0516433d15be66634aa0c101a8e2caab605d82`.
+Reloaded ONLY existing Gateway launch job; PID21888 owns loopback33418. Initial
+probe during startup was connection-refused; after startup health200 remained
+healthy in two samples beyond15s grace. Existing WebUI19711:8790 and shell12591
+(bundle0.13.0+3a347be8, exact agent-primary external path) were not restarted.
+Legitimate menubar12591 heartbeat fresh throughout. Schema15 plus authenticated
+invalid-source probe now returns Invalid identifier (old backend returned Invalid
+goal fields): new contract actually loaded, not inferred from GitHEAD/health.
+No valid real-agent goal/message was created. Tasks read returns no queued/running.
+
+Before/after/stable hashes match for the one execution_unknown request, all
+unknown/pending handoffs, presentation/primary and Global Stop. Nothing replayed.
+Served existing shared UI assets still match external passing dist byte-for-byte
+(index-DkqErgZz.js SHA2568fb3f5b8fd6a31ef6f4aa69c6096ea2a1965b827185a0766dbb611e5e7da061e;
+index-BijpUMNE.css SHA2569608489256be019316ad15e41b6797a3cdd0914fe42f3aa2f4700bc02a3b8518).
+External evidence: agent-primary-20261019/peer-tests.log, peer-before.json,
+peer-preflight.json, peer-after.json, peer-stable.json, peer-contract-{before,after,stable}.json,
+peer-runtime.json under ~/.cache/jaeger/verification. Other pre-existing test
+Gateway/WebUI processes observed read-only, untouched; only33418 job reloaded.
+
+Residual limits: no external peer/provider acceptance or Grok remote backend
+claim; local model transport scripted. Arbitrary inbox text remains intentionally
+inert until existing explicit scoped goal admission, then terminal reply is
+automatic. Crash-gap recovery is on inbox/goal read, not a new autonomous worker.
+No native messaging/popup/dialog visual acceptance: tool inventory lacks Jaeger,
+known exact lookup unsupported/timed out; no native input/reload risking draft.
+Existing unknown request remains unresolved, not retried. Voice/media remain paused.
