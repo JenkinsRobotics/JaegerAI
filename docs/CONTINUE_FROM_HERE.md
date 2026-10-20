@@ -2,6 +2,8 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `master` — operator-authorized canonical integration, 2026-10-19.
+**Duplicate-instance qualification (2026-10-19):** Stale shell12099 safely closed; only intended owner12591 remains, services/heartbeat/hashes healthy. Earlier CUA popup captures were not PID-proven. Correct-owner window17223 is not onscreen; exact-path CUA binding times out and macOS window-ID selection is unsupported. Showing/retesting that exact window remains blocked; do not relaunch it or claim owner-specific visual acceptance.
+
 **Popup correction (2026-10-19):** UI `9f1082a2` served and live-retested: single-line replacement, full-width hover, ordinary supported Rename Bot. Grok live labels compared; exact Grok pixel comparison remains blocked by distorted capture. Services/shell unchanged.
 
 **Sidebar/primary rollout (2026-10-19):** Feature commit `11272d91` deployed in newer shell `0.13.0+3a347be8`, PID12591; canonical Gateway12599/WebUI12608 healthy. Served asset hashes and authenticated new routes verified; native menu/picker observed without submitting agent changes. See latest [Mac completion record](integration/MAC_APP_COMPLETION.md). Prior draft-access blocker resolved by fresh empty-composer evidence; prior full-feature acceptance limits remain.
