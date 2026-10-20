@@ -812,3 +812,28 @@ fixture was paused, same focused file rerun with guard intact and passed.
 No broad/expensive successful suite repeated. External summary-focused.log,
 repair-running.json and repair-qualified.json retain source/test/runtime separation.
 Fixture restart and post-fix running→idle evidence follow below.
+
+**Fixture repair qualified:** source `d2e96265`, isolated PID24286, fixed loopback
+WebUI58310/Gateway58305 healthy in repeated checks beyond lifecycle grace. URL
+http://127.0.0.1:58310/?host=macos is left stable; old58091 remains retired.
+Canonical package-path repair eliminates observed bind_skill_scope import failure.
+New browser-postfix-background-check: receipt running + summary working during
+real30s scripted-provider wait, then completed persisted transcript + summary idle.
+Saved postfix-running.json/postfix-qualified.json. Separate prior approved child
+handoff_12d63e7c7a3a completed and posted to browser-fixture-parent thread; worker
+session and result match. No live browser-motion visual acceptance claimed yet.
+Both original diagnostic receipts remain execution_unknown unchanged, not replayed;
+Beta's home keeps its unknown history/guard. Use Alpha for a fresh SLOW-STREAM chat
+check; navigate away/back to observe background completion. For Beta working
+motion, use normal Follow up with SLOW-STREAM and its owner approval, then inspect
+correlated child/result. Coordinator's previously pending approval is preserved.
+
+Alpha shield preset, Beta primary, all fixture presentation/history/approvals
+preserved across repair. Manifest updated; external launch.py resumes only fixed
+owned ports and canonical package paths, refuses an occupied port. No production
+restart/install/deploy, source dependency environment change, credential creation,
+grant change, native input/reload or unknown replay. Production shell12591,
+Gateway21888/WebUI19711 untouched; protected-state hashes still match pre-fixture
+baseline and legitimate12591 heartbeat fresh. Source working-state fix is NOT yet
+loaded into production Gateway21888. Source and fixture backend evidence are now
+current; coordinator visual checks are the next action. Voice/media remain paused.
