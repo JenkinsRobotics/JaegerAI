@@ -42,7 +42,7 @@ def test_v13_upgrade_preserves_messages_without_backfill_and_atomic_limit(
         conn.execute("DROP TABLE agent_webhook_outbox")
         conn.execute("UPDATE schema_meta SET value='13' WHERE key='version'")
     upgraded = GatewaySessionStore(path)
-    assert upgraded.schema_version() == 14
+    assert upgraded.schema_version() == 15
     assert len(AgentMessages(upgraded).list("ares")["messages"]) == 1
     assert records(upgraded) == []  # Upgrades do not forward historical conversations.
     service = AgentMessages(upgraded)

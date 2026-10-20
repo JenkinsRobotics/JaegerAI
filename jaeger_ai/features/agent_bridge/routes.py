@@ -111,6 +111,8 @@ def register(gateway):
 
     @wrap("list_messages")
     async def listing(request, caller):
+        from .responses import deliver_responses
+        deliver_responses(gateway, caller=caller)
         return web.json_response(
             service.list(
                 caller,
@@ -129,9 +131,11 @@ def register(gateway):
             "goal",
             "workspace_folder",
             "rea_tools",
+            "source_message_id",
         }:
             raise BridgeError("Invalid goal fields")
         goal_id, thread = key(body.get("id")), key(body.get("thread"))
+        source = key(body["source_message_id"]) if "source_message_id" in body else None
         goal = body.get("goal")
         if not isinstance(goal, str) or not goal.strip() or len(goal.encode()) > 16384:
             raise BridgeError("Goal must contain 1..16384 bytes")
@@ -165,7 +169,7 @@ def register(gateway):
             "allowed_tools": supported_tools(),
         }
         digest = hashlib.sha256(
-            json.dumps({**turn, "text": goal}, sort_keys=True).encode()
+            json.dumps({**turn, "text": goal, **({"source_message_id": source} if source else {})}, sort_keys=True).encode()
         ).hexdigest()
         session = (
             request["caller"].session_prefix or f"agent:{caller}:"
@@ -173,6 +177,16 @@ def register(gateway):
         async with goal_lock:
             with gateway.store._get_conn() as conn:
                 service.access(conn, caller, thread)
+                if source:
+                    message = conn.execute(
+                        "SELECT payload FROM agent_messages WHERE sender=? AND id=? AND thread=? AND recipient='jaegerd'",
+                        (caller, source, thread),
+                    ).fetchone()
+                    if not message or json.loads(message["payload"])["kind"] not in {"task", "question"}:
+                        raise BridgeError("Only an owned task/question to jaegerd can admit a reply goal", 409)
+                    binding = conn.execute("SELECT id FROM agent_goals WHERE caller=? AND source_message_id=?", (caller, source)).fetchone()
+                    if binding and binding["id"] != goal_id:
+                        raise BridgeError("Message already bound to a goal", 409)
                 prior = conn.execute(
                     "SELECT * FROM agent_goals WHERE caller=? AND id=?",
                     (caller, goal_id),
@@ -186,13 +200,13 @@ def register(gateway):
                             "allowed_tools"
                         )
                         digest = hashlib.sha256(
-                            json.dumps({**turn, "text": goal}, sort_keys=True).encode()
+                            json.dumps({**turn, "text": goal, **({"source_message_id": source} if source else {})}, sort_keys=True).encode()
                         ).hexdigest()
                 if prior and (prior["digest"] != digest or prior["thread"] != thread):
                     raise BridgeError("Goal id reused with different content", 409)
                 conn.execute(
-                    "INSERT OR IGNORE INTO agent_goals VALUES(?,?,?,?,?,?)",
-                    (caller, goal_id, thread, session, turn["request_id"], digest),
+                    "INSERT OR IGNORE INTO agent_goals(caller,id,thread,session,request_id,digest,source_message_id) VALUES(?,?,?,?,?,?,?)",
+                    (caller, goal_id, thread, session, turn["request_id"], digest, source),
                 )
             # Bridge delegation requests the lead's tools, not keyword-based
             # triage into a narrower specialist catalog.
@@ -235,6 +249,8 @@ def register(gateway):
     @wrap("goal_status")
     async def status(request, caller):
         row = goal_row(caller, request.match_info["goal_id"])
+        from .responses import deliver_responses
+        deliver_responses(gateway, request_id=row["request_id"])
         receipt = gateway.store.get_request(row["request_id"])
         return web.json_response(
             project_goal(row["id"], row["thread"], receipt, gateway=gateway)

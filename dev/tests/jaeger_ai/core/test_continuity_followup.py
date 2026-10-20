@@ -75,3 +75,43 @@ def test_icon_is_independent_durable_metadata_and_posts_keep_status_once(tmp_pat
         reopened.append_handoff_post_once('owned-home','assistant','conflicting result',**kwargs)
     store.deliver_task_result('owned-task','owned-home','done','completed',sender_agent_id=row['id'])
     assert reopened.list_messages('owned-home')['messages'][0]['status']=='completed'
+
+
+@pytest.mark.asyncio
+async def test_approved_followup_executes_correlated_child_and_posts_result(gw, monkeypatch):
+    import asyncio
+    app, client = gw
+    app.store.ensure_session('owned-home', metadata={'agent_id': 'native:everyday'})
+    parent(app.store)
+    before = [a.to_dict() for a in app._registry().list_agents()]
+    seen = []
+
+    # Script only the local model transport. Real admission, delegate runtime,
+    # approval, worker receipt and terminal exchange producers remain in use.
+    async def local_model(session_id, turn_id, text, *, request_id=None, execution=None):
+        seen.append((session_id, text, execution))
+        app._persist_terminal(request_id, session_id, 'completed', {'output': 'isolated correlated answer', 'backend': 'fixture'}, assistant_text='isolated correlated answer', record_entity_event=False)
+    monkeypatch.setattr(app, '_execute_turn_inner', local_model)
+    response = await client.post('/v1/handoffs/owned-thread/reply', json={'task': 'return local answer', 'request_id': 'successful-followup'})
+    assert response.status == 202
+    child = await response.json()
+    assert not seen and child['status'] == 'pending_approval'
+    approval = next(a for a in app.store.list_pending_approvals() if a['metadata'].get('handoff_id') == child['id'])
+    assert (await client.post('/v1/approvals/'+approval['approval_id'], headers=client_headers('ares'), json={'decision': 'once'})).status == 403
+    assert (await client.post('/v1/approvals/'+approval['approval_id'], json={'decision': 'once'})).status == 200
+    for _ in range(300):
+        if app.store.get_handoff(child['id'])['status'] in {'completed', 'failed'}: break
+        await asyncio.sleep(.01)
+    result = app.store.get_handoff(child['id'])
+    assert result['status'] == 'completed', result
+    assert result['result']['summary'] == 'isolated correlated answer'
+    assert len(seen) == 1 and seen[0][2]['allowed_tools'] == ['read_file']
+    exchange = await (await client.get('/v1/handoffs/'+child['id']+'/messages')).json()
+    assert exchange['reply_to_handoff_id'] == 'owned-thread' and exchange['thread_handoff_id'] == 'owned-thread'
+    assert exchange['messages'][-1]['content'] == 'isolated correlated answer'
+    posts = app.store.list_messages('owned-home')['messages']
+    assert any(m['kind'] == 'handoff_result' and m['links']['handoff_id'] == child['id'] for m in posts)
+    assert [a.to_dict() for a in app._registry().list_agents()] == before
+    repeat = await client.post('/v1/handoffs/owned-thread/reply', json={'task': 'return local answer', 'request_id': 'successful-followup'})
+    assert repeat.status == 200 and (await repeat.json())['id'] == child['id']
+    assert len(seen) == 1

@@ -94,7 +94,7 @@ class AgentMessages:
             raise BridgeError("Thread unavailable", 404)
         return row
 
-    def send(self, caller, data):
+    def send(self, caller, data, *, correlation=None):
         if not isinstance(data, dict) or set(data) - {
             "id",
             "thread",
@@ -104,10 +104,13 @@ class AgentMessages:
             "body",
             "refs",
             "status_line",
+            "reply_to",
         }:
             raise BridgeError("Unknown fields (sender and timestamp are server owned)")
         for field in ("id", "thread"):
             key(data.get(field))
+        if "reply_to" in data:
+            key(data["reply_to"])
         recipient = data.get("to")
         if recipient not in CALLERS or recipient == caller:
             raise BridgeError("Invalid recipient")
@@ -138,9 +141,12 @@ class AgentMessages:
                 }
             ),
         }
+        if correlation is not None:
+            safe["correlation"] = correlation
         digest = hashlib.sha256(
             json.dumps(
-                {**data, "refs": refs, "status_line": data.get("status_line", "")},
+                {**data, "refs": refs, "status_line": data.get("status_line", ""),
+                 **({"correlation": correlation} if correlation is not None else {})},
                 sort_keys=True,
             ).encode()
         ).hexdigest()
@@ -165,6 +171,11 @@ class AgentMessages:
                     "INSERT INTO agent_threads VALUES(?,?,?)",
                     (data["thread"], caller, recipient),
                 )
+            if "reply_to" in data and conn.execute(
+                "SELECT 1 FROM agent_messages WHERE thread=? AND sender=? AND id=?",
+                (data["thread"], recipient, data["reply_to"]),
+            ).fetchone() is None:
+                raise BridgeError("Reply target unavailable", 404)
             safe.update({"from": caller, "created_at": time.time()})
             conn.execute(
                 "INSERT INTO agent_messages(id,thread,sender,recipient,digest,payload,created_at) VALUES(?,?,?,?,?,?,?)",

@@ -4899,6 +4899,11 @@ class JaegerGatewayApp:
                 assistant_text=assistant_text,
                 session_status=session_status,
             )
+            try:
+                from jaeger_ai.features.agent_bridge.responses import deliver_responses
+                deliver_responses(self, request_id=request_id)
+            except Exception:
+                logger.exception("Peer response delivery deferred to inbox/goal read recovery")
             if persisted.get("event"):
                 self.event_bus.fanout(persisted["event"])
             if not persisted.get("replayed"):

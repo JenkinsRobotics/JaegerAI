@@ -639,3 +639,50 @@ current; native acceptance remains blocked. Automatic arbitrary peer inbox/repli
 external bridge roundtrip and successful new follow-up model/result execution
 remain unimplemented/unverified as distinguished above. Voice/media and large
 avatar scope remains paused, not removed or silently replaced.
+
+## Correlated peer response closure — 2026-10-19
+
+Prior61f08ff7 gap distinguished: native follow-up admission/result producers were
+implemented, but a successful admitted child roundtrip had not been validated.
+AgentMessages had no connection to those execution receipts; inbox messages were
+inert. This pass adds explicit `source_message_id` binding through the existing
+scoped goal admission, then automatic terminal responses to that exact message.
+It does NOT interpret arbitrary incoming text as execution authority.
+
+Source: agent_bridge routes/MCP accept the optional binding; service validates
+participant-scoped `reply_to`, rejects client correlation; schema15 adds nullable
+source ID plus unique caller/source index in the existing goal table. No old-row
+backfill. responses.py derives answer/status only from canonical terminal receipts
+and freezes model completion as unverified; result correlation includes goal,
+request, session and canonical task/handoff IDs where present. Gateway terminal
+producer delivers automatically; inbox/goal reads recover a crash gap using data
+only. Deterministic IDs deduplicate message/outbox delivery. Task/question source
+only, one goal/source, no response-triggered dispatch or approval bypass. Existing
+workspace grants, admission, tools, scopes and identity/history remain intact.
+
+Focused external peer-tests.log: **101 passed,85 existing aiohttp key warnings**.
+Includes actual temporary native write through scripted local model transport,
+owner approval (peer cannot approve), denial/no effect, second correlated follow-up,
+duplicate binding/delivery, foreign access/reply rejection, server metadata spoof
+rejection, unknown recovery/no replay, failed/blocked outcome status, migration
+preservation/no backfill, and existing tool confinement/outbox transport checks.
+Native handoff follow-up now demonstrates real approval → delegate runtime →
+canonical child admission/receipt → correlated origin result. Only its local model
+transport is scripted. Specialist registry/tool ceiling/history unchanged; repeated
+terminal follow-up returns same handoff without another execution. Early test
+failures were test-contract issues (unsupported synthetic receipt status blocked;
+terminal idempotent response is200, not pending202), fixed to use real contracts.
+No broad/UI suite or UI build needed; no UI source changed.
+
+Read-only CUA inventory refreshed once: running apps list contains no Jaeger entry
+or process-specific target. Prior exact-path lookup timeout/windowId unsupported
+remains the native acceptance blocker. No repeated lookup, native input/reload,
+duplicate app launch or draft access. Popup visual proof remains outstanding.
+Voice/media/large avatars remain paused. External credential-backed peer delivery
+and remote Grok semantics remain unverified; inbox data alone still intentionally
+cannot start work. Approved execution uses existing explicit goal/handoff requests.
+
+Rollout preflight: sole production shell12591, Gateway19707:33418 and WebUI19711:8790;
+fresh legitimate lease, no active request/handoff, unknown request1 preserved.
+Only exact Gateway launch-job reload is needed; no shell/WebUI/assets switch.
+Runtime outcome and source commit recorded below after verification.
