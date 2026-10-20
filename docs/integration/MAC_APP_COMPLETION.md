@@ -370,3 +370,40 @@ coordinated replacement without submitting/discarding text.
   fallback changed. New bundle left open. This proves scoped rollout/menu/picker,
   not full Grok parity, live primary mutation/cross-device persistence, successful
   model turn, Stop/approval or voice acceptance. Those earlier limits remain.
+
+
+## 2026-10-19 — live popup comparison and bounded correction
+
+Live AX: Grok primary in Pinned Bots offers Unpin, Mark as Unread, Copy conversation
+ID, Hide from sidebar, Replace with different Bot. Jaeger primary is currently
+unpinned (in specialist list): Pin is correct, not a label defect. Its same primary
+action order is present. Grok ordinary unpinned Jaeger Mac App offers Pin, Move to
+new section, Mark as Unread, Rename Bot, Copy conversation ID, Hide from sidebar,
+Delete. Jaeger supports rename but had omitted it from this popup; now exposed for
+ordinary agents with advertised rename capability. Unsupported sections/destructive
+delete remain absent; Jaeger Make primary remains reachable by design. No real bot
+state changed for comparison. No ordinary pinned Grok bot exists in the observed
+sidebar; primary-unpinned Grok and primary-pinned Jaeger states were not created
+by mutating user agents. Pin state permutations remain covered by isolated tests.
+
+Jaeger live screenshot reproduced wrapping Replace with different Bot and a hover
+highlight stopping before the row edge. Producer: fixed 242px inner stack under a
+310px outer positioning box, plus nested wrappers with intrinsically sized buttons.
+Desktop popup now sizes to longest label within viewport, rows span full width,
+and labels stay single-line. Phone preview geometry unchanged. Original local SVG
+swap arrows replace the incorrect back-arrow icon; existing shipped REA TD component
+at offset469000 names arrow-swap. Replacement also requires advertised primary
+capability, not only a caller-provided alternative flag.
+
+Grok native screenshots returned a tiny distorted whole-window image even after
+settled capture/raise; live AX labels are readable, but exact Grok pixel width,
+padding, icons, separators, hover and placement cannot be visually certified.
+Jaeger separators remain two groups before copy and hide, as requested primary
+reference; no speculative radius/placement/style rewrite made. Grok's existing
+composer draft retained; no message, account setting, pin/read/hide/primary action
+submitted in either app.
+
+Focused popup, primary and management-flow tests:7 passed (3 files), production
+UI build/typecheck/theme/no-mock passed; Vite size advisory remains. Logs external:
+`agent-primary-20261019/popup-comparison-tests.log` and
+`popup-comparison-build.log`. UI-only deployment/visible retest recorded next.

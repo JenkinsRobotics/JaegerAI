@@ -299,3 +299,11 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 
 .jg-amenu { max-height: calc(100dvh - 16px); max-width: calc(100vw - 16px); overflow-y: auto; }
 .jg-amenu__scrim:not(.is-phone) .jg-amenu__item, .jg-amenu__scrim:not(.is-phone) .jg-amenu__bubble, .jg-amenu__scrim:not(.is-phone) .jg-amenu__head { font-size: var(--jg-font-body); }
+
+/* Desktop actions size to their longest label; nested row wrappers must not
+   shrink the hit/hover surface. Phone preview geometry stays independent. */
+.jg-amenu__scrim:not(.is-phone) .jg-amenu { width: max-content; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__stack { width: auto; min-width: 242px; max-width: calc(100vw - 16px); }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__item { width: 100%; white-space: nowrap; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__item span { overflow: hidden; text-overflow: ellipsis; }
+.jg-amenu__swap { flex-shrink: 0; width: 22px; }
