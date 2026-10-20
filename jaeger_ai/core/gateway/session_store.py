@@ -1995,7 +1995,7 @@ class GatewaySessionStore:
                 raise PresentationConflict('Primary changed on another client; refresh and retry')
             data = self._read_agent_presentation(conn)
             prefs = data.setdefault(agent_id, {})
-            if prefs.get('archived'):
+            if prefs.get('archived') or prefs.get('deleted'):
                 raise PresentationConflict('Restore this agent before making it primary')
             if not prefs.get('pinned'):
                 if sum(p.get('pinned') is True for p in data.values()) >= MAX_AGENT_PINS:
@@ -2022,12 +2022,42 @@ class GatewaySessionStore:
         conn.execute("INSERT INTO schema_meta(key,value) VALUES('agent_presentation:operator',?) "
                      "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(data),))
 
+    @staticmethod
+    def _read_agent_sections(conn) -> list[dict[str, Any]]:
+        row = conn.execute("SELECT value FROM schema_meta WHERE key='agent_sections:operator'").fetchone()
+        data = json.loads(row['value']) if row else []
+        if not isinstance(data, list) or any(not isinstance(s, dict) or not isinstance(s.get('id'), str) or not isinstance(s.get('name'), str) for s in data):
+            raise ValueError('Invalid section metadata; preserved without overwriting')
+        return data
+
+    def agent_sections(self) -> list[dict[str, Any]]:
+        with self._get_conn() as conn:
+            return self._read_agent_sections(conn)
+
+    def create_agent_section(self, name: str) -> dict[str, Any]:
+        from jaeger_ai.core.gateway.agent_presentation import validate_patch
+        name = validate_patch({'display_name': name})['display_name']
+        if name is None:
+            raise ValueError('Section name required')
+        with self._immediate() as conn:
+            sections = self._read_agent_sections(conn)
+            if len(sections) >= 32:
+                raise ValueError('At most 32 sections')
+            section = {'id': 'section_' + uuid.uuid4().hex, 'name': name, 'order': len(sections)}
+            sections.append(section)
+            conn.execute("INSERT INTO schema_meta(key,value) VALUES('agent_sections:operator',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(sections),))
+            return section
+
     def patch_agent_presentation(self, agent_id: str, body: dict[str, Any]) -> dict[str, Any]:
         from jaeger_ai.core.gateway.agent_presentation import validate_patch, MAX_AGENT_PINS
         patch = validate_patch(body)
         with self._immediate() as conn:
             data = self._read_agent_presentation(conn)
             prefs = dict(data.get(agent_id, {}))
+            if patch.get('deleted') is True and self._read_primary_agent(conn) == agent_id:
+                raise ValueError('Replace the primary bot before deleting it')
+            if patch.get('section_id') is not None and patch['section_id'] not in {s['id'] for s in self._read_agent_sections(conn)}:
+                raise ValueError('Section not found')
             if patch.get('pinned') is True and not prefs.get('pinned'):
                 if sum(v.get('pinned') is True for v in data.values()) >= MAX_AGENT_PINS:
                     raise ValueError(f'At most {MAX_AGENT_PINS} agents can be pinned; unpin an agent first')

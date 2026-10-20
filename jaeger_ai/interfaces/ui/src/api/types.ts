@@ -22,6 +22,7 @@ export interface Agent {
   display_name?: string;
   role?: AgentRole;
   kind?: string;
+  deleted?: boolean;
   archived?: boolean;
   presentation?: { display_name?: string; archived?: boolean; pinned?: boolean; pin_order?: number };
   hidden?: boolean;

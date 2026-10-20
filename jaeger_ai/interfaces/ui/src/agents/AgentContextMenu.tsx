@@ -9,15 +9,17 @@ import { AgentAvatar } from "./AgentAvatar";
 import { label } from "./agentsLogic";
 
 export type AgentMenuAction = "rename" | "open" | "profile" | "history" | "read" | "unread" | "pin" | "unpin" | "section" | "template" | "hide" | "copy-id" | "duplicate" | "delete" | "replace-primary" | "make-primary";
-type Item = { id: AgentMenuAction; label: string; icon: IconName; separator?: boolean };
+type Item = { id: AgentMenuAction; label: string; icon: IconName; separator?: boolean; danger?: boolean };
 
 export function agentMenuItems(agent: Agent, caps: AgentCaps, pinned: boolean, alternative = false, unread = false): { main: Item[]; more: Item[] } {
   return { main: [
     ...(caps.pin ? [{ id: pinned ? "unpin" as const : "pin" as const, label: pinned ? "Unpin" : "Pin", icon: "pin" as IconName }] : []),
+    ...(!agent.primary && caps.sections ? [{ id: "section" as const, label: "Move to new section", icon: "folder" as IconName }] : []),
     ...(caps.unread && (!unread || caps.read) ? [{ id: unread ? "read" as const : "unread" as const, label: unread ? "Mark as Read" : "Mark as Unread", icon: "mail-read" as IconName }] : []),
-    ...(!agent.primary && caps.rename ? [{ id: "rename" as const, label: "Rename Bot", icon: "edit" as IconName }] : []),
+    ...(!agent.primary && caps.rename ? [{ id: "rename" as const, label: "Rename Bot", icon: "edit" as IconName, separator: true }] : []),
     { id: "copy-id", label: "Copy conversation ID", icon: "copy", separator: true },
     ...(caps.hide ? [{ id: "hide" as const, label: "Hide from sidebar", icon: "eye-closed" as IconName, separator: true }] : []),
+    ...(!agent.primary && caps.remove ? [{ id: "delete" as const, label: "Delete", icon: "trash" as IconName, danger: true }] : []),
     ...(agent.primary && caps.primary && alternative ? [{ id: "replace-primary" as const, label: "Replace with different Bot", icon: "reply" as IconName }] : []),
   ], more: [] };
 }
@@ -27,6 +29,8 @@ function AgentMenuGlyph({ action }: { action: AgentMenuAction }) {
   return <svg className="jg-amenu__glyph" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     {(action === "pin" || action === "unpin") && <><path d="m6 3 7 2-2 3 1 4-4-1-3 2-2-7 3-3ZM8 11l-4 5" />{action === "unpin" && <path d="m2 2 14 14" />}</>}
     {(action === "read" || action === "unread") && <><path d="M5 7a4 4 0 0 1 8 0v4l2 2H3l2-2V7ZM7 15h4" />{action === "unread" && <circle cx="14" cy="4" r="2" fill="currentColor" stroke="none" />}</>}
+    {action === "section" && <><path d="M2 7V3h5l2 2h7v10H2V7" /><path d="M12 10h5m-2.5-2.5v5" /></>}
+    {action === "delete" && <><path d="M3 5h12M7 5V2h4v3M5 5v11h8V5M8 8v5M10 8v5" /></>}
     {action === "copy-id" && <><rect x="6" y="5" width="9" height="11" rx="2" /><path d="M11 3H5a2 2 0 0 0-2 2v7" /></>}
     {action === "hide" && <><path d="M3 6a10 10 0 0 0-2 3s3 5 8 5a9 9 0 0 0 4-1M6 4a10 10 0 0 1 3-1c5 0 8 6 8 6a13 13 0 0 1-2 3M2 2l14 14M7 7a3 3 0 0 0 4 4" /></>}
     {action === "rename" && <><path d="M8 3H3v12h12v-5M7 11l1-4 6-6 3 3-6 6-4 1Z" /></>}
@@ -52,7 +56,7 @@ export function AgentContextMenu({ agent, preview, at, phone, caps, pinned, alte
   const pick = (id: AgentMenuAction) => { onClose(); onAction(id, agent); };
   const row = (it: Item) => <div key={it.id}>
     {it.separator && <div className="jg-amenu__sep" role="separator" />}
-    <button type="button" role="menuitem" className="jg-amenu__item" onClick={() => pick(it.id)}>
+    <button type="button" role="menuitem" className={`jg-amenu__item${it.danger ? " is-danger" : ""}`} onClick={() => pick(it.id)}>
       <AgentMenuGlyph action={it.id} /><span>{it.label}</span>
     </button>
   </div>;
@@ -65,7 +69,7 @@ export function AgentContextMenu({ agent, preview, at, phone, caps, pinned, alte
           <div className="jg-amenu__bubble">{preview || "No messages yet"}</div>
         </section>}
         <div className="jg-amenu__stack">
-          <div className="jg-amenu__card" role="menu" aria-label={`${name} actions`}>
+          <div className={`jg-amenu__card${!agent.primary ? " is-ordinary" : ""}`} role="menu" aria-label={`${name} actions`}>
             {main.map(row)}
           </div>
 

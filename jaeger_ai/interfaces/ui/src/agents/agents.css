@@ -329,3 +329,9 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-avatar[data-running="true"] .jg-avatar__robot { animation: jg-robot-work 1.2s ease-in-out infinite alternate; }
 @keyframes jg-robot-work { to { transform: translateY(-2px); } }
 @media (prefers-reduced-motion: reduce) { .jg-avatar[data-running="true"] .jg-avatar__robot { animation: none; } }
+
+/* Ordinary-bot reference: inset rules separate rename/copy/hide groups. */
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__card.is-ordinary .jg-amenu__sep { margin: 6px 8px; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__card.is-ordinary .jg-amenu__item { gap: 6px; min-height: 32px; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu:has(.is-ordinary) .jg-amenu__stack { min-width: 194px; }
+.jg-amenu__scrim:not(.is-phone) .jg-amenu__card.is-ordinary .jg-amenu__item { font-size: var(--jg-font-body); line-height: 20px; }

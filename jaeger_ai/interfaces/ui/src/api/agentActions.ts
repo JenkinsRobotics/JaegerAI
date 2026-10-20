@@ -4,7 +4,7 @@
 import type { Agent } from "./types";
 
 export interface Section { id: string; name: string; order?: number }
-export interface AgentPatch { icon_preset?: string | null; display_name?: string | null; archived?: boolean; pinned?: boolean; hidden?: boolean; section_id?: string | null; enabled?: boolean }
+export interface AgentPatch { deleted?: boolean; icon_preset?: string | null; display_name?: string | null; archived?: boolean; pinned?: boolean; hidden?: boolean; section_id?: string | null; enabled?: boolean }
 
 export interface AgentActions {
   setPrimary?(agentId: string, expectedId: string): Promise<void>;
