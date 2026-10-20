@@ -720,3 +720,49 @@ jaeger_ai/__pycache__/__init__.cpython-312.pyc (mtime2026-10-18 10:20:36)
 and dev/__pycache__/bytecode_guard.cpython-312-pytest-9.1.1.pyc
 (mtime2026-10-17 20:58:58). Not produced by this pass; left untouched rather than
 expanding into unrelated cleanup. Tracked working tree clean after evidence commit.
+
+## Independent browser acceptance fixture — prepared, visual checks pending
+
+Actual current shared UI served at http://127.0.0.1:58310/?host=macos through real
+WebUI Handler/proxy and isolated Gateway http://127.0.0.1:58305, owned fixture
+PID23345. Source remains0a051643; current served HTML/assets match passing dist.
+No mock UI or mock adapter. Contract-worker pattern from
+`dev/tests/fixtures/gateway_contract_worker.py`, external adapted worker only:
+scripted OpenAIAdapter.call boundary, local lmstudio model config requiring no
+API key, existing caller_tokens directory reused read-only, no generated tokens,
+passwords, signing/PBKDF keys or authority grant files. Real admission, scopes,
+approvals, session/task/handoff/presentation stores and SSE handlers remain.
+No new bridge workspace grant or external peer/provider connection. Network
+fixture guard admits only its own Gateway connection; no provider calls allowed.
+Existing production lifecycle heartbeat and Global Stop guards remain in use,
+read-only during these checks. Coordinator must not use Global Stop/auth controls.
+
+Fixture state: ~/.jaeger/verification/browser-acceptance-20261019.
+External runner/logs/manifest: ~/.cache/jaeger/verification/browser-acceptance-20261019.
+Alpha: native:everyday / agent-native:everyday,130 explicitly SEEDED history
+messages to exercise50-message paging. Beta: native:builder /
+agent-native:builder, idle seeded context. Seeded parent browser-fixture-parent
+links Alpha→Beta with read_file ceiling and a clearly labeled nonexecuted prior
+result, for normal Follow up/approval UI. Small robot presets initialized through
+normal presentation PATCH; fixture Settings/primary/pin/unread/hide mutations
+allowed. Primary initially Alpha; read-only handoff sample now authoritative Beta
+(after coordinator interaction); no reset of those fixture changes.
+
+Important fixture limits, NOT acceptance claims: first launch exited because the
+optional webhook default8793 was already occupied; nothing else stopped. Existing
+JAEGER_TEST_HEADLESS=1 fixture mode excludes unrelated background producers. The
+initial probe browser-fixture-ready-probe then stayed admitted without entering
+the scripted provider. A single fixture-only restart preserved it as
+execution_unknown, never replayed. Its cause has not been established; therefore
+successful live browser working/streaming/follow-up execution remains unproven.
+Owned fixture task inspection is saved locally for subsequent diagnostics. Prior
+successful isolated101-test results remain separate from this browser attempt.
+Do not infer genuine working motion from this unresolved fixture request.
+
+Earlier URL58091 retired at fixture-only restart;58310 is stable and left running
+for coordinator. No more fixture restart/reseed while visual checks proceed.
+Production shell12591/Gateway21888/WebUI19711 untouched. Before/after hashes for
+production unknown request1, unknown/pending handoffs, agent presentation/primary
+and Global Stop match; legitimate shell12591 heartbeat fresh. No native window
+interaction or draft access. Native12591 acceptance remains separate and blocked.
+No successful suites rerun; only local serving/hash/auth/data/probe checks.
