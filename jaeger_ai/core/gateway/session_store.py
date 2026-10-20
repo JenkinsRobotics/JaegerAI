@@ -1952,8 +1952,8 @@ class GatewaySessionStore:
 
     # Agent "seen" markers reuse schema_meta (key ``agent_seen:<id>``): one
     # small row per agent, no new table.
-    def mark_agent_seen(self, agent_id: str, *, seen_at: float, event_id: int | None = None) -> dict[str, Any]:
-        record = {"agent_id": agent_id, "seen_at": float(seen_at), "event_id": event_id}
+    def mark_agent_seen(self, agent_id: str, *, seen_at: float, event_id: int | None = None, unread: bool = False) -> dict[str, Any]:
+        record = {"agent_id": agent_id, "seen_at": float(seen_at), "event_id": event_id, "unread": unread}
         with self._immediate() as conn:
             conn.execute(
                 "INSERT INTO schema_meta(key, value) VALUES(?, ?) "
@@ -1961,6 +1961,39 @@ class GatewaySessionStore:
                 (f"agent_seen:{agent_id}", json.dumps(record)),
             )
         return record
+
+    def primary_agent_id(self) -> str:
+        from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID
+        with self._immediate() as conn:
+            conn.execute("INSERT OR IGNORE INTO schema_meta(key,value) VALUES('agent_primary:operator',?)", (json.dumps(LEAD_AGENT_ID),))
+            return self._read_primary_agent(conn)
+
+    @staticmethod
+    def _read_primary_agent(conn) -> str:
+        from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID
+        row = conn.execute("SELECT value FROM schema_meta WHERE key='agent_primary:operator'").fetchone()
+        value = json.loads(row['value']) if row else LEAD_AGENT_ID
+        if not isinstance(value, str) or not value:
+            raise ValueError('Invalid operator primary pointer; preserved without overwriting')
+        return value
+
+    def set_primary_agent(self, agent_id: str, expected_id: str) -> None:
+        if any(not isinstance(v, str) or not v for v in (agent_id, expected_id)):
+            raise ValueError('Primary IDs must be nonempty strings')
+        from jaeger_ai.core.gateway.agent_presentation import MAX_AGENT_PINS, PresentationConflict
+        with self._immediate() as conn:
+            if self._read_primary_agent(conn) != expected_id:
+                raise PresentationConflict('Primary changed on another client; refresh and retry')
+            data = self._read_agent_presentation(conn)
+            prefs = data.setdefault(agent_id, {})
+            if prefs.get('archived'):
+                raise PresentationConflict('Restore this agent before making it primary')
+            if not prefs.get('pinned'):
+                if sum(p.get('pinned') is True for p in data.values()) >= MAX_AGENT_PINS:
+                    raise PresentationConflict('Pin slots are full; unpin an agent before replacing primary')
+                prefs.update(pinned=True, pin_order=max((p.get('pin_order', -1) for p in data.values()), default=-1) + 1)
+            self._write_agent_presentation(conn, data)
+            conn.execute("INSERT INTO schema_meta(key,value) VALUES('agent_primary:operator',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(agent_id),))
 
     # Operator-local presentation metadata shares the existing store/transaction owner.
     def agent_presentation(self) -> dict[str, dict[str, Any]]:

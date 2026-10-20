@@ -260,3 +260,36 @@ The older test Gateway at 56062 was left intact. No test state was deleted.
 
 Next action: consume the queued assessment, then prioritize its demonstrated
 Mac app failures. Do not start another broad implementation/audit in parallel.
+
+
+## 2026-10-19 — sidebar and primary source checkpoint (not deployed)
+
+- Durable operator presentation-primary pointer defaults to the existing execution
+  lead. Admin-scoped validated compare-and-set selects an existing eligible native
+  lead/specialist and pins it atomically; stale pointers/full pins fail without
+  partial updates. Registry execution roles/configuration, tools, permissions,
+  immutable identities, sessions and history are not transferred or rewritten.
+- Shared UI supplies Pin/Unpin, Mark as Unread, Copy conversation ID, Hide from
+  sidebar and primary replacement picker; nonprimary Make primary is reachable.
+  Copy resolves the selected session or backend home ID, never the agent ID.
+  Rename/profile/history/restore remain in management. Hiding primary retains its
+  pointer; unpinning retains primary and moves its row out of the pinned strip.
+- Explicit unread survives storage reopen and overrides local seen state until
+  explicit open/read. Polling does not clear it. Changing primary preserves the
+  currently open chat/draft; remount defaults to the persisted primary.
+- Fixed popup coordinator so clicking an alert-dialog rename input does not dismiss
+  it. The remaining primary-flow failure was a test-contract error: the pinned
+  container may disappear entirely after unpin. Assertion now accepts absence and
+  additionally proves the agent remains in the sidebar; clipboard mock is restored.
+- Final focused evidence: external `~/.cache/jaeger/verification/agent-primary-20261019/`:
+  `ui-tests.log` 23 passed (7 files); `primary-flow.log` 2 passed;
+  `typecheck.log` passed; `ui-build.log` passed (Vite chunk-size advisory only).
+  External build: `ui-source/dist`, unserved. `backend-tests.log` 20 passed (final rerun after UI edits).
+- Isolated two-agent fixtures cover primary persistence/reopen, CAS/pin conflicts,
+  ineligible agents/admin scope, unchanged execution/history, unread, exact home ID,
+  draft continuity, hide/restore and pin/unpin. These are source/contract evidence,
+  not native acceptance or Grok remote-backend parity.
+- Matthew's “Wait while I use it” remains binding: no native window/draft access,
+  production mutation, service restart/reload, deployment or served-build switch.
+  Live popup appearance/clipboard, cross-client persistence and native acceptance
+  remain pending. Earlier Stop/answer/approval/voice limits remain unchanged.

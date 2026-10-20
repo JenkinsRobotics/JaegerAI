@@ -55,7 +55,7 @@ def test_ordered_pins_merge_metadata_and_reject_stale_cross_device_write(tmp_pat
     assert not first.agent_presentation()['a']['pinned']
 
 
-def test_handler_protects_lead_and_only_uses_existing_admin_scope(tmp_path):
+def test_presentation_keeps_execution_lead_while_allowing_cosmetic_hide_pin_with_admin_scope(tmp_path):
     store = GatewaySessionStore(tmp_path / 'sessions.sqlite3')
     records = {r['id']: SimpleNamespace(id=r['id'], to_dict=lambda r=r: dict(r)) for r in [row(), row('native:jaeger', 'lead')]}
     app = SimpleNamespace(store=store, _registry=lambda: SimpleNamespace(get_agent=records.get),
@@ -65,8 +65,8 @@ def test_handler_protects_lead_and_only_uses_existing_admin_scope(tmp_path):
         async def read_json(): return body
         req = SimpleNamespace(match_info={'id': aid}, json=read_json)
         return await JaegerGatewayApp.handle_agent_presentation(app, req)
-    assert asyncio.run(request('native:jaeger', {'archived': True})).status == 409
-    assert asyncio.run(request('native:jaeger', {'pinned': True})).status == 409
+    assert asyncio.run(request('native:jaeger', {'archived': True})).status == 200
+    assert asyncio.run(request('native:jaeger', {'pinned': True})).status == 200
     assert asyncio.run(request('native:jaeger', {'display_name': 'My assistant'})).status == 200
     assert records['native:jaeger'].to_dict()['display_name'] == 'Builder'
     assert asyncio.run(request('agent:builder', {'archived': True})).status == 200
@@ -112,7 +112,7 @@ def test_ordered_pin_handler_validates_ids_and_preserves_other_clients_changes(t
     assert asyncio.run(call({'agent_ids': ['agent:builder'], 'expected_agent_ids': []})).status == 200
     assert asyncio.run(call({'agent_ids': [], 'expected_agent_ids': []})).status == 409
     assert asyncio.run(call({'agent_ids': ['missing'], 'expected_agent_ids': ['agent:builder']})).status == 404
-    assert asyncio.run(call({'agent_ids': ['native:jaeger'], 'expected_agent_ids': ['agent:builder']})).status == 409
+    assert asyncio.run(call({'agent_ids': ['agent:builder', 'native:jaeger'], 'expected_agent_ids': ['agent:builder']})).status == 200
     assert asyncio.run(call({'agent_ids': [], 'expected_agent_ids': ['agent:builder'], 'owner': 'someone'})).status == 400
     assert store.agent_presentation()['agent:builder']['pinned'] is True
 

@@ -2,6 +2,8 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `master` — operator-authorized canonical integration, 2026-10-19.
+**Source checkpoint (2026-10-19):** Sidebar/primary changes are source-only; see the latest section in [Mac completion record](integration/MAC_APP_COMPLETION.md). Operator is using the native window: no interaction, runtime restart/reload/deploy or served-build switch until coordination resumes.
+
 **Current work:** [Mac source completion](integration/MAC_APP_COMPLETION.md), canonical Gateway33418/WebUI8790 and newer shell are running; lifecycle/replay, specialist identity, terminal-answer and confirmed-Stop fixes committed. Visible retests await draft-safe window coordination; no competing coder/runtime owner.
 **Branch rule:** one owner; canonical `interfaces/macos-shell` + `interfaces/ui` and required backend only. Local canonical Gateway33418/WebUI8790 startup and replacement of only the current newer shell are now explicitly authorized (2026-10-19); no unrelated services, tunnels or old fallbacks; no credentials, authentication, permissions or persistent-access changes. No broad feature expansion or repeated broad suites. The [legacy cleanup record](integration/SCOPED_CLEANUP.md) remains cumulative recovery evidence. Never restore legacy frontends or automatic fallbacks.
 

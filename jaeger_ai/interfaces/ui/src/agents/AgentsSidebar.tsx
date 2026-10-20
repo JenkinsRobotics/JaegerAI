@@ -45,8 +45,12 @@ interface Props {
 
 /** Sidebar content split into the AppShell slots: top / primary / sections / footer. */
 export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewChatMenu, onRenameChat, onArchiveChat, onSearch, onConnectApps, onSettings, onRetry, userInitials, status, pins = [], onPin = () => {}, onUnpin = () => {}, onInfo, onHistory, onMarkRead, onAgentMenu }: Props) {
-  const { lead, specialists: all } = sidebarRows(state.agents, state.summaries);
-  const { pinned, rest: specialists } = splitPinned(all, pins);
+  const { lead: primary, specialists: all } = sidebarRows(state.agents, state.summaries);
+  const rows = primary ? [primary, ...all] : all;
+  const legacy = state.agents.every((a) => a.primary === undefined);
+  const { pinned: pinnedRows, rest: specialists } = splitPinned(rows, legacy && primary ? [primary.agent.id, ...pins] : pins);
+  const lead = pinnedRows.find((r) => r.agent.id === primary?.agent.id);
+  const pinned = pinnedRows.filter((r) => r.agent.id !== lead?.agent.id);
   const selectedAgent = selection.type === "agent" ? selection.agentId : undefined;
   const openId = selection.type === "agent" ? selection.sessionId : undefined;
   const chatsFor = (agentId: string) => selectedAgent === agentId && (
@@ -70,8 +74,8 @@ export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewCha
         {state.error && <ErrorState compact title="Couldn't load agents" error={state.error} onRetry={onRetry} />}
         {(lead || pinned.length > 0) && (
           <PinnedArea lead={lead} pinned={pinned} selectedId={selectedAgent}
-            unread={(row) => selectedAgent !== row.agent.id && isUnread(row.agent.id, row.lastActivityAt, state.seen, row.summary?.unseen)}
-            onSelect={(agentId) => onSelect({ type: "agent", agentId })} onPin={onPin} onUnpin={onUnpin}>
+            unread={(row) => isUnread(row.agent.id, row.lastActivityAt, state.seen, row.summary?.unseen)}
+            onAgentMenu={onAgentMenu} onSelect={(agentId) => onSelect({ type: "agent", agentId })} onPin={onPin} onUnpin={onUnpin}>
             {lead && chatsFor(lead.agent.id)}
             {pinned.map((row) => <div key={row.agent.id}>{chatsFor(row.agent.id)}</div>)}
           </PinnedArea>
@@ -86,7 +90,7 @@ export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewCha
               <AgentRow
                 row={row}
                 selected={selectedAgent === row.agent.id}
-                unread={selectedAgent !== row.agent.id && isUnread(row.agent.id, row.lastActivityAt, state.seen, row.summary?.unseen)}
+                unread={isUnread(row.agent.id, row.lastActivityAt, state.seen, row.summary?.unseen)}
                 onSelect={() => onSelect({ type: "agent", agentId: row.agent.id })}
               />
               {chatsFor(row.agent.id)}

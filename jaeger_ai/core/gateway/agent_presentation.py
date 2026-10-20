@@ -37,17 +37,25 @@ class PresentationConflict(ValueError):
 
 
 def protected(row: dict[str, Any]) -> bool:
-    return not can_rename(row) or bool(row.get('primary')) or row.get('id') == 'native:jaeger' or row.get('role') != 'specialist' or bool((row.get('metadata') or {}).get('internal'))
+    # Presentation protection is independent of execution lead/system grants.
+    return not can_rename(row)
 
 
-def project(row: dict[str, Any], saved: dict[str, dict[str, Any]], *, writable: bool = False) -> dict[str, Any]:
+def primary_eligible(row: dict[str, Any]) -> bool:
+    return (can_rename(row) and row.get('kind') == 'jaeger_native'
+            and not row.get('hidden') and not row.get('archived') and not row.get('disabled'))
+
+
+def project(row: dict[str, Any], saved: dict[str, dict[str, Any]], *, writable: bool = False, primary_id: str | None = None) -> dict[str, Any]:
     prefs = saved.get(row['id'], {})
+    from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID
+    primary_id = primary_id or LEAD_AGENT_ID
     guarded = protected(row)
     archived = prefs.get('archived') is True and not guarded
-    out = {**row, 'archived': archived, 'hidden': bool(row.get('hidden')) or archived,
+    out = {**row, 'primary': row['id'] == primary_id, 'archived': archived, 'hidden': bool(row.get('hidden')) or archived,
            'pinned': prefs.get('pinned') is True and not guarded,
            'pin_order': prefs.get('pin_order'), 'presentation': {k: prefs[k] for k in ('display_name', 'archived', 'pinned', 'pin_order') if k in prefs},
-           'ui_actions': {'read': writable, 'rename': writable and can_rename(row), 'hide': writable and not guarded, 'pin': writable and not guarded}}
+           'ui_actions': {'read': writable, 'rename': writable and can_rename(row), 'hide': writable and not guarded, 'pin': writable and not guarded, 'unread': writable and not guarded, 'primary': writable and primary_eligible({**row, 'archived': archived})}}
     if isinstance(prefs.get('display_name'), str):
         out['display_name'] = prefs['display_name']
     return out

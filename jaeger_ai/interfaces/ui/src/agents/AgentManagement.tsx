@@ -2,7 +2,8 @@
 import type { Agent } from "../api/types";
 import { label } from "./agentsLogic";
 
-export function AgentManagement({ agents, busy, onRename, onArchive, onResetName, onPin, onImportPins }: {
+export function AgentManagement({ agents, busy, onRename, onArchive, onResetName, onPin, onImportPins, onPrimary, onProfile, onHistory }: {
+  onPrimary?: (agent: Agent) => void; onProfile?: (agent: Agent) => void; onHistory?: (agent: Agent) => void;
   agents: Agent[]; busy?: boolean; onImportPins?: () => void; onRename: (agent: Agent) => void;
   onArchive: (agent: Agent, archived: boolean) => void; onPin: (agent: Agent, pinned: boolean) => void; onResetName: (agent: Agent) => void;
 }) {
@@ -14,12 +15,15 @@ export function AgentManagement({ agents, busy, onRename, onArchive, onResetName
     {onImportPins && <button type="button" disabled={busy} onClick={onImportPins}>Import this device’s pins into available shared slots</button>}
     {!managed.length && <p>This server does not advertise agent presentation management.</p>}
     {managed.map((agent) => <div className="jg-sheet__card" key={agent.id}>
-      <div className="jg-sheet__row"><span className="jg-sheet__row-label"><strong>{label(agent)}</strong><small>{agent.id}{agent.archived ? " · Archived" : ""}</small></span>
+      <div className="jg-sheet__row"><span className="jg-sheet__row-label"><strong>{label(agent)}</strong><small>{agent.id}{agent.primary ? " · Primary" : ""}{agent.archived ? " · Hidden" : ""}</small></span>
         <div className="jg-agent-management-actions">
+          {onProfile && <button type="button" onClick={() => onProfile(agent)}>Profile</button>}
+          {onHistory && <button type="button" onClick={() => onHistory(agent)}>History</button>}
+          {onPrimary && !agent.primary && agent.ui_actions?.primary && <button type="button" disabled={busy} onClick={() => onPrimary(agent)}>Make primary</button>}
           {agent.ui_actions?.rename && <button type="button" disabled={busy} onClick={() => onRename(agent)}>Rename</button>}
           {agent.presentation?.display_name && <button type="button" disabled={busy} onClick={() => onResetName(agent)}>Reset display name</button>}
           {agent.ui_actions?.pin && <button type="button" disabled={busy} onClick={() => onPin(agent, !agent.pinned)}>{agent.pinned ? "Unpin" : "Pin"}</button>}
-          {agent.ui_actions?.hide && <button type="button" disabled={busy} onClick={() => onArchive(agent, !agent.archived)}>{agent.archived ? "Restore" : "Archive"}</button>}
+          {agent.ui_actions?.hide && <button type="button" disabled={busy} onClick={() => onArchive(agent, !agent.archived)}>{agent.archived ? "Restore" : "Hide from sidebar"}</button>}
         </div>
       </div>
     </div>)}

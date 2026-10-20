@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import time
 import json
+import math
 import logging
 import ipaddress
 import os
@@ -1305,6 +1306,8 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/frameworks/{id}/grants", self.handle_framework_grant)
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
         self.app.router.add_post("/v1/agents/pins", self.handle_agent_pins)
+        self.app.router.add_get("/v1/agents/primary", self.handle_agent_primary)
+        self.app.router.add_post("/v1/agents/primary", self.handle_agent_primary)
         self.app.router.add_patch("/v1/agents/{id}", self.handle_agent_presentation)
         self.app.router.add_get("/v1/agents/summary", self.handle_agents_summary)
         self.app.router.add_get("/v1/agents/{id}", self.handle_get_agent)
@@ -1882,6 +1885,30 @@ class JaegerGatewayApp:
             return web.json_response(payload)
         return web.json_response(self._with_skills(registry.to_catalog()))
 
+    async def handle_agent_primary(self, request: web.Request) -> web.Response:
+        """Operator presentation default only: never activate or rewrite an agent."""
+        from jaeger_ai.core.gateway.agent_presentation import primary_eligible, PresentationConflict
+        if request.method == 'GET':
+            return web.json_response({'agent_id': self.store.primary_agent_id()})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict) or set(body) != {'agent_id', 'expected_agent_id'} or any(not isinstance(v, str) or not v for v in body.values()):
+                raise ValueError('Canonical agent_id and expected_agent_id are required')
+            record = self._registry().get_agent(body['agent_id'])
+            if record is None or record.id != body['agent_id']:
+                return web.json_response({'error': 'Agent not found'}, status=404)
+            from jaeger_ai.core.gateway.agent_presentation import project
+            row = project(record.to_dict(), self.store.agent_presentation(), primary_id=self.store.primary_agent_id())
+            if not primary_eligible(row):
+                return web.json_response({'error': 'Agent is not an exposed native lead/specialist'}, status=409)
+            self.store.set_primary_agent(record.id, body['expected_agent_id'])
+        except PresentationConflict as exc:
+            return web.json_response({'error': str(exc)}, status=409)
+        except (ValueError, TypeError) as exc:
+            return web.json_response({'error': str(exc)}, status=400)
+        self.event_bus.publish('*', 'agent.updated', {'primary_agent_id': record.id})
+        return web.json_response({'agent_id': record.id})
+
     async def handle_agent_presentation(self, request: web.Request) -> web.Response:
         """Admin-scoped cosmetic update; never rewrites registry definitions or sessions."""
         from jaeger_ai.core.gateway.agent_presentation import validate_patch, protected, can_rename
@@ -1961,8 +1988,9 @@ class JaegerGatewayApp:
         agents = [a for a in registry.list_agents() if a.role.value in {"lead", "specialist"}]
         tasks = [t.to_dict() for t in self.task_owner.store.list_tasks()] if self.task_owner else []
         presentation = self.store.agent_presentation()
+        primary_id = self.store.primary_agent_id()
         return web.json_response(summarize_agents(
-            [project(a.to_dict(), presentation) for a in agents],
+            [project(a.to_dict(), presentation, primary_id=primary_id) for a in agents],
             tasks=tasks,
             handoffs=self.store.list_handoffs(limit=500),
             sessions=self.store.list_sessions(),
@@ -1973,10 +2001,11 @@ class JaegerGatewayApp:
     async def handle_agent_seen(self, request: web.Request) -> web.Response:
         """POST /v1/agents/{id}/seen — mark an agent's activity read (summary ``unseen``).
 
-        Body (optional): ``{seen_at?: epoch seconds, event_id?: int}``; defaults to now.
+        Body: optional seen_at/event_id and boolean unread. Explicit unread persists until open/read clears it.
         """
         agent_id = request.match_info["id"]
-        if self._registry().get_agent(agent_id) is None:
+        record = self._registry().get_agent(agent_id)
+        if record is None or record.id != agent_id:
             return web.json_response({"error": "Agent not found"}, status=404)
         try:
             body = await request.json() if request.can_read_body else {}
@@ -1988,7 +2017,11 @@ class JaegerGatewayApp:
             event_id = int(body["event_id"]) if body.get("event_id") is not None else None
         except (TypeError, ValueError):
             return web.json_response({"error": "seen_at must be a number and event_id an integer"}, status=400)
-        return web.json_response(self.store.mark_agent_seen(agent_id, seen_at=seen_at, event_id=event_id))
+        if set(body) - {'seen_at', 'event_id', 'unread'} or not isinstance(body.get('unread', False), bool) or not math.isfinite(seen_at):
+            return web.json_response({'error': 'Only finite seen_at, event_id and boolean unread are accepted'}, status=400)
+        value = self.store.mark_agent_seen(agent_id, seen_at=seen_at, event_id=event_id, unread=body.get('unread', False))
+        self.event_bus.publish('*', 'agent.updated', {'agent_id': agent_id, 'read_marker': value})
+        return web.json_response(value)
 
     def _last_message_preview(self, session_id: str) -> str:
         session = self.store.get_session(session_id) or {}
@@ -3282,6 +3315,7 @@ class JaegerGatewayApp:
 
         from jaeger_ai.core.gateway.agent_presentation import project
         presentation = self.store.agent_presentation()
+        primary_id = self.store.primary_agent_id()
         from jaeger_ai.core.gateway.caller_auth import CALLERS
         caller = _REQUEST_CALLER.get()
         spec = CALLERS.get(caller[0]) if caller else None
@@ -3290,7 +3324,7 @@ class JaegerGatewayApp:
         def one(row: Any) -> Any:
             if not isinstance(row, dict) or not row.get("id"):
                 return row
-            view = project(row, presentation, writable=writable)
+            view = project(row, presentation, writable=writable, primary_id=primary_id)
             try:
                 return {**view, "skills": self._agent_skill_cards(AgentRecord.from_dict(row))}
             except Exception:  # noqa: BLE001

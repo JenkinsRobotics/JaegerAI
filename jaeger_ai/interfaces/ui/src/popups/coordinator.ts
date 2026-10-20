@@ -37,7 +37,7 @@ export function useExclusivePopup(open: boolean, close: () => void, anchor?: Anc
     const onOther = (e: Event) => { if ((e as CustomEvent).detail !== me) closeRef.current(); };
     const onPress = (e: Event) => {
       const t = e.target;
-      if (t instanceof Element && t.closest("[role=menu],[role=dialog],[data-jg-popup]")) return;
+      if (t instanceof Element && t.closest("[role=menu],[role=dialog],[role=alertdialog],[data-jg-popup]")) return;
       const a = anchorRef.current;
       if (a instanceof Element && t instanceof Node && a.contains(t)) return;
       closeRef.current();

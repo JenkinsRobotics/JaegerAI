@@ -1,66 +1,47 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { agentCaps, NO_CAPS, type AgentActions } from "../api/agentActions";
-import { MockSource } from "../api/mock";
+import { AgentContextMenu, agentMenuItems } from "./AgentContextMenu";
+import { NO_CAPS, agentCaps } from "../api/agentActions";
 import type { Agent } from "../api/types";
-import { AgentContextMenu, AgentPrompt, agentMenuItems } from "./AgentContextMenu";
-
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 afterEach(() => { document.body.innerHTML = ""; });
-const gw = { id: "agent:gw", name: "gw", display_name: "Jaeger Gateway & WebUI", role: "builder" } as Agent;
-const ALL = { rename: true, read: true, pin: true, hide: true, sections: true, duplicate: true, remove: true, template: true };
-const labels = (sel: string) => [...document.querySelectorAll(`${sel} [role="menuitem"]`)].map((b) => b.textContent!.replace(/[\uE000-\uF8FF]/g, "").trim());
-function mount(node: React.ReactNode) { const el = document.createElement("div"); document.body.append(el); const root = createRoot(el); act(() => root.render(node)); return root; }
+const bot: Agent = { id: "native:fixture", name: "Fixture", role: "specialist", kind: "jaeger_native", primary: true };
+const caps = { ...NO_CAPS, read: true, unread: true, primary: true, pin: true, hide: true, rename: true };
 
-describe("agent capabilities (spec fields on GET /v1/agents)", () => {
-  it("today's gateway (no new fields): nothing server-backed", () => {
-    expect(agentCaps([gw], {} as AgentActions)).toEqual(NO_CAPS);
+describe("scoped Mac agent popup", () => {
+  it("matches current primary groups, toggles pin, and never offers identity transfer or delete", () => {
+    const { main, more } = agentMenuItems(bot, caps, true, true);
+    expect(main.map((i) => i.label)).toEqual(["Unpin", "Mark as Unread", "Copy conversation ID", "Hide from sidebar", "Replace with different Bot"]);
+    expect(main.filter((i) => i.separator).map((i) => i.id)).toEqual(["copy-id", "hide"]);
+    expect(more).toEqual([]);
+    expect(agentMenuItems(bot, caps, false, true).main[0].label).toBe("Pin");
+    expect(agentMenuItems(bot, caps, true, false).main.some((i) => i.id === "replace-primary")).toBe(false);
   });
-  it("a gateway on the spec: every item", () => {
-    expect(agentCaps([{ ...gw, ui_actions: ALL }], {} as AgentActions)).toEqual(ALL);
+  it("offers Make primary for an advertised nonprimary and no unsupported controls", () => {
+    const other = { ...bot, primary: false };
+    expect(agentMenuItems(other, caps, false, true).main.at(-1)?.label).toBe("Make primary");
+    expect(agentMenuItems(other, NO_CAPS, false, true).main.map((i) => i.label)).toEqual(["Copy conversation ID"]);
+    expect(agentCaps([other], {} as never)).toEqual(NO_CAPS);
+  });
+  it("renders actual separators and dispatches the chosen ID without a hidden More menu", () => {
+    const onAction = vi.fn(); const el = document.createElement("div"); document.body.append(el); const root = createRoot(el);
+    act(() => root.render(<AgentContextMenu agent={bot} preview="" at={{ x: 12, y: 12 }} phone={false} caps={caps} pinned alternative onAction={onAction} onClose={() => {}} />));
+    const items = [...el.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')];
+    expect(el.querySelectorAll('[role="separator"]')).toHaveLength(2);
+    expect(el.querySelector('.jg-amenu__preview')).toBeNull();
+    expect(items.some((i) => i.textContent?.includes("More"))).toBe(false);
+    act(() => items.at(-1)!.click());
+    expect(onAction).toHaveBeenCalledWith("replace-primary", bot);
+    act(() => root.unmount());
   });
 });
 
-describe("AgentContextMenu", () => {
-  it("full spec: Grok's order, preview card, More expands Copy ID / Duplicate / Delete and dims the first card", () => {
-    const onAction = vi.fn();
-    mount(<AgentContextMenu agent={gw} preview="The iPhone fix is tested" at={{ x: 10, y: 10 }} phone caps={ALL} pinned={false} onAction={onAction} onClose={() => {}} />);
-    expect(document.querySelector(".jg-amenu__bubble")!.textContent).toBe("The iPhone fix is tested");
-    expect(labels('[aria-label="Jaeger Gateway & WebUI actions"]')).toEqual(["Open chat", "Agent profile", "Conversation history", "Rename display name", "Mark Read", "Pin", "New Section", "Share as Template", "Archive", "More"]);
-    expect(document.querySelector(".is-danger")!.textContent).toContain("Archive");
-    act(() => [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find((b) => b.textContent!.includes("More"))!.click());
-    expect(labels('[aria-label="More"]')).toEqual(["More", "Copy ID", "Duplicate", "Delete"]);
-    expect(document.querySelector(".jg-amenu__card.is-dimmed")).toBeTruthy();
-    act(() => [...document.querySelectorAll<HTMLButtonElement>('[aria-label="More"] [role="menuitem"]')].find((b) => b.textContent!.includes("Delete"))!.click());
-    expect(onAction).toHaveBeenCalledWith("delete", gw);
-  });
-  it("today's gateway: only Mark Read (local), Pin (local) and More → Copy ID", () => {
-    const { main, more } = agentMenuItems(gw, NO_CAPS, false);
-    expect(main.map((i) => i.label)).toEqual(["Open chat", "Agent profile", "Conversation history", "Mark Read on this device", "Pin on this device"]);
-    expect(more.map((i) => i.label)).toEqual(["Copy ID"]);
-  });
-  it("never offers Hide or Delete for protected agents (primary, native:jaeger)", () => {
-    for (const a of [{ ...gw, primary: true }, { ...gw, id: "native:jaeger" }]) {
-      const { main, more } = agentMenuItems(a, ALL, true);
-      expect(main.map((i) => i.label)).not.toContain("Archive");
-      expect(main.map((i) => i.label)).not.toContain("Unpin");
-      expect(more.map((i) => i.label)).not.toContain("Delete");
-    }
-  });
-});
-
-describe("Delete confirm + mock gateway", () => {
-  it("Cancel never deletes; Delete confirms; the mock soft-deletes and refuses the lead with 409", async () => {
-    const done = vi.fn();
-    mount(<AgentPrompt title="Delete Jaeger Gateway & WebUI?" danger confirm="Delete" onDone={done} />);
-    act(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Cancel")!.click());
-    expect(done).toHaveBeenLastCalledWith(false);
-    act(() => [...document.querySelectorAll("button")].find((b) => b.textContent === "Delete")!.click());
-    expect(done).toHaveBeenLastCalledWith(true, "");
-    const mock = new MockSource();
-    await mock.agentActions.remove("agent:gateway-webui");
-    expect((await mock.agents()).some((a) => a.id === "agent:gateway-webui")).toBe(false);
-    await expect(mock.agentActions.remove("native:jaeger")).rejects.toMatchObject({ status: 409 });
-  });
+it("keeps the secondary rename prompt open when its input is clicked", async () => {
+  const { AgentPrompt } = await import('./AgentContextMenu');
+  const done = vi.fn(); const el = document.createElement('div'); document.body.append(el); const root = createRoot(el);
+  await act(async () => { root.render(<AgentPrompt title="Rename fixture" confirm="Save" input={{ placeholder: "Name", value: "Owned" }} onDone={done} />); });
+  act(() => el.querySelector('input')!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })));
+  expect(done).not.toHaveBeenCalled();
+  act(() => root.unmount());
 });

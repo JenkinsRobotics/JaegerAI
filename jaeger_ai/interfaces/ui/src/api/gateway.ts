@@ -85,6 +85,8 @@ export class GatewayClient implements JaegerSource {
     return this.json<Agent>("/v1/agents", { kind: "jaeger_native", role: "specialist", ...body });
   }
   readonly agentActions: AgentActions = {
+    setPrimary: async (id, expectedId) => { await this.json("/v1/agents/primary", { agent_id: id, expected_agent_id: expectedId }); },
+    markUnread: async (id) => { await this.json(`/v1/agents/${encodeURIComponent(id)}/seen`, { unread: true }); },
     savePins: async (ids, expectedIds) => { await this.json("/v1/agents/pins", { agent_ids: ids, expected_agent_ids: expectedIds }); },
     markRead: async (id, _messageId) => { await this.json(`/v1/agents/${encodeURIComponent(id)}/seen`, {}); },
     patchAgent: async (id, body) => { await this.json(`/v1/agents/${encodeURIComponent(id)}`, body, "PATCH"); },
