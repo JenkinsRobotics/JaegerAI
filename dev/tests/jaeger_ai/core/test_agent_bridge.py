@@ -35,7 +35,7 @@ def headers(caller="mcp"):
 def test_migration_and_durable_redacted_idempotency(tmp_path):
     path = tmp_path / "sessions.sqlite3"
     store = GatewaySessionStore(path)
-    assert store.schema_version() == 14
+    assert store.schema_version() == 15
     service = AgentMessages(store)
     item = message(body="api_key=very-secret sk-abcdefghijklmnopqrst")
     result = service.send("mcp", item)
@@ -48,7 +48,7 @@ def test_migration_and_durable_redacted_idempotency(tmp_path):
     with store._get_conn() as conn:
         assert conn.execute("SELECT count(*) FROM agent_messages").fetchone()[0] == 1
         conn.execute("UPDATE schema_meta SET value='12' WHERE key='version'")
-    assert GatewaySessionStore(path).schema_version() == 14
+    assert GatewaySessionStore(path).schema_version() == 15
 
 
 @pytest.mark.parametrize(

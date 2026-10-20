@@ -175,3 +175,28 @@ or Hopper context is used.
 Validation details and exact commands are recorded in
 [PHASE2_VALIDATION.md](PHASE2_VALIDATION.md). Earlier `REVIEW*` documents describe
 Phase 1 snapshots and are retained as history.
+
+## Correlated peer responses (schema 15)
+
+`send_message` / POST messages accepts optional `reply_to`: an existing message
+from the other participant in the same thread. A reply cannot reference the
+sender's own message or a foreign thread. `from`, timestamps and result
+`correlation` remain server-owned; clients cannot provide correlation metadata.
+
+`start_goal` accepts optional `source_message_id`. It must identify this caller's
+existing task/question to `jaegerd` in this thread. One source message binds to
+at most one goal; retries retain the original request/tool ceiling. This explicit
+call still requires the existing workspace grant and normal Gateway admission,
+PolicyKernel and owner tool approvals. An inbox message by itself never starts
+execution. Answers/results/status cannot enroll another reply goal.
+
+After the canonical terminal receipt, the Gateway automatically returns an
+answer/status in the same thread with `reply_to`, goal/request/session IDs and
+any canonical result task/handoff ID. Deterministic delivery IDs prevent duplicate
+responses/outbox rows. Inbox/goal reads repair a missed terminal delivery after a
+crash using durable receipts only; they never execute or retry a request. Old
+unlinked messages/goals are not backfilled. Unknown outcomes explicitly say no
+retry started. Model completion is labeled `completed_unverified`; canonical
+owner verification remains available on goal status. Denials/blocked operations
+remain in the normal tool result, without claiming successful effects. No
+response-to-response dispatch, automatic approval or new peer credentials.

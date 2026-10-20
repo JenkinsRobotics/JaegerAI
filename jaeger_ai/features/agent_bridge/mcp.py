@@ -25,6 +25,7 @@ def register(mcp, client_for_context):
         body: str,
         refs: list[str] | None = None,
         status_line: str = "",
+        reply_to: str | None = None,
         ctx: Context | None = None,
     ) -> dict:
         """Store untrusted message data; this never starts a goal or a tool."""
@@ -41,6 +42,7 @@ def register(mcp, client_for_context):
                 "body": body,
                 "refs": refs or [],
                 "status_line": status_line,
+                **({"reply_to": reply_to} if reply_to is not None else {}),
             },
         )
 
@@ -77,6 +79,7 @@ def register(mcp, client_for_context):
         thread: str,
         id: str,
         rea_tools: list[str] | None = None,
+        source_message_id: str | None = None,
         ctx: Context | None = None,
     ) -> dict:
         """Request workspace file work through normal Gateway authority/approvals.
@@ -97,6 +100,7 @@ def register(mcp, client_for_context):
                 "goal": goal,
                 "workspace_folder": workspace_folder,
                 "rea_tools": rea_tools or [],
+                **({"source_message_id": source_message_id} if source_message_id is not None else {}),
             },
         )
 

@@ -55,6 +55,8 @@ def enqueue(conn, message):
         "body",
         "refs",
         "status_line",
+        "reply_to",
+        "correlation",
         "created_at",
     )
     payload = json.dumps(
