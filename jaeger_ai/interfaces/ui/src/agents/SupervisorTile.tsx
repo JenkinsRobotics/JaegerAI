@@ -9,8 +9,8 @@ export function SupervisorTile({ row, selected, unread = false, onSelect }: { ro
   const state = useAvatarState(row.summary?.status, unread);
   return (
     <div className="jg-supervisor-wrap">
-      <button type="button" className={`jg-supervisor${selected ? " is-selected" : ""}`} aria-current={selected ? "page" : undefined} onClick={onSelect} title={name}>
-        <SupervisorArt id={row.agent.id} name={name} unread={unread} lead={row.agent.role === "lead"} state={state} />
+      <button type="button" className={`jg-supervisor${selected ? " is-selected" : ""}`} aria-current={selected ? "page" : undefined} onClick={onSelect} title={row.agent.primary ? `${name} · Primary bot` : name}>
+        <SupervisorArt id={row.agent.id} name={name} unread={unread} lead={row.agent.primary ?? row.agent.role === "lead"} state={state} />
         <span className="jg-supervisor__label">{name}</span>
       </button>
     </div>

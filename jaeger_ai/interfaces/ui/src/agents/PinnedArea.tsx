@@ -11,6 +11,7 @@ const TILE_MENU: MenuItem[] = [{ id: "unpin", label: "Unpin" }];
 const carriesAgent = (e: DragEvent) => Array.from(e.dataTransfer?.types ?? []).includes(AGENT_DRAG_TYPE);
 
 interface Props {
+  onAgentMenu?: (agentId: string, x: number, y: number) => void;
   lead?: SidebarRow;
   pinned: SidebarRow[];
   selectedId?: string;
@@ -21,7 +22,7 @@ interface Props {
   children?: ReactNode;
 }
 
-export function PinnedArea({ lead, pinned, selectedId, unread, onSelect, onPin, onUnpin, children }: Props) {
+export function PinnedArea({ lead, pinned, selectedId, unread, onSelect, onPin, onUnpin, children, onAgentMenu }: Props) {
   const [over, setOver] = useState(false);
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const onDragOver = (e: DragEvent<HTMLDivElement>) => { if (!carriesAgent(e)) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; setOver(true); };
@@ -38,7 +39,7 @@ export function PinnedArea({ lead, pinned, selectedId, unread, onSelect, onPin, 
     <div key={row.agent.id} className="jg-pinned__slot" draggable={index !== undefined}
       onDragStart={index === undefined ? undefined : (e) => { e.dataTransfer.setData(AGENT_DRAG_TYPE, row.agent.id); e.dataTransfer.effectAllowed = "move"; }}
       onDrop={index === undefined ? undefined : dropAt(index)}
-      onContextMenu={index === undefined ? undefined : (e) => { e.preventDefault(); setMenu({ id: row.agent.id, x: e.clientX, y: e.clientY }); }}>
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); if (onAgentMenu) onAgentMenu(row.agent.id, e.clientX, e.clientY); else if (index !== undefined) setMenu({ id: row.agent.id, x: e.clientX, y: e.clientY }); }}>
       <SupervisorTile row={row} selected={selectedId === row.agent.id} unread={unread(row)} onSelect={() => onSelect(row.agent.id)} />
     </div>
   );

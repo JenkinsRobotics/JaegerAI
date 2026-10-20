@@ -26,7 +26,7 @@ it("renames, archives, restores and pins the same agent through acknowledged bac
   try {
     await flush(() => root.render(<App source={source} />));
     await settings(); await clickText("Agents");
-    await flush(() => { [...el.querySelectorAll<HTMLElement>('[aria-label="Manage agents"] .jg-sheet__card')].find((r) => r.textContent!.includes(worker.id))!.querySelector<HTMLButtonElement>('button')!.click(); });
+    await flush(() => { [...el.querySelectorAll<HTMLElement>('[aria-label="Manage agents"] .jg-sheet__card')].find((r) => r.textContent!.includes(worker.id))!.querySelectorAll<HTMLButtonElement>('button').forEach((b) => { if (b.textContent === 'Rename') b.click(); }); });
     await flush(() => {
       const input = el.querySelector<HTMLInputElement>('input[aria-label="Display name"]')!;
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'New worker label');
@@ -35,7 +35,7 @@ it("renames, archives, restores and pins the same agent through acknowledged bac
     await clickText("Save display name");
     expect(patch).toHaveBeenCalledWith(worker.id, { display_name: "New worker label" });
     await settings();
-    await clickText("Archive");
+    await clickText("Hide from sidebar");
     expect(worker.archived).toBe(true);
     expect(el.querySelector('[data-agent-id="agent:worker"]')).toBeNull();
     await clickText("Restore");

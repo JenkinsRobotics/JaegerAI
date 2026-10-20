@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JaegerSource } from "./api/source";
+import { PrimaryPicker } from "./agents/PrimaryPicker";
 import { AgentManagement } from "./agents/AgentManagement";
 import { AgentDetails } from "./agents/AgentDetails";
 import { agentsSidebarSlots, type Selection } from "./agents/AgentsSidebar";
@@ -24,7 +25,7 @@ import { PhoneChat, PhoneList } from "./phone/PhoneShell";
 import { usePhone } from "./phone/usePhone";
 import { AgentContextMenu, AgentPrompt, type AgentMenuAction } from "./agents/AgentContextMenu";
 import { capabilitiesOf, type HostCapabilities } from "./chat/hostH8";
-import { agentCaps } from "./api/agentActions";
+import { agentCaps, conversationIdForAgent } from "./api/agentActions";
 import type { Agent } from "./api/types";
 import "./phone/phone.css";
 
@@ -65,6 +66,15 @@ export function App({ source }: { source: JaegerSource }) {
   }, [source, host]);
   host.home = home;
   const [selection, setSelection] = useState<Selection>({ type: "agent", agentId: LEAD_ID });
+  const [initialReady, setInitialReady] = useState(false);
+  const [primaryPicker, setPrimaryPicker] = useState<{ expectedId: string } | null>(null);
+  const defaultAgentId = store.agents.find((a) => a.primary)?.id ?? LEAD_ID;
+  useEffect(() => {
+    if (!initialReady && store.agents.length) {
+      setSelection({ type: "agent", agentId: defaultAgentId });
+      setInitialReady(true);
+    }
+  }, [initialReady, store.agents, defaultAgentId]);
   const [sessionId, setSessionId] = useState<string>();
   const [sessionError, setSessionError] = useState<string>();
   const [sessionAttempt, setSessionAttempt] = useState(0);
@@ -110,7 +120,7 @@ export function App({ source }: { source: JaegerSource }) {
 
   // Selecting an agent opens its one home chat. An explicit session (a handoff's worker side) opens as is.
   useEffect(() => {
-    if (!selectedAgentId) return;
+    if (!selectedAgentId || !initialReady) return;
     let live = true;
     setSessionError(undefined);
     (explicitSessionId ? Promise.resolve(explicitSessionId) : home.home(selectedAgentId)).then(
@@ -119,10 +129,10 @@ export function App({ source }: { source: JaegerSource }) {
     );
     store.seeAgent(selectedAgentId);
     return () => { live = false; };
-  }, [selectedAgentId, explicitSessionId, home, store.seeAgent, sessionAttempt]);
+  }, [selectedAgentId, explicitSessionId, home, store.seeAgent, sessionAttempt, initialReady]);
 
   /** There is one chat per agent now: "new chat with X" opens X's home chat. */
-  const newChat = useCallback((agentId: string) => setSelection({ type: "agent", agentId }), []);
+  const newChat = useCallback((agentId: string) => { if (agentId === selectedAgentId) void store.seeAgent(agentId); setSelection({ type: "agent", agentId }); }, [selectedAgentId, store.seeAgent]);
 
   const createAgent = useCallback(async (displayName: string, job: string) => {
     const agent = await source.createAgent({
@@ -147,21 +157,21 @@ export function App({ source }: { source: JaegerSource }) {
     host.openHandoff = openHandoff;
     host.openDetails = (agentId: string) => { setHistoryAgentId(null); setDetailsAgentId(agentId); };
     host.openHistory = (agentId: string) => { setDetailsAgentId(null); setHistorySessionId(undefined); setHistoryAgentId(agentId); };
-    host.openChat = (sessionId: string) => { setDetailsAgentId(null); setHistorySessionId(sessionId); setHistoryAgentId(selectedAgentId ?? LEAD_ID); };
+    host.openChat = (sessionId: string) => { setDetailsAgentId(null); setHistorySessionId(sessionId); setHistoryAgentId(selectedAgentId ?? defaultAgentId); };
     const byId = new Map(store.agents.map((a) => [a.id, label(a)]));
     names.current = (id: string) => byId.get(id) ?? id;
-  }, [host, store.agents, openHandoff, selectedAgentId]);
+  }, [host, store.agents, openHandoff, selectedAgentId, defaultAgentId]);
   useEffect(() => onNativeEvent((detail) => { if (detail.type === "window.visibility") void store.refresh(); }), [store.refresh]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); setSettingsOpen(true); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setJumpOpen((v) => !v); return; }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newChat(selectedAgentId ?? LEAD_ID); }
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newChat(selectedAgentId ?? defaultAgentId); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newChat, selectedAgentId]);
+  }, [newChat, selectedAgentId, defaultAgentId]);
 
   const actions = source.agentActions;
   const caps = agentCaps(agentMenu ? store.agents.filter((a) => a.id === agentMenu.agentId) : store.agents, actions);
@@ -169,9 +179,14 @@ export function App({ source }: { source: JaegerSource }) {
   const fail = (what: string) => (error: unknown) => setNotice(`Couldn't ${what}: ${message(error)}`);
   const onAgentAction = (action: AgentMenuAction, agent: Agent) => {
     switch (action) {
-      case "open": setSelection({ type: "agent", agentId: agent.id }); setDetailsAgentId(null); setHistoryAgentId(null); setPhoneView("chat"); return;
+      case "open": if (selectedAgentId === agent.id) void store.seeAgent(agent.id); setSelection({ type: "agent", agentId: agent.id }); setDetailsAgentId(null); setHistoryAgentId(null); setPhoneView("chat"); return;
       case "profile": setHistoryAgentId(null); setDetailsAgentId(agent.id); return;
       case "history": setDetailsAgentId(null); setHistorySessionId(undefined); setHistoryAgentId(agent.id); return;
+      case "replace-primary": setPrimaryPicker({ expectedId: defaultAgentId }); return;
+      case "make-primary": void changePrimary(agent.id, defaultAgentId); return;
+      case "unread":
+        if (actions?.markUnread) void actions.markUnread(agent.id).then(() => store.refresh(), fail("mark it unread"));
+        return;
       case "read":
         if (caps.read && actions) void actions.markRead(agent.id, agent.last_message?.id ?? null).then(() => { store.seeAgent(agent.id); return store.refresh(); }, fail("mark it read"));
         else store.seeAgent(agent.id);
@@ -181,9 +196,23 @@ export function App({ source }: { source: JaegerSource }) {
         updatePins((cur) => action === "pin" ? pin(cur, agent.id) : unpin(cur, agent.id)); return;
       case "hide": void changePresentation(agent, { archived: true }); return;
       case "template": if (actions) void actions.template(agent.id).then((t) => copy(JSON.stringify(t, null, 2), "Template copied"), fail("get the template")); return;
-      case "copy-id": void copy(agent.id, "ID copied"); return;
+      case "copy-id":
+        void conversationIdForAgent(agent.id, (id) => home.home(id), selectedAgentId && explicitSessionId ? { agentId: selectedAgentId, sessionId: explicitSessionId } : undefined)
+          .then((id) => copy(id, "Conversation ID copied"), fail("resolve the conversation"));
+        return;
       case "section": case "duplicate": case "delete": setAgentPrompt({ kind: action, agent }); return;
     }
+  };
+  const changePrimary = async (id: string, expectedId: string) => {
+    if (!actions?.setPrimary || managementBusy) return;
+    setManagementBusy(true);
+    try {
+      await actions.setPrimary(id, expectedId);
+      await store.refresh();
+      setPrimaryPicker(null);
+      setNotice("Primary bot updated; your open chat and draft stay here");
+    } catch (error) { fail("replace the primary bot")(error); await store.refresh(); }
+    finally { setManagementBusy(false); }
   };
   const changePresentation = async (agent: Agent, patch: { display_name?: string | null; archived?: boolean }) => {
     if (!actions || managementBusy) return;
@@ -203,7 +232,7 @@ export function App({ source }: { source: JaegerSource }) {
     } else if (p.kind === "delete") {
       void actions.remove(p.agent.id).then(async () => {
         setNotice(`${label(p.agent)} deleted`);
-        if (selectedAgentId === p.agent.id) { setSelection({ type: "agent", agentId: LEAD_ID }); setPhoneView("list"); }
+        if (selectedAgentId === p.agent.id) { setSelection({ type: "agent", agentId: defaultAgentId }); setPhoneView("list"); }
         await store.refresh();
       }, fail("delete it"));
     } else if (p.kind === "section") {
@@ -219,7 +248,10 @@ export function App({ source }: { source: JaegerSource }) {
     state: store,
     selection: selection.type === "agent" ? { ...selection, sessionId } : selection,
     chats: [],
-    onSelect: setSelection,
+    onSelect: (next) => {
+      if (next.type === "agent" && next.agentId === selectedAgentId) void store.seeAgent(next.agentId);
+      setSelection(next);
+    },
     onNewChatMenu: setNewChatAnchor,
     onRenameChat: () => {},
     onArchiveChat: () => {},
@@ -245,12 +277,12 @@ export function App({ source }: { source: JaegerSource }) {
   const chatBody = sessionError
     ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
     : <ChatPane host={host} sessionId={sessionId} />;
-  const phoneAgent = store.agents.find((a) => a.id === (selectedAgentId ?? LEAD_ID));
+  const phoneAgent = store.agents.find((a) => a.id === (selectedAgentId ?? defaultAgentId));
   const main = phone
     ? (phoneView === "chat"
       ? <PhoneChat agentId={phoneAgent?.id ?? LEAD_ID} agentName={phoneAgent ? label(phoneAgent) : "Jaeger"} avatarUrl={phoneAgent?.avatar_url}
           onBack={() => { setPhoneView("list"); void store.refresh(); }} onInfo={() => host.openDetails?.(phoneAgent?.id ?? LEAD_ID)}>{chatBody}</PhoneChat>
-      : <PhoneList state={store} userInitials="MJ" statusOk={!store.error} onOpen={(agentId) => { setSelection({ type: "agent", agentId }); setPhoneView("chat"); }}
+      : <PhoneList state={store} userInitials="MJ" statusOk={!store.error} onOpen={(agentId) => { newChat(agentId); setPhoneView("chat"); }}
           onSearch={() => setJumpOpen(true)} onNew={setNewChatAnchor} onSettings={() => setSettingsOpen(true)} onAgentMenu={openAgentMenu} />)
     : null;
   return (
@@ -275,10 +307,12 @@ export function App({ source }: { source: JaegerSource }) {
           )}
       </AppShell>}
       {menuAgent && agentMenu && (
-        <AgentContextMenu agent={menuAgent} at={agentMenu} phone={phone} caps={caps} pinned={pins.includes(menuAgent.id)}
+        <AgentContextMenu agent={menuAgent} at={agentMenu} phone={phone} caps={caps} pinned={pins.includes(menuAgent.id)} alternative={store.agents.some((a) => a.id !== menuAgent.id && a.ui_actions?.primary && visible(a))}
           preview={menuAgent.last_message?.preview ?? store.summaries.find((x) => x.id === menuAgent.id)?.last_preview ?? ""}
           onAction={onAgentAction} onClose={() => setAgentMenu(null)} />
       )}
+      {primaryPicker && <PrimaryPicker agents={store.agents.filter((a) => a.ui_actions?.primary && a.id !== primaryPicker.expectedId && visible(a))} busy={managementBusy}
+        onPick={(id) => void changePrimary(id, primaryPicker.expectedId)} onClose={() => { if (!managementBusy) setPrimaryPicker(null); }} />}
       {agentPrompt?.kind === "rename" && <AgentPrompt title={`Rename ${label(agentPrompt.agent)}`} confirm="Save display name" input={{ placeholder: "Display name", value: label(agentPrompt.agent) }} message="Presentation only. Agent ID, role, tools, context and conversations stay the same." onDone={onPromptDone} />}
       {agentPrompt?.kind === "delete" && <AgentPrompt title={`Delete ${label(agentPrompt.agent)}?`} danger confirm="Delete"
         message="It leaves the sidebar. Its home chat and history are kept and can be restored." onDone={onPromptDone} />}
@@ -290,13 +324,13 @@ export function App({ source }: { source: JaegerSource }) {
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
         onNewChat={newChat} onCreateAgent={createAgent} />
       <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} agentsPanel={<AgentManagement agents={store.agents} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived })} />} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} agentsPanel={<AgentManagement agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived })} />} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
-        onAgent={(agentId) => { setSelection({ type: "agent", agentId }); if (phone) setPhoneView("chat"); }}
+        onAgent={(agentId) => { newChat(agentId); if (phone) setPhoneView("chat"); }}
         actions={[
-          { id: "new", label: "New chat", shortcut: "⌘N", run: () => newChat(selectedAgentId ?? LEAD_ID) },
-          { id: "history", label: "Chat history", run: () => host.openHistory?.(selectedAgentId ?? LEAD_ID) },
+          { id: "new", label: "New chat", shortcut: "⌘N", run: () => newChat(selectedAgentId ?? defaultAgentId) },
+          { id: "history", label: "Chat history", run: () => host.openHistory?.(selectedAgentId ?? defaultAgentId) },
           { id: "tasks", label: "Tasks", run: () => setSelection({ type: "tasks" }) },
           { id: "settings", label: "Settings", shortcut: "⌘,", run: () => setSettingsOpen(true) },
         ]} />

@@ -7,6 +7,8 @@ export interface Section { id: string; name: string; order?: number }
 export interface AgentPatch { display_name?: string | null; archived?: boolean; pinned?: boolean; hidden?: boolean; section_id?: string | null; enabled?: boolean }
 
 export interface AgentActions {
+  setPrimary?(agentId: string, expectedId: string): Promise<void>;
+  markUnread?(agentId: string): Promise<void>;
   savePins?(agentIds: string[], expectedIds: string[]): Promise<void>;
   markRead(agentId: string, messageId: string | null): Promise<void>;
   patchAgent(agentId: string, body: AgentPatch): Promise<void>;
@@ -17,8 +19,8 @@ export interface AgentActions {
   template(agentId: string): Promise<unknown>;
 }
 
-export interface AgentCaps { rename: boolean; read: boolean; pin: boolean; hide: boolean; sections: boolean; duplicate: boolean; remove: boolean; template: boolean }
-export const NO_CAPS: AgentCaps = { rename: false, read: false, pin: false, hide: false, sections: false, duplicate: false, remove: false, template: false };
+export interface AgentCaps { primary?: boolean; unread?: boolean; rename: boolean; read: boolean; pin: boolean; hide: boolean; sections: boolean; duplicate: boolean; remove: boolean; template: boolean }
+export const NO_CAPS: AgentCaps = { primary: false, unread: false, rename: false, read: false, pin: false, hide: false, sections: false, duplicate: false, remove: false, template: false };
 
 /** Intersection of explicit actions for the selected agents; no identity-field guessing. */
 export function agentCaps(agents: Agent[], actions?: AgentActions): AgentCaps {
@@ -26,5 +28,13 @@ export function agentCaps(agents: Agent[], actions?: AgentActions): AgentCaps {
   return Object.fromEntries(Object.keys(NO_CAPS).map((key) => [key, agents.every((a) => a.ui_actions?.[key as keyof AgentCaps] === true)])) as unknown as AgentCaps;
 }
 
-/** The primary agent and native:jaeger are protected (409 protected_agent): never offer Delete for them. */
-export const isProtected = (a: Pick<Agent, "id" | "primary" | "role">) => Boolean(a.primary) || a.role === "lead" || a.id === "native:jaeger";
+/** Execution lead/system protections are independent of the presentation-primary flag. */
+export const isProtected = (a: Pick<Agent, "id" | "primary" | "role">) => a.role === "lead" || a.id === "native:jaeger";
+
+
+/** Resolve a conversation, never substitute an agent ID for its home/session ID. */
+export async function conversationIdForAgent(agentId: string, home: (id: string) => Promise<string>, selected?: { agentId: string; sessionId: string }): Promise<string> {
+  const id = selected?.agentId === agentId ? selected.sessionId : await home(agentId);
+  if (typeof id !== "string" || !id.trim()) throw new Error("Conversation ID unavailable");
+  return id;
+}

@@ -54,7 +54,15 @@ export function useAgentsStore(source: JaegerSource) {
     return () => { abort.abort(); clearTimeout(timer); };
   }, [source, refresh]);
 
-  const seeAgent = useCallback((agentId: string) => setState((s) => ({ ...s, seen: markSeen(agentId) })), []);
+  const seeAgent = useCallback(async (agentId: string) => {
+    try {
+      if (source.agentActions) await source.agentActions.markRead(agentId, null);
+      setState((s) => ({ ...s, seen: markSeen(agentId) }));
+      if (source.agentActions) await refresh();
+    } catch (error) {
+      setState((s) => ({ ...s, error: `Couldn't mark this agent read: ${String((error as Error)?.message ?? error)}` }));
+    }
+  }, [source, refresh]);
   return { ...state, refresh, seeAgent };
 }
 

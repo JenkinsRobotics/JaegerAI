@@ -85,7 +85,7 @@ def summarize_agents(
             "last_handoff_id": handoff.get("id") if handoff else None,
             "session_id": chat.get("session_id") if chat else None,
             "seen_at": (seen or {}).get(aid, {}).get("seen_at"),
-            "unseen": bool(latest and latest[0] > float((seen or {}).get(aid, {}).get("seen_at") or 0)),
+            "unseen": bool((seen or {}).get(aid, {}).get("unread") or (latest and latest[0] > float((seen or {}).get(aid, {}).get("seen_at") or 0))),
             "task": ({key: task.get(key) for key in ("task_id", "goal", "state", "eta", "runner", "updated_at")}
                      if task else None),
         })
