@@ -2,6 +2,8 @@
 
 **Classification:** CURRENT AUTHORITATIVE
 **Branch:** `master` — operator-authorized canonical integration, 2026-10-19.
+**Ordinary-menu served rollout (2026-10-20):** Passing canonical UI3628c8a3 now served8790 with exact hashes; sections route loaded after exact WebUI25804→81027 restart. Existing shell42831/Gateway42878 retained healthy; unknown1/metadata/Stop preserved. Native page refresh awaits draft confirmation; do not claim visible menu acceptance. See completion record/evidence menu-rollout-20261020.
+
 **Message notification checkpoint (2026-10-19):** Source distinguishes requested/approval-waiting handoffs from durable recipient delivery; only confirmed receipt says Messaged. Two named bots/3+ overlapping avatars with N Bots. Focused UI16/backend8/build pass; backend evidence in message-notification-20261019/backend-final.log. Not served: foreground owner absent/stale lease and Gateway33418 offline; unknown request1 not replayed. See completion record for limits and existing unrelated UI assertions.
 
 **Current regular-bot popup checkpoint (2026-10-19):** Source6ddec235 implements screenshot’s ordinary seven-row menu/groups, original folder-plus/trash glyphs/red Delete, durable new sections and user-approved recoverable Deleted bots/Restore. Backend19/UI7/type/build pass. NOT production deployed: live preflight found no JaegerShell, stale owner12591 lease and production33418 already offline;8790 still serves prior build. No production stop/restart/lease bypass/native launch performed. Candidate/records retained under ~/.cache/jaeger/verification/regular-menu-20261019. Resume safe rollout only with legitimate foreground ownership. See [completion record](integration/MAC_APP_COMPLETION.md).
