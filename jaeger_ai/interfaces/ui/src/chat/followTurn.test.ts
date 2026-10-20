@@ -133,3 +133,42 @@ describe("durable terminal answer", () => {
     expect(parts.filter((p) => p.kind === "markdownContent").map((p) => p.text).join("")).toBe("MAC-CONTINUITY-OK");
   });
 });
+
+
+describe("WebHost Stop confirmation", () => {
+  it("keeps the turn pending until the Gateway confirms cancellation", async () => {
+    let finish!: (event: GatewayEvent) => void;
+    const cancel = vi.fn(async () => {});
+    const stream: Stream = async (_s, _c, onEvent, signal) => {
+      finish = onEvent;
+      await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+    };
+    const host = new WebHost({ send: async () => ({ request_id: "stop-r", start_event_id: 1 }), cancel, stream } as unknown as JaegerSource);
+    const parts: ChatPart[] = [];
+    const handle = host.startTurn({ sessionId: "fixture", turnId: "stop-r", message: "owned check" }, (p) => parts.push(p));
+    await new Promise((r) => setTimeout(r, 0));
+    let settled = false;
+    void handle.done.then(() => { settled = true; });
+    handle.cancel(); handle.cancel();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(settled).toBe(false);
+    expect(parts).toContainEqual({ kind: "progress", message: "Stopping… Waiting for Gateway confirmation." });
+    finish(ev(2, "turn.cancelled", "stop-r"));
+    expect((await handle.done).state).toBe("cancelled");
+  });
+  it("handles Stop before admission without aborting observation or submitting again", async () => {
+    let admit!: (r: TurnReceipt) => void;
+    const send = vi.fn(() => new Promise<TurnReceipt>((r) => { admit = r; }));
+    const cancel = vi.fn(async () => {});
+    const host = new WebHost({ send, cancel, stream: replayAll([ev(2, "turn.cancelled", "assigned")]) } as unknown as JaegerSource);
+    const handle = host.startTurn({ sessionId: "fixture", turnId: "client-r", message: "owned check" }, () => {});
+    handle.cancel();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(cancel).not.toHaveBeenCalled();
+    admit({ request_id: "assigned", start_event_id: 1 });
+    expect((await handle.done).state).toBe("cancelled");
+    expect(cancel).toHaveBeenCalledWith("fixture", "assigned");
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+});

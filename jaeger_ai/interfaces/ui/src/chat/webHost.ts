@@ -146,6 +146,14 @@ export class WebHost implements ChatHost {
     const controller = new AbortController();
     const requestId = request.turnId;
     let admitted = false;
+    let cancelRequested = false;
+    let admittedRequestId = requestId;
+    const requestCancel = () => {
+      onPart({ kind: "progress", message: "Stopping… Waiting for Gateway confirmation." });
+      void this.source.cancel(request.sessionId, admittedRequestId).catch((error: unknown) => {
+        onPart({ kind: "warning", message: `Stop was not confirmed: ${message(error)}. Still observing this request.` });
+      });
+    };
     const done = (async (): Promise<{ state: TurnState }> => {
       // The gateway attaches workspace files by path. Host-picked files (H8 `path`) are registered first;
       // pasted or dropped ones have no path, so they're named in a warning instead of silently dropped.
@@ -157,8 +165,9 @@ export class WebHost implements ChatHost {
         onPart({ kind: "error", message: message(error) });
         return { state: "failed" };
       }
+      admittedRequestId = receipt.request_id ?? requestId;
       admitted = true;
-      if (controller.signal.aborted) { void this.source.cancel(request.sessionId, receipt.request_id); return { state: "cancelled" }; }
+      if (cancelRequested) requestCancel();
       const start = typeof receipt.start_event_id === "number" ? receipt.start_event_id - 1 : 0;
       return followTurn({
         source: this.source,
@@ -175,8 +184,11 @@ export class WebHost implements ChatHost {
     })();
     return {
       cancel: () => {
-        if (admitted) void this.source.cancel(request.sessionId, requestId);
-        controller.abort();
+        if (cancelRequested) return;
+        cancelRequested = true;
+        if (admitted) requestCancel();
+        // Keep observing the original request. A client-side stream abort is
+        // not proof that execution stopped (and must not unlock another send).
       },
       done,
     };
