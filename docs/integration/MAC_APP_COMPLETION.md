@@ -293,3 +293,30 @@ Mac app failures. Do not start another broad implementation/audit in parallel.
   production mutation, service restart/reload, deployment or served-build switch.
   Live popup appearance/clipboard, cross-client persistence and native acceptance
   remain pending. Earlier Stop/answer/approval/voice limits remain unchanged.
+
+
+## 2026-10-19 — authorized rollout blocked before runtime change
+
+Matthew superseded the earlier wait and authorized scoped deployment. Inspection
+confirmed existing shell PID4604, Gateway4623 and WebUI6257; exact managed jobs
+remain `com.jenkinsrobotics.jaeger-gateway` and `com.jenkinsrobotics.jaeger-webui`,
+canonical repo working directories, loopback33418/8790. Both health URLs returned
+200. No job configuration, listener, credentials or user metadata changed.
+
+Replacement built and signature-verified externally at
+`~/.cache/jaeger/verification/agent-primary-20261019/native-shell/JaegerShell.app`,
+version `0.13.0+11272d91`, source commit
+`11272d91dd2c584b8fbc7259c83ac7698457acae`, source fingerprint
+`391d7c3e85fe1b9258e97a7a129055d9b5a1c56609959c980b0e2789b34aac4f`.
+The passing shared UI candidate remains unserved in `ui-source/dist` alongside
+the bundle. Build log: `shell-build.log`; detailed snapshot: `deployment-blocker.json`.
+
+Concrete blocker: the old shell remains alive despite its window being closed.
+Three desktop access attempts (exact running bundle path twice, then app name)
+timed out. `MinimalChat.tsx` holds draft text only in React memory; a closed window
+is not proof of an empty draft. Cannot safely relaunch/reload before confirming
+or recovering any retained draft. No shell quit/start, Gateway/WebUI restart,
+served-build switch or live-agent mutation was performed. New routes, new native
+menu/picker and sustained replacement ownership remain unverified live. Next:
+recover/check the old window draft, then perform the already-authorized coordinated
+shell ownership replacement and exact managed-service reloads.
