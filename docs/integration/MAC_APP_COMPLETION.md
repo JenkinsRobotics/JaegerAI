@@ -766,3 +766,49 @@ production unknown request1, unknown/pending handoffs, agent presentation/primar
 and Global Stop match; legitimate shell12591 heartbeat fresh. No native window
 interaction or draft access. Native12591 acceptance remains separate and blocked.
 No successful suites rerun; only local serving/hash/auth/data/probe checks.
+
+## Browser fixture transport repair and receipt-backed motion — 2026-10-19
+
+Coordinator Safari AX checkpoint on former58091: older history060→001 loaded
+inline, no session list. Alpha Settings robot→robot-shield survived Cmd-R and
+reopening Agents. Beta primary replacement persisted, sole AX Primary bot marker
+and Replace branch moved from Alpha while Alpha chat remained selected. Primary
+popup: Unpin / Mark as Read / Copy conversation ID / Hide / Replace; ordinary
+Alpha: Unpin / Mark as Unread / Rename / Copy / Hide. These are coordinator-reported
+live browser observations, separate from native12591. Distorted tiny screenshots
+still prevent pixel/star-color/separator visual proof. Safari AX and app screenshot
+APIs available; no full-desktop capture API exposed. capture_screen_context is
+voice-only and is NOT a fallback. Missing native target binding does not mean the
+Mac is disconnected; native12591 remains running.
+
+Disconnect:58091 retired during the earlier fixture-only restart. Stable repaired
+fixture uses58310(WebUI)/58305(Gateway). Diagnosed execution through the owned
+async task snapshot: ImportError importing bind_skill_scope from installed
+~/.jaeger/venv/lib/python3.12/site-packages/jaeger_agent/skill_registry/playbook_skills.py.
+Canonical packages/jaeger-agent has that API. Fixture launcher now explicitly
+loads canonical packages/jaeger-agent and packages/jaeger-os on PYTHONPATH; no
+install, dependency rewrite, credentials/grants or production runtime change.
+Preserved both prior diagnostic receipts; neither replayed. Distinct probe3
+completed via owner-react with output BROWSER-TRANSPORT-PROBE-3. Separate approved
+follow-up browser-repaired-followup-check completed on its native child session,
+same browser-fixture-parent thread, read_file ceiling, and origin transcript post.
+Coordinator's earlier pending follow-up approval was not resolved by these checks.
+A distinct30s scripted-provider background stream completed after request closure
+with durable origin result (Completed after301 chunks). No real provider/peer.
+
+That live stream exposed an actual projection defect: active chat receipt was
+running but agent summary idle because only tasks/handoffs were considered.
+Narrow producer fix: summary joins active durable receipts to agent-owned session
+IDs. Running→working, admitted/queued→queued, awaiting approval→waiting_approval,
+cancelling→blocked. Terminal/unknown history does not fabricate current running
+motion. Existing status priority and handoff/task semantics unchanged. No new
+execution, grants, state table or UI assets. Source changed only agent_summary.py,
+summary route, and focused contract checks. Production process stays on its
+previous loaded backend; this repair is loaded ONLY into isolated fixture.
+
+Focused25 tests passed,10 existing aiohttp warnings, exit0. First run's25 assertions
+passed but isolation guard correctly rejected concurrent fixture monitor writes;
+fixture was paused, same focused file rerun with guard intact and passed.
+No broad/expensive successful suite repeated. External summary-focused.log,
+repair-running.json and repair-qualified.json retain source/test/runtime separation.
+Fixture restart and post-fix running→idle evidence follow below.

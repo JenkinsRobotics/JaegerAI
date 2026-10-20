@@ -1997,6 +1997,8 @@ class JaegerGatewayApp:
             sessions=self.store.list_sessions(),
             last_message=self._last_message_preview,
             seen=self.store.agents_seen(),
+            requests=[r for status in ("admitted", "queued", "running", "awaiting_approval", "cancelling")
+                      for r in self.store.list_requests(status=status)],
         ))
 
     async def handle_agent_seen(self, request: web.Request) -> web.Response:
