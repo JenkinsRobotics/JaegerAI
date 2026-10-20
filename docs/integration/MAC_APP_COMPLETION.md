@@ -407,3 +407,26 @@ Focused popup, primary and management-flow tests:7 passed (3 files), production
 UI build/typecheck/theme/no-mock passed; Vite size advisory remains. Logs external:
 `agent-primary-20261019/popup-comparison-tests.log` and
 `popup-comparison-build.log`. UI-only deployment/visible retest recorded next.
+
+
+**Popup live retest:** Shared UI feature commit
+`9f1082a25df75734212717d8f22cbacb9b9677b3` deployed via external dist only;
+old distribution preserved in `previous/popup-compare-1792458114`. Native shell
+12591/build0.13.0+3a347be8, Gateway12599 and WebUI12608 stayed running; no service
+restart or native bundle replacement needed. Empty composer observed before
+authorized Cmd-R. Native screenshot proves replacement label single-line, hover
+full width, two separators and original swap icon. Live AX proves unchanged
+primary order and new ordinary Rename Bot action; picker opened then Cancel,
+ordinary menu dismissed. No primary/pin/hide/unread/rename action submitted.
+
+Served HTML/all referenced JS/CSS match passing candidate exactly. Main JS
+`index-z3zwKTGI.js` SHA256
+`ad69147b4f87a2183587d88aa648613151a9af69b3023bd28ef075f8789f0193`;
+CSS `index-DPkosDT4.css` SHA256
+`ac5cfa079175a16fe585f2c61c23034549d39d16db09a7191e87efa1b26ad00e`.
+Both health endpoints200; legitimate PID12591 heartbeat age0.90s. Evidence external
+`popup-live-verification.json`. Pixel-level Grok width/padding/hover/placement
+comparison still blocked by distorted234px capture; no exact parity claim.
+No new backend code, permission changes, runtime authority or conversation
+navigation changes. Backend20 passing from feature checkpoint remains source
+evidence, not a newly rerun suite in this UI-only correction.
