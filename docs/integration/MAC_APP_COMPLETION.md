@@ -1051,3 +1051,13 @@ foreground app owner is available, continue already-authorized fixture route
 checks and safe production rollout of6ddec235; preserve unknowns/metadata/drafts.
 Do not infer source completion or previous successful production rollout means
 this new ordinary menu is loaded in a native window. No pixel-match claim.
+
+### Message notification delivery truth — 2026-10-19
+
+Bounded source repair: outgoing handoff markers previously said **Messaged** at admission, including approval waits. `_post_handoff_request` now publishes a delivery receipt only after `append_handoff_post_once` durably writes the recipient home transcript. The existing authenticated handoff execution/admission/approval path is unchanged. Delivery does not mean the recipient completed its work. No new send endpoint, grants, or automatic approval.
+
+Typed live/persisted adapters preserve delivery state. Marker text separates requested, approval-waiting, unconfirmed and confirmed states; historical parts without delivery evidence remain unverified. Same-handoff updates replace the marker and delayed admission cannot overwrite confirmed delivery. Grouping respects delivery state. Two recipients retain inline names/original avatars; three or more render overlapping avatars and **N Bots** with the existing recipient disclosure. No proprietary assets copied. This is source/build evidence, not pixel/native acceptance.
+
+Evidence: `~/.cache/jaeger/verification/message-notification-20261019/`. UI notification-focused3 passed (6 unrelated skipped), avatar/transcript13 passed. Initial wider core run19 passed/2 failed: existing hardcoded-lead and local-unread expectations conflict with prior authoritative primary/unread behavior; retained unchanged outside this scope. Build/type/theme/no-mock pass, existing chunk-size advisory. Backend8 passed (9 existing aiohttp warnings), final log backend-final.log; checks cover actual recipient home write, handoff correlation and no delivery event on persistence failure.
+
+Runtime boundary: read-only preflight still finds no JaegerShell, stale menubar owner12591 and no production33418. No lease manipulation/app launch/service restart/served-build change. Unknown request count1 remains; newest saved message-related request is execution_unknown, not delivery proof, and was NOT retried. Cannot establish that it is Matthew's exact reported send or establish a successful live send while owner/Gateway are absent. Existing popup/native pixel acceptance gap remains. Candidate is external/unserved under the evidence directory ui-source/dist. Next: legitimate foreground ownership, then approved coordinated rollout and fresh owned-fixture send/approval/receipt acceptance; never replay the unknown request.

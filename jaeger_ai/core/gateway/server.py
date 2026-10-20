@@ -2346,10 +2346,15 @@ class JaegerGatewayApp:
         try:
             target = self._registry().get_agent(record["to_agent_id"])
             home, _ = self._ensure_agent_home(record["to_agent_id"], getattr(target, "display_name", None))
-            self.store.append_handoff_post_once(
+            message_id = self.store.append_handoff_post_once(
                 home, "user", str(record.get("task") or ""), kind="handoff_request",
                 sender_agent_id=record.get("from_agent_id"),
                 links={"handoff_id": record["id"], "origin_session_id": record.get("session_id"), "thread_handoff_id": (record.get("metadata") or {}).get("thread_handoff_id") or record["id"], "reply_to_handoff_id": (record.get("metadata") or {}).get("reply_to_handoff_id")}, meta={"status": record.get("status")})
+            # Delivery means the target home transcript durably accepted this
+            # message, not merely that admission or approval was requested.
+            self._publish_handoff("agent.handoff", {
+                **record, "metadata": {**(record.get("metadata") or {}),
+                                       "delivery_message_id": message_id}})
         except Exception:  # noqa: BLE001 — a transcript copy never fails the handoff
             logger.warning("handoff_request message not posted for %s", record.get("id"), exc_info=True)
 

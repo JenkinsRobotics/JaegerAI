@@ -42,7 +42,7 @@ describe("live tool events", () => {
 });
 
 describe("transcript layout", () => {
-  const to = (id: string, name: string): ChatPart => ({ kind: "handoff", handoffId: id, agentId: id, agentName: name, count: 1, direction: "to" });
+  const to = (id: string, name: string): ChatPart => ({ kind: "handoff", status: "delivered", handoffId: id, agentId: id, agentName: name, count: 1, direction: "to" });
 
   it("folds back-to-back Messaged markers into one", () => {
     const segs = segments([to("a", "Sweep"), to("b", "Gateway"), { kind: "markdownContent", text: "ok" }]);

@@ -144,7 +144,7 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
       continue; // live only: the progress line
     } else if (part.kind === "handoff") {
       const prev = last && "marker" in last ? last.marker : undefined;
-      if (prev && prev.direction === "to" && part.direction === "to") {
+      if (prev && prev.direction === "to" && part.direction === "to" && prev.status === part.status) {
         const agents = [...(prev.agents ?? [{ id: prev.agentId, name: prev.agentName }])];
         if (!agents.some((a) => a.id === part.agentId)) agents.push({ id: part.agentId, name: part.agentName });
         out[out.length - 1] = { marker: { ...prev, agents } };

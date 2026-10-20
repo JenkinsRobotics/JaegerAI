@@ -49,7 +49,7 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       const h = (p.handoff && typeof p.handoff === "object" ? p.handoff : p) as Payload;
       const direction = event.event === "agent.handoff" ? "to" : "from";
       const agentId = str(direction === "to" ? h.to_agent_id : h.to_agent_id ?? h.from_agent_id);
-      return { parts: [{ kind: "handoff", handoffId: str(h.id ?? h.handoff_id), agentId, agentName: agentName(agentId), count: 1, direction }] };
+      return { parts: [{ kind: "handoff", status: (h.metadata as Payload | undefined)?.delivery_message_id ? "delivered" : str(h.status || "unverified"), handoffId: str(h.id ?? h.handoff_id), agentId, agentName: agentName(agentId), count: 1, direction }] };
     }
     case "turn.finish":
     case "turn.reconciled":

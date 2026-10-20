@@ -10,12 +10,20 @@ type Ref = { id: string; name: string };
 
 const joinNames = (names: string[]) => (names.length <= 1 ? names[0] ?? "" : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`);
 
+const outgoingLabel = (part: HandoffPart) => {
+  if (part.status === "delivered") return "Messaged";
+  if (part.status === "pending_approval") return "Awaiting approval to message";
+  if (["denied", "rejected", "cancelled"].includes(part.status ?? "")) return "Not sent to";
+  if (["failed", "execution_unknown"].includes(part.status ?? "")) return "Delivery unconfirmed to";
+  return "Requested message to";
+};
+
 /** Plain-text form (aria-label, tests). */
 export function handoffText(part: HandoffPart): string {
   if (part.direction === "from") return `Message from ${part.agentName}`;
-  if (part.agents && part.agents.length > 1) return `Messaged ${joinNames(part.agents.map((a) => a.name))}`;
-  if (part.count > 1) return `${part.count} messages with ${part.agentName}`;
-  return `Messaged ${part.agentName}`;
+  if (part.agents && part.agents.length > 1) return `${outgoingLabel(part)} ${joinNames(part.agents.map((a) => a.name))}`;
+  if (part.count > 1 && part.status === "delivered") return `${part.count} messages with ${part.agentName}`;
+  return `${outgoingLabel(part)} ${part.agentName}`;
 }
 
 const who = (ref: Ref) => (
@@ -47,7 +55,7 @@ export function RecipientStack({ refs, defaultOpen = false }: { refs: Ref[]; def
     <span className="jg-handoff__group" ref={box}>
       <span className="jg-handoff__stack">{refs.slice(0, 3).map((r) => <AgentAvatar key={r.id} id={r.id} name={r.name} size={18} />)}</span>
       <button type="button" className="jg-handoff__count" aria-haspopup="true" aria-expanded={open}
-        aria-label={`${refs.length} agents in this exchange`} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}>{refs.length}</button>
+        aria-label={`${refs.length} agents in this exchange`} onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}>{refs.length} Bots</button>
       {open && (
         <span className="jg-handoff__menu" role="dialog" aria-label="Agents in this exchange">
           <span className="jg-handoff__menu-title">Agents in this exchange</span>
@@ -65,7 +73,7 @@ export function HandoffMarker({ part, onOpen }: { part: HandoffPart; onOpen?: (h
     return (
       <div className="jg-handoff" role="separator" aria-label={text}>
         <span className="jg-handoff__chip">
-          {onOpen ? <button type="button" className="jg-handoff__open" onClick={() => onOpen(part.handoffId)}>Messaged</button> : <span>Messaged</span>}
+          {onOpen ? <button type="button" className="jg-handoff__open" onClick={() => onOpen(part.handoffId)}>{outgoingLabel(part)}</button> : <span>{outgoingLabel(part)}</span>}
           <RecipientStack refs={part.agents} />
         </span>
       </div>
@@ -74,9 +82,9 @@ export function HandoffMarker({ part, onOpen }: { part: HandoffPart; onOpen?: (h
   const self = { id: part.agentId, name: part.agentName };
   const content =
     part.direction === "from" ? <><span>Message from</span>{who(self)}</>
-    : part.agents && part.agents.length > 1 ? <><span>Messaged</span>{people(part.agents)}</>
-    : part.count > 1 ? <><span>{part.count} messages with</span>{who(self)}</>
-    : <><span>Messaged</span>{who(self)}</>;
+    : part.agents && part.agents.length > 1 ? <><span>{outgoingLabel(part)}</span>{people(part.agents)}</>
+    : part.count > 1 && part.status === "delivered" ? <><span>{part.count} messages with</span>{who(self)}</>
+    : <><span>{outgoingLabel(part)}</span>{who(self)}</>;
   return (
     <div className="jg-handoff" role="separator" aria-label={text}>
       {onOpen

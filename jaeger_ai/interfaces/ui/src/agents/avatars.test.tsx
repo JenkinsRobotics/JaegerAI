@@ -56,7 +56,7 @@ describe("avatar silhouettes", () => {
 
 describe("handoff with 3+ recipients", () => {
   const part: Extract<ChatPart, { kind: "handoff" }> = {
-    kind: "handoff", handoffId: "h1", agentId: "a", agentName: "A", count: 1, direction: "to",
+    kind: "handoff", status: "delivered", handoffId: "h1", agentId: "a", agentName: "A", count: 1, direction: "to",
     agents: [{ id: "a", name: "A" }, { id: "b", name: "B" }, { id: "c", name: "C" }, { id: "d", name: "D" }],
   };
 
@@ -65,7 +65,7 @@ describe("handoff with 3+ recipients", () => {
     expect(html.match(/class="jg-handoff__stack"/g)).toHaveLength(1);
     expect(html.match(/width:18px/g)).toHaveLength(3);
     expect(html).toContain('aria-label="4 agents in this exchange"');
-    expect(html).toContain(">4</button>");
+    expect(html).toContain(">4 Bots</button>");
     const two = renderToStaticMarkup(<HandoffMarker part={{ ...part, agents: part.agents!.slice(0, 2) }} />);
     expect(two).not.toContain("jg-handoff__stack");
     expect(two).toContain('aria-label="Messaged A and B"');

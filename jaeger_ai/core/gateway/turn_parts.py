@@ -56,10 +56,15 @@ def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         elif name in _HANDOFF:
             handoff = data.get("handoff") or {}
             agent_id = handoff.get("to_agent_id")
-            parts.append({"type": "handoff", "direction": _HANDOFF[name], "handoff_id": handoff.get("id"),
+            part = {"type": "handoff", "direction": _HANDOFF[name], "handoff_id": handoff.get("id"),
                           "agent_id": agent_id,
                           "agent_name": (handoff.get("metadata") or {}).get("target_display") or agent_id,
-                          "status": handoff.get("status")})
+                          "status": "delivered" if (handoff.get("metadata") or {}).get("delivery_message_id") else handoff.get("status")}
+            prior = next((i for i, p in enumerate(parts) if p["type"] == "handoff" and p["handoff_id"] == part["handoff_id"] and p["direction"] == part["direction"]), None)
+            if prior is None:
+                parts.append(part)
+            elif parts[prior].get("status") != "delivered" or part.get("status") == "delivered":
+                parts[prior] = part
     return parts
 
 

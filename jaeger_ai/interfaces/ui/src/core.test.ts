@@ -44,7 +44,7 @@ describe("agents", () => {
     expect([...times].sort((a, b) => b - a)).toEqual(times);
   });
   it("marker text", () => {
-    const base = { kind: "handoff" as const, handoffId: "h", agentId: "a", agentName: "Mac App", count: 1, direction: "to" as const };
+    const base = { kind: "handoff" as const, status: "delivered", handoffId: "h", agentId: "a", agentName: "Mac App", count: 1, direction: "to" as const };
     expect(handoffText(base)).toBe("Messaged Mac App");
     expect(handoffText({ ...base, count: 4 })).toBe("4 messages with Mac App");
     expect(handoffText({ ...base, direction: "from" })).toBe("Message from Mac App");
@@ -65,4 +65,20 @@ describe("avatar color", () => {
     expect(avatarColor("x")).toMatch(/^var\(--jg-avatar-/);
     expect(avatarColor("native:jaeger")).toBe("var(--jg-avatar-red)");
   });
+});
+
+it("does not call admitted or unverified handoffs Messaged", () => {
+  const base = { kind: "handoff" as const, handoffId: "h", agentId: "a", agentName: "Builder", count: 1, direction: "to" as const };
+  expect(handoffText({ ...base, status: "pending_approval" })).toBe("Awaiting approval to message Builder");
+  expect(handoffText({ ...base, status: "admitted" })).toBe("Requested message to Builder");
+  expect(handoffText(base)).toBe("Requested message to Builder");
+  expect(mapEvent({ event: "agent.handoff", payload: { handoff: { id: "h", to_agent_id: "a", status: "running", metadata: { delivery_message_id: 42 } } } })?.parts[0]).toMatchObject({ status: "delivered", agentId: "a" });
+});
+
+it("updates a delivery marker once and ignores delayed admission", () => {
+  const admitted: ChatPart = { kind: "handoff", status: "admitted", handoffId: "h", agentId: "a", agentName: "A", direction: "to", count: 1 };
+  const delivered = { ...admitted, status: "delivered" };
+  const parts = applyPart(applyPart([], admitted), delivered);
+  expect(parts).toEqual([delivered]);
+  expect(applyPart(parts, admitted)).toEqual([delivered]);
 });
