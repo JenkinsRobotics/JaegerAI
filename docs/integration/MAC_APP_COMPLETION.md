@@ -1030,3 +1030,24 @@ and primary-flow interactions. Tests used disposable state; no operator mutation
 Fixture paused for backend isolation guard; production still untouched at this
 source checkpoint. Passing UI candidate frozen externally under regular-menu-20261019/dist.
 Actual serving/route checks and safe rollout recorded below; no pixel/native claim.
+
+**Ordinary menu rollout BLOCKED at live ownership preflight:** code6ddec235 passing,
+not production deployed. Foreground shell12591 no longer exists; no JaegerShell
+process found. Existing production Gateway25800 has already exited under lifecycle
+policy;33418 unavailable, WebUI25804:8790 still serves the previous build. Lease
+still names12591, aged252.85s at sample, Global Stop false. No production stop,
+restart, launchd/env change or lease edit performed by this pass. Exact fixture
+38566 serves the candidate58310 but authenticated requests fail423 lifecycle owner
+disappeared. Attempt to create a new owned test fixture was refused before
+admission; no live section/delete mutation acceptance claimed. Other pre-existing
+test Gateways97479/97490 left untouched. No old fallback or replacement native
+launch used to bypass owner disappearance; no native reload/draft interaction.
+
+External regular-menu-20261019 retains immutable passing dist, backend.log,
+fixture-check script and rollout-blocker.json. UI7/build logs under prior external
+browser-acceptance-20261019; backend19 passed in disposable fixtures with unchanged
+registry/history and protected scopes. Pending next step: once a legitimate
+foreground app owner is available, continue already-authorized fixture route
+checks and safe production rollout of6ddec235; preserve unknowns/metadata/drafts.
+Do not infer source completion or previous successful production rollout means
+this new ordinary menu is loaded in a native window. No pixel-match claim.
