@@ -964,3 +964,37 @@ corroborate coordinator's reported approved request/result and nonduplicate stre
 no decision or execution call was sent by this production rollout. Saved
 browser-approved-result.json/browser-checkpoint.json. This updates earlier pending
 checkpoint evidence without inferring pixel/native presentation acceptance.
+
+## Final browser approval acceptance — coordinator confirmed, durable correlation verified
+
+Coordinator refreshed current58310, opened Alpha, and saw Conversation approvals
+with exact task "Isolated browser follow-up acceptance: return a short correlated
+result." under "Allow handoff to Builder?", Deny once/Allow once. Clicked Allow
+once ONCE; card disappeared; Browser Fixture Beta Handoff result · Completed
+appeared with CONTRACT-ANSWER and Follow up/Open chat. No resubmission or replay;
+browser composer empty. This closes the standalone handoff approval visibility /
+explicit decision / result browser acceptance gap for this local fixture.
+
+Read-only durable corroboration, exact same fixture:
+- Approval `approval_256248f9a08f`: resolved, decision `once`.
+- Handoff `handoff_de3ba2e52f16`; admission request `4e0d7a10-025c-4b62-9802-09615c0f735f`.
+- Delegate child run `24d69fc32b6642fe`; canonical child request
+  `902bf9b77f73705bc12923e2281e1106`: exactly one receipt, completed.
+- Worker session `specialist:native:builder:4e0d7a10-025c-4b62-9802-09615c0f`; result output equals that child receipt.
+- Thread and reply parent both `browser-fixture-parent`; origin Alpha
+  `agent-native:everyday` has exactly one result message `153`.
+- Beta home has exactly one intended mirror message `154`,
+  not another execution. Both carry identical handoff/child/origin/thread/reply links.
+- Frozen child actor `owner:webui`, read_file-only ceiling, specialist identity and
+  original context/history preserved; no model-output verification claim.
+
+Evidence: activity-approval-production-20261019/final-browser-approval-acceptance.json
+under ~/.cache/jaeger/verification, linked to the existing production runtime /
+asset / protected-state rollout evidence. Current production25800:33418/25804:8790
+and fixture25226:58310 checked healthy read-only. No additional rollout, restart,
+source change, approval decision or request sent for this recording. Production
+activity d2e96265 + approval0fb7ab8c rollout remains complete with earlier sustained
+health and hash proof; this is its final browser acceptance addendum. Native12591
+window untouched. Pixel motion/star color still unprovable from distorted images;
+no pixel/native certification. Voice/media remain paused. No suite rerun needed
+for documentation-only acceptance recording.
