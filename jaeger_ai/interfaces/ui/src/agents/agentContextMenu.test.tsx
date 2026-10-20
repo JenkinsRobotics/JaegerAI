@@ -15,13 +15,14 @@ describe("scoped Mac agent popup", () => {
     expect(main.map((i) => i.label)).toEqual(["Unpin", "Mark as Unread", "Copy conversation ID", "Hide from sidebar", "Replace with different Bot"]);
     expect(main.filter((i) => i.separator).map((i) => i.id)).toEqual(["copy-id", "hide"]);
     expect(more).toEqual([]);
+    expect(agentMenuItems(bot, caps, true, true, true).main[1]).toMatchObject({ id: "read", label: "Mark as Read" });
     expect(agentMenuItems(bot, { ...caps, primary: false }, true, true).main.some((i) => i.id === "replace-primary")).toBe(false);
     expect(agentMenuItems(bot, caps, false, true).main[0].label).toBe("Pin");
     expect(agentMenuItems(bot, caps, true, false).main.some((i) => i.id === "replace-primary")).toBe(false);
   });
-  it("offers supported ordinary Rename Bot and Make primary without unsupported controls", () => {
+  it("offers only reference ordinary supported actions, with Make primary in management", () => {
     const other = { ...bot, primary: false };
-    expect(agentMenuItems(other, caps, false, true).main.map((i) => i.label)).toEqual(["Pin", "Mark as Unread", "Rename Bot", "Copy conversation ID", "Hide from sidebar", "Make primary"]);
+    expect(agentMenuItems(other, caps, false, true).main.map((i) => i.label)).toEqual(["Pin", "Mark as Unread", "Rename Bot", "Copy conversation ID", "Hide from sidebar"]);
     expect(agentMenuItems(other, NO_CAPS, false, true).main.map((i) => i.label)).toEqual(["Copy conversation ID"]);
     expect(agentCaps([other], {} as never)).toEqual(NO_CAPS);
   });

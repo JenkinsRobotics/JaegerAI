@@ -187,10 +187,7 @@ export function App({ source }: { source: JaegerSource }) {
       case "unread":
         if (actions?.markUnread) void actions.markUnread(agent.id).then(() => store.refresh(), fail("mark it unread"));
         return;
-      case "read":
-        if (caps.read && actions) void actions.markRead(agent.id, agent.last_message?.id ?? null).then(() => { store.seeAgent(agent.id); return store.refresh(); }, fail("mark it read"));
-        else store.seeAgent(agent.id);
-        return;
+      case "read": void store.seeAgent(agent.id); return;
       case "rename": setAgentPrompt({ kind: "rename", agent }); return;
       case "pin": case "unpin":
         updatePins((cur) => action === "pin" ? pin(cur, agent.id) : unpin(cur, agent.id)); return;
@@ -276,7 +273,7 @@ export function App({ source }: { source: JaegerSource }) {
   const historyAgent = store.agents.find((a) => a.id === historyAgentId);
   const chatBody = sessionError
     ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
-    : <ChatPane host={host} sessionId={sessionId} />;
+    : <ChatPane host={host} sessionId={sessionId} agents={store.agents} />;
   const phoneAgent = store.agents.find((a) => a.id === (selectedAgentId ?? defaultAgentId));
   const main = phone
     ? (phoneView === "chat"
@@ -294,7 +291,7 @@ export function App({ source }: { source: JaegerSource }) {
             <div className="jg-main-row">
               {sessionError
                 ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
-                : <ChatPane host={host} sessionId={sessionId} />}
+                : <ChatPane host={host} sessionId={sessionId} agents={store.agents} />}
               {detailsAgent && (
                 <AgentDetails agent={detailsAgent} summary={store.summaries.find((s) => s.id === detailsAgent.id)}
                   onOpenHistory={() => { setDetailsAgentId(null); setHistoryAgentId(detailsAgent.id); }} onClose={() => setDetailsAgentId(null)} />
@@ -307,7 +304,7 @@ export function App({ source }: { source: JaegerSource }) {
           )}
       </AppShell>}
       {menuAgent && agentMenu && (
-        <AgentContextMenu agent={menuAgent} at={agentMenu} phone={phone} caps={caps} pinned={pins.includes(menuAgent.id)} alternative={store.agents.some((a) => a.id !== menuAgent.id && a.ui_actions?.primary && visible(a))}
+        <AgentContextMenu agent={menuAgent} at={agentMenu} phone={phone} caps={caps} unread={store.summaries.find((s) => s.id === menuAgent.id)?.unseen === true} pinned={pins.includes(menuAgent.id)} alternative={store.agents.some((a) => a.id !== menuAgent.id && a.ui_actions?.primary && visible(a))}
           preview={menuAgent.last_message?.preview ?? store.summaries.find((x) => x.id === menuAgent.id)?.last_preview ?? ""}
           onAction={onAgentAction} onClose={() => setAgentMenu(null)} />
       )}

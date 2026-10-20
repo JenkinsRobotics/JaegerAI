@@ -1,3 +1,4 @@
+import type { Agent } from "../api/types";
 /* Chat pane seam. FROZEN with Jaeger IDE Chat (2026-10-17). Mirror only; do
  * not extend here. The shared chat widget (a port of the VS Code 1.142 chat
  * widget, packages/jaeger-chat-ui + jaeger-chat-gateway) mounts through
@@ -105,10 +106,11 @@ export interface ChatHost {
 }
 
 export interface ChatPaneOptions {
+  agents?: Agent[];
   sessionId?: string;
 }
 
-export type ChatPaneMount = (el: HTMLElement, host: ChatHost, opts: ChatPaneOptions) => () => void;
+export type ChatPaneMount = (el: HTMLElement, host: ChatHost, opts: ChatPaneOptions) => (() => void) & { updateAgents?: (agents: Agent[]) => void };
 
 /** Apply the onPart contract to a part list. */
 export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {

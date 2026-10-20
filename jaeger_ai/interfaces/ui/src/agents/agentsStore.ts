@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import type { JaegerSource } from "../api/source";
 import type { Agent, AgentSummary, GatewayEvent } from "../api/types";
 import type { Section } from "../api/agentActions";
@@ -20,6 +20,7 @@ const POLL_MS = 15_000;
 
 export async function loadRoster(source: Pick<JaegerSource, "agents" | "agentsSummary"> & Partial<Pick<JaegerSource, "agentActions">>) {
   const [agents, summaries] = await Promise.all([source.agents(), source.agentsSummary()]);
+  if (agents.filter((a) => a.primary === true).length > 1) throw new Error("Invalid primary projection: multiple primary agents");
   const sections = source.agentActions && agents.some((a) => "section_id" in a) ? await source.agentActions.sections().catch(() => []) : [];
   return { agents, summaries, sections };
 }
@@ -27,13 +28,15 @@ export async function loadRoster(source: Pick<JaegerSource, "agents" | "agentsSu
 export function useAgentsStore(source: JaegerSource) {
   const [state, setState] = useState<AgentsState>({ agents: [], summaries: [], sections: [], seen: loadSeen(), loading: true });
 
+  const refreshVersion = useRef(0);
   const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current;
     setState((s) => ({ ...s, loading: true }));
     try {
       const { agents, summaries, sections } = await loadRoster(source);
-      setState((s) => ({ ...s, agents, summaries, sections, loading: false, error: undefined }));
+      if (version === refreshVersion.current) setState((s) => ({ ...s, agents, summaries, sections, loading: false, error: undefined }));
     } catch (error) {
-      setState((s) => ({ ...s, loading: false, error: String((error as Error)?.message ?? error) }));
+      if (version === refreshVersion.current) setState((s) => ({ ...s, loading: false, error: String((error as Error)?.message ?? error) }));
     }
   }, [source]);
 
@@ -49,7 +52,7 @@ export function useAgentsStore(source: JaegerSource) {
     if (!source.globalEvents) return;
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const soon = () => { clearTimeout(timer); timer = setTimeout(() => void refresh(), 250); };
+    const soon = () => { ++refreshVersion.current; clearTimeout(timer); timer = setTimeout(() => void refresh(), 250); };
     void source.globalEvents((event) => onRosterEvent(event, soon, setState), abort.signal).catch(() => { /* no global stream: poll */ });
     return () => { abort.abort(); clearTimeout(timer); };
   }, [source, refresh]);

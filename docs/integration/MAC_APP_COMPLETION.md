@@ -459,3 +459,69 @@ UI tool. Do not claim correct-owner loaded9f1082a2 pixels, focus or hover accept
 No restart workaround attempted: explicit latest scope leaves12591 untouched.
 Next action: recover exact12591 window access/show (without launching a duplicate),
 then verify its loaded popup. Source fixes and served hashes remain verified.
+
+
+## 2026-10-19 — corrective primary badge / desktop popup (acceptance incomplete)
+
+Matthew rejected previous presentation; similar labels/tests are not acceptance.
+Producer defects: SupervisorArt hid star when unread; only pinned tiles had a
+star; role-lead fallback and unpinned text label substituted for primary identity.
+Desktop still inherited phone blur/22px corners/large spacing. Read/unread always
+used envelope/Mark as Unread; unpin used unslashed pin. Ordinary menu added a
+nonreference Make primary control. These source defects are corrected.
+
+Authoritative state chain: existing SQLite schema_meta agent_primary:operator →
+GatewaySessionStore.primary_agent_id → server._with_skills/project(primary_id),
+with one pointer snapshot per catalog → GatewayClient.agents typed Agent.primary →
+useAgentsStore → sidebarRows/AgentAvatar + ChatPane mounted agents projection →
+header/menu branches. No role/name/index/pin fallback selects badge. Exactly one
+primary projection permitted; invalid multiple-primary snapshots fail visibly,
+preserving last roster. Refresh generation ignores delayed older fetches; an
+agent.updated event invalidates in-flight data before debounced authoritative
+refresh. Poll/remount refresh covers dropped-stream recovery. No optimistic
+primary switch: backend setPrimary CAS must succeed; rejected saves keep old
+star/menu/pointer. No auth, roles, history, config or backend mutation changes.
+
+Original reusable avatar corner badge now shown in row/tile/header for projected
+primary; unread remains independently visible. Original star graphic; REA
+rendering main corner at index-wlkGG389.js~264142 uses filled star; Kbe/Xbe at
+256944–257028 defines16px pinned/9.6px expanded badge,8px/4.8px star. Shipped CSS
+sand-19arc22/qxvkua/xcaa6e resolves yellow-bright #f59312, white star, inset border.
+Our new token matches yellow/white; small header marker scales independently.
+
+REA Ly~460600 verifies bell vs bell-dot and Mark as Read/Unread state inversion;
+By~461460 pin-slash vs pin; rename pencil-square; copy, eye-slash and arrow-swap
+confirmed callsites. Local original outline glyphs implement those semantics.
+Shipped CSS menu variables:30px row,13px type,18px line,12px outer/6px row radius,
+6px inner/8px row inset. Desktop uses these with existing font-size preference
+scaling, two primary separators, single-line full hit/hover rows, cursor alignment
+with viewport clamp; full-page phone blur removed only for desktop agent popup.
+Ordinary Rename Bot advertised; Make primary remains in Settings/Agents, absent
+from context menu. Sections/delete unsupported and absent, not fake controls.
+
+Changed source: agents/AgentAvatar, SupervisorTile, AgentRow, AgentsSidebar,
+agentsLogic, agentsStore, AgentContextMenu, agents.css; App; chat/ChatPane,
+mountMinimal, host typed mount update, MinimalChat; shell/tokens.jaeger.css.
+Widget roster updates in place so header primary can change without remounting
+composer/draft. Updated avatars/menu/primaryFlow tests; new primaryOrdering test.
+
+Final focused UI23 passed (6 files); backend20 passed; production build including
+type/theme/no-mock passed (existing Vite chunk advisory). External evidence root
+`agent-primary-20261019`: primary-correction-tests.log, -backend.log, -build.log.
+Two-specialist fixture moves primary and sole represented star identity; old
+loses star/Replace, retains chat/draft/role; unread/star, pin/unpin, hide/restore,
+reopen, rejected save, exact copy covered. Separate delayed-response fixture
+proves stale A cannot overwrite newer B, alias/order/lead role cannot choose star,
+invalid multiple primary rejected. Existing backend fixtures assert SQLite reopen,
+CAS/full-pin atomicity, unchanged histories/tools/execution roles/admin scopes.
+
+LIVE: Grok primary pinned/read still Unpin/Mark as Unread/copy/hide/Replace;
+ordinary unread currently Mark as Read/Rename Bot etc, confirming inverse.
+Reference screenshots still distorted234px; cannot certify row/icon/hover pixels.
+Grok drafts untouched; menus dismissed only. Correct sole PID12591 exact-path
+CUA still times out. Tried registered ctrl-option-space without launching any
+app: native log confirms existing window toggles, but exact owner AX capture
+remains unavailable. Requested operator show existing window asynchronously; no
+answer yet. No native reload/relaunch/service restart, no real-agent actions.
+Do NOT claim correct-owner visual acceptance. Serving passing candidate is safe
+without reloading a hidden potentially-drafted window; hashes recorded separately.
