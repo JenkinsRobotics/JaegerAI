@@ -1,3 +1,4 @@
+import {writeNativeClipboard} from '../platform/nativeClipboard';
 /* NativeHost: ChatHost inside the macOS shell (?host=macos). Data still flows
  * through the same-origin gateway proxy (WebHost). OS actions go through
  * window.jaegerNative, with web fallbacks when the bridge is absent. */
@@ -58,9 +59,7 @@ export class NativeHost extends WebHost implements VoiceHost, PickFilesHost {
   }
   openFile(path: string) { void postNative("open.file", { path }); }
   override async copy(text: string) {
-    const bridge=nativeBridge();
-    if(bridge){const receipt=await bridge.post("clipboard.write",{text}) as {copied?:boolean};if(receipt?.copied!==true)throw Error("Native clipboard write unconfirmed; no automatic retry");}
-    else await super.copy(text);
+    if(!await writeNativeClipboard(text))await super.copy(text);
   }
   onThemeChanged(cb: () => void) {
     return onNativeEvent((detail) => { if (detail.type === "appearance.changed") cb(); });

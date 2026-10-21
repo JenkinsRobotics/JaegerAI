@@ -11,7 +11,9 @@ final class HostContractTests: XCTestCase {
     func testEveryRequestTypeTheUIPostsIsImplemented() {
         let payloads: [String: [String: Any]] = [
             "open.external": ["url": "https://example.com/"], "open.file": ["path": "/Users/me/notes.md"],
-            "clipboard.write": ["text": "hi"], "mic.status": [:], "tts.status": [:],
+            "clipboard.write": ["text": "hi"], "clipboard.read": [:], "mic.status": [:], "tts.status": [:],
+            "notifications.navigationAck": ["id": "12345678-1234-4234-9234-123456789012"],
+            "notifications.badge": ["state": "unknown"], "notify": ["title": "Owned fixture"],
         ]
         for type in HostContract.requestTypes {
             guard case .success(let command) = cmd(type, payloads[type] ?? [:]) else { return XCTFail("\(type) refused") }
@@ -38,7 +40,7 @@ final class HostContractTests: XCTestCase {
     }
 
     func testEventTypesIncludeTheOnesTheUIListensFor() {
-        XCTAssertEqual(Set(HostContract.eventTypes), ["window.visibility", "hotkey", "appearance.changed"])
+        XCTAssertEqual(Set(HostContract.eventTypes), ["window.visibility", "hotkey", "appearance.changed", "notification.open"])
     }
 
     func testMainScreenOverrideKeys() {

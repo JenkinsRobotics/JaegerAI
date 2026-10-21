@@ -33,6 +33,7 @@ protocol BridgeHost: AnyObject {
     func bridgeTTSSpeak(text: String, voice: String?, done: @escaping BridgeDone)
     func bridgeTTSStop()
     func bridgeOpenFile(_ url: URL)
+    func bridgeReadClipboard() -> [String: Any]
     func bridgeCopy(_ text: String) -> Bool?
     func bridgeMicStatus() -> [String: Any]
     func bridgeTTSStatus() -> [String: Any]
@@ -129,6 +130,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case .ttsStop: host.bridgeTTSStop(); reply(id, ["stopped": true])
         case .openExternal(let url): host.bridgeOpenLink(url); reply(id, ["opened": url.absoluteString])
         case .openFile(let url): host.bridgeOpenFile(url); reply(id, ["opened": url.path])
+        case .clipboardRead: reply(id, host.bridgeReadClipboard())
         case .clipboardWrite(let text):
             if let copied = host.bridgeCopy(text) {
                 if copied { reply(id, ["copied": true]) }
@@ -278,6 +280,10 @@ extension JaegerShellApplication {
     }
     func bridgeTTSStop() { voiceController?.stopSpeaking() }
     func bridgeOpenFile(_ url: URL) { NSWorkspace.shared.open(url) }
+    func bridgeReadClipboard() -> [String: Any] {
+        // No polling, log, transcript or model admission. Explicit trusted UI request only.
+        ClipboardPreview.project(NSPasteboard.general.string(forType: .string))
+    }
     func bridgeCopy(_ text: String) -> Bool? {
         NSPasteboard.general.clearContents()
         return NSPasteboard.general.setString(text, forType: .string)

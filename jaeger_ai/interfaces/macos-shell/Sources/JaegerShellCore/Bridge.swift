@@ -82,6 +82,7 @@ public enum BridgeCommand: Equatable {
     // jaeger_ai/interfaces/ui NativeHost (chat/nativeHost.ts, platform/native.ts)
     case openExternal(URL)
     case openFile(URL)
+    case clipboardRead
     case clipboardWrite(String)
     case micStatus, ttsStatus
     case filesPick(FilePickOptions)
@@ -173,6 +174,9 @@ public enum BridgeCommand: Equatable {
                   let url = BridgeFiles.validateReveal(raw, home: home, fileExists: fileExists)
             else { return .failure(.invalidPayload("path must be an existing absolute path under the home folder")) }
             return .success(.openFile(url))
+        case "clipboard.read":
+            guard p.isEmpty else { return .failure(.invalidPayload("clipboard read accepts no authority or action fields")) }
+            return .success(.clipboardRead)
         case "clipboard.write":
             guard let text = p["text"] as? String, text.count <= 1_000_000 else {
                 return .failure(.invalidPayload("text must be a string (≤1,000,000)"))
@@ -213,6 +217,7 @@ public enum BridgeCommand: Equatable {
         case .ttsStop: return "tts.stop"
         case .openExternal: return "open.external"
         case .openFile: return "open.file"
+        case .clipboardRead: return "clipboard.read"
         case .clipboardWrite: return "clipboard.write"
         case .micStatus: return "mic.status"
         case .ttsStatus: return "tts.status"
@@ -307,8 +312,8 @@ public enum WindowChromePolicy {
 /// src/platform/native.ts (probeVoice: mic.status + tts.status must not be not_implemented;
 /// events window.visibility, hotkey). `post(type, payload) => Promise<result>`; errors reject.
 public enum HostContract {
-    public static let requestTypes = ["open.external", "open.file", "clipboard.write", "mic.status", "tts.status"]
-    public static let eventTypes = ["window.visibility", "hotkey", "appearance.changed"]
+    public static let requestTypes = ["open.external", "open.file", "clipboard.read", "clipboard.write", "mic.status", "tts.status", "notifications.status", "notifications.navigation", "notifications.navigationAck", "notifications.badge", "notify", "app.info"]
+    public static let eventTypes = ["window.visibility", "hotkey", "appearance.changed", "notification.open"]
 }
 
 // MARK: files.pick — the composer's + on the macOS host (IDE Chat H8 contract: JaegerChatHost.pickFiles).
