@@ -269,3 +269,9 @@ def test_mcp_resource_proxy_has_no_arbitrary_uri_get_route(overlay):
     path='/v1/runtime/mcp/owned/resources/snapshots/owned-snapshot'
     assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
     assert not _route(overlay,'/v1/runtime/mcp/owned/resources/fetch-url','POST')
+
+
+def test_notification_memory_and_delivery_read_queries_reach_existing_owner(overlay):
+    for path in ('/v1/notifications?category=approvals&before=50','/v1/agents/native%3Abuilder/memory?q=owned','/v1/channels/deliveries?before=50'):
+        assert _route(overlay,path)
+        assert overlay._calls[-1]==('GET',path)

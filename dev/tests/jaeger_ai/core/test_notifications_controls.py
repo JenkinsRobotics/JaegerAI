@@ -14,6 +14,8 @@ async def test_notifications_privacy_preferences_read_cursor_and_scopes(tmp_path
     gateway.event_bus.publish('owned-note','task.updated',{'task':{'task_id':'owned-task','state':'failed','goal':'PRIVATE GOAL','error':'PRIVATE ERROR'}})
     gateway.event_bus.publish('owned-note','task.updated',{'task':{'task_id':'owned-task','state':'failed','goal':'PRIVATE GOAL'}})
     async with TestClient(TestServer(gateway.app),headers=client_headers('webui')) as client:
+        assert (await client.get('/v1/notifications?before=-1')).status==400
+        assert (await client.get('/v1/notifications?category=not-a-category')).status==400
         response=await client.get('/v1/notifications');assert response.status==200
         data=await response.json()
         assert len(data['notifications'])==2 and all(n['unread'] for n in data['notifications'])
@@ -57,3 +59,22 @@ def test_notifications_follow_actual_terminal_and_handoff_producers(tmp_path):
     delegated=[n for n in result['notifications'] if n['title']=='Delegated work status changed']
     assert len(delegated)==1 and delegated[0]['session_id']=='owned-origin' and delegated[0]['status']=='completed'
     assert gateway.store.get_request('owned-unknown')['status']=='execution_unknown'
+
+
+def test_notification_category_paging_and_observed_cursor_are_read_only(tmp_path):
+    from jaeger_ai.features.notifications.routes import feed
+    gateway=JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.sqlite3'))
+    gateway.store.ensure_session('owned-paging',metadata={'agent_id':'native:builder'})
+    for i in range(65):gateway.event_bus.publish('owned-paging','approval.request',{'approval_id':f'owned-{i}','prompt':'PRIVATE'})
+    gateway.event_bus.publish('owned-paging','turn.unknown',{'request_id':'owned-uncertain','error':'PRIVATE'})
+    first=feed(gateway.store,category='approvals')
+    second=feed(gateway.store,category='approvals',before=first['next_before'])
+    assert len(first['notifications'])==50 and len(second['notifications'])==15
+    assert not ({n['event_id'] for n in first['notifications']}&{n['event_id'] for n in second['notifications']})
+    assert first['observed_through']==second['observed_through']
+    errors=feed(gateway.store,category='errors')
+    assert len(errors['notifications'])==1 and errors['notifications'][0]['title']=='Conversation outcome unknown'
+    assert 'PRIVATE' not in str(first) and first['preferences']['read_through']==0
+    assert gateway.store.list_requests()==[] and gateway.store.list_pending_approvals()==[]
+    with pytest.raises(ValueError):feed(gateway.store,category='not-a-category')
+    with pytest.raises(ValueError):feed(gateway.store,before=-1)
