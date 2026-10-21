@@ -1680,3 +1680,46 @@ Bounded GB040 source now supports Jaeger local installed/available/unpublished, 
 - GB-008/GB-009 fixture tests: `src/chat/blueprintGb008Gb009.test.tsx`, 5/5. These are isolated component fixtures (no gateway), not live acceptance.
 - Commands and outcomes: `npx vitest run` gave 110 files and 387 tests, all passed. `npx tsc --noEmit` is clean. `npm run build` reported ✓ and no-mock: ok.
 - Served state: not redeployed. The webui :8790 isn't listening; ~/.jaeger/ui-dist was untouched; the gateway pid 42878 and the Mac app weren't restarted. Rollout of these UI commits needs an authorised plan: rebuild ui-dist from 2cbe3c6d and restart the webui.
+
+## 2026-10-21 resume: WP-04 → WP-13 and step 4 (single lead)
+
+Writer checks: Codex session last written 03:42 PDT. Re-checked idle at 07:27, 07:34, 07:44 and 07:48 (each package boundary).
+
+### Ledger after reconciliation (implementation_state)
+implemented_awaiting_acceptance 54 · code_remaining 7 · blocked 13 · excluded 5 · unreconciled 0 (79 groups).
+- code_remaining: GB-028, GB-031, GB-032, GB-033, GB-066, GB-071, GB-076
+- blocked: GB-026, GB-027, GB-045, GB-046, GB-047, GB-052, GB-059, GB-061, GB-065, GB-069, GB-072, GB-075, GB-078 (each names its exact dependency/restriction in the ledger)
+- Moved to implemented_awaiting_acceptance this pass: GB-008, GB-009, GB-024, GB-025, GB-051, GB-064, GB-074.
+
+### Code changes this pass
+- 58d6a99f composer: no send on the WebKit IME-committing Enter (keyCode 229). GB-008/009 fixtures.
+- 2cbe3c6d follow-up dialog test asserts lookup reconciliation, not the superseded resend.
+- 363f97cd GB-025 sandbox-unavailable refusal test.
+- (gateway daemon test commit) four handoff fakes aligned with mapping requests (3f84e339), current chat kwargs and standing specialist tools. No production change.
+- ba1da142 popups/coordinator: focus returns to the invoker; IME-cancelling Escape no longer dismisses.
+- GB-074 commit: MinimalChat bounds inline retention by whole pages (RETAINED_TURNS_MAX=400); dropped pages refetch from their original cursor.
+
+### Step 4 commands and outcomes (box clock PDT; logs in ~/.cache/jaeger/verification/blueprint-20261020/)
+- UI: `npx vitest run`: 112 files / 391 tests passed. `npm run build`: theme-literals ok, tsc ok, vite built, no-mock ok.
+- `./scripts/verify.sh` (all/frontend/backend/wiring): exit 1 in every stage, from the TEST ISOLATION tripwire only. `~/.jaeger/verification/browser-acceptance-20261019/fixture-task-inspection.json` is rewritten about every 20 s by an external process, most likely Codex fixture pid 8931 (`gateway_contract_worker.py`, started Oct 19 11:53 PDT from the native-panels worktree; same cause recorded above for fixture38566). The tests themselves passed: IDE node 219; hygiene 9; durability 14; tiers 6; skill audit 5; ide-gateway wiring 1; webui-gateway proxy 80 (separate sessions, not summed with each other).
+- Focused pytest: project-root/team-projects/write-exec/read-confinement/workspace 51 passed; sandbox boundary 1; gateway daemon + adapter resilience + profile adapters + MCP lifecycle 88 passed. These overlap the verify stages only where listed.
+- Swift: `swift build` complete; `swift test`: 67 tests, 0 failures.
+- Real authenticated end-to-end (UI → gateway → persistence → UI): NOT RUN. caller_auth token lookup falls back to the Keychain (`security find-generic-password`), and an isolated stack would need a new fixture token. Both are forbidden by the brief. Decision needed: authorise a scratch 0600 token file under an isolated JAEGER_STATE_DIR, or run with Matthew present. All UI evidence above is isolated component fixtures (labelled mocks), not live acceptance. Nothing was tested on screen.
+
+### What is actually running (read-only correlation, 07:50 PDT)
+- Gateway pid 42878, cwd the main checkout, started Mon Oct 19 22:43:02 PDT. It loaded source at 3628c8a3 (last commit before start), 82 commits behind HEAD at the time of check. None of this pass's code is loaded; this pass changed no gateway production code.
+- WebUI :8790: not listening. `JAEGER_WEBUI_UI_DIST` (features/webui/api/ui_shell.py) selects the dist; default ~/.cache/jaeger/ui-rebuild-mainscreen/dist. Pins present in ~/.jaeger/ui-dist: 736504e3, 7171518c, f21ed1df (newest, Oct 19 07:34). None contains this pass.
+- Mac app: pid 42831 `JaegerShell.app --own-production-lifecycle` from ~/.cache/jaeger/verification/agent-primary-20261019/native-shell, build-commit 3a347be8 (Oct 19 17:53, 104 commits behind). It points at the WebUI :8790, which is down.
+
+### Rollout plan (NOT executed; approver: Matthew)
+Preconditions: Matthew approves; the Codex fixture pid 8931 is stopped or kept per his decision; no other writer is active.
+1. Build a new pin, leaving existing pins untouched:
+   `cd ~/GitHub/JaegerAI/jaeger_ai/interfaces/ui && npm ci && node_modules/.bin/vite build --configLoader runner --outDir ~/.jaeger/ui-dist/<FINAL_SHORT_SHA> --emptyOutDir && test -f ~/.jaeger/ui-dist/<FINAL_SHORT_SHA>/index.html`
+2. Record the rollback pin: the previous value of JAEGER_WEBUI_UI_DIST used by the webui launcher (if unknown, ~/.jaeger/ui-dist/f21ed1df, the newest existing pin). Do not edit launchd plists; pass the variable at launch.
+3. Start the webui on the new pin (loopback):
+   `cd ~/GitHub/JaegerAI && JAEGER_WEBUI_UI_DIST=~/.jaeger/ui-dist/<FINAL_SHORT_SHA> HERMES_WEBUI_HOST=127.0.0.1 ./scripts/run-jaeger-webui.sh`
+   Verify: `curl -s http://127.0.0.1:8790/ | grep -o 'assets/index-[^"]*'` matches `ls ~/.jaeger/ui-dist/<FINAL_SHORT_SHA>/assets/index-*`.
+   Rollback: stop that webui process (its own pid only), then relaunch with `JAEGER_WEBUI_UI_DIST=<rollback pin>`.
+4. Rebuild the Mac dev app's bundled shell (debug; never installs, never touches /Applications/JaegerAI.app):
+   `cd ~/GitHub/JaegerAI/jaeger_ai/interfaces/macos-shell && Scripts/build-main-screen.sh && Scripts/build-shell.sh` gives ~/.cache/jaeger/macos-shell/JaegerShell.app, build-commit = FINAL. Switching the running pid 42831 to it requires quitting that app: Matthew's decision. Not done headless.
+5. Gateway: this pass needs no gateway restart. The running gateway is 82 commits stale from other work; restarting it is a separate authorised decision.
