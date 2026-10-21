@@ -6172,7 +6172,16 @@ class JaegerGatewayApp:
             return web.json_response({'error': 'Session not found'}, status=404)
         from .attachment_access import resolve
         rows = []
-        for row in self.store.list_attachments(session_id):
+        media = request.query.get('kind') == 'media'
+        next_after = None
+        if media:
+            query, after = request.query.get('q', ''), request.query.get('after', '')
+            if len(query) > 200 or len(after) > 128 or any(ord(c) < 32 for c in query + after):
+                return web.json_response({'error': 'Bounded literal media search required'}, status=400)
+            candidates, next_after = self.store.search_session_media(session_id, query, after=after)
+        else:
+            candidates = self.store.list_attachments(session_id)
+        for row in candidates:
             reason = None
             try:
                 resolve(row, staged_root=self._staged_upload_dir(session_id), workspace=session.get('workspace') or '')
@@ -6181,7 +6190,7 @@ class JaegerGatewayApp:
             except ValueError as exc:
                 reason = str(exc)
             rows.append({**self._upload_view(row), 'readable': reason is None, 'unavailable_reason': reason})
-        return web.json_response({'session_id': session_id, 'files': rows, 'max_bytes': self.UPLOAD_MAX_BYTES})
+        return web.json_response({'session_id': session_id, 'files': rows, 'max_bytes': self.UPLOAD_MAX_BYTES, **({'query': query, 'next_after': next_after, 'source': 'existing_session_attachments', 'licensing': 'not_verified', 'selection_attaches': False} if media else {})})
 
     async def handle_session_file(self, request: web.Request) -> web.Response:
         session_id = request.match_info['id']

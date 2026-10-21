@@ -2377,6 +2377,19 @@ class GatewaySessionStore:
             )
         return row
 
+    def search_session_media(self, session_id: str, query: str, *, after: str = '', limit: int = 25) -> tuple[list[dict[str, Any]], str | None]:
+        """Existing session raster attachments only; names never imply file access."""
+        from jaeger_ai.contract.file_previews import RASTER_MEDIA_TYPES
+        with self._get_conn() as conn:
+            conn.create_function('media_casefold', 1, lambda value: str(value or '').casefold(), deterministic=True)
+            rows = conn.execute(
+                "SELECT * FROM attachments WHERE session_id=? AND mime_type IN (?,?,?,?) "
+                "AND instr(media_casefold(original_filename),?)>0 AND attachment_id>? ORDER BY attachment_id LIMIT ?",
+                (session_id, *RASTER_MEDIA_TYPES, query.casefold(), after, limit + 1),
+            ).fetchall()
+            result = [{**dict(row), 'metadata': _row_meta(row['metadata_json'])} for row in rows[:limit]]
+            return result, result[-1]['attachment_id'] if len(rows) > limit else None
+
     def list_attachments(self, session_id: str) -> list[dict[str, Any]]:
         with self._get_conn() as conn:
             rows = conn.execute(

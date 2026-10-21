@@ -5,3 +5,6 @@ PDF_MAX_TEXT_BYTES=64000
 PDF_MAX_DIMENSION=1280
 PDF_MAX_PREVIEW_PAGES=20
 PDF_MAX_DOCUMENT_PAGES=10000
+
+# Passive raster previews only; SVG/HTML are never mounted as media.
+RASTER_MEDIA_TYPES = ("image/png", "image/jpeg", "image/webp", "image/gif")

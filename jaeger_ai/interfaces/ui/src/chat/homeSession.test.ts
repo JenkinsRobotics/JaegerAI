@@ -132,6 +132,15 @@ describe("fallbackHome (today's gateway)", () => {
     expect(await Promise.all([home.home("a"), home.home("a")])).toEqual(["new", "new"]);
     expect(created).toEqual(["new"]);
   });
+  it("retires inactive full snapshots and reloads evicted older history from its source", async () => {
+    const {s} = source([],5); const home=fallbackHome(s,{pageSize:2});
+    const alpha=await home.page('alpha');await home.page('beta');
+    const older=await home.page('alpha',alpha.before);
+    expect(older.sessionId).toBe('alpha');expect(older.turns.map(t=>t.turnId)).toEqual(['r1','r2']);
+    expect(s.session).toHaveBeenCalledTimes(3);
+    await home.page('alpha',older.before);expect(s.session).toHaveBeenCalledTimes(3);
+    expect(s.createSession).not.toHaveBeenCalled();
+  });
   it("pages turns client-side, oldest page last, and lists the other chats as history", async () => {
     const { s } = source([row("h", 50), row("x", 10)], 5);
     const onCursor = vi.fn();

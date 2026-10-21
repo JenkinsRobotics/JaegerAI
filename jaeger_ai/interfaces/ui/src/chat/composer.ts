@@ -118,3 +118,13 @@ export function autoGrow(el: HTMLTextAreaElement | null) {
   el.style.height = `${Math.min(el.scrollHeight, COMPOSER_MAX_PX)}px`;
   el.style.overflowY = el.scrollHeight > COMPOSER_MAX_PX ? "auto" : "hidden";
 }
+
+/** Only a verified read of the active session may stage an existing raster. */
+export function stageSavedMedia(current:PendingFile[],sessionId:string,file:Awaited<ReturnType<import('../api/source').SessionFiles['read']>>):{files:PendingFile[];note:string} {
+  if(file.session_id!==sessionId)throw Error('Saved media belongs to a different conversation');
+  if(!['image/png','image/jpeg','image/webp','image/gif'].includes(file.mime)||file.size>MAX_ATTACHMENT_BYTES||file.size<1||!file.data_base64||!file.sha256)throw Error('Saved media is unsupported or exceeds draft limits');
+  const id=`media:${sessionId}:${file.attachment_id}:${file.sha256}`;
+  if(current.some(row=>row.id===id))return {files:current,note:'This saved media is already in the draft'};
+  if(current.length>=MAX_ATTACHMENTS)return {files:current,note:`Only ${MAX_ATTACHMENTS} files per message`};
+  return {files:[...current,{id,name:file.name,type:file.mime,size:file.size,data:file.data_base64}],note:'Verified media added to draft; not sent'};
+}

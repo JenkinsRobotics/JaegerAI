@@ -24,7 +24,7 @@ import { SessionQueue } from "./SessionQueue";
 import { WebHost } from "./webHost";
 import type { HomeEntry, HomeSessions } from "./homeSession";
 import { PostMessage, SummaryCard } from "./HomeEntries";
-import { addFiles, autoGrow, bytesUploadEnabled, readBase64, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
+import { stageSavedMedia, addFiles, autoGrow, bytesUploadEnabled, readBase64, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
 import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
 import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
@@ -643,7 +643,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       </div>
       <div className="jg-chat__scroll" ref={scroller} onContextMenu={onMessageMenu} onScroll={onScroll} onWheel={markInput} onTouchMove={markInput} onPointerDown={markInput} onKeyDown={markInput}>
         <div className="jg-chat__column">
-          {filesOpen && host.sessionFiles && sessionId && <><SessionFiles key={sessionId} files={host.sessionFiles} sessionId={sessionId} onClose={()=>setFilesOpen(false)}/>{host.taskArtifacts&&<TaskArtifacts key={"artifacts:"+sessionId} controls={host.taskArtifacts} sessionId={sessionId}/>}</>}
+          {filesOpen && host.sessionFiles && sessionId && <><SessionFiles key={sessionId} files={host.sessionFiles} sessionId={sessionId} onClose={()=>setFilesOpen(false)} onSelectMedia={bytesUploadEnabled()&&draftReady&&!active&&!recoveryBlocked?file=>{try{if(!sessionId||active||recoveryBlocked)return;stageSavedMedia([],sessionId,file);setFiles(current=>{const result=stageSavedMedia(current,sessionId,file);setFileNote(result.note);return result.files;});}catch(e){setFileNote(String(e));}}:undefined}/>{host.taskArtifacts&&<TaskArtifacts key={"artifacts:"+sessionId} controls={host.taskArtifacts} sessionId={sessionId}/>}</>}
           {loadError && <ErrorState title="Couldn't load this chat" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
           {session && !session.turns.length && <p className="jg-chat__empty">What should we work on?</p>}
           {session && (older || olderError) && (

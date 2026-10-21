@@ -27,11 +27,11 @@ it('renders verified HTML-looking text literally and rejects a changed digest',a
   await act(async()=>root.render(<SessionFiles files={files} sessionId="owned-home" onClose={()=>{}}/>));
   const preview=[...host.querySelectorAll('button')].find(b=>b.textContent==='Preview fixture.html')!;
   await act(async()=>preview.click());
-  await act(async()=>{await vi.waitFor(()=>expect(host.querySelector('pre')?.textContent).toBe(text),{timeout:1000});});
+  await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});expect(host.querySelector('pre')?.textContent).toBe(text);},{timeout:1000});
   expect(host.querySelector('pre')?.textContent).toBe(text);expect(host.querySelector('b')).toBeNull();expect(host.querySelector('iframe')).toBeNull();
   read.mockResolvedValueOnce({session_id:'owned-home',...file,data_base64:btoa('x'.repeat(text.length))});
   await act(async()=>preview.click());
-  await act(async()=>{await vi.waitFor(()=>expect(host.textContent).toContain('File digest mismatch'),{timeout:1000});});
+  await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});expect(host.textContent).toContain('File digest mismatch');},{timeout:1000});
   expect(host.textContent).toContain('File digest mismatch');expect(host.querySelector('pre')).toBeNull();
  }finally{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();}
 });
@@ -74,4 +74,13 @@ it('discards an old PDF result after another artifact becomes the selected previ
   await act(async()=>resolve({session_id:'owned',...a,preview:{format:'unsupported',notice:'OLD PDF RESULT'}}));
   expect(host.querySelector('[aria-label="Preview b.csv"]')).not.toBeNull();expect(host.textContent).toContain('CURRENT');expect(host.textContent).not.toContain('OLD PDF RESULT');expect(host.querySelector('iframe')).toBeNull();
  }finally{await act(async()=>root.unmount());host.remove();}
+});
+it('verifies exact saved raster bytes before exposing an explicit draft action',async()=>{
+ const {webcrypto,createHash}=await import('node:crypto');vi.stubGlobal('crypto',webcrypto);
+ const create=vi.fn(()=> 'blob:owned-raster'),revoke=vi.fn();const OriginalURL=URL;vi.stubGlobal('URL',class extends OriginalURL{static createObjectURL=create;static revokeObjectURL=revoke;});
+ const text='owned raster bytes',file={attachment_id:'owned-image',name:'image.png',mime:'image/png',size:text.length,sha256:createHash('sha256').update(text).digest('hex'),readable:true};
+ const read=vi.fn(async()=>({session_id:'owned-home',...file,data_base64:btoa(text)}));const files={list:async()=>({session_id:'owned-home',files:[file],max_bytes:100}),read};const onSelect=vi.fn();
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try{await act(async()=>root.render(<SessionFiles files={files} sessionId="owned-home" onClose={()=>{}} onSelectMedia={onSelect}/>));expect(onSelect).not.toHaveBeenCalled();await act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Preview image.png')!.click());await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,0));});expect(host.textContent).toContain('Add verified media to draft');},{timeout:1000});expect(onSelect).not.toHaveBeenCalled();await act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Add verified media to draft')!.click());expect(onSelect).toHaveBeenCalledExactlyOnceWith({session_id:'owned-home',...file,data_base64:btoa(text)});
+ }finally{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();}expect(revoke).toHaveBeenCalledWith('blob:owned-raster');
 });
