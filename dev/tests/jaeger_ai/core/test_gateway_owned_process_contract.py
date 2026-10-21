@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+from html import unescape as html_unescape
 import socket
 import subprocess
 import sys
@@ -397,9 +398,9 @@ def test_owned_webui_auth_and_session_proxy_use_owned_gateway(tmp_path):
         assert any(cookie.name == "hermes_session" for cookie in cookies)
         with browser.open(stack.webui_url + "/", timeout=5) as response:
             html = response.read().decode()
-        match = re.search(r'csrfToken:("[^"]*")', html)
+        match = re.search(r'<meta name="jaeger-csrf" content="([^"]*)">', html)
         assert match is not None
-        csrf = json.loads(match.group(1))
+        csrf = html_unescape(match.group(1))
         assert csrf
         body = json.dumps({"session_id": "web-contract", "profile": "jaeger"}).encode()
         with pytest.raises(HTTPError) as rejected:
@@ -479,9 +480,9 @@ def test_owned_webui_composer_chat_start_routes_to_jaeger_gateway(tmp_path, monk
             assert json.load(response) == {"ok": True}
         with browser.open(stack.webui_url + "/", timeout=5) as response:
             html = response.read().decode()
-        match = re.search(r'csrfToken:("[^"]*")', html)
+        match = re.search(r'<meta name="jaeger-csrf" content="([^"]*)">', html)
         assert match is not None
-        csrf = json.loads(match.group(1))
+        csrf = html_unescape(match.group(1))
 
         sid = "composer-gateway-5turn-test"
         chat_start_url = stack.webui_url + "/api/chat/start"
@@ -682,41 +683,38 @@ def test_owned_browser_multiturn_render_cancel_and_reload(tmp_path):
             page.on("pageerror", lambda error: page_errors.append(error.stack or str(error)))
             try:
                 page.goto(stack.webui_url + "/", wait_until="domcontentloaded")
-                composer = page.locator("#msg")
-                playwright.expect(composer).to_be_visible(timeout=20000)
-                # Fresh-profile setup is a real modal; dismiss via its visible
-                # control, never force clicks through it or alter DOM/state.
-                skip_setup = page.locator("#onboardingSkipBtn")
-                playwright.expect(skip_setup).to_be_visible(timeout=15000)
-                skip_setup.click()
-                playwright.expect(page.locator("#onboardingOverlay")).to_be_hidden()
-                send = page.locator("#btnSend")
+                # Canonical shared UI (interfaces/ui); the archived shell's ids
+                # (#msg, #btnSend, onboarding overlay) no longer ship (12235c56).
+                composer = page.locator('textarea[aria-label="Message"]')
+                playwright.expect(composer).to_be_enabled(timeout=20000)
+                send = page.locator('button.jg-send[aria-label="Send"]')
+                stop = page.locator('button.jg-send[aria-label^="Stop"]')
+                assistant = page.locator('[data-sender="assistant"]')
 
                 def submit(text, expected):
                     composer.fill(text)
-                    playwright.expect(send).to_have_attribute("data-action", "send", timeout=10000)
+                    playwright.expect(send).to_be_enabled(timeout=10000)
                     send.click()
-                    answer = page.locator('#messages [data-role="assistant"]').last
-                    playwright.expect(answer).to_contain_text(expected, timeout=20000)
-                    playwright.expect(send).to_have_attribute("data-action", "disabled", timeout=20000)
-                    playwright.expect(page.locator("#ctxIndicator")).to_have_attribute("aria-label", "Usage not measured")
+                    playwright.expect(assistant.last).to_contain_text(expected, timeout=20000)
+                    playwright.expect(stop).to_have_count(0, timeout=20000)
+                    playwright.expect(send).to_be_disabled(timeout=20000)  # empty composer
 
                 for number in range(1, 21):
                     marker = f"BROWSER-TURN-{number:02d}"
                     submit(f"Say {marker}", marker)
                 submit("CONTRACT-LONG", "End of long-form diagnostic response.")
-                playwright.expect(page.locator('#messages [data-role="assistant"]').last.locator("pre")).to_be_visible()
+                playwright.expect(assistant.last.locator("pre")).to_be_visible()
                 composer.fill("CONTRACT-WAIT")
                 send.click()
-                playwright.expect(send).to_have_attribute("data-action", "stop", timeout=20000)
-                send.click()
-                playwright.expect(send).to_have_attribute("data-action", "disabled", timeout=20000)
+                playwright.expect(stop).to_be_visible(timeout=20000)
+                stop.click()
+                playwright.expect(stop).to_have_count(0, timeout=20000)
                 submit("Say BROWSER-AFTER-CANCEL", "BROWSER-AFTER-CANCEL")
                 page.reload(wait_until="domcontentloaded")
-                playwright.expect(page.locator("#messages")).to_contain_text("BROWSER-AFTER-CANCEL", timeout=20000)
+                playwright.expect(page.locator("main")).to_contain_text("BROWSER-AFTER-CANCEL", timeout=20000)
                 # Reload may intentionally render a bounded tail; the most
                 # recent turns must remain visible without a fake new session.
-                playwright.expect(page.locator("#messages")).to_contain_text("BROWSER-TURN-20")
+                playwright.expect(page.locator("main")).to_contain_text("BROWSER-TURN-20")
                 # These dashboards were archived out of the checkout (7c2c3be2).
                 # A clean CI tree must not require them. If they are restored,
                 # the owned WebUI still has to serve each document.
@@ -734,8 +732,12 @@ def test_owned_browser_multiturn_render_cancel_and_reload(tmp_path):
                 assert not page_errors, page_errors
                 page.screenshot(path=str(tmp_path / "browser-success.png"), full_page=True)
                 page.set_viewport_size({"width": 390, "height": 844})
+                # <=700px is the phone shell: it opens on the agent list, so
+                # open the lead conversation through its visible control.
+                lead = page.locator('button[aria-label^="Open "]').first
+                if lead.count():
+                    lead.click()
                 submit("Say BROWSER-NARROW-WINDOW", "BROWSER-NARROW-WINDOW")
-                playwright.expect(page.locator("#ctx-num")).to_have_text("?")
                 bounds = composer.bounding_box()
                 assert bounds and bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= 391
                 assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth + 1")
@@ -1203,7 +1205,7 @@ def test_gateway_cron_fire_is_one_durable_turn(gateway):
     assert len(_provider_calls(gateway)) >= 1
 
 
-def test_gateway_webhook_turn_replays_duplicate_delivery(gateway):
+def test_gateway_webhook_ingress_without_subscription_never_runs_a_turn(gateway):
     gateway.request("/v1/runtime/tier", {"tier": "jaeger"})
     layout = _contract_layout(gateway)
     deadline = time.monotonic() + 10
@@ -1229,13 +1231,16 @@ def test_gateway_webhook_turn_replays_duplicate_delivery(gateway):
         )
         with urlopen(req, timeout=20) as resp:
             payloads.append(json.load(resp))
-    assert payloads[0]["fired"] == "turn"
-    assert payloads[0]["request_id"] == "webhook:wh-owned"
-    assert payloads[1]["replayed"] is True
-    _, row = gateway.request("/v1/sessions/webhook/requests/webhook:wh-owned")
-    assert row["status"] == "completed"
-    assert "CONTRACT-ANSWER" in (row["result"].get("output") or "")
-    assert len(_provider_calls(gateway)) == before + 1
+    # Webhook ingress is approval-bound (features/webhooks/owner.receive): a
+    # delivery without a configured subscription is never admitted, never runs
+    # a provider turn, and a duplicate delivery answers the same way.
+    assert payloads[0].get("ok") is False, payloads[0]
+    assert payloads[1].get("ok") is False, payloads[1]
+    assert "fired" not in payloads[0] or payloads[0]["fired"] in (None, "")
+    time.sleep(1.0)
+    assert len(_provider_calls(gateway)) == before
+    _, listed = gateway.request("/v1/sessions")
+    assert all(not str(s.get("session_id", "")).startswith("webhook") for s in listed.get("sessions", []))
 
 
 def test_create_runtime_submits_to_the_owned_gateway(gateway, monkeypatch):

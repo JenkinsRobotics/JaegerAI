@@ -9,6 +9,14 @@ import { decodeSSE, type SSEFrame } from "./sse";
 import type { JaegerSource, RequestSnapshot, PendingApproval, TurnReceipt , UploadedAttachment, ConnectAppsListing, ConnectedApp, ModelInventory, ScheduleControls, LibraryControls, ReactionSnapshot, SessionQueue } from "./source";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
+/** The WebUI's session CSRF token (meta tag the server injects for a
+ * cookie-authenticated page) as the header unsafe requests must carry. */
+export function csrfHeader(method: string): Record<string, string> {
+  if (/^(GET|HEAD|OPTIONS)$/i.test(method) || typeof document === "undefined") return {};
+  const token = document.querySelector<HTMLMetaElement>('meta[name="jaeger-csrf"]')?.content;
+  return token ? { "X-Hermes-CSRF-Token": token } : {};
+}
+
 export class GatewayError extends Error {
   constructor(message: string, readonly status: number, readonly body?: unknown) {
     super(message);
@@ -185,7 +193,7 @@ export class GatewayClient implements JaegerSource {
     try {
       const response = await fetch(`${this.base}${path}`, {
         method: method ?? (body === undefined ? "GET" : "POST"),
-        headers: { ...(body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" }), ...extraHeaders },
+        headers: { ...(body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" }), ...csrfHeader(method ?? (body === undefined ? "GET" : "POST")), ...extraHeaders },
         body: body === undefined ? undefined : JSON.stringify(body),
         credentials: "same-origin",
         signal: controller.signal,
