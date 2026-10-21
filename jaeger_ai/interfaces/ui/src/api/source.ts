@@ -105,6 +105,12 @@ export interface PluginControls {
   operation(id:string):Promise<{receipt:ControlResult|null}>;
 }
 export interface SemanticClaims {available:boolean;scope:string;context_scope?:string;matching?:string;observed_at?:number;next_before:number|null;claims:{claim_id:string;subject:string;predicate:string;value:string;provenance:string;confidence:number;source_id:string;valid_from:number;valid_until:number|null;created_at:number;revision:string;active:boolean;recent_context_candidate:boolean;truncated?:boolean}[]}
+export type SemanticClaimDetail=Omit<SemanticClaims['claims'][number],'recent_context_candidate'>&{actions:('correct'|'forget'|'restore')[];replaces_claim_id:string|null;changes:{action:string;actor:string;changed_at:number;replacement_claim_id:string|null}[]};
+export interface SemanticClaimControls {
+ detail(id:string):Promise<SemanticClaimDetail>;
+ mutate(id:string,action:'correct'|'forget'|'restore',body:{operation_id:string;expected_revision:string;text?:string}):Promise<ControlResult>;
+ operation(id:string):Promise<{receipt:ControlResult|null}>;
+}
 export interface GatewayDiagnostics {
   sessions: number; requests: Record<string, number>; approvals: Record<string, number>; handoffs: Record<string, number>;
   unknown_requests: { request_id: string; session_id: string; status: string }[]; unknown_list_limit: number;
@@ -147,6 +153,7 @@ export interface ChannelSnapshot {
 }
 export interface TaskProposalReceipt { task_id: string; status: string; replayed: boolean; request_id: string; origin_session_id: string }
 export interface JaegerSource {
+  semanticClaimControls?:SemanticClaimControls;
   semanticClaims?(options:{query:string;includeInactive:boolean;before?:number}):Promise<SemanticClaims>;
   plugins?:PluginControls;
   channelControls?: {

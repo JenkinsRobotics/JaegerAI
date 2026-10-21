@@ -281,3 +281,13 @@ def test_semantic_memory_proxy_is_read_only_and_preserves_query(overlay):
     path='/v1/runtime/memory/claims?q=owned&before=50&include_inactive=true'
     assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
     assert not _route(overlay,'/v1/runtime/memory/claims','POST')
+
+
+def test_semantic_claim_commands_and_recovery_use_explicit_proxy_routes(overlay):
+    for action in ('correct','forget','restore'):
+        path='/v1/runtime/memory/claims/clm_owned/'+action
+        assert _route(overlay,path,'POST') and overlay._calls[-1]==('POST',path)
+    for path in ('/v1/runtime/memory/claims/clm_owned','/v1/runtime/memory/claim-operations/owned-operation'):
+        assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
+    assert not _route(overlay,'/v1/runtime/memory/claims/clm_owned/delete','POST')
+    assert not _route(overlay,'/v1/runtime/memory/claims/clm_owned/restore/extra','POST')

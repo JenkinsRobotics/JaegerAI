@@ -200,3 +200,99 @@ async def test_semantic_memory_http_uses_only_loaded_owner_and_existing_read_sco
         assert gateway.store.list_requests()==[]
     async with TestClient(TestServer(gateway.app),headers=client_headers('a2a')) as http:
         assert (await http.get('/v1/runtime/memory/claims')).status==403
+
+
+def test_claim_correction_forget_restore_preserves_provenance_and_recovery(tmp_path):
+    store=SqliteWorldStore(tmp_path/'knowledge.sqlite3')
+    original=store.record_claim('Owned fixture','preference','old',provenance='verified',source_id='fixture-evidence')
+    before=store.claim_detail(original.claim_id)
+    command=dict(expected_revision=before['revision'],operation_id='owned-correction',actor='human:operator',text='new')
+    receipt=store.manage_claim(original.claim_id,'correct',**command)
+    assert store.manage_claim(original.claim_id,'correct',**command)==receipt
+    reopened=SqliteWorldStore(store.db_path)
+    assert reopened.claim_operation('owned-correction')==receipt
+    historical=reopened.claim_detail(original.claim_id)
+    assert historical['value']=='old' and historical['provenance']=='verified' and historical['source_id']=='fixture-evidence'
+    assert not historical['active'] and historical['actions']==[]
+    replacement=receipt['result']['replacement_claim_id'];detail=reopened.claim_detail(replacement)
+    assert detail['replaces_claim_id']==original.claim_id
+    assert (detail['value'],detail['provenance'],detail['source_id'])==('new','told','human:operator')
+    assert [c.claim_id for c in reopened.query_claims('Owned fixture')]==[replacement]
+    assert reopened.search_claims()['claims'][0]['revision']==detail['revision']
+    reopened.manage_claim(replacement,'forget',expected_revision=detail['revision'],operation_id='owned-forget',actor='human:operator')
+    assert reopened.query_claims('Owned fixture')==[] and reopened.list_recent_claims()==[]
+    forgotten=reopened.claim_detail(replacement);assert forgotten['actions']==['restore']
+    reopened.manage_claim(replacement,'restore',expected_revision=forgotten['revision'],operation_id='owned-restore',actor='human:operator')
+    restored=reopened.claim_detail(replacement)
+    assert restored['value']=='new' and restored['revision']!=detail['revision']
+    with pytest.raises(ValueError,match='changed'):
+        reopened.manage_claim(replacement,'forget',expected_revision=detail['revision'],operation_id='owned-stale',actor='human:operator')
+    with pytest.raises(ValueError,match='conflicts'):
+        reopened.manage_claim(original.claim_id,'correct',**{**command,'text':'different'})
+    assert len(reopened.query_claims('Owned fixture',include_inactive=True))==2
+
+
+def test_claim_restore_does_not_extend_expiry_or_modify_system_claims(tmp_path,monkeypatch):
+    import jaeger_ai.core.world.store as module
+    store=SqliteWorldStore(tmp_path/'knowledge.sqlite3');now=1000.
+    monkeypatch.setattr(module.time,'time',lambda:now)
+    claim=store.record_claim('Owned','temporary','value')
+    with store._get_connection() as conn:conn.execute('UPDATE world_claims SET valid_until=1010 WHERE claim_id=?',(claim.claim_id,))
+    store.manage_claim(claim.claim_id,'forget',expected_revision=store.claim_detail(claim.claim_id)['revision'],operation_id='forget-expiring',actor='human:operator')
+    now=1011.
+    detail=store.claim_detail(claim.claim_id);assert detail['actions']==[]
+    with pytest.raises(ValueError,match='validity elapsed'):
+        store.manage_claim(claim.claim_id,'restore',expected_revision=detail['revision'],operation_id='restore-expired',actor='human:operator')
+    protected=store.record_claim('Owned','system','value',provenance='system')
+    detail=store.claim_detail(protected.claim_id);assert detail['actions']==[]
+    with pytest.raises(ValueError,match='protected'):
+        store.manage_claim(protected.claim_id,'forget',expected_revision=detail['revision'],operation_id='protected',actor='human:operator')
+
+
+@pytest.mark.asyncio
+async def test_claim_controls_existing_admin_scope_residency_and_atomic_receipt(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from aiohttp.test_utils import TestClient,TestServer
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+    from jaeger_ai.core.entity.ownership import EntityRuntimeMode
+    gateway=JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.sqlite3'))
+    owner=SqliteWorldStore(tmp_path/'knowledge.sqlite3');claim=owner.record_claim('Owned fixture','preference','saved')
+    runtime=SimpleNamespace(mode=EntityRuntimeMode.OWNER,is_resident=True,memory_subsystem=SimpleNamespace(semantic=SimpleNamespace(world_store=owner)))
+    monkeypatch.setattr(EntityRuntime,'_instance',runtime)
+    base='/v1/runtime/memory/claims/'+claim.claim_id
+    body={'operation_id':'owned-http-forget','expected_revision':owner.claim_detail(claim.claim_id)['revision']}
+    async with TestClient(TestServer(gateway.app),headers=client_headers('jaegerd')) as http:
+        assert (await http.post(base+'/forget',json=body)).status==403
+        detail=await (await http.get(base)).json();assert detail['actions']==[]
+    async with TestClient(TestServer(gateway.app),headers=client_headers('webui')) as http:
+        runtime.is_resident=False
+        assert (await http.post(base+'/forget',json=body)).status==400
+        assert gateway.store.control_operation(body['operation_id']) is None
+        runtime.is_resident=True
+        result=await http.post(base+'/forget',json=body);assert result.status==200
+        receipt=await result.json();assert receipt['ok'] and owner.query_claims('Owned fixture')==[]
+        # Domain receipt remains authoritative if process dies before the Gateway receipt settles.
+        with gateway.store._get_conn() as conn:
+            conn.execute('UPDATE control_operations SET receipt_json=NULL,status=? WHERE operation_id=?',('reserved',body['operation_id']))
+        recovered=await (await http.get('/v1/runtime/memory/claim-operations/'+body['operation_id'])).json()
+        assert recovered['receipt']==receipt
+        assert await (await http.post(base+'/forget',json=body)).json()==receipt
+        assert len(owner.claim_detail(claim.claim_id)['changes'])==1
+        assert gateway.store.list_requests()==[]
+
+
+def test_concurrent_claim_commands_allow_only_one_current_revision(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    store=SqliteWorldStore(tmp_path/'knowledge.sqlite3');claim=store.record_claim('Owned concurrent','preference','old')
+    revision=store.claim_detail(claim.claim_id)['revision']
+    def change(index):
+        try:return store.manage_claim(claim.claim_id,'correct',expected_revision=revision,operation_id=f'owned-concurrent-{index}',actor='human:operator',text=f'new-{index}')
+        except ValueError:return None
+    with ThreadPoolExecutor(max_workers=2) as pool:results=list(pool.map(change,range(2)))
+    assert sum(result is not None for result in results)==1
+    assert len(store.query_claims('Owned concurrent'))==1
+    assert len(store.query_claims('Owned concurrent',include_inactive=True))==2
+    assert len(store.claim_detail(claim.claim_id)['changes'])==1
