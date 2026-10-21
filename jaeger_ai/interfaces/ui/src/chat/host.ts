@@ -81,6 +81,7 @@ export interface ChatAgentRef { id: string; name: string; description?: string }
 export interface ChatConfig { defaultModel?: string; defaultMode?: string; [key: string]: unknown }
 
 export interface ChatHost {
+  readonly sessionFiles?: import("../api/source").SessionFiles;
   readonly sessionQueue?: import("../api/source").SessionQueue;
   readonly messageReactions?: import("../api/source").JaegerSource["messageReactions"];
   readonly modelSettings?: import("../api/source").ModelSettings;

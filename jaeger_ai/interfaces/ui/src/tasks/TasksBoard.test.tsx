@@ -24,3 +24,29 @@ it("does not offer edit or approval for authorized or already executed paused ta
   expect(el.textContent).not.toContain("Edit proposal");
   expect([...el.querySelectorAll("button")].filter(b => b.textContent === "Cancel task")).toHaveLength(2);
 });
+it("recovers an uncertain proposal by read only lookup without clearing a newer draft", async () => {
+  const prefix = 'jaeger.ui.task-proposal.';
+  const intent = { requestId: 'owned-nonce', sessionId: 'owned-home', origin: 'owned-bot', goal: 'Original proposal ' };
+  localStorage.setItem(prefix+'intent.v1.owned-nonce', JSON.stringify(intent));
+  localStorage.setItem(prefix+'draft.v1', JSON.stringify({ goal: 'Newer draft', origin: 'owned-bot' }));
+  const create = vi.fn(), lookup = vi.fn(async () => ({ session_id: intent.sessionId, request_id: intent.requestId, tasks: [{ task_id: 'owned-task', goal: 'Later edited proposal', state: 'paused', provenance: { submission_goal: 'Original proposal' } }] }));
+  const el = await mount({ tasks: async () => [], agentHome: vi.fn(), taskActions: { create, lookup } as never });
+  expect((el.querySelector('[aria-label="Task objective"]') as HTMLTextAreaElement).value).toBe('Newer draft');
+  await act(async () => [...el.querySelectorAll('button')].find(b=>b.textContent==='Check saved proposal')!.click());
+  expect(lookup).toHaveBeenCalledExactlyOnceWith('owned-home', 'owned-nonce');
+  expect(create).not.toHaveBeenCalled();
+  expect(localStorage.getItem(prefix+'intent.v1.owned-nonce')).toBeNull();
+  expect(JSON.parse(localStorage.getItem(prefix+'draft.v1')!).goal).toBe('Newer draft');
+  localStorage.removeItem(prefix+'draft.v1');
+});
+it("retains the command journal when lookup is absent or has a conflicting objective", async () => {
+  const key = 'jaeger.ui.task-proposal.intent.v1.owned-conflict';
+  localStorage.setItem(key, JSON.stringify({ requestId: 'owned-conflict', sessionId: 'owned-home', origin: 'owned-bot', goal: 'Original' }));
+  const create = vi.fn();
+  const el = await mount({ tasks: async () => [{ task_id: 'other', goal: 'Different', provenance: { request_id: 'owned-conflict', session_id: 'owned-home' } }], agentHome: vi.fn(), taskActions: { create } as never });
+  await act(async () => [...el.querySelectorAll('button')].find(b=>b.textContent==='Check saved proposal')!.click());
+  expect(el.textContent).toContain('Saved task objective differs');
+  expect(localStorage.getItem(key)).not.toBeNull();
+  expect(create).not.toHaveBeenCalled();
+  localStorage.removeItem(key);
+});

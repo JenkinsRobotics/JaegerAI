@@ -107,14 +107,34 @@ class GatewayTaskOwner:
         approved = authorized or (not proposal and context.get('source') == 'client')
         workspace = str(execution.get('workspace') or '')
         paths = self.artifact_paths(workspace, artifacts)
-        identity = key or json.dumps([context.get('request_id') or '', ' '.join(goal.casefold().split())])
+        submission_id = context.get('client_submission_id')
+        fingerprint = None
+        if submission_id:
+            from .store import TaskConflict
+            if not isinstance(submission_id, str) or len(submission_id) > 128:
+                raise ValueError('Client submission ID must be text of at most128 characters')
+            fingerprint = hashlib.sha256(json.dumps({'goal': goal, 'execution': execution, 'artifacts': paths,
+                'proposal': proposal, 'agent_id': context.get('agent_id') or '', 'eta': context.get('eta'),
+                'runner': context.get('runner') or 'native'}, sort_keys=True).encode()).hexdigest()
+            matches = self.store.client_submissions(parent, submission_id)
+            if len(matches) > 1:
+                raise TaskConflict('Multiple legacy tasks share this submission identity; inspect them without replay')
+            if matches:
+                previous = matches[0]
+                previous_fingerprint = previous.provenance.get('submission_fingerprint')
+                same = previous_fingerprint == fingerprint if previous_fingerprint else (previous.goal == goal and previous.payload.get('execution') == execution and previous.payload.get('artifacts') == paths and previous.agent_id == str(context.get('agent_id') or '') and previous.runner == str(context.get('runner') or 'native') and previous.eta == context.get('eta'))
+                if not same:
+                    raise TaskConflict('Client submission identity conflicts with admitted work')
+                return {'ok': True, 'task_id': previous.task_id, 'status': previous.state.value, 'replayed': True,
+                        'session_id': f'task:{previous.task_id}', 'authorized': previous.provenance.get('authorized', False)}
+        identity = ('client:' + submission_id) if submission_id else key or json.dumps([context.get('request_id') or '', ' '.join(goal.casefold().split())])
         tid = 'task_' + hashlib.sha256(json.dumps([parent, identity]).encode()).hexdigest()[:24]
         payload = {'execution': execution, 'artifacts': paths}
         task = DurableTask(tid, 'native:jaeger', goal, kind=TaskKind.LONG_RUNNING,
             state=TaskState.QUEUED if approved else TaskState.PAUSED, payload=payload,
             notification_policy=NotificationPolicy(recipient_session_id=parent),
             provenance={'request_id': context.get('request_id'), 'authorized': approved,
-                        'source': context.get('source'), 'session_id': parent},
+                        'source': context.get('source'), 'session_id': parent, **({'submission_fingerprint': fingerprint, 'submission_goal': goal} if fingerprint else {})},
             agent_id=str(context.get('agent_id') or ''), eta=context.get('eta'),
             runner=str(context.get('runner') or 'native'))
         task, replayed = self.store.admit_task(task)

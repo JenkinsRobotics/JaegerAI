@@ -1380,8 +1380,10 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/runtime/models", self.handle_runtime_models)
         self.app.router.add_get("/v1/runtime/capabilities", self.handle_runtime_capabilities)
         self.app.router.add_get("/v1/runtime/skills", self.handle_runtime_skills)
+        self.app.router.add_get("/v1/runtime/skills/detail", self.handle_runtime_skill_detail)
         self.app.router.add_get("/v1/runtime/tools", self.handle_runtime_tools)
         self.app.router.add_get("/v1/channels", self.handle_channels)
+        self.app.router.add_get("/v1/task-submissions/{request_id}", self.handle_task_submission)
         self.app.router.add_get("/v1/runtime/diagnostics", self.handle_runtime_diagnostics)
         self.app.router.add_post("/v1/sessions/{id}/ide/{ide_request_id}", self.handle_ide_result)
         self.app.router.add_get("/v1/runtime/autonomy", self.handle_get_autonomy)
@@ -1389,6 +1391,8 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/runtime/tier", self.handle_get_tier)
         self.app.router.add_post("/v1/runtime/tier", self.handle_set_tier)
         self.app.router.add_get("/v1/sessions/{id}/attachments", self.handle_list_attachments)
+        self.app.router.add_get("/v1/sessions/{id}/files", self.handle_session_files)
+        self.app.router.add_get("/v1/sessions/{id}/files/{attachment_id}", self.handle_session_file)
         self.app.router.add_post("/v1/sessions/{id}/attachments", self.handle_add_attachment)
         self.app.router.add_post("/v1/sessions/{id}/attachments/upload", self.handle_upload_attachment)
         self.app.router.add_get("/v1/tasks", self.handle_tasks)
@@ -5865,6 +5869,61 @@ class JaegerGatewayApp:
         ]
         return web.json_response({"skills": rows, "count": len(rows)})
 
+    async def handle_runtime_skill_detail(self, request: web.Request) -> web.Response:
+        """Inspect registry provenance/requirements only; never load toolsets or scripts."""
+        from jaeger_agent.skill_registry.playbook_skills import discover_playbooks
+        from jaeger_ai.core.redaction import redact_text
+        name, category = request.query.get('name', ''), request.query.get('category', '')
+        if not name or not category or len(name) > 200 or len(category) > 200:
+            return web.json_response({'error': 'Exact skill name and category required'}, status=400)
+        matches = [s for s in discover_playbooks() if s.name == name and s.category == category]
+        if len(matches) != 1:
+            return web.json_response({'error': 'Skill not found or registry identity ambiguous'}, status=404 if not matches else 409)
+        skill = matches[0]
+        clean = lambda values: [redact_text(str(value))[:300] for value in values[:100]]
+        return web.json_response({'name': skill.name, 'category': skill.category,
+            'description': redact_text(skill.description)[:2000], 'origin': skill.origin,
+            'lifecycle': skill.lifecycle, 'skill_class': skill.skill_class,
+            'platforms': clean(skill.platforms), 'requires_tools': clean(skill.requires_tools),
+            'optional_tools': clean(skill.optional_tools), 'requires_toolsets': clean(skill.requires_toolsets),
+            'requires_plugins': clean(skill.requires_plugins), 'aliases': clean(skill.aliases),
+            'tags': clean(skill.tags), 'auto_activate': bool(skill.auto_activate), 'tier': skill.tier,
+            'scope': 'discovered_registry_metadata', 'execution_authorized': False,
+            'availability': 'not_probed', 'origin_verified': False})
+
+    async def handle_session_files(self, request: web.Request) -> web.Response:
+        session_id = request.match_info['id']
+        session = self.store.get_session(session_id)
+        if session is None:
+            return web.json_response({'error': 'Session not found'}, status=404)
+        from .attachment_access import resolve
+        rows = []
+        for row in self.store.list_attachments(session_id):
+            reason = None
+            try:
+                resolve(row, staged_root=self._staged_upload_dir(session_id), workspace=session.get('workspace') or '')
+                if row['size_bytes'] > self.UPLOAD_MAX_BYTES:
+                    reason = 'Attachment exceeds supported read size'
+            except ValueError as exc:
+                reason = str(exc)
+            rows.append({**self._upload_view(row), 'readable': reason is None, 'unavailable_reason': reason})
+        return web.json_response({'session_id': session_id, 'files': rows, 'max_bytes': self.UPLOAD_MAX_BYTES})
+
+    async def handle_session_file(self, request: web.Request) -> web.Response:
+        session_id = request.match_info['id']
+        session = self.store.get_session(session_id)
+        rows = self.store.list_attachments(session_id) if session else []
+        row = next((r for r in rows if r['attachment_id'] == request.match_info['attachment_id']), None)
+        if row is None:
+            return web.json_response({'error': 'Session attachment not found'}, status=404)
+        from .attachment_access import read
+        try:
+            result = await asyncio.to_thread(read, row, staged_root=self._staged_upload_dir(session_id),
+                workspace=session.get('workspace') or '', limit=self.UPLOAD_MAX_BYTES)
+        except (OSError, ValueError):
+            return web.json_response({'error': 'Attachment missing, changed, or outside its originating workspace; bytes withheld'}, status=409)
+        return web.json_response({'session_id': session_id, **result})
+
     async def handle_list_attachments(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
         if self.store.get_session(session_id) is None:
@@ -6263,6 +6322,14 @@ class JaegerGatewayApp:
             out['runner'] = runner
         return out
 
+    async def handle_task_submission(self, request: web.Request) -> web.Response:
+        session_id = str(request.query.get('session_id') or '')
+        request_id = request.match_info['request_id']
+        if not session_id or self.store.get_session(session_id) is None:
+            return web.json_response({'error': 'Existing originating session required'}, status=404)
+        return web.json_response({'session_id': session_id, 'request_id': request_id,
+            'tasks': [task.to_dict() for task in self.task_owner.store.client_submissions(session_id, request_id)]})
+
     async def handle_tasks(self, request: web.Request) -> web.Response:
         if request.method == 'GET':
             tasks = [t.to_dict() for t in self.task_owner.store.list_tasks()]
@@ -6279,15 +6346,21 @@ class JaegerGatewayApp:
             return web.json_response({'error': 'Existing session_id required'}, status=400)
         execution = dict(body.get('execution') or {})
         execution.setdefault('workspace', parent.get('workspace') or '')
+        execution['caller'] = request.get('caller_actor')
         try:
+            submission_id = body.get('request_id')
+            if submission_id is not None and (not isinstance(submission_id, str) or not submission_id.strip() or len(submission_id) > 128):
+                raise ValueError('request_id must be nonempty text of at most128 characters')
             board = self._task_board_fields(body)
+            board.setdefault('agent_id', self._session_agent_id(parent))
             result = self.task_owner.submit(str(body.get('goal') or ''),
                 context={'session_id': parent['session_id'], 'source': 'client', 'execution': execution,
-                         'request_id': body.get('request_id'), **board},
+                         'request_id': submission_id, 'client_submission_id': submission_id, **board},
                 artifacts=body.get('artifacts'), proposal=bool(body.get('proposal')))
         except ValueError as exc:
-            return web.json_response({'error': str(exc)}, status=400)
-        return web.json_response(result, status=200 if result['replayed'] else 201)
+            from jaeger_ai.core.tasks.store import TaskConflict
+            return web.json_response({'error': str(exc)}, status=409 if isinstance(exc, TaskConflict) else 400)
+        return web.json_response({**result, 'request_id': submission_id, 'origin_session_id': parent['session_id']}, status=200 if result['replayed'] else 201)
 
     async def handle_task(self, request: web.Request) -> web.Response:
         task = self.task_owner.store.get_task(request.match_info['id'])

@@ -16,6 +16,10 @@ from collections.abc import Callable
 from contextlib import closing
 
 
+class TaskConflict(ValueError):
+    """A client submission identity already belongs to another objective."""
+
+
 class SqliteDurableTaskStore:
     """Persistent SQLite store for durable tasks and automations."""
 
@@ -112,6 +116,12 @@ class SqliteDurableTaskStore:
             rows = conn.execute(query, params).fetchall()
             return [DurableTask.from_dict(json.loads(r["task_json"])) for r in rows]
 
+    def client_submissions(self, session_id: str, request_id: str) -> list[DurableTask]:
+        """Bounded legacy/current proposal lookup; never choose among ambiguity."""
+        with closing(self._get_conn()) as conn:
+            rows = conn.execute("SELECT task_json FROM durable_tasks WHERE json_extract(task_json,'$.provenance.session_id')=? AND json_extract(task_json,'$.provenance.request_id')=? AND json_extract(task_json,'$.provenance.source')='client' AND COALESCE(json_extract(task_json,'$.provenance.turn_owned'),0)=0 AND json_extract(task_json,'$.provenance.workflow_id') IS NULL AND json_extract(task_json,'$.provenance.schedule_id') IS NULL ORDER BY created_at LIMIT 2", (session_id, request_id)).fetchall()
+        return [DurableTask.from_dict(json.loads(row[0])) for row in rows]
+
     def admit_task(self, task: DurableTask) -> tuple[DurableTask, bool]:
         """Atomic insert; a stable identity never overwrites an existing execution."""
         with closing(self._get_conn()) as conn, conn:
@@ -119,8 +129,12 @@ class SqliteDurableTaskStore:
             old = conn.execute('SELECT task_json FROM durable_tasks WHERE task_id=?', (task.task_id,)).fetchone()
             if old:
                 previous = DurableTask.from_dict(json.loads(old[0]))
-                if previous.goal != task.goal or any(previous.payload.get(k) != v for k, v in task.payload.items()):
-                    raise ValueError('Task identity conflicts with an admitted objective or execution configuration')
+                old_fingerprint = previous.provenance.get('submission_fingerprint')
+                new_fingerprint = task.provenance.get('submission_fingerprint')
+                conflict = (old_fingerprint != new_fingerprint if old_fingerprint or new_fingerprint else
+                            previous.goal != task.goal or any(previous.payload.get(k) != v for k, v in task.payload.items()))
+                if conflict:
+                    raise TaskConflict('Task identity conflicts with an admitted objective or execution configuration')
                 return previous, True
             conn.execute('INSERT INTO durable_tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
                          (task.task_id, task.owning_agent, task.goal, task.kind.value,

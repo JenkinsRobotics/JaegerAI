@@ -223,3 +223,10 @@ def test_channel_status_proxy_does_not_accept_lifecycle_mutations(overlay):
     assert _route(overlay,'/v1/channels')
     assert overlay._calls[-1]==('GET','/v1/channels')
     assert not _route(overlay,'/v1/channels/telegram/connect','POST')
+
+
+def test_file_skill_and_proposal_reads_preserve_identity_and_query(overlay):
+    for path in ('/v1/sessions/owned/files', '/v1/sessions/owned/files/att_owned', '/v1/runtime/skills/detail?name=owned&category=fixture', '/v1/task-submissions/owned-nonce?session_id=owned'):
+        assert _route(overlay,path)
+        assert overlay._calls[-1]==('GET',path)
+    assert not _route(overlay,'/v1/sessions/owned/files/att_owned','DELETE')
