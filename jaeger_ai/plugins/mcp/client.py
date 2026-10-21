@@ -89,6 +89,28 @@ class MCPServerConfig:
     tools_read_only: list[str] = field(default_factory=list)
     connect_timeout_s: float = 20.0
     call_timeout_s: float = 60.0
+    #   tool_timeouts_s: {name or fnmatch glob: seconds} overriding call_timeout_s
+    #                  for known long tools (e.g. REA analyze_*); first match wins.
+    tool_timeouts_s: dict[str, float] = field(default_factory=dict)
+
+    def timeout_for(self, tool_name: str) -> float:
+        import fnmatch
+        for pattern, seconds in self.tool_timeouts_s.items():
+            if fnmatch.fnmatchcase(tool_name, pattern):
+                return seconds
+        return self.call_timeout_s
+
+
+class MCPCallCancelled(RuntimeError):
+    """The turn was stopped while an MCP call was in flight."""
+
+    def __init__(self, message: str, *, notice_sent: bool = False) -> None:
+        super().__init__(message)
+        self.notice_sent = notice_sent
+
+
+#: How long Stop may wait for the notifications/cancelled write.
+CANCEL_NOTICE_TIMEOUT_S = 2.0
 
 
 DEFAULT_CONNECT_TIMEOUT_S = 20.0
@@ -158,6 +180,9 @@ def server_config_from_entry(entry: dict[str, Any], *, env: dict[str, str] | Non
         tools_read_only=_name_list(tools.get("read_only")),
         connect_timeout_s=_timeout(entry.get("connect_timeout_s"), DEFAULT_CONNECT_TIMEOUT_S),
         call_timeout_s=_timeout(entry.get("call_timeout_s"), DEFAULT_CALL_TIMEOUT_S),
+        tool_timeouts_s={str(k): _timeout(v, DEFAULT_CALL_TIMEOUT_S)
+                         for k, v in (entry.get("tool_timeouts_s") or {}).items()
+                         if str(k).strip()} if isinstance(entry.get("tool_timeouts_s"), dict) else {},
     )
 
 
@@ -327,8 +352,20 @@ class _MCPClient:
         listing = await self._session.list_tools()
         return list(listing.tools)
 
-    async def call(self, tool_name: str, arguments: dict[str, Any]) -> Any:
-        return await self._session.call_tool(tool_name, arguments)
+    async def call(self, tool_name: str, arguments: dict[str, Any],
+                   inflight: dict[str, Any] | None = None) -> Any:
+        session = self._session
+        if inflight is not None:
+            # ClientSession.call_tool reaches send_request with no await in
+            # between, so this is the JSON-RPC id the request goes out with.
+            inflight["request_id"] = getattr(session, "_request_id", None)
+        return await session.call_tool(tool_name, arguments)
+
+    async def cancel_request(self, request_id: Any, reason: str) -> None:
+        """MCP notifications/cancelled for one in-flight request (both transports)."""
+        from mcp.types import CancelledNotification, CancelledNotificationParams, ClientNotification
+        await self._session.send_notification(ClientNotification(CancelledNotification(
+            params=CancelledNotificationParams(requestId=request_id, reason=reason))))
 
     async def list_resources(self, cursor: str | None = None) -> Any:
         return await self._session.list_resources(cursor=cursor)
@@ -350,6 +387,7 @@ class MCPRegistry:
     """Holds clients, runs the async loop, exposes a sync API."""
 
     def __init__(self) -> None:
+        self._last_cancelled: dict[str, dict[str, Any]] = {}
         self._loop = asyncio.new_event_loop()
         self._loop_thread = threading.Thread(target=self._run_loop, daemon=True, name="mcp-loop")
         self._loop_thread.start()
@@ -367,7 +405,8 @@ class MCPRegistry:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
-    def _submit(self, coro: Any, timeout: float, *, cancellation: threading.Event | None = None) -> Any:
+    def _submit(self, coro: Any, timeout: float, *, cancellation: threading.Event | None = None,
+                on_cancel: Any = None) -> Any:
         if cancellation is not None and cancellation.is_set():
             coro.close()
             raise RuntimeError("MCP call cancelled before dispatch")
@@ -379,7 +418,14 @@ class MCPRegistry:
                 # Remote cancellation is best effort; leave the effect ledger
                 # claim pending rather than reporting that the effect stopped.
                 future.cancel()
-                raise RuntimeError("MCP call interrupted; remote outcome unconfirmed; do not retry")
+                notice_sent = False
+                if on_cancel is not None:
+                    try:
+                        notice_sent = bool(on_cancel())
+                    except Exception as exc:  # noqa: BLE001 — the notice is best effort
+                        logger.warning("mcp: cancel notice failed: %s", exc)
+                raise MCPCallCancelled("MCP call interrupted; remote outcome unconfirmed; do not retry",
+                                       notice_sent=notice_sent)
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 future.cancel()
@@ -451,7 +497,7 @@ class MCPRegistry:
             self._active_calls[spec.server_name] = self._active_calls.get(spec.server_name, 0) + 1
         try:
             if timeout is None:
-                timeout = client.config.call_timeout_s
+                timeout = client.config.timeout_for(spec.tool_name)
             secrets = set(client.config.headers.values())
             secrets.update(
                 value
@@ -459,9 +505,34 @@ class MCPRegistry:
                 if _SECRET_NAME.search(key)
             )
             from jaeger_agent.core.cancellation import current_cancellation
+            inflight: dict[str, Any] = {}
+
+            def send_cancel_notice() -> bool:
+                rid = inflight.get("request_id")
+                if rid is None:
+                    return False
+                notice = asyncio.run_coroutine_threadsafe(
+                    client.cancel_request(rid, "Stopped by the user"), self._loop)
+                notice.result(timeout=CANCEL_NOTICE_TIMEOUT_S)
+                return True
+
             try:
-                result = self._submit(client.call(spec.tool_name, arguments), timeout=timeout,
-                                      cancellation=current_cancellation())
+                result = self._submit(client.call(spec.tool_name, arguments, inflight), timeout=timeout,
+                                      cancellation=current_cancellation(), on_cancel=send_cancel_notice)
+            except MCPCallCancelled as exc:
+                # Stop with a delivered notifications/cancelled: the server was
+                # told to abandon the request and the SDK has dropped its
+                # response stream, so a late reply is discarded. This call's own
+                # outcome stays unknown (the error says do not retry), but the
+                # server stays usable for new calls. Without the notice, fall
+                # back to the reconciliation lock exactly as before.
+                if not exc.notice_sent:
+                    with self._lifecycle_lock:
+                        self._server_states[spec.server_name] = "outcome_unknown"
+                else:
+                    self._last_cancelled[spec.server_name] = {
+                        "tool": spec.tool_name, "request_id": inflight.get("request_id"), "at": time.time()}
+                raise RuntimeError(_redact_known_secrets(str(exc), secrets)) from None
             except Exception as exc:
                 # A lost response can follow a real external effect. Never replay
                 # it automatically, including after cancellation or timeout.
