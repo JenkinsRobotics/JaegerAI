@@ -98,6 +98,12 @@ export interface ToolInventory {
   count: number; servers: { id?: string; name: string; state: string; tool_count: number; active_calls?: number; actions?: string[]; resources_advertised?:boolean }[];
   mcp_initialized: boolean; scope: string; execution_authorized: false;
 }
+export interface InstalledPlugin {id:string;name:string;package:string;version:string;state:string;active_hooks:number;hook_count:number;tool_count:number;command_count:number;actions:('pause_hooks'|'resume_hooks')[];provenance:string}
+export interface PluginControls {
+  list():Promise<{plugins:InstalledPlugin[];scope:string;activation_performed:false}>;
+  mutate(id:string,action:'pause_hooks'|'resume_hooks',body:{operation_id:string;expected_state:string}):Promise<ControlResult>;
+  operation(id:string):Promise<{receipt:ControlResult|null}>;
+}
 export interface GatewayDiagnostics {
   sessions: number; requests: Record<string, number>; approvals: Record<string, number>; handoffs: Record<string, number>;
   unknown_requests: { request_id: string; session_id: string; status: string }[]; unknown_list_limit: number;
@@ -139,6 +145,7 @@ export interface ChannelSnapshot {
 }
 export interface TaskProposalReceipt { task_id: string; status: string; replayed: boolean; request_id: string; origin_session_id: string }
 export interface JaegerSource {
+  plugins?:PluginControls;
   channelControls?: {
     mutate(id:string,action:'bind'|'connect'|'disconnect',body:Record<string,unknown>):Promise<ControlResult>;
     operation(id:string):Promise<{receipt:ControlResult|null}>;

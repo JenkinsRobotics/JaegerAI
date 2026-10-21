@@ -58,6 +58,11 @@ export class GatewayClient implements JaegerSource {
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
   };
   searchMessages(agentId: string, query: string, before?: string) { return this.json<import("./source").MessageSearchPage>(`/v1/agents/${encodeURIComponent(agentId)}/messages/search?q=${encodeURIComponent(query)}${before ? `&before=${encodeURIComponent(before)}` : ""}`); }
+  readonly plugins: import('./source').PluginControls = {
+    list: () => this.json('/v1/runtime/plugins'),
+    mutate: (id,action,body) => this.json(`/v1/runtime/plugins/${encodeURIComponent(id)}/${action}`,body),
+    operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
+  };
   readonly mcpResources: import('./source').MCPResources = {
     mutate: (server,action,body) => this.json(`/v1/runtime/mcp/${encodeURIComponent(server)}/resources/${action}`,body),
     snapshot: (server,id) => this.json(`/v1/runtime/mcp/${encodeURIComponent(server)}/resources/snapshots/${encodeURIComponent(id)}`),

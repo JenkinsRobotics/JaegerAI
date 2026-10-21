@@ -115,3 +115,17 @@ transport: zmq      # only when runtime: separate_process
 The plugin's source code structure stays the same; only the runtime
 topology changes. See VOCABULARY.md → "Plugin is a deployment endpoint,
 not a structural fork" for the rationale.
+
+## Installed extension catalog and hook lifecycle
+
+`registry.catalog()` and authenticated `GET /v1/runtime/plugins` inspect installed
+entry-point metadata without loading code. Discovery stages context registrations,
+merges only a successful nonconflicting result, and never retries an uncertain
+registration or overlays a changed distribution during the same process.
+`pause_hooks` / `resume_hooks` control only handlers dispatched by `fire_hook`;
+active handlers block transitions. Tools, commands, transports, background threads
+and arbitrary plugin side effects are **not** unloaded or stopped. State is
+process-local; restart preserves the existing discovery policy, not a promise of
+durable disabled plugins. Import/install/update/uninstall require a separate
+package lifecycle boundary. No catalog or hook control invokes package installers,
+entry-point loading, credential setup or permission grants.

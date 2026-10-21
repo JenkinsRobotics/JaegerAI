@@ -1300,6 +1300,8 @@ class JaegerGatewayApp:
         register_workflows(self)
         from jaeger_ai.plugins.mcp.routes import register as register_mcp_controls
         register_mcp_controls(self)
+        from jaeger_ai.plugins.control_routes import register as register_plugin_controls
+        register_plugin_controls(self)
         from jaeger_ai.features.notifications.routes import register as register_notifications
         register_notifications(self)
         from jaeger_ai.features.channels.controls import register as register_channel_controls

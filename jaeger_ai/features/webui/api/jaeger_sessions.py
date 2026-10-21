@@ -244,6 +244,14 @@ def route(handler, parsed, method: str) -> bool:
             return False
         return _proxy(handler, "GET", "/v1/task-submissions/" + quote(request_id, safe="") + query)
 
+    if path == '/v1/runtime/plugins' and method == 'GET':
+        return _proxy(handler,method,path)
+    if path.startswith('/v1/runtime/plugins/') and method == 'POST':
+        segments=path.split('/')
+        if len(segments)==6 and segments[5] in {'pause_hooks','resume_hooks'}:
+            return _proxy(handler,method,path,_body_bytes(handler))
+        return False
+
     if path == '/v1/notifications' and method in {'GET','PATCH'}:
         return _proxy(handler, method, path, _body_bytes(handler) if method == 'PATCH' else None)
 
