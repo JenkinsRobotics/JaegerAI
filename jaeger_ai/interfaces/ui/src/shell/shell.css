@@ -1,7 +1,7 @@
 /* Modified from AetherStudio studio/src/studio.css (Apache-2.0, ece0209):
  * the .studio sidebar/body/content frame, tokens only. Tints are color-mix()
  * over existing tokens (no new literals). Jenkins Robotics 2026-10-17: solid
- * surfaces from tokens.jaeger.css (no translucency); band height and
+ * surfaces from the generated design tokens (tokens.compat.css) (no translucency); band height and
  * traffic-light reserve come from the native chrome contract. */
 * { box-sizing: border-box; }
 html, body, #root { margin: 0; height: 100%; }
@@ -12,7 +12,7 @@ body {
   font-size: var(--jg-font-body);
 }
 :root {
-  /* Type sizes: tokens.jaeger.css. Top band: the native contract's value in the macOS host. */
+  /* Type sizes: the generated design tokens (tokens.compat.css). Top band: the native contract's value in the macOS host. */
   --jg-band-height: var(--jaeger-native-band-height, 52px);
   --jg-radius-window: 12px;
   --jg-radius-bubble: 18px;

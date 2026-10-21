@@ -9,6 +9,8 @@ export function detectHost(search = location.search): JaegerHost {
 
 export function applyHostAttributes(host: JaegerHost, root = document.documentElement) {
   root.dataset.jaegerHost = host;
+  // Generated tokens: body 13px in the native shell, 14px on the web (SPEC-03).
+  root.dataset.surface = host === "macos" ? "native" : "web";
   if (host === "macos") root.setAttribute("data-aether-native-window", "");
   else root.removeAttribute("data-aether-native-window");
 }

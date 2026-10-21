@@ -1,8 +1,9 @@
 import "./platform/bootstrap";
-import "@aether/ui/tokens.css";
+import "../vendor/jaeger-design-tokens/jaeger.css";
+import "../vendor/jaeger-design-tokens/aether.css";
 import "@aether/ui/widgets.css";
 import "@aether/ui/home.css";
-import "./shell/tokens.jaeger.css";
+import "./shell/tokens.compat.css";
 import "./shell/shell.css";
 import "./agents/agents.css";
 import "./chat/chat.css";

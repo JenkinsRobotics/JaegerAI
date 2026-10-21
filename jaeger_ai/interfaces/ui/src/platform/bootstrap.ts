@@ -4,6 +4,8 @@
 import { applyHostAttributes, detectHost } from "./host";
 
 applyHostAttributes(detectHost());
+import { installModeSync } from "./appearanceSync";
+installModeSync();
 try {
   if (!localStorage.getItem("aether-appearance")) localStorage.setItem("aether-appearance", "light");
 } catch { /* storage unavailable: Aether falls back to System */ }
