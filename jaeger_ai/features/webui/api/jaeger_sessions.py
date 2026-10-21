@@ -380,6 +380,10 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path in ("/api/jaeger/runtime/models", "/api/runtime/models"):
         return _proxy(handler, "GET", "/v1/runtime/models")
 
+    if path=='/v1/runtime/mcp/configuration' and method=='GET':return _proxy(handler,method,path)
+    if path=='/v1/runtime/mcp/configuration/change' and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))
+    if path.startswith('/v1/runtime/mcp/configuration/operations/') and len(path.split('/'))==7 and method=='GET':return _proxy(handler,method,path)
+
     if path.startswith('/v1/runtime/mcp/'):
         segments=path.split('/')
         if method=='POST' and len(segments)==7 and segments[5]=='resources' and segments[6] in {'list','read','import'}:

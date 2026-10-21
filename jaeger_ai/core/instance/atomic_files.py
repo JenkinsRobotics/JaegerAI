@@ -24,8 +24,9 @@ def _write_unlocked(path: Path, payload: str, *, expected_revision: str | None =
     try:
         with os.fdopen(descriptor,'w',encoding='utf-8') as handle:
             handle.write(payload);handle.flush();os.fchmod(handle.fileno(),mode);os.fsync(handle.fileno())
-        if expected_revision is not None and file_revision(path)!=expected_revision:
-            raise ValueError('Configuration changed before commit; current file retained')
+        if expected_revision is not None:
+            observed=file_revision(path) if path.exists() else 'missing'
+            if observed!=expected_revision:raise ValueError('Configuration changed before commit; current file retained')
         os.replace(temporary,path)
         parent=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY)
         try:os.fsync(parent)
@@ -109,3 +110,30 @@ def mutate_yaml(path: Path, model_cls: type[BaseModel], transform, *, expected_r
         elif file_revision(path)!=revision:raise ValueError('Configuration changed before commit; current file retained')
         return result,different,after
 
+
+
+def mutate_json(path: Path, transform, *, expected_revision: str, default=None, before_commit=None):
+    """Revision-bound JSON update through the same canonical file writer."""
+    import hashlib
+    import json
+    with _file_write_lock(path):
+        raw=path.read_bytes() if path.exists() else None
+        revision=hashlib.sha256(raw).hexdigest() if raw is not None else 'missing'
+        if revision!=expected_revision:raise ValueError('Configuration changed; review the current definition')
+        current=json.loads(raw) if raw is not None else default
+        result=transform(current)
+        payload=json.dumps(result,indent=2,sort_keys=True)+'\n'
+        after=hashlib.sha256(payload.encode()).hexdigest()
+        if before_commit is not None:before_commit(result,after)
+        _write_unlocked(path,payload,expected_revision=revision)
+        return result,after
+
+
+def read_json_versioned(path: Path, *, default=None):
+    """Read one exact raw revision and document under the mutation lock."""
+    import hashlib
+    import json
+    with _file_write_lock(path):
+        raw=path.read_bytes() if path.exists() else None
+        return (json.loads(raw) if raw is not None else default,
+                hashlib.sha256(raw).hexdigest() if raw is not None else 'missing')

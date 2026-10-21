@@ -214,6 +214,7 @@ export interface JaegerSource {
     operation(id:string):Promise<{receipt:ControlResult|null}>;
   };
   mcpResources?:MCPResources;
+  mcpConfiguration?:MCPConfiguration;
   agentMemory?:AgentMemoryControls;
   notifications?: Notifications;
   sessionFiles?: SessionFiles;
@@ -309,3 +310,11 @@ export interface SkillChangeReceipt {operation_id:string;command?:Record<string,
 export interface SkillReview {requested_tools?:string[];added_tool_requirements?:string[];declared_version?:string;scope_granted?:false;provenance?:string;name:string;category:string;content_sha256:string;expected_revision:string;action:'import'|'update';warnings:string[];publisher_verified:false;execution_authorized:false}
 export interface PlaybookBundle {format:'jaeger-playbook-bundle-v1';name:string;revision:string;provenance:string;publisher_verified:false;license_verified:false;target:'local_file';execution_authorized:false;files:{path:string;size_bytes:number;sha256:string;base64:string}[]}
 export interface ManagedSkills {export?(name:string,revision:string):Promise<PlaybookBundle>;review(body:{name:string;category:string;content:string;expected_revision:string}):Promise<SkillReview>;content(name:string):Promise<{name:string;category:string;content:string;revision:string;content_redacted:boolean}>;list():Promise<{skills:ManagedSkill[];operations:SkillChangeReceipt[];config_revision?:string;scope:'current_instance_playbooks';activation_performed:false}>;change(body:SkillChange):Promise<SkillChangeReceipt>;original(op:string):Promise<SkillChangeReceipt>}
+
+export type MCPConfigurationIntent = {operation_id:string;expected_revision:string}&({action:'stage';definition:{name:string;url:string}|{name:string;command:string;args:string[]}}|{action:'startup';name:string;enabled:boolean});
+export type MCPConfigurationReceipt = {operation_id:string;outcome:'saved'|'rejected'|'unknown';error?:string;config_revision?:string;connection_attempted?:false};
+export interface MCPConfiguration {
+  read():Promise<{config_revision:string;servers:{name:string;startup_enabled:boolean;transport:string;status:'not_probed'}[]}>;
+  change(body:MCPConfigurationIntent):Promise<MCPConfigurationReceipt>;
+  operation(id:string):Promise<MCPConfigurationReceipt>;
+}

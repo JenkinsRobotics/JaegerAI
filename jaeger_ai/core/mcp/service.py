@@ -506,3 +506,91 @@ def load_gateway_servers(layout: Any) -> dict[str, Any]:
                 result["errors"] = {"_load": f"{type(exc).__name__}: {exc}"}
         _GATEWAY_MCP_LOADED.update(result)
         return dict(result)
+
+
+
+def _configured_secret_values(data: dict[str,Any]) -> set[str]:
+    """Already-present values only; no credential resolution or transport init."""
+    import sys
+    secrets=set()
+    for row in data.get('servers',[]):
+        if not isinstance(row,dict):continue
+        for field in ('headers','env'):
+            values=row.get(field,{})
+            if isinstance(values,dict):
+                secrets.update(value for key,value in values.items() if isinstance(value,str) and value and (field=='headers' or _SECRET.search(str(key))))
+    module=sys.modules.get('jaeger_ai.plugins.mcp.client')
+    registry=module.get_registry() if module else None
+    if registry is not None:
+        with registry._lifecycle_lock:
+            configs=[client.config for client in registry._clients.values()]+list(registry._disconnected.values())
+        for config in configs:
+            secrets.update(value for value in config.headers.values() if isinstance(value,str) and value)
+            secrets.update(value for key,value in config.env.items() if isinstance(value,str) and value and _SECRET.search(key))
+    return secrets
+
+def configuration_revision(layout: Any) -> str:
+    path=_path(layout)
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else 'missing'
+
+
+def stage_disabled_server(layout: Any, payload: dict[str,Any], *, expected_revision: str, before_commit=None) -> dict[str,Any]:
+    """Stage a NEW inert definition only; no credentials or bridge initialization."""
+    from jaeger_ai.core.instance.atomic_files import mutate_json
+    from jaeger_ai.core.redaction import redact_text
+    if not isinstance(payload,dict) or set(payload) not in ({'name','url'},{'name','command','args'}):raise MCPServiceError('Only new URL or command/args definitions are supported; no credential/grant fields')
+    name=_name(payload['name'])
+    if 'url' in payload:
+        url=_url(payload['url'])
+        if urlsplit(url).query:raise MCPServiceError('URL query credentials/options are not supported in this setup view')
+        row={'name':name,'url':url}
+    else:
+        command=payload['command'];args=payload['args']
+        if not isinstance(command,str) or not command.strip() or len(command)>4096 or not isinstance(args,list) or len(args)>100 or any(not isinstance(value,str) or len(value)>4096 for value in args):raise MCPServiceError('Bounded command and argument strings required')
+        if any(_SECRET.search(value) for value in args):raise MCPServiceError('Credential arguments are not accepted in this setup view')
+        row={'name':name,'command':command,'args':args}
+    text=json.dumps(row)
+    if redact_text(text)!=text:raise MCPServiceError('Potential credential content refused')
+    row.update(enabled=False,tools={'gated':True,'read_only':[]})
+    def change(data):
+        if not isinstance(data,dict) or not isinstance(data.get('servers',[]),list):raise MCPServiceError('Invalid existing MCP configuration')
+        if any(secret in text for secret in _configured_secret_values(data)):raise MCPServiceError('Known credential content refused')
+        servers=data.get('servers',[])
+        if any(isinstance(value,dict) and value.get('name')==name for value in servers):raise MCPServiceError('A definition with this identity already exists; no overwrite')
+        return {**data,'servers':[*servers,row]}
+    _,revision=mutate_json(_path(layout),change,expected_revision=expected_revision,default={'version':1,'servers':[]},before_commit=before_commit)
+    return {'name':name,'startup_enabled':False,'config_revision':revision,'definition_state':'saved_disabled','connection_attempted':False,'credentials_changed':False,'grants_changed':False}
+
+
+def set_startup_enabled(layout: Any, name: str, enabled: bool, *, expected_revision: str, before_commit=None) -> dict[str,Any]:
+    """Change only an existing startup flag; never migrate/resolve credentials."""
+    from jaeger_ai.core.instance.atomic_files import mutate_json
+    normalized=_name(name)
+    if type(enabled) is not bool:raise MCPServiceError('Explicit startup boolean required')
+    def change(data):
+        if not isinstance(data,dict) or not isinstance(data.get('servers'),list):raise MCPServiceError('Invalid MCP configuration')
+        rows=[row for row in data['servers'] if isinstance(row,dict) and row.get('name')==normalized]
+        if len(rows)!=1:raise MCPServiceError('Existing server identity is missing or ambiguous')
+        return {**data,'servers':[{**row,'enabled':enabled} if row is rows[0] else row for row in data['servers']]}
+    _,revision=mutate_json(_path(layout),change,expected_revision=expected_revision,before_commit=before_commit)
+    return {'name':normalized,'startup_enabled':enabled,'config_revision':revision,'connection_attempted':False,'credentials_changed':False,'grants_changed':False,'current_connection_unchanged':True}
+
+
+def configured_startup_inventory(layout: Any) -> dict[str,Any]:
+    """Local definitions only. Never resolve credentials or initialize transport."""
+    from jaeger_ai.core.redaction import redact_text
+    from jaeger_ai.core.instance.atomic_files import read_json_versioned
+    data,revision=read_json_versioned(_path(layout),default={'version':1,'servers':[]})
+    if not isinstance(data,dict) or not isinstance(data.get('servers'),list):raise MCPServiceError('Invalid MCP configuration')
+    secrets=_configured_secret_values(data)
+    rows=[]
+    for row in data.get('servers',[]):
+        if not isinstance(row,dict):continue
+        name=row.get('name')
+        if not isinstance(name,str) or not _NAME.fullmatch(name):continue
+        # Do not echo arbitrary transport/catalog values into the UI.
+        safe=redact_text(name)
+        if safe!=name or any(secret in name for secret in secrets):continue
+        rows.append({'name':name,'startup_enabled':bool(row.get('enabled',True)),
+                     'transport':'http' if row.get('url') else 'stdio','status':'not_probed'})
+    return {'servers':rows,'config_revision':revision,'connection_attempted':False}
