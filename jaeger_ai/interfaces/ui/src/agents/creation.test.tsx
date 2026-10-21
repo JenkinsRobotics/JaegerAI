@@ -1,0 +1,20 @@
+import { act } from 'react';
+import { createRoot } from 'react-dom/client';
+import { it, expect, vi } from 'vitest';
+import { NewChatMenu } from './NewChatMenu';
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+it('recovers an acknowledged creation by saved command without submitting another creation', async () => {
+  const key = 'jaeger.ui.agent-create.v1';
+  localStorage.setItem(key, JSON.stringify({ operationId: 'owned-create', name: 'Owned bot', job: 'Fixture role' }));
+  const create = vi.fn(), recover = vi.fn(async () => ({ failed: undefined }));
+  const element = document.createElement('div'); document.body.append(element);
+  const root = createRoot(element);
+  await act(async () => root.render(<NewChatMenu anchor={null} agents={[]} onClose={() => {}} onNewChat={() => {}} onCreateAgent={create} onRecoverAgent={recover} />));
+  const check = [...document.querySelectorAll('button')].find(b => b.textContent === 'Check saved creation')!;
+  expect(check).toBeTruthy();
+  expect([...document.querySelectorAll('button')].find(b => b.textContent === 'Create')?.disabled).toBe(true);
+  await act(async () => check.click());
+  expect(recover).toHaveBeenCalledExactlyOnceWith('owned-create'); expect(create).not.toHaveBeenCalled();
+  expect(localStorage.getItem(key)).toBeNull();
+  await act(async () => root.unmount()); element.remove();
+});

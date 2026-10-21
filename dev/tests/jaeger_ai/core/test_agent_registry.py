@@ -136,6 +136,27 @@ class TestGatewayAgentsAPI(_CallerAuthedTestCase):
         if hasattr(self, "state_root") and self.state_root.exists():
             shutil.rmtree(self.state_root, ignore_errors=True)
 
+    async def test_creation_command_reconciles_without_identity_mutation(self):
+        body = {"name": "owned-creation", "display_name": "Owned", "role": "specialist", "operation_id": "owned-create-1"}
+        first = await self.client.post("/v1/agents", json=body)
+        assert first.status == 201
+        agent = await first.json()
+        again = await self.client.post("/v1/agents", json=body)
+        assert again.status == 201 and await again.json() == agent
+        receipt = await self.client.get("/v1/control-operations/owned-create-1")
+        assert (await receipt.json())["receipt"]["agent"] == agent
+        conflict = await self.client.post("/v1/agents", json={**body, "display_name": "Wrong", "role": "lead"})
+        assert conflict.status == 409
+        duplicate = await self.client.post("/v1/agents", json={**body, "operation_id": "owned-create-2", "display_name": "Wrong", "role": "lead"})
+        assert duplicate.status == 409
+        current = await self.client.get("/v1/agents/" + agent["id"])
+        assert (await current.json())["display_name"] == "Owned"
+        assert self.gateway_app._registry().get_agent(agent["id"]).role.value == "specialist"
+        self.temp_store.reserve_control_operation("owned-unresolved", {"action": "agent.create", "body": {"name": "not-created"}})
+        unknown = await self.client.post("/v1/agents", json={"name": "not-created", "operation_id": "owned-unresolved"})
+        assert unknown.status == 409
+        assert self.gateway_app._registry().get_agent("native:not-created") is None
+
     async def test_agents_catalog_create_and_activate(self):
         resp = await self.client.request("GET", "/health")
         assert resp.status == 200
