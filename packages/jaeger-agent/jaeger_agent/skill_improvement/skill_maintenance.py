@@ -74,7 +74,7 @@ def archive_lock(root: Path):
         yield archive
 
 
-def _move_to_archive(root: Path, d: Path, *, validate=None) -> str:
+def _move_to_archive(root: Path, d: Path, *, validate=None, before_move=None) -> str:
     if d.is_symlink() or not d.resolve().is_relative_to(root.resolve()):
         raise ValueError("Skill archive must remain inside its instance")
     with archive_lock(root) as archive:
@@ -83,6 +83,7 @@ def _move_to_archive(root: Path, d: Path, *, validate=None) -> str:
             dest=archive/(d.name+"-"+uuid.uuid4().hex)
         # Validate under the same lock immediately before the atomic move.
         if validate is not None:validate()
+        if before_move is not None:before_move(dest.name)
         # Same instance filesystem: atomic move; never purge an older version.
         os.rename(d,dest)
     return dest.name

@@ -1,5 +1,6 @@
 """Recoverable instance-playbook controls through the existing skill owner."""
 import hashlib
+import json
 
 from aiohttp import web
 
@@ -21,10 +22,46 @@ def register(gateway):
             raise web.HTTPForbidden(text='Existing owner administration scope required')
         return request['caller_actor']
     def key(actor,op):return 'skill-owner:'+hashlib.sha256((actor+'\0'+op).encode()).hexdigest()
+    def root_id():return hashlib.sha256(str(layout().root).encode()).hexdigest()
+    def save_plan(actor,body,source):
+        proposal={'actor':actor,'command':body,'source':source,'root':root_id()}
+        with gateway.store._immediate() as conn:
+            conn.execute('INSERT INTO schema_meta(key,value) VALUES(?,?)',('skill-plan:'+key(actor,body['operation_id']),json.dumps(proposal)))
     def original(actor,op):
         row=gateway.store.control_operation(key(actor,op))
         if row is None:raise web.HTTPNotFound(text='Original skill operation not retained')
-        return row.get('receipt') or {'operation_id':op,'outcome':'unknown','error':'Original operation uncertain; inspect only, never repeat'}
+        if row.get('receipt') is not None:return row['receipt']
+        # SQLite plan precedes the atomic filesystem move under the same skill
+        # lock. Recovery observes exact retained identities, never renames again.
+        with gateway.store._get_conn() as conn:
+            retained=conn.execute('SELECT value FROM schema_meta WHERE key=?',('skill-plan:'+key(actor,op),)).fetchone()
+            fingerprint=conn.execute('SELECT fingerprint FROM control_operations WHERE operation_id=?',(key(actor,op),)).fetchone()
+        if retained:
+            try:
+                from jaeger_agent.skill_improvement.skill_maintenance import (
+                    archive_lock,
+                )
+
+                from jaeger_ai.core.gateway.session_store import input_fingerprint
+                plan=json.loads(retained['value']);body=plan['command'];source=plan['source']
+                valid=(plan['actor']==actor and body['operation_id']==op and plan['root']==root_id()
+                    and fingerprint['fingerprint']==input_fingerprint(json.dumps({'actor':actor,'body':body},sort_keys=True)))
+                if valid:
+                    current=layout();relative=service.managed_relative(source['original_relative']);name=service.archive_identity(source['archive_name'])
+                    if not service._playbook_module().active_skill_path(current.skills_dir,current.skills_dir/relative):raise ValueError('Unqualified origin')
+                    with archive_lock(current.skills_dir) as archive:
+                        active=current.skills_dir/relative;removed=archive/name
+                        proof=False
+                        if body['action']=='remove':proof=(not active.exists() and not active.is_symlink() and removed.is_dir() and not removed.is_symlink() and service.skill_revision(removed)==source['revision']==body['expected_revision'] and source['name']==body['name'])
+                        if body['action']=='restore':proof=(not removed.exists() and not removed.is_symlink() and active.is_dir() and service.skill_revision(active)==source['revision'])
+                        if proof:
+                            value={'ok':True,'owner':'jaeger','name':source['name'],'state':'removed' if body['action']=='remove' else 'restored','restart_required':False,'revision':source['revision']}
+                            if body['action']=='remove':value.update(archive_name=name,original_relative=str(relative))
+                            receipt={'operation_id':op,'actor':actor,'command':body,'action':body['action'],'outcome':'saved','result':value,'recovered':True}
+                            gateway.store.finish_control_operation(key(actor,op),receipt)
+                            return receipt
+            except (ValueError,TypeError,KeyError,OSError):pass # Inspection failure preserves uncertainty and original files.
+        return {'operation_id':op,'outcome':'unknown','error':'Original operation uncertain; inspect only, never repeat'}
 
     async def listing(request):
         actor=owner(request);current=layout();rows=[]
@@ -35,6 +72,7 @@ def register(gateway):
             if value['mutable']:
                 try:
                     folder,_,_=service._find_playbook(current,row['name'])
+                    service.managed_relative(str(folder.relative_to(current.skills_dir)))
                     value['revision']=service.skill_revision(folder)
                 except (ValueError,OSError):value['management_error']='Skill identity/assets require inspection; no mutation available'
             if redact_text(row['name'])!=row['name']:
@@ -42,7 +80,6 @@ def register(gateway):
             rows.append(value)
         with gateway.store._get_conn() as conn:
             saved=conn.execute("SELECT receipt_json FROM control_operations WHERE operation_id LIKE 'skill-owner:%' ORDER BY created_at DESC LIMIT 100").fetchall()
-        import json
         receipts=[]
         for record in saved:
             if not record[0]:continue
@@ -62,7 +99,23 @@ def register(gateway):
             action=body.get('action')
             expected={'operation_id','action','name','expected_revision'} if action=='remove' else {'operation_id','action','restore_from'}
             if action not in {'remove','restore'} or set(body)!=expected:raise ValueError('Exact supported skill command fields required')
-            if not gateway.store.reserve_control_operation(key(actor,op),{'actor':actor,'body':body}):return web.json_response(safe(original(actor,op)))
+            resource=body.get('name')
+            if action=='restore':
+                prior=original(actor,body['restore_from'])
+                if prior.get('outcome')!='saved' or prior.get('action')!='remove':raise ValueError('Known original remove receipt required')
+                resource=prior['result']['name']
+            if not isinstance(resource,str):raise TypeError('Canonical skill identity required')
+            try:
+                fresh=gateway.store.reserve_scoped_control_operation(key(actor,op),{'actor':actor,'body':body},'skill-owner:'+root_id()+':'+resource)
+            except ValueError as exc:
+                if gateway.store.control_operation(key(actor,op)) is not None:raise
+                # A different outstanding operation blocks this new intent.
+                # Retain its rejection without replacing the resource pointer;
+                # it must never become executable after the earlier one settles.
+                if gateway.store.reserve_control_operation(key(actor,op),{'actor':actor,'body':body}):
+                    gateway.store.finish_control_operation(key(actor,op),{'operation_id':op,'actor':actor,'action':action,'command':body,'outcome':'rejected','error':str(exc)})
+                return web.json_response(safe(original(actor,op)))
+            if not fresh:return web.json_response(safe(original(actor,op)))
         except (ValueError,TypeError) as exc:return web.json_response({'error':str(exc)},status=409)
         try:
             if action=='remove':
@@ -71,12 +124,12 @@ def register(gateway):
                 folder,_,zone=service._find_playbook(current,body['name'])
                 if zone!='instance':raise service.SkillServiceError('Bundled skills cannot be removed')
                 if service.skill_revision(folder)!=body['expected_revision']:raise service.SkillServiceError('Skill changed since review')
-                value=service.remove_skill(current,body['name'],expected_revision=body['expected_revision'])
+                value=service.remove_skill(current,body['name'],expected_revision=body['expected_revision'],before_move=lambda source:save_plan(actor,body,source))
             else:
                 prior=original(actor,body['restore_from'])
                 if prior.get('outcome')!='saved' or prior.get('action')!='remove':raise service.SkillServiceError('Known original remove receipt required')
                 source=prior['result']
-                value=service.restore_skill(current,source['name'],**{k:source[k] for k in ('archive_name','original_relative','revision')})
+                value=service.restore_skill(current,source['name'],**{k:source[k] for k in ('archive_name','original_relative','revision')},before_move=lambda proposal:save_plan(actor,body,proposal))
             receipt={'operation_id':op,'actor':actor,'action':action,'outcome':'saved','result':value,'command':body}
         except (ValueError,TypeError) as exc:
             receipt={'operation_id':op,'actor':actor,'action':action,'outcome':'rejected','error':str(exc),'command':body}

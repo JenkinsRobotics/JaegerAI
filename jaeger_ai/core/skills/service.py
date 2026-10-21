@@ -277,7 +277,20 @@ def set_skill_enabled(layout: Any, name: str, enabled: bool) -> dict[str, Any]:
     }
 
 
-def remove_skill(layout: Any, name: str, *, expected_revision: str | None = None) -> dict[str, Any]:
+def archive_identity(value: str) -> str:
+    if not isinstance(value,str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}",value) or value in {'.','..'}:
+        raise SkillServiceError("Invalid archived skill identity")
+    return value
+
+
+def managed_relative(value: str) -> Path:
+    relative=Path(value)
+    if relative.is_absolute() or not 1<=len(relative.parts)<=2 or any(_name(part)!=part for part in relative.parts):
+        raise SkillServiceError("Invalid original skill path")
+    return relative
+
+
+def remove_skill(layout: Any, name: str, *, expected_revision: str | None = None, before_move=None) -> dict[str, Any]:
     normalized = _name(name)
     folder, _skill_file, zone = _find_playbook(layout, normalized)
     if zone != "instance" or not _within(Path(layout.skills_dir), folder):
@@ -289,8 +302,10 @@ def remove_skill(layout: Any, name: str, *, expected_revision: str | None = None
     revision=expected_revision if expected_revision is not None else skill_revision(folder)
     def unchanged():
         if skill_revision(folder)!=revision:raise SkillServiceError("Skill changed since review; active replacement retained")
-    original=str(folder.relative_to(Path(layout.skills_dir)))
-    archive_name=_move_to_archive(Path(layout.skills_dir),folder,validate=unchanged)
+    original=str(managed_relative(str(folder.relative_to(Path(layout.skills_dir)))))
+    def planned(archive_name):
+        if before_move is not None:before_move({'name':normalized,'archive_name':archive_name,'original_relative':original,'revision':revision})
+    archive_name=_move_to_archive(Path(layout.skills_dir),folder,validate=unchanged,before_move=planned)
     return {"ok": True, "name": normalized, "owner": "jaeger",
             "state":"removed","archive_name":archive_name,"original_relative":original,"revision":revision,
             "restart_required":restart_required}
@@ -318,17 +333,15 @@ def skill_revision(folder: Path) -> str:
     return hashlib.sha256(json.dumps(files,ensure_ascii=False).encode()).hexdigest()
 
 
-def restore_skill(layout: Any, name: str, *, archive_name: str, original_relative: str, revision: str) -> dict[str, Any]:
+def restore_skill(layout: Any, name: str, *, archive_name: str, original_relative: str, revision: str, before_move=None) -> dict[str, Any]:
     """Restore an exact removed folder into a vacant original location only.
 
     Uses the remove receipt's identities. Never overwrite an active replacement,
     import scripts, grant tools or replace config. Gateway journals own receipts.
     """
     from jaeger_agent.skill_improvement.skill_maintenance import archive_lock
-    normalized=_name(name);archived=str(archive_name)
-    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,254}",archived) or archived in {'.','..'}:raise SkillServiceError("Invalid archived skill identity")
-    relative=Path(original_relative)
-    if relative.is_absolute() or not 1<=len(relative.parts)<=2 or any(_name(part)!=part for part in relative.parts):raise SkillServiceError("Invalid original skill path")
+    normalized=_name(name);archived=archive_identity(archive_name)
+    relative=managed_relative(original_relative)
     root=Path(layout.skills_dir);destination=root/relative
     if not _playbook_module().active_skill_path(root,destination):raise SkillServiceError("Invalid original skill path")
     with archive_lock(root) as archive:
@@ -344,5 +357,6 @@ def restore_skill(layout: Any, name: str, *, archive_name: str, original_relativ
         declared=str(_playbook_module()._parse_frontmatter(text).get("name") or relative.name)
         if declared!=normalized:raise SkillServiceError("Archived skill identity mismatch")
         destination.parent.mkdir(parents=True,exist_ok=True)
+        if before_move is not None:before_move({'name':normalized,'archive_name':archived,'original_relative':str(relative),'revision':revision})
         os.rename(source,destination)
     return {"ok":True,"name":normalized,"state":"restored","revision":revision,"owner":"jaeger","restart_required":False}
