@@ -143,12 +143,13 @@ class DiscordBridge:
         {sent: False, error: "..."} on failure.
         """
         if self._client is None or self._loop is None:
-            return {"sent": False, "error": "discord bridge not connected"}
+            return {"sent": False, "effect": "not_started", "error": "discord bridge not connected"}
         try:
             recipient_id = int(recipient)
         except (TypeError, ValueError):
-            return {"sent": False, "error": f"recipient must be a numeric Discord ID, got {recipient!r}"}
+            return {"sent": False, "effect": "not_started", "error": f"recipient must be a numeric Discord ID, got {recipient!r}"}
 
+        message_ids = []
         async def _do_send() -> dict[str, Any]:
             target: Any = self._client.get_user(recipient_id) or self._client.get_channel(recipient_id)
             if target is None:
@@ -156,20 +157,21 @@ class DiscordBridge:
                 try:
                     target = await self._client.fetch_user(recipient_id)
                 except Exception as exc:
-                    return {"sent": False, "error": f"unknown user/channel {recipient_id}: {exc}"}
+                    return {"sent": False, "effect": "not_started", "error": f"unknown user/channel {recipient_id}: {exc}"}
             sender = target
             # For users, sending requires opening a DM channel first.
             if hasattr(target, "create_dm"):
                 sender = await target.create_dm()
             for i in range(0, len(text), 1900):
                 msg = await sender.send(text[i : i + 1900])
-            return {"sent": True, "channel_id": str(sender.id), "message_id": str(msg.id)}
+                message_ids.append(str(msg.id))
+            return {"sent": True, "channel_id": str(sender.id), "message_id": str(msg.id), "message_ids": message_ids}
 
         try:
             fut = asyncio.run_coroutine_threadsafe(_do_send(), self._loop)
             return fut.result(timeout=15)
         except Exception as exc:
-            return {"sent": False, "error": f"{type(exc).__name__}: {exc}"}
+            return {"sent": False, "execution_unknown": True, "message_ids": list(message_ids), "error": "Transport submission outcome unknown; do not retry"}
 
     # ----- internals -----
     def _run(self) -> None:
@@ -254,7 +256,7 @@ class DiscordBridge:
 
             async with message.channel.typing():
                 # Run the (blocking) LLM call in a thread so we don't block the discord loop.
-                reply = await asyncio.to_thread(self._safe_handle, content, session_key, str(message.id))
+                reply = await asyncio.to_thread(self._safe_handle, content, session_key, str(message.id), str(uid))
             if reply:
                 # Discord caps messages at 2000 chars
                 for i in range(0, len(reply), 1900):
@@ -265,16 +267,16 @@ class DiscordBridge:
         except Exception as exc:
             print(f"[discord] client.run failed: {exc}", flush=True)
 
-    def _safe_handle(self, text: str, session_key: str | None = None, message_id: str | None = None) -> str:
+    def _safe_handle(self, text: str, session_key: str | None = None, message_id: str | None = None, author_id: str | None = None) -> str:
         try:
             if self._llm_lock is not None:
                 with self._llm_lock:
-                    return self._call_handler(text, session_key, message_id) or ""
-            return self._call_handler(text, session_key, message_id) or ""
+                    return self._call_handler(text, session_key, message_id, author_id) or ""
+            return self._call_handler(text, session_key, message_id, author_id) or ""
         except Exception as exc:
             return f"(agent error: {type(exc).__name__}: {exc})"
 
-    def _call_handler(self, text: str, session_key: str | None, message_id: str | None = None) -> str:
+    def _call_handler(self, text: str, session_key: str | None, message_id: str | None = None, author_id: str | None = None) -> str:
         from .._messaging import call_handler_once, handler_admission
         with handler_admission(self):
-            return call_handler_once(self._handler, text, session_key=session_key, message_id=message_id) or ""
+            return call_handler_once(self._handler, text, session_key=session_key, message_id=message_id, author_id=author_id) or ""

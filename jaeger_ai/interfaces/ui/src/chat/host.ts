@@ -54,6 +54,7 @@ export interface TurnHandle {
 }
 
 export interface ChatTurn {
+  channelReply?:{messageId:number;channel:string;recipient:string};
   turnId: string;
   /** Authoritative admission identity; never a message/rendering ID. */
   requestId?: string;

@@ -23,7 +23,7 @@ export type WireKind = "message" | "channel_message" | "summary" | "handoff_requ
 
 /** One persisted message. */
 export interface WireMessage {
-  channel?: { channel_id: string; provider_conversation_id: string; external_message_id: string; authority: string };
+  channel?: { channel_id: string; provider_conversation_id: string; external_message_id: string; ingress_author_id?:string; authority: string };
   request_id?: string;
   /** An integer on 417d8a0c; kept as string | number so ids never compare across types. */
   id: number | string;

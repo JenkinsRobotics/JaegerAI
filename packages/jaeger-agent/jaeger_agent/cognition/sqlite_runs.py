@@ -348,6 +348,13 @@ class SqliteEffectLedger:
             raise EffectError(f"no effect {key!r}")
         raise EffectError(f"effect {key!r} is already done")
 
+    def annotate_pending(self, key: str, receipt: Any) -> None:
+        """Retain partial evidence without releasing/settling an uncertain effect."""
+        encoded=json.dumps(receipt)
+        with sqlite_store.writer() as conn:
+            updated=conn.execute("UPDATE effects SET result_json=? WHERE key=? AND status='pending'",(encoded,key)).rowcount
+            if updated!=1:raise EffectError('Pending effect missing or already settled')
+
     def abandon(self, key: str) -> None:
         """Free a pending claim. DELETE is conditional on pending so a
         stale reader that saw pending cannot delete a row another

@@ -81,7 +81,7 @@ export interface SkillDetail {
 }
 export interface NotificationPreferences { revision:number;enabled:boolean;muted_agent_ids:string[];read_through:number }
 export interface Notifications {
-  read():Promise<{preferences:NotificationPreferences;notifications:{event_id:number;session_id:string;agent_id?:string;title:string;status?:string;timestamp:number;unread:boolean}[];privacy:string;enabled:boolean}>;
+  read():Promise<{preferences:NotificationPreferences;notifications:{event_id:number;session_id:string;agent_id?:string;title:string;status?:string;timestamp:number;unread:boolean}[];privacy:string;enabled:boolean;observed_through?:number}>;
   save(body:{expected_revision:number;enabled:boolean;muted_agent_ids:string[]}):Promise<{preferences:NotificationPreferences}>;
   markRead(through:number):Promise<{preferences:NotificationPreferences}>;
 }
@@ -139,6 +139,7 @@ export interface WorkflowControls {
   mutate(action: WorkflowAction, id: string, body: Record<string, unknown>): Promise<WorkflowReceipt>;
   operation(id: string): Promise<{ receipt: WorkflowReceipt | null }>;
 }
+export interface ChannelDeliveries {initialized:boolean;scope:string;next_before:number|null;deliveries:{id:string;run_id:string;state:string;claimed_at:string;completed_at:string|null;delivery_verified:false;message_id?:string;message_ids:string[];reply_to_message_id?:string;session_id?:string;request_id?:string}[]}
 export interface ChannelSnapshot {
   channels: { binding?: {revision:number;agent_id:string|null}|null; active_binding?: {revision:number;agent_id:string|null}|null; active_handlers?:number; id: string; name: string; catalog_maturity: string; adapter_registered: boolean; bridge_registered: boolean; thread_state: string; connection_health: "not_probed"; delivery_verified: false; actions: string[] }[];
   scope: "current_gateway_process_only";
@@ -150,6 +151,7 @@ export interface JaegerSource {
     mutate(id:string,action:'bind'|'connect'|'disconnect',body:Record<string,unknown>):Promise<ControlResult>;
     operation(id:string):Promise<{receipt:ControlResult|null}>;
   };
+  channelDeliveries?(before?:number):Promise<ChannelDeliveries>;
   channels?(): Promise<ChannelSnapshot>;
   workflows?: WorkflowControls;
   agentKnowledge?: AgentKnowledgeControls;

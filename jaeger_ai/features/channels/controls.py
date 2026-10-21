@@ -6,6 +6,14 @@ from . import bindings
 
 
 def register(gateway):
+    async def deliveries(request):
+        from .deliveries import listing
+        try:
+            cursor=request.query.get('before')
+            return web.json_response(await asyncio.to_thread(listing,before=int(cursor) if cursor is not None else None))
+        except (TypeError,ValueError):return web.json_response({'error':'Invalid delivery cursor'},status=400)
+        except Exception:return web.json_response({'error':'Loaded effect ledger unavailable; no send or reconciliation performed'},status=503)
+    gateway.app.router.add_get('/v1/channels/deliveries',deliveries)
     async def mutate(request):
         from jaeger_ai import plugins
         from .registry import get_registry

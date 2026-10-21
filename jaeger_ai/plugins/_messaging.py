@@ -122,7 +122,7 @@ SLASH_DENIED = "⛔ commands are owner-only — you have conversation access."
 SLASH_UNKNOWN = "unknown command — try /mode"
 
 
-def call_handler_once(handler: Any, text: str, *, session_key: str | None = None, message_id: str | None = None) -> Any:
+def call_handler_once(handler: Any, text: str, *, session_key: str | None = None, message_id: str | None = None, author_id: str | None = None) -> Any:
     """Select the supported callback shape before invocation; never replay errors.
 
     A TypeError raised by the handler can occur after admission or an external
@@ -135,7 +135,7 @@ def call_handler_once(handler: Any, text: str, *, session_key: str | None = None
         signature = inspect.signature(handler)
     except (TypeError, ValueError) as exc:
         raise TypeError('Messaging callback needs an inspectable text/session_key signature') from exc
-    choices = [{'session_key':session_key,'message_id':message_id}, {'session_key':session_key}, {}]
+    choices = ([{'session_key':session_key,'message_id':message_id,'author_id':author_id}] if author_id is not None else []) + [{'session_key':session_key,'message_id':message_id}, {'session_key':session_key}, {}]
     for kwargs in choices:
         try:
             signature.bind(text, **kwargs)

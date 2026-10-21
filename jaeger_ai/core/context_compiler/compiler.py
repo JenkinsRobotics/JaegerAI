@@ -88,7 +88,7 @@ class ContextCompiler:
             else:
                 summary_item = None
 
-        def encode(items: list[dict[str, str]]) -> str:
+        def encode(items: list[dict[str, Any]]) -> str:
             # Escaping angle brackets keeps a quoted transcript value from
             # spelling ``</conversation_history>`` in the outer prompt.
             return (
@@ -98,7 +98,7 @@ class ContextCompiler:
                 .replace("&", "\\u0026")
             )
 
-        selected: list[dict[str, str]] = []
+        selected: list[dict[str, Any]] = []
         for row in reversed(rows):
             role = str(row.get("role") or "").strip().lower()
             if role not in {"user", "assistant"}:
@@ -106,7 +106,10 @@ class ContextCompiler:
             content = str(row.get("content") or row.get("text") or "").strip()
             if not content:
                 continue
-            candidate = [{"role": role, "content": content}, *selected]
+            from jaeger_ai.contract.channel_messages import reply_reference
+            reference=reply_reference(row)
+            metadata={'channel_reply_target':reference} if reference else {}
+            candidate = [{"role": role, "content": content,**metadata}, *selected]
             if len(encode(candidate)) <= char_limit:
                 selected = candidate
                 continue
@@ -116,13 +119,13 @@ class ContextCompiler:
             low, high = 0, len(content)
             while low < high:
                 size = (low + high + 1) // 2
-                partial = [{"role": role, "content": content[-size:]}, *selected]
+                partial = [{"role": role, "content": content[-size:],**metadata}, *selected]
                 if len(encode(partial)) <= char_limit:
                     low = size
                 else:
                     high = size - 1
             if low:
-                selected = [{"role": role, "content": content[-low:]}, *selected]
+                selected = [{"role": role, "content": content[-low:],**metadata}, *selected]
                 break
             break
         if summary_item is not None:

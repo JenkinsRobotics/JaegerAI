@@ -143,11 +143,11 @@ class IMessageBridge:
         {sent: True, recipient} on success or {sent: False, error: "..."}.
         """
         if recipient not in self._allowed:
-            return {"sent": False, "error": f"recipient {recipient!r} not in IMESSAGE_ALLOWED_HANDLES"}
+            return {"sent": False, "effect": "not_started", "error": f"recipient {recipient!r} not in IMESSAGE_ALLOWED_HANDLES"}
         try:
             self._send(recipient, text)
         except Exception as exc:
-            return {"sent": False, "error": f"{type(exc).__name__}: {exc}"}
+            return {"sent": False, "execution_unknown": True, "error": "Transport submission outcome unknown; do not retry"}
         return {"sent": True, "recipient": recipient}
 
     # ----- internals -----

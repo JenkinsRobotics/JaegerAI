@@ -180,7 +180,7 @@ def _part_view(part: Any) -> Any:
 
 
 def _channel_message_view(extra: dict[str, Any]) -> dict[str, str]:
-    return {key: extra[key] for key in ('channel_id','provider_conversation_id','external_message_id','authority') if isinstance(extra.get(key),str)}
+    return {key: extra[key] for key in ('channel_id','provider_conversation_id','external_message_id','ingress_author_id','authority') if isinstance(extra.get(key),str)}
 
 
 def message_dict(m: Any, session_id: str | None = None) -> dict[str, Any]:
@@ -2287,10 +2287,10 @@ class GatewaySessionStore:
             return out
 
 
-    def append_channel_message_once(self, session_id: str, *, channel: str, conversation_id: str, external_id: str, text: str) -> dict:
+    def append_channel_message_once(self, session_id: str, *, channel: str, conversation_id: str, external_id: str, text: str, author_id: str | None = None) -> dict:
         """Provider message identity, durable inbox delivery only; never run a turn."""
         key = json.dumps(['channel_inbox',channel,conversation_id,external_id])
-        digest = input_fingerprint(json.dumps({'session_id':session_id,'text':text},sort_keys=True))
+        digest = input_fingerprint(json.dumps({'session_id':session_id,'text':text,**({'author_id':author_id} if author_id is not None else {})},sort_keys=True))
         with self._immediate() as conn:
             old = conn.execute('SELECT digest,receipt_json FROM background_deliveries WHERE delivery_key=?',(key,)).fetchone()
             if old:
@@ -2302,7 +2302,7 @@ class GatewaySessionStore:
             # Attribution is literal data, never an authenticated owner claim.
             content = '['+channel+' incoming · '+conversation_id[:160]+']\n'+text
             mid = self.append_message(session_id,'user',content,kind='channel_message',
-                meta={'channel_id':channel,'provider_conversation_id':conversation_id,'external_message_id':external_id,'authority':'incoming_data_only'},conn=conn)
+                meta={'channel_id':channel,'provider_conversation_id':conversation_id,'external_message_id':external_id,**({'ingress_author_id':author_id} if author_id is not None else {}),'authority':'incoming_data_only'},conn=conn)
             receipt={'message_id':mid,'session_id':session_id,'execution_admitted':False}
             conn.execute('INSERT INTO background_deliveries(delivery_key,digest,receipt_json) VALUES(?,?,?)',(key,digest,json.dumps(receipt)))
             return {**receipt,'replayed':False}

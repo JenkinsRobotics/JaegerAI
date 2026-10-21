@@ -194,3 +194,8 @@ it('keeps incoming channel data in the continuous feed without inventing a resul
  expect(page.entries).toEqual({});expect(page.turns).toHaveLength(1);
  expect(page.turns[0].message).toBe('[telegram incoming] external data');expect(page.turns[0].parts).toEqual([]);
 });
+it('retains exact saved incoming reply identity without inventing request authority',()=>{
+ const page=fromWirePage('owned-home',{next_before:null,messages:[W({id:42,kind:'channel_message',role:'user',content:'External data',channel:{channel_id:'telegram',provider_conversation_id:'telegram:123',external_message_id:'provider-77',authority:'incoming_data_only'}})]},String);
+ expect(page.turns[0].channelReply).toEqual({messageId:42,channel:'telegram',recipient:'123'});
+ expect(page.turns[0].requestId).toBeUndefined();
+});

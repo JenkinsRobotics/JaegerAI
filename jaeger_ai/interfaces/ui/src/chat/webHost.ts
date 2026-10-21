@@ -55,7 +55,10 @@ export function messagesToTurns(messages: SessionMessage[] = [], agentName: (id:
   const turns: ChatSession["turns"] = [];
   for (const m of messages) {
     if (m.role === "user") {
-      turns.push({ turnId: m.request_id != null ? String(m.request_id) : m.id != null ? String(m.id) : `t${turns.length}`, requestId: m.request_id, message: m.content ?? "", parts: [], state: "complete", createdAt: epochMs(m) });
+      const incoming=m.kind==='channel_message'&&m.channel?.authority==='incoming_data_only'&&['discord','telegram','imessage'].includes(m.channel.channel_id)?m.channel:undefined;
+      const messageId=Number(m.id),prefix=incoming?incoming.channel_id+':':'';
+      const channelReply=incoming&&Number.isSafeInteger(messageId)&&messageId>0&&incoming.provider_conversation_id.startsWith(prefix)&&incoming.provider_conversation_id.length>prefix.length?{messageId,channel:incoming.channel_id,recipient:incoming.provider_conversation_id.slice(prefix.length)}:undefined;
+      turns.push({ turnId: m.request_id != null ? String(m.request_id) : m.id != null ? String(m.id) : `t${turns.length}`, requestId: m.request_id, message: m.content ?? "", parts: [], state: "complete", createdAt: epochMs(m),channelReply });
     } else if (m.role === "assistant") {
       // A reply with no user turn before it (proactive note, relayed report) still shows.
       if (!turns.length || m.request_id && turns.at(-1)?.requestId !== m.request_id) turns.push({ turnId: m.request_id ?? `t${turns.length}`, requestId: m.request_id, message: "", parts: [], state: "complete", createdAt: epochMs(m) });

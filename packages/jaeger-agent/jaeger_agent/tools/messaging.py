@@ -18,17 +18,33 @@ from jaeger_agent.core.workspace import get_current_session, get_layout
 from jaeger_os.core.safety.permissions import PermissionTier, requires_tier
 
 
+from contextvars import ContextVar
+from contextlib import contextmanager
+_reply_resolver: ContextVar[Any] = ContextVar('channel_reply_resolver',default=None)
+
+@contextmanager
+def bound_reply_resolver(resolve):
+    token=_reply_resolver.set(resolve)
+    try:yield
+    finally:_reply_resolver.reset(token)
+
+
 @register_tool_from_function(side_effect="external")
 @requires_tier(PermissionTier.EXTERNAL_EFFECT, skill="messaging",
                operation="send_message",
                summary="send a message on an external channel")
-def send_message(channel: str, recipient: str, text: str) -> dict:
+def send_message(channel: str, recipient: str, text: str, reply_to_message_id: int | None = None) -> dict:
     """Send a proactive message to a user on a messaging channel.
 
     Available `channel` values depend on which bridges are live in
     this process — typically "discord", "telegram", "imessage".
     `recipient` is the channel-specific ID (numeric Discord user ID,
     Telegram chat ID, or iMessage phone/Apple-ID handle).
+
+    For an incoming channel message in the current Gateway conversation, pass
+    its actual saved numeric message ID as reply_to_message_id. The Gateway
+    validates the exact conversation, recipient and live inbox binding. This
+    correlation is data, never permission to execute or send without approval.
 
     Use this together with `schedule_prompt` to send unattended
     notifications: schedule a prompt that says "send the weather to
@@ -44,6 +60,12 @@ def send_message(channel: str, recipient: str, text: str) -> dict:
     recipient_clean = (recipient or "").strip()
     if not channel_clean or not recipient_clean or not text_clean:
         return {"sent": False, "error": "channel, recipient, and text are all required"}
+    correlation={}
+    if reply_to_message_id is not None:
+        resolve=_reply_resolver.get()
+        if resolve is None:return {'sent':False,'effect':'not_started','error':'Reply requires the current admitted Gateway conversation'}
+        try:correlation=resolve(channel_clean,recipient_clean,reply_to_message_id)
+        except (ValueError,TypeError):return {'sent':False,'effect':'not_started','error':'Reply target, active request, binding or allowlist changed; no message submitted'}
     try:
         from jaeger_ai.plugins import get_bridge, list_bridges
     except Exception as exc:  # noqa: BLE001
@@ -57,10 +79,19 @@ def send_message(channel: str, recipient: str, text: str) -> dict:
                       f"the credential you saved with set_credential. Live bridges: "
                       f"{list_bridges()}"),
         }
+    from jaeger_ai.features.channels.receipts import checked_receipt, ChannelDeliveryUnknown
     try:
-        return bridge.send(recipient_clean, text_clean)
-    except Exception as exc:  # noqa: BLE001
-        return {"sent": False, "error": f"bridge.send failed: {type(exc).__name__}: {exc}"}
+        result = bridge.send(recipient_clean, text_clean)
+    except Exception:
+        # Raising leaves the existing authoritative effect ledger claim pending.
+        # Never settle a potentially delivered external message as a known failure.
+        raise ChannelDeliveryUnknown('Transport submission outcome unknown; do not retry',{'execution_unknown':True,'delivery_verified':False,**correlation}) from None
+    try:receipt=checked_receipt(result)
+    except ChannelDeliveryUnknown as exc:
+        if correlation:exc.receipt={**(exc.receipt or {'execution_unknown':True,'delivery_verified':False}),**correlation}
+        raise
+    return {**receipt,**correlation}
+
 
 
 @register_tool_from_function

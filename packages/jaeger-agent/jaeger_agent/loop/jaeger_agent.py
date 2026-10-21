@@ -2175,8 +2175,8 @@ class JaegerAgent:
             except Exception:  # noqa: BLE001 — never break the loop over typing
                 pass
             try:
-                from jaeger_agent.cognition.effects import EffectIndeterminate
-                if isinstance(exc, EffectIndeterminate):
+                from jaeger_agent.cognition.effects import EffectIndeterminate, EffectOutcomeUnknown
+                if isinstance(exc, (EffectIndeterminate, EffectOutcomeUnknown)):
                     err_type = "effect_indeterminate"
                     retryable = False
             except Exception:  # noqa: BLE001

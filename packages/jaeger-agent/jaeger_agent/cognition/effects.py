@@ -45,6 +45,13 @@ class EffectError(RuntimeError):
     """Bad ledger usage — unknown key, or resolving a settled effect."""
 
 
+class EffectOutcomeUnknown(EffectError):
+    """Uncertain effect; a partial receipt is evidence, never settlement."""
+    def __init__(self, message: str, receipt: Any = None):
+        super().__init__(message)
+        self.receipt = receipt
+
+
 class EffectIndeterminate(EffectError):
     """A claim exists with no recorded outcome. A human or a checker
     decides; the runtime will not guess."""
@@ -136,6 +143,13 @@ class InMemoryEffectLedger:
             effect.completed_at = _now()
             return effect
 
+    def annotate_pending(self, key: str, receipt: Any) -> None:
+        with self._lock:
+            effect=self._items.get(key)
+            if effect is None:raise EffectError(f'no effect {key!r}')
+            _settled(effect)
+            effect.result=receipt
+
     def abandon(self, key: str) -> None:
         with self._lock:
             effect = self._items.get(key)
@@ -149,6 +163,7 @@ __all__ = [
     "Effect",
     "EffectError",
     "EffectIndeterminate",
+    "EffectOutcomeUnknown",
     "EffectLedger",
     "InMemoryEffectLedger",
 ]
