@@ -1,3 +1,4 @@
+import { WorkflowRuns } from "./WorkflowRuns";
 import { GatewayError } from "../api/gateway";
 import { useEffect, useRef, useState } from 'react';
 import type { JaegerSource, WorkflowAction, WorkflowDocument, WorkflowReceipt, WorkflowDefinition } from '../api/source';
@@ -101,6 +102,7 @@ export function WorkflowsPanel({ source, agents }: { source: JaegerSource; agent
       <button type="button" disabled={!editable||!catalog||definition.steps.length>=catalog.limits.steps} onClick={()=>setDefinition({...definition,steps:[...definition.steps,{title:'',instruction:''}]})}>Add instruction step</button></div>}
       <details><summary>Imported definition source</summary><label>Workflow definition JSON<textarea aria-label="Workflow definition JSON" rows={14} style={{width:'100%',boxSizing:'border-box'}} value={draft.raw} disabled={!editable} onChange={e=>update(e.target.value)}/></label></details>
       {!current?.archived&&<button type="button" disabled={busy||Boolean(pending)||!draft.raw.trim()||selected!=='new'&&current?.id!==selected} onClick={()=>void mutate(selected==='new'?'create':'save')}>Save workflow</button>}
+      {current&&<WorkflowRuns source={source} workflowId={current.id} refresh={attempt}/>}
       {current&&<><details><summary>Current saved definition</summary><pre>{JSON.stringify(current.definition,null,2)}</pre></details><button type="button" disabled={busy||Boolean(pending)} onClick={()=>void mutate(current.archived?'restore':'archive')}>{current.archived?'Restore workflow':'Archive workflow'}</button>
       {!current.archived&&source.agentHome&&<><label>Return results to<select aria-label="Workflow originating bot" value={origin} disabled={busy||Boolean(pending)} onChange={e=>setOrigin(e.target.value)}><option value="">Choose bot</option>{agents.filter(a=>!a.hidden&&!a.deleted).map(a=><option key={a.id} value={a.id}>{a.display_name??a.name}</option>)}</select></label><button type="button" disabled={busy||Boolean(pending)||!origin} onClick={()=>setConfirm(true)}>Propose saved workflow run…</button></>}</>}
     </>}

@@ -1,4 +1,6 @@
 """Real workflow Library/Task owners; no external execution or grants."""
+import json
+
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
@@ -71,3 +73,60 @@ async def test_workflow_invalid_grants_and_unknown_are_never_executed(tmp_path,m
         assert unknown.status==409 and (await unknown.json())['execution_unknown'] is True
         assert (await (await client.get('/v1/workflows')).json())['workflows']==[]
         assert gateway.task_owner.store.list_tasks()==[]
+
+
+@pytest.mark.asyncio
+async def test_workflow_acknowledges_exact_committed_snapshot_and_runs_receipts(tmp_path, monkeypatch):
+    from jaeger_ai.features.knowledge_library import KnowledgeLibrary
+    from jaeger_ai.core.tasks.models import TaskState
+    layout = InstanceLayout(root=tmp_path/'instance')
+    layout.ensure_dirs()
+    dump_yaml(layout.config_path, Config(instance_name='workflow-race', model=ModelConfig(model_path='/dev/null')))
+    monkeypatch.setenv('JAEGER_INSTANCE_DIR', str(layout.root))
+    gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.sqlite3'))
+    definition = {'format': 'jaeger.workflow.v1', 'name': 'Race', 'description': '', 'steps': [{'title': 'Review', 'instruction': 'Review supplied text'}]}
+    original_save = KnowledgeLibrary.save_document
+
+    def save_then_concurrent_winner(lib, document_id, **kwargs):
+        committed = original_save(lib, document_id, **kwargs)
+        # A second SQLite connection advances immediately after the first commit.
+        other = KnowledgeLibrary(layout.memory_dir/'library.db')
+        try:
+            original_save(other, document_id, title='Later writer', content=json.dumps({**definition, 'name': 'Later writer'}), expected_revision=committed['revision'])
+        finally:
+            other.close()
+        return committed
+
+    async with TestClient(TestServer(gateway.app), headers=client_headers('webui')) as client:
+        created = await (await client.post('/v1/workflows', json={'operation_id': 'race-create', 'definition': definition})).json()
+        document_id = created['workflow']['id']
+        monkeypatch.setattr(KnowledgeLibrary, 'save_document', save_then_concurrent_winner)
+        body = {'operation_id': 'race-save', 'expected_revision': 1, 'definition': {**definition, 'name': 'My committed edit'}}
+        saved = await (await client.post(f'/v1/workflows/{document_id}/save', json=body)).json()
+        assert saved['workflow']['revision'] == 2
+        assert saved['workflow']['definition']['name'] == 'My committed edit'
+        assert (await (await client.get(f'/v1/workflows/{document_id}')).json())['revision'] == 3
+        assert await (await client.post(f'/v1/workflows/{document_id}/save', json=body)).json() == saved
+        gateway.store.ensure_session('workflow-owned-home', metadata={'agent_id': 'native:builder'})
+        admit = gateway.task_owner.store.admit_task
+        def check_atomic_reference(task):
+            assert task.provenance['workflow_id'] == document_id
+            assert task.provenance['workflow_revision'] == 3
+            assert task.provenance['authorized'] is False
+            return admit(task)
+        monkeypatch.setattr(gateway.task_owner.store, 'admit_task', check_atomic_reference)
+        proposed = await (await client.post(f'/v1/workflows/{document_id}/propose', json={'operation_id': 'run-create', 'expected_revision': 3, 'session_id': 'workflow-owned-home'})).json()
+        tid = proposed['task']['task_id']
+        rows = (await (await client.get(f'/v1/workflows/{document_id}/runs')).json())['runs']
+        assert len(rows) == 1 and rows[0]['task_id'] == tid
+        assert rows[0]['authorized'] is False and rows[0]['request_status'] is None
+        assert rows[0]['workflow_revision'] == 3 and rows[0]['origin_session_id'] == 'workflow-owned-home'
+        # Retained canonical unknown must remain visible, even alongside a stale task label.
+        gateway.store.admit_request(f'task:{tid}', 'fixture work', request_id=f'{tid}:0')
+        gateway.store.complete_request(f'{tid}:0', status='execution_unknown', result={'error': 'fixture retained uncertainty'})
+        gateway.task_owner.store.update_task(tid, lambda task: setattr(task, 'state', TaskState.COMPLETED))
+        rows = (await (await client.get(f'/v1/workflows/{document_id}/runs')).json())['runs']
+        assert rows[0]['request_status'] == 'execution_unknown'
+        assert len(gateway.store.list_requests()) == 1  # GET never retries execution.
+    async with TestClient(TestServer(gateway.app), headers=client_headers('a2a')) as client:
+        assert (await client.get(f'/v1/workflows/{document_id}/runs')).status == 403

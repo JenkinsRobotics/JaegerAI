@@ -27,7 +27,11 @@ def validate(value: Any) -> dict:
 
 
 def read(library, document_id: str) -> dict:
-    row = library.managed_document(document_id)
+    return project(library.managed_document(document_id))
+
+
+def project(row: dict) -> dict:
+    """Project the exact owner snapshot, never reread after a committed mutation."""
     if row['collection_id'] != WORKFLOW_COLLECTION_ID:
         raise KeyError('Workflow not found')
     return {**{k: row[k] for k in ('id', 'revision', 'digest', 'archived')}, 'definition': validate(json.loads(row['content']))}

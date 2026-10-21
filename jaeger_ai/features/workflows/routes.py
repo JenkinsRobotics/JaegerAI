@@ -1,10 +1,11 @@
 """Workflow controls; storage remains Library and execution remains TaskOwner."""
 from __future__ import annotations
 import json
+import time
 from aiohttp import web
 from jaeger_ai.contract.workflows import WORKFLOW_FORMAT, WORKFLOW_MAX_BYTES, WORKFLOW_MAX_STEPS, WORKFLOW_COLLECTION_ID
 from jaeger_ai.features.knowledge_library.managed import DocumentConflict
-from .definitions import goal, read as read_workflow, validate
+from .definitions import goal, project, read as read_workflow, validate
 
 
 def register(gateway):
@@ -34,7 +35,32 @@ def register(gateway):
         except (RuntimeError, OSError):
             return web.json_response({'error': 'Instance Library unavailable'}, status=503)
 
+    async def runs(request):
+        try:
+            workflow = use(lambda lib: read_workflow(lib, request.match_info['id']))
+        except KeyError:
+            raise web.HTTPNotFound() from None
+        except (ValueError, RuntimeError, OSError):
+            return web.json_response({'error': 'Workflow definition unavailable; existing tasks remain in Tasks'}, status=409)
+        items = []
+        for task in gateway.task_owner.store.list_tasks():
+            if task.provenance.get('workflow_id') != workflow['id']:
+                continue
+            # Same canonical receipt used by TaskOwner recovery; historical task
+            # labels alone cannot assert a running/unknown request is settled.
+            request_row = gateway.store.get_request(f"{task.task_id}:{int(task.payload.get('attempt', 0))}")
+            items.append({'task_id': task.task_id, 'state': task.state.value,
+                          'authorized': bool(task.provenance.get('authorized')),
+                          'workflow_revision': task.provenance.get('workflow_revision'),
+                          'workflow_digest': task.provenance.get('workflow_digest'),
+                          'origin_session_id': task.notification_policy.recipient_session_id,
+                          'updated_at': task.updated_at, 'result': task.result, 'error': task.error,
+                          'request_status': request_row.get('status') if request_row else None})
+        return web.json_response({'workflow_id': workflow['id'], 'runs': items})
+
     async def mutate(request):
+        from jaeger_ai.contract.knowledge import DOCUMENT_WRITE_WINDOW_SECONDS
+        deadline = time.monotonic() + DOCUMENT_WRITE_WINDOW_SECONDS
         action = request.match_info.get('action', 'create')
         if action not in {'create', 'save', 'archive', 'restore', 'propose'}:
             raise web.HTTPNotFound()
@@ -59,18 +85,18 @@ def register(gateway):
                 if action == 'create':
                     definition = validate(body['definition'])
                     row = lib.create_document(title=definition['name'], content=json.dumps(definition, ensure_ascii=False), command_id=oid, collection_id=WORKFLOW_COLLECTION_ID)
-                    return read_workflow(lib, row['id'])
+                    return project(row)
                 current = read_workflow(lib, document_id)
                 if type(body['expected_revision']) is not int or body['expected_revision'] != current['revision']:
                     raise DocumentConflict('Workflow changed; reload before continuing')
                 if action == 'save':
                     definition = validate(body['definition'])
-                    lib.save_document(document_id, title=definition['name'], content=json.dumps(definition, ensure_ascii=False), expected_revision=current['revision'])
+                    return project(lib.save_document(document_id, title=definition['name'], content=json.dumps(definition, ensure_ascii=False), expected_revision=current['revision'], write_deadline=deadline))
                 elif action in {'archive', 'restore'}:
-                    lib.archive_document(document_id, archived=action == 'archive', expected_revision=current['revision'])
+                    return project(lib.archive_document(document_id, archived=action == 'archive', expected_revision=current['revision'], write_deadline=deadline))
                 elif current['archived']:
                     raise DocumentConflict('Restore workflow before proposing a run')
-                return read_workflow(lib, document_id)
+                return current
             workflow = use(apply)
             task = None
             if action == 'propose':
@@ -81,8 +107,7 @@ def register(gateway):
                     raise ValueError('Existing originating conversation required')
                 metadata = parent.get('metadata') or {}
                 execution = {'workspace': parent.get('workspace') or '', 'caller': request.get('caller_actor'), 'model': metadata.get('model'), 'provider': metadata.get('provider')}
-                task = gateway.task_owner.submit(goal(workflow), context={'session_id': parent['session_id'], 'source': 'client', 'request_id': oid, 'execution': execution, 'agent_id': gateway._session_agent_id(parent)}, proposal=True, key='workflow:' + oid)
-                gateway.task_owner.store.update_task(task['task_id'], lambda row: row.provenance.update(workflow_id=workflow['id'], workflow_revision=workflow['revision'], workflow_digest=workflow['digest']))
+                task = gateway.task_owner.submit(goal(workflow), context={'session_id': parent['session_id'], 'source': 'client', 'request_id': oid, 'execution': execution, 'agent_id': gateway._session_agent_id(parent)}, proposal=True, key='workflow:' + oid, workflow_reference={key: workflow[key] for key in ('id', 'revision', 'digest')})
             receipt = {'ok': True, 'operation_id': oid, 'http_status': 200, 'workflow': workflow, 'task': task}
         except DocumentConflict as exc:
             receipt = {'ok': False, 'operation_id': oid, 'http_status': 409, 'error': str(exc)}
@@ -98,6 +123,7 @@ def register(gateway):
         return web.json_response(receipt, status=receipt['http_status'])
 
     gateway.app.router.add_get('/v1/workflows', read)
+    gateway.app.router.add_get('/v1/workflows/{id}/runs', runs)
     gateway.app.router.add_get('/v1/workflows/{id}', read)
     gateway.app.router.add_post('/v1/workflows', mutate)
     gateway.app.router.add_post('/v1/workflows/{id}/{action}', mutate)

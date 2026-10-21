@@ -92,7 +92,16 @@ class GatewayTaskOwner:
         return sorted(set(paths))
 
     def submit(self, goal: str, *, context: dict, artifacts: list[str] | None = None,
-               proposal: bool = False, key: str = '') -> dict:
+               proposal: bool = False, key: str = '', workflow_reference: dict | None = None) -> dict:
+        workflow_provenance = {}
+        if workflow_reference is not None:
+            if (not isinstance(workflow_reference, dict) or set(workflow_reference) != {'id', 'revision', 'digest'}
+                    or not isinstance(workflow_reference['id'], str) or not workflow_reference['id']
+                    or type(workflow_reference['revision']) is not int or workflow_reference['revision'] < 1
+                    or not isinstance(workflow_reference['digest'], str)
+                    or re.fullmatch(r'[0-9a-f]{64}', workflow_reference['digest']) is None):
+                raise ValueError('Exact saved workflow reference required')
+            workflow_provenance = {'workflow_' + key: value for key, value in workflow_reference.items()}
         goal = goal.strip()
         if not goal:
             raise ValueError('Task objective is required')
@@ -134,7 +143,7 @@ class GatewayTaskOwner:
             state=TaskState.QUEUED if approved else TaskState.PAUSED, payload=payload,
             notification_policy=NotificationPolicy(recipient_session_id=parent),
             provenance={'request_id': context.get('request_id'), 'authorized': approved,
-                        'source': context.get('source'), 'session_id': parent, **({'submission_fingerprint': fingerprint, 'submission_goal': goal} if fingerprint else {})},
+                        'source': context.get('source'), 'session_id': parent, **workflow_provenance, **({'submission_fingerprint': fingerprint, 'submission_goal': goal} if fingerprint else {})},
             agent_id=str(context.get('agent_id') or ''), eta=context.get('eta'),
             runner=str(context.get('runner') or 'native'))
         task, replayed = self.store.admit_task(task)
