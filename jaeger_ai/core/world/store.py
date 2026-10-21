@@ -100,6 +100,7 @@ class SqliteWorldStore:
                     created_at REAL NOT NULL
                 );
 
+                CREATE INDEX IF NOT EXISTS idx_evidence_target_source ON world_evidence(target_id,source_type);
                 CREATE INDEX IF NOT EXISTS idx_claims_subj ON world_claims(subject);
                 CREATE INDEX IF NOT EXISTS idx_claims_prov ON world_claims(provenance);
                 CREATE INDEX IF NOT EXISTS idx_rel_subj ON world_relationships(subject_entity_id);
@@ -234,9 +235,97 @@ class SqliteWorldStore:
                 for r in rows
             ]
 
+    @staticmethod
+    def _claim_snapshot(conn, row) -> dict[str, Any]:
+        import hashlib
+        value={key:row[key] for key in ('claim_id','subject','predicate','value','provenance','confidence','source_id','valid_from','valid_until','created_at')}
+        managed=conn.execute("SELECT evidence_id FROM world_evidence WHERE target_id=? AND source_type='operator_claim_change' ORDER BY rowid DESC LIMIT 1",(row['claim_id'],)).fetchone()
+        if managed:value['management_revision']=managed[0]
+        value['revision']=hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
+        return value
+
+    def claim_detail(self, claim_id: str) -> dict[str, Any]:
+        with self._get_connection() as conn:
+            conn.execute('BEGIN')
+            row=conn.execute('SELECT * FROM world_claims WHERE claim_id=?',(claim_id,)).fetchone()
+            if row is None:raise ValueError('Claim unavailable')
+            value=self._claim_snapshot(conn,row)
+            history=[json.loads(r['snippet']) for r in conn.execute("SELECT snippet FROM world_evidence WHERE target_id=? AND source_type='operator_claim_change' ORDER BY rowid DESC LIMIT 20",(claim_id,))]
+            origin=conn.execute("SELECT snippet FROM world_evidence WHERE target_id=? AND source_type='operator_claim_origin' ORDER BY rowid DESC LIMIT 1",(claim_id,)).fetchone()
+        active=row['valid_until'] is None or row['valid_until']>time.time()
+        value['active']=active;value['truncated']=len(value['value'])>16000
+        value['value']=value['value'][:16000]
+        value['changes']=history
+        value['replaces_claim_id']=json.loads(origin[0])['replaces_claim_id'] if origin else None
+        value['actions']=[] if row['provenance']=='system' else ['correct','forget'] if active else ['restore'] if history and history[0]['action']=='forget' and (history[0]['previous_valid_until'] is None or history[0]['previous_valid_until']>time.time()) else []
+        return value
+
+    @staticmethod
+    def _claim_operation_id(operation_id: str) -> str:
+        import hashlib
+        if not isinstance(operation_id,str) or not operation_id.strip() or len(operation_id)>128:raise ValueError('Stable operation identity required')
+        return 'claim_op_'+hashlib.sha256(operation_id.encode()).hexdigest()
+
+    def claim_operation(self, operation_id: str) -> dict[str, Any] | None:
+        with self._get_connection() as conn:
+            row=conn.execute("SELECT snippet FROM world_evidence WHERE evidence_id=? AND source_type='operator_claim_change'",(self._claim_operation_id(operation_id),)).fetchone()
+        return json.loads(row[0])['receipt'] if row else None
+
+    def manage_claim(self, claim_id: str, action: str, *, expected_revision: str, operation_id: str, actor: str, text: str | None = None) -> dict[str, Any]:
+        """Atomic, recoverable operator changes in this world owner. Never erase originals.
+
+        Corrections create a new TOLD claim, preserving original provenance.
+        Forget expires only semantic retrieval; restore undoes this owner's last
+        forget with its original validity ceiling. Audit evidence owns receipts.
+        """
+        import hashlib
+        eid=self._claim_operation_id(operation_id)
+        if action not in {'correct','forget','restore'} or not isinstance(actor,str) or not actor:raise ValueError('Unsupported claim operation')
+        if action=='correct' and (not isinstance(text,str) or not text.strip() or len(text)>16000):raise ValueError('Correction requires 1–16000 characters')
+        if action!='correct' and text is not None:raise ValueError('Unexpected correction text')
+        payload={'claim_id':claim_id,'action':action,'expected_revision':expected_revision,'actor':actor,'text':text}
+        fingerprint=hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
+        with self._get_connection() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            prior=conn.execute('SELECT snippet FROM world_evidence WHERE evidence_id=?',(eid,)).fetchone()
+            if prior:
+                recorded=json.loads(prior[0])
+                if recorded['fingerprint']!=fingerprint:raise ValueError('Operation identity conflicts with preserved command')
+                return recorded['receipt']
+            row=conn.execute('SELECT * FROM world_claims WHERE claim_id=?',(claim_id,)).fetchone()
+            if row is None:raise ValueError('Claim unavailable')
+            snapshot=self._claim_snapshot(conn,row)
+            if snapshot['revision']!=expected_revision:raise ValueError('Claim changed; read and review before saving')
+            if row['provenance']=='system':raise ValueError('System-derived claims are protected; change their authoritative source')
+            now=time.time();active=row['valid_until'] is None or row['valid_until']>now
+            replacement=None;prior_validity=row['valid_until']
+            if action=='restore':
+                previous=conn.execute("SELECT snippet FROM world_evidence WHERE target_id=? AND source_type='operator_claim_change' ORDER BY rowid DESC LIMIT 1",(claim_id,)).fetchone()
+                previous=json.loads(previous[0]) if previous else None
+                if active or not previous or previous['action']!='forget':raise ValueError('Only the latest operator-forgotten claim can be restored')
+                until=previous['previous_valid_until']
+                if until is not None and until<=now:raise ValueError('Original validity elapsed; restoration cannot extend it')
+                conn.execute('UPDATE world_claims SET valid_until=? WHERE claim_id=?',(until,claim_id))
+            else:
+                if not active:raise ValueError('Only an active claim can be corrected or forgotten')
+                conn.execute('UPDATE world_claims SET valid_until=? WHERE claim_id=?',(now,claim_id))
+                if action=='correct':
+                    replacement='clm_'+uuid.uuid4().hex[:12]
+                    conn.execute('INSERT INTO world_claims(claim_id,subject,predicate,value,provenance,confidence,source_id,valid_from,valid_until,created_at) VALUES(?,?,?,?,?,?,?,?,?,?)',
+                        (replacement,row['subject'],row['predicate'],text.strip(),'told',1.0,actor,now,prior_validity,now))
+                    conn.execute('INSERT INTO world_evidence VALUES(?,?,?,?,?,?,?)',(eid+'_origin',replacement,'operator_claim_origin',actor,json.dumps({'replaces_claim_id':claim_id,'operation_id':operation_id}),None,now))
+            # Store audit and resulting revision in the same transaction as expiry/replacement.
+            receipt={'ok':True,'operation_id':operation_id,'http_status':200,'result':{'domain':'semantic_claim','claim_id':claim_id,'action':action,'replacement_claim_id':replacement}}
+            evidence={'action':action,'actor':actor,'operation_id':operation_id,'fingerprint':fingerprint,'previous_valid_until':prior_validity,'previous_revision':expected_revision,'replacement_claim_id':replacement,'changed_at':now,'receipt':receipt}
+            conn.execute('INSERT INTO world_evidence VALUES(?,?,?,?,?,?,?)',(eid,claim_id,'operator_claim_change',actor,json.dumps(evidence),None,now))
+            current=conn.execute('SELECT * FROM world_claims WHERE claim_id=?',(claim_id,)).fetchone()
+            receipt['result']['revision']=self._claim_snapshot(conn,current)['revision']
+            evidence['receipt']=receipt
+            conn.execute('UPDATE world_evidence SET snippet=? WHERE evidence_id=?',(json.dumps(evidence),eid))
+        return receipt
+
     def search_claims(self, query: str = '', *, before: int | None = None, include_inactive: bool = False) -> dict[str, Any]:
         """Bounded literal search of this semantic owner; no copied index or writes."""
-        import hashlib
         if not isinstance(query,str) or len(query)>200:raise ValueError('Memory query must be at most200 characters')
         if before is not None and (type(before) is not int or not 0<before<2**63):raise ValueError('Invalid memory cursor')
         clauses=[];params=[];now=time.time()
@@ -245,12 +334,12 @@ class SqliteWorldStore:
         if query:
             clauses.append("(instr(lower(subject),lower(?))>0 OR instr(lower(predicate),lower(?))>0 OR instr(lower(value),lower(?))>0)");params.extend([query]*3)
         with self._get_connection() as conn:
+            conn.execute('BEGIN')
             rows=conn.execute('SELECT rowid AS cursor,* FROM world_claims'+(' WHERE '+' AND '.join(clauses) if clauses else '')+' ORDER BY rowid DESC LIMIT 51',params).fetchall()
             recent={r[0] for r in conn.execute('SELECT claim_id FROM world_claims WHERE valid_until IS NULL OR valid_until>? ORDER BY created_at DESC LIMIT 12',(now,))}
+            snapshots=[self._claim_snapshot(conn,row) for row in rows[:50]]
         claims=[]
-        for row in rows[:50]:
-            value={key:row[key] for key in ('claim_id','subject','predicate','value','provenance','confidence','source_id','valid_from','valid_until','created_at')}
-            value['revision']=hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
+        for row,value in zip(rows[:50],snapshots):
             value['truncated']=len(value['value'])>4000 or any(len(value[key])>512 for key in ('subject','predicate','source_id'))
             value['value']=value['value'][:4000]
             for key in ('subject','predicate','source_id'):value[key]=value[key][:512]

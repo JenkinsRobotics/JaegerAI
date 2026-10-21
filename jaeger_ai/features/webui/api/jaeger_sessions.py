@@ -247,6 +247,14 @@ def route(handler, parsed, method: str) -> bool:
     if path == '/v1/runtime/memory/claims' and method == 'GET':
         return _proxy(handler,method,path+query)
 
+    if path.startswith('/v1/runtime/memory/claims/'):
+        parts=path.split('/')
+        if method=='GET' and len(parts)==6:return _proxy(handler,method,path)
+        if method=='POST' and len(parts)==7 and parts[-1] in {'correct','forget','restore'}:return _proxy(handler,method,path,_body_bytes(handler))
+        return False
+    if path.startswith('/v1/runtime/memory/claim-operations/') and method=='GET' and len(path.split('/'))==6:
+        return _proxy(handler,method,path)
+
     if path == '/v1/runtime/plugins' and method == 'GET':
         return _proxy(handler,method,path)
     if path.startswith('/v1/runtime/plugins/') and method == 'POST':

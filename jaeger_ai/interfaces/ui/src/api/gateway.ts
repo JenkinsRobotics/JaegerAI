@@ -58,6 +58,11 @@ export class GatewayClient implements JaegerSource {
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
   };
   searchMessages(agentId: string, query: string, before?: string) { return this.json<import("./source").MessageSearchPage>(`/v1/agents/${encodeURIComponent(agentId)}/messages/search?q=${encodeURIComponent(query)}${before ? `&before=${encodeURIComponent(before)}` : ""}`); }
+  semanticClaimControls:import('./source').SemanticClaimControls={
+    detail:id=>this.json('/v1/runtime/memory/claims/'+encodeURIComponent(id)),
+    mutate:(id,action,body)=>this.json('/v1/runtime/memory/claims/'+encodeURIComponent(id)+'/'+action,body),
+    operation:id=>this.json('/v1/runtime/memory/claim-operations/'+encodeURIComponent(id)),
+  };
   semanticClaims(options:{query:string;includeInactive:boolean;before?:number}) {const query=new URLSearchParams({q:options.query,include_inactive:String(options.includeInactive)});if(options.before)query.set('before',String(options.before));return this.json<import('./source').SemanticClaims>('/v1/runtime/memory/claims?'+query.toString());}
   readonly plugins: import('./source').PluginControls = {
     list: () => this.json('/v1/runtime/plugins'),
