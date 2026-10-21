@@ -131,6 +131,11 @@ export class GatewayClient implements JaegerSource {
     save: body => this.json('/v1/notifications',body,'PATCH'),
     markRead: through => this.json('/v1/notifications',{read_through:through},'PATCH'),
   };
+  readonly mcpConfiguration: import('./source').MCPConfiguration = {
+    read:()=>this.json('/v1/runtime/mcp/configuration'),
+    change:body=>this.json('/v1/runtime/mcp/configuration/change',body),
+    operation:id=>this.json('/v1/runtime/mcp/configuration/operations/'+encodeURIComponent(id)),
+  };
   readonly mcpControls: NonNullable<import('./source').JaegerSource['mcpControls']> = {
     mutate: (id,action,body) => this.json(`/v1/runtime/mcp/${encodeURIComponent(id)}/${action}`,body),
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),

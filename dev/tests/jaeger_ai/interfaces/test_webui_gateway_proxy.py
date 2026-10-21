@@ -392,3 +392,13 @@ def test_local_skill_export_uses_authenticated_proxy_exact_revision(overlay):
     path='/v1/runtime/skills/managed/export?name=fixture&revision=owned'
     assert _route(overlay,path) is True
     assert overlay._calls[-1]==('GET',path)
+
+
+@pytest.mark.parametrize(('path','method'),[
+    ('/v1/runtime/mcp/configuration','GET'),
+    ('/v1/runtime/mcp/configuration/change','POST'),
+    ('/v1/runtime/mcp/configuration/operations/owned-op','GET'),
+])
+def test_mcp_local_configuration_routes(overlay,path,method):
+    assert _route(overlay,path,method) is True
+    assert overlay._calls[-1]==(method,path)
