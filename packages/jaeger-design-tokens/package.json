@@ -1,0 +1,11 @@
+{
+  "name": "@jaeger/design-tokens",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Jaeger design tokens: single source tokens/jaeger-tokens.json -> CSS vars, VS Code map, Swift, TUI theme.",
+  "files": ["dist", "assets", "tokens"],
+  "scripts": {
+    "build": "python3 build/build_tokens.py tokens/jaeger-tokens.json dist && python3 build/verify_dist.py --write",
+    "verify": "python3 build/verify_dist.py"
+  }
+}
