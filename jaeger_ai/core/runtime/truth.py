@@ -200,16 +200,17 @@ def provider_model_inventory(instance_root: Path | None = None) -> dict[str, Any
         "reason": None if lmstudio.get("online") else str(lmstudio.get("detail") or "offline"),
         "models": lm_models,
     })
+    from jaeger_ai.core.models.external_model import provider_configuration
     for family in ("openai", "anthropic", "gemini", "xai", "openrouter", "groq", "deepseek"):
         providers.append({
             "id": family,
             "display_name": family.replace("_", " ").title(),
             "location": "cloud",
             "supported": True,
-            "configured": False,
+            **provider_configuration(family, root),
             "reachable": False,
-            "reason": "not configured on this instance",
             "models": [],
+            "model_catalog_scope": "no_remote_model_access_probe",
         })
     active = _active_model(root)
     return {

@@ -5692,8 +5692,8 @@ class JaegerGatewayApp:
     async def handle_runtime_models(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.runtime.truth import provider_model_inventory, webui_model_catalog
         return web.json_response({
-            **provider_model_inventory(),
-            "webui_catalog": webui_model_catalog(),
+            **await asyncio.to_thread(provider_model_inventory),
+            "webui_catalog": await asyncio.to_thread(webui_model_catalog),
         })
 
     async def handle_runtime_capabilities(self, request: web.Request) -> web.Response:

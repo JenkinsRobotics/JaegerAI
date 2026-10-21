@@ -210,7 +210,7 @@ class SemanticMemory:
     def list_recent(self, limit: int = 20) -> list[dict[str, Any]]:
         claims = self.world_store.list_recent_claims(limit)
         return [
-            {"subject": c.subject, "predicate": c.predicate, "value": c.value, "confidence": c.confidence, "provenance": c.provenance.value}
+            {"claim_id":c.claim_id,"source_id":c.source_id,"subject": c.subject, "predicate": c.predicate, "value": c.value, "confidence": c.confidence, "provenance": c.provenance.value}
             for c in claims
         ]
 

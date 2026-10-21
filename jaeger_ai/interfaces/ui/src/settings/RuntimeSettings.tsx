@@ -47,7 +47,7 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
         {selected && !choices.some(m => m.id === selected) && <option value={selected} disabled>{selected} (currently unavailable)</option>}
         {choices.map(m => <option key={m.id} value={m.id}>{m.label}{m.certified ? "" : " (tool certification not verified)"}</option>)}
       </select></label><button type="button" disabled={busy || Boolean(selected && !choices.some(m => m.id === selected))} onClick={() => void save()}>Save conversation model</button></>}
-      <ul>{inventory?.providers.map(provider => <li key={provider.id}><strong>{provider.display_name}</strong> · {provider.reachable ? "Reachable" : provider.configured ? "Unreachable" : "Not configured"}{provider.reason ? ` · ${provider.reason}` : ""}</li>)}</ul>
+      <ul>{inventory?.providers.map(provider => <li key={provider.id}><strong>{provider.display_name}</strong> · {provider.availability==='unknown'?"Configuration unknown":provider.availability==='not_probed'?"Configured · health not probed":provider.reachable ? "Reachable" : provider.configured ? "Unreachable" : "Not configured"}{provider.reason ? ` · ${provider.reason}` : ""}</li>)}</ul>
     </Dialog>, document.body)}
   </>;
 }

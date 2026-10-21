@@ -124,3 +124,24 @@ async def test_plugin_http_scope_receipt_and_no_catalog_activation(tmp_path,monk
     async with TestClient(TestServer(gateway.app),headers=client_headers('a2a')) as http:
         assert (await http.get('/v1/runtime/plugins')).status==403
         assert (await http.post(path,json=body)).status==403
+
+
+def test_package_revision_change_is_visible_and_cannot_resume_retained_code(monkeypatch):
+    from types import SimpleNamespace
+    loads=[]
+    def entry(version):
+        return SimpleNamespace(name='owned-fixture',value='owned.fixture:register',dist=SimpleNamespace(name='owned-package',version=version),load=lambda:(loads.append(version) or (lambda ctx:ctx.register_hook('turn_end',lambda **kw:None))))
+    installed=[entry('1')]
+    monkeypatch.setattr(registry,'_entries',lambda group:installed)
+    registry.discover_plugins();old=registry.catalog()['plugins'][0]
+    registry.control_hooks(old['id'],'pause_hooks','loaded')
+    installed[:]=[entry('2')]
+    rows=registry.catalog()['plugins'];retained=next(row for row in rows if row['id']==old['id']);candidate=next(row for row in rows if row['id']!=old['id'])
+    assert retained['distribution_state']=='replaced' and retained['actions']==[]
+    assert candidate['distribution_state']=='current' and candidate['activation_blocked_by_loaded_revision']
+    assert old['id'] in candidate['related_revision_ids']
+    with pytest.raises(ValueError,match='distribution changed'):
+        registry.control_hooks(old['id'],'resume_hooks','hooks_paused')
+    assert registry.discover_plugins()==[] and loads==['1']
+    installed.clear()
+    assert registry.catalog()['plugins'][0]['distribution_state']=='removed'

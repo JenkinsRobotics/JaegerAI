@@ -176,6 +176,14 @@ def selection_failure_message(ext: ExternalModelConfig, reason: str) -> str:
 # ---------------------------------------------------------------------------
 # Key resolution
 # ---------------------------------------------------------------------------
+def _credential_layout(layout: Any | None) -> Any | None:
+    """Normalize an instance path without initializing or migrating it."""
+    from os import PathLike
+    from pathlib import Path
+    from jaeger_ai.core.instance.instance import InstanceLayout
+    return InstanceLayout(root=Path(layout)) if isinstance(layout,(str,PathLike)) else layout
+
+
 def resolve_api_key(ext: ExternalModelConfig, layout: Any | None) -> str:
     """Resolve the provider API key, in priority order:
 
@@ -190,40 +198,25 @@ def resolve_api_key(ext: ExternalModelConfig, layout: Any | None) -> str:
     local Ollama server, which accepts any placeholder key.
     """
     if layout is not None:
-        try:
-            from pathlib import Path
-            from jaeger_agent.core import credentials as creds
+        from jaeger_agent.core import credentials as creds
 
-            # Collect candidate credential names to check in order
-            candidates: list[str] = []
-            if ext.api_key_credential:
-                candidates.append(ext.api_key_credential)
-            for alias in _PROVIDER_CREDENTIAL_ALIASES.get(ext.provider, ()):
-                if alias not in candidates:
-                    candidates.append(alias)
-
-            for cred_name in candidates:
-                try:
-                    val = creds.get_credential(layout, cred_name)
-                    if val:
-                        return val
-                except Exception:  # noqa: BLE001
-                    pass
-
-                try:
-                    root = getattr(layout, "root", None) or getattr(layout, "credentials_dir", None) or Path(str(layout))
-                    if hasattr(layout, "credentials_dir"):
-                        cred_file = layout.credentials_dir / cred_name
-                    else:
-                        cred_file = Path(str(root)) / "credentials" / cred_name
-                    if cred_file.is_file():
-                        txt = cred_file.read_text(encoding="utf-8").strip()
-                        if txt:
-                            return txt
-                except Exception:  # noqa: BLE001
-                    pass
-        except Exception:  # noqa: BLE001
-            pass
+        # Path.root is a filesystem anchor, not an instance root. Normalize
+        # without initialization, migration, permission changes or file writes.
+        layout=_credential_layout(layout)
+        candidates=[]
+        if ext.api_key_credential:candidates.append(ext.api_key_credential)
+        for alias in _PROVIDER_CREDENTIAL_ALIASES.get(ext.provider,()):
+            if alias not in candidates:candidates.append(alias)
+        for name in candidates:
+            name=creds._validate_name(name)
+            try:
+                value=creds.get_credential(layout,name)
+                if value:return value
+            except creds.CredentialError:
+                # Missing aliases may fall through; a present but rejected
+                # credential must never be reread through an unchecked path.
+                target=layout.credentials_dir/name
+                if target.exists():raise ExternalModelError('Configured credential unavailable under existing file protections') from None
 
     if ext.api_key_env:
         val = os.environ.get(ext.api_key_env, "").strip()
@@ -246,6 +239,29 @@ def resolve_api_key(ext: ExternalModelConfig, layout: Any | None) -> str:
 # providers directly via :mod:`jaeger_agent.adapters`, so the only
 # work this layer needs to do is validate that the API key is present
 # before the adapter tries to use it.
+
+
+def provider_configuration(provider: str, layout: Any | None) -> dict[str, Any]:
+    """Configuration presence through the execution credential resolver, never a health probe.
+
+    Return no credential, endpoint, environment name or exception detail. A
+    configured credential is not evidence of provider/model connectivity.
+    """
+    if provider not in _CLOUD_PROVIDERS:
+        raise ValueError('Unsupported cloud provider')
+    try:
+        from jaeger_ai.core.instance.schemas import Config,load_yaml
+        layout=_credential_layout(layout)
+        external=ExternalModelConfig(provider=provider)
+        if layout is not None and layout.config_path.is_file():
+            saved=load_yaml(layout.config_path,Config).external_model
+            if saved.provider==provider:external=saved
+        configured=bool(resolve_api_key(external,layout))
+    except Exception:
+        return {'configured':False,'configuration_observed':False,'availability':'unknown','reason':'Provider configuration could not be inspected'}
+    return {'configured':configured,'configuration_observed':True,
+            'availability':'not_probed' if configured else 'not_configured',
+            'reason':'Existing credential configured; remote health and model access have not been probed' if configured else 'No credential resolved for this instance'}
 
 
 def validate_external_provider(ext: ExternalModelConfig, api_key: str) -> str:

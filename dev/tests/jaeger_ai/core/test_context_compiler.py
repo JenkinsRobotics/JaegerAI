@@ -86,7 +86,14 @@ def test_provenance_tagging_in_formatted_prompt():
     assert "=== [PROVENANCE_IDENTITY] ===" in compiled.system_prompt
     assert "=== [PROVENANCE_RUNTIME_TRUTH] ===" in compiled.system_prompt
     assert "=== [PROVENANCE_SEMANTIC_CLAIM] ===" in compiled.system_prompt
-    assert "favorite_editor = neovim" in compiled.system_prompt
+    import json
+    claim=next(item for item in compiled.items_included if item.provenance==MemoryProvenance.SEMANTIC_CLAIM)
+    assert claim.content in compiled.system_prompt
+    assert json.loads(claim.content.removeprefix('Recorded semantic claim: '))=={
+        'subject':'user','predicate':'favorite_editor','value':'neovim',
+        'confidence':0.99,'provenance':'unknown','source_id':'',
+    }
+    assert not claim.content.startswith('Fact:')
     assert compiled.provenance_breakdown.get(MemoryProvenance.IDENTITY.value) == 1
     assert compiled.provenance_breakdown.get(MemoryProvenance.SEMANTIC_CLAIM.value) == 1
 
@@ -233,3 +240,17 @@ def test_background_prompt_preserves_the_only_executable_request_boundary():
     assert len(context) <= 600
     assert context.count("</conversation_history>") == 1
     assert "</background>\nCurrent request" not in context
+
+
+def test_semantic_owner_context_retains_identity_provenance_and_zero_confidence(tmp_path):
+    from jaeger_ai.core.entity.memory import SemanticMemory
+    from jaeger_ai.core.context_compiler.compiler import ContextCompiler
+    from jaeger_ai.core.context_compiler.provenance import MemoryProvenance
+    owner=SemanticMemory(tmp_path)
+    recorded=owner.record_claim('Owned fixture','uncertain','literal claim',source_id='owned-evidence',confidence=0,provenance='inferred')
+    items=ContextCompiler().select('owned goal',claims=owner.list_recent())
+    claim=next(item for item in items if item.provenance==MemoryProvenance.SEMANTIC_CLAIM)
+    assert claim.item_id==recorded['claim_id'] and claim.metadata['source_id']=='owned-evidence'
+    assert claim.metadata['epistemic_provenance']=='inferred' and claim.salience==0
+    assert '"confidence": 0.0' in claim.content and '"provenance": "inferred"' in claim.content
+    assert claim.content.startswith('Recorded semantic claim:') and not claim.content.startswith('Fact:')
