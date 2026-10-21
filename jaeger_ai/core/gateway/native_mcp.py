@@ -58,6 +58,83 @@ def _is_transient_http(exc: BaseException) -> bool:
     return isinstance(exc, urllib.error.URLError)
 
 
+# ── GB-032 connector grant enforcement ────────────────────────────────────
+GRANT_ARGUMENT = "_connector_grant"
+_grant_store = None
+_grant_store_lock = threading.Lock()
+
+
+class ConnectorGrantDenied(RuntimeError):
+    """A connector grant refused the call; nothing was dispatched."""
+
+    def __init__(self, result: dict[str, Any]) -> None:
+        self.result = dict(result)
+        reason = self.result.get("reason", "denied")
+        detail = ""
+        if self.result.get("missing_scopes"):
+            detail = f" (missing scope: {', '.join(self.result['missing_scopes'])})"
+        reconnect = self.result.get("reconnect")
+        hint = (f"; reconnect: reauthorize {reconnect.get('connector')} account {reconnect.get('account_id')}"
+                if isinstance(reconnect, dict) else "")
+        super().__init__(f"Connector grant refused: {reason}{detail}{hint}")
+
+
+def connector_grant_store():
+    """Lazily resolve the grant store at the blueprint_routes default path.
+
+    Opening is lazy and reads never create the database.
+    """
+    global _grant_store
+    with _grant_store_lock:
+        if _grant_store is None:
+            from jaeger_ai.core.gateway.connector_grants import ConnectorGrantStore, default_grants_path
+            _grant_store = ConnectorGrantStore(default_grants_path())
+        return _grant_store
+
+
+def set_connector_grant_store(store) -> None:
+    """Bind a store explicitly (tests, or a gateway with a non-default path)."""
+    global _grant_store
+    with _grant_store_lock:
+        _grant_store = store
+
+
+def check_connector_grant(tool: str, grant: Any) -> dict[str, Any]:
+    """Fail closed: raise ``ConnectorGrantDenied`` unless the grant allows ``tool``.
+
+    ``grant`` is ``{"grant_id"?, "connector"?, "account_id"?, "required_scopes"?,
+    "expected_revision"?, "tool"?}``. Without ``grant_id`` the single active grant
+    for exactly ``connector``+``account_id`` is used; another account is never
+    substituted.
+    """
+    if not isinstance(grant, dict):
+        raise ConnectorGrantDenied({"reason": "invalid_grant_reference"})
+    store = connector_grant_store()
+    grant_id = str(grant.get("grant_id") or "").strip()
+    connector = str(grant.get("connector") or "").strip()
+    account = str(grant.get("account_id") or "").strip()
+    if not grant_id:
+        if not connector or not account:
+            raise ConnectorGrantDenied({"reason": "grant_reference_incomplete"})
+        rows = store.list(connector=connector, account_id=account)
+        if len(rows) != 1:
+            from jaeger_ai.core.gateway.connector_grants import reconnect_path
+            raise ConnectorGrantDenied({"reason": "no_active_grant", "connector": connector, "account_id": account,
+                                        "reconnect": reconnect_path(connector, account)})
+        grant_id = rows[0].grant_id
+    try:
+        result = store.authorize_call(grant_id, tool=str(grant.get("tool") or tool),
+                                      required_scopes=grant.get("required_scopes") or [],
+                                      expected_revision=grant.get("expected_revision"))
+    except Exception as exc:  # noqa: BLE001 — unreadable store or bad input: refuse
+        raise ConnectorGrantDenied({"reason": f"grant_check_failed: {type(exc).__name__}"}) from exc
+    if (connector and result.get("connector") != connector) or (account and result.get("account_id") != account):
+        result = {**result, "allowed": False, "reason": "grant_account_mismatch"}
+    if not result.get("allowed"):
+        raise ConnectorGrantDenied(result)
+    return result
+
+
 # ── MCP Client ──────────────────────────────────────────────────────────────
 
 class MCPClient:
@@ -175,7 +252,20 @@ class MCPClient:
                 return results[0].get("result", results[0])
             raise RuntimeError("MCP returned no response")
 
-    def call_tool(self, name: str, arguments: dict[str, Any]) -> dict:
+    def call_tool(self, name: str, arguments: dict[str, Any], *, grant: dict[str, Any] | None = None) -> dict:
+        """Call one MCP tool.
+
+        GB-032: when a connector grant is in play (``grant=`` or the reserved
+        ``arguments["_connector_grant"]`` key, which is never forwarded), the
+        grant is checked with ``ConnectorGrantStore.authorize_call`` right
+        before dispatch; a refusal raises ``ConnectorGrantDenied`` and the
+        call is not made. Calls with no grant behave exactly as before.
+        """
+        if grant is None and isinstance(arguments, dict) and GRANT_ARGUMENT in arguments:
+            arguments = dict(arguments)
+            grant = arguments.pop(GRANT_ARGUMENT)
+        if grant is not None:
+            check_connector_grant(name, grant)
         with self._lock:
             if not self._session_id:
                 self.initialize()
