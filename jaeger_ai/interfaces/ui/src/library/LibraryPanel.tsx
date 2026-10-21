@@ -106,6 +106,7 @@ export function LibraryPanel({ controls }: { controls: LibraryControls }) {
   const ready = selected === "new" || Boolean(document);
   const editable = selected === "new" || document?.editable === true;
   return <section aria-label="Library">
+    {document?.provenance&&<details><summary>Imported reference provenance</summary><pre>{JSON.stringify(document.provenance,null,2)}</pre><p>Recorded at import; subsequent edits can change document content. Not a publisher verification or access grant.</p></details>}
     <p>Managed Jaeger documents are editable. Existing indexed collections stay read-only; no new folder access is granted here.</p>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {pending && <p role="alert">Document action needs reconciliation. <button type="button" disabled={busy} onClick={() => void reconcile()}>Check saved document action</button></p>}

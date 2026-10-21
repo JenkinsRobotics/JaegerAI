@@ -272,6 +272,7 @@ class _MCPClient:
         self.config = config
         self._session: Any = None
         self._exit_stack: Any = None
+        self.resources_advertised = False
 
     async def connect(self) -> list[Any]:
         from contextlib import AsyncExitStack
@@ -321,12 +322,20 @@ class _MCPClient:
             )
             read, write = await self._exit_stack.enter_async_context(stdio_client(params))
         self._session = await self._exit_stack.enter_async_context(ClientSession(read, write))
-        await self._session.initialize()
+        initialization = await self._session.initialize()
+        self.resources_advertised = getattr(getattr(initialization,"capabilities",None),"resources",None) is not None
         listing = await self._session.list_tools()
         return list(listing.tools)
 
     async def call(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         return await self._session.call_tool(tool_name, arguments)
+
+    async def list_resources(self, cursor: str | None = None) -> Any:
+        return await self._session.list_resources(cursor=cursor)
+
+    async def read_resource(self, uri: str) -> Any:
+        from pydantic import AnyUrl
+        return await self._session.read_resource(AnyUrl(uri))
 
     async def close(self, *, strict: bool = False) -> None:
         if self._exit_stack is not None:
@@ -350,6 +359,9 @@ class MCPRegistry:
         self._active_calls: dict[str, int] = {}
         self._server_states: dict[str, str] = {}
         self._disconnected: dict[str, MCPServerConfig] = {}
+        self._resource_handles: dict[tuple[str,str],dict[str,str]] = {}
+        self._resource_pages: dict[tuple[str,str],str] = {}
+        self._resource_snapshots: dict[str,dict[str,Any]] = {}
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
@@ -501,6 +513,9 @@ class MCPRegistry:
                     self._disconnected[name] = client.config
                     del self._clients[name]
                     self._server_states[name] = 'disconnected'
+                    self._resource_handles = {key:value for key,value in self._resource_handles.items() if key[0]!=name}
+                    self._resource_pages = {key:value for key,value in self._resource_pages.items() if key[0]!=name}
+                    self._resource_snapshots = {key:value for key,value in self._resource_snapshots.items() if value['server_id']!=control_id}
             else:
                 self.add_server(self._disconnected[name])
                 with self._lifecycle_lock:
@@ -678,7 +693,7 @@ def runtime_inventory() -> dict[str, Any]:
         state = states.get(name, 'loaded_not_probed')
         actions = [] if active.get(name, 0) else ['disconnect'] if state == 'loaded_not_probed' else ['reconnect'] if state == 'disconnected' else []
         servers.append({'id': registry.control_id(name), 'name': safe(name), 'state': state,
-                        'tool_count': sum(t.server_name == name for t in specs), 'active_calls': active.get(name, 0), 'actions': actions})
+                        'tool_count': sum(t.server_name == name for t in specs), 'active_calls': active.get(name, 0), 'resources_advertised':bool(getattr(registry._clients.get(name),'resources_advertised',False)), 'actions': actions})
     loaded_names = {name for name, _ in clients}
     servers.extend({"name": safe(name), "state": "connection_failed", "tool_count": 0} for name in connection_errors() if name not in loaded_names)
     tools = [{"agent_name": t.agent_name, "display_name": safe(t.agent_name), "server": safe(t.server_name), "description": safe(t.description)} for t in specs]

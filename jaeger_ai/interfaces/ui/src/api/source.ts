@@ -46,7 +46,7 @@ export interface ScheduleControls {
   mutate(action: ScheduleAction, body: { operation_id: string; job_id?: string; name?: string; prompt?: string; schedule?: string }): Promise<ControlResult>;
   operation(id: string): Promise<{ receipt: ControlResult | null }>;
 }
-export interface LibraryDocument { id: string; title: string; content: string; digest: string; revision?: number; archived?: boolean; editable?: boolean }
+export interface LibraryDocument { id: string; title: string; content: string; digest: string; revision?: number; archived?: boolean; editable?: boolean; provenance?:Record<string,unknown> }
 export interface LibraryControls {
   list(): Promise<{ limits?: { document_bytes: number }; documents: Omit<LibraryDocument, "content">[]; collections: { id: string; label: string; kind: string }[] }>;
   search(query: string): Promise<{ results: { id: string; title: string; snippet: string }[] }>;
@@ -85,9 +85,17 @@ export interface Notifications {
   save(body:{expected_revision:number;enabled:boolean;muted_agent_ids:string[]}):Promise<{preferences:NotificationPreferences}>;
   markRead(through:number):Promise<{preferences:NotificationPreferences}>;
 }
+export interface ResourceCatalog { server_id:string;resources:{id:string;title:string;description:string;mime:string}[];next_page:string|null;truncated:boolean;availability:string;no_grants:true }
+export interface ResourceSnapshot { id:string;title:string;server_id:string;resource_id:string;text:string;digest:string;redacted:boolean;observed_at:number;source:string;authority:string }
+export interface ResourceReceipt extends ControlResult { result?:{catalog?:ResourceCatalog;snapshot?:Omit<ResourceSnapshot,'text'>;volatile_content?:boolean;document?:{id:string;revision:number;digest:string;provenance:Record<string,unknown>}} }
+export interface MCPResources {
+  mutate(serverId:string,action:'list'|'read'|'import',body:Record<string,unknown>):Promise<ResourceReceipt>;
+  snapshot(serverId:string,id:string):Promise<ResourceSnapshot>;
+  operation(id:string):Promise<{receipt:ResourceReceipt|null}>;
+}
 export interface ToolInventory {
   tools: { name: string; description: string; toolset: string; source: string; server: string | null; side_effect: string; permission_tier: string; beta: boolean; dangerous: boolean; availability: string }[];
-  count: number; servers: { id?: string; name: string; state: string; tool_count: number; active_calls?: number; actions?: string[] }[];
+  count: number; servers: { id?: string; name: string; state: string; tool_count: number; active_calls?: number; actions?: string[]; resources_advertised?:boolean }[];
   mcp_initialized: boolean; scope: string; execution_authorized: false;
 }
 export interface GatewayDiagnostics {
@@ -153,6 +161,7 @@ export interface JaegerSource {
     mutate(id:string,action:'disconnect'|'reconnect',body:{operation_id:string;expected_state:string}):Promise<ControlResult>;
     operation(id:string):Promise<{receipt:ControlResult|null}>;
   };
+  mcpResources?:MCPResources;
   agentMemory?:AgentMemoryControls;
   notifications?: Notifications;
   sessionFiles?: SessionFiles;

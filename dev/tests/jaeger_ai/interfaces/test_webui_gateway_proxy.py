@@ -260,3 +260,12 @@ def test_specialist_memory_proxy_preserves_canonical_identity(overlay):
         assert _route(overlay,'/v1/agents/native%3Abuilder/memory',method)
         assert overlay._calls[-1]==(method,'/v1/agents/native%3Abuilder/memory')
     assert not _route(overlay,'/v1/agents/native%3Abuilder%2Fother/memory','POST')
+
+
+def test_mcp_resource_proxy_has_no_arbitrary_uri_get_route(overlay):
+    for action in ('list','read','import'):
+        path='/v1/runtime/mcp/owned/resources/'+action
+        assert _route(overlay,path,'POST') and overlay._calls[-1]==('POST',path)
+    path='/v1/runtime/mcp/owned/resources/snapshots/owned-snapshot'
+    assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
+    assert not _route(overlay,'/v1/runtime/mcp/owned/resources/fetch-url','POST')
