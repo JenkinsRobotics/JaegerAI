@@ -107,10 +107,10 @@ export interface MessageSearchPage {
   agent_id: string; next_before: string | null; matching: string;
   matches: { message_id: string; session_id: string; role: string; kind: string; title: string; timestamp: number; snippet: string; content: string; truncated: boolean }[];
 }
-export interface AgentMemorySnapshot { agent_id:string;editable:boolean;loaded_in_specialist_prompt:boolean;notes:string;revision:string;chars:number;prompt_chars:number;max_chars:number;prompt_truncated:boolean;versions:{revision:string;saved_at:number}[] }
+export interface AgentMemorySnapshot { agent_id:string;editable:boolean;loaded_in_specialist_prompt:boolean;notes:string;revision:string;chars:number;prompt_chars:number;max_chars:number;prompt_truncated:boolean;versions:{revision:string;saved_at:number}[];context_preview?:string;context_scope?:string;provenance?:{source:string;digest:string;author:string;history:string};search?:{query:string;matches:{line:number;text:string;within_prompt_budget:boolean}[];truncated:boolean;scope:string} }
 export interface AgentMemoryControls {
-  read(id:string):Promise<AgentMemorySnapshot>;
-  mutate(id:string,body:{operation_id:string;expected_revision:string;action:'replace';text:string}|{operation_id:string;expected_revision:string;action:'restore';restore_revision:string}):Promise<ControlResult&{agent_id?:string;revision?:string}>;
+  read(id:string,query?:string):Promise<AgentMemorySnapshot>;
+  mutate(id:string,body:{operation_id:string;expected_revision:string;action:'replace';text:string}|{operation_id:string;expected_revision:string;action:'restore';restore_revision:string}|{operation_id:string;expected_revision:string;action:'forget'}):Promise<ControlResult&{agent_id?:string;revision?:string}>;
   operation(id:string):Promise<{receipt:(ControlResult&{agent_id?:string;revision?:string})|null}>;
 }
 export interface AgentKnowledgeSnapshot {

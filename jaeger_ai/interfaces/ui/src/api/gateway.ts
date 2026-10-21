@@ -64,7 +64,7 @@ export class GatewayClient implements JaegerSource {
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
   };
   readonly agentMemory: import('./source').AgentMemoryControls = {
-    read: id => this.json(`/v1/agents/${encodeURIComponent(id)}/memory`),
+    read: (id,query) => this.json(`/v1/agents/${encodeURIComponent(id)}/memory${query?`?q=${encodeURIComponent(query)}`:""}`),
     mutate: (id,body) => this.json(`/v1/agents/${encodeURIComponent(id)}/memory`,body),
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
   };

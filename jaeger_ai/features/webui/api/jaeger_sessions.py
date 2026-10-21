@@ -257,7 +257,7 @@ def route(handler, parsed, method: str) -> bool:
         from urllib.parse import quote,unquote
         agent_id=unquote(path[len('/v1/agents/'):-len('/memory')])
         if not agent_id or '/' in agent_id:return False
-        return _proxy(handler,method,'/v1/agents/'+quote(agent_id,safe='')+'/memory',_body_bytes(handler) if method=='POST' else None)
+        return _proxy(handler,method,'/v1/agents/'+quote(agent_id,safe='')+'/memory'+query,_body_bytes(handler) if method=='POST' else None)
 
     if method == "GET" and path == "/v1/channels":
         return _proxy(handler, "GET", path)

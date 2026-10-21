@@ -56,6 +56,16 @@ async def test_http_memory_edits_do_not_change_agent_authority_or_history(tmp_pa
         reread=await (await client.get('/v1/agents/native:builder/memory')).json()
         assert reread['notes']=='Owned preference fixture\n' and reread['revision']==receipt['revision']
         assert 'Owned preference fixture' in gateway._system_prompt_for_agent(gateway._registry().get_agent('native:builder'))
+        searched=await (await client.get('/v1/agents/native:builder/memory?q=PREFERENCE')).json()
+        assert searched['search']['matches'][0]['line']==1
+        assert searched['context_preview']=='Owned preference fixture'
+        assert searched['provenance']['digest']==receipt['revision'] and searched['provenance']['author']=='not_recorded'
+        forgotten=await client.post('/v1/agents/native:builder/memory',json={'operation_id':'owned-forget','action':'forget','expected_revision':reread['revision']})
+        assert forgotten.status==200
+        assert 'Owned preference fixture' not in gateway._system_prompt_for_agent(gateway._registry().get_agent('native:builder'))
+        empty=await (await client.get('/v1/agents/native:builder/memory')).json()
+        assert not empty['context_preview'] and empty['versions'][0]['revision']==receipt['revision']
+        assert (await client.post('/v1/agents/native:builder/memory',json={'operation_id':'owned-memory-restore','action':'restore','expected_revision':empty['revision'],'restore_revision':receipt['revision']})).status==200
         assert gateway._registry().get_agent('native:builder').to_dict()==original
         assert len(gateway.store.get_session('owned-history')['messages'])==1 and gateway.store.list_requests()==[]
         protected=await client.post('/v1/agents/native:gateway/memory',json={**body,'operation_id':'owned-protected-memory'})
@@ -78,3 +88,17 @@ def test_notes_writer_serializes_concurrent_appends_and_preserves_readonly_mode(
             mutate_notes(root,'replace','Not authorized to change readonly file')
         assert file.read_bytes()==before and file.stat().st_mode & 0o777==0o440
     finally:file.chmod(0o600)
+
+
+def test_recoverable_forget_preserves_revision_and_is_not_a_model_tool_action(tmp_path):
+    root=tmp_path/'owned-forget'
+    original=mutate_notes(root,'replace','Owned correction target')
+    with bound_notes_dir(root):
+        assert not agent_notes('forget',expected_revision=original['revision'])['ok']
+    assert read_notes(root)==original
+    forgotten=mutate_notes(root,'forget',expected_revision=original['revision'])
+    assert forgotten['notes']==''
+    assert original['revision'] in {v['revision'] for v in note_versions(root)}
+    with pytest.raises(ValueError,match='changed'):mutate_notes(root,'forget',expected_revision=original['revision'])
+    restored=mutate_notes(root,'restore',expected_revision=forgotten['revision'],restore_revision=original['revision'])
+    assert restored['notes']==original['notes']

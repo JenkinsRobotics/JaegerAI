@@ -85,7 +85,10 @@ def mutate_notes(root: Path, action: str, text: str = '', *, expected_revision: 
         revision = hashlib.sha256(original).hexdigest()
         if expected_revision is not None and expected_revision != revision:
             raise ValueError('Notes changed; reload and review before saving')
-        if action == 'restore':
+        if action == 'forget':
+            if expected_revision is None:raise ValueError('Recoverable forget requires the reviewed revision')
+            new = ''
+        elif action == 'restore':
             if not restore_revision or not re.fullmatch(r'[a-f0-9]{64}',restore_revision):raise ValueError('Invalid saved notes revision')
             saved_path = _versions(root) / (restore_revision + '.md')
             if not saved_path.is_file() or saved_path.is_symlink():raise ValueError('Saved revision missing or unsafe')
@@ -97,7 +100,7 @@ def mutate_notes(root: Path, action: str, text: str = '', *, expected_revision: 
             if not body:raise ValueError('text is required; empty destructive clears are unavailable')
             if action not in {'append','replace'}:raise ValueError('action must be append, replace or restore')
             new = (current.rstrip() + '\n' + body + '\n').lstrip() if action == 'append' else body + '\n'
-        if not new.strip():raise ValueError('Empty destructive clears are unavailable')
+        if not new.strip() and action != 'forget':raise ValueError('Empty destructive clears are unavailable')
         if len(new) > NOTES_MAX_CHARS:raise ValueError(f'notes would exceed {NOTES_MAX_CHARS} characters; original preserved')
         if (root/'NOTES.md').exists() and not ((root/'NOTES.md').stat().st_mode & 0o222):raise ValueError('Notes file is read-only; original permissions preserved')
         versions = _versions(root);versions.mkdir(mode=0o700,exist_ok=True)
@@ -133,6 +136,8 @@ def agent_notes(action: str = "read", text: str = "", expected_revision: str | N
         return {"ok": False, "error": "agent_notes is only available to a specialist agent"}
     try:
         if (action or 'read').strip().lower() == 'read':return {'ok':True,**read_notes(root)}
+        if action.strip().lower() not in {'append','replace'}:
+            raise ValueError('Tool action must be read, append or replace; operator recovery controls are separate')
         return {'ok':True,**mutate_notes(root,action.strip().lower(),text,expected_revision=expected_revision)}
     except (OSError,ValueError) as exc:
         return {'ok':False,'error':str(exc)}
