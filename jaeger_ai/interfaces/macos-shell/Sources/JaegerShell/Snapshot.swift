@@ -359,6 +359,7 @@ final class Snapshotter: NSObject, BridgeHost {
     func bridgeHideWindow() { calls.append("window.hide") }
     func bridgeToggleWindow() { calls.append("window.toggle") }
     func bridgeSetPinned(_ pinned: Bool) { calls.append("window.setPinned") }
+    func bridgeActivityBadge(_ state: ActivityBadgeState) -> [String: Any] { ["applied": false, "state": state.rawValue, "scope": "menu_bar_retained_activity_presence"] }
     func bridgeAcknowledgeNotificationNavigation(_ id: String) -> Bool { false }
     func bridgeNotificationNavigation() -> [String: Any] { ["navigation": NSNull()] }
     func bridgeNotificationStatus(_ done: @escaping ([String: Any]) -> Void) { done(["authorization": "unknown", "permission_requested": false]) }

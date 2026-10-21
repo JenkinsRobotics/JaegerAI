@@ -103,7 +103,7 @@ export interface SkillDetail {
 }
 export interface NotificationPreferences { revision:number;enabled:boolean;muted_agent_ids:string[];read_through:number }
 export interface Notifications {
-  read(options?:{before?:number;category?:string}):Promise<{preferences:NotificationPreferences;notifications:{event_id:number;session_id:string;agent_id?:string;title:string;status?:string;timestamp:number;unread:boolean}[];privacy:string;enabled:boolean;observed_through?:number;next_before?:number|null;category?:string;categories?:{id:string;label:string}[]}>;
+  read(options?:{before?:number;category?:string}):Promise<{retained_unread_presence?:'present'|'absent'|'unknown';preferences:NotificationPreferences;notifications:{event_id:number;session_id:string;agent_id?:string;title:string;status?:string;timestamp:number;unread:boolean}[];privacy:string;enabled:boolean;observed_through?:number;next_before?:number|null;category?:string;categories?:{id:string;label:string}[]}>;
   save(body:{expected_revision:number;enabled:boolean;muted_agent_ids:string[]}):Promise<{preferences:NotificationPreferences}>;
   markRead(through:number):Promise<{preferences:NotificationPreferences}>;
 }

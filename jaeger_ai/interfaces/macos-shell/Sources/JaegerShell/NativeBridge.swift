@@ -16,6 +16,7 @@ protocol BridgeHost: AnyObject {
     func bridgeSetPinned(_ pinned: Bool)
     func bridgeNotificationStatus(_ done: @escaping ([String: Any]) -> Void)
     func bridgeNotify(title: String, body: String, sessionId: String?, done: @escaping BridgeDone)
+    func bridgeActivityBadge(_ state: ActivityBadgeState) -> [String: Any]
     func bridgeAcknowledgeNotificationNavigation(_ id: String) -> Bool
     func bridgeNotificationNavigation() -> [String: Any]
     func bridgeOpenLink(_ url: URL)
@@ -106,6 +107,7 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case .windowToggle: host.bridgeToggleWindow(); reply(id, [:])
         case .windowSetPinned(let pinned): host.bridgeSetPinned(pinned); reply(id, ["pinned": pinned])
         case .notificationStatus: host.bridgeNotificationStatus { [weak self] result in self?.reply(id, result) }
+        case .notificationBadge(let state): reply(id, host.bridgeActivityBadge(state))
         case .notificationNavigation: reply(id, host.bridgeNotificationNavigation())
         case .notificationNavigationAck(let navigationId): reply(id, ["cleared": host.bridgeAcknowledgeNotificationNavigation(navigationId)])
         case .notify(let title, let body, let sessionId): host.bridgeNotify(title: title, body: body, sessionId: sessionId) { [weak self] result, error in self?.finish(id, result, error) }
@@ -208,6 +210,12 @@ extension JaegerShellApplication: BridgeHost {
         return status
     }
 
+    func bridgeActivityBadge(_ state: ActivityBadgeState) -> [String: Any] {
+        statusController?.setActivityBadge(state)
+        return ["applied": statusController?.isPresent == true, "state": state.rawValue,
+                "scope": "menu_bar_retained_activity_presence", "dock_badge_available": false]
+    }
+
     func bridgeAcknowledgeNotificationNavigation(_ id: String) -> Bool {
         notificationNavigation.acknowledge(id)
     }
@@ -228,7 +236,7 @@ extension JaegerShellApplication: BridgeHost {
             case .notDetermined: status = "not_determined"
             @unknown default: status = "unknown"
             }
-            DispatchQueue.main.async { done(["authorization": status, "permission_requested": false, "delivery_proven": false]) }
+            DispatchQueue.main.async { done(["authorization": status, "permission_requested": false, "delivery_proven": false, "activity_badge_available": self.statusController?.isPresent == true, "activity_badge_scope": "menu_bar_retained_activity_presence", "activity_badge_state": self.statusController?.activityBadgeState ?? "off", "dock_badge_available": false]) }
         }
     }
 

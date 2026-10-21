@@ -60,6 +60,7 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
     func bridgeHideWindow() { calls.append("window.hide"); app.bridge?.send(["type": "window.visibility", "visible": false]) }
     func bridgeToggleWindow() { calls.append("window.toggle") }
     func bridgeSetPinned(_ pinned: Bool) { calls.append("window.setPinned \(pinned)") }
+    func bridgeActivityBadge(_ state: ActivityBadgeState) -> [String: Any] { ["applied": false, "state": state.rawValue, "scope": "menu_bar_retained_activity_presence"] }
     func bridgeAcknowledgeNotificationNavigation(_ id: String) -> Bool { false }
     func bridgeNotificationNavigation() -> [String: Any] { ["navigation": NSNull()] }
     func bridgeNotificationStatus(_ done: @escaping ([String: Any]) -> Void) { done(["authorization": "unknown", "permission_requested": false]) }

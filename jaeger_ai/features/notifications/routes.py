@@ -47,7 +47,18 @@ def feed(store,*,before=None,category='all'):
             title={'approval.request':'Approval requested','notification.proactive':'New proactive notification','turn.failed':'Conversation failed','turn.unknown':'Conversation outcome unknown','task.updated':'Task status changed','agent.handoff.finished':'Delegated work status changed'}[event]
             result.append({'event_id':row['event_id'],'session_id':row['session_id'],'agent_id':agent_id,'title':title,'status':status,'timestamp':row['timestamp'],'unread':row['event_id']>prefs['read_through']})
             if len(result)==50:break
-        return {'preferences':prefs,'notifications':result,'privacy':'metadata_only_no_message_preview','scope':'local_operator','enabled':prefs['enabled'],'observed_through':observed,'next_before':last if last and (len(result)==50 or scanned==500) else None,'category':category,'categories':[{'id':key,'label':value[0]} for key,value in CATEGORIES.items()],'pagination_scope':'retained_activity_per_page_entity_dedupe'}
+        # Presence over retained activity, never a total unread count. Older or
+        # category pages cannot establish the current global presence. A full
+        # filtered scan with no visible row stays unknown when capped at500.
+        presence = 'unknown'
+        if before is None and category == 'all':
+            if not prefs['enabled']:
+                presence = 'absent'
+            elif any(row['unread'] for row in result):
+                presence = 'present'
+            elif result or scanned < 500:
+                presence = 'absent'  # newest visible row is at/below read watermark
+        return {'retained_unread_presence':presence,'preferences':prefs,'notifications':result,'privacy':'metadata_only_no_message_preview','scope':'local_operator','enabled':prefs['enabled'],'observed_through':observed,'next_before':last if last and (len(result)==50 or scanned==500) else None,'category':category,'categories':[{'id':key,'label':value[0]} for key,value in CATEGORIES.items()],'pagination_scope':'retained_activity_per_page_entity_dedupe'}
 
 
 def register(gateway):

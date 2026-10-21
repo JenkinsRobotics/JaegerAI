@@ -18,6 +18,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let gatewayItem = NSMenuItem(title: "Gateway: …", action: nil, keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Launch at Login", action: nil, keyEquivalent: "")
     private let runningIcon = StatusItemController.loadIcon("jaeger_icon_22")
+    private var lastRunning = true
+    private var activityBadge: ActivityBadgeState = .off
     private let offIcon = StatusItemController.loadIcon("jaeger_icon_off_22")
 
     init(app: JaegerShellApplication) {
@@ -44,9 +46,34 @@ final class StatusItemController: NSObject, NSMenuDelegate {
 
     var isPresent: Bool { statusItem.button != nil && statusItem.isVisible }
 
+    var activityBadgeState: String { activityBadge.rawValue }
+
+    func setActivityBadge(_ state: ActivityBadgeState) {
+        activityBadge = state
+        renderStatusIcon()
+    }
+
     private func setRunning(_ running: Bool) {
-        if let icon = running ? runningIcon : offIcon { statusItem.button?.image = icon }
-        statusItem.button?.toolTip = running ? "Jaeger (ui-rebuild)" : "Jaeger (ui-rebuild) — WebUI not running"
+        lastRunning = running
+        renderStatusIcon()
+    }
+
+    private func renderStatusIcon() {
+        let base = (lastRunning ? runningIcon : offIcon)
+            ?? NSImage(systemSymbolName: "circle.hexagongrid", accessibilityDescription: "Jaeger")
+        if let base, activityBadge == .present || activityBadge == .unknown {
+            let state = activityBadge
+            statusItem.button?.image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+                base.draw(in: rect)
+                let dot = NSBezierPath(ovalIn: NSRect(x: 12, y: 0, width: 5, height: 5))
+                if state == .present { NSColor.controlAccentColor.setFill(); dot.fill() }
+                else { NSColor.secondaryLabelColor.setStroke(); dot.lineWidth = 1; dot.stroke() }
+                return true
+            }
+        } else { statusItem.button?.image = base }
+        let suffix = activityBadge == .present ? " — unread retained activity" : activityBadge == .unknown ? " — unread activity unknown" : ""
+        statusItem.button?.toolTip = "Jaeger" + (lastRunning ? "" : " — WebUI not running") + suffix
+        statusItem.button?.setAccessibilityLabel("Jaeger" + suffix)
     }
 
     /// One read-only probe of the WebUI to pick the icon (normal launch only).

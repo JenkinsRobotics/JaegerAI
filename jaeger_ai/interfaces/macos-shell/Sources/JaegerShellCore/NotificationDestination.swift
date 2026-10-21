@@ -44,3 +44,8 @@ public final class NotificationNavigationMailbox {
         return true
     }
 }
+
+/// No numeric count: Gateway proves retained presence, absence, or an incomplete scan.
+public enum ActivityBadgeState: String, Equatable, Sendable {
+    case off, present, absent, unknown
+}
