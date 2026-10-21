@@ -78,3 +78,18 @@ def import_template(content: Any) -> dict[str,Any]:
     if redact_text(content)!=content:raise ValueError('Potential secret content requires review; template refused')
     return {**prompt,'template':{'id':'local:'+hashlib.sha256(content.encode()).hexdigest(),'version':value['version'],
             'source_bot':source,'visibility':'owner_local','export_policy':'prompt_only_no_grants','provenance':'owner_provided_unverified'}}
+
+
+def template_catalog(record: Any) -> dict[str,Any]:
+    """Validate retained immutable snapshots before catalog selection or mutation."""
+    import hashlib
+    value=record.metadata.get('template_catalog',{'revision':0,'hidden':False,'versions':[]})
+    if not isinstance(value,dict) or set(value)!={'revision','hidden','versions'} or type(value['revision']) is not int or value['revision']<0 or type(value['hidden']) is not bool or not isinstance(value['versions'],list) or len(value['versions'])>100:
+        raise ValueError('Saved template metadata invalid; retained without replacement')
+    seen=set()
+    for row in value['versions']:
+        if not isinstance(row,dict) or set(row)!={'version','content','sha256'} or not isinstance(row['content'],str):raise ValueError('Invalid retained template version')
+        parsed=import_template(row['content']);source=parsed['template']['source_bot']
+        if row['sha256']!=hashlib.sha256(row['content'].encode()).hexdigest() or type(row['version']) is not int or row['version']!=parsed['template']['version'] or source['agent_id']!=record.id or row['version'] in seen:raise ValueError('Retained template identity/version mismatch')
+        seen.add(row['version'])
+    return value

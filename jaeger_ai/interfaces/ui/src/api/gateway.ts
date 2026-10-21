@@ -223,6 +223,7 @@ export class GatewayClient implements JaegerSource {
     save: (id, body) => this.json(`/v1/agents/${encodeURIComponent(id)}/knowledge`, body, "PATCH"),
   };
   readonly specialistControls: import("./source").SpecialistControls = {
+    catalog:{read:id=>this.json(`/v1/agents/${encodeURIComponent(id)}/templates`),change:(id,body)=>this.json(`/v1/agents/${encodeURIComponent(id)}/templates`,body),operation:id=>this.json('/v1/agent-template-operations/'+encodeURIComponent(id))},
     exportTemplate:(id,revision)=>this.json(`/v1/agents/${encodeURIComponent(id)}/template-export?revision=${revision}`),
     templates: () => this.json("/v1/agent-templates"),
     read: id => this.json(`/v1/agents/${encodeURIComponent(id)}/configuration`),

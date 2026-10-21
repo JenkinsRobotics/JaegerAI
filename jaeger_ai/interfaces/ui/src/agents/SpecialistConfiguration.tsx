@@ -1,3 +1,4 @@
+import {TemplateCatalog} from './TemplateCatalog';
 import {validateTemplateExport} from './templateExport';
 import { Dialog } from '@aether/ui';
 import { useEffect, useRef, useState } from 'react';
@@ -78,6 +79,7 @@ export function SpecialistConfiguration({ agentId, controls, onClose, onSaved }:
     {row && <><p>Revision {row.revision}{row.template ? ` · ${row.template.id} v${row.template.version}` : ''}. Prompt settings do not grant tools or bypass approvals.</p>{!row.editable && <p>This definition is protected or this caller cannot edit it.</p>}</>}
     {row && <details><summary>Current saved specialist settings</summary><p>{row.specialty}</p><p>{row.summary}</p><pre>{row.instructions}</pre></details>}
     {draft && <form className="jg-form" onSubmit={e => { e.preventDefault(); void save(); }}>{(['specialty', 'summary', 'instructions'] as const).map(field => <label className="jg-form__field" key={field}><span>{field}</span><textarea aria-label={`Specialist ${field}`} disabled={busy || !row?.editable || Boolean(pending)} maxLength={{specialty:200,summary:2000,instructions:12000}[field]} value={draft[field]} onChange={e => edit({ [field]: e.target.value })} /></label>)}</form>}
+    {row?.editable&&controls.catalog&&<TemplateCatalog agentId={agentId} controls={controls.catalog}/>}
     {controls.exportTemplate&&<button type="button" disabled={busy||!row?.editable||Boolean(pending)} onClick={()=>void exportPrompt()}>Export current saved prompt template</button>}
     <button type="button" disabled={busy} onClick={() => void check()}>{pending ? 'Check uncertain settings save' : 'Read current saved settings'}</button>
   </Dialog>;

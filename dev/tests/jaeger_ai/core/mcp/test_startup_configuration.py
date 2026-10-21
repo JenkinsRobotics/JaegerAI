@@ -25,7 +25,7 @@ def test_stage_disabled_then_startup_cas_preserves_credentials_and_grants(tmp_pa
         service.set_startup_enabled(layout,'owned',False,expected_revision=before)
     assert json.loads(path.read_text())==data
     inventory=service.configured_startup_inventory(layout)
-    assert inventory['servers']==[{'name':'owned','startup_enabled':True,'transport':'http','status':'not_probed'}]
+    assert inventory['servers']==[{'name':'owned','startup_enabled':True,'transport':'http','status':'not_probed','authentication':'headers_configured_not_probed','tool_policy':{'include':[],'exclude':[],'gated':True}}]
     assert 'existing-owned-ref' not in json.dumps(inventory)
 
 

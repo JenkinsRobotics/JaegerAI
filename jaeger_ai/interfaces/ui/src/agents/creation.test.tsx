@@ -34,3 +34,19 @@ it('dispatches one explicit local snapshot creation and preserves uncertain inte
   expect([...document.querySelectorAll('button')].find(b=>b.textContent==='Create')?.disabled).toBe(true);
  }finally{await act(async()=>root.unmount());host.remove();anchor.remove();localStorage.clear();}
 });
+it('selects distinct saved versions with the same catalog identity',async()=>{
+ localStorage.clear();const anchor=document.createElement('button');document.body.append(anchor);const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ const template={id:'saved:native:source',name:'Owned saved template',specialty:'owned',summary:'owned',instructions:'owned',tools_granted:false as const};
+ const controls={templates:vi.fn(async()=>({templates:[{...template,version:1},{...template,version:2}]})),read:vi.fn(),save:vi.fn()};const create=vi.fn(async()=>{throw Error('Lost ACK');});
+ try{
+  await act(async()=>root.render(<NewChatMenu anchor={anchor} agents={[]} controls={controls} onClose={()=>{}} onNewChat={()=>{}} onCreateAgent={create}/>));
+  await act(async()=>[...document.querySelectorAll('[role="menuitem"]')].find(b=>b.textContent?.includes('Create agent'))!.dispatchEvent(new MouseEvent('click',{bubbles:true})));
+  const select=document.querySelector<HTMLSelectElement>('[aria-label="Agent template"]')!;
+  expect([...select.options].map(o=>o.value)).toEqual(['','saved:native:source:v1','saved:native:source:v2']);
+  const input=document.querySelector<HTMLInputElement>('input[placeholder="Research"]')!;
+  await act(async()=>{select.value='saved:native:source:v2';select.dispatchEvent(new Event('change',{bubbles:true}));Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Owned version two');input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Create')!.click());
+  expect(create).toHaveBeenCalledExactlyOnceWith('Owned version two','',expect.any(String),{id:'saved:native:source',version:2},undefined);
+  expect(JSON.parse(localStorage.getItem('jaeger.ui.agent-create.v1')!).template).toEqual({id:'saved:native:source',version:2});
+ }finally{await act(async()=>root.unmount());host.remove();anchor.remove();localStorage.clear();}
+});

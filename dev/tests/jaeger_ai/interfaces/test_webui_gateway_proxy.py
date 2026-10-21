@@ -408,3 +408,12 @@ def test_template_export_keeps_reviewed_revision(overlay):
     path='/v1/agents/native:owned/template-export?revision=2'
     assert _route(overlay,path) is True
     assert overlay._calls[-1]==('GET',path)
+
+
+@pytest.mark.parametrize(('path','method'),[
+    ('/v1/agents/native:owned/templates','GET'),('/v1/agents/native:owned/templates','POST'),
+    ('/v1/agent-template-operations/owned-command','GET'),
+])
+def test_saved_template_catalog_proxy(overlay,path,method):
+    assert _route(overlay,path,method) is True
+    assert overlay._calls[-1]==(method,path)

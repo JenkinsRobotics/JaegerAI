@@ -50,5 +50,8 @@ async def test_divergent_lost_result_stays_unknown_and_blocks_fresh_intent(gw,tm
     assert (await (await http.get(path+'/operations/'+body['operation_id'])).json())['outcome']=='unknown'
     assert (await (await http.post(path+'/change',json=body)).json())['outcome']=='unknown'
     assert (await http.post(path+'/change',json={**body,'operation_id':'owned-mcp-fresh'})).status==409
+    rejected=await (await http.get(path+'/operations/owned-mcp-fresh')).json()
+    assert rejected['outcome']=='rejected'
+    assert await (await http.post(path+'/change',json={**body,'operation_id':'owned-mcp-fresh'})).json()==rejected
     assert calls==[1]
     assert (root/'mcp.json').read_text()=='{"version":1,"servers":[]}'

@@ -80,8 +80,9 @@ export interface SpecialistSettings { specialty: string; summary: string; instru
 export interface SpecialistConfiguration extends SpecialistSettings { agent_id: string; revision: number; editable: boolean; template?: { id: string; version: number } }
 export interface AgentTemplate extends SpecialistSettings { id: string; version: number; name: string; tools_granted: false }
 export interface SpecialistControls {
+  catalog?:TemplateCatalogControls;
   exportTemplate?(id:string,revision:number):Promise<{agent_id:string;revision:number;content:string;sha256:string;filename:string;visibility:'owner_local';export_policy:'prompt_only_no_grants'}>;
-  templates(): Promise<{ templates: AgentTemplate[] }>;
+  templates(): Promise<{ templates: AgentTemplate[];unavailable_saved_sources?:string[] }>;
   read(id: string): Promise<SpecialistConfiguration>;
   save(id: string, body: { expected_revision: number; settings: SpecialistSettings }): Promise<SpecialistConfiguration>;
 }
@@ -312,10 +313,16 @@ export interface SkillReview {requested_tools?:string[];added_tool_requirements?
 export interface PlaybookBundle {format:'jaeger-playbook-bundle-v1';name:string;revision:string;provenance:string;publisher_verified:false;license_verified:false;target:'local_file';execution_authorized:false;files:{path:string;size_bytes:number;sha256:string;base64:string}[]}
 export interface ManagedSkills {export?(name:string,revision:string):Promise<PlaybookBundle>;review(body:{name:string;category:string;content:string;expected_revision:string}):Promise<SkillReview>;content(name:string):Promise<{name:string;category:string;content:string;revision:string;content_redacted:boolean}>;list():Promise<{skills:ManagedSkill[];operations:SkillChangeReceipt[];config_revision?:string;scope:'current_instance_playbooks';activation_performed:false}>;change(body:SkillChange):Promise<SkillChangeReceipt>;original(op:string):Promise<SkillChangeReceipt>}
 
-export type MCPConfigurationIntent = {operation_id:string;expected_revision:string}&({action:'stage';definition:{name:string;url:string}|{name:string;command:string;args:string[]}}|{action:'startup';name:string;enabled:boolean});
-export type MCPConfigurationReceipt = {operation_id:string;outcome:'saved'|'rejected'|'unknown';error?:string;config_revision?:string;connection_attempted?:false};
+export type MCPConfigurationIntent = {operation_id:string;expected_revision:string}&({action:'stage';definition:{name:string;url:string}|{name:string;command:string;args:string[]}}|{action:'startup';name:string;enabled:boolean}|{action:'policy';name:string;policy:MCPToolPolicy}|{action:'restore_policy';restore_from:string});
+export interface MCPToolPolicy {include:string[];exclude:string[];gated:boolean}
+export type MCPConfigurationReceipt = {operation_id:string;outcome:'saved'|'rejected'|'unknown';error?:string;config_revision?:string;connection_attempted?:false;kind?:'tool_policy_restriction'|'tool_policy_restore';name?:string;before_policy?:MCPToolPolicy;after_policy?:MCPToolPolicy};
 export interface MCPConfiguration {
-  read():Promise<{config_revision:string;servers:{name:string;startup_enabled:boolean;transport:string;status:'not_probed'}[]}>;
+  read():Promise<{config_revision:string;restore_operation?:string;servers:{name:string;startup_enabled:boolean;transport:string;status:'not_probed';authentication?:'oauth_configured_not_probed'|'headers_configured_not_probed'|'credential_references_not_probed'|'transport_auth_not_configured';tool_policy?:MCPToolPolicy;policy_error?:string}[]}>;
   change(body:MCPConfigurationIntent):Promise<MCPConfigurationReceipt>;
   operation(id:string):Promise<MCPConfigurationReceipt>;
 }
+
+export interface TemplateCatalogState {agent_id:string;source_revision:number;catalog_revision:number;hidden:boolean;versions:{version:number;sha256:string}[]}
+export type TemplateCatalogIntent={operation_id:string;expected_catalog_revision:number}&({action:'save';expected_revision:number}|{action:'visibility';hidden:boolean});
+export type TemplateCatalogReceipt={operation_id:string;outcome:'saved'|'rejected'|'unknown';error?:string;result?:TemplateCatalogState};
+export interface TemplateCatalogControls {read(id:string):Promise<TemplateCatalogState>;change(id:string,body:TemplateCatalogIntent):Promise<TemplateCatalogReceipt>;operation(id:string):Promise<TemplateCatalogReceipt>}

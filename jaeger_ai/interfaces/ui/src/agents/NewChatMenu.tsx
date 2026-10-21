@@ -44,7 +44,7 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
   useEffect(() => {
     if (!creating || !controls) return;
     let live = true;
-    void controls.templates().then(v => { if (live) { setTemplates(v.templates); setTemplateError(undefined); } }, e => { if (live) setTemplateError(String(e)); });
+    void controls.templates().then(v => { if (live) { setTemplates(v.templates); setTemplateError(v.unavailable_saved_sources?.length?'Some saved local template versions are unreadable; originals retained. Available templates remain usable.':undefined); } }, e => { if (live) setTemplateError(String(e)); });
     return () => { live = false; };
   }, [creating, controls]);
   const [pending, setPending] = useState<string>();
@@ -56,7 +56,7 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
       if (!raw) return;
       const value = JSON.parse(raw);
       if (typeof value.operationId !== "string" || typeof value.name !== "string" || typeof value.job !== "string") throw Error("Invalid saved creation command; original retained");
-      setSnapshot(value.snapshot??''); setTemplateId(value.template?.id ?? ""); setPending(value.operationId); setName(value.name); setJob(value.job); setCreating(true);
+      setSnapshot(value.snapshot??''); setTemplateId(value.template?value.template.id+':v'+value.template.version:''); setPending(value.operationId); setName(value.name); setJob(value.job); setCreating(true);
     } catch (e) { lock.current = true; setCreating(true); setError(`Creation recovery unavailable: ${String(e)}`); }
   }, []);
   const closeDialog = () => { if (busy) return; setCreating(false); if (!pending) { setName(""); setJob(""); setSnapshot(''); setError(undefined); } };
@@ -65,7 +65,7 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
     if (!agentSlug(name)) { setError("Give the agent a name."); return; }
     lock.current = true; setBusy(true); setError(undefined);
     const operationId = crypto.randomUUID();
-    const selectedTemplate = templates.find(t => t.id === templateId);
+    const selectedTemplate = templates.find(t => t.id+':v'+t.version === templateId);
     const template = selectedTemplate ? { id: selectedTemplate.id, version: selectedTemplate.version } : undefined;
     try {
       if (snapshot && templateId) throw Error("Choose a catalog template or a local snapshot, not both");
@@ -103,11 +103,11 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
           <button type="button" className="aui-button aui-button--primary" disabled={busy || Boolean(pending)} onClick={() => void submit()}>Create</button>
         </>}>
         <form className="jg-form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
-          {controls && <label className="jg-form__field"><span>Start from template</span><select aria-label="Agent template" disabled={busy || Boolean(pending)} value={templateId} onChange={e => setTemplateId(e.target.value)}><option value="">Blank specialist</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name} · v{t.version}</option>)}</select></label>}
+          {controls && <label className="jg-form__field"><span>Start from template</span><select aria-label="Agent template" disabled={busy || Boolean(pending)} value={templateId} onChange={e => setTemplateId(e.target.value)}><option value="">Blank specialist</option>{templates.map(t => <option key={t.id+':'+t.version} value={t.id+':v'+t.version}>{t.name} · v{t.version}</option>)}</select></label>}
           <label className="jg-form__field"><span>Local prompt template JSON (optional)</span><textarea aria-label="Local prompt template JSON" disabled={busy||Boolean(pending)} maxLength={100000} value={snapshot} onChange={e=>{setSnapshot(e.target.value);setTemplateId('');}}/></label>
           {snapshot&&<p>Creates a new specialist from the supplied prompt only. Source linkage is unverified; no history, accounts, plugin state or grants transfer. The server validates the exact policy and version.</p>}
-          {templateError && <p role="alert">Templates unavailable: {templateError}. Blank creation remains available.</p>}
-          {templateId && <p>{templates.find(t => t.id === templateId)?.summary} No tool permissions or credentials are copied.</p>}
+          {templateError && <p role="alert">{templateError}. Blank creation remains available.</p>}
+          {templateId && <p>{templates.find(t => t.id+':v'+t.version === templateId)?.summary} No tool permissions or credentials are copied.</p>}
 
           <label className="jg-form__field">
             <span>Name</span>
