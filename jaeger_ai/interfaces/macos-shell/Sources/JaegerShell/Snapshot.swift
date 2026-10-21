@@ -380,6 +380,7 @@ final class Snapshotter: NSObject, BridgeHost {
     func bridgeTTSSpeak(text: String, voice: String?, done: @escaping BridgeDone) { calls.append("tts.speak refused"); done(nil, "snapshot_mode") }
     func bridgeTTSStop() { calls.append("tts.stop") }
     func bridgeOpenFile(_ url: URL) { calls.append("file.open (recorded)") }
+    func bridgeReadClipboard() -> [String: Any] { ["state": "not_performed", "max_bytes": ClipboardPreview.maxBytes] }
     func bridgeCopy(_ text: String) -> Bool? { calls.append("copy (recorded)"); return nil }
     func bridgeMicStatus() -> [String: Any] { calls.append("mic.status"); return ["permission": "not_requested"] }
     func bridgeTTSStatus() -> [String: Any] { calls.append("tts.status"); return ["available": false] }
