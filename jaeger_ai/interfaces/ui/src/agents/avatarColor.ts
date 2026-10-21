@@ -1,4 +1,4 @@
-/* Deterministic avatar color per agent, from the Jaeger avatar tokens (tokens.jaeger.css;
+/* Deterministic avatar color per agent, from the Jaeger avatar tokens (the generated design tokens (tokens.compat.css);
  * no literals here). The same id always gets the same hue. */
 export const AVATAR_PALETTE = [
   "var(--jg-avatar-red)",

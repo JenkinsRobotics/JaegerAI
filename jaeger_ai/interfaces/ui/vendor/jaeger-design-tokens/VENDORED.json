@@ -1,0 +1,10 @@
+{
+ "package": "@jaeger/design-tokens",
+ "version": "1.0.0",
+ "source": "packages/jaeger-design-tokens/dist",
+ "sha256": {
+  "jaeger.css": "6bbd20a3653e06dee98884dd992e8ceeb2805eb904b27e06c175777da832f374",
+  "aether.css": "55a4877d13f8b0ac81d64b2853037647a1fae9dee5a218d1ea72d19d2004132e",
+  "jaeger-vscode-map.css": "1d24b5c025bd475b74214aa7e85fd42f3062ed867285e717ddee3bebbdff4d45"
+ }
+}

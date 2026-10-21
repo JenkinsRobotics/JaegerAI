@@ -1,0 +1,134 @@
+/* Compatibility layer over the generated design tokens (vendor/jaeger-design-tokens, @jaeger/design-tokens 1.0.0).
+ * Colours, type, spacing, radius and motion come from jaeger.css; this file only maps the pre-package names that
+ * component CSS still uses onto them (SPEC-00 migration map) and adds Aether aliases the generated aether.css lacks.
+ * No new colour values: everything below the component palettes is var() or color-mix() of a generated token.
+ * Mode: html[data-mode] (kept in sync with Aether's .aether-light-theme class by platform/appearanceSync.ts). */
+:root,
+:root .aether-home-theme {
+  /* Surfaces and text (migration map). */
+  --jg-color-chrome: var(--jg-bg);
+  --jg-color-pane: var(--jg-surface);
+  --jg-color-sidebar: var(--jg-sidebar);
+  --jg-color-elevated: var(--jg-raised);
+  --jg-color-fg: var(--jg-text);
+  --jg-color-text: var(--jg-text);
+  --jg-color-text-secondary: var(--jg-text-2);
+  --jg-color-text-tertiary: var(--jg-text-3);
+  --jg-color-text-quaternary: var(--jg-faint);
+  --jg-color-border: var(--jg-border);
+  --jg-color-border-tertiary: color-mix(in srgb, var(--jg-border) 60%, transparent);
+  --jg-color-inset: var(--jg-inset);
+  --jg-color-hover: var(--jg-inset);
+  --jg-color-active: color-mix(in srgb, var(--jg-text) 8%, transparent);
+  --jg-color-control-hover: var(--jg-inset);
+  --jg-color-bubble-assistant: var(--jg-inset);
+  --jg-color-accent: var(--jg-accent);
+  --jg-color-accent-text: var(--jg-accent-text);
+  --jg-color-on-accent: var(--jg-on-accent);
+  --jg-color-on-badge: var(--jg-tint-label);
+  --jg-color-shade: var(--jg-text);
+  --jg-color-shadow: var(--jg-text);
+  --jg-danger: var(--jg-error);
+  --jg-danger-fill: var(--jg-error);
+  --jg-primary-yellow: var(--jg-warn);
+  /* Agent avatar hues → the 8 tints (white-label safe at AA). */
+  --jg-avatar-red: var(--jg-tint-red);
+  --jg-avatar-green: var(--jg-tint-green);
+  --jg-avatar-purple: var(--jg-tint-purple);
+  --jg-avatar-pink: var(--jg-tint-pink);
+  --jg-avatar-teal: var(--jg-tint-teal);
+  --jg-avatar-brown: var(--jg-tint-brown);
+  --jg-avatar-blue: var(--jg-tint-blue);
+  --jg-avatar-orange: var(--jg-tint-orange);
+  --jg-mix-bubble-user: 80%;
+  --jg-mix-agent-button: 92%;
+  --jg-alpha-text-secondary: 68%;
+  --jg-alpha-text-tertiary: 56%;
+  --jg-alpha-text-quaternary: 40%;
+  --jg-alpha-border: 12%;
+  --jg-alpha-border-tertiary: 8%;
+  --jg-alpha-hover: 6%;
+  --jg-alpha-active: 8%;
+  --jg-alpha-bubble-assistant: 6%;
+  --jg-shadow-card: 0 1px 2px color-mix(in srgb, var(--jg-color-shadow) 6%, transparent),
+                    0 4px 16px color-mix(in srgb, var(--jg-color-shadow) 6%, transparent);
+  --jg-shadow-control: 0 1px 3px color-mix(in srgb, var(--jg-color-shadow) 12%, transparent);
+  /* Type and motion (old names). */
+  --jg-font-family: var(--jg-font-sans);
+  --jg-font-size-base: var(--jg-font-size-body);
+  --jg-font-body: var(--jg-font-size-body);
+  --jg-font-small: var(--jg-font-size-sm);
+  --jg-font-tiny: var(--jg-font-size-xs);
+  --jg-font-weight-base: var(--jg-font-weight-regular);
+  --jg-line-height-base: 22px;
+  --jg-ease-out-quint: var(--jg-ease-out);
+  --jg-ease-out-cubic: var(--jg-ease-press);
+
+  /* Aether names the generated aether.css does not cover (used by vendored widgets). */
+  --aether-color-bg-control-hover: var(--jg-inset);
+  --aether-color-bg-selected: var(--jg-accent);
+  --aether-color-text-on-selected: var(--jg-on-accent);
+  --aether-color-border-control-hover: var(--jg-border-strong);
+  --aether-color-selection-edge: var(--jg-focus);
+  --aether-color-shadow: var(--jg-text);
+  --aether-color-hardware: var(--jg-tint-orange);
+  --aether-color-joint: var(--jg-tint-purple);
+  --aether-focus-halo: none;
+  --aether-font-mono: var(--jg-font-mono);
+  --aether-font-letter-caps: 0.09em;
+  --aether-font-size-body: var(--jg-font-size-sm);
+  --aether-font-size-caption: 9px;
+  --aether-font-size-label: 10px;
+  --aether-font-size-micro: 8px;
+  --aether-font-weight-strong: var(--jg-font-weight-strong);
+  --aether-size-grid: var(--jg-space-1);
+  --aether-size-icon-slot: 36px;
+  --aether-size-rail: 42px;
+  --aether-size-row: 36px;
+  --aether-size-statusbar: 27px;
+  --aether-size-topbar: 56px;
+  color-scheme: light dark;
+}
+:root[data-mode="light"] { color-scheme: light; --jg-shadow-control: 0 1px 3px color-mix(in srgb, var(--jg-color-shadow) 12%, transparent); }
+:root[data-mode="dark"] {
+  color-scheme: dark;
+  --jg-shadow-card: 0 1px 2px color-mix(in srgb, var(--jg-color-shadow) 40%, transparent),
+                    0 4px 16px color-mix(in srgb, var(--jg-color-shadow) 32%, transparent);
+  --jg-shadow-control: none;
+}
+:root[data-mode="dark"], :root[data-mode="dark"] .aether-home-theme { --jg-color-shade: var(--jg-bg); --jg-color-shadow: var(--jg-bg); --aether-color-shadow: var(--jg-bg); }
+
+body {
+  font-family: var(--jg-font-sans);
+  font-size: var(--jg-font-size-body);
+  font-weight: var(--jg-font-weight-regular);
+  line-height: var(--jg-line-height-base);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Component palettes not yet in the token set (follow-up: add to jaeger-tokens.json). */
+/* Phone layout (phone/phone.css) and the agent context menu (agents/AgentContextMenu.tsx), from the Grok Bot iOS
+ * refs: dark unless Aether's light appearance is on. */
+:root {
+  --jg-p-bg: #121212; --jg-p-fg: #f2f2f2; --jg-p-dim: #8e8e93; --jg-p-raised: #262626; --jg-p-button: #2c2c2e; --jg-p-me: #3a3a3c;
+  --jg-p-blue: #2f6fea; --jg-p-green: #34c759; --jg-p-orange: #f5a623; --jg-p-on-color: #ffffff;
+  --jg-p-voice-bg: #ffffff; --jg-p-voice-fg: #000000;
+  --jg-menu-scrim: rgba(0, 0, 0, .35); --jg-menu-shadow: rgba(0, 0, 0, .35); --jg-menu-fg: #f2f2f2; --jg-menu-dim: #aeaeb2;
+  --jg-menu-preview: #1c1c1e; --jg-menu-bubble: #2c2c2e; --jg-menu-card: rgba(58, 58, 60, .72); --jg-menu-line: rgba(255, 255, 255, .08);
+  --jg-menu-hover: rgba(255, 255, 255, .08); --jg-menu-sep: rgba(255, 255, 255, .12); --jg-menu-input: #1c1c1e; --jg-menu-input-line: rgba(255, 255, 255, .15);
+  --jg-menu-button: rgba(255, 255, 255, .1); --jg-menu-toast: rgba(44, 44, 46, .95);
+  --jg-danger: #ff5a5f; --jg-danger-fill: #e5484d;
+  --jg-scrim: rgba(0, 0, 0, .55);
+}
+:root.aether-light-theme {
+  color-scheme: light;
+  --jg-p-bg: #ffffff; --jg-p-fg: #111111; --jg-p-dim: #6e6e73; --jg-p-raised: #f0f0f2; --jg-p-button: #ececef; --jg-p-me: #d1d1d6;
+  --jg-p-voice-bg: #111111; --jg-p-voice-fg: #ffffff;
+  --jg-menu-scrim: rgba(0, 0, 0, .18); --jg-menu-shadow: rgba(0, 0, 0, .18); --jg-menu-fg: #111111; --jg-menu-dim: #6e6e73;
+  --jg-menu-preview: #ffffff; --jg-menu-bubble: #f0f0f2; --jg-menu-card: rgba(250, 250, 250, .8); --jg-menu-line: rgba(0, 0, 0, .08);
+  --jg-menu-hover: rgba(0, 0, 0, .06); --jg-menu-sep: rgba(0, 0, 0, .1); --jg-menu-input: #ffffff; --jg-menu-input-line: rgba(0, 0, 0, .15);
+  --jg-menu-button: rgba(0, 0, 0, .06); --jg-menu-toast: rgba(44, 44, 46, .95);
+  --jg-danger: #e5484d; --jg-danger-fill: #e5484d;
+  --jg-scrim: rgba(0, 0, 0, .5);   /* measured: Grok dims 245 → 122 */
+}
+:root:not(.aether-light-theme) { color-scheme: dark; }

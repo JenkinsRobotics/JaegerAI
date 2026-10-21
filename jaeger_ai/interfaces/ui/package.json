@@ -6,8 +6,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "node scripts/check-theme-literals.mjs && tsc --noEmit && vite build && node scripts/check-no-mock.mjs",
+    "build": "node scripts/check-vendored-tokens.mjs && node scripts/check-theme-literals.mjs && tsc --noEmit && vite build && node scripts/check-no-mock.mjs",
     "preview": "vite preview --host 127.0.0.1",
+    "check:tokens": "node scripts/check-vendored-tokens.mjs",
     "check:theme": "node scripts/check-theme-literals.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
