@@ -1431,6 +1431,8 @@ class JaegerGatewayApp:
         self.app.router.add_get('/v1/runtime/updates/plan', update_plan)
         from .computer_status import register as register_computer_status
         register_computer_status(self)
+        from .policy_status import register as register_policy_status
+        register_policy_status(self)
         self.app.router.add_post("/v1/sessions/{id}/ide/{ide_request_id}", self.handle_ide_result)
         self.app.router.add_get("/v1/runtime/autonomy", self.handle_get_autonomy)
         self.app.router.add_post("/v1/runtime/autonomy", self.handle_set_autonomy)

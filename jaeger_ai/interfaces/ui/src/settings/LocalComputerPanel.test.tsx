@@ -10,3 +10,10 @@ it('keeps Gateway inventory and explicit native OS status separate without captu
   await act(async()=>[...el.querySelectorAll('button')].find(b=>b.textContent==='Open Accessibility settings')!.click());expect(el.textContent).toContain('did not change any permission');expect(post).toHaveBeenCalledTimes(2);
  }finally{await act(async()=>root.unmount());el.remove();window.jaegerNative=prior;}
 });
+it('shows source policy separately from a grant and clears it on failed refresh',async()=>{
+ const policySources=vi.fn().mockResolvedValue({scope:'bound_instance_policy_sources',state:'observed',revision:'owned',action_authorized:false,mutation_supported:false,hook_execution_performed:false,per_request_grants:'not_inferred',os_permissions:'not_inferred',commissioning_state:'configured',sources:[{id:'filesystem.write',value:false,source:'commissioning_authority'},{id:'shell.risk_mode',value:'deny',source:'commissioning_authority'}],persistent_skill_grants:{state:'configured',count:1,names_disclosed:false,scope:'configured_skill_names_only_not_per_call_authority'},limits:['A stored grant is not an action authorization.']});
+ const source={policySources}as unknown as JaegerSource;const el=document.createElement('div');document.body.append(el);const root=createRoot(el);
+ try{await act(async()=>root.render(<LocalComputerPanel source={source}/>));const panel=()=>el.querySelector('[aria-label="Existing policy sources"]')!;expect(panel().textContent).toContain('filesystem.write');expect(panel().textContent).toContain('deny');expect(panel().textContent).toContain('cannot authorize a tool');expect(panel().querySelector('input,select,button')).toBeNull();
+ policySources.mockRejectedValue(Error('unavailable'));await act(async()=>[...el.querySelectorAll('button')].find(b=>b.textContent==='Recheck Gateway computer inventory')!.click());expect(panel().textContent).toContain('unavailable');expect(panel().textContent).not.toContain('filesystem.write');
+ }finally{await act(async()=>root.unmount());el.remove();}
+});

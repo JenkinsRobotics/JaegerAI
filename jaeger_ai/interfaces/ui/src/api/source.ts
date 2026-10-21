@@ -151,6 +151,7 @@ export interface SemanticClaimControls {
  mutate(id:string,action:'correct'|'forget'|'restore',body:{operation_id:string;expected_revision:string;text?:string}):Promise<ControlResult>;
  operation(id:string):Promise<{receipt:ControlResult|null}>;
 }
+export interface PolicySources {scope:'bound_instance_policy_sources';state:'observed'|'runtime_not_bound';revision:string|null;action_authorized:false;mutation_supported:false;hook_execution_performed:false;per_request_grants:string;os_permissions:string;sources:{id:string;value:string|boolean|number;source:string}[];commissioning_state?:string;persistent_skill_grants?:{state:string;count:number|null;scope:string;names_disclosed:false};limits:string[]}
 export interface ComputerSnapshot {scope:'gateway_process_only';computers:{id:string;kind:string;state:string;process_id:number;os:string;architecture:string;screen_view:string;input_authorization:string;os_permissions:string;recovery:string}[];hosted:{state:string;allocation_supported:false};requests:Record<string,number>;approvals:Record<string,number>;actions:{allocate:false;restart:false;input:false;capture:false};limits:string[]}
 export interface UpdatePlan {component:'jaeger-update-plan';reported_package_version:string;install_method:string;channel:'stable'|'latest';channels:('stable'|'latest')[];source_checkout_revision:string|null;source_checkout_dirty:boolean|null;identity_scope:string;active_instance_schema:string|null;installed_schema:string;migration_state:string;work:{active_requests:number;unknown_requests:number;nonterminal_tasks:number};restart_blockers:string[];restart_policy:string;release_state:string;signature_state:string;automatic_install_supported:false;automatic_restart_supported:false;check_command:string[];manual_update_command:string[];rollback:{available:boolean;supported_by:string;command:string[];requires_explicit_operator_review:true};limits:string[]}
 export interface GatewayDiagnostics {
@@ -232,6 +233,7 @@ export interface JaegerSource {
   savedMessage?(agentId:string,messageId:string,offset:number,revision?:string):Promise<SavedMessageChunk>;
   searchMessages?(agentId: string, query: string, before?: string): Promise<MessageSearchPage>;
   diagnosticCapture?:import('./diagnosticCapture').DiagnosticCaptureControls;
+  policySources?():Promise<PolicySources>;
   computers?():Promise<ComputerSnapshot>;
   updatePlan?(channel:"stable"|"latest"):Promise<UpdatePlan>;
   diagnostics?(): Promise<GatewayDiagnostics>;
