@@ -195,6 +195,9 @@ export function showsProgress(turn: ChatTurn): boolean {
 
 const replyText = (turn: ChatTurn) => turn.parts.filter((p) => p.kind === "markdownContent").map((p) => (p as { text: string }).text).join("\n\n");
 
+/** Inline transcript retention budget (turns); older durable pages are refetched on demand. */
+export const RETAINED_TURNS_MAX = 400;
+
 export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessionId?: string; agents?: Agent[] }) {
   const devicePreferences = useDevicePreferences();
   const [filesOpen,setFilesOpen]=useState(false);
@@ -236,6 +239,9 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   /** Turns already there when the chat loaded don't play the enter animation. */
   const loadedTurns = useRef<Set<string>>(new Set());
   const snapshotOwner = useRef<string | undefined>(undefined);
+  /** Loaded home pages, oldest first, each with the cursor that fetched it (undefined = newest). Retention is
+   * trimmed by whole pages so a dropped page stays reachable: `older` goes back to its own cursor (GB-074). */
+  const pages = useRef<Array<{ ids: string[]; cursor?: string }>>([]);
   const summarizedSnapshot = useRef(false);
   const field = useRef<HTMLTextAreaElement>(null);
   /** Grok's "Composer actions" (the + button) and "Message actions" (right-click a bubble) menus. */
@@ -296,6 +302,8 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     if (sessionId && home) home.page(sessionId).then((p) => {
       if (!live) return;
       loadedTurns.current = new Set(p.turns.map((t) => t.turnId));
+      if (!sameOwner || !pages.current.length) pages.current = [{ ids: p.turns.map((t) => t.turnId) }];
+      else pages.current[pages.current.length - 1].ids.push(...p.turns.map((t) => t.turnId));
       snapshotOwner.current = sessionId;
       setEntries(current => sameOwner ? { ...current, ...p.entries } : p.entries);
       if (!sameOwner) setOlder(p.before);
@@ -325,6 +333,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       if (event.type === "changed") { setAttempt(n => n + 1); return; }
       const p = event.page;
       p.turns.forEach((t) => loadedTurns.current.add(t.turnId));
+      pages.current[pages.current.length - 1]?.ids.push(...p.turns.map((t) => t.turnId));
       setEntries((cur) => ({ ...cur, ...p.entries }));
       setSession((s) => (s && s.id === p.sessionId ? { ...s, turns: [...s.turns.filter((t) => !p.turns.some((n) => n.turnId === t.turnId)), ...p.turns] } : s));
     }, controller.signal).catch(() => { /* live posts are best-effort; the next load shows them */ });
@@ -337,7 +346,9 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     if (!home || !sessionId || !older || loadingOlder) return;
     setLoadingOlder(true);
     setOlderError(undefined);
+    const cursor = older;
     home.page(sessionId, older).then((p) => {
+      pages.current.unshift({ ids: p.turns.map((t) => t.turnId), cursor });
       if (el) prepend.current = { height: el.scrollHeight, top: el.scrollTop };
       stick.current = false;
       p.turns.forEach((t) => loadedTurns.current.add(t.turnId));
@@ -346,6 +357,25 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       setSession((s) => (s && s.id === p.sessionId ? { ...s, turns: [...p.turns, ...s.turns.filter((t) => !p.turns.some((n) => n.turnId === t.turnId))] } : s));
     }, (error: unknown) => setOlderError(String((error as Error)?.message ?? error))).finally(() => setLoadingOlder(false));
   }, [home, sessionId, older, loadingOlder]);
+
+  /** Bound inline history: while the reader is at the bottom and no page is loading, drop the oldest whole pages
+   * beyond RETAINED_TURNS_MAX. Durable history is untouched; scrolling up refetches from the dropped cursor. */
+  const trimRetained = useCallback(() => {
+    if (!stick.current || loadingOlder) return;
+    let total = pages.current.reduce((n, pg) => n + pg.ids.length, 0);
+    const dropped = new Set<string>(); let cursor: string | undefined; let trimmed = false;
+    while (total > RETAINED_TURNS_MAX && pages.current.length > 1) {
+      const pg = pages.current.shift()!;
+      pg.ids.forEach((id) => { dropped.add(id); loadedTurns.current.delete(id); });
+      total -= pg.ids.length; cursor = pg.cursor; trimmed = true;
+    }
+    if (!trimmed) return;
+    for (const pg of pages.current) for (const id of pg.ids) if (dropped.delete(id)) loadedTurns.current.add(id);
+    setOlder(cursor);
+    setEntries((cur) => Object.fromEntries(Object.entries(cur).filter(([id]) => !dropped.has(id))));
+    setSession((s) => (s ? { ...s, turns: s.turns.filter((t) => !dropped.has(t.turnId)) } : s));
+  }, [loadingOlder]);
+  useEffect(() => { trimRetained(); }, [session, trimRetained]);
 
   // The agent this chat talks to: pill, placeholder and tint.
   useEffect(() => {
@@ -399,6 +429,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     const near = gap < Math.max(STICK_PX, streamStyle.scroll.thresholdPx) || (stick.current && !userScrolled());
     if (el.scrollTop < OLDER_PX && older && !loadingOlder && !olderError) loadOlder();
     stick.current = near;
+    if (near) trimRetained();
     // Remember how much was there when the reader left, for the unread badge.
     if (near) unreadBase.current = null;
     else if (unreadBase.current === null) unreadBase.current = messageCount(session?.turns ?? []);
