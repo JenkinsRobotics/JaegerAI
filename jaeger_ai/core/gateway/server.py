@@ -4087,7 +4087,7 @@ class JaegerGatewayApp:
         """
         native_session = mcp_session or "dispatcher"
 
-        def _blocking_chat() -> tuple[str, str]:
+        def _blocking_chat_unbound() -> tuple[str, str]:
             import urllib.error
             from urllib.parse import urlparse
 
@@ -4152,6 +4152,17 @@ class JaegerGatewayApp:
             if host:
                 label = f"mcp:{host}"
             return response_text, label
+
+        def _blocking_chat() -> tuple[str, str]:
+            # Bind this turn's Stop event so native_mcp's tools/call can be
+            # interrupted (notifications/cancelled) instead of running to its
+            # timeout. No scope (unregistered or released request) → unbound,
+            # which is exactly the old blocking call.
+            from jaeger_agent.core.cancellation import turn_cancellation
+
+            scope = self._cancellations.get(request_id) if request_id else None
+            with turn_cancellation(getattr(scope, "event", None)):
+                return _blocking_chat_unbound()
 
         try:
             return await asyncio.wait_for(
