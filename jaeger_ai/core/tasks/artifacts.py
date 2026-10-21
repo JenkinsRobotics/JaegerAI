@@ -15,11 +15,11 @@ from pathlib import Path
 
 from jaeger_os.core.safety.file_safety import is_sensitive_path
 
-from .models import TaskState
+from .completion import is_owner_verified
 
 
 def references(gateway, task):
-    if task.state is not TaskState.COMPLETED_VERIFIED:
+    if not is_owner_verified(task):
         return []
     evidence = task.payload.get('verification')
     if not isinstance(evidence, list):

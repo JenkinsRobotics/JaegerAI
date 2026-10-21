@@ -30,6 +30,11 @@ class CompletionError(ValueError):
 _KEEP: Any = object()
 
 
+def is_owner_verified(task: Any) -> bool:
+    """True only for a task the completion authority marked verified (readers ask here)."""
+    return getattr(task, "state", None) is TaskState.COMPLETED_VERIFIED
+
+
 def authoritative_transition(
     task: DurableTask,
     state: TaskState,
