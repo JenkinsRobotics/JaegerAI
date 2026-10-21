@@ -61,6 +61,12 @@ describe("PostMessage (handoff and task results as real messages)", () => {
     expect(html).toContain("jg-post--handoff_request");
     expect(html).toContain('<button type="button" class="jg-post__chip">Handoff request</button>');
   });
+  it("opens a durable task artifact reference without turning the message path into a grant",async()=>{
+    const open=vi.fn();const task:Post={...handoff,post:"task_result",taskId:"owned-task",handoffId:undefined};
+    const {el,done}=await mount(<PostMessage entry={task} links={links} onOpenTaskArtifacts={open}/>);
+    await act(async()=>[...el.querySelectorAll('button')].find(b=>b.textContent==='Open task artifacts')!.click());
+    expect(open).toHaveBeenCalledWith('owned-task');done();
+  });
   it("labels task results; no handoff button, no chat link without a child session", () => {
     const task: Post = { ...handoff, post: "task_result", handoffId: undefined, childSessionId: undefined, taskId: "t5", status: "failed" };
     expect(postChipText(task)).toBe("Task result · Failed");
