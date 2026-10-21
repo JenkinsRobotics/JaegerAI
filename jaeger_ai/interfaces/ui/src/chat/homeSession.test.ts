@@ -7,7 +7,7 @@ import { contractHome, ENTRY_PREFIX, fallbackHome, fromWirePage, HOME_ROUTES, to
 
 afterEach(() => localStorage.clear());
 
-const W = (m: Partial<WireMessage> & { id: string }): WireMessage => ({ session_id: "s", role: "assistant", kind: "message", content: "", created_at: 0, ...m });
+const W = (m: Partial<WireMessage> & { id: string | number }): WireMessage => ({ session_id: "s", role: "assistant", kind: "message", content: "", created_at: 0, ...m });
 
 describe("fromWirePage (contract wire → UI page)", () => {
   // Newest first, as the route returns it.
@@ -87,6 +87,10 @@ describe("contractHome", () => {
     expect(seen.map((e) => e.type)).toEqual(["entry", "entry", "summarized"]);
     expect(seen[0].type === "entry" && seen[0].page.entries[`${ENTRY_PREFIX}live-1`]).toMatchObject({ post: "task_result", taskId: "t9", text: "Built." });
     expect(seen[2]).toEqual({ type: "summarized", summaryMessageId: "live-s" });
+    mockPost((s, e) => source.emit(s, e), W({ id: "background", session_id: sid, content: "Completed elsewhere", request_id: "owned-background" }));
+    expect(seen.at(-1)).toEqual({ type: "changed" });
+    mockPost((s, e) => source.emit(s, e), W({ id: "foreign-background", session_id: "foreign", request_id: "foreign-request" }));
+    expect(seen).toHaveLength(4);
     controller.abort();
     await running;
     MOCK_MESSAGES[sid].splice(keep);
@@ -177,4 +181,11 @@ it("rejects a foreign home and a stuck older-history cursor without creating a r
  const home=contractHome(async path=> path.includes('/home') ? {agent_id:'other',session_id:'foreign'} : path.includes('/messages') ? {messages:[],next_before:'50'} : {agent_id:'a'});
  await expect(home.home('a')).rejects.toThrow('does not match');
  await expect(home.page('owned','50')).rejects.toThrow('did not advance');
+});
+
+it('preserves real admission identity across home snapshots instead of renaming message IDs as requests',()=>{
+ const page=fromWirePage('owned-home',{next_before:null,messages:[W({id:22,role:'assistant',content:'Answer',request_id:'owned-request'}),W({id:21,role:'user',content:'Question',request_id:'owned-request'})]},String);
+ expect(page.turns).toHaveLength(1);expect(page.turns[0]).toMatchObject({turnId:'owned-request',requestId:'owned-request',message:'Question'});
+ const legacy=fromWirePage('owned-home',{next_before:null,messages:[W({id:17,role:'user',content:'Legacy'})]},String);
+ expect(legacy.turns[0].turnId).toBe('17');expect(legacy.turns[0].requestId).toBeUndefined();
 });

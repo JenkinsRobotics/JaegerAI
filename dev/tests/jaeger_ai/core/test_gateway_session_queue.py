@@ -38,7 +38,11 @@ def test_durable_queue_survives_store_restart_and_preserves_order(tmp_path: Path
     store = GatewaySessionStore(path)
     store.enqueue_request("session", "first", request_id="q1")
     second = store.enqueue_request("session", "second", request_id="q2", requested={"model": "glm"})
-    assert store.schema_version() == 12
+    assert store.schema_version() == 15  # Current canonical schema; queue was introduced at12.
+    import sqlite3
+    with sqlite3.connect(path) as conn:
+        columns = {row[1] for row in conn.execute('PRAGMA table_info(client_requests)')}
+    assert {'queue_position', 'execution_json', 'request_id', 'status'} <= columns
     assert [row["request_id"] for row in store.list_queue("session")] == ["q1", "q2"]
     assert second["execution"]["model"] == "glm"
 
@@ -101,7 +105,7 @@ def test_queue_add_publishes_durable_projection_and_starts_when_idle(tmp_path: P
     )))
     payload = _body(response)
     assert response.status == 202
-    assert payload["status"] == "running"
+    assert payload["status"] == "admitted"  # Dispatch is not proof that execution started.
     assert started == [{"sid": "session", "rid": "q1", "text": "follow-up work"}]
     events = app.event_bus.get_replay_events("session")
     assert [event.event for event in events if event.event != "message.created"] == ["turn.start", "queue.updated"]
@@ -163,3 +167,29 @@ def test_terminal_outcome_drains_the_next_queue_item_once(tmp_path: Path):
     assert app.store.list_queue("session") == []
     events = [event.event for event in app.event_bus.get_replay_events("session") if event.event != "message.created"]
     assert events == ["turn.start", "turn.finish", "turn.start", "queue.updated"]
+
+
+def test_new_queue_receipt_never_borrows_an_older_promoted_request_identity(tmp_path):
+    app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.sqlite3'))
+    first = app.store.enqueue_request('session', 'older queued', request_id='older')
+    started = []
+    app._start_admitted_turn = lambda row, *args: started.append(row['request_id'])
+    response = asyncio.run(app.handle_add_queue(_Request({'id':'session'}, {'text':'new follow-up','request_id':'newer'}, method='POST')))
+    payload = _body(response)
+    assert started == ['older']
+    assert payload['request_id'] == 'newer' and payload['status'] == 'queued' and payload['queued']
+    assert payload['turn_id'] != first['turn_id']
+    assert payload['turn_id'] == app.store.get_request('newer')['turn_id']
+    assert 'start_event_id' not in payload
+
+
+def test_queue_edit_version_conflict_preserves_newer_text_and_execution(tmp_path):
+    import pytest
+    store = GatewaySessionStore(tmp_path/'gateway.sqlite3')
+    row = store.enqueue_request('session', 'Original', request_id='owned', requested={'model':'configured'})
+    updated = store.update_queue_item('session', 'owned', text='Newer', expected_updated_at=row['updated_at'])
+    with pytest.raises(RequestConflict):
+        store.update_queue_item('session', 'owned', text='Stale overwrite', expected_updated_at=row['updated_at'])
+    current = store.get_request('owned')
+    assert current['input_text'] == 'Newer' and current['execution'] == updated['execution']
+    assert current['turn_id'] == row['turn_id'] and current['status'] == 'queued'

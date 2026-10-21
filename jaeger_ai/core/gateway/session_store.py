@@ -201,6 +201,9 @@ def message_dict(m: Any, session_id: str | None = None) -> dict[str, Any]:
     }
     if isinstance(extra.get("status"), str):
         out["status"] = extra["status"]
+    for key in ("request_id", "turn_id"):
+        if isinstance(extra.get(key), str):
+            out[key] = extra[key]
     if out["kind"] == "summary" and isinstance(extra.get("summary"), dict):
         out["summary"] = extra["summary"]
     return out
@@ -211,6 +214,10 @@ def _typed_fields(m: Any) -> dict[str, Any]:
     plain chat rows keep their established shape."""
     keys = m.keys()
     out: dict[str, Any] = {}
+    extra = _row_meta(m["meta_json"] if "meta_json" in keys else None)
+    for key in ("request_id", "turn_id"):
+        if isinstance(extra.get(key), str):
+            out[key] = extra[key]
     kind = m["kind"] if "kind" in keys else None
     if kind and kind != "message":
         out["kind"] = kind
@@ -1138,6 +1145,7 @@ class GatewaySessionStore:
         text: str | None = None,
         status: str | None = None,
         position: int | None = None,
+        expected_updated_at: float | None = None,
     ) -> dict[str, Any] | None:
         """Edit only a still-queued item; running work is immutable."""
         if status is not None and status not in QUEUE_STATUSES:
@@ -1150,6 +1158,8 @@ class GatewaySessionStore:
             ).fetchone()
             if row is None or row["status"] not in QUEUE_STATUSES:
                 return None
+            if expected_updated_at is not None and row['updated_at'] != expected_updated_at:
+                raise RequestConflict('Queued request changed; refresh before editing')
             if text is not None:
                 clean = str(text).strip()
                 if not clean:
@@ -1226,6 +1236,7 @@ class GatewaySessionStore:
             execution = _row_meta(row["execution_json"])
             visible = execution.get("display_text") or row["input_text"]
             msg_id = self.append_message(session_id, "user", visible, timestamp=now, conn=conn,
+                                         meta={"request_id": row["request_id"], "turn_id": row["turn_id"]},
                                          parts=_attachment_parts(conn, session_id, execution))
             meta = _row_meta(session["metadata_json"])
             if execution.get("model"):
@@ -1370,6 +1381,7 @@ class GatewaySessionStore:
             )
             visible = choices["display_text"] if "display_text" in choices else text
             msg_id = self.append_message(session_id, "user", visible, timestamp=now, conn=conn,
+                                         meta={"request_id": rid, "turn_id": turn_id},
                                          parts=_attachment_parts(conn, session_id, execution))
             conn.execute(
                 "UPDATE sessions SET status='running', metadata_json=?, updated_at=? WHERE session_id=?",
@@ -1533,6 +1545,7 @@ class GatewaySessionStore:
                                        "target": ameta.get("target"), "status": appr["status"],
                                        "decision": appr["decision"]})
                 self.append_message(row["session_id"], "assistant", assistant_text, timestamp=now, conn=conn,
+                                    meta={"request_id": request_id, "turn_id": row["turn_id"]},
                                     parts=turn_parts or None)
             sess_status = session_status or ("idle" if status == "completed" else status)
             conn.execute(
@@ -1704,6 +1717,35 @@ class GatewaySessionStore:
             if message_id is not None and rating in {"positive", "negative"}:
                 result[str(message_id)] = rating
         return result
+
+    def message_reactions(self, session_id: str) -> dict[str, Any]:
+        """Durable per-request/per-role decoration, independent of SSE retention."""
+        with self._get_conn() as conn:
+            rows = conn.execute("SELECT event_id,data_json FROM activity_history WHERE session_id=? AND event='message.reaction' ORDER BY event_id", (session_id,)).fetchall()
+        result: dict[str, list[str]] = {}
+        for row in rows:
+            data = _row_meta(row['data_json'])
+            key = data['request_id'] + '|' + data['role']
+            values = result.setdefault(key, [])
+            if data['active'] and data['emoji'] not in values:
+                values.append(data['emoji'])
+            elif not data['active'] and data['emoji'] in values:
+                values.remove(data['emoji'])
+        return {'reactions': result, 'event_id': rows[-1]['event_id'] if rows else 0}
+
+    def set_message_reaction(self, session_id: str, request_id: str, role: str, emoji: str, active: bool) -> dict:
+        from jaeger_ai.contract.message_feedback import REACTION_EMOJIS
+        if not isinstance(role, str) or role not in {'user', 'assistant'} or emoji not in REACTION_EMOJIS or type(active) is not bool:
+            raise ValueError('Invalid reaction')
+        event = None
+        with self._immediate() as conn:
+            if conn.execute('SELECT 1 FROM client_requests WHERE session_id=? AND request_id=?', (session_id, request_id)).fetchone() is None:
+                raise KeyError('Request not found in this conversation')
+            row = conn.execute("SELECT data_json FROM activity_history WHERE session_id=? AND event='message.reaction' AND json_extract(data_json,'$.request_id')=? AND json_extract(data_json,'$.role')=? AND json_extract(data_json,'$.emoji')=? ORDER BY event_id DESC LIMIT 1", (session_id, request_id, role, emoji)).fetchone()
+            previous = bool(_row_meta(row['data_json']).get('active')) if row else False
+            if previous != active:
+                event = self._insert_event(conn, session_id, 'message.reaction', {'request_id': request_id, 'role': role, 'emoji': emoji, 'active': active})
+        return {**self.message_reactions(session_id), '_event': event}
 
     def activity_history(self, session_id: str, after: int = 0, limit: int = 500) -> dict[str, Any]:
         """Paged durable work history; independent of the bounded SSE replay window."""

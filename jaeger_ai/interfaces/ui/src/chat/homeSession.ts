@@ -23,6 +23,7 @@ export type WireKind = "message" | "summary" | "handoff_request" | "handoff_resu
 
 /** One persisted message. */
 export interface WireMessage {
+  request_id?: string;
   /** An integer on 417d8a0c; kept as string | number so ids never compare across types. */
   id: number | string;
   session_id: string;
@@ -61,7 +62,7 @@ export const HOME_EVENT_MESSAGE = "message.created";
 export const HOME_EVENT_SUMMARIZED = "session.summarized";
 
 /** What the chat view does with a live event: show a new entry, or reload the newest page. */
-export type HomeLiveEvent = { type: "entry"; page: HomePage } | { type: "summarized"; summaryMessageId: string };
+export type HomeLiveEvent = { type: "entry"; page: HomePage } | { type: "summarized"; summaryMessageId: string } | { type: "changed" };
 
 export type GetJson = (path: string) => Promise<unknown>;
 
@@ -120,7 +121,7 @@ const POST: Record<string, "handoff_request" | "handoff" | "task_result"> = { ha
 /** One wire message → the SessionMessage shape messagesToTurns already reads. */
 const asSession = (m: WireMessage): SessionMessage => ({
   ...(m as unknown as SessionMessage), role: m.role, content: m.content, created_at: (toMs(m.created_at) ?? 0) / 1000,
-  request_id: m.role === "user" ? String(m.id) : undefined,
+  request_id: m.request_id,
 });
 
 /** Wire page (newest first) → UI page (oldest first). Ordinary messages group into turns as today
@@ -132,7 +133,7 @@ export function fromWirePage(sessionId: string, page: WirePage, agentName: (id: 
   let run: WireMessage[] = [];
   const flush = () => {
     if (!run.length) return;
-    const ids = run.filter((m) => m.role === "user").map((m) => String(m.id));
+    const ids = run.map((m) => m.request_id ?? String(m.id));
     const mapped = messagesToTurns(run.map(asSession), agentName);
     // A run that opens with a reply gets a synthetic turn; name it after that message.
     mapped.forEach((t) => { if (!ids.includes(t.turnId)) t.turnId = `reply:${run[0].id}`; });
@@ -237,6 +238,7 @@ export function contractHome(getJson: GetJson, opts: HomeOptions = {}, stream?: 
           const msg = (payload as unknown as WireMessageCreated).message;
           // Ordinary messages arrive through the turn stream already; posts and summaries don't.
           if (msg && msg.session_id === sessionId && msg.kind && msg.kind !== "message") on({ type: "entry", page: fromWirePage(sessionId, { messages: [msg], next_before: null }, name) });
+          else if (msg && msg.session_id === sessionId && msg.request_id) on({ type: "changed" });
         } else if (event.event === HOME_EVENT_SUMMARIZED) {
           const sum = payload as unknown as WireSessionSummarized;
           if (sum.session_id === sessionId) on({ type: "summarized", summaryMessageId: String(sum.summary_message_id) });

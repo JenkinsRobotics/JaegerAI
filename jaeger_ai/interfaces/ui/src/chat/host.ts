@@ -58,6 +58,8 @@ export interface TurnHandle {
 
 export interface ChatTurn {
   turnId: string;
+  /** Authoritative admission identity; never a message/rendering ID. */
+  requestId?: string;
   message: string;
   parts: ChatPart[];
   state: "pending" | TurnState;
@@ -82,6 +84,8 @@ export interface ChatAgentRef { id: string; name: string; description?: string }
 export interface ChatConfig { defaultModel?: string; defaultMode?: string; [key: string]: unknown }
 
 export interface ChatHost {
+  readonly sessionQueue?: import("../api/source").SessionQueue;
+  readonly messageReactions?: import("../api/source").JaegerSource["messageReactions"];
   readonly modelSettings?: import("../api/source").ModelSettings;
   readonly kind: HostKind;
   getConfig(): Promise<ChatConfig>;

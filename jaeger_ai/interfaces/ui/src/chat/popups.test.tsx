@@ -71,8 +71,10 @@ describe("composer + and message menus", () => {
     expect(click).toHaveBeenCalled();
   });
   it("right-click on a bubble: Grok's reaction row + Reply, Copy, Copy request ID; Reply quotes it; a reaction shows under the turn", async () => {
+    const saveReaction = vi.fn(async (_id: string, body: { emoji: string }) => ({ reactions: { 'owned-request|assistant': [body.emoji] }, event_id: 1, allowed_emojis: ['👍', '👎', '❤️', '😂', '🎉'] }));
     const host = { capabilities: { voice: false }, startTurn: vi.fn(), respondToConfirmation: vi.fn(), copy: vi.fn(), openExternal: vi.fn(),
-      sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [{ turnId: "t1", message: "hello there", parts: [{ kind: "markdownContent", text: "Hi! **Done.**" }], state: "complete" }] })) } };
+      messageReactions: { load: async () => ({ reactions: {}, event_id: 0, allowed_emojis: ['👍', '👎', '❤️', '😂', '🎉'] }), save: saveReaction },
+      sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [{ turnId: "t1", requestId: "owned-request", message: "hello there", parts: [{ kind: "markdownContent", text: "Hi! **Done.**" }], state: "complete" }] })) } };
     await act(async () => { root.render(<MinimalChat host={host as never} sessionId="s1" />); });
     await act(async () => { await new Promise((r) => setTimeout(r, 20)); });
     const bubble = el.querySelector(".jg-bubble--assistant")!;
@@ -89,6 +91,7 @@ describe("composer + and message menus", () => {
     expect(el.querySelector('[aria-label="Quoted reply"]')).toBeNull();
     await act(async () => { bubble.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })); });
     await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="React 👍"]')!.click(); });
+    expect(saveReaction).toHaveBeenCalledExactlyOnceWith('s1', {request_id:'owned-request', role:'assistant', emoji:'👍', active:true});
     expect(document.querySelector('[data-turn-id="t1"] .jg-reaction')?.textContent).toBe("👍");
     expect(document.querySelector('[role="menu"]')).toBeNull();
   });

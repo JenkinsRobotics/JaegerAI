@@ -1,6 +1,7 @@
 import { mergeSessionSnapshot } from "./sessionProjection";
 import { useDraft } from "./useDraft";
 import type { Agent } from "../api/types";
+import type { ReactionSnapshot } from "../api/source";
 /* Minimal stand-in chat renderer, styled to the Grok Bot Mac target. The
  * shared VS Code-derived widget replaces it through ChatPaneMount.
  * Jenkins Robotics 2026-10-17: tool steps fold into a "Show steps" card, and a
@@ -16,6 +17,7 @@ import { ArrowDownIcon, CloseIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIc
 import { ErrorState } from "../shell/ErrorState";
 import { badge, messageCount, unreadSince } from "./scrollFollow";
 import { RuntimeSettings } from "../settings/RuntimeSettings";
+import { SessionQueue } from "./SessionQueue";
 import { WebHost } from "./webHost";
 import type { HomeEntry, HomeSessions } from "./homeSession";
 import { PostMessage, SummaryCard } from "./HomeEntries";
@@ -222,13 +224,42 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   const unreadBase = useRef<number | null>(null);
   /** Turns already there when the chat loaded don't play the enter animation. */
   const loadedTurns = useRef<Set<string>>(new Set());
+  const snapshotOwner = useRef<string | undefined>(undefined);
+  const summarizedSnapshot = useRef(false);
   const field = useRef<HTMLTextAreaElement>(null);
   /** Grok's "Composer actions" (the + button) and "Message actions" (right-click a bubble) menus. */
   const plus = useRef<HTMLButtonElement>(null);
   const [composerMenu, setComposerMenu] = useState(false);
-  const [messageMenu, setMessageMenu] = useState<{ x: number; y: number; text: string; turnId?: string } | null>(null);
-  /** Local-only reactions per turn (the gateway has no reactions yet). */
+  const [messageMenu, setMessageMenu] = useState<{ x: number; y: number; text: string; turnId?: string; requestId?: string; role: "user" | "assistant" } | null>(null);
+  /** Authoritative durable reactions; request+role are independent targets. */
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
+  const [reactionEmojis, setReactionEmojis] = useState<string[]>([]), [reactionError, setReactionError] = useState<string>();
+  const reactionVersion = useRef(0), reactionGeneration = useRef(0), reactionBusy = useRef(new Set<string>());
+  const applyReactions = (snapshot: ReactionSnapshot) => {
+    if (!Number.isFinite(snapshot.event_id) || snapshot.event_id < reactionVersion.current) return;
+    reactionVersion.current = snapshot.event_id; setReactions(snapshot.reactions); setReactionEmojis(snapshot.allowed_emojis);
+  };
+  useEffect(() => {
+    const owner = ++reactionGeneration.current; reactionVersion.current = 0; setReactions({}); setReactionEmojis([]);
+    if (!sessionId || !host.messageReactions) return;
+    let live = true, reading = false;
+    const load = async () => {
+      if (reading) return; reading = true;
+      try { const snapshot = await host.messageReactions!.load(sessionId); if (live && owner === reactionGeneration.current) { applyReactions(snapshot); setReactionError(undefined); } }
+      catch (e) { if (live) setReactionError(`Reactions unavailable: ${String((e as Error).message ?? e)}`); }
+      finally { reading = false; }
+    };
+    void load(); const timer = setInterval(load, 5000);
+    return () => { live = false; reactionGeneration.current++; clearInterval(timer); };
+  }, [host, sessionId]);
+  const changeReaction = (requestId: string | undefined, role: "user" | "assistant", emoji: string, active: boolean) => {
+    if (!requestId || !sessionId || !host.messageReactions) return;
+    const key = `${requestId}|${role}|${emoji}`, owner = reactionGeneration.current;
+    if (reactionBusy.current.has(key)) return; reactionBusy.current.add(key);
+    void host.messageReactions.save(sessionId, { request_id: requestId, role, emoji, active }).then(snapshot => {
+      if (owner === reactionGeneration.current) { applyReactions(snapshot); setReactionError(undefined); }
+    }, e => { if (owner === reactionGeneration.current) setReactionError(`Reaction not confirmed: ${String((e as Error).message ?? e)}. Status will refresh; nothing was resent.`); }).finally(() => reactionBusy.current.delete(key));
+  };
   const picker = useRef<HTMLInputElement>(null);
   const stick = useRef(true);
   const voiceHost = "micStart" in host ? (host as ChatHost & VoiceHost) : undefined;
@@ -244,19 +275,21 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
 
   useEffect(() => {
     let live = true;
+    const sameOwner = snapshotOwner.current === sessionId;
     setSession(current => current?.id === sessionId ? current : null);
     setLoadError(undefined);
     stick.current = true;
-    setEntries({});
-    setOlder(undefined);
+    if (!sameOwner) { setEntries({}); setOlder(undefined); }
     setOlderError(undefined);
     const fail = (error: unknown) => { if (live) setLoadError(String((error as Error)?.message ?? error)); };
     if (sessionId && home) home.page(sessionId).then((p) => {
       if (!live) return;
       loadedTurns.current = new Set(p.turns.map((t) => t.turnId));
-      setEntries(p.entries);
-      setOlder(p.before);
-      setSession(current => mergeSessionSnapshot(current, { id: p.sessionId, title: p.title ?? "", agentId: p.agentId, turns: p.turns }));
+      snapshotOwner.current = sessionId;
+      setEntries(current => sameOwner ? { ...current, ...p.entries } : p.entries);
+      if (!sameOwner) setOlder(p.before);
+      const reset = summarizedSnapshot.current; summarizedSnapshot.current = false;
+      setSession(current => mergeSessionSnapshot(current, { id: p.sessionId, title: p.title ?? "", agentId: p.agentId, turns: p.turns }, reset));
     }, fail);
     else if (sessionId) host.sessions.load(sessionId).then(
       (s) => { if (live) { loadedTurns.current = new Set(s.turns.map((t) => t.turnId)); setSession(current => mergeSessionSnapshot(current, s)); } },
@@ -277,7 +310,8 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     if (!home?.live || !sessionId) return;
     const controller = new AbortController();
     home.live(sessionId, (event) => {
-      if (event.type === "summarized") { setAttempt((n) => n + 1); return; }
+      if (event.type === "summarized") { summarizedSnapshot.current = true; snapshotOwner.current = undefined; setAttempt(n => n + 1); return; }
+      if (event.type === "changed") { setAttempt(n => n + 1); return; }
       const p = event.page;
       p.turns.forEach((t) => loadedTurns.current.add(t.turnId));
       setEntries((cur) => ({ ...cur, ...p.entries }));
@@ -424,17 +458,17 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     const bubble = (e.target as HTMLElement).closest<HTMLElement>(".jg-bubble");
     if (!bubble) return;
     e.preventDefault();
-    setMessageMenu({ x: e.clientX, y: e.clientY, text: (bubble.innerText ?? bubble.textContent ?? "").trim(), turnId: bubble.closest<HTMLElement>("[data-turn-id]")?.dataset.turnId });
+    const turnId = bubble.closest<HTMLElement>("[data-turn-id]")?.dataset.turnId;
+    setMessageMenu({ x: e.clientX, y: e.clientY, text: (bubble.innerText ?? bubble.textContent ?? "").trim(), turnId, requestId: session?.turns.find(t => t.turnId === turnId)?.requestId, role: bubble.dataset.sender === "user" ? "user" : "assistant" });
   };
   const onMessageAction = (action: MessageAction) => {
     const text = messageMenu?.text ?? "";
     const turnId = messageMenu?.turnId;
     setMessageMenu(null);
     if (action === "copy") void navigator.clipboard?.writeText(text).catch(() => {});
-    if (action === "copy-id" && turnId) void navigator.clipboard?.writeText(turnId).catch(() => {});
-    if (action.startsWith("react:") && turnId) {
-      const emoji = action.slice(6);
-      setReactions((r) => ({ ...r, [turnId]: r[turnId]?.includes(emoji) ? r[turnId] : [...(r[turnId] ?? []), emoji] }));
+    if (action === "copy-id" && messageMenu?.requestId) void host.copy(messageMenu.requestId).catch(e => setReactionError(`Couldn't copy request ID: ${String(e)}`));
+    if (action.startsWith("react:") && messageMenu?.requestId) {
+      changeReaction(messageMenu.requestId, messageMenu.role, action.slice(6), true);
     }
     if (action === "reply") {
       setQuote({ turnId: turnId ?? "", text: text.split("\n").filter(Boolean).slice(0, 3).join("\n") });
@@ -454,20 +488,22 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
 
   const recovering = useRef<string | undefined>(undefined);
   const checkingRequest = useRef(false);
+  const observingRequest = useRef<string | undefined>(undefined);
   const [recoveryStatus, setRecoveryStatus] = useState<"checking" | "unknown" | "clear">(host instanceof WebHost ? "checking" : "clear");
   const recoveryBlocked = recoveryStatus !== "clear";
-  const checkSavedRequest = async () => {
-    if (!(host instanceof WebHost) || !session || active || checkingRequest.current) return;
+  const checkSavedRequest = async (silent = false) => {
+    if (!(host instanceof WebHost) || !session || active || checkingRequest.current || observingRequest.current) return;
     checkingRequest.current = true;
-    setRecoveryStatus("checking");
+    if (!silent) setRecoveryStatus("checking");
     let intent;
-    try { intent = await host.findPendingIntent(session.id, session.turns.find(t => t.state === "unknown")?.turnId); }
-    catch (error) { setFileNote(`Request lookup unavailable: ${String(error)}`); setRecoveryStatus("unknown"); return; }
+    try { intent = await host.findPendingIntent(session.id, silent ? undefined : session.turns.find(t => t.state === "unknown")?.turnId); }
+    catch (error) { setFileNote(`Request lookup unavailable: ${String(error)}`); if (!silent) setRecoveryStatus("unknown"); return; }
     finally { checkingRequest.current = false; }
-    if (!intent) { setRecoveryStatus("clear"); return; }
+    if (!intent) { if (!silent) setRecoveryStatus("clear"); return; }
+    observingRequest.current = intent.requestId; setRecoveryStatus("checking");
     recovering.current = session.id;
     const turnId = intent.requestId;
-    setSession(s => s && s.id === intent.sessionId ? { ...s, turns: [...s.turns.filter(t => t.turnId !== turnId), { turnId, message: intent.text, state: "pending", parts: [] }] } : s);
+    setSession(s => s && s.id === intent.sessionId ? { ...s, turns: [...s.turns.filter(t => t.turnId !== turnId), { turnId, requestId: intent.requestId, message: intent.text, state: "pending", parts: [] }] } : s);
     const handle = host.recoverTurn(intent, part => updateTurn(turnId, t => ({ ...t, parts: applyPart(t.parts, part) })), () => {
       if (intent.deviceDraft !== false) {
         setDraft(current => current === (intent.draftBody ?? intent.text) ? "" : current);
@@ -477,6 +513,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     });
     setActive(handle);
     void handle.done.then(({ state }) => {
+      observingRequest.current = undefined;
       updateTurn(turnId, t => ({ ...t, state }));
       setRecoveryStatus(state === "unknown" ? "unknown" : "clear");
       setActive(null);
@@ -485,6 +522,11 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   useEffect(() => {
     if (session && draftReady && recovering.current !== session.id) checkSavedRequest();
   }, [session?.id, draftReady]);
+  useEffect(() => {
+    if (!session || !draftReady || active || recoveryStatus !== "clear" || !(host instanceof WebHost)) return;
+    const timer = setInterval(() => { void checkSavedRequest(true); }, 3000);
+    return () => clearInterval(timer);
+  }, [session?.id, draftReady, Boolean(active), recoveryStatus, host]);
 
   const send = (text = draft, speakReply = false) => {
     const attached = speakReply ? [] : files.filter((f) => !f.error);
@@ -496,7 +538,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     sending.current = true;
     if (attached.length) sentFiles.current.set(turnId, attached);
     stick.current = true;
-    setSession({ ...session, turns: [...session.turns, { turnId, message, parts: [], state: "pending", createdAt: Date.now() }] });
+    setSession({ ...session, turns: [...session.turns, { turnId, requestId: turnId, message, parts: [], state: "pending", createdAt: Date.now() }] });
     let finished: ChatTurn | undefined;
     const attachments = attached.length ? toAttachments(attached) : undefined;
     const handle = host.startTurn({ sessionId: session.id, turnId, message, draftFileIds: attached.map(f => f.id), draftBody: text, quoteKey, onAccepted: () => {
@@ -612,14 +654,14 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
               {needsSeparator(session.turns[index - 1]?.createdAt, turn.createdAt) && (
                 <div className="jg-separator" role="separator">{separatorLabel(turn.createdAt!)}</div>
               )}
-              {turn.message && <div className="jg-bubble jg-bubble--user" data-sender="user">{turn.message}</div>}
+              {turn.message && <><div className="jg-bubble jg-bubble--user" data-sender="user">{turn.message}</div><Reactions emojis={reactions[`${turn.requestId}|user`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "user", emoji, false)} /></>}
               {segments(turn.parts, turn.state).map((seg, i) =>
                 "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} decided={decisions[seg.card.callId]}
                   tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
                 : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
-              <Reactions emojis={reactions[turn.turnId] ?? []} onRemove={(e) => setReactions((r) => ({ ...r, [turn.turnId]: (r[turn.turnId] ?? []).filter((x) => x !== e) }))} />
+              <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
               {showsProgress(turn) && <ProgressLine phrase={turn.parts.length ? activityPhrase(turn, agentName) : "Waiting for progress…"} agent={agent} state={turnAvatarState(turn)} />}
             </section>
           ))}
@@ -631,7 +673,9 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         <ArrowDownIcon />
         {unread > 0 && <span className="jg-jump__badge">{badge(unread)}</span>}
       </button>
-      <MessageMenu at={messageMenu ? { x: messageMenu.x, y: messageMenu.y } : null} requestId={messageMenu?.turnId} onAction={onMessageAction} onClose={() => setMessageMenu(null)} />
+      <MessageMenu at={messageMenu ? { x: messageMenu.x, y: messageMenu.y } : null} requestId={messageMenu?.requestId} reactionEmojis={messageMenu?.requestId ? reactionEmojis : []} onAction={onMessageAction} onClose={() => setMessageMenu(null)} />
+      {reactionError && <p role="alert">{reactionError}</p>}
+      {sessionId && host.sessionQueue && <SessionQueue key={sessionId} controls={host.sessionQueue} sessionId={sessionId} onAccepted={() => { setAttempt(n => n + 1); void checkSavedRequest(true); }} />}
       <form ref={composer} className="jg-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">

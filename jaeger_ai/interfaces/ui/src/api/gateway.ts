@@ -4,7 +4,7 @@ import type { AgentActions, Section } from "./agentActions";
  * proxy), which forwards /v1/* to the gateway and adds the caller token on the
  * server side. The browser never sees or sends a token. */
 import { decodeSSE, type SSEFrame } from "./sse";
-import type { JaegerSource, RequestSnapshot, PendingApproval, TurnReceipt , UploadedAttachment, ConnectAppsListing, ConnectedApp, ModelInventory, ScheduleControls, LibraryControls } from "./source";
+import type { JaegerSource, RequestSnapshot, PendingApproval, TurnReceipt , UploadedAttachment, ConnectAppsListing, ConnectedApp, ModelInventory, ScheduleControls, LibraryControls, ReactionSnapshot, SessionQueue } from "./source";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 export class GatewayError extends Error {
@@ -38,6 +38,17 @@ export function normalizeFrame(frame: SSEFrame): GatewayEvent {
 export class GatewayClient implements JaegerSource {
   readonly kind = "live" as const;
   constructor(private readonly base = "") {}
+  sessionQueue: SessionQueue = {
+    list: id => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`),
+    enqueue: (id, text, request_id) => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`, { text, request_id }),
+    update: (id, requestId, body) => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue/${encodeURIComponent(requestId)}`, body, "PATCH"),
+    reorder: (id, order) => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue/reorder`, { order }),
+    status: (id, requestId) => this.requestStatus(id, requestId),
+  };
+  messageReactions = {
+    load: (id: string) => this.json<ReactionSnapshot>(`/v1/sessions/${encodeURIComponent(id)}/feedback`),
+    save: (id: string, body: { request_id: string; role: "user" | "assistant"; emoji: string; active: boolean }) => this.json<ReactionSnapshot>(`/v1/sessions/${encodeURIComponent(id)}/feedback`, body),
+  };
   library: LibraryControls = {
     list: () => this.json("/v1/library"),
     search: query => this.json(`/v1/library/search?q=${encodeURIComponent(query)}`),
