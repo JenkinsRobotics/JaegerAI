@@ -1340,6 +1340,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/agents/{id}", self.handle_get_agent)
         self.app.router.add_get("/v1/agents/{id}/home", self.handle_agent_home)
         self.app.router.add_get("/v1/agents/{id}/messages/search", self.handle_agent_message_search)
+        self.app.router.add_get("/v1/agents/{id}/messages/{message_id}", self.handle_agent_message_content)
         self.app.router.add_post("/v1/agents/{id}/activate", self.handle_activate_agent)
         self.app.router.add_post("/v1/agents/{id}/seen", self.handle_agent_seen)
         self.app.router.add_post("/v1/agents/{id}/handoff", self.handle_handoff_agent)
@@ -2011,11 +2012,21 @@ class JaegerGatewayApp:
             if not 1 <= len(query) <= 200:
                 raise ValueError('Search text must be 1–200 characters')
             before = int(request.query['before']) if request.query.get('before') else None
-            if before is not None and before < 1:
-                raise ValueError('before must be a positive message ID')
+            if before is not None and not 1<=before<2**63:
+                raise ValueError('before must be a positive SQLite message ID')
         except ValueError as exc:
             return web.json_response({'error': str(exc)}, status=400)
         return web.json_response(self.store.search_agent_messages(agent_id, query, before=before))
+
+    async def handle_agent_message_content(self, request: web.Request) -> web.Response:
+        agent_id=request.match_info['id']
+        record=self._registry().get_agent(agent_id)
+        if record is None or record.id!=agent_id:return web.json_response({'error':'Agent not found'},status=404)
+        try:
+            value=self.store.agent_message_content(agent_id,int(request.match_info['message_id']),offset=int(request.query.get('offset','0')),expected_revision=request.query.get('revision'))
+            if value is None:return web.json_response({'error':'Message not found in this agent scope'},status=404)
+            return web.json_response(value)
+        except ValueError as exc:return web.json_response({'error':str(exc)},status=409)
 
     async def handle_agent_templates(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.agent_registry.configuration import TEMPLATES

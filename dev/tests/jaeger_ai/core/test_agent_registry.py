@@ -426,10 +426,16 @@ class TestGatewayHandoffAPI(_CallerAuthedTestCase):
         )
         assert resp.status == 404
         body = await resp.json()
-        assert body.get("error") == "Approval not found"
+        assert body.get("error") == "Approval is stale, expired, or its permission context changed"
+        assert self.temp_store.get_approval("approval_nonexistent_xyz") is None
+        assert self.temp_store.list_requests() == []
 
-    async def test_resolve_approval_twice_clean_404(self):
-        """Second resolve of the same approval_id → clean 404 (not corrupt)."""
+    async def test_opposite_approval_decision_conflicts_without_reexecution(self):
+        """First writer wins; a conflicting decision cannot overwrite or execute again."""
+        executed = []
+        async def owned_handoff_boundary(handoff_id):
+            executed.append(handoff_id)
+        self.gateway_app._execute_handoff = owned_handoff_boundary
         resp = await self.client.request(
             "POST",
             "/v1/agents/native:gateway/handoff",
@@ -452,15 +458,22 @@ class TestGatewayHandoffAPI(_CallerAuthedTestCase):
         first = await resp.json()
         assert first["resolved"] is True
         assert first["approved"] is True
+        await asyncio.sleep(0)
+        original = self.temp_store.get_approval(approval_id)
+        assert original["status"] == "resolved" and original["decision"] == "once"
+        assert len(executed) == 1
 
         resp = await self.client.request(
             "POST",
             f"/v1/approvals/{approval_id}",
             json={"approved": False},
         )
-        assert resp.status == 404
+        assert resp.status == 409
         body = await resp.json()
-        assert body.get("error") == "Approval not found"
+        assert body.get("error") == "Approval is stale, expired, or its permission context changed"
+        await asyncio.sleep(0)
+        assert self.temp_store.get_approval(approval_id) == original
+        assert len(executed) == 1 and self.temp_store.list_requests() == []
 
 
 def test_role_defaults_and_catalog_lead(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):

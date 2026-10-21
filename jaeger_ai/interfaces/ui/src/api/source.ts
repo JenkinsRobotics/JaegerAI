@@ -134,9 +134,10 @@ export interface GatewayDiagnostics {
   unknown_requests: { request_id: string; session_id: string; status: string }[]; unknown_list_limit: number;
   process_id: number; server_module_sha256: string; fingerprint_scope: string; observed_at: number; read_only: true;
 }
+export interface SavedMessageChunk {agent_id:string;message_id:string;session_id:string;role:string;kind:string;content:string;offset:number;end_offset:number;total_chars:number;revision:string;next_offset:number|null;previous_offset:number|null}
 export interface MessageSearchPage {
   agent_id: string; next_before: string | null; matching: string;
-  matches: { message_id: string; session_id: string; role: string; kind: string; title: string; timestamp: number; snippet: string; content: string; truncated: boolean }[];
+  matches: { message_id: string; session_id: string; role: string; kind: string; title: string; timestamp: number; snippet: string; content: string; truncated: boolean;match_offset?:number;content_revision?:string }[];
 }
 export interface AgentMemorySnapshot { agent_id:string;editable:boolean;loaded_in_specialist_prompt:boolean;notes:string;revision:string;chars:number;prompt_chars:number;max_chars:number;prompt_truncated:boolean;versions:{revision:string;saved_at:number}[];context_preview?:string;context_scope?:string;provenance?:{source:string;digest:string;author:string;history:string};search?:{query:string;matches:{line:number;text:string;within_prompt_budget:boolean}[];truncated:boolean;scope:string} }
 export interface AgentMemoryControls {
@@ -183,6 +184,7 @@ export interface JaegerSource {
   channels?(): Promise<ChannelSnapshot>;
   workflows?: WorkflowControls;
   agentKnowledge?: AgentKnowledgeControls;
+  savedMessage?(agentId:string,messageId:string,offset:number,revision?:string):Promise<SavedMessageChunk>;
   searchMessages?(agentId: string, query: string, before?: string): Promise<MessageSearchPage>;
   diagnostics?(): Promise<GatewayDiagnostics>;
   tools?(query?: string): Promise<ToolInventory>;
