@@ -12,12 +12,13 @@ interface Props {
   agent: Agent;
   summary?: AgentSummary;
   /** Opens the agent's older chats (read-only); the home chat is the only live one. */
+  onCopyConversationLink?:()=>void;
   onSearch?: () => void;
   onOpenHistory?: () => void;
   onClose: () => void;
 }
 
-export function AgentDetails({ agent, summary, onOpenHistory, onSearch, onClose }: Props) {
+export function AgentDetails({ agent, summary, onOpenHistory, onSearch, onClose, onCopyConversationLink }: Props) {
   const name = label(agent);
   const task = summary?.task;
   const runner = runnerLabel(task?.runner ?? agent.runner);
@@ -57,6 +58,7 @@ export function AgentDetails({ agent, summary, onOpenHistory, onSearch, onClose 
           <ul className="jg-tool-chips">{agent.allowed_tools!.map((t) => <li key={t} className="jg-tool-chip">{t}</li>)}</ul>
         </section>
       )}
+      {onCopyConversationLink&&<button type="button" onClick={onCopyConversationLink}>Copy local conversation link</button>}
       {onSearch && <button type="button" className="aui-button" onClick={onSearch}>Search messages</button>}
       {onOpenHistory && (
         <section className="jg-details__section">

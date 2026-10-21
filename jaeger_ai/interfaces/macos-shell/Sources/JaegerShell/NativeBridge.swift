@@ -33,7 +33,7 @@ protocol BridgeHost: AnyObject {
     func bridgeTTSSpeak(text: String, voice: String?, done: @escaping BridgeDone)
     func bridgeTTSStop()
     func bridgeOpenFile(_ url: URL)
-    func bridgeCopy(_ text: String)
+    func bridgeCopy(_ text: String) -> Bool?
     func bridgeMicStatus() -> [String: Any]
     func bridgeTTSStatus() -> [String: Any]
     func bridgePickFiles(_ options: FilePickOptions, done: @escaping BridgeDone)
@@ -129,7 +129,11 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case .ttsStop: host.bridgeTTSStop(); reply(id, ["stopped": true])
         case .openExternal(let url): host.bridgeOpenLink(url); reply(id, ["opened": url.absoluteString])
         case .openFile(let url): host.bridgeOpenFile(url); reply(id, ["opened": url.path])
-        case .clipboardWrite(let text): host.bridgeCopy(text); reply(id, ["copied": text.count])
+        case .clipboardWrite(let text):
+            if let copied = host.bridgeCopy(text) {
+                if copied { reply(id, ["copied": true]) }
+                else { replyError(id, "clipboard_write_failed") }
+            } else { reply(id, ["copied": false, "recorded": true]) }
         case .micStatus: reply(id, host.bridgeMicStatus())
         case .ttsStatus: reply(id, host.bridgeTTSStatus())
         case .filesPick(let options): host.bridgePickFiles(options) { [weak self] result, error in self?.finish(id, result, error) }
@@ -274,9 +278,9 @@ extension JaegerShellApplication {
     }
     func bridgeTTSStop() { voiceController?.stopSpeaking() }
     func bridgeOpenFile(_ url: URL) { NSWorkspace.shared.open(url) }
-    func bridgeCopy(_ text: String) {
+    func bridgeCopy(_ text: String) -> Bool? {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        return NSPasteboard.general.setString(text, forType: .string)
     }
     func bridgeMicStatus() -> [String: Any] { VoiceController.micStatus(recording: voiceController?.isRecording ?? false) }
     func bridgeTTSStatus() -> [String: Any] { VoiceController.ttsStatus(speaking: voiceController?.tts.isSpeaking ?? false) }

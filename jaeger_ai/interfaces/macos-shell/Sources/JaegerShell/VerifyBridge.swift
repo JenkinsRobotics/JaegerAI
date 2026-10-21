@@ -107,7 +107,7 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
     }
     func bridgeTTSStop() { calls.append("tts.stop") }
     func bridgeOpenFile(_ url: URL) { calls.append("open.file \(url.path) (recorded, not opened)") }
-    func bridgeCopy(_ text: String) { calls.append("clipboard.write \(text.count) chars (recorded, clipboard untouched)") }
+    func bridgeCopy(_ text: String) -> Bool? { calls.append("clipboard.write \(text.count) chars (recorded, clipboard untouched)"); return nil }
     func bridgeMicStatus() -> [String: Any] { calls.append("mic.status"); return VoiceController.micStatus(recording: false) }
     func bridgeTTSStatus() -> [String: Any] { calls.append("tts.status"); return VoiceController.ttsStatus(speaking: false) }
     func bridgePickFiles(_ options: FilePickOptions, done: @escaping BridgeDone) { calls.append("files.pick (cancelled)"); done(["files": []], nil) }
@@ -224,7 +224,7 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
             "new_ui_rendered": (js["ui_rendered"] as? Int ?? 0) > 0,
             "hostts_open_external_ok": ok("open_external") == true && calls.contains { $0.hasPrefix("link.open") },
             "hostts_open_file_outside_home_refused": ok("open_file_outside") == false,
-            "hostts_clipboard_write_ok": ok("clipboard") == true && calls.contains { $0.hasPrefix("clipboard.write") },
+            "hostts_clipboard_dispatch_recorded": ok("clipboard") == true && ((js["clipboard"] as? [String: Any])?["result"] as? [String: Any])?["recorded"] as? Bool == true && calls.contains { $0.hasPrefix("clipboard.write") },
             "hostts_mic_status_ok": ok("mic_status") == true,
             "hostts_tts_status_ok": ok("tts_status") == true,
             "hostts_probe_voice_true": js["probe_voice"] as? Bool == true,

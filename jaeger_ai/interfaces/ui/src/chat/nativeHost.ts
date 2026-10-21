@@ -58,7 +58,8 @@ export class NativeHost extends WebHost implements VoiceHost, PickFilesHost {
   }
   openFile(path: string) { void postNative("open.file", { path }); }
   override async copy(text: string) {
-    if (nativeBridge()) await postNative("clipboard.write", { text });
+    const bridge=nativeBridge();
+    if(bridge){const receipt=await bridge.post("clipboard.write",{text}) as {copied?:boolean};if(receipt?.copied!==true)throw Error("Native clipboard write unconfirmed; no automatic retry");}
     else await super.copy(text);
   }
   onThemeChanged(cb: () => void) {

@@ -1,6 +1,6 @@
 import {UpdatePlanPanel} from './settings/UpdatePlanPanel';
 import {useNotificationNavigation} from './platform/useNotificationNavigation';
-import {notificationConversation} from './platform/notificationNavigation';
+import {localConversationLink,notificationConversation} from './platform/notificationNavigation';
 import {TaskArtifacts} from './library/TaskArtifacts';
 import {EntityMemoryPanel} from './settings/EntityMemoryPanel';
 import {useNativeNotifications} from './platform/useNativeNotifications';
@@ -355,7 +355,7 @@ export function App({ source }: { source: JaegerSource }) {
                 ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
                 : <ChatPane host={host} sessionId={sessionId} agents={store.agents} />}
               {detailsAgent && (
-                <AgentDetails onSearch={source.searchMessages ? () => setMessageSearchAgent(detailsAgent) : undefined} agent={detailsAgent} summary={store.summaries.find((s) => s.id === detailsAgent.id)}
+                <AgentDetails onCopyConversationLink={()=>{void conversationIdForAgent(detailsAgent.id,id=>home.home(id),selectedAgentId&&explicitSessionId?{agentId:selectedAgentId,sessionId:explicitSessionId}:undefined).then(id=>copy(localConversationLink(id),"Local conversation link copied; it grants no access and requires the registered Jaeger handler"),fail("resolve the conversation link")).catch(fail("copy the conversation link"));}} onSearch={source.searchMessages ? () => setMessageSearchAgent(detailsAgent) : undefined} agent={detailsAgent} summary={store.summaries.find((s) => s.id === detailsAgent.id)}
                   onOpenHistory={() => { setDetailsAgentId(null); setHistoryAgentId(detailsAgent.id); }} onClose={() => setDetailsAgentId(null)} />
               )}
               {historyAgent && (
