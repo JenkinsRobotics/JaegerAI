@@ -52,7 +52,10 @@ def _output(binary: str, args: list[str], data: bytes, *, limit: int, deadline: 
             if process.wait(timeout=max(0.01,deadline-time.monotonic()))!=0:raise ValueError('PDF parser refused input')
             return b''.join(chunks)
         finally:
-            if process.poll() is None:
+            # Do not poll here: polling reaps an exited group leader. Its
+            # descendants may still hold stdout open, and retaining the unreaped
+            # leader reserves this PID/PGID until the owned group is signalled.
+            if process.returncode is None:
                 try:os.killpg(process.pid,signal.SIGKILL)
                 except ProcessLookupError:pass
                 process.wait()
