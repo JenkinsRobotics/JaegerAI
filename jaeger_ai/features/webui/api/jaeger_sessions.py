@@ -398,7 +398,7 @@ def route(handler, parsed, method: str) -> bool:
 
     if path=='/v1/runtime/skills/managed' and method=='GET':return _proxy(handler,method,path)
     if path in {'/v1/runtime/skills/managed/change','/v1/runtime/skills/managed/review'} and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))
-    if path=='/v1/runtime/skills/managed/content' and method=='GET':return _proxy(handler,method,path+query)
+    if path in {'/v1/runtime/skills/managed/content','/v1/runtime/skills/managed/export'} and method=='GET':return _proxy(handler,method,path+query)
     if path.startswith('/v1/runtime/skills/managed/operations/') and len(path.split('/'))==7 and method=='GET':return _proxy(handler,method,path)
 
     if method == "GET" and path in {"/v1/runtime/skills", "/v1/runtime/skills/detail", "/v1/runtime/tools", "/v1/runtime/diagnostics"}:

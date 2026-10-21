@@ -192,6 +192,12 @@ async def test_review_import_update_retain_original_version_and_explicit_rollbac
     restored=await (await http.post(path+'/change',json={'action':'restore','restore_from':'owned-update','operation_id':'owned-version-rollback'})).json()
     assert restored['outcome']=='saved' and restored['result']['revision']==loaded['revision']
     assert asset.read_text()=='preserve owned asset' and service.get_skill(layout,'fixture')['content']==first
+    bundle_response=await http.get(path+'/export?name=fixture&revision='+loaded['revision'])
+    assert bundle_response.status==200
+    bundle=await bundle_response.json()
+    assert bundle['target']=='local_file' and not bundle['execution_authorized']
+    assert {file['path'] for file in bundle['files']}=={'SKILL.md','.origin','asset.txt'}
+    assert (await http.get(path+'/export?name=fixture&revision='+loaded['revision'],headers=client_headers('jaegerd'))).status==403
     assert (await http.post(path+'/review',json=preview,headers=client_headers('jaegerd'))).status==403
 
 

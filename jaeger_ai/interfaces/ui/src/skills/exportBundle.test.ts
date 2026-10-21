@@ -1,0 +1,6 @@
+import {expect,it} from 'vitest';import {validatedBundle} from './exportBundle';import type {PlaybookBundle} from '../api/source';
+it('allows only exact inert data identity and checks actual bytes before requesting a file',async()=>{
+ const bytes=new TextEncoder().encode('owned local text');const sha=[...new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))].map(b=>b.toString(16).padStart(2,'0')).join('');
+ const value={format:'jaeger-playbook-bundle-v1',name:'fixture',revision:'owned-revision',provenance:'instance_installed_unverified',publisher_verified:false,license_verified:false,target:'local_file',execution_authorized:false,files:[{path:'SKILL.md',size_bytes:bytes.length,sha256:sha,base64:btoa('owned local text')}]} satisfies PlaybookBundle;
+ expect((await validatedBundle(value,'fixture','owned-revision')).type).toBe('application/json');await expect(validatedBundle({...value,name:'foreign'},'fixture','owned-revision')).rejects.toThrow('identity');await expect(validatedBundle({...value,files:[{...value.files[0],path:'../outside'}]},'fixture','owned-revision')).rejects.toThrow('Unsafe');await expect(validatedBundle({...value,files:[{...value.files[0],sha256:'0'.repeat(64)}]},'fixture','owned-revision')).rejects.toThrow('digest');
+});
