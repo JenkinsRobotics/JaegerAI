@@ -1655,8 +1655,9 @@ class GatewaySessionStore:
         with self._immediate() as conn:
             changed = conn.execute(
                 "UPDATE client_requests SET status=?, updated_at=? WHERE request_id=? "
-                "AND status NOT IN ('completed', 'failed', 'cancelled')",
-                (status, now, request_id),
+                "AND status NOT IN ('completed', 'failed', 'cancelled') "
+                "AND NOT (status='execution_unknown' AND ?='cancelling')",
+                (status, now, request_id, status),
             )
             if changed.rowcount == 0:
                 row = conn.execute(

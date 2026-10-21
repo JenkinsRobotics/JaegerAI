@@ -185,3 +185,14 @@ it("ignores a retired stream callback even if its event ID is newer", async () =
  const outcome=await followTurn({source:{stream},sessionId:'s',requestId:'r',cursor:0,signal:new AbortController().signal,onPart:p=>parts.push(p),backoffMs:[1],sleep:noSleep});
  expect(outcome.state).toBe('complete');expect(parts).toEqual([{kind:'markdownContent',text:'a'},{kind:'markdownContent',text:'b'}]);
 });
+it('shows acknowledged but unconfirmed owned IDs and keeps observing until real cancellation',async()=>{
+ let finish!:(event:GatewayEvent)=>void;
+ const stream:Stream=async(_s,_c,onEvent)=>new Promise<void>(resolve=>{finish=event=>{onEvent(event);resolve();};});
+ const cancel=vi.fn(async()=>({session_id:'fixture',request_id:'owned-stop-ack',status:'cancelling',cancel_requested:true,cancellation_confirmed:false,unconfirmed_task_ids:['owned-child']}));
+ const host=new WebHost({send:async()=>({request_id:'owned-stop-ack',start_event_id:1}),cancel,stream}as unknown as JaegerSource);
+ const parts:ChatPart[]=[];const handle=host.startTurn({sessionId:'fixture',turnId:'owned-stop-ack',message:'fixture'},p=>parts.push(p));
+ await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));handle.cancel();
+ await vi.waitFor(()=>expect(parts).toContainEqual({kind:'warning',message:expect.stringContaining('owned-stop-ack, owned-child')}));
+ let done=false;void handle.done.then(()=>{done=true;});await Promise.resolve();expect(done).toBe(false);
+ finish(ev(2,'turn.cancelled','owned-stop-ack'));expect((await handle.done).state).toBe('cancelled');expect(cancel).toHaveBeenCalledTimes(1);
+});

@@ -22,6 +22,8 @@ export interface PendingApproval {
   task?: string; status: string;
 }
 
+export interface CancellationReceipt {session_id:string;request_id:string;status:string;cancel_requested:boolean;cancellation_confirmed?:boolean;unconfirmed_task_ids?:string[];already_terminal?:boolean}
+
 export interface RequestSnapshot {
   request_id: string; session_id: string; turn_id?: string; status: string; input_text?: string;
   result?: { output?: string; error?: string; summary?: string; [key: string]: unknown };
@@ -257,7 +259,7 @@ export interface JaegerSource {
   /** POST /v1/sessions/{id}/attachments/upload (bytes, 25 MB max): 201 → the stored file. 404/405 = not
    * supported by this gateway; 413 = too large. */
   uploadAttachment?(sessionId: string, body: { name: string; mime: string; data_base64: string }, idempotencyKey?: string, options?:import("./chunkUpload").UploadOptions): Promise<UploadedAttachment>;
-  cancel(sessionId: string, requestId?: string): Promise<void>;
+  cancel(sessionId: string, requestId?: string): Promise<CancellationReceipt|void>;
   pendingApprovals?(sessionId: string): Promise<PendingApproval[]>;
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   tasks(): Promise<Task[]>;

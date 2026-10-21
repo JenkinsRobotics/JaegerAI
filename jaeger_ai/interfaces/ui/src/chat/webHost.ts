@@ -168,12 +168,20 @@ export class WebHost implements ChatHost {
     const uploadController = new AbortController();
     const requestId = request.turnId;
     let admitted = false;
+    let observing = true;
     let cancelRequested = false;
     let admittedRequestId = requestId;
     const requestCancel = () => {
       onPart({ kind: "progress", message: "Stopping… Waiting for Gateway confirmation." });
-      void this.source.cancel(request.sessionId, admittedRequestId).catch((error: unknown) => {
-        onPart({ kind: "warning", message: `Stop was not confirmed: ${message(error)}. Still observing this request.` });
+      void this.source.cancel(request.sessionId, admittedRequestId).then(receipt=>{
+        if(!observing||!receipt)return;
+        if(receipt.request_id!==admittedRequestId||receipt.session_id!==request.sessionId)throw Error('Stop receipt did not match the original request');
+        if(receipt.cancel_requested&&receipt.cancellation_confirmed===false){
+          const ids=[...new Set([admittedRequestId,...(Array.isArray(receipt.unconfirmed_task_ids)?receipt.unconfirmed_task_ids.filter(id=>typeof id==='string'&&/^[A-Za-z0-9_.:-]{1,128}$/.test(id)).slice(0,64):[])])];
+          onPart({kind:'warning',message:`Stop request acknowledged; outcome is not yet confirmed for ${ids.join(', ')}. Still observing the original request.`});
+        }
+      }).catch((error: unknown) => {
+        if(observing)onPart({ kind: "warning", message: `Stop was not confirmed: ${message(error)}. Still observing this request.` });
       });
     };
     const done = (async (): Promise<{ state: TurnState }> => {
@@ -245,7 +253,7 @@ export class WebHost implements ChatHost {
       });
       if (outcome.state !== "unknown") settleIntent(request.sessionId, requestId);
       return outcome;
-    })();
+    })().finally(()=>{observing=false;});
     return {
       cancel: () => {
         if (cancelRequested) return;
