@@ -65,8 +65,9 @@ public struct BridgeRequest {
 public enum BridgeCommand: Equatable {
     case windowShow, windowHide, windowToggle
     case windowSetPinned(Bool)
-    case notificationStatus
-    case notify(title: String, body: String)
+    case notificationStatus, notificationNavigation
+    case notificationNavigationAck(String)
+    case notify(title: String, body: String, sessionId: String?)
     case linkOpen(URL)
     case fileReveal(URL)
     case appInfo, stackStatus, launchAtLoginGet
@@ -101,13 +102,26 @@ public enum BridgeCommand: Equatable {
             guard let pinned = strictBool(p["pinned"]) else { return .failure(.invalidPayload("pinned must be a boolean")) }
             return .success(.windowSetPinned(pinned))
         case "notifications.status": return .success(.notificationStatus)
+        case "notifications.navigation": return .success(.notificationNavigation)
+        case "notifications.navigationAck":
+            guard let id = p["id"] as? String, id.count == 36, UUID(uuidString: id) != nil else {
+                return .failure(.invalidPayload("valid notification navigation identity required"))
+            }
+            return .success(.notificationNavigationAck(id))
         case "notify":
             guard let title = p["title"] as? String, !title.isEmpty, title.count <= 200 else {
                 return .failure(.invalidPayload("title must be a non-empty string (≤200)"))
             }
             let body = p["body"] as? String ?? ""
             guard body.count <= 1000 else { return .failure(.invalidPayload("body too long (≤1000)")) }
-            return .success(.notify(title: title, body: body))
+            var sessionId: String?
+            if let raw = p["session_id"] {
+                guard let id = raw as? String, NotificationDestination.validSession(id) else {
+                    return .failure(.invalidPayload("session_id must be a bounded conversation identity, not a URL"))
+                }
+                sessionId = id
+            }
+            return .success(.notify(title: title, body: body, sessionId: sessionId))
         case "link.open":
             guard let raw = p["url"] as? String, let url = BridgeLinks.validate(raw) else {
                 return .failure(.invalidPayload("url must be an http(s) URL with a host"))
@@ -174,6 +188,8 @@ public enum BridgeCommand: Equatable {
         case .windowToggle: return "window.toggle"
         case .windowSetPinned: return "window.setPinned"
         case .notificationStatus: return "notifications.status"
+        case .notificationNavigation: return "notifications.navigation"
+        case .notificationNavigationAck: return "notifications.navigationAck"
         case .notify: return "notify"
         case .linkOpen: return "link.open"
         case .fileReveal: return "file.reveal"
