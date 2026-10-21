@@ -1,3 +1,4 @@
+import {uploadChunks,type UploadOptions} from "./chunkUpload";
 import {DIAGNOSTIC_CAPTURE_KEY} from "./diagnosticCapture";
 import type { AgentActions, Section } from "./agentActions";
 /* Typed port of jaeger_ai/interfaces/ide/gateway.js for the browser.
@@ -161,8 +162,10 @@ export class GatewayClient implements JaegerSource {
     install: (id: string) => this.json<{ id?: string; state?: ConnectedApp["state"] }>(`/api/connect-apps/${encodeURIComponent(id)}/install`, { confirm: true }),
   };
 
-  async json<T>(path: string, body?: unknown, method?: string, extraHeaders?: Record<string, string>): Promise<T> {
+  async json<T>(path: string, body?: unknown, method?: string, extraHeaders?: Record<string, string>, signal?:AbortSignal): Promise<T> {
     const controller = new AbortController();
+    const onAbort=()=>controller.abort();
+    if(signal?.aborted)controller.abort();else signal?.addEventListener("abort",onAbort,{once:true});
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
     try {
       const response = await fetch(`${this.base}${path}`, {
@@ -182,6 +185,7 @@ export class GatewayClient implements JaegerSource {
       return data as T;
     } finally {
       clearTimeout(timer);
+      signal?.removeEventListener("abort",onAbort);
     }
   }
 
@@ -255,9 +259,15 @@ export class GatewayClient implements JaegerSource {
   }
   /** Bytes, not a path: JSON {name, mime, data_base64} (the route also takes multipart 'file' + 'name'). */
   /** idempotencyKey: one per file, so a retried upload replays the same attachment instead of staging a second. */
-  uploadAttachment(sessionId: string, body: { name: string; mime: string; data_base64: string }, idempotencyKey?: string) {
-    return this.json<UploadedAttachment>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments/upload`, body, undefined,
-      idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined);
+  async uploadAttachment(sessionId: string, body: { name: string; mime: string; data_base64: string }, idempotencyKey?: string, options:UploadOptions={}) {
+    // Preserve the existing small-file contract; large files use bounded resumable staging.
+    if(body.data_base64.length>350_000){
+      const bytes=Uint8Array.from(atob(body.data_base64),c=>c.charCodeAt(0));
+      return uploadChunks((path,value,signal)=>this.json(path,value,undefined,undefined,signal),sessionId,bytes,body,idempotencyKey??crypto.randomUUID(),options);
+    }
+    const result=await this.json<UploadedAttachment>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments/upload`, body, undefined,
+      idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined,options.signal);
+    options.onProgress?.({received:result.size,total:result.size,state:'complete'});return result;
   }
   async cancel(sessionId: string, requestId?: string) {
     await this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, requestId ? { request_id: requestId } : {});

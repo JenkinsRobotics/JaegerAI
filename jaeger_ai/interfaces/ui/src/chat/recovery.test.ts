@@ -47,3 +47,11 @@ it("discovers existing unknown work without a local journal and never grants it 
  expect((await host.recoverTurn(intent!,p=>parts.push(p)).done).state).toBe("unknown");
  expect(parts.at(-1)).toMatchObject({kind:"warning"});
 });
+it('Stop during bytes staging aborts transfer and never dispatches or invokes execution Stop',async()=>{
+ let entered!:(signal:AbortSignal)=>void;const ready=new Promise<AbortSignal>(resolve=>{entered=resolve;});
+ const send=vi.fn(),cancel=vi.fn();const source={kind:'live',send,cancel,uploadAttachment:vi.fn(async(_sid,_body,_key,options)=>{
+  entered(options.signal);return await new Promise((_resolve,reject)=>options.signal.addEventListener('abort',()=>reject(new DOMException('Upload paused','AbortError')),{once:true}));
+ })} as unknown as JaegerSource;
+ const handle=new WebHost(source).startTurn({sessionId:'owned-stage',turnId:'owned-stage-stop',message:'fixture',attachments:[{name:'fixture.bin',mimeType:'application/octet-stream',data:btoa('fixture')}]},()=>{});
+ const signal=await ready;handle.cancel();expect(signal.aborted).toBe(true);expect((await handle.done).state).toBe('cancelled');expect(send).not.toHaveBeenCalled();expect(cancel).not.toHaveBeenCalled();
+});

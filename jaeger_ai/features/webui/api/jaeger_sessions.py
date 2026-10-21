@@ -445,6 +445,11 @@ def route(handler, parsed, method: str) -> bool:
     if len(parts) == 2 and method == "GET" and parts[1] in {"messages", "events", "feedback"}:
         return _proxy(handler, "GET", f"/v1/sessions/{session_id}/{parts[1]}{query}")
 
+    if len(parts)==2 and parts[1]=='uploads' and method in {'GET','POST'}:
+        return _proxy(handler,method,f'/v1/sessions/{session_id}/uploads'+query,None if method=='GET' else _body_bytes(handler))
+    if len(parts)==3 and parts[1]=='uploads' and parts[2] in {'chunk','finish'} and method=='POST':
+        return _proxy(handler,method,f'/v1/sessions/{session_id}/uploads/{parts[2]}',_body_bytes(handler))
+
     # /v1/sessions/{id}/attachments/upload — JSON (base64) body only: this
     # proxy relays application/json; multipart must go to the Gateway directly.
     if len(parts) == 3 and parts[1:] == ["attachments", "upload"] and method == "POST":

@@ -250,7 +250,7 @@ export interface JaegerSource {
    * of a path. Only called when the bytes-upload flag is on (composer.bytesUploadEnabled). */
   /** POST /v1/sessions/{id}/attachments/upload (bytes, 25 MB max): 201 → the stored file. 404/405 = not
    * supported by this gateway; 413 = too large. */
-  uploadAttachment?(sessionId: string, body: { name: string; mime: string; data_base64: string }, idempotencyKey?: string): Promise<UploadedAttachment>;
+  uploadAttachment?(sessionId: string, body: { name: string; mime: string; data_base64: string }, idempotencyKey?: string, options?:import("./chunkUpload").UploadOptions): Promise<UploadedAttachment>;
   cancel(sessionId: string, requestId?: string): Promise<void>;
   pendingApprovals?(sessionId: string): Promise<PendingApproval[]>;
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;

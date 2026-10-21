@@ -114,17 +114,18 @@ export class WebHost implements ChatHost {
   async getConfig() { return { defaultMode: "agent" }; }
 
   /** POST each picked file to /v1/sessions/{id}/attachments; the ids that registered go with the turn. */
-  private async registerAttachments(request: StartTurnRequest, onPart: (part: ChatPart) => void): Promise<{ ids: string[]; draftFileIds: string[] }> {
+  private async registerAttachments(request: StartTurnRequest, onPart: (part: ChatPart) => void, signal?:AbortSignal): Promise<{ ids: string[]; draftFileIds: string[] }> {
     const ids: string[] = [];
     const draftFileIds: string[] = [];
     const rejected: RejectedAttachment[] = [];
     // H8 widens ChatAttachment with path/size; read through the local mirror until it's vendored.
     for (const [index, file] of ((request.attachments ?? []) as HostAttachment[]).entries()) {
+      if(signal?.aborted)break;
       // Bytes first (the upload route, 417d8a0c), path as the fallback for gateways without it (404/405).
       if (typeof file.data === "string" && this.source.uploadAttachment && bytesUploadEnabled() && this.bytesUpload !== false) {
         if (Math.floor((file.data.length * 3) / 4) > UPLOAD_MAX_BYTES) { rejected.push({ name: file.name, reason: UPLOAD_TOO_LARGE }); continue; }
         try {
-          const row = await this.source.uploadAttachment(request.sessionId, { name: file.name, mime: file.mimeType, data_base64: file.data }, `upload-${request.turnId}-${index}`);
+          const row = await this.source.uploadAttachment(request.sessionId, { name: file.name, mime: file.mimeType, data_base64: file.data }, `upload-${request.turnId}-${index}`, {signal,onProgress:value=>onPart({kind:"progress",message:`${value.state==='complete'?'File staged':'Staging file'}: ${file.name} · ${value.received}/${value.total} bytes. No turn dispatched yet.`})});
           this.bytesUpload = true;
           ids.push(row.attachment_id);
           if (request.draftFileIds?.[index]) draftFileIds.push(request.draftFileIds[index]);
@@ -164,6 +165,7 @@ export class WebHost implements ChatHost {
 
   startTurn(request: StartTurnRequest, onPart: (part: ChatPart) => void): TurnHandle {
     const controller = new AbortController();
+    const uploadController = new AbortController();
     const requestId = request.turnId;
     let admitted = false;
     let cancelRequested = false;
@@ -187,7 +189,7 @@ export class WebHost implements ChatHost {
         onPart({ kind: "error", message: `Not sent: ${message(error)}` });
         return { state: "unknown" };
       }
-      const registered = await this.registerAttachments(request, onPart);
+      const registered = await this.registerAttachments(request, onPart, uploadController.signal);
       const attachmentIds = registered.ids;
       if (cancelRequested) {
         settleIntent(request.sessionId, requestId);
@@ -248,7 +250,7 @@ export class WebHost implements ChatHost {
       cancel: () => {
         if (cancelRequested) return;
         cancelRequested = true;
-        if (admitted) requestCancel();
+        if (admitted) requestCancel();else uploadController.abort();
         // Keep observing the original request. A client-side stream abort is
         // not proof that execution stopped (and must not unlock another send).
       },
