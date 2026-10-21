@@ -135,3 +135,14 @@ def test_handoff_record_states_the_effective_tool_scope():
     assert _handoff_tool_scope(Agent(), []) == {"tool_scope": "standing", "effective_tools": ["read_file", "web_search"]}
     assert _handoff_tool_scope(Agent(), ["web_search", "terminal"]) == {"tool_scope": "granted_subset", "effective_tools": ["web_search"]}
     assert _handoff_tool_scope(Bare(), ["terminal"]) == {"tool_scope": "model_only", "effective_tools": []}
+
+
+def test_existing_store_without_clarify_table_gains_it_on_open(tmp_path):
+    """A store created before GB-033 (live gateway DB) must not crash startup."""
+    import sqlite3
+    db = tmp_path / "s.sqlite3"
+    GatewaySessionStore(db)
+    with sqlite3.connect(db) as conn:
+        conn.execute("DROP TABLE clarify_forms")
+    store = GatewaySessionStore(db)
+    assert store.expire_orphaned_clarify() == 0

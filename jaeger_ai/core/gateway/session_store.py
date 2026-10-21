@@ -342,6 +342,24 @@ class GatewaySessionStore:
             conn.execute("CREATE TABLE IF NOT EXISTS control_operations (operation_id TEXT PRIMARY KEY, "
                          "fingerprint TEXT NOT NULL, status TEXT NOT NULL, receipt_json TEXT, created_at REAL NOT NULL)")
             self._migrate(conn)
+            # Additive, idempotent: existing stores (any schema version) gain it too.
+            conn.executescript("""
+                -- Server-produced clarify forms (GB-033): one revisioned entity per
+                -- question, resolved exactly once (answered | cancelled | expired).
+                CREATE TABLE IF NOT EXISTS clarify_forms (
+                    clarify_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    request_id TEXT,
+                    question TEXT NOT NULL,
+                    choices_json TEXT NOT NULL DEFAULT '[]',
+                    revision INTEGER NOT NULL DEFAULT 1,
+                    status TEXT NOT NULL,
+                    answer TEXT,
+                    created_at REAL NOT NULL,
+                    resolved_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_clarify_session ON clarify_forms(session_id, status);
+            """)
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
         conn.execute(
@@ -396,21 +414,6 @@ class GatewaySessionStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, created_at);
 
-                -- Server-produced clarify forms (GB-033): one revisioned entity per
-                -- question, resolved exactly once (answered | cancelled | expired).
-                CREATE TABLE IF NOT EXISTS clarify_forms (
-                    clarify_id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    request_id TEXT,
-                    question TEXT NOT NULL,
-                    choices_json TEXT NOT NULL DEFAULT '[]',
-                    revision INTEGER NOT NULL DEFAULT 1,
-                    status TEXT NOT NULL,
-                    answer TEXT,
-                    created_at REAL NOT NULL,
-                    resolved_at REAL
-                );
-                CREATE INDEX IF NOT EXISTS idx_clarify_session ON clarify_forms(session_id, status);
 
                 CREATE TABLE IF NOT EXISTS handoffs (
                     id TEXT PRIMARY KEY,
