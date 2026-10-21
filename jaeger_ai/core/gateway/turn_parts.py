@@ -10,7 +10,7 @@ from typing import Any, Iterable
 
 _TOOL_END = {"tool.completed": "done", "tool.done": "done", "tool.failed": "error", "tool.error": "error"}
 _HANDOFF = {"agent.handoff": "to", "agent.handoff.finished": "from"}
-PART_EVENTS = ("turn.delta", "turn.reasoning", "turn.reasoning.done", "tool.started", "agent.knowledge", "turn.context",
+PART_EVENTS = ("turn.delta", "turn.reasoning", "turn.reasoning.done", "tool.started", "agent.knowledge", "turn.context", "turn.model",
                *_TOOL_END, "turn.plan", *_HANDOFF)
 
 
@@ -51,6 +51,8 @@ def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             part["elapsed_s"] = data.get("elapsed_s")
             if data.get("output"):
                 part["output"] = data["output"]
+        elif name == "turn.model":
+            parts.append({"type":"model_identity", "actual_model":data.get("actual_model"), "scope":data.get("scope") or "unknown"})
         elif name == "turn.context":
             parts.append({"type": "model_context", "outline": data.get("outline") or {}})
         elif name == "agent.knowledge":

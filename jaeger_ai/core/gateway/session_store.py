@@ -950,20 +950,88 @@ class GatewaySessionStore:
             conn.execute("DELETE FROM activity_history WHERE session_id = ?", (session_id,))
             return res.rowcount > 0
 
+    @staticmethod
+    def model_choice_revision(metadata: dict[str, Any]) -> int:
+        value=metadata.get('model_choice_revision',0)
+        if type(value) is not int or not 0<=value<2**53-1:
+            raise ValueError('Stored model-choice generation is invalid; inspect without overwriting')
+        return value
+
     def update_metadata(self, session_id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
-        """Merge ``patch`` into session metadata and return the updated session."""
-        session = self.get_session(session_id)
-        if session is None:
-            return None
-        meta = dict(session.get("metadata") or {})
-        meta.update(patch or {})
-        now = time.time()
-        with self._get_conn() as conn:
-            conn.execute(
-                "UPDATE sessions SET metadata_json = ?, updated_at = ? WHERE session_id = ?",
-                (json.dumps(meta), now, session_id),
-            )
+        """Atomic merge; unrelated metadata cannot be lost to a concurrent writer."""
+        patch = dict(patch or {})
+        if 'model_choice_revision' in patch:raise ValueError('Model-choice generation is owner-managed')
+        with self._immediate() as conn:
+            row=conn.execute('SELECT metadata_json FROM sessions WHERE session_id=?',(session_id,)).fetchone()
+            if row is None:return None
+            meta=_row_meta(row['metadata_json'])
+            if {'model','provider'} & patch.keys():meta['model_choice_revision']=self.model_choice_revision(meta)+1
+            meta.update(patch or {})
+            conn.execute('UPDATE sessions SET metadata_json=?,updated_at=? WHERE session_id=?',(json.dumps(meta),time.time(),session_id))
         return self.get_session(session_id)
+
+    @staticmethod
+    def _model_choice_fingerprint(session_id, operation_id, expected_revision, actor, requested_model):
+        import re
+        if not isinstance(operation_id,str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,128}',operation_id):raise ValueError('Valid model operation ID required')
+        if type(expected_revision) is not int or not 0<=expected_revision<2**53-1:raise ValueError('Current model-choice generation required')
+        if requested_model is not None and (not isinstance(requested_model,str) or not requested_model.strip()):raise ValueError('Invalid requested model')
+        command={'domain':'model_choice','session_id':session_id,'requested_model':requested_model,'expected_revision':expected_revision,'actor':actor}
+        return input_fingerprint(json.dumps(command,sort_keys=True))
+
+    def model_choice_operation(self, session_id, *, operation_id, expected_revision, actor, requested_model):
+        fingerprint=self._model_choice_fingerprint(session_id,operation_id,expected_revision,actor,requested_model)
+        with self._get_conn() as conn:
+            prior=conn.execute('SELECT fingerprint,receipt_json FROM control_operations WHERE operation_id=?',(operation_id,)).fetchone()
+        if prior is None:return None
+        if prior['fingerprint']!=fingerprint:raise ValueError('Model operation ID belongs to another command')
+        if prior['receipt_json'] is None:raise ValueError('Earlier model operation unresolved; inspect without replay')
+        return json.loads(prior['receipt_json'])
+
+    def cancel_model_choice(self, session_id, *, operation_id, expected_revision, actor, requested_model):
+        """Resolve an uncertain config intent without undoing any committed choice.
+
+        A receipt already committed wins. Otherwise the original command receives
+        a rejection atomically, so an in-flight/late handler cannot apply it.
+        This affects no turn/request, tool, permission or model execution.
+        """
+        fingerprint=self._model_choice_fingerprint(session_id,operation_id,expected_revision,actor,requested_model)
+        with self._immediate() as conn:
+            prior=conn.execute('SELECT fingerprint,receipt_json FROM control_operations WHERE operation_id=?',(operation_id,)).fetchone()
+            if prior:
+                if prior['fingerprint']!=fingerprint:raise ValueError('Model operation ID belongs to another command')
+                if prior['receipt_json'] is None:raise ValueError('Incompatible earlier operation unresolved; preserve original')
+                return json.loads(prior['receipt_json'])
+            if conn.execute('SELECT 1 FROM sessions WHERE session_id=?',(session_id,)).fetchone() is None:raise ValueError('Session not found')
+            receipt={'ok':False,'operation_id':operation_id,'domain':'model_choice','session_id':session_id,'http_status':409,
+                'error':'Pending model choice cancelled before commit; current model unchanged', 'result':{'cancelled':True}}
+            conn.execute("INSERT INTO control_operations VALUES(?,?,'settled',?,?)",(operation_id,fingerprint,json.dumps(receipt),time.time()))
+        return receipt
+
+    def save_model_choice(self, session_id: str, choice: dict[str, Any] | None, *, operation_id: str, expected_revision: int, actor: str, requested_model: str | None) -> dict[str, Any]:
+        """Existing metadata and control receipt committed together; no model execution."""
+        fingerprint=self._model_choice_fingerprint(session_id,operation_id,expected_revision,actor,requested_model)
+        if choice is not None and set(choice)!={'model','provider'}:raise ValueError('Only model/provider defaults may change')
+        with self._immediate() as conn:
+            prior=conn.execute('SELECT fingerprint,receipt_json FROM control_operations WHERE operation_id=?',(operation_id,)).fetchone()
+            if prior:
+                if prior['fingerprint']!=fingerprint:raise ValueError('Model operation ID belongs to another command')
+                if prior['receipt_json'] is None:raise ValueError('Earlier model operation unresolved; inspect without replay')
+                return json.loads(prior['receipt_json'])
+            row=conn.execute('SELECT metadata_json FROM sessions WHERE session_id=?',(session_id,)).fetchone()
+            if row is None:raise ValueError('Session not found')
+            meta=_row_meta(row['metadata_json'])
+            revision=self.model_choice_revision(meta)
+            if choice is None:
+                receipt={'ok':False,'operation_id':operation_id,'domain':'model_choice','session_id':session_id,'http_status':409,'error':'Model availability could not be validated; current choice retained'}
+            elif revision!=expected_revision:
+                receipt={'ok':False,'operation_id':operation_id,'domain':'model_choice','session_id':session_id,'http_status':409,'error':'Conversation model changed; read current settings before reviewing a new choice'}
+            else:
+                meta.update(choice);meta['model_choice_revision']=revision+1
+                conn.execute('UPDATE sessions SET metadata_json=?,updated_at=? WHERE session_id=?',(json.dumps(meta),time.time(),session_id))
+                receipt={'ok':True,'operation_id':operation_id,'domain':'model_choice','session_id':session_id,'http_status':200,'result':{'model':choice['model'],'provider':choice['provider'],'model_choice_revision':revision+1}}
+            conn.execute("INSERT INTO control_operations VALUES(?,?,'settled',?,?)",(operation_id,fingerprint,json.dumps(receipt),time.time()))
+        return receipt
 
     def clear_messages(self, session_id: str) -> bool:
         """Drop transcript messages; keep the session row (handoff keep_history=false)."""
@@ -1247,10 +1315,16 @@ class GatewaySessionStore:
                                          meta={"request_id": row["request_id"], "turn_id": row["turn_id"]},
                                          parts=_attachment_parts(conn, session_id, execution))
             meta = _row_meta(session["metadata_json"])
-            if execution.get("model"):
-                meta["model"] = execution["model"]
-            if execution.get("provider"):
-                meta["provider"] = execution["provider"]
+            choices = _row_meta(row['requested_json'])
+            # A queued implicit default is an execution snapshot, not authority
+            # to revert a newer explicit conversation preference on promotion.
+            if 'model' in choices:
+                meta['model'] = execution.get('model')
+                meta['provider'] = execution.get('provider')
+            elif 'provider' in choices:
+                meta['provider'] = execution.get('provider')
+            if 'model' in choices or 'provider' in choices:
+                meta['model_choice_revision'] = self.model_choice_revision(meta) + 1
             conn.execute(
                 "UPDATE client_requests SET status='admitted', updated_at=? WHERE request_id=?",
                 (now, row["request_id"]),
@@ -1290,6 +1364,7 @@ class GatewaySessionStore:
         *,
         request_id: str | None = None,
         requested: dict[str, Any] | None = None,
+        expected_model_revision: int | None = None,
     ) -> dict[str, Any]:
         """Atomically accept a client request and freeze what it executes.
 
@@ -1363,6 +1438,8 @@ class GatewaySessionStore:
                     else "Turn already in progress"
                 )
             meta = _row_meta(session["metadata_json"] if session else "{}")
+            if expected_model_revision is not None and self.model_choice_revision(meta)!=expected_model_revision:
+                raise RequestConflict("Conversation model changed during validation; no new request admitted")
             execution = self._resolve_execution(conn, session_id, choices, meta,
                                                 session["workspace"] if session else "")
             if "model" in choices:
@@ -1375,6 +1452,8 @@ class GatewaySessionStore:
                     meta.pop("provider", None)
             elif choices.get("provider"):
                 meta["provider"] = choices["provider"]
+            if "model" in choices or "provider" in choices:
+                meta["model_choice_revision"] = self.model_choice_revision(meta) + 1
             turn_id = uuid.uuid4().hex
             conn.execute(
                 """
