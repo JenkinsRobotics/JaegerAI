@@ -50,3 +50,12 @@ it("retains the command journal when lookup is absent or has a conflicting objec
   expect(create).not.toHaveBeenCalled();
   localStorage.removeItem(key);
 });
+it('keeps canonical completed/failed/cancelled tasks in Finished with exact execution states',async()=>{
+ const el=await mount({tasks:async()=>['completed','completed_verified','failed','cancelled'].map(state=>({task_id:state,state,goal:state,error:state==='failed'?'Retained failure':undefined}))});
+ const finished=el.querySelector('[aria-label="Finished"]')!;expect(finished.textContent).toContain('completed_verified');expect(finished.textContent).toContain('Retained failure');expect(finished.textContent).toContain('cancelled');expect(el.querySelector('[aria-label="Other states"]')).toBeNull();
+});
+
+it('does not offer an unsupported cancellation of owner-terminal blocked or needs-owner receipts',async()=>{
+ const el=await mount({tasks:async()=>['blocked','needs_owner'].map(state=>({task_id:state,state,error:'Retained reason'})),taskActions:{} as never});
+ expect(el.textContent).toContain('Retained reason');expect(el.textContent).not.toContain('Cancel task');
+});

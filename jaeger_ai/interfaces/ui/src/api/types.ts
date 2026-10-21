@@ -108,7 +108,12 @@ export interface SessionDetail extends SessionRow {
 
 export type TaskState = "queued" | "running" | "needs_owner" | "paused" | "blocked" | "failed" | "done" | "cancelled" | string;
 
+export interface TaskPresentation {revision:number;pinned:boolean;todo_done:boolean;read_updated_at:number;unread_override:boolean;unread:boolean}
+export type TaskPresentationAction="pin"|"unpin"|"mark_read"|"mark_unread"|"todo_done"|"todo_open";
+export interface TaskPresentationIntent {operation_id:string;action:TaskPresentationAction;expected_revision:number;expected_updated_at:number}
+export interface TaskPresentationReceipt {ok:boolean;scope:"task_presentation";actor:string;task_id:string;operation_id:string;action:TaskPresentationAction;presentation?:TaskPresentation;error?:string;http_status:number}
 export interface Task {
+  presentation?: TaskPresentation;
   task_id: string;
   goal?: string;
   state?: TaskState;

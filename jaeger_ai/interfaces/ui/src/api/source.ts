@@ -252,6 +252,10 @@ export interface JaegerSource {
   pendingApprovals?(sessionId: string): Promise<PendingApproval[]>;
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   tasks(): Promise<Task[]>;
+  taskPresentation?: {
+    change(id:string,body:import("./types").TaskPresentationIntent):Promise<import("./types").TaskPresentationReceipt>;
+    operation(id:string,operationId:string):Promise<{receipt:import("./types").TaskPresentationReceipt|null}>;
+  };
   agentHome?(agentId: string): Promise<{ session_id: string; agent_id: string }>;
   taskActions?: {
     create(body: { session_id: string; goal: string; request_id: string; proposal: true }): Promise<TaskProposalReceipt>;

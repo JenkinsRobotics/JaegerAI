@@ -331,3 +331,9 @@ def test_diagnostic_capture_proxy_accepts_only_bounded_control_routes(overlay):
         path='/v1/runtime/diagnostics/capture/'+action
         assert _route(overlay,path,'POST') and overlay._calls[-1]==('POST',path)
     assert not _route(overlay,'/v1/runtime/diagnostics/capture/traffic','POST')
+
+
+def test_task_presentation_and_original_operation_routes(overlay):
+    for path,method in [('/v1/tasks/owned/presentation','POST'),('/v1/tasks/owned/presentation-operations/nonce','GET')]:
+        assert _route(overlay,path,method)
+        assert overlay._calls[-1]==(method,path)

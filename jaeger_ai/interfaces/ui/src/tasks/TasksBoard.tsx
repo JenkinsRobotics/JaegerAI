@@ -1,3 +1,4 @@
+import {TaskPresentationControls} from "./TaskPresentationControls";
 import { GatewayError } from "../api/gateway";
 /** Projection of the existing Gateway durable task owner; never a second scheduler. */
 import { useEffect, useRef, useState } from "react";
@@ -10,9 +11,9 @@ const COLUMNS = [
   { id: "queued", title: "Queued", states: ["queued"] },
   { id: "running", title: "Working", states: ["running"] },
   { id: "waiting", title: "Needs you", states: ["needs_owner", "paused", "blocked"] },
-  { id: "done", title: "Finished", states: ["done", "failed", "cancelled"] },
+  { id: "done", title: "Finished", states: ["done", "completed", "completed_verified", "failed", "cancelled"] },
 ];
-const terminal = (task: Task) => ["done", "failed", "cancelled"].includes(String(task.state));
+const terminal = (task: Task) => ["done", "completed", "completed_verified", "needs_owner", "blocked", "failed", "cancelled"].includes(String(task.state));
 const proposal = (task: Task) => task.state === "paused" && task.provenance?.authorized === false && !task.run_history?.length;
 
 interface ProposalIntent { requestId: string; sessionId: string; origin: string; goal: string }
@@ -117,12 +118,14 @@ export function TasksBoard({ source, agents }: { source: JaegerSource; agents: A
     </form>}
     {tasks === null && !error && <p role="status">Loading tasks…</p>}
     {tasks !== null && <div className="jg-board">{columns.map(col => {
-      const items = tasks.filter(t => col.id === "other" ? !known.includes(String(t.state)) : col.states.includes(String(t.state)));
+      const items = tasks.filter(t => col.id === "other" ? !known.includes(String(t.state)) : col.states.includes(String(t.state))).sort((a,b)=>Number(Boolean(b.presentation?.pinned))-Number(Boolean(a.presentation?.pinned)));
       if (col.id === "other" && !items.length) return null;
       return <section key={col.id} className="jg-board__col" aria-label={col.title}><h2 className="jg-board__title">{col.title} <span className="jg-muted">{items.length}</span></h2>
         {items.map(t => <article key={t.task_id} className={`jg-card jg-card--${t.state}`}>
           <div className="jg-card__goal">{t.goal ?? t.task_id}</div>
           <div className="jg-card__meta"><span>{agentName(t.agent_id ?? t.owning_agent)}</span><span>{t.state}</span>{runnerLabel(t.runner) && <span className="jg-tag">{runnerLabel(t.runner)}</span>}{t.eta && <span>ETA {t.eta}</span>}</div>
+          <details><summary>Task details · {t.task_id}</summary><p>Last observed task revision {t.updated_at ?? "unknown"}. Board refreshes every15 seconds; this is not a live execution guarantee.</p><p>Origin conversation: {t.provenance?.session_id ?? "not recorded"} · Origin request: {t.provenance?.request_id ?? "not recorded"}</p><pre>{JSON.stringify(t.run_history ?? [],null,2)}</pre></details>
+          {source.taskPresentation && t.presentation && typeof t.updated_at==='number' && <TaskPresentationControls task={t} controls={source.taskPresentation} changed={()=>setAttempt(n=>n+1)}/>}
           {t.error && <p role="alert">{t.error}</p>}
           {t.result != null && <details><summary>Result</summary><pre>{typeof t.result === "string" ? t.result : JSON.stringify(t.result, null, 2)}</pre></details>}
           {source.taskActions && <div>

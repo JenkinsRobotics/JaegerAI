@@ -228,6 +228,11 @@ def route(handler, parsed, method: str) -> bool:
     except Exception:
         pass
 
+    if path.startswith('/v1/tasks/'):
+        segments=path.split('/')
+        if len(segments)==5 and segments[4]=='presentation' and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))
+        if len(segments)==6 and segments[4]=='presentation-operations' and method=='GET':return _proxy(handler,method,path)
+
     # Global event stream (agents, approvals, tasks, connect-apps): the same
     # SSE pump as the session stream, no separate proxy.
     if path in {"/api/jaeger/events/stream", "/v1/events/stream"} and method == "GET":
