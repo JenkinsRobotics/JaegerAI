@@ -79,9 +79,15 @@ export interface SkillDetail {
   requires_plugins: string[]; aliases: string[]; tags: string[]; auto_activate: boolean; tier: string;
   availability: string; origin_verified: false; execution_authorized: false; scope: string;
 }
+export interface NotificationPreferences { revision:number;enabled:boolean;muted_agent_ids:string[];read_through:number }
+export interface Notifications {
+  read():Promise<{preferences:NotificationPreferences;notifications:{event_id:number;session_id:string;agent_id?:string;title:string;status?:string;timestamp:number;unread:boolean}[];privacy:string;enabled:boolean}>;
+  save(body:{expected_revision:number;enabled:boolean;muted_agent_ids:string[]}):Promise<{preferences:NotificationPreferences}>;
+  markRead(through:number):Promise<{preferences:NotificationPreferences}>;
+}
 export interface ToolInventory {
   tools: { name: string; description: string; toolset: string; source: string; server: string | null; side_effect: string; permission_tier: string; beta: boolean; dangerous: boolean; availability: string }[];
-  count: number; servers: { name: string; state: string; tool_count: number }[];
+  count: number; servers: { id?: string; name: string; state: string; tool_count: number; active_calls?: number; actions?: string[] }[];
   mcp_initialized: boolean; scope: string; execution_authorized: false;
 }
 export interface GatewayDiagnostics {
@@ -133,6 +139,11 @@ export interface JaegerSource {
   };
   library?: LibraryControls;
   skillDetail?(name: string, category: string): Promise<SkillDetail>;
+  mcpControls?: {
+    mutate(id:string,action:'disconnect'|'reconnect',body:{operation_id:string;expected_state:string}):Promise<ControlResult>;
+    operation(id:string):Promise<{receipt:ControlResult|null}>;
+  };
+  notifications?: Notifications;
   sessionFiles?: SessionFiles;
   skills?(query?: string): Promise<{ skills: { name: string; category: string; description: string; lifecycle: string }[]; count: number }>;
   schedules?: ScheduleControls;

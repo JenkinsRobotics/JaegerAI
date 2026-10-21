@@ -230,3 +230,18 @@ def test_file_skill_and_proposal_reads_preserve_identity_and_query(overlay):
         assert _route(overlay,path)
         assert overlay._calls[-1]==('GET',path)
     assert not _route(overlay,'/v1/sessions/owned/files/att_owned','DELETE')
+
+
+def test_mcp_lifecycle_proxy_only_known_transitions(overlay):
+    for action in ('disconnect','reconnect'):
+        path='/v1/runtime/mcp/owned/'+action
+        assert _route(overlay,path,'POST')
+        assert overlay._calls[-1]==('POST',path)
+    assert not _route(overlay,'/v1/runtime/mcp/owned/install','POST')
+
+
+def test_notification_proxy_preserves_read_and_preference_method(overlay):
+    assert _route(overlay,'/v1/notifications')
+    assert _route(overlay,'/v1/notifications','PATCH')
+    assert overlay._calls[-2:]==[('GET','/v1/notifications'),('PATCH','/v1/notifications')]
+    assert not _route(overlay,'/v1/notifications','DELETE')

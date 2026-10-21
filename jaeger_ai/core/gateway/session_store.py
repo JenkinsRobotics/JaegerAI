@@ -2384,6 +2384,29 @@ class GatewaySessionStore:
                          (operation_id, fingerprint, time.time()))
             return True
 
+    def reserve_scoped_control_operation(self, operation_id: str, payload: dict[str, Any], scope: str) -> bool:
+        """A lost lifecycle receipt blocks fresh commands for the same resource.
+
+        Existing control_operations owns receipts; schema_meta holds only the
+        resource's latest command pointer, surviving process/client restarts.
+        """
+        fingerprint = input_fingerprint(json.dumps(payload, sort_keys=True))
+        with self._immediate() as conn:
+            old = conn.execute('SELECT fingerprint FROM control_operations WHERE operation_id=?', (operation_id,)).fetchone()
+            if old:
+                if old['fingerprint'] != fingerprint:
+                    raise ValueError('Operation identity already belongs to a different action')
+                return False
+            key = 'control_scope:' + scope
+            previous = conn.execute('SELECT value FROM schema_meta WHERE key=?', (key,)).fetchone()
+            if previous:
+                prior = conn.execute('SELECT receipt_json FROM control_operations WHERE operation_id=?', (previous['value'],)).fetchone()
+                if prior is None or prior['receipt_json'] is None:
+                    raise ValueError('Earlier resource operation is unresolved: ' + previous['value'] + '; inspect without retry')
+            conn.execute("INSERT INTO control_operations VALUES(?,?,'execution_unknown',NULL,?)", (operation_id, fingerprint, time.time()))
+            conn.execute('INSERT INTO schema_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', (key,operation_id))
+        return True
+
     def finish_control_operation(self, operation_id: str, receipt: dict[str, Any]) -> None:
         with self._immediate() as conn:
             conn.execute("UPDATE control_operations SET status='settled', receipt_json=? WHERE operation_id=?",

@@ -1298,6 +1298,10 @@ class JaegerGatewayApp:
         register_library(self)
         from jaeger_ai.features.workflows.routes import register as register_workflows
         register_workflows(self)
+        from jaeger_ai.plugins.mcp.routes import register as register_mcp_controls
+        register_mcp_controls(self)
+        from jaeger_ai.features.notifications.routes import register as register_notifications
+        register_notifications(self)
         from .native_controls import register as register_native_controls
         register_native_controls(self)
         from jaeger_ai.features.agent_bridge.routes import register
