@@ -99,6 +99,12 @@ export interface MessageSearchPage {
   agent_id: string; next_before: string | null; matching: string;
   matches: { message_id: string; session_id: string; role: string; kind: string; title: string; timestamp: number; snippet: string; content: string; truncated: boolean }[];
 }
+export interface AgentMemorySnapshot { agent_id:string;editable:boolean;loaded_in_specialist_prompt:boolean;notes:string;revision:string;chars:number;prompt_chars:number;max_chars:number;prompt_truncated:boolean;versions:{revision:string;saved_at:number}[] }
+export interface AgentMemoryControls {
+  read(id:string):Promise<AgentMemorySnapshot>;
+  mutate(id:string,body:{operation_id:string;expected_revision:string;action:'replace';text:string}|{operation_id:string;expected_revision:string;action:'restore';restore_revision:string}):Promise<ControlResult&{agent_id?:string;revision?:string}>;
+  operation(id:string):Promise<{receipt:(ControlResult&{agent_id?:string;revision?:string})|null}>;
+}
 export interface AgentKnowledgeSnapshot {
   limits: { max_documents: number; context_chars: number };
   agent_id: string; revision: number; editable: boolean;
@@ -147,6 +153,7 @@ export interface JaegerSource {
     mutate(id:string,action:'disconnect'|'reconnect',body:{operation_id:string;expected_state:string}):Promise<ControlResult>;
     operation(id:string):Promise<{receipt:ControlResult|null}>;
   };
+  agentMemory?:AgentMemoryControls;
   notifications?: Notifications;
   sessionFiles?: SessionFiles;
   skills?(query?: string): Promise<{ skills: { name: string; category: string; description: string; lifecycle: string }[]; count: number }>;

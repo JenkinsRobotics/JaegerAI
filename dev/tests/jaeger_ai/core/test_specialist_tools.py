@@ -7,7 +7,7 @@ from jaeger_ai.core.gateway.server import JaegerGatewayApp
 
 
 def _agent(name, **meta):
-    return SimpleNamespace(name=name, metadata=meta, role=SimpleNamespace(value="specialist"))
+    return SimpleNamespace(id="native:"+name,name=name, metadata=meta, role=SimpleNamespace(value="specialist"))
 
 
 def test_every_standing_specialist_has_a_scoped_tool_set_with_its_notes_tool():
@@ -24,7 +24,8 @@ def test_scope_intersects_with_the_admitted_grant(tmp_path, monkeypatch):
     app = SimpleNamespace(agent_memory_dir=JaegerGatewayApp.agent_memory_dir)
     scope = JaegerGatewayApp._specialist_scope(app, _agent("everyday"), {"model": "m"})
     assert "get_events" in scope["execution"]["allowed_tools"] and scope["execution"]["model"] == "m"
-    assert scope["notes_dir"] == tmp_path / "memory" / "agents" / "everyday"
+    import hashlib
+    assert scope["notes_dir"] == tmp_path / "memory" / "agents" / "by-id" / hashlib.sha256(b"native:everyday").hexdigest()[:32]
     composed = JaegerGatewayApp._specialist_scope(app, _agent("everyday"), {"allowed_tools": []})
     assert composed["execution"]["allowed_tools"] == []  # compose-only stays compose-only
     narrow = JaegerGatewayApp._specialist_scope(app, _agent("everyday"), {"allowed_tools": ["get_time", "terminal"]})

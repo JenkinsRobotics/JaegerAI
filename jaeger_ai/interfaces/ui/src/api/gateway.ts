@@ -58,6 +58,11 @@ export class GatewayClient implements JaegerSource {
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
   };
   searchMessages(agentId: string, query: string, before?: string) { return this.json<import("./source").MessageSearchPage>(`/v1/agents/${encodeURIComponent(agentId)}/messages/search?q=${encodeURIComponent(query)}${before ? `&before=${encodeURIComponent(before)}` : ""}`); }
+  readonly agentMemory: import('./source').AgentMemoryControls = {
+    read: id => this.json(`/v1/agents/${encodeURIComponent(id)}/memory`),
+    mutate: (id,body) => this.json(`/v1/agents/${encodeURIComponent(id)}/memory`,body),
+    operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
+  };
   readonly channelControls: NonNullable<import('./source').JaegerSource['channelControls']> = {
     mutate: (id,action,body) => this.json(`/v1/channels/${encodeURIComponent(id)}/${action}`,body),
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),

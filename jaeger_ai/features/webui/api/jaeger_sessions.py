@@ -253,6 +253,12 @@ def route(handler, parsed, method: str) -> bool:
             return _proxy(handler,'POST',path,_body_bytes(handler))
         return False
 
+    if path.startswith('/v1/agents/') and path.endswith('/memory') and method in {'GET','POST'}:
+        from urllib.parse import quote,unquote
+        agent_id=unquote(path[len('/v1/agents/'):-len('/memory')])
+        if not agent_id or '/' in agent_id:return False
+        return _proxy(handler,method,'/v1/agents/'+quote(agent_id,safe='')+'/memory',_body_bytes(handler) if method=='POST' else None)
+
     if method == "GET" and path == "/v1/channels":
         return _proxy(handler, "GET", path)
 
