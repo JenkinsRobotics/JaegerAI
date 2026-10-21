@@ -430,3 +430,9 @@ def test_verified_artifact_routes_keep_task_identity_and_preview_query(overlay):
         assert _route(overlay, path) is True
         assert overlay._calls[-1] == ('GET', path)
     assert _route(overlay, '/v1/library/artifacts/owned-task/artifact-owned/extra') is False
+
+
+def test_canonical_update_plan_does_not_route_legacy_update_apply(overlay):
+    path='/v1/runtime/updates/plan?channel=latest'
+    assert _route(overlay,path) is True and overlay._calls[-1]==('GET',path)
+    assert _route(overlay,'/v1/runtime/updates/apply','POST') is False

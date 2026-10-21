@@ -151,6 +151,7 @@ export interface SemanticClaimControls {
  mutate(id:string,action:'correct'|'forget'|'restore',body:{operation_id:string;expected_revision:string;text?:string}):Promise<ControlResult>;
  operation(id:string):Promise<{receipt:ControlResult|null}>;
 }
+export interface UpdatePlan {component:'jaeger-update-plan';reported_package_version:string;install_method:string;channel:'stable'|'latest';channels:('stable'|'latest')[];source_checkout_revision:string|null;source_checkout_dirty:boolean|null;identity_scope:string;active_instance_schema:string|null;installed_schema:string;migration_state:string;work:{active_requests:number;unknown_requests:number;nonterminal_tasks:number};restart_blockers:string[];restart_policy:string;release_state:string;signature_state:string;automatic_install_supported:false;automatic_restart_supported:false;check_command:string[];manual_update_command:string[];rollback:{available:boolean;supported_by:string;command:string[];requires_explicit_operator_review:true};limits:string[]}
 export interface GatewayDiagnostics {
   sessions: number; requests: Record<string, number>; approvals: Record<string, number>; handoffs: Record<string, number>;
   unknown_requests: { request_id: string; session_id: string; status: string }[]; unknown_list_limit: number;
@@ -209,6 +210,7 @@ export interface JaegerSource {
   savedMessage?(agentId:string,messageId:string,offset:number,revision?:string):Promise<SavedMessageChunk>;
   searchMessages?(agentId: string, query: string, before?: string): Promise<MessageSearchPage>;
   diagnosticCapture?:import('./diagnosticCapture').DiagnosticCaptureControls;
+  updatePlan?(channel:"stable"|"latest"):Promise<UpdatePlan>;
   diagnostics?(): Promise<GatewayDiagnostics>;
   tools?(query?: string): Promise<ToolInventory>;
   specialistControls?: SpecialistControls;
