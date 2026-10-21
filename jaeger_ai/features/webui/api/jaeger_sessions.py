@@ -228,7 +228,7 @@ def route(handler, parsed, method: str) -> bool:
     except Exception:
         pass
 
-    if path in {'/v1/runtime/updates/plan','/v1/runtime/computers'} and method == 'GET':
+    if path in {'/v1/runtime/updates/plan','/v1/runtime/computers','/v1/runtime/policy-sources'} and method == 'GET':
         return _proxy(handler, method, path + query)
 
     if path.startswith('/v1/tasks/'):
