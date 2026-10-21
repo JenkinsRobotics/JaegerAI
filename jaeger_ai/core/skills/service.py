@@ -181,7 +181,7 @@ def install_skill(layout: Any, name: str, content: str, category: str = "") -> d
         return _install_skill(layout,name,content,category)
 
 
-def _install_skill(layout: Any, name: str, content: str, category: str = "") -> dict[str, Any]:
+def _install_skill(layout: Any, name: str, content: str, category: str = "", *, before_replace=None) -> dict[str, Any]:
     """Install or update one instance-owned playbook atomically."""
     normalized = _name(name)
     category = str(category or "").strip()
@@ -206,14 +206,16 @@ def _install_skill(layout: Any, name: str, content: str, category: str = "") -> 
         skill_file = destination / "SKILL.md"
         if skill_file.is_symlink():
             raise SkillServiceError("refusing to replace a symlinked skill file")
+        from jaeger_agent.skill_improvement.skill_maintenance import ARCHIVE_DIR
         descriptor, temporary_name = tempfile.mkstemp(
-            prefix=".SKILL-", suffix=".md", dir=destination)
+            prefix=".SKILL-", suffix=".md", dir=root/ARCHIVE_DIR)
         temporary_file = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "wb") as handle:
                 handle.write(encoded)
                 handle.flush()
                 os.fsync(handle.fileno())
+            if before_replace is not None:before_replace()
             os.replace(temporary_file, skill_file)
         finally:
             temporary_file.unlink(missing_ok=True)
@@ -222,6 +224,7 @@ def _install_skill(layout: Any, name: str, content: str, category: str = "") -> 
         try:
             (temporary / "SKILL.md").write_bytes(encoded)
             pb.mark_skill_origin(temporary, "user")
+            if before_replace is not None:before_replace()
             os.replace(temporary, destination)
         finally:
             if temporary.exists():
@@ -311,26 +314,100 @@ def remove_skill(layout: Any, name: str, *, expected_revision: str | None = None
             "restart_required":restart_required}
 
 
-def skill_revision(folder: Path) -> str:
-    """Bounded complete-folder identity, without importing or executing files."""
-    import hashlib
-    import json
+def _skill_files(folder: Path) -> dict[str,tuple[bytes,int]]:
+    """Bounded regular-file snapshot; never follow links or read devices."""
     import stat
-    files=[];total=0
-    for path in sorted(folder.rglob("*")):
+    files={};total=0
+    for count,path in enumerate(folder.rglob("*")):
+        if count>=4096:raise SkillServiceError("Skill exceeds managed entry bound")
         if path.is_symlink():raise SkillServiceError("Symlinked skill assets cannot be managed")
         if path.is_dir():continue
         descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
         with os.fdopen(descriptor,"rb") as handle:
             before=os.fstat(handle.fileno())
-            if not stat.S_ISREG(before.st_mode) or before.st_nlink!=1:raise SkillServiceError("Skill assets must be owned regular files")
+            if not stat.S_ISREG(before.st_mode) or before.st_nlink!=1 or before.st_mode&0o7000:raise SkillServiceError("Skill assets must be owned regular files without special permission bits")
             total+=before.st_size
             if len(files)>=2000 or total>20_000_000:raise SkillServiceError("Skill exceeds managed snapshot bounds")
-            data=handle.read(before.st_size+1)
-            after=os.fstat(handle.fileno())
+            data=handle.read(before.st_size+1);after=os.fstat(handle.fileno())
             if len(data)!=before.st_size or (before.st_mtime_ns,before.st_size)!=(after.st_mtime_ns,after.st_size):raise SkillServiceError("Skill changed during review")
-        files.append([str(path.relative_to(folder)),hashlib.sha256(data).hexdigest()])
-    return hashlib.sha256(json.dumps(files,ensure_ascii=False).encode()).hexdigest()
+        files[str(path.relative_to(folder))]=(data,before.st_mode&0o777)
+    return files
+
+
+def _files_revision(files: dict[str,tuple[bytes,int]]) -> str:
+    import hashlib
+    import json
+    parts=[[name,hashlib.sha256(files[name][0]).hexdigest()] for name in sorted(files,key=Path)]
+    return hashlib.sha256(json.dumps(parts,ensure_ascii=False).encode()).hexdigest()
+
+
+def skill_revision(folder: Path) -> str:
+    """Complete content identity without importing or executing skill files."""
+    return _files_revision(_skill_files(folder))
+
+
+def review_playbook(layout: Any, name: str, content: str, category: str, expected_revision: str) -> dict[str,Any]:
+    """Review original owner-provided Markdown only; no install/activation."""
+    import hashlib
+    from jaeger_ai.core.redaction import redact_text
+    from jaeger_ai.core.safety.skills_guard import scan_text
+    normalized=_name(name)
+    if normalized!=name or not isinstance(category,str) or category and _name(category)!=category:raise SkillServiceError("Canonical name/category required")
+    if not isinstance(content,str) or not 1<=len(content.encode('utf-8'))<=_MAX_SKILL_BYTES:raise SkillServiceError("Bounded UTF-8 skill content required")
+    if any(redact_text(value)!=value for value in (name,category,content)):raise SkillServiceError("Potential credential content refused; no skill saved")
+    fm=_playbook_module()._parse_frontmatter(content)
+    if str(fm.get('name') or '')!=name or fm.get('archived') or str(fm.get('lifecycle') or '').lower()=='archived':raise SkillServiceError("Matching active playbook frontmatter required")
+    findings=scan_text(content)
+    if any(item.severity=='critical' for item in findings):raise SkillServiceError("Skill safety scanner refused critical content")
+    catalog=next((row for row in list_skills(layout)['skills'] if row['name']==name),None)
+    prior_tools=[]
+    if catalog:
+        if catalog['zone']!='instance' or catalog['kinds']!=['playbook']:raise SkillServiceError("Bundled/code identities require their existing clone/package owner")
+        folder,_,_= _find_playbook(layout,name)
+        previous_fm=_playbook_module()._parse_frontmatter((folder/'SKILL.md').read_text(encoding='utf-8'))
+        prior_tools=_playbook_module()._meta_str_list(previous_fm,'requires_tools')
+        relative=managed_relative(str(folder.relative_to(Path(layout.skills_dir))))
+        wanted=Path(category)/name if category else Path(name)
+        if relative!=wanted:raise SkillServiceError("Existing identity path differs; no implicit move or shadow copy")
+        if skill_revision(folder)!=expected_revision:raise SkillServiceError("Skill changed since review")
+    elif expected_revision!='missing':raise SkillServiceError("Original skill is no longer available")
+    requested=_playbook_module()._meta_str_list(fm,'requires_tools')
+    declared=str(fm.get('version') or '')[:100]
+    return {'requested_tools':requested,'added_tool_requirements':sorted(set(requested)-set(prior_tools)),'declared_version':declared,'scope_granted':False,'provenance':'owner_provided_unverified','name':name,'category':category,'content_sha256':hashlib.sha256(content.encode()).hexdigest(),'expected_revision':expected_revision,'action':'update' if catalog else 'import','warnings':sorted({item.pattern_id for item in findings}),'publisher_verified':False,'execution_authorized':False}
+
+
+def save_playbook(layout: Any, name: str, content: str, category: str, expected_revision: str, *, before_save=None) -> dict[str,Any]:
+    """CAS save; retained full prior version, no code import or external fetch."""
+    import uuid
+    from jaeger_agent.skill_improvement.skill_maintenance import archive_lock
+    root=Path(layout.skills_dir);relative=Path(category)/name if category else Path(name)
+    with archive_lock(root) as archive:
+        review=review_playbook(layout,name,content,category,expected_revision)
+        folder=root/relative
+        if folder.exists() and review['action']=='import':raise SkillServiceError("An unregistered destination exists; no overwrite")
+        files=_skill_files(folder) if review['action']=='update' else {'.origin':(b'user\n',0o600)}
+        if review['action']=='update' and _files_revision(files)!=expected_revision:raise SkillServiceError("Skill changed since review; replacement retained")
+        backup=None
+        if review['action']=='update':
+            backup=uuid.uuid4().hex;destination=archive/backup;destination.mkdir(mode=0o700)
+            for path,(data,mode) in files.items():
+                target=destination/path;target.parent.mkdir(parents=True,exist_ok=True)
+                descriptor=os.open(target,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
+                with os.fdopen(descriptor,'wb') as handle:handle.write(data);handle.flush();os.fsync(handle.fileno());os.fchmod(handle.fileno(),mode)
+            if skill_revision(destination)!=expected_revision:raise OSError("Prior snapshot could not be verified; active version untouched")
+        changed={**files,'SKILL.md':(content.encode('utf-8'),files.get('SKILL.md',(b'',0o600))[1])}
+        revision=_files_revision(changed)
+        proposal={'name':name,'original_relative':str(relative),'archive_name':backup,'revision':revision,'previous_revision':expected_revision,'state':'updated' if backup else 'installed'}
+        # Recheck at the serialized producer, after snapshot work, before plan/replace.
+        if backup and skill_revision(folder)!=expected_revision:raise SkillServiceError("Skill changed during snapshot; replacement retained")
+        if before_save is not None:before_save(proposal)
+        def unchanged():
+            if backup:
+                if skill_revision(folder)!=expected_revision:raise SkillServiceError("Skill changed before commit; active replacement retained")
+            elif folder.exists() or folder.is_symlink():raise SkillServiceError("A new destination appeared; no overwrite")
+        _install_skill(layout,name,content,category,before_replace=unchanged)
+        if skill_revision(folder)!=revision:raise OSError("Saved skill revision is uncertain; inspect original receipt without replay")
+    return {'ok':True,'owner':'jaeger','restart_required':False,**proposal,'publisher_verified':False,'execution_authorized':False}
 
 
 def restore_skill(layout: Any, name: str, *, archive_name: str, original_relative: str, revision: str, before_move=None) -> dict[str, Any]:
@@ -358,5 +435,7 @@ def restore_skill(layout: Any, name: str, *, archive_name: str, original_relativ
         if declared!=normalized:raise SkillServiceError("Archived skill identity mismatch")
         destination.parent.mkdir(parents=True,exist_ok=True)
         if before_move is not None:before_move({'name':normalized,'archive_name':archived,'original_relative':str(relative),'revision':revision})
+        if destination.exists() or destination.is_symlink():raise SkillServiceError('An active replacement appeared; restore refused')
+        if skill_revision(source)!=revision:raise SkillServiceError('Archived skill changed before commit; restore refused')
         os.rename(source,destination)
     return {"ok":True,"name":normalized,"state":"restored","revision":revision,"owner":"jaeger","restart_required":False}

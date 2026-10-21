@@ -379,3 +379,10 @@ def test_owned_handoff_stop_reaches_real_gateway_owner(overlay,path,method):
 def test_managed_skill_controls_use_existing_authenticated_proxy(overlay,path,method):
     assert _route(overlay,path,method) is True
     assert overlay._calls[-1]==(method,path)
+
+
+def test_playbook_review_content_routes_preserve_exact_scope_and_query(overlay):
+    assert _route(overlay,'/v1/runtime/skills/managed/review','POST') is True
+    assert overlay._calls[-1]==('POST','/v1/runtime/skills/managed/review')
+    assert _route(overlay,'/v1/runtime/skills/managed/content?name=fixture') is True
+    assert overlay._calls[-1]==('GET','/v1/runtime/skills/managed/content?name=fixture')

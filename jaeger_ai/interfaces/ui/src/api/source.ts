@@ -303,6 +303,8 @@ export interface TurnReceipt {
 }
 
 export interface ManagedSkill {name:string;category:string;zone:string;mutable:boolean;revision:string|null;description:string;management_error?:string}
-export type SkillChange={operation_id:string;action:'remove';name:string;expected_revision:string}|{operation_id:string;action:'restore';restore_from:string};
-export interface SkillChangeReceipt {operation_id:string;command?:SkillChange;action?:'remove'|'restore';outcome:'saved'|'rejected'|'unknown';result?:{name:string;state:string;revision:string;archive_name?:string;original_relative?:string};error?:string}
-export interface ManagedSkills {list():Promise<{skills:ManagedSkill[];operations:SkillChangeReceipt[];scope:'current_instance_playbooks';activation_performed:false}>;change(body:SkillChange):Promise<SkillChangeReceipt>;original(op:string):Promise<SkillChangeReceipt>}
+export interface SkillSave {operation_id:string;action:'save';name:string;category:string;content:string;expected_revision:string;review_digest:string}
+export type SkillChange=SkillSave|{operation_id:string;action:'remove';name:string;expected_revision:string}|{operation_id:string;action:'restore';restore_from:string};
+export interface SkillChangeReceipt {operation_id:string;command?:Record<string,unknown>;action?:'remove'|'restore'|'save';outcome:'saved'|'rejected'|'unknown';result?:{name:string;state:string;revision:string;archive_name?:string;original_relative?:string};error?:string}
+export interface SkillReview {requested_tools?:string[];added_tool_requirements?:string[];declared_version?:string;scope_granted?:false;provenance?:string;name:string;category:string;content_sha256:string;expected_revision:string;action:'import'|'update';warnings:string[];publisher_verified:false;execution_authorized:false}
+export interface ManagedSkills {review(body:{name:string;category:string;content:string;expected_revision:string}):Promise<SkillReview>;content(name:string):Promise<{name:string;category:string;content:string;revision:string;content_redacted:boolean}>;list():Promise<{skills:ManagedSkill[];operations:SkillChangeReceipt[];scope:'current_instance_playbooks';activation_performed:false}>;change(body:SkillChange):Promise<SkillChangeReceipt>;original(op:string):Promise<SkillChangeReceipt>}
