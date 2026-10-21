@@ -1,9 +1,12 @@
 """Owner command/option fixtures, no providers or model execution."""
 import asyncio
+
 import pytest
-from dev.tests.jaeger_ai.core.test_sessions_contract import gw
+
 from jaeger_ai.core.gateway.caller_auth import client_headers
 from jaeger_ai.core.gateway.handoff_controls import command_key
+
+pytest_plugins = ("dev.tests.jaeger_ai.core.test_sessions_contract",)
 
 
 @pytest.mark.asyncio
@@ -97,6 +100,7 @@ async def test_reply_owner_command_is_approval_bound_correlated_and_recovers_ack
 @pytest.mark.asyncio
 async def test_owner_command_cannot_bypass_stop_or_live_owner_gate(gw,monkeypatch):
     from types import SimpleNamespace
+
     from jaeger_ai.core.gateway.global_stop import GlobalStop
     from jaeger_ai.core.runtime.lifecycle_lease import LifecycleLease
     app,http=gw
