@@ -2949,7 +2949,10 @@ class JaegerGatewayApp:
             )})
         if request.query.get("view") == "settings":
             metadata = payload.get("metadata") or {}
-            return web.json_response({"session_id": session_id, "model": metadata.get("model"), "provider": metadata.get("provider")})
+            try:
+                revision=self.store.model_choice_revision(metadata)
+            except ValueError as exc:return web.json_response({'error':str(exc)},status=409)
+            return web.json_response({"session_id": session_id, "model": metadata.get("model"), "provider": metadata.get("provider"), "model_choice_revision": revision, "atomic_model_operations": True})
         return web.json_response(payload)
 
     async def handle_branch_session(self, request: web.Request) -> web.Response:
@@ -3085,7 +3088,7 @@ class JaegerGatewayApp:
         for provider in provider_model_inventory().get("providers") or []:
             if not provider.get("reachable") or (lane and provider.get("id") != lane):
                 continue
-            if any(str(m.get("id")) == name for m in provider.get("models") or []):
+            if any(str(m.get("id")) == name and m.get("available") is not False for m in provider.get("models") or []):
                 return {"model": name, "provider": provider.get("id")}
         return None
 
@@ -3115,6 +3118,30 @@ class JaegerGatewayApp:
         session = self.store.get_session(session_id)
         if session is None:
             return web.json_response({"error": "Session not found"}, status=404)
+        if 'cancel_model_choice' in body:
+            try:
+                command=body['cancel_model_choice']
+                if set(body)!={'cancel_model_choice'} or not isinstance(command,dict) or set(command)!={'model','operation_id','expected_model_revision'}:raise ValueError('Exact original model command required')
+                receipt=self.store.cancel_model_choice(session_id,operation_id=command['operation_id'],expected_revision=command['expected_model_revision'],actor=request['caller_actor'],requested_model=command['model'])
+                return web.json_response(receipt) # Cancellation readback can be a prior committed success.
+            except (ValueError,TypeError) as exc:return web.json_response({'error':str(exc)},status=409)
+        modern = 'operation_id' in body or 'expected_model_revision' in body
+        if modern:
+            if set(body)!={'model','operation_id','expected_model_revision'}:
+                return web.json_response({'error':'Versioned model command cannot change other session fields'},status=400)
+            # Resolve through existing provider inventory; no credentials/configuration edits.
+            try:
+                previous=self.store.model_choice_operation(session_id,operation_id=body['operation_id'],expected_revision=body['expected_model_revision'],actor=request['caller_actor'],requested_model=model)
+                if previous is not None:return web.json_response(previous,status=previous['http_status'])
+                try:
+                    choice={'model':None,'provider':None} if model is None else await asyncio.to_thread(self._session_model_choice,model.strip())
+                except Exception:
+                    choice=None  # No metadata effect; commit an explicit rejection receipt.
+                receipt=self.store.save_model_choice(session_id,choice,operation_id=body['operation_id'],expected_revision=body['expected_model_revision'],actor=request['caller_actor'],requested_model=model)
+            except (ValueError,TypeError) as exc:return web.json_response({'error':str(exc)},status=409)
+            if receipt['ok']:
+                self.event_bus.publish(session_id,'session.updated',{'session':self.store.get_session(session_id)})
+            return web.json_response(receipt,status=receipt['http_status'])
         if "model" in body:
             if model is None:
                 choice = {"model": None, "provider": None}
@@ -3245,6 +3272,28 @@ class JaegerGatewayApp:
             requested["caller"] = actor
         return requested
 
+    async def _turn_model_revision(self, session_id: str, requested: dict[str, Any], request_id: str | None) -> int | None:
+        # An existing immutable receipt outlives model availability; never probe or
+        # re-admit it. Fresh admissions revalidate only an explicitly chosen model.
+        if request_id and self.store.get_request(request_id) is not None:return None
+        session=self.store.get_session(session_id) or {}
+        meta=session.get('metadata') or {}
+        revision=self.store.model_choice_revision(meta)
+        candidate=requested.get('model') if 'model' in requested else meta.get('model')
+        if not candidate:return revision
+        lane,name=split_routed_model_id(str(candidate))
+        provider=requested.get('provider') or lane or meta.get('provider')
+        from jaeger_ai.core.runtime.truth import provider_model_inventory
+        try:inventory=await asyncio.to_thread(provider_model_inventory)
+        except Exception:return revision # Discovery unknown, never claim available.
+        rows=[p for p in inventory.get('providers',[]) if not provider or p.get('id')==provider]
+        if any(p.get('reachable') and any(str(m.get('id'))==name and m.get('available') is not False for m in p.get('models',[])) for p in rows):return revision
+        # Configured/unprobed cloud catalogs are intentionally unknown. Absence
+        # from a positively observed local catalog is a definite unavailability.
+        known=rows and all(p.get('reachable') or p.get('configured') is False or p.get('id') in {'ollama','lmstudio'} for p in rows)
+        if known:raise ValueError('Selected model is unavailable in the current observed catalog; no request admitted')
+        return revision
+
     async def handle_send_turn(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
         body = await request.json() if request.can_read_body else {}
@@ -3272,8 +3321,10 @@ class JaegerGatewayApp:
 
         requested = self._requested_from_body(body)
         try:
+            model_revision=await self._turn_model_revision(session_id,requested,request_id)
             admitted = self.store.admit_request(
                 session_id, text, request_id=request_id, requested=requested,
+                expected_model_revision=model_revision,
             )
         except RequestConflict as exc:
             return web.json_response({"error": str(exc), "session_id": session_id}, status=409)
@@ -3978,6 +4029,7 @@ class JaegerGatewayApp:
         attachments: list[dict[str, Any]] | None = None,
         context_ids: tuple[str, str] | None = None,
         context_references: tuple[Any, ...] = (),
+        on_model_identity: Callable[[str | None], None] | None = None,
     ) -> str:
         """Live text turn via locked Ollama — never routes through :8813."""
         target_model = model or DEFAULT_OLLAMA_MODEL
@@ -4117,6 +4169,12 @@ class JaegerGatewayApp:
                         f"Ollama chat HTTP {resp.status}: {body[:500]}"
                     )
                 data = json.loads(body)
+        if on_model_identity is not None:
+            from jaeger_ai.core.redaction import redact_text
+            reported=data.get('model')
+            valid=isinstance(reported,str) and 0<len(reported)<=200 and re.fullmatch(r'[A-Za-z0-9._:/@+ -]+',reported) and redact_text(reported)==reported and not (ollama_key and ollama_key in reported)
+            try:on_model_identity(reported if valid else None)
+            except Exception:logger.debug('Model identity observer unavailable')
         message = (data.get("message") or {})
         content = str(message.get("content") or "").strip()
         if not content:
@@ -4595,6 +4653,10 @@ class JaegerGatewayApp:
         request_text = text
         context_references: tuple[Any, ...] = ()
         pinned_references: tuple[Any, ...] = ()
+        actual_model: str | None = None
+        def observed_model(value: str | None) -> None:
+            nonlocal actual_model
+            actual_model = value
 
         try:
             atts = self._turn_attachments(session_id, execution)
@@ -4689,6 +4751,7 @@ class JaegerGatewayApp:
                             attachments=session_atts,
                             context_ids=(session_id, request_id or turn_id),
                             context_references=context_references,
+                            on_model_identity=observed_model,
                         ),
                         loop,
                     )
@@ -4758,6 +4821,7 @@ class JaegerGatewayApp:
                         attachments=self._turn_attachments(session_id, execution),
                         context_ids=(session_id, request_id or turn_id),
                         context_references=context_references,
+                        on_model_identity=observed_model,
                     ),
                     loop,
                 )
@@ -4865,7 +4929,12 @@ class JaegerGatewayApp:
                     "proactive_source": "sensor",
                     "proactive_salience": _normalize_salience(options["proactive_salience"]),
                 }
+            self.event_bus.publish(session_id,'turn.model',{'request_id':rid,'turn_id':turn_id,
+                'actual_model':actual_model,'scope':'provider_reported' if actual_model else 'unknown'})
             result = {
+                "actual_model": actual_model,
+                "model_field_scope": "configured_route",
+                "model_identity_scope": "provider_reported" if actual_model else "unknown",
                 "output": response_text,
                 "status": "completed",
                 "backend": backend,

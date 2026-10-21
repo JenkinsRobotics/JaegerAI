@@ -19,3 +19,10 @@ it('keeps exact item admission distinct from budget drops and lost verbatim cont
  if(part.kind==='modelContext')expect(part.outline.items?.map(row=>row.state)).toEqual(['retained_exact','budget_dropped','not_retained_exact']);
  expect(JSON.stringify(modelContext({items:[{...item,owner:'PRIVATE',claim_id:'PRIVATE',record_ref:'PRIVATE'}]}))).not.toContain('PRIVATE');
 });
+it('keeps provider-reported actual model distinct from unavailable actual identity live and restored',()=>{
+ const live=mapEvent({event:'turn.model',payload:{actual_model:'actual-provider-model',scope:'provider_reported'}})!.parts[0];
+ expect(live).toEqual({kind:'modelIdentity',actualModel:'actual-provider-model',scope:'provider_reported'});
+ expect(mapEvent({event:'turn.model',payload:{model:'requested-model',scope:'unknown'}})!.parts[0]).toEqual({kind:'modelIdentity',actualModel:null,scope:'unknown'});
+ const turns=messagesToTurns([{id:1,role:'user',content:'Question',request_id:'owned'},{id:2,role:'assistant',content:'Answer',request_id:'owned',parts:[{type:'model_identity',actual_model:'actual-provider-model',scope:'provider_reported'},{type:'text',text:'Answer'}]}]);
+ expect(turns[0].parts).toEqual([live,{kind:'markdownContent',text:'Answer'}]);
+});

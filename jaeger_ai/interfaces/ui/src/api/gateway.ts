@@ -124,7 +124,10 @@ export class GatewayClient implements JaegerSource {
   };
   modelSettings = {
     inventory: () => this.json<ModelInventory>("/api/runtime/models"),
-    read: (id: string) => this.json<{ session_id: string; model?: string | null; provider?: string | null }>(`/v1/sessions/${encodeURIComponent(id)}?view=settings`),
+    read: (id: string) => this.json<import("./source").ModelChoiceSnapshot>(`/v1/sessions/${encodeURIComponent(id)}?view=settings`),
+    cancelPending:(id:string,body:import('./source').ModelChoiceIntent)=>this.json<import('./source').ModelChoiceReceipt>(`/v1/sessions/${encodeURIComponent(id)}`,{cancel_model_choice:body},"PATCH"),
+    saveVersioned:(id:string,body:import('./source').ModelChoiceIntent)=>this.json<import('./source').ModelChoiceReceipt>(`/v1/sessions/${encodeURIComponent(id)}`,body,"PATCH"),
+    operation:(id:string)=>this.json<{receipt:import('./source').ModelChoiceReceipt|null}>('/v1/control-operations/'+encodeURIComponent(id)),
     save: async (id: string, model: string | null) => { await this.json(`/v1/sessions/${encodeURIComponent(id)}`, { model }, "PATCH"); },
   };
   connectApps = {

@@ -111,7 +111,7 @@ async def test_patch_session_model_is_validated_and_drives_turn_defaults(tmp_pat
         assert ok.status == 200
         assert (await ok.json())["metadata"]["model"] == "qwen3:4b"
         settings = await client.get("/v1/sessions/s1?view=settings")
-        assert await settings.json() == {"session_id": "s1", "model": "qwen3:4b", "provider": "ollama"}
+        assert await settings.json() == {"session_id": "s1", "model": "qwen3:4b", "provider": "ollama", "model_choice_revision":1,"atomic_model_operations":True}
         assert (await client.patch("/v1/sessions/s1", json={"model": "offline-model"})).status == 400
         assert (await client.patch("/v1/sessions/s1", json={"model": "nope"})).status == 400
         assert (await client.patch("/v1/sessions/s1", json={"model": 3})).status == 400

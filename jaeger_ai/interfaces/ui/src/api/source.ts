@@ -32,9 +32,15 @@ export interface ModelInventory {
   active?: { provider: string; model: string };
   providers: { id: string; display_name: string; reachable: boolean; configured: boolean; availability?:'not_probed'|'not_configured'|'unknown';configuration_observed?:boolean;reason?: string; models: { id: string; available?: boolean; usable_for_react?: boolean }[] }[];
 }
+export interface ModelChoiceSnapshot {session_id:string;model?:string|null;provider?:string|null;model_choice_revision?:number;atomic_model_operations?:boolean}
+export interface ModelChoiceReceipt extends ControlResult {domain:string;session_id:string}
+export interface ModelChoiceIntent {operation_id:string;model:string|null;expected_model_revision:number}
 export interface ModelSettings {
   inventory(): Promise<ModelInventory>;
-  read(sessionId: string): Promise<{ session_id: string; model?: string | null; provider?: string | null }>;
+  read(sessionId: string): Promise<ModelChoiceSnapshot>;
+  saveVersioned?(sessionId:string,body:ModelChoiceIntent):Promise<ModelChoiceReceipt>;
+  cancelPending?(sessionId:string,body:ModelChoiceIntent):Promise<ModelChoiceReceipt>;
+  operation?(id:string):Promise<{receipt:ModelChoiceReceipt|null}>;
   save(sessionId: string, model: string | null): Promise<void>;
 }
 export interface ScheduleJob { id: string; name: string; prompt: string; cron: string; enabled: boolean; state: string; next_fire_at?: string }
