@@ -78,3 +78,31 @@ def test_notification_category_paging_and_observed_cursor_are_read_only(tmp_path
     assert gateway.store.list_requests()==[] and gateway.store.list_pending_approvals()==[]
     with pytest.raises(ValueError):feed(gateway.store,category='not-a-category')
     with pytest.raises(ValueError):feed(gateway.store,before=-1)
+
+
+def test_retained_unread_presence_is_not_a_total_or_false_absence_after_bounded_scan(tmp_path):
+    from jaeger_ai.features.notifications.routes import feed
+    gateway=JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'presence.db'))
+    gateway.store.ensure_session('owned-presence',metadata={'agent_id':'native:builder'})
+    assert feed(gateway.store)['retained_unread_presence']=='absent'
+    gateway.event_bus.publish('owned-presence','approval.request',{'approval_id':'owned-old'})
+    assert feed(gateway.store)['retained_unread_presence']=='present'
+    assert feed(gateway.store,category='approvals')['retained_unread_presence']=='unknown'
+    # Newer nonterminal task updates are deliberately not notification entries.
+    # Capping500 cannot justify saying the older unread approval is absent.
+    for index in range(500):gateway.event_bus.publish('owned-presence','task.updated',{'task':{'task_id':f'owned-running-{index}','state':'running'}})
+    assert feed(gateway.store)['retained_unread_presence']=='unknown'
+    page=feed(gateway.store);assert page['notifications']==[] and page['next_before']
+    assert feed(gateway.store,before=page['next_before'])['retained_unread_presence']=='unknown'
+    gateway.event_bus.publish('owned-presence','turn.failed',{'request_id':'owned-failed'})
+    current=feed(gateway.store);assert current['retained_unread_presence']=='present'
+    # Use the owner's existing preference mutation helper, no direct badge store.
+    from jaeger_ai.features.notifications.routes import settings,write
+    with gateway.store._immediate() as conn:
+        value=settings(conn);value['read_through']=current['observed_through'];write(conn,value)
+    assert feed(gateway.store)['retained_unread_presence']=='absent'
+    gateway.event_bus.publish('owned-presence','approval.request',{'approval_id':'owned-new'})
+    assert feed(gateway.store)['retained_unread_presence']=='present'
+    with gateway.store._immediate() as conn:
+        value=settings(conn);value['enabled']=False;write(conn,value)
+    assert feed(gateway.store)['retained_unread_presence']=='absent'

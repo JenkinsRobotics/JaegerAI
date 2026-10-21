@@ -32,3 +32,13 @@ it.each([true,false])('routes one-session summaries to that session and mixed su
   await consumer.poll();expect(post.mock.calls.filter(row=>row[0]==='notify')).toHaveLength(1);
  }finally{localStorage.removeItem(NATIVE_NOTIFICATION_KEY);localStorage.removeItem(NATIVE_NOTIFICATION_CURSOR);if(prior)Object.defineProperty(navigator,'locks',prior);else Reflect.deleteProperty(navigator,'locks');}
 });
+it('badge-only preference uses authoritative retained presence without banners, cursor writes or permission requests',async()=>{
+ const prior=Object.getOwnPropertyDescriptor(navigator,'locks');Object.defineProperty(navigator,'locks',{value:{request:async(_n:unknown,_o:unknown,fn:(lock:object)=>Promise<void>)=>fn({})},configurable:true});
+ localStorage.removeItem(NATIVE_NOTIFICATION_CURSOR);localStorage.setItem(NATIVE_NOTIFICATION_KEY,JSON.stringify({enabled:false,badge:true,quiet:true,start:'00:00',end:'00:00'}));
+ let presence:'present'|'unknown'|'absent'='present';const read:Notifications['read']=async()=>({preferences:{revision:0,enabled:true,muted_agent_ids:[],read_through:0},privacy:'metadata_only_no_message_preview',enabled:true,observed_through:1,notifications:[],retained_unread_presence:presence});
+ const post=vi.fn(async(type:string,payload?:unknown)=>{if(type==='notifications.status')return{authorization:'denied',permission_requested:false,activity_badge_available:true};if(type==='notifications.badge')return{applied:true,state:(payload as {state:string}).state,scope:'menu_bar_retained_activity_presence'};throw Error('Badge must not request permission or submit a banner');});
+ try{
+  const consumer=new NativeNotificationConsumer(read,{post});await consumer.poll();presence='unknown';await consumer.poll();presence='absent';await consumer.poll();
+  expect(post.mock.calls.filter(row=>row[0]==='notifications.badge').map(row=>row[1])).toEqual([{state:'present'},{state:'unknown'},{state:'absent'}]);expect(localStorage.getItem(NATIVE_NOTIFICATION_CURSOR)).toBeNull();
+ }finally{localStorage.removeItem(NATIVE_NOTIFICATION_KEY);localStorage.removeItem(NATIVE_NOTIFICATION_CURSOR);if(prior)Object.defineProperty(navigator,'locks',prior);else Reflect.deleteProperty(navigator,'locks');}
+});

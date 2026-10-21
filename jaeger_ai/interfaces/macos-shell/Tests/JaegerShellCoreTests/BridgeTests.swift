@@ -62,6 +62,9 @@ final class BridgeTests: XCTestCase {
             XCTAssertNotNil(cmd("notify", ["title": "Hi", "session_id": invalid]).failureValue)
         }
         XCTAssertEqual(cmd("notifications.navigation").successValue, .notificationNavigation)
+        XCTAssertEqual(cmd("notifications.badge", ["state": "unknown"]).successValue, .notificationBadge(.unknown))
+        XCTAssertNotNil(cmd("notifications.badge", ["state": "42"]).failureValue)
+        XCTAssertNotNil(cmd("notifications.badge", ["state": true]).failureValue)
         XCTAssertNotNil(cmd("notify", [:]).failureValue)
         XCTAssertEqual(cmd("notifications.status").successValue, .notificationStatus)
         XCTAssertEqual(BridgeCommand.notificationStatus.name, "notifications.status")

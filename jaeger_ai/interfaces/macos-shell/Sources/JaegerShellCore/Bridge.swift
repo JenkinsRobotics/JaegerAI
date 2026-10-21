@@ -67,6 +67,7 @@ public enum BridgeCommand: Equatable {
     case windowSetPinned(Bool)
     case notificationStatus, notificationNavigation
     case notificationNavigationAck(String)
+    case notificationBadge(ActivityBadgeState)
     case notify(title: String, body: String, sessionId: String?)
     case linkOpen(URL)
     case fileReveal(URL)
@@ -102,6 +103,11 @@ public enum BridgeCommand: Equatable {
             guard let pinned = strictBool(p["pinned"]) else { return .failure(.invalidPayload("pinned must be a boolean")) }
             return .success(.windowSetPinned(pinned))
         case "notifications.status": return .success(.notificationStatus)
+        case "notifications.badge":
+            guard let raw = p["state"] as? String, let state = ActivityBadgeState(rawValue: raw) else {
+                return .failure(.invalidPayload("badge state must be off, present, absent or unknown"))
+            }
+            return .success(.notificationBadge(state))
         case "notifications.navigation": return .success(.notificationNavigation)
         case "notifications.navigationAck":
             guard let id = p["id"] as? String, id.count == 36, UUID(uuidString: id) != nil else {
@@ -190,6 +196,7 @@ public enum BridgeCommand: Equatable {
         case .notificationStatus: return "notifications.status"
         case .notificationNavigation: return "notifications.navigation"
         case .notificationNavigationAck: return "notifications.navigationAck"
+        case .notificationBadge: return "notifications.badge"
         case .notify: return "notify"
         case .linkOpen: return "link.open"
         case .fileReveal: return "file.reveal"
