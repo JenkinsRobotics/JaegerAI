@@ -183,7 +183,9 @@ export interface WorkflowDefinition { format: string; name: string; description:
 export interface WorkflowDocument { id: string; revision: number; digest: string; archived: boolean; definition: WorkflowDefinition }
 export type WorkflowAction = "create" | "save" | "archive" | "restore" | "propose";
 export interface WorkflowReceipt extends ControlResult { workflow?: WorkflowDocument; task?: { task_id: string; status: string; authorized: boolean } | null }
+export interface WorkflowRun { task_id: string; state: string; authorized: boolean; workflow_revision: number; workflow_digest: string; origin_session_id: string | null; updated_at: number; result: unknown; error: string | null; request_status: string | null }
 export interface WorkflowControls {
+  runs(id: string): Promise<{ workflow_id: string; runs: WorkflowRun[] }>;
   list(): Promise<{ workflows: { id: string; title: string; revision: number; archived: boolean }[]; format: string; limits: { steps: number; bytes: number } }>;
   read(id: string): Promise<WorkflowDocument>;
   mutate(action: WorkflowAction, id: string, body: Record<string, unknown>): Promise<WorkflowReceipt>;

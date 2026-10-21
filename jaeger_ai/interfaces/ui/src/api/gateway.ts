@@ -222,6 +222,7 @@ export class GatewayClient implements JaegerSource {
   }
   readonly workflows: import("./source").WorkflowControls = {
     list: () => this.json("/v1/workflows"),
+    runs: id => this.json(`/v1/workflows/${encodeURIComponent(id)}/runs`),
     read: id => this.json(`/v1/workflows/${encodeURIComponent(id)}`),
     mutate: (action, id, body) => this.json(action === "create" ? "/v1/workflows" : `/v1/workflows/${encodeURIComponent(id)}/${action}`, body),
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),

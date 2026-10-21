@@ -133,6 +133,7 @@ class SqliteDurableTaskStore:
                 new_fingerprint = task.provenance.get('submission_fingerprint')
                 conflict = (old_fingerprint != new_fingerprint if old_fingerprint or new_fingerprint else
                             previous.goal != task.goal or any(previous.payload.get(k) != v for k, v in task.payload.items()))
+                conflict = conflict or any(previous.provenance.get(k) != task.provenance.get(k) for k in ('workflow_id', 'workflow_revision', 'workflow_digest'))
                 if conflict:
                     raise TaskConflict('Task identity conflicts with an admitted objective or execution configuration')
                 return previous, True

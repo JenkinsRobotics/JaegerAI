@@ -373,3 +373,23 @@ async def test_skill_inspection_uses_exact_registry_identity_without_loading_too
         assert (await client.get('/v1/runtime/skills/detail', params={'name': skill.name, 'category': skill.category})).status == 409
     async with TestClient(TestServer(gateway.app), headers=client_headers('a2a')) as client:
         assert (await client.get('/v1/runtime/skills/detail', params={'name': skill.name, 'category': skill.category})).status == 403
+
+
+def test_workflow_reference_is_atomic_immutable_data_not_authority(owner):
+    from jaeger_ai.core.tasks.store import TaskConflict
+    ref = {'id': 'owned-document', 'revision': 1, 'digest': 'a' * 64}
+    result = owner.submit('Review fixture', context=context(owner, 'background'), proposal=True,
+                          key='workflow-owned', workflow_reference=ref)
+    task = owner.store.get_task(result['task_id'])
+    assert task.provenance['workflow_id'] == ref['id']
+    assert task.provenance['authorized'] is False
+    assert task.state == TaskState.PAUSED
+    assert owner.submit('Review fixture', context=context(owner, 'background'), proposal=True,
+                        key='workflow-owned', workflow_reference=ref)['replayed']
+    with pytest.raises(TaskConflict):
+        owner.submit('Review fixture', context=context(owner, 'background'), proposal=True,
+                     key='workflow-owned', workflow_reference={**ref, 'revision': 2})
+    with pytest.raises(ValueError, match='Exact saved workflow'):
+        owner.submit('No grants', context=context(owner), workflow_reference={**ref, 'authorized': True})
+    assert len(owner.store.list_tasks()) == 1
+    assert owner.gateway.store.list_requests() == []
