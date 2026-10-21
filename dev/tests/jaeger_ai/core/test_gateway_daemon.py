@@ -928,6 +928,8 @@ async def test_specialist_handoff_executes_isolated_child(tmp_path: Path, monkey
     assert final["result"]["ok"] is True
     assert "child-result" in final["result"]["summary"]
     assert seen and seen[0].startswith("specialist:")
+    assert final["metadata"]["tool_scope"] in {"standing", "model_only"}     # never claims "no tools" silently
+    assert "effective_tools" in final["metadata"]
 
 
 @pytest.mark.asyncio

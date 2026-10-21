@@ -309,6 +309,8 @@ export interface JaegerSource {
   cancel(sessionId: string, requestId?: string): Promise<CancellationReceipt|void>;
   pendingApprovals?(sessionId: string): Promise<PendingApproval[]>;
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
+  /** POST /v1/sessions/{id}/clarify/{clarify_id}: resolves once; rejects on 409 stale/already resolved. */
+  answerClarify?(sessionId: string, clarifyId: string, revision: number, response: string): Promise<void>;
   tasks(): Promise<Task[]>;
   taskPresentation?: {
     change(id:string,body:import("./types").TaskPresentationIntent):Promise<import("./types").TaskPresentationReceipt>;

@@ -1264,7 +1264,9 @@ def _register_builtins(client: Any) -> None:
         sink = current_turn_sink("interaction_request_sink")
         if callable(sink):
             answer = str(sink("clarify", question, ()) or "").strip()
-            return {"asked": True, "question": question, "answer": answer}
+            if answer:
+                return {"asked": True, "question": question, "answer": answer}
+        # No surface, or no answer (timeout/cancel): plain-text question, answered by the next turn.
         return t.ask_user(question=question)
 
     @register_tool_from_function
