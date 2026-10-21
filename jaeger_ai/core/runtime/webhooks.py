@@ -1,21 +1,27 @@
 """Loopback HTTP triggers — Hermes-style inbound routines.
 
-A POST on 127.0.0.1 drops a kanban card or fires a synthetic turn.
+A subscribed POST creates an approval-bound Gateway task proposal, never a turn.
 GitHub event payloads are recognised when the path is ``/github`` or
 the body looks like a GitHub webhook.
 
 Bind is loopback-only. Optional shared secret via
 ``Authorization: Bearer …`` or ``X-Hub-Signature-256`` is accepted
-when configured; empty secret means loopback is enough.
+when configured. Subscription admission additionally requires a configured secret;
+empty-secret loopback requests cannot admit work. Existing credentials are untouched.
 """
 
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
+
+from jaeger_ai.contract.webhooks import FILTER_TOKEN_PATTERN, MAX_EVENT_BODY_BYTES, SUBSCRIPTION_ID_PATTERN
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8793
@@ -89,7 +95,8 @@ class _Handler(BaseHTTPRequestHandler):
     server_version = "JaegerWebhook/1"
 
     def log_message(self, fmt: str, *args: Any) -> None:  # noqa: A003
-        print(f"[jaeger-webhook] {fmt % args}", flush=True)
+        # HTTP paths, query strings and provider text can contain secrets.
+        print("[jaeger-webhook] request completed", flush=True)
 
     def _unauthorized(self) -> None:
         self.send_response(401)
@@ -112,38 +119,57 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         secret = getattr(self.server, "webhook_secret", "") or ""
-        if secret:
-            auth = self.headers.get("Authorization") or ""
-            token = auth.split(" ", 1)[-1] if auth else ""
-            hub = self.headers.get("X-Hub-Signature-256") or ""
-            if token != secret and secret not in hub:
-                self._unauthorized()
-                return
-        length = int(self.headers.get("Content-Length") or 0)
-        raw = self.rfile.read(max(0, min(length, 1_000_000))).decode("utf-8", "replace")
-        body: dict[str, Any] | None
         try:
-            parsed = json.loads(raw) if raw.strip() else {}
-            body = parsed if isinstance(parsed, dict) else {}
-        except json.JSONDecodeError:
-            body = {"prompt": raw}
-        interpreted = interpret(urlparse(self.path).path, body, raw=raw)
-        delivery = (
-            self.headers.get("X-Jaeger-Delivery-Id")
-            or self.headers.get("X-GitHub-Delivery")
-            or (body.get("delivery_id") if isinstance(body, dict) else None)
-        )
-        if delivery:
-            interpreted["delivery_id"] = str(delivery).strip()
-        callback = getattr(self.server, "webhook_callback", None)
-        result: dict[str, Any] = {"ok": True, **interpreted}
-        if callable(callback):
-            try:
-                extra = callback(interpreted) or {}
-                if isinstance(extra, dict):
-                    result.update(extra)
-            except Exception as exc:  # noqa: BLE001
-                result = {"ok": False, "error": str(exc), **interpreted}
+            length = int(self.headers.get('Content-Length') or '0')
+            if not 0 <= length <= MAX_EVENT_BODY_BYTES:
+                raise ValueError()
+        except ValueError:
+            self.send_error(413, 'Unsupported event size')
+            return
+        raw_bytes = self.rfile.read(length)
+        auth = self.headers.get('Authorization') or ''
+        bearer = auth[7:] if auth.lower().startswith('bearer ') else ''
+        signature = self.headers.get('X-Hub-Signature-256') or ''
+        authenticated = bool(secret) and (
+            hmac.compare_digest(bearer.encode(), secret.encode())
+            or hmac.compare_digest(signature.encode(), ('sha256=' + hmac.new(secret.encode(), raw_bytes, hashlib.sha256).hexdigest()).encode()))
+        if secret and not authenticated:
+            self._unauthorized()
+            return
+        try:
+            body = json.loads(raw_bytes) if raw_bytes else {}
+            if not isinstance(body, dict):
+                raise ValueError()
+        except (ValueError, UnicodeError):
+            self._ok({'ok': False, 'status': 'rejected', 'reason': 'invalid_json'})
+            return
+        path = urlparse(self.path).path
+        match = re.fullmatch(rf'/(?:hook|github)/({SUBSCRIPTION_ID_PATTERN})', path)
+        if not match or secret and secret in match[1]:
+            self._ok({'ok': False, 'status': 'rejected', 'reason': 'subscription_required'})
+            return
+        def safe(value):
+            # Redact every provider string we project, not just prompt/title.
+            return str(value).replace(secret, '[redacted]') if secret else str(value)
+        interpreted = interpret(path, body)
+        provider = 'github' if self.headers.get('X-GitHub-Event') else 'generic'
+        sender = body.get('sender')
+        if isinstance(sender, dict):
+            sender = sender.get('login')
+        event = {'subscription_id': match[1], 'provider': provider,
+                 'delivery_id': safe(self.headers.get('X-Jaeger-Delivery-Id') or self.headers.get('X-GitHub-Delivery') or body.get('delivery_id') or ''),
+                 'event_type': safe(self.headers.get('X-GitHub-Event') or self.headers.get('X-Jaeger-Event') or ''),
+                 'sender': safe(sender or ''), 'title': safe(interpreted['title']), 'prompt': safe(interpreted['prompt']),
+                 'authenticated': authenticated}
+        if any(re.fullmatch(FILTER_TOKEN_PATTERN, event[key]) is None for key in ('delivery_id', 'event_type', 'sender')):
+            self._ok({'ok': False, 'status': 'rejected', 'reason': 'invalid_event_identity'})
+            return
+        callback = getattr(self.server, 'webhook_callback', None)
+        try:
+            result = callback(event) if callable(callback) else {'ok': False, 'status': 'unavailable'}
+        except Exception:
+            # The callback may have committed before response/publish failure.
+            result = {'ok': False, 'status': 'admission_unknown', 'error': 'Inspect original subscription delivery; do not generate a new identity'}
         self._ok(result)
 
 

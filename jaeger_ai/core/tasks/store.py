@@ -126,20 +126,26 @@ class SqliteDurableTaskStore:
         """Atomic insert; a stable identity never overwrites an existing execution."""
         with closing(self._get_conn()) as conn, conn:
             conn.execute('BEGIN IMMEDIATE')
-            old = conn.execute('SELECT task_json FROM durable_tasks WHERE task_id=?', (task.task_id,)).fetchone()
-            if old:
-                previous = DurableTask.from_dict(json.loads(old[0]))
-                old_fingerprint = previous.provenance.get('submission_fingerprint')
-                new_fingerprint = task.provenance.get('submission_fingerprint')
-                conflict = (old_fingerprint != new_fingerprint if old_fingerprint or new_fingerprint else
-                            previous.goal != task.goal or any(previous.payload.get(k) != v for k, v in task.payload.items()))
-                conflict = conflict or any(previous.provenance.get(k) != task.provenance.get(k) for k in ('workflow_id', 'workflow_revision', 'workflow_digest'))
-                if conflict:
-                    raise TaskConflict('Task identity conflicts with an admitted objective or execution configuration')
-                return previous, True
-            conn.execute('INSERT INTO durable_tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                         (task.task_id, task.owning_agent, task.goal, task.kind.value,
-                          task.state.value, json.dumps(task.to_dict()), task.created_at, task.updated_at))
+            return self.admit_task_in_transaction(conn, task)
+
+    def admit_task_in_transaction(self, conn, task: DurableTask) -> tuple[DurableTask, bool]:
+        """Existing owner insert composed with an inbound receipt/approval commit."""
+        if not conn.in_transaction:
+            raise ValueError('Task admission requires an active owner transaction')
+        old = conn.execute('SELECT task_json FROM durable_tasks WHERE task_id=?', (task.task_id,)).fetchone()
+        if old:
+            previous = DurableTask.from_dict(json.loads(old[0]))
+            old_fingerprint = previous.provenance.get('submission_fingerprint')
+            new_fingerprint = task.provenance.get('submission_fingerprint')
+            conflict = (old_fingerprint != new_fingerprint if old_fingerprint or new_fingerprint else
+                        previous.goal != task.goal or any(previous.payload.get(k) != v for k, v in task.payload.items()))
+            conflict = conflict or any(previous.provenance.get(k) != task.provenance.get(k) for k in ('workflow_id', 'workflow_revision', 'workflow_digest'))
+            if conflict:
+                raise TaskConflict('Task identity conflicts with an admitted objective or execution configuration')
+            return previous, True
+        conn.execute('INSERT INTO durable_tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                     (task.task_id, task.owning_agent, task.goal, task.kind.value,
+                      task.state.value, json.dumps(task.to_dict()), task.created_at, task.updated_at))
         return task, False
 
     def update_task(self, task_id: str, change: Callable[[DurableTask], None]) -> DurableTask:

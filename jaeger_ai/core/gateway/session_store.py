@@ -1365,6 +1365,7 @@ class GatewaySessionStore:
         request_id: str | None = None,
         requested: dict[str, Any] | None = None,
         expected_model_revision: int | None = None,
+        admission_guard: Callable[[sqlite3.Connection], None] | None = None,
     ) -> dict[str, Any]:
         """Atomically accept a client request and freeze what it executes.
 
@@ -1454,6 +1455,8 @@ class GatewaySessionStore:
                 meta["provider"] = choices["provider"]
             if "model" in choices or "provider" in choices:
                 meta["model_choice_revision"] = self.model_choice_revision(meta) + 1
+            if admission_guard is not None:
+                admission_guard(conn)
             turn_id = uuid.uuid4().hex
             conn.execute(
                 """
@@ -1901,10 +1904,11 @@ class GatewaySessionStore:
         fingerprint: str | None = None,
         metadata: dict[str, Any] | None = None,
         approval_id: str | None = None,
+        connection: sqlite3.Connection | None = None,
     ) -> dict[str, Any]:
         now = time.time()
         aid = approval_id or f"approval_{uuid.uuid4().hex[:12]}"
-        with self._immediate() as conn:
+        def insert(conn):
             conn.execute(
                 """
                 INSERT INTO approvals(
@@ -1924,7 +1928,13 @@ class GatewaySessionStore:
                     json.dumps(metadata or {}),
                 ),
             )
-        return self.get_approval(aid) or {}
+            return self._approval_row(conn.execute("SELECT * FROM approvals WHERE approval_id=?", (aid,)).fetchone())
+        if connection is not None:
+            if not connection.in_transaction:
+                raise ValueError("Approval admission requires an owner transaction")
+            return insert(connection)
+        with self._immediate() as conn:
+            return insert(conn)
 
     def get_approval(self, approval_id: str) -> dict[str, Any] | None:
         with self._get_conn() as conn:
