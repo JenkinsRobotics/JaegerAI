@@ -213,10 +213,10 @@ class SqliteWorldStore:
             )
         return claim
 
-    def query_claims(self, subject: str) -> list[WorldClaim]:
+    def query_claims(self, subject: str, *, include_inactive: bool = False) -> list[WorldClaim]:
         with self._get_connection() as conn:
             rows = conn.execute(
-                "SELECT * FROM world_claims WHERE subject = ? ORDER BY created_at DESC", (subject,)
+                "SELECT * FROM world_claims WHERE subject = ?" + ("" if include_inactive else " AND (valid_until IS NULL OR valid_until>?)") + " ORDER BY created_at DESC", (subject,) if include_inactive else (subject,time.time())
             ).fetchall()
             return [
                 WorldClaim(
@@ -233,6 +233,31 @@ class SqliteWorldStore:
                 )
                 for r in rows
             ]
+
+    def search_claims(self, query: str = '', *, before: int | None = None, include_inactive: bool = False) -> dict[str, Any]:
+        """Bounded literal search of this semantic owner; no copied index or writes."""
+        import hashlib
+        if not isinstance(query,str) or len(query)>200:raise ValueError('Memory query must be at most200 characters')
+        if before is not None and (type(before) is not int or not 0<before<2**63):raise ValueError('Invalid memory cursor')
+        clauses=[];params=[];now=time.time()
+        if not include_inactive:clauses.append('(valid_until IS NULL OR valid_until>?)');params.append(now)
+        if before is not None:clauses.append('rowid<?');params.append(before)
+        if query:
+            clauses.append("(instr(lower(subject),lower(?))>0 OR instr(lower(predicate),lower(?))>0 OR instr(lower(value),lower(?))>0)");params.extend([query]*3)
+        with self._get_connection() as conn:
+            rows=conn.execute('SELECT rowid AS cursor,* FROM world_claims'+(' WHERE '+' AND '.join(clauses) if clauses else '')+' ORDER BY rowid DESC LIMIT 51',params).fetchall()
+            recent={r[0] for r in conn.execute('SELECT claim_id FROM world_claims WHERE valid_until IS NULL OR valid_until>? ORDER BY created_at DESC LIMIT 12',(now,))}
+        claims=[]
+        for row in rows[:50]:
+            value={key:row[key] for key in ('claim_id','subject','predicate','value','provenance','confidence','source_id','valid_from','valid_until','created_at')}
+            value['revision']=hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
+            value['truncated']=len(value['value'])>4000 or any(len(value[key])>512 for key in ('subject','predicate','source_id'))
+            value['value']=value['value'][:4000]
+            for key in ('subject','predicate','source_id'):value[key]=value[key][:512]
+            value['active']=row['valid_until'] is None or row['valid_until']>now
+            value['recent_context_candidate']=row['claim_id'] in recent
+            claims.append(value)
+        return {'claims':claims,'next_before':rows[49]['cursor'] if len(rows)>50 else None,'observed_at':now,'matching':'literal_sqlite_lower','context_scope':'recent_semantic_candidates_not_admitted_context'}
 
     def list_recent_claims(self, limit: int = 20) -> list[WorldClaim]:
         """Claims still in force, newest first. An expired claim was withdrawn
