@@ -356,3 +356,16 @@ def test_owner_handoff_and_reply_command_routes(overlay):
     for path,method in paths:
         assert _route(overlay,path,method)
         assert overlay._calls[-1]==(method,path)
+
+
+@pytest.mark.parametrize(('path','method'),[
+    ('/v1/handoff-controls','GET'),
+    ('/v1/handoffs/owned-h/stop-state','GET'),
+    ('/v1/handoffs/owned-h/stop-commands','POST'),
+    ('/v1/handoffs/owned-h/stop-commands/owned-op','GET'),
+])
+def test_owned_handoff_stop_reaches_real_gateway_owner(overlay,path,method):
+    bodies=[]
+    overlay._proxy=lambda h,m,p,b=None:bodies.append((m,p,b)) or True
+    assert _route(overlay,path,method) is True
+    assert bodies==[(method,path,b'{}' if method=='POST' else None)]
