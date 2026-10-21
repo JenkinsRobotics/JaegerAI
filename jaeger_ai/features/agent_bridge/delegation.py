@@ -1,12 +1,8 @@
 """Durable origin for bridge handoffs through the existing Gateway team path."""
 
-import hashlib
+from jaeger_ai.contract import handoffs
 
 from .service import BridgeError, enabled
-
-
-def child_request_id(request_id):
-    return hashlib.sha256(("handoff:" + request_id).encode()).hexdigest()[:32]
 
 
 def origin(gateway, session_id, request_id):
@@ -32,7 +28,7 @@ def origin(gateway, session_id, request_id):
 
     if session_id != specialist_session(
         handoff["to_agent_id"], handoff["request_id"]
-    ) or request_id != child_request_id(handoff["request_id"]):
+    ) or request_id != handoffs.child_request_id(handoff["request_id"]):
         raise PermissionError("Bridge child identity mismatch")
     with gateway.store._get_conn() as conn:
         root = conn.execute(
@@ -107,7 +103,7 @@ async def cancel_handoffs(gateway, binding):
             continue
         gateway.store.save_handoff({**handoff, "status": "cancelled"})
         gateway._close_pending_approvals(handoff["request_id"])
-        child_id = child_request_id(handoff["request_id"])
+        child_id = handoffs.child_request_id(handoff["request_id"])
         if gateway.store.get_request(child_id) is not None:
             session = specialist_session(handoff["to_agent_id"], handoff["request_id"])
             await gateway.handle_cancel_turn(

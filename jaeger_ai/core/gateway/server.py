@@ -2869,12 +2869,34 @@ class JaegerGatewayApp:
         if record is None:
             return web.json_response({"error": "Handoff not found"}, status=404)
         if record["status"] == "execution_unknown":
-            import hashlib
+            from jaeger_ai.contract.handoffs import child_request_id, request_digest
             from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
             rid = record.get("request_id") or record["id"]
-            native_id = hashlib.sha256(("handoff:" + rid).encode()).hexdigest()
             session = specialist_session(record["to_agent_id"], rid)
-            receipt = self._native_receipt(native_id, session)
+            canonical = self.store.get_request(child_request_id(rid))
+            if canonical is not None:
+                owner_session=self.store.get_session(canonical['session_id']) or {}
+                meta=owner_session.get('metadata') or {}
+                expected_actor=(record.get('metadata') or {}).get('caller_actor')
+                bound=(canonical['session_id']==session and meta.get('handoff_id')==record['id']
+                       and meta.get('agent_id')==record['to_agent_id']
+                       and (canonical.get('execution') or {}).get('is_subordinate') is True
+                       and (canonical.get('execution') or {}).get('caller')==expected_actor)
+                if not bound:
+                    return web.json_response({**record,'recovery_error':'Retained child identity does not match this handoff; outcome remains unknown'})
+                status=canonical['status']
+                if status in {'completed','failed','cancelled'}:
+                    result=canonical.get('result') or {}
+                    record=self.store.save_handoff({**record,'status':status,'result':{
+                        'ok':status=='completed','status':status,'summary':result.get('output') or result.get('error') or result.get('halt_reason') or '',
+                        'worker_session_id':session,'metadata':{'gateway_request_id':canonical['request_id'],'recovered_from':'canonical_gateway_receipt','result_scope':'child_request_outcome','goal_verification':'not_inferred_from_turn_completion'}}})
+                    self._publish_handoff('agent.handoff.finished',record)
+                # A canonical admitted/running/unknown record cannot be replaced
+                # by a different/older receipt source. Never restart that child.
+                return web.json_response(record)
+            # Read-only continuity for pre-Gateway native receipts; no old app,
+            # runtime fallback or execution is started by this compatibility read.
+            receipt = self._native_receipt(request_digest(rid), session)
             if receipt and not receipt.get("execution_unknown") and receipt.get("status") in {"completed", "failed", "cancelled"}:
                 reply = receipt.get("reply") or {}
                 record = self.store.save_handoff({**record, "status": receipt["status"],
@@ -6333,10 +6355,10 @@ class JaegerGatewayApp:
         (``allowed_tools=None``) or the granted subset, its own skills, its
         notes, the project root as the bound workspace, approvals parked on
         that child turn, and a durable receipt in client_requests."""
-        import hashlib
+        from jaeger_ai.contract.handoffs import child_request_id
         from jaeger_ai.core.agent_registry.specialist_runtime import specialist_agent
 
-        child_rid = hashlib.sha256(("handoff:" + request_id).encode()).hexdigest()[:32]
+        child_rid = child_request_id(request_id)
         target_record=self._registry().get_agent(agent_id or specialist_agent(session_id) or '')
         if target_record is not None and target_record.disabled:
             raise ValueError('Specialist disabled; no new child admission')
