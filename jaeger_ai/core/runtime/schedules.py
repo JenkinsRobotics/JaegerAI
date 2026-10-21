@@ -45,6 +45,7 @@ def create_job(
     at: str | None = None,
     deliver: str | None = None,
     recipient: str | None = None,
+    timezone_name: str | None = None,
 ) -> dict[str, Any]:
     # This is the explicit human-facing control plane, not an agent tool call.
     # The HTTP route is the user's confirmation, so invoking the decorated
@@ -60,6 +61,7 @@ def create_job(
             prompt=prompt,
             name=name,
             at=at,
+            **({"timezone_name": timezone_name} if timezone_name is not None else {}),
         )
     except Exception as exc:
         raise ValueError(str(exc)) from exc
@@ -99,7 +101,7 @@ def _set_status(name: str, status: str) -> bool:
 
     with sqlite_store.writer() as conn:
         cur = conn.execute(
-            "UPDATE schedules SET status = ? WHERE schedule_id = ? "
+            "UPDATE schedules SET status = ?, config_revision = config_revision + 1 WHERE schedule_id = ? "
             "AND status IN ('active', 'paused')",
             (status, name),
         )
@@ -118,7 +120,7 @@ def restore_job(name: str) -> dict[str, Any]:
     """Recover a cancelled definition paused; never schedule work as a side effect of restore."""
     from jaeger_agent.memory import sqlite_store
     with sqlite_store.writer() as conn:
-        changed = conn.execute("UPDATE schedules SET status='paused' WHERE schedule_id=? AND status='cancelled'", ((name or '').strip(),)).rowcount
+        changed = conn.execute("UPDATE schedules SET status='paused', config_revision=config_revision+1 WHERE schedule_id=? AND status='cancelled'", ((name or '').strip(),)).rowcount
     return {"restored": bool(changed), "name": name}
 
 
@@ -131,17 +133,25 @@ __all__ = [
 ]
 
 
-def update_job(name: str, *, prompt: str, schedule: str) -> dict[str, Any]:
-    """Edit one existing schedule atomically without resurrecting or unpausing it."""
+def update_job(name: str, *, prompt: str, schedule: str, timezone_name: str | None = None,
+               expected_revision: int | None = None) -> dict[str, Any]:
+    """Edit configuration under the owner transaction; scheduler progress is independent."""
     from datetime import datetime, timezone
     from croniter import croniter
-    from jaeger_agent.memory import sqlite_store
+    from jaeger_agent.memory import sqlite_store, memory
     if not prompt.strip() or not croniter.is_valid(schedule):
         raise ValueError("A prompt and valid cron expression are required")
-    next_fire = croniter(schedule, datetime.now().astimezone()).get_next(datetime).astimezone(timezone.utc).isoformat(timespec="seconds")
+    if expected_revision is not None and (type(expected_revision) is not int or expected_revision < 0):
+        raise ValueError("A valid schedule revision is required")
     with sqlite_store.writer() as conn:
-        changed = conn.execute("UPDATE schedules SET cron=?, prompt=?, next_fire_at=? WHERE schedule_id=? AND status IN ('active','paused')",
-                               (schedule, prompt.strip(), next_fire, name)).rowcount
-        if not changed:
+        row = conn.execute("SELECT * FROM schedules WHERE schedule_id=? AND status IN ('active','paused')", (name,)).fetchone()
+        if row is None:
             raise ValueError("Schedule not found or no longer editable")
-    return {"updated": True, "name": name}
+        if expected_revision is not None and row['config_revision'] != expected_revision:
+            raise ValueError("Schedule revision changed; refresh and review the saved definition")
+        zone = memory.schedule_timezone(row['timezone'] if timezone_name is None else timezone_name)
+        next_fire = croniter(schedule, datetime.now().astimezone(zone)).get_next(datetime).astimezone(timezone.utc).isoformat(timespec="seconds")
+        conn.execute("UPDATE schedules SET cron=?, prompt=?, timezone=?, next_fire_at=?, config_revision=config_revision+1 WHERE schedule_id=?",
+                     (schedule, prompt.strip(), zone.key if zone else None, next_fire, name))
+        revision = row['config_revision'] + 1
+    return {"updated": True, "name": name, "config_revision": revision}

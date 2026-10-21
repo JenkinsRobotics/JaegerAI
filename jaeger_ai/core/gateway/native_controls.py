@@ -18,7 +18,8 @@ def register(gateway):
             jobs = owner.list_jobs(include_cancelled=request.query.get("include_deleted") == "1")["schedules"]
             return web.json_response({"jobs": [
                 {**j, "id": j["name"], "schedule_display": j["cron"],
-                 "enabled": j["status"] == "active", "state": j["status"]} for j in jobs],
+                 "enabled": j["status"] == "active", "state": j["status"],
+                 "next_fire_at": j["next_run_at"], "timezone_policy": j.get("timezone") or "gateway_local"} for j in jobs],
                 "scheduler": "jaeger"})
         except RuntimeError as exc:
             return web.json_response({"error": str(exc)}, status=503)
@@ -66,9 +67,9 @@ def register(gateway):
                     name = "native-" + oid
                 if any(j["name"] == name for j in owner.list_jobs(include_cancelled=True)["schedules"]):
                     raise ValueError("A schedule with this name already exists")
-                result = owner.create_job(name=name, prompt=str(body.get("prompt") or ""), schedule=str(body.get("schedule") or ""))
+                result = owner.create_job(name=name, prompt=str(body.get("prompt") or ""), schedule=str(body.get("schedule") or ""), timezone_name=body.get("timezone"))
             elif action == "update":
-                result = owner.update_job(name, prompt=str(body.get("prompt") or ""), schedule=str(body.get("schedule") or ""))
+                result = owner.update_job(name, prompt=str(body.get("prompt") or ""), schedule=str(body.get("schedule") or ""), timezone_name=body.get("timezone"), expected_revision=body.get("expected_revision"))
             elif action == "run":
                 if gateway._current_tier() == "chat":
                     raise ValueError("Scheduled execution is disabled in Chat mode")

@@ -356,3 +356,31 @@ def test_one_shot_future_not_claimed_early(bound):
     mem.add_schedule("", "later", name="later", at=future)
     assert mem.claim_due_schedules() == []
     assert [s["name"] for s in mem.list_schedules()] == ["later"]
+
+
+def test_explicit_zone_spring_and_fall_claims_keep_wall_time_and_no_duplicate(bound):
+    from zoneinfo import ZoneInfo
+    zone = ZoneInfo('America/New_York')
+    mem.add_schedule('0 9 * * *','fixture only',name='zoned',timezone_name=zone.key)
+    for day, expected_hour in [('2026-03-07T14:00:00+00:00',13),('2026-10-31T13:00:00+00:00',14)]:
+        with sqlite_store.writer() as conn:
+            conn.execute("UPDATE schedules SET next_fire_at=? WHERE schedule_id='zoned'",(day,))
+        now = datetime.fromisoformat(day)
+        assert len(mem.claim_due_schedules(now)) == 1
+        next_run = datetime.fromisoformat(mem.list_schedules()[0]['next_run_at'])
+        assert next_run.hour == expected_hour and next_run.astimezone(zone).hour == 9
+        assert mem.claim_due_schedules(now) == []
+
+
+def test_v6_schedule_migration_retains_existing_local_policy_and_next_fire(bound):
+    mem.add_schedule('0 9 * * *','preserved objective',name='legacy')
+    before = mem.list_schedules()[0]
+    conn = sqlite_store.connection()
+    # Reconstruct the actual previous schedule shape, not a mocked migration.
+    conn.execute('ALTER TABLE schedules DROP COLUMN timezone')
+    conn.execute('ALTER TABLE schedules DROP COLUMN config_revision')
+    conn.execute('UPDATE schema_version SET version=6 WHERE id=1')
+    conn.commit()
+    sqlite_store._ensure_schema(conn)
+    after = mem.list_schedules()[0]
+    assert after == before and after['timezone'] is None and after['config_revision'] == 0
