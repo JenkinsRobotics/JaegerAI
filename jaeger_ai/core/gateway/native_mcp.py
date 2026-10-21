@@ -135,6 +135,28 @@ def check_connector_grant(tool: str, grant: Any) -> dict[str, Any]:
     return result
 
 
+# ── Stop / cancellation ───────────────────────────────────────────────────
+CANCEL_POLL_S = 0.1
+CANCEL_NOTICE_TIMEOUT_S = 2.0
+
+
+class MCPCallCancelled(RuntimeError):
+    """Stop arrived while a tools/call was in flight; the reply is abandoned."""
+
+    def __init__(self, message: str, *, notice_sent: bool = False) -> None:
+        super().__init__(message)
+        self.notice_sent = notice_sent
+
+
+def _bound_cancellation() -> threading.Event | None:
+    """The turn's cancellation event bound with ``turn_cancellation`` (if any)."""
+    try:
+        from jaeger_agent.core.cancellation import current_cancellation
+    except Exception:  # noqa: BLE001 — agent package absent: no cancellation
+        return None
+    return current_cancellation()
+
+
 # ── MCP Client ──────────────────────────────────────────────────────────────
 
 class MCPClient:
@@ -236,12 +258,49 @@ class MCPClient:
                 seen.add(cursor)
             raise RuntimeError("MCP catalog exceeds page limit")
 
-    def _execute_call(self, name: str, arguments: dict[str, Any]) -> dict:
+    def _execute_call(self, name: str, arguments: dict[str, Any], *,
+                      cancel: threading.Event | None = None) -> dict:
+        """One tools/call. ``cancel`` (or the turn's bound cancellation, see
+        ``jaeger_agent.core.cancellation``) makes the wait stoppable: on Stop the
+        client posts ``notifications/cancelled`` for this request id, abandons
+        the response and raises ``MCPCallCancelled``. Without a cancellation
+        event the call is exactly the old blocking request."""
+        if cancel is None:
+            cancel = _bound_cancellation()
+        request_id = self._next_id()
         body = json.dumps({
-            "jsonrpc": "2.0", "id": self._next_id(), "method": "tools/call",
+            "jsonrpc": "2.0", "id": request_id, "method": "tools/call",
             "params": {"name": name, "arguments": arguments}
         }).encode("utf-8")
         req = urllib.request.Request(self.base_url, data=body, headers=self._headers(), method="POST")
+        if cancel is None:
+            return self._send_call(req)
+        if cancel.is_set():
+            raise MCPCallCancelled("MCP call cancelled before dispatch", notice_sent=False)
+        outcome: dict[str, Any] = {}
+        done = threading.Event()
+
+        def worker() -> None:
+            try:
+                outcome["result"] = self._send_call(req)
+            except BaseException as exc:  # noqa: BLE001 — re-raised in the caller
+                outcome["error"] = exc
+            finally:
+                done.set()
+
+        threading.Thread(target=worker, daemon=True, name=f"mcp-call-{request_id}").start()
+        while not done.wait(CANCEL_POLL_S):
+            if cancel.is_set():
+                sent = self._send_cancelled(request_id, "Stopped by the user")
+                # The abandoned worker finishes on its own (bounded by
+                # REQUEST_TIMEOUT); its reply is dropped. It holds no lock.
+                raise MCPCallCancelled(
+                    "MCP call interrupted; remote outcome unconfirmed; do not retry", notice_sent=sent)
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome["result"]
+
+    def _send_call(self, req: urllib.request.Request) -> dict:
         open_kwargs = {} if REQUEST_TIMEOUT is None else {"timeout": REQUEST_TIMEOUT}
         with urllib.request.urlopen(req, **open_kwargs) as resp:
             data = resp.read()
@@ -252,7 +311,20 @@ class MCPClient:
                 return results[0].get("result", results[0])
             raise RuntimeError("MCP returned no response")
 
-    def call_tool(self, name: str, arguments: dict[str, Any], *, grant: dict[str, Any] | None = None) -> dict:
+    def _send_cancelled(self, request_id: int, reason: str) -> bool:
+        """POST the MCP notifications/cancelled on the same MCP session (best effort)."""
+        body = json.dumps({"jsonrpc": "2.0", "method": "notifications/cancelled",
+                           "params": {"requestId": request_id, "reason": reason}}).encode("utf-8")
+        req = urllib.request.Request(self.base_url, data=body, headers=self._headers(), method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=CANCEL_NOTICE_TIMEOUT_S) as resp:
+                return 200 <= resp.status < 300
+        except Exception as exc:  # noqa: BLE001
+            print(f"[jaeger-bridge] MCP cancel notice failed: {exc}")
+            return False
+
+    def call_tool(self, name: str, arguments: dict[str, Any], *, grant: dict[str, Any] | None = None,
+                  cancel: threading.Event | None = None) -> dict:
         """Call one MCP tool.
 
         GB-032: when a connector grant is in play (``grant=`` or the reserved
@@ -270,14 +342,14 @@ class MCPClient:
             if not self._session_id:
                 self.initialize()
             try:
-                return self._execute_call(name, arguments)
+                return self._execute_call(name, arguments, **({'cancel': cancel} if cancel is not None else {}))
             except urllib.error.HTTPError as err:
                 if err.code == 404:
                     print(f"[jaeger-bridge] MCP session error ({err.code}), re-initializing session...")
                     self._session_id = None
                     try:
                         self.initialize()
-                        return self._execute_call(name, arguments)
+                        return self._execute_call(name, arguments, **({'cancel': cancel} if cancel is not None else {}))
                     except Exception as retry_err:
                         print(f"[jaeger-bridge] MCP re-initialize failed: {retry_err}")
                         raise
