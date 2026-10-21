@@ -120,6 +120,12 @@ export class GatewayClient implements JaegerSource {
   async updateSession(id: string, body: { title?: string; archived?: boolean }) {
     await this.json(`/v1/sessions/${encodeURIComponent(id)}`, body, "PATCH");
   }
+  readonly workflows: import("./source").WorkflowControls = {
+    list: () => this.json("/v1/workflows"),
+    read: id => this.json(`/v1/workflows/${encodeURIComponent(id)}`),
+    mutate: (action, id, body) => this.json(action === "create" ? "/v1/workflows" : `/v1/workflows/${encodeURIComponent(id)}/${action}`, body),
+    operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
+  };
   readonly agentKnowledge: import("./source").AgentKnowledgeControls = {
     read: id => this.json(`/v1/agents/${encodeURIComponent(id)}/knowledge`),
     save: (id, body) => this.json(`/v1/agents/${encodeURIComponent(id)}/knowledge`, body, "PATCH"),

@@ -30,12 +30,13 @@ export function applyAppearance(mode: Appearance) {
   document.documentElement.dataset.appearance = mode;
 }
 
-type Tab = "agents" | "general" | "voice" | "connection" | "about" | "automations" | "skills" | "library" | "tools" | "diagnostics";
+type Tab = "agents" | "general" | "voice" | "connection" | "about" | "automations" | "skills" | "library" | "tools" | "diagnostics" | "workflows";
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: "general", label: "General", icon: "settings-gear" },
   { id: "agents", label: "Agents", icon: "account" },
   { id: "voice", label: "Voice", icon: "mic" },
   { id: "connection", label: "Connection", icon: "server" },
+  { id: "workflows", label: "Workflows", icon: "settings-gear" },
   { id: "automations", label: "Automations", icon: "settings-gear" },
   { id: "tools", label: "Tools & MCP", icon: "settings-gear" },
   { id: "skills", label: "Skills", icon: "settings-gear" },
@@ -54,8 +55,8 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   return <button type="button" role="switch" aria-label={label} aria-checked={checked} className={`jg-switch${checked ? " is-on" : ""}`} onClick={() => onChange(!checked)}><span /></button>;
 }
 
-export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel }: {
-  open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode; toolsPanel?: ReactNode; diagnosticsPanel?: ReactNode;
+export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel }: {
+  open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode; toolsPanel?: ReactNode; diagnosticsPanel?: ReactNode; workflowsPanel?: ReactNode;
 }) {
   const [tab, setTab] = useState<Tab>("general");
   const [appearance, setAppearance] = useState<Appearance>(storedAppearance);
@@ -79,7 +80,7 @@ export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPan
     <div className="jg-sheet__scrim" onMouseDown={onClose}>
       <div className="jg-sheet" role="dialog" aria-modal aria-label="Settings" onMouseDown={(e) => e.stopPropagation()}>
         <nav className="jg-sheet__nav" aria-label="Settings sections">
-          {TABS.filter(t => (t.id !== "automations" || automationsPanel) && (t.id !== "skills" || skillsPanel) && (t.id !== "library" || libraryPanel) && (t.id !== "tools" || toolsPanel) && (t.id !== "diagnostics" || diagnosticsPanel)).map((t) => (
+          {TABS.filter(t => (t.id !== "automations" || automationsPanel) && (t.id !== "skills" || skillsPanel) && (t.id !== "library" || libraryPanel) && (t.id !== "tools" || toolsPanel) && (t.id !== "diagnostics" || diagnosticsPanel) && (t.id !== "workflows" || workflowsPanel)).map((t) => (
             <button key={t.id} type="button" className={`jg-sheet__tab${t.id === tab ? " is-active" : ""}`} aria-current={t.id === tab ? "page" : undefined} onClick={() => setTab(t.id)}>
               <Icon name={t.icon} size={15} />{t.label}
             </button>
@@ -122,6 +123,7 @@ export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPan
           {tab === "agents" && (agentsPanel ?? <p>Agent management is not available from this host.</p>)}
           {tab === "automations" && automationsPanel}
           {tab === "skills" && skillsPanel}
+          {tab === "workflows" && workflowsPanel}
           {tab === "tools" && toolsPanel}
           {tab === "diagnostics" && diagnosticsPanel}
           {tab === "library" && libraryPanel}
