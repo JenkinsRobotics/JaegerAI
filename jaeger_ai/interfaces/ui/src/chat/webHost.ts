@@ -1,3 +1,4 @@
+import { modelContext } from "./modelContext";
 import { readIntent, saveIntent, settleIntent, type SendIntent } from "./sendJournal";
 import { requestOutcome } from "./requestOutcome";
 /* WebHost: ChatHost for the browser. Data comes from a JaegerSource (live =
@@ -27,6 +28,7 @@ function holdApprovedTools(source: PersistedPart[], parts: ChatPart[]) {
 
 function persistedToPart(p: PersistedPart, agentName: (id: string) => string): ChatPart | null {
   switch (p.type) {
+    case "model_context": return {kind: "modelContext", outline: modelContext(p.outline)};
     case "knowledge": return { kind: "knowledgeContext", documents: p.documents };
     case "text": return p.text ? { kind: "markdownContent", text: p.text } : null;
     case "reasoning": return { kind: "thinking", text: p.text ?? "", durationMs: p.duration_ms };

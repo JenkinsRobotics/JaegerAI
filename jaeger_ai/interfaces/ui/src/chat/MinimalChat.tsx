@@ -82,6 +82,8 @@ export function RevealMarkdown({ text, live, links, style }: { text: string; liv
 
 function BubblePart({ part, links, live = false, style }: { part: ChatPart; links: Links; live?: boolean; style: StreamStyleParams }) {
   switch (part.kind) {
+    case "modelContext":
+      return <details className="jg-knowledge-context"><summary>Model dispatch context · {part.outline.messages.length} messages</summary><p>Observed immediately before an adapter call; provider acceptance and consumption are unknown. No prompt content is retained.</p><p>Format: {part.outline.shape} · Separate system text: {part.outline.system_chars} characters · Tool schemas: {part.outline.tool_count}</p><ol>{part.outline.messages.map((row, index) => <li key={index}>{row.role} · {row.text_chars} text characters · {row.omitted_blocks} non-text blocks omitted</li>)}</ol>{part.outline.truncated && <p>Outline limited; some entries omitted.</p>}<p>Character counts are not token usage. Memory/document selection and execution permissions are not inferred from these counts.</p></details>;
     case "knowledgeContext":
       return <details className="jg-knowledge-context"><summary>Knowledge context · {part.documents.length} documents</summary><ul>{part.documents.map(doc => <li key={doc.id}>{doc.title} · revision {doc.revision}<small> · {doc.digest.slice(0, 12)}</small></li>)}</ul><p>Loaded as reference material. Tool permissions and approvals are unchanged.</p></details>;
     case "markdownContent":

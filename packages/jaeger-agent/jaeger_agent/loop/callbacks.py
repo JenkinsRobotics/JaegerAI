@@ -99,6 +99,9 @@ class AgentCallbacks:
     # inactivity timers paused during long generations.
     heartbeat: Callable[[float], None] | None = None
 
+    # Content-free formatted-input outline, immediately before each adapter call.
+    model_input: Callable[[dict[str, Any]], None] | None = None
+
     # Dependency Inversion: Injected usage telemetry callbacks
     record_skill_route: Callable[..., None] | None = None
     record_skill: Callable[..., None] | None = None
@@ -111,6 +114,15 @@ class AgentCallbacks:
     # Always call these from the agent loop rather than reaching for the
     # field directly: they no-op on missing callbacks and swallow handler
     # exceptions so a buggy observer never breaks the turn.
+
+    def on_model_input(self, payload: Any) -> None:
+        if self.model_input is None:
+            return
+        try:
+            from .input_outline import input_outline
+            self.model_input(input_outline(payload))
+        except Exception:  # observer cannot affect execution or retry
+            pass
 
     def on_tool_progress(self, name: str, phase: str, data: Any) -> None:
         if self.tool_progress is None:
