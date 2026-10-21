@@ -32,6 +32,8 @@ export function useExclusivePopup(open: boolean, close: () => void, anchor?: Anc
   useEffect(() => {
     if (!open || typeof window === "undefined") return;
     const me = id.current;
+    // Focus returns to the invoking control on close (GB-064), unless the user already moved it elsewhere.
+    const invoker = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
     openCount += 1;
     window.dispatchEvent(new CustomEvent(POPUP_OPEN_EVENT, { detail: me }));
     const onOther = (e: Event) => { if ((e as CustomEvent).detail !== me) closeRef.current(); };
@@ -42,7 +44,8 @@ export function useExclusivePopup(open: boolean, close: () => void, anchor?: Anc
       if (a instanceof Element && t instanceof Node && a.contains(t)) return;
       closeRef.current();
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") closeRef.current(); };
+    // Escape that cancels an IME composition belongs to the input method, not the popup.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !e.isComposing && e.keyCode !== 229) closeRef.current(); };
     window.addEventListener(POPUP_OPEN_EVENT, onOther);
     document.addEventListener("mousedown", onPress, true);
     document.addEventListener("pointerdown", onPress, true);
@@ -53,6 +56,11 @@ export function useExclusivePopup(open: boolean, close: () => void, anchor?: Anc
       document.removeEventListener("pointerdown", onPress, true);
       document.removeEventListener("keydown", onKey, true);
       popupClosed();
+      if (invoker) queueMicrotask(() => {
+        const now = document.activeElement;
+        const lost = !now || now === document.body || !now.isConnected;
+        if (lost && invoker.isConnected) invoker.focus({ preventScroll: true });
+      });
     };
   }, [open]);
 }
