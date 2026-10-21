@@ -50,6 +50,15 @@ class ConnectorGrant:
         return d
 
 
+GRANTS_DB = "connector_grants.sqlite3"
+
+
+def default_grants_path() -> Path:
+    """Same default as ``blueprint_routes``: next to the Gateway session store."""
+    from jaeger_ai.core.gateway.session_store import default_store_path
+    return default_store_path(create=False).parent / GRANTS_DB
+
+
 def reconnect_path(connector: str, account_id: str) -> dict[str, str]:
     return {"action": "reauthorize", "connector": connector, "account_id": account_id}
 
