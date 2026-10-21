@@ -275,3 +275,9 @@ def test_notification_memory_and_delivery_read_queries_reach_existing_owner(over
     for path in ('/v1/notifications?category=approvals&before=50','/v1/agents/native%3Abuilder/memory?q=owned','/v1/channels/deliveries?before=50'):
         assert _route(overlay,path)
         assert overlay._calls[-1]==('GET',path)
+
+
+def test_semantic_memory_proxy_is_read_only_and_preserves_query(overlay):
+    path='/v1/runtime/memory/claims?q=owned&before=50&include_inactive=true'
+    assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
+    assert not _route(overlay,'/v1/runtime/memory/claims','POST')

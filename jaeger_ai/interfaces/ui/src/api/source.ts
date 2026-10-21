@@ -104,6 +104,7 @@ export interface PluginControls {
   mutate(id:string,action:'pause_hooks'|'resume_hooks',body:{operation_id:string;expected_state:string}):Promise<ControlResult>;
   operation(id:string):Promise<{receipt:ControlResult|null}>;
 }
+export interface SemanticClaims {available:boolean;scope:string;context_scope?:string;matching?:string;observed_at?:number;next_before:number|null;claims:{claim_id:string;subject:string;predicate:string;value:string;provenance:string;confidence:number;source_id:string;valid_from:number;valid_until:number|null;created_at:number;revision:string;active:boolean;recent_context_candidate:boolean;truncated?:boolean}[]}
 export interface GatewayDiagnostics {
   sessions: number; requests: Record<string, number>; approvals: Record<string, number>; handoffs: Record<string, number>;
   unknown_requests: { request_id: string; session_id: string; status: string }[]; unknown_list_limit: number;
@@ -146,6 +147,7 @@ export interface ChannelSnapshot {
 }
 export interface TaskProposalReceipt { task_id: string; status: string; replayed: boolean; request_id: string; origin_session_id: string }
 export interface JaegerSource {
+  semanticClaims?(options:{query:string;includeInactive:boolean;before?:number}):Promise<SemanticClaims>;
   plugins?:PluginControls;
   channelControls?: {
     mutate(id:string,action:'bind'|'connect'|'disconnect',body:Record<string,unknown>):Promise<ControlResult>;

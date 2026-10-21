@@ -30,8 +30,9 @@ export function applyAppearance(mode: Appearance) {
   document.documentElement.dataset.appearance = mode;
 }
 
-type Tab = "notifications" | "agents" | "general" | "voice" | "connection" | "about" | "automations" | "skills" | "library" | "tools" | "diagnostics" | "workflows" | "channels";
+type Tab = "memory" | "notifications" | "agents" | "general" | "voice" | "connection" | "about" | "automations" | "skills" | "library" | "tools" | "diagnostics" | "workflows" | "channels";
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
+  {id:"memory",label:"Memory",icon:"info"},
   { id: "notifications", label: "Notifications", icon: "info" },
   { id: "general", label: "General", icon: "settings-gear" },
   { id: "agents", label: "Agents", icon: "account" },
@@ -57,8 +58,8 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   return <button type="button" role="switch" aria-label={label} aria-checked={checked} className={`jg-switch${checked ? " is-on" : ""}`} onClick={() => onChange(!checked)}><span /></button>;
 }
 
-export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel }: {
-  open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode; toolsPanel?: ReactNode; diagnosticsPanel?: ReactNode; workflowsPanel?: ReactNode; channelsPanel?: ReactNode; notificationsPanel?: ReactNode;
+export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel }: {
+  open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode; toolsPanel?: ReactNode; diagnosticsPanel?: ReactNode; workflowsPanel?: ReactNode; channelsPanel?: ReactNode; notificationsPanel?: ReactNode; memoryPanel?:ReactNode;
 }) {
   const [tab, setTab] = useState<Tab>("general");
   const [appearance, setAppearance] = useState<Appearance>(storedAppearance);
@@ -82,7 +83,7 @@ export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPan
     <div className="jg-sheet__scrim" onMouseDown={onClose}>
       <div className="jg-sheet" role="dialog" aria-modal aria-label="Settings" onMouseDown={(e) => e.stopPropagation()}>
         <nav className="jg-sheet__nav" aria-label="Settings sections">
-          {TABS.filter(t => (t.id !== "notifications" || notificationsPanel) && (t.id !== "automations" || automationsPanel) && (t.id !== "skills" || skillsPanel) && (t.id !== "library" || libraryPanel) && (t.id !== "tools" || toolsPanel) && (t.id !== "diagnostics" || diagnosticsPanel) && (t.id !== "workflows" || workflowsPanel) && (t.id !== "channels" || channelsPanel)).map((t) => (
+          {TABS.filter(t => (t.id !== "memory" || memoryPanel) && (t.id !== "notifications" || notificationsPanel) && (t.id !== "automations" || automationsPanel) && (t.id !== "skills" || skillsPanel) && (t.id !== "library" || libraryPanel) && (t.id !== "tools" || toolsPanel) && (t.id !== "diagnostics" || diagnosticsPanel) && (t.id !== "workflows" || workflowsPanel) && (t.id !== "channels" || channelsPanel)).map((t) => (
             <button key={t.id} type="button" className={`jg-sheet__tab${t.id === tab ? " is-active" : ""}`} aria-current={t.id === tab ? "page" : undefined} onClick={() => setTab(t.id)}>
               <Icon name={t.icon} size={15} />{t.label}
             </button>
@@ -130,6 +131,7 @@ export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPan
           {tab === "workflows" && workflowsPanel}
           {tab === "tools" && toolsPanel}
           {tab === "diagnostics" && diagnosticsPanel}
+          {tab === "memory" && memoryPanel}
           {tab === "library" && libraryPanel}
           {tab === "voice" && <Section title="This device">
             <Row label="Dictation"><span className="jg-sheet__value">{yes(capabilities?.dictation ?? (capabilities?.voice === false ? false : undefined))}</span></Row>

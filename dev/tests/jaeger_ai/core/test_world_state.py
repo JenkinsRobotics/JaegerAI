@@ -157,3 +157,46 @@ def test_a_withdrawn_claim_is_not_recalled(temp_store: SqliteWorldStore):
 
     assert kept.claim_id in recalled
     assert withdrawn.claim_id not in recalled
+
+
+def test_semantic_claim_search_and_expiry_share_the_existing_owner(tmp_path):
+    import time
+    from jaeger_ai.core.world.store import SqliteWorldStore
+    store=SqliteWorldStore(tmp_path/'knowledge.sqlite3')
+    for i in range(52):store.record_claim('Owned subject','preference',f'Owned literal {i}%',source_id='owned-fixture')
+    expired=store.record_claim('Expired subject','preference','Expired value')
+    with store._get_connection() as conn:conn.execute('UPDATE world_claims SET valid_until=? WHERE claim_id=?',(time.time()-1,expired.claim_id))
+    assert store.query_claims('Expired subject')==[]
+    assert len(store.query_claims('Expired subject',include_inactive=True))==1
+    first=store.search_claims('literal');second=store.search_claims('literal',before=first['next_before'])
+    assert len(first['claims'])==50 and len(second['claims'])==2
+    assert not ({c['claim_id'] for c in first['claims']}&{c['claim_id'] for c in second['claims']})
+    assert store.search_claims('%')['claims'] and store.search_claims('Expired')['claims']==[]
+    historic=store.search_claims('Expired',include_inactive=True)['claims'][0]
+    assert not historic['active'] and not historic['recent_context_candidate'] and len(historic['revision'])==64
+
+
+@pytest.mark.asyncio
+async def test_semantic_memory_http_uses_only_loaded_owner_and_existing_read_scope(tmp_path,monkeypatch):
+    from types import SimpleNamespace
+    from aiohttp.test_utils import TestClient,TestServer
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+    from jaeger_ai.core.world.store import SqliteWorldStore
+    gateway=JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.sqlite3'))
+    owner=SqliteWorldStore(tmp_path/'knowledge.sqlite3');owner.record_claim('Owned','preference','x'*5000,source_id='owned-fixture')
+    async with TestClient(TestServer(gateway.app),headers=client_headers('webui')) as http:
+        monkeypatch.setattr(EntityRuntime,'_instance',None)
+        absent=await (await http.get('/v1/runtime/memory/claims')).json()
+        assert not absent['available'] and EntityRuntime._instance is None
+        monkeypatch.setattr(EntityRuntime,'_instance',SimpleNamespace(memory_subsystem=SimpleNamespace(semantic=SimpleNamespace(world_store=owner))))
+        available=await (await http.get('/v1/runtime/memory/claims?q=Owned')).json()
+        assert available['available'] and len(available['claims'])==1
+        row=available['claims'][0];assert row['truncated'] and len(row['value'])==4000
+        assert len(owner.query_claims('Owned')[0].value)==5000
+        assert (await http.get('/v1/runtime/memory/claims?before=-1')).status==400
+        assert gateway.store.list_requests()==[]
+    async with TestClient(TestServer(gateway.app),headers=client_headers('a2a')) as http:
+        assert (await http.get('/v1/runtime/memory/claims')).status==403
