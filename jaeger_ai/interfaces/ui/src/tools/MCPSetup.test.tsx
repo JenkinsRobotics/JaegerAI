@@ -6,7 +6,7 @@ import type {MCPConfiguration} from '../api/source';
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
 it('reviews future startup separately and recovers lost ACK without replay',async()=>{
  localStorage.clear();
- const controls:MCPConfiguration={read:vi.fn(async()=>({config_revision:'reviewed',servers:[{name:'owned',transport:'stdio',status:'not_probed' as const,startup_enabled:false}]})),change:vi.fn(async()=>{throw Error('lost ACK');}),operation:vi.fn(async id=>({operation_id:id,outcome:'saved' as const,connection_attempted:false as const}))};
+ const controls:MCPConfiguration={read:vi.fn(async()=>({config_revision:'reviewed',servers:[{name:'owned',transport:'stdio',status:'not_probed' as const,startup_enabled:false}]})),change:vi.fn(async()=>{throw Error('lost ACK');}),operation:vi.fn(async id=>({operation_id:id,outcome:'saved' as const,config_revision:'saved-revision',connection_attempted:false as const}))};
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  const click=async(text:string)=>act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent===text)!.click());
  try{

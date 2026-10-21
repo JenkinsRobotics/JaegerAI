@@ -27,13 +27,22 @@ def register(gateway):
         if row:
             plan=json.loads(row[0])
             if service.configuration_revision(layout())==plan['revision']:
-                receipt={'operation_id':op,'outcome':'saved','recovered':True,'config_revision':plan['revision'],'connection_attempted':False,'current_connection_unchanged':True}
+                receipt={'operation_id':op,'outcome':'saved','recovered':True,**plan.get('result',{}),'config_revision':plan['revision'],'connection_attempted':False,'current_connection_unchanged':True}
                 gateway.store.finish_control_operation(key,receipt)
                 return receipt
         return {'operation_id':op,'outcome':'unknown','error':'Original result unresolved; do not replay'}
     async def listing(request):
         owner(request)
-        try:return web.json_response(service.configured_startup_inventory(layout()))
+        try:
+            value=service.configured_startup_inventory(layout())
+            with gateway.store._immediate() as conn:
+                latest=conn.execute('SELECT value FROM schema_meta WHERE key=?',('control_scope:mcp-config:'+str(layout().root),)).fetchone()
+            if latest:
+                row=gateway.store.control_operation(latest[0])
+                receipt=row.get('receipt') if row else None
+                if receipt and receipt.get('kind')=='tool_policy_restriction' and receipt.get('config_revision')==value['config_revision']:
+                    value['restore_operation']=receipt['operation_id']
+            return web.json_response(value)
         except (ValueError,OSError):return web.json_response({'error':'Local MCP configuration unavailable; no connection attempted'},status=409)
     async def operation(request):return web.json_response(observed(owner(request),request.match_info['operation']))
     async def change(request):
@@ -41,25 +50,37 @@ def register(gateway):
         try:
             body=await request.json()
             if not isinstance(body,dict):raise TypeError()
-            action=body.get('action');fields={'operation_id','action','expected_revision','definition'} if action=='stage' else {'operation_id','action','expected_revision','name','enabled'}
-            if action not in {'stage','startup'} or set(body)!=fields:raise ValueError()
+            action=body.get('action')
+            fields={'stage':{'operation_id','action','expected_revision','definition'},'startup':{'operation_id','action','expected_revision','name','enabled'},'policy':{'operation_id','action','expected_revision','name','policy'},'restore_policy':{'operation_id','action','expected_revision','restore_from'}}
+            if action not in fields or set(body)!=fields[action]:raise ValueError()
             op=body['operation_id']
             if not isinstance(op,str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,128}',op):raise ValueError()
             if not isinstance(body['expected_revision'],str):raise TypeError()
             # Retain intent identity, never duplicate command arguments/transport secrets.
             digest=hashlib.sha256(json.dumps(body,sort_keys=True).encode()).hexdigest()
             key=identity(actor,op)
-            fresh=gateway.store.reserve_scoped_control_operation(key,{'actor':actor,'digest':digest},'mcp-config:'+str(layout().root))
+            intent={'actor':actor,'digest':digest}
+            try:fresh=gateway.store.reserve_scoped_control_operation(key,intent,'mcp-config:'+str(layout().root))
+            except ValueError:
+                if gateway.store.control_operation(key) is not None:raise
+                if gateway.store.reserve_control_operation(key,intent):
+                    gateway.store.finish_control_operation(key,{'operation_id':op,'outcome':'rejected','error':'Earlier configuration operation unresolved; this intent will never execute'})
+                return web.json_response(observed(actor,op),status=409)
             if not fresh:return web.json_response(observed(actor,op))
         except (ValueError,TypeError):return web.json_response({'error':'Invalid or conflicting reviewed MCP intent'},status=409)
-        def planned(_data,revision):
+        def planned(_data,revision,result=None):
             with gateway.store._immediate() as conn:
-                conn.execute('INSERT INTO schema_meta(key,value) VALUES(?,?)',('mcp-plan:'+key,json.dumps({'revision':revision})))
+                conn.execute('INSERT INTO schema_meta(key,value) VALUES(?,?)',('mcp-plan:'+key,json.dumps({'revision':revision,**({'result':result} if result is not None else {})})))
         try:
             if action=='stage':result=service.stage_disabled_server(layout(),body['definition'],expected_revision=body['expected_revision'],before_commit=planned)
-            else:result=service.set_startup_enabled(layout(),body['name'],body['enabled'],expected_revision=body['expected_revision'],before_commit=planned)
+            elif action=='startup':result=service.set_startup_enabled(layout(),body['name'],body['enabled'],expected_revision=body['expected_revision'],before_commit=planned)
+            elif action=='policy':result=service.set_tool_policy(layout(),body['name'],body['policy'],expected_revision=body['expected_revision'],before_commit=planned)
+            else:
+                prior=observed(actor,body['restore_from'])
+                if prior.get('outcome')!='saved' or prior.get('kind')!='tool_policy_restriction' or prior.get('config_revision')!=body['expected_revision']:raise ValueError('Exact saved original restriction required')
+                result=service.set_tool_policy(layout(),prior['name'],prior['before_policy'],restore_policy=prior['after_policy'],expected_revision=body['expected_revision'],before_commit=planned)
             receipt={'operation_id':op,'outcome':'saved',**result}
-        except (ValueError,TypeError,KeyError):receipt={'operation_id':op,'outcome':'rejected','error':'Definition invalid, changed or unsupported; current configuration retained'}
+        except (ValueError,TypeError,KeyError,web.HTTPNotFound):receipt={'operation_id':op,'outcome':'rejected','error':'Definition invalid, changed or unsupported; current configuration retained'}
         except Exception:  # noqa: BLE001 - durable unknown receipt must never replay
             return web.json_response({'operation_id':op,'outcome':'unknown','error':'Inspect original receipt; do not replay'},status=503)
         gateway.store.finish_control_operation(key,receipt)

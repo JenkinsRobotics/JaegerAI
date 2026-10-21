@@ -1308,6 +1308,8 @@ class JaegerGatewayApp:
         register_channel_controls(self)
         from .agent_memory import register as register_agent_memory
         register_agent_memory(self)
+        from .agent_templates import register as register_agent_templates
+        register_agent_templates(self)
         from .entity_memory import register as register_entity_memory
         register_entity_memory(self)
         from .native_controls import register as register_native_controls
@@ -2056,7 +2058,12 @@ class JaegerGatewayApp:
 
     async def handle_agent_templates(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.agent_registry.configuration import TEMPLATES
-        return web.json_response({"templates": [dict(t, tools_granted=False, visibility='owner_local', export_policy='prompt_only_no_grants') for t in TEMPLATES]})
+        templates=[dict(t,tools_granted=False,visibility='owner_local',export_policy='prompt_only_no_grants') for t in TEMPLATES]
+        caller=request.get('caller');unavailable=[]
+        if caller and 'admin' in caller.scopes and not caller.session_prefix and request['caller_actor'].startswith('owner:'):
+            try:templates+= [{k:v for k,v in row.items() if k!='snapshot'} for row in self._registry().saved_templates(errors=unavailable)]
+            except (ValueError,OSError):return web.json_response({'error':'Retained local template catalog unavailable; no version discarded'},status=409)
+        return web.json_response({'templates':templates,'unavailable_saved_sources':unavailable})
 
     async def handle_agent_knowledge(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.agent_registry.configuration import editable, settings
@@ -2178,7 +2185,10 @@ class JaegerGatewayApp:
                       'template':template_snapshot['template'],'allowed_tools':[]}
         if body.get('template_id') is not None:
             from jaeger_ai.core.agent_registry.configuration import TEMPLATES
-            template = next((t for t in TEMPLATES if t['id'] == body['template_id'] and type(body.get('template_version')) is int and t['version'] == body['template_version']), None)
+            try:
+                template = next((t for t in TEMPLATES if t['id'] == body['template_id'] and type(body.get('template_version')) is int and t['version'] == body['template_version']), None)
+                if template is None:template=next((t for t in self._registry().saved_templates(errors=[]) if t['id']==body['template_id'] and type(body.get('template_version')) is int and t['version']==body['template_version']),None)
+            except (ValueError,OSError):return failure('Retained template catalog unavailable',409)
             if template is None:
                 return failure("Unknown template/version")
             if (kind != 'jaeger_native' or body.get('role', 'specialist') != 'specialist'
@@ -2192,7 +2202,7 @@ class JaegerGatewayApp:
                 return failure(str(exc))
             metadata = {'specialty': metadata.get('specialty') or template['specialty'], 'summary': template['summary'],
                         'operator_instructions': template['instructions'], 'configuration_revision': 0,
-                        'template': {'id': template['id'], 'version': template['version']}, 'allowed_tools': []}
+                        'template': {'id': template['id'], 'version': template['version'], **({'source_bot':template['source_bot'],'visibility':'owner_local','export_policy':'prompt_only_no_grants','provenance':'owner_saved_snapshot'} if 'source_bot' in template else {})}, 'allowed_tools': []}
         creation_role="specialist" if template_snapshot is not None or body.get("template_id") is not None else (str(body["role"]) if body.get("role") else None)
         try:
             record = self._registry().create_agent(

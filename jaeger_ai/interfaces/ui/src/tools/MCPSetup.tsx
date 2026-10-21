@@ -1,3 +1,4 @@
+import {MCPToolRestrictions} from './MCPToolRestrictions';
 import {useEffect,useState} from 'react';
 import type {MCPConfiguration,MCPConfigurationIntent,MCPConfigurationReceipt} from '../api/source';
 const journal='jaeger.ui.mcp.configuration.v1';
@@ -10,7 +11,7 @@ export function MCPSetup({controls}:{controls:MCPConfiguration}){
   async function refresh(){try{setSnapshot(await controls.read());setError('');}catch{setError('Local definitions unavailable. No connection attempted.');}}
   useEffect(()=>{void refresh();},[controls]);
   function accept(receipt:MCPConfigurationReceipt,id:string){
-    if(receipt.operation_id!==id)throw Error('Original operation identity mismatch');
+    if(receipt.operation_id!==id||!['saved','rejected','unknown'].includes(receipt.outcome)||receipt.outcome==='saved'&&typeof receipt.config_revision!=='string')throw Error('Original operation identity/contract mismatch');
     setResult(receipt);
     if(receipt.outcome!=='unknown'){localStorage.removeItem(journal);setPending('');void refresh();}
   }
@@ -28,7 +29,8 @@ export function MCPSetup({controls}:{controls:MCPConfiguration}){
     {error&&<p role="alert">{error}</p>}{result&&<p role="status">Configuration {result.outcome}. {result.error}</p>}
     {pending&&<p>Pending original operation. <button disabled={busy} onClick={()=>void inspect()}>Inspect original configuration result</button></p>}
     <button disabled={busy} onClick={()=>void refresh()}>Read local MCP definitions</button>
-    {snapshot?.servers.map(row=><article key={row.name}><strong>{row.name}</strong><p>{row.transport} · {row.status} · startup {row.startup_enabled?'enabled':'disabled'}</p><button disabled={busy||!!pending} onClick={()=>setReview({action:'startup',operation_id:crypto.randomUUID(),expected_revision:snapshot.config_revision,name:row.name,enabled:!row.startup_enabled})}>Review {row.startup_enabled?'disable':'enable'} at next startup</button></article>)}
+    {snapshot?.servers.map(row=><article key={row.name}><strong>{row.name}</strong><p>{row.transport} · {row.status} · startup {row.startup_enabled?'enabled':'disabled'}</p>{row.authentication&&<p>Authentication: {row.authentication.replaceAll('_',' ')}. Existing credential owner unchanged; no consent or credential access requested.</p>}<button disabled={busy||!!pending} onClick={()=>setReview({action:'startup',operation_id:crypto.randomUUID(),expected_revision:snapshot.config_revision,name:row.name,enabled:!row.startup_enabled})}>Review {row.startup_enabled?'disable':'enable'} at next startup</button>{row.tool_policy&&<MCPToolRestrictions name={row.name} policy={row.tool_policy} revision={snapshot.config_revision} disabled={busy||!!pending} onReview={setReview}/>} {row.policy_error&&<p>{row.policy_error}</p>}</article>)}
+    {snapshot?.restore_operation&&<button disabled={busy||!!pending} onClick={()=>setReview({action:'restore_policy',operation_id:crypto.randomUUID(),expected_revision:snapshot.config_revision,restore_from:snapshot.restore_operation!})}>Review restore previous tool filter</button>}
     <fieldset disabled={!snapshot||busy||!!pending}><legend>Add disabled MCP definition</legend>
       <label>Server name<input value={name} maxLength={64} onChange={e=>setName(e.target.value)}/></label>
       <label>Transport<select value={transport} onChange={e=>setTransport(e.target.value)}><option value="http">HTTP</option><option value="stdio">Local command</option></select></label>
@@ -36,7 +38,8 @@ export function MCPSetup({controls}:{controls:MCPConfiguration}){
       {transport==='stdio'&&<label>Arguments (JSON array, no secrets)<textarea value={args} onChange={e=>setArgs(e.target.value)}/></label>}
       <button onClick={stage}>Review disabled definition</button>
     </fieldset>
-    {review&&<div role="dialog" aria-label="Review MCP configuration"><p>{review.action==='stage'?'Save a new disabled definition. No connection will start.':`Set ${review.name} startup to ${review.enabled?'enabled: the configured command or remote server may run/connect on the next initialization':'disabled'}. Existing connection is unchanged.`}</p>
+    {review&&<div role="dialog" aria-label="Review MCP configuration"><p>{review.action==='policy'?'Save reviewed restrictive tool filtering for next initialization. Current registered tools and in-flight work are unchanged. Read-only declarations and approval policy are retained.':review.action==='restore_policy'?'Restore only the original tool filter from this exact previous restriction receipt. Reject if any configuration changed; no new grants, credentials or connection.':review.action==='stage'?'Save a new disabled definition. No connection will start.':`Set ${review.name} startup to ${review.enabled?'enabled: the configured command or remote server may run/connect on the next initialization':'disabled'}. Existing connection is unchanged.`}</p>
+      {review.action==='policy'&&<pre>{review.name+': '+JSON.stringify(review.policy,null,2)}</pre>}
       {review.action==='stage'&&<pre>{JSON.stringify(review.definition,null,2)}</pre>}
       <button disabled={busy||!!pending} onClick={()=>void save()}>Confirm configuration</button><button onClick={()=>setReview(undefined)}>Cancel</button></div>}
   </section>;

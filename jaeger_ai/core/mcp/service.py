@@ -529,6 +529,13 @@ def _configured_secret_values(data: dict[str,Any]) -> set[str]:
             secrets.update(value for key,value in config.env.items() if isinstance(value,str) and value and _SECRET.search(key))
     return secrets
 
+def _has_known_secret(value: Any, secrets: set[str]) -> bool:
+    if isinstance(value,str):return any(secret in value for secret in secrets)
+    if isinstance(value,dict):return any(_has_known_secret(item,secrets) for item in value.values())
+    if isinstance(value,list):return any(_has_known_secret(item,secrets) for item in value)
+    return False
+
+
 def configuration_revision(layout: Any) -> str:
     path=_path(layout)
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else 'missing'
@@ -554,7 +561,7 @@ def stage_disabled_server(layout: Any, payload: dict[str,Any], *, expected_revis
     row.update(enabled=False,tools={'gated':True,'read_only':[]})
     def change(data):
         if not isinstance(data,dict) or not isinstance(data.get('servers',[]),list):raise MCPServiceError('Invalid existing MCP configuration')
-        if any(secret in text for secret in _configured_secret_values(data)):raise MCPServiceError('Known credential content refused')
+        if _has_known_secret(row,_configured_secret_values(data)):raise MCPServiceError('Known credential content refused')
         servers=data.get('servers',[])
         if any(isinstance(value,dict) and value.get('name')==name for value in servers):raise MCPServiceError('A definition with this identity already exists; no overwrite')
         return {**data,'servers':[*servers,row]}
@@ -591,6 +598,64 @@ def configured_startup_inventory(layout: Any) -> dict[str,Any]:
         # Do not echo arbitrary transport/catalog values into the UI.
         safe=redact_text(name)
         if safe!=name or any(secret in name for secret in secrets):continue
-        rows.append({'name':name,'startup_enabled':bool(row.get('enabled',True)),
-                     'transport':'http' if row.get('url') else 'stdio','status':'not_probed'})
+        auth_status=('oauth_configured_not_probed' if row.get('auth')=='oauth' else
+                     'headers_configured_not_probed' if isinstance(row.get('headers'),dict) and row['headers'] else
+                     'credential_references_not_probed' if isinstance(row.get('env'),dict) and any(_secret_ref(v) for v in row['env'].values()) else
+                     'transport_auth_not_configured')
+        projection={'name':name,'startup_enabled':bool(row.get('enabled',True)),
+                    'transport':'http' if row.get('url') else 'stdio','status':'not_probed','authentication':auth_status}
+        try:
+            policy=_tool_policy(row)
+            if _has_known_secret(policy,secrets):raise MCPServiceError('Unsafe policy projection')
+            projection['tool_policy']=policy
+        except ValueError:projection['policy_error']='Existing policy needs local owner review; no masked rewrite offered'
+        rows.append(projection)
     return {'servers':rows,'config_revision':revision,'connection_attempted':False}
+
+
+def _tool_policy(entry: dict[str,Any]) -> dict[str,Any]:
+    tools=entry.get('tools',{})
+    if not isinstance(tools,dict):raise MCPServiceError('Invalid existing tool policy')
+    policy={'include':tools.get('include',[]),'exclude':tools.get('exclude',[]),'gated':tools.get('gated',False)}
+    return _validate_tool_policy(policy)
+
+
+def _validate_tool_policy(policy: Any) -> dict[str,Any]:
+    from jaeger_ai.core.redaction import redact_text
+    if not isinstance(policy,dict) or set(policy)!={'include','exclude','gated'} or type(policy['gated']) is not bool:raise MCPServiceError('Exact include/exclude/gated policy required')
+    for key in ('include','exclude'):
+        values=policy[key]
+        if not isinstance(values,list) or len(values)>100 or any(not isinstance(v,str) or not v.strip() or v!=v.strip() or len(v)>200 or any(ord(c)<32 for c in v) for v in values):raise MCPServiceError('Bounded tool-name/glob arrays required')
+        if len(set(values))!=len(values):raise MCPServiceError('Duplicate tool patterns refused')
+    if redact_text(json.dumps(policy))!=json.dumps(policy):raise MCPServiceError('Potential secret tool policy refused')
+    return policy
+
+
+def set_tool_policy(layout: Any, name: str, policy: Any, *, expected_revision: str, before_commit=None, restore_policy=None) -> dict[str,Any]:
+    """Persist guarded startup filtering only; never grants or live reconnection.
+
+    Fresh edits must be provable restrictions. Restore is an INTERNAL owner path
+    bound by the Gateway to an exact prior receipt and unchanged whole file.
+    """
+    from jaeger_ai.core.instance.atomic_files import mutate_json
+    normalized=_name(name);policy=_validate_tool_policy(policy);observed={}
+    if restore_policy is not None:restore_policy=_validate_tool_policy(restore_policy)
+    def change(data):
+        if not isinstance(data,dict) or not isinstance(data.get('servers'),list):raise MCPServiceError('Invalid MCP configuration')
+        rows=[row for row in data['servers'] if isinstance(row,dict) and row.get('name')==normalized]
+        if len(rows)!=1:raise MCPServiceError('Existing server missing or ambiguous')
+        current=rows[0];prior=_tool_policy(current)
+        if _has_known_secret([policy,prior],_configured_secret_values(data)):raise MCPServiceError('Known secret tool policy refused')
+        if restore_policy is None:
+            if prior['include'] and (not policy['include'] or not set(policy['include'])<=set(prior['include'])):raise MCPServiceError('Include changes must narrow the existing patterns')
+            if not set(prior['exclude'])<=set(policy['exclude']):raise MCPServiceError('Existing exclusions must be retained')
+            if prior['gated'] and not policy['gated']:raise MCPServiceError('Existing gating must be retained')
+        elif prior!=restore_policy:raise MCPServiceError('Reviewed restriction changed; restore refused')
+        observed.update(name=normalized,before_policy=prior,after_policy=policy,kind='tool_policy_restore' if restore_policy is not None else 'tool_policy_restriction',connection_attempted=False,current_connection_unchanged=True,credentials_changed=False,grants_changed=False)
+        updated={**current,'tools':{**current.get('tools',{}),**policy}}
+        return {**data,'servers':[updated if row is current else row for row in data['servers']]}
+    def planned(data,revision):
+        observed['config_revision']=revision
+        if before_commit is not None:before_commit(data,revision,dict(observed))
+    _,revision=mutate_json(_path(layout),change,expected_revision=expected_revision,before_commit=planned)
+    return {**observed,'config_revision':revision}

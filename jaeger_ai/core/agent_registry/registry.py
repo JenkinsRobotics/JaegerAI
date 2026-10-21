@@ -54,18 +54,25 @@ class AgentRegistry:
         self.root = (root or _state_root()).expanduser().resolve()
         self.path = default_registry_path(self.root)
         self._data: dict[str, Any] = {"version": 1, "active_id": None, "agents": {}}
+        self._revision = "missing"
         self._load()
 
     # ── persistence ───────────────────────────────────────────────
 
     def _load(self) -> None:
         if not self.path.is_file():
+            self._revision = "missing"
             return
         try:
-            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            import hashlib
+            content=self.path.read_bytes()
+            raw = json.loads(content)
+            self._revision=hashlib.sha256(content).hexdigest()
         except (OSError, json.JSONDecodeError, TypeError, ValueError):
+            self._revision=None
             return
-        if not isinstance(raw, dict):
+        if not isinstance(raw, dict) or not isinstance(raw.get("agents",{}),dict) or any(not isinstance(v,dict) for v in raw.get("agents",{}).values()):
+            self._revision=None
             return
         agents: dict[str, Any] = {}
         for key, value in (raw.get("agents") or {}).items():
@@ -76,17 +83,19 @@ class AgentRegistry:
                 value["switchable"] = True
                 agents[str(key)] = value
         self._data = {
+            **raw,
             "version": int(raw.get("version") or 1),
             "active_id": raw.get("active_id"),
             "agents": agents,
         }
 
     def _save(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        tmp = self.path.with_suffix(".tmp")
+        from jaeger_ai.core.instance.atomic_files import _file_write_lock, _write_unlocked, file_revision
+        if self._revision is None:raise RuntimeError('Registry unreadable; original retained')
         payload = json.dumps(self._data, indent=2, sort_keys=True) + "\n"
-        tmp.write_text(payload, encoding="utf-8")
-        tmp.replace(self.path)
+        with _file_write_lock(self.path):
+            _write_unlocked(self.path,payload,expected_revision=self._revision)
+            self._revision=file_revision(self.path)
 
     # ── discovery ─────────────────────────────────────────────────
 
@@ -363,19 +372,84 @@ class AgentRegistry:
         return self._configure_metadata(agent_id, {'knowledge_documents': references}, expected_revision)
 
     def _configure_metadata(self, agent_id: str, patch: dict[str, Any], expected_revision: int) -> AgentRecord:
-        from .configuration import editable, settings
-        self._load()
-        record = self.get_agent(agent_id)
-        if record is None or record.id != agent_id:
-            raise KeyError("Agent not found")
-        if not editable(record):
-            raise PermissionError("Built-in, lead and external definitions are read-only")
-        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision != settings(record)['revision']:
-            raise RuntimeError("Specialist configuration changed; reload before saving")
-        record.metadata = {**record.metadata, **patch, 'configuration_revision': expected_revision + 1}
-        self._data['agents'][record.id] = record.to_dict()
-        self._save()
-        return record
+        from .configuration import settings
+        def transform(record):
+            if type(expected_revision) is not int or expected_revision!=settings(record)['revision']:
+                raise RuntimeError("Specialist configuration changed; reload before saving")
+            record.metadata={**record.metadata,**patch,'configuration_revision':expected_revision+1}
+        return self._mutate_specialist(agent_id,transform)
+
+    def _mutate_specialist(self, agent_id: str, transform, *, before_commit=None) -> AgentRecord:
+        from jaeger_ai.core.instance.atomic_files import mutate_json, read_json_versioned
+        from .configuration import editable
+        _data,revision=read_json_versioned(self.path,default={'version':1,'active_id':None,'agents':{}})
+        def change(data):
+            if not isinstance(data,dict) or not isinstance(data.get('agents',{}),dict):raise ValueError('Registry data invalid; original retained')
+            raw=data.get('agents',{}).get(agent_id)
+            if not isinstance(raw,dict):raise KeyError('Agent not found')
+            record=AgentRecord.from_dict(raw)
+            if record.id!=agent_id:raise KeyError('Agent not found')
+            if not editable(record):raise PermissionError('Built-in, lead and external definitions are read-only')
+            transform(record)
+            return {**data,'agents':{**data['agents'],agent_id:{**raw,**record.to_dict()}}}
+        data,after=mutate_json(self.path,change,expected_revision=revision,before_commit=before_commit)
+        self._data=data;self._revision=after
+        return AgentRecord.from_dict(data['agents'][agent_id])
+
+    def save_template(self, agent_id: str, expected_revision: int, expected_catalog_revision: int, *, before_commit=None) -> dict[str,Any]:
+        from .configuration import export_template, template_catalog
+        def transform(record):
+            catalog=template_catalog(record)
+            if type(expected_catalog_revision) is not int or catalog['revision']!=expected_catalog_revision:
+                raise RuntimeError('Template catalog changed; review current versions')
+            exported=export_template(record,expected_revision)
+            versions=catalog['versions']
+            same=next((v for v in versions if v['sha256']==exported['sha256']),None)
+            if same is None:
+                if any(v['version']==expected_revision+1 for v in versions):raise RuntimeError('Source revision conflicts with retained template; original retained')
+                if len(versions)>=100:raise ValueError('Retained version capacity reached; export remains available, no version discarded')
+                versions=[*versions,{'version':expected_revision+1,'content':exported['content'],'sha256':exported['sha256']}]
+            record.metadata={**record.metadata,'template_catalog':{'revision':catalog['revision']+1,'hidden':catalog['hidden'],'versions':versions}}
+        record=self._mutate_specialist(agent_id,transform,before_commit=before_commit)
+        return self.template_state(record)
+
+    def set_template_hidden(self, agent_id: str, hidden: bool, expected_catalog_revision: int, *, before_commit=None) -> dict[str,Any]:
+        from .configuration import template_catalog
+        if type(hidden) is not bool:raise TypeError('Explicit catalog visibility required')
+        def transform(record):
+            catalog=template_catalog(record)
+            if type(expected_catalog_revision) is not int or catalog['revision']!=expected_catalog_revision:
+                raise RuntimeError('Template catalog changed; review current versions')
+            if not catalog['versions']:raise ValueError('No saved template versions')
+            record.metadata={**record.metadata,'template_catalog':{**catalog,'revision':catalog['revision']+1,'hidden':hidden}}
+        return self.template_state(self._mutate_specialist(agent_id,transform,before_commit=before_commit))
+
+    @staticmethod
+    def template_state(record: AgentRecord) -> dict[str,Any]:
+        from .configuration import settings,template_catalog
+        catalog=template_catalog(record)
+        return {'agent_id':record.id,'source_revision':settings(record)['revision'],'catalog_revision':catalog['revision'],
+                'hidden':catalog['hidden'],'versions':[{'version':v['version'],'sha256':v['sha256']} for v in catalog['versions']]}
+
+    def saved_templates(self, *, errors: list[str] | None = None) -> list[dict[str,Any]]:
+        from .configuration import editable,import_template,template_catalog
+        self._load();rows=[]
+        if self._revision is None:raise ValueError('Registry unreadable; original retained')
+        for record in self._registered():
+            if not editable(record):continue
+            try:catalog=template_catalog(record)
+            except ValueError:
+                if errors is None:raise
+                errors.append(record.id)
+                continue
+            if catalog['hidden']:continue
+            for version in catalog['versions']:
+                snapshot=import_template(version['content'])
+                rows.append({'id':'saved:'+record.id,'version':version['version'],'name':record.display_name,
+                             **{key:snapshot[key] for key in ('specialty','summary','instructions')},'tools_granted':False,
+                             'source_bot':snapshot['template']['source_bot'],'visibility':'owner_local','export_policy':'prompt_only_no_grants',
+                             'snapshot':version['content']})
+        return rows
 
     def register_third_party(
         self,
