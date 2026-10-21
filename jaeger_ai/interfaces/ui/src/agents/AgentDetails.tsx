@@ -58,6 +58,13 @@ export function AgentDetails({ agent, summary, onOpenHistory, onSearch, onClose,
           <ul className="jg-tool-chips">{agent.allowed_tools!.map((t) => <li key={t} className="jg-tool-chip">{t}</li>)}</ul>
         </section>
       )}
+      <section className="jg-details__section" aria-label="Bot access">
+        <h3>Access</h3>
+        {agent.access?.scope === 'local_operator' ? <>
+          <p>Local operator access. Sections, pins and primary selection organize navigation; they do not grant membership or share conversations.</p>
+          <p>Cross-account sharing is unavailable: {agent.access.reason}.</p>
+        </> : <p>This adapter does not advertise a supported account-sharing authority.</p>}
+      </section>
       {onCopyConversationLink&&<button type="button" onClick={onCopyConversationLink}>Copy local conversation link</button>}
       {onSearch && <button type="button" className="aui-button" onClick={onSearch}>Search messages</button>}
       {onOpenHistory && (
