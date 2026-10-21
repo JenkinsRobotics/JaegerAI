@@ -65,6 +65,11 @@ def project(row: dict[str, Any], saved: dict[str, dict[str, Any]], *, writable: 
            'icon_preset': prefs.get('icon_preset'), 'icon_choices': list(ICON_PRESETS),
            'pin_order': prefs.get('pin_order'), 'presentation': {k: prefs[k] for k in ('display_name', 'archived', 'pinned', 'pin_order', 'icon_preset', 'section_id', 'deleted') if k in prefs},
            'ui_actions': {'icon': writable and can_rename(row), 'read': writable, 'rename': writable and can_rename(row), 'hide': writable and not guarded, 'pin': writable and not guarded, 'unread': writable and not guarded, 'sections': writable and not guarded, 'remove': writable and not guarded and row['id'] != primary_id, 'primary': writable and primary_eligible({**row, 'archived': archived, 'deleted': deleted})}}
+    # This is the existing local authority boundary, not a team-membership
+    # system inferred from execution roles, primary pointers or sidebar groups.
+    out['access'] = {'scope': 'local_operator', 'sharing_supported': False,
+                     'membership_management_supported': False, 'grouping_grants_access': False,
+                     'reason': 'No cross-account membership authority is configured'}
     if isinstance(prefs.get('display_name'), str):
         out['display_name'] = prefs['display_name']
     return out

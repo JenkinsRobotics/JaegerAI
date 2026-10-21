@@ -37,3 +37,11 @@ describe("AgentDetails skills and tools", () => {
     expect(MOCK_AGENTS.filter(visible).every((a) => (a.skills?.length ?? 0) > 0)).toBe(true);
   });
 });
+
+it('uses explicit access authority metadata rather than primary pin or execution role', () => {
+  const local = {scope:'local_operator',sharing_supported:false,membership_management_supported:false,grouping_grants_access:false,reason:'No cross-account membership authority is configured'} as const;
+  const html = render({id:'owned-bot',name:'Owned',role:'lead',primary:true,pinned:true,access:local});
+  expect(html).toContain('do not grant membership or share conversations');
+  expect(html).toContain('Cross-account sharing is unavailable');
+  expect(render({id:'unknown-owner',name:'Other',role:'lead',primary:true,pinned:true})).toContain('does not advertise');
+});

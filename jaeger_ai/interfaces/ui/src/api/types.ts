@@ -15,6 +15,7 @@ export interface AgentSkill {
 export type Runner = "native" | `delegate:${string}` | string;
 
 export interface Agent {
+  access?: {scope: "local_operator"; sharing_supported: false; membership_management_supported: false; grouping_grants_access: false; reason: string};
   delegation?: {can_request:boolean;background:"durable";per_request_model:boolean;tools:string};
   /** Explicit server-supported menu actions; omitted/false means unavailable. */
   ui_actions?: Partial<import("./agentActions").AgentCaps>;

@@ -136,3 +136,26 @@ def test_projected_controls_follow_existing_caller_scopes_even_when_skills_fail(
             assert value['ui_actions']['hide'] is allowed
         finally:
             _REQUEST_CALLER.reset(token)
+
+
+def test_local_grouping_primary_and_pin_never_create_membership_authority(tmp_path):
+    store = GatewaySessionStore(tmp_path/'groups.sqlite3')
+    original = row()
+    original['access'] = {'sharing_supported': True, 'membership_management_supported': True}
+    section = store.create_agent_section('Owned grouping fixture')
+    store.ensure_session('owned-group-home', metadata={'agent_id': original['id']})
+    store.append_message('owned-group-home', 'user', 'Owned immutable history')
+    history = store.get_session('owned-group-home')
+    store.patch_agent_presentation(original['id'], {'section_id': section['id'], 'pinned': True})
+    for writable in (False, True):
+        view = project(original, store.agent_presentation(), writable=writable, primary_id=original['id'])
+        assert view['primary'] and view['pinned'] and view['section_id'] == section['id']
+        assert view['access']['scope'] == 'local_operator'
+        assert view['access']['sharing_supported'] is False
+        assert view['access']['membership_management_supported'] is False
+        assert view['access']['grouping_grants_access'] is False
+        assert view['role'] == original['role'] and view['allowed_tools'] == original['allowed_tools']
+        assert view['ui_actions']['sections'] is writable
+    assert store.get_session('owned-group-home') == history
+    with pytest.raises(ValueError):
+        validate_patch({'access': {'sharing_supported': True}})
