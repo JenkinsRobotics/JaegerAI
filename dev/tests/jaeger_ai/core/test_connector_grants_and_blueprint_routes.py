@@ -144,3 +144,31 @@ def test_preview_route_no_resident(tmp_path, monkeypatch):
     assert st == 200 and body["dry_run"] is True and body["decision"] == "deny"
     assert body["winning_rule"]["pending"] is True and bad == 400
     assert rules["bound"] is False
+
+
+def test_preview_route_with_live_runtime_layout(tmp_path, monkeypatch):
+    """A bound runtime exposes an InstanceLayout (not a str); preview must use its root."""
+    from jaeger_ai.core.authority.kernel import PolicyKernel, ProposedAction, ReviewRuleStore
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+    from jaeger_ai.core.instance.instance import InstanceLayout
+
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("JAEGER_GLOBAL_STOP_PATH", str(tmp_path / "gs.json"))
+    monkeypatch.setenv("JAEGER_LIFECYCLE_LEASE", str(tmp_path / "ll.json"))
+    (tmp_path / "inst").mkdir()
+    layout = InstanceLayout(root=tmp_path / "inst")
+    ReviewRuleStore.for_instance(layout).save({"scope": "team", "subject": "write_file", "effect": "deny"})
+    monkeypatch.setattr(EntityRuntime, "_instance", SimpleNamespace(layout=layout), raising=False)
+    gw, _ = _gateway(tmp_path, OWNER, "owner:matthew")
+
+    async def f(c):
+        p = await c.post("/v1/authority/preview", json={"tool_name": "write_file", "arguments": {"path": "a"}})
+        r = await c.get("/v1/authority/review-rules")
+        return p.status, await p.json(), await r.json()
+    st, body, rules = _run(gw, f)
+    assert st == 200 and body["decision"] == "deny"
+    assert body["policy_name"] == "review_rules:team" and "fail-closed" not in body["reason"]
+    assert rules["bound"] is True and rules["revisions"]["team"] == 1
+    out = PolicyKernel().preview(ProposedAction(tool_name="write_file", arguments={}, actor="owner:m"),
+                                 instance_root=layout)
+    assert out["policy_name"] == "review_rules:team"

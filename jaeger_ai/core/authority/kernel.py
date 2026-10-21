@@ -189,8 +189,10 @@ def _resolve_instance_root(
 ) -> Path | None:
     """The bound instance directory. ``allow_runtime=False`` (dry runs) never
     touches ``EntityRuntime.get_singleton()``, which can start a resident."""
-    if instance_root:
-        return Path(instance_root)
+    if instance_root is not None and instance_root != "":
+        # A live runtime hands over an InstanceLayout, not a path.
+        from jaeger_ai.core.instance.first_boot import instance_dir
+        return Path(instance_dir(instance_root))
     ctx = proposal.context or {}
     for key in ("instance_root", "layout_root", "instance_dir"):
         val = ctx.get(key)
