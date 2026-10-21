@@ -82,6 +82,8 @@ public enum BridgeCommand: Equatable {
     // jaeger_ai/interfaces/ui NativeHost (chat/nativeHost.ts, platform/native.ts)
     case openExternal(URL)
     case openFile(URL)
+    case computerStatus
+    case computerSettings(ComputerSettingsTarget)
     case clipboardRead
     case clipboardWrite(String)
     case micStatus, ttsStatus
@@ -174,6 +176,14 @@ public enum BridgeCommand: Equatable {
                   let url = BridgeFiles.validateReveal(raw, home: home, fileExists: fileExists)
             else { return .failure(.invalidPayload("path must be an existing absolute path under the home folder")) }
             return .success(.openFile(url))
+        case "computer.status":
+            guard p.isEmpty else { return .failure(.invalidPayload("computer status accepts no action fields")) }
+            return .success(.computerStatus)
+        case "computer.settings":
+            guard p.count == 1, let raw = p["target"] as? String, let target = ComputerSettingsTarget(rawValue: raw) else {
+                return .failure(.invalidPayload("only accessibility or screen_recording settings navigation is supported"))
+            }
+            return .success(.computerSettings(target))
         case "clipboard.read":
             guard p.isEmpty else { return .failure(.invalidPayload("clipboard read accepts no authority or action fields")) }
             return .success(.clipboardRead)
@@ -217,6 +227,8 @@ public enum BridgeCommand: Equatable {
         case .ttsStop: return "tts.stop"
         case .openExternal: return "open.external"
         case .openFile: return "open.file"
+        case .computerStatus: return "computer.status"
+        case .computerSettings: return "computer.settings"
         case .clipboardRead: return "clipboard.read"
         case .clipboardWrite: return "clipboard.write"
         case .micStatus: return "mic.status"
@@ -312,7 +324,7 @@ public enum WindowChromePolicy {
 /// src/platform/native.ts (probeVoice: mic.status + tts.status must not be not_implemented;
 /// events window.visibility, hotkey). `post(type, payload) => Promise<result>`; errors reject.
 public enum HostContract {
-    public static let requestTypes = ["open.external", "open.file", "clipboard.read", "clipboard.write", "mic.status", "tts.status", "notifications.status", "notifications.navigation", "notifications.navigationAck", "notifications.badge", "notify", "app.info"]
+    public static let requestTypes = ["open.external", "open.file", "clipboard.read", "clipboard.write", "computer.status", "computer.settings", "mic.status", "tts.status", "notifications.status", "notifications.navigation", "notifications.navigationAck", "notifications.badge", "notify", "app.info"]
     public static let eventTypes = ["window.visibility", "hotkey", "appearance.changed", "notification.open"]
 }
 

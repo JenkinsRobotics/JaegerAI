@@ -1,0 +1,28 @@
+import{useEffect,useRef,useState}from'react';
+import type{ComputerSnapshot,JaegerSource}from'../api/source';
+import{nativeBridge}from'../platform/native';
+type NativeStatus={scope:'native_shell_process';process_id:number;screen_os_permission:'granted'|'not_granted_or_undetermined';input_os_permission:'granted'|'not_granted_or_undetermined'};
+export function LocalComputerPanel({source}:{source:JaegerSource}){
+ const [snapshot,setSnapshot]=useState<ComputerSnapshot>(),[attempt,setAttempt]=useState(0),[error,setError]=useState<string>(),[native,setNative]=useState<NativeStatus>(),[notice,setNotice]=useState<string>(),[busy,setBusy]=useState(false);
+ const generation=useRef(0),locked=useRef(false);useEffect(()=>()=>{generation.current++;},[]);
+ useEffect(()=>{let live=true;setSnapshot(undefined);if(source.computers)void source.computers().then(value=>{if(live){if(value.scope!=='gateway_process_only')throw Error('Unexpected computer inventory scope');setSnapshot(value);setError(undefined);}}).catch(e=>{if(live)setError(String(e));});return()=>{live=false;};},[source,attempt]);
+ const readNative=async()=>{
+  if(locked.current)return;locked.current=true;setBusy(true);setNative(undefined);setError(undefined);const owner=++generation.current;
+  try{const bridge=nativeBridge();if(!bridge)throw Error('No native OS status broker in this browser');const row=await bridge.post('computer.status') as NativeStatus&{permission_requested?:boolean;capture_performed?:boolean;input_performed?:boolean};if(owner!==generation.current)return;
+   if(!row||row.scope!=='native_shell_process'||!Number.isSafeInteger(row.process_id)||row.permission_requested!==false||row.capture_performed!==false||row.input_performed!==false||![row.screen_os_permission,row.input_os_permission].every(v=>['granted','not_granted_or_undetermined'].includes(v)))throw Error('Native permission status unavailable or unqualified');setNative(row);
+  }catch(e){if(owner===generation.current)setError(String(e));}finally{locked.current=false;if(owner===generation.current)setBusy(false);}
+ };
+ const settings=async(target:'accessibility'|'screen_recording')=>{
+  if(locked.current)return;locked.current=true;setBusy(true);setNotice(undefined);setError(undefined);const owner=++generation.current;
+  try{const bridge=nativeBridge();if(!bridge)throw Error('No native settings broker');const result=await bridge.post('computer.settings',{target}) as {open_request_accepted?:boolean;permission_changed?:boolean};if(owner!==generation.current)return;if(result?.open_request_accepted!==true||result.permission_changed!==false)throw Error('OS settings navigation was not confirmed');setNotice('OS settings open request accepted. Jaeger did not change any permission; read status explicitly afterward.');}
+  catch(e){if(owner===generation.current)setError(String(e));}finally{locked.current=false;if(owner===generation.current)setBusy(false);}
+ };
+ const available=Boolean(nativeBridge());
+ return <section aria-label="Computers and native permissions"><h3>Computers and permissions</h3><p>Gateway execution host, native window process and hosted computers are separate. OS permission is not a tool grant; requests still use their admitted context, policy and approvals.</p>
+  <button type="button" onClick={()=>setAttempt(n=>n+1)}>Recheck Gateway computer inventory</button>{error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
+  {!source.computers&&<p>This adapter has no computer inventory contract.</p>}{snapshot?.computers.map(row=><article key={row.id}><h4>Gateway host · {row.id}</h4><p>{row.state} · process {row.process_id} · {row.os} / {row.architecture}</p><p>Screen view: {row.screen_view.replaceAll('_',' ')}. Input: {row.input_authorization.replaceAll('_',' ')}. Recovery: {row.recovery.replaceAll('_',' ')}.</p></article>)}
+  {snapshot&&<><p>Hosted inventory: {snapshot.hosted.state.replaceAll('_',' ')}. No allocator or remote control is advertised by this endpoint.</p>{snapshot.limits.map(limit=><p key={limit}>{limit}</p>)}</>}
+  <button type="button" disabled={!available||busy} onClick={()=>void readNative()}>Read native OS permission status</button>{native&&<p>Native process {native.process_id}: screen OS permission {native.screen_os_permission.replaceAll('_',' ')}; input OS permission {native.input_os_permission.replaceAll('_',' ')}. Automation is per-target and unknown here. No capture/input was performed.</p>}
+  <button type="button" disabled={!available||busy} onClick={()=>void settings('accessibility')}>Open Accessibility settings</button><button type="button" disabled={!available||busy} onClick={()=>void settings('screen_recording')}>Open Screen Recording settings</button><p>Opening a fixed OS pane does not toggle permission or grant bot/app access. No screen stream, input session or hosted machine is started here.</p>
+ </section>;
+}

@@ -436,3 +436,9 @@ def test_canonical_update_plan_does_not_route_legacy_update_apply(overlay):
     path='/v1/runtime/updates/plan?channel=latest'
     assert _route(overlay,path) is True and overlay._calls[-1]==('GET',path)
     assert _route(overlay,'/v1/runtime/updates/apply','POST') is False
+
+
+def test_local_computer_status_is_read_only_proxy(overlay):
+    assert _route(overlay,'/v1/runtime/computers') is True
+    assert overlay._calls[-1]==('GET','/v1/runtime/computers')
+    assert _route(overlay,'/v1/runtime/computers/allocate','POST') is False
