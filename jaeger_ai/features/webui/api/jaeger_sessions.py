@@ -432,7 +432,7 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and len(parts) in {2, 3} and parts[1] == "files":
         from urllib.parse import quote, unquote
         suffix = f"/{quote(unquote(parts[2]), safe='')}" if len(parts) == 3 else ""
-        return _proxy(handler, "GET", f"/v1/sessions/{session_id}/files{suffix}")
+        return _proxy(handler, "GET", f"/v1/sessions/{session_id}/files{suffix}{query}")
 
     if len(parts) == 2 and parts[1] == "attachments":
         if method == "GET":

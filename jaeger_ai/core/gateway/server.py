@@ -6043,6 +6043,17 @@ class JaegerGatewayApp:
                 workspace=session.get('workspace') or '', limit=self.UPLOAD_MAX_BYTES)
         except (OSError, ValueError):
             return web.json_response({'error': 'Attachment missing, changed, or outside its originating workspace; bytes withheld'}, status=409)
+        if request.query.get('view') == 'preview':
+            import base64
+            from .attachment_preview import spreadsheet
+            try:
+                preview = await asyncio.to_thread(spreadsheet, base64.b64decode(result['data_base64']), result['mime'], result['name'])
+            except Exception as exc:  # malformed/unsupported binary input is a safe fallback
+                # Parser failures never disclose archive contents/paths or launch a viewer.
+                import logging
+                logging.getLogger(__name__).debug('Bounded attachment preview unavailable: %s', type(exc).__name__)
+                preview = {'format':'unsupported', 'notice':'This file has no supported bounded spreadsheet preview. Download verified bytes to use an appropriate viewer.'}
+            return web.json_response({'session_id': session_id, **{k:v for k,v in result.items() if k!='data_base64'}, 'preview':preview})
         return web.json_response({'session_id': session_id, **result})
 
     async def handle_list_attachments(self, request: web.Request) -> web.Response:

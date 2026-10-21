@@ -337,3 +337,9 @@ def test_task_presentation_and_original_operation_routes(overlay):
     for path,method in [('/v1/tasks/owned/presentation','POST'),('/v1/tasks/owned/presentation-operations/nonce','GET')]:
         assert _route(overlay,path,method)
         assert overlay._calls[-1]==(method,path)
+
+
+def test_file_preview_query_reaches_same_scoped_reader(overlay):
+    path='/v1/sessions/owned/files/attachment?view=preview'
+    assert _route(overlay,path,'GET')
+    assert overlay._calls[-1]==('GET',path)
