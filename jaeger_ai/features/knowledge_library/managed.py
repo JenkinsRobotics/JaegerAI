@@ -7,6 +7,7 @@ import time
 
 
 from jaeger_ai.contract.knowledge import MANAGED_DOCUMENT_MAX_BYTES
+from jaeger_ai.contract.workflows import WORKFLOW_COLLECTION_ID
 
 
 class DocumentConflict(ValueError):
@@ -50,12 +51,14 @@ class ManagedDocuments:
             raise KeyError('Managed document not found')
         return {**dict(row), 'archived': bool(row['archived'])}
 
-    def create_document(self, *, title: str, content: str, command_id: str) -> dict:
+    def create_document(self, *, title: str, content: str, command_id: str, collection_id: str = "managed") -> dict:
         title, content, digest = self._text(title, content)
         if not isinstance(command_id, str) or not command_id.strip() or len(command_id) > 128:
             raise ValueError('Stable command_id required (at most128 characters)')
         document_id = 'doc_' + hashlib.sha256(command_id.encode()).hexdigest()[:32]
-        payload = json.dumps([title, content], ensure_ascii=False)
+        if collection_id not in {'managed', WORKFLOW_COLLECTION_ID}:
+            raise ValueError('Unsupported managed document classification')
+        payload = json.dumps([title, content] if collection_id == 'managed' else [title, content, collection_id], ensure_ascii=False)
         with self.conn:
             self.conn.execute('BEGIN IMMEDIATE')
             previous = self.conn.execute('SELECT creation_payload FROM library_managed_documents WHERE document_id=?', (document_id,)).fetchone()
@@ -64,8 +67,8 @@ class ManagedDocuments:
                     raise DocumentConflict('Command ID already used for different content')
                 return {**self.managed_document(document_id), 'replayed': True}
             now = time.time()
-            self.conn.execute("INSERT OR IGNORE INTO collections VALUES('managed','Jaeger documents','jaeger://managed','managed',?)", (now,))
-            self.conn.execute('INSERT INTO library_documents VALUES(?,?,?,?,?,?,?,?)', (document_id, 'managed', document_id, title, content, digest, now, now))
+            self.conn.execute("INSERT OR IGNORE INTO collections VALUES(?,?,?,?,?)", (collection_id, "Jaeger documents" if collection_id == "managed" else "Workflows", "jaeger://" + collection_id, collection_id, now))
+            self.conn.execute('INSERT INTO library_documents VALUES(?,?,?,?,?,?,?,?)', (document_id, collection_id, document_id, title, content, digest, now, now))
             self.conn.execute('INSERT INTO library_managed_documents VALUES(?,1,0,?)', (document_id, payload))
             self.conn.execute('INSERT INTO library_document_versions VALUES(?,1,?,?,?,?)', (document_id, title, content, digest, now))
         return {**self.managed_document(document_id), 'replayed': False}

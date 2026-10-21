@@ -68,7 +68,7 @@ EVENT_TYPES = frozenset({
     "agent.skills", "agent.knowledge", "project.created", "project.checked",
     # Sessions contract: every transcript row, and rolling summaries.
     "message.created", "session.summarized", "message.feedback", "message.reaction",
-    "schedule.changed", "library.document.updated",
+    "schedule.changed", "library.document.updated", "workflow.changed",
     # Durable task projection. The task owner is the authority; these are its
     # stream. ``jaeger.state`` is the presence projection (see contract/presence.py).
     "task.created", "task.updated", "jaeger.state",

@@ -92,7 +92,18 @@ export interface AgentKnowledgeControls {
   read(id: string): Promise<AgentKnowledgeSnapshot>;
   save(id: string, body: { expected_revision: number; document_ids: string[] }): Promise<AgentKnowledgeSnapshot>;
 }
+export interface WorkflowDefinition { format: string; name: string; description: string; steps: { title: string; instruction: string }[] }
+export interface WorkflowDocument { id: string; revision: number; digest: string; archived: boolean; definition: WorkflowDefinition }
+export type WorkflowAction = "create" | "save" | "archive" | "restore" | "propose";
+export interface WorkflowReceipt extends ControlResult { workflow?: WorkflowDocument; task?: { task_id: string; status: string; authorized: boolean } | null }
+export interface WorkflowControls {
+  list(): Promise<{ workflows: { id: string; title: string; revision: number; archived: boolean }[]; format: string; limits: { steps: number; bytes: number } }>;
+  read(id: string): Promise<WorkflowDocument>;
+  mutate(action: WorkflowAction, id: string, body: Record<string, unknown>): Promise<WorkflowReceipt>;
+  operation(id: string): Promise<{ receipt: WorkflowReceipt | null }>;
+}
 export interface JaegerSource {
+  workflows?: WorkflowControls;
   agentKnowledge?: AgentKnowledgeControls;
   searchMessages?(agentId: string, query: string, before?: string): Promise<MessageSearchPage>;
   diagnostics?(): Promise<GatewayDiagnostics>;

@@ -207,3 +207,13 @@ def test_template_and_specialist_settings_proxy_preserves_owner_contract(overlay
     assert _route(overlay, '/v1/agents/native%3Aowned/configuration', 'PATCH')
     assert overlay._calls[-3:] == [('GET', '/v1/agent-templates'), ('GET', '/v1/agents/native%3Aowned/configuration'), ('PATCH', '/v1/agents/native%3Aowned/configuration')]
     assert not _route(overlay, '/v1/agents/native%3Aowned%2Fother/configuration', 'PATCH')
+
+
+def test_workflow_routes_use_gateway_and_reject_unadvertised_mutations(overlay):
+    assert _route(overlay, '/v1/workflows')
+    assert _route(overlay, '/v1/workflows/owned')
+    assert _route(overlay, '/v1/workflows', 'POST')
+    for action in ('save','archive','restore','propose'):
+        assert _route(overlay, '/v1/workflows/owned/'+action, 'POST')
+    assert not _route(overlay, '/v1/workflows/owned/delete', 'POST')
+    assert not _route(overlay, '/v1/workflows/owned', 'DELETE')

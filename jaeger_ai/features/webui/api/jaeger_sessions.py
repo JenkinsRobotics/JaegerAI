@@ -237,6 +237,13 @@ def route(handler, parsed, method: str) -> bool:
         # The gateway serves /health, NOT /v1/health — the latter 404s.
         return _proxy(handler, "GET", "/health")
 
+    if path == "/v1/workflows" or path.startswith("/v1/workflows/"):
+        if method == "GET":
+            return _proxy(handler, "GET", path + query)
+        if method == "POST" and (path == "/v1/workflows" or path.rsplit('/', 1)[1] in {'save', 'archive', 'restore', 'propose'}):
+            return _proxy(handler, "POST", path, _body_bytes(handler))
+        return False
+
     if method == "GET" and path.startswith("/v1/agents/") and path.endswith("/messages/search"):
         from urllib.parse import quote, unquote
         agent_id = unquote(path[len("/v1/agents/"):-len("/messages/search")])

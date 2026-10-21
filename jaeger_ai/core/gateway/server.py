@@ -1296,6 +1296,8 @@ class JaegerGatewayApp:
     def _setup_routes(self) -> None:
         from jaeger_ai.features.knowledge_library.routes import register as register_library
         register_library(self)
+        from jaeger_ai.features.workflows.routes import register as register_workflows
+        register_workflows(self)
         from .native_controls import register as register_native_controls
         register_native_controls(self)
         from jaeger_ai.features.agent_bridge.routes import register
