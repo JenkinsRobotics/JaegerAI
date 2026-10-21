@@ -1,3 +1,4 @@
+import {DIAGNOSTIC_CAPTURE_KEY} from "./diagnosticCapture";
 import type { AgentActions, Section } from "./agentActions";
 /* Typed port of jaeger_ai/interfaces/ide/gateway.js for the browser.
  * Same-origin only: the page is served by the Jaeger WebUI (or the Vite dev
@@ -99,6 +100,29 @@ export class GatewayClient implements JaegerSource {
   };
   channelDeliveries(before?:number) { return this.json<import("./source").ChannelDeliveries>(`/v1/channels/deliveries${before?`?before=${before}`:""}`); }
   channels() { return this.json<import("./source").ChannelSnapshot>("/v1/channels"); }
+  diagnosticCapture:import('./diagnosticCapture').DiagnosticCaptureControls={
+    read:()=>this.json('/v1/runtime/diagnostics/capture'),
+    start:body=>this.json('/v1/runtime/diagnostics/capture/start',body),
+    stop:id=>this.json('/v1/runtime/diagnostics/capture/stop',{capture_id:id}),
+    export:()=>this.json('/v1/runtime/diagnostics/export'),
+  };
+  private diagnosticWindow='';
+  private diagnosticSent=0;
+  private diagnosticCauses=new Map<string,string>();
+  private reportDiagnostic(code:string,sessionId?:string,frameId?:string,requestId?:string){
+    try{
+      const raw=localStorage.getItem(DIAGNOSTIC_CAPTURE_KEY);if(!raw)return;
+      const active=JSON.parse(raw);if(typeof active.id!=='string'||!active.id||typeof active.expires_at!=='number'||Date.now()/1000>=active.expires_at)return;
+      if(this.diagnosticWindow!==active.id){this.diagnosticWindow=active.id;this.diagnosticSent=0;this.diagnosticCauses.clear();}
+      if(this.diagnosticSent>=256)return;this.diagnosticSent++;
+      const cause=frameId&&/^[0-9]{1,19}$/.test(frameId)?`${code}:${sessionId??'*'}:${frameId}`:undefined;
+      const eventId=cause&&this.diagnosticCauses.get(cause)||crypto.randomUUID();
+      if(cause&&this.diagnosticCauses.size<128)this.diagnosticCauses.set(cause,eventId);
+      // Fixed category + opaque cause only. No raw event, error message, stack,
+      // headers or token. Best effort, no retry and no recursive instrumentation.
+      void this.json('/v1/runtime/diagnostics/capture/report',{capture_id:active.id,event_id:eventId,code,...(sessionId?{session_id:sessionId}:{}),...(sessionId&&requestId?{request_id:requestId}:{})}).catch(()=>{});
+    }catch{/* unavailable storage/report transport cannot affect execution */}
+  }
   diagnostics() { return this.json<import("./source").GatewayDiagnostics>("/v1/runtime/diagnostics"); }
   tools(query = "") { return this.json<import("./source").ToolInventory>(`/v1/runtime/tools?q=${encodeURIComponent(query)}`); }
   readonly notifications: import('./source').Notifications = {
@@ -265,7 +289,9 @@ export class GatewayClient implements JaegerSource {
   async globalEvents(onEvent: (event: GatewayEvent) => void, signal: AbortSignal) {
     const response = await fetch(`${this.base}/v1/events/stream`, { headers: { Accept: "text/event-stream" }, credentials: "same-origin", signal });
     if (!response.ok || !response.body) throw new GatewayError(`events ${response.status}`, response.status, undefined);
-    for await (const frame of decodeSSE(response.body, signal)) onEvent(normalizeFrame(frame));
+    for await (const frame of decodeSSE(response.body, signal,undefined,(code,id)=>this.reportDiagnostic(code,undefined,id))) {
+      const event=normalizeFrame(frame);try{onEvent(event);}catch(error){this.reportDiagnostic('subscriber_error',event.session_id&&event.session_id!=='*'?event.session_id:undefined,frame.id,typeof event.request_id==='string'?event.request_id:undefined);throw error;}
+    }
   }
 
   async stream(sessionId: string, cursor: number | undefined, onEvent: (event: GatewayEvent) => void, signal: AbortSignal) {
@@ -278,6 +304,8 @@ export class GatewayClient implements JaegerSource {
       try { body = await response.json(); } catch { /* not JSON */ }
       throw new GatewayError((body as { error?: string })?.error ?? `stream ${response.status}`, response.status, body);
     }
-    for await (const frame of decodeSSE(response.body, signal)) onEvent(normalizeFrame(frame));
+    for await (const frame of decodeSSE(response.body, signal,undefined,(code,id)=>this.reportDiagnostic(code,sessionId,id))) {
+      const event=normalizeFrame(frame);try{onEvent(event);}catch(error){this.reportDiagnostic('subscriber_error',sessionId,frame.id,typeof event.request_id==='string'?event.request_id:undefined);throw error;}
+    }
   }
 }
