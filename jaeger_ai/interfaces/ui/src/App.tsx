@@ -1,3 +1,4 @@
+import {useNativeNotifications} from './platform/useNativeNotifications';
 import { NotificationsPanel } from "./settings/NotificationsPanel";
 import { ChannelsPanel } from "./channels/ChannelsPanel";
 import { WorkflowsPanel } from "./workflows/WorkflowsPanel";
@@ -54,6 +55,7 @@ function forcesFallback(): boolean {
 const message = (error: unknown) => String((error as Error)?.message ?? error);
 
 export function App({ source }: { source: JaegerSource }) {
+  useNativeNotifications(source.notifications);
   const hostKind = detectHost();
   const host = useMemo(() => {
     const created = hostKind === "macos" ? new NativeHost(source) : new WebHost(source);

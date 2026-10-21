@@ -521,6 +521,12 @@ class LedgerToolExecutor:
                 run_id=self._run_id,
             )
         except Exception as exc:
+            from jaeger_agent.cognition.effects import EffectOutcomeUnknown
+            if isinstance(exc,EffectOutcomeUnknown) and exc.receipt is not None:
+                annotate=getattr(self._ledger,'annotate_pending',None)
+                if callable(annotate):
+                    try:annotate(key,exc.receipt)
+                    except Exception:logger.warning('Could not preserve partial effect receipt; claim remains pending',exc_info=True)
             name = type(exc).__name__
             if name in {"PermissionDenied", "HumanOverrideRequired"}:
                 try:

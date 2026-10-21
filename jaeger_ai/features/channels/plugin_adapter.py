@@ -38,11 +38,12 @@ class PluginBridgeAdapter:
     def send(self, message: OutboundMessage) -> dict[str, Any]:
         send = getattr(self._bridge, "send", None)
         if not callable(send):
-            return {"sent": False, "error": f"{self.channel_id} bridge has no send()"}
-        result = send(message.recipient_id, message.text)
-        if isinstance(result, dict):
-            return result
-        return {"sent": True, "result": result}
+            return {"sent": False, "effect": "not_started", "error": f"{self.channel_id} bridge has no send()"}
+        from .receipts import checked_receipt, ChannelDeliveryUnknown
+        try:result = send(message.recipient_id, message.text)
+        except Exception:raise ChannelDeliveryUnknown('Transport submission outcome unknown; do not retry') from None
+        return checked_receipt(result)
+
 
 
 def register_plugin_bridge(channel_id: str, bridge: Any, registry: Any | None = None) -> PluginBridgeAdapter:

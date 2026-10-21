@@ -1,0 +1,4 @@
+import {useEffect} from 'react';import type {Notifications} from '../api/source';import {nativeBridge} from './native';import {NativeNotificationConsumer,NATIVE_NOTIFICATION_CHANGED} from './nativeNotifications';
+export function useNativeNotifications(controls?:Notifications){
+ useEffect(()=>{const bridge=nativeBridge();if(!bridge||!controls)return;let active=true;const consumer=new NativeNotificationConsumer(controls.read.bind(controls),bridge,message=>{if(active)window.dispatchEvent(new CustomEvent('jaeger:native-notification-status',{detail:message}));});const poll=()=>{if(active)void consumer.poll();};poll();const timer=setInterval(poll,15000);window.addEventListener(NATIVE_NOTIFICATION_CHANGED,poll);return()=>{active=false;consumer.dispose();clearInterval(timer);window.removeEventListener(NATIVE_NOTIFICATION_CHANGED,poll);};},[controls]);
+}

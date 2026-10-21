@@ -23,7 +23,8 @@ def write(conn,value):
 def feed(store):
     with closing(store._get_conn()) as conn:
         prefs=settings(conn)
-        rows=conn.execute("SELECT a.event_id,a.session_id,a.event,a.data_json,a.timestamp,s.metadata_json FROM activity_history a JOIN sessions s ON s.session_id=a.session_id WHERE a.event IN ('approval.request','task.updated','agent.handoff.finished','notification.proactive','turn.failed','turn.unknown') ORDER BY a.event_id DESC LIMIT 500").fetchall()
+        observed=conn.execute('SELECT COALESCE(MAX(event_id),0) FROM activity_history').fetchone()[0]
+        rows=conn.execute("SELECT a.event_id,a.session_id,a.event,a.data_json,a.timestamp,s.metadata_json FROM activity_history a JOIN sessions s ON s.session_id=a.session_id WHERE a.event_id<=? AND a.event IN ('approval.request','task.updated','agent.handoff.finished','notification.proactive','turn.failed','turn.unknown') ORDER BY a.event_id DESC LIMIT 500",(observed,)).fetchall()
         result=[];seen=set()
         for row in rows:
             data=json.loads(row['data_json']);metadata=json.loads(row['metadata_json'] or '{}');agent_id=metadata.get('agent_id')
@@ -39,7 +40,7 @@ def feed(store):
             title={'approval.request':'Approval requested','notification.proactive':'New proactive notification','turn.failed':'Conversation failed','turn.unknown':'Conversation outcome unknown','task.updated':'Task status changed','agent.handoff.finished':'Delegated work status changed'}[event]
             result.append({'event_id':row['event_id'],'session_id':row['session_id'],'agent_id':agent_id,'title':title,'status':status,'timestamp':row['timestamp'],'unread':row['event_id']>prefs['read_through']})
             if len(result)==50:break
-        return {'preferences':prefs,'notifications':result,'privacy':'metadata_only_no_message_preview','scope':'local_operator','enabled':prefs['enabled']}
+        return {'preferences':prefs,'notifications':result,'privacy':'metadata_only_no_message_preview','scope':'local_operator','enabled':prefs['enabled'],'observed_through':observed}
 
 
 def register(gateway):

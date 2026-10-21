@@ -138,11 +138,11 @@ class TelegramBridge:
     def send(self, recipient: str, text: str) -> dict[str, Any]:
         """Send `text` to a Telegram chat ID (numeric, as a string)."""
         if self._app is None or self._loop is None:
-            return {"sent": False, "error": "telegram bridge not connected"}
+            return {"sent": False, "effect": "not_started", "error": "telegram bridge not connected"}
         try:
             chat_id = int(recipient)
         except (TypeError, ValueError):
-            return {"sent": False, "error": f"recipient must be a numeric chat ID, got {recipient!r}"}
+            return {"sent": False, "effect": "not_started", "error": f"recipient must be a numeric chat ID, got {recipient!r}"}
 
         async def _do_send() -> Any:
             return await self._app.bot.send_message(chat_id=chat_id, text=text)
@@ -152,7 +152,7 @@ class TelegramBridge:
             msg = fut.result(timeout=15)
             return {"sent": True, "chat_id": str(chat_id), "message_id": str(getattr(msg, "message_id", "?"))}
         except Exception as exc:
-            return {"sent": False, "error": f"{type(exc).__name__}: {exc}"}
+            return {"sent": False, "execution_unknown": True, "error": "Transport submission outcome unknown; do not retry"}
 
     # ----- inbound: mid-turn approval prompts -----
     def _on_agent_request(self, msg: Any) -> None:

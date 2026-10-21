@@ -89,6 +89,7 @@ export type PersistedPart =
   | { type: "handoff"; direction: "to" | "from"; handoff_id?: string; agent_id?: string; agent_name?: string; status?: string };
 
 export interface SessionMessage {
+  kind?:string;channel?:{channel_id:string;provider_conversation_id:string;external_message_id:string;ingress_author_id?:string;authority:string};
   id?: string | number;
   role: "user" | "assistant" | "system" | "tool" | string;
   content?: string;

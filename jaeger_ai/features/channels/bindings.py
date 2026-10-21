@@ -33,7 +33,7 @@ def inbox(gateway,channel,binding):
     continuous home feed. A user's subsequent reply is an ordinary new turn.
     """
     agent_id=binding['agent_id']
-    def receive(text,*,session_key=None,message_id=None):
+    def receive(text,*,session_key=None,message_id=None,author_id=None):
         from jaeger_ai.core.gateway.server import _control_plane_block
         if _control_plane_block():raise ValueError('Gateway is stopped or lacks a live lifecycle owner; message not admitted')
         if not session_key or not str(session_key).startswith(channel+':') or not message_id:
@@ -41,9 +41,11 @@ def inbox(gateway,channel,binding):
         if not isinstance(text,str) or not text.strip() or len(text)>32000:
             raise ValueError('Message must contain1–32000 characters')
         if read(gateway.store,channel)!=binding:raise ValueError('Channel binding changed; reconnect explicitly')
+        if channel=='discord' and (not isinstance(author_id,str) or not author_id.isdecimal() or int(author_id)<=0):
+            raise ValueError('Discord ingress author identity required; no channel/user identity inference')
         target=gateway._registry().get_agent(agent_id)
         if target is None:raise ValueError('Bound bot no longer exists; message not admitted')
         home,_=gateway._ensure_agent_home(agent_id,getattr(target,'display_name',None))
-        receipt=gateway.store.append_channel_message_once(home,channel=channel,conversation_id=str(session_key),external_id=str(message_id),text=text)
+        receipt=gateway.store.append_channel_message_once(home,channel=channel,conversation_id=str(session_key),external_id=str(message_id),text=text,author_id=author_id)
         return f"Saved to Jaeger inbox (message {receipt['message_id']}). No bot execution or tool approval was authorized."
     return receive

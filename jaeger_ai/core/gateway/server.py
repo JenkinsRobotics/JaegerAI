@@ -108,7 +108,7 @@ APPROVAL_WAIT_S = 300.0
 # Arguments that name what a tool call will touch, in the order a human
 # reading an approval on a phone needs them.
 _APPROVAL_TARGET_KEYS = (
-    "path", "src", "dst", "command", "url", "to", "recipient", "package",
+    "path", "src", "dst", "command", "url", "channel", "to", "recipient", "reply_to_message_id", "package",
     "script", "code", "target", "name", "query",
 )
 
@@ -3986,8 +3986,9 @@ class JaegerGatewayApp:
             except Exception:
                 pass
 
+        from jaeger_ai.contract.channel_messages import model_content
         messages = [
-            {"role": item.get("role"), "content": item.get("content")}
+            {"role": item.get("role"), "content": model_content(item)}
             for item in (history or [])
             if item.get("role") in {"user", "assistant"} and item.get("content")
         ]
@@ -4480,11 +4481,12 @@ class JaegerGatewayApp:
         from jaeger_agent.tool_executor import caller_identity
 
         from jaeger_ai.features.agent_bridge.tool_scope import goal_scope
+        from jaeger_ai.features.channels.replies import scope as channel_reply_scope
 
         actor = (execution or {}).get("caller")
         try:
             with caller_identity(actor if isinstance(actor, str) and actor.strip() else None), \
-                    goal_scope(self, session_id, request_id, execution):
+                    goal_scope(self, session_id, request_id, execution), channel_reply_scope(self, session_id, request_id):
                 await self._execute_turn_inner(
                     session_id, turn_id, text, request_id=request_id, execution=execution,
                 )
