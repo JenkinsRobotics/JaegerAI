@@ -1314,6 +1314,8 @@ class JaegerGatewayApp:
         register_workflows(self)
         from jaeger_ai.features.webhooks.routes import register as register_webhooks
         register_webhooks(self)
+        from jaeger_ai.features.finance.routes import register as register_finance
+        register_finance(self)
         from jaeger_ai.plugins.mcp.routes import register as register_mcp_controls
         register_mcp_controls(self)
         from jaeger_ai.plugins.control_routes import register as register_plugin_controls

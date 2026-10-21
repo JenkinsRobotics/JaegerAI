@@ -66,3 +66,28 @@ jaeger finance seed-demo
 # Purge all local financial records (privacy control)
 jaeger finance purge --force
 ```
+
+## Owner-local financial policy and review UI
+
+Settings → Financial policy reads only the existing `pending_actions` metadata and
+fixed operation catalog via authenticated `/v1/finance/review`. It never initializes
+finance storage, accesses encryption keys, probes providers or links accounts.
+Missing storage is `not_initialized`; a malformed existing store is unavailable.
+Unknown operation names are blocked rather than treated as autonomous reads.
+
+`POST /v1/finance/actions/{id}/review` requires existing unprefixed owner admin,
+the exact reviewed row hash, a stable operation ID and a local review/denial.
+Known, complete local proposals can be marked reviewed; **this does not apply the
+proposal, execute a purchase or create a grant**. Cards, payments, settlement and
+account linking have no UI execution path. Budget analysis is not a card limit.
+Status and the existing hash-chain audit receipt commit together under SQLite
+`BEGIN IMMEDIATE`; expiry is checked again before commit. Concurrent stale
+reviewers lose without replacing the winner. Unknown outcomes remain unchanged.
+A lost response is looked up at `/v1/finance/operations/{id}`, never resubmitted
+by the UI. Device operation journals contain IDs/revision/decision only.
+
+Compatibility: no schema migration, key migration or provider change. Existing
+public Python exports remain lazy-compatible; passive route import does not load
+tools/providers. Rollback retains existing pending statuses and audit records.
+An `approved` pending row means local review metadata only; it is not settlement.
+No automatic action should be triggered from these records after rollback.
