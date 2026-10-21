@@ -1,9 +1,10 @@
+import {useReducedMotion} from "../settings/devicePreferences";
 /* Stream style (shared setting with IDE Chat). LOCAL MIRROR of the canonical type that will live in
  * jaeger-chat packages/jaeger-chat-ui/src/streamStyle.ts (StreamStyleId, StreamStyleParams, STREAM_STYLES,
  * resolveStreamStyle); keep the names identical so swapping to the package import is a small diff.
  * The "grok" preset is measured from Grok Bot 0.71.2 (spec: jaeger-shots/specs/stream-grok.md); the
  * others are PROVISIONAL placeholders until measured. */
-import { useSyncExternalStore } from "react";
+import {useMemo, useSyncExternalStore} from "react";
 
 export type StreamStyleId = "vscode" | "grok" | "chatgpt" | "claude" | "instant";
 
@@ -97,5 +98,7 @@ export function setStreamStyle(id: StreamStyleId) {
 }
 export function useStreamStyle(): StreamStyleParams {
   const id = useSyncExternalStore((l) => { listeners.add(l); return () => listeners.delete(l); }, read, read);
-  return STREAM_STYLES[id];
+  const reduced = useReducedMotion();
+  return useMemo(() => reduced ? {...STREAM_STYLES[id], reveal: STREAM_STYLES.instant.reveal,
+    enter: STREAM_STYLES.instant.enter, scroll: {...STREAM_STYLES[id].scroll, smooth: false}} : STREAM_STYLES[id], [id, reduced]);
 }

@@ -3,6 +3,7 @@
  * a close button top-right. Only settings Jaeger really has: device typography, Theme (Aether's aether-appearance), Stream style
  * (streamStyle.ts, per device), file uploads (composer BYTES_UPLOAD_FLAG); Voice and Connection are read-only
  * status. Esc / a click outside / ⌘, again close it (popup coordinator). Icons: codicons (MIT). */
+import {DevicePreferencesPanel} from "./DevicePreferencesPanel";
 import { useEffect, useState, type ReactNode } from "react";
 import { useExclusivePopup } from "../popups/coordinator";
 import { Icon, type IconName } from "../icons/Icon";
@@ -107,6 +108,7 @@ export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPan
                 </select>
               </Row>
             </Section>
+            <DevicePreferencesPanel/>
             <Section title="Chat">
               <fieldset className="jg-sheet__radios">
                 <legend className="jg-sheet__row-label">Stream style</legend>

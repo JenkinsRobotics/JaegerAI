@@ -1,3 +1,4 @@
+import {displayDate} from "../settings/devicePreferences";
 /* Home-chat entries that aren't turns: the summary card that stands in for summarized older
  * messages, and handoff / task results posted into the chat as real messages. */
 import { useState } from "react";
@@ -9,7 +10,7 @@ type Summary = Extract<HomeEntry, { kind: "summary" }>;
 type Post = Extract<HomeEntry, { kind: "post" }>;
 type Open = { onOpen: (url: string) => void; onCopy: (text: string) => void };
 
-const day = (ms?: number) => (ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "");
+const day = (ms?: number) => (ms ? displayDate(ms, {month: "short", day: "numeric"}) : "");
 export function summaryLine(entry: Summary): string {
   const span = entry.fromAt && entry.toAt ? ` · ${day(entry.fromAt)}–${day(entry.toAt)}` : "";
   return `Earlier conversation summarized${entry.count ? ` (${entry.count} messages)` : ""}${span}`;

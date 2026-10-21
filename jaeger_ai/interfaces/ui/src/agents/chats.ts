@@ -1,3 +1,4 @@
+import {displayDate, displayDayDistance} from "../settings/devicePreferences";
 /* An agent's chats in the sidebar (Grok Bot: every chat keeps a row, a fresh
  * chat never hides the old one). Pure helpers + the per-agent loader. */
 import { useCallback, useEffect, useState } from "react";
@@ -31,11 +32,10 @@ export function shortTime(seconds: number | undefined, now = Date.now()): string
   const diff = Math.max(0, now - ms);
   if (diff < 60_000) return "now";
   if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m`;
-  const day = (t: number) => new Date(new Date(t).toDateString()).getTime();
-  const days = Math.round((day(now) - day(ms)) / 86_400_000);
+  const days = displayDayDistance(ms, now);
   if (days === 0) return `${Math.floor(diff / 3_600_000)}h`;
   if (days === 1) return "Yesterday";
-  return new Date(ms).toLocaleDateString([], { month: "short", day: "numeric" });
+  return displayDate(ms, {month: "short", day: "numeric"});
 }
 
 /** The selected agent's chats, reloaded when `version` changes (new chat,

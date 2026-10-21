@@ -1,3 +1,4 @@
+import {useDevicePreferences} from "./settings/devicePreferences";
 import {WebhooksPanel} from './webhooks/WebhooksPanel';
 import {LocalComputerPanel} from './settings/LocalComputerPanel';
 import {NativeClipboardPanel} from './settings/NativeClipboardPanel';
@@ -63,6 +64,7 @@ function forcesFallback(): boolean {
 const message = (error: unknown) => String((error as Error)?.message ?? error);
 
 export function App({ source }: { source: JaegerSource }) {
+  useDevicePreferences(); // Reformat visible timestamps without recreating source/streams.
   useNativeNotifications(source.notifications);
   const hostKind = detectHost();
   const host = useMemo(() => {

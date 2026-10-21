@@ -90,7 +90,7 @@ export function WebhooksPanel({source, agents}: {source: JaegerSource; agents: A
   };
   const disabled = busy || pending.length > 0;
   const update = (patch: Partial<WebhookDefinition>) => editor && edit({...editor, definition: {...editor.definition, ...patch}});
-  return <section aria-label="Webhook subscriptions"><h3>Inbound webhook subscriptions</h3>
+  return <section className="jg-webhook-preferences" aria-label="Webhook subscriptions"><h3>Inbound webhook subscriptions</h3>
     <p>Events create paused Tasks for your approval. Incoming text never authorizes tools. Existing shared-secret transport is required; sender filters do not independently verify a remote publisher. This panel starts no listener and creates no credentials.</p>
     {catalog && <p>Listener: {catalog.listener} · Existing credential: {catalog.credential_status} · Admission: {catalog.admission}</p>}
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}

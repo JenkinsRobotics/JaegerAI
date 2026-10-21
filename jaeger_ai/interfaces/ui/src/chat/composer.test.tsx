@@ -3,6 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MAX_ATTACHMENTS, MAX_ATTACHMENT_BYTES, addFiles, attachmentError, fileSize, primaryAction, restoreRejected, toAttachments } from "./composer";
 import { WebHost } from "./webHost";
+import type { JaegerSource } from "../api/source";
 import type { ChatHost, StartTurnRequest } from "./host";
 import { MinimalChat } from "./MinimalChat";
 
@@ -102,7 +103,7 @@ describe("refused attachments", () => {
     expect(toAttachments(back)).toEqual([]);
   });
   it("shows the 'escapes workspace' 400 on that file's chip (DOM)", async () => {
-    const host = Object.assign(Object.create(WebHost.prototype) as WebHost, {
+    const host = Object.assign(new WebHost({} as JaegerSource), {
       capabilities: { voice: false },
       startTurn: (req: StartTurnRequest) => {
         host.onAttachmentsRejected?.(req.turnId, [{ name: "secret.txt", reason: "attachment path escapes workspace" }]);

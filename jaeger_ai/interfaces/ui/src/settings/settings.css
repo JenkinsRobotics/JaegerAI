@@ -83,3 +83,13 @@
 .jg-agent-management-actions button { font: inherit; padding: 5px 8px; }
 [aria-label="Manage agents"] .jg-sheet__card { margin-bottom: 10px; }
 [aria-label="Manage agents"] small { overflow-wrap: anywhere; }
+
+/* Device and inbound setup fields shrink with the existing settings sheet. */
+:is(.jg-device-preferences, .jg-webhook-preferences) { min-width: 0; overflow-wrap: anywhere; }
+:is(.jg-device-preferences, .jg-webhook-preferences) label { display: grid; gap: 6px; margin-block: 12px; min-width: 0; }
+:is(.jg-device-preferences, .jg-webhook-preferences) :is(input:not([type="checkbox"]), textarea, select) {
+  box-sizing: border-box; width: 100%; max-width: 100%; min-width: 0; font: inherit; color: inherit;
+}
+.jg-device-preferences label.jg-device-check { display: flex; align-items: center; }
+.jg-device-preferences dt { font-weight: 600; margin-top: 12px; }
+.jg-device-preferences dd { margin: 4px 0 0; }
