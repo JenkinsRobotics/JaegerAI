@@ -373,6 +373,9 @@ def route(handler, parsed, method: str) -> bool:
             return _proxy(handler, 'POST', path, _body_bytes(handler))
         return False
 
+    if path in {'/v1/runtime/diagnostics/capture','/v1/runtime/diagnostics/export'} and method=='GET':return _proxy(handler,method,path)
+    if path.startswith('/v1/runtime/diagnostics/capture/') and method=='POST' and path.rsplit('/',1)[1] in {'start','stop','report'}:return _proxy(handler,method,path,_body_bytes(handler))
+
     if method == "GET" and path in {"/v1/runtime/skills", "/v1/runtime/skills/detail", "/v1/runtime/tools", "/v1/runtime/diagnostics"}:
         return _proxy(handler, "GET", path + query)
 

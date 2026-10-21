@@ -192,6 +192,7 @@ export interface JaegerSource {
   agentKnowledge?: AgentKnowledgeControls;
   savedMessage?(agentId:string,messageId:string,offset:number,revision?:string):Promise<SavedMessageChunk>;
   searchMessages?(agentId: string, query: string, before?: string): Promise<MessageSearchPage>;
+  diagnosticCapture?:import('./diagnosticCapture').DiagnosticCaptureControls;
   diagnostics?(): Promise<GatewayDiagnostics>;
   tools?(query?: string): Promise<ToolInventory>;
   specialistControls?: SpecialistControls;

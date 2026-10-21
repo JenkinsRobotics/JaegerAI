@@ -322,3 +322,12 @@ def test_scoped_message_portion_proxy_preserves_preconditions(overlay):
     assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
     assert not _route(overlay,'/v1/agents/native%3Aowned/messages/123','POST')
     assert not _route(overlay,'/v1/agents/native%3Aowned/messages/123/extra')
+
+
+def test_diagnostic_capture_proxy_accepts_only_bounded_control_routes(overlay):
+    for path in ('/v1/runtime/diagnostics/capture','/v1/runtime/diagnostics/export'):
+        assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
+    for action in ('start','stop','report'):
+        path='/v1/runtime/diagnostics/capture/'+action
+        assert _route(overlay,path,'POST') and overlay._calls[-1]==('POST',path)
+    assert not _route(overlay,'/v1/runtime/diagnostics/capture/traffic','POST')
