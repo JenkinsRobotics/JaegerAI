@@ -58,8 +58,8 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   return <button type="button" role="switch" aria-label={label} aria-checked={checked} className={`jg-switch${checked ? " is-on" : ""}`} onClick={() => onChange(!checked)}><span /></button>;
 }
 
-export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel }: {
-  clipboardPanel?:ReactNode;updatesPanel?:ReactNode;requestedTab?:{tab:Tab;sequence:number}; open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode; toolsPanel?: ReactNode; diagnosticsPanel?: ReactNode; workflowsPanel?: ReactNode; channelsPanel?: ReactNode; notificationsPanel?: ReactNode; memoryPanel?:ReactNode;
+export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel, computerPanel }: {
+  computerPanel?:ReactNode;clipboardPanel?:ReactNode;updatesPanel?:ReactNode;requestedTab?:{tab:Tab;sequence:number}; open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode; toolsPanel?: ReactNode; diagnosticsPanel?: ReactNode; workflowsPanel?: ReactNode; channelsPanel?: ReactNode; notificationsPanel?: ReactNode; memoryPanel?:ReactNode;
 }) {
   const [tab, setTab] = useState<Tab>("general");
   useEffect(()=>{if(open&&requestedTab)setTab(requestedTab.tab);},[open,requestedTab]);
@@ -140,6 +140,7 @@ export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPan
             <Row label="Ambient listening / barge-in"><span className="jg-sheet__value">Not implemented in this app</span></Row>
           </Section>}
           {tab === "connection" && <Section title="Gateway">
+            {computerPanel}
             {clipboardPanel}
             <Row label="Application API address" hint="Read-only. The backend owns Gateway routing and authentication."><span className="jg-sheet__value">{gateway ?? (typeof location !== "undefined" ? location.origin : "")}</span></Row>
             <Row label="Token" hint="Held by the server, never by this page."><span className="jg-sheet__value">Server-side</span></Row>

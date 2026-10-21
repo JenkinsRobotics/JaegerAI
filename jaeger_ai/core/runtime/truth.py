@@ -344,10 +344,10 @@ def capability_snapshot(instance_root: Path | None = None) -> dict[str, Any]:
             "certified": vision_certified,
             "reason": None if vision_certified else "no VISION-certified model on this instance",
         },
-        "filesystem": {"supported": True, "configured": True, "available": True, "authorized": True},
-        "shell": {"supported": True, "configured": True, "available": True, "authorized": True},
+        "filesystem": {"supported": True, "configured": True, "available": True, "authorized": None, "authorization_scope": "per_admitted_turn_and_existing_tool_policy"},
+        "shell": {"supported": True, "configured": True, "available": True, "authorized": None, "authorization_scope": "per_admitted_turn_and_existing_tool_policy"},
         "memory": {"supported": True, "configured": True, "available": True, "authorized": True},
-        "remote_access": {"supported": True, "configured": True, "available": True, "authorized": True},
+        "remote_access": {"supported": True, "configured": None, "available": None, "authorized": None, "scope": "remote_surface_connection_and_caller_not_probed", "reason": "Remote surface authorization requires the existing network/session policy; it is not a hosted computer or OS input grant"},
         "audio": _audio_truth(),
         "browser": {"supported": True, "configured": False, "available": False, "reason": "not probed in this snapshot"},
     }

@@ -3,6 +3,8 @@
 // handler is separate and unchanged.
 
 import AppKit
+import ApplicationServices
+import CoreGraphics
 import JaegerShellCore
 import ServiceManagement
 import UniformTypeIdentifiers
@@ -33,6 +35,8 @@ protocol BridgeHost: AnyObject {
     func bridgeTTSSpeak(text: String, voice: String?, done: @escaping BridgeDone)
     func bridgeTTSStop()
     func bridgeOpenFile(_ url: URL)
+    func bridgeComputerStatus() -> [String: Any]
+    func bridgeComputerSettings(_ target: ComputerSettingsTarget) -> Bool
     func bridgeReadClipboard() -> [String: Any]
     func bridgeCopy(_ text: String) -> Bool?
     func bridgeMicStatus() -> [String: Any]
@@ -130,6 +134,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case .ttsStop: host.bridgeTTSStop(); reply(id, ["stopped": true])
         case .openExternal(let url): host.bridgeOpenLink(url); reply(id, ["opened": url.absoluteString])
         case .openFile(let url): host.bridgeOpenFile(url); reply(id, ["opened": url.path])
+        case .computerStatus: reply(id, host.bridgeComputerStatus())
+        case .computerSettings(let target): reply(id, ["open_request_accepted": host.bridgeComputerSettings(target), "permission_changed": false])
         case .clipboardRead: reply(id, host.bridgeReadClipboard())
         case .clipboardWrite(let text):
             if let copied = host.bridgeCopy(text) {
@@ -280,6 +286,16 @@ extension JaegerShellApplication {
     }
     func bridgeTTSStop() { voiceController?.stopSpeaking() }
     func bridgeOpenFile(_ url: URL) { NSWorkspace.shared.open(url) }
+    func bridgeComputerStatus() -> [String: Any] {
+        ["scope": "native_shell_process", "process_id": ProcessInfo.processInfo.processIdentifier,
+         "screen_os_permission": CGPreflightScreenCaptureAccess() ? "granted" : "not_granted_or_undetermined",
+         "input_os_permission": AXIsProcessTrusted() ? "granted" : "not_granted_or_undetermined",
+         "permission_requested": false, "capture_performed": false, "input_performed": false,
+         "automation_permission": "per_target_unknown", "tool_authority": "not_inferred"]
+    }
+    func bridgeComputerSettings(_ target: ComputerSettingsTarget) -> Bool {
+        NSWorkspace.shared.open(target.url)
+    }
     func bridgeReadClipboard() -> [String: Any] {
         // No polling, log, transcript or model admission. Explicit trusted UI request only.
         ClipboardPreview.project(NSPasteboard.general.string(forType: .string))

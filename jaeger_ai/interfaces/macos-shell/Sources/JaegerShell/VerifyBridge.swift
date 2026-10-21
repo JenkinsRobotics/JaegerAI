@@ -107,6 +107,8 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
     }
     func bridgeTTSStop() { calls.append("tts.stop") }
     func bridgeOpenFile(_ url: URL) { calls.append("open.file \(url.path) (recorded, not opened)") }
+    func bridgeComputerStatus() -> [String: Any] { ["scope": "fixture_no_os_probe", "permission_requested": false, "capture_performed": false, "input_performed": false] }
+    func bridgeComputerSettings(_ target: ComputerSettingsTarget) -> Bool { false }
     func bridgeReadClipboard() -> [String: Any] { ["state": "not_performed", "max_bytes": ClipboardPreview.maxBytes] }
     func bridgeCopy(_ text: String) -> Bool? { calls.append("clipboard.write \(text.count) chars (recorded, clipboard untouched)"); return nil }
     func bridgeMicStatus() -> [String: Any] { calls.append("mic.status"); return VoiceController.micStatus(recording: false) }
