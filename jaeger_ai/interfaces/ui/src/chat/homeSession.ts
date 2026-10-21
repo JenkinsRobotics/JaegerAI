@@ -298,16 +298,19 @@ export function fallbackHome(source: JaegerSource, opts: HomeOptions = {}): Home
   const name = opts.agentName ?? ((id: string) => id);
   const size = opts.pageSize ?? 30;
   const pending = new Map<string, Promise<string>>();
-  const loaded = new Map<string, Promise<{ session: ChatSession; lastEventId?: number }>>();
+  // Compatibility paging retains one full source snapshot, never every visited
+  // bot. Canonical paged home is preferred; evicted history reloads its owner.
+  let loaded: {id:string;work:Promise<{session:ChatSession;lastEventId?:number}>} | undefined;
   const homeIds = new Map<string, string>();
   const load = (sessionId: string, fresh: boolean) => {
-    if (fresh || !loaded.has(sessionId)) {
-      loaded.set(sessionId, source.session(sessionId).then((d) => ({
-        session: { id: sessionId, title: d.title ?? "Untitled", agentId: d.agent_id ?? undefined, turns: messagesToTurns(d.messages, name) },
-        lastEventId: d.last_event_id,
-      })));
-    }
-    return loaded.get(sessionId)!;
+    if (!fresh && loaded?.id === sessionId) return loaded.work;
+    const work = source.session(sessionId).then((d) => ({
+      session: { id: sessionId, title: d.title ?? "Untitled", agentId: d.agent_id ?? undefined, turns: messagesToTurns(d.messages, name) },
+      lastEventId: d.last_event_id,
+    }));
+    loaded = {id:sessionId,work};
+    void work.catch(() => { if (loaded?.work === work) loaded = undefined; });
+    return work;
   };
   const slice = async (sessionId: string, before?: string): Promise<HomePage> => {
     const { session, lastEventId } = await load(sessionId, before === undefined);

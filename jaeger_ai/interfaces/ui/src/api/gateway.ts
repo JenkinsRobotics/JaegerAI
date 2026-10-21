@@ -150,6 +150,7 @@ export class GatewayClient implements JaegerSource {
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
   };
   readonly sessionFiles: import('./source').SessionFiles = {
+    media:(sessionId,query,after)=>this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files?kind=media&q=${encodeURIComponent(query)}${after?'&after='+encodeURIComponent(after):''}`),
     preview:(sessionId,id,page)=>this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(id)}?view=preview${page===undefined?'':'&page='+page}`),
     list: sessionId => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files`),
     read: (sessionId, id) => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(id)}`),

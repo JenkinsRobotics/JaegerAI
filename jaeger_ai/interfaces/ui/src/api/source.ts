@@ -10,6 +10,7 @@ export const PDF_PREVIEW_BOUNDS={pages:20,documentPages:10000,dimension:1280,ima
 export interface LiteralFilePreview {format:"spreadsheet"|"pdf"|"unsupported";notice:string;page?:number;page_count?:number;page_limit?:number;image_base64?:string;width?:number;height?:number;text?:string;sheets?:{name:string;rows:string[][];row_numbers?:number[]}[];limits?:Record<string,number>}
 export interface SessionFilePreview {session_id:string;attachment_id:string;name:string;mime:string;size:number;sha256:string;preview:LiteralFilePreview}
 export interface SessionFiles {
+  media?(sessionId:string,query:string,after?:string):Promise<{session_id:string;query:string;files:SessionFile[];next_after:string|null;source:'existing_session_attachments';licensing:'not_verified';selection_attaches:false}>;
   preview?(sessionId:string,attachmentId:string,page?:number):Promise<SessionFilePreview>;
   list(sessionId: string): Promise<{ session_id: string; files: SessionFile[]; max_bytes: number }>;
   read(sessionId: string, attachmentId: string): Promise<{ session_id: string; attachment_id: string; name: string; mime: string; size: number; sha256: string; data_base64: string }>;
