@@ -30,7 +30,7 @@ export interface ConnectedApp {
 export interface ConnectAppsListing { apps: ConnectedApp[]; categories: { id: string; label: string }[]; connected_count: number }
 export interface ModelInventory {
   active?: { provider: string; model: string };
-  providers: { id: string; display_name: string; reachable: boolean; configured: boolean; reason?: string; models: { id: string; available?: boolean; usable_for_react?: boolean }[] }[];
+  providers: { id: string; display_name: string; reachable: boolean; configured: boolean; availability?:'not_probed'|'not_configured'|'unknown';configuration_observed?:boolean;reason?: string; models: { id: string; available?: boolean; usable_for_react?: boolean }[] }[];
 }
 export interface ModelSettings {
   inventory(): Promise<ModelInventory>;
@@ -98,7 +98,7 @@ export interface ToolInventory {
   count: number; servers: { id?: string; name: string; state: string; tool_count: number; active_calls?: number; actions?: string[]; resources_advertised?:boolean }[];
   mcp_initialized: boolean; scope: string; execution_authorized: false;
 }
-export interface InstalledPlugin {id:string;name:string;package:string;version:string;state:string;active_hooks:number;hook_count:number;tool_count:number;command_count:number;actions:('pause_hooks'|'resume_hooks')[];provenance:string}
+export interface InstalledPlugin {distribution_state?:'current'|'replaced'|'removed';activation_blocked_by_loaded_revision?:boolean;related_revision_ids?:string[];id:string;name:string;package:string;version:string;state:string;active_hooks:number;hook_count:number;tool_count:number;command_count:number;actions:('pause_hooks'|'resume_hooks')[];provenance:string}
 export interface PluginControls {
   list():Promise<{plugins:InstalledPlugin[];scope:string;activation_performed:false}>;
   mutate(id:string,action:'pause_hooks'|'resume_hooks',body:{operation_id:string;expected_state:string}):Promise<ControlResult>;

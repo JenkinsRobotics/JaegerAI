@@ -169,3 +169,48 @@ def test_gateway_attachments_do_not_escape_via_store(tmp_path: Path):
     assert listed[0]["attachment_id"] == row["attachment_id"]
     assert listed[0]["original_filename"] == "note.txt"
     assert listed[0]["provenance"] == "remote_upload"
+
+
+def test_cloud_configuration_uses_execution_resolver_without_claiming_health_or_exposing_secret(tmp_path,monkeypatch):
+    import json,os,stat
+    from jaeger_ai.core.models import discovery,external_model
+    from jaeger_ai.core.runtime.truth import provider_model_inventory
+    # Every ambient credential fallback is masked; only owned dummy files exist.
+    for name in list(os.environ):
+        if 'KEY' in name.upper() or 'TOKEN' in name.upper():monkeypatch.delenv(name,raising=False)
+    root=tmp_path/'owned-instance';layout=InstanceLayout(root=root)
+    layout.credentials_dir.mkdir(parents=True)
+    credential=layout.credentials_dir/'owned_custom_credential'
+    credential.write_text('owned-fixture-not-a-real-key');credential.chmod(0o600)
+    config=Config(instance_name='owned-fixture',model=ModelConfig(model_path='/dev/null'));config.external_model.enabled=True;config.external_model.provider='openai';config.external_model.api_key_credential='owned_custom_credential';config.external_model.api_key_env='OWNED_CUSTOM_PROVIDER_VALUE'
+    dump_yaml(layout.config_path,config)
+    original=credential.read_bytes();mode=stat.S_IMODE(credential.stat().st_mode)
+    monkeypatch.setattr(discovery,'discover_ollama',lambda:{'online':False,'models':[]})
+    monkeypatch.setattr(discovery,'discover_lmstudio',lambda:{'online':False,'models':[]})
+    result=provider_model_inventory(root);providers={row['id']:row for row in result['providers']}
+    assert providers['openai']['configured'] and providers['openai']['availability']=='not_probed'
+    assert not providers['openai']['reachable'] and providers['openai']['models']==[]
+    assert providers['anthropic']['availability']=='not_configured'
+    assert 'owned-fixture-not-a-real-key' not in json.dumps(result)
+    assert credential.read_bytes()==original and stat.S_IMODE(credential.stat().st_mode)==mode
+    assert external_model.resolve_api_key(config.external_model,root)=='owned-fixture-not-a-real-key'
+    # Exact configured env selector applies when its named file is absent.
+    config.external_model.api_key_credential='owned_missing';dump_yaml(layout.config_path,config)
+    monkeypatch.setenv('OWNED_CUSTOM_PROVIDER_VALUE','owned-fixture-env-value')
+    assert external_model.provider_configuration('openai',root)['availability']=='not_probed'
+    monkeypatch.delenv('OWNED_CUSTOM_PROVIDER_VALUE')
+    assert external_model.provider_configuration('openai',root)['availability']=='not_configured'
+    # Existing protections are checked, never bypassed by a raw-file fallback.
+    credential.chmod(0o644);config.external_model.api_key_credential=credential.name;dump_yaml(layout.config_path,config)
+    rejected=external_model.provider_configuration('openai',root)
+    assert rejected['availability']=='unknown' and not rejected['configuration_observed']
+    assert stat.S_IMODE(credential.stat().st_mode)==0o644 and credential.read_bytes()==original
+
+
+def test_provider_configuration_failure_is_unknown_not_false_success(tmp_path,monkeypatch):
+    from jaeger_ai.core.models import external_model
+    def failed(*args,**kwargs):raise RuntimeError('owned-fixture-secret')
+    monkeypatch.setattr(external_model,'resolve_api_key',failed)
+    result=external_model.provider_configuration('openai',tmp_path)
+    assert result['availability']=='unknown' and not result['configuration_observed']
+    assert 'owned-fixture-secret' not in str(result)

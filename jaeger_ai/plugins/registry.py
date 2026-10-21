@@ -86,16 +86,22 @@ def catalog(group: str = 'jaeger_ai.plugins') -> dict[str, Any]:
         for ep in _entries(group):
             identity,package,version=_identity(ep,group)
             installed[identity]=(ep.name,package,version)
+        present=set(installed)
         for identity,loaded in _LOADED.items():
             if loaded['group']==group:installed.setdefault(identity,(loaded['name'],loaded['package'],loaded['version']))
         for identity,(name,package,version) in installed.items():
             loaded=_LOADED.get(identity)
             state=loaded['state'] if loaded else 'installed_not_loaded'
+            retained=[other for other,row in _LOADED.items() if row['group']==group and row['name']==name and other!=identity]
+            candidates=[other for other,(other_name,_,_) in installed.items() if other in present and other_name==name and other!=identity]
+            distribution_state='current' if identity in present else 'replaced' if candidates else 'removed'
             rows.append({'id':identity,'name':redact_text(name)[:200],'package':redact_text(package)[:200],
                 'version':redact_text(version)[:100],'state':state,'active_hooks':loaded['active'] if loaded else 0,
                 'hook_count':loaded['hook_count'] if loaded else 0,'tool_count':loaded['tool_count'] if loaded else 0,
                 'command_count':loaded['command_count'] if loaded else 0,
-                'actions':['pause_hooks'] if state=='loaded' and loaded['hook_count'] else ['resume_hooks'] if state=='hooks_paused' else [],
+                'distribution_state':distribution_state,'activation_blocked_by_loaded_revision':bool(retained),
+                'related_revision_ids':sorted(set(retained+candidates)),
+                'actions':['pause_hooks'] if state=='loaded' and loaded['hook_count'] else ['resume_hooks'] if state=='hooks_paused' and distribution_state=='current' and not retained else [],
                 'provenance':'installed_distribution_metadata_not_publisher_verification'})
     return {'plugins':rows,'scope':'current_process','activation_performed':False}
 
@@ -106,6 +112,9 @@ def control_hooks(identity: str, action: str, expected_state: str):
         row=_LOADED.get(identity)
         if row is None or row['state']!=expected_state:raise ValueError('Plugin state changed; reload catalog')
         if row['active']:raise ValueError('Plugin hook is running; no lifecycle change made')
+        if action=='resume_hooks':
+            installed={_identity(ep,row['group'])[0] for ep in _entries(row['group'])}
+            if identity not in installed:raise ValueError('Installed distribution changed or was removed; retained code cannot be resumed')
         target={'pause_hooks':('loaded','hooks_paused'),'resume_hooks':('hooks_paused','loaded')}.get(action)
         if target is None or row['state']!=target[0] or not row['hook_count']:raise ValueError('No supported hook lifecycle action')
         row['state']=target[1]

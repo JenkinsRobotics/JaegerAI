@@ -225,10 +225,11 @@ class ContextCompiler:
                 subj = c.get("subject", "user")
                 pred = c.get("predicate", "attribute")
                 val = c.get("value", "")
-                conf = float(c.get("confidence") or 0.9)
-                content = f"Fact: {subj}.{pred} = {val} (confidence={conf:.2f})"
+                conf = float(c["confidence"]) if c.get("confidence") is not None else 0.9
+                content = "Recorded semantic claim: " + json.dumps({"subject":subj,"predicate":pred,"value":val,"confidence":conf,"provenance":c.get("provenance","unknown"),"source_id":c.get("source_id","")},ensure_ascii=False)
                 items.append(ContextItem(
-                    item_id=f"claim_{idx}",
+                    item_id=str(c.get("claim_id") or f"claim_{idx}"),
+                    metadata={"claim_id":c.get("claim_id"),"source_id":c.get("source_id"),"epistemic_provenance":c.get("provenance","unknown")},
                     provenance=MemoryProvenance.SEMANTIC_CLAIM,
                     content=content,
                     salience=conf,
