@@ -343,3 +343,9 @@ def test_file_preview_query_reaches_same_scoped_reader(overlay):
     path='/v1/sessions/owned/files/attachment?view=preview'
     assert _route(overlay,path,'GET')
     assert overlay._calls[-1]==('GET',path)
+
+
+def test_resumable_upload_routes_preserve_original_operation_and_scope(overlay):
+    for method,path in [('POST','/v1/sessions/owned/uploads'),('GET','/v1/sessions/owned/uploads?operation_id=original'),('POST','/v1/sessions/owned/uploads/chunk'),('POST','/v1/sessions/owned/uploads/finish')]:
+        assert _route(overlay,path,method)
+        assert overlay._calls[-1]==(method,path)

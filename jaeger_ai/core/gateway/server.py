@@ -1410,6 +1410,8 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/sessions/{id}/files/{attachment_id}", self.handle_session_file)
         self.app.router.add_post("/v1/sessions/{id}/attachments", self.handle_add_attachment)
         self.app.router.add_post("/v1/sessions/{id}/attachments/upload", self.handle_upload_attachment)
+        from .upload_chunks import register as register_upload_chunks
+        register_upload_chunks(self)
         self.app.router.add_get("/v1/tasks", self.handle_tasks)
         self.app.router.add_post("/v1/tasks", self.handle_tasks)
         self.app.router.add_get("/v1/tasks/{id}", self.handle_task)
