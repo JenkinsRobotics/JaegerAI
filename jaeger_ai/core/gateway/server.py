@@ -1414,6 +1414,8 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/tasks", self.handle_tasks)
         self.app.router.add_get("/v1/tasks/{id}", self.handle_task)
         self.app.router.add_patch("/v1/tasks/{id}", self.handle_task_edit)
+        self.app.router.add_post("/v1/tasks/{id}/presentation", self.handle_task_presentation)
+        self.app.router.add_get("/v1/tasks/{id}/presentation-operations/{operation}", self.handle_task_presentation_operation)
         self.app.router.add_post("/v1/tasks/{id}/cancel", self.handle_task_cancel)
         self.app.router.add_post("/v1/tasks/{id}/approve", self.handle_task_approve)
         self.app.router.add_get("/v1/orchestration/workers", self.handle_list_orchestration_workers)
@@ -6451,7 +6453,8 @@ class JaegerGatewayApp:
 
     async def handle_tasks(self, request: web.Request) -> web.Response:
         if request.method == 'GET':
-            tasks = [t.to_dict() for t in self.task_owner.store.list_tasks()]
+            from jaeger_ai.core.tasks.presentation import view
+            tasks = [view(self, t) for t in self.task_owner.store.list_tasks()]
             agent_filter = request.query.get('agent_id')
             if agent_filter:
                 tasks = [t for t in tasks if t.get('agent_id') == agent_filter]
@@ -6483,7 +6486,25 @@ class JaegerGatewayApp:
 
     async def handle_task(self, request: web.Request) -> web.Response:
         task = self.task_owner.store.get_task(request.match_info['id'])
-        return web.json_response(task.to_dict() if task else {'error': 'Task not found'}, status=200 if task else 404)
+        from jaeger_ai.core.tasks.presentation import view
+        return web.json_response(view(self, task) if task else {'error': 'Task not found'}, status=200 if task else 404)
+
+    async def handle_task_presentation(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.tasks.presentation import change
+        try:
+            receipt = change(self, request.match_info['id'], await request.json(), request['caller_actor'])
+            return web.json_response(receipt, status=receipt['http_status'])
+        except KeyError:
+            return web.json_response({'error':'Task not found'}, status=404)
+        except (ValueError, TypeError) as exc:
+            return web.json_response({'error':str(exc)}, status=409)
+
+    async def handle_task_presentation_operation(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.tasks.presentation import operation
+        try:
+            return web.json_response(operation(self, request.match_info['id'], request.match_info['operation'], request['caller_actor']))
+        except KeyError:
+            return web.json_response({'error':'Task presentation operation not found'}, status=404)
 
     async def handle_task_edit(self, request: web.Request) -> web.Response:
         try:

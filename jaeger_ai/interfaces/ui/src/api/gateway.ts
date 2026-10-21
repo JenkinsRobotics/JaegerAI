@@ -272,6 +272,10 @@ export class GatewayClient implements JaegerSource {
     const data = await this.json<{ tasks?: Task[] } | Task[]>("/v1/tasks");
     return Array.isArray(data) ? data : data.tasks ?? [];
   }
+  taskPresentation = {
+    change:(id:string,body:import("./types").TaskPresentationIntent)=>this.json<import("./types").TaskPresentationReceipt>(`/v1/tasks/${encodeURIComponent(id)}/presentation`,body),
+    operation:(id:string,oid:string)=>this.json<{receipt:import("./types").TaskPresentationReceipt|null}>(`/v1/tasks/${encodeURIComponent(id)}/presentation-operations/${encodeURIComponent(oid)}`),
+  };
   taskActions = {
     lookup: (sessionId: string, requestId: string) => this.json<{ session_id: string; request_id: string; tasks: Task[] }>(`/v1/task-submissions/${encodeURIComponent(requestId)}?session_id=${encodeURIComponent(sessionId)}`),
     create: (body: { session_id: string; goal: string; request_id: string; proposal: true }) => this.json<import("./source").TaskProposalReceipt>("/v1/tasks", body),
