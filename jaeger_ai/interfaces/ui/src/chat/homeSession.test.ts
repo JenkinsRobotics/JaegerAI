@@ -189,3 +189,8 @@ it('preserves real admission identity across home snapshots instead of renaming 
  const legacy=fromWirePage('owned-home',{next_before:null,messages:[W({id:17,role:'user',content:'Legacy'})]},String);
  expect(legacy.turns[0].turnId).toBe('17');expect(legacy.turns[0].requestId).toBeUndefined();
 });
+it('keeps incoming channel data in the continuous feed without inventing a result',()=>{
+ const page=fromWirePage('owned-home',{next_before:null,messages:[W({id:'owned-incoming',kind:'channel_message',role:'user',content:'[telegram incoming] external data'})]},String);
+ expect(page.entries).toEqual({});expect(page.turns).toHaveLength(1);
+ expect(page.turns[0].message).toBe('[telegram incoming] external data');expect(page.turns[0].parts).toEqual([]);
+});

@@ -85,3 +85,12 @@ def test_handler_signature_is_selected_without_executing_a_probe():
     with pytest.raises(TypeError):
         call_handler_once(unsupported,'owned text',session_key='owned-session')
     assert calls==['owned text']
+
+
+def test_provider_message_identity_reaches_new_handlers_without_breaking_legacy_callbacks():
+    calls=[]
+    def current(text,*,session_key,message_id):calls.append((text,session_key,message_id));return 'saved'
+    assert _messaging.call_handler_once(current,'owned',session_key='telegram:123',message_id='provider-1')=='saved'
+    assert calls==[('owned','telegram:123','provider-1')]
+    def legacy(text,session_key=None):return (text,session_key)
+    assert _messaging.call_handler_once(legacy,'owned',session_key='telegram:123',message_id='provider-1')==('owned','telegram:123')

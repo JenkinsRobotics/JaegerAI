@@ -222,7 +222,7 @@ def test_workflow_routes_use_gateway_and_reject_unadvertised_mutations(overlay):
 def test_channel_status_proxy_does_not_accept_lifecycle_mutations(overlay):
     assert _route(overlay,'/v1/channels')
     assert overlay._calls[-1]==('GET','/v1/channels')
-    assert not _route(overlay,'/v1/channels/telegram/connect','POST')
+    assert not _route(overlay,'/v1/channels/telegram/new-token','POST')
 
 
 def test_file_skill_and_proposal_reads_preserve_identity_and_query(overlay):
@@ -245,3 +245,11 @@ def test_notification_proxy_preserves_read_and_preference_method(overlay):
     assert _route(overlay,'/v1/notifications','PATCH')
     assert overlay._calls[-2:]==[('GET','/v1/notifications'),('PATCH','/v1/notifications')]
     assert not _route(overlay,'/v1/notifications','DELETE')
+
+
+def test_channel_controls_proxy_preserves_known_actions(overlay):
+    for action in ('bind','connect','disconnect'):
+        path='/v1/channels/telegram/'+action
+        assert _route(overlay,path,'POST')
+        assert overlay._calls[-1]==('POST',path)
+    assert not _route(overlay,'/v1/channels/telegram/new-token','POST')

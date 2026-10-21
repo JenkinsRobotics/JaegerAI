@@ -73,6 +73,7 @@ class DiscordBridge:
         self._admin = {str(a) for a in (admin_ids or set())}
         self._awaiting: dict[str, str] = {}   # recipient → pending approval id
         self._client: Any = None
+        self._stop_requested = threading.Event()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._token = (token or os.environ.get("DISCORD_BOT_TOKEN", "")).strip()
@@ -83,8 +84,11 @@ class DiscordBridge:
 
     # ----- lifecycle -----
     def start(self) -> None:
-        if self._thread is not None:
+        if self._thread is not None and self._thread.is_alive():
             return
+        from .._messaging import resume_handlers
+        resume_handlers(self)
+        self._stop_requested.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="discord-bridge")
         self._thread.start()
         # Register so the agent's send_message tool can find us.
@@ -113,16 +117,21 @@ class DiscordBridge:
             self._awaiting.pop(recipient, None)
 
     def stop(self) -> None:
-        from .. import deregister_bridge
-        deregister_bridge("discord")
-        if self._client is None or self._loop is None:
-            return
-        coro = self._client.close()
-        try:
-            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        from .._messaging import stop_handlers
+        stop_handlers(self)
+        self._stop_requested.set()
+        if self._client is not None and self._loop is not None and self._loop.is_running():
+            future = asyncio.run_coroutine_threadsafe(self._client.close(), self._loop)
             future.result(timeout=10)
-        except Exception:
-            pass
+        if self._thread is not None:
+            self._thread.join(timeout=10)
+            if self._thread.is_alive():
+                raise RuntimeError('Discord transport did not stop; registration retained')
+        from .. import deregister_bridge
+        deregister_bridge('discord', expected=self)
+        if self._bus is not None:
+            from jaeger_ai.core.messages import AgentRequest
+            self._bus.unsubscribe(AgentRequest.topic, self._on_agent_request)
 
     # ----- outbound: agent-initiated messages -----
     def send(self, recipient: str, text: str) -> dict[str, Any]:
@@ -174,6 +183,10 @@ class DiscordBridge:
 
         @client.event
         async def on_ready() -> None:
+            self._loop = asyncio.get_running_loop()
+            if self._stop_requested.is_set():
+                await client.close()
+                return
             print(f"[discord] connected as {client.user}", flush=True)
             if self._allowed:
                 print(f"[discord] allowlist: {len(self._allowed)} user(s)", flush=True)
@@ -241,7 +254,7 @@ class DiscordBridge:
 
             async with message.channel.typing():
                 # Run the (blocking) LLM call in a thread so we don't block the discord loop.
-                reply = await asyncio.to_thread(self._safe_handle, content, session_key)
+                reply = await asyncio.to_thread(self._safe_handle, content, session_key, str(message.id))
             if reply:
                 # Discord caps messages at 2000 chars
                 for i in range(0, len(reply), 1900):
@@ -252,15 +265,16 @@ class DiscordBridge:
         except Exception as exc:
             print(f"[discord] client.run failed: {exc}", flush=True)
 
-    def _safe_handle(self, text: str, session_key: str | None = None) -> str:
+    def _safe_handle(self, text: str, session_key: str | None = None, message_id: str | None = None) -> str:
         try:
             if self._llm_lock is not None:
                 with self._llm_lock:
-                    return self._call_handler(text, session_key) or ""
-            return self._call_handler(text, session_key) or ""
+                    return self._call_handler(text, session_key, message_id) or ""
+            return self._call_handler(text, session_key, message_id) or ""
         except Exception as exc:
             return f"(agent error: {type(exc).__name__}: {exc})"
 
-    def _call_handler(self, text: str, session_key: str | None) -> str:
-        from .._messaging import call_handler_once
-        return call_handler_once(self._handler, text, session_key=session_key) or ""
+    def _call_handler(self, text: str, session_key: str | None, message_id: str | None = None) -> str:
+        from .._messaging import call_handler_once, handler_admission
+        with handler_admission(self):
+            return call_handler_once(self._handler, text, session_key=session_key, message_id=message_id) or ""

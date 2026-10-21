@@ -9,8 +9,7 @@ Each plugin lives in its own subdirectory with:
   • <module>.py      — the implementation
   • tests/smoke_test.py — importability check the loader runs before activation
 
-This file holds the **shared bridge registry**. Bridges that successfully
-start (i.e. opened a connection with valid credentials) call
+This file holds the **shared bridge registry**. Bridges registered by their transport lifecycle call
 `register_bridge("<channel>", self)`. The agent's `send_message(channel,
 recipient, text)` tool reads the registry to route outbound messages.
 
@@ -32,14 +31,15 @@ _BRIDGES_LOCK = threading.Lock()
 
 
 def register_bridge(name: str, bridge: Any) -> None:
-    """Bridges call this from their `start()` once they're connected."""
+    """Register an owned transport handle; registration is not health proof."""
     with _BRIDGES_LOCK:
         _BRIDGES[name] = bridge
 
 
-def deregister_bridge(name: str) -> None:
+def deregister_bridge(name: str, *, expected: Any = None) -> None:
     with _BRIDGES_LOCK:
-        _BRIDGES.pop(name, None)
+        if expected is None or _BRIDGES.get(name) is expected:
+            _BRIDGES.pop(name, None)
 
 
 def get_bridge(name: str) -> Any:
@@ -143,6 +143,7 @@ def start_bridge(name: str, *, layout: Any, handler: Any, llm_lock: Any = None,
         admin_ids |= people.admins_for_channel(layout, channel)
     except Exception:  # noqa: BLE001 — person index is optional
         pass
+    bridge = None
     try:
         mod = importlib.import_module(spec["mod"], __package__)
         kwargs = {"llm_lock": llm_lock, "bus": bus, spec["allow_kw"]: allowed,
@@ -152,7 +153,11 @@ def start_bridge(name: str, *, layout: Any, handler: Any, llm_lock: Any = None,
         bridge = getattr(mod, spec["cls"])(handler, **kwargs)
         bridge.start()
     except Exception as exc:  # noqa: BLE001 — surface; a bad bridge never crashes the agent
-        return {"started": False, "channel": channel, "error": f"{type(exc).__name__}: {exc}"}
+        thread = getattr(bridge, "_thread", None)
+        uncertain = bool(thread and thread.is_alive())
+        if uncertain:
+            register_bridge(channel, bridge)
+        return {"execution_unknown": uncertain, "started": False, "channel": channel, "error": f"{type(exc).__name__}: {exc}"}
     return {"started": True, "channel": channel}
 
 

@@ -1302,6 +1302,8 @@ class JaegerGatewayApp:
         register_mcp_controls(self)
         from jaeger_ai.features.notifications.routes import register as register_notifications
         register_notifications(self)
+        from jaeger_ai.features.channels.controls import register as register_channel_controls
+        register_channel_controls(self)
         from .native_controls import register as register_native_controls
         register_native_controls(self)
         from jaeger_ai.features.agent_bridge.routes import register
@@ -5841,7 +5843,7 @@ class JaegerGatewayApp:
 
     async def handle_channels(self, request: web.Request) -> web.Response:
         from jaeger_ai.features.channels.status import snapshot
-        return web.json_response(snapshot())
+        return web.json_response(snapshot(self.store))
 
     async def handle_runtime_diagnostics(self, request: web.Request) -> web.Response:
         return web.json_response({**self.store.diagnostics_snapshot(), 'process_id': os.getpid(),

@@ -19,10 +19,11 @@ import { messagesToTurns } from "./webHost";
 /** GET /v1/agents/{agent_id}/home → the agent's one home chat; `created` is true on the first call. */
 export interface WireHome { session_id: string; agent_id: string; created: boolean }
 
-export type WireKind = "message" | "summary" | "handoff_request" | "handoff_result" | "task_result";
+export type WireKind = "message" | "channel_message" | "summary" | "handoff_request" | "handoff_result" | "task_result";
 
 /** One persisted message. */
 export interface WireMessage {
+  channel?: { channel_id: string; provider_conversation_id: string; external_message_id: string; authority: string };
   request_id?: string;
   /** An integer on 417d8a0c; kept as string | number so ids never compare across types. */
   id: number | string;
@@ -142,7 +143,7 @@ export function fromWirePage(sessionId: string, page: WirePage, agentName: (id: 
   };
   for (const m of [...page.messages].reverse()) {
     const kind = m.kind ?? "message";
-    if (kind === "message") { run.push(m); continue; }
+    if (kind === "message" || kind === "channel_message") { run.push(m); continue; }
     flush();
     const turnId = ENTRY_PREFIX + m.id;
     const createdAt = toMs(m.created_at);

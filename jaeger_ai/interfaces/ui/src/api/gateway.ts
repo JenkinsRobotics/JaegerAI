@@ -58,6 +58,10 @@ export class GatewayClient implements JaegerSource {
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
   };
   searchMessages(agentId: string, query: string, before?: string) { return this.json<import("./source").MessageSearchPage>(`/v1/agents/${encodeURIComponent(agentId)}/messages/search?q=${encodeURIComponent(query)}${before ? `&before=${encodeURIComponent(before)}` : ""}`); }
+  readonly channelControls: NonNullable<import('./source').JaegerSource['channelControls']> = {
+    mutate: (id,action,body) => this.json(`/v1/channels/${encodeURIComponent(id)}/${action}`,body),
+    operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
+  };
   channels() { return this.json<import("./source").ChannelSnapshot>("/v1/channels"); }
   diagnostics() { return this.json<import("./source").GatewayDiagnostics>("/v1/runtime/diagnostics"); }
   tools(query = "") { return this.json<import("./source").ToolInventory>(`/v1/runtime/tools?q=${encodeURIComponent(query)}`); }

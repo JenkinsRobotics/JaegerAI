@@ -122,7 +122,7 @@ SLASH_DENIED = "⛔ commands are owner-only — you have conversation access."
 SLASH_UNKNOWN = "unknown command — try /mode"
 
 
-def call_handler_once(handler: Any, text: str, *, session_key: str | None = None) -> Any:
+def call_handler_once(handler: Any, text: str, *, session_key: str | None = None, message_id: str | None = None) -> Any:
     """Select the supported callback shape before invocation; never replay errors.
 
     A TypeError raised by the handler can occur after admission or an external
@@ -135,9 +135,58 @@ def call_handler_once(handler: Any, text: str, *, session_key: str | None = None
         signature = inspect.signature(handler)
     except (TypeError, ValueError) as exc:
         raise TypeError('Messaging callback needs an inspectable text/session_key signature') from exc
+    choices = [{'session_key':session_key,'message_id':message_id}, {'session_key':session_key}, {}]
+    for kwargs in choices:
+        try:
+            signature.bind(text, **kwargs)
+        except TypeError:
+            continue
+        return handler(text, **kwargs)
+    raise TypeError('Messaging callback does not support text/session/message identity')
+
+
+# Same bridge owns lifecycle and handler admission; no second worker/runtime.
+import threading as _threading
+from contextlib import contextmanager as _contextmanager
+_GATE_INIT = _threading.Lock()
+
+
+def _gate(bridge):
+    with _GATE_INIT:
+        if not hasattr(bridge, '_handler_gate'):
+            bridge._handler_gate = _threading.Lock()
+            bridge._handler_active = 0
+            bridge._handler_stopping = False
+    return bridge._handler_gate
+
+
+def bridge_activity(bridge):
+    with _gate(bridge):
+        return {'active_handlers': bridge._handler_active, 'stopping': bridge._handler_stopping}
+
+
+def resume_handlers(bridge):
+    with _gate(bridge):
+        if bridge._handler_active:
+            raise RuntimeError('Incoming handler is still active')
+        bridge._handler_stopping = False
+
+
+def stop_handlers(bridge):
+    with _gate(bridge):
+        if bridge._handler_active:
+            raise RuntimeError('Incoming handler is active; transport retained')
+        bridge._handler_stopping = True
+
+
+@_contextmanager
+def handler_admission(bridge):
+    with _gate(bridge):
+        if bridge._handler_stopping:
+            raise RuntimeError('Channel is disconnecting; no new handler admitted')
+        bridge._handler_active += 1
     try:
-        signature.bind(text, session_key=session_key)
-    except TypeError:
-        signature.bind(text)  # Validation only: no callback has run yet.
-        return handler(text)
-    return handler(text, session_key=session_key)
+        yield
+    finally:
+        with _gate(bridge):
+            bridge._handler_active -= 1
