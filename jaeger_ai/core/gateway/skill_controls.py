@@ -5,7 +5,9 @@ from pathlib import Path
 
 from aiohttp import web
 
+from jaeger_ai.core.instance.atomic_files import read_yaml_versioned
 from jaeger_ai.core.instance.instance import InstanceLayout
+from jaeger_ai.core.instance.schemas import Config
 from jaeger_ai.core.skills import service
 
 
@@ -52,6 +54,21 @@ def register(gateway):
                 valid=(plan['actor']==actor and body['operation_id']==op and plan['root']==root_id()
                     and fingerprint['fingerprint']==input_fingerprint(json.dumps({'actor':actor,'body':body},sort_keys=True)))
                 if valid:
+                    if body['action']=='availability':
+                        current=layout()
+                        from jaeger_agent.skill_improvement.skill_maintenance import (
+                            archive_lock,
+                        )
+                        with archive_lock(current.skills_dir):
+                            policy,config_revision=read_yaml_versioned(current.config_path,Config)
+                            folder,_,zone=service._find_playbook(current,source['name'])
+                            proof=(zone=='instance' and source['name']==body['name'] and source['enabled']==body['enabled'] and source['revision']==body['expected_skill_revision'] and service.skill_revision(folder)==source['revision'] and config_revision==source['config_revision'] and (source['name'] not in policy.skills.disabled_playbooks)==source['enabled'])
+                            if proof:
+                                value={'ok':True,'owner':'jaeger',**source,'restart_required':False,'state':'published' if source['enabled'] else 'unpublished','scope':'future_playbook_selection','scope_granted':False}
+                                receipt={'operation_id':op,'actor':actor,'command':body,'action':'availability','outcome':'saved','result':value,'recovered':True}
+                                gateway.store.finish_control_operation(key(actor,op),receipt)
+                                return receipt
+                        return {'operation_id':op,'outcome':'unknown','error':'Original availability outcome uncertain; inspect only'}
                     current=layout();relative=service.managed_relative(source['original_relative']);name=service.archive_identity(source['archive_name']) if source.get('archive_name') else None
                     if not service._playbook_module().active_skill_path(current.skills_dir,current.skills_dir/relative):raise ValueError('Unqualified origin')
                     with archive_lock(current.skills_dir) as archive:
@@ -74,9 +91,10 @@ def register(gateway):
 
     async def listing(request):
         actor=owner(request);current=layout();rows=[]
+        policy,config_revision=read_yaml_versioned(current.config_path,Config)
         for row in service.list_skills(current)['skills']:
             if 'playbook' not in row['kinds']:continue
-            value={**row,'revision':None,'mutable':row['zone']=='instance' and row['kinds']==['playbook']}
+            value={**row,'disabled':row['name'] in policy.skills.disabled_playbooks,'revision':None,'mutable':row['zone']=='instance' and row['kinds']==['playbook']}
             if 'tool' in row['kinds']:value['management_error']='Loaded code skills require the package/runtime lifecycle; this playbook control cannot unload code'
             if value['mutable']:
                 try:
@@ -94,7 +112,7 @@ def register(gateway):
             if not record[0]:continue
             value=json.loads(record[0])
             if value.get('actor')==actor:receipts.append(value)
-        return web.json_response(safe({'skills':rows,'operations':receipts,'scope':'current_instance_playbooks','activation_performed':False,'publish_targets':[{'id':'local_file','available':True,'external':False}],'external_publishing':{'supported':False,'reason':'No external publisher handler is configured'}}))
+        return web.json_response(safe({'skills':rows,'operations':receipts,'scope':'current_instance_playbooks','activation_performed':False,'config_revision':config_revision,'publish_targets':[{'id':'local_file','available':True,'external':False}],'external_publishing':{'supported':False,'reason':'No external publisher handler is configured'}}))
 
     async def review(request):
         owner(request)
@@ -131,8 +149,8 @@ def register(gateway):
             op=body.get('operation_id')
             if not isinstance(op,str) or not 1<=len(op)<=128:raise ValueError('Stable bounded operation required')
             action=body.get('action')
-            expected=({'operation_id','action','name','expected_revision'} if action=='remove' else {'operation_id','action','name','category','content','expected_revision','review_digest'} if action=='save' else {'operation_id','action','restore_from'})
-            if action not in {'remove','restore','save'} or set(body)!=expected:raise ValueError('Exact supported skill command fields required')
+            expected=({'operation_id','action','name','expected_skill_revision','expected_config_revision','enabled'} if action=='availability' else {'operation_id','action','name','expected_revision'} if action=='remove' else {'operation_id','action','name','category','content','expected_revision','review_digest'} if action=='save' else {'operation_id','action','restore_from'})
+            if action not in {'remove','restore','save','availability'} or set(body)!=expected:raise ValueError('Exact supported skill command fields required')
             if action=='save' and not isinstance(body['content'],str):raise TypeError('UTF-8 Markdown text required')
             resource=body.get('name')
             if action=='restore':
@@ -160,6 +178,8 @@ def register(gateway):
                 if zone!='instance':raise service.SkillServiceError('Bundled skills cannot be removed')
                 if service.skill_revision(folder)!=body['expected_revision']:raise service.SkillServiceError('Skill changed since review')
                 value=service.remove_skill(current,body['name'],expected_revision=body['expected_revision'],before_move=lambda source:save_plan(actor,body,source))
+            elif action=='availability':
+                value=service.set_playbook_availability(current,body['name'],body['enabled'],expected_skill_revision=body['expected_skill_revision'],expected_config_revision=body['expected_config_revision'],before_commit=lambda proposal:save_plan(actor,body,proposal))
             elif action=='save':
                 if not isinstance(body['content'],str):raise TypeError('UTF-8 Markdown text required')
                 if hashlib.sha256(body['content'].encode('utf-8')).hexdigest()!=body['review_digest']:raise ValueError('Reviewed content digest changed')

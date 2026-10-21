@@ -1299,11 +1299,8 @@ class Manifest(BaseModel):
 # Generic helpers — write+read with validation
 # ---------------------------------------------------------------------------
 def _atomic_write(path: Path, payload: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(payload, encoding="utf-8")
-    import os
-    os.replace(tmp, path)
+    from jaeger_ai.core.instance.atomic_files import atomic_write
+    atomic_write(path,payload)
 
 
 def dump_yaml(path: Path, model: BaseModel) -> None:
