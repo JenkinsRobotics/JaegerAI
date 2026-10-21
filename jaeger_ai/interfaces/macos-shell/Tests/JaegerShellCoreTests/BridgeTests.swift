@@ -58,6 +58,8 @@ final class BridgeTests: XCTestCase {
         XCTAssertEqual(cmd("tts.stop").successValue, .ttsStop)
         XCTAssertEqual(cmd("notify", ["title": "Hi", "body": "there"]).successValue, .notify(title: "Hi", body: "there"))
         XCTAssertNotNil(cmd("notify", [:]).failureValue)
+        XCTAssertEqual(cmd("notifications.status").successValue, .notificationStatus)
+        XCTAssertEqual(BridgeCommand.notificationStatus.name, "notifications.status")
     }
 
     func testStrictBools() {

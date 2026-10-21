@@ -61,7 +61,7 @@ EVENT_TYPES = frozenset({
     "board.updated",
     # Tier 3 proactive delivery. Clients speak when ``speak`` is true;
     # DIGEST entries are visual/staged and never ring.
-    "notification.proactive", "notifications.changed", "mcp.changed", "channel.changed",
+    "notification.proactive", "notifications.changed", "mcp.changed", "channel.changed", "plugins.changed",
     # IDE bridge + attachments + agent lifecycle.
     "ide.request", "attachment.added",
     "agent.created", "agent.activated", "agent.handoff", "agent.handoff.finished",

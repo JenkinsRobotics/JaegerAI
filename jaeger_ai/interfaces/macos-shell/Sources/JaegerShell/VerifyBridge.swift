@@ -60,7 +60,8 @@ final class BridgeVerifier: NSObject, BridgeHost, WKNavigationDelegate {
     func bridgeHideWindow() { calls.append("window.hide"); app.bridge?.send(["type": "window.visibility", "visible": false]) }
     func bridgeToggleWindow() { calls.append("window.toggle") }
     func bridgeSetPinned(_ pinned: Bool) { calls.append("window.setPinned \(pinned)") }
-    func bridgeNotify(title: String, body: String) { calls.append("notify \(title)") }
+    func bridgeNotificationStatus(_ done: @escaping ([String: Any]) -> Void) { done(["authorization": "unknown", "permission_requested": false]) }
+    func bridgeNotify(title: String, body: String, done: @escaping BridgeDone) { calls.append("notify \(title)"); done(["accepted": true, "delivery_proven": false], nil) }
     func bridgeOpenLink(_ url: URL) { calls.append("link.open \(url.absoluteString) (recorded, not opened)") }
     func bridgeReveal(_ url: URL) { calls.append("file.reveal \(url.path) (recorded)") }
     func bridgeAppInfo() -> [String: Any] { calls.append("app.info"); return ShellEnvironment.appInfo(app.start) }

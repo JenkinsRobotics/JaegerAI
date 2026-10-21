@@ -65,6 +65,7 @@ public struct BridgeRequest {
 public enum BridgeCommand: Equatable {
     case windowShow, windowHide, windowToggle
     case windowSetPinned(Bool)
+    case notificationStatus
     case notify(title: String, body: String)
     case linkOpen(URL)
     case fileReveal(URL)
@@ -99,6 +100,7 @@ public enum BridgeCommand: Equatable {
         case "window.setPinned":
             guard let pinned = strictBool(p["pinned"]) else { return .failure(.invalidPayload("pinned must be a boolean")) }
             return .success(.windowSetPinned(pinned))
+        case "notifications.status": return .success(.notificationStatus)
         case "notify":
             guard let title = p["title"] as? String, !title.isEmpty, title.count <= 200 else {
                 return .failure(.invalidPayload("title must be a non-empty string (≤200)"))
@@ -171,6 +173,7 @@ public enum BridgeCommand: Equatable {
         case .windowHide: return "window.hide"
         case .windowToggle: return "window.toggle"
         case .windowSetPinned: return "window.setPinned"
+        case .notificationStatus: return "notifications.status"
         case .notify: return "notify"
         case .linkOpen: return "link.open"
         case .fileReveal: return "file.reveal"

@@ -14,7 +14,8 @@ protocol BridgeHost: AnyObject {
     func bridgeHideWindow()
     func bridgeToggleWindow()
     func bridgeSetPinned(_ pinned: Bool)
-    func bridgeNotify(title: String, body: String)
+    func bridgeNotificationStatus(_ done: @escaping ([String: Any]) -> Void)
+    func bridgeNotify(title: String, body: String, done: @escaping BridgeDone)
     func bridgeOpenLink(_ url: URL)
     func bridgeReveal(_ url: URL)
     func bridgeAppInfo() -> [String: Any]
@@ -102,7 +103,8 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case .windowHide: host.bridgeHideWindow(); reply(id, ["visible": false])
         case .windowToggle: host.bridgeToggleWindow(); reply(id, [:])
         case .windowSetPinned(let pinned): host.bridgeSetPinned(pinned); reply(id, ["pinned": pinned])
-        case .notify(let title, let body): host.bridgeNotify(title: title, body: body); reply(id, ["queued": true])
+        case .notificationStatus: host.bridgeNotificationStatus { [weak self] result in self?.reply(id, result) }
+        case .notify(let title, let body): host.bridgeNotify(title: title, body: body) { [weak self] result, error in self?.finish(id, result, error) }
         case .linkOpen(let url): host.bridgeOpenLink(url); reply(id, ["opened": url.absoluteString])
         case .fileReveal(let url): host.bridgeReveal(url); reply(id, ["revealed": url.path])
         case .appInfo: reply(id, host.bridgeAppInfo())
@@ -202,19 +204,40 @@ extension JaegerShellApplication: BridgeHost {
         return status
     }
 
-    func bridgeNotify(title: String, body: String) {
+    func bridgeNotificationStatus(_ done: @escaping ([String: Any]) -> Void) {
+        UNUserNotificationCenter.current().getNotificationSettings { settings in
+            let status: String
+            switch settings.authorizationStatus {
+            case .authorized: status = "authorized"
+            case .provisional: status = "provisional"
+            case .denied: status = "denied"
+            case .notDetermined: status = "not_determined"
+            @unknown default: status = "unknown"
+            }
+            DispatchQueue.main.async { done(["authorization": status, "permission_requested": false, "delivery_proven": false]) }
+        }
+    }
+
+    func bridgeNotify(title: String, body: String, done: @escaping BridgeDone) {
         let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
-            guard granted else {
-                shellLog("[shell][notify] not authorised \(error?.localizedDescription ?? "")")
+        center.getNotificationSettings { settings in
+            guard [.authorized, .provisional].contains(settings.authorizationStatus) else {
+                DispatchQueue.main.async { done(nil, "notifications_not_authorized_no_permission_requested") }
                 return
             }
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
-            center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
+            let identifier = UUID().uuidString
+            center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil)) { error in
+                DispatchQueue.main.async {
+                    if error != nil { done(nil, "notification_submission_failed") }
+                    else { done(["accepted": true, "notification_id": identifier, "delivery_proven": false, "permission_requested": false], nil) }
+                }
+            }
         }
     }
+
 }
 
 extension JaegerShellApplication {
