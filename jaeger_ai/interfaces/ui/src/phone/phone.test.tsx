@@ -7,7 +7,7 @@ import { rowTime } from "./usePhone";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 const now = Date.now() / 1000;
 const agents = [
-  { id: "native:jaeger", name: "jaeger", display_name: "Jager AI system engineer", role: "lead" },
+  { id: "native:jaeger", name: "jaeger", display_name: "Jager AI system engineer", role: "lead", primary: true },
   { id: "native:gw", name: "gw", display_name: "Jaeger Gateway & WebUI", role: "specialist" },
   { id: "native:mac", name: "mac", display_name: "Jaeger Mac App", role: "specialist", unread_count: 0,
     last_message: { id: "m1", created_at: new Date((now - 60) * 1000).toISOString(), kind: "task", preview: "From last_message" } },
@@ -20,10 +20,10 @@ function mount(node: React.ReactNode) {
 }
 
 describe("phone list", () => {
-  it("features the lead with a star; rows have name, time, typed preview, unread dot and an N-unread pill", () => {
+  it("features the persisted primary with a star; rows have name, time, typed preview, unread dot and an N-unread pill", () => {
     const onOpen = vi.fn();
     const { el, root } = mount(<PhoneList state={{ agents, summaries, seen: {} }} userInitials="MJ" statusOk onOpen={onOpen} onSearch={() => {}} onNew={() => {}} onSettings={() => {}} />);
-    expect(el.querySelector(".jg-plead__name")!.textContent).toBe("Jaeger");
+    expect(el.querySelector(".jg-plead__name")!.textContent).toBe("Jager AI system engineer");
     const rows = [...el.querySelectorAll(".jg-prow")];
     expect(rows.map((r) => r.querySelector(".jg-prow__name")!.textContent)).toEqual(["Jaeger Mac App", "Jaeger Gateway & WebUI"]);
     expect(rows[0].textContent).toContain("From last_message");

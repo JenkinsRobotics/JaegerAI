@@ -47,7 +47,7 @@ def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             if part is None:
                 part = {"type": "tool", "call_id": data.get("call_id"), "tool": data.get("tool")}
                 parts.append(part)
-            part["status"] = _TOOL_END[name]
+            part["status"] = data.get("outcome") or _TOOL_END[name]
             part["elapsed_s"] = data.get("elapsed_s")
             if data.get("output"):
                 part["output"] = data["output"]

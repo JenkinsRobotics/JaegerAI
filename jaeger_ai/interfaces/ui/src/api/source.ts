@@ -14,7 +14,56 @@ export interface PendingApproval {
   task?: string; status: string;
 }
 
+export interface RequestSnapshot {
+  request_id: string; session_id: string; turn_id?: string; status: string; input_text?: string;
+  result?: { output?: string; error?: string; summary?: string; [key: string]: unknown };
+}
+export interface ConnectedApp {
+  id: string; name: string; description?: string; category?: string; status: string; actions: string[];
+  state: { value: string; detail?: string; version?: string; checked_at?: number };
+}
+export interface ConnectAppsListing { apps: ConnectedApp[]; categories: { id: string; label: string }[]; connected_count: number }
+export interface ModelInventory {
+  active?: { provider: string; model: string };
+  providers: { id: string; display_name: string; reachable: boolean; configured: boolean; reason?: string; models: { id: string; available?: boolean; usable_for_react?: boolean }[] }[];
+}
+export interface ModelSettings {
+  inventory(): Promise<ModelInventory>;
+  read(sessionId: string): Promise<{ session_id: string; model?: string | null; provider?: string | null }>;
+  save(sessionId: string, model: string | null): Promise<void>;
+}
+export interface ScheduleJob { id: string; name: string; prompt: string; cron: string; enabled: boolean; state: string; next_fire_at?: string }
+export type ScheduleAction = "create" | "update" | "pause" | "resume" | "delete" | "restore" | "run";
+export interface ControlResult { ok: boolean; operation_id: string; result?: unknown; error?: string; http_status?: number }
+export interface ScheduleControls {
+  list(): Promise<{ jobs: ScheduleJob[]; scheduler: string }>;
+  history(name: string): Promise<{ tasks: Task[]; requests: RequestSnapshot[] }>;
+  mutate(action: ScheduleAction, body: { operation_id: string; job_id?: string; name?: string; prompt?: string; schedule?: string }): Promise<ControlResult>;
+  operation(id: string): Promise<{ receipt: ControlResult | null }>;
+}
+export interface LibraryDocument { id: string; title: string; content: string; digest: string; revision?: number; archived?: boolean; editable?: boolean }
+export interface LibraryControls {
+  list(): Promise<{ documents: Omit<LibraryDocument, "content">[]; collections: { id: string; label: string; kind: string }[] }>;
+  search(query: string): Promise<{ results: { id: string; title: string; snippet: string }[] }>;
+  read(id: string): Promise<LibraryDocument>;
+  versions(id: string): Promise<{ versions: { revision: number; title: string; created_at: number }[] }>;
+  mutate(action: "create" | "save" | "archive" | "restore" | "version", id: string, body: Record<string, unknown>): Promise<ControlResult & { document?: { id: string; revision: number; digest: string; archived: boolean } }>;
+  operation(id: string): Promise<{ receipt: (ControlResult & { document?: { id: string } }) | null }>;
+}
+
 export interface JaegerSource {
+  library?: LibraryControls;
+  skills?(query?: string): Promise<{ skills: { name: string; category: string; description: string; lifecycle: string }[]; count: number }>;
+  schedules?: ScheduleControls;
+  modelSettings?: ModelSettings;
+  connectApps?: {
+    list(): Promise<ConnectAppsListing>;
+    state(id: string): Promise<{ id: string; state: ConnectedApp["state"] }>;
+    install(id: string): Promise<{ id?: string; state?: ConnectedApp["state"] }>;
+  };
+  /** Read-only same-ID acceptance and terminal-outcome lookup. */
+  requestStatus?(sessionId: string, requestId: string): Promise<RequestSnapshot>;
+  sessionControl?(sessionId: string): Promise<{ latest_request?: { request_id: string; status: string } | null }>;
   readonly kind: "live" | "mock";
   agents(): Promise<Agent[]>;
   agentsSummary(): Promise<AgentSummary[]>;
@@ -44,6 +93,13 @@ export interface JaegerSource {
   pendingApprovals?(sessionId: string): Promise<PendingApproval[]>;
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   tasks(): Promise<Task[]>;
+  agentHome?(agentId: string): Promise<{ session_id: string; agent_id: string }>;
+  taskActions?: {
+    create(body: { session_id: string; goal: string; request_id: string; proposal: true }): Promise<{ task_id: string; status: string; replayed: boolean }>;
+    edit(id: string, goal: string, expected_updated_at: number): Promise<Task>;
+    approve(id: string, expected_updated_at: number): Promise<void>;
+    cancel(id: string): Promise<void>;
+  };
   handoffs(query?: { session_id?: string }): Promise<Handoff[]>;
   /** Its own home-chat implementation, when the source has one (dev mock only). */
   homeSessions?(opts: HomeOptions): HomeSessions;

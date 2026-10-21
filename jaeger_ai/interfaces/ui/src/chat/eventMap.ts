@@ -2,7 +2,7 @@
  * meant to be regenerated from the gateway's events.schema.json later.
  * Event names follow core/gateway/event_bus.py EVENT_TYPES. */
 import type { GatewayEvent } from "../api/types";
-import type { ChatPart, TurnState } from "./host";
+import type { ChatPart, TurnState, ToolInvocationState } from "./host";
 
 export interface MappedEvent {
   parts: ChatPart[];
@@ -34,7 +34,7 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
     case "tool.failed":
       return {
         parts: [
-          { kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "cancelled", output: p.error },
+          { kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: (["denied", "rejected", "unsupported", "unknown", "cancelled"].includes(str(p.outcome)) ? str(p.outcome) : "failed") as ToolInvocationState, output: p.error },
           { kind: "error", message: str(p.error ?? p.message ?? "Tool failed") },
         ],
       };
@@ -55,7 +55,7 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
     case "turn.reconciled":
       return { parts: [], state: "complete" };
     case "turn.unknown":
-      return { parts: [{ kind: "error", message: str(p.error ?? p.message ?? "The gateway lost track of this turn.") }], state: "failed" };
+      return { parts: [{ kind: "error", message: str(p.error ?? p.message ?? "The gateway lost track of this turn. It will not be resent.") }], state: "unknown" };
     case "turn.cancelled":
       return { parts: [], state: "cancelled" };
     case "turn.failed":

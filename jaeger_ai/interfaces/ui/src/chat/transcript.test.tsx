@@ -37,7 +37,7 @@ describe("history (persisted parts)", () => {
 describe("live tool events", () => {
   it("finishes a tool on the gateway's tool.completed / tool.failed names", () => {
     expect(mapEvent({ event: "tool.completed", payload: { call_id: "c1", tool: "call_agent" } })?.parts[0]).toMatchObject({ state: "completed" });
-    expect(mapEvent({ event: "tool.failed", payload: { call_id: "c1", tool: "call_agent", error: "boom" } })?.parts[0]).toMatchObject({ state: "cancelled" });
+    expect(mapEvent({ event: "tool.failed", payload: { call_id: "c1", tool: "call_agent", error: "boom" } })?.parts[0]).toMatchObject({ state: "failed" });
   });
 });
 

@@ -41,6 +41,21 @@ describe("scoped Mac agent popup", () => {
     expect(onAction).toHaveBeenCalledWith("replace-primary", bot);
     act(() => root.unmount());
   });
+  it("moves only to an explicit existing section, keeps current membership visible, and retains creation", () => {
+    const onMove = vi.fn(), onAction = vi.fn(), close = vi.fn();
+    const el = document.createElement("div"); document.body.append(el); const root = createRoot(el);
+    act(() => root.render(<AgentContextMenu agent={{ ...bot, primary: false, section_id: "owned" }} preview="" at={{ x: 12, y: 12 }} phone={false} caps={{ ...caps, sections: true }} pinned sections={[{ id: "owned", name: "Owned section" }]} onMove={onMove} onAction={onAction} onClose={close} />));
+    const move = [...el.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.startsWith("Move to"))!;
+    act(() => move.click());
+    expect(onMove).not.toHaveBeenCalled();
+    expect(el.querySelector('[role="menuitemradio"][aria-checked="true"]')?.textContent).toBe("Owned section");
+    const unassigned = [...el.querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')].find(b => b.textContent === "Unassigned")!;
+    act(() => unassigned.click());
+    expect(onMove).toHaveBeenCalledExactlyOnceWith(null); expect(close).toHaveBeenCalledOnce();
+    const create = [...el.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent === "New section…")!;
+    act(() => create.click()); expect(onAction).toHaveBeenCalledWith("section", expect.objectContaining({ id: bot.id }));
+    act(() => root.unmount());
+  });
 });
 
 it("keeps the secondary rename prompt open when its input is clicked", async () => {

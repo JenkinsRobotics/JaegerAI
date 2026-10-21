@@ -16,6 +16,9 @@ import { NativeHost } from "./chat/nativeHost";
 import { WebHost } from "./chat/webHost";
 import { ConnectAppsDialog } from "./connect-apps/ConnectAppsDialog";
 import { SettingsDialog } from "./settings/SettingsDialog";
+import { LibraryPanel } from "./library/LibraryPanel";
+import { SkillsPanel } from "./skills/SkillsPanel";
+import { AutomationsPanel } from "./automations/AutomationsPanel";
 import { JumpTo } from "./agents/JumpTo";
 import { detectHost } from "./platform/host";
 import { onNativeEvent } from "./platform/native";
@@ -77,7 +80,7 @@ export function App({ source }: { source: JaegerSource }) {
       setInitialReady(true);
     }
   }, [initialReady, store.agents, defaultAgentId]);
-  const [sessionId, setSessionId] = useState<string>();
+  const [sessionBinding, setSessionBinding] = useState<{ key: string; id: string }>();
   const [sessionError, setSessionError] = useState<string>();
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [connectOpen, setConnectOpen] = useState(false);
@@ -119,6 +122,9 @@ export function App({ source }: { source: JaegerSource }) {
 
   const selectedAgentId = selection.type === "agent" ? selection.agentId : undefined;
   const explicitSessionId = selection.type === "agent" ? selection.sessionId : undefined;
+  const selectionKey = `${selectedAgentId ?? ""}|${explicitSessionId ?? ""}`;
+  // A prior bot's composer must never accept input while the new home resolves.
+  const sessionId = sessionBinding?.key === selectionKey ? sessionBinding.id : undefined;
 
   // Selecting an agent opens its one home chat. An explicit session (a handoff's worker side) opens as is.
   useEffect(() => {
@@ -126,12 +132,18 @@ export function App({ source }: { source: JaegerSource }) {
     let live = true;
     setSessionError(undefined);
     (explicitSessionId ? Promise.resolve(explicitSessionId) : home.home(selectedAgentId)).then(
-      (id) => { if (live) setSessionId(id); },
-      (error: unknown) => { if (live) { setSessionId(undefined); setSessionError(message(error)); } },
+      (id) => { if (live) setSessionBinding({ key: selectionKey, id }); },
+      (error: unknown) => { if (live) { setSessionBinding(undefined); setSessionError(message(error)); } },
     );
     store.seeAgent(selectedAgentId);
     return () => { live = false; };
   }, [selectedAgentId, explicitSessionId, home, store.seeAgent, sessionAttempt, initialReady]);
+
+  useEffect(() => {
+    const reconnect = () => { if (sessionError) setSessionAttempt(n => n + 1); };
+    window.addEventListener("online", reconnect);
+    return () => window.removeEventListener("online", reconnect);
+  }, [sessionError]);
 
   /** There is one chat per agent now: "new chat with X" opens X's home chat. */
   const newChat = useCallback((agentId: string) => { if (agentId === selectedAgentId) void store.seeAgent(agentId); setSelection({ type: "agent", agentId }); }, [selectedAgentId, store.seeAgent]);
@@ -214,13 +226,13 @@ export function App({ source }: { source: JaegerSource }) {
     } catch (error) { fail("replace the primary bot")(error); await store.refresh(); }
     finally { setManagementBusy(false); }
   };
-  const changePresentation = async (agent: Agent, patch: { deleted?: boolean; display_name?: string | null; archived?: boolean; icon_preset?: string | null }) => {
+  const changePresentation = async (agent: Agent, patch: import("./api/agentActions").AgentPatch) => {
     if (!actions || managementBusy) return;
     setManagementBusy(true);
     try {
       await actions.patchAgent(agent.id, patch);
       await store.refresh();
-      setNotice(patch.archived === true ? `${label(agent)} archived; its work and history are kept` : patch.archived === false ? `${label(agent)} restored` : 'icon_preset' in patch ? 'Sidebar icon updated' : 'Display name updated');
+      setNotice(patch.archived === true ? `${label(agent)} archived; its work and history are kept` : patch.archived === false ? `${label(agent)} restored` : 'section_id' in patch ? 'Sidebar section updated' : 'icon_preset' in patch ? 'Sidebar icon updated' : 'Display name updated');
     } catch (error) { fail('update agent presentation')(error); }
     finally { setManagementBusy(false); }
   };
@@ -308,6 +320,7 @@ export function App({ source }: { source: JaegerSource }) {
       </AppShell>}
       {menuAgent && agentMenu && (
         <AgentContextMenu agent={menuAgent} at={agentMenu} phone={phone} caps={caps} unread={store.summaries.find((s) => s.id === menuAgent.id)?.unseen === true} pinned={pins.includes(menuAgent.id)} alternative={store.agents.some((a) => a.id !== menuAgent.id && a.ui_actions?.primary && visible(a))}
+          sections={store.sections} onMove={(section_id) => void changePresentation(menuAgent, { section_id })}
           preview={menuAgent.last_message?.preview ?? store.summaries.find((x) => x.id === menuAgent.id)?.last_preview ?? ""}
           onAction={onAgentAction} onClose={() => setAgentMenu(null)} />
       )}
@@ -324,8 +337,8 @@ export function App({ source }: { source: JaegerSource }) {
       {notice && <div className="jg-toast" role="status">{notice}</div>}
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
         onNewChat={newChat} onCreateAgent={createAgent} />
-      <ConnectAppsDialog open={connectOpen} onClose={() => setConnectOpen(false)} />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} agentsPanel={<AgentManagement onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived, ...(!archived ? { deleted: false } : {}) })} />} />
+      <ConnectAppsDialog open={connectOpen} source={source} onClose={() => setConnectOpen(false)} />
+      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} automationsPanel={source.schedules ? <AutomationsPanel controls={source.schedules} /> : undefined} skillsPanel={source.skills ? <SkillsPanel source={source} /> : undefined} libraryPanel={source.library ? <LibraryPanel controls={source.library} /> : undefined} agentsPanel={<AgentManagement onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived, ...(!archived ? { deleted: false } : {}) })} />} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
         onAgent={(agentId) => { newChat(agentId); if (phone) setPhoneView("chat"); }}

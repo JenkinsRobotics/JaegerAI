@@ -35,9 +35,10 @@ describe("eventMap + applyPart", () => {
 });
 
 describe("agents", () => {
-  it("hides internal agents, pins the lead, sorts specialists by activity", () => {
+  it("hides internal agents, uses authoritative primary, sorts specialists by activity", () => {
     expect(visible(MOCK_AGENTS.find((a) => a.id === "native:gateway")!)).toBe(false);
-    const { lead, specialists } = sidebarRows(MOCK_AGENTS, MOCK_SUMMARY);
+    expect(sidebarRows(MOCK_AGENTS, MOCK_SUMMARY).lead).toBeUndefined();
+    const { lead, specialists } = sidebarRows(MOCK_AGENTS.map(a => ({...a,primary:a.id === "native:jaeger"})), MOCK_SUMMARY);
     expect(lead?.agent.id).toBe("native:jaeger");
     expect(specialists.map((r) => r.agent.id)[0]).toBe("agent:agents-view");
     const times = specialists.map((r) => r.lastActivityAt);
@@ -50,10 +51,12 @@ describe("agents", () => {
     expect(handoffText({ ...base, direction: "from" })).toBe("Message from Mac App");
     expect(handoffText({ ...base, agents: [{ id: "a", name: "A" }, { id: "b", name: "B" }] })).toBe("Messaged A and B");
   });
-  it("unread uses the local mark, else the server flag", () => {
+  it("explicit server unread overrides device marks; absent server value uses local mark", () => {
     expect(isUnread("a", 10, {}, true)).toBe(true);
-    expect(isUnread("a", 10, { a: 20 }, true)).toBe(false);
-    expect(isUnread("a", 30, { a: 20 }, false)).toBe(true);
+    expect(isUnread("a", 10, { a: 20 }, true)).toBe(true);
+    expect(isUnread("a", 30, { a: 20 }, false)).toBe(false);
+    expect(isUnread("a", 30, { a: 20 })).toBe(true);
+    expect(isUnread("a", 10, { a: 20 })).toBe(false);
   });
 });
 

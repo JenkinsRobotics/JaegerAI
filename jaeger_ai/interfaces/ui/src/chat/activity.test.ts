@@ -66,7 +66,12 @@ describe("activity", () => {
     expect(stepsSummary([tool("shell"), tool("read_file", "completed", "r1"), tool("bash", "completed", "s2"),
       tool("read_file", "completed", "r2"), tool("terminal", "completed", "s3")])).toBe("Ran 3 commands · Read 2 files");
     expect(stepsSummary([tool("web_search")])).toBe("Searched the web");
-    expect(stepsSummary([tool("write_file"), tool("shell", "executing", "s")])).toBe("Edited 1 file · Ran 1 command · 1 running");
+    expect(stepsSummary([tool("write_file"), tool("shell", "executing", "s")])).toBe("Edited 1 file · 1 running");
     expect(stepsSummary([tool("npm run build"), tool("git commit", "waitingForConfirmation", "g")])).toBe("Ran 1 command · 1 waiting for your OK");
   });
+});
+
+it("does not count rejected/failed edits as files edited", () => {
+ const item: ToolPart={kind:"toolInvocation",callId:"rejected",toolName:"write_file",input:{path:"fixture"},state:"rejected"};
+ expect(stepsSummary([item,{...item,callId:"failed",state:"failed"}])).toBe("1 failed · 1 rejected");
 });

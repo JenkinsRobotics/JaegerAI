@@ -10,7 +10,7 @@ import type { Agent } from "../api/types";
 
 export type HostKind = "vscode" | "native" | "web";
 
-export type ToolInvocationState = "streaming" | "waitingForConfirmation" | "executing" | "completed" | "cancelled";
+export type ToolInvocationState = "streaming" | "waitingForConfirmation" | "executing" | "completed" | "cancelled" | "failed" | "denied" | "rejected" | "unsupported" | "unknown";
 
 export type ChatPart =
   | { kind: "markdownContent"; text: string }
@@ -43,9 +43,13 @@ export interface StartTurnRequest {
   mode?: string;
   message: string;
   attachments?: ChatAttachment[];
+  onAccepted?: () => void;
+  draftFileIds?: string[];
+  draftBody?: string;
+  quoteKey?: string;
 }
 
-export type TurnState = "complete" | "cancelled" | "failed" | "needs_input";
+export type TurnState = "complete" | "cancelled" | "failed" | "needs_input" | "unknown";
 
 export interface TurnHandle {
   cancel(): void;
@@ -78,6 +82,7 @@ export interface ChatAgentRef { id: string; name: string; description?: string }
 export interface ChatConfig { defaultModel?: string; defaultMode?: string; [key: string]: unknown }
 
 export interface ChatHost {
+  readonly modelSettings?: import("../api/source").ModelSettings;
   readonly kind: HostKind;
   getConfig(): Promise<ChatConfig>;
   listModels(): Promise<ChatModel[]>;

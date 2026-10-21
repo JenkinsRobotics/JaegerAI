@@ -4,7 +4,7 @@ import type { AgentActions, Section } from "./agentActions";
  * proxy), which forwards /v1/* to the gateway and adds the caller token on the
  * server side. The browser never sees or sends a token. */
 import { decodeSSE, type SSEFrame } from "./sse";
-import type { JaegerSource, PendingApproval, TurnReceipt , UploadedAttachment } from "./source";
+import type { JaegerSource, RequestSnapshot, PendingApproval, TurnReceipt , UploadedAttachment, ConnectAppsListing, ConnectedApp, ModelInventory, ScheduleControls, LibraryControls } from "./source";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 export class GatewayError extends Error {
@@ -38,6 +38,31 @@ export function normalizeFrame(frame: SSEFrame): GatewayEvent {
 export class GatewayClient implements JaegerSource {
   readonly kind = "live" as const;
   constructor(private readonly base = "") {}
+  library: LibraryControls = {
+    list: () => this.json("/v1/library"),
+    search: query => this.json(`/v1/library/search?q=${encodeURIComponent(query)}`),
+    read: id => this.json(`/v1/library/documents/${encodeURIComponent(id)}`),
+    versions: id => this.json(`/v1/library/documents/${encodeURIComponent(id)}/versions`),
+    mutate: (action, id, body) => this.json(action === "create" ? "/v1/library/documents" : `/v1/library/documents/${encodeURIComponent(id)}/${action}`, body),
+    operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
+  };
+  skills(query = "") { return this.json<{ skills: { name: string; category: string; description: string; lifecycle: string }[]; count: number }>(`/v1/runtime/skills?q=${encodeURIComponent(query)}`); }
+  schedules: ScheduleControls = {
+    list: () => this.json("/v1/schedules?include_deleted=1"),
+    history: name => this.json(`/v1/schedules/history?job_id=${encodeURIComponent(name)}`),
+    mutate: (action, body) => this.json(`/v1/schedules/${action}`, body),
+    operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
+  };
+  modelSettings = {
+    inventory: () => this.json<ModelInventory>("/api/runtime/models"),
+    read: (id: string) => this.json<{ session_id: string; model?: string | null; provider?: string | null }>(`/v1/sessions/${encodeURIComponent(id)}?view=settings`),
+    save: async (id: string, model: string | null) => { await this.json(`/v1/sessions/${encodeURIComponent(id)}`, { model }, "PATCH"); },
+  };
+  connectApps = {
+    list: () => this.json<ConnectAppsListing>("/api/connect-apps"),
+    state: (id: string) => this.json<{ id: string; state: ConnectedApp["state"] }>(`/api/connect-apps/${encodeURIComponent(id)}/state?refresh=1`),
+    install: (id: string) => this.json<{ id?: string; state?: ConnectedApp["state"] }>(`/api/connect-apps/${encodeURIComponent(id)}/install`, { confirm: true }),
+  };
 
   async json<T>(path: string, body?: unknown, method?: string, extraHeaders?: Record<string, string>): Promise<T> {
     const controller = new AbortController();
@@ -106,6 +131,12 @@ export class GatewayClient implements JaegerSource {
   send(sessionId: string, text: string, requestId: string, attachmentIds: string[] = []) {
     return this.json<TurnReceipt>(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`, { text, request_id: requestId, attachment_ids: attachmentIds });
   }
+  sessionControl(sessionId: string) {
+    return this.json<{ latest_request?: { request_id: string; status: string } | null }>(`/v1/sessions/${encodeURIComponent(sessionId)}?view=control`);
+  }
+  requestStatus(sessionId: string, requestId: string) {
+    return this.json<RequestSnapshot>(`/v1/sessions/${encodeURIComponent(sessionId)}/requests/${encodeURIComponent(requestId)}`);
+  }
   addAttachment(sessionId: string, body: { path: string; filename?: string; mime_type?: string }) {
     return this.json<{ attachment_id: string }>(`/v1/sessions/${encodeURIComponent(sessionId)}/attachments`, body);
   }
@@ -129,6 +160,13 @@ export class GatewayClient implements JaegerSource {
     const data = await this.json<{ tasks?: Task[] } | Task[]>("/v1/tasks");
     return Array.isArray(data) ? data : data.tasks ?? [];
   }
+  taskActions = {
+    create: (body: { session_id: string; goal: string; request_id: string; proposal: true }) => this.json<{ task_id: string; status: string; replayed: boolean }>("/v1/tasks", body),
+    edit: (id: string, goal: string, expected_updated_at: number) => this.json<Task>(`/v1/tasks/${encodeURIComponent(id)}`, { goal, expected_updated_at }, "PATCH"),
+    approve: async (id: string, expected_updated_at: number) => { await this.json(`/v1/tasks/${encodeURIComponent(id)}/approve`, { expected_updated_at }); },
+    cancel: async (id: string) => { await this.json(`/v1/tasks/${encodeURIComponent(id)}/cancel`, {}); },
+  };
+  agentHome(agentId: string) { return this.json<{ session_id: string; agent_id: string }>(`/v1/agents/${encodeURIComponent(agentId)}/home`); }
   async handoffs(query: { session_id?: string } = {}): Promise<Handoff[]> {
     const qs = query.session_id ? `?session_id=${encodeURIComponent(query.session_id)}` : "";
     const data = await this.json<{ handoffs?: Handoff[] } | Handoff[]>(`/api/handoffs${qs}`);
@@ -136,7 +174,7 @@ export class GatewayClient implements JaegerSource {
   }
 
   async globalEvents(onEvent: (event: GatewayEvent) => void, signal: AbortSignal) {
-    const response = await fetch(`${this.base}/v1/events`, { headers: { Accept: "text/event-stream" }, credentials: "same-origin", signal });
+    const response = await fetch(`${this.base}/v1/events/stream`, { headers: { Accept: "text/event-stream" }, credentials: "same-origin", signal });
     if (!response.ok || !response.body) throw new GatewayError(`events ${response.status}`, response.status, undefined);
     for await (const frame of decodeSSE(response.body, signal)) onEvent(normalizeFrame(frame));
   }

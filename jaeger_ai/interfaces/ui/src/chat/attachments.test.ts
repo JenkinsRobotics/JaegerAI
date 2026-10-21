@@ -3,7 +3,7 @@ import type { JaegerSource } from "../api/source";
 import type { ChatPart } from "./host";
 import { WebHost } from "./webHost";
 
-/** A source that records attachment registrations and the turn body, then fails the send (no stream needed). */
+/** A source that records attachment registrations and the turn body, returns a durable completed receipt (no live stream needed). */
 function recording(failPath?: string) {
   const registered: Array<{ path: string; filename?: string; mime_type?: string }> = [];
   const sent: Array<{ text: string; ids?: string[] }> = [];
@@ -14,7 +14,9 @@ function recording(failPath?: string) {
       registered.push(body);
       return { attachment_id: `att_${registered.length}` };
     },
-    send: async (_s: string, text: string, _r: string, ids?: string[]) => { sent.push({ text, ids }); throw new Error("stop here"); },
+    send: async (_s: string, text: string, _r: string, ids?: string[]) => { sent.push({ text, ids }); return { request_id: _r }; },
+    requestStatus: async (_s: string, r: string) => ({request_id:r,session_id:_s,status:"completed",result:{}}),
+    stream: async (_s: string, _c: number, onEvent: (e: unknown) => void) => { onEvent({event:"turn.finish",request_id:"t1",event_id:1}); },
     cancel: async () => {},
   } as unknown as JaegerSource;
   return { source, registered, sent };

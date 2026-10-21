@@ -30,12 +30,15 @@ export function applyAppearance(mode: Appearance) {
   document.documentElement.dataset.appearance = mode;
 }
 
-type Tab = "agents" | "general" | "voice" | "connection" | "about";
+type Tab = "agents" | "general" | "voice" | "connection" | "about" | "automations" | "skills" | "library";
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: "general", label: "General", icon: "settings-gear" },
   { id: "agents", label: "Agents", icon: "account" },
   { id: "voice", label: "Voice", icon: "mic" },
   { id: "connection", label: "Connection", icon: "server" },
+  { id: "automations", label: "Automations", icon: "settings-gear" },
+  { id: "skills", label: "Skills", icon: "settings-gear" },
+  { id: "library", label: "Library", icon: "settings-gear" },
   { id: "about", label: "About", icon: "info" },
 ];
 
@@ -49,8 +52,8 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   return <button type="button" role="switch" aria-label={label} aria-checked={checked} className={`jg-switch${checked ? " is-on" : ""}`} onClick={() => onChange(!checked)}><span /></button>;
 }
 
-export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPanel }: {
-  open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode;
+export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel }: {
+  open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode;
 }) {
   const [tab, setTab] = useState<Tab>("general");
   const [appearance, setAppearance] = useState<Appearance>(storedAppearance);
@@ -74,7 +77,7 @@ export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPan
     <div className="jg-sheet__scrim" onMouseDown={onClose}>
       <div className="jg-sheet" role="dialog" aria-modal aria-label="Settings" onMouseDown={(e) => e.stopPropagation()}>
         <nav className="jg-sheet__nav" aria-label="Settings sections">
-          {TABS.map((t) => (
+          {TABS.filter(t => (t.id !== "automations" || automationsPanel) && (t.id !== "skills" || skillsPanel) && (t.id !== "library" || libraryPanel)).map((t) => (
             <button key={t.id} type="button" className={`jg-sheet__tab${t.id === tab ? " is-active" : ""}`} aria-current={t.id === tab ? "page" : undefined} onClick={() => setTab(t.id)}>
               <Icon name={t.icon} size={15} />{t.label}
             </button>
@@ -115,6 +118,9 @@ export function SettingsDialog({ open, onClose, capabilities, gateway, agentsPan
             </Section>
           </>}
           {tab === "agents" && (agentsPanel ?? <p>Agent management is not available from this host.</p>)}
+          {tab === "automations" && automationsPanel}
+          {tab === "skills" && skillsPanel}
+          {tab === "library" && libraryPanel}
           {tab === "voice" && <Section title="This device">
             <Row label="Dictation"><span className="jg-sheet__value">{yes(capabilities?.dictation ?? (capabilities?.voice === false ? false : undefined))}</span></Row>
             <Row label="Spoken turns" hint="Tap to record, then stop to send and hear a reply; not hands-free listening."><span className="jg-sheet__value">{yes(capabilities?.voiceChat ?? (capabilities?.voice === false ? false : undefined))}</span></Row>

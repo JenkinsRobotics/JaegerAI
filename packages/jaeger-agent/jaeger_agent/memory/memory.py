@@ -930,7 +930,7 @@ def cancel_schedule(name: str) -> bool:
     with sqlite_store.writer() as conn:
         cur = conn.execute(
             "UPDATE schedules SET status = 'cancelled' "
-            "WHERE schedule_id = ? AND status = 'active'",
+            "WHERE schedule_id = ? AND status IN ('active', 'paused')",
             (name,),
         )
         return cur.rowcount > 0

@@ -1,3 +1,5 @@
+import { mergeSessionSnapshot } from "./sessionProjection";
+import { useDraft } from "./useDraft";
 import type { Agent } from "../api/types";
 /* Minimal stand-in chat renderer, styled to the Grok Bot Mac target. The
  * shared VS Code-derived widget replaces it through ChatPaneMount.
@@ -13,6 +15,7 @@ import { HandoffMarker } from "../agents/HandoffMarker";
 import { ArrowDownIcon, CloseIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
 import { badge, messageCount, unreadSince } from "./scrollFollow";
+import { RuntimeSettings } from "../settings/RuntimeSettings";
 import { WebHost } from "./webHost";
 import type { HomeEntry, HomeSessions } from "./homeSession";
 import { PostMessage, SummaryCard } from "./HomeEntries";
@@ -99,6 +102,7 @@ function ToolLine({ part }: { part: ToolPart }) {
     <div className={`jg-tool jg-tool--${part.state}`}>
       <span className="jg-tool__verb">{verb}</span>{" "}
       {mono ? <code className="jg-tool__target">{target}</code> : <span className="jg-tool__target">{target}</span>}
+      <span className="jg-tool__outcome"> · {part.state}</span>
     </div>
   );
 }
@@ -139,7 +143,7 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
     const last = out[out.length - 1];
     if (part.kind === "toolInvocation") {
       if (state === "pending") continue;
-      steps.push(ended && (part.state === "executing" || part.state === "streaming") ? { ...part, state: "cancelled" } : part);
+      steps.push(ended && (part.state === "executing" || part.state === "streaming") ? { ...part, state: state === "cancelled" ? "cancelled" : "unknown" } : part);
     } else if (part.kind === "progress") {
       continue; // live only: the progress line
     } else if (part.kind === "handoff") {
@@ -196,11 +200,11 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   const [loadError, setLoadError] = useState<string>();
   const [attempt, setAttempt] = useState(0);
   const [agent, setAgent] = useState<{ id: string; name: string }>({ id: "native:jaeger", name: "Jaeger" });
-  const [draft, setDraft] = useState("");
+  const { draft, setDraft, quote, setQuote, files, setFiles, ready: draftReady, error: draftError } = useDraft(sessionId);
   const [active, setActive] = useState<TurnHandle | null>(null);
   const [atBottom, setAtBottom] = useState(true);
   const [listening, setListening] = useState<"dictation" | "voice" | null>(null);
-  const [files, setFiles] = useState<PendingFile[]>([]);
+  const sending = useRef(false);
   /** Files sent with each turn, so a refusal can put exactly those back as error chips. */
   const sentFiles = useRef(new Map<string, PendingFile[]>());
   useEffect(() => {
@@ -240,7 +244,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
 
   useEffect(() => {
     let live = true;
-    setSession(null);
+    setSession(current => current?.id === sessionId ? current : null);
     setLoadError(undefined);
     stick.current = true;
     setEntries({});
@@ -252,14 +256,20 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       loadedTurns.current = new Set(p.turns.map((t) => t.turnId));
       setEntries(p.entries);
       setOlder(p.before);
-      setSession({ id: p.sessionId, title: p.title ?? "", agentId: p.agentId, turns: p.turns });
+      setSession(current => mergeSessionSnapshot(current, { id: p.sessionId, title: p.title ?? "", agentId: p.agentId, turns: p.turns }));
     }, fail);
     else if (sessionId) host.sessions.load(sessionId).then(
-      (s) => { if (live) { loadedTurns.current = new Set(s.turns.map((t) => t.turnId)); setSession(s); } },
+      (s) => { if (live) { loadedTurns.current = new Set(s.turns.map((t) => t.turnId)); setSession(current => mergeSessionSnapshot(current, s)); } },
       fail,
     );
     return () => { live = false; };
   }, [host, home, sessionId, attempt]);
+
+  useEffect(() => {
+    const reconnect = () => { if (loadError) setAttempt(n => n + 1); };
+    window.addEventListener("online", reconnect);
+    return () => window.removeEventListener("online", reconnect);
+  }, [loadError]);
 
   /** Live summaries and posts (message.created / session.summarized) while the chat is open. A
    * summary reloads the newest page, since it replaces messages already on screen. */
@@ -342,7 +352,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     if (!el) return;
     const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
     const near = gap < Math.max(STICK_PX, streamStyle.scroll.thresholdPx) || (stick.current && !userScrolled());
-    if (el.scrollTop < OLDER_PX && older && !loadingOlder) loadOlder();
+    if (el.scrollTop < OLDER_PX && older && !loadingOlder && !olderError) loadOlder();
     stick.current = near;
     // Remember how much was there when the reader left, for the unread badge.
     if (near) unreadBase.current = null;
@@ -378,15 +388,22 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     setFiles((current) => {
       const r = addFiles(current, incoming, () => crypto.randomUUID());
       setFileNote(r.note);
-      // Bytes upload (flag, off by default): read path-less files now so send() stays synchronous.
-      if (bytesUploadEnabled()) {
-        for (const f of r.files) if (f.blob && !f.data && !current.includes(f)) {
-          void readBase64(f.blob).then((data) => setFiles((cur) => cur.map((x) => (x.id === f.id ? { ...x, data } : x))));
-        }
-      }
       return r.files;
     });
   };
+  const readingFiles = useRef(new Set<string>());
+  useEffect(() => {
+    if (!bytesUploadEnabled()) return;
+    for (const file of files) {
+      const key = `${sessionId}:${file.id}`;
+      if (!file.blob || file.path || file.data !== undefined || file.error || readingFiles.current.has(key)) continue;
+      readingFiles.current.add(key);
+      void readBase64(file.blob).then(data => setFiles(current => current.map(f => f.id === file.id ? { ...f, data } : f)),
+        error => setFiles(current => current.map(f => f.id === file.id ? { ...f, error: `Cannot read file: ${String(error)}` } : f)))
+        .finally(() => readingFiles.current.delete(key));
+    }
+  }, [files, sessionId]);
+  const preparingFiles = bytesUploadEnabled() && files.some(f => f.blob && !f.path && f.data === undefined && !f.error);
   const onPaste = (event: ClipboardEvent<HTMLTextAreaElement>) => {
     const pasted = event.clipboardData?.files;
     if (!pasted?.length) return;
@@ -420,8 +437,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       setReactions((r) => ({ ...r, [turnId]: r[turnId]?.includes(emoji) ? r[turnId] : [...(r[turnId] ?? []), emoji] }));
     }
     if (action === "reply") {
-      const quote = text.split("\n").filter(Boolean).slice(0, 3).map((l) => `> ${l}`).join("\n");
-      setDraft((d) => `${quote}\n\n${d}`);
+      setQuote({ turnId: turnId ?? "", text: text.split("\n").filter(Boolean).slice(0, 3).join("\n") });
       requestAnimationFrame(() => field.current?.focus());
     }
   };
@@ -436,23 +452,76 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     setSession((s) => (s ? { ...s, turns: s.turns.map((t) => (t.turnId === turnId ? fn(t) : t)) } : s));
   }, []);
 
+  const recovering = useRef<string | undefined>(undefined);
+  const checkingRequest = useRef(false);
+  const [recoveryStatus, setRecoveryStatus] = useState<"checking" | "unknown" | "clear">(host instanceof WebHost ? "checking" : "clear");
+  const recoveryBlocked = recoveryStatus !== "clear";
+  const checkSavedRequest = async () => {
+    if (!(host instanceof WebHost) || !session || active || checkingRequest.current) return;
+    checkingRequest.current = true;
+    setRecoveryStatus("checking");
+    let intent;
+    try { intent = await host.findPendingIntent(session.id, session.turns.find(t => t.state === "unknown")?.turnId); }
+    catch (error) { setFileNote(`Request lookup unavailable: ${String(error)}`); setRecoveryStatus("unknown"); return; }
+    finally { checkingRequest.current = false; }
+    if (!intent) { setRecoveryStatus("clear"); return; }
+    recovering.current = session.id;
+    const turnId = intent.requestId;
+    setSession(s => s && s.id === intent.sessionId ? { ...s, turns: [...s.turns.filter(t => t.turnId !== turnId), { turnId, message: intent.text, state: "pending", parts: [] }] } : s);
+    const handle = host.recoverTurn(intent, part => updateTurn(turnId, t => ({ ...t, parts: applyPart(t.parts, part) })), () => {
+      if (intent.deviceDraft !== false) {
+        setDraft(current => current === (intent.draftBody ?? intent.text) ? "" : current);
+        setFiles(current => current.filter(f => f.error || !(intent.draftFileIds ?? []).includes(f.id)));
+        setQuote(current => current && JSON.stringify(current) === intent.quoteKey ? undefined : current);
+      }
+    });
+    setActive(handle);
+    void handle.done.then(({ state }) => {
+      updateTurn(turnId, t => ({ ...t, state }));
+      setRecoveryStatus(state === "unknown" ? "unknown" : "clear");
+      setActive(null);
+    });
+  };
+  useEffect(() => {
+    if (session && draftReady && recovering.current !== session.id) checkSavedRequest();
+  }, [session?.id, draftReady]);
+
   const send = (text = draft, speakReply = false) => {
     const attached = speakReply ? [] : files.filter((f) => !f.error);
-    const message = text.trim() || (attached.length ? `Attached: ${attached.map((f) => f.name).join(", ")}` : "");
-    if (!message || !session || active) return;
+    const body = text.trim() || (attached.length ? `Attached: ${attached.map((f) => f.name).join(", ")}` : "");
+    const quoteKey = quote ? JSON.stringify(quote) : undefined;
+    const message = quote ? `${quote.text.split("\n").map(line => `> ${line}`).join("\n")}\n\n${body}` : body;
+    if (!body || !session || recoveryBlocked || preparingFiles || !draftReady || sending.current || active || session.turns.some((t) => t.state === "unknown")) return;
     const turnId = crypto.randomUUID();
-    setDraft("");
-    if (attached.length) { setFiles([]); setFileNote(undefined); sentFiles.current.set(turnId, attached); }
+    sending.current = true;
+    if (attached.length) sentFiles.current.set(turnId, attached);
     stick.current = true;
     setSession({ ...session, turns: [...session.turns, { turnId, message, parts: [], state: "pending", createdAt: Date.now() }] });
     let finished: ChatTurn | undefined;
     const attachments = attached.length ? toAttachments(attached) : undefined;
-    const handle = host.startTurn({ sessionId: session.id, turnId, message, ...(attachments ? { attachments } : {}) }, (part) => updateTurn(turnId, (t) => (finished = { ...t, parts: applyPart(t.parts, part) })));
+    const handle = host.startTurn({ sessionId: session.id, turnId, message, draftFileIds: attached.map(f => f.id), draftBody: text, quoteKey, onAccepted: () => {
+      setDraft(current => current === text ? "" : current);
+      setQuote(current => current && JSON.stringify(current) === quoteKey ? undefined : current);
+      setFiles(current => current.filter(f => f.error || !attached.some(sent => sent.id === f.id)));
+      setFileNote(undefined);
+    }, ...(attachments ? { attachments } : {}) }, (part) => updateTurn(turnId, (t) => (finished = { ...t, parts: applyPart(t.parts, part) })));
     setActive(handle);
     void handle.done.then(({ state }) => {
       updateTurn(turnId, (t) => ({ ...t, state }));
+      sending.current = false;
+      sentFiles.current.delete(turnId);
+      if (state === "complete") {
+        setDraft(current => current === text ? "" : current);
+        setQuote(current => current && JSON.stringify(current) === quoteKey ? undefined : current);
+        setFiles(current => current.filter(f => f.error || !attached.some(sent => sent.id === f.id)));
+      }
       setActive(null);
       if (speakReply && state === "complete" && finished) voiceHost?.speak(replyText(finished));
+    }, error => {
+      sending.current = false;
+      sentFiles.current.delete(turnId);
+      updateTurn(turnId, t => ({ ...t, state: "unknown", parts: [...t.parts, { kind: "warning", message: `Request observation interrupted: ${String(error)}. Nothing was retried.` }] }));
+      setActive(null);
     });
   };
   const stop = () => active?.cancel();
@@ -480,15 +549,19 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
 
   /** Decisions made here; only ever set by a click on Allow once / Deny once (never automatically). */
   const [decisions, setDecisions] = useState<Record<string, "approve" | "deny">>({});
+  const decidingIds = useRef(new Set<string>());
   const decide = (turnId: string): Decide => (callId, decision) => {
-    if (decisions[callId]) return;
-    setDecisions((d) => ({ ...d, [callId]: decision }));
-    void host.respondToConfirmation(turnId, callId, decision);
-    updateTurn(turnId, (t) => ({
+    if (decisions[callId] || decidingIds.current.has(callId)) return;
+    decidingIds.current.add(callId);
+    void host.respondToConfirmation(turnId, callId, decision).then(() => {
+      setDecisions((d) => ({ ...d, [callId]: decision }));
+      updateTurn(turnId, (t) => ({
       ...t,
       parts: t.parts.map((p) =>
-        p.kind === "toolInvocation" && p.callId === callId ? { ...p, state: decision === "approve" ? "executing" : "cancelled" } : p),
-    }));
+        p.kind === "toolInvocation" && p.callId === callId ? { ...p, state: decision === "approve" ? "executing" : "denied" } : p),
+      }));
+    }, error => updateTurn(turnId, t => ({ ...t, parts: [...t.parts, { kind: "error", message: `Approval decision not confirmed: ${String(error)}` }] })))
+      .finally(() => decidingIds.current.delete(callId));
   };
 
   const links: Links = { onCopy: (text) => void host.copy(text), onOpen: (url) => host.openExternal(url) };
@@ -502,6 +575,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   return (
     <div className={`jg-chat${dropping ? " is-dropping" : ""}`} style={tint} ref={chatRoot} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <div className="jg-chat__band" data-aether-window-drag-region>
+        <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={Boolean(active)} />
         <div className="jg-agent-pill-wrap">
           <button ref={pill} type="button" className="jg-agent-pill" title={`${agent.name}`} aria-haspopup="menu" aria-expanded={menuOpen}
             onClick={() => (host instanceof WebHost && host.openHistory ? setMenuOpen((o) => !o) : host.openDetails?.(agent.id))}>
@@ -549,7 +623,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
               {showsProgress(turn) && <ProgressLine phrase={turn.parts.length ? activityPhrase(turn, agentName) : "Waiting for progress…"} agent={agent} state={turnAvatarState(turn)} />}
             </section>
           ))}
-          {sessionId && host instanceof WebHost && <SessionApprovals key={sessionId} sessionId={sessionId} host={host} />}
+          {sessionId && host instanceof WebHost && <SessionApprovals key={sessionId} sessionId={sessionId} host={host} excludeIds={session?.turns.flatMap(t => t.parts.flatMap(p => p.kind === "confirmation" ? [p.callId] : []))} />}
         </div>
       </div>
       <button type="button" className={`jg-jump${atBottom ? "" : " is-visible"}`} onClick={jumpToLatest}
@@ -577,7 +651,12 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         <Menu open={composerMenu} anchor={composerMenu ? plus.current : null} ariaLabel="Composer actions" placement="top-start" onClose={() => setComposerMenu(false)}
           items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
           onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
-        <textarea ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : `${typeof document !== "undefined" && document.documentElement.classList.contains("jg-phone") ? "Ask" : "Message"} ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
+        {(recoveryBlocked || session?.turns.some(t => t.state === "unknown")) && <div role="status">{recoveryStatus === "checking" ? "Checking saved work…" : <>Outcome unknown. Nothing will be resent. <button type="button" onClick={() => void checkSavedRequest()}>Check saved request</button></>}</div>}
+        {fileNote && !files.length && <div role="status">{fileNote}</div>}
+        {quote && <div className="jg-chip" aria-label="Quoted reply"><span>{quote.text}</span><button type="button" aria-label="Cancel reply" onClick={() => setQuote(undefined)}>×</button></div>}
+        {preparingFiles && <div role="status">Preparing attachments…</div>}
+        {draftError && <div role="alert">{draftError}</div>}
+        <textarea disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : `${typeof document !== "undefined" && document.documentElement.classList.contains("jg-phone") ? "Ask" : "Message"} ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
         {dictation && primary !== "dictate" && (
           <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
             aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
@@ -586,7 +665,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         {primary === "stop"
           ? <button type="button" className="jg-send" aria-label="Stop (⌘Esc)" onClick={stop}><StopIcon /></button>
           : primary === "send"
-            ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText}><SendIcon /></button>
+            ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText || recoveryBlocked || preparingFiles || !draftReady || !session || session?.turns.some(t => t.state === "unknown")}><SendIcon /></button>
             : primary === "dictate"
               ? <button type="button" className={`jg-send${listening === "dictation" ? " is-listening" : ""}`}
                   aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}

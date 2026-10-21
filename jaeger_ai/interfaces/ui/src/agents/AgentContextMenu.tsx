@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { Agent } from "../api/types";
 import { type AgentCaps } from "../api/agentActions";
+import type { Section } from "../api/agentActions";
 import { useExclusivePopup } from "../popups/coordinator";
 import { type IconName } from "../icons/Icon";
 import { AgentAvatar } from "./AgentAvatar";
@@ -11,10 +12,10 @@ import { label } from "./agentsLogic";
 export type AgentMenuAction = "rename" | "open" | "profile" | "history" | "read" | "unread" | "pin" | "unpin" | "section" | "template" | "hide" | "copy-id" | "duplicate" | "delete" | "replace-primary" | "make-primary";
 type Item = { id: AgentMenuAction; label: string; icon: IconName; separator?: boolean; danger?: boolean };
 
-export function agentMenuItems(agent: Agent, caps: AgentCaps, pinned: boolean, alternative = false, unread = false): { main: Item[]; more: Item[] } {
+export function agentMenuItems(agent: Agent, caps: AgentCaps, pinned: boolean, alternative = false, unread = false, hasSections = false): { main: Item[]; more: Item[] } {
   return { main: [
     ...(caps.pin ? [{ id: pinned ? "unpin" as const : "pin" as const, label: pinned ? "Unpin" : "Pin", icon: "pin" as IconName }] : []),
-    ...(!agent.primary && caps.sections ? [{ id: "section" as const, label: "Move to new section", icon: "folder" as IconName }] : []),
+    ...(!agent.primary && caps.sections ? [{ id: "section" as const, label: hasSections ? "Move to" : "Move to new section", icon: "folder" as IconName }] : []),
     ...(caps.unread && (!unread || caps.read) ? [{ id: unread ? "read" as const : "unread" as const, label: unread ? "Mark as Read" : "Mark as Unread", icon: "mail-read" as IconName }] : []),
     ...(!agent.primary && caps.rename ? [{ id: "rename" as const, label: "Rename Bot", icon: "edit" as IconName, separator: true }] : []),
     { id: "copy-id", label: "Copy conversation ID", icon: "copy", separator: true },
@@ -38,12 +39,25 @@ function AgentMenuGlyph({ action }: { action: AgentMenuAction }) {
   </svg>;
 }
 
-export function AgentContextMenu({ agent, preview, at, phone, caps, pinned, alternative = false, unread = false, onAction, onClose }: {
+export function AgentContextMenu({ agent, preview, at, phone, caps, pinned, alternative = false, unread = false, sections = [], onMove, onAction, onClose }: {
   agent: Agent; preview: string; at: { x: number; y: number }; phone: boolean; caps: AgentCaps; pinned: boolean; alternative?: boolean; unread?: boolean;
   onAction: (a: AgentMenuAction, agent: Agent) => void; onClose: () => void;
+  sections?: Section[]; onMove?: (sectionId: string | null) => void;
 }) {
   const col = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const [sectionAt, setSectionAt] = useState<{ left: number; top: number } | null>(null);
+  const sectionTrigger = useRef<HTMLButtonElement>(null);
+  const sectionMenu = useRef<HTMLDivElement>(null);
+  const focusSections = useRef(false);
+  const hasSections = sections.length > 0 && Boolean(onMove);
+  const openSections = () => {
+    const r = sectionTrigger.current?.getBoundingClientRect();
+    if (r) setSectionAt({ left: r.right + 242 < innerWidth ? r.right : Math.max(8, r.left - 242), top: Math.max(8, Math.min(r.top, innerHeight - Math.min(400, (sections.length + 2) * 36) - 8)) });
+  };
+  useLayoutEffect(() => {
+    if (sectionAt && focusSections.current) { sectionMenu.current?.querySelector<HTMLButtonElement>("button")?.focus(); focusSections.current = false; }
+  }, [sectionAt]);
   useExclusivePopup(true, onClose, at);
   useLayoutEffect(() => {
     const r = col.current?.getBoundingClientRect();
@@ -51,13 +65,17 @@ export function AgentContextMenu({ agent, preview, at, phone, caps, pinned, alte
     if (phone) { setPos({ left: Math.max(12, (innerWidth - r.width) / 2), top: Math.max(12, Math.min(96, innerHeight - r.height - 12)) }); return; }
     setPos({ left: Math.max(8, Math.min(at.x, innerWidth - r.width - 8)), top: Math.max(8, Math.min(at.y, innerHeight - r.height - 8)) });
   }, [at, phone]);
-  const { main } = agentMenuItems(agent, caps, pinned, alternative, unread);
+  const { main } = agentMenuItems(agent, caps, pinned, alternative, unread, hasSections);
   const name = label(agent);
   const pick = (id: AgentMenuAction) => { onClose(); onAction(id, agent); };
   const row = (it: Item) => <div key={it.id}>
     {it.separator && <div className="jg-amenu__sep" role="separator" />}
-    <button type="button" role="menuitem" className={`jg-amenu__item${it.danger ? " is-danger" : ""}`} onClick={() => pick(it.id)}>
+    <button type="button" role="menuitem" ref={it.id === "section" ? sectionTrigger : undefined} aria-haspopup={it.id === "section" && hasSections ? "menu" : undefined} aria-expanded={it.id === "section" && hasSections ? Boolean(sectionAt) : undefined}
+      className={`jg-amenu__item${it.danger ? " is-danger" : ""}`} onMouseEnter={() => { if (it.id === "section" && hasSections) openSections(); else setSectionAt(null); }}
+      onKeyDown={e => { if (it.id === "section" && hasSections && e.key === "ArrowRight") { e.preventDefault(); focusSections.current = true; openSections(); } }}
+      onClick={() => it.id === "section" && hasSections ? openSections() : pick(it.id)}>
       <AgentMenuGlyph action={it.id} /><span>{it.label}</span>
+      {it.id === "section" && hasSections && <span className="jg-amenu__chev" aria-hidden="true">›</span>}
     </button>
   </div>;
   return (
@@ -75,6 +93,11 @@ export function AgentContextMenu({ agent, preview, at, phone, caps, pinned, alte
 
         </div>
       </div>
+      {sectionAt && <div ref={sectionMenu} className="jg-amenu__card jg-amenu__sections" role="menu" aria-label="Move bot to section" style={sectionAt} onMouseDown={e => e.stopPropagation()} onKeyDown={e => { if (e.key === "ArrowLeft" || e.key === "Escape") { e.stopPropagation(); setSectionAt(null); sectionTrigger.current?.focus(); } }}>
+        {[{ id: null, name: "Unassigned" }, ...sections].map(section => <button key={section.id ?? "unassigned"} type="button" role="menuitemradio" aria-checked={(agent.section_id ?? null) === section.id} className="jg-amenu__item" onClick={() => { onClose(); onMove?.(section.id); }}>{section.name}</button>)}
+        <div role="separator" className="jg-amenu__sep" />
+        <button type="button" role="menuitem" className="jg-amenu__item" onClick={() => pick("section")}>New section…</button>
+      </div>}
     </div>
   );
 }

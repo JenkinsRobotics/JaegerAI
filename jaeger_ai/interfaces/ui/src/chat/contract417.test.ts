@@ -80,6 +80,7 @@ describe("fba6cea9 shared home id", () => {
     const { contractHome } = await import("./homeSession");
     const getJson = vi.fn(async (path: string) => {
       if (/\/v1\/agents\/(jaeger|native%3Ajaeger)\/home$/.test(path)) return { session_id: "agent-native:jaeger", agent_id: "native:jaeger", created: false };
+      if (path === "/v1/agents/jaeger") return { id: "native:jaeger" };
       throw new Error(`unexpected ${path}`);
     });
     const h = contractHome(getJson as never);

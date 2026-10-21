@@ -273,3 +273,15 @@ def test_a_result_for_a_missing_parent_is_reported_once_not_every_tick(owner, mo
         for _ in range(5):
             asyncio.run(owner.tick())
     assert sum('result retained' in r.getMessage() for r in caplog.records) == 1
+
+
+def test_terminal_proposal_approval_cannot_claim_queued(owner):
+    import json
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    result = owner.submit('Cancelled proposal', context=context(owner, 'background'), proposal=True)
+    asyncio.run(owner.cancel(result['task_id']))
+    request = SimpleNamespace(match_info={'id': result['task_id']}, can_read_body=False)
+    response = asyncio.run(JaegerGatewayApp.handle_task_approve(SimpleNamespace(task_owner=owner), request))
+    assert response.status == 409
+    assert json.loads(response.body)['status'] == 'cancelled'
+    assert owner.store.get_task(result['task_id']).state is TaskState.CANCELLED

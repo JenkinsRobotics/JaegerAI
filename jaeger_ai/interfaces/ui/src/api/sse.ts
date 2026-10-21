@@ -37,13 +37,21 @@ export function parseSSEChunk(buffer: string): { frames: SSEFrame[]; rest: strin
   return { frames, rest };
 }
 
-export async function* decodeSSE(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<SSEFrame> {
+export async function* decodeSSE(body: ReadableStream<Uint8Array>, signal?: AbortSignal, idleMs = 30_000): AsyncGenerator<SSEFrame> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   try {
     while (!signal?.aborted) {
-      const { value, done } = await reader.read();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let result: ReadableStreamReadResult<Uint8Array>;
+      try {
+        result = await Promise.race([
+          reader.read(),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("Event transport idle; reconnecting to the same request")), idleMs); }),
+        ]);
+      } finally { if (timer !== undefined) clearTimeout(timer); }
+      const { value, done } = result;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       if (buffer.length > MAX_BUFFER) throw new Error("SSE frame exceeds 8 MB");
@@ -52,6 +60,7 @@ export async function* decodeSSE(body: ReadableStream<Uint8Array>, signal?: Abor
       yield* frames;
     }
   } finally {
+    await reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }

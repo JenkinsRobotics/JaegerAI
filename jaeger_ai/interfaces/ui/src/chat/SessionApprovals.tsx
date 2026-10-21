@@ -1,4 +1,4 @@
-/** Standalone handoff decisions survive navigation/reload without an active chat turn. */
+/** Pending tool/handoff decisions survive navigation/reload without an active chat turn. */
 import { useEffect, useRef, useState } from "react";
 import type { PendingApproval } from "../api/source";
 import { ApprovalCard } from "./ApprovalCard";
@@ -8,7 +8,7 @@ type Host = {
   respondToConfirmation(sessionId: string, approvalId: string, decision: "approve" | "deny"): Promise<void>;
 };
 
-export function SessionApprovals({ sessionId, host }: { sessionId: string; host: Host }) {
+export function SessionApprovals({ sessionId, host, excludeIds = [] }: { sessionId: string; host: Host; excludeIds?: string[] }) {
   const resolved = useRef(new Set<string>());
   const deciding = useRef(false);
   const [rows, setRows] = useState<PendingApproval[]>([]);
@@ -22,7 +22,7 @@ export function SessionApprovals({ sessionId, host }: { sessionId: string; host:
       reading = true;
       try {
         const result = await host.pendingApprovals(sessionId);
-        if (active) { setRows(result.filter((r) => !resolved.current.has(r.approval_id) && r.kind === "handoff" && r.status === "pending" && r.session_id === sessionId)); setError(undefined); }
+        if (active) { setRows(result.filter((r) => !resolved.current.has(r.approval_id) && ["handoff", "tool", "tool_confirm"].includes(r.kind) && r.status === "pending" && r.session_id === sessionId)); setError(undefined); }
       } catch (e) { if (active) setError(String((e as Error).message ?? e)); }
       finally { reading = false; }
     };
@@ -44,7 +44,7 @@ export function SessionApprovals({ sessionId, host }: { sessionId: string; host:
   };
   return <div aria-label="Conversation approvals" aria-live="polite">
     {error && <p role="alert">Couldn’t load or decide approval: {error}</p>}
-    {rows.map((row) => <fieldset key={row.approval_id} disabled={Boolean(busy)} style={{ border: 0, padding: 0, margin: 0 }}>
+    {rows.filter(row => !excludeIds.includes(row.approval_id)).map((row) => <fieldset key={row.approval_id} disabled={Boolean(busy)} style={{ border: 0, padding: 0, margin: 0 }}>
       <ApprovalCard title={row.prompt} message={row.task ?? row.prompt} onDecide={(decision) => void decide(row.approval_id, decision)} />
     </fieldset>)}
   </div>;

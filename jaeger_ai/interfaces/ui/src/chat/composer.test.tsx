@@ -42,7 +42,7 @@ describe("composer (DOM)", () => {
   const started: StartTurnRequest[] = [];
   const host = {
     capabilities: { voice: false },
-    startTurn: vi.fn((req: StartTurnRequest) => { started.push(req); return { cancel() {}, done: new Promise(() => {}) }; }),
+    startTurn: vi.fn((req: StartTurnRequest) => { started.push(req); req.onAccepted?.(); return { cancel() {}, done: new Promise(() => {}) }; }),
     respondToConfirmation: vi.fn(),
     sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [] })) },
     copy: vi.fn(), openExternal: vi.fn(),
@@ -63,9 +63,10 @@ describe("composer (DOM)", () => {
     await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
     expect(el.querySelector(".jg-chip__name")?.textContent).toBe("notes.md");
     const send = el.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!;
-    expect(send.disabled).toBe(false); // a file alone is enough to send
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(send.disabled).toBe(false); // file bytes must be ready before Send enables
     await act(async () => { send.click(); });
-    expect(started[0].attachments).toEqual([{ name: "notes.md", mimeType: "text/markdown", size: 5 }]);
+    expect(started[0].attachments).toEqual([{ name: "notes.md", mimeType: "text/markdown", size: 5, data: btoa("hello") }]);
     expect(el.querySelector(".jg-chip")).toBeNull();
   });
 
@@ -118,6 +119,7 @@ describe("refused attachments", () => {
     const input = el.querySelector<HTMLInputElement>('input[type="file"]')!;
     Object.defineProperty(input, "files", { configurable: true, value: [new File(["x"], "secret.txt", { type: "text/plain" })] });
     await act(async () => { input.dispatchEvent(new Event("change", { bubbles: true })); });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
     await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click(); });
     const chip = el.querySelector(".jg-chip.is-error");
     expect(chip?.querySelector(".jg-chip__name")?.textContent).toBe("secret.txt");

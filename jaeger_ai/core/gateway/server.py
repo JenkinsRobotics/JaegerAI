@@ -1290,6 +1290,8 @@ class JaegerGatewayApp:
             await asyncio.sleep(2)
 
     def _setup_routes(self) -> None:
+        from jaeger_ai.features.knowledge_library.routes import register as register_library
+        register_library(self)
         from .native_controls import register as register_native_controls
         register_native_controls(self)
         from jaeger_ai.features.agent_bridge.routes import register
@@ -2768,6 +2770,9 @@ class JaegerGatewayApp:
             return web.json_response({key: payload.get(key) for key in (
                 "session_id", "status", "latest_request",
             )})
+        if request.query.get("view") == "settings":
+            metadata = payload.get("metadata") or {}
+            return web.json_response({"session_id": session_id, "model": metadata.get("model"), "provider": metadata.get("provider")})
         return web.json_response(payload)
 
     async def handle_branch_session(self, request: web.Request) -> web.Response:
@@ -4077,6 +4082,8 @@ class JaegerGatewayApp:
                 }
                 if isinstance(result.get("explanation"), str):
                     plan_payload["explanation"] = result["explanation"][:500]
+            from jaeger_ai.contract.tool_outcomes import tool_outcome
+            outcome = tool_outcome(bool(ok), result)
             del args, result, error
             flush()
             end_reasoning()
@@ -4110,6 +4117,7 @@ class JaegerGatewayApp:
                 "call_id": activity_id,
                 "tool": _safe_tool_event_name(name),
                 "phase": phase,
+                "outcome": outcome,
                 "success": succeeded,
                 "ok": succeeded,
                 "elapsed_s": duration,
@@ -5389,8 +5397,16 @@ class JaegerGatewayApp:
         )
         await response.prepare(request)
 
+        events = self.event_bus.subscribe(session_id, since_event_id=last_event_id)
+        pending = asyncio.create_task(anext(events))
         try:
-            async for evt in self.event_bus.subscribe(session_id, since_event_id=last_event_id):
+            while True:
+                ready, _ = await asyncio.wait({pending}, timeout=getattr(self, "_sse_keepalive_seconds", 10.0))
+                if not ready:
+                    # Transport-only comment: no model progress, cursor or durable state.
+                    await response.write(b": keepalive\n\n")
+                    continue
+                evt = pending.result()
                 payload = json.dumps({
                     "event_id": evt.event_id,
                     "session_id": evt.session_id,
@@ -5400,8 +5416,13 @@ class JaegerGatewayApp:
                 })
                 chunk = f"id: {evt.event_id}\nevent: {evt.event}\ndata: {payload}\n\n"
                 await response.write(chunk.encode("utf-8"))
-        except (asyncio.CancelledError, ConnectionResetError, ReplayGap):
+                pending = asyncio.create_task(anext(events))
+        except (asyncio.CancelledError, ConnectionResetError, ReplayGap, StopAsyncIteration):
             pass
+        finally:
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+            await events.aclose()
 
         return response
 
@@ -6090,6 +6111,8 @@ class JaegerGatewayApp:
         task = self.task_owner.store.get_task(task_id)
         if task is None:
             return web.json_response({'error': 'Task not found'}, status=404)
+        if task.is_terminal:
+            return web.json_response({'error': 'Terminal task cannot be approved', 'task_id': task_id, 'status': task.state.value}, status=409)
         if task.provenance.get('authorized'):
             return web.json_response({'task_id': task_id, 'status': task.state.value})
         if request.can_read_body:
@@ -6100,7 +6123,8 @@ class JaegerGatewayApp:
         for approval in self.store.list_pending_approvals():
             if (approval.get('metadata') or {}).get('task_id') == task_id:
                 self.store.resolve_approval(approval['approval_id'], approved=True, decision='once')
-        return web.json_response({'task_id': task_id, 'status': 'queued'})
+        current = self.task_owner.store.get_task(task_id)
+        return web.json_response({'task_id': task_id, 'status': current.state.value})
 
     async def handle_task_cancel(self, request: web.Request) -> web.Response:
         cancelled = await self.task_owner.cancel(request.match_info['id'])

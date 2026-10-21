@@ -21,7 +21,7 @@ const POLL_MS = 15_000;
 export async function loadRoster(source: Pick<JaegerSource, "agents" | "agentsSummary"> & Partial<Pick<JaegerSource, "agentActions">>) {
   const [agents, summaries] = await Promise.all([source.agents(), source.agentsSummary()]);
   if (agents.filter((a) => a.primary === true).length > 1) throw new Error("Invalid primary projection: multiple primary agents");
-  const sections = source.agentActions && agents.some((a) => "section_id" in a) ? await source.agentActions.sections().catch(() => []) : [];
+  const sections = source.agentActions && agents.some((a) => "section_id" in a || a.ui_actions?.sections === true) ? await source.agentActions.sections() : [];
   return { agents, summaries, sections };
 }
 

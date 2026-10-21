@@ -1,3 +1,5 @@
+import { readIntent, saveIntent, settleIntent, type SendIntent } from "./sendJournal";
+import { requestOutcome } from "./requestOutcome";
 /* WebHost: ChatHost for the browser. Data comes from a JaegerSource (live =
  * same-origin /v1 and /api fetches; mock = dev-only sample data). Failures
  * surface to the caller; there is no silent fallback. */
@@ -11,8 +13,7 @@ import type { HostAttachment, HostCapabilities } from "./hostH8";
 
 const KEY = (id: string) => `jaeger.ui.session.${id}`;
 
-const toolState = (s?: string): ToolInvocationState => s === "done" ? "completed" : s === "error" ? "cancelled" : "executing";
-const idempotencyKey = () => globalThis.crypto?.randomUUID?.() ?? `up-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+const toolState = (s?: string): ToolInvocationState => ["done", "completed"].includes(s ?? "") ? "completed" : ["error", "failed"].includes(s ?? "") ? "failed" : ["denied", "rejected", "cancelled", "unsupported", "unknown"].includes(s ?? "") ? s as ToolInvocationState : "executing";
 
 /** A pending approval holds its tool: matched on tool + target (call_id is usually null). */
 function holdApprovedTools(source: PersistedPart[], parts: ChatPart[]) {
@@ -104,18 +105,20 @@ export class WebHost implements ChatHost {
   async getConfig() { return { defaultMode: "agent" }; }
 
   /** POST each picked file to /v1/sessions/{id}/attachments; the ids that registered go with the turn. */
-  private async registerAttachments(request: StartTurnRequest, onPart: (part: ChatPart) => void): Promise<string[]> {
+  private async registerAttachments(request: StartTurnRequest, onPart: (part: ChatPart) => void): Promise<{ ids: string[]; draftFileIds: string[] }> {
     const ids: string[] = [];
+    const draftFileIds: string[] = [];
     const rejected: RejectedAttachment[] = [];
     // H8 widens ChatAttachment with path/size; read through the local mirror until it's vendored.
-    for (const file of (request.attachments ?? []) as HostAttachment[]) {
+    for (const [index, file] of ((request.attachments ?? []) as HostAttachment[]).entries()) {
       // Bytes first (the upload route, 417d8a0c), path as the fallback for gateways without it (404/405).
-      if (file.data && this.source.uploadAttachment && bytesUploadEnabled() && this.bytesUpload !== false) {
+      if (typeof file.data === "string" && this.source.uploadAttachment && bytesUploadEnabled() && this.bytesUpload !== false) {
         if (Math.floor((file.data.length * 3) / 4) > UPLOAD_MAX_BYTES) { rejected.push({ name: file.name, reason: UPLOAD_TOO_LARGE }); continue; }
         try {
-          const row = await this.source.uploadAttachment(request.sessionId, { name: file.name, mime: file.mimeType, data_base64: file.data }, idempotencyKey());
+          const row = await this.source.uploadAttachment(request.sessionId, { name: file.name, mime: file.mimeType, data_base64: file.data }, `upload-${request.turnId}-${index}`);
           this.bytesUpload = true;
           ids.push(row.attachment_id);
+          if (request.draftFileIds?.[index]) draftFileIds.push(request.draftFileIds[index]);
           continue;
         } catch (error) {
           const status = (error as { status?: number }).status;
@@ -129,19 +132,24 @@ export class WebHost implements ChatHost {
       try {
         const row = await this.source.addAttachment(request.sessionId, { path: file.path, filename: file.name, mime_type: file.mimeType });
         ids.push(row.attachment_id);
+        if (request.draftFileIds?.[index]) draftFileIds.push(request.draftFileIds[index]);
       } catch (error) {
         rejected.push({ name: file.name, path: file.path, reason: message(error) });
       }
     }
     if (rejected.length) {
-      onPart({ kind: "warning", message: `Not sent: ${rejected.map((r) => `${r.name} (${r.reason})`).join(", ")}. The rest of your message went through.` });
+      onPart({ kind: "warning", message: `Not attached: ${rejected.map((r) => `${r.name} (${r.reason})`).join(", ")}.` });
       this.onAttachmentsRejected?.(request.turnId, rejected);
     }
-    return ids;
+    return { ids, draftFileIds };
   }
   /** The chat view puts refused files back on the composer as error chips. */
   onAttachmentsRejected?: (turnId: string, rejected: RejectedAttachment[]) => void;
-  async listModels() { return []; }
+  get modelSettings() { return this.source.modelSettings; }
+  async listModels() {
+    const inventory = await this.source.modelSettings?.inventory();
+    return inventory?.providers.filter(p => p.reachable).flatMap(p => p.models.filter(m => m.available !== false).map(m => ({ id: `@${p.id}:${m.id}`, name: m.id, provider: p.id }))) ?? [];
+  }
 
   startTurn(request: StartTurnRequest, onPart: (part: ChatPart) => void): TurnHandle {
     const controller = new AbortController();
@@ -158,19 +166,59 @@ export class WebHost implements ChatHost {
     const done = (async (): Promise<{ state: TurnState }> => {
       // The gateway attaches workspace files by path. Host-picked files (H8 `path`) are registered first;
       // pasted or dropped ones have no path, so they're named in a warning instead of silently dropped.
-      const attachmentIds = await this.registerAttachments(request, onPart);
+      let intent: SendIntent;
+      try {
+        const prior = readIntent(request.sessionId);
+        if (prior) throw new Error(`Request ${prior.requestId} needs reconciliation before another turn`);
+        intent = { version: 1, sessionId: request.sessionId, requestId, text: request.message, draftBody: request.draftBody, quoteKey: request.quoteKey, attachmentIds: [], draftFileIds: request.draftFileIds ?? [], phase: "preparing" };
+        saveIntent(intent);
+      } catch (error) {
+        onPart({ kind: "error", message: `Not sent: ${message(error)}` });
+        return { state: "unknown" };
+      }
+      const registered = await this.registerAttachments(request, onPart);
+      const attachmentIds = registered.ids;
+      if (cancelRequested) {
+        settleIntent(request.sessionId, requestId);
+        onPart({ kind: "progress", message: "Stopped before dispatch; no turn was submitted." });
+        return { state: "cancelled" };
+      }
+      intent = { ...intent, attachmentIds, draftFileIds: registered.draftFileIds, phase: "submitting" };
+      try { saveIntent(intent); } catch (error) {
+        onPart({ kind: "error", message: `Not sent: could not preserve request (${message(error)})` });
+        return { state: "unknown" };
+      }
       let receipt;
       try {
         receipt = await this.source.send(request.sessionId, request.message, requestId, attachmentIds);
       } catch (error) {
-        onPart({ kind: "error", message: message(error) });
-        return { state: "failed" };
+        // A lost HTTP reply says nothing about admission. Query the same ID,
+        // never call send again. A 404 can race admission and remains uncertain.
+        try {
+          const row = await this.source.requestStatus?.(request.sessionId, requestId);
+          if (row && row.request_id === requestId && row.session_id === request.sessionId) {
+            request.onAccepted?.();
+            const state = requestOutcome(row, onPart);
+            if (state) {
+              if (state !== "unknown") settleIntent(request.sessionId, requestId);
+              return { state };
+            }
+            receipt = { request_id: row.request_id, turn_id: row.turn_id };
+          }
+        } catch { /* retain uncertainty below */ }
+        if (!receipt) {
+          onPart({ kind: "warning", message: `Acceptance is unknown (${message(error)}). Request ${requestId} is preserved; do not resend.` });
+          return { state: "unknown" };
+        }
       }
+      intent = { ...intent, phase: "accepted" };
+      try { saveIntent(intent); } catch { /* pre-dispatch identity remains durable */ }
+      request.onAccepted?.();
       admittedRequestId = receipt.request_id ?? requestId;
       admitted = true;
       if (cancelRequested) requestCancel();
       const start = typeof receipt.start_event_id === "number" ? receipt.start_event_id - 1 : 0;
-      return followTurn({
+      const outcome = await followTurn({
         source: this.source,
         sessionId: request.sessionId,
         requestId: receipt.request_id ?? requestId,
@@ -182,6 +230,8 @@ export class WebHost implements ChatHost {
         agentName: this.agentName,
         backoffMs: this.backoffMs,
       });
+      if (outcome.state !== "unknown") settleIntent(request.sessionId, requestId);
+      return outcome;
     })();
     return {
       cancel: () => {
@@ -193,6 +243,47 @@ export class WebHost implements ChatHost {
       },
       done,
     };
+  }
+
+  pendingIntent(sessionId: string) { return readIntent(sessionId); }
+
+  async findPendingIntent(sessionId: string, unresolvedRequestId?: string): Promise<SendIntent | undefined> {
+    const local = this.pendingIntent(sessionId);
+    if (local) return local;
+    const control = await this.source?.sessionControl?.(sessionId);
+    const latest = unresolvedRequestId ? { request_id: unresolvedRequestId, status: "execution_unknown" } : control?.latest_request;
+    if (!latest || !["admitted", "running", "awaiting_approval", "cancelling", "execution_unknown"].includes(latest.status)) return;
+    const row = await this.source.requestStatus?.(sessionId, latest.request_id);
+    if (!row || row.session_id !== sessionId || row.request_id !== latest.request_id) throw new Error("Saved request identity could not be verified");
+    // Cross-device/background work has no authority to clear this device's draft.
+    return { version: 1, deviceDraft: false, sessionId, requestId: row.request_id,
+      text: row.input_text ?? "", attachmentIds: [], phase: "accepted" };
+  }
+
+  /** Observe an existing journaled request. Never calls send or reuploads files. */
+  recoverTurn(intent: SendIntent, onPart: (part: ChatPart) => void, onAccepted?: () => void): TurnHandle {
+    const controller = new AbortController();
+    const done = (async (): Promise<{ state: TurnState }> => {
+      try {
+        const row = await this.source.requestStatus?.(intent.sessionId, intent.requestId);
+        if (!row || row.request_id !== intent.requestId || row.session_id !== intent.sessionId) throw new Error("No matching receipt");
+        onAccepted?.();
+        const settled = requestOutcome(row, onPart);
+        const outcome = settled ? { state: settled } : await followTurn({
+          source: this.source, sessionId: intent.sessionId, requestId: intent.requestId,
+          turnId: row.turn_id, cursor: 0, signal: controller.signal, onPart,
+          backoffMs: this.backoffMs, agentName: this.agentName,
+        });
+        if (outcome.state !== "unknown") settleIntent(intent.sessionId, intent.requestId);
+        return outcome;
+      } catch {
+        onPart({ kind: "warning", message: `Request ${intent.requestId} remains unconfirmed. Nothing was resent.` });
+        return { state: "unknown" };
+      }
+    })();
+    return { done, cancel: () => {
+      void this.source.cancel(intent.sessionId, intent.requestId).catch(error => onPart({ kind: "warning", message: `Stop unconfirmed: ${message(error)}` }));
+    } };
   }
 
   pendingApprovals = (sessionId: string) => this.source.pendingApprovals?.(sessionId) ?? Promise.resolve([]);

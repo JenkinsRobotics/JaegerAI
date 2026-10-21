@@ -154,3 +154,39 @@ def test_connect_apps_proxy_routes_live_in_the_agents_overlay(monkeypatch):
         assert mod.route(handler, urlparse(path), method) is True
     assert calls == [("GET", "/v1/connect-apps"), ("GET", "/v1/connect-apps/vscode/state?refresh=1"),
                      ("POST", "/v1/connect-apps/vscode/install")]
+
+
+def test_session_control_query_and_global_stream_use_canonical_routes(overlay, monkeypatch):
+    assert _route(overlay, '/v1/sessions/owned?view=control')
+    assert overlay._calls[-1] == ('GET', '/v1/sessions/owned?view=control')
+    calls = []
+    monkeypatch.setattr(overlay, '_proxy_stream', lambda h, sid, query, **kwargs: calls.append((sid, kwargs['upstream_path'])) or True)
+    assert _route(overlay, '/v1/events/stream')
+    assert calls == [('*', '/v1/events/stream')]
+
+
+def test_skills_and_schedule_controls_stay_on_gateway_owner(overlay):
+    assert _route(overlay, '/v1/runtime/skills?q=owned')
+    assert _route(overlay, '/v1/schedules?include_deleted=1')
+    assert _route(overlay, '/v1/schedules/history?job_id=owned')
+    assert _route(overlay, '/v1/control-operations/owned')
+    assert ('GET', '/v1/runtime/skills?q=owned') in overlay._calls
+
+
+def test_tasks_mutations_forward_only_supported_existing_actions(monkeypatch):
+    root = pathlib.Path(__file__).resolve().parents[4] / "jaeger_ai/features/webui"
+    sys.path.insert(0, str(root))
+    try:
+        spec = importlib.util.spec_from_file_location("_task_proxy", root / "api/jaeger_agents.py")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+    finally:
+        sys.path.pop(0)
+    calls = []
+    monkeypatch.setattr(mod, "_proxy", lambda h, m, p, b=None, **k: calls.append((m, p, b)) or True)
+    monkeypatch.setattr(mod, "_sessions_route", lambda *a: False, raising=False)
+    handler = SimpleNamespace(_json_body_bytes=b'{"expected_updated_at":42}')
+    for method, suffix in (("PATCH", "owned"), ("POST", "owned/approve"), ("POST", "owned/cancel")):
+        assert mod.route(handler, urlparse('/v1/tasks/' + suffix), method)
+    assert calls == [(m, '/v1/tasks/' + s, handler._json_body_bytes) for m, s in (("PATCH", "owned"), ("POST", "owned/approve"), ("POST", "owned/cancel"))]
+    assert not mod.route(handler, urlparse('/v1/tasks/owned/delete'), 'POST')

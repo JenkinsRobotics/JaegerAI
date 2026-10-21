@@ -74,3 +74,21 @@ async def test_proposal_edit_invalidates_old_approval(gateway):
     pending = gateway.store.list_pending_approvals()
     assert len(pending) == 1 and "revised" in pending[0]["prompt"]
     assert not gateway.task_owner.store.get_task(tid).provenance["authorized"]
+
+
+@pytest.mark.asyncio
+async def test_paused_schedule_cancel_and_restore_preserve_definition_without_running(gateway):
+    from jaeger_ai.core.runtime import schedules
+    body = {'operation_id': 'recover-create', 'name': 'recoverable', 'prompt': 'Keep this definition', 'schedule': '0 9 * * *'}
+    assert (await call(gateway, '/v1/schedules/{action}', action='create', body=body))[0] == 200
+    for action in ('pause', 'delete'):
+        assert (await call(gateway, '/v1/schedules/{action}', action=action, body={'operation_id': 'recover-' + action, 'job_id': 'recoverable'}))[0] == 200
+    assert schedules.list_jobs()['schedules'] == []
+    deleted = (await call(gateway, '/v1/schedules', method='GET', query={'include_deleted': '1'}))[1]['jobs']
+    assert len(deleted) == 1 and deleted[0]['state'] == 'cancelled' and not deleted[0]['enabled']
+    assert deleted[0]['prompt'] == 'Keep this definition'
+    assert (await call(gateway, '/v1/schedules/{action}', action='create', body={**body, 'operation_id': 'replacement-attempt'}))[0] == 400
+    assert (await call(gateway, '/v1/schedules/{action}', action='restore', body={'operation_id': 'recover-restore', 'job_id': 'recoverable'}))[0] == 200
+    restored = schedules.list_jobs()['schedules'][0]
+    assert restored['status'] == 'paused' and restored['prompt'] == 'Keep this definition'
+    assert gateway.task_owner.store.list_tasks() == []

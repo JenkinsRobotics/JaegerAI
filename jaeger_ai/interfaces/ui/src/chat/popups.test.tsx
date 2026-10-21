@@ -83,7 +83,10 @@ describe("composer + and message menus", () => {
     expect(document.querySelectorAll('[aria-label^="React "]').length).toBe(5);
     const reply = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((n) => n.textContent?.includes("Reply"))!;
     await act(async () => { reply.click(); });
-    expect(el.querySelector<HTMLTextAreaElement>(".jg-composer__input")!.value).toBe("> Hi! Done.\n\n");
+    expect(el.querySelector<HTMLTextAreaElement>(".jg-composer__input")!.value).toBe("");
+    expect(el.querySelector('[aria-label="Quoted reply"]')?.textContent).toContain("Hi! Done.");
+    await act(async () => el.querySelector<HTMLButtonElement>('[aria-label="Cancel reply"]')!.click());
+    expect(el.querySelector('[aria-label="Quoted reply"]')).toBeNull();
     await act(async () => { bubble.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 20, clientY: 20 })); });
     await act(async () => { document.querySelector<HTMLButtonElement>('[aria-label="React 👍"]')!.click(); });
     expect(document.querySelector('[data-turn-id="t1"] .jg-reaction')?.textContent).toBe("👍");
