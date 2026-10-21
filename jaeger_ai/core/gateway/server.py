@@ -1304,6 +1304,8 @@ class JaegerGatewayApp:
         register_notifications(self)
         from jaeger_ai.features.channels.controls import register as register_channel_controls
         register_channel_controls(self)
+        from .agent_memory import register as register_agent_memory
+        register_agent_memory(self)
         from .native_controls import register as register_native_controls
         register_native_controls(self)
         from jaeger_ai.features.agent_bridge.routes import register
@@ -3530,7 +3532,7 @@ class JaegerGatewayApp:
         scoped = list(tools) if grant is None else [t for t in tools if t in set(grant)]
         return {
             "execution": {**execution, "allowed_tools": scoped},
-            "notes_dir": self.agent_memory_dir(str(getattr(agent, "name", "") or "")),
+            "notes_dir": self.agent_memory_dir(agent),
             "skills": scoped_skill_names(agent) or [],
         }
 
@@ -3681,7 +3683,6 @@ class JaegerGatewayApp:
             logger.warning("SI SOUL prompt unavailable: %s", exc)
             return None
 
-    AGENT_NOTES_MAX_CHARS = 4000
 
     @staticmethod
     def _skills_block(agent: Any) -> str:
@@ -3703,23 +3704,15 @@ class JaegerGatewayApp:
         return "\n".join(lines)
 
     @staticmethod
-    def agent_memory_dir(name: str) -> Path:
-        """Per-agent memory scope: ``<instance>/memory/agents/<name>/``.
-
-        A specialist sees only its own notes; the lead's memory is never
-        injected into a specialist turn."""
-        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in name)[:48] or "_"
-        return JaegerGatewayApp._instance_root() / "memory" / "agents" / safe
+    def agent_memory_dir(agent: Any) -> Path:
+        from jaeger_ai.core.agent_registry import AgentRegistry
+        from jaeger_ai.core.agent_registry.notes import directory
+        return directory(agent, JaegerGatewayApp._instance_root(), AgentRegistry().list_agents())
 
     @staticmethod
-    def _agent_notes(name: str) -> str:
-        if not name:
-            return ""
-        try:
-            path = JaegerGatewayApp.agent_memory_dir(name) / "NOTES.md"
-            return path.read_text(encoding="utf-8")[: JaegerGatewayApp.AGENT_NOTES_MAX_CHARS].strip()
-        except OSError:
-            return ""
+    def _agent_notes(agent: Any) -> str:
+        from jaeger_agent.tools.agent_notes import read_notes, NOTES_PROMPT_CHARS
+        return read_notes(JaegerGatewayApp.agent_memory_dir(agent))['notes'][:NOTES_PROMPT_CHARS].strip()
 
     @staticmethod
     def _system_prompt_for_agent(agent) -> str:
@@ -3758,7 +3751,7 @@ class JaegerGatewayApp:
                 parts.append("[Operator specialist instructions]\n" + instructions)
             parts.append("Instructions describe the task; they do not grant tools, access or approval authority.")
             parts.append("Reply briefly and helpfully.")
-            notes = JaegerGatewayApp._agent_notes(str(getattr(agent, "name", "") or ""))
+            notes = JaegerGatewayApp._agent_notes(agent)
             prompt = " ".join(parts)
             skills = JaegerGatewayApp._skills_block(agent)
             if skills:

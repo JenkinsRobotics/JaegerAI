@@ -253,3 +253,10 @@ def test_channel_controls_proxy_preserves_known_actions(overlay):
         assert _route(overlay,path,'POST')
         assert overlay._calls[-1]==('POST',path)
     assert not _route(overlay,'/v1/channels/telegram/new-token','POST')
+
+
+def test_specialist_memory_proxy_preserves_canonical_identity(overlay):
+    for method in ('GET','POST'):
+        assert _route(overlay,'/v1/agents/native%3Abuilder/memory',method)
+        assert overlay._calls[-1]==(method,'/v1/agents/native%3Abuilder/memory')
+    assert not _route(overlay,'/v1/agents/native%3Abuilder%2Fother/memory','POST')
