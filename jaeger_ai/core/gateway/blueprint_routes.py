@@ -40,7 +40,11 @@ async def _body(request: web.Request) -> dict[str, Any]:
 def _instance_root():
     from jaeger_ai.core.entity.runtime import EntityRuntime
     runtime = EntityRuntime._instance  # never get_singleton(): must not start a resident
-    return getattr(runtime, "layout", None)
+    layout = getattr(runtime, "layout", None)
+    if layout is None:
+        return None
+    from jaeger_ai.core.instance.first_boot import instance_dir
+    return instance_dir(layout)  # InstanceLayout or path -> Path
 
 
 def _publish(gateway, event: str, data: dict[str, Any]) -> None:
