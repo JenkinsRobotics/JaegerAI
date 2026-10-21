@@ -1,3 +1,4 @@
+import { modelContext } from "./modelContext";
 /* Gateway SSE event -> ChatPart mapping. ONE place, on purpose: this file is
  * meant to be regenerated from the gateway's events.schema.json later.
  * Event names follow core/gateway/event_bus.py EVENT_TYPES. */
@@ -16,6 +17,7 @@ const str = (value: unknown): string => (typeof value === "string" ? value : val
 export function mapEvent(event: GatewayEvent, agentName: (id: string) => string = (id) => id): MappedEvent | null {
   const p: Payload = (event.payload && typeof event.payload === "object" ? event.payload : event) as Payload;
   switch (event.event) {
+    case "turn.context": return {parts: [{kind: "modelContext", outline: modelContext(p.outline)}]};
     case "agent.knowledge": {
       const documents = Array.isArray(p.documents) ? p.documents.filter((doc): doc is { id: string; revision: number; digest: string; title: string } => Boolean(doc && typeof doc === "object" && typeof doc.id === "string" && typeof doc.revision === "number" && typeof doc.digest === "string" && typeof doc.title === "string")) : [];
       return { parts: [{ kind: "knowledgeContext", documents }] };

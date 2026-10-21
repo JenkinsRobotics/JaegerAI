@@ -9,6 +9,7 @@ export type HostKind = "vscode" | "native" | "web";
 export type ToolInvocationState = "streaming" | "waitingForConfirmation" | "executing" | "completed" | "cancelled" | "failed" | "denied" | "rejected" | "unsupported" | "unknown";
 
 export type ChatPart =
+  | { kind: "modelContext"; outline: import("./modelContext").ModelContextOutline }
   | { kind: "knowledgeContext"; documents: { id: string; revision: number; digest: string; title: string }[] }
   | { kind: "markdownContent"; text: string }
   | { kind: "thinking"; text: string; durationMs?: number }

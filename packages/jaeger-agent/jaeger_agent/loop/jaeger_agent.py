@@ -1761,6 +1761,7 @@ class JaegerAgent:
                     formatted = adapter.format_messages(
                         self.messages, self.tools, self.system_prompt,
                     )
+                    self.callbacks.on_model_input(formatted)
                     with first_progress_grace(self.first_progress_timeout_s):
                         raw = adapter.call(
                             formatted,

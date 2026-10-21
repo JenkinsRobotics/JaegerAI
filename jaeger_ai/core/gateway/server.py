@@ -3965,6 +3965,7 @@ class JaegerGatewayApp:
         system_prompt: str | None = None,
         history: list[dict[str, Any]] | None = None,
         attachments: list[dict[str, Any]] | None = None,
+        context_ids: tuple[str, str] | None = None,
     ) -> str:
         """Live text turn via locked Ollama — never routes through :8813."""
         target_model = model or DEFAULT_OLLAMA_MODEL
@@ -4085,6 +4086,16 @@ class JaegerGatewayApp:
 
         timeout = ClientTimeout(total=90)
         async with ClientSession(timeout=timeout) as session:
+            if context_ids is not None:
+                from jaeger_agent.loop.input_outline import input_outline
+                try:
+                    self.event_bus.publish(context_ids[0], "turn.context", {
+                        "request_id": context_ids[1],
+                        "turn_id": (self.store.get_request(context_ids[1]) or {}).get("turn_id") or context_ids[1],
+                        "outline": input_outline(payload),
+                    })
+                except Exception:
+                    logger.debug("Model context observer unavailable", exc_info=False)
             async with session.post(
                 f"{LOCKED_OLLAMA_URL}/api/chat", json=payload, headers=ollama_headers
             ) as resp:
@@ -4315,7 +4326,13 @@ class JaegerGatewayApp:
             flush()
             end_reasoning()
 
+        def on_model_input(outline: dict[str, Any]) -> None:
+            self.event_bus.publish(session_id, "turn.context", {
+                **ids, "outline": outline,
+            })
+
         return AgentCallbacks(
+            model_input=on_model_input,
             stream_delta=on_delta,
             reasoning=on_reasoning,
             tool_progress=on_tool_progress,
@@ -4651,6 +4668,7 @@ class JaegerGatewayApp:
                                 current, admitted_request,
                             ),
                             attachments=session_atts,
+                            context_ids=(session_id, request_id or turn_id),
                         ),
                         loop,
                     )
@@ -4717,6 +4735,7 @@ class JaegerGatewayApp:
                         system_prompt=no_tools_lane_system_prompt(system_prompt),
                         history=self._history_before_admitted_user(current, admitted_request),
                         attachments=self._turn_attachments(session_id, execution),
+                        context_ids=(session_id, request_id or turn_id),
                     ),
                     loop,
                 )
