@@ -60,7 +60,33 @@ export interface SessionQueue {
   reorder(sessionId: string, order: string[]): Promise<unknown>;
   status(sessionId: string, requestId: string): Promise<RequestSnapshot>;
 }
+export interface SpecialistSettings { specialty: string; summary: string; instructions: string }
+export interface SpecialistConfiguration extends SpecialistSettings { agent_id: string; revision: number; editable: boolean; template?: { id: string; version: number } }
+export interface AgentTemplate extends SpecialistSettings { id: string; version: number; name: string; tools_granted: false }
+export interface SpecialistControls {
+  templates(): Promise<{ templates: AgentTemplate[] }>;
+  read(id: string): Promise<SpecialistConfiguration>;
+  save(id: string, body: { expected_revision: number; settings: SpecialistSettings }): Promise<SpecialistConfiguration>;
+}
+export interface ToolInventory {
+  tools: { name: string; description: string; toolset: string; source: string; server: string | null; side_effect: string; permission_tier: string; beta: boolean; dangerous: boolean; availability: string }[];
+  count: number; servers: { name: string; state: string; tool_count: number }[];
+  mcp_initialized: boolean; scope: string; execution_authorized: false;
+}
+export interface GatewayDiagnostics {
+  sessions: number; requests: Record<string, number>; approvals: Record<string, number>; handoffs: Record<string, number>;
+  unknown_requests: { request_id: string; session_id: string; status: string }[]; unknown_list_limit: number;
+  process_id: number; server_module_sha256: string; fingerprint_scope: string; observed_at: number; read_only: true;
+}
+export interface MessageSearchPage {
+  agent_id: string; next_before: string | null; matching: string;
+  matches: { message_id: string; session_id: string; role: string; kind: string; title: string; timestamp: number; snippet: string; content: string; truncated: boolean }[];
+}
 export interface JaegerSource {
+  searchMessages?(agentId: string, query: string, before?: string): Promise<MessageSearchPage>;
+  diagnostics?(): Promise<GatewayDiagnostics>;
+  tools?(query?: string): Promise<ToolInventory>;
+  specialistControls?: SpecialistControls;
   sessionQueue?: SessionQueue;
   messageReactions?: {
     load(sessionId: string): Promise<ReactionSnapshot>;
@@ -90,7 +116,7 @@ export interface JaegerSource {
   /** Agent context-menu actions (agentActions.ts); optional, gated by agentCaps. */
   agentActions?: AgentActions;
   agentCreationStatus?(operationId: string): Promise<{ receipt: { ok: boolean; agent?: Agent; error?: string } | null }>;
-  createAgent(body: { operation_id?: string; name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }): Promise<Agent>;
+  createAgent(body: { template_id?: string; template_version?: number; operation_id?: string; name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }): Promise<Agent>;
   /** The specialist's side of one hand-off: its worker session and messages. */
   replyHandoff?(handoffId: string, task: string, requestId: string): Promise<Handoff>;
   handoffExchange(handoffId: string): Promise<HandoffExchange>;

@@ -190,3 +190,17 @@ def test_tasks_mutations_forward_only_supported_existing_actions(monkeypatch):
         assert mod.route(handler, urlparse('/v1/tasks/' + suffix), method)
     assert calls == [(m, '/v1/tasks/' + s, handler._json_body_bytes) for m, s in (("PATCH", "owned"), ("POST", "owned/approve"), ("POST", "owned/cancel"))]
     assert not mod.route(handler, urlparse('/v1/tasks/owned/delete'), 'POST')
+
+
+def test_template_and_specialist_settings_proxy_preserves_owner_contract(overlay):
+    assert _route(overlay, '/v1/agents/native%3Aowned/messages/search?q=literal%25&before=50')
+    assert overlay._calls[-1] == ('GET', '/v1/agents/native%3Aowned/messages/search?q=literal%25&before=50')
+    assert _route(overlay, '/v1/runtime/diagnostics')
+    assert overlay._calls[-1] == ('GET', '/v1/runtime/diagnostics')
+    assert _route(overlay, '/v1/runtime/tools?q=owned')
+    assert overlay._calls[-1] == ('GET', '/v1/runtime/tools?q=owned')
+    assert _route(overlay, '/v1/agent-templates')
+    assert _route(overlay, '/v1/agents/native%3Aowned/configuration')
+    assert _route(overlay, '/v1/agents/native%3Aowned/configuration', 'PATCH')
+    assert overlay._calls[-3:] == [('GET', '/v1/agent-templates'), ('GET', '/v1/agents/native%3Aowned/configuration'), ('PATCH', '/v1/agents/native%3Aowned/configuration')]
+    assert not _route(overlay, '/v1/agents/native%3Aowned%2Fother/configuration', 'PATCH')

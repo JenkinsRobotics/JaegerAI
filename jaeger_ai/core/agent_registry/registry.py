@@ -347,6 +347,29 @@ class AgentRegistry:
         self._save()
         return record
 
+    def configure_specialist(self, agent_id: str, values: dict[str, Any], expected_revision: int) -> AgentRecord:
+        """Edit prompt settings on a custom specialist; never its identity/grants.
+
+        Gateway handlers call synchronously. Reload before CAS and atomically
+        replace the existing registry file; no session or instance migration.
+        """
+        from .configuration import editable, settings, validate_settings
+        values = validate_settings(values)
+        self._load()
+        record = self.get_agent(agent_id)
+        if record is None or record.id != agent_id:
+            raise KeyError("Agent not found")
+        if not editable(record):
+            raise PermissionError("Built-in, lead and external definitions are read-only")
+        if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision != settings(record)['revision']:
+            raise RuntimeError("Specialist configuration changed; reload before saving")
+        meta = dict(record.metadata)
+        meta.update(specialty=values['specialty'], summary=values['summary'], operator_instructions=values['instructions'], configuration_revision=expected_revision + 1)
+        record.metadata = meta
+        self._data['agents'][record.id] = record.to_dict()
+        self._save()
+        return record
+
     def register_third_party(
         self,
         name: str,

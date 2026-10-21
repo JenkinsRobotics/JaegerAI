@@ -57,6 +57,9 @@ export class GatewayClient implements JaegerSource {
     mutate: (action, id, body) => this.json(action === "create" ? "/v1/library/documents" : `/v1/library/documents/${encodeURIComponent(id)}/${action}`, body),
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
   };
+  searchMessages(agentId: string, query: string, before?: string) { return this.json<import("./source").MessageSearchPage>(`/v1/agents/${encodeURIComponent(agentId)}/messages/search?q=${encodeURIComponent(query)}${before ? `&before=${encodeURIComponent(before)}` : ""}`); }
+  diagnostics() { return this.json<import("./source").GatewayDiagnostics>("/v1/runtime/diagnostics"); }
+  tools(query = "") { return this.json<import("./source").ToolInventory>(`/v1/runtime/tools?q=${encodeURIComponent(query)}`); }
   skills(query = "") { return this.json<{ skills: { name: string; category: string; description: string; lifecycle: string }[]; count: number }>(`/v1/runtime/skills?q=${encodeURIComponent(query)}`); }
   schedules: ScheduleControls = {
     list: () => this.json("/v1/schedules?include_deleted=1"),
@@ -117,8 +120,13 @@ export class GatewayClient implements JaegerSource {
   async updateSession(id: string, body: { title?: string; archived?: boolean }) {
     await this.json(`/v1/sessions/${encodeURIComponent(id)}`, body, "PATCH");
   }
+  readonly specialistControls: import("./source").SpecialistControls = {
+    templates: () => this.json("/v1/agent-templates"),
+    read: id => this.json(`/v1/agents/${encodeURIComponent(id)}/configuration`),
+    save: (id, body) => this.json(`/v1/agents/${encodeURIComponent(id)}/configuration`, body, "PATCH"),
+  };
   agentCreationStatus(operationId: string) { return this.json<{ receipt: { ok: boolean; agent?: Agent; error?: string } | null }>(`/v1/control-operations/${encodeURIComponent(operationId)}`); }
-  createAgent(body: { operation_id?: string; name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }) {
+  createAgent(body: { template_id?: string; template_version?: number; operation_id?: string; name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }) {
     return this.json<Agent>("/v1/agents", { kind: "jaeger_native", role: "specialist", ...body });
   }
   readonly agentActions: AgentActions = {

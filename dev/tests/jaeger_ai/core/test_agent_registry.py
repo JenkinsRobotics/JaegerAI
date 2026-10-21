@@ -157,6 +157,109 @@ class TestGatewayAgentsAPI(_CallerAuthedTestCase):
         assert unknown.status == 409
         assert self.gateway_app._registry().get_agent("native:not-created") is None
 
+    async def test_template_configuration_preserves_identity_policy_and_history(self):
+        from jaeger_ai.core.gateway.caller_auth import required_scope, client_headers
+        inventory = await self.client.get('/v1/runtime/tools')
+        assert inventory.status == 200
+        assert (await inventory.json())['execution_authorized'] is False
+        denied_inventory = await self.client.get('/v1/runtime/tools', headers=client_headers('a2a'))
+        assert denied_inventory.status == 403
+        templates = await self.client.get('/v1/agent-templates')
+        template = (await templates.json())['templates'][0]
+        assert template['tools_granted'] is False
+        body = {'name': 'owned-template', 'role': 'specialist', 'operation_id': 'owned-template-command',
+                'template_id': template['id'], 'template_version': template['version']}
+        created = await self.client.post('/v1/agents', json=body)
+        assert created.status == 201
+        agent = await created.json()
+        assert agent['metadata']['template'] == {'id': template['id'], 'version': template['version']}
+        assert agent['metadata']['allowed_tools'] == []
+        session = 'owned-config-history'
+        self.temp_store.ensure_session(session, metadata={'agent_id': agent['id']})
+        self.temp_store.append_message(session, 'user', 'Preserve this history')
+        before = self.temp_store.get_session(session)
+        route = '/v1/agents/' + agent['id'] + '/configuration'
+        current = await self.client.get(route)
+        config = await current.json()
+        assert config['editable'] and config['revision'] == 0
+        values = {'specialty': 'Evidence review', 'summary': 'Summarize supplied material', 'instructions': 'Label uncertainty; do not invent evidence.'}
+        updated = await self.client.patch(route, json={'expected_revision': 0, 'settings': values})
+        assert updated.status == 200 and (await updated.json())['revision'] == 1
+        conflict = await self.client.patch(route, json={'expected_revision': 0, 'settings': {**values, 'instructions': 'Stale'}})
+        assert conflict.status == 409
+        unsafe = await self.client.patch(route, json={'expected_revision': 1, 'settings': {**values, 'allowed_tools': ['terminal']}})
+        assert unsafe.status == 400
+        protected = await self.client.patch('/v1/agents/native:builder/configuration', json={'expected_revision': 0, 'settings': values})
+        assert protected.status == 403
+        denied = await self.client.patch(route, json={'expected_revision': 1, 'settings': values}, headers=client_headers('a2a'))
+        assert denied.status == 403
+        assert required_scope('PATCH', '/v1/agents/{id}/configuration') == 'admin'
+        reopened = self.gateway_app._registry().get_agent(agent['id'])
+        assert reopened.id == agent['id'] and reopened.role.value == 'specialist'
+        assert reopened.metadata['allowed_tools'] == []
+        assert reopened.metadata['template'] == agent['metadata']['template']
+        assert 'Label uncertainty' in self.gateway_app._system_prompt_for_agent(reopened)
+        assert self.temp_store.get_session(session) == before
+        assert self.temp_store.primary_agent_id() == 'native:jaeger'
+        unknown_template = await self.client.post('/v1/agents', json={**body, 'name': 'owned-invalid-template', 'operation_id': 'owned-invalid-template', 'template_version': 999})
+        assert unknown_template.status == 400
+        assert self.gateway_app._registry().get_agent('native:owned-invalid-template') is None
+        injected = await self.client.post('/v1/agents', json={**body, 'name': 'owned-template-grant', 'operation_id': 'owned-template-grant', 'metadata': {'allowed_tools': ['terminal']}})
+        assert injected.status == 400
+        assert self.gateway_app._registry().get_agent('native:owned-template-grant') is None
+
+    async def test_diagnostics_observes_unknown_without_mutation_or_text_exposure(self):
+        import hashlib
+        from jaeger_ai.core.gateway import server as module
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        self.temp_store.ensure_session('owned-diagnostic-session')
+        self.temp_store.admit_request('owned-diagnostic-session', 'PRIVATE-FIXTURE-TEXT', request_id='owned-diagnostic-unknown')
+        self.temp_store.mark_request_status('owned-diagnostic-unknown', 'execution_unknown')
+        before = self.temp_store.get_request('owned-diagnostic-unknown')
+        response = await self.client.get('/v1/runtime/diagnostics')
+        assert response.status == 200
+        wire = await response.json()
+        assert wire['read_only'] is True
+        assert wire['requests']['execution_unknown'] == 1
+        assert wire['unknown_requests'] == [{'request_id': 'owned-diagnostic-unknown', 'session_id': 'owned-diagnostic-session', 'status': 'execution_unknown'}]
+        assert 'PRIVATE-FIXTURE-TEXT' not in json.dumps(wire)
+        assert wire['server_module_sha256'] == hashlib.sha256(Path(module.__file__).read_bytes()).hexdigest()
+        assert self.temp_store.get_request('owned-diagnostic-unknown') == before
+        denied = await self.client.get('/v1/runtime/diagnostics', headers=client_headers('a2a'))
+        assert denied.status == 403
+
+    async def test_message_search_scopes_agent_history_and_pages_without_execution(self):
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
+        agent = self.gateway_app._registry().create_agent('owned-search', role='specialist')
+        for session in ('owned-search-home', 'owned-search-older'):
+            self.temp_store.ensure_session(session, metadata={'agent_id': agent.id})
+            for index in range(12):
+                self.temp_store.append_message(session, 'user', f'Needle {index}')
+        legacy = specialist_session(agent.id, 'owned-child')
+        self.temp_store.ensure_session(legacy)
+        self.temp_store.append_message(legacy, 'assistant', 'Needle legacy child')
+        self.temp_store.ensure_session('owned-search-foreign', metadata={'agent_id': 'native:other'})
+        self.temp_store.append_message('owned-search-foreign', 'user', 'Needle FOREIGN')
+        self.temp_store.append_message('owned-search-home', 'user', '100% literal match')
+        url = '/v1/agents/' + agent.id + '/messages/search'
+        first = await self.client.get(url, params={'q': 'needle'})
+        page = await first.json()
+        assert first.status == 200 and page['agent_id'] == agent.id and len(page['matches']) == 20
+        next_page = await self.client.get(url, params={'q': 'needle', 'before': page['next_before']})
+        older = await next_page.json()
+        assert len(older['matches']) == 5 and older['next_before'] is None
+        hits = page['matches'] + older['matches']
+        assert len({hit['message_id'] for hit in hits}) == 25
+        assert all('FOREIGN' not in hit['content'] for hit in hits)
+        literal = await self.client.get(url, params={'q': '%'})
+        assert len((await literal.json())['matches']) == 1
+        invalid = await self.client.get(url, params={'q': 'needle', 'before': '-1'})
+        assert invalid.status == 400
+        forbidden = await self.client.get(url, params={'q': 'needle'}, headers=client_headers('a2a'))
+        assert forbidden.status == 403
+        assert not self.temp_store.list_requests()
+
     async def test_agents_catalog_create_and_activate(self):
         resp = await self.client.request("GET", "/health")
         assert resp.status == 200

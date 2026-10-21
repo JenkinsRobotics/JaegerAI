@@ -2,7 +2,9 @@
 import type { Agent } from "../api/types";
 import { label } from "./agentsLogic";
 
-export function AgentManagement({ agents, busy, onRename, onArchive, onResetName, onPin, onImportPins, onPrimary, onProfile, onHistory, onIcon }: {
+export function AgentManagement({ agents, busy, onRename, onArchive, onResetName, onPin, onImportPins, onPrimary, onProfile, onHistory, onIcon, onConfigure, onSearch }: {
+  onSearch?: (agent: Agent) => void;
+  onConfigure?: (agent: Agent) => void;
   onIcon?: (agent: Agent, preset: string | null) => void;
   onPrimary?: (agent: Agent) => void; onProfile?: (agent: Agent) => void; onHistory?: (agent: Agent) => void;
   agents: Agent[]; busy?: boolean; onImportPins?: () => void; onRename: (agent: Agent) => void;
@@ -21,6 +23,8 @@ export function AgentManagement({ agents, busy, onRename, onArchive, onResetName
       <div className="jg-sheet__row"><span className="jg-sheet__row-label"><strong>{label(agent)}</strong><small>{agent.id}{agent.primary ? " · Primary" : ""}{agent.deleted ? " · Deleted (recoverable)" : agent.archived ? " · Hidden" : ""}</small></span>
         <div className="jg-agent-management-actions">
           {onIcon && agent.ui_actions?.icon && <label>Sidebar icon<select aria-label={`Icon for ${label(agent)}`} value={agent.icon_preset ?? ""} disabled={busy} onChange={(e) => onIcon(agent, e.target.value || null)}><option value="">Original avatar</option>{agent.icon_choices?.map((id) => <option key={id} value={id}>{id.replaceAll('-', ' ')}</option>)}</select></label>}
+          {onSearch && <button type="button" onClick={() => onSearch(agent)}>Search messages</button>}
+          {onConfigure && <button type="button" onClick={() => onConfigure(agent)}>Configure specialist</button>}
           {onProfile && <button type="button" onClick={() => onProfile(agent)}>Profile</button>}
           {onHistory && <button type="button" onClick={() => onHistory(agent)}>History</button>}
           {onPrimary && !agent.primary && agent.ui_actions?.primary && <button type="button" disabled={busy} onClick={() => onPrimary(agent)}>Make primary</button>}

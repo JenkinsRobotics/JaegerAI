@@ -584,3 +584,28 @@ def call_mcp_tool(qualified_name: str, arguments: dict[str, Any]) -> dict[str, A
     if _GLOBAL_REGISTRY is None:
         return {"error": "MCP not initialized — pass --with-mcp"}
     return _GLOBAL_REGISTRY.call(qualified_name, arguments)
+
+
+def runtime_inventory() -> dict[str, Any]:
+    """Snapshot loaded connections/tools without connecting or exposing config.
+
+    Reuse loaded secret values for redaction; never return command, URL, args,
+    environment, headers, input defaults or connection exception strings.
+    """
+    from jaeger_ai.core.redaction import redact_text
+    registry = get_registry()
+    if registry is None:
+        return {"initialized": False, "servers": [], "tools": []}
+    clients = list(registry._clients.items())
+    secrets = set()
+    for _, client in clients:
+        secrets.update(client.config.headers.values())
+        secrets.update(value for key, value in client.config.env.items() if _SECRET_NAME.search(key))
+    def safe(value: str) -> str:
+        return redact_text(_redact_known_secrets(str(value), secrets))[:1000]
+    specs = registry.list_tools()
+    servers = [{"name": safe(name), "state": "loaded_not_probed", "tool_count": sum(t.server_name == name for t in specs)} for name, _ in clients]
+    loaded_names = {name for name, _ in clients}
+    servers.extend({"name": safe(name), "state": "connection_failed", "tool_count": 0} for name in connection_errors() if name not in loaded_names)
+    tools = [{"agent_name": t.agent_name, "display_name": safe(t.agent_name), "server": safe(t.server_name), "description": safe(t.description)} for t in specs]
+    return {"initialized": True, "servers": servers, "tools": tools}

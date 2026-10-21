@@ -1,7 +1,7 @@
 /* Owned fixture UI→authenticated proxy→canonical presentation store; no execution changes. */
 import {readFile,writeFile,mkdir} from 'node:fs/promises';import {pathToFileURL} from 'node:url';import path from 'node:path';import {randomUUID} from 'node:crypto';
 const [modulePath,listenerPath,evidence]=process.argv.slice(2);const {chromium}=await import(pathToFileURL(path.resolve(modulePath)));const target=JSON.parse(await readFile(listenerPath,'utf8'));
-if(!target.state.includes('/.jaeger/verification/blueprint-')||[8790,33418].includes(target.webui_port))throw Error('Refuse production');
+if(!target.state.includes('/.cache/jaeger/fixtures/blueprint-')||[8790,33418].includes(target.webui_port))throw Error('Refuse production');
 await mkdir(evidence,{recursive:true});const b=await chromium.launch({headless:true});const p=await b.newPage({baseURL:`http://127.0.0.1:${target.webui_port}`,viewport:{width:1280,height:900}});const checks=[];
 const api=async(url,data,method)=>{const r=await p.request.fetch(url,{method:method??(data?'POST':'GET'),data});if(!r.ok())throw Error(`${url} ${r.status()}`);return r.json();};
 try{

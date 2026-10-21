@@ -8,7 +8,7 @@ const [modulePath, listenerPath, evidence]=process.argv.slice(2);
 if(!modulePath||!listenerPath||!evidence)throw new Error('Require module, owned listener and external evidence paths');
 const {chromium}=await import(pathToFileURL(path.resolve(modulePath)));
 const target=JSON.parse(await readFile(listenerPath,'utf8'));
-if(!target.state.includes('/.jaeger/verification/')||[8790,33418].includes(target.webui_port)||[8790,33418].includes(target.gateway_port))throw new Error('Refuse production/nonfixture target');
+if(!target.state.includes('/.cache/jaeger/fixtures/blueprint-')||[8790,33418].includes(target.webui_port)||[8790,33418].includes(target.gateway_port))throw new Error('Refuse production/nonfixture target');
 await mkdir(evidence,{recursive:true});
 const base=`http://127.0.0.1:${target.webui_port}`;
 const browser=await chromium.launch({headless:true});
