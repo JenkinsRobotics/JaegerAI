@@ -135,6 +135,7 @@ export class GatewayClient implements JaegerSource {
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
   };
   readonly sessionFiles: import('./source').SessionFiles = {
+    preview:(sessionId,id)=>this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(id)}?view=preview`),
     list: sessionId => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files`),
     read: (sessionId, id) => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(id)}`),
   };
