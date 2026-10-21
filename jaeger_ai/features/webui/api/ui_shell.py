@@ -49,6 +49,44 @@ def _send(handler, path: Path, cache: str, ctype: str | None = None) -> bool:
     return True
 
 
+def _session_csrf_token(handler) -> str | None:
+    """The CSRF token for this browser's verified session cookie, else None."""
+    try:
+        from api.auth import csrf_token_for_session, is_auth_enabled, parse_cookie, verify_session
+    except Exception:  # noqa: BLE001 — no auth module: nothing to hand out
+        return None
+    if not is_auth_enabled():
+        return None
+    cookie = parse_cookie(handler)
+    if not cookie or not verify_session(cookie):
+        return None
+    return csrf_token_for_session(cookie)
+
+
+def _send_index(handler, index: Path) -> bool:
+    """index.html, carrying the session CSRF token as a meta tag (no inline
+    script, so CSP is unchanged). The UI echoes it in ``X-Hermes-CSRF-Token``
+    on unsafe requests, which ``routes._check_csrf`` requires for cookie auth."""
+    import html as _html
+
+    token = _session_csrf_token(handler)
+    if not token:
+        return _send(handler, index, _NO_STORE)
+    body = index.read_bytes()
+    meta = f'<meta name="jaeger-csrf" content="{_html.escape(token, quote=True)}">'.encode()
+    lower = body.lower()
+    at = lower.find(b"<head>")
+    body = body[: at + 6] + meta + body[at + 6:] if at >= 0 else meta + body
+    handler.send_response(200)
+    handler.send_header("Content-Type", _MIME[".html"])
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", _NO_STORE)
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    handler.end_headers()
+    handler.wfile.write(body)
+    return True
+
+
 def _send_kill_switch(handler) -> bool:
     body = KILL_SWITCH_SW
     handler.send_response(200)
@@ -119,7 +157,7 @@ def serve(handler, parsed) -> bool:
             return True
         return False
     if path in ("/", "/index.html") or (path.startswith("/session/") and path.count("/") == 2):
-        return _send(handler, root / "index.html", _NO_STORE)
+        return _send_index(handler, root / "index.html")
     if path in ("/sw.js", "/static/sw.js"):
         return _send_kill_switch(handler)
     if path == "/static/manifest.json" or (path.startswith("/static/") and path.endswith(".webmanifest")):
