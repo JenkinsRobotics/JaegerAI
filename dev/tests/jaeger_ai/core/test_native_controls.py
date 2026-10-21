@@ -92,3 +92,26 @@ async def test_paused_schedule_cancel_and_restore_preserve_definition_without_ru
     restored = schedules.list_jobs()['schedules'][0]
     assert restored['status'] == 'paused' and restored['prompt'] == 'Keep this definition'
     assert gateway.task_owner.store.list_tasks() == []
+
+
+@pytest.mark.asyncio
+async def test_timezone_projection_revision_rejection_and_run_once_preserve_recurrence(gateway):
+    from jaeger_ai.core.runtime import schedules
+    body = {'operation_id':'zone-create','name':'zone-fixture','prompt':'Only fixture objective','schedule':'0 9 * * *','timezone':'America/New_York'}
+    assert (await call(gateway,'/v1/schedules/{action}',action='create',body=body))[0] == 200
+    job = (await call(gateway,'/v1/schedules',method='GET'))[1]['jobs'][0]
+    assert job['timezone_policy'] == 'America/New_York' and job['next_fire_at'] == job['next_run_at']
+    assert job['config_revision'] == 0
+    invalid = {**body,'job_id':job['name'],'expected_revision':0,'operation_id':'zone-invalid','timezone':'Invalid/Fixture'}
+    assert (await call(gateway,'/v1/schedules/{action}',action='update',body=invalid))[0] == 400
+    assert schedules.list_jobs()['schedules'][0]['next_run_at'] == job['next_run_at']
+    changed = {**invalid,'timezone':'Europe/London','operation_id':'zone-update'}
+    assert (await call(gateway,'/v1/schedules/{action}',action='update',body=changed))[0] == 200
+    assert (await call(gateway,'/v1/schedules/{action}',action='update',body={**changed,'operation_id':'zone-stale','prompt':'must not overwrite'}))[0] == 400
+    current = schedules.list_jobs()['schedules'][0]
+    assert current['timezone'] == 'Europe/London' and current['config_revision'] == 1 and current['prompt'] == body['prompt']
+    run = {'operation_id':'zone-run-once','job_id':job['name']}
+    first = await call(gateway,'/v1/schedules/{action}',action='run',body=run)
+    assert await call(gateway,'/v1/schedules/{action}',action='run',body=run) == first
+    assert len(gateway.task_owner.store.list_tasks()) == 1
+    assert schedules.list_jobs()['schedules'][0] == current

@@ -43,13 +43,13 @@ export interface ModelSettings {
   operation?(id:string):Promise<{receipt:ModelChoiceReceipt|null}>;
   save(sessionId: string, model: string | null): Promise<void>;
 }
-export interface ScheduleJob { id: string; name: string; prompt: string; cron: string; enabled: boolean; state: string; next_fire_at?: string }
+export interface ScheduleJob { id: string; name: string; prompt: string; cron: string; enabled: boolean; state: string; next_fire_at?: string; timezone?: string | null; timezone_policy?: string; config_revision?: number }
 export type ScheduleAction = "create" | "update" | "pause" | "resume" | "delete" | "restore" | "run";
 export interface ControlResult { execution_unknown?: boolean; ok: boolean; operation_id: string; result?: unknown; error?: string; http_status?: number }
 export interface ScheduleControls {
   list(): Promise<{ jobs: ScheduleJob[]; scheduler: string }>;
   history(name: string): Promise<{ tasks: Task[]; requests: RequestSnapshot[] }>;
-  mutate(action: ScheduleAction, body: { operation_id: string; job_id?: string; name?: string; prompt?: string; schedule?: string }): Promise<ControlResult>;
+  mutate(action: ScheduleAction, body: { operation_id: string; job_id?: string; name?: string; prompt?: string; schedule?: string; timezone?: string; expected_revision?: number }): Promise<ControlResult>;
   operation(id: string): Promise<{ receipt: ControlResult | null }>;
 }
 export interface LibraryDocument { id: string; title: string; content: string; digest: string; revision?: number; archived?: boolean; editable?: boolean; provenance?:Record<string,unknown> }
