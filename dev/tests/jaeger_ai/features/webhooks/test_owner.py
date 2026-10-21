@@ -56,7 +56,7 @@ def test_subscription_dedupe_scope_filters_out_of_order_and_reopen(gateway):
     older = owner.receive(gateway, event(eid='older-event'))
     assert older['ok']  # arrival history, no invented remote chronology
     assert owner.receive(gateway, event(prompt='Changed content'))['status'] == 'conflict'
-    for changes, reason in [({'sender': 'unauthorized'}, 'sender_filter_rejected'), ({'event_type': 'other'}, 'event_filter_rejected'), ({'authenticated': False}, 'shared_secret_required')]:
+    for changes, reason in [({'sender': 'unauthorized'}, 'sender_filter_rejected'), ({'event_type': 'other'}, 'event_filter_rejected'), ({'authenticated': False}, 'shared_secret_required'), ({'prompt': 'x' * 17000}, 'event_size_exceeded')]:
         denied = owner.receive(gateway, event(eid='reject-' + reason, **changes))
         assert denied['status'] == 'rejected' and denied['reason'] == reason
     assert len(gateway.task_owner.store.list_tasks()) == 3
