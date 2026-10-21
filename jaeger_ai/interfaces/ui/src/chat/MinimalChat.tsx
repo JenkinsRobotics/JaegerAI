@@ -533,7 +533,18 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   const checkingRequest = useRef(false);
   const observingRequest = useRef<string | undefined>(undefined);
   const [recoveryStatus, setRecoveryStatus] = useState<"checking" | "unknown" | "clear">(host instanceof WebHost ? "checking" : "clear");
-  const recoveryBlocked = recoveryStatus !== "clear";
+  // Only an in-flight check blocks the composer. An unknown outcome is shown with an explicit,
+  // never-replaying way forward (and the gateway acknowledges it on the next admitted turn).
+  const recoveryBlocked = recoveryStatus === "checking";
+  const [unknownRequest, setUnknownRequest] = useState<string | undefined>();
+  const [acknowledging, setAcknowledging] = useState(false);
+  const continueWithoutReplay = async () => {
+    if (!(host instanceof WebHost) || !session || !unknownRequest || acknowledging) return;
+    setAcknowledging(true);
+    try { await host.acknowledgeUnknown(session.id, unknownRequest); setUnknownRequest(undefined); setRecoveryStatus("clear"); }
+    catch (error) { setFileNote(`Could not acknowledge: ${String(error)}. Nothing was resent.`); }
+    finally { setAcknowledging(false); }
+  };
   const checkSavedRequest = async (silent = false) => {
     if (!(host instanceof WebHost) || !session || active || checkingRequest.current || observingRequest.current) return;
     checkingRequest.current = true;
@@ -543,7 +554,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     catch (error) { setFileNote(`Request lookup unavailable: ${String(error)}`); if (!silent) setRecoveryStatus("unknown"); return; }
     finally { checkingRequest.current = false; }
     if (!intent) { if (!silent) setRecoveryStatus("clear"); return; }
-    observingRequest.current = intent.requestId; setRecoveryStatus("checking");
+    observingRequest.current = intent.requestId; setRecoveryStatus("checking"); setUnknownRequest(intent.requestId);
     recovering.current = session.id;
     const turnId = intent.requestId;
     setSession(s => s && s.id === intent.sessionId ? { ...s, turns: [...s.turns.filter(t => t.turnId !== turnId), { turnId, requestId: intent.requestId, message: intent.text, state: "pending", parts: [] }] } : s);
@@ -559,6 +570,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       observingRequest.current = undefined;
       updateTurn(turnId, t => ({ ...t, state }));
       setRecoveryStatus(state === "unknown" ? "unknown" : "clear");
+      if (state !== "unknown") setUnknownRequest(undefined);
       setActive(null);
     });
   };
@@ -576,7 +588,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     const body = text.trim() || (attached.length ? `Attached: ${attached.map((f) => f.name).join(", ")}` : "");
     const quoteKey = quote ? JSON.stringify(quote) : undefined;
     const message = quote ? `${quote.text.split("\n").map(line => `> ${line}`).join("\n")}\n\n${body}` : body;
-    if (!body || !session || recoveryBlocked || preparingFiles || !draftReady || sending.current || active || session.turns.some((t) => t.state === "unknown")) return;
+    if (!body || !session || recoveryBlocked || preparingFiles || !draftReady || sending.current || active || recoveryStatus === "unknown") return;
     const turnId = crypto.randomUUID();
     sending.current = true;
     if (attached.length) sentFiles.current.set(turnId, attached);
@@ -742,7 +754,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         <Menu open={composerMenu} anchor={composerMenu ? plus.current : null} ariaLabel="Composer actions" placement="top-start" onClose={() => setComposerMenu(false)}
           items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
           onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
-        {(recoveryBlocked || session?.turns.some(t => t.state === "unknown")) && <div role="status">{recoveryStatus === "checking" ? "Checking saved work…" : <>Outcome unknown. Nothing will be resent. <button type="button" onClick={() => void checkSavedRequest()}>Check saved request</button></>}</div>}
+        {recoveryStatus !== "clear" && <div role="status" className="jg-recovery">{recoveryStatus === "checking" ? "Checking saved work…" : <>Previous request outcome unknown. It was not replayed. <button type="button" disabled={acknowledging || !unknownRequest} onClick={() => void continueWithoutReplay()}>Continue without replaying</button> <button type="button" onClick={() => void checkSavedRequest()}>Check again</button></>}</div>}
         {fileNote && !files.length && <div role="status">{fileNote}</div>}
         {quote && <div className="jg-chip" aria-label="Quoted reply"><span>{quote.text}</span><button type="button" aria-label="Cancel reply" onClick={() => setQuote(undefined)}>×</button></div>}
         {preparingFiles && <div role="status">Preparing attachments…</div>}
@@ -756,7 +768,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         {primary === "stop"
           ? <button type="button" className="jg-send" aria-label="Stop (⌘Esc)" onClick={stop}><StopIcon /></button>
           : primary === "send"
-            ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText || recoveryBlocked || preparingFiles || !draftReady || !session || session?.turns.some(t => t.state === "unknown")}><SendIcon /></button>
+            ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText || recoveryBlocked || preparingFiles || !draftReady || !session || recoveryStatus === "unknown"}><SendIcon /></button>
             : primary === "dictate"
               ? <button type="button" className={`jg-send${listening === "dictation" ? " is-listening" : ""}`}
                   aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}

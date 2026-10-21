@@ -274,15 +274,30 @@ export class WebHost implements ChatHost {
 
   async findPendingIntent(sessionId: string, unresolvedRequestId?: string): Promise<SendIntent | undefined> {
     const local = this.pendingIntent(sessionId);
-    if (local) return local;
+    if (local) {
+      // A device intent whose request the owner already acknowledged (unknown, not replayed) is settled here.
+      const row = local.phase === "accepted" ? await this.source.requestStatus?.(sessionId, local.requestId).catch(() => undefined) : undefined;
+      if (row && row.request_id === local.requestId && row.status === "execution_unknown" && row.result?.acknowledged) {
+        settleIntent(sessionId, local.requestId);
+      } else return local;
+    }
     const control = await this.source?.sessionControl?.(sessionId);
     const latest = unresolvedRequestId ? { request_id: unresolvedRequestId, status: "execution_unknown" } : control?.latest_request;
     if (!latest || !["admitted", "running", "awaiting_approval", "cancelling", "execution_unknown"].includes(latest.status)) return;
     const row = await this.source.requestStatus?.(sessionId, latest.request_id);
     if (!row || row.session_id !== sessionId || row.request_id !== latest.request_id) throw new Error("Saved request identity could not be verified");
+    if (row.status === "execution_unknown" && row.result?.acknowledged) return;  // owner already accepted: unknown, not replayed
     // Cross-device/background work has no authority to clear this device's draft.
     return { version: 1, deviceDraft: false, sessionId, requestId: row.request_id,
       text: row.input_text ?? "", attachmentIds: [], phase: "accepted" };
+  }
+
+  /** Accept an unknown outcome without replaying it; frees this device's saved intent too. */
+  async acknowledgeUnknown(sessionId: string, requestId: string): Promise<void> {
+    if (!this.source.acknowledgeUnknown) throw new Error("This gateway cannot acknowledge unknown outcomes");
+    const row = await this.source.acknowledgeUnknown(sessionId, requestId);
+    if (row.request_id !== requestId || !row.result?.acknowledged) throw new Error("Acknowledgement was not confirmed");
+    settleIntent(sessionId, requestId);
   }
 
   /** Observe an existing journaled request. Never calls send or reuploads files. */
@@ -293,6 +308,7 @@ export class WebHost implements ChatHost {
         const row = await this.source.requestStatus?.(intent.sessionId, intent.requestId);
         if (!row || row.request_id !== intent.requestId || row.session_id !== intent.sessionId) throw new Error("No matching receipt");
         onAccepted?.();
+        if (row.status === "execution_unknown" && row.result?.acknowledged) settleIntent(intent.sessionId, intent.requestId);
         const settled = requestOutcome(row, onPart);
         const outcome = settled ? { state: settled } : await followTurn({
           source: this.source, sessionId: intent.sessionId, requestId: intent.requestId,

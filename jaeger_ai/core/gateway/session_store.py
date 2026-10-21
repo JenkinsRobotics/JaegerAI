@@ -1376,7 +1376,27 @@ class GatewaySessionStore:
             })
             return payload
 
-    def admit_request(
+    def admit_request(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        """Admit a turn (see ``_admit_request``). A session left ``execution_unknown`` by an earlier
+        turn is acknowledged first (outcome stays unknown, nothing is replayed) so one unknown
+        outcome never locks the conversation; the acknowledgement events go to ``event_sink``."""
+        events: list[dict[str, Any]] = []
+        payload = self._admit_request(*args, _ack_events=events, **kwargs)
+        self._emit(events)
+        if events:
+            payload["acknowledged_unknown"] = [e["data"]["request_id"] for e in events]
+        return payload
+
+    def _emit(self, events: list[dict[str, Any]]) -> None:
+        sink = getattr(self, "event_sink", None)
+        for event in events:
+            if sink is not None:
+                try:
+                    sink(event)
+                except Exception:  # noqa: BLE001 — durable row exists; live fanout is best effort
+                    pass
+
+    def _admit_request(
         self,
         session_id: str,
         text: str,
@@ -1385,6 +1405,7 @@ class GatewaySessionStore:
         requested: dict[str, Any] | None = None,
         expected_model_revision: int | None = None,
         admission_guard: Callable[[sqlite3.Connection], None] | None = None,
+        _ack_events: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Atomically accept a client request and freeze what it executes.
 
@@ -1451,6 +1472,11 @@ class GatewaySessionStore:
                 (session_id,),
             ).fetchone()
             status = session["status"] if session else "idle"
+            if status == "execution_unknown":
+                acked = self._acknowledge_unknown(conn, session_id, actor="admission", now=now)
+                if _ack_events is not None:
+                    _ack_events.extend(acked)
+                status = "idle"
             if status in {"running", "execution_unknown", "cancelling"}:
                 raise RequestBusy(
                     "Previous execution needs reconciliation before another turn"
@@ -1671,6 +1697,42 @@ class GatewaySessionStore:
                 {**result, "request_id": request_id, "turn_id": row["turn_id"], "status": status}, now,
             )
             return payload
+
+    def acknowledge_unknown(self, session_id: str, *, actor: str, request_id: str | None = None) -> list[dict[str, Any]]:
+        """Owner acknowledgement of unknown outcomes: the request keeps ``execution_unknown`` (truth),
+        gains an ``acknowledged`` receipt (``replayed: False``), and the session is idle again.
+        Nothing is executed or replayed. Returns the durable ``turn.unknown.acknowledged`` events."""
+        with self._immediate() as conn:
+            events = self._acknowledge_unknown(conn, session_id, actor=actor, now=time.time(), request_id=request_id)
+        self._emit(events)
+        return events
+
+    def _acknowledge_unknown(self, conn: sqlite3.Connection, session_id: str, *, actor: str, now: float,
+                             request_id: str | None = None) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM client_requests WHERE session_id=? AND status='execution_unknown'"
+        args: tuple[Any, ...] = (session_id,)
+        if request_id:
+            sql += " AND request_id=?"
+            args += (request_id,)
+        events: list[dict[str, Any]] = []
+        for row in conn.execute(sql, args).fetchall():
+            result = _row_meta(row["result_json"])
+            if result.get("acknowledged"):
+                continue
+            ack = {"at": now, "by": actor, "replayed": False,
+                   "note": "Outcome unknown; acknowledged without replay"}
+            result = {**result, "acknowledged": ack}
+            conn.execute("UPDATE client_requests SET result_json=?, updated_at=? WHERE request_id=?",
+                         (json.dumps(result), now, row["request_id"]))
+            events.append(self._insert_event(conn, session_id, "turn.unknown.acknowledged", {
+                "request_id": row["request_id"], "turn_id": row["turn_id"], "status": "execution_unknown",
+                "acknowledged": ack}, now))
+        still = conn.execute("SELECT 1 FROM client_requests WHERE session_id=? AND status='execution_unknown' "
+                             "AND json_extract(result_json,'$.acknowledged') IS NULL LIMIT 1", (session_id,)).fetchone()
+        if not still:
+            conn.execute("UPDATE sessions SET status='idle', updated_at=? WHERE session_id=? AND status='execution_unknown'",
+                         (now, session_id))
+        return events
 
     def mark_request_status(self, request_id: str, status: str) -> dict[str, Any] | None:
         now = time.time()

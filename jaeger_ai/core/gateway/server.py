@@ -800,6 +800,7 @@ class JaegerGatewayApp:
         self.event_bus = event_bus or GatewayEventBus(store=self.store)
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
+        self.store.event_sink = self.event_bus.fanout  # unknown-outcome acknowledgements reach live clients
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
         #: clarify_id → future resolved with the owner's answer (GB-033).
         self.pending_clarify: dict[str, asyncio.Future[str]] = {}
@@ -5726,6 +5727,17 @@ class JaegerGatewayApp:
         if row["status"] in {"completed", "failed", "cancelled"}:
             return web.json_response({**row, "reconciled": False, "already_terminal": True})
         receipt = self._native_receipt(row.get("native_run_id"), row.get("native_session"))
+        unresolved = receipt is None or receipt.get("execution_unknown") is not False \
+            or receipt.get("status") not in {"completed", "failed", "cancelled"}
+        if unresolved and body.get("acknowledge_unknown") is True and row["status"] == "execution_unknown":
+            # The owner accepts that the outcome cannot be known. Nothing is replayed; the
+            # request keeps execution_unknown and the conversation can continue.
+            events = self.store.acknowledge_unknown(session_id, actor=str(request.get("caller_actor") or "owner"),
+                                                    request_id=request_id)
+            fresh = self.store.get_request(request_id) or row
+            return web.json_response({**fresh, "reconciled": True, "outcome": "unknown_not_replayed",
+                                      "acknowledged": bool(events) or bool((fresh.get("result") or {}).get("acknowledged")),
+                                      "receipt": receipt})
         if receipt is None or receipt.get("execution_unknown") is not False:
             return web.json_response({
                 **row,

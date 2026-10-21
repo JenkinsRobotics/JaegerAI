@@ -268,6 +268,8 @@ export interface JaegerSource {
   };
   /** Read-only same-ID acceptance and terminal-outcome lookup. */
   requestStatus?(sessionId: string, requestId: string): Promise<RequestSnapshot>;
+  /** Owner accepts an unknown outcome: nothing is replayed; the request stays execution_unknown. */
+  acknowledgeUnknown?(sessionId: string, requestId: string): Promise<RequestSnapshot>;
   sessionControl?(sessionId: string): Promise<{ latest_request?: { request_id: string; status: string } | null }>;
   readonly kind: "live" | "mock";
   agents(): Promise<Agent[]>;
