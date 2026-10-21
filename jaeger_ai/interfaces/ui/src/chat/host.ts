@@ -1,18 +1,15 @@
 import type { Agent } from "../api/types";
-/* Chat pane seam. FROZEN with Jaeger IDE Chat (2026-10-17). Mirror only; do
- * not extend here. The shared chat widget (a port of the VS Code 1.142 chat
- * widget, packages/jaeger-chat-ui + jaeger-chat-gateway) mounts through
- * `ChatPaneMount`. The renderer in this folder is a minimal stand-in for the
- * mock screenshot.
- *
- * Contract: `mount(el, host, opts) => dispose`. It is framework-free and owns
- * `el` and nothing else. */
+/* Shared UI chat-host seam for the browser and native shell. Gateway transport
+ * and recovery live in typed adapters; this renderer does not own execution.
+ * Keep live and persisted part mappings aligned when extending the contract.
+ * The IDE extension is a separate surface and is not modified by this module. */
 
 export type HostKind = "vscode" | "native" | "web";
 
 export type ToolInvocationState = "streaming" | "waitingForConfirmation" | "executing" | "completed" | "cancelled" | "failed" | "denied" | "rejected" | "unsupported" | "unknown";
 
 export type ChatPart =
+  | { kind: "knowledgeContext"; documents: { id: string; revision: number; digest: string; title: string }[] }
   | { kind: "markdownContent"; text: string }
   | { kind: "thinking"; text: string; durationMs?: number }
   | { kind: "toolInvocation"; callId: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown }
@@ -124,6 +121,7 @@ export type ChatPaneMount = (el: HTMLElement, host: ChatHost, opts: ChatPaneOpti
 
 /** Apply the onPart contract to a part list. */
 export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
+  if (part.kind === "knowledgeContext") { const index = parts.findIndex(p => p.kind === "knowledgeContext"); return index < 0 ? [...parts, part] : parts.map((p, i) => i === index ? part : p); }
   if (part.kind === "handoff") {
     const index = parts.findIndex((p) => p.kind === "handoff" && p.handoffId === part.handoffId && p.direction === part.direction);
     if (index >= 0) return parts.map((p, i) => i === index && !(p.kind === "handoff" && p.status === "delivered" && part.status !== "delivered") ? part : p);

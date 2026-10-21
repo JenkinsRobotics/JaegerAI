@@ -4,6 +4,7 @@ import hashlib
 import json
 from aiohttp import web
 from .managed import DocumentConflict
+from jaeger_ai.contract.knowledge import MANAGED_DOCUMENT_MAX_BYTES
 from .store import LibraryError
 
 
@@ -31,7 +32,7 @@ def register(gateway):
             if request.path.endswith('/search'):
                 query = request.query.get('q', '')[:1000]
                 return web.json_response({'results': use(lambda lib: lib.search(query))})
-            return web.json_response(use(lambda lib: {'collections': lib.list(), 'documents': lib.managed_documents(include_archived=True)}))
+            return web.json_response(use(lambda lib: {'collections': lib.list(), 'documents': lib.managed_documents(include_archived=True), 'limits': {'document_bytes': MANAGED_DOCUMENT_MAX_BYTES}}))
         except (LibraryError, KeyError):
             return web.json_response({'error': 'Document not found'}, status=404)
         except (RuntimeError, OSError) as exc:

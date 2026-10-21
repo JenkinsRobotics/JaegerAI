@@ -2,7 +2,8 @@
 import type { Agent } from "../api/types";
 import { label } from "./agentsLogic";
 
-export function AgentManagement({ agents, busy, onRename, onArchive, onResetName, onPin, onImportPins, onPrimary, onProfile, onHistory, onIcon, onConfigure, onSearch }: {
+export function AgentManagement({ agents, busy, onRename, onArchive, onResetName, onPin, onImportPins, onPrimary, onProfile, onHistory, onIcon, onConfigure, onSearch, onKnowledge }: {
+  onKnowledge?: (agent: Agent) => void;
   onSearch?: (agent: Agent) => void;
   onConfigure?: (agent: Agent) => void;
   onIcon?: (agent: Agent, preset: string | null) => void;
@@ -23,6 +24,7 @@ export function AgentManagement({ agents, busy, onRename, onArchive, onResetName
       <div className="jg-sheet__row"><span className="jg-sheet__row-label"><strong>{label(agent)}</strong><small>{agent.id}{agent.primary ? " · Primary" : ""}{agent.deleted ? " · Deleted (recoverable)" : agent.archived ? " · Hidden" : ""}</small></span>
         <div className="jg-agent-management-actions">
           {onIcon && agent.ui_actions?.icon && <label>Sidebar icon<select aria-label={`Icon for ${label(agent)}`} value={agent.icon_preset ?? ""} disabled={busy} onChange={(e) => onIcon(agent, e.target.value || null)}><option value="">Original avatar</option>{agent.icon_choices?.map((id) => <option key={id} value={id}>{id.replaceAll('-', ' ')}</option>)}</select></label>}
+          {onKnowledge && <button type="button" onClick={() => onKnowledge(agent)}>Knowledge</button>}
           {onSearch && <button type="button" onClick={() => onSearch(agent)}>Search messages</button>}
           {onConfigure && <button type="button" onClick={() => onConfigure(agent)}>Configure specialist</button>}
           {onProfile && <button type="button" onClick={() => onProfile(agent)}>Profile</button>}

@@ -27,6 +27,7 @@ function holdApprovedTools(source: PersistedPart[], parts: ChatPart[]) {
 
 function persistedToPart(p: PersistedPart, agentName: (id: string) => string): ChatPart | null {
   switch (p.type) {
+    case "knowledge": return { kind: "knowledgeContext", documents: p.documents };
     case "text": return p.text ? { kind: "markdownContent", text: p.text } : null;
     case "reasoning": return { kind: "thinking", text: p.text ?? "", durationMs: p.duration_ms };
     case "tool": return {

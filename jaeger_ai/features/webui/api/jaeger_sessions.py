@@ -246,15 +246,16 @@ def route(handler, parsed, method: str) -> bool:
 
     if method == "GET" and path == "/v1/agent-templates":
         return _proxy(handler, "GET", path)
-    if path.startswith("/v1/agents/") and path.endswith("/configuration") and method in {"GET", "PATCH"}:
+    if path.startswith("/v1/agents/") and (path.endswith("/configuration") or path.endswith("/knowledge")) and method in {"GET", "PATCH"}:
         from urllib.parse import quote, unquote
-        agent_id = unquote(path[len("/v1/agents/"):-len("/configuration")])
+        resource = path.rsplit("/", 1)[1]
+        agent_id = unquote(path[len("/v1/agents/"):-(len(resource) + 1)])
         if not agent_id or '/' in agent_id:
             return False
         raw = None
         if method == "PATCH":
             raw = _body_bytes(handler)
-        return _proxy(handler, method, "/v1/agents/" + quote(agent_id, safe="") + "/configuration", raw)
+        return _proxy(handler, method, "/v1/agents/" + quote(agent_id, safe="") + "/" + resource, raw)
 
     if method == "GET" and (path in {"/v1/library", "/v1/library/search"} or path.startswith("/v1/library/documents/")):
         return _proxy(handler, "GET", path + query)

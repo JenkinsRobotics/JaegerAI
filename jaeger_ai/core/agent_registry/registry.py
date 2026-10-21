@@ -353,8 +353,17 @@ class AgentRegistry:
         Gateway handlers call synchronously. Reload before CAS and atomically
         replace the existing registry file; no session or instance migration.
         """
-        from .configuration import editable, settings, validate_settings
+        from .configuration import validate_settings
         values = validate_settings(values)
+        return self._configure_metadata(agent_id, {'specialty': values['specialty'], 'summary': values['summary'], 'operator_instructions': values['instructions']}, expected_revision)
+
+    def assign_knowledge(self, agent_id: str, references: list[dict[str, Any]], expected_revision: int) -> AgentRecord:
+        # References are resolved/validated by the existing library owner, never
+        # accepted as client-supplied paths, content, digests or grants.
+        return self._configure_metadata(agent_id, {'knowledge_documents': references}, expected_revision)
+
+    def _configure_metadata(self, agent_id: str, patch: dict[str, Any], expected_revision: int) -> AgentRecord:
+        from .configuration import editable, settings
         self._load()
         record = self.get_agent(agent_id)
         if record is None or record.id != agent_id:
@@ -363,9 +372,7 @@ class AgentRegistry:
             raise PermissionError("Built-in, lead and external definitions are read-only")
         if isinstance(expected_revision, bool) or not isinstance(expected_revision, int) or expected_revision != settings(record)['revision']:
             raise RuntimeError("Specialist configuration changed; reload before saving")
-        meta = dict(record.metadata)
-        meta.update(specialty=values['specialty'], summary=values['summary'], operator_instructions=values['instructions'], configuration_revision=expected_revision + 1)
-        record.metadata = meta
+        record.metadata = {**record.metadata, **patch, 'configuration_revision': expected_revision + 1}
         self._data['agents'][record.id] = record.to_dict()
         self._save()
         return record

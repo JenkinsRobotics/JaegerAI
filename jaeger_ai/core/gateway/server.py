@@ -1312,6 +1312,8 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/frameworks/{id}/grants", self.handle_framework_grant)
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
         self.app.router.add_get("/v1/agent-templates", self.handle_agent_templates)
+        self.app.router.add_get("/v1/agents/{id}/knowledge", self.handle_agent_knowledge)
+        self.app.router.add_patch("/v1/agents/{id}/knowledge", self.handle_agent_knowledge)
         self.app.router.add_get("/v1/agents/{id}/configuration", self.handle_agent_configuration)
         self.app.router.add_patch("/v1/agents/{id}/configuration", self.handle_agent_configuration)
         self.app.router.add_get("/v1/sections", self.handle_agent_sections)
@@ -1999,6 +2001,47 @@ class JaegerGatewayApp:
     async def handle_agent_templates(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.agent_registry.configuration import TEMPLATES
         return web.json_response({"templates": [dict(t, tools_granted=False) for t in TEMPLATES]})
+
+    async def handle_agent_knowledge(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.agent_registry.configuration import editable, settings
+        from jaeger_ai.features.knowledge_library.agent_context import pin_documents
+        from jaeger_ai.contract.knowledge import MAX_KNOWLEDGE_DOCUMENTS, MAX_KNOWLEDGE_CONTEXT_CHARS
+        from jaeger_ai.features.knowledge_library.tools import _library
+        registry = self._registry()
+        record = registry.get_agent(request.match_info['id'])
+        if record is None or record.id != request.match_info['id']:
+            return web.json_response({'error': 'Agent not found'}, status=404)
+        if request.method == 'PATCH' and not editable(record):
+            return web.json_response({'error': 'Protected specialist definition'}, status=403)
+        try:
+            library = _library()
+            try:
+                if request.method == 'PATCH':
+                    body = await request.json()
+                    if not isinstance(body, dict) or set(body) != {'expected_revision', 'document_ids'}:
+                        raise ValueError('expected_revision and document_ids are required')
+                    refs = pin_documents(library, body['document_ids'])
+                    record = registry.assign_knowledge(record.id, refs, body['expected_revision'])
+                catalog = library.managed_documents(include_archived=True)
+            finally:
+                library.close()
+        except KeyError:
+            return web.json_response({'error': 'Managed document not found'}, status=404)
+        except PermissionError as exc:
+            return web.json_response({'error': str(exc)}, status=403)
+        except ValueError as exc:
+            return web.json_response({'error': str(exc)}, status=400)
+        except RuntimeError as exc:
+            return web.json_response({'error': str(exc)}, status=409)
+        except OSError:
+            return web.json_response({'error': 'Instance knowledge library unavailable'}, status=503)
+        if request.method == 'PATCH':
+            self.event_bus.publish('*', 'agent.updated', {'agent_id': record.id, 'configuration_revision': settings(record)['revision']})
+        caller = request.get('caller')
+        return web.json_response({'agent_id': record.id, 'revision': settings(record)['revision'],
+                                  'editable': editable(record) and bool(caller and 'admin' in caller.scopes),
+                                  'documents': record.metadata.get('knowledge_documents') or [], 'available': catalog,
+                                  'limits': {'max_documents': MAX_KNOWLEDGE_DOCUMENTS, 'context_chars': MAX_KNOWLEDGE_CONTEXT_CHARS}})
 
     async def handle_agent_configuration(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.agent_registry.configuration import editable, settings
@@ -4531,6 +4574,11 @@ class JaegerGatewayApp:
                 self._finish_cancelled(session_id, turn_id, rid, agent_fields, "cancelled before native dispatch")
                 return
 
+            if agent is not None and (getattr(agent, 'metadata', None) or {}).get('knowledge_documents'):
+                from jaeger_ai.features.knowledge_library.agent_context import materialize
+                knowledge = materialize(agent, actor=(execution or {}).get('caller'))
+                system_prompt += "\n\n" + knowledge['text']
+                self.event_bus.publish(session_id, 'agent.knowledge', {'request_id': rid, 'turn_id': turn_id, 'agent_id': agent.id, 'documents': knowledge['documents']})
             backend = LOCKED_OLLAMA_URL
             model = DEFAULT_OLLAMA_MODEL
             response_text: str | None = None

@@ -65,7 +65,7 @@ EVENT_TYPES = frozenset({
     # IDE bridge + attachments + agent lifecycle.
     "ide.request", "attachment.added",
     "agent.created", "agent.activated", "agent.handoff", "agent.handoff.finished",
-    "agent.skills", "project.created", "project.checked",
+    "agent.skills", "agent.knowledge", "project.created", "project.checked",
     # Sessions contract: every transcript row, and rolling summaries.
     "message.created", "session.summarized", "message.feedback", "message.reaction",
     "schedule.changed", "library.document.updated",

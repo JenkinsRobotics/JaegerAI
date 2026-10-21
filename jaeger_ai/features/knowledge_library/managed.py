@@ -6,6 +6,9 @@ import sqlite3
 import time
 
 
+from jaeger_ai.contract.knowledge import MANAGED_DOCUMENT_MAX_BYTES
+
+
 class DocumentConflict(ValueError):
     pass
 
@@ -30,7 +33,7 @@ class ManagedDocuments:
     def _text(title: str, content: str) -> tuple[str, str, str]:
         if not isinstance(title, str) or not title.strip() or len(title.strip()) > 200:
             raise ValueError('Title must contain 1–200 characters')
-        if not isinstance(content, str) or len(content.encode('utf-8')) > 2_000_000:
+        if not isinstance(content, str) or len(content.encode('utf-8')) > MANAGED_DOCUMENT_MAX_BYTES:
             raise ValueError('Document content must be text, at most 2 MB')
         return title.strip(), content, hashlib.sha256(content.encode()).hexdigest()
 
