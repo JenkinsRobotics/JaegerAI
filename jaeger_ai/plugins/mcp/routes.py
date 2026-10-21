@@ -6,6 +6,8 @@ from aiohttp import web
 
 
 def register(gateway):
+    from .resource_routes import register as register_resources
+    register_resources(gateway)
     async def mutate(request):
         action = request.match_info['action']
         if action not in {'disconnect', 'reconnect'}:

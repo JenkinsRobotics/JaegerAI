@@ -321,6 +321,13 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path in ("/api/jaeger/runtime/models", "/api/runtime/models"):
         return _proxy(handler, "GET", "/v1/runtime/models")
 
+    if path.startswith('/v1/runtime/mcp/'):
+        segments=path.split('/')
+        if method=='POST' and len(segments)==7 and segments[5]=='resources' and segments[6] in {'list','read','import'}:
+            return _proxy(handler,'POST',path,_body_bytes(handler))
+        if method=='GET' and len(segments)==8 and segments[5:7]==['resources','snapshots']:
+            return _proxy(handler,'GET',path)
+
     if method == 'POST' and path.startswith('/v1/runtime/mcp/'):
         segments = path.split('/')
         if len(segments) == 6 and segments[5] in {'disconnect','reconnect'}:

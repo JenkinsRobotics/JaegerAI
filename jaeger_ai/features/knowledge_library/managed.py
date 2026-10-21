@@ -45,20 +45,29 @@ class ManagedDocuments:
             'WHERE (? OR m.archived=0) ORDER BY d.modified_at DESC,d.id', (include_archived,))]
 
     def managed_document(self, document_id: str) -> dict:
-        row = self.conn.execute('SELECT d.*,m.revision,m.archived FROM library_documents d '
+        row = self.conn.execute('SELECT d.*,m.revision,m.archived,m.creation_payload FROM library_documents d '
                                 'JOIN library_managed_documents m ON m.document_id=d.id WHERE d.id=?', (document_id,)).fetchone()
         if row is None:
             raise KeyError('Managed document not found')
-        return {**dict(row), 'archived': bool(row['archived'])}
+        result = {**dict(row), 'archived': bool(row['archived'])}
+        creation = json.loads(result.pop('creation_payload'))
+        if isinstance(creation,list) and isinstance(creation[-1],dict):result['provenance'] = creation[-1]
+        return result
 
-    def create_document(self, *, title: str, content: str, command_id: str, collection_id: str = "managed") -> dict:
+    def create_document(self, *, title: str, content: str, command_id: str, collection_id: str = "managed", provenance: dict | None = None) -> dict:
         title, content, digest = self._text(title, content)
         if not isinstance(command_id, str) or not command_id.strip() or len(command_id) > 128:
             raise ValueError('Stable command_id required (at most128 characters)')
         document_id = 'doc_' + hashlib.sha256(command_id.encode()).hexdigest()[:32]
         if collection_id not in {'managed', WORKFLOW_COLLECTION_ID}:
             raise ValueError('Unsupported managed document classification')
-        payload = json.dumps([title, content] if collection_id == 'managed' else [title, content, collection_id], ensure_ascii=False)
+        creation = [title, content] if collection_id == 'managed' else [title, content, collection_id]
+        if provenance is not None:
+            import re
+            if set(provenance)!={'kind','server_id','resource_id','source_text_digest','observed_at','redacted'} or provenance['kind']!='configured_mcp_resource' or not re.fullmatch(r'[a-f0-9]{24}',provenance['server_id']) or not re.fullmatch(r'[a-f0-9]{32}',provenance['resource_id']) or not re.fullmatch(r'[a-f0-9]{64}',provenance['source_text_digest']) or type(provenance['redacted']) is not bool or not isinstance(provenance['observed_at'],(int,float)):
+                raise ValueError('Invalid resource snapshot provenance')
+            creation.append(provenance)
+        payload = json.dumps(creation, ensure_ascii=False)
         with self.conn:
             self.conn.execute('BEGIN IMMEDIATE')
             previous = self.conn.execute('SELECT creation_payload FROM library_managed_documents WHERE document_id=?', (document_id,)).fetchone()
