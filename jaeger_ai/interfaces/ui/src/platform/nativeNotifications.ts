@@ -27,6 +27,7 @@ export class NativeNotificationConsumer{
  dispose(){this.active=false;}
  constructor(private read:Notifications['read'],private bridge:JaegerNativeBridge,private report:(message:string)=>void=()=>{}){}
  async poll(now=new Date()){
+  try{if(!nativeNotificationPreferences().enabled)return;}catch(e){this.report(String(e));return;}
   if(typeof navigator==='undefined'||!navigator.locks){this.report('Exclusive native notification coordination unavailable; automatic notifications inactive.');return;}
   try{await navigator.locks.request('jaeger.native-notifications.v1',{ifAvailable:true},async lock=>{if(lock&&this.active)await this.consume(now);});}catch(e){this.report(`Exclusive notification coordination failed: ${String(e)}; automatic delivery inactive.`);}
  }

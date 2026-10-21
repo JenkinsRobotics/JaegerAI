@@ -82,7 +82,7 @@ export class GatewayClient implements JaegerSource {
   diagnostics() { return this.json<import("./source").GatewayDiagnostics>("/v1/runtime/diagnostics"); }
   tools(query = "") { return this.json<import("./source").ToolInventory>(`/v1/runtime/tools?q=${encodeURIComponent(query)}`); }
   readonly notifications: import('./source').Notifications = {
-    read: () => this.json('/v1/notifications'),
+    read: options => {const query=new URLSearchParams();if(options?.before)query.set('before',String(options.before));if(options?.category)query.set('category',options.category);return this.json('/v1/notifications'+(query.size?'?'+query.toString():''));},
     save: body => this.json('/v1/notifications',body,'PATCH'),
     markRead: through => this.json('/v1/notifications',{read_through:through},'PATCH'),
   };

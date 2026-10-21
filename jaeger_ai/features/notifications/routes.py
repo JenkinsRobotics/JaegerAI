@@ -6,6 +6,7 @@ from aiohttp import web
 
 KEY='notifications:operator'
 NOTIFICATION_EVENTS=('approval.request','task.updated','agent.handoff.finished','notification.proactive','turn.failed','turn.unknown')
+CATEGORIES={'all':('All activity',NOTIFICATION_EVENTS),'approvals':('Approvals',('approval.request',)),'tasks':('Tasks',('task.updated',)),'delegates':('Delegated work',('agent.handoff.finished',)),'errors':('Conversation failures and unknowns',('turn.failed','turn.unknown')),'proactive':('Proactive notifications',('notification.proactive',))}
 
 
 def settings(conn):
@@ -20,13 +21,19 @@ def write(conn,value):
     conn.execute('INSERT INTO schema_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value',(KEY,json.dumps(value)))
 
 
-def feed(store):
+def feed(store,*,before=None,category='all'):
+    if category not in CATEGORIES:raise ValueError('Unknown notification category')
+    if before is not None and (type(before) is not int or not 0<before<2**63):raise ValueError('Invalid notification cursor')
     with closing(store._get_conn()) as conn:
         prefs=settings(conn)
         observed=conn.execute('SELECT COALESCE(MAX(event_id),0) FROM activity_history').fetchone()[0]
-        rows=conn.execute("SELECT a.event_id,a.session_id,a.event,a.data_json,a.timestamp,s.metadata_json FROM activity_history a JOIN sessions s ON s.session_id=a.session_id WHERE a.event_id<=? AND a.event IN ('approval.request','task.updated','agent.handoff.finished','notification.proactive','turn.failed','turn.unknown') ORDER BY a.event_id DESC LIMIT 500",(observed,)).fetchall()
-        result=[];seen=set()
+        events=CATEGORIES[category][1]
+        cursor=min(observed,before-1) if before is not None else observed
+        rows=conn.execute("SELECT a.event_id,a.session_id,a.event,a.data_json,a.timestamp,s.metadata_json FROM activity_history a JOIN sessions s ON s.session_id=a.session_id WHERE a.event_id<=? AND a.event IN ("+','.join('?' for _ in events)+") ORDER BY a.event_id DESC LIMIT 500",(cursor,*events)).fetchall()
+
+        result=[];seen=set();scanned=0;last=None
         for row in rows:
+            scanned+=1;last=row['event_id']
             data=json.loads(row['data_json']);metadata=json.loads(row['metadata_json'] or '{}');agent_id=metadata.get('agent_id')
             if agent_id in prefs['muted_agent_ids']:continue
             event=row['event'];entity=data.get('task') if event=='task.updated' else data.get('handoff') if event=='agent.handoff.finished' else data
@@ -40,12 +47,16 @@ def feed(store):
             title={'approval.request':'Approval requested','notification.proactive':'New proactive notification','turn.failed':'Conversation failed','turn.unknown':'Conversation outcome unknown','task.updated':'Task status changed','agent.handoff.finished':'Delegated work status changed'}[event]
             result.append({'event_id':row['event_id'],'session_id':row['session_id'],'agent_id':agent_id,'title':title,'status':status,'timestamp':row['timestamp'],'unread':row['event_id']>prefs['read_through']})
             if len(result)==50:break
-        return {'preferences':prefs,'notifications':result,'privacy':'metadata_only_no_message_preview','scope':'local_operator','enabled':prefs['enabled'],'observed_through':observed}
+        return {'preferences':prefs,'notifications':result,'privacy':'metadata_only_no_message_preview','scope':'local_operator','enabled':prefs['enabled'],'observed_through':observed,'next_before':last if last and (len(result)==50 or scanned==500) else None,'category':category,'categories':[{'id':key,'label':value[0]} for key,value in CATEGORIES.items()],'pagination_scope':'retained_activity_per_page_entity_dedupe'}
 
 
 def register(gateway):
     async def read(request):
-        try:return web.json_response(feed(gateway.store))
+        try:
+            raw=request.query.get('before');cursor=int(raw) if raw else None;category=request.query.get('category','all')
+            if category not in CATEGORIES or cursor is not None and not 0<cursor<2**63:raise ValueError('Invalid notification filter/cursor')
+        except (ValueError,TypeError):return web.json_response({'error':'Invalid notification filter/cursor'},status=400)
+        try:return web.json_response(feed(gateway.store,before=cursor,category=category))
         except (ValueError,TypeError):return web.json_response({'error':'Saved notification state unavailable; original preserved'},status=409)
     async def mutate(request):
         try:

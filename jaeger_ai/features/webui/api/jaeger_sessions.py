@@ -253,7 +253,7 @@ def route(handler, parsed, method: str) -> bool:
         return False
 
     if path == '/v1/notifications' and method in {'GET','PATCH'}:
-        return _proxy(handler, method, path, _body_bytes(handler) if method == 'PATCH' else None)
+        return _proxy(handler, method, path+(query if method=='GET' else ''), _body_bytes(handler) if method == 'PATCH' else None)
 
     if method == 'GET' and path == '/v1/channels/deliveries':
         return _proxy(handler,method,path+query)
