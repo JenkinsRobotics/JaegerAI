@@ -304,3 +304,14 @@ def test_plugin_package_and_startup_proxy_routes_are_explicit(overlay):
 def test_plugin_package_history_proxy_preserves_cursor(overlay):
     path='/v1/runtime/plugins/packages?before=owned-cursor'
     assert _route(overlay,path,'GET') and overlay._calls[-1]==('GET',path)
+
+
+def test_episode_context_routes_are_explicit_and_preserve_query(overlay):
+    path='/v1/runtime/memory/episodes?q=owned&before=42'
+    assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
+    for action in ('annotate','forget','restore'):
+        path='/v1/runtime/memory/episodes/evt-owned/'+action
+        assert _route(overlay,path,'POST') and overlay._calls[-1]==('POST',path)
+    for path in ('/v1/runtime/memory/episodes/evt-owned','/v1/runtime/memory/episode-operations/owned-operation'):
+        assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
+    assert not _route(overlay,'/v1/runtime/memory/episodes/evt-owned/delete','POST')

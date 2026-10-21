@@ -117,6 +117,10 @@ async def test_custom_agent_knowledge_pins_context_and_preserves_policy(tmp_path
         bound = gateway._registry().get_agent(agent['id'])
         context = materialize(bound, actor='owner:webui')
         assert 'ORIGINAL PINNED REFERENCE' in context['text'] and 'NEW UNASSIGNED REVISION' not in context['text']
+        from jaeger_agent.loop.context_provenance import observe_references
+        observed = observe_references({'messages':[{'role':'system','content':context['text']}]}, context['context_references'])
+        assert observed[0]['state'] == 'retained_exact' and observed[0]['document_id'] == document_id and observed[0]['document_revision'] == 1
+        assert 'ORIGINAL PINNED' not in str(observed)
         with pytest.raises(PermissionError):
             materialize(bound, actor='a2a')
         sid = 'owned-knowledge-session'; store.ensure_session(sid,metadata={'agent_id':agent['id'],'interaction_tier':'chat'})

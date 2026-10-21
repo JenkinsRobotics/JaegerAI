@@ -244,6 +244,11 @@ def route(handler, parsed, method: str) -> bool:
             return False
         return _proxy(handler, "GET", "/v1/task-submissions/" + quote(request_id, safe="") + query)
 
+    if path == '/v1/runtime/memory/episodes' and method == 'GET':return _proxy(handler,method,path+query)
+    if path.startswith('/v1/runtime/memory/episodes/') and method=='GET' and len(path.split('/'))==6:return _proxy(handler,method,path)
+    if path.startswith('/v1/runtime/memory/episodes/') and method=='POST' and len(path.split('/'))==7 and path.split('/')[-1] in {'annotate','forget','restore'}:return _proxy(handler,method,path,_body_bytes(handler))
+    if path.startswith('/v1/runtime/memory/episode-operations/') and method=='GET' and len(path.split('/'))==6:return _proxy(handler,method,path)
+
     if path == '/v1/runtime/memory/claims' and method == 'GET':
         return _proxy(handler,method,path+query)
 

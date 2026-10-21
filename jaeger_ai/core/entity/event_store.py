@@ -17,7 +17,7 @@ import sqlite3
 from typing import Any, Iterator
 
 from jaeger_ai.core.instance.instance import operator_state_root
-from .events import JaegerEvent
+from .events import EventType, JaegerEvent
 
 logger = logging.getLogger("jaeger.entity.event_store")
 
@@ -93,53 +93,146 @@ class SqliteEventStore:
         If `idempotency_key` is provided and already exists, the existing event is returned
         without inserting a duplicate.
         """
+        with self._transaction() as conn:
+            return self._append(conn, event)
+
+    def _append(self, conn, event: JaegerEvent) -> JaegerEvent:
         payload_str = json.dumps(event.payload, ensure_ascii=False)
         prov_str = json.dumps(event.provenance, ensure_ascii=False)
 
-        with self._transaction() as conn:
-            if event.idempotency_key:
-                cur = conn.execute(
-                    "SELECT * FROM entity_events WHERE idempotency_key = ?",
-                    (event.idempotency_key,),
-                )
-                row = cur.fetchone()
-                if row:
-                    return self._row_to_event(row)
+        if event.idempotency_key:
+            cur = conn.execute(
+                "SELECT * FROM entity_events WHERE idempotency_key = ?",
+                (event.idempotency_key,),
+            )
+            row = cur.fetchone()
+            if row:
+                return self._row_to_event(row)
 
-            try:
-                conn.execute(
-                    """
-                    INSERT INTO entity_events (
-                        event_id, event_type, actor, source, session_id,
-                        timestamp, salience, idempotency_key, parent_event_id,
-                        payload_json, provenance_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        event.event_id,
-                        event.event_type,
-                        event.actor,
-                        event.source,
-                        event.session_id,
-                        event.timestamp,
-                        event.salience,
-                        event.idempotency_key,
-                        event.parent_event_id,
-                        payload_str,
-                        prov_str,
-                    ),
-                )
-            except sqlite3.IntegrityError:
-                cur = conn.execute(
-                    "SELECT * FROM entity_events WHERE event_id = ?",
-                    (event.event_id,),
-                )
-                row = cur.fetchone()
-                if row:
-                    return self._row_to_event(row)
-                raise
+        try:
+            conn.execute(
+                """
+                INSERT INTO entity_events (
+                    event_id, event_type, actor, source, session_id,
+                    timestamp, salience, idempotency_key, parent_event_id,
+                    payload_json, provenance_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    event.event_id,
+                    event.event_type,
+                    event.actor,
+                    event.source,
+                    event.session_id,
+                    event.timestamp,
+                    event.salience,
+                    event.idempotency_key,
+                    event.parent_event_id,
+                    payload_str,
+                    prov_str,
+                ),
+            )
+        except sqlite3.IntegrityError:
+            cur = conn.execute(
+                "SELECT * FROM entity_events WHERE event_id = ?",
+                (event.event_id,),
+            )
+            row = cur.fetchone()
+            if row:
+                return self._row_to_event(row)
+            raise
 
         return event
+
+    def _episode_state(self, conn, event_id):
+        from hashlib import sha256
+        row = conn.execute("SELECT * FROM entity_events WHERE event_id=? AND event_type IN ('human.message','agent.response')", (event_id,)).fetchone()
+        if row is None:
+            raise ValueError('Retained conversational episode not found')
+        event = self._row_to_event(row)
+        change = conn.execute("SELECT event_id,payload_json FROM entity_events WHERE event_type=? AND parent_event_id=? ORDER BY id DESC LIMIT 1", (EventType.MEMORY_EPISODE_CHANGED.value,event_id,)).fetchone()
+        policy = json.loads(change['payload_json']) if change else {}
+        return event, {'active':policy.get('active',True), 'annotation':policy.get('annotation',''),
+            'revision':sha256((event_id+'\0'+(change['event_id'] if change else 'original')).encode()).hexdigest()}
+
+    def episode_context(self, event_id):
+        """Append-only record plus its latest explicit operator recall policy."""
+        with self._get_conn() as conn:
+            event, state = self._episode_state(conn,event_id)
+        return {**state, 'event_id':event.event_id, 'event_type':event.event_type,
+            'session_id':event.session_id, 'actor':event.actor, 'source':event.source,
+            'timestamp':event.timestamp,
+            'text':str(event.payload.get('text') or event.payload.get('agent_response') or '')[:8000]}
+
+    def episode_context_page(self, query='', *, before=None, limit=30):
+        if not isinstance(query,str) or len(query)>200 or before is not None and (type(before) is not int or before<=0):
+            raise ValueError('Invalid episode query/cursor')
+        needle=query.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
+        with self._get_conn() as conn:
+            rows=conn.execute("SELECT id,event_id FROM entity_events WHERE event_type IN ('human.message','agent.response') AND id<? AND COALESCE(json_extract(payload_json,'$.text'),json_extract(payload_json,'$.agent_response'),'') LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?", (before or 9223372036854775807,'%'+needle+'%',limit+1)).fetchall()
+            values=[]
+            for row in rows[:limit]:
+                event,state=self._episode_state(conn,row['event_id'])
+                text=str(event.payload.get('text') or event.payload.get('agent_response') or '')
+                values.append({**state,'event_id':event.event_id,'event_type':event.event_type,
+                    'session_id':event.session_id,'actor':event.actor,'source':event.source,
+                    'timestamp':event.timestamp,'text':text[:8000],'truncated':len(text)>8000})
+        return {'episodes':values,'next_before':rows[limit-1]['id'] if len(rows)>limit else None}
+
+    @staticmethod
+    def _episode_operation_id(value):
+        import re
+        if not isinstance(value,str) or not re.fullmatch(r'[A-Za-z0-9_-]{8,128}',value):
+            raise ValueError('Valid immutable episode operation ID required')
+        return 'memory:episode:'+value
+
+    def episode_operation(self, operation_id):
+        key=self._episode_operation_id(operation_id)
+        with self._get_conn() as conn:
+            row=conn.execute('SELECT payload_json FROM entity_events WHERE idempotency_key=?',(key,)).fetchone()
+        return json.loads(row['payload_json']).get('receipt') if row else None
+
+    def manage_episode(self, event_id, action, *, expected_revision, operation_id, actor, text=None):
+        """Atomic CAS plus event/receipt; immutable history is never rewritten.
+
+        Exclusion affects cross-conversation automatic recall only. A correction
+        is explicit TOLD advice beside the original, never replacement evidence.
+        """
+        from dataclasses import replace
+        key=self._episode_operation_id(operation_id)
+        if action not in {'annotate','forget','restore'} or not isinstance(expected_revision,str) or len(expected_revision)!=64:
+            raise ValueError('Invalid episode action/revision')
+        if action=='annotate' and (not isinstance(text,str) or not text.strip() or len(text)>8000):
+            raise ValueError('Correction note must contain 1–8000 characters')
+        command={'event_id':event_id,'action':action,'expected_revision':expected_revision,'actor':actor,'text':text}
+        with self._transaction() as conn:
+            old=conn.execute('SELECT payload_json FROM entity_events WHERE idempotency_key=?',(key,)).fetchone()
+            if old:
+                value=json.loads(old['payload_json'])
+                if value.get('command')!=command:raise ValueError('Operation ID belongs to a different command')
+                return value['receipt']
+            original,state=self._episode_state(conn,event_id)
+            if state['revision']!=expected_revision:raise ValueError('Episode context changed; inspect current revision')
+            if action=='forget' and not state['active'] or action=='restore' and state['active']:
+                raise ValueError('Episode recall state already changed')
+            active=action!='forget' if action!='annotate' else state['active']
+            annotation=text if action=='annotate' else state['annotation']
+            receipt={'ok':True,'operation_id':operation_id,'domain':'episode_context','http_status':200,
+                'result':{'event_id':event_id,'active':active,'action':action,'original_preserved':True,'scope':'cross_conversation_automatic_context'}}
+            event=JaegerEvent.typed(EventType.MEMORY_EPISODE_CHANGED.value,{'command':command,'active':active,'annotation':annotation,'receipt':receipt}, actor=actor,source='memory.controls',session_id=original.session_id,parent_event_id=original.event_id)
+            self._append(conn,replace(event,idempotency_key=key))
+        return receipt
+
+    def project_recall(self, events):
+        """Apply the existing owner's current policy without editing its events."""
+        from dataclasses import replace
+        result=[]
+        with self._get_conn() as conn:
+            for event in events:
+                _,state=self._episode_state(conn,event.event_id)
+                if state['active']:
+                    result.append(replace(event,payload={**event.payload,'operator_correction':state['annotation']}))
+        return result
 
     def get_event(self, event_id: str) -> JaegerEvent | None:
         with self._get_conn() as conn:

@@ -39,7 +39,7 @@ export interface ModelSettings {
 }
 export interface ScheduleJob { id: string; name: string; prompt: string; cron: string; enabled: boolean; state: string; next_fire_at?: string }
 export type ScheduleAction = "create" | "update" | "pause" | "resume" | "delete" | "restore" | "run";
-export interface ControlResult { ok: boolean; operation_id: string; result?: unknown; error?: string; http_status?: number }
+export interface ControlResult { execution_unknown?: boolean; ok: boolean; operation_id: string; result?: unknown; error?: string; http_status?: number }
 export interface ScheduleControls {
   list(): Promise<{ jobs: ScheduleJob[]; scheduler: string }>;
   history(name: string): Promise<{ tasks: Task[]; requests: RequestSnapshot[] }>;
@@ -115,6 +115,13 @@ export interface PluginControls {
   mutate(id:string,action:'pause_hooks'|'resume_hooks',body:{operation_id:string;expected_state:string}):Promise<ControlResult>;
   operation(id:string):Promise<{receipt:ControlResult|null}>;
 }
+export interface EpisodeContext {event_id:string;event_type:string;session_id:string;actor:string;source:string;timestamp:number;text:string;truncated?:boolean;annotation:string;active:boolean;revision:string;editable?:boolean}
+export interface EpisodeControls {
+ list(query:string,before?:number):Promise<{available:boolean;editable:boolean;scope:string;episodes:EpisodeContext[];next_before:number|null}>;
+ detail(id:string):Promise<EpisodeContext>;
+ mutate(id:string,action:'annotate'|'forget'|'restore',body:{operation_id:string;expected_revision:string;text?:string}):Promise<ControlResult>;
+ operation(id:string):Promise<{receipt:ControlResult|null}>;
+}
 export interface SemanticClaims {available:boolean;scope:string;context_scope?:string;matching?:string;observed_at?:number;next_before:number|null;claims:{claim_id:string;subject:string;predicate:string;value:string;provenance:string;confidence:number;source_id:string;valid_from:number;valid_until:number|null;created_at:number;revision:string;active:boolean;recent_context_candidate:boolean;truncated?:boolean}[]}
 export type SemanticClaimDetail=Omit<SemanticClaims['claims'][number],'recent_context_candidate'>&{actions:('correct'|'forget'|'restore')[];replaces_claim_id:string|null;changes:{action:string;actor:string;changed_at:number;replacement_claim_id:string|null}[]};
 export interface SemanticClaimControls {
@@ -165,6 +172,7 @@ export interface ChannelSnapshot {
 export interface TaskProposalReceipt { task_id: string; status: string; replayed: boolean; request_id: string; origin_session_id: string }
 export interface JaegerSource {
   semanticClaimControls?:SemanticClaimControls;
+  episodes?: EpisodeControls;
   semanticClaims?(options:{query:string;includeInactive:boolean;before?:number}):Promise<SemanticClaims>;
   plugins?:PluginControls;
   channelControls?: {
