@@ -239,6 +239,12 @@ export interface JaegerSource {
   agentCreationStatus?(operationId: string): Promise<{ receipt: { ok: boolean; agent?: Agent; error?: string } | null }>;
   createAgent(body: { template_id?: string; template_version?: number; operation_id?: string; name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }): Promise<Agent>;
   /** The specialist's side of one hand-off: its worker session and messages. */
+  delegation?: {
+    create(targetId:string,body:{task:string;request_id:string;session_id:string;from_agent_id:string;require_approval:true;model:string|null;background:true}):Promise<import("./types").HandoffCommandReceipt>;
+    original(targetId:string,requestId:string):Promise<import("./types").HandoffCommandReceipt>;
+  };
+  originalHandoffReply?(parentId:string,requestId:string):Promise<import("./types").HandoffCommandReceipt>;
+  replyHandoffCommand?(parentId:string,task:string,requestId:string):Promise<import("./types").HandoffCommandReceipt>;
   replyHandoff?(handoffId: string, task: string, requestId: string): Promise<Handoff>;
   handoffExchange(handoffId: string): Promise<HandoffExchange>;
   /** POST /v1/sessions/{id}/turns. `start_event_id` is the durable cursor of

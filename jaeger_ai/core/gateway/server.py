@@ -1412,6 +1412,8 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/sessions/{id}/attachments/upload", self.handle_upload_attachment)
         from .upload_chunks import register as register_upload_chunks
         register_upload_chunks(self)
+        from .handoff_controls import register as register_handoff_controls
+        register_handoff_controls(self)
         self.app.router.add_get("/v1/tasks", self.handle_tasks)
         self.app.router.add_post("/v1/tasks", self.handle_tasks)
         self.app.router.add_get("/v1/tasks/{id}", self.handle_task)
@@ -2252,6 +2254,16 @@ class JaegerGatewayApp:
         """Lead → specialist handoff using a real isolated child run."""
         to_agent_id = request.match_info["id"]
         body = await request.json() if request.can_read_body else {}
+        if not isinstance(body,dict):
+            return web.json_response({'error':'Handoff must be an object'},status=400)
+        requested_model=body.get('model')
+        if requested_model is not None and (not isinstance(requested_model,str) or not 1<=len(requested_model.strip())<=200):
+            return web.json_response({'error':'Model must be a bounded configured model ID or null'},status=400)
+        requested_model=requested_model.strip() if requested_model else None
+        if body.get('permission_mode','inherit')!='inherit':
+            return web.json_response({'error':'Permission-mode overrides are unavailable; existing caller and tool ceilings remain'},status=403)
+        if 'background' in body and body['background'] is not True:
+            return web.json_response({'error':'This owner supports durable background handoffs only; foreground execution is unavailable'},status=400)
         task = str(body.get("task") or "").strip()
         if not task:
             return web.json_response({"error": "task is required"}, status=400)
@@ -2278,6 +2290,12 @@ class JaegerGatewayApp:
                 return web.json_response({"error": str(exc)}, status=409)
             require_approval = True
         request_id = str(body.get("request_id") or uuid.uuid4().hex)
+        if not request.get('_owner_handoff_command'):
+            from .handoff_controls import command_key
+            kind='handoff_reply' if reply_parent else 'handoff_request'
+            resource=reply_parent['id'] if reply_parent else target.id
+            if self.store.control_operation(command_key(kind,resource,request_id,request.get('caller_actor'))):
+                return web.json_response({'error':'Original owner command retained; inspect its receipt, do not resubmit through another route'},status=409)
         parent_run_id = body.get("parent_run_id") or body.get("parent_request_id")
         parent_chain = list(body.get("parent_chain") or [])
         depth = int(body.get("delegation_depth") or len(parent_chain))
@@ -2337,6 +2355,13 @@ class JaegerGatewayApp:
             depth = len(parent_chain)
             from_id = "native:jaeger" if is_root else str(parent_meta.get("agent_id") or "")
 
+        model_choice=None
+        if requested_model and not target.disabled and self.store.get_handoff_by_request(request_id) is None:
+            try:model_choice=await asyncio.to_thread(self._session_model_choice,requested_model)
+            except Exception:
+                return web.json_response({'error':'Model availability could not be established; no handoff admitted','admitted':False},status=503)
+        # Re-read after discovery yields, before synchronous admission. Concurrent
+        # duplicate callers cannot both create children for the same request ID.
         existing = self.store.get_handoff_by_request(request_id)
         if existing:
             prior = existing.get("metadata") or {}
@@ -2349,6 +2374,7 @@ class JaegerGatewayApp:
                 or prior.get("bridge_origin") != bridge_origin
                 or (bridge_origin is not None and prior.get("workspace") != workspace)
                 or sorted(prior.get("allowed_tools") or []) != sorted(allowed_tools)
+                or prior.get("requested_model") != requested_model
                 or prior.get("timeout_seconds", 120) != timeout_s
                 or prior.get("reply_to_handoff_id") != (reply_parent["id"] if reply_parent else None)):
                 return web.json_response(
@@ -2357,6 +2383,10 @@ class JaegerGatewayApp:
                 )
             return web.json_response(existing, status=200)
 
+        if target.disabled:
+            return web.json_response({"error":"Specialist is disabled; no new handoff admitted"},status=403)
+        if requested_model and model_choice is None:
+            return web.json_response({'error':'Selected handoff model is not available in the current configured catalog'},status=400)
         from jaeger_ai.core.agent_registry.specialist_runtime import check_delegation_limits
         limit_error = check_delegation_limits(
             from_agent_id=from_id,
@@ -2395,6 +2425,10 @@ class JaegerGatewayApp:
                 "thread_handoff_id": ((reply_parent.get("metadata") or {}).get("thread_handoff_id") or reply_parent["id"]) if reply_parent else handoff_id,
                 "caller_actor": actor,
                 "bridge_origin": bridge_origin,
+                "requested_model": requested_model,
+                "model_choice": model_choice,
+                "background": True,
+                "permission_mode": "inherit",
                 "target_display": target.display_name,
                 "target_role": (target.metadata or {}).get("role"),
                 "specialty": (target.metadata or {}).get("specialty"),
@@ -2413,11 +2447,12 @@ class JaegerGatewayApp:
         }
         saved = self.store.save_handoff(record)
         if require_approval and approval_id:
+            approval_prompt=f"Allow handoff to {target.display_name}"+(f" using requested model {requested_model}" if requested_model else "")+"?"
             self.store.create_approval(
                 approval_id=approval_id,
                 kind="handoff",
                 session_id=origin_session,
-                prompt=f"Allow handoff to {target.display_name}?",
+                prompt=approval_prompt,
                 options=["once", "deny"],
                 request_id=request_id,
                 metadata={"handoff_id": handoff_id, "to_agent_id": target.id},
@@ -2432,7 +2467,7 @@ class JaegerGatewayApp:
                 "to_agent_id": target.id,
                 "task": task,
                 "options": ["once", "deny"],
-                "prompt": f"Allow handoff to {target.display_name}?",
+                "prompt": approval_prompt,
             }
             self.event_bus.publish("*", "approval.request", request_payload)
             origin = self._origin_turn(saved)
@@ -3643,6 +3678,7 @@ class JaegerGatewayApp:
             if not isinstance(row, dict) or not row.get("id"):
                 return row
             view = project(row, presentation, writable=writable, primary_id=primary_id)
+            view['delegation']={'can_request':bool(writable and spec and 'delegate' in spec.scopes and row.get('kind')=='jaeger_native' and row.get('role')=='specialist' and not view.get('hidden') and not view.get('deleted') and not view.get('disabled')),'background':'durable','per_request_model':True,'tools':'existing inherited ceilings'}
             try:
                 return {**view, "skills": self._agent_skill_cards(AgentRecord.from_dict(row))}
             except Exception:  # noqa: BLE001
@@ -6190,6 +6226,9 @@ class JaegerGatewayApp:
         if record["status"] not in {"admitted", "approved"}:
             return
         try:
+            target_record=self._registry().get_agent(record["to_agent_id"])
+            if target_record is None or target_record.disabled:
+                raise ValueError("Specialist unavailable or disabled; no child started")
             self.store.save_handoff({**record, "status": "running"})
             from jaeger_agent.cognition.runs import InMemoryRunStore
             from jaeger_agent.delegates.contracts import DelegateRequest
@@ -6298,6 +6337,9 @@ class JaegerGatewayApp:
         from jaeger_ai.core.agent_registry.specialist_runtime import specialist_agent
 
         child_rid = hashlib.sha256(("handoff:" + request_id).encode()).hexdigest()[:32]
+        target_record=self._registry().get_agent(agent_id or specialist_agent(session_id) or '')
+        if target_record is not None and target_record.disabled:
+            raise ValueError('Specialist disabled; no new child admission')
         meta = {
             "agent_id": agent_id or specialist_agent(session_id), "agent_pinned": True,
             "route_checked": True, "handoff_child": True, "handoff_id": handoff_id,
@@ -6313,12 +6355,19 @@ class JaegerGatewayApp:
         # Identity comes from durable admission, never from that later context.
         handoff = self.store.get_handoff(handoff_id) if handoff_id else None
         if handoff is not None:
-            requested["caller"] = (handoff.get("metadata") or {}).get("caller_actor")
+            handoff_meta=handoff.get('metadata') or {}
+            requested["caller"] = handoff_meta.get("caller_actor")
+            choice=handoff_meta.get('model_choice')
+            if choice is not None:
+                if not isinstance(choice,dict) or set(choice)!={'model','provider'} or any(not isinstance(v,str) or not v for v in choice.values()):
+                    raise ValueError('Retained handoff model choice is malformed; no new turn admitted')
+                requested.update(choice)
         if allowed_tools is not None:
             requested["allowed_tools"] = list(allowed_tools)
         if workspace:
             requested["workspace"] = workspace
-        admitted = self.store.admit_request(session_id, text, request_id=child_rid, requested=requested)
+        revision=await self._turn_model_revision(session_id,requested,child_rid) if requested.get('model') else None
+        admitted = self.store.admit_request(session_id, text, request_id=child_rid, requested=requested,expected_model_revision=revision)
         self._start_admitted_turn(admitted, session_id, text)
         rid = admitted["request_id"]
         task = self._running_tasks.get(rid)

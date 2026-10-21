@@ -352,7 +352,7 @@ export function App({ source }: { source: JaegerSource }) {
       )}
       {primaryPicker && <PrimaryPicker agents={store.agents.filter((a) => a.ui_actions?.primary && a.id !== primaryPicker.expectedId && visible(a))} busy={managementBusy}
         onPick={(id) => void changePrimary(id, primaryPicker.expectedId)} onClose={() => { if (!managementBusy) setPrimaryPicker(null); }} />}
-      {replyHandoffId && source.replyHandoff && <HandoffReplyDialog handoffId={replyHandoffId} send={(id, task, rid) => source.replyHandoff!(id, task, rid)} onClose={() => setReplyHandoffId(null)} />}
+      {replyHandoffId && source.replyHandoff && <HandoffReplyDialog key={replyHandoffId} handoffId={replyHandoffId} command={source.replyHandoffCommand?.bind(source)} lookup={source.originalHandoffReply?.bind(source)} send={(id, task, rid) => source.replyHandoff!(id, task, rid)} onClose={() => setReplyHandoffId(null)} />}
       {agentPrompt?.kind === "rename" && <AgentPrompt title={`Rename ${label(agentPrompt.agent)}`} confirm="Save display name" input={{ placeholder: "Display name", value: label(agentPrompt.agent) }} message="Presentation only. Agent ID, role, tools, context and conversations stay the same." onDone={onPromptDone} />}
       {agentPrompt?.kind === "delete" && <AgentPrompt title={`Delete ${label(agentPrompt.agent)}?`} danger confirm="Delete"
         message="It leaves the sidebar. Its home chat and history are kept and can be restored." onDone={onPromptDone} />}

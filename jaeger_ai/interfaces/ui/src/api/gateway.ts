@@ -238,6 +238,12 @@ export class GatewayClient implements JaegerSource {
     remove: async (id) => { await this.json(`/v1/agents/${encodeURIComponent(id)}`, { deleted: true }, "PATCH"); },
     template: (id) => this.json<unknown>(`/v1/agents/${encodeURIComponent(id)}/template`),
   };
+  delegation:NonNullable<JaegerSource['delegation']>={
+    create:(id,body)=>this.json(`/v1/agents/${encodeURIComponent(id)}/handoff-commands`,body),
+    original:(id,rid)=>this.json(`/v1/agents/${encodeURIComponent(id)}/handoff-commands/${encodeURIComponent(rid)}`),
+  };
+  originalHandoffReply(parent:string,rid:string){return this.json<import('./types').HandoffCommandReceipt>(`/v1/handoffs/${encodeURIComponent(parent)}/reply-commands/${encodeURIComponent(rid)}`);}
+  replyHandoffCommand(parent:string,task:string,rid:string){return this.json<import('./types').HandoffCommandReceipt>(`/v1/handoffs/${encodeURIComponent(parent)}/reply-commands`,{task,request_id:rid});}
   replyHandoff(handoffId: string, task: string, requestId: string) {
     return this.json<Handoff>(`/api/handoffs/${encodeURIComponent(handoffId)}/reply`, { task, request_id: requestId });
   }

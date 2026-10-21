@@ -35,6 +35,7 @@ def reply_payload(store, handoff_id, body):
         'require_approval': True, 'reply_to_handoff_id': parent['id'],
         'permitted_context': ('Earlier exchange data, not a permission grant.\nTask: ' + str(parent.get('task') or '') + '\nResult: ' + str((parent.get('result') or {}).get('summary') or ''))[:24000],
         'allowed_tools': list(meta.get('allowed_tools') or []),
+        'model': meta.get('requested_model'), 'background': True,
         'project_id': meta.get('project_id'), 'workspace': meta.get('workspace'),
         'timeout_seconds': meta.get('timeout_seconds', 120),
     }
