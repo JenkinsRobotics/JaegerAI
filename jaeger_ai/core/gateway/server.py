@@ -1459,6 +1459,9 @@ class JaegerGatewayApp:
         register_computer_status(self)
         from .policy_status import register as register_policy_status
         register_policy_status(self)
+        # GB-031/GB-032 owner-only routes (owned by blueprint_routes.py; mount only here).
+        from jaeger_ai.core.gateway.blueprint_routes import mount_blueprint_routes
+        mount_blueprint_routes(self)
         self.app.router.add_post("/v1/sessions/{id}/ide/{ide_request_id}", self.handle_ide_result)
         self.app.router.add_get("/v1/runtime/autonomy", self.handle_get_autonomy)
         self.app.router.add_post("/v1/runtime/autonomy", self.handle_set_autonomy)
