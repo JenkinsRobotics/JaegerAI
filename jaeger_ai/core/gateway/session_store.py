@@ -34,7 +34,7 @@ class RequestBusy(RuntimeError):
     """A session already has in-flight or unreconciliation work."""
 
 
-def default_store_path() -> Path:
+def default_store_path(*, create: bool = True) -> Path:
     """The durable session database — ``<state root>/gateway_sessions.sqlite3``.
 
     Resolved through ``operator_state_root()``, the one place that
@@ -51,7 +51,7 @@ def default_store_path() -> Path:
     from jaeger_ai.core.instance.instance import operator_state_root
 
     root = operator_state_root()
-    root.mkdir(parents=True, exist_ok=True)
+    if create:root.mkdir(parents=True, exist_ok=True)
     return root / "gateway_sessions.sqlite3"
 
 

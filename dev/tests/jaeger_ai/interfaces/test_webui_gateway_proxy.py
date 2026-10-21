@@ -291,3 +291,16 @@ def test_semantic_claim_commands_and_recovery_use_explicit_proxy_routes(overlay)
         assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
     assert not _route(overlay,'/v1/runtime/memory/claims/clm_owned/delete','POST')
     assert not _route(overlay,'/v1/runtime/memory/claims/clm_owned/restore/extra','POST')
+
+
+def test_plugin_package_and_startup_proxy_routes_are_explicit(overlay):
+    for path in ('/v1/runtime/plugins/packages/preview','/v1/runtime/plugins/packages/change','/v1/runtime/plugins/owned/startup'):
+        assert _route(overlay,path,'POST') and overlay._calls[-1]==('POST',path)
+    for path in ('/v1/runtime/plugins/packages','/v1/runtime/plugins/package-operations/owned-op'):
+        assert _route(overlay,path,'GET') and overlay._calls[-1]==('GET',path)
+    assert not _route(overlay,'/v1/runtime/plugins/packages/shell','POST')
+
+
+def test_plugin_package_history_proxy_preserves_cursor(overlay):
+    path='/v1/runtime/plugins/packages?before=owned-cursor'
+    assert _route(overlay,path,'GET') and overlay._calls[-1]==('GET',path)

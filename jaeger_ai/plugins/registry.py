@@ -51,8 +51,9 @@ class PluginContext:
     def register_hook(self, event: str, handler: Callable[..., Any]) -> None:
         """Register a lifecycle hook. ``event`` ∈ :data:`HOOK_EVENTS`."""
         if event not in HOOK_EVENTS:
-            raise ValueError(f"unknown hook event {event!r}; "
-                             f"expected one of {HOOK_EVENTS}")
+            raise ValueError(
+                f"unknown hook event {event!r}; expected one of {HOOK_EVENTS}"
+            )
         self.hooks.setdefault(event, []).append(handler)
 
 
@@ -65,60 +66,211 @@ _HOOK_OWNERS: dict[int, str] = {}
 
 def _entries(group: str):
     from importlib.metadata import entry_points
-    try:return list(entry_points(group=group))
-    except TypeError:return list(entry_points().get(group, []))
+
+    try:
+        return list(entry_points(group=group))
+    except TypeError:
+        return list(entry_points().get(group, []))
 
 
 def _identity(ep, group):
-    dist=getattr(ep,'dist',None)
-    package=str(getattr(dist,'name','') or '')
-    version=str(getattr(dist,'version','') or '')
-    raw='\0'.join((group,ep.name,ep.value,package,version))
-    return hashlib.sha256(raw.encode()).hexdigest()[:32],package,version
+    dist = getattr(ep, "dist", None)
+    package = str(getattr(dist, "name", "") or "")
+    version = str(getattr(dist, "version", "") or "")
+    raw = "\0".join((group, ep.name, ep.value, package, version))
+    return hashlib.sha256(raw.encode()).hexdigest()[:32], package, version
 
 
-def catalog(group: str = 'jaeger_ai.plugins') -> dict[str, Any]:
+def _revision(ep, group):
+    """Content-bound approval separate from the stable public catalog identity."""
+    import base64
+    from pathlib import Path
+
+    identity, _, _ = _identity(ep, group)
+    dist = getattr(ep, "dist", None)
+    files = getattr(dist, "files", None)
+    if not files:
+        return identity, False
+    checks = []
+    verified = True
+    size = 0
+    try:
+        root = Path(dist.locate_file("")).resolve()
+        for file in sorted(files, key=str):
+            if str(file).endswith(".pyc"):
+                continue
+            path = Path(dist.locate_file(file))
+            if (
+                path.is_symlink()
+                or not path.resolve().is_relative_to(root)
+                or not path.is_file()
+            ):
+                return identity, False
+            size += path.stat().st_size
+            if size > 100 * 1024 * 1024 or len(checks) > 2048:
+                return identity, False
+            content = path.read_bytes()
+            sha = hashlib.sha256(content).digest()
+            checks.append((str(file), sha.hex()))
+            if str(file).endswith(".pth"):
+                verified = False
+            recorded = getattr(file, "hash", None)
+            if not str(file).endswith("/RECORD"):
+                if (
+                    recorded is None
+                    or recorded.mode not in {"sha256", "sha384", "sha512"}
+                    or recorded.value
+                    != base64.urlsafe_b64encode(
+                        hashlib.new(recorded.mode, content).digest()
+                    )
+                    .decode()
+                    .rstrip("=")
+                ):
+                    verified = False
+        return hashlib.sha256((identity + "\0" + str(checks)).encode()).hexdigest()[
+            :32
+        ], verified
+    except Exception:
+        return identity, False
+
+
+def catalog(group: str = "jaeger_ai.plugins", *, policy=None) -> dict[str, Any]:
     """Installed metadata only; never import an entry point to inspect it."""
     from jaeger_ai.core.redaction import redact_text
-    rows=[]
+    from . import startup
+
+    try:
+        policy = policy if policy is not None else startup.read()
+        policy_known = True
+    except Exception:
+        policy = {"revision": 0, "entries": {}}
+        policy_known = False
+    rows = []
     with _LOCK:
-        installed={}
+        installed = {}
         for ep in _entries(group):
-            identity,package,version=_identity(ep,group)
-            installed[identity]=(ep.name,package,version)
-        present=set(installed)
-        for identity,loaded in _LOADED.items():
-            if loaded['group']==group:installed.setdefault(identity,(loaded['name'],loaded['package'],loaded['version']))
-        for identity,(name,package,version) in installed.items():
-            loaded=_LOADED.get(identity)
-            state=loaded['state'] if loaded else 'installed_not_loaded'
-            retained=[other for other,row in _LOADED.items() if row['group']==group and row['name']==name and other!=identity]
-            candidates=[other for other,(other_name,_,_) in installed.items() if other in present and other_name==name and other!=identity]
-            distribution_state='current' if identity in present else 'replaced' if candidates else 'removed'
-            rows.append({'id':identity,'name':redact_text(name)[:200],'package':redact_text(package)[:200],
-                'version':redact_text(version)[:100],'state':state,'active_hooks':loaded['active'] if loaded else 0,
-                'hook_count':loaded['hook_count'] if loaded else 0,'tool_count':loaded['tool_count'] if loaded else 0,
-                'command_count':loaded['command_count'] if loaded else 0,
-                'distribution_state':distribution_state,'activation_blocked_by_loaded_revision':bool(retained),
-                'related_revision_ids':sorted(set(retained+candidates)),
-                'actions':['pause_hooks'] if state=='loaded' and loaded['hook_count'] else ['resume_hooks'] if state=='hooks_paused' and distribution_state=='current' and not retained else [],
-                'provenance':'installed_distribution_metadata_not_publisher_verification'})
-    return {'plugins':rows,'scope':'current_process','activation_performed':False}
+            identity, package, version = _identity(ep, group)
+            revision, verified = _revision(ep, group)
+            installed[identity] = (ep.name, package, version, revision, verified)
+        present = set(installed)
+        for identity, loaded in _LOADED.items():
+            if loaded["group"] == group:
+                installed.setdefault(
+                    identity,
+                    (
+                        loaded["name"],
+                        loaded["package"],
+                        loaded["version"],
+                        loaded.get("revision", identity),
+                        False,
+                    ),
+                )
+        for identity, (name, package, version, revision, verified) in installed.items():
+            loaded = _LOADED.get(identity)
+            state = loaded["state"] if loaded else "installed_not_loaded"
+            retained = [
+                other
+                for other, row in _LOADED.items()
+                if row["group"] == group and row["name"] == name and other != identity
+            ]
+            candidates = [
+                other
+                for other, (other_name, *_) in installed.items()
+                if other in present and other_name == name and other != identity
+            ]
+            changed = bool(loaded) and loaded.get("revision", identity) != revision
+            distribution_state = (
+                "replaced"
+                if changed
+                else "current"
+                if identity in present
+                else "replaced"
+                if candidates
+                else "removed"
+            )
+            slot_id = startup.slot(group, name, package)
+            setting = policy["entries"].get(slot_id)
+            rows.append(
+                {
+                    "slot_id": slot_id,
+                    "startup_revision": policy["revision"],
+                    "startup_known": policy_known,
+                    "startup_policy": "unknown"
+                    if not policy_known
+                    else "legacy"
+                    if setting is None
+                    else "disabled"
+                    if setting == "disabled"
+                    else "enabled_revision"
+                    if setting == revision and verified
+                    else "revision_unapproved",
+                    "startup_editable": policy_known and identity in present,
+                    "startup_approvable": verified,
+                    "startup_revision_id": revision,
+                    "restart_required": bool(loaded)
+                    and (
+                        not policy_known
+                        or not startup.permitted(policy, slot_id, revision)
+                    ),
+                    "id": identity,
+                    "name": redact_text(name)[:200],
+                    "package": redact_text(package)[:200],
+                    "version": redact_text(version)[:100],
+                    "state": state,
+                    "active_hooks": loaded["active"] if loaded else 0,
+                    "hook_count": loaded["hook_count"] if loaded else 0,
+                    "tool_count": loaded["tool_count"] if loaded else 0,
+                    "command_count": loaded["command_count"] if loaded else 0,
+                    "distribution_state": distribution_state,
+                    "activation_blocked_by_loaded_revision": bool(retained) or changed,
+                    "related_revision_ids": sorted(set(retained + candidates)),
+                    "actions": ["pause_hooks"]
+                    if state == "loaded" and loaded["hook_count"]
+                    else ["resume_hooks"]
+                    if state == "hooks_paused"
+                    and distribution_state == "current"
+                    and not retained
+                    else [],
+                    "provenance": "installed_distribution_metadata_not_publisher_verification",
+                }
+            )
+    return {"plugins": rows, "scope": "current_process", "activation_performed": False}
 
 
 def control_hooks(identity: str, action: str, expected_state: str):
     """Quiesce managed hook dispatch only. No import, unload, grant or transport stop."""
     with _LOCK:
-        row=_LOADED.get(identity)
-        if row is None or row['state']!=expected_state:raise ValueError('Plugin state changed; reload catalog')
-        if row['active']:raise ValueError('Plugin hook is running; no lifecycle change made')
-        if action=='resume_hooks':
-            installed={_identity(ep,row['group'])[0] for ep in _entries(row['group'])}
-            if identity not in installed:raise ValueError('Installed distribution changed or was removed; retained code cannot be resumed')
-        target={'pause_hooks':('loaded','hooks_paused'),'resume_hooks':('hooks_paused','loaded')}.get(action)
-        if target is None or row['state']!=target[0] or not row['hook_count']:raise ValueError('No supported hook lifecycle action')
-        row['state']=target[1]
-        return {'id':identity,'state':row['state'],'scope':'managed_hook_dispatch_only','code_unloaded':False,'tools_changed':False,'restart_policy':'existing_discovery_default_unchanged'}
+        row = _LOADED.get(identity)
+        if row is None or row["state"] != expected_state:
+            raise ValueError("Plugin state changed; reload catalog")
+        if row["active"]:
+            raise ValueError("Plugin hook is running; no lifecycle change made")
+        if action == "resume_hooks":
+            installed = {
+                _identity(ep, row["group"])[0]: _revision(ep, row["group"])[0]
+                for ep in _entries(row["group"])
+            }
+            if identity not in installed or installed[identity] != row.get(
+                "revision", identity
+            ):
+                raise ValueError(
+                    "Installed distribution changed or was removed; retained code cannot be resumed"
+                )
+        target = {
+            "pause_hooks": ("loaded", "hooks_paused"),
+            "resume_hooks": ("hooks_paused", "loaded"),
+        }.get(action)
+        if target is None or row["state"] != target[0] or not row["hook_count"]:
+            raise ValueError("No supported hook lifecycle action")
+        row["state"] = target[1]
+        return {
+            "id": identity,
+            "state": row["state"],
+            "scope": "managed_hook_dispatch_only",
+            "code_unloaded": False,
+            "tools_changed": False,
+            "restart_policy": "existing_discovery_default_unchanged",
+        }
 
 
 def discover_plugins(group: str = "jaeger_ai.plugins") -> list[str]:
@@ -127,7 +279,7 @@ def discover_plugins(group: str = "jaeger_ai.plugins") -> list[str]:
     and skipped — never fatal. Idempotent enough for a single boot call."""
     loaded: list[str] = []
     try:
-        from importlib.metadata import entry_points
+        __import__("importlib.metadata")
     except ImportError:
         # Narrowed from bare Exception: only an import failure belongs here,
         # and on any supported Python this cannot happen. Logged rather than
@@ -138,38 +290,86 @@ def discover_plugins(group: str = "jaeger_ai.plugins") -> list[str]:
             exc_info=True,
         )
         return loaded
+    from . import startup
+
+    try:
+        policy = startup.read()
+    except Exception:
+        logger.error("Plugin startup policy unavailable; no entry points loaded")
+        return loaded
     for ep in _entries(group):
-        identity,package,version=_identity(ep,group)
+        identity, package, version = _identity(ep, group)
+        revision, verified = _revision(ep, group)
+        setting = policy["entries"].get(startup.slot(group, ep.name, package))
+        if setting is not None and (
+            not verified
+            or not startup.permitted(
+                policy, startup.slot(group, ep.name, package), revision
+            )
+        ):
+            continue
         with _LOCK:
-            old=_LOADED.get(identity)
+            old = _LOADED.get(identity)
             if old is not None:
-                if old['state'] in {'loaded','hooks_paused'}:loaded.append(ep.name)
+                if old["state"] in {"loaded", "hooks_paused"}:
+                    loaded.append(ep.name)
                 continue  # Failed/uncertain registration must never be replayed.
-            if any(row['group']==group and row['name']==ep.name for row in _LOADED.values()):
+            if any(
+                row["group"] == group and row["name"] == ep.name
+                for row in _LOADED.values()
+            ):
                 continue  # Changed distribution must not overlay previously loaded code.
-            row={'name':ep.name,'group':group,'package':package,'version':version,'state':'loading','active':0,'hook_count':0,'command_count':0,'tool_count':0}
-            _LOADED[identity]=row
+            row = {
+                "name": ep.name,
+                "group": group,
+                "package": package,
+                "version": version,
+                "state": "loading",
+                "revision": revision,
+                "active": 0,
+                "hook_count": 0,
+                "command_count": 0,
+                "tool_count": 0,
+            }
+            _LOADED[identity] = row
         try:
             register = ep.load()
-            staged=PluginContext()
+            staged = PluginContext()
             register(staged)
             with _LOCK:
-                if set(staged.commands)&set(_CONTEXT.commands):raise ValueError('Plugin command conflicts with existing owner')
-                if any(id(handler) in _HOOK_OWNERS for handlers in staged.hooks.values() for handler in handlers):raise ValueError('Plugin hook already belongs to another owner')
-                _CONTEXT.tools.extend(staged.tools);_CONTEXT.commands.update(staged.commands)
-                for event,handlers in staged.hooks.items():
-                    _CONTEXT.hooks.setdefault(event,[]).extend(handlers)
-                    for handler in handlers:_HOOK_OWNERS[id(handler)]=identity
-                row.update(state='loaded',hook_count=sum(map(len,staged.hooks.values())),command_count=len(staged.commands),tool_count=len(staged.tools))
+                if set(staged.commands) & set(_CONTEXT.commands):
+                    raise ValueError("Plugin command conflicts with existing owner")
+                if any(
+                    id(handler) in _HOOK_OWNERS
+                    for handlers in staged.hooks.values()
+                    for handler in handlers
+                ):
+                    raise ValueError("Plugin hook already belongs to another owner")
+                _CONTEXT.tools.extend(staged.tools)
+                _CONTEXT.commands.update(staged.commands)
+                for event, handlers in staged.hooks.items():
+                    _CONTEXT.hooks.setdefault(event, []).extend(handlers)
+                    for handler in handlers:
+                        _HOOK_OWNERS[id(handler)] = identity
+                row.update(
+                    state="loaded",
+                    hook_count=sum(map(len, staged.hooks.values())),
+                    command_count=len(staged.commands),
+                    tool_count=len(staged.tools),
+                )
             loaded.append(ep.name)
         except Exception as exc:  # noqa: BLE001 — one bad plugin can't break boot
-            with _LOCK:row['state']='registration_outcome_unknown'
+            with _LOCK:
+                row["state"] = "registration_outcome_unknown"
             # Stays broad on purpose: third-party `register()` can raise
             # anything, and one bad plugin must not stop the others or the
             # boot. Now carries a traceback — a bare message told the
             # operator a plugin failed but never where.
             logger.warning(
-                "plugin %s failed to load: %s", ep.name, exc, exc_info=True,
+                "plugin %s failed to load: %s",
+                ep.name,
+                exc,
+                exc_info=True,
             )
     return loaded
 
@@ -183,28 +383,34 @@ def fire_hook(event: str, **kwargs: Any) -> None:
     """Fire every handler registered for ``event``. Exceptions are swallowed
     per handler — a buggy plugin hook never breaks the turn. Called from the
     agent loop's tool callbacks (pre_tool/post_tool) and turn boundaries."""
-    with _LOCK:handlers=list(_CONTEXT.hooks.get(event, ()))
+    with _LOCK:
+        handlers = list(_CONTEXT.hooks.get(event, ()))
     for handler in handlers:
         with _LOCK:
-            owner=_LOADED.get(_HOOK_OWNERS.get(id(handler)))
+            owner = _LOADED.get(_HOOK_OWNERS.get(id(handler)))
             if owner is not None:
-                if owner['state']!='loaded':continue
-                owner['active']+=1
+                if owner["state"] != "loaded":
+                    continue
+                owner["active"] += 1
         try:
             handler(**kwargs)
         except Exception:  # noqa: BLE001 — a hook must not break the turn
             # Was `pass`: a plugin hook could fail on every single turn and
             # leave no trace anywhere. Still non-fatal, now audible.
             logger.warning(
-                "plugin hook for %r raised; continuing", event, exc_info=True,
+                "plugin hook for %r raised; continuing",
+                event,
+                exc_info=True,
             )
         finally:
             if owner is not None:
-                with _LOCK:owner['active']-=1
+                with _LOCK:
+                    owner["active"] -= 1
 
 
 def reset_for_tests() -> None:
     """Clear the global registry (tests only)."""
     global _CONTEXT
     _CONTEXT = PluginContext()
-    _LOADED.clear();_HOOK_OWNERS.clear()
+    _LOADED.clear()
+    _HOOK_OWNERS.clear()

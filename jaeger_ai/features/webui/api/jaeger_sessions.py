@@ -255,11 +255,15 @@ def route(handler, parsed, method: str) -> bool:
     if path.startswith('/v1/runtime/memory/claim-operations/') and method=='GET' and len(path.split('/'))==6:
         return _proxy(handler,method,path)
 
+    if path=='/v1/runtime/plugins/packages' and method=='GET':return _proxy(handler,method,path+query)
+    if path in {'/v1/runtime/plugins/packages/preview','/v1/runtime/plugins/packages/change'} and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))
+    if path.startswith('/v1/runtime/plugins/package-operations/') and method=='GET' and len(path.split('/'))==6:return _proxy(handler,method,path)
+
     if path == '/v1/runtime/plugins' and method == 'GET':
         return _proxy(handler,method,path)
     if path.startswith('/v1/runtime/plugins/') and method == 'POST':
         segments=path.split('/')
-        if len(segments)==6 and segments[5] in {'pause_hooks','resume_hooks'}:
+        if len(segments)==6 and segments[5] in {'pause_hooks','resume_hooks','startup'}:
             return _proxy(handler,method,path,_body_bytes(handler))
         return False
 
