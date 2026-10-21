@@ -393,3 +393,67 @@ def test_workflow_reference_is_atomic_immutable_data_not_authority(owner):
         owner.submit('No grants', context=context(owner), workflow_reference={**ref, 'authorized': True})
     assert len(owner.store.list_tasks()) == 1
     assert owner.gateway.store.list_requests() == []
+
+
+def test_task_child_preserves_saved_specialist_identity_and_admitted_tool_ceiling(owner):
+    ctx = {**context(owner), 'agent_id': 'native:builder',
+           'execution': {**context(owner)['execution'], 'allowed_tools': ['read_file'], 'caller': 'owner:webui'}}
+    tid = owner.submit('Review supplied fixture', context=ctx)['task_id']
+    session = owner.gateway.store.get_session(f'task:{tid}')
+    assert session['metadata']['agent_id'] == 'native:builder'
+    assert session['metadata']['agent_pinned'] and session['metadata']['route_checked']
+    launches = []
+    async def run():
+        def start(admitted, sid, prompt):
+            launches.append(admitted)
+            assert owner.gateway.store.get_session(sid)['metadata']['agent_id'] == 'native:builder'
+            async def complete():
+                owner.gateway.store.complete_request(admitted['request_id'], status='completed', result={'output': 'Fixture reviewed'})
+            owner.gateway._running_tasks[admitted['request_id']] = asyncio.create_task(complete())
+        owner.gateway._start_admitted_turn = start
+        await owner._execute(tid)
+    asyncio.run(run())
+    assert len(launches) == 1
+    assert launches[0]['execution']['allowed_tools'] == ['read_file']
+    assert launches[0]['execution']['caller'] == 'owner:webui'
+    assert owner.store.get_task(tid).agent_id == 'native:builder'
+
+
+def test_task_child_conflict_and_old_unbound_admission_do_not_dispatch_or_rebind(owner):
+    ctx = {**context(owner), 'agent_id': 'native:builder'}
+    tid = owner.submit('Fixture identity conflict', context=ctx)['task_id']
+    sid = f'task:{tid}'
+    owner.gateway.store.update_metadata(sid, {'agent_id': 'native:finance'})
+    owner.gateway._start_admitted_turn = lambda *a: pytest.fail('identity conflict dispatched')
+    asyncio.run(owner._execute(tid))
+    assert owner.store.get_task(tid).state == TaskState.PAUSED
+    assert 'no rebind' in owner.store.get_task(tid).error
+    assert owner.gateway.store.get_session(sid)['metadata']['agent_id'] == 'native:finance'
+    assert owner.gateway.store.list_requests() == []
+    # Simulate a retained older child which never captured identity at admission.
+    other = owner.submit('Fixture old child', context={**ctx, 'request_id': 'other-parent'})['task_id']
+    child = f'task:{other}'
+    owner.gateway.store.update_metadata(child, {'agent_id': None})
+    owner.gateway.store.admit_request(child, 'Already admitted', request_id=f'{other}:0')
+    before = owner.gateway.store.get_request(f'{other}:0')
+    asyncio.run(owner._execute(other))
+    assert 'no saved execution identity' in owner.store.get_task(other).error
+    assert owner.gateway.store.get_request(f'{other}:0') == before
+    assert owner.gateway.store.get_session(child)['metadata'].get('agent_id') is None
+    # Unknown recovery consumes the existing receipt, never changes its identity.
+    owner.gateway.store.complete_request(f'{other}:0', status='execution_unknown', result={'error': 'Retained uncertainty'})
+    unknown = owner.gateway.store.get_request(f'{other}:0')
+    asyncio.run(owner._execute(other))
+    assert owner.gateway.store.get_request(f'{other}:0') == unknown
+    assert owner.gateway.store.get_session(child)['metadata'].get('agent_id') is None
+
+
+def test_delayed_task_dispatch_respects_current_agent_disable_without_fallback(owner):
+    tid = owner.submit('Owned delayed fixture', context={**context(owner), 'agent_id': 'native:builder'})['task_id']
+    owner.gateway._registry = lambda: SimpleNamespace(get_agent=lambda aid: SimpleNamespace(disabled=True))
+    owner.gateway._start_admitted_turn = lambda *a: pytest.fail('disabled agent dispatched')
+    asyncio.run(owner._execute(tid))
+    task = owner.store.get_task(tid)
+    assert task.state == TaskState.PAUSED and 'disabled' in task.error
+    assert owner.gateway.store.get_session(f'task:{tid}')['metadata']['agent_id'] == 'native:builder'
+    assert owner.gateway.store.list_requests() == []
