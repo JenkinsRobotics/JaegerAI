@@ -307,6 +307,9 @@ export class GatewayClient implements JaegerSource {
   sessionControl(sessionId: string) {
     return this.json<{ latest_request?: { request_id: string; status: string } | null }>(`/v1/sessions/${encodeURIComponent(sessionId)}?view=control`);
   }
+  acknowledgeUnknown(sessionId: string, requestId: string) {
+    return this.json<RequestSnapshot>(`/v1/sessions/${encodeURIComponent(sessionId)}/reconcile`, { request_id: requestId, acknowledge_unknown: true });
+  }
   requestStatus(sessionId: string, requestId: string) {
     return this.json<RequestSnapshot>(`/v1/sessions/${encodeURIComponent(sessionId)}/requests/${encodeURIComponent(requestId)}`);
   }
