@@ -14,6 +14,8 @@ def register(gateway):
     gateway.app.router.add_get('/v1/agents/{id}/handoff-requests/{request_id}',lookup)
     gateway.app.router.add_get('/v1/handoffs/{parent}/replies/{request_id}',lookup)
     register_commands(gateway)
+    from .handoff_stop_controls import register as register_stop
+    register_stop(gateway)
 
 
 def command_key(kind,resource,request_id,actor):

@@ -245,6 +245,11 @@ export interface JaegerSource {
     create(targetId:string,body:{task:string;request_id:string;session_id:string;from_agent_id:string;require_approval:true;model:string|null;background:true}):Promise<import("./types").HandoffCommandReceipt>;
     original(targetId:string,requestId:string):Promise<import("./types").HandoffCommandReceipt>;
   };
+  handoffStops?: {
+    list():Promise<{handoffs:import('./types').HandoffStopRow[];limit:number}>;
+    stop(id:string,body:{operation_id:string;request_id:string}):Promise<import('./types').HandoffStopReceipt>;
+    original(id:string,operation:string):Promise<import('./types').HandoffStopReceipt>;
+  };
   originalHandoffReply?(parentId:string,requestId:string):Promise<import("./types").HandoffCommandReceipt>;
   replyHandoffCommand?(parentId:string,task:string,requestId:string):Promise<import("./types").HandoffCommandReceipt>;
   replyHandoff?(handoffId: string, task: string, requestId: string): Promise<Handoff>;

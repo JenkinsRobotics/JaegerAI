@@ -174,10 +174,12 @@ export class WebHost implements ChatHost {
     const requestCancel = () => {
       onPart({ kind: "progress", message: "Stopping… Waiting for Gateway confirmation." });
       void this.source.cancel(request.sessionId, admittedRequestId).then(receipt=>{
-        if(!observing||!receipt)return;
+        if(!receipt)return;
         if(receipt.request_id!==admittedRequestId||receipt.session_id!==request.sessionId)throw Error('Stop receipt did not match the original request');
-        if(receipt.cancel_requested&&receipt.cancellation_confirmed===false){
-          const ids=[...new Set([admittedRequestId,...(Array.isArray(receipt.unconfirmed_task_ids)?receipt.unconfirmed_task_ids.filter(id=>typeof id==='string'&&/^[A-Za-z0-9_.:-]{1,128}$/.test(id)).slice(0,64):[])])];
+        const children=Array.isArray(receipt.unconfirmed_task_ids)?receipt.unconfirmed_task_ids.filter(id=>typeof id==='string'&&/^[A-Za-z0-9_.:-]{1,128}$/.test(id)).slice(0,64):[];
+        if(!observing){if(children.length)onPart({kind:'warning',message:`Parent observation ended; Stop remains unconfirmed for owned work: ${children.join(', ')}. Check background work.`});return;}
+        if(receipt.cancel_requested&&receipt.cancellation_confirmed===false||children.length){
+          const ids=[...new Set([...(receipt.cancel_requested&&receipt.cancellation_confirmed===false?[admittedRequestId]:[]),...children])];
           onPart({kind:'warning',message:`Stop request acknowledged; outcome is not yet confirmed for ${ids.join(', ')}. Still observing the original request.`});
         }
       }).catch((error: unknown) => {

@@ -259,22 +259,25 @@ def register(gateway):
     @wrap("cancel_goal")
     async def cancel(request, caller):
         row = goal_row(caller, request.match_info["goal_id"])
-        response = await gateway.handle_cancel_turn(
-            TurnRequest(request, row["session"], {"request_id": row["request_id"]})
-        )
+        cancel_context=TurnRequest(request, row["session"], {"request_id": row["request_id"]})
+        response = await gateway.handle_cancel_turn(cancel_context)
         if response.status != 200:
             return response
         from .delegation import cancel_handoffs
 
-        await cancel_handoffs(
+        legacy_children=await cancel_handoffs(
             gateway,
             {
                 "caller": caller,
                 "session": row["session"],
                 "request_id": row["request_id"],
             },
+            request_context=cancel_context,
         )
         canonical = json.loads(response.body)
+        from jaeger_ai.core.gateway.handoff_cancellation import unconfirmed_ids
+        canonical['owned_handoff_cancellations']=(canonical.get('owned_handoff_cancellations') or [])+legacy_children
+        canonical['unconfirmed_task_ids']=unconfirmed_ids(canonical['owned_handoff_cancellations'])
         return web.json_response(
             {
                 **project_goal(row["id"], row["thread"], canonical, gateway=gateway),
@@ -284,6 +287,8 @@ def register(gateway):
                         "cancel_requested",
                         "already_terminal",
                         "cancellation_confirmed",
+                        "owned_handoff_cancellations",
+                        "unconfirmed_task_ids",
                     )
                     if name in canonical
                 },
