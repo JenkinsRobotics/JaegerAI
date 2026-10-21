@@ -148,8 +148,7 @@ class GatewayTaskOwner:
             runner=str(context.get('runner') or 'native'))
         task, replayed = self.store.admit_task(task)
         if not replayed:
-            self.gateway.store.ensure_session(f'task:{tid}', title=goal[:100], profile='jaeger', workspace=workspace,
-                metadata={'task_id':tid, 'parent_session_id':parent, 'actionable':True})
+            self._execution_session(task)
             self.gateway.event_bus.publish(parent, 'task.created', {'task': task.to_dict()})
             if not approved:
                 approval = self.gateway.store.create_approval(kind='background_task',
@@ -517,6 +516,29 @@ class GatewayTaskOwner:
         if not operation.cancelled() and operation.exception() is not None:
             logging.getLogger(__name__).error('Task %s will reconcile from its receipt: %s', task_id, operation.exception())
 
+    def _execution_session(self, task, *, admitted=False):
+        """Bind an unstarted child to its saved execution identity, never rebind.
+
+        Existing admitted children without an identity need owner inspection;
+        adding specialist metadata after admission would change execution truth.
+        """
+        sid = f'task:{task.task_id}'
+        existing = self.gateway.store.get_session(sid)
+        previous = (existing or {}).get('metadata') or {}
+        metadata = {'task_id': task.task_id, 'parent_session_id': task.notification_policy.recipient_session_id,
+                    'actionable': True}
+        if previous.get('task_id') not in (None, task.task_id):
+            raise ValueError('Task child belongs to a different saved task; no dispatch')
+        if task.agent_id:
+            bound = (existing or {}).get('agent_id') or previous.get('agent_id')
+            if bound and bound != task.agent_id:
+                raise ValueError('Task child execution identity differs from saved task; no rebind or dispatch')
+            if admitted and not bound:
+                raise ValueError('Admitted task child has no saved execution identity; inspect its receipt without replay')
+            metadata.update(agent_id=task.agent_id, agent_pinned=True, route_checked=True)
+        return self.gateway.store.ensure_session(sid, title=task.goal[:100], profile='jaeger',
+            workspace=str(task.payload['execution'].get('workspace') or ''), metadata=metadata)
+
     async def _execute(self, task_id):
         task = self.store.get_task(task_id)
         if task is None or task.is_terminal:
@@ -529,10 +551,27 @@ class GatewayTaskOwner:
         execution['options'] = {**(execution.get('options') or {}), 'background': True,
                                 'source': 'durable_task', 'task_id': task_id,
                                 'verification_error': task.error}
-        self.gateway.store.ensure_session(sid, title=task.goal[:100], profile='jaeger',
-            workspace=str(execution.get('workspace') or ''),
-            metadata={'task_id': task_id, 'parent_session_id': task.notification_policy.recipient_session_id,
-                      'actionable': True})
+        row = self.gateway.store.get_request(rid)
+        if row is None or row.get('status') in {'admitted', 'running'} and rid not in self.gateway._running_tasks:
+            try:
+                self._execution_session(task, admitted=row is not None)
+                if task.agent_id:
+                    # Current registry execution protections still apply after a
+                    # delayed approval. No fallback to the lead on disappearance.
+                    registry = getattr(self.gateway, '_registry', None)
+                    if registry is not None:
+                        agent = registry().get_agent(task.agent_id)
+                        if agent is None or agent.disabled:
+                            raise ValueError('Saved task agent is unavailable or disabled; no dispatch')
+            except ValueError as exc:
+                reason = str(exc)
+                def hold(current):
+                    if not current.is_terminal:
+                        authoritative_transition(current, TaskState.PAUSED, error=reason)
+                retained = self.store.update_task(task_id, hold)
+                self.gateway.event_bus.publish(task.notification_policy.recipient_session_id or sid,
+                    'task.updated', {'task': retained.to_dict()})
+                return
         prompt = ('Execute this authorized durable task fully. Do not queue the same work again. '
                   'Use the real tools, preserve progress, verify the requested outcome, and return the result. '
                   + EVIDENCE_CONTRACT + '\n\n'
