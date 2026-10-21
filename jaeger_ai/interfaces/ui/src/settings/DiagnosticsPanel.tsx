@@ -1,3 +1,4 @@
+import {displayDate} from "./devicePreferences";
 import {DiagnosticCapturePanel} from "./DiagnosticCapturePanel";
 import { useEffect, useState } from 'react';
 import type { GatewayDiagnostics, JaegerSource } from '../api/source';
@@ -13,7 +14,7 @@ export function DiagnosticsPanel({ source }: { source: JaegerSource }) {
   };
   return <><section aria-label="Gateway diagnostics"><p>Read-only durable state. Unknown execution is preserved; checking never retries work.</p><button type="button" onClick={() => setAttempt(n=>n+1)}>Refresh diagnostics</button>
     {error && <p role="alert">Could not read diagnostics: {error}. Last snapshot retained.</p>}{!snapshot && !error && <p role="status">Reading Gateway diagnostics…</p>}
-    {snapshot && <><p>Gateway process {snapshot.process_id} · observed {new Date(snapshot.observed_at*1000).toLocaleString()}</p><details><summary>Backend source fingerprint</summary><code>{snapshot.server_module_sha256}</code><p>{snapshot.fingerprint_scope}. This does not identify every loaded module or this UI build.</p></details><p>{snapshot.sessions} persisted conversations</p>
+    {snapshot && <><p>Gateway process {snapshot.process_id} · observed {displayDate(new Date(snapshot.observed_at*1000))}</p><details><summary>Backend source fingerprint</summary><code>{snapshot.server_module_sha256}</code><p>{snapshot.fingerprint_scope}. This does not identify every loaded module or this UI build.</p></details><p>{snapshot.sessions} persisted conversations</p>
       {(['requests','approvals','handoffs'] as const).map(group=><section key={group}><h3>{group}</h3><dl>{Object.entries(snapshot[group]).map(([state,count])=><div key={state}><dt>{state.replaceAll('_',' ')}</dt><dd>{count}</dd></div>)}</dl>{!Object.keys(snapshot[group]).length && <p>No records.</p>}</section>)}
       <h3>Unknown requests</h3><p>Showing up to {snapshot.unknown_list_limit}; total {snapshot.requests.execution_unknown ?? 0}.</p>{snapshot.unknown_requests.map(row=><article className="jg-card" key={row.request_id}><p>{row.request_id}</p><small>Conversation {row.session_id}</small>{source.requestStatus && <button type="button" disabled={Boolean(checking)} onClick={() => void check(row.session_id,row.request_id)}>Check saved request status</button>}</article>)}</>}
     {receipt && <p role="status">{receipt}</p>}

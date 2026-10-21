@@ -11,3 +11,7 @@ try {
 import { applyTextSize, storedTextSize } from "../settings/textSize";
 applyTextSize(storedTextSize(), false);
 window.addEventListener("storage", (event) => { if (event.key === "jaeger.ui.text-size" || event.key === null) applyTextSize(storedTextSize(), false); });
+
+import {applyDevicePreferences, devicePreferenceSnapshot, DEVICE_PREF_KEY} from "../settings/devicePreferences";
+applyDevicePreferences(devicePreferenceSnapshot().preferences);
+window.addEventListener("storage", event => {if(event.key === DEVICE_PREF_KEY || event.key === null) applyDevicePreferences(devicePreferenceSnapshot().preferences);});

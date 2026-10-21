@@ -32,3 +32,12 @@
   :is(.jg-send, .jg-composer__icon, .jg-action, .jg-agent-pill, .jg-jump, .jg-round-button, .jg-pill, .jg-user-chip,
       .jg-chip__remove, .jg-handoff__count, .jg-steps__summary, .aui-button, .aui-icon-button):active { scale: none; }
 }
+
+/* Explicit device reduction also covers streaming reveal and small robots.
+   OS reduction cannot be overridden by a device preference. */
+:root[data-jg-motion="reduce"] *, :root[data-jg-motion="reduce"] *::before, :root[data-jg-motion="reduce"] *::after {
+  animation: none !important; transition: none !important; scroll-behavior: auto !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

@@ -1,3 +1,4 @@
+import {displayDate, displayDayDistance} from "../settings/devicePreferences";
 /* Phone layout switch: width ≤ 700px OR a coarse (touch) pointer, on any host. The Mac app at its normal width
  * (fine pointer, ≥ 700px) never matches, so the desktop layout is untouched. Also keeps --jg-vvh = the visual
  * viewport height, so the phone shell (and its composer) shrinks above the on-screen keyboard. */
@@ -32,10 +33,9 @@ export function usePhone(): boolean {
 export function rowTime(epochSeconds: number, now = new Date()): string {
   if (!epochSeconds) return "";
   const d = new Date(epochSeconds * 1000);
-  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const days = Math.round((day(now) - day(d)) / 86400000);
-  if (days <= 0) return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  const days = displayDayDistance(d.getTime(), now.getTime());
+  if (days <= 0) return displayDate(d, {hour: "numeric", minute: "2-digit"});
   if (days === 1) return "Yesterday";
-  if (days < 7) return d.toLocaleDateString("en-US", { weekday: "long" });
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (days < 7) return displayDate(d, {weekday: "long"});
+  return displayDate(d, {month: "short", day: "numeric"});
 }

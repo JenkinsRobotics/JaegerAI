@@ -1,3 +1,4 @@
+import {displayDate, displayDayKey, displayDayDistance, useDevicePreferences} from "../settings/devicePreferences";
 import {TaskArtifacts} from '../library/TaskArtifacts';
 import { mergeSessionSnapshot } from "./sessionProjection";
 import { useDraft } from "./useDraft";
@@ -54,18 +55,17 @@ const OLDER_PX = 160;
 
 export function separatorLabel(at: number, now = Date.now()): string {
   const d = new Date(at);
-  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
-  const diff = Math.round((day(new Date(now)) - day(d)) / 86_400_000);
+  const time = displayDate(d, {hour: "numeric", minute: "2-digit"});
+  const diff = displayDayDistance(at, now);
   if (diff === 0) return `Today ${time}`;
   if (diff === 1) return `Yesterday ${time}`;
-  return `${d.toLocaleDateString([], { month: "short", day: "numeric" })}, ${time}`;
+  return `${displayDate(d, {month: "short", day: "numeric"})}, ${time}`;
 }
 
 export function needsSeparator(prev: number | undefined, at: number | undefined): boolean {
   if (at === undefined) return false;
   if (prev === undefined) return true;
-  return new Date(prev).toDateString() !== new Date(at).toDateString() || at - prev > SEPARATOR_GAP_MS;
+  return displayDayKey(prev) !== displayDayKey(at) || at - prev > SEPARATOR_GAP_MS;
 }
 
 /** Streamed reply text, paced and entered per the stream style (reveal.ts). */
@@ -196,6 +196,7 @@ export function showsProgress(turn: ChatTurn): boolean {
 const replyText = (turn: ChatTurn) => turn.parts.filter((p) => p.kind === "markdownContent").map((p) => (p as { text: string }).text).join("\n\n");
 
 export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessionId?: string; agents?: Agent[] }) {
+  const devicePreferences = useDevicePreferences();
   const [filesOpen,setFilesOpen]=useState(false);
   useEffect(()=>setFilesOpen(false),[sessionId]);
   const [session, setSession] = useState<ChatSession | null>(null);
@@ -713,7 +714,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         {quote && <div className="jg-chip" aria-label="Quoted reply"><span>{quote.text}</span><button type="button" aria-label="Cancel reply" onClick={() => setQuote(undefined)}>×</button></div>}
         {preparingFiles && <div role="status">Preparing attachments…</div>}
         {draftError && <div role="alert">{draftError}</div>}
-        <textarea disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : `${typeof document !== "undefined" && document.documentElement.classList.contains("jg-phone") ? "Ask" : "Message"} ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
+        <textarea spellCheck={devicePreferences.spellcheck} disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : `${typeof document !== "undefined" && document.documentElement.classList.contains("jg-phone") ? "Ask" : "Message"} ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
         {dictation && primary !== "dictate" && (
           <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
             aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
