@@ -3,6 +3,8 @@ import base64
 import hashlib
 import os
 import shutil
+import signal
+import subprocess
 import sys
 import time
 
@@ -56,6 +58,47 @@ def test_local_parser_byte_limit_and_timeout_reap_only_owned_children(tmp_path):
     code=f'import os,time;from pathlib import Path;Path({str(marker)!r}).write_text(str(os.getpid()));time.sleep(30)'
     with pytest.raises(TimeoutError):_output(sys.executable,['-c',code],b'',limit=32,deadline=time.monotonic()+0.4)
     with pytest.raises(ProcessLookupError):os.kill(int(marker.read_text()),0)
+
+
+
+def test_deadline_cleans_descendant_after_parent_exit_without_signalling_other_group(tmp_path):
+    marker=tmp_path/'descendant.pid'
+    control=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)'],start_new_session=True)
+    child=None
+    def observe(pid, *, allow_missing=False):
+        observed=subprocess.run(['ps','-o','stat=','-p',str(pid)],capture_output=True,text=True,timeout=2,check=False)
+        assert not observed.stderr.strip(), observed.stderr
+        assert observed.returncode in ({0,1} if allow_missing else {0}), observed
+        status=observed.stdout.strip()
+        if observed.returncode==0:assert status and len(status.splitlines())==1, observed
+        else:assert allow_missing and not status, observed
+        return status
+    # The child inherits stdout and its parent's new process group. The parent
+    # exits immediately; only the child keeps the parser pipe open.
+    code=("import os,subprocess,sys;from pathlib import Path;"
+          "p=subprocess.Popen([sys.executable,'-c','import time;time.sleep(30)']);"
+          f"Path({str(marker)!r}).write_text(str(p.pid));os._exit(0)")
+    try:
+        assert not observe(control.pid).startswith('Z')
+        with pytest.raises(TimeoutError):
+            _output(sys.executable,['-c',code],b'',limit=32,deadline=time.monotonic()+0.8)
+        child=int(marker.read_text())
+        # A killed orphan can remain a zombie briefly until init reaps it.
+        # ps status distinguishes that from a surviving sleeping descendant.
+        end=time.monotonic()+3
+        while time.monotonic()<end:
+            status=observe(child,allow_missing=True)
+            if not status or status.startswith('Z'):break
+            time.sleep(0.02)
+        assert not status or status.startswith('Z'), status
+        assert not observe(control.pid).startswith('Z')
+        assert control.poll() is None
+    finally:
+        if child is None and marker.exists():child=int(marker.read_text())
+        if child is not None:
+            try:os.kill(child,signal.SIGKILL)
+            except ProcessLookupError:pass
+        control.kill();control.wait()
 
 
 @pytest.mark.asyncio
