@@ -903,7 +903,7 @@ class ReviewRuleStore:
     @classmethod
     def for_instance(cls, instance_root: Path | str) -> "ReviewRuleStore":
         from jaeger_ai.core.instance.first_boot import instance_dir
-        return cls(instance_dir(Path(instance_root)) / REVIEW_RULES_FILENAME)
+        return cls(instance_dir(instance_root) / REVIEW_RULES_FILENAME)
 
     def _read(self) -> dict[str, Any]:
         import json
