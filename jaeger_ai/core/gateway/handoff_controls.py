@@ -17,12 +17,14 @@ def register(gateway):
 
 
 def command_key(kind,resource,request_id,actor):
-    import hashlib,json
+    import hashlib
+    import json
     return 'handoff-command:'+hashlib.sha256(json.dumps([kind,resource,request_id,actor]).encode()).hexdigest()
 
 
 def register_commands(gateway):
     import json
+
     from jaeger_ai.core.gateway.session_store import _session_agent, input_fingerprint
     def original(kind,resource,rid,actor):
         saved=gateway.store.control_operation(command_key(kind,resource,rid,actor))
@@ -58,7 +60,7 @@ def register_commands(gateway):
         resource=request.match_info.get('parent') or request.match_info['id'];actor=request['caller_actor']
         try:
             body=await request.json()
-            if not isinstance(body,dict):raise ValueError('Command must be an object')
+            if not isinstance(body,dict):raise TypeError('Command must be an object')
             rid=body.get('request_id')
             if not isinstance(rid,str) or not 1<=len(rid)<=128:raise ValueError('Stable request identity required')
             expected={'task','request_id'} if kind=='handoff_reply' else {'task','request_id','session_id','from_agent_id','require_approval','model','background'}
@@ -81,7 +83,9 @@ def register_commands(gateway):
                 if origin is None or origin.id!=body['from_agent_id'] or session is None or _session_agent(session['session_id'],session.get('metadata') or {})!=origin.id:raise ValueError('Origin identity and conversation do not match')
             class CommandRequest(dict):
                 can_read_body=True
-                match_info={'id':resource}
+                def __init__(self, original_request):
+                    super().__init__(original_request)
+                    self.match_info={'id':resource}
                 async def json(self):return body
             nested=CommandRequest(request);nested['_owner_handoff_command']=True
             response=await (gateway.handle_handoff_reply(nested) if kind=='handoff_reply' else gateway.handle_handoff_agent(nested))
@@ -93,7 +97,7 @@ def register_commands(gateway):
         except (ValueError,TypeError) as exc:
             proof=original(kind,resource,rid,actor)
             receipt=proof if proof['outcome']=='saved' else {'scope':kind,'resource_id':resource,'request_id':rid,'outcome':'rejected','handoff':None,'error':str(exc)}
-        except Exception:
+        except Exception:  # noqa: BLE001 - unexpected post-admission failure must remain unknown, never replayed
             return web.json_response(original(kind,resource,rid,actor)) # Original reservation retained; no automatic executor replay.
         receipt['command']=body
         gateway.store.finish_control_operation(oid,receipt)
