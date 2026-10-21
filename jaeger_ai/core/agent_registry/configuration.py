@@ -37,3 +37,44 @@ def settings(record: Any) -> dict[str, Any]:
     return {"agent_id": record.id, "revision": int(meta.get('configuration_revision', 0)),
             **{key: str(meta.get('operator_instructions' if key == 'instructions' else key) or '') for key in ('specialty', 'summary', 'instructions')},
             "template": meta.get('template')}
+
+
+def export_template(record: Any, expected_revision: int) -> dict[str,Any]:
+    """Explicit owner-local prompt snapshot; no history/tools/accounts/metadata copy."""
+    import hashlib
+    import json
+
+    from jaeger_ai.core.redaction import redact_text
+    if not editable(record):raise PermissionError('Protected definitions cannot be exported as owner templates')
+    current=settings(record)
+    if type(expected_revision) is not int or expected_revision!=current['revision']:raise RuntimeError('Source configuration changed; review current settings')
+    prompt=validate_settings({key:current[key] for key in ('specialty','summary','instructions')})
+    payload={'format':'jaeger.specialist-template','schema_version':1,'version':current['revision']+1,
+             'visibility':'owner_local','export_policy':'prompt_only_no_grants',
+             'source_bot':{'agent_id':record.id,'configuration_revision':current['revision']},
+             'settings':prompt,'tools_granted':False,'credentials_included':False,'history_included':False}
+    content=json.dumps(payload,ensure_ascii=False,sort_keys=True,indent=2)+'\n'
+    if redact_text(content)!=content:raise ValueError('Potential secret content requires owner review; export refused')
+    return {'agent_id':record.id,'revision':current['revision'],'content':content,
+            'sha256':hashlib.sha256(content.encode()).hexdigest(),'filename':'jaeger-specialist-template.json',
+            'visibility':'owner_local','export_policy':'prompt_only_no_grants'}
+
+
+def import_template(content: Any) -> dict[str,Any]:
+    """Validate an owner-provided local prompt snapshot; provenance is unverified."""
+    import hashlib
+    import json
+
+    from jaeger_ai.core.redaction import redact_text
+    if not isinstance(content,str) or len(content)>100000:raise ValueError('Bounded local template JSON required')
+    value=json.loads(content)
+    fields={'format','schema_version','version','visibility','export_policy','source_bot','settings','tools_granted','credentials_included','history_included'}
+    if not isinstance(value,dict) or set(value)!=fields or value['format']!='jaeger.specialist-template' or type(value['schema_version']) is not int or value['schema_version']!=1 or value['visibility']!='owner_local' or value['export_policy']!='prompt_only_no_grants' or any(value[key] is not False for key in ('tools_granted','credentials_included','history_included')):
+        raise ValueError('Only owner-local prompt-only templates without private fields or grants are supported')
+    source=value['source_bot']
+    if not isinstance(source,dict) or set(source)!={'agent_id','configuration_revision'} or not isinstance(source['agent_id'],str) or not 1<=len(source['agent_id'])<=200 or any(ord(c)<32 for c in source['agent_id']) or type(source['configuration_revision']) is not int or source['configuration_revision']<0 or type(value['version']) is not int or value['version']!=source['configuration_revision']+1:
+        raise ValueError('Invalid template source/version linkage')
+    prompt=validate_settings(value['settings'])
+    if redact_text(content)!=content:raise ValueError('Potential secret content requires review; template refused')
+    return {**prompt,'template':{'id':'local:'+hashlib.sha256(content.encode()).hexdigest(),'version':value['version'],
+            'source_bot':source,'visibility':'owner_local','export_policy':'prompt_only_no_grants','provenance':'owner_provided_unverified'}}

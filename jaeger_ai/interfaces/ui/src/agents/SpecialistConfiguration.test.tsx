@@ -21,3 +21,15 @@ it('preserves stale prompt draft and its revision; reload reconciles without rep
   expect(localStorage.getItem(key)).toContain(draft.instructions);
   await act(async () => root.unmount()); element.remove(); localStorage.removeItem(key);
 });
+it('requests the saved revision export and refuses a mismatched receipt without touching drafts',async()=>{
+ const draft={specialty:'draft',summary:'draft',instructions:'Unsent local draft'};const key='jaeger.ui.specialist-settings.v1.native%3Aowned';localStorage.setItem(key,JSON.stringify({draft,baseRevision:0}));
+ const exportTemplate=vi.fn(async()=>({agent_id:'native:other',revision:1,content:'{}',sha256:'invalid',filename:'untrusted',visibility:'owner_local' as const,export_policy:'prompt_only_no_grants' as const}));
+ const save=vi.fn();const controls:SpecialistControls={templates:vi.fn(),read:vi.fn(async()=>({agent_id:'native:owned',revision:1,editable:true,specialty:'saved',summary:'saved',instructions:'Saved prompt'})),save,exportTemplate};
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try{
+  await act(async()=>root.render(<SpecialistConfiguration agentId="native:owned" controls={controls} onClose={()=>{}} onSaved={()=>{}}/>));
+  await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Export current saved prompt template')!.click());
+  expect(exportTemplate).toHaveBeenCalledExactlyOnceWith('native:owned',1);expect(save).not.toHaveBeenCalled();
+  expect(document.body.textContent).toContain('Template export failed');expect(document.body.textContent).not.toContain('download requested');expect(localStorage.getItem(key)).toContain('Unsent local draft');
+ }finally{await act(async()=>root.unmount());host.remove();localStorage.removeItem(key);}
+});

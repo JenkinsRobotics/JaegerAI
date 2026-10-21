@@ -26,7 +26,7 @@ interface Props {
   agents: Agent[];
   onClose: () => void;
   onNewChat: (agentId: string) => void;
-  onCreateAgent: (displayName: string, job: string, operationId: string, template?: { id: string; version: number }) => Promise<void>;
+  onCreateAgent: (displayName: string, job: string, operationId: string, template?: { id: string; version: number }, snapshot?:string) => Promise<void>;
   controls?: SpecialistControls;
   onRecoverAgent?: (operationId: string) => Promise<{ failed?: string }>;
 }
@@ -38,6 +38,7 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
+  const [snapshot,setSnapshot]=useState('');
   const [templates, setTemplates] = useState<AgentTemplate[]>([]), [templateId, setTemplateId] = useState("");
   const [templateError, setTemplateError] = useState<string>();
   useEffect(() => {
@@ -55,10 +56,10 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
       if (!raw) return;
       const value = JSON.parse(raw);
       if (typeof value.operationId !== "string" || typeof value.name !== "string" || typeof value.job !== "string") throw Error("Invalid saved creation command; original retained");
-      setTemplateId(value.template?.id ?? ""); setPending(value.operationId); setName(value.name); setJob(value.job); setCreating(true);
+      setSnapshot(value.snapshot??''); setTemplateId(value.template?.id ?? ""); setPending(value.operationId); setName(value.name); setJob(value.job); setCreating(true);
     } catch (e) { lock.current = true; setCreating(true); setError(`Creation recovery unavailable: ${String(e)}`); }
   }, []);
-  const closeDialog = () => { if (busy) return; setCreating(false); if (!pending) { setName(""); setJob(""); setError(undefined); } };
+  const closeDialog = () => { if (busy) return; setCreating(false); if (!pending) { setName(""); setJob(""); setSnapshot(''); setError(undefined); } };
   const submit = async () => {
     if (lock.current || pending) return;
     if (!agentSlug(name)) { setError("Give the agent a name."); return; }
@@ -67,10 +68,12 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
     const selectedTemplate = templates.find(t => t.id === templateId);
     const template = selectedTemplate ? { id: selectedTemplate.id, version: selectedTemplate.version } : undefined;
     try {
+      if (snapshot && templateId) throw Error("Choose a catalog template or a local snapshot, not both");
+      if (snapshot) {const parsed=JSON.parse(snapshot);if(parsed?.format!=='jaeger.specialist-template')throw Error('Local template format unsupported');}
       if (templateId && !template) throw Error("Selected template is unavailable; reload the catalog before creating");
-      localStorage.setItem(key, JSON.stringify({ operationId, name: name.trim(), job: job.trim(), template })); setPending(operationId);
-      await onCreateAgent(name.trim(), job.trim(), operationId, template);
-      localStorage.removeItem(key); setPending(undefined); setCreating(false); setName(""); setJob("");
+      localStorage.setItem(key, JSON.stringify({ operationId, name: name.trim(), job: job.trim(), template, snapshot:snapshot||undefined })); setPending(operationId);
+      await onCreateAgent(name.trim(), job.trim(), operationId, template,snapshot||undefined);
+      localStorage.removeItem(key); setPending(undefined); setCreating(false); setName(""); setJob(""); setSnapshot('');
     } catch (e) { setError(`Creation not confirmed: ${String((e as Error)?.message ?? e)}. Check saved creation; nothing is automatically retried.`); }
     finally { lock.current = false; setBusy(false); }
   };
@@ -80,7 +83,7 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
     try {
       const result = await onRecoverAgent(pending);
       localStorage.removeItem(key); setPending(undefined);
-      if (result.failed) setError(result.failed); else { setCreating(false); setName(""); setJob(""); setError(undefined); }
+      if (result.failed) setError(result.failed); else { setCreating(false); setName(""); setJob(""); setSnapshot(''); setError(undefined); }
     } catch (e) { setError(String((e as Error)?.message ?? e)); }
     finally { lock.current = false; setBusy(false); }
   };
@@ -101,6 +104,8 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
         </>}>
         <form className="jg-form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
           {controls && <label className="jg-form__field"><span>Start from template</span><select aria-label="Agent template" disabled={busy || Boolean(pending)} value={templateId} onChange={e => setTemplateId(e.target.value)}><option value="">Blank specialist</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name} · v{t.version}</option>)}</select></label>}
+          <label className="jg-form__field"><span>Local prompt template JSON (optional)</span><textarea aria-label="Local prompt template JSON" disabled={busy||Boolean(pending)} maxLength={100000} value={snapshot} onChange={e=>{setSnapshot(e.target.value);setTemplateId('');}}/></label>
+          {snapshot&&<p>Creates a new specialist from the supplied prompt only. Source linkage is unverified; no history, accounts, plugin state or grants transfer. The server validates the exact policy and version.</p>}
           {templateError && <p role="alert">Templates unavailable: {templateError}. Blank creation remains available.</p>}
           {templateId && <p>{templates.find(t => t.id === templateId)?.summary} No tool permissions or credentials are copied.</p>}
 
@@ -110,7 +115,7 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
           </label>
           <label className="jg-form__field">
             <span>What should it do?</span>
-            <TextField disabled={busy || Boolean(pending)} value={job} placeholder="Find and summarise sources for the lead" onChange={(e) => setJob(e.target.value)} />
+            <TextField disabled={busy || Boolean(pending)||Boolean(snapshot)} value={job} placeholder="Find and summarise sources for the lead" onChange={(e) => setJob(e.target.value)} />
           </label>
           {pending && <p role="status">Saved creation needs reconciliation. <button type="button" disabled={busy || !onRecoverAgent} onClick={() => void recover()}>Check saved creation</button></p>}
           {error && <p className="jg-form__error" role="alert">{error}</p>}

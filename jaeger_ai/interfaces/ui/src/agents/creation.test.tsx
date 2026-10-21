@@ -18,3 +18,19 @@ it('recovers an acknowledged creation by saved command without submitting anothe
   expect(localStorage.getItem(key)).toBeNull();
   await act(async () => root.unmount()); element.remove();
 });
+it('dispatches one explicit local snapshot creation and preserves uncertain intent for lookup',async()=>{
+ localStorage.clear();const anchor=document.createElement('button');document.body.append(anchor);
+ const content=JSON.stringify({format:'jaeger.specialist-template',schema_version:1});
+ const create=vi.fn(async()=>{throw Error('lost ACK');}),recover=vi.fn();
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try{
+  await act(async()=>root.render(<NewChatMenu anchor={anchor} agents={[]} onClose={()=>{}} onNewChat={()=>{}} onCreateAgent={create} onRecoverAgent={recover}/>));
+  await act(async()=>[...document.querySelectorAll('[role="menuitem"]')].find(b=>b.textContent?.includes('Create agent'))!.dispatchEvent(new MouseEvent('click',{bubbles:true})));
+  const input=document.querySelector<HTMLInputElement>('input[placeholder="Research"]')!,field=document.querySelector<HTMLTextAreaElement>('[aria-label="Local prompt template JSON"]')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Owned copy');input.dispatchEvent(new Event('input',{bubbles:true}));Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,content);field.dispatchEvent(new Event('input',{bubbles:true}));});
+  await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Create')!.click());
+  const saved=JSON.parse(localStorage.getItem('jaeger.ui.agent-create.v1')!);
+  expect(saved.snapshot).toBe(content);expect(create).toHaveBeenCalledExactlyOnceWith('Owned copy','',saved.operationId,undefined,content);
+  expect([...document.querySelectorAll('button')].find(b=>b.textContent==='Create')?.disabled).toBe(true);
+ }finally{await act(async()=>root.unmount());host.remove();anchor.remove();localStorage.clear();}
+});

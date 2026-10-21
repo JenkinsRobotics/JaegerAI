@@ -223,12 +223,13 @@ export class GatewayClient implements JaegerSource {
     save: (id, body) => this.json(`/v1/agents/${encodeURIComponent(id)}/knowledge`, body, "PATCH"),
   };
   readonly specialistControls: import("./source").SpecialistControls = {
+    exportTemplate:(id,revision)=>this.json(`/v1/agents/${encodeURIComponent(id)}/template-export?revision=${revision}`),
     templates: () => this.json("/v1/agent-templates"),
     read: id => this.json(`/v1/agents/${encodeURIComponent(id)}/configuration`),
     save: (id, body) => this.json(`/v1/agents/${encodeURIComponent(id)}/configuration`, body, "PATCH"),
   };
   agentCreationStatus(operationId: string) { return this.json<{ receipt: { ok: boolean; agent?: Agent; error?: string } | null }>(`/v1/control-operations/${encodeURIComponent(operationId)}`); }
-  createAgent(body: { template_id?: string; template_version?: number; operation_id?: string; name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }) {
+  createAgent(body: { template_snapshot?:string; template_id?: string; template_version?: number; operation_id?: string; name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }) {
     return this.json<Agent>("/v1/agents", { kind: "jaeger_native", role: "specialist", ...body });
   }
   readonly agentActions: AgentActions = {
