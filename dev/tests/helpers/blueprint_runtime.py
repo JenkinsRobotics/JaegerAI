@@ -17,8 +17,12 @@ import threading
 async def main(state: Path, ui_dist: Path) -> None:
     repo = Path(__file__).resolve().parents[3]
     state = state.expanduser().resolve()
-    if state == Path.home()/'.jaeger' or state.is_relative_to(repo) or not state.is_relative_to(Path.home()/'.jaeger/verification'):
-        raise RuntimeError('Require an owned ~/.jaeger/verification fixture root')
+    fixture_root = (Path.home()/'.cache/jaeger/fixtures').resolve()
+    # The pytest live-state guard watches all of ~/.jaeger, including its old
+    # verification subtree. Concurrent browser fixture writes must stay outside
+    # that tree; do not exclude them or weaken the guard.
+    if state == fixture_root or state.is_relative_to(repo) or not state.is_relative_to(fixture_root):
+        raise RuntimeError('Require an owned ~/.cache/jaeger/fixtures/blueprint-* fixture root')
     if not state.name.startswith('blueprint-'):
         raise RuntimeError('Require an explicitly named blueprint fixture')
     source_sha = {name: hashlib.sha256((repo/name).read_bytes()).hexdigest() for name in [

@@ -7,7 +7,7 @@ import {createHash,randomUUID} from 'node:crypto';
 const [modulePath,listenerPath,evidence]=process.argv.slice(2);
 const {chromium}=await import(pathToFileURL(path.resolve(modulePath)));
 const target=JSON.parse(await readFile(listenerPath,'utf8'));
-if(!target.state.includes('/.jaeger/verification/blueprint-')||[8790,33418].includes(target.webui_port)||[8790,33418].includes(target.gateway_port))throw new Error('Refuse nonfixture target');
+if(!target.state.includes('/.cache/jaeger/fixtures/blueprint-')||[8790,33418].includes(target.webui_port)||[8790,33418].includes(target.gateway_port))throw new Error('Refuse nonfixture target');
 await mkdir(evidence,{recursive:true});const profile=path.resolve(evidence,'owned-browser-profile');
 try{await access(profile);throw new Error('Refuse reuse of prior browser scenario');}catch(e){if(e.code!=='ENOENT')throw e;}
 const base=`http://127.0.0.1:${target.webui_port}`;const runId=randomUUID().slice(0,8);let context,page;const proof={checks:[],requests:[],errors:[],source_sha256:target.source_sha256};

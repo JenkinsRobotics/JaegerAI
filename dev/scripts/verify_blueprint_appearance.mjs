@@ -4,7 +4,7 @@ import {pathToFileURL} from 'node:url';import path from 'node:path';
 const [modulePath,listenerPath,evidence,expectation='passing']=process.argv.slice(2);
 const {chromium}=await import(pathToFileURL(path.resolve(modulePath)));
 const target=JSON.parse(await readFile(listenerPath,'utf8'));
-if(!target.state.includes('/.jaeger/verification/blueprint-')||[8790,33418].includes(target.webui_port))throw Error('Refuse production');
+if(!target.state.includes('/.cache/jaeger/fixtures/blueprint-')||[8790,33418].includes(target.webui_port))throw Error('Refuse production');
 await mkdir(evidence,{recursive:true});const browser=await chromium.launch({headless:true});const results=[];
 try{
 for(const os of ['light','dark'])for(const choice of ['system','light','dark']){

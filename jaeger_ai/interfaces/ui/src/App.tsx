@@ -1,3 +1,7 @@
+import { MessageSearch } from "./agents/MessageSearch";
+import { DiagnosticsPanel } from "./settings/DiagnosticsPanel";
+import { ToolsPanel } from "./tools/ToolsPanel";
+import { SpecialistConfiguration } from "./agents/SpecialistConfiguration";
 import { HandoffReplyDialog } from "./agents/HandoffReplyDialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JaegerSource } from "./api/source";
@@ -95,6 +99,8 @@ export function App({ source }: { source: JaegerSource }) {
   }, [host, settingsOpen]);
   const [jumpOpen, setJumpOpen] = useState(false);
   const [newChatAnchor, setNewChatAnchor] = useState<HTMLElement | null>(null);
+  const [messageSearchAgent, setMessageSearchAgent] = useState<Agent>();
+  const [configurationAgentId, setConfigurationAgentId] = useState<string>();
   const [detailsAgentId, setDetailsAgentId] = useState<string | null>(null);
   const [historyAgentId, setHistoryAgentId] = useState<string | null>(null);
   const [historySessionId, setHistorySessionId] = useState<string>();
@@ -148,9 +154,9 @@ export function App({ source }: { source: JaegerSource }) {
   /** There is one chat per agent now: "new chat with X" opens X's home chat. */
   const newChat = useCallback((agentId: string) => { if (agentId === selectedAgentId) void store.seeAgent(agentId); setSelection({ type: "agent", agentId }); }, [selectedAgentId, store.seeAgent]);
 
-  const createAgent = useCallback(async (displayName: string, job: string, operationId: string) => {
+  const createAgent = useCallback(async (displayName: string, job: string, operationId: string, template?: { id: string; version: number }) => {
     const agent = await source.createAgent({
-      operation_id: operationId, name: agentSlug(displayName), display_name: displayName, ...(job ? { metadata: { specialty: job } } : {}),
+      ...(template ? { template_id: template.id, template_version: template.version } : {}), operation_id: operationId, name: agentSlug(displayName), display_name: displayName, ...(job ? { metadata: { specialty: job } } : {}),
     });
     await store.refresh();
     newChat(agent.id);
@@ -318,7 +324,7 @@ export function App({ source }: { source: JaegerSource }) {
                 ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
                 : <ChatPane host={host} sessionId={sessionId} agents={store.agents} />}
               {detailsAgent && (
-                <AgentDetails agent={detailsAgent} summary={store.summaries.find((s) => s.id === detailsAgent.id)}
+                <AgentDetails onSearch={source.searchMessages ? () => setMessageSearchAgent(detailsAgent) : undefined} agent={detailsAgent} summary={store.summaries.find((s) => s.id === detailsAgent.id)}
                   onOpenHistory={() => { setDetailsAgentId(null); setHistoryAgentId(detailsAgent.id); }} onClose={() => setDetailsAgentId(null)} />
               )}
               {historyAgent && (
@@ -346,9 +352,11 @@ export function App({ source }: { source: JaegerSource }) {
         input={{ placeholder: "Name", value: `${label(agentPrompt.agent)} copy` }} onDone={onPromptDone} />}
       {notice && <div className="jg-toast" role="status">{notice}</div>}
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
-        onNewChat={newChat} onCreateAgent={createAgent} onRecoverAgent={recoverCreatedAgent} />
+        controls={source.specialistControls} onNewChat={newChat} onCreateAgent={createAgent} onRecoverAgent={recoverCreatedAgent} />
+      {messageSearchAgent && source.searchMessages && <MessageSearch source={source} agentId={messageSearchAgent.id} name={label(messageSearchAgent)} onClose={() => setMessageSearchAgent(undefined)} />}
+      {configurationAgentId && source.specialistControls && <SpecialistConfiguration key={configurationAgentId} agentId={configurationAgentId} controls={source.specialistControls} onClose={() => setConfigurationAgentId(undefined)} onSaved={() => { void store.refresh(); }} />}
       <ConnectAppsDialog open={connectOpen} source={source} onClose={() => setConnectOpen(false)} />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} automationsPanel={source.schedules ? <AutomationsPanel controls={source.schedules} /> : undefined} skillsPanel={source.skills ? <SkillsPanel source={source} /> : undefined} libraryPanel={source.library ? <LibraryPanel controls={source.library} /> : undefined} agentsPanel={<AgentManagement onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived, ...(!archived ? { deleted: false } : {}) })} />} />
+      <SettingsDialog diagnosticsPanel={source.diagnostics ? <DiagnosticsPanel source={source} /> : undefined} toolsPanel={source.tools ? <ToolsPanel source={source} /> : undefined} open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} automationsPanel={source.schedules ? <AutomationsPanel controls={source.schedules} /> : undefined} skillsPanel={source.skills ? <SkillsPanel source={source} /> : undefined} libraryPanel={source.library ? <LibraryPanel controls={source.library} /> : undefined} agentsPanel={<AgentManagement onSearch={source.searchMessages ? agent => { setSettingsOpen(false); setMessageSearchAgent(agent); } : undefined} onConfigure={source.specialistControls ? agent => { setSettingsOpen(false); setConfigurationAgentId(agent.id); } : undefined} onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived, ...(!archived ? { deleted: false } : {}) })} />} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
         onAgent={(agentId) => { newChat(agentId); if (phone) setPhoneView("chat"); }}

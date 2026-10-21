@@ -3,6 +3,7 @@
 import { Dialog, TextField, type MenuItem } from "@aether/ui";
 import { AppMenu as Menu } from "../popups/AppMenu";
 import { useEffect, useRef, useState } from "react";
+import type { AgentTemplate, SpecialistControls } from "../api/source";
 import type { Agent } from "../api/types";
 import { label } from "./agentsLogic";
 
@@ -25,17 +26,26 @@ interface Props {
   agents: Agent[];
   onClose: () => void;
   onNewChat: (agentId: string) => void;
-  onCreateAgent: (displayName: string, job: string, operationId: string) => Promise<void>;
+  onCreateAgent: (displayName: string, job: string, operationId: string, template?: { id: string; version: number }) => Promise<void>;
+  controls?: SpecialistControls;
   onRecoverAgent?: (operationId: string) => Promise<{ failed?: string }>;
 }
 
-export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent, onRecoverAgent }: Props) {
+export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent, onRecoverAgent, controls }: Props) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [job, setJob] = useState("");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
+  const [templates, setTemplates] = useState<AgentTemplate[]>([]), [templateId, setTemplateId] = useState("");
+  const [templateError, setTemplateError] = useState<string>();
+  useEffect(() => {
+    if (!creating || !controls) return;
+    let live = true;
+    void controls.templates().then(v => { if (live) { setTemplates(v.templates); setTemplateError(undefined); } }, e => { if (live) setTemplateError(String(e)); });
+    return () => { live = false; };
+  }, [creating, controls]);
   const [pending, setPending] = useState<string>();
   const lock = useRef(false);
   const key = "jaeger.ui.agent-create.v1";
@@ -45,7 +55,7 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
       if (!raw) return;
       const value = JSON.parse(raw);
       if (typeof value.operationId !== "string" || typeof value.name !== "string" || typeof value.job !== "string") throw Error("Invalid saved creation command; original retained");
-      setPending(value.operationId); setName(value.name); setJob(value.job); setCreating(true);
+      setTemplateId(value.template?.id ?? ""); setPending(value.operationId); setName(value.name); setJob(value.job); setCreating(true);
     } catch (e) { lock.current = true; setCreating(true); setError(`Creation recovery unavailable: ${String(e)}`); }
   }, []);
   const closeDialog = () => { if (busy) return; setCreating(false); if (!pending) { setName(""); setJob(""); setError(undefined); } };
@@ -54,9 +64,12 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
     if (!agentSlug(name)) { setError("Give the agent a name."); return; }
     lock.current = true; setBusy(true); setError(undefined);
     const operationId = crypto.randomUUID();
+    const selectedTemplate = templates.find(t => t.id === templateId);
+    const template = selectedTemplate ? { id: selectedTemplate.id, version: selectedTemplate.version } : undefined;
     try {
-      localStorage.setItem(key, JSON.stringify({ operationId, name: name.trim(), job: job.trim() })); setPending(operationId);
-      await onCreateAgent(name.trim(), job.trim(), operationId);
+      if (templateId && !template) throw Error("Selected template is unavailable; reload the catalog before creating");
+      localStorage.setItem(key, JSON.stringify({ operationId, name: name.trim(), job: job.trim(), template })); setPending(operationId);
+      await onCreateAgent(name.trim(), job.trim(), operationId, template);
       localStorage.removeItem(key); setPending(undefined); setCreating(false); setName(""); setJob("");
     } catch (e) { setError(`Creation not confirmed: ${String((e as Error)?.message ?? e)}. Check saved creation; nothing is automatically retried.`); }
     finally { lock.current = false; setBusy(false); }
@@ -87,6 +100,10 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent,
           <button type="button" className="aui-button aui-button--primary" disabled={busy || Boolean(pending)} onClick={() => void submit()}>Create</button>
         </>}>
         <form className="jg-form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+          {controls && <label className="jg-form__field"><span>Start from template</span><select aria-label="Agent template" disabled={busy || Boolean(pending)} value={templateId} onChange={e => setTemplateId(e.target.value)}><option value="">Blank specialist</option>{templates.map(t => <option key={t.id} value={t.id}>{t.name} · v{t.version}</option>)}</select></label>}
+          {templateError && <p role="alert">Templates unavailable: {templateError}. Blank creation remains available.</p>}
+          {templateId && <p>{templates.find(t => t.id === templateId)?.summary} No tool permissions or credentials are copied.</p>}
+
           <label className="jg-form__field">
             <span>Name</span>
             <TextField disabled={busy || Boolean(pending)} value={name} placeholder="Research" onChange={(e) => setName(e.target.value)} invalid={Boolean(error)} />

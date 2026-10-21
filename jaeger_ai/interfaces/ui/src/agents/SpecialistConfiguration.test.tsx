@@ -1,0 +1,23 @@
+import { act } from 'react'; import { createRoot } from 'react-dom/client'; import { it, expect, vi } from 'vitest';
+import { SpecialistConfiguration } from './SpecialistConfiguration'; import type { SpecialistControls } from '../api/source';
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+it('preserves stale prompt draft and its revision; reload reconciles without replaying a failed save', async () => {
+  const draft = { specialty: 'Owned specialty', summary: 'Owned draft', instructions: 'Preserve my instructions' };
+  const key = 'jaeger.ui.specialist-settings.v1.native%3Aowned'; localStorage.setItem(key, JSON.stringify({ draft, baseRevision: 0 }));
+  const read = vi.fn(async () => ({ agent_id: 'native:owned', revision: 1, editable: true, specialty: 'Server specialty', summary: 'Other edit', instructions: 'Saved instructions' }));
+  const save = vi.fn(async () => { throw Error('revision conflict'); }); const controls = { read, save, templates: vi.fn() } as unknown as SpecialistControls;
+  const element = document.createElement('div'); document.body.append(element); let root = createRoot(element);
+  const render = () => <SpecialistConfiguration agentId="native:owned" controls={controls} onClose={vi.fn()} onSaved={vi.fn()} />;
+  const button = (label: string) => [...document.querySelectorAll('button')].find(b => b.textContent === label)!;
+  await act(async () => root.render(render()));
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="Specialist instructions"]')?.value).toBe(draft.instructions);
+  await act(async () => button('Save specialist settings').click());
+  expect(save).toHaveBeenCalledExactlyOnceWith('native:owned', { expected_revision: 0, settings: draft });
+  await act(async () => root.unmount()); root = createRoot(element); await act(async () => root.render(render()));
+  expect(button('Save specialist settings').disabled).toBe(true);
+  await act(async () => button('Check uncertain settings save').click());
+  expect(save).toHaveBeenCalledOnce(); expect(document.body.textContent).toContain('Your draft is preserved');
+  expect(document.querySelector<HTMLTextAreaElement>('[aria-label="Specialist instructions"]')?.value).toBe(draft.instructions);
+  expect(localStorage.getItem(key)).toContain(draft.instructions);
+  await act(async () => root.unmount()); element.remove(); localStorage.removeItem(key);
+});

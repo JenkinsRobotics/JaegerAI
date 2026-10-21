@@ -2329,6 +2329,41 @@ class GatewaySessionStore:
                          (key, input_fingerprint(text), json.dumps(receipt)))
             return {**receipt, 'replayed': False}
 
+    def search_agent_messages(self, agent_id: str, query: str, *, before: int | None = None, limit: int = 20) -> dict[str, Any]:
+        """Literal text search within the canonical agent's existing conversations.
+
+        Stable message-ID cursor; no index/store copies, admission or read markers.
+        Same metadata/legacy specialist binding as list_sessions(agent_id=...).
+        """
+        from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
+        prefix = specialist_session(agent_id, '')
+        where = "(json_extract(s.metadata_json, '$.agent_id') = ? OR (json_extract(s.metadata_json, '$.agent_id') IS NULL AND substr(s.session_id, 1, ?) = ?)) AND instr(lower(m.content), lower(?)) > 0"
+        params: list[Any] = [agent_id, len(prefix), prefix, query]
+        if before is not None:
+            where += ' AND m.id < ?'
+            params.append(before)
+        with self._get_conn() as conn:
+            rows = conn.execute('SELECT m.id, m.session_id, m.role, m.kind, m.content, m.timestamp, s.title FROM messages m JOIN sessions s ON s.session_id=m.session_id WHERE ' + where + ' ORDER BY m.id DESC LIMIT ?', [*params, limit + 1]).fetchall()
+        hits = []
+        for row in rows[:limit]:
+            content = str(row['content'] or '')
+            position = content.lower().find(query.lower())
+            start = max(0, position - 100)
+            hits.append({'message_id': str(row['id']), 'session_id': row['session_id'], 'role': row['role'], 'kind': row['kind'], 'title': row['title'],
+                         'timestamp': row['timestamp'], 'snippet': content[start:start + 500], 'content': content[:8000], 'truncated': len(content) > 8000})
+        return {'agent_id': agent_id, 'matches': hits, 'next_before': str(rows[limit - 1]['id']) if len(rows) > limit else None, 'matching': 'literal_sqlite_lower'}
+
+    def diagnostics_snapshot(self) -> dict[str, Any]:
+        """Read-only durable counts/unknown identities; no text, paths or retry."""
+        with self._get_conn() as conn:
+            conn.execute('BEGIN')
+            counts = {}
+            for name, table in (('requests', 'client_requests'), ('approvals', 'approvals'), ('handoffs', 'handoffs')):
+                counts[name] = {row['status']: row['n'] for row in conn.execute(f'SELECT status, COUNT(*) AS n FROM {table} GROUP BY status')}
+            unknown = [dict(row) for row in conn.execute("SELECT request_id, session_id, status FROM client_requests WHERE status='execution_unknown' ORDER BY created_at DESC LIMIT 20")]
+            return {'sessions': conn.execute('SELECT COUNT(*) FROM sessions').fetchone()[0], **counts,
+                    'unknown_requests': unknown, 'unknown_list_limit': 20}
+
     def control_operation(self, operation_id: str) -> dict[str, Any] | None:
         with self._get_conn() as conn:
             row = conn.execute("SELECT * FROM control_operations WHERE operation_id=?", (operation_id,)).fetchone()

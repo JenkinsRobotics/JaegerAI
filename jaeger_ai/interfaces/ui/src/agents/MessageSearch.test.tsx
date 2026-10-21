@@ -1,0 +1,20 @@
+import { act } from 'react'; import { createRoot } from 'react-dom/client'; import { it, expect, vi } from 'vitest';
+import { MessageSearch } from './MessageSearch'; import type { JaegerSource, MessageSearchPage } from '../api/source';
+(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+it('ignores a late previous-bot search response after the new bot search resolves', async () => {
+  let oldResolve!: (page: MessageSearchPage) => void;
+  const result = (agent_id: string, content: string): MessageSearchPage => ({ agent_id, matches:[{message_id:content,session_id:'owned',role:'user',kind:'message',title:'Owned',timestamp:1,snippet:content,content,truncated:false}], next_before:null,matching:'literal_sqlite_lower' });
+  const searchMessages = vi.fn((id:string) => id === 'a' ? new Promise<MessageSearchPage>(r=>{oldResolve=r;}) : Promise.resolve(result('b','Current bot content')));
+  const source = {searchMessages} as unknown as JaegerSource;
+  const element=document.createElement('div');document.body.append(element);const root=createRoot(element);
+  const render=(id:string)=><MessageSearch source={source} agentId={id} name={id} onClose={()=>{}}/>;
+  await act(async()=>root.render(render('a')));
+  const input=document.querySelector<HTMLInputElement>('[aria-label="Search bot messages"]')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'needle');input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await act(async()=>{await new Promise(r=>setTimeout(r,230));});
+  expect(searchMessages).toHaveBeenCalledWith('a','needle');
+  await act(async()=>root.render(render('b')));await act(async()=>{await new Promise(r=>setTimeout(r,230));});
+  await act(async()=>oldResolve(result('a','Stale private content')));
+  expect(document.body.textContent).toContain('Current bot content');expect(document.body.textContent).not.toContain('Stale private content');
+  await act(async()=>root.unmount());element.remove();
+});

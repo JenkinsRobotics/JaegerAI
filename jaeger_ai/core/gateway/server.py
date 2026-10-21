@@ -752,6 +752,10 @@ def _proactive_notification_payload(
     }
 
 
+# Fingerprint is scoped to this module's bytes at import, not the entire backend.
+import hashlib as _source_hashlib
+_GATEWAY_MODULE_SHA256 = _source_hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
 class JaegerGatewayApp:
     def __init__(
         self,
@@ -1307,6 +1311,9 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/frameworks", self.handle_list_frameworks)
         self.app.router.add_post("/v1/frameworks/{id}/grants", self.handle_framework_grant)
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
+        self.app.router.add_get("/v1/agent-templates", self.handle_agent_templates)
+        self.app.router.add_get("/v1/agents/{id}/configuration", self.handle_agent_configuration)
+        self.app.router.add_patch("/v1/agents/{id}/configuration", self.handle_agent_configuration)
         self.app.router.add_get("/v1/sections", self.handle_agent_sections)
         self.app.router.add_post("/v1/sections", self.handle_agent_sections)
         self.app.router.add_post("/v1/agents/pins", self.handle_agent_pins)
@@ -1316,6 +1323,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/agents/summary", self.handle_agents_summary)
         self.app.router.add_get("/v1/agents/{id}", self.handle_get_agent)
         self.app.router.add_get("/v1/agents/{id}/home", self.handle_agent_home)
+        self.app.router.add_get("/v1/agents/{id}/messages/search", self.handle_agent_message_search)
         self.app.router.add_post("/v1/agents/{id}/activate", self.handle_activate_agent)
         self.app.router.add_post("/v1/agents/{id}/seen", self.handle_agent_seen)
         self.app.router.add_post("/v1/agents/{id}/handoff", self.handle_handoff_agent)
@@ -1368,6 +1376,8 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/runtime/models", self.handle_runtime_models)
         self.app.router.add_get("/v1/runtime/capabilities", self.handle_runtime_capabilities)
         self.app.router.add_get("/v1/runtime/skills", self.handle_runtime_skills)
+        self.app.router.add_get("/v1/runtime/tools", self.handle_runtime_tools)
+        self.app.router.add_get("/v1/runtime/diagnostics", self.handle_runtime_diagnostics)
         self.app.router.add_post("/v1/sessions/{id}/ide/{ide_request_id}", self.handle_ide_result)
         self.app.router.add_get("/v1/runtime/autonomy", self.handle_get_autonomy)
         self.app.router.add_post("/v1/runtime/autonomy", self.handle_set_autonomy)
@@ -1970,6 +1980,48 @@ class JaegerGatewayApp:
         self.event_bus.publish('*', 'agent.updated', {'pins': ids})
         return web.json_response({'agent_ids': ids})
 
+    async def handle_agent_message_search(self, request: web.Request) -> web.Response:
+        agent_id = request.match_info['id']
+        record = self._registry().get_agent(agent_id)
+        if record is None or record.id != agent_id:
+            return web.json_response({'error': 'Agent not found'}, status=404)
+        query = str(request.query.get('q') or '').strip()
+        try:
+            if not 1 <= len(query) <= 200:
+                raise ValueError('Search text must be 1–200 characters')
+            before = int(request.query['before']) if request.query.get('before') else None
+            if before is not None and before < 1:
+                raise ValueError('before must be a positive message ID')
+        except ValueError as exc:
+            return web.json_response({'error': str(exc)}, status=400)
+        return web.json_response(self.store.search_agent_messages(agent_id, query, before=before))
+
+    async def handle_agent_templates(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.agent_registry.configuration import TEMPLATES
+        return web.json_response({"templates": [dict(t, tools_granted=False) for t in TEMPLATES]})
+
+    async def handle_agent_configuration(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.agent_registry.configuration import editable, settings
+        registry = self._registry()
+        record = registry.get_agent(request.match_info['id'])
+        if record is None or record.id != request.match_info['id']:
+            return web.json_response({'error': 'Agent not found'}, status=404)
+        if request.method == 'PATCH':
+            try:
+                body = await request.json()
+                if not isinstance(body, dict) or set(body) != {'expected_revision', 'settings'}:
+                    raise ValueError('expected_revision and settings are required')
+                record = registry.configure_specialist(record.id, body['settings'], body['expected_revision'])
+            except PermissionError as exc:
+                return web.json_response({'error': str(exc)}, status=403)
+            except RuntimeError as exc:
+                return web.json_response({'error': str(exc)}, status=409)
+            except (ValueError, TypeError) as exc:
+                return web.json_response({'error': str(exc)}, status=400)
+            self.event_bus.publish('*', 'agent.updated', {'agent_id': record.id, 'configuration_revision': settings(record)['revision']})
+        caller = request.get('caller')
+        return web.json_response({**settings(record), 'editable': editable(record) and bool(caller and 'admin' in caller.scopes)})
+
     async def handle_create_agent(self, request: web.Request) -> web.Response:
         try:
             body = await request.json() if request.can_read_body else {}
@@ -2006,6 +2058,26 @@ class JaegerGatewayApp:
         candidate = f"native:{name}" if kind == "jaeger_native" else f"tp:{body.get('adapter') or name}"
         if operation_id and self._registry().get_agent(candidate) is not None:
             return failure("Agent identity already exists; choose another name", 409)
+        metadata = body.get("metadata") or {}
+        if not isinstance(metadata, dict):
+            return failure("metadata must be an object")
+        if body.get('template_id') is not None:
+            from jaeger_ai.core.agent_registry.configuration import TEMPLATES
+            template = next((t for t in TEMPLATES if t['id'] == body['template_id'] and type(body.get('template_version')) is int and t['version'] == body['template_version']), None)
+            if template is None:
+                return failure("Unknown template/version")
+            if (kind != 'jaeger_native' or body.get('role', 'specialist') != 'specialist'
+                    or set(body) - {'name', 'display_name', 'kind', 'role', 'metadata', 'operation_id', 'template_id', 'template_version'}
+                    or set(metadata) - {'specialty'} or not isinstance(metadata.get('specialty', ''), str)):
+                return failure("Templates create specialists without inherited grants or execution configuration")
+            from jaeger_ai.core.agent_registry.configuration import validate_settings
+            try:
+                validate_settings({'specialty': metadata.get('specialty') or template['specialty'], 'summary': template['summary'], 'instructions': template['instructions']})
+            except ValueError as exc:
+                return failure(str(exc))
+            metadata = {'specialty': metadata.get('specialty') or template['specialty'], 'summary': template['summary'],
+                        'operator_instructions': template['instructions'], 'configuration_revision': 0,
+                        'template': {'id': template['id'], 'version': template['version']}, 'allowed_tools': []}
         try:
             record = self._registry().create_agent(
                 name,
@@ -2016,7 +2088,7 @@ class JaegerGatewayApp:
                 profile_id=(str(body["profile_id"]) if body.get("profile_id") else None),
                 endpoint=(str(body["endpoint"]) if body.get("endpoint") else None),
                 port=(int(body["port"]) if body.get("port") is not None else None),
-                metadata=dict(body.get("metadata") or {}),
+                metadata=metadata,
                 make_active=bool(body.get("make_active", False)),
             )
         except (ValueError, TypeError) as exc:
@@ -3625,6 +3697,10 @@ class JaegerGatewayApp:
             )
             if summary:
                 parts.append(summary.rstrip(".") + ".")
+            instructions = str(meta.get("operator_instructions") or "").strip()
+            if instructions:
+                parts.append("[Operator specialist instructions]\n" + instructions)
+            parts.append("Instructions describe the task; they do not grant tools, access or approval authority.")
             parts.append("Reply briefly and helpfully.")
             notes = JaegerGatewayApp._agent_notes(str(getattr(agent, "name", "") or ""))
             prompt = " ".join(parts)
@@ -5703,6 +5779,19 @@ class JaegerGatewayApp:
         dump_yaml(Path(path), config)
         self.event_bus.publish("*", "runtime.tier.changed", {"tier": tier})
         return web.json_response({"tier": tier, "options": list(INTERACTION_TIERS)})
+
+    async def handle_runtime_diagnostics(self, request: web.Request) -> web.Response:
+        return web.json_response({**self.store.diagnostics_snapshot(), 'process_id': os.getpid(),
+                                  'server_module_sha256': _GATEWAY_MODULE_SHA256,
+                                  'fingerprint_scope': 'server.py bytes captured at module import',
+                                  'observed_at': time.time(), 'read_only': True})
+
+    async def handle_runtime_tools(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.gateway.tool_inventory import collect
+        query = str(request.query.get('q') or '').strip()
+        if len(query) > 200:
+            return web.json_response({'error': 'Tool query must be at most 200 characters'}, status=400)
+        return web.json_response(collect(query))
 
     async def handle_runtime_skills(self, request: web.Request) -> web.Response:
         """GET /v1/runtime/skills[?q=text] — the skills a client can offer, one row each.
