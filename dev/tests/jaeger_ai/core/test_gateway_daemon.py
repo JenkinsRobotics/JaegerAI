@@ -397,7 +397,7 @@ async def test_execute_turn_specialist_skips_mcp(monkeypatch, tmp_path):
     async def _boom_native(*a, **k):
         raise AssertionError("specialist must not call native MCP")
 
-    async def _ollama(text, *, system_prompt=None, history=None, model=None, attachments=None):
+    async def _ollama(text, *, system_prompt=None, history=None, model=None, attachments=None, **_kwargs):
         assert "specialist" in (system_prompt or "").lower()
         return "SPECIALIST:Ops"
 
@@ -848,6 +848,8 @@ async def test_reconcile_uses_native_receipt_and_does_not_replay(tmp_path: Path,
     class Req:
         match_info = {"id": "s"}
         can_read_body = True
+        def get(self, key, default=None):  # aiohttp Request is a mapping; no authenticated caller
+            return default
         async def json(self):
             return {"request_id": "e" * 32}
 
@@ -868,6 +870,10 @@ class _FakeAgent:
         self.display_name = display_name
         self.metadata = {"role": specialty, "specialty": specialty}
 
+    @property
+    def disabled(self) -> bool:  # mirrors agent_registry.types.Agent.disabled
+        return bool((self.metadata or {}).get("disabled"))
+
 
 class _FakeRegistry:
     def __init__(self, agents):
@@ -885,10 +891,11 @@ async def test_specialist_handoff_executes_isolated_child(tmp_path: Path, monkey
     app._registry = lambda: _FakeRegistry([_FakeAgent("native:everyday", "Everyday", "everyday")])
     seen = []
 
-    async def specialist(session_id, text, *, request_id, allowed_tools):
+    async def specialist(session_id, text, *, request_id, allowed_tools, **context):
         seen.append(session_id)
+        assert context.get("agent_id") in (None, "native:everyday")
         assert request_id == "f" * 32
-        assert allowed_tools == []
+        assert allowed_tools is None  # standing specialist tools (see test_team_projects)
         assert "dispatcher" not in session_id
         assert "SECRET_PRIVATE" not in text
         return "child-result", "mcp:specialist"
@@ -898,6 +905,8 @@ async def test_specialist_handoff_executes_isolated_child(tmp_path: Path, monkey
     class Create:
         match_info = {"id": "native:everyday"}
         can_read_body = True
+        def get(self, key, default=None):  # aiohttp Request is a mapping; no authenticated caller
+            return default
         async def json(self):
             return {
                 "task": "Reply with the calendar hint",
@@ -938,6 +947,8 @@ async def test_denied_handoff_does_not_execute(tmp_path: Path, monkeypatch):
     class Create:
         match_info = {"id": "native:surfaces"}
         can_read_body = True
+        def get(self, key, default=None):  # aiohttp Request is a mapping; no authenticated caller
+            return default
         async def json(self):
             return {"task": "change chrome", "require_approval": True, "from_agent_id": "native:jaeger"}
 
@@ -947,6 +958,8 @@ async def test_denied_handoff_does_not_execute(tmp_path: Path, monkeypatch):
     class Decide:
         match_info = {"id": handoff["approval_id"]}
         can_read_body = True
+        def get(self, key, default=None):  # aiohttp Request is a mapping; no authenticated caller
+            return default
         async def json(self):
             return {"approved": False}
 
@@ -967,6 +980,8 @@ async def test_recursive_delegation_is_rejected(tmp_path: Path, monkeypatch):
     class Create:
         match_info = {"id": "native:gateway"}
         can_read_body = True
+        def get(self, key, default=None):  # aiohttp Request is a mapping; no authenticated caller
+            return default
         async def json(self):
             return {
                 "task": "loop",
@@ -998,6 +1013,8 @@ async def test_disconnect_does_not_cancel_accepted_work(tmp_path: Path):
     class Req:
         match_info = {"id": "s"}
         can_read_body = True
+        def get(self, key, default=None):  # aiohttp Request is a mapping; no authenticated caller
+            return default
         async def json(self):
             return req_body
 
