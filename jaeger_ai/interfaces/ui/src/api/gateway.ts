@@ -276,7 +276,7 @@ export class GatewayClient implements JaegerSource {
     options.onProgress?.({received:result.size,total:result.size,state:'complete'});return result;
   }
   async cancel(sessionId: string, requestId?: string) {
-    await this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, requestId ? { request_id: requestId } : {});
+    return this.json<import("./source").CancellationReceipt>(`/v1/sessions/${encodeURIComponent(sessionId)}/cancel`, requestId ? { request_id: requestId } : {});
   }
   async pendingApprovals(sessionId: string): Promise<PendingApproval[]> {
     const data = await this.json<{ approvals: PendingApproval[] }>(`/v1/approvals?session_id=${encodeURIComponent(sessionId)}`);

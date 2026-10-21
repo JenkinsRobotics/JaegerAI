@@ -88,3 +88,8 @@ describe("fba6cea9 shared home id", () => {
     expect(await h.home("native:jaeger")).toBe("agent-native:jaeger");
   });
 });
+it('returns the actual Stop receipt instead of discarding unconfirmed outcome metadata',async()=>{
+ const receipt={session_id:'owned-session',request_id:'owned-request',status:'execution_unknown',cancel_requested:true,cancellation_confirmed:false};
+ vi.stubGlobal('fetch',vi.fn(async()=>new Response(JSON.stringify(receipt),{status:200})));
+ try{expect(await new GatewayClient('').cancel('owned-session','owned-request')).toEqual(receipt);}finally{vi.unstubAllGlobals();}
+});
