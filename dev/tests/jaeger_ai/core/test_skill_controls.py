@@ -91,3 +91,65 @@ async def test_intervening_edit_is_rejected_by_owner_and_active_replacement_surv
     monkeypatch.setattr(service,'remove_skill',lambda *a,**k:pytest.fail('Rejected original command must never execute later'))
     assert await (await http.post(path+'/change',json=body)).json()==result
     assert await (await http.get(path+'/operations/owned-racing-remove')).json()==result
+
+
+@pytest.mark.asyncio
+async def test_filesystem_receipt_crash_recovers_observed_remove_restore_without_reexecution(gw,tmp_path,monkeypatch):
+    app,http=gw;layout=InstanceLayout(root=tmp_path/'owned-recovery');layout.root.mkdir()
+    dump_yaml(layout.config_path,Config(instance_name='owned',model=ModelConfig(model_path='/dev/null')))
+    bundled=tmp_path/'empty-recovery';bundled.mkdir()
+    monkeypatch.setattr(app,'_instance_root',lambda:layout.root)
+    monkeypatch.setattr(service._playbook_module(),'_SKILLS_DIR',bundled)
+    monkeypatch.setattr(service,'_code_rows',lambda _:[])
+    service.install_skill(layout,'fixture','---\nname: fixture\n---\nowned durable bytes')
+    path='/v1/runtime/skills/managed';revision=(await (await http.get(path)).json())['skills'][0]['revision']
+    finish=app.store.finish_control_operation
+    def crash(*a,**k):raise OSError('owned fixture crash after move before receipt')
+    monkeypatch.setattr(app.store,'finish_control_operation',crash)
+    body={'operation_id':'owned-crash-remove','action':'remove','name':'fixture','expected_revision':revision}
+    assert (await http.post(path+'/change',json=body)).status==500
+    assert not (layout.skills_dir/'fixture').exists()
+    monkeypatch.setattr(app.store,'finish_control_operation',finish)
+    monkeypatch.setattr(service,'remove_skill',lambda *a,**k:pytest.fail('Recovery must not repeat filesystem mutation'))
+    recovered=await (await http.get(path+'/operations/owned-crash-remove')).json()
+    assert recovered['outcome']=='saved' and recovered['recovered'] and recovered['result']['state']=='removed'
+    assert await (await http.post(path+'/change',json=body)).json()==recovered
+    monkeypatch.setattr(app.store,'finish_control_operation',crash)
+    restore={'operation_id':'owned-crash-restore','action':'restore','restore_from':'owned-crash-remove'}
+    assert (await http.post(path+'/change',json=restore)).status==500
+    assert (layout.skills_dir/'fixture'/'SKILL.md').read_text().endswith('owned durable bytes')
+    monkeypatch.setattr(app.store,'finish_control_operation',finish)
+    monkeypatch.setattr(service,'restore_skill',lambda *a,**k:pytest.fail('Recovery must not repeat restoration'))
+    restored=await (await http.get(path+'/operations/owned-crash-restore')).json()
+    assert restored['outcome']=='saved' and restored['recovered'] and restored['result']['state']=='restored'
+    assert await (await http.post(path+'/change',json=restore)).json()==restored
+
+
+@pytest.mark.asyncio
+async def test_planned_but_unproven_move_stays_unknown_and_blocks_fresh_resource_commands(gw,tmp_path,monkeypatch):
+    app,http=gw;layout=InstanceLayout(root=tmp_path/'owned-unproven');layout.root.mkdir()
+    dump_yaml(layout.config_path,Config(instance_name='owned',model=ModelConfig(model_path='/dev/null')))
+    bundled=tmp_path/'empty-unproven';bundled.mkdir()
+    monkeypatch.setattr(app,'_instance_root',lambda:layout.root)
+    monkeypatch.setattr(service._playbook_module(),'_SKILLS_DIR',bundled)
+    monkeypatch.setattr(service,'_code_rows',lambda _:[])
+    content='---\nname: fixture\n---\nuntouched original';service.install_skill(layout,'fixture',content)
+    path='/v1/runtime/skills/managed';revision=(await (await http.get(path)).json())['skills'][0]['revision']
+    original=service.remove_skill;calls=[]
+    def interrupt(current,name,**kwargs):
+        calls.append(name);planned=kwargs['before_move']
+        def before_move(proposal):planned(proposal);raise OSError('owned fixture interruption before atomic move')
+        kwargs['before_move']=before_move
+        return original(current,name,**kwargs)
+    monkeypatch.setattr(service,'remove_skill',interrupt)
+    body={'operation_id':'owned-unproven-remove','action':'remove','name':'fixture','expected_revision':revision}
+    value=await (await http.post(path+'/change',json=body)).json()
+    assert value['outcome']=='unknown'
+    assert (await (await http.get(path+'/operations/owned-unproven-remove')).json())['outcome']=='unknown'
+    newer={**body,'operation_id':'owned-fresh-must-not-repeat'}
+    rejected=await (await http.post(path+'/change',json=newer)).json()
+    assert rejected['outcome']=='rejected' and rejected['command']==newer
+    assert await (await http.post(path+'/change',json=newer)).json()==rejected
+    assert calls==['fixture'] and service.get_skill(layout,'fixture')['content']==content
+    assert await (await http.post(path+'/change',json=body)).json()==value
+    assert calls==['fixture']
