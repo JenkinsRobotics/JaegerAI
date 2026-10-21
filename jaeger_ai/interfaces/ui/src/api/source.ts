@@ -179,6 +179,13 @@ export interface AgentKnowledgeControls {
   read(id: string): Promise<AgentKnowledgeSnapshot>;
   save(id: string, body: { expected_revision: number; document_ids: string[] }): Promise<AgentKnowledgeSnapshot>;
 }
+export interface FinanceAction { id: string; revision: string; operation: string; policy_tier: string; stored_status: string; status: string; expires_at: string | null; settlement_status: string; execution_supported: false; can_record_review: boolean; can_deny: boolean; proposed_change?: Record<string,string>; declared_scope?: {amount:string;currency:string;merchant:string} }
+export interface FinanceReceipt extends ControlResult {action_id: string; decision: 'record_review'|'deny'; status:string; review_only:true; execution_performed:false; reviewed_revision:string; http_status:number}
+export interface FinanceControls {
+  status(): Promise<{state:string;policy:{money_movement:string;payment_cards:string;provider:string;spending_limits:string;approval_scope:string;unknown_operations:string;execution_supported:false;operations:{id:string;tier:string}[]};actions:FinanceAction[];limit?:number}>;
+  decide(id:string,body:{operation_id:string;expected_revision:string;decision:'record_review'|'deny'}):Promise<FinanceReceipt>;
+  operation(id:string):Promise<{receipt:FinanceReceipt|null}>;
+}
 export interface WebhookDefinition { name: string; provider: 'generic' | 'github'; events: string[]; senders: string[]; session_id: string; objective: string; enabled: boolean; archived: boolean }
 export interface WebhookSubscription extends WebhookDefinition { id: string; revision: number; agent_id: string; updated_at: number }
 export interface WebhookDelivery { delivery_id: string; subscription_id: string; provider: string; received_at: number; ok: boolean; status: string; reason?: string; task_id?: string; approval_id?: string; task_state?: string; request_status?: string | null; authorized?: boolean }
@@ -220,6 +227,7 @@ export interface JaegerSource {
   channels?(): Promise<ChannelSnapshot>;
   workflows?: WorkflowControls;
   webhooks?: WebhookControls;
+  finance?: FinanceControls;
   agentKnowledge?: AgentKnowledgeControls;
   savedMessage?(agentId:string,messageId:string,offset:number,revision?:string):Promise<SavedMessageChunk>;
   searchMessages?(agentId: string, query: string, before?: string): Promise<MessageSearchPage>;

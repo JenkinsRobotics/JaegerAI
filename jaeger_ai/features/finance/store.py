@@ -53,10 +53,24 @@ class FinanceStore:
         except OSError:
             pass
 
+    @classmethod
+    def open_existing(cls, *, readonly: bool = True):
+        """Metadata-only access: no initialization, cipher, keys, chmod or provider."""
+        path = default_database_path()
+        if path.is_symlink() or not path.is_file():
+            raise FileNotFoundError('Existing finance store unavailable')
+        store = cls.__new__(cls)
+        store.db_path = path
+        store.cipher = None
+        store._existing_mode = 'ro' if readonly else 'rw'
+        return store
+
     def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path), timeout=30.0)
+        mode = getattr(self, '_existing_mode', None)
+        conn = sqlite3.connect(self.db_path.resolve().as_uri() + '?mode=' + mode, uri=True, timeout=5.0) if mode else sqlite3.connect(str(self.db_path), timeout=30.0)
         conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL;")
+        if not mode:
+            conn.execute("PRAGMA journal_mode=WAL;")
         conn.execute("PRAGMA synchronous=NORMAL;")
         conn.execute("PRAGMA foreign_keys=ON;")
         return conn
@@ -498,9 +512,9 @@ class FinanceStore:
             return cur.rowcount > 0
 
     # ---------------- Audit Log (Append-Only Hash Chain) ----------------
-    def append_audit(self, action: str, actor: str, details: dict[str, Any]) -> str:
+    def append_audit(self, action: str, actor: str, details: dict[str, Any], *, connection=None) -> str:
         """Append an immutable audit entry with SHA-256 cryptographic chain link."""
-        with self._get_conn() as conn:
+        def append(conn):
             last = conn.execute("SELECT record_hash FROM audit_log ORDER BY id DESC LIMIT 1").fetchone()
             prev_hash = last["record_hash"] if last else "0" * 64
             now_iso = datetime.now(UTC).isoformat()
@@ -518,6 +532,15 @@ class FinanceStore:
                 (now_iso, action, actor, details_str, prev_hash, record_hash),
             )
             return record_hash
+
+        if connection is not None:
+            if not connection.in_transaction:
+                raise ValueError('Finance audit requires an owner transaction')
+            return append(connection)
+        from contextlib import closing
+        with closing(self._get_conn()) as conn, conn:
+            conn.execute('BEGIN IMMEDIATE')
+            return append(conn)
 
     def get_audit_log(self, limit: int = 50) -> list[dict[str, Any]]:
         entries: list[dict[str, Any]] = []

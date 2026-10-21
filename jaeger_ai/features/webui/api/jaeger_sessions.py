@@ -316,6 +316,11 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path == "/v1/channels":
         return _proxy(handler, "GET", path)
 
+    if path == "/v1/finance/review" or path.startswith("/v1/finance/operations/") and len(path.split("/")) == 5:
+        return _proxy(handler, "GET", path + query) if method == "GET" else False
+    if path.startswith("/v1/finance/actions/") and path.endswith("/review") and len(path.split("/")) == 6:
+        return _proxy(handler, "POST", path, _body_bytes(handler)) if method == "POST" else False
+
     if path == "/v1/webhooks" or path.startswith("/v1/webhooks/"):
         if method == "GET":
             return _proxy(handler, "GET", path + query)
