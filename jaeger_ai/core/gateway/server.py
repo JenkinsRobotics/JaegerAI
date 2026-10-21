@@ -104,6 +104,8 @@ OWNER_RUN_SESSION_PREFIX = "owner:"
 
 # How long a tool call waits for the operator before it is refused.
 APPROVAL_WAIT_S = 300.0
+#: How long a parked clarify form waits for the owner before the turn falls back to plain text.
+CLARIFY_WAIT_S = 600.0
 
 # Arguments that name what a tool call will touch, in the order a human
 # reading an approval on a phone needs them.
@@ -494,6 +496,23 @@ async def _authenticate_caller(request: web.Request, handler: Any) -> web.Stream
         _REQUEST_CALLER.reset(bound)
 
 
+def _handoff_tool_scope(target: Any, allowed_tools: Any) -> dict[str, Any]:
+    """What the child can actually use, for the handoff record (D3, 2026-10-21).
+
+    ``allowed_tools`` is the caller's grant: empty means "no explicit grant", and the
+    child then runs with its standing specialist tools (``_specialist_scope``), not
+    with no tools. Record the effective set so the record never understates it."""
+    from jaeger_ai.core.agent_registry.specialists import specialist_tools
+
+    standing = specialist_tools(target)
+    grant = [str(t) for t in (allowed_tools or [])]
+    if not standing:
+        return {"tool_scope": "model_only", "effective_tools": []}
+    if not grant:
+        return {"tool_scope": "standing", "effective_tools": list(standing)}
+    return {"tool_scope": "granted_subset", "effective_tools": [t for t in standing if t in set(grant)]}
+
+
 class _GatewayToolConfirmationProvider:
     """Park WRITE_LOCAL (and similar) confirms on the Gateway approval bus.
 
@@ -782,6 +801,8 @@ class JaegerGatewayApp:
         if getattr(self.event_bus, "store", None) is None:
             self.event_bus.attach_store(self.store)
         self.pending_approvals: dict[str, asyncio.Future[bool]] = {}
+        #: clarify_id → future resolved with the owner's answer (GB-033).
+        self.pending_clarify: dict[str, asyncio.Future[str]] = {}
         # Requests the agent has sent to the operator's editor, awaiting its answer.
         self._ide_pending: dict[str, tuple[str, Any]] = {}
         from jaeger_agent import task_port
@@ -845,6 +866,9 @@ class JaegerGatewayApp:
         expired = self.store.expire_orphaned_tool_confirms()
         if expired:
             logger.info("Expired %d tool approvals orphaned by the previous process", expired)
+        expired_forms = self.store.expire_orphaned_clarify()
+        if expired_forms:
+            logger.info("Expired %d clarify forms orphaned by the previous process", expired_forms)
         runtime_for_producers = None
         try:
             from jaeger_ai.core.entity.ownership import EntityRuntimeMode
@@ -1377,6 +1401,8 @@ class JaegerGatewayApp:
         self.app.router.add_patch("/v1/sessions/{id}", self.handle_patch_session)
         self.app.router.add_post("/v1/sessions/{id}/branch", self.handle_branch_session)
         self.app.router.add_post("/v1/sessions/{id}/feedback", self.handle_message_feedback)
+        self.app.router.add_get("/v1/sessions/{id}/clarify", self.handle_list_clarify)
+        self.app.router.add_post("/v1/sessions/{id}/clarify/{clarify_id}", self.handle_answer_clarify)
         self.app.router.add_get("/v1/sessions/{id}/feedback", self.handle_message_feedback)
         self.app.router.add_post("/v1/sessions/{id}/retry", self.handle_retry_session)
         self.app.router.add_post("/v1/sessions/{id}/turns", self.handle_send_turn)
@@ -2521,6 +2547,7 @@ class JaegerGatewayApp:
                 "specialty": (target.metadata or {}).get("specialty"),
                 "permitted_context": permitted_context,
                 "allowed_tools": list(allowed_tools),
+                **_handoff_tool_scope(target, allowed_tools),
                 "timeout_seconds": timeout_s,
                 "parent_chain": [*parent_chain, from_id],
                 "delegation_depth": depth + 1,
@@ -4593,8 +4620,10 @@ class JaegerGatewayApp:
             request_row = self.store.get_request(request_id) or {}
             options = selection.get("options") or {}
             source = "background" if options.get("background") else "user"
+            from jaeger_ai.main import interaction_request_sink
             with task_scope(self.task_owner, session_id=session_key, request_id=request_id,
                             execution=selection, user_text=request_row.get("input_text", prompt), source=source), \
+                    interaction_request_sink(self._clarify_sink(session_key, request_id)), \
                     tool_allowlist(list(grant) if grant is not None else None), \
                     read_confinement(self._read_roots(runtime, selection, self._staged_upload_dir(session_key))):
                 return runtime.run_subordinate_react(
@@ -5925,6 +5954,98 @@ class JaegerGatewayApp:
                 row = {**row, "session_id": handoff.get("session_id"), "task": handoff.get("task")}
         origin = (row.get("metadata") or {}).get("origin")
         return {**row, "origin": origin} if origin else row
+
+    # ── clarify forms (GB-033) ─────────────────────────────────────────
+    def _clarify_sink(self, session_id: str, request_id: str) -> Callable[[str, str, tuple[str, ...]], str]:
+        """Interaction sink for an in-process turn: park a revisioned clarify form and wait.
+
+        Runs on the tool's worker thread. Returns the owner's answer, or "" (the
+        clarify tool then falls back to its plain-text question) on timeout,
+        cancellation or a missing loop. Secret requests are not brokered here.
+        """
+        def sink(kind: str, prompt: str, options: tuple[str, ...] = ()) -> str:
+            loop = getattr(self, "_loop", None)
+            question = str(prompt or "").strip()
+            if kind != "clarify" or not question or loop is None or not loop.is_running():
+                return ""
+            box: dict[str, Any] = {"done": threading.Event(), "answer": "", "row": None}
+
+            def _arm() -> None:
+                row = self.store.create_clarify(session_id=session_id, request_id=request_id,
+                                                question=question, choices=[str(o) for o in options or ()])
+                box["row"] = row
+                fut = loop.create_future()
+                self.pending_clarify[row["clarify_id"]] = fut
+                self.event_bus.publish(session_id, "clarify.request", {
+                    "clarify_id": row["clarify_id"], "revision": row["revision"], "question": question,
+                    "choices": row["choices"], "session_id": session_id, "request_id": request_id,
+                })
+
+                def _done(f: asyncio.Future) -> None:
+                    try:
+                        box["answer"] = str(f.result() or "")
+                    except Exception:
+                        box["answer"] = ""
+                    box["done"].set()
+                fut.add_done_callback(_done)
+
+            loop.call_soon_threadsafe(_arm)
+            scope = self._cancellations.get(request_id)
+            deadline = time.monotonic() + CLARIFY_WAIT_S
+            outcome = ""
+            while not box["done"].wait(timeout=0.05):
+                if scope is not None and scope.cancelled:
+                    outcome = "cancelled"; break
+                if time.monotonic() >= deadline:
+                    outcome = "expired"; break
+            row = box["row"]
+            if outcome and row is not None:
+                self.pending_clarify.pop(row["clarify_id"], None)
+                if self.store.resolve_clarify(row["clarify_id"], revision=row["revision"], status=outcome):
+                    self.event_bus.publish(session_id, "clarify.resolved",
+                                           {"clarify_id": row["clarify_id"], "status": outcome})
+                return ""
+            return box["answer"]
+        return sink
+
+    async def handle_list_clarify(self, request: web.Request) -> web.Response:
+        """GET /v1/sessions/{id}/clarify → pending forms (reload/reconnect recovery)."""
+        sid = request.match_info["id"]
+        return web.json_response({"forms": self.store.list_clarify(sid)})
+
+    async def handle_answer_clarify(self, request: web.Request) -> web.Response:
+        """POST /v1/sessions/{id}/clarify/{clarify_id} {revision, response}: resolve exactly once.
+
+        404 unknown/foreign form, 400 bad body, 409 stale revision or already resolved."""
+        sid, cid = request.match_info["id"], request.match_info["clarify_id"]
+        try:
+            body = await request.json() if request.can_read_body else {}
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        row = self.store.get_clarify(cid)
+        if not row or row["session_id"] != sid:
+            return web.json_response({"error": "Clarify form not found"}, status=404)
+        response = str((body or {}).get("response") or "").strip()
+        revision = (body or {}).get("revision")
+        if not response or not isinstance(revision, int) or isinstance(revision, bool):
+            return web.json_response({"error": "revision (int) and a non-empty response are required"}, status=400)
+        if row["status"] != "pending":
+            return web.json_response({"error": "Clarify form already resolved", "status": row["status"],
+                                      "clarify_id": cid, "revision": row["revision"]}, status=409)
+        if revision != row["revision"]:
+            return web.json_response({"error": "Stale clarify revision", "stale": True,
+                                      "clarify_id": cid, "revision": row["revision"]}, status=409)
+        settled = self.store.resolve_clarify(cid, revision=revision, status="answered", answer=response)
+        if settled is None:
+            current = self.store.get_clarify(cid) or {}
+            return web.json_response({"error": "Clarify form already resolved", "status": current.get("status"),
+                                      "clarify_id": cid, "revision": current.get("revision")}, status=409)
+        fut = self.pending_clarify.pop(cid, None)
+        if fut is not None and not fut.done():
+            fut.set_result(response)
+        self.event_bus.publish(sid, "clarify.resolved", {"clarify_id": cid, "status": "answered"})
+        return web.json_response({"clarify_id": cid, "revision": revision, "status": "answered",
+                                  "delivered": fut is not None})
 
     async def handle_list_approvals(self, request: web.Request) -> web.Response:
         pending = [self._with_origin(row) for row in self.store.list_pending_approvals()]

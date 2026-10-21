@@ -313,6 +313,11 @@ export class WebHost implements ChatHost {
 
   pendingApprovals = (sessionId: string) => this.source.pendingApprovals?.(sessionId) ?? Promise.resolve([]);
 
+  get answerClarify(): ((sessionId: string, clarifyId: string, revision: number, response: string) => Promise<void>) | undefined {
+    const source = this.source;
+    return source.answerClarify ? (sessionId, clarifyId, revision, response) => source.answerClarify!(sessionId, clarifyId, revision, response) : undefined;
+  }
+
   async respondToConfirmation(turnId: string, callId: string, decision: "approve" | "deny") {
     await this.source.approve(turnId, callId, decision === "approve");
   }

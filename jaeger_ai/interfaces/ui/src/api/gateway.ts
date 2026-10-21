@@ -324,6 +324,10 @@ export class GatewayClient implements JaegerSource {
     const data = await this.json<{ approvals: PendingApproval[] }>(`/v1/approvals?session_id=${encodeURIComponent(sessionId)}`);
     return data.approvals;
   }
+  async answerClarify(sessionId: string, clarifyId: string, revision: number, response: string) {
+    await this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/clarify/${encodeURIComponent(clarifyId)}`, { revision, response });
+  }
+
   async approve(_sessionId: string, approvalId: string, approved: boolean) {
     await this.json(`/v1/approvals/${encodeURIComponent(approvalId)}`, { approved });
   }

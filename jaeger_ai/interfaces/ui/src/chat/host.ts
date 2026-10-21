@@ -22,7 +22,9 @@ export type ChatPart =
   /** PROPOSED addition (not yet in the frozen IDE Chat contract): an answered
    * question widget. Renders the question plus its options with the chosen
    * one highlighted. */
-  | { kind: "question"; callId: string; title: string; options: Array<{ id: string; label: string }>; chosenId?: string }
+  | { kind: "question"; callId: string; title: string; options: Array<{ id: string; label: string }>; chosenId?: string;
+      /** Server clarify form (GB-033): answerable only while pending, at this revision. */
+      revision?: number; status?: "pending" | "answered" | "cancelled" | "expired"; sessionId?: string }
   /** Centered hand-off marker. `agents` set means a grouped "Messaged X and Y". */
   | { kind: "handoff"; status?: string; handoffId: string; agentId: string; agentName: string; count: number; direction: "to" | "from"; agents?: Array<{ id: string; name: string }> };
 
@@ -97,6 +99,8 @@ export interface ChatHost {
    * it; everything else appends. */
   startTurn(request: StartTurnRequest, onPart: (part: ChatPart) => void): TurnHandle;
   respondToConfirmation(turnId: string, callId: string, decision: "approve" | "deny", scope?: "once" | "session"): Promise<void>;
+  /** Answer a server clarify form once (GB-033). Absent: the card is display-only. */
+  answerClarify?(sessionId: string, clarifyId: string, revision: number, response: string): Promise<void>;
   sessions: {
     list(): Promise<ChatSessionSummary[]>;
     load(id: string): Promise<ChatSession>;
@@ -136,9 +140,14 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
   if ((part.kind === "markdownContent" || part.kind === "thinking") && last?.kind === part.kind) {
     return [...parts.slice(0, -1), { ...last, ...part, text: last.text + part.text } as ChatPart];
   }
-  if (part.kind === "toolInvocation" || part.kind === "confirmation") {
+  if (part.kind === "toolInvocation" || part.kind === "confirmation" || part.kind === "question") {
     const index = parts.findIndex((p) => p.kind === part.kind && p.callId === part.callId);
-    if (index >= 0) return parts.map((p, i) => (i === index ? ({ ...p, ...part } as ChatPart) : p));
+    if (index >= 0) return parts.map((p, i) => {
+      if (i !== index) return p;
+      // A clarify.resolved update carries only its status; keep the question and its options.
+      if (part.kind === "question" && p.kind === "question" && !part.title) return { ...p, status: part.status ?? p.status };
+      return { ...p, ...part } as ChatPart;
+    });
   }
   return [...parts, part];
 }

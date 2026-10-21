@@ -51,6 +51,15 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       parts.push({ kind: "confirmation", callId: str(p.approval_id ?? p.id ?? p.call_id), title: str(p.title ?? (p.tool ? `Run ${str(p.tool)}?` : "Approval needed")), message: str(p.prompt ?? p.summary ?? p.message) });
       return { parts };
     }
+    case "clarify.request": {
+      const choices = Array.isArray(p.choices) ? p.choices.map(str).filter(Boolean) : [];
+      return { parts: [{ kind: "question", callId: str(p.clarify_id), title: str(p.question), sessionId: str(p.session_id) || undefined,
+        revision: typeof p.revision === "number" ? p.revision : 1, status: "pending", options: choices.map((label, i) => ({ id: `c${i}`, label })) }] };
+    }
+    case "clarify.resolved": {
+      const status = p.status === "answered" || p.status === "cancelled" || p.status === "expired" ? p.status : undefined;
+      return status ? { parts: [{ kind: "question", callId: str(p.clarify_id), title: "", options: [], status } as ChatPart] } : null;
+    }
     case "agent.handoff":
     case "agent.handoff.finished": {
       const h = (p.handoff && typeof p.handoff === "object" ? p.handoff : p) as Payload;

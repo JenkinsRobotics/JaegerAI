@@ -396,6 +396,22 @@ class GatewaySessionStore:
                 );
                 CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, created_at);
 
+                -- Server-produced clarify forms (GB-033): one revisioned entity per
+                -- question, resolved exactly once (answered | cancelled | expired).
+                CREATE TABLE IF NOT EXISTS clarify_forms (
+                    clarify_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    request_id TEXT,
+                    question TEXT NOT NULL,
+                    choices_json TEXT NOT NULL DEFAULT '[]',
+                    revision INTEGER NOT NULL DEFAULT 1,
+                    status TEXT NOT NULL,
+                    answer TEXT,
+                    created_at REAL NOT NULL,
+                    resolved_at REAL
+                );
+                CREATE INDEX IF NOT EXISTS idx_clarify_session ON clarify_forms(session_id, status);
+
                 CREATE TABLE IF NOT EXISTS handoffs (
                     id TEXT PRIMARY KEY,
                     request_id TEXT NOT NULL,
@@ -1965,6 +1981,56 @@ class GatewaySessionStore:
                 "SELECT * FROM approvals WHERE status='pending' ORDER BY created_at"
             ).fetchall()
             return [self._approval_row(r) for r in rows]
+
+    # ── clarify forms (GB-033) ─────────────────────────────────────────
+    def create_clarify(self, *, session_id: str, request_id: str | None, question: str,
+                       choices: list[str] | tuple[str, ...] = (), clarify_id: str | None = None) -> dict[str, Any]:
+        cid = clarify_id or f"clarify_{uuid.uuid4().hex[:12]}"
+        with self._immediate() as conn:
+            conn.execute(
+                "INSERT INTO clarify_forms (clarify_id, session_id, request_id, question, choices_json, revision,"
+                " status, created_at) VALUES (?,?,?,?,?,1,'pending',?)",
+                (cid, session_id, request_id, question, json.dumps(list(choices)), time.time()),
+            )
+        return self.get_clarify(cid) or {}
+
+    def _clarify_row(self, row: sqlite3.Row) -> dict[str, Any]:
+        return {"clarify_id": row["clarify_id"], "session_id": row["session_id"], "request_id": row["request_id"],
+                "question": row["question"], "choices": json.loads(row["choices_json"] or "[]"),
+                "revision": int(row["revision"]), "status": row["status"], "answer": row["answer"],
+                "created_at": row["created_at"], "resolved_at": row["resolved_at"]}
+
+    def get_clarify(self, clarify_id: str) -> dict[str, Any] | None:
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT * FROM clarify_forms WHERE clarify_id=?", (clarify_id,)).fetchone()
+            return self._clarify_row(row) if row else None
+
+    def list_clarify(self, session_id: str, *, pending_only: bool = True) -> list[dict[str, Any]]:
+        sql = "SELECT * FROM clarify_forms WHERE session_id=?" + (" AND status='pending'" if pending_only else "")
+        with self._get_conn() as conn:
+            return [self._clarify_row(r) for r in conn.execute(sql + " ORDER BY created_at", (session_id,)).fetchall()]
+
+    def resolve_clarify(self, clarify_id: str, *, revision: int, status: str,
+                        answer: str | None = None) -> dict[str, Any] | None:
+        """First terminal decision wins for the current revision; stale or repeated returns None."""
+        if status not in {"answered", "cancelled", "expired"}:
+            raise ValueError(f"bad clarify status {status!r}")
+        with self._immediate() as conn:
+            cur = conn.execute(
+                "UPDATE clarify_forms SET status=?, answer=?, resolved_at=? "
+                "WHERE clarify_id=? AND status='pending' AND revision=?",
+                (status, answer if status == "answered" else None, time.time(), clarify_id, int(revision)),
+            )
+            if cur.rowcount != 1:
+                return None
+        return self.get_clarify(clarify_id)
+
+    def expire_orphaned_clarify(self) -> int:
+        """Pending forms from a previous process have no waiting turn; close them as expired."""
+        with self._immediate() as conn:
+            return conn.execute(
+                "UPDATE clarify_forms SET status='expired', resolved_at=? WHERE status='pending'", (time.time(),),
+            ).rowcount
 
     def expire_orphaned_tool_confirms(self) -> int:
         """Close ``tool_confirm`` approvals left by a previous process.
