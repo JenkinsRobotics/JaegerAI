@@ -54,10 +54,10 @@ export function messagesToTurns(messages: SessionMessage[] = [], agentName: (id:
   const turns: ChatSession["turns"] = [];
   for (const m of messages) {
     if (m.role === "user") {
-      turns.push({ turnId: m.request_id != null ? String(m.request_id) : `t${turns.length}`, message: m.content ?? "", parts: [], state: "complete", createdAt: epochMs(m) });
+      turns.push({ turnId: m.request_id != null ? String(m.request_id) : m.id != null ? String(m.id) : `t${turns.length}`, requestId: m.request_id, message: m.content ?? "", parts: [], state: "complete", createdAt: epochMs(m) });
     } else if (m.role === "assistant") {
       // A reply with no user turn before it (proactive note, relayed report) still shows.
-      if (!turns.length) turns.push({ turnId: `t${turns.length}`, message: "", parts: [], state: "complete", createdAt: epochMs(m) });
+      if (!turns.length || m.request_id && turns.at(-1)?.requestId !== m.request_id) turns.push({ turnId: m.request_id ?? `t${turns.length}`, requestId: m.request_id, message: "", parts: [], state: "complete", createdAt: epochMs(m) });
       const parts = m.parts?.length
         ? m.parts.map((p) => persistedToPart(p, agentName)).filter((p): p is ChatPart => p !== null)
         : [{ kind: "markdownContent" as const, text: m.content ?? "" }];
@@ -146,6 +146,8 @@ export class WebHost implements ChatHost {
   /** The chat view puts refused files back on the composer as error chips. */
   onAttachmentsRejected?: (turnId: string, rejected: RejectedAttachment[]) => void;
   get modelSettings() { return this.source.modelSettings; }
+  get messageReactions() { return this.source.messageReactions; }
+  get sessionQueue() { return this.source.sessionQueue; }
   async listModels() {
     const inventory = await this.source.modelSettings?.inventory();
     return inventory?.providers.filter(p => p.reachable).flatMap(p => p.models.filter(m => m.available !== false).map(m => ({ id: `@${p.id}:${m.id}`, name: m.id, provider: p.id }))) ?? [];

@@ -2809,12 +2809,29 @@ class JaegerGatewayApp:
         return web.json_response(branch, status=201)
 
     async def handle_message_feedback(self, request: web.Request) -> web.Response:
+        from jaeger_ai.contract.message_feedback import REACTION_EMOJIS
         session_id = request.match_info["id"]
         if self.store.get_session(session_id) is None:
             return web.json_response({"error": "Session not found"}, status=404)
         if request.method == "GET":
-            return web.json_response({"feedback": self.store.message_feedback(session_id)})
-        body = await request.json() if request.can_read_body else {}
+            return web.json_response({"feedback": self.store.message_feedback(session_id), **self.store.message_reactions(session_id), 'allowed_emojis': REACTION_EMOJIS})
+        try:
+            body = await request.json() if request.can_read_body else {}
+        except ValueError:
+            return web.json_response({'error': 'JSON object required'}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({'error': 'JSON object required'}, status=400)
+        if isinstance(body, dict) and 'emoji' in body:
+            if set(body) != {'request_id', 'role', 'emoji', 'active'} or body['emoji'] not in REACTION_EMOJIS or not isinstance(body['role'], str) or body['role'] not in {'user', 'assistant'} or type(body['active']) is not bool or not isinstance(body['request_id'], str):
+                return web.json_response({'error': 'Valid request_id, role, emoji and boolean active required'}, status=400)
+            target = self.store.get_request(body['request_id'])
+            if target is None or target['session_id'] != session_id:
+                return web.json_response({'error': 'Request not found in this conversation'}, status=404)
+            snapshot = self.store.set_message_reaction(session_id, target['request_id'], body['role'], body['emoji'], body['active'])
+            event = snapshot.pop('_event', None)
+            if event:
+                self.event_bus.fanout(event)
+            return web.json_response({**snapshot, 'allowed_emojis': REACTION_EMOJIS})
         rating = str(body.get("rating") or "").strip().lower()
         if rating not in {"positive", "negative"}:
             return web.json_response({"error": "rating must be positive or negative"}, status=400)
@@ -3173,15 +3190,17 @@ class JaegerGatewayApp:
             self._start_admitted_turn(
                 promoted, session_id, str(promoted.get("input_text") or ""),
             )
+        current_item = self.store.get_request(item['request_id']) or item
+        own_promotion = promoted is not None and promoted['request_id'] == item['request_id']
         payload = {
             "session_id": session_id,
             "request_id": item["request_id"],
-            "turn_id": promoted.get("turn_id") if promoted else item.get("turn_id"),
-            "status": "running" if promoted else item["status"],
-            "queued": promoted is None,
+            "turn_id": current_item.get("turn_id"),
+            "status": current_item["status"],
+            "queued": current_item['status'] in {'queued', 'paused'},
             "replayed": bool(item.get("replayed")),
         }
-        if promoted and promoted.get("event"):
+        if own_promotion and promoted.get("event"):
             payload["start_event_id"] = promoted["event"]["event_id"]
         return web.json_response(payload, status=202)
 
@@ -3200,7 +3219,10 @@ class JaegerGatewayApp:
                 text=fields.get("text"),
                 status=fields.get("status"),
                 position=fields.get("position"),
+                expected_updated_at=body.get('expected_updated_at'),
             )
+        except RequestConflict as exc:
+            return web.json_response({'error': str(exc)}, status=409)
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
         if updated is None:

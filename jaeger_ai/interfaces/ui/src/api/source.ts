@@ -51,7 +51,21 @@ export interface LibraryControls {
   operation(id: string): Promise<{ receipt: (ControlResult & { document?: { id: string } }) | null }>;
 }
 
+export interface ReactionSnapshot { reactions: Record<string, string[]>; event_id: number; allowed_emojis: string[] }
+export interface QueuedRequest extends RequestSnapshot { input_text: string; queue_position?: number; updated_at: number }
+export interface SessionQueue {
+  list(sessionId: string): Promise<{ session_id: string; items: QueuedRequest[] }>;
+  enqueue(sessionId: string, text: string, requestId: string): Promise<{ session_id: string; request_id: string; status: string }>;
+  update(sessionId: string, requestId: string, body: { text?: string; status?: "queued" | "paused"; expected_updated_at: number }): Promise<unknown>;
+  reorder(sessionId: string, order: string[]): Promise<unknown>;
+  status(sessionId: string, requestId: string): Promise<RequestSnapshot>;
+}
 export interface JaegerSource {
+  sessionQueue?: SessionQueue;
+  messageReactions?: {
+    load(sessionId: string): Promise<ReactionSnapshot>;
+    save(sessionId: string, body: { request_id: string; role: "user" | "assistant"; emoji: string; active: boolean }): Promise<ReactionSnapshot>;
+  };
   library?: LibraryControls;
   skills?(query?: string): Promise<{ skills: { name: string; category: string; description: string; lifecycle: string }[]; count: number }>;
   schedules?: ScheduleControls;

@@ -11,6 +11,8 @@
 /* Floating agent pill over the scrolling transcript. */
 .jg-chat__band { position: absolute; z-index: 2; top: 0; left: 0; right: 0; height: var(--jg-band-height); padding-top: 8px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; pointer-events: none; }
 .jg-runtime-trigger { position: absolute; right: 12px; pointer-events: auto; max-width: 35%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.jg-session-queue { flex: none; margin: 4px 12px; max-height: 30vh; overflow: auto; font-size: var(--jg-font-small); }
+.jg-session-queue textarea { max-width: 100%; box-sizing: border-box; }
 .jg-agent-pill {
   pointer-events: auto; display: inline-flex; align-items: center; gap: 7px; max-width: 60%; height: 38px; padding: 0 15px 0 9px;
   border-radius: 999px; border: 0; background: var(--aether-color-bg-control); color: var(--aether-color-text);

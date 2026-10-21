@@ -1,8 +1,8 @@
 import type {ChatSession} from './host';
 /** Snapshot content cannot settle a live/unknown request or erase loaded history. */
-export function mergeSessionSnapshot(current: ChatSession | null, next: ChatSession): ChatSession {
+export function mergeSessionSnapshot(current: ChatSession | null, next: ChatSession, resetSettled = false): ChatSession {
   if (!current || current.id !== next.id) return next;
-  const turns = new Map(current.turns.map(turn => [turn.turnId, turn]));
+  const turns = new Map(current.turns.filter(turn => !resetSettled || ['pending','unknown'].includes(turn.state)).map(turn => [turn.turnId, turn]));
   for (const turn of next.turns) {
     const existing = turns.get(turn.turnId);
     if (!existing || !['pending','unknown'].includes(existing.state)) turns.set(turn.turnId, turn);

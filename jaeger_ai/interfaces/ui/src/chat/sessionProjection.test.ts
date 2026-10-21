@@ -10,3 +10,9 @@ it('late snapshot cannot erase streamed text, settle unknown work, or remove old
  expect(merged.turns[2].state).toBe('unknown');
  expect(mergeSessionSnapshot(current,{id:'different',title:'different',turns:[]})).toEqual({id:'different',title:'different',turns:[]});
 });
+
+it('an authoritative summary replaces settled projection while preserving live and unknown work',()=>{
+ const current={id:'owned',title:'',turns:[{turnId:'old',message:'Covered history',parts:[],state:'complete'},{turnId:'live',message:'Current',parts:[],state:'pending'},{turnId:'unknown',message:'Uncertain',parts:[],state:'unknown'}]} as ChatSession;
+ const next={id:'owned',title:'',turns:[{turnId:'summary',message:'Summary',parts:[],state:'complete'}]} as ChatSession;
+ expect(mergeSessionSnapshot(current,next,true).turns.map(t=>t.turnId)).toEqual(['live','unknown','summary']);
+});

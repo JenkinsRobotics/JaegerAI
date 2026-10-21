@@ -306,6 +306,12 @@ def route(handler, parsed, method: str) -> bool:
 
     parts = suffix.split("/")
     session_id = parts[0]
+    if len(parts) == 2 and parts[1] == 'queue' and method in {'GET', 'POST'}:
+        return _proxy(handler, method, f'/v1/sessions/{session_id}/queue', _body_bytes(handler) if method == 'POST' else None)
+    if len(parts) == 3 and parts[1] == 'queue' and parts[2] == 'reorder' and method == 'POST':
+        return _proxy(handler, 'POST', f'/v1/sessions/{session_id}/queue/reorder', _body_bytes(handler))
+    if len(parts) == 3 and parts[1] == 'queue' and method == 'PATCH':
+        return _proxy(handler, 'PATCH', f'/v1/sessions/{session_id}/queue/{parts[2]}', _body_bytes(handler))
 
     # /v1/sessions/{id}/stream — long-lived, handled separately
     if len(parts) == 2 and parts[1] == "stream" and method == "GET":
@@ -319,7 +325,7 @@ def route(handler, parsed, method: str) -> bool:
         return False
 
     # /v1/sessions/{id}/{messages|events} — read routes, query string relayed
-    if len(parts) == 2 and method == "GET" and parts[1] in {"messages", "events"}:
+    if len(parts) == 2 and method == "GET" and parts[1] in {"messages", "events", "feedback"}:
         return _proxy(handler, "GET", f"/v1/sessions/{session_id}/{parts[1]}{query}")
 
     # /v1/sessions/{id}/attachments/upload — JSON (base64) body only: this
@@ -332,7 +338,7 @@ def route(handler, parsed, method: str) -> bool:
         return _proxy(handler, "POST", f"/v1/sessions/{session_id}/ide/{parts[2]}", _body_bytes(handler))
 
     # /v1/sessions/{id}/{turns|cancel|reconcile}
-    if len(parts) == 2 and method == "POST" and parts[1] in {"turns", "cancel", "reconcile"}:
+    if len(parts) == 2 and method == "POST" and parts[1] in {"turns", "cancel", "reconcile", "feedback"}:
         return _proxy(
             handler, "POST", f"/v1/sessions/{session_id}/{parts[1]}", _body_bytes(handler),
         )
