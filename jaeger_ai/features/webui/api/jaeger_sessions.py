@@ -335,6 +335,7 @@ def route(handler, parsed, method: str) -> bool:
             if not agent_id or '/' in agent_id:return False
             return _proxy(handler,'GET','/v1/agents/'+quote(agent_id,safe='')+'/messages/'+parts[5]+query)
 
+    if method=="GET" and path.startswith("/v1/agents/") and path.endswith("/template-export") and len(path.split("/"))==5:return _proxy(handler,method,path+query)
     if method == "GET" and path == "/v1/agent-templates":
         return _proxy(handler, "GET", path)
     if path.startswith("/v1/agents/") and (path.endswith("/configuration") or path.endswith("/knowledge")) and method in {"GET", "PATCH"}:

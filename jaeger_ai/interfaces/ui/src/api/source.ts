@@ -80,6 +80,7 @@ export interface SpecialistSettings { specialty: string; summary: string; instru
 export interface SpecialistConfiguration extends SpecialistSettings { agent_id: string; revision: number; editable: boolean; template?: { id: string; version: number } }
 export interface AgentTemplate extends SpecialistSettings { id: string; version: number; name: string; tools_granted: false }
 export interface SpecialistControls {
+  exportTemplate?(id:string,revision:number):Promise<{agent_id:string;revision:number;content:string;sha256:string;filename:string;visibility:'owner_local';export_policy:'prompt_only_no_grants'}>;
   templates(): Promise<{ templates: AgentTemplate[] }>;
   read(id: string): Promise<SpecialistConfiguration>;
   save(id: string, body: { expected_revision: number; settings: SpecialistSettings }): Promise<SpecialistConfiguration>;
@@ -241,7 +242,7 @@ export interface JaegerSource {
   /** Agent context-menu actions (agentActions.ts); optional, gated by agentCaps. */
   agentActions?: AgentActions;
   agentCreationStatus?(operationId: string): Promise<{ receipt: { ok: boolean; agent?: Agent; error?: string } | null }>;
-  createAgent(body: { template_id?: string; template_version?: number; operation_id?: string; name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }): Promise<Agent>;
+  createAgent(body: { template_snapshot?:string; template_id?: string; template_version?: number; operation_id?: string; name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }): Promise<Agent>;
   /** The specialist's side of one hand-off: its worker session and messages. */
   delegation?: {
     create(targetId:string,body:{task:string;request_id:string;session_id:string;from_agent_id:string;require_approval:true;model:string|null;background:true}):Promise<import("./types").HandoffCommandReceipt>;

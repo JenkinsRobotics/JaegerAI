@@ -164,9 +164,9 @@ export function App({ source }: { source: JaegerSource }) {
   /** There is one chat per agent now: "new chat with X" opens X's home chat. */
   const newChat = useCallback((agentId: string) => { if (agentId === selectedAgentId) void store.seeAgent(agentId); setSelection({ type: "agent", agentId }); }, [selectedAgentId, store.seeAgent]);
 
-  const createAgent = useCallback(async (displayName: string, job: string, operationId: string, template?: { id: string; version: number }) => {
+  const createAgent = useCallback(async (displayName: string, job: string, operationId: string, template?: { id: string; version: number }, snapshot?:string) => {
     const agent = await source.createAgent({
-      ...(template ? { template_id: template.id, template_version: template.version } : {}), operation_id: operationId, name: agentSlug(displayName), display_name: displayName, ...(job ? { metadata: { specialty: job } } : {}),
+      ...(snapshot?{template_snapshot:snapshot}:{}), ...(template ? { template_id: template.id, template_version: template.version } : {}), operation_id: operationId, name: agentSlug(displayName), display_name: displayName, ...(!snapshot&&job ? { metadata: { specialty: job } } : {}),
     });
     await store.refresh();
     newChat(agent.id);

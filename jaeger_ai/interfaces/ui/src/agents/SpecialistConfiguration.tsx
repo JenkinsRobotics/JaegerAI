@@ -1,3 +1,4 @@
+import {validateTemplateExport} from './templateExport';
 import { Dialog } from '@aether/ui';
 import { useEffect, useRef, useState } from 'react';
 import type { SpecialistConfiguration as Configuration, SpecialistControls, SpecialistSettings } from '../api/source';
@@ -5,6 +6,7 @@ interface Pending { expected_revision: number; settings: SpecialistSettings }
 const values = (row: SpecialistSettings): SpecialistSettings => ({ specialty: row.specialty, summary: row.summary, instructions: row.instructions });
 /** Registry prompt settings only. Unknown saves reconcile by reading; no automatic retry. */
 export function SpecialistConfiguration({ agentId, controls, onClose, onSaved }: { agentId: string; controls: SpecialistControls; onClose: () => void; onSaved: () => void }) {
+  const currentAgent=useRef(agentId);currentAgent.current=agentId;
   const key = `jaeger.ui.specialist-settings.v1.${encodeURIComponent(agentId)}`;
   const [row, setRow] = useState<Configuration>(), [draft, setDraft] = useState<SpecialistSettings>();
   const [baseRevision, setBaseRevision] = useState<number>();
@@ -55,6 +57,20 @@ export function SpecialistConfiguration({ agentId, controls, onClose, onSaved }:
     } catch (e) { setError(`Could not reconcile settings: ${String(e)}. Nothing was resent.`); }
     finally { lock.current = false; setBusy(false); }
   };
+  const exportPrompt=async()=>{
+    if(!row?.editable||!controls.exportTemplate||lock.current||pending)return;
+    lock.current=true;setBusy(true);setError(undefined);const revision=row.revision;
+    try{
+      const result=await controls.exportTemplate(agentId,revision);
+      const content=await validateTemplateExport(result,agentId,revision);
+      if(currentAgent.current!==agentId)return;
+      const url=URL.createObjectURL(new Blob([content],{type:'application/json'}));
+      try{const link=document.createElement('a');link.href=url;link.download='jaeger-specialist-template.json';document.body.append(link);link.click();link.remove();}
+      finally{setTimeout(()=>URL.revokeObjectURL(url),1000);}
+      setNotice('Prompt-only template download requested. OS save is unconfirmed. No history, tools, credentials or account configuration copied.');
+    }catch(e){if(currentAgent.current===agentId)setError(`Template export failed: ${String(e)}`);}
+    finally{lock.current=false;if(currentAgent.current===agentId)setBusy(false);}
+  };
   const close = () => { if (busy) return; if (storageBlocked.current) { setError('Draft is not saved on this device. Keep this editor open and save or copy your text before closing.'); return; } onClose(); };
   return <Dialog open title="Specialist configuration" onClose={close} actions={<><button type="button" disabled={busy} onClick={close}>Close</button><button type="button" disabled={busy || !row?.editable || !draft || Boolean(pending)} onClick={() => void save()}>Save specialist settings</button></>}>
     {!row && !error && <p role="status">Loading specialist configuration…</p>}
@@ -62,6 +78,7 @@ export function SpecialistConfiguration({ agentId, controls, onClose, onSaved }:
     {row && <><p>Revision {row.revision}{row.template ? ` · ${row.template.id} v${row.template.version}` : ''}. Prompt settings do not grant tools or bypass approvals.</p>{!row.editable && <p>This definition is protected or this caller cannot edit it.</p>}</>}
     {row && <details><summary>Current saved specialist settings</summary><p>{row.specialty}</p><p>{row.summary}</p><pre>{row.instructions}</pre></details>}
     {draft && <form className="jg-form" onSubmit={e => { e.preventDefault(); void save(); }}>{(['specialty', 'summary', 'instructions'] as const).map(field => <label className="jg-form__field" key={field}><span>{field}</span><textarea aria-label={`Specialist ${field}`} disabled={busy || !row?.editable || Boolean(pending)} maxLength={{specialty:200,summary:2000,instructions:12000}[field]} value={draft[field]} onChange={e => edit({ [field]: e.target.value })} /></label>)}</form>}
+    {controls.exportTemplate&&<button type="button" disabled={busy||!row?.editable||Boolean(pending)} onClick={()=>void exportPrompt()}>Export current saved prompt template</button>}
     <button type="button" disabled={busy} onClick={() => void check()}>{pending ? 'Check uncertain settings save' : 'Read current saved settings'}</button>
   </Dialog>;
 }

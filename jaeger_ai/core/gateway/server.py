@@ -1326,6 +1326,7 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/frameworks/{id}/grants", self.handle_framework_grant)
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
         self.app.router.add_get("/v1/agent-templates", self.handle_agent_templates)
+        self.app.router.add_get("/v1/agents/{id}/template-export", self.handle_agent_template_export)
         self.app.router.add_get("/v1/agents/{id}/knowledge", self.handle_agent_knowledge)
         self.app.router.add_patch("/v1/agents/{id}/knowledge", self.handle_agent_knowledge)
         self.app.router.add_get("/v1/agents/{id}/configuration", self.handle_agent_configuration)
@@ -2038,9 +2039,24 @@ class JaegerGatewayApp:
             return web.json_response(value)
         except ValueError as exc:return web.json_response({'error':str(exc)},status=409)
 
+    async def handle_agent_template_export(self, request: web.Request) -> web.Response:
+        from jaeger_ai.core.agent_registry.configuration import export_template
+        caller=request.get('caller')
+        if caller is None or 'admin' not in caller.scopes or caller.session_prefix or not request['caller_actor'].startswith('owner:'):
+            raise web.HTTPForbidden(text='Existing owner administration scope required')
+        record=self._registry().get_agent(request.match_info['id'])
+        if record is None or record.id!=request.match_info['id']:raise web.HTTPNotFound()
+        try:
+            revision=request.query.get('revision','')
+            if not revision.isdecimal():raise ValueError('Reviewed source revision required')
+            return web.json_response(export_template(record,int(revision)))
+        except PermissionError as exc:return web.json_response({'error':str(exc)},status=403)
+        except RuntimeError as exc:return web.json_response({'error':str(exc)},status=409)
+        except ValueError as exc:return web.json_response({'error':str(exc)},status=400)
+
     async def handle_agent_templates(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.agent_registry.configuration import TEMPLATES
-        return web.json_response({"templates": [dict(t, tools_granted=False) for t in TEMPLATES]})
+        return web.json_response({"templates": [dict(t, tools_granted=False, visibility='owner_local', export_policy='prompt_only_no_grants') for t in TEMPLATES]})
 
     async def handle_agent_knowledge(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.agent_registry.configuration import editable, settings
@@ -2117,6 +2133,10 @@ class JaegerGatewayApp:
             if not isinstance(operation_id, str) or not operation_id.strip() or len(operation_id) > 128:
                 return web.json_response({"error": "Invalid operation_id"}, status=400)
             payload = {"action": "agent.create", "body": {k: v for k, v in body.items() if k != "operation_id"}}
+            if body.get('template_snapshot') is not None:
+                import hashlib
+                # Snapshot may contain rejected private text. Retain identity, not content.
+                payload={'action':'agent.create','body_digest':hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()}
             try:
                 fresh = self.store.reserve_control_operation(operation_id, payload)
             except ValueError as exc:
@@ -2131,6 +2151,11 @@ class JaegerGatewayApp:
             if operation_id:
                 self.store.finish_control_operation(operation_id, {"ok": False, "operation_id": operation_id, "error": message, "http_status": status})
             return web.json_response({"error": message}, status=status)
+        template_snapshot=None
+        if body.get('template_snapshot') is not None:
+            from jaeger_ai.core.agent_registry.configuration import import_template
+            try:template_snapshot=import_template(body['template_snapshot'])
+            except (ValueError,TypeError) as exc:return failure(str(exc))
         name = str(body.get("name") or "").strip()
         if not name:
             return failure("name is required")
@@ -2144,6 +2169,13 @@ class JaegerGatewayApp:
         metadata = body.get("metadata") or {}
         if not isinstance(metadata, dict):
             return failure("metadata must be an object")
+        if template_snapshot is not None:
+            if (kind!='jaeger_native' or body.get('role','specialist')!='specialist'
+                    or set(body)-{'name','display_name','kind','role','operation_id','template_snapshot'}):
+                return failure('Local templates create new specialists without inherited authority')
+            metadata={'specialty':template_snapshot['specialty'],'summary':template_snapshot['summary'],
+                      'operator_instructions':template_snapshot['instructions'],'configuration_revision':0,
+                      'template':template_snapshot['template'],'allowed_tools':[]}
         if body.get('template_id') is not None:
             from jaeger_ai.core.agent_registry.configuration import TEMPLATES
             template = next((t for t in TEMPLATES if t['id'] == body['template_id'] and type(body.get('template_version')) is int and t['version'] == body['template_version']), None)
@@ -2161,11 +2193,12 @@ class JaegerGatewayApp:
             metadata = {'specialty': metadata.get('specialty') or template['specialty'], 'summary': template['summary'],
                         'operator_instructions': template['instructions'], 'configuration_revision': 0,
                         'template': {'id': template['id'], 'version': template['version']}, 'allowed_tools': []}
+        creation_role="specialist" if template_snapshot is not None or body.get("template_id") is not None else (str(body["role"]) if body.get("role") else None)
         try:
             record = self._registry().create_agent(
                 name,
                 kind=kind,
-                role=(str(body["role"]) if body.get("role") else None),
+                role=creation_role,
                 display_name=(str(body["display_name"]) if body.get("display_name") else None),
                 adapter=(str(body["adapter"]) if body.get("adapter") else None),
                 profile_id=(str(body["profile_id"]) if body.get("profile_id") else None),

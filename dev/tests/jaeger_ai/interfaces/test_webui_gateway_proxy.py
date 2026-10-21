@@ -402,3 +402,9 @@ def test_local_skill_export_uses_authenticated_proxy_exact_revision(overlay):
 def test_mcp_local_configuration_routes(overlay,path,method):
     assert _route(overlay,path,method) is True
     assert overlay._calls[-1]==(method,path)
+
+
+def test_template_export_keeps_reviewed_revision(overlay):
+    path='/v1/agents/native:owned/template-export?revision=2'
+    assert _route(overlay,path) is True
+    assert overlay._calls[-1]==('GET',path)
