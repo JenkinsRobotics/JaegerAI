@@ -597,7 +597,8 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); stop(); return; }
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); send(); }
+    // WebKit (WKWebView, Safari) reports the IME-committing Enter with keyCode 229 and isComposing=false.
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); send(); }
   };
 
   /** Decisions made here; only ever set by a click on Allow once / Deny once (never automatically). */

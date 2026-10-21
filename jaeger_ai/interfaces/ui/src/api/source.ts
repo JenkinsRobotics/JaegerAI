@@ -330,7 +330,7 @@ export interface JaegerSource {
   /** Session SSE (`/v1/sessions/{id}/stream?last_event_id=<cursor>`). Resolves
    * when the stream ends or `signal` aborts; throws GatewayError on HTTP errors. */
   /** PROPOSED global event stream (agent.updated/created/deleted, section.updated/deleted, agent.unread); the
-   * channel is not in the spec yet (GET /v1/events assumed). Optional: without it the roster polls. */
+   * channel is GET /v1/events/stream. Optional: without it the roster polls. */
   globalEvents?(onEvent: (event: GatewayEvent) => void, signal: AbortSignal): Promise<void>;
   stream(sessionId: string, cursor: number | undefined, onEvent: (event: GatewayEvent) => void, signal: AbortSignal): Promise<void>;
 }
