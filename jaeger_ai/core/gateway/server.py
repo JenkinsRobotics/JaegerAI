@@ -2362,7 +2362,14 @@ class JaegerGatewayApp:
                 return web.json_response({'error':'Model availability could not be established; no handoff admitted','admitted':False},status=503)
         # Re-read after discovery yields, before synchronous admission. Concurrent
         # duplicate callers cannot both create children for the same request ID.
+        from .handoff_ownership import parent_context
+        parent=parent_context(self,parent_run_id,hint_session,actor)
         existing = self.store.get_handoff_by_request(request_id)
+        if parent and (existing is None or (existing.get('metadata') or {}).get('parent_binding')):
+            from_id=parent['binding']['source_agent_id']
+            parent_run_id=parent['binding']['request_id']
+            parent_chain=parent['parent_chain']
+            depth=len(parent_chain)
         if existing:
             prior = existing.get("metadata") or {}
             if (existing["task"] != task or existing["to_agent_id"] != target.id
@@ -2383,6 +2390,8 @@ class JaegerGatewayApp:
                 )
             return web.json_response(existing, status=200)
 
+        if parent and (parent['root']['status'] in {'cancelling','cancelled','execution_unknown','failed'} or self._cancellations.is_cancelled(parent['root']['request_id'])):
+            return web.json_response({'error':'Parent request is stopped or uncertain; no new child admitted'},status=409)
         if target.disabled:
             return web.json_response({"error":"Specialist is disabled; no new handoff admitted"},status=403)
         if requested_model and model_choice is None:
@@ -2403,6 +2412,7 @@ class JaegerGatewayApp:
         approval_id = f"approval_{uuid.uuid4().hex[:12]}" if require_approval else None
         handoff_id = f"handoff_{uuid.uuid4().hex[:12]}"
         origin_session = str(body.get("session_id") or "").strip() or None
+        if origin_session is None and parent:origin_session=parent['binding']['session_id']
         if origin_session is None and parent_run_id:
             parent_row = (self.store.get_request(str(parent_run_id))
                           or self.store.get_request_by_turn(str(parent_run_id)))
@@ -2424,6 +2434,8 @@ class JaegerGatewayApp:
                 "reply_to_handoff_id": reply_parent["id"] if reply_parent else None,
                 "thread_handoff_id": ((reply_parent.get("metadata") or {}).get("thread_handoff_id") or reply_parent["id"]) if reply_parent else handoff_id,
                 "caller_actor": actor,
+                "parent_binding": parent['binding'] if parent else None,
+                "parent_binding_state": 'qualified' if parent else 'unqualified' if parent_run_id else 'independent',
                 "bridge_origin": bridge_origin,
                 "requested_model": requested_model,
                 "model_choice": model_choice,
@@ -2869,19 +2881,13 @@ class JaegerGatewayApp:
         if record is None:
             return web.json_response({"error": "Handoff not found"}, status=404)
         if record["status"] == "execution_unknown":
-            from jaeger_ai.contract.handoffs import child_request_id, request_digest
+            from jaeger_ai.contract.handoffs import request_digest
             from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
             rid = record.get("request_id") or record["id"]
             session = specialist_session(record["to_agent_id"], rid)
-            canonical = self.store.get_request(child_request_id(rid))
+            from .handoff_ownership import child_receipt
+            session,_,canonical,bound=child_receipt(self,record)
             if canonical is not None:
-                owner_session=self.store.get_session(canonical['session_id']) or {}
-                meta=owner_session.get('metadata') or {}
-                expected_actor=(record.get('metadata') or {}).get('caller_actor')
-                bound=(canonical['session_id']==session and meta.get('handoff_id')==record['id']
-                       and meta.get('agent_id')==record['to_agent_id']
-                       and (canonical.get('execution') or {}).get('is_subordinate') is True
-                       and (canonical.get('execution') or {}).get('caller')==expected_actor)
                 if not bound:
                     return web.json_response({**record,'recovery_error':'Retained child identity does not match this handoff; outcome remains unknown'})
                 status=canonical['status']
@@ -5473,8 +5479,16 @@ class JaegerGatewayApp:
         row = self.store.get_request(request_id) or self.store.get_request_by_turn(request_id)
         if row is None or row["session_id"] != session_id:
             return web.json_response({"error": "Request not found"}, status=404)
+        from jaeger_ai.core.authority.kernel import is_untrusted_actor
+        actor=request.get('caller_actor')
+        if actor and is_untrusted_actor(actor) and (row.get('execution') or {}).get('caller')!=actor:
+            return web.json_response({'error':'Request cancellation is outside this actor scope'},status=403)
+        from .handoff_cancellation import cancel_descendants, unconfirmed_ids
         if row["status"] in {"completed", "failed", "cancelled"}:
-            return web.json_response({**row, "cancel_requested": False, "already_terminal": True})
+            self._cancellations.cancel(row['request_id'])
+            children=await cancel_descendants(self,row,request)
+            return web.json_response({**row, "cancel_requested": False, "already_terminal": True,
+                'owned_handoff_cancellations':children,'unconfirmed_task_ids':unconfirmed_ids(children)})
         scope = self._cancellations.cancel(row["request_id"])
         updated = self.store.mark_request_status(row["request_id"], "cancelling") or row
         native_requested = False
@@ -5485,12 +5499,15 @@ class JaegerGatewayApp:
                 updated["native_run_id"], updated.get("native_session") or "dispatcher"
             )
         self._close_pending_approvals(row["request_id"])
+        children=await cancel_descendants(self,row,request)
+        unconfirmed=unconfirmed_ids(children)
         self.event_bus.publish(session_id, "turn.cancel", {
             "request_id": updated["request_id"],
             "turn_id": updated["turn_id"],
             "native_cancel_requested": native_requested,
             "native_cancel_confirmed": False,
             "interrupt_delivered": scope.interrupt_delivered,
+            "owned_handoff_cancellations":children,"unconfirmed_task_ids":unconfirmed,
         })
         return web.json_response({
             **updated,
@@ -5498,6 +5515,7 @@ class JaegerGatewayApp:
             "native_cancel_requested": native_requested,
             "interrupt_delivered": scope.interrupt_delivered,
             "cancellation_confirmed": False,
+            "owned_handoff_cancellations":children,"unconfirmed_task_ids":unconfirmed,
         })
 
     def _close_pending_approvals(self, request_id: str) -> None:
@@ -6313,8 +6331,23 @@ class JaegerGatewayApp:
             )
             result = await executor.execute(runtime.runtime_id, request)
             status = "execution_unknown" if result.metadata.get("execution_unknown") else result.status
-            if (self.store.get_handoff(handoff_id) or {}).get("status") == "cancelled":
-                status = "cancelled"
+            from .handoff_ownership import child_receipt
+            current=self.store.get_handoff(handoff_id) or record
+            _,_,canonical,bound=child_receipt(self,current)
+            summary=result.summary;result_meta=dict(result.metadata)
+            if canonical is not None and bound:
+                status=canonical['status'] if canonical['status'] in {'completed','failed','cancelled'} else 'execution_unknown'
+                actual=canonical.get('result') or {}
+                summary=actual.get('output') or actual.get('error') or summary
+                result_meta.update(execution_unknown=status=='execution_unknown',gateway_request_id=canonical['request_id'],confirmation_scope='canonical_child_request')
+            elif canonical is not None:
+                status='execution_unknown';summary='Retained child identity is unqualified; outcome remains unknown'
+                result_meta={'execution_unknown':True,'confirmation_scope':'unqualified_child'}
+            elif canonical is None and (current.get('metadata') or {}).get('cancel_requested'):
+                status='cancelled';summary='Cancelled before child admission; no child execution started'
+                result_meta.update(execution_unknown=False,cancellation_confirmed=True,confirmation_scope='pre_admission')
+                record={**record,'metadata':{**(record.get('metadata') or {}),'cancelled_before_admission':True}}
+            elif current.get('status')=='cancelled':status='cancelled'
             ok = status == "completed"
             saved = self.store.save_handoff({
                 **record,
@@ -6322,10 +6355,10 @@ class JaegerGatewayApp:
                 "child_run_id": child.id,
                 "result": {
                     "ok": ok,
-                    "status": result.status,
-                    "summary": result.summary,
+                    "status": status,
+                    "summary": summary,
                     "evidence": list(result.evidence),
-                    "metadata": dict(result.metadata),
+                    "metadata": result_meta,
                     "worker_session_id": result.worker_session_id,
                 },
             })
@@ -6359,6 +6392,9 @@ class JaegerGatewayApp:
         from jaeger_ai.core.agent_registry.specialist_runtime import specialist_agent
 
         child_rid = child_request_id(request_id)
+        current_handoff=self.store.get_handoff(handoff_id) if handoff_id else None
+        if (current_handoff or {}).get('metadata',{}).get('cancel_requested') or (current_handoff or {}).get('status')=='cancelled':
+            raise ValueError('Handoff cancelled before child admission')
         target_record=self._registry().get_agent(agent_id or specialist_agent(session_id) or '')
         if target_record is not None and target_record.disabled:
             raise ValueError('Specialist disabled; no new child admission')
@@ -6389,6 +6425,13 @@ class JaegerGatewayApp:
         if workspace:
             requested["workspace"] = workspace
         revision=await self._turn_model_revision(session_id,requested,child_rid) if requested.get('model') else None
+        current_handoff=self.store.get_handoff(handoff_id) if handoff_id else None
+        binding=((current_handoff or {}).get('metadata') or {}).get('parent_binding')
+        parent_row=self.store.get_request(binding['request_id']) if binding else None
+        if (current_handoff or {}).get('metadata',{}).get('cancel_requested') or (current_handoff or {}).get('status')=='cancelled':
+            raise ValueError('Handoff cancelled before child admission')
+        if parent_row and (parent_row['status'] in {'cancelling','cancelled','execution_unknown','failed'} or self._cancellations.is_cancelled(parent_row['request_id'])):
+            raise ValueError('Parent request stopped or uncertain; no child admission')
         admitted = self.store.admit_request(session_id, text, request_id=child_rid, requested=requested,expected_model_revision=revision)
         self._start_admitted_turn(admitted, session_id, text)
         rid = admitted["request_id"]

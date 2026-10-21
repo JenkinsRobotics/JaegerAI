@@ -171,3 +171,8 @@ export interface GatewayEvent {
   payload?: Record<string, unknown>;
   [key: string]: unknown;
 }
+
+/** Cancellation admission is separate from effect-aware terminal settlement. */
+export interface HandoffStopState {handoff_id:string;child_request_id?:string|null;child_status?:string|null;handoff_status?:string;outcome:'terminal'|'requested'|'unknown'|'blocked';cancellation_confirmed:boolean;confirmation_scope?:string;reason?:string;descendants?:HandoffStopState[]}
+export interface HandoffStopReceipt {handoff_id:string;request_id:string;operation_id:string;outcome:'accepted'|'unknown';current:HandoffStopState;unconfirmed_task_ids:string[];error?:string|null}
+export interface HandoffStopRow {handoff_id:string;request_id:string;task:string;from_agent_id:string;to_agent_id:string;current:HandoffStopState}

@@ -90,22 +90,15 @@ def prepare_handoff(gateway, actor, body, workspace_folder, tools):
     return binding, list(tools or grant)
 
 
-async def cancel_handoffs(gateway, binding):
-    """Cancel only children durably linked to this goal, using canonical cancel."""
-    from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
+async def cancel_handoffs(gateway, binding, *, request_context=None):
+    """Historical bridge bindings use the same effect-aware cancellation owner."""
+    from jaeger_ai.core.gateway.handoff_cancellation import cancel_one
 
-    from .routes import TurnRequest
-
+    context=request_context if request_context is not None else {}
+    results=[]
     for handoff in gateway.store.list_handoffs():
-        if (handoff.get("metadata") or {}).get("bridge_origin") != binding or handoff[
-            "status"
-        ] in {"completed", "failed", "cancelled", "denied"}:
+        if (handoff.get('metadata') or {}).get('bridge_origin')!=binding or handoff['status'] in {'completed','failed','cancelled','denied','rejected'}:
             continue
-        gateway.store.save_handoff({**handoff, "status": "cancelled"})
-        gateway._close_pending_approvals(handoff["request_id"])
-        child_id = handoffs.child_request_id(handoff["request_id"])
-        if gateway.store.get_request(child_id) is not None:
-            session = specialist_session(handoff["to_agent_id"], handoff["request_id"])
-            await gateway.handle_cancel_turn(
-                TurnRequest({}, session, {"request_id": child_id})
-            )
+        if handoff['id'] in context.get('_handoff_cancel_seen',set()):continue
+        results.append(await cancel_one(gateway,handoff['id'],operation_id='bridge-stop:'+binding['request_id'],request_context=context,origin_request_id=binding['request_id']))
+    return results

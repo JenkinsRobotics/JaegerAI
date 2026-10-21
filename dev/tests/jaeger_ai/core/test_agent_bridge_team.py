@@ -157,11 +157,19 @@ async def test_goal_cancel_denies_pending_team_and_child_writes(
                 bool(app.team_executions) and bool(app.store.list_pending_approvals())
             )
         )
-    assert (
-        await client.post("/v1/agent-goals/team-cancel/cancel", headers=h(), json={})
-    ).status == 200
-    assert app.store.get_handoff(handoff["id"])["status"] == "cancelled"
-    await asyncio.sleep(0.2)
+    response=await client.post("/v1/agent-goals/team-cancel/cancel", headers=h(), json={})
+    assert response.status == 200
+    acknowledgement=await response.json()
+    assert not (root / "cancelled-team.txt").exists()
+    if stage == "write":
+        from jaeger_ai.contract.handoffs import child_request_id
+        child_id=child_request_id(handoff["request_id"])
+        # Signal acknowledgement is not terminal effect proof. Require actual
+        # canonical settlement, retained parent result and no file mutation.
+        await wait_for(lambda: app.store.get_request(child_id)["status"]=="cancelled")
+    else:
+        assert acknowledgement["unconfirmed_task_ids"]==[]
+    await wait_for(lambda: app.store.get_handoff(handoff["id"])["status"]=="cancelled")
     assert not (root / "cancelled-team.txt").exists()
     assert not app.store.list_pending_approvals()
 

@@ -242,6 +242,11 @@ export class GatewayClient implements JaegerSource {
     create:(id,body)=>this.json(`/v1/agents/${encodeURIComponent(id)}/handoff-commands`,body),
     original:(id,rid)=>this.json(`/v1/agents/${encodeURIComponent(id)}/handoff-commands/${encodeURIComponent(rid)}`),
   };
+  handoffStops:NonNullable<JaegerSource['handoffStops']>={
+    list:()=>this.json('/v1/handoff-controls'),
+    stop:(id,body)=>this.json(`/v1/handoffs/${encodeURIComponent(id)}/stop-commands`,body),
+    original:(id,op)=>this.json(`/v1/handoffs/${encodeURIComponent(id)}/stop-commands/${encodeURIComponent(op)}`),
+  };
   originalHandoffReply(parent:string,rid:string){return this.json<import('./types').HandoffCommandReceipt>(`/v1/handoffs/${encodeURIComponent(parent)}/reply-commands/${encodeURIComponent(rid)}`);}
   replyHandoffCommand(parent:string,task:string,rid:string){return this.json<import('./types').HandoffCommandReceipt>(`/v1/handoffs/${encodeURIComponent(parent)}/reply-commands`,{task,request_id:rid});}
   replyHandoff(handoffId: string, task: string, requestId: string) {

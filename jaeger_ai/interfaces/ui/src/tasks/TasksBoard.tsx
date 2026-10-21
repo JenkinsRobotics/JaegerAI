@@ -1,3 +1,4 @@
+import {OwnedHandoffs} from "./OwnedHandoffs";
 import {SpecialistHandoff} from "./SpecialistHandoff";
 import {TaskPresentationControls} from "./TaskPresentationControls";
 import { GatewayError } from "../api/gateway";
@@ -110,7 +111,7 @@ export function TasksBoard({ source, agents }: { source: JaegerSource; agents: A
     {error && <ErrorState compact={tasks !== null} title="Task operation or refresh failed" error={error} onRetry={() => setAttempt(n => n + 1)} />}
     {notice && <p role="status">{notice}</p>}
     {operationError && <p role="alert">{operationError}</p>}{proposalError && <p role="alert">{proposalError}</p>}
-    {source.delegation&&source.agentHome&&<SpecialistHandoff source={source} agents={agents}/>}
+    <OwnedHandoffs source={source}/>{source.delegation&&source.agentHome&&<SpecialistHandoff source={source} agents={agents}/>}
     {source.taskActions && source.agentHome && <form className="jg-task-form" aria-label="New task proposal" onSubmit={e => { e.preventDefault(); create(); }}>
       <label>Return results to <select aria-label="Task originating bot" value={origin} onChange={e => changeDraft(goal,e.target.value)} disabled={busy || Boolean(uncertain) || !draftReady}><option value="">Choose bot</option>{origin&&!agents.some(a=>a.id===origin&&!a.hidden&&!a.deleted)&&<option value={origin}>Saved bot · {origin}</option>}{agents.filter(a => !a.hidden && !a.deleted).map(a => <option key={a.id} value={a.id}>{label(a)}</option>)}</select></label>
       <label>Objective <textarea aria-label="Task objective" value={goal} onChange={e => changeDraft(e.target.value,origin)} disabled={busy || Boolean(uncertain) || !draftReady} /></label>

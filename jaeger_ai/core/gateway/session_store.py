@@ -2035,6 +2035,11 @@ class GatewaySessionStore:
             prior = conn.execute("SELECT * FROM handoffs WHERE id=?", (record["id"],)).fetchone()
             if prior and prior["status"] in {"completed", "failed", "cancelled", "denied"}:
                 return self._handoff_row(prior)
+            metadata=dict(record.get('metadata') or {})
+            if prior:
+                previous=json.loads(prior['metadata_json'] or '{}')
+                for key in ('cancel_requested','cancel_operation_id','cancel_requested_at','cancel_origin_request_id','cancelled_before_admission','parent_binding','parent_binding_state','caller_actor','bridge_origin','requested_model','model_choice'):
+                    if key in previous:metadata[key]=previous[key]
             conn.execute(
                 """
                 INSERT INTO handoffs(
@@ -2062,13 +2067,32 @@ class GatewaySessionStore:
                     1 if record.get("require_approval") else 0,
                     record.get("approval_id"),
                     json.dumps(record.get("result") or record.get("result_json") or {}),
-                    json.dumps(record.get("metadata") or {}),
+                    json.dumps(metadata),
                     record.get("created_at") or now,
                     now,
                     record.get("session_id"),
                 ),
             )
         return self.get_handoff(record["id"]) or record
+
+    def request_handoff_cancellation(self, handoff_id: str, operation_id: str, *, origin_request_id: str | None = None) -> dict[str, Any]:
+        """Monotonic intent. Only prove cancellation when no child was admitted."""
+        from jaeger_ai.contract.handoffs import child_request_id
+        with self._immediate() as conn:
+            row=conn.execute('SELECT * FROM handoffs WHERE id=?',(handoff_id,)).fetchone()
+            if row is None:raise KeyError(handoff_id)
+            if row['status'] in {'completed','failed','cancelled','denied','rejected'}:return self._handoff_row(row)
+            meta=json.loads(row['metadata_json'] or '{}')
+            if not meta.get('cancel_requested'):
+                meta.update(cancel_requested=True,cancel_operation_id=operation_id,cancel_requested_at=time.time(),cancel_origin_request_id=origin_request_id)
+            child=conn.execute('SELECT status FROM client_requests WHERE request_id=?',(child_request_id(row['request_id']),)).fetchone()
+            status=row['status'];result=json.loads(row['result_json'] or '{}')
+            if child is None and status in {'pending_approval','approved','admitted'}:
+                status='cancelled';meta['cancelled_before_admission']=True
+                result={'ok':False,'status':'cancelled','summary':'Cancelled before child admission; no child execution started','metadata':{'cancellation_confirmed':True,'confirmation_scope':'pre_admission'}}
+            conn.execute('UPDATE handoffs SET metadata_json=?,status=?,result_json=?,updated_at=? WHERE id=?',(json.dumps(meta),status,json.dumps(result),time.time(),handoff_id))
+            row=conn.execute('SELECT * FROM handoffs WHERE id=?',(handoff_id,)).fetchone()
+            return self._handoff_row(row)
 
     def get_handoff(self, handoff_id: str) -> dict[str, Any] | None:
         with self._get_conn() as conn:
