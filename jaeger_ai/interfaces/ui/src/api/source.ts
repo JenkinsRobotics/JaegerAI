@@ -6,10 +6,11 @@ import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, Sessi
  * gateway through same-origin paths; the mock adapter replays sample data. */
 /** 201 from the bytes upload route. */
 export interface SessionFile { attachment_id: string; name: string; mime: string; size: number; sha256: string; readable: boolean; unavailable_reason?: string }
-export interface LiteralFilePreview {format:"spreadsheet"|"unsupported";notice:string;sheets?:{name:string;rows:string[][];row_numbers?:number[]}[];limits?:Record<string,number>}
+export const PDF_PREVIEW_BOUNDS={pages:20,documentPages:10000,dimension:1280,imageBytes:8*1024*1024,textBytes:64000} as const;
+export interface LiteralFilePreview {format:"spreadsheet"|"pdf"|"unsupported";notice:string;page?:number;page_count?:number;page_limit?:number;image_base64?:string;width?:number;height?:number;text?:string;sheets?:{name:string;rows:string[][];row_numbers?:number[]}[];limits?:Record<string,number>}
 export interface SessionFilePreview {session_id:string;attachment_id:string;name:string;mime:string;size:number;sha256:string;preview:LiteralFilePreview}
 export interface SessionFiles {
-  preview?(sessionId:string,attachmentId:string):Promise<SessionFilePreview>;
+  preview?(sessionId:string,attachmentId:string,page?:number):Promise<SessionFilePreview>;
   list(sessionId: string): Promise<{ session_id: string; files: SessionFile[]; max_bytes: number }>;
   read(sessionId: string, attachmentId: string): Promise<{ session_id: string; attachment_id: string; name: string; mime: string; size: number; sha256: string; data_base64: string }>;
 }
