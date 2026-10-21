@@ -98,8 +98,19 @@ export interface ToolInventory {
   count: number; servers: { id?: string; name: string; state: string; tool_count: number; active_calls?: number; actions?: string[]; resources_advertised?:boolean }[];
   mcp_initialized: boolean; scope: string; execution_authorized: false;
 }
-export interface InstalledPlugin {distribution_state?:'current'|'replaced'|'removed';activation_blocked_by_loaded_revision?:boolean;related_revision_ids?:string[];id:string;name:string;package:string;version:string;state:string;active_hooks:number;hook_count:number;tool_count:number;command_count:number;actions:('pause_hooks'|'resume_hooks')[];provenance:string}
+export interface InstalledPlugin {slot_id?:string;startup_revision?:number;startup_known?:boolean;startup_policy?:'legacy'|'disabled'|'enabled_revision'|'revision_unapproved'|'unknown';startup_editable?:boolean;startup_approvable?:boolean;startup_revision_id?:string;restart_required?:boolean;distribution_state?:'current'|'replaced'|'removed';activation_blocked_by_loaded_revision?:boolean;related_revision_ids?:string[];id:string;name:string;package:string;version:string;state:string;active_hooks:number;hook_count:number;tool_count:number;command_count:number;actions:('pause_hooks'|'resume_hooks')[];provenance:string}
+export interface PackagePlan {package:string;version:string|null;installed_version:string|null;sha256?:string;attachment_id?:string;expected_fingerprint:string;policy_revision:number;entries:{name:string;value:string;slot_id:string}[];requires:string[];restart_required:boolean;activation_performed:false;provenance:string}
+export type PackageReview={action:'install';session_id:string;attachment_id?:string;upload_key?:string}|{action:'remove';package:string}|{action:'restore';restore_from:string};
+export type PackageCommand={operation_id:string;expected_fingerprint:string;expected_policy_revision:number}&({action:'install';session_id:string;attachment_id:string;sha256:string}|{action:'remove';package:string}|{action:'restore';restore_from:string});
+export interface PluginPackages {
+ list(before?:string):Promise<{environment:string;next_before?:string|null;operations:{operation_id:string;package:string;version:string|null;action:string;phase:string;backup_available:boolean}[];supported:string;activation_performed:false}>;
+ preview(body:PackageReview):Promise<PackagePlan>;
+ change(body:PackageCommand):Promise<ControlResult>;
+ operation(id:string):Promise<{receipt:ControlResult|null;pending?:{error?:string;phase?:string}}>;
+}
 export interface PluginControls {
+  packages?:PluginPackages;
+  startup?(id:string,body:{operation_id:string;expected_revision:number;enabled:boolean}):Promise<ControlResult>;
   list():Promise<{plugins:InstalledPlugin[];scope:string;activation_performed:false}>;
   mutate(id:string,action:'pause_hooks'|'resume_hooks',body:{operation_id:string;expected_state:string}):Promise<ControlResult>;
   operation(id:string):Promise<{receipt:ControlResult|null}>;

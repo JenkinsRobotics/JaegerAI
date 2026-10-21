@@ -1,0 +1,20 @@
+import {useRef,useState} from 'react';
+import type {PluginControls,InstalledPlugin,ControlResult} from '../api/source';
+export function PluginStartup({row,controls,refresh}:{row:InstalledPlugin;controls:PluginControls;refresh:()=>void}){
+ const key='jaeger.ui.plugin-startup.v1.'+row.id;
+ type Intent={operation_id:string;expected_revision:number;enabled:boolean};
+ const [pending,setPending]=useState<Intent|undefined>(()=>{try{const raw=localStorage.getItem(key);return raw?JSON.parse(raw):undefined;}catch{return {operation_id:'invalid-journal',expected_revision:-1,enabled:false};}}),[confirm,setConfirm]=useState<boolean>(),[error,setError]=useState<string>(),[notice,setNotice]=useState<string>(),[busy,setBusy]=useState(false);const lock=useRef(false);
+ const finish=(receipt:ControlResult,intent:Intent)=>{
+  if(receipt.operation_id!==intent.operation_id)throw Error('Startup receipt mismatch');
+  const result=receipt.result as {id?:string;scope?:string;startup_policy?:string;activation_performed?:boolean};
+  if(receipt.ok&&(result?.id!==row.id||result.scope!=='future_discovery_only'||result.startup_policy!==(intent.enabled?'enabled_revision':'disabled')||result.activation_performed!==false))throw Error('Startup result mismatch');
+  localStorage.removeItem(key);setPending(undefined);setConfirm(undefined);setNotice(receipt.ok?'Startup policy saved. No code loaded or unloaded; current activity retained.':receipt.error??'Policy rejected');refresh();
+ };
+ const run=async(check=false)=>{if(lock.current)return;lock.current=true;setBusy(true);setError(undefined);try{
+  if(check){if(!pending)return;const {receipt}=await controls.operation(pending.operation_id);if(!receipt)throw Error('Original outcome unresolved; no replay');finish(receipt,pending);}
+  else{if(confirm===undefined||pending||!controls.startup||row.startup_revision===undefined)return;if(localStorage.getItem(key))throw Error('Saved command needs reconciliation; reopen this panel');
+   const intent={operation_id:crypto.randomUUID(),expected_revision:row.startup_revision,enabled:confirm};localStorage.setItem(key,JSON.stringify(intent));setPending(intent);finish(await controls.startup(row.id,intent),intent);
+  }
+ }catch(e){setError(String(e)+'. Original command retained; no automatic activation or retry.');}finally{lock.current=false;setBusy(false);}};
+ return <section aria-label={'Startup policy for '+row.name}><p>Future discovery: {row.startup_policy??'not advertised'}. {row.restart_required?'Restart required to retire retained code; this control does not restart anything.':'No current code load/unload performed.'}</p>{row.startup_editable&&!row.startup_approvable&&<p>File integrity is not verifiable; future startup may be disabled, but this revision cannot be newly approved.</p>}{error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}{pending?<button disabled={busy} type="button" onClick={()=>void run(true)}>Check startup operation</button>:row.startup_editable&&controls.startup&&<>{row.startup_policy!=='disabled'&&<button type="button" disabled={busy} onClick={()=>setConfirm(false)}>Disable future startup</button>}{row.startup_policy!=='enabled_revision'&&row.startup_approvable&&<button type="button" disabled={busy} onClick={()=>setConfirm(true)}>Review exact revision for startup</button>}</>}{confirm!==undefined&&!pending&&<div role="group" aria-label="Confirm startup policy"><p>{confirm?'Permit only this exact installed revision at a future discovery. Installing a different revision requires review again.':'Disable future loads. Already loaded tools, commands and background work remain retained.'} In-process plugin code shares the application process access; this is not a sandbox. This control does not change tool grants or start a connection. Restart is separately coordinated.</p><button type="button" disabled={busy} onClick={()=>void run()}>Confirm startup policy</button><button type="button" disabled={busy} onClick={()=>setConfirm(undefined)}>Cancel startup policy</button></div>}</section>;
+}
