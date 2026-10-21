@@ -1,3 +1,4 @@
+import {SkillLifecycle} from "./SkillLifecycle";
 import { useEffect, useRef, useState } from "react";
 import type { JaegerSource, SkillDetail } from "../api/source";
 export function SkillsPanel({ source }: { source: JaegerSource }) {
@@ -20,7 +21,7 @@ export function SkillsPanel({ source }: { source: JaegerSource }) {
     return () => { live = false; clearTimeout(timer); };
   }, [source, query, attempt]);
   if (!source.skills) return <p>Skills catalog is unavailable from this host.</p>;
-  return <section aria-label="Skills catalog"><label>Find skill <input aria-label="Find skill" value={query} onChange={e => setQuery(e.target.value)} /></label>
+  return <section aria-label="Skills catalog"><SkillLifecycle source={source}/><label>Find skill <input aria-label="Find skill" value={query} onChange={e => setQuery(e.target.value)} /></label>
     <p>Discovered Gateway playbooks. Lifecycle is reported by the registry; this view does not install, publish or grant tools.</p>
     {loading && <p role="status">Loading skills…</p>}{error && <p role="alert">Couldn't load skills: {error} <button type="button" onClick={() => setAttempt(n => n + 1)}>Retry skills</button></p>}
     {rows && <p>{rows.count} matching skills</p>}

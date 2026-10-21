@@ -97,3 +97,16 @@ def test_maintenance_sweep_archives_and_keeps_healthy() -> None:
     out = sm.maintenance_sweep(layout, keep=1)
     assert out["archived"]["w"] == ["w_v1", "w_v2"]
     assert "w" not in out["retired"]
+
+
+def test_archive_collision_preserves_both_original_versions(tmp_path):
+    layout=InstanceLayout(root=tmp_path/'owned-instance')
+    root=sm.skills_root(layout);original=root/'w_v1';original.mkdir(parents=True)
+    (original/'SKILL.md').write_text('first owned version')
+    first=sm._move_to_archive(root,original)
+    original.mkdir();(original/'SKILL.md').write_text('second owned version')
+    second=sm._move_to_archive(root,original)
+    assert first!=second
+    assert (root/sm.ARCHIVE_DIR/first/'SKILL.md').read_text()=='first owned version'
+    assert (root/sm.ARCHIVE_DIR/second/'SKILL.md').read_text()=='second owned version'
+    assert not original.exists()

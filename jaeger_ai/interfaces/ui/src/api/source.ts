@@ -207,6 +207,7 @@ export interface JaegerSource {
     save(sessionId: string, body: { request_id: string; role: "user" | "assistant"; emoji: string; active: boolean }): Promise<ReactionSnapshot>;
   };
   library?: LibraryControls;
+  managedSkills?:ManagedSkills;
   skillDetail?(name: string, category: string): Promise<SkillDetail>;
   mcpControls?: {
     mutate(id:string,action:'disconnect'|'reconnect',body:{operation_id:string;expected_state:string}):Promise<ControlResult>;
@@ -300,3 +301,8 @@ export interface TurnReceipt {
   status?: string;
   replayed?: boolean;
 }
+
+export interface ManagedSkill {name:string;category:string;zone:string;mutable:boolean;revision:string|null;description:string;management_error?:string}
+export type SkillChange={operation_id:string;action:'remove';name:string;expected_revision:string}|{operation_id:string;action:'restore';restore_from:string};
+export interface SkillChangeReceipt {operation_id:string;command?:SkillChange;action?:'remove'|'restore';outcome:'saved'|'rejected'|'unknown';result?:{name:string;state:string;revision:string;archive_name?:string;original_relative?:string};error?:string}
+export interface ManagedSkills {list():Promise<{skills:ManagedSkill[];operations:SkillChangeReceipt[];scope:'current_instance_playbooks';activation_performed:false}>;change(body:SkillChange):Promise<SkillChangeReceipt>;original(op:string):Promise<SkillChangeReceipt>}

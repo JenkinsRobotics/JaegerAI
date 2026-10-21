@@ -240,12 +240,34 @@ def _instance_skills_dir() -> Path | None:
 _DISCOVERY_CACHE: dict[str, Any] = {"sig": None, "result": None}
 
 
+def active_skill_path(root: Path, path: Path) -> bool:
+    """Hidden retirement/staging trees are never live skill sources.
+
+    Check every component; a symlink must not reintroduce an archived or
+    outside skill under an active-looking name. Shared by management readers.
+    """
+    try:
+        relative=path.relative_to(root)
+        if any(part.startswith(".") for part in relative.parts):
+            return False
+        current=root
+        for part in relative.parts:
+            current=current/part
+            if current.is_symlink():
+                return False
+        return path.resolve().is_relative_to(root.resolve())
+    except (OSError,ValueError):
+        return False
+
+
 def _discovery_signature(roots: list[Path]) -> tuple:
     sig: list[tuple] = []
     for root in roots:
         if not root.is_dir():
             continue
         for md in sorted(root.rglob("SKILL.md")):
+            if not active_skill_path(root,md):
+                continue
             try:
                 st = md.stat()
                 sig.append((str(md), st.st_mtime, st.st_size))
@@ -304,6 +326,8 @@ def discover_playbooks() -> list[PlaybookSkill]:
         if not root.is_dir():
             continue
         for md in root.rglob("SKILL.md"):
+            if not active_skill_path(root,md):
+                continue
             folder = md.parent
             # Presence-based unification: ANY folder with a SKILL.md is a recipe.
             # A folder that ALSO ships a module registers tools (skill_loader) —
