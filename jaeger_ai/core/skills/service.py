@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import re
 import shutil
 import tempfile
+from pathlib import Path
 from typing import Any
 
-from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
-
+from jaeger_ai.core.instance.atomic_files import mutate_yaml
+from jaeger_ai.core.instance.schemas import Config, load_yaml
 
 _NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MAX_SKILL_BYTES = 2_000_000
@@ -253,31 +253,24 @@ def _clone_skill(layout: Any, name: str) -> dict[str, Any]:
     return {"ok": True, "name": normalized, "owner": "jaeger", "restart_required": False}
 
 
-def set_skill_enabled(layout: Any, name: str, enabled: bool) -> dict[str, Any]:
-    normalized = _name(name)
-    catalog = {row["name"]: row for row in list_skills(layout)["skills"]}
-    if normalized not in catalog:
-        raise SkillServiceError(f"skill {normalized!r} not found")
-    cfg = load_yaml(layout.config_path, Config)
-    disabled = list(dict.fromkeys(str(item) for item in cfg.skills.disabled_playbooks))
-    if enabled:
-        cfg.skills.disabled_playbooks = [item for item in disabled if item != normalized]
-    elif normalized not in disabled:
-        cfg.skills.disabled_playbooks = [*disabled, normalized]
-
-    core_names = {row["name"] for row in _code_rows(layout) if row["zone"] == "builtin"}
-    if normalized in core_names:
-        allowlist = set(cfg.skills.enabled_base_skills) or set(core_names)
-        if enabled:
-            allowlist.add(normalized)
-        else:
-            allowlist.discard(normalized)
-        cfg.skills.enabled_base_skills = sorted(allowlist)
-    dump_yaml(layout.config_path, Config.model_validate(cfg.model_dump()))
-    return {
-        "ok": True, "name": normalized, "enabled": bool(enabled),
-        "owner": "jaeger", "restart_required": normalized in core_names,
-    }
+def set_skill_enabled(layout: Any, name: str, enabled: bool, *, expected_revision: str | None = None, before_commit=None) -> dict[str, Any]:
+    """Existing playbook/code policy owner; targeted atomic config transform."""
+    normalized=_name(name)
+    catalog={row['name']:row for row in list_skills(layout)['skills']}
+    if normalized not in catalog:raise SkillServiceError(f"skill {normalized!r} not found")
+    core_names={row['name'] for row in _code_rows(layout) if row['zone']=='builtin'}
+    def change(cfg):
+        disabled=list(dict.fromkeys(str(item) for item in cfg.skills.disabled_playbooks))
+        if enabled:cfg.skills.disabled_playbooks=[item for item in disabled if item!=normalized]
+        elif normalized not in disabled:cfg.skills.disabled_playbooks=[*disabled,normalized]
+        if normalized in core_names:
+            allowlist=set(cfg.skills.enabled_base_skills) or set(core_names)
+            if enabled:allowlist.add(normalized)
+            else:allowlist.discard(normalized)
+            cfg.skills.enabled_base_skills=sorted(allowlist)
+        return cfg
+    _,_,revision=mutate_yaml(layout.config_path,Config,change,expected_revision=expected_revision,before_commit=before_commit)
+    return {'ok':True,'name':normalized,'enabled':bool(enabled),'owner':'jaeger','restart_required':normalized in core_names,'config_revision':revision}
 
 
 def archive_identity(value: str) -> str:
@@ -351,6 +344,7 @@ def skill_revision(folder: Path) -> str:
 def review_playbook(layout: Any, name: str, content: str, category: str, expected_revision: str) -> dict[str,Any]:
     """Review original owner-provided Markdown only; no install/activation."""
     import hashlib
+
     from jaeger_ai.core.redaction import redact_text
     from jaeger_ai.core.safety.skills_guard import scan_text
     normalized=_name(name)
@@ -381,6 +375,7 @@ def review_playbook(layout: Any, name: str, content: str, category: str, expecte
 def save_playbook(layout: Any, name: str, content: str, category: str, expected_revision: str, *, before_save=None) -> dict[str,Any]:
     """CAS save; retained full prior version, no code import or external fetch."""
     import uuid
+
     from jaeger_agent.skill_improvement.skill_maintenance import archive_lock
     root=Path(layout.skills_dir);relative=Path(category)/name if category else Path(name)
     with archive_lock(root) as archive:
@@ -447,6 +442,7 @@ def export_playbook(layout: Any, name: str, revision: str) -> dict[str,Any]:
     """Local inert data bundle only; no publisher call or verified license claim."""
     import base64
     import hashlib
+
     from jaeger_ai.core.redaction import redact_text
     from jaeger_ai.core.safety.skills_guard import scan_text
     folder,_,zone=_find_playbook(layout,name)
@@ -465,3 +461,20 @@ def export_playbook(layout: Any, name: str, revision: str) -> dict[str,Any]:
             if redact_text(text)!=text or any(item.severity=='critical' for item in scan_text(text)):raise SkillServiceError("Potential private or dangerous content cannot be exported")
         result.append({'path':path,'size_bytes':len(data),'sha256':hashlib.sha256(data).hexdigest(),'base64':base64.b64encode(data).decode()})
     return {'format':'jaeger-playbook-bundle-v1','name':name,'revision':revision,'provenance':'instance_installed_unverified','publisher_verified':False,'license_verified':False,'target':'local_file','execution_authorized':False,'files':result}
+
+
+def set_playbook_availability(layout: Any, name: str, enabled: bool, *, expected_skill_revision: str, expected_config_revision: str, before_commit=None) -> dict[str,Any]:
+    """Publish/unpublish existing instance instructions; never grant tool scope."""
+    from jaeger_agent.skill_improvement.skill_maintenance import archive_lock
+    if type(enabled) is not bool:raise SkillServiceError('Explicit availability boolean required')
+    normalized=_name(name)
+    with archive_lock(Path(layout.skills_dir)):
+        row=next((r for r in list_skills(layout)['skills'] if r['name']==normalized),None)
+        if row is None or row['zone']!='instance' or row['kinds']!=['playbook']:raise SkillServiceError('Only an existing instance playbook can change availability here')
+        folder,_,_=_find_playbook(layout,normalized)
+        if skill_revision(folder)!=expected_skill_revision:raise SkillServiceError('Skill changed since availability review')
+        def planned(_cfg,revision):
+            if before_commit is not None:before_commit({'name':normalized,'revision':expected_skill_revision,'config_revision':revision,'enabled':enabled})
+            if skill_revision(folder)!=expected_skill_revision:raise SkillServiceError('Skill changed before policy commit; existing policy retained')
+        value=set_skill_enabled(layout,normalized,enabled,expected_revision=expected_config_revision,before_commit=planned)
+    return {**value,'revision':expected_skill_revision,'state':'published' if enabled else 'unpublished','scope':'future_playbook_selection','scope_granted':False}

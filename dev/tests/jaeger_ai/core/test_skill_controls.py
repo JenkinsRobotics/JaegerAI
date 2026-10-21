@@ -229,3 +229,40 @@ async def test_saved_markdown_crash_recovery_never_repeats_import_or_update(gw,t
     assert result['result']['state']==('updated' if updating else 'installed')
     assert 'content' not in result['command'] and result['command']['content_sha256']==body['review_digest']
     assert await (await http.post('/v1/runtime/skills/managed/change',json=body)).json()==result
+
+
+@pytest.mark.asyncio
+async def test_local_availability_policy_changes_real_selection_without_grants_and_recovers_ack(gw,tmp_path,monkeypatch):
+    app,http=gw;layout=InstanceLayout(root=tmp_path/'owned-availability');layout.root.mkdir()
+    dump_yaml(layout.config_path,Config(instance_name='owned',model=ModelConfig(model_path='/dev/null')))
+    bundled=tmp_path/'empty-availability';bundled.mkdir()
+    monkeypatch.setattr(app,'_instance_root',lambda:layout.root)
+    pb=service._playbook_module();monkeypatch.setattr(pb,'_SKILLS_DIR',bundled);monkeypatch.setattr(pb,'_instance_skills_dir',lambda:layout.skills_dir)
+    from jaeger_ai.core.instance.schemas import load_yaml
+    monkeypatch.setattr(pb,'_disabled_playbook_names',lambda:set(load_yaml(layout.config_path,Config).skills.disabled_playbooks))
+    monkeypatch.setattr(service,'_code_rows',lambda _:[])
+    service.install_skill(layout,'fixture','---\nname: fixture\n---\nSafe local instructions')
+    assert pb.find_playbook('fixture') is not None
+    path='/v1/runtime/skills/managed';listing=await (await http.get(path)).json();row=listing['skills'][0]
+    before=load_yaml(layout.config_path,Config).model_dump()
+    command={'operation_id':'owned-unpublish','action':'availability','name':'fixture','enabled':False,'expected_skill_revision':row['revision'],'expected_config_revision':listing['config_revision']}
+    hidden=await (await http.post(path+'/change',json=command)).json()
+    assert hidden['outcome']=='saved' and hidden['result']['state']=='unpublished' and hidden['result']['scope_granted'] is False
+    assert pb.find_playbook('fixture') is None
+    assert load_yaml(layout.config_path,Config).model_dump()=={**before,'skills':{**before['skills'],'disabled_playbooks':['fixture']}}
+    assert await (await http.post(path+'/change',json=command)).json()==hidden
+    stale={**command,'operation_id':'owned-stale-publish','enabled':True}
+    assert (await (await http.post(path+'/change',json=stale)).json())['outcome']=='rejected'
+    current=await (await http.get(path)).json()
+    publish={**command,'operation_id':'owned-publish','enabled':True,'expected_config_revision':current['config_revision']}
+    finish=app.store.finish_control_operation
+    def crash(*a,**k):raise OSError('owned availability receipt interruption')
+    monkeypatch.setattr(app.store,'finish_control_operation',crash)
+    assert (await http.post(path+'/change',json=publish)).status==500
+    assert pb.find_playbook('fixture') is not None
+    monkeypatch.setattr(app.store,'finish_control_operation',finish)
+    monkeypatch.setattr(service,'set_playbook_availability',lambda *a,**k:pytest.fail('Original lookup cannot repeat a policy write'))
+    recovered=await (await http.get(path+'/operations/owned-publish')).json()
+    assert recovered['outcome']=='saved' and recovered['recovered'] and recovered['result']['state']=='published'
+    assert load_yaml(layout.config_path,Config).model_dump()==before
+    assert (await http.post(path+'/change',json=publish,headers=client_headers('jaegerd'))).status==403

@@ -4,7 +4,7 @@
 JSON-ready descriptor per EXPOSED leaf field (a leaf carrying
 ``json_schema_extra`` set by :func:`jaeger_os.core.instance.schemas._setting`).
 ``set_value`` coerces + validates a change back through the same model and
-persists it via the schema's own ``dump_yaml``. Every surface — ``jaeger
+persists a fresh field patch via the shared ``mutate_yaml`` writer. Every surface — ``jaeger
 settings`` and the Swift app — reads and writes through here, so a setting is
 defined ONCE (the annotated ``Field``) and rendered everywhere. There is no
 hand-enumerated field list in the CLI, the bridge, or the Swift app.
@@ -24,7 +24,8 @@ import typing
 from pathlib import Path
 from typing import Any
 
-from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
+from jaeger_ai.core.instance.atomic_files import mutate_yaml
+from jaeger_ai.core.instance.schemas import Config, load_yaml
 
 # Page order for grouped output — the eight spec groups, then any spill-over.
 GROUP_ORDER = [
@@ -228,7 +229,7 @@ def get_value(layout: Any, path: str) -> Any:
 
 def set_value(layout: Any, path: str, value: Any) -> dict[str, Any]:
     """Validate + persist a change, round-tripping through the ``Config``
-    model (coerce + validate + ``dump_yaml``). Returns ``{ok, restart_required,
+    model (coerce + validate + locked ``mutate_yaml``). Returns ``{ok, restart_required,
     path, value}``. Raises ``ValueError`` on an unknown path or invalid value."""
     from pydantic import ValidationError
     desc = describe(layout, path)
@@ -239,14 +240,12 @@ def set_value(layout: Any, path: str, value: Any) -> dict[str, Any]:
             value = json.loads(value)
         except json.JSONDecodeError as exc:
             raise ValueError(f"invalid JSON for {path}: {exc.msg}") from exc
-    cfg = _load(layout)
-    data = cfg.model_dump()
-    _assign(data, path.split("."), value)
-    try:
-        new = Config.model_validate(data)
-    except ValidationError as exc:
-        raise ValueError(_fmt_validation_error(path, exc)) from exc
-    dump_yaml(layout.config_path, new)
+    def change(cfg):
+        data=cfg.model_dump()
+        _assign(data,path.split('.'),value)
+        try:return Config.model_validate(data)
+        except ValidationError as exc:raise ValueError(_fmt_validation_error(path,exc)) from exc
+    new,_,_=mutate_yaml(layout.config_path,Config,change)
     saved = _read_path(new, path)
     if desc["type"] == "secret":
         saved = ""

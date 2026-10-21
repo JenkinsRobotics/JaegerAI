@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from jaeger_ai.core.instance.schemas import Config, dump_yaml, load_yaml
+from jaeger_ai.core.instance.atomic_files import mutate_yaml
+from jaeger_ai.core.instance.schemas import Config, load_yaml
 
 
 def _ollama_base_url() -> str:
@@ -114,13 +115,15 @@ def configure_model(
     context_length: Any = None,
     dry_run: bool = False,
 ) -> dict[str, Any]:
-    current = load_yaml(layout.config_path, Config)
-    validated, selected_provider, selected_model = selected_model_config(
-        current, provider=provider, model=model, base_url=base_url,
-        context_length=context_length)
-    changed = validated != current
-    if changed and not dry_run:
-        dump_yaml(layout.config_path, validated)
+    selected={}
+    def change(current):
+        validated,selected_provider,selected_model=selected_model_config(current,provider=provider,model=model,base_url=base_url,context_length=context_length)
+        selected.update(provider=selected_provider,model=selected_model)
+        return validated
+    if dry_run:
+        current=load_yaml(layout.config_path,Config);changed=change(current)!=current
+    else:_,changed,_=mutate_yaml(layout.config_path,Config,change)
+    selected_provider=selected['provider'];selected_model=selected['model']
     return {
         "ok": True,
         "owner": "jaeger",
@@ -226,7 +229,6 @@ def configure_fallback_chain(
     else:
         raise ValueError("fallback chain must be a list of {provider, model}")
 
-    current = load_yaml(layout.config_path, Config)
     cleaned: list[dict[str, str]] = []
     for raw in rows:
         if not isinstance(raw, dict):
@@ -256,14 +258,12 @@ def configure_fallback_chain(
             "base_url": str(raw.get("base_url") or ""),
         })
 
-    updated = current.model_copy(deep=True)
-    updated.external_model.fallback = [
-        FallbackModel.model_validate(row) for row in cleaned
-    ]
-    validated = Config.model_validate(updated.model_dump())
-    changed = validated != current
-    if changed and not dry_run:
-        dump_yaml(layout.config_path, validated)
+    def change(current):
+        current.external_model.fallback=[FallbackModel.model_validate(row) for row in cleaned]
+        return Config.model_validate(current.model_dump())
+    if dry_run:
+        current=load_yaml(layout.config_path,Config);changed=change(current.model_copy(deep=True))!=current
+    else:_,changed,_=mutate_yaml(layout.config_path,Config,change)
     return {
         "ok": True,
         "owner": "jaeger",
@@ -303,35 +303,34 @@ __all__ = ["configure_model", "configure_fallback_chain", "dead_brain_reason"]
 def update_configured_stack(layout: Any, args: dict[str, Any]) -> dict[str, Any]:
     """Validate all onboarding changes, then write one runtime configuration."""
     from jaeger_ai.core.instance.schemas import FallbackModel
-    current = load_yaml(layout.config_path, Config)
-    updated = current.model_copy(deep=True)
-    if args.get("primary_model"):
-        updated, _, _ = selected_model_config(
-            updated, provider=args.get("primary_provider"),
-            model=args["primary_model"], base_url=args.get("primary_endpoint"))
-    if "fallback_model" in args:
-        model = str(args["fallback_model"] or "").strip()
-        if model:
-            fallback, provider, model = selected_model_config(
-                updated, provider=args.get("fallback_provider"), model=model,
-                base_url=args.get("fallback_endpoint"))
-            if provider == "local":
-                raise ValueError("Choose an external fallback; local models belong in the asleep role")
-            updated.external_model.fallback = [FallbackModel(
-                provider=provider, model=model, base_url=fallback.external_model.base_url)]
-        else:
-            updated.external_model.fallback = []
-    for key, section, field in (
-        ("coder_model", "deep_think", "coder_model"),
-        ("tts_voice", "kokoro_tts", "voice"),
-        ("stt_fast_model", "whisper_stt", "fast_model_name"),
-        ("stt_accurate_model", "whisper_stt", "accurate_model_name"),
-    ):
-        if args.get(key):
-            setattr(getattr(updated, section), field, str(args[key]).strip())
-    updated = Config.model_validate(updated.model_dump())
-    changed = updated != current
-    if changed:
-        dump_yaml(layout.config_path, updated)
+    def change(current):
+        updated = current.model_copy(deep=True)
+        if args.get("primary_model"):
+            updated, _, _ = selected_model_config(
+                updated, provider=args.get("primary_provider"),
+                model=args["primary_model"], base_url=args.get("primary_endpoint"))
+        if "fallback_model" in args:
+            model = str(args["fallback_model"] or "").strip()
+            if model:
+                fallback, provider, model = selected_model_config(
+                    updated, provider=args.get("fallback_provider"), model=model,
+                    base_url=args.get("fallback_endpoint"))
+                if provider == "local":
+                    raise ValueError("Choose an external fallback; local models belong in the asleep role")
+                updated.external_model.fallback = [FallbackModel(
+                    provider=provider, model=model, base_url=fallback.external_model.base_url)]
+            else:
+                updated.external_model.fallback = []
+        for key, section, field in (
+            ("coder_model", "deep_think", "coder_model"),
+            ("tts_voice", "kokoro_tts", "voice"),
+            ("stt_fast_model", "whisper_stt", "fast_model_name"),
+            ("stt_accurate_model", "whisper_stt", "accurate_model_name"),
+        ):
+            if args.get(key):
+                setattr(getattr(updated, section), field, str(args[key]).strip())
+        updated = Config.model_validate(updated.model_dump())
+        return updated
+    _,changed,_=mutate_yaml(layout.config_path,Config,change)
     return {"saved": True, "changed": changed, "restart_required": changed,
             "instance": layout.root.name}
