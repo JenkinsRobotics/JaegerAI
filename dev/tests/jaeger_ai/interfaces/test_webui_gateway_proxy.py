@@ -417,3 +417,9 @@ def test_template_export_keeps_reviewed_revision(overlay):
 def test_saved_template_catalog_proxy(overlay,path,method):
     assert _route(overlay,path,method) is True
     assert overlay._calls[-1]==(method,path)
+
+
+def test_pdf_preview_page_query_is_retained(overlay):
+    path='/v1/sessions/owned/files/attachment?view=preview&page=2'
+    assert _route(overlay,path) is True
+    assert overlay._calls[-1]==('GET',path)

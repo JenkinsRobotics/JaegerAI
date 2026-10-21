@@ -6169,13 +6169,30 @@ class JaegerGatewayApp:
         if request.query.get('view') == 'preview':
             import base64
             from .attachment_preview import spreadsheet
+            from .pdf_preview import pdf
+            from jaeger_ai.contract.file_previews import PDF_MAX_PREVIEW_PAGES
             try:
-                preview = await asyncio.to_thread(spreadsheet, base64.b64decode(result['data_base64']), result['mime'], result['name'])
+                if result['name'].lower().endswith('.pdf'):
+                    raw_page=request.query.get('page','1')
+                    if not raw_page.isdecimal() or not 1<=int(raw_page)<=PDF_MAX_PREVIEW_PAGES:raise ValueError('Unsupported PDF preview page')
+                    # One ephemeral PDF parser per Gateway. Verify source bytes above
+                    # even for cached/repeated reads; never cache authorization.
+                    key=(result['sha256'],result['mime'],result['name'],int(raw_page))
+                    previous_key,work=getattr(self,'_pdf_preview_work',(None,None))
+                    if work is not None and not work.done() and previous_key!=key:
+                        preview={'format':'unsupported','notice':'Another PDF page preview is being prepared. Retry after it settles; no additional renderer was started.'}
+                    else:
+                        if work is None or previous_key!=key or work.done() and (work.cancelled() or work.exception() is not None):
+                            work=asyncio.create_task(asyncio.to_thread(pdf,base64.b64decode(result['data_base64']),result['mime'],result['name'],page=int(raw_page)))
+                            work.add_done_callback(lambda task: task.exception() if not task.cancelled() else None)
+                            self._pdf_preview_work=(key,work)
+                        preview=await asyncio.shield(work)
+                else:preview = await asyncio.to_thread(spreadsheet, base64.b64decode(result['data_base64']), result['mime'], result['name'])
             except Exception as exc:  # malformed/unsupported binary input is a safe fallback
                 # Parser failures never disclose archive contents/paths or launch a viewer.
                 import logging
                 logging.getLogger(__name__).debug('Bounded attachment preview unavailable: %s', type(exc).__name__)
-                preview = {'format':'unsupported', 'notice':'This file has no supported bounded spreadsheet preview. Download verified bytes to use an appropriate viewer.'}
+                preview = {'format':'unsupported', 'notice':'This file or page has no available bounded preview. Download verified bytes to use an appropriate viewer.'}
             return web.json_response({'session_id': session_id, **{k:v for k,v in result.items() if k!='data_base64'}, 'preview':preview})
         return web.json_response({'session_id': session_id, **result})
 
