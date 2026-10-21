@@ -13,3 +13,8 @@ export async function notificationConversation(read:(id:string)=>Promise<Session
  if(session.session_id!==id||!session.agent_id||!agents.some(a=>a.id===session.agent_id))throw Error('Notification conversation is unavailable or has no exposed bot identity');
  return {type:'agent' as const,agentId:session.agent_id,sessionId:session.session_id};
 }
+
+export function localConversationLink(id:string){
+ if(!notificationNavigation({target:'conversation',session_id:id})||id==='.'||id==='..')throw Error('This conversation identity has no supported local deep link');
+ return 'jaeger://conversation/'+encodeURIComponent(id);
+}

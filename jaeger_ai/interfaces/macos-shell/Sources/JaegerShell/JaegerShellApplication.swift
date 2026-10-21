@@ -151,6 +151,22 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
         }
     }
 
+    func application(_ application: NSApplication, open urls: [URL]) {
+        // Latest explicit navigation wins. Invalid URLs never reach a web load,
+        // service command, permission broker or model turn; do not log raw URLs.
+        for url in urls {
+            guard let destination = JaegerDeepLink.destination(url) else {
+                shellLog("[shell][navigation] unsupported deep link refused")
+                continue
+            }
+            notificationNavigation.receive(destination)
+            if window != nil {
+                showWindow()
+                bridge?.send(["type": "notification.open"])
+            }
+        }
+    }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,

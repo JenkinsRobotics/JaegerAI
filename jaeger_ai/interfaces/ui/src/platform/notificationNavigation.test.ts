@@ -1,5 +1,5 @@
 import {it,expect,vi}from'vitest';
-import{notificationNavigation,notificationConversation}from'./notificationNavigation';
+import{notificationNavigation,notificationConversation,localConversationLink}from'./notificationNavigation';
 import type{Agent}from'../api/types';
 it('accepts only navigation and resolves the actual session bot through the authenticated owner',async()=>{
  expect(notificationNavigation({target:'notifications'})).toEqual({target:'notifications'});
@@ -11,4 +11,11 @@ it('accepts only navigation and resolves the actual session bot through the auth
  await expect(notificationConversation(read,[{id:'specialist-alpha'}]as Agent[],'owned-beta-home')).rejects.toThrow('exposed bot identity');
  await expect(notificationConversation(read,agents,'../escape')).rejects.toThrow('Invalid');
  expect(read).toHaveBeenCalledTimes(2);
+});
+
+it('builds links from actual selected/home session IDs, never bot display names or execution authority',async()=>{
+ const {conversationIdForAgent}=await import('../api/agentActions');const home=vi.fn(async()=> 'owned-beta:home');
+ expect(localConversationLink(await conversationIdForAgent('beta',home,{agentId:'beta',sessionId:'owned-beta:existing'}))).toBe('jaeger://conversation/owned-beta%3Aexisting');expect(home).not.toHaveBeenCalled();
+ expect(localConversationLink(await conversationIdForAgent('beta',home,{agentId:'alpha',sessionId:'other'}))).toBe('jaeger://conversation/owned-beta%3Ahome');expect(home).toHaveBeenCalledWith('beta');
+ for(const bad of ['../escape','https://remote','..'])expect(()=>localConversationLink(bad)).toThrow();
 });
