@@ -265,3 +265,16 @@ def test_review_reports_tool_delta_without_changing_existing_configuration_or_gr
     assert review['scope_granted'] is False and review['declared_version']=='2'
     service.save_playbook(instance,'fixture',changed,'',revision)
     assert instance.config_path.read_bytes()==before
+
+
+def test_local_bundle_export_is_verified_inert_data_and_refuses_private_files(layout):
+    import base64
+    instance,_=layout;content='---\nname: fixture\n---\nSafe local export'
+    service.install_skill(instance,'fixture',content)
+    folder=instance.skills_dir/'fixture';revision=service.skill_revision(folder)
+    bundle=service.export_playbook(instance,'fixture',revision)
+    assert bundle['target']=='local_file' and not bundle['publisher_verified'] and not bundle['execution_authorized']
+    assert base64.b64decode(next(r['base64'] for r in bundle['files'] if r['path']=='SKILL.md')).decode()==content
+    with pytest.raises(service.SkillServiceError,match='changed'):service.export_playbook(instance,'fixture','stale')
+    (folder/'.env').write_text('owned dummy private fixture, not a credential')
+    with pytest.raises(service.SkillServiceError,match='private credential files'):service.export_playbook(instance,'fixture',service.skill_revision(folder))

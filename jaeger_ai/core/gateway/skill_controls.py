@@ -94,7 +94,7 @@ def register(gateway):
             if not record[0]:continue
             value=json.loads(record[0])
             if value.get('actor')==actor:receipts.append(value)
-        return web.json_response(safe({'skills':rows,'operations':receipts,'scope':'current_instance_playbooks','activation_performed':False}))
+        return web.json_response(safe({'skills':rows,'operations':receipts,'scope':'current_instance_playbooks','activation_performed':False,'publish_targets':[{'id':'local_file','available':True,'external':False}],'external_publishing':{'supported':False,'reason':'No external publisher handler is configured'}}))
 
     async def review(request):
         owner(request)
@@ -103,6 +103,13 @@ def register(gateway):
             if not isinstance(body,dict) or set(body)!={'name','content','category','expected_revision'}:raise ValueError('Exact review fields required')
             return web.json_response(safe(service.review_playbook(layout(),**body)))
         except (ValueError,TypeError) as exc:return web.json_response({'error':str(exc)},status=409)
+
+    async def export(request):
+        owner(request)
+        try:
+            value=service.export_playbook(layout(),request.query.get('name',''),request.query.get('revision',''))
+            return web.json_response(value,headers={'Content-Disposition':'attachment; filename="jaeger-playbook.json"','Cache-Control':'no-store'})
+        except (ValueError,OSError) as exc:return web.json_response({'error':str(exc)},status=409)
 
     async def content(request):
         owner(request)
@@ -173,5 +180,6 @@ def register(gateway):
     gateway.app.router.add_get('/v1/runtime/skills/managed',listing)
     gateway.app.router.add_post('/v1/runtime/skills/managed/review',review)
     gateway.app.router.add_get('/v1/runtime/skills/managed/content',content)
+    gateway.app.router.add_get('/v1/runtime/skills/managed/export',export)
     gateway.app.router.add_post('/v1/runtime/skills/managed/change',change)
     gateway.app.router.add_get('/v1/runtime/skills/managed/operations/{operation_id}',read)

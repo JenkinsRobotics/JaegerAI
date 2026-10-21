@@ -314,12 +314,14 @@ def remove_skill(layout: Any, name: str, *, expected_revision: str | None = None
             "restart_required":restart_required}
 
 
-def _skill_files(folder: Path) -> dict[str,tuple[bytes,int]]:
+def _skill_files(folder: Path, *, for_export: bool = False) -> dict[str,tuple[bytes,int]]:
     """Bounded regular-file snapshot; never follow links or read devices."""
     import stat
     files={};total=0
     for count,path in enumerate(folder.rglob("*")):
         if count>=4096:raise SkillServiceError("Skill exceeds managed entry bound")
+        relative=path.relative_to(folder)
+        if for_export and any((part.startswith('.') and part!='.origin') or part.lower() in {'credentials','credentials.json','id_rsa','id_ed25519','secrets.yaml','secrets.json'} or Path(part).suffix.lower() in {'.pem','.key','.p12','.pfx'} for part in relative.parts):raise SkillServiceError("Potential private credential files cannot be exported")
         if path.is_symlink():raise SkillServiceError("Symlinked skill assets cannot be managed")
         if path.is_dir():continue
         descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
@@ -439,3 +441,27 @@ def restore_skill(layout: Any, name: str, *, archive_name: str, original_relativ
         if skill_revision(source)!=revision:raise SkillServiceError('Archived skill changed before commit; restore refused')
         os.rename(source,destination)
     return {"ok":True,"name":normalized,"state":"restored","revision":revision,"owner":"jaeger","restart_required":False}
+
+
+def export_playbook(layout: Any, name: str, revision: str) -> dict[str,Any]:
+    """Local inert data bundle only; no publisher call or verified license claim."""
+    import base64
+    import hashlib
+    from jaeger_ai.core.redaction import redact_text
+    from jaeger_ai.core.safety.skills_guard import scan_text
+    folder,_,zone=_find_playbook(layout,name)
+    if zone!='instance':raise SkillServiceError("Only explicitly installed instance playbooks can be exported here")
+    files=_skill_files(folder,for_export=True)
+    if _files_revision(files)!=revision:raise SkillServiceError("Skill changed since export selection")
+    result=[]
+    for path,(data,_) in files.items():
+        inspection=data.decode('utf-8',errors='replace')
+        if redact_text(inspection)!=inspection:raise SkillServiceError('Potential private content cannot be exported')
+        if redact_text(path)!=path:raise SkillServiceError("Potential private metadata cannot be exported")
+        try:text=data.decode('utf-8')
+        except UnicodeDecodeError:
+            if Path(path).suffix.lower() not in {'.png','.jpg','.jpeg','.gif','.webp','.ico'}:raise SkillServiceError("Binary export is limited to known image assets") from None
+        else:
+            if redact_text(text)!=text or any(item.severity=='critical' for item in scan_text(text)):raise SkillServiceError("Potential private or dangerous content cannot be exported")
+        result.append({'path':path,'size_bytes':len(data),'sha256':hashlib.sha256(data).hexdigest(),'base64':base64.b64encode(data).decode()})
+    return {'format':'jaeger-playbook-bundle-v1','name':name,'revision':revision,'provenance':'instance_installed_unverified','publisher_verified':False,'license_verified':False,'target':'local_file','execution_authorized':False,'files':result}

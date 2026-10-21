@@ -386,3 +386,9 @@ def test_playbook_review_content_routes_preserve_exact_scope_and_query(overlay):
     assert overlay._calls[-1]==('POST','/v1/runtime/skills/managed/review')
     assert _route(overlay,'/v1/runtime/skills/managed/content?name=fixture') is True
     assert overlay._calls[-1]==('GET','/v1/runtime/skills/managed/content?name=fixture')
+
+
+def test_local_skill_export_uses_authenticated_proxy_exact_revision(overlay):
+    path='/v1/runtime/skills/managed/export?name=fixture&revision=owned'
+    assert _route(overlay,path) is True
+    assert overlay._calls[-1]==('GET',path)
