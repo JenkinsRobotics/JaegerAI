@@ -51,13 +51,24 @@ html.jg-phone .jg-chat { background: var(--jg-p-bg); color: var(--jg-p-fg); }
 html.jg-phone .jg-chat__scroll { padding-top: calc(env(safe-area-inset-top) + 64px); padding-left: 16px; padding-right: 16px; }
 html.jg-phone .jg-bubble { max-width: 100%; font-size: 17px; line-height: 1.4; border-radius: 20px; padding: 12px 14px; }
 html.jg-phone .jg-bubble--assistant { align-self: stretch; background: var(--jg-p-raised); color: var(--jg-p-fg); }
-html.jg-phone .jg-composer { position: relative; display: flex; align-items: center; gap: 10px; margin: 0; padding: 8px 14px calc(env(safe-area-inset-bottom) + 8px);
+/* Composer (ref parity2/phone/ref/composer-ref.jpg): round + outside the field, a pill field ("Ask <agent>") with the
+ * mic inline near its right end, and the solid round voice/send button at the pill's right end. The bar sits on the
+ * home-indicator safe area; with the keyboard open (jg-kb-open, from visualViewport) it sits directly on the keyboard. */
+html.jg-phone .jg-composer { position: relative; display: flex; align-items: flex-end; gap: 10px; margin: 0; padding: 8px 14px calc(env(safe-area-inset-bottom) + 8px);
   border: 0; border-radius: 0; box-shadow: none; background: var(--jg-p-bg); }
+html.jg-phone.jg-kb-open .jg-composer { padding-bottom: 8px; }
+html.jg-phone .jg-composer > [role="status"], html.jg-phone .jg-composer > [role="alert"], html.jg-phone .jg-composer > .jg-chip { flex-basis: 100%; }
+html.jg-phone .jg-composer { flex-wrap: wrap; }
 html.jg-phone .jg-composer__icon--filled[aria-label="Attach file"] { width: 44px; height: 44px; border-radius: 50%; background: var(--jg-p-button); color: var(--jg-p-fg); flex: none; }
 html.jg-phone .jg-composer__input { min-height: 44px; padding: 11px 92px 11px 16px; border-radius: 22px; background: var(--jg-p-raised); color: var(--jg-p-fg); font-size: 17px; box-sizing: border-box; }
 html.jg-phone .jg-composer__input::placeholder { color: var(--jg-p-dim); }
-html.jg-phone .jg-composer .jg-composer__icon--filled:not([aria-label="Attach file"]) { position: absolute; right: 62px; width: 36px; height: 36px; background: none; color: var(--jg-p-dim); }
-html.jg-phone .jg-send { position: absolute; right: 22px; width: 36px; height: 36px; border-radius: 50%; background: var(--jg-p-voice-bg); color: var(--jg-p-voice-fg); }
+html.jg-phone .jg-composer__input { flex: 1; min-width: 0; resize: none; border: 0; outline: none; }
+html.jg-phone .jg-composer__input:focus-visible { box-shadow: 0 0 0 2px var(--jg-p-me); }
+html.jg-phone .jg-composer .jg-composer__icon--filled:not([aria-label="Attach file"]) { position: absolute; right: 62px; bottom: calc(env(safe-area-inset-bottom) + 12px); width: 36px; height: 36px; border-radius: 50%; background: none; color: var(--jg-p-dim); }
+html.jg-phone .jg-send { position: absolute; right: 18px; bottom: calc(env(safe-area-inset-bottom) + 12px); width: 36px; height: 36px; border-radius: 50%; border: 0; display: grid; place-items: center; padding: 0;
+  background: var(--jg-p-voice-bg); color: var(--jg-p-voice-fg); }
+html.jg-phone .jg-send:disabled { opacity: 0.45; }
+html.jg-phone.jg-kb-open .jg-composer .jg-composer__icon--filled:not([aria-label="Attach file"]), html.jg-phone.jg-kb-open .jg-send { bottom: 12px; }
 html.jg-phone button, html.jg-phone [role="menuitem"] { min-height: 44px; }
 html.jg-phone .jg-composer button, html.jg-phone .jg-prow__art * { min-height: 0; }
 html.jg-phone .jg-phone-list .jg-prow { min-height: 78px; }

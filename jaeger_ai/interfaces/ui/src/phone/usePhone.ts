@@ -4,6 +4,8 @@ import {displayDate, displayDayDistance} from "../settings/devicePreferences";
  * viewport height, so the phone shell (and its composer) shrinks above the on-screen keyboard. */
 import { useEffect, useState } from "react";
 
+/** Smallest viewport shrink treated as an on-screen keyboard (iOS accessory bars alone are ~45px). */
+export const KEYBOARD_MIN_PX = 120;
 export const PHONE_QUERY = "(max-width: 700px), (pointer: coarse)";
 const matches = () => typeof matchMedia === "function" && matchMedia(PHONE_QUERY).matches;
 
@@ -21,10 +23,16 @@ export function usePhone(): boolean {
     root.classList.toggle("jg-phone", phone);
     if (!phone) { root.style.removeProperty("--jg-vvh"); return; }
     const vv = window.visualViewport;
-    const sync = () => root.style.setProperty("--jg-vvh", `${Math.round(vv?.height ?? innerHeight)}px`);
+    const sync = () => {
+      const h = Math.round(vv?.height ?? innerHeight);
+      root.style.setProperty("--jg-vvh", `${h}px`);
+      // On-screen keyboard open: the visual viewport is well short of the layout viewport. The composer then
+      // sits directly on the keyboard (no home-indicator safe-area gap below it).
+      root.classList.toggle("jg-kb-open", innerHeight - h > KEYBOARD_MIN_PX);
+    };
     sync();
     vv?.addEventListener("resize", sync); vv?.addEventListener("scroll", sync); addEventListener("resize", sync);
-    return () => { vv?.removeEventListener("resize", sync); vv?.removeEventListener("scroll", sync); removeEventListener("resize", sync); root.classList.remove("jg-phone"); };
+    return () => { vv?.removeEventListener("resize", sync); vv?.removeEventListener("scroll", sync); removeEventListener("resize", sync); root.classList.remove("jg-phone", "jg-kb-open"); };
   }, [phone]);
   return phone;
 }

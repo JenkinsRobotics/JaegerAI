@@ -60,3 +60,30 @@ describe("phone chat", () => {
     act(() => root.unmount());
   });
 });
+
+describe("phone composer keyboard", () => {
+  it("marks the keyboard open from the visual viewport and clears it on close", async () => {
+    const { usePhone, KEYBOARD_MIN_PX } = await import("./usePhone");
+    const { createRoot } = await import("react-dom/client");
+    const { act } = await import("react");
+    const listeners: Record<string, () => void> = {};
+    const vv = { height: 844, addEventListener: (n: string, f: () => void) => { listeners[n] = f; }, removeEventListener: () => {} };
+    Object.defineProperty(window, "visualViewport", { value: vv, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 844, configurable: true });
+    const mm = window.matchMedia;
+    window.matchMedia = ((q: string) => ({ matches: true, media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    function Probe() { usePhone(); return null; }
+    const host = document.createElement("div"); const root = createRoot(host);
+    await act(async () => root.render(<Probe />));
+    const html = document.documentElement;
+    expect(html.classList.contains("jg-kb-open")).toBe(false);
+    vv.height = 844 - KEYBOARD_MIN_PX - 200; await act(async () => listeners.resize());
+    expect(html.classList.contains("jg-kb-open")).toBe(true);
+    expect(html.style.getPropertyValue("--jg-vvh")).toBe(`${vv.height}px`);
+    vv.height = 844; await act(async () => listeners.resize());
+    expect(html.classList.contains("jg-kb-open")).toBe(false);
+    await act(async () => root.unmount());
+    expect(html.classList.contains("jg-phone")).toBe(false);
+    window.matchMedia = mm;
+  });
+});
