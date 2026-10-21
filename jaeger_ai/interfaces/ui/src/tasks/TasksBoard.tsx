@@ -1,3 +1,4 @@
+import {TaskArtifacts} from '../library/TaskArtifacts';
 import {OwnedHandoffs} from "./OwnedHandoffs";
 import {SpecialistHandoff} from "./SpecialistHandoff";
 import {TaskPresentationControls} from "./TaskPresentationControls";
@@ -25,6 +26,7 @@ const editKey = (id: string) => 'jaeger.ui.task-proposal.edit.v1.' + encodeURICo
 const savedProposals = (): ProposalIntent[] => Object.keys(localStorage).filter(key=>key.startsWith(PROPOSAL_INTENTS)).map(key=>{const value=JSON.parse(localStorage.getItem(key)!);if(!value.requestId||!value.sessionId||!value.origin||typeof value.goal!=='string')throw Error('Invalid saved task identity; original retained');return value as ProposalIntent;});
 
 export function TasksBoard({ source, agents }: { source: JaegerSource; agents: Agent[] }) {
+  const [artifactTask,setArtifactTask]=useState<string>();
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [error, setError] = useState<string>();
   const [operationError, setOperationError] = useState<string>();
@@ -130,6 +132,7 @@ export function TasksBoard({ source, agents }: { source: JaegerSource; agents: A
           <details><summary>Task details · {t.task_id}</summary><p>Last observed task revision {t.updated_at ?? "unknown"}. Board refreshes every15 seconds; this is not a live execution guarantee.</p><p>Origin conversation: {t.provenance?.session_id ?? "not recorded"} · Origin request: {t.provenance?.request_id ?? "not recorded"}</p><pre>{JSON.stringify(t.run_history ?? [],null,2)}</pre></details>
           {source.taskPresentation && t.presentation && typeof t.updated_at==='number' && <TaskPresentationControls task={t} controls={source.taskPresentation} changed={()=>setAttempt(n=>n+1)}/>}
           {t.error && <p role="alert">{t.error}</p>}
+          {source.taskArtifacts&&<button type="button" onClick={()=>setArtifactTask(t.task_id)}>Open task artifacts</button>}
           {t.result != null && <details><summary>Result</summary><pre>{typeof t.result === "string" ? t.result : JSON.stringify(t.result, null, 2)}</pre></details>}
           {source.taskActions && <div>
             {proposal(t) && typeof t.updated_at === "number" && <><button type="button" disabled={busy} onClick={() => openEditor(t)}>Edit proposal</button><button type="button" disabled={busy || (editing?.task_id===t.task_id && editGoal.trim()!==t.goal)} onClick={() => void act(() => source.taskActions!.approve(t.task_id, t.updated_at!), "Proposal approved; waiting for runner")}>Approve this version</button></>}
@@ -138,6 +141,7 @@ export function TasksBoard({ source, agents }: { source: JaegerSource; agents: A
         </article>)}
       </section>;
     })}</div>}
+    {artifactTask&&source.taskArtifacts&&<><button onClick={()=>setArtifactTask(undefined)}>Close task artifacts</button><TaskArtifacts controls={source.taskArtifacts} taskId={artifactTask}/></>}
     {editing && <form className="jg-task-form" aria-label="Edit task proposal" onSubmit={e => { e.preventDefault(); saveEdit(); }}>
       <textarea aria-label="Revised task objective" value={editGoal} onChange={e => changeEdit(e.target.value)} disabled={busy} /><button disabled={busy || !editGoal.trim()}>Save proposal</button><button type="button" disabled={busy} onClick={() => setEditing(undefined)}>Close editor</button>
     </form>}

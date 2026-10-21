@@ -423,3 +423,10 @@ def test_pdf_preview_page_query_is_retained(overlay):
     path='/v1/sessions/owned/files/attachment?view=preview&page=2'
     assert _route(overlay,path) is True
     assert overlay._calls[-1]==('GET',path)
+
+
+def test_verified_artifact_routes_keep_task_identity_and_preview_query(overlay):
+    for path in ('/v1/library/artifacts?task_id=owned-task', '/v1/library/artifacts/owned-task/artifact-owned?view=preview&page=2'):
+        assert _route(overlay, path) is True
+        assert overlay._calls[-1] == ('GET', path)
+    assert _route(overlay, '/v1/library/artifacts/owned-task/artifact-owned/extra') is False

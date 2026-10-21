@@ -91,6 +91,7 @@ export class WebHost implements ChatHost {
   /** Set by the app: a handoff marker opens the specialist's side of it. */
   openHandoffReply?: (handoffId: string) => void;
   openHandoff?: (handoffId: string) => void;
+  openTaskArtifacts?: (taskId:string)=>void;
   /** Set by the app: the header pill opens the agent's details panel. */
   openDetails?: (agentId: string) => void;
   /** Bytes upload route: unknown until first tried; false after a 404/405 (feature-detect). */
@@ -101,6 +102,7 @@ export class WebHost implements ChatHost {
 
   constructor(protected readonly source: JaegerSource, private readonly backoffMs?: number[]) {}
 
+  get taskArtifacts(){return this.source.taskArtifacts;}
   get sessionFiles() { return this.source.sessionFiles; }
 
   setAgentNames(names: Map<string, string>) { this.agentNames = names; }

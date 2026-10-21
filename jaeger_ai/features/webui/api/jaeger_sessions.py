@@ -351,6 +351,9 @@ def route(handler, parsed, method: str) -> bool:
             raw = _body_bytes(handler)
         return _proxy(handler, method, "/v1/agents/" + quote(agent_id, safe="") + "/" + resource, raw)
 
+    if method == "GET" and (path == "/v1/library/artifacts" or len(path.split("/")) == 6 and path.startswith("/v1/library/artifacts/")):
+        return _proxy(handler, method, path + query)
+
     if method == "GET" and (path in {"/v1/library", "/v1/library/search"} or path.startswith("/v1/library/documents/")):
         return _proxy(handler, "GET", path + query)
     if method == "POST" and (path == "/v1/library/documents" or path.startswith("/v1/library/documents/") and path.rsplit('/', 1)[1] in {"save", "archive", "restore", "version"}):

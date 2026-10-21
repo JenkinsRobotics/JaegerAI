@@ -1,12 +1,13 @@
+import {TaskArtifacts} from './TaskArtifacts';
 import { useEffect, useRef, useState } from "react";
-import type { LibraryControls, LibraryDocument } from "../api/source";
+import type { LibraryControls, LibraryDocument, TaskArtifacts as ArtifactControls } from "../api/source";
 const draftKey = (id: string) => `jaeger.ui.library.draft.v1.${encodeURIComponent(id)}`;
 const OP = "jaeger.ui.library.operation.v1";
 const backupKeys = (id: string) => { try { return Object.keys(localStorage).filter(key => key.startsWith(draftKey(id) + '.backup.')); } catch { return []; } };
 type Draft = Pick<LibraryDocument, "title" | "content" | "revision">;
 type Intent = { operationId: string; action: "create" | "save" | "archive" | "restore" | "version"; documentId: string };
 /** Native documents only; indexed corpus previews cannot gain edit/file access. */
-export function LibraryPanel({ controls }: { controls: LibraryControls }) {
+export function LibraryPanel({ controls, artifacts }: { controls: LibraryControls; artifacts?:ArtifactControls }) {
   const [catalog, setCatalog] = useState<Awaited<ReturnType<LibraryControls["list"]>>>(), [attempt, setAttempt] = useState(0);
   const [selected, setSelected] = useState<string>(), [document, setDocument] = useState<LibraryDocument>();
   const [draft, setDraft] = useState<Draft>({ title: "", content: "" });
@@ -106,6 +107,7 @@ export function LibraryPanel({ controls }: { controls: LibraryControls }) {
   const ready = selected === "new" || Boolean(document);
   const editable = selected === "new" || document?.editable === true;
   return <section aria-label="Library">
+    {artifacts&&<TaskArtifacts controls={artifacts}/>}
     {document?.provenance&&<details><summary>Imported reference provenance</summary><pre>{JSON.stringify(document.provenance,null,2)}</pre><p>Recorded at import; subsequent edits can change document content. Not a publisher verification or access grant.</p></details>}
     <p>Managed Jaeger documents are editable. Existing indexed collections stay read-only; no new folder access is granted here.</p>
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}

@@ -1,3 +1,4 @@
+import {TaskArtifacts} from '../library/TaskArtifacts';
 import { mergeSessionSnapshot } from "./sessionProjection";
 import { useDraft } from "./useDraft";
 import type { Agent } from "../api/types";
@@ -641,7 +642,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       </div>
       <div className="jg-chat__scroll" ref={scroller} onContextMenu={onMessageMenu} onScroll={onScroll} onWheel={markInput} onTouchMove={markInput} onPointerDown={markInput} onKeyDown={markInput}>
         <div className="jg-chat__column">
-          {filesOpen && host.sessionFiles && sessionId && <SessionFiles key={sessionId} files={host.sessionFiles} sessionId={sessionId} onClose={()=>setFilesOpen(false)}/>}
+          {filesOpen && host.sessionFiles && sessionId && <><SessionFiles key={sessionId} files={host.sessionFiles} sessionId={sessionId} onClose={()=>setFilesOpen(false)}/>{host.taskArtifacts&&<TaskArtifacts key={"artifacts:"+sessionId} controls={host.taskArtifacts} sessionId={sessionId}/>}</>}
           {loadError && <ErrorState title="Couldn't load this chat" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
           {session && !session.turns.length && <p className="jg-chat__empty">What should we work on?</p>}
           {session && (older || olderError) && (
@@ -658,7 +659,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
               )}
               {entries[turn.turnId].kind === "summary"
                 ? <SummaryCard entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "summary" }>} links={links} />
-                : <PostMessage onReply={host.openHandoffReply ? (id) => host.openHandoffReply?.(id) : undefined} entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "post" }>} links={links} onOpenHandoff={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} onOpenChat={host instanceof WebHost && host.openChat ? (id) => (host as WebHost).openChat?.(id) : undefined} />}
+                : <PostMessage onOpenTaskArtifacts={host.openTaskArtifacts ? id=>host.openTaskArtifacts?.(id) : undefined} onReply={host.openHandoffReply ? (id) => host.openHandoffReply?.(id) : undefined} entry={entries[turn.turnId] as Extract<HomeEntry, { kind: "post" }>} links={links} onOpenHandoff={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} onOpenChat={host instanceof WebHost && host.openChat ? (id) => (host as WebHost).openChat?.(id) : undefined} />}
             </section>
           ) : (
             <section key={turn.turnId} data-turn-id={turn.turnId} className={`jg-turn${loadedTurns.current.has(turn.turnId) ? "" : " is-new"}`}>

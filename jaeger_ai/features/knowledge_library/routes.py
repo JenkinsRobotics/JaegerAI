@@ -82,6 +82,16 @@ def register(gateway):
             gateway.event_bus.publish('*', 'library.document.updated', receipt['document'])
         return web.json_response(receipt, status=receipt['http_status'])
 
+    async def artifacts(request):
+        from jaeger_ai.core.tasks.artifacts import catalog
+        return web.json_response({'artifacts': catalog(gateway, request.query.get('task_id'), request.query.get('session_id')), 'max_bytes': gateway.UPLOAD_MAX_BYTES})
+
+    async def artifact(request):
+        from jaeger_ai.core.tasks.artifacts import read as read_artifact
+        return await read_artifact(gateway, request)
+
+    gateway.app.router.add_get('/v1/library/artifacts', artifacts)
+    gateway.app.router.add_get('/v1/library/artifacts/{task_id}/{artifact_id}', artifact)
     gateway.app.router.add_get('/v1/library', read)
     gateway.app.router.add_get('/v1/library/search', read)
     gateway.app.router.add_get('/v1/library/documents/{document_id}', read)

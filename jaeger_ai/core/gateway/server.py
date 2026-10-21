@@ -6160,6 +6160,11 @@ class JaegerGatewayApp:
         row = next((r for r in rows if r['attachment_id'] == request.match_info['attachment_id']), None)
         if row is None:
             return web.json_response({'error': 'Session attachment not found'}, status=404)
+        return await self._session_file_response(request, row, session)
+
+    async def _session_file_response(self, request, row, session):
+        # Shared verified-byte projection for attachments and owner task artifacts.
+        session_id = session['session_id']
         from .attachment_access import read
         try:
             result = await asyncio.to_thread(read, row, staged_root=self._staged_upload_dir(session_id),

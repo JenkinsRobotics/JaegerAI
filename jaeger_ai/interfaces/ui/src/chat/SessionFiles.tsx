@@ -3,9 +3,10 @@ import {literalPreview} from './literalPreview';
 import type { SessionFiles as Files, SessionFile, LiteralFilePreview } from '../api/source';
 
 /** Files stay in their originating session. Never render untrusted HTML/SVG. */
-export function SessionFiles({files,sessionId,onClose}:{files:Files;sessionId:string;onClose:()=>void}){
+export function SessionFiles({files,sessionId,onClose,initialAttachmentId}:{files:Files;sessionId:string;onClose:()=>void;initialAttachmentId?:string}){
   const [rows,setRows]=useState<SessionFile[]>(),[error,setError]=useState<string>(),[busy,setBusy]=useState(false);
   const [preview,setPreview]=useState<{name:string;text?:string;image?:string;unsupported?:boolean;mime?:string;literal?:LiteralFilePreview;row?:SessionFile}>();
+  const initialOpened=useRef<string | undefined>(undefined);
   const generation=useRef(0),objectUrl=useRef<string | undefined>(undefined);
   const release=()=>{if(objectUrl.current){URL.revokeObjectURL(objectUrl.current);objectUrl.current=undefined;}};
   useEffect(()=>{const token=++generation.current;setRows(undefined);setError(undefined);setPreview(undefined);setBusy(false);release();
@@ -35,6 +36,7 @@ export function SessionFiles({files,sessionId,onClose}:{files:Files;sessionId:st
       }else setPreview({name:result.name,unsupported:true});
     }catch(e){if(token===generation.current)setError(String(e));}finally{if(token===generation.current)setBusy(false);}
   };
+  useEffect(()=>{const identity=sessionId+'/'+initialAttachmentId;if(!initialAttachmentId||!rows||initialOpened.current===identity)return;const row=rows.find(r=>r.attachment_id===initialAttachmentId);if(row&&row.readable){initialOpened.current=identity;void open(row);}},[rows,initialAttachmentId,sessionId]);
   return <section aria-label="Conversation files" className="jg-card"><h3>Conversation files</h3><button type="button" onClick={onClose}>Close files</button><p>Files registered in this conversation, including staged uploads. Opening does not attach them to another turn. Text is shown literally; previews do not execute file content.</p>
     {error&&<p role="alert">{error}</p>}{!rows&&!error&&<p role="status">Loading files…</p>}{rows?.length===0&&<p>No registered files.</p>}
     {rows?.map(row=><article key={row.attachment_id}><strong>{row.name}</strong><p>{row.mime} · {row.size} bytes</p>{row.readable?<><button type="button" onClick={()=>void open(row)}>Preview {row.name}</button><button disabled={busy} type="button" onClick={()=>void open(row,true)}>Download {row.name}</button></>:<p>{row.unavailable_reason??'File access unavailable'}</p>}</article>)}
