@@ -39,3 +39,19 @@ it('confirms restore in app and preserves the independently unsaved draft',async
   expect(document.body.textContent).toContain('Existing draft retained separately');expect(document.body.textContent).toContain('Earlier saved notes');
  }finally{await act(async()=>root.unmount());host.remove();for(const k of Object.keys(localStorage))if(k===key||k.startsWith(prefix))localStorage.removeItem(k);}
 });
+it('requires recoverable-forget confirmation and preserves a separate correction draft',async()=>{
+ const id='owned-forget',key='jaeger.ui.agent-memory.draft.v1.'+id;
+ localStorage.setItem(key,JSON.stringify({text:'Unsent correction draft',base:'current'}));
+ const row={agent_id:id,notes:'Saved notes',revision:'current',chars:11,max_chars:16000,prompt_chars:4000,editable:true,loaded_in_specialist_prompt:true,prompt_truncated:false,context_preview:'Saved notes',provenance:{source:'specialist_notes_owner',digest:'current',author:'not_recorded',history:'recoverable_content_revisions'},versions:[]} as AgentMemorySnapshot;
+ const read=vi.fn().mockResolvedValueOnce(row).mockResolvedValue({...row,notes:'',revision:'empty',context_preview:'',versions:[{revision:'current',saved_at:1}]});
+ const mutate=vi.fn(async(_id:string,body:{operation_id:string})=>({ok:true,operation_id:body.operation_id,agent_id:id,revision:'empty'}));
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try{
+  await act(async()=>root.render(<AgentMemory agentId={id} controls={{read,mutate,operation:vi.fn()}} onClose={()=>{}}/>));
+  await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Forget saved notes recoverably')!.click());expect(mutate).not.toHaveBeenCalled();
+  await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Confirm recoverable forget')!.click());
+  expect(mutate.mock.calls[0][1]).toMatchObject({expected_revision:'current',action:'forget'});
+  expect(JSON.parse(localStorage.getItem(key)!).text).toBe('Unsent correction draft');
+  expect(host.textContent).toContain('Existing draft retained separately');
+ }finally{await act(async()=>root.unmount());host.remove();for(const k of Object.keys(localStorage))if(k===key||k.startsWith('jaeger.ui.agent-memory.operation.v1.'+id+'.'))localStorage.removeItem(k);}
+});

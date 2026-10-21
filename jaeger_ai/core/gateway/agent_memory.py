@@ -18,7 +18,19 @@ def register(gateway):
         try:
             record,root=owner(request.match_info['id'])
             snapshot=await asyncio.to_thread(read_notes,root)
-            return web.json_response({'agent_id':record.id,'editable':editable(record),'loaded_in_specialist_prompt':record.role.value=='specialist',**snapshot,'versions':await asyncio.to_thread(note_versions,root)})
+            query=request.query.get('q','').strip()
+            if len(query)>200:return web.json_response({'error':'Memory search is limited to 200 characters'},status=400)
+            matches=[];offset=0
+            for number,line in enumerate(snapshot['notes'].splitlines(keepends=True),1):
+                if query and query.casefold() in line.casefold():
+                    matches.append({'line':number,'text':line.rstrip('\r\n')[:1000],'within_prompt_budget':offset<snapshot['prompt_chars']})
+                offset+=len(line)
+            return web.json_response({'agent_id':record.id,'editable':editable(record),'loaded_in_specialist_prompt':record.role.value=='specialist',**snapshot,
+                'context_preview':snapshot['notes'][:snapshot['prompt_chars']].strip() if record.role.value=='specialist' else '',
+                'context_scope':'observed_notes_only_next_turn_may_differ',
+                'provenance':{'source':'specialist_notes_owner','digest':snapshot['revision'],'author':'not_recorded','history':'recoverable_content_revisions'},
+                'search':{'query':query,'matches':matches[:50],'truncated':len(matches)>50,'scope':'current_saved_notes'},
+                'versions':await asyncio.to_thread(note_versions,root)})
         except KeyError:return web.json_response({'error':'Agent not found'},status=404)
         except (ValueError,OSError):return web.json_response({'error':'Memory ownership/content unavailable; original notes preserved'},status=409)
     async def mutate(request):
@@ -27,8 +39,8 @@ def register(gateway):
             if not editable(record):return web.json_response({'error':'Only exposed native specialist notes are editable; execution definitions unchanged'},status=403)
             body=await request.json()
             action=body.get('action') if isinstance(body,dict) else None
-            fields={'operation_id','expected_revision','action', 'text' if action=='replace' else 'restore_revision'}
-            if action not in {'replace','restore'} or set(body)!=fields:raise ValueError('Unsupported notes action/fields')
+            fields={'operation_id','expected_revision','action'} | ({'text'} if action=='replace' else {'restore_revision'} if action=='restore' else set())
+            if action not in {'replace','restore','forget'} or set(body)!=fields:raise ValueError('Unsupported notes action/fields')
             oid=body['operation_id']
             if not isinstance(oid,str) or not oid.strip() or len(oid)>128 or not isinstance(body['expected_revision'],str):raise ValueError('Stable operation and current revision required')
             if action=='replace' and not isinstance(body['text'],str):raise ValueError('Notes text required')
