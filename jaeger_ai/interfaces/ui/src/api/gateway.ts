@@ -117,7 +117,8 @@ export class GatewayClient implements JaegerSource {
   async updateSession(id: string, body: { title?: string; archived?: boolean }) {
     await this.json(`/v1/sessions/${encodeURIComponent(id)}`, body, "PATCH");
   }
-  createAgent(body: { name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }) {
+  agentCreationStatus(operationId: string) { return this.json<{ receipt: { ok: boolean; agent?: Agent; error?: string } | null }>(`/v1/control-operations/${encodeURIComponent(operationId)}`); }
+  createAgent(body: { operation_id?: string; name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }) {
     return this.json<Agent>("/v1/agents", { kind: "jaeger_native", role: "specialist", ...body });
   }
   readonly agentActions: AgentActions = {

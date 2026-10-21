@@ -1971,11 +1971,41 @@ class JaegerGatewayApp:
         return web.json_response({'agent_ids': ids})
 
     async def handle_create_agent(self, request: web.Request) -> web.Response:
-        body = await request.json() if request.can_read_body else {}
+        try:
+            body = await request.json() if request.can_read_body else {}
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        if not isinstance(body, dict):
+            return web.json_response({"error": "Body must be an object"}, status=400)
+        operation_id = body.get("operation_id")
+        if operation_id is not None:
+            if not isinstance(operation_id, str) or not operation_id.strip() or len(operation_id) > 128:
+                return web.json_response({"error": "Invalid operation_id"}, status=400)
+            payload = {"action": "agent.create", "body": {k: v for k, v in body.items() if k != "operation_id"}}
+            try:
+                fresh = self.store.reserve_control_operation(operation_id, payload)
+            except ValueError as exc:
+                return web.json_response({"error": str(exc)}, status=409)
+            if not fresh:
+                saved = self.store.control_operation(operation_id) or {}
+                receipt = saved.get("receipt")
+                if receipt:
+                    return web.json_response(receipt.get("agent") if receipt.get("ok") else {"error": receipt.get("error")}, status=receipt.get("http_status", 200))
+                return web.json_response({"error": "Agent creation outcome unknown; reconcile the saved operation without retry", "operation_id": operation_id}, status=409)
+        def failure(message: str, status: int = 400):
+            if operation_id:
+                self.store.finish_control_operation(operation_id, {"ok": False, "operation_id": operation_id, "error": message, "http_status": status})
+            return web.json_response({"error": message}, status=status)
         name = str(body.get("name") or "").strip()
         if not name:
-            return web.json_response({"error": "name is required"}, status=400)
+            return failure("name is required")
         kind = str(body.get("kind") or "jaeger_native").strip()
+        # Explicit creation commands cannot silently rename/reconfigure an existing
+        # discovered, built-in or registered identity. Legacy registration callers
+        # retain their existing contract when no operation identity is supplied.
+        candidate = f"native:{name}" if kind == "jaeger_native" else f"tp:{body.get('adapter') or name}"
+        if operation_id and self._registry().get_agent(candidate) is not None:
+            return failure("Agent identity already exists; choose another name", 409)
         try:
             record = self._registry().create_agent(
                 name,
@@ -1989,8 +2019,10 @@ class JaegerGatewayApp:
                 metadata=dict(body.get("metadata") or {}),
                 make_active=bool(body.get("make_active", False)),
             )
-        except ValueError as exc:
-            return web.json_response({"error": str(exc)}, status=400)
+        except (ValueError, TypeError) as exc:
+            return failure(str(exc))
+        if operation_id:
+            self.store.finish_control_operation(operation_id, {"ok": True, "operation_id": operation_id, "agent": record.to_dict(), "http_status": 201})
         self.event_bus.publish("*", "agent.created", {"agent": record.to_dict()})
         return web.json_response(record.to_dict(), status=201)
 

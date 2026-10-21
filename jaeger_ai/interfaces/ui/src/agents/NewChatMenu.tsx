@@ -2,7 +2,7 @@
  * agent. A fresh chat never replaces an old one; both stay in the sidebar. */
 import { Dialog, TextField, type MenuItem } from "@aether/ui";
 import { AppMenu as Menu } from "../popups/AppMenu";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Agent } from "../api/types";
 import { label } from "./agentsLogic";
 
@@ -25,28 +25,51 @@ interface Props {
   agents: Agent[];
   onClose: () => void;
   onNewChat: (agentId: string) => void;
-  onCreateAgent: (displayName: string, job: string) => Promise<void>;
+  onCreateAgent: (displayName: string, job: string, operationId: string) => Promise<void>;
+  onRecoverAgent?: (operationId: string) => Promise<{ failed?: string }>;
 }
 
-export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent }: Props) {
+export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent, onRecoverAgent }: Props) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState("");
   const [job, setJob] = useState("");
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
 
-  const closeDialog = () => { setCreating(false); setName(""); setJob(""); setError(undefined); };
-  const submit = async () => {
-    if (!agentSlug(name)) { setError("Give the agent a name."); return; }
-    setBusy(true);
+  const [pending, setPending] = useState<string>();
+  const lock = useRef(false);
+  const key = "jaeger.ui.agent-create.v1";
+  useEffect(() => {
     try {
-      await onCreateAgent(name.trim(), job.trim());
-      closeDialog();
-    } catch (e) {
-      setError(String((e as Error)?.message ?? e));
-    } finally {
-      setBusy(false);
-    }
+      const raw = localStorage.getItem(key);
+      if (!raw) return;
+      const value = JSON.parse(raw);
+      if (typeof value.operationId !== "string" || typeof value.name !== "string" || typeof value.job !== "string") throw Error("Invalid saved creation command; original retained");
+      setPending(value.operationId); setName(value.name); setJob(value.job); setCreating(true);
+    } catch (e) { lock.current = true; setCreating(true); setError(`Creation recovery unavailable: ${String(e)}`); }
+  }, []);
+  const closeDialog = () => { if (busy) return; setCreating(false); if (!pending) { setName(""); setJob(""); setError(undefined); } };
+  const submit = async () => {
+    if (lock.current || pending) return;
+    if (!agentSlug(name)) { setError("Give the agent a name."); return; }
+    lock.current = true; setBusy(true); setError(undefined);
+    const operationId = crypto.randomUUID();
+    try {
+      localStorage.setItem(key, JSON.stringify({ operationId, name: name.trim(), job: job.trim() })); setPending(operationId);
+      await onCreateAgent(name.trim(), job.trim(), operationId);
+      localStorage.removeItem(key); setPending(undefined); setCreating(false); setName(""); setJob("");
+    } catch (e) { setError(`Creation not confirmed: ${String((e as Error)?.message ?? e)}. Check saved creation; nothing is automatically retried.`); }
+    finally { lock.current = false; setBusy(false); }
+  };
+  const recover = async () => {
+    if (!pending || !onRecoverAgent || lock.current) return;
+    lock.current = true; setBusy(true);
+    try {
+      const result = await onRecoverAgent(pending);
+      localStorage.removeItem(key); setPending(undefined);
+      if (result.failed) setError(result.failed); else { setCreating(false); setName(""); setJob(""); setError(undefined); }
+    } catch (e) { setError(String((e as Error)?.message ?? e)); }
+    finally { lock.current = false; setBusy(false); }
   };
 
   return (
@@ -61,17 +84,18 @@ export function NewChatMenu({ anchor, agents, onClose, onNewChat, onCreateAgent 
       <Dialog open={creating} title="Create agent" onClose={closeDialog}
         actions={<>
           <button type="button" className="aui-button" onClick={closeDialog}>Cancel</button>
-          <button type="button" className="aui-button aui-button--primary" disabled={busy} onClick={() => void submit()}>Create</button>
+          <button type="button" className="aui-button aui-button--primary" disabled={busy || Boolean(pending)} onClick={() => void submit()}>Create</button>
         </>}>
         <form className="jg-form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
           <label className="jg-form__field">
             <span>Name</span>
-            <TextField value={name} placeholder="Research" onChange={(e) => setName(e.target.value)} invalid={Boolean(error)} />
+            <TextField disabled={busy || Boolean(pending)} value={name} placeholder="Research" onChange={(e) => setName(e.target.value)} invalid={Boolean(error)} />
           </label>
           <label className="jg-form__field">
             <span>What should it do?</span>
-            <TextField value={job} placeholder="Find and summarise sources for the lead" onChange={(e) => setJob(e.target.value)} />
+            <TextField disabled={busy || Boolean(pending)} value={job} placeholder="Find and summarise sources for the lead" onChange={(e) => setJob(e.target.value)} />
           </label>
+          {pending && <p role="status">Saved creation needs reconciliation. <button type="button" disabled={busy || !onRecoverAgent} onClick={() => void recover()}>Check saved creation</button></p>}
           {error && <p className="jg-form__error" role="alert">{error}</p>}
         </form>
       </Dialog>

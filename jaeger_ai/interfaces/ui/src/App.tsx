@@ -148,12 +148,22 @@ export function App({ source }: { source: JaegerSource }) {
   /** There is one chat per agent now: "new chat with X" opens X's home chat. */
   const newChat = useCallback((agentId: string) => { if (agentId === selectedAgentId) void store.seeAgent(agentId); setSelection({ type: "agent", agentId }); }, [selectedAgentId, store.seeAgent]);
 
-  const createAgent = useCallback(async (displayName: string, job: string) => {
+  const createAgent = useCallback(async (displayName: string, job: string, operationId: string) => {
     const agent = await source.createAgent({
-      name: agentSlug(displayName), display_name: displayName, ...(job ? { metadata: { specialty: job } } : {}),
+      operation_id: operationId, name: agentSlug(displayName), display_name: displayName, ...(job ? { metadata: { specialty: job } } : {}),
     });
     await store.refresh();
     newChat(agent.id);
+  }, [source, store.refresh, newChat]);
+
+  const recoverCreatedAgent = useCallback(async (operationId: string) => {
+    if (!source.agentCreationStatus) throw Error("Creation reconciliation is unavailable from this host");
+    const result = await source.agentCreationStatus(operationId);
+    if (!result.receipt) throw Error("Creation outcome remains unknown. Nothing was resent.");
+    if (!result.receipt.ok) return { failed: result.receipt.error ?? "Creation rejected" };
+    if (!result.receipt.agent?.id) throw Error("Creation receipt has no agent identity");
+    await store.refresh(); newChat(result.receipt.agent.id);
+    return { failed: undefined };
   }, [source, store.refresh, newChat]);
 
   // A handoff marker opens the specialist's side of that exchange: its own
@@ -336,7 +346,7 @@ export function App({ source }: { source: JaegerSource }) {
         input={{ placeholder: "Name", value: `${label(agentPrompt.agent)} copy` }} onDone={onPromptDone} />}
       {notice && <div className="jg-toast" role="status">{notice}</div>}
       <NewChatMenu anchor={newChatAnchor} agents={store.agents.filter(visible)} onClose={() => setNewChatAnchor(null)}
-        onNewChat={newChat} onCreateAgent={createAgent} />
+        onNewChat={newChat} onCreateAgent={createAgent} onRecoverAgent={recoverCreatedAgent} />
       <ConnectAppsDialog open={connectOpen} source={source} onClose={() => setConnectOpen(false)} />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} automationsPanel={source.schedules ? <AutomationsPanel controls={source.schedules} /> : undefined} skillsPanel={source.skills ? <SkillsPanel source={source} /> : undefined} libraryPanel={source.library ? <LibraryPanel controls={source.library} /> : undefined} agentsPanel={<AgentManagement onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived, ...(!archived ? { deleted: false } : {}) })} />} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}

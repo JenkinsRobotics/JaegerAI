@@ -89,7 +89,8 @@ export interface JaegerSource {
   /** POST /v1/agents: a new specialist the lead can hand work to. */
   /** Agent context-menu actions (agentActions.ts); optional, gated by agentCaps. */
   agentActions?: AgentActions;
-  createAgent(body: { name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }): Promise<Agent>;
+  agentCreationStatus?(operationId: string): Promise<{ receipt: { ok: boolean; agent?: Agent; error?: string } | null }>;
+  createAgent(body: { operation_id?: string; name: string; display_name?: string; role?: string; metadata?: Record<string, unknown> }): Promise<Agent>;
   /** The specialist's side of one hand-off: its worker session and messages. */
   replyHandoff?(handoffId: string, task: string, requestId: string): Promise<Handoff>;
   handoffExchange(handoffId: string): Promise<HandoffExchange>;
