@@ -328,12 +328,13 @@ class _MCPClient:
     async def call(self, tool_name: str, arguments: dict[str, Any]) -> Any:
         return await self._session.call_tool(tool_name, arguments)
 
-    async def close(self) -> None:
+    async def close(self, *, strict: bool = False) -> None:
         if self._exit_stack is not None:
             try:
                 await self._exit_stack.aclose()
             except Exception:
-                pass
+                if strict:
+                    raise
 
 
 class MCPRegistry:
@@ -345,6 +346,10 @@ class MCPRegistry:
         self._loop_thread.start()
         self._clients: dict[str, _MCPClient] = {}
         self._tools: dict[str, MCPToolSpec] = {}
+        self._lifecycle_lock = threading.RLock()
+        self._active_calls: dict[str, int] = {}
+        self._server_states: dict[str, str] = {}
+        self._disconnected: dict[str, MCPServerConfig] = {}
 
     def _run_loop(self) -> None:
         asyncio.set_event_loop(self._loop)
@@ -424,28 +429,88 @@ class MCPRegistry:
         return specs
 
     def call(self, qualified_name: str, arguments: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
-        spec = self._tools.get(qualified_name)
-        if spec is None:
-            raise ValueError(f"unknown MCP tool: {qualified_name}")
-        client = self._clients[spec.server_name]
-        if timeout is None:
-            timeout = client.config.call_timeout_s
-        secrets = set(client.config.headers.values())
-        secrets.update(
-            value
-            for key, value in client.config.env.items()
-            if _SECRET_NAME.search(key)
-        )
-        from jaeger_agent.core.cancellation import current_cancellation
+        with self._lifecycle_lock:
+            spec = self._tools.get(qualified_name)
+            if spec is None:
+                raise ValueError(f"unknown MCP tool: {qualified_name}")
+            if self._server_states.get(spec.server_name, 'loaded_not_probed') != 'loaded_not_probed':
+                raise RuntimeError('MCP server lifecycle or prior outcome requires reconciliation; no call dispatched')
+            client = self._clients[spec.server_name]
+            self._active_calls[spec.server_name] = self._active_calls.get(spec.server_name, 0) + 1
         try:
-            result = self._submit(client.call(spec.tool_name, arguments), timeout=timeout,
-                                  cancellation=current_cancellation())
-        except Exception as exc:
-            # A lost response can follow a real external effect. Never replay
-            # it automatically, including after cancellation or timeout.
-            raise RuntimeError(_redact_known_secrets(str(exc), secrets)) from None
-        payload = _result_to_dict(result)
-        return _redact_known_secrets(payload, secrets)
+            if timeout is None:
+                timeout = client.config.call_timeout_s
+            secrets = set(client.config.headers.values())
+            secrets.update(
+                value
+                for key, value in client.config.env.items()
+                if _SECRET_NAME.search(key)
+            )
+            from jaeger_agent.core.cancellation import current_cancellation
+            try:
+                result = self._submit(client.call(spec.tool_name, arguments), timeout=timeout,
+                                      cancellation=current_cancellation())
+            except Exception as exc:
+                # A lost response can follow a real external effect. Never replay
+                # it automatically, including after cancellation or timeout.
+                with self._lifecycle_lock:
+                    self._server_states[spec.server_name] = "outcome_unknown"
+                raise RuntimeError(_redact_known_secrets(str(exc), secrets)) from None
+            payload = _result_to_dict(result)
+            return _redact_known_secrets(payload, secrets)
+
+        finally:
+            with self._lifecycle_lock:
+                self._active_calls[spec.server_name] -= 1
+
+    @staticmethod
+    def control_id(name: str) -> str:
+        import hashlib
+        return hashlib.sha256(name.encode()).hexdigest()[:24]
+
+    def lifecycle(self, control_id: str, action: str, expected_state: str) -> dict[str, Any]:
+        """Only disconnect/reconnect an already-loaded owner's unchanged config.
+
+        No config/credentials/permissions from HTTP. Unknown remote outcomes or
+        active calls forbid lifecycle operations; transport close is not cancellation.
+        """
+        with self._lifecycle_lock:
+            names = set(self._clients) | set(self._disconnected)
+            name = next((n for n in names if self.control_id(n) == control_id), None)
+            if name is None:
+                raise ValueError('Loaded MCP connection not found')
+            state = self._server_states.get(name, 'loaded_not_probed')
+            allowed = {'disconnect': 'loaded_not_probed', 'reconnect': 'disconnected'}
+            if action not in allowed or state != allowed[action] or state != expected_state:
+                raise ValueError('MCP connection changed or outcome is uncertain; refresh without replay')
+            if self._active_calls.get(name, 0):
+                raise ValueError('MCP calls are active; connection retained')
+            self._server_states[name] = 'disconnecting' if action == 'disconnect' else 'connecting'
+        try:
+            if action == 'disconnect':
+                client = self._clients[name]
+                self._submit(client.close(strict=True), timeout=10)
+                from jaeger_os.core.tools.tool_registry import unregister_tool
+                from jaeger_agent.skill_registry.toolset_scoping import unregister_mcp_server_toolset
+                with self._lifecycle_lock:
+                    for key, spec in list(self._tools.items()):
+                        if spec.server_name == name:
+                            unregister_tool(spec.agent_name)
+                            del self._tools[key]
+                    unregister_mcp_server_toolset(name)
+                    self._disconnected[name] = client.config
+                    del self._clients[name]
+                    self._server_states[name] = 'disconnected'
+            else:
+                self.add_server(self._disconnected[name])
+                with self._lifecycle_lock:
+                    del self._disconnected[name]
+                    self._server_states[name] = 'loaded_not_probed'
+            return {'id': control_id, 'state': self._server_states[name], 'delivery_verified': False}
+        except Exception:
+            with self._lifecycle_lock:
+                self._server_states[name] = 'outcome_unknown'
+            raise RuntimeError('MCP lifecycle outcome unknown; automatic retry is disabled') from None
 
     def list_tools(self) -> list[MCPToolSpec]:
         return list(self._tools.values())
@@ -596,15 +661,24 @@ def runtime_inventory() -> dict[str, Any]:
     registry = get_registry()
     if registry is None:
         return {"initialized": False, "servers": [], "tools": []}
-    clients = list(registry._clients.items())
+    with registry._lifecycle_lock:
+        clients = list(registry._clients.items())
+        disconnected = list(registry._disconnected.items())
+        states = dict(registry._server_states)
+        active = dict(registry._active_calls)
     secrets = set()
-    for _, client in clients:
-        secrets.update(client.config.headers.values())
-        secrets.update(value for key, value in client.config.env.items() if _SECRET_NAME.search(key))
+    for config in [client.config for _, client in clients] + [config for _, config in disconnected]:
+        secrets.update(config.headers.values())
+        secrets.update(value for key, value in config.env.items() if _SECRET_NAME.search(key))
     def safe(value: str) -> str:
         return redact_text(_redact_known_secrets(str(value), secrets))[:1000]
     specs = registry.list_tools()
-    servers = [{"name": safe(name), "state": "loaded_not_probed", "tool_count": sum(t.server_name == name for t in specs)} for name, _ in clients]
+    servers = []
+    for name in sorted({n for n, _ in clients} | {n for n, _ in disconnected}):
+        state = states.get(name, 'loaded_not_probed')
+        actions = [] if active.get(name, 0) else ['disconnect'] if state == 'loaded_not_probed' else ['reconnect'] if state == 'disconnected' else []
+        servers.append({'id': registry.control_id(name), 'name': safe(name), 'state': state,
+                        'tool_count': sum(t.server_name == name for t in specs), 'active_calls': active.get(name, 0), 'actions': actions})
     loaded_names = {name for name, _ in clients}
     servers.extend({"name": safe(name), "state": "connection_failed", "tool_count": 0} for name in connection_errors() if name not in loaded_names)
     tools = [{"agent_name": t.agent_name, "display_name": safe(t.agent_name), "server": safe(t.server_name), "description": safe(t.description)} for t in specs]

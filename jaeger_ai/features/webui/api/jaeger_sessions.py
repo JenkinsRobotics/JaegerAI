@@ -244,6 +244,9 @@ def route(handler, parsed, method: str) -> bool:
             return False
         return _proxy(handler, "GET", "/v1/task-submissions/" + quote(request_id, safe="") + query)
 
+    if path == '/v1/notifications' and method in {'GET','PATCH'}:
+        return _proxy(handler, method, path, _body_bytes(handler) if method == 'PATCH' else None)
+
     if method == "GET" and path == "/v1/channels":
         return _proxy(handler, "GET", path)
 
@@ -305,6 +308,12 @@ def route(handler, parsed, method: str) -> bool:
 
     if method == "GET" and path in ("/api/jaeger/runtime/models", "/api/runtime/models"):
         return _proxy(handler, "GET", "/v1/runtime/models")
+
+    if method == 'POST' and path.startswith('/v1/runtime/mcp/'):
+        segments = path.split('/')
+        if len(segments) == 6 and segments[5] in {'disconnect','reconnect'}:
+            return _proxy(handler, 'POST', path, _body_bytes(handler))
+        return False
 
     if method == "GET" and path in {"/v1/runtime/skills", "/v1/runtime/skills/detail", "/v1/runtime/tools", "/v1/runtime/diagnostics"}:
         return _proxy(handler, "GET", path + query)

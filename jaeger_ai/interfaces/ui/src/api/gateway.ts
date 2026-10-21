@@ -61,6 +61,15 @@ export class GatewayClient implements JaegerSource {
   channels() { return this.json<import("./source").ChannelSnapshot>("/v1/channels"); }
   diagnostics() { return this.json<import("./source").GatewayDiagnostics>("/v1/runtime/diagnostics"); }
   tools(query = "") { return this.json<import("./source").ToolInventory>(`/v1/runtime/tools?q=${encodeURIComponent(query)}`); }
+  readonly notifications: import('./source').Notifications = {
+    read: () => this.json('/v1/notifications'),
+    save: body => this.json('/v1/notifications',body,'PATCH'),
+    markRead: through => this.json('/v1/notifications',{read_through:through},'PATCH'),
+  };
+  readonly mcpControls: NonNullable<import('./source').JaegerSource['mcpControls']> = {
+    mutate: (id,action,body) => this.json(`/v1/runtime/mcp/${encodeURIComponent(id)}/${action}`,body),
+    operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
+  };
   readonly sessionFiles: import('./source').SessionFiles = {
     list: sessionId => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files`),
     read: (sessionId, id) => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(id)}`),
