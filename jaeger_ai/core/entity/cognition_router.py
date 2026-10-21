@@ -126,7 +126,7 @@ class DirectResponseHandler(CognitionStrategyHandler):
         }
 
 
-def with_background(request: str, context: Mapping[str, Any], *, lessons: str = "") -> str:
+def with_background(request: str, context: Mapping[str, Any], *, lessons: str = "", references: list[Any] | None = None) -> str:
     """Put durable context in front of a request without making it one.
 
     Recent messages from every session are recalled so the Entity remembers
@@ -183,10 +183,22 @@ def with_background(request: str, context: Mapping[str, Any], *, lessons: str = 
             f"{safe_json(conversation_value)}\n"
             "</conversation_history>"
         )
-    if blocks:
-        fitted: list[str] = []
+    tracked = []
+    if references is not None:
+        from jaeger_agent.loop.context_provenance import ContextReference
+        owners = {"PROVENANCE_SEMANTIC_CLAIM":"semantic", "PROVENANCE_EPISODIC_EVENT":"episodic",
+                  "PROVENANCE_REFLEXION":"reflection", "PROVENANCE_RETRIEVED_DOCUMENT":"document",
+                  "PROVENANCE_LEARNED_SKILL":"skill"}
+        for item in list(context.get("context_items") or [])[:128]:
+            owner = owners.get(item.provenance.value)
+            if owner:
+                ref = ContextReference(owner, str(item.metadata.get("owner_id") or item.item_id), item.content)
+                references.append(ref)
+                tracked.append((ref, json.loads(ref.fragment())))
+    if blocks or tracked:
+        fitted: list[Any] = []
         background = ""
-        for block in blocks:
+        for ref, block in [(None, block) for block in blocks] + tracked:
             candidate = [*fitted, block]
             section = (
                 "<background>\n"
@@ -200,6 +212,8 @@ def with_background(request: str, context: Mapping[str, Any], *, lessons: str = 
             if used + extra <= context_limit:
                 fitted = candidate
                 background = section
+                if ref is not None:
+                    ref.selected = True
         if fitted:
             add_if_fits(background)
     if lessons.strip():

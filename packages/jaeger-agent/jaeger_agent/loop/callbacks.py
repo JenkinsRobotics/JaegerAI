@@ -101,6 +101,7 @@ class AgentCallbacks:
 
     # Content-free formatted-input outline, immediately before each adapter call.
     model_input: Callable[[dict[str, Any]], None] | None = None
+    context_references: tuple[Any, ...] = ()
 
     # Dependency Inversion: Injected usage telemetry callbacks
     record_skill_route: Callable[..., None] | None = None
@@ -120,7 +121,7 @@ class AgentCallbacks:
             return
         try:
             from .input_outline import input_outline
-            self.model_input(input_outline(payload))
+            self.model_input(input_outline(payload, references=self.context_references))
         except Exception:  # observer cannot affect execution or retry
             pass
 

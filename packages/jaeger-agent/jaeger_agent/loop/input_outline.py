@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 
-def input_outline(payload):
+def input_outline(payload, *, references=()):
     """Known payload shapes only. Counts are not token usage or provider acceptance.
 
     Never stringify arbitrary objects or persist model names, tool schemas, text,
@@ -10,6 +10,9 @@ def input_outline(payload):
     """
     result = {"shape": "unsupported", "messages": [], "system_chars": 0,
               "tool_count": 0, "truncated": False}
+    if references:
+        from .context_provenance import observe_references
+        result["items"] = observe_references(payload, references)
     if not isinstance(payload, dict):
         return result
     tools = payload.get("tools")

@@ -67,6 +67,7 @@ class PreparedTurn:
     event: Any
     user_text: str
     session_id: str
+    context_references: tuple[Any, ...] = ()
 
 
 class EntityRuntime:
@@ -263,7 +264,8 @@ class EntityRuntime:
                     limit=400,
                 )
                 if ev.session_id != session_id
-            ][-12:]
+            ]
+            recent = self.event_store.project_recall(recent)[-12:]
             speaker = {
                 EventType.HUMAN_MESSAGE.value: "user",
                 EventType.AGENT_RESPONSE.value: "you",
@@ -420,27 +422,39 @@ class EntityRuntime:
             request_id=request_id, metadata=meta,
         )
         self.ingest(event)
-        recall_text, _ = self._cross_session_recall(session_id)
-        if recall_text:
-            ctx["durable_recall"] = recall_text
+        recall_text, recent = self._cross_session_recall(session_id)
+        try:
+            claims = self.memory_subsystem.semantic.list_recent(12)
+        except Exception:
+            claims = []
         runtime_truth = self._runtime_truth()
         if runtime_truth:
             ctx["runtime_truth"] = runtime_truth
-        self._reflexion_refs(user_text, meta, event, session_id)
-        skills_text, _ = self._skill_matches(user_text, event, session_id)
-        if skills_text:
+        reflection_refs = self._reflexion_refs(user_text, meta, event, session_id)
+        skills_text, matched_skills = self._skill_matches(user_text, event, session_id)
+        if skills_text and not matched_skills:
             ctx["learned_skills_prompt"] = skills_text
-        docs_text, _ = self._document_hits(user_text, event, session_id)
-        if docs_text:
+        docs_text, hits = self._document_hits(user_text, event, session_id)
+        if docs_text and not hits:
             ctx["retrieved_documents"] = docs_text
         lessons = ""
         try:
-            lessons = self.reflexion_store.to_prompt_context_block(user_text)
+            if not reflection_refs:
+                lessons = self.reflexion_store.to_prompt_context_block(user_text)
         except Exception as exc:
             logger.debug("reflexion lessons skipped: %s", exc)
+        ctx["context_items"] = self.context_compiler.rank(self.context_compiler.select(
+            user_text, claims=claims, events=recent, reflections=reflection_refs,
+            documents=hits, skills=matched_skills,
+        ))
+        if recall_text and not claims and not recent:
+            # Legacy helper with no item metadata: retain data without inventing refs.
+            ctx["durable_recall"] = recall_text
+        references: list[Any] = []
+        prompt = with_background(user_text, ctx, lessons=lessons, references=references)
         return PreparedTurn(
-            prompt=with_background(user_text, ctx, lessons=lessons),
-            event=event, user_text=user_text, session_id=session_id,
+            prompt=prompt, event=event, user_text=user_text, session_id=session_id,
+            context_references=tuple(references),
         )
 
     def record_world_claim(

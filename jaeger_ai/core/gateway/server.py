@@ -3966,6 +3966,7 @@ class JaegerGatewayApp:
         history: list[dict[str, Any]] | None = None,
         attachments: list[dict[str, Any]] | None = None,
         context_ids: tuple[str, str] | None = None,
+        context_references: tuple[Any, ...] = (),
     ) -> str:
         """Live text turn via locked Ollama — never routes through :8813."""
         target_model = model or DEFAULT_OLLAMA_MODEL
@@ -4092,7 +4093,7 @@ class JaegerGatewayApp:
                     self.event_bus.publish(context_ids[0], "turn.context", {
                         "request_id": context_ids[1],
                         "turn_id": (self.store.get_request(context_ids[1]) or {}).get("turn_id") or context_ids[1],
-                        "outline": input_outline(payload),
+                        "outline": input_outline(payload, references=context_references),
                     })
                 except Exception:
                     logger.debug("Model context observer unavailable", exc_info=False)
@@ -4344,6 +4345,7 @@ class JaegerGatewayApp:
         on_model: Callable[[str], None] | None = None,
         execution: dict[str, Any] | None = None,
         continuation_state: dict[str, Any] | None = None,
+        context_references: tuple[Any, ...] = (),
     ) -> dict[str, Any]:
         """Run one inner ReAct step in the EntityRuntime OWNER process."""
         from jaeger_ai.core.entity.runtime import EntityRuntime
@@ -4365,6 +4367,7 @@ class JaegerGatewayApp:
             selection = session.get("metadata") or {}
             lane, selected_model = split_routed_model_id(str(selection.get("model") or session.get("model") or ""))
         callbacks, flush = self._turn_stream_callbacks(session_key, request_id)
+        callbacks.context_references = context_references
         from jaeger_agent.tool_executor import tool_allowlist
         from jaeger_agent.core.workspace import read_confinement
 
@@ -4408,6 +4411,7 @@ class JaegerGatewayApp:
         on_model: Callable[[str], None] | None = None,
         execution: dict[str, Any] | None = None,
         objective: str = "",
+        context_references: tuple[Any, ...] = (),
     ) -> dict[str, Any]:
         """One admitted request: inner ReAct plus owner-side continuation."""
         from jaeger_ai.core.runtime.autonomous_runner import run_continued_turn
@@ -4420,6 +4424,7 @@ class JaegerGatewayApp:
                 inner_prompt, session_key=session_key, request_id=request_id,
                 on_model=on_model, execution=execution,
                 continuation_state=continuation_state,
+                context_references=context_references,
             )
             return {
                 **out,
@@ -4577,6 +4582,8 @@ class JaegerGatewayApp:
         # decisions read this: an inlined "inspect it with the vision_analyze
         # tool" note made a plain question about an image look actionable.
         request_text = text
+        context_references: tuple[Any, ...] = ()
+        pinned_references: tuple[Any, ...] = ()
 
         try:
             atts = self._turn_attachments(session_id, execution)
@@ -4607,6 +4614,7 @@ class JaegerGatewayApp:
                 from jaeger_ai.features.knowledge_library.agent_context import materialize
                 knowledge = materialize(agent, actor=(execution or {}).get('caller'))
                 system_prompt += "\n\n" + knowledge['text']
+                pinned_references = tuple(knowledge.get("context_references", ()))
                 self.event_bus.publish(session_id, 'agent.knowledge', {'request_id': rid, 'turn_id': turn_id, 'agent_id': agent.id, 'documents': knowledge['documents']})
             backend = LOCKED_OLLAMA_URL
             model = DEFAULT_OLLAMA_MODEL
@@ -4669,6 +4677,7 @@ class JaegerGatewayApp:
                             ),
                             attachments=session_atts,
                             context_ids=(session_id, request_id or turn_id),
+                            context_references=context_references,
                         ),
                         loop,
                     )
@@ -4707,6 +4716,7 @@ class JaegerGatewayApp:
                     on_model=selected_model,
                     execution=execution if session_key == session_id else None,
                     objective=request_text,
+                    context_references=context_references,
                 )
 
             session_meta = (session.get("metadata") or {}) if isinstance(session, dict) and isinstance(session.get("metadata"), dict) else {}
@@ -4736,6 +4746,7 @@ class JaegerGatewayApp:
                         history=self._history_before_admitted_user(current, admitted_request),
                         attachments=self._turn_attachments(session_id, execution),
                         context_ids=(session_id, request_id or turn_id),
+                        context_references=context_references,
                     ),
                     loop,
                 )
@@ -4769,11 +4780,13 @@ class JaegerGatewayApp:
                     ide_context=((execution or {}).get("options") or {}).get("ide"),
                 )
                 prompt = prepared.prompt
+                context_references = pinned_references + tuple(getattr(prepared, "context_references", ()))
             except Exception:
                 # Memory is an enrichment: if reading it fails the operator's
                 # request must still reach the agent, unadorned.
                 logger.warning("turn context unavailable for %s; running the bare request", rid, exc_info=True)
                 prepared, prompt = None, text
+                context_references = pinned_references
             self._present(session_id, "thinking", intent="turn")
             card_task_id, execution = self._open_turn_card(
                 runtime, prepared, session=session, session_id=session_id, rid=rid,

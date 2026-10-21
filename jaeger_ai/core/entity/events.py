@@ -36,6 +36,7 @@ class EventType(str, Enum):
     AGENT_ACTION = "agent.action"
     AGENT_RESPONSE = "agent.response"
     MEMORY_CONSOLIDATED = "memory.consolidated"
+    MEMORY_EPISODE_CHANGED = "memory.episode.changed"
     BACKGROUND_COMPLETED = "background.completed"
     PERCEPTION_SENSED = "perception.sensed"
     SKILL_CANDIDATE = "skill.candidate"

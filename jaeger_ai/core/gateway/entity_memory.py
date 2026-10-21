@@ -75,3 +75,63 @@ def register(gateway):
     gateway.app.router.add_get('/v1/runtime/memory/claims/{id}',detail)
     gateway.app.router.add_post('/v1/runtime/memory/claims/{id}/{action}',mutate)
     gateway.app.router.add_get('/v1/runtime/memory/claim-operations/{id}',operation)
+
+    def episode_owner(*, writing=False):
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        from jaeger_ai.core.entity.ownership import EntityRuntimeMode
+        runtime=EntityRuntime._instance
+        owner=getattr(runtime,'event_store',None)
+        if owner is None or writing and (getattr(runtime,'mode',None)!=EntityRuntimeMode.OWNER or not getattr(runtime,'is_resident',False)):
+            raise ValueError('Resident episodic owner unavailable; no runtime was started')
+        return owner
+    async def episodes(request):
+        try:
+            owner=episode_owner()
+            raw=request.query.get('before')
+            value=await asyncio.to_thread(owner.episode_context_page,request.query.get('q',''),before=int(raw) if raw else None)
+            try:episode_owner(writing=True);editable=admin(request)
+            except ValueError:editable=False
+            return web.json_response({'available':True,'editable':editable,'scope':'cross_conversation_automatic_context',**value})
+        except (ValueError,TypeError) as exc:return web.json_response({'error':str(exc)},status=409)
+        except Exception:return web.json_response({'error':'Loaded episodic owner unavailable; retained history unchanged'},status=503)
+    async def episode_detail(request):
+        try:
+            value=await asyncio.to_thread(episode_owner().episode_context,request.match_info["id"])
+            try:episode_owner(writing=True);editable=admin(request)
+            except ValueError:editable=False
+            return web.json_response({**value,"editable":editable})
+        except ValueError as exc:return web.json_response({"error":str(exc)},status=409)
+    async def episode_receipt(request):
+        try:
+            stored=gateway.store.control_operation(request.match_info['id'])
+            candidate=stored.get('receipt') if stored else None
+            receipt=candidate if candidate and candidate.get('domain')=='episode_context' else None
+            if receipt is None:receipt=await asyncio.to_thread(episode_owner().episode_operation,request.match_info['id'])
+            return web.json_response({'receipt':receipt})
+        except ValueError as exc:return web.json_response({'error':str(exc)},status=409)
+    async def episode_change(request):
+        if not admin(request):return web.json_response({'error':'Existing owner admin scope required'},status=403)
+        try:
+            action=request.match_info['action']
+            fields={'operation_id','expected_revision'}|({'text'} if action=='annotate' else set())
+            body=await request.json()
+            if action not in {'annotate','forget','restore'} or not isinstance(body,dict) or set(body)!=fields:raise ValueError('Invalid episode command fields')
+            owner=episode_owner(writing=True)
+            owner._episode_operation_id(body['operation_id'])
+            command={'domain':'episode_context','id':request.match_info['id'],'action':action,'actor':request['caller_actor'],'body':body}
+            if not gateway.store.reserve_control_operation(body['operation_id'],command):
+                receipt=owner.episode_operation(body['operation_id']) or gateway.store.control_operation(body['operation_id'])['receipt']
+                return web.json_response(receipt or {'execution_unknown':True,'operation_id':body['operation_id'],'error':'Original outcome unresolved; inspect without replay'},status=receipt.get('http_status',200) if receipt else 409)
+        except (ValueError,TypeError) as exc:return web.json_response({'error':str(exc)},status=400)
+        try:
+            from .server import _control_plane_block
+            if _control_plane_block():raise ValueError('Global Stop or live-owner guard prevents memory changes')
+            receipt=await asyncio.to_thread(owner.manage_episode,request.match_info['id'],action,expected_revision=body['expected_revision'],operation_id=body['operation_id'],actor=request['caller_actor'],text=body.get('text'))
+        except ValueError as exc:receipt={'ok':False,'domain':'episode_context','operation_id':body['operation_id'],'http_status':409,'error':str(exc)}
+        except Exception:return web.json_response({'execution_unknown':True,'operation_id':body['operation_id'],'error':'Episode outcome unknown; inspect saved receipt without replay'},status=503)
+        gateway.store.finish_control_operation(body['operation_id'],receipt)
+        return web.json_response(receipt,status=receipt['http_status'])
+    gateway.app.router.add_get('/v1/runtime/memory/episodes',episodes)
+    gateway.app.router.add_get('/v1/runtime/memory/episodes/{id}',episode_detail)
+    gateway.app.router.add_post('/v1/runtime/memory/episodes/{id}/{action}',episode_change)
+    gateway.app.router.add_get('/v1/runtime/memory/episode-operations/{id}',episode_receipt)

@@ -8,8 +8,8 @@ import { requestOutcome } from "./requestOutcome";
  *     frame with id <= cursor is dropped, so a replay cannot settle the turn;
  *   - when the stream drops or ends early, reconnect with backoff and resume
  *     from the cursor (`?last_event_id=`, per server.py _sse_stream);
- *   - a 410 (cursor no longer retained) fails the turn with that message
- *     instead of silently replaying. */
+ *   - a 410 (cursor no longer retained) reconciles the original request;
+ *     unavailable lookup leaves its outcome unknown without replay. */
 import { GatewayError } from "../api/gateway";
 import type { JaegerSource } from "../api/source";
 import type { GatewayEvent } from "../api/types";

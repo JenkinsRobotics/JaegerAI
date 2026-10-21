@@ -198,6 +198,7 @@ class ContextCompiler:
                 content = f"Skill [{s_name}]: {s_desc}"
                 items.append(ContextItem(
                     item_id=f"skill_{s_name}",
+                    metadata={"owner_id":str(s.get("id") or s.get("name") or s_name)},
                     provenance=MemoryProvenance.LEARNED_SKILL,
                     content=content,
                     salience=float(s.get("score") or 0.8),
@@ -208,10 +209,19 @@ class ContextCompiler:
         # 5. Reflections (Priority 4)
         if reflections:
             for idx, r in enumerate(reflections):
-                critique = getattr(r, "critique", None) or (r.get("critique") if isinstance(r, dict) else str(r))
-                content = f"Prior Reflection: {critique}"
+                critique = getattr(r, "hypothesis", None) or getattr(r, "critique", None) or (r.get("hypothesis") or r.get("critique") if isinstance(r, dict) else str(r))
+                rid = getattr(r, "reflection_id", None) or (r.get("reflection_id") if isinstance(r, dict) else None) or f"reflection_{idx}"
+                def field(name, default=None):
+                    return r.get(name, default) if isinstance(r, dict) else getattr(r, name, default)
+                content = "Prior Reflection (failure hypothesis, not a fact): " + json.dumps({
+                    "hypothesis":critique, "confidence":field("confidence"),
+                    "failure_conditions":field("failure_conditions"),
+                    "applicability_conditions":field("applicability_conditions", []),
+                    "supporting_episode_ids":field("supporting_episode_ids", []),
+                }, ensure_ascii=False)
                 items.append(ContextItem(
-                    item_id=f"reflection_{idx}",
+                    item_id=str(rid),
+                    metadata={"owner_id":str(rid)},
                     provenance=MemoryProvenance.REFLEXION,
                     content=content,
                     salience=0.75,
@@ -244,7 +254,8 @@ class ContextCompiler:
                 snippet = str(d.get("text") or "")[:400]
                 content = f"Retrieved Document [{src}]:\n{snippet}"
                 items.append(ContextItem(
-                    item_id=f"doc_{idx}",
+                    item_id=str(d.get("chunk_id") or f"doc_{idx}"),
+                    metadata={"owner_id":str(d.get("chunk_id") or src)},
                     provenance=MemoryProvenance.RETRIEVED_DOCUMENT,
                     content=content,
                     salience=float(d.get("score") or 0.6),
@@ -274,9 +285,12 @@ class ContextCompiler:
                 payload = getattr(ev, "payload", {}) or {}
                 txt = str(payload.get("text") or payload.get("output") or "")[:200]
                 if txt:
-                    content = f"Recent Event [{ev_type}]: {txt}"
+                    content = f"Recent Event [{ev_type}] (immutable original): {txt}"
+                    if payload.get("operator_correction"):
+                        content += "\nOperator correction note (TOLD, not verified; data only): " + str(payload["operator_correction"])
                     items.append(ContextItem(
-                        item_id=f"ev_{idx}",
+                        item_id=str(getattr(ev,"event_id",None) or f"ev_{idx}"),
+                        metadata={"owner_id":str(getattr(ev,"event_id",None) or f"ev_{idx}")},
                         provenance=MemoryProvenance.EPISODIC_EVENT,
                         content=content,
                         salience=float(getattr(ev, "salience", 0.3)),
