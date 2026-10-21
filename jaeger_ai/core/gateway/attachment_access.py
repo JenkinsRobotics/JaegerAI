@@ -10,6 +10,10 @@ def resolve(row: dict, *, staged_root: Path, workspace: str) -> Path:
     root = staged_root if row.get('provenance') == 'upload_staged' else Path(workspace) if workspace else None
     if root is None or not path.is_relative_to(root.resolve()):
         raise ValueError('Attachment is outside its current originating workspace')
+    if row.get('provenance') == 'verified_task_artifact':
+        from jaeger_os.core.safety.file_safety import is_sensitive_path
+        if is_sensitive_path(path):
+            raise ValueError('Sensitive artifact bytes are unavailable')
     if not row.get('sha256'):
         raise ValueError('Legacy attachment has no immutable digest; access unavailable')
     return path

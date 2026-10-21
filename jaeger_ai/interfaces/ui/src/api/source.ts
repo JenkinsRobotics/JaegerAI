@@ -14,6 +14,12 @@ export interface SessionFiles {
   list(sessionId: string): Promise<{ session_id: string; files: SessionFile[]; max_bytes: number }>;
   read(sessionId: string, attachmentId: string): Promise<{ session_id: string; attachment_id: string; name: string; mime: string; size: number; sha256: string; data_base64: string }>;
 }
+export interface TaskArtifact extends SessionFile {task_id:string;task_title:string;session_id:string}
+export interface TaskArtifacts {
+  list(taskId?:string,sessionId?:string):Promise<{artifacts:TaskArtifact[];max_bytes:number}>;
+  read(taskId:string,artifactId:string):ReturnType<SessionFiles['read']>;
+  preview(taskId:string,artifactId:string,page?:number):Promise<SessionFilePreview>;
+}
 export interface UploadedAttachment { attachment_id: string; name: string; mime: string; size: number; sha256: string }
 
 import type { AgentActions } from "./agentActions";
@@ -210,6 +216,7 @@ export interface JaegerSource {
     save(sessionId: string, body: { request_id: string; role: "user" | "assistant"; emoji: string; active: boolean }): Promise<ReactionSnapshot>;
   };
   library?: LibraryControls;
+  taskArtifacts?:TaskArtifacts;
   managedSkills?:ManagedSkills;
   skillDetail?(name: string, category: string): Promise<SkillDetail>;
   mcpControls?: {

@@ -51,6 +51,11 @@ export class GatewayClient implements JaegerSource {
     load: (id: string) => this.json<ReactionSnapshot>(`/v1/sessions/${encodeURIComponent(id)}/feedback`),
     save: (id: string, body: { request_id: string; role: "user" | "assistant"; emoji: string; active: boolean }) => this.json<ReactionSnapshot>(`/v1/sessions/${encodeURIComponent(id)}/feedback`, body),
   };
+  taskArtifacts:import('./source').TaskArtifacts={
+    list:(taskId,sessionId)=>this.json('/v1/library/artifacts?'+new URLSearchParams({...taskId?{task_id:taskId}:{},...sessionId?{session_id:sessionId}:{}})),
+    read:(taskId,id)=>this.json(`/v1/library/artifacts/${encodeURIComponent(taskId)}/${encodeURIComponent(id)}`),
+    preview:(taskId,id,page)=>this.json(`/v1/library/artifacts/${encodeURIComponent(taskId)}/${encodeURIComponent(id)}?view=preview${page?'&page='+page:''}`),
+  };
   library: LibraryControls = {
     list: () => this.json("/v1/library"),
     search: query => this.json(`/v1/library/search?q=${encodeURIComponent(query)}`),

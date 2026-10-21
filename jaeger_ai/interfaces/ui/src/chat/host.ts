@@ -84,6 +84,7 @@ export interface ChatAgentRef { id: string; name: string; description?: string }
 export interface ChatConfig { defaultModel?: string; defaultMode?: string; [key: string]: unknown }
 
 export interface ChatHost {
+  readonly taskArtifacts?:import("../api/source").TaskArtifacts;
   readonly sessionFiles?: import("../api/source").SessionFiles;
   readonly sessionQueue?: import("../api/source").SessionQueue;
   readonly messageReactions?: import("../api/source").JaegerSource["messageReactions"];
@@ -111,6 +112,7 @@ export interface ChatHost {
   onSessionEvent?(cb: (event: { sessionId: string; type: string }) => void): () => void;
   openHandoffReply?(handoffId: string): void;
   openHandoff?(handoffId: string): void;
+  openTaskArtifacts?(taskId:string):void;
   /** PROPOSED addition: the chat header's agent pill opens that agent's details. */
   openDetails?(agentId: string): void;
   capabilities: { voice: boolean };
