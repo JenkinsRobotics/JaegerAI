@@ -120,6 +120,10 @@ export class GatewayClient implements JaegerSource {
   async updateSession(id: string, body: { title?: string; archived?: boolean }) {
     await this.json(`/v1/sessions/${encodeURIComponent(id)}`, body, "PATCH");
   }
+  readonly agentKnowledge: import("./source").AgentKnowledgeControls = {
+    read: id => this.json(`/v1/agents/${encodeURIComponent(id)}/knowledge`),
+    save: (id, body) => this.json(`/v1/agents/${encodeURIComponent(id)}/knowledge`, body, "PATCH"),
+  };
   readonly specialistControls: import("./source").SpecialistControls = {
     templates: () => this.json("/v1/agent-templates"),
     read: id => this.json(`/v1/agents/${encodeURIComponent(id)}/configuration`),

@@ -81,6 +81,8 @@ export function RevealMarkdown({ text, live, links, style }: { text: string; liv
 
 function BubblePart({ part, links, live = false, style }: { part: ChatPart; links: Links; live?: boolean; style: StreamStyleParams }) {
   switch (part.kind) {
+    case "knowledgeContext":
+      return <details className="jg-knowledge-context"><summary>Knowledge context · {part.documents.length} documents</summary><ul>{part.documents.map(doc => <li key={doc.id}>{doc.title} · revision {doc.revision}<small> · {doc.digest.slice(0, 12)}</small></li>)}</ul><p>Loaded as reference material. Tool permissions and approvals are unchanged.</p></details>;
     case "markdownContent":
       return <RevealMarkdown text={part.text} live={live} links={links} style={style} />;
     case "thinking":

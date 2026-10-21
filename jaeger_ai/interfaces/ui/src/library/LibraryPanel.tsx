@@ -83,6 +83,26 @@ export function LibraryPanel({ controls }: { controls: LibraryControls }) {
     catch (e) { setError(String((e as Error).message ?? e)); }
     finally { locked.current = false; setBusy(false); }
   };
+  useEffect(() => () => { generation.current++; }, []);
+  const importText = async (file: File) => {
+    if (locked.current || pending || volatile.current) { setError("Save or recover the current draft/action before importing another file"); return; }
+    const limit = catalog?.limits?.document_bytes;
+    if (!limit || file.size > limit) { setError("Text file exceeds this Gateway's document limit or its limits are unavailable"); return; }
+    locked.current = true; setBusy(true); setError(undefined);
+    const owner = ++generation.current;
+    try {
+      const bytes = await file.arrayBuffer();
+      if (owner !== generation.current) return;
+      if (bytes.byteLength > limit) throw Error("Text file exceeds the Gateway document limit");
+      const content = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+      if (content.includes("\0")) throw Error("Binary content is not supported; choose a UTF-8 text document");
+      const next = { title: file.name.trim().slice(0, 200) || "Imported document", content };
+      storeNewDraft(next); volatile.current = false;
+      setSelected("new"); setDocument(undefined); setVersions(undefined); setDraft(next);
+      setNotice("Text file loaded as a draft. Save document to store it in Library; existing draft backup retained.");
+    } catch (e) { if (owner === generation.current) setError(`Text import failed: ${String((e as Error).message ?? e)}. No document was submitted.`); }
+    finally { locked.current = false; if (owner === generation.current) setBusy(false); }
+  };
   const ready = selected === "new" || Boolean(document);
   const editable = selected === "new" || document?.editable === true;
   return <section aria-label="Library">
@@ -90,6 +110,7 @@ export function LibraryPanel({ controls }: { controls: LibraryControls }) {
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {pending && <p role="alert">Document action needs reconciliation. <button type="button" disabled={busy} onClick={() => void reconcile()}>Check saved document action</button></p>}
     <button type="button" disabled={busy || Boolean(pending)} onClick={() => void open("new")}>New document</button><button type="button" disabled={busy} onClick={() => setAttempt(n => n + 1)}>Refresh library</button>
+    <label>Import UTF-8 text document<input type="file" aria-label="Import text document" accept="text/*,.md,.markdown,.json,.yaml,.yml,.csv,.toml,.rst,.org" disabled={busy || Boolean(pending) || !catalog?.limits?.document_bytes} onChange={e => { const file = e.target.files?.[0]; e.target.value = ""; if (file) void importText(file); }} /></label>
     <form onSubmit={e => { e.preventDefault(); void controls.search(query).then(value => setResults(value.results), e => setError(String(e))); }}><label>Search indexed documents <input aria-label="Search library" value={query} onChange={e => setQuery(e.target.value)} /></label><button>Search library</button></form>
     {catalog?.collections.map(collection => <p key={collection.id}>{collection.label} · {collection.kind}</p>)}
     <ul>{catalog?.documents.map(doc => <li key={doc.id}><button type="button" disabled={busy} onClick={() => void open(doc.id)}>{doc.title}{doc.archived ? " (Archived)" : ""} · revision {doc.revision}</button></li>)}</ul>

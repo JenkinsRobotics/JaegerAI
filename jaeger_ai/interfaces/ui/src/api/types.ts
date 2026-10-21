@@ -79,6 +79,7 @@ export interface SessionRow {
 
 /** One persisted response part (core/gateway/turn_parts.py). */
 export type PersistedPart =
+  | { type: "knowledge"; documents: { id: string; revision: number; digest: string; title: string }[] }
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string; duration_ms?: number }
   | { type: "tool"; call_id?: string | null; tool?: string; status?: string; state?: string; input?: unknown; output?: unknown }

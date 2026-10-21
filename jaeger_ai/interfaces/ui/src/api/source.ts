@@ -43,7 +43,7 @@ export interface ScheduleControls {
 }
 export interface LibraryDocument { id: string; title: string; content: string; digest: string; revision?: number; archived?: boolean; editable?: boolean }
 export interface LibraryControls {
-  list(): Promise<{ documents: Omit<LibraryDocument, "content">[]; collections: { id: string; label: string; kind: string }[] }>;
+  list(): Promise<{ limits?: { document_bytes: number }; documents: Omit<LibraryDocument, "content">[]; collections: { id: string; label: string; kind: string }[] }>;
   search(query: string): Promise<{ results: { id: string; title: string; snippet: string }[] }>;
   read(id: string): Promise<LibraryDocument>;
   versions(id: string): Promise<{ versions: { revision: number; title: string; created_at: number }[] }>;
@@ -82,7 +82,18 @@ export interface MessageSearchPage {
   agent_id: string; next_before: string | null; matching: string;
   matches: { message_id: string; session_id: string; role: string; kind: string; title: string; timestamp: number; snippet: string; content: string; truncated: boolean }[];
 }
+export interface AgentKnowledgeSnapshot {
+  limits: { max_documents: number; context_chars: number };
+  agent_id: string; revision: number; editable: boolean;
+  documents: { id: string; revision: number; digest: string }[];
+  available: { id: string; title: string; revision: number; digest: string; archived: boolean }[];
+}
+export interface AgentKnowledgeControls {
+  read(id: string): Promise<AgentKnowledgeSnapshot>;
+  save(id: string, body: { expected_revision: number; document_ids: string[] }): Promise<AgentKnowledgeSnapshot>;
+}
 export interface JaegerSource {
+  agentKnowledge?: AgentKnowledgeControls;
   searchMessages?(agentId: string, query: string, before?: string): Promise<MessageSearchPage>;
   diagnostics?(): Promise<GatewayDiagnostics>;
   tools?(query?: string): Promise<ToolInventory>;

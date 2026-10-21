@@ -177,3 +177,22 @@ async def test_idle_stream_keepalive_is_not_a_durable_event(tmp_path):
         assert await response.content.readline() == b': keepalive\n'
         assert len(_events(app)) == before
         response.close()
+
+
+def test_context_and_tools_persist_after_sse_retention_prunes_early_events(tmp_path, monkeypatch):
+    from jaeger_ai.core.gateway import session_store as module
+    monkeypatch.setattr(module, 'MAX_RETAINED_EVENTS', 4)
+    store = GatewaySessionStore(tmp_path/'owned-retention.sqlite3')
+    store.ensure_session('owned-history')
+    store.admit_request('owned-history','Question',request_id='owned-context')
+    documents = [{'id':'owned-doc','revision':1,'digest':'owned-digest','title':'Owned reference'}]
+    store.append_event('owned-history','agent.knowledge',{'request_id':'owned-context','documents':documents})
+    store.append_event('owned-history','tool.started',{'request_id':'owned-context','call_id':'owned-tool','tool':'read_file'})
+    store.append_event('owned-history','tool.completed',{'request_id':'owned-context','call_id':'owned-tool','tool':'read_file','outcome':'completed'})
+    for _ in range(8):
+        store.append_event('owned-history','turn.delta',{'request_id':'owned-context','delta':'a'})
+    assert not any(event['event']=='agent.knowledge' for event in store.replay_events('owned-history',0)['events'])
+    store.complete_request('owned-context',status='completed',result={},assistant_text='aaaaaaaa')
+    parts=store.get_session('owned-history')['messages'][-1]['parts']
+    assert any(part['type']=='knowledge' and part['documents']==documents for part in parts)
+    assert any(part['type']=='tool' and part['call_id']=='owned-tool' and part['status']=='completed' for part in parts)

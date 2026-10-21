@@ -7,11 +7,12 @@ from .store import KnowledgeLibrary, LibraryError
 
 
 def _library() -> KnowledgeLibrary:
-    from jaeger_ai.main import _pipeline
+    # Gateway and CLI both bind this canonical workspace owner. Importing
+    # main._pipeline here created a second, usually uninitialized binding in
+    # the daemon and made the real Library UI fail despite mocked route tests.
+    from jaeger_agent.core.workspace import get_layout
 
-    layout = _pipeline.get("layout")
-    if layout is None:
-        raise RuntimeError("Jaeger instance is not bound")
+    layout = get_layout()
     return KnowledgeLibrary(layout.memory_dir / "library.db")
 
 

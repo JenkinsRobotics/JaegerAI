@@ -1530,7 +1530,7 @@ class GatewaySessionStore:
                 turn_events = [
                     {"event": e["event"], "data": json.loads(e["data_json"] or "{}"), "timestamp": e["timestamp"]}
                     for e in conn.execute(
-                        f"SELECT event, data_json, timestamp FROM events WHERE session_id=? AND event IN ({marks}) "
+                        f"SELECT event, data_json, timestamp FROM activity_history WHERE session_id=? AND event IN ({marks}) "
                         "AND json_extract(data_json, '$.request_id')=? ORDER BY event_id ASC",
                         (row["session_id"], *PART_EVENTS, request_id),
                     )
