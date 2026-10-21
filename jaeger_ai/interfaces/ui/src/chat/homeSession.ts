@@ -192,13 +192,19 @@ export function contractHome(getJson: GetJson, opts: HomeOptions = {}, stream?: 
       const detail = await getJson(`/v1/sessions/${encodeURIComponent(sessionId)}`) as SessionRow;
       if (detail.agent_id) agentOf.set(sessionId, detail.agent_id);
     }
-    return { ...fromWirePage(sessionId, (await getJson(HOME_ROUTES.page(sessionId, limit, before))) as WirePage, name), agentId: agentOf.get(sessionId) };
+    const wire = await getJson(HOME_ROUTES.page(sessionId, limit, before)) as WirePage;
+    if (!Array.isArray(wire.messages) || wire.messages.some(message => message.session_id !== sessionId)) throw new Error("History response belongs to a different conversation; nothing was merged");
+    const next = wire.next_before == null ? undefined : String(wire.next_before);
+    if (before && next && (next === before || (/^\d+$/.test(before) && /^\d+$/.test(next) && Number(next) >= Number(before)))) throw new Error("History cursor did not advance; current messages are preserved");
+    return { ...fromWirePage(sessionId, wire, name), agentId: agentOf.get(sessionId) };
   };
   const rows = async (agentId: string) => rowsOf(await getJson(HOME_ROUTES.sessions(agentId)));
   return {
     mode: "contract",
     async home(agentId) {
       const wire = (await getJson(HOME_ROUTES.home(agentId))) as WireHome;
+      const canonical = wire.agent_id === agentId ? agentId : ((await getJson(`/v1/agents/${encodeURIComponent(agentId)}`)) as {id?: string}).id;
+      if (wire.agent_id !== canonical || typeof wire.session_id !== "string" || !wire.session_id) throw new Error("Home response does not match the selected bot; no replacement chat was created");
       homes.set(agentId, wire.session_id);
       agentOf.set(wire.session_id, wire.agent_id);
       return wire.session_id;

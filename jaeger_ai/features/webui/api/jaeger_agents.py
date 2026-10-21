@@ -395,10 +395,17 @@ def route(handler, parsed, method: str) -> bool:
 
             raw = json.dumps(read_body(handler) or {}).encode("utf-8")
         return _proxy(handler, "POST", "/v1/tasks", raw)
-    if method == "GET" and (path.startswith("/api/tasks/") or path.startswith("/v1/tasks/")):
+    if path.startswith(("/api/tasks/", "/v1/tasks/")):
         from urllib.parse import quote
-
-        return _proxy(handler, "GET", f"/v1/tasks/{quote(path.split('/tasks/', 1)[1], safe='')}")
+        rest = path.split('/tasks/', 1)[1].split('/')
+        if len(rest) == 1 and rest[0] and method in {"GET", "PATCH"} or len(rest) == 2 and rest[0] and rest[1] in {"cancel", "approve"} and method == "POST":
+            raw = None
+            if method != "GET":
+                raw = getattr(handler, "_json_body_bytes", None)
+                if raw is None:
+                    from api.helpers import read_body
+                    raw = json.dumps(read_body(handler) or {}).encode("utf-8")
+            return _proxy(handler, method, '/v1/tasks/' + '/'.join(quote(part, safe='') for part in rest), raw)
 
     # Connect Apps (Agents View panel). The install body is relayed as-is;
     # the Gateway enforces confirm:true and the owner-caller rule.

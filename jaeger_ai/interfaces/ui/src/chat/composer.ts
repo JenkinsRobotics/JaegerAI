@@ -51,7 +51,7 @@ export async function withBytes(files: PendingFile[], enabled = bytesUploadEnabl
   const sendable = files.filter((f) => !f.error);
   return Promise.all(base.map(async (a, i) => {
     const blob = sendable[i].blob;
-    return a.path || a.data || !blob ? a : { ...a, data: await readBase64(blob) };
+    return a.path || a.data !== undefined || !blob ? a : { ...a, data: await readBase64(blob) };
   }));
 }
 

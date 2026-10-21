@@ -150,12 +150,12 @@ describe("contract page owner identity", () => {
   it("preserves canonical specialist identity across newest and older pages", async () => {
     const get = vi.fn(async (path: string) => path.includes("/home")
       ? { session_id: "specialist-home", agent_id: "native:specialist", created: false }
-      : { messages: [], next_before: null });
+      : path === "/v1/agents/specialist" ? { id: "native:specialist" } : { messages: [], next_before: null });
     const home = contractHome(get);
     const id = await home.home("specialist");
     expect((await home.page(id)).agentId).toBe("native:specialist");
     expect((await home.page(id, "older")).agentId).toBe("native:specialist");
-    expect(get).toHaveBeenCalledTimes(3);
+    expect(get).toHaveBeenCalledTimes(4);
   });
   it("resolves explicit worker sessions through session identity and caches the binding", async () => {
     const get = vi.fn(async (path: string) => path === "/v1/sessions/worker"
@@ -171,4 +171,10 @@ describe("contract page owner identity", () => {
 it("retains durable exchange correlation and terminal status across paged home reload", () => {
   const ui = fromWirePage('owned-home', { next_before: null, messages: [W({ id: 'owned-result', kind: 'handoff_result', status: 'completed', sender_agent_id: 'native:owned', content: 'owned result', links: { handoff_id: 'child', thread_handoff_id: 'root', reply_to_handoff_id: 'parent', origin_session_id: 'owned-home' } })] }, String);
   expect(ui.entries[ENTRY_PREFIX+'owned-result']).toMatchObject({ handoffId: 'child', threadId: 'root', replyTo: 'parent', originSessionId: 'owned-home', status: 'completed' });
+});
+
+it("rejects a foreign home and a stuck older-history cursor without creating a replacement", async () => {
+ const home=contractHome(async path=> path.includes('/home') ? {agent_id:'other',session_id:'foreign'} : path.includes('/messages') ? {messages:[],next_before:'50'} : {agent_id:'a'});
+ await expect(home.home('a')).rejects.toThrow('does not match');
+ await expect(home.page('owned','50')).rejects.toThrow('did not advance');
 });

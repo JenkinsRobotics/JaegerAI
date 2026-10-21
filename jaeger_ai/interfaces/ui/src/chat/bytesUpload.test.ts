@@ -42,7 +42,7 @@ describe("bytes upload (on by default since 417d8a0c; flag \"0\" opts out)", () 
   };
   const turn = async (host: WebHost) => {
     const parts: ChatPart[] = [];
-    await host.startTurn({ sessionId: "s1", turnId: "t1", message: "m", attachments: [{ name: "note.txt", mimeType: "text/plain", data: btoa("hello") }] }, (p) => parts.push(p)).done;
+    await host.startTurn({ sessionId: crypto.randomUUID(), turnId: crypto.randomUUID(), message: "m", attachments: [{ name: "note.txt", mimeType: "text/plain", data: btoa("hello") }] }, (p) => parts.push(p)).done;
     return parts;
   };
   it("WebHost uploads the bytes unless opted out", async () => {

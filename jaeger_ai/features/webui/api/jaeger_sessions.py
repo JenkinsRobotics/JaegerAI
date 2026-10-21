@@ -230,12 +230,35 @@ def route(handler, parsed, method: str) -> bool:
 
     # Global event stream (agents, approvals, tasks, connect-apps): the same
     # SSE pump as the session stream, no separate proxy.
-    if path == "/api/jaeger/events/stream" and method == "GET":
+    if path in {"/api/jaeger/events/stream", "/v1/events/stream"} and method == "GET":
         return _proxy_stream(handler, "*", query, upstream_path="/v1/events/stream")
 
     if path in ("/api/jaeger/gateway/health", "/api/jaeger/health"):
         # The gateway serves /health, NOT /v1/health — the latter 404s.
         return _proxy(handler, "GET", "/health")
+
+    if method == "GET" and (path in {"/v1/library", "/v1/library/search"} or path.startswith("/v1/library/documents/")):
+        return _proxy(handler, "GET", path + query)
+    if method == "POST" and (path == "/v1/library/documents" or path.startswith("/v1/library/documents/") and path.rsplit('/', 1)[1] in {"save", "archive", "restore", "version"}):
+        raw = getattr(handler, "_json_body_bytes", None)
+        if raw is None:
+            from api.helpers import read_body
+            raw = json.dumps(read_body(handler) or {}).encode("utf-8")
+        return _proxy(handler, "POST", path, raw)
+
+    if method == "GET" and path in {"/v1/schedules", "/v1/schedules/history"}:
+        return _proxy(handler, "GET", path + query)
+    if method == "GET" and path.startswith("/v1/control-operations/"):
+        from urllib.parse import quote
+        operation_id = path[len("/v1/control-operations/"):]
+        if operation_id and '/' not in operation_id:
+            return _proxy(handler, "GET", "/v1/control-operations/" + quote(operation_id, safe=""))
+    if method == "POST" and path.startswith("/v1/schedules/") and path.rsplit('/', 1)[1] in {"create", "update", "pause", "resume", "delete", "restore", "run"}:
+        raw = getattr(handler, "_json_body_bytes", None)
+        if raw is None:
+            from api.helpers import read_body
+            raw = json.dumps(read_body(handler) or {}).encode("utf-8")
+        return _proxy(handler, "POST", path, raw)
 
     if path in ("/api/jaeger/runtime/status", "/api/runtime/status"):
         return _proxy(handler, "GET", "/v1/runtime/status")
@@ -245,6 +268,9 @@ def route(handler, parsed, method: str) -> bool:
 
     if method == "GET" and path in ("/api/jaeger/runtime/models", "/api/runtime/models"):
         return _proxy(handler, "GET", "/v1/runtime/models")
+
+    if method == "GET" and path == "/v1/runtime/skills":
+        return _proxy(handler, "GET", path + query)
 
     if method == "GET" and path in ("/api/jaeger/runtime/capabilities", "/api/runtime/capabilities"):
         return _proxy(handler, "GET", "/v1/runtime/capabilities")
@@ -326,7 +352,7 @@ def route(handler, parsed, method: str) -> bool:
     # /v1/sessions/{id}
     if len(parts) == 1:
         if method == "GET":
-            return _proxy(handler, "GET", f"/v1/sessions/{session_id}")
+            return _proxy(handler, "GET", f"/v1/sessions/{session_id}{query}")
         if method == "PATCH":  # rename / archive / default model
             return _proxy(handler, "PATCH", f"/v1/sessions/{session_id}", _body_bytes(handler))
         if method == "DELETE":

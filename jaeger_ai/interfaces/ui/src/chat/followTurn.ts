@@ -1,3 +1,4 @@
+import { requestOutcome } from "./requestOutcome";
 /* Follow exactly one turn on the session stream (review #3).
  *
  * Mirrors core/gateway/openai_compat.py (_follow): send first, then stream
@@ -18,7 +19,7 @@ import type { ChatPart, TurnState } from "./host";
 export const DEFAULT_BACKOFF_MS = [250, 500, 1000, 2000, 4000, 8000];
 
 export interface FollowOptions {
-  source: Pick<JaegerSource, "stream">;
+  source: Pick<JaegerSource, "stream" | "requestStatus">;
   sessionId: string;
   requestId: string;
   turnId?: string;
@@ -58,8 +59,21 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
   let cursor = opts.cursor;
   let attempt = 0;
   let answer = "";
+  let generation = 0;
+  const reconcile = async (): Promise<{ state: TurnState }> => {
+    try {
+      const row = await opts.source.requestStatus?.(opts.sessionId, opts.requestId);
+      if (row?.request_id === opts.requestId && row.session_id === opts.sessionId) {
+        const state = requestOutcome(row, opts.onPart, answer);
+        if (state) return { state };
+      }
+    } catch { /* unavailable lookup cannot settle execution */ }
+    opts.onPart({ kind: "warning", message: "Connection lost. Request outcome is unknown; no work was resent. Check this request again after reconnecting." });
+    return { state: "unknown" };
+  };
 
   while (!opts.signal.aborted) {
+    const ownerGeneration = ++generation;
     const local = new AbortController();
     const stop = () => local.abort();
     opts.signal.addEventListener("abort", stop, { once: true });
@@ -67,7 +81,7 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
     let progressed = false;
     try {
       await opts.source.stream(opts.sessionId, cursor, (event) => {
-        if (terminal) return;
+        if (terminal || ownerGeneration !== generation || local.signal.aborted) return;
         const id = typeof event.event_id === "number" && Number.isFinite(event.event_id) ? event.event_id : undefined;
         if (id !== undefined) {
           if (id <= cursor) return; // replayed or duplicate frame
@@ -98,13 +112,14 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
       if (opts.signal.aborted) break;
       if (error instanceof GatewayError && error.status === 410) {
         opts.onPart({ kind: "error", message: "The stream cursor expired before this turn finished. Reload the session to see the result." });
-        return { state: "failed" };
+        return reconcile();
       }
       if (error instanceof GatewayError && error.status >= 400 && error.status < 500) {
         opts.onPart({ kind: "error", message: error.message });
-        return { state: "failed" };
+        return reconcile();
       }
     } finally {
+      if (generation === ownerGeneration) generation++;
       opts.signal.removeEventListener("abort", stop);
     }
     if (terminal) return { state: terminal };
@@ -113,9 +128,9 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
     if (progressed) attempt = 0;
     if (attempt >= backoff.length) {
       opts.onPart({ kind: "error", message: "Lost the connection to the gateway." });
-      return { state: "failed" };
+      return reconcile();
     }
     await sleep(backoff[attempt++], opts.signal);
   }
-  return { state: "cancelled" };
+  return reconcile();
 }

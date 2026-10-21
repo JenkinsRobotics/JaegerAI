@@ -104,6 +104,7 @@ def test_tool_failure_is_sanitized_and_replays_from_durable_cursor(tmp_path):
         "call_id": started.data["activity_id"],
         "tool": "run_shell",
         "phase": "failed",
+        "outcome": "failed",
         "success": False,
         "ok": False,
         "elapsed_s": 1.235,
@@ -284,3 +285,16 @@ def test_helper_output_is_bounded(tmp_path):
     flush()
     (event,) = _events_named(app, "session", "request", "tool.completed")
     assert len(event.data["output"]) <= 12_010
+
+
+def test_tool_outcome_retains_permission_category_without_error_contents(tmp_path):
+    app, store, _ = _admitted_app(tmp_path)
+    callbacks, flush = app._turn_stream_callbacks("session", "request")
+    callbacks.on_tool_progress("write_file", "start", {})
+    callbacks.on_tool_done("write_file", {}, {"ok": False, "error_type": "permission_denied", "error": "PRIVATE-ERROR"}, False, "PRIVATE-ERROR", .1)
+    flush()
+    event = _request_events(app, "session", "request")[-1]
+    assert event.event == "tool.failed" and event.data["outcome"] == "denied"
+    assert "PRIVATE-ERROR" not in json.dumps(event.data)
+    store.complete_request("request", status="completed", result={}, assistant_text="Fixture declined")
+    assert store.get_session("session")["messages"][-1]["parts"][-1]["status"] == "denied"

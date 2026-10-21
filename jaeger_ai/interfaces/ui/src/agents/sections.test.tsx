@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { groupRows } from "./sections";
-import { onRosterEvent, type AgentsState } from "./agentsStore";
+import { loadRoster, onRosterEvent, type AgentsState } from "./agentsStore";
 import { MockSource } from "../api/mock";
 
 const row = (id: string, extra: Record<string, unknown> = {}) => ({ agent: { id, name: id, ...extra } as never, lastActivityAt: 0 });
@@ -18,6 +18,9 @@ describe("sections grouping", () => {
 });
 
 describe("roster events", () => {
+  it("does not fabricate an empty section list when its supported backend fails", async () => {
+    await expect(loadRoster({ agents: async () => [{ id: "owned", name: "Owned", section_id: null } as never], agentsSummary: async () => [], agentActions: { sections: async () => { throw new Error("section registry offline"); } } as never })).rejects.toThrow("section registry offline");
+  });
   it("agent.unread patches in place; agent.* and section.* refresh; others ignored", () => {
     let state = { agents: [{ id: "a", name: "a", unread_count: 0 }], summaries: [], seen: {}, loading: false } as unknown as AgentsState;
     const refresh = vi.fn();

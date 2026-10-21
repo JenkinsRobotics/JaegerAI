@@ -40,7 +40,7 @@ describe("an agent's chats", () => {
 
 describe("New chat menu", () => {
   it("offers a fresh chat with each agent, then Create agent", () => {
-    const items = newChatItems([{ id: "native:jaeger", name: "jaeger", role: "lead" }, { id: "native:everyday", name: "everyday", display_name: "Everyday" }]);
+    const items = newChatItems([{ id: "native:jaeger", name: "jaeger", display_name: "Jaeger", role: "lead" }, { id: "native:everyday", name: "everyday", display_name: "Everyday" }]);
     expect(items.map((i) => i.label)).toEqual(["New chat with Jaeger", "New chat with Everyday", "Create agent…"]);
     expect(items[2].separatorBefore).toBe(true);
   });

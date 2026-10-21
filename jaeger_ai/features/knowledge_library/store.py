@@ -6,6 +6,7 @@ import hashlib
 import sqlite3
 import time
 from pathlib import Path
+from .managed import ManagedDocuments
 
 TEXT_SUFFIXES = frozenset({".md", ".markdown", ".txt", ".rst", ".org", ".json", ".yaml", ".yml", ".toml", ".csv"})
 MAX_FILE_BYTES = 2_000_000
@@ -16,7 +17,7 @@ class LibraryError(ValueError):
     pass
 
 
-class KnowledgeLibrary:
+class KnowledgeLibrary(ManagedDocuments):
     def __init__(self, path: Path) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(path))
@@ -54,6 +55,7 @@ class KnowledgeLibrary:
                 END;
                 """
             )
+            self.init_managed()
 
     def close(self) -> None:
         self.conn.close()
@@ -82,6 +84,8 @@ class KnowledgeLibrary:
 
     def index(self, collection_id: str) -> dict:
         collection = self._collection(collection_id)
+        if collection['kind'] == 'managed':
+            raise LibraryError('Managed documents are already indexed; no filesystem import applies')
         root = Path(collection["root"]).resolve(strict=True)
         indexed = unchanged = skipped = 0
         seen: set[str] = set()
@@ -163,7 +167,7 @@ class KnowledgeLibrary:
             "snippet(library_documents_fts,1,'[',']','…',24) AS snippet "
             "FROM library_documents_fts JOIN library_documents d "
             "ON d.rowid=library_documents_fts.rowid "
-            "WHERE library_documents_fts MATCH ? ORDER BY rank LIMIT ?",
+            "WHERE library_documents_fts MATCH ? AND NOT EXISTS (SELECT 1 FROM library_managed_documents m WHERE m.document_id=d.id AND m.archived=1) ORDER BY rank LIMIT ?",
             (phrase, max(1, min(int(limit), 100))),
         ).fetchall()
         return [dict(row) for row in rows]

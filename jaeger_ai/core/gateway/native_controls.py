@@ -15,10 +15,10 @@ def register(gateway):
         from jaeger_agent.memory import sqlite_store
         try:
             sqlite_store.connection()  # Fail visibly if the instance has not bound.
-            jobs = owner.list_jobs()["schedules"]
+            jobs = owner.list_jobs(include_cancelled=request.query.get("include_deleted") == "1")["schedules"]
             return web.json_response({"jobs": [
                 {**j, "id": j["name"], "schedule_display": j["cron"],
-                 "enabled": not j["paused"], "state": j["status"]} for j in jobs],
+                 "enabled": j["status"] == "active", "state": j["status"]} for j in jobs],
                 "scheduler": "jaeger"})
         except RuntimeError as exc:
             return web.json_response({"error": str(exc)}, status=503)
@@ -38,7 +38,7 @@ def register(gateway):
         from jaeger_ai.core.runtime import schedules as owner
         from jaeger_agent.memory import sqlite_store
         action = request.match_info["action"]
-        if action not in {"create", "update", "pause", "resume", "delete", "run"}:
+        if action not in {"create", "update", "pause", "resume", "delete", "restore", "run"}:
             raise web.HTTPNotFound()
         try:
             body = await request.json()
@@ -64,7 +64,7 @@ def register(gateway):
             if action == "create":
                 if not name:
                     name = "native-" + oid
-                if any(j["name"] == name for j in owner.list_jobs()["schedules"]):
+                if any(j["name"] == name for j in owner.list_jobs(include_cancelled=True)["schedules"]):
                     raise ValueError("A schedule with this name already exists")
                 result = owner.create_job(name=name, prompt=str(body.get("prompt") or ""), schedule=str(body.get("schedule") or ""))
             elif action == "update":
@@ -79,8 +79,8 @@ def register(gateway):
                 result = gateway.task_owner.submit(job["prompt"], context={"session_id": parent["session_id"], "source": "client", "request_id": oid}, key=oid)
                 gateway.task_owner.store.update_task(result["task_id"], lambda task: task.provenance.update(schedule_id=name))
             else:
-                result = {"pause": owner.pause_job, "resume": owner.resume_job, "delete": owner.cancel_job}[action](name)
-                if not any(result.get(k) for k in ("paused", "resumed", "cancelled")):
+                result = {"pause": owner.pause_job, "resume": owner.resume_job, "delete": owner.cancel_job, "restore": owner.restore_job}[action](name)
+                if not any(result.get(k) for k in ("paused", "resumed", "cancelled", "restored")):
                     raise ValueError("Schedule not found")
             receipt = {"ok": True, "operation_id": oid, "result": result, "http_status": 200}
         except ValueError as exc:

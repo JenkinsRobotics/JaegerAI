@@ -81,7 +81,7 @@ export interface SessionRow {
 export type PersistedPart =
   | { type: "text"; text: string }
   | { type: "reasoning"; text: string; duration_ms?: number }
-  | { type: "tool"; call_id?: string | null; tool?: string; status?: "running" | "done" | "error"; state?: "running" | "done" | "error"; input?: unknown; output?: unknown }
+  | { type: "tool"; call_id?: string | null; tool?: string; status?: string; state?: string; input?: unknown; output?: unknown }
   /** 417d8a0c: an approval the turn asked for. call_id is usually null, so it matches its tool on tool+target. */
   | { type: "approval"; approval_id: string; call_id?: string | null; tool?: string; target?: string; status?: string; state?: string; decision?: string | null }
   | { type: "plan"; [key: string]: unknown }
@@ -113,6 +113,10 @@ export interface Task {
   runner?: Runner | null;
   updated_at?: number;
   created_at?: number;
+  provenance?: { authorized?: boolean; session_id?: string; request_id?: string };
+  result?: unknown;
+  error?: string | null;
+  run_history?: unknown[];
 }
 
 export interface Handoff {

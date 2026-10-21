@@ -277,6 +277,8 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-amenu__item.is-title { font-weight: 600; }
 .jg-amenu__item .jg-icon { width: 22px; }
 .jg-amenu__chev { margin-left: auto; opacity: .8; }
+.jg-amenu__sections { position: fixed; z-index: 1; width: 242px; max-height: min(400px, calc(100vh - 16px)); overflow-y: auto; }
+.jg-amenu__sections [aria-checked="true"] { background: var(--jg-menu-hover); }
 .jg-amenu__sep { height: 1px; margin: 4px 20px; background: var(--jg-menu-sep); }
 .jg-amenu__scrim:not(.is-phone) .jg-amenu__item { min-height: 34px; font-size: 14px; }
 .jg-amenu__scrim:not(.is-phone) .jg-amenu__bubble { font-size: 14px; }

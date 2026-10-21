@@ -125,11 +125,13 @@ export function stepsSummary(tools: ToolPart[]): string {
   const counts = new Map<ToolCategory, number>();
   const waiting = tools.filter((t) => t.state === "waitingForConfirmation").length;
   for (const t of tools) {
-    if (t.state === "waitingForConfirmation") continue;
+    if (t.state !== "completed") continue;
     const c = toolCategory(t.toolName);
     counts.set(c, (counts.get(c) ?? 0) + 1);
   }
   const live = tools.filter((t) => t.state === "streaming" || t.state === "executing").length;
-  return [...[...counts].map(([c, n]) => DONE[c](n)), live ? `${live} running` : "", waiting ? `${waiting} waiting for your OK` : ""]
+  const outcomes = ["failed", "denied", "rejected", "unsupported", "cancelled", "unknown"]
+    .flatMap(state => { const n = tools.filter(t => t.state === state).length; return n ? [`${n} ${state}`] : []; });
+  return [...[...counts].map(([c, n]) => DONE[c](n)), ...outcomes, live ? `${live} running` : "", waiting ? `${waiting} waiting for your OK` : ""]
     .filter(Boolean).join(" · ");
 }

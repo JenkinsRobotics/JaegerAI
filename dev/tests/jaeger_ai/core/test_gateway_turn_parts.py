@@ -110,6 +110,8 @@ async def test_patch_session_model_is_validated_and_drives_turn_defaults(tmp_pat
         ok = await client.patch("/v1/sessions/s1", json={"model": "@ollama:qwen3:4b"})
         assert ok.status == 200
         assert (await ok.json())["metadata"]["model"] == "qwen3:4b"
+        settings = await client.get("/v1/sessions/s1?view=settings")
+        assert await settings.json() == {"session_id": "s1", "model": "qwen3:4b", "provider": "ollama"}
         assert (await client.patch("/v1/sessions/s1", json={"model": "offline-model"})).status == 400
         assert (await client.patch("/v1/sessions/s1", json={"model": "nope"})).status == 400
         assert (await client.patch("/v1/sessions/s1", json={"model": 3})).status == 400
@@ -161,3 +163,17 @@ def test_sent_marker_requires_durable_recipient_post(tmp_path, monkeypatch):
     before = len(_events(gateway))
     gateway._post_handoff_request({**record, "id": "handoff_failed_delivery"})
     assert len(_events(gateway)) == before
+
+
+@pytest.mark.asyncio
+async def test_idle_stream_keepalive_is_not_a_durable_event(tmp_path):
+    from aiohttp.test_utils import TestClient, TestServer
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    app = _gateway(tmp_path)
+    app._sse_keepalive_seconds = .01
+    before = len(_events(app))
+    async with TestClient(TestServer(app.app), headers=client_headers('webui')) as client:
+        response = await client.get('/v1/sessions/s1/stream')
+        assert await response.content.readline() == b': keepalive\n'
+        assert len(_events(app)) == before
+        response.close()

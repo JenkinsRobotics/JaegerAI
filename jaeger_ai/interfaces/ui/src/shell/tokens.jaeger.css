@@ -1,7 +1,8 @@
 /* Jaeger design tokens (Jenkins Robotics, 2026-10-17, original). Values follow the measured Grok Bot desktop
  * window (Jaeger-Mac-App-Improvement-Guide.md): neutral grays, one foreground with text tiers as opacities,
  * 14px / 420 / 22px type. No third-party code, fonts or assets: the system font is used.
- * Light by default; dark follows the system (prefers-color-scheme), like the native window background.
+ * Appearance settings resolve system preference to aether-light-theme. All surfaces and menus use
+ * that single resolved choice; explicit light/dark must not be overridden by the OS media query.
  * Loaded after the Aether CSS: the --aether-* colors are remapped onto these, so Aether widgets and the
  * existing component CSS pick them up without new literals. */
 :root {
@@ -50,8 +51,7 @@
   --jg-dur-base: 150ms;
   --jg-dur-slow: 200ms;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
+:root:not(.aether-light-theme) {
     --jg-color-chrome: #121212;
     --jg-color-pane: #161616;
     --jg-color-sidebar: #0e0e0e;
@@ -67,7 +67,6 @@
     --jg-shadow-card: 0 1px 2px color-mix(in srgb, var(--jg-color-shadow) 40%, transparent),
                       0 4px 16px color-mix(in srgb, var(--jg-color-shadow) 32%, transparent);
     --jg-shadow-control: none;
-  }
 }
 
 /* Derived colors and type: declared where they are used so they re-resolve per theme. */
@@ -149,6 +148,7 @@ body {
   --jg-scrim: rgba(0, 0, 0, .55);
 }
 :root.aether-light-theme {
+  color-scheme: light;
   --jg-p-bg: #ffffff; --jg-p-fg: #111111; --jg-p-dim: #6e6e73; --jg-p-raised: #f0f0f2; --jg-p-button: #ececef; --jg-p-me: #d1d1d6;
   --jg-p-voice-bg: #111111; --jg-p-voice-fg: #ffffff;
   --jg-menu-scrim: rgba(0, 0, 0, .18); --jg-menu-shadow: rgba(0, 0, 0, .18); --jg-menu-fg: #111111; --jg-menu-dim: #6e6e73;
@@ -158,3 +158,4 @@ body {
   --jg-danger: #e5484d; --jg-danger-fill: #e5484d;
   --jg-scrim: rgba(0, 0, 0, .5);   /* measured: Grok dims 245 → 122 */
 }
+:root:not(.aether-light-theme) { color-scheme: dark; }

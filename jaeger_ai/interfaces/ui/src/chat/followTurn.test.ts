@@ -1,3 +1,5 @@
+import { beforeEach } from "vitest";
+beforeEach(() => localStorage.clear());
 import { describe, expect, it, vi } from "vitest";
 import { GatewayError } from "../api/gateway";
 import type { JaegerSource, TurnReceipt } from "../api/source";
@@ -79,15 +81,15 @@ describe("followTurn (review #3)", () => {
     const stream: Stream = async () => { /* closes immediately */ };
     const parts: ChatPart[] = [];
     const result = await followTurn({ source: { stream }, sessionId: "s", requestId: "r1", cursor: 0, signal: new AbortController().signal, onPart: (p) => parts.push(p), backoffMs: [1, 1], sleep: noSleep });
-    expect(result.state).toBe("failed");
-    expect(parts.at(-1)).toMatchObject({ kind: "error" });
+    expect(result.state).toBe("unknown");
+    expect(parts.at(-1)).toMatchObject({ kind: "warning" });
   });
 
   it("fails clearly on 410 cursor expired instead of replaying", async () => {
     const stream: Stream = async () => { throw new GatewayError("Resume cursor is no longer retained", 410); };
     const parts: ChatPart[] = [];
     const result = await followTurn({ source: { stream }, sessionId: "s", requestId: "r1", cursor: 4, signal: new AbortController().signal, onPart: (p) => parts.push(p), sleep: noSleep });
-    expect(result.state).toBe("failed");
+    expect(result.state).toBe("unknown");
     expect(parts[0]).toMatchObject({ kind: "error" });
   });
 });
@@ -157,18 +159,29 @@ describe("WebHost Stop confirmation", () => {
     finish(ev(2, "turn.cancelled", "stop-r"));
     expect((await handle.done).state).toBe("cancelled");
   });
-  it("handles Stop before admission without aborting observation or submitting again", async () => {
+  it("handles Stop after submission but before admission reply without submitting again", async () => {
     let admit!: (r: TurnReceipt) => void;
     const send = vi.fn(() => new Promise<TurnReceipt>((r) => { admit = r; }));
     const cancel = vi.fn(async () => {});
     const host = new WebHost({ send, cancel, stream: replayAll([ev(2, "turn.cancelled", "assigned")]) } as unknown as JaegerSource);
     const handle = host.startTurn({ sessionId: "fixture", turnId: "client-r", message: "owned check" }, () => {});
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(1));
     handle.cancel();
-    await new Promise((r) => setTimeout(r, 0));
     expect(cancel).not.toHaveBeenCalled();
     admit({ request_id: "assigned", start_event_id: 1 });
     expect((await handle.done).state).toBe("cancelled");
     expect(cancel).toHaveBeenCalledWith("fixture", "assigned");
     expect(send).toHaveBeenCalledTimes(1);
   });
+});
+
+it("ignores a retired stream callback even if its event ID is newer", async () => {
+ let stale!: (event:GatewayEvent)=>void;let calls=0;const parts:ChatPart[]=[];
+ const stream:Stream=async(_s,_c,onEvent)=>{
+  if(++calls===1){stale=onEvent;onEvent(ev(1,'turn.delta','r',{delta:'a'}));return;}
+  stale(ev(999,'turn.failed','r',{error:'retired connection'}));
+  onEvent(ev(2,'turn.delta','r',{delta:'b'}));onEvent(ev(3,'turn.finish','r'));
+ };
+ const outcome=await followTurn({source:{stream},sessionId:'s',requestId:'r',cursor:0,signal:new AbortController().signal,onPart:p=>parts.push(p),backoffMs:[1],sleep:noSleep});
+ expect(outcome.state).toBe('complete');expect(parts).toEqual([{kind:'markdownContent',text:'a'},{kind:'markdownContent',text:'b'}]);
 });

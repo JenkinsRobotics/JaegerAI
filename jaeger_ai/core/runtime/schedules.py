@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 
-def list_jobs(*, include_paused: bool = True) -> dict[str, Any]:
+def list_jobs(*, include_paused: bool = True, include_cancelled: bool = False) -> dict[str, Any]:
     from jaeger_agent.memory import sqlite_store
     from jaeger_agent.memory.memory import _schedule_row_to_dict
 
@@ -19,6 +19,8 @@ def list_jobs(*, include_paused: bool = True) -> dict[str, Any]:
     except RuntimeError:
         return {"count": 0, "schedules": []}
     statuses = ("active", "paused") if include_paused else ("active",)
+    if include_cancelled:
+        statuses += ("cancelled",)
     placeholders = ",".join("?" * len(statuses))
     rows = conn.execute(
         f"SELECT * FROM schedules WHERE status IN ({placeholders}) "
@@ -110,6 +112,14 @@ def pause_job(name: str) -> dict[str, Any]:
 
 def resume_job(name: str) -> dict[str, Any]:
     return {"resumed": _set_status(name, "active"), "name": name}
+
+
+def restore_job(name: str) -> dict[str, Any]:
+    """Recover a cancelled definition paused; never schedule work as a side effect of restore."""
+    from jaeger_agent.memory import sqlite_store
+    with sqlite_store.writer() as conn:
+        changed = conn.execute("UPDATE schedules SET status='paused' WHERE schedule_id=? AND status='cancelled'", ((name or '').strip(),)).rowcount
+    return {"restored": bool(changed), "name": name}
 
 
 __all__ = [
