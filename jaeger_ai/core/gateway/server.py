@@ -1381,6 +1381,7 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/runtime/capabilities", self.handle_runtime_capabilities)
         self.app.router.add_get("/v1/runtime/skills", self.handle_runtime_skills)
         self.app.router.add_get("/v1/runtime/tools", self.handle_runtime_tools)
+        self.app.router.add_get("/v1/channels", self.handle_channels)
         self.app.router.add_get("/v1/runtime/diagnostics", self.handle_runtime_diagnostics)
         self.app.router.add_post("/v1/sessions/{id}/ide/{ide_request_id}", self.handle_ide_result)
         self.app.router.add_get("/v1/runtime/autonomy", self.handle_get_autonomy)
@@ -5829,6 +5830,10 @@ class JaegerGatewayApp:
         dump_yaml(Path(path), config)
         self.event_bus.publish("*", "runtime.tier.changed", {"tier": tier})
         return web.json_response({"tier": tier, "options": list(INTERACTION_TIERS)})
+
+    async def handle_channels(self, request: web.Request) -> web.Response:
+        from jaeger_ai.features.channels.status import snapshot
+        return web.json_response(snapshot())
 
     async def handle_runtime_diagnostics(self, request: web.Request) -> web.Response:
         return web.json_response({**self.store.diagnostics_snapshot(), 'process_id': os.getpid(),

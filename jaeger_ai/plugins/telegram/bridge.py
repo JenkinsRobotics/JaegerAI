@@ -336,9 +336,5 @@ class TelegramBridge:
             return f"(agent error: {type(exc).__name__}: {exc})"
 
     def _call_handler(self, text: str, session_key: str | None) -> str:
-        """Handler signature is permissive: try the modern (text, session_key)
-        form first, fall back to (text) for callers that haven't upgraded."""
-        try:
-            return self._handler(text, session_key=session_key) or ""
-        except TypeError:
-            return self._handler(text) or ""
+        from .._messaging import call_handler_once
+        return call_handler_once(self._handler, text, session_key=session_key) or ""

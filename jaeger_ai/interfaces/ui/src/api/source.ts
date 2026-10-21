@@ -102,7 +102,12 @@ export interface WorkflowControls {
   mutate(action: WorkflowAction, id: string, body: Record<string, unknown>): Promise<WorkflowReceipt>;
   operation(id: string): Promise<{ receipt: WorkflowReceipt | null }>;
 }
+export interface ChannelSnapshot {
+  channels: { id: string; name: string; catalog_maturity: string; adapter_registered: boolean; bridge_registered: boolean; thread_state: string; connection_health: "not_probed"; delivery_verified: false; actions: string[] }[];
+  scope: "current_gateway_process_only";
+}
 export interface JaegerSource {
+  channels?(): Promise<ChannelSnapshot>;
   workflows?: WorkflowControls;
   agentKnowledge?: AgentKnowledgeControls;
   searchMessages?(agentId: string, query: string, before?: string): Promise<MessageSearchPage>;

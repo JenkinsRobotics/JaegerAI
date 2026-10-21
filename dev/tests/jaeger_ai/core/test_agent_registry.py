@@ -260,6 +260,17 @@ class TestGatewayAgentsAPI(_CallerAuthedTestCase):
         assert forbidden.status == 403
         assert not self.temp_store.list_requests()
 
+    async def test_channel_status_is_read_only_and_external_scope_denied(self):
+        from jaeger_ai.core.gateway.caller_auth import client_headers
+        response = await self.client.get('/v1/channels')
+        assert response.status == 200
+        payload = await response.json()
+        assert payload['scope'] == 'current_gateway_process_only'
+        assert all(row['delivery_verified'] is False and row['connection_health'] == 'not_probed' for row in payload['channels'])
+        assert self.temp_store.list_requests() == []
+        denied = await self.client.get('/v1/channels', headers=client_headers('a2a'))
+        assert denied.status == 403
+
     async def test_agents_catalog_create_and_activate(self):
         resp = await self.client.request("GET", "/health")
         assert resp.status == 200
