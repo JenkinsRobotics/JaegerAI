@@ -6,19 +6,29 @@ import { HandoffReplyDialog } from './HandoffReplyDialog';
 import { AgentAvatar } from './AgentAvatar';
 import { GatewayClient } from '../api/gateway';
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-it('preserves follow-up draft/error and stable idempotency key; only acknowledged approval is reported', async () => {
-  const send = vi.fn().mockRejectedValueOnce(new Error('owned network failure')).mockResolvedValueOnce({ id: 'owned-child', status: 'pending_approval' });
+it('a failed follow-up send keeps the original intent and reconciles it by lookup; it is never resubmitted', async () => {
+  localStorage.clear();
+  const send = vi.fn().mockRejectedValueOnce(new Error('owned network failure'));
+  let rid = '';
+  const lookup = vi.fn(async (id: string, requestId: string) => ({ scope: 'handoff_reply', resource_id: id, request_id: requestId, outcome: 'saved',
+    command: { task: 'owned follow-up', request_id: requestId }, handoff: { id: 'owned-child', status: 'pending_approval', task: 'owned follow-up', request_id: requestId, metadata: { reply_to_handoff_id: id } } }) as never);
   const el = document.createElement('div'); document.body.append(el); const root = createRoot(el);
   const flush = async (fn: () => void) => act(async () => { fn(); await new Promise((r) => setTimeout(r, 0)); });
   try {
-    await flush(() => root.render(<HandoffReplyDialog handoffId="owned-parent" send={send} onClose={() => {}} />));
+    await flush(() => root.render(<HandoffReplyDialog handoffId="owned-parent" send={send} lookup={lookup} onClose={() => {}} />));
     const field = el.querySelector('textarea')!;
     await flush(() => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,'owned follow-up'); field.dispatchEvent(new Event('input',{bubbles:true})); });
     const submit = el.querySelector<HTMLButtonElement>('[type=submit]')!;
     await flush(() => submit.click());
     expect(field.value).toBe('owned follow-up'); expect(el.textContent).toContain('owned network failure'); expect(el.textContent).not.toContain('Awaiting approval.');
+    expect(send).toHaveBeenCalledTimes(1); rid = send.mock.calls[0][2];
+    expect(submit.disabled).toBe(true);
     await flush(() => submit.click());
-    expect(send.mock.calls[0]).toEqual(send.mock.calls[1]);
+    expect(send).toHaveBeenCalledTimes(1);
+    const check = [...el.querySelectorAll('button')].find((b) => b.textContent === 'Check original follow-up')!;
+    await flush(() => check.click());
+    expect(lookup).toHaveBeenCalledWith('owned-parent', rid);
+    expect(send).toHaveBeenCalledTimes(1);
     expect(el.textContent).toContain('Awaiting approval.'); expect(submit.disabled).toBe(true);
   } finally { await flush(() => root.unmount()); el.remove(); }
 });
