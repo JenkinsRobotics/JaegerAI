@@ -246,7 +246,7 @@ async def test_run_team_uses_canonical_children_and_each_handoff_approval(
 async def test_handoff_retry_cannot_cross_goal_and_fake_child_metadata_is_not_a_binding(
     tool_bridge,
 ):
-    from jaeger_ai.features.agent_bridge.delegation import child_request_id
+    from jaeger_ai.contract.handoffs import child_request_id
 
     client, app, root = tool_bridge
     for goal_id in ("parent-one", "parent-two"):
