@@ -237,6 +237,13 @@ def route(handler, parsed, method: str) -> bool:
         # The gateway serves /health, NOT /v1/health — the latter 404s.
         return _proxy(handler, "GET", "/health")
 
+    if method == "GET" and path.startswith("/v1/task-submissions/"):
+        from urllib.parse import quote, unquote
+        request_id = unquote(path[len("/v1/task-submissions/"):])
+        if not request_id or '/' in request_id:
+            return False
+        return _proxy(handler, "GET", "/v1/task-submissions/" + quote(request_id, safe="") + query)
+
     if method == "GET" and path == "/v1/channels":
         return _proxy(handler, "GET", path)
 
@@ -299,7 +306,7 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path in ("/api/jaeger/runtime/models", "/api/runtime/models"):
         return _proxy(handler, "GET", "/v1/runtime/models")
 
-    if method == "GET" and path in {"/v1/runtime/skills", "/v1/runtime/tools", "/v1/runtime/diagnostics"}:
+    if method == "GET" and path in {"/v1/runtime/skills", "/v1/runtime/skills/detail", "/v1/runtime/tools", "/v1/runtime/diagnostics"}:
         return _proxy(handler, "GET", path + query)
 
     if method == "GET" and path in ("/api/jaeger/runtime/capabilities", "/api/runtime/capabilities"):
@@ -346,6 +353,11 @@ def route(handler, parsed, method: str) -> bool:
     # /v1/sessions/{id}/stream — long-lived, handled separately
     if len(parts) == 2 and parts[1] == "stream" and method == "GET":
         return _proxy_stream(handler, session_id, query)
+
+    if method == "GET" and len(parts) in {2, 3} and parts[1] == "files":
+        from urllib.parse import quote, unquote
+        suffix = f"/{quote(unquote(parts[2]), safe='')}" if len(parts) == 3 else ""
+        return _proxy(handler, "GET", f"/v1/sessions/{session_id}/files{suffix}")
 
     if len(parts) == 2 and parts[1] == "attachments":
         if method == "GET":

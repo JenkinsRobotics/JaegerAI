@@ -5,6 +5,11 @@ import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, Sessi
 /** Everything the screen needs from Jaeger. The live adapter calls the
  * gateway through same-origin paths; the mock adapter replays sample data. */
 /** 201 from the bytes upload route. */
+export interface SessionFile { attachment_id: string; name: string; mime: string; size: number; sha256: string; readable: boolean; unavailable_reason?: string }
+export interface SessionFiles {
+  list(sessionId: string): Promise<{ session_id: string; files: SessionFile[]; max_bytes: number }>;
+  read(sessionId: string, attachmentId: string): Promise<{ session_id: string; attachment_id: string; name: string; mime: string; size: number; sha256: string; data_base64: string }>;
+}
 export interface UploadedAttachment { attachment_id: string; name: string; mime: string; size: number; sha256: string }
 
 import type { AgentActions } from "./agentActions";
@@ -68,6 +73,12 @@ export interface SpecialistControls {
   read(id: string): Promise<SpecialistConfiguration>;
   save(id: string, body: { expected_revision: number; settings: SpecialistSettings }): Promise<SpecialistConfiguration>;
 }
+export interface SkillDetail {
+  name: string; category: string; description: string; origin: string; lifecycle: string; skill_class: string;
+  platforms: string[]; requires_tools: string[]; optional_tools: string[]; requires_toolsets: string[];
+  requires_plugins: string[]; aliases: string[]; tags: string[]; auto_activate: boolean; tier: string;
+  availability: string; origin_verified: false; execution_authorized: false; scope: string;
+}
 export interface ToolInventory {
   tools: { name: string; description: string; toolset: string; source: string; server: string | null; side_effect: string; permission_tier: string; beta: boolean; dangerous: boolean; availability: string }[];
   count: number; servers: { name: string; state: string; tool_count: number }[];
@@ -106,6 +117,7 @@ export interface ChannelSnapshot {
   channels: { id: string; name: string; catalog_maturity: string; adapter_registered: boolean; bridge_registered: boolean; thread_state: string; connection_health: "not_probed"; delivery_verified: false; actions: string[] }[];
   scope: "current_gateway_process_only";
 }
+export interface TaskProposalReceipt { task_id: string; status: string; replayed: boolean; request_id: string; origin_session_id: string }
 export interface JaegerSource {
   channels?(): Promise<ChannelSnapshot>;
   workflows?: WorkflowControls;
@@ -120,6 +132,8 @@ export interface JaegerSource {
     save(sessionId: string, body: { request_id: string; role: "user" | "assistant"; emoji: string; active: boolean }): Promise<ReactionSnapshot>;
   };
   library?: LibraryControls;
+  skillDetail?(name: string, category: string): Promise<SkillDetail>;
+  sessionFiles?: SessionFiles;
   skills?(query?: string): Promise<{ skills: { name: string; category: string; description: string; lifecycle: string }[]; count: number }>;
   schedules?: ScheduleControls;
   modelSettings?: ModelSettings;
@@ -163,7 +177,8 @@ export interface JaegerSource {
   tasks(): Promise<Task[]>;
   agentHome?(agentId: string): Promise<{ session_id: string; agent_id: string }>;
   taskActions?: {
-    create(body: { session_id: string; goal: string; request_id: string; proposal: true }): Promise<{ task_id: string; status: string; replayed: boolean }>;
+    create(body: { session_id: string; goal: string; request_id: string; proposal: true }): Promise<TaskProposalReceipt>;
+    lookup?(sessionId: string, requestId: string): Promise<{ session_id: string; request_id: string; tasks: Task[] }>;
     edit(id: string, goal: string, expected_updated_at: number): Promise<Task>;
     approve(id: string, expected_updated_at: number): Promise<void>;
     cancel(id: string): Promise<void>;

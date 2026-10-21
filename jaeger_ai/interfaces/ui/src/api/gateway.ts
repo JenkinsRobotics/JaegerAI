@@ -61,6 +61,11 @@ export class GatewayClient implements JaegerSource {
   channels() { return this.json<import("./source").ChannelSnapshot>("/v1/channels"); }
   diagnostics() { return this.json<import("./source").GatewayDiagnostics>("/v1/runtime/diagnostics"); }
   tools(query = "") { return this.json<import("./source").ToolInventory>(`/v1/runtime/tools?q=${encodeURIComponent(query)}`); }
+  readonly sessionFiles: import('./source').SessionFiles = {
+    list: sessionId => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files`),
+    read: (sessionId, id) => this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(id)}`),
+  };
+  skillDetail(name: string, category: string) { return this.json<import('./source').SkillDetail>(`/v1/runtime/skills/detail?name=${encodeURIComponent(name)}&category=${encodeURIComponent(category)}`); }
   skills(query = "") { return this.json<{ skills: { name: string; category: string; description: string; lifecycle: string }[]; count: number }>(`/v1/runtime/skills?q=${encodeURIComponent(query)}`); }
   schedules: ScheduleControls = {
     list: () => this.json("/v1/schedules?include_deleted=1"),
@@ -192,7 +197,8 @@ export class GatewayClient implements JaegerSource {
     return Array.isArray(data) ? data : data.tasks ?? [];
   }
   taskActions = {
-    create: (body: { session_id: string; goal: string; request_id: string; proposal: true }) => this.json<{ task_id: string; status: string; replayed: boolean }>("/v1/tasks", body),
+    lookup: (sessionId: string, requestId: string) => this.json<{ session_id: string; request_id: string; tasks: Task[] }>(`/v1/task-submissions/${encodeURIComponent(requestId)}?session_id=${encodeURIComponent(sessionId)}`),
+    create: (body: { session_id: string; goal: string; request_id: string; proposal: true }) => this.json<import("./source").TaskProposalReceipt>("/v1/tasks", body),
     edit: (id: string, goal: string, expected_updated_at: number) => this.json<Task>(`/v1/tasks/${encodeURIComponent(id)}`, { goal, expected_updated_at }, "PATCH"),
     approve: async (id: string, expected_updated_at: number) => { await this.json(`/v1/tasks/${encodeURIComponent(id)}/approve`, { expected_updated_at }); },
     cancel: async (id: string) => { await this.json(`/v1/tasks/${encodeURIComponent(id)}/cancel`, {}); },

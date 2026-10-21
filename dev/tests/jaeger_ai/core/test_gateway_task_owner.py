@@ -285,3 +285,91 @@ def test_terminal_proposal_approval_cannot_claim_queued(owner):
     assert response.status == 409
     assert json.loads(response.body)['status'] == 'cancelled'
     assert owner.store.get_task(result['task_id']).state is TaskState.CANCELLED
+
+
+def test_client_nonce_survives_edit_and_rejects_changed_submission(owner):
+    from jaeger_ai.core.tasks.store import TaskConflict
+    ctx = {**context(owner, 'client'), 'client_submission_id': 'owned-nonce', 'request_id': 'owned-nonce'}
+    first = owner.submit('Original proposal', context=ctx, proposal=True)
+    task = owner.store.get_task(first['task_id'])
+    owner.edit_proposal(task.task_id, goal='Edited saved proposal', expected_updated_at=task.updated_at)
+    repeated = owner.submit('Original proposal', context=ctx, proposal=True)
+    assert repeated['replayed'] and repeated['task_id'] == first['task_id']
+    assert owner.store.get_task(task.task_id).goal == 'Edited saved proposal'
+    with pytest.raises(TaskConflict):
+        owner.submit('Different original command', context=ctx, proposal=True)
+    assert len(owner.store.list_tasks()) == 1
+    assert len(owner.gateway.store.list_pending_approvals()) == 1
+    assert owner.gateway.store.list_requests() == []
+
+
+def test_native_multi_task_identity_and_legacy_lookup_remain_unchanged(owner):
+    from jaeger_ai.core.tasks.store import TaskConflict
+    ctx = context(owner, 'client')
+    first = owner.submit('First intentional objective', context=ctx, proposal=True)
+    second = owner.submit('Second intentional objective', context=ctx, proposal=True)
+    assert first['task_id'] != second['task_id']
+    assert {t.task_id for t in owner.store.client_submissions('parent', ctx['request_id'])} == {first['task_id'], second['task_id']}
+    with pytest.raises(TaskConflict, match='Multiple legacy'):
+        owner.submit('First intentional objective', context={**ctx, 'client_submission_id': ctx['request_id']}, proposal=True)
+    assert len(owner.store.list_tasks()) == 2
+
+
+@pytest.mark.asyncio
+async def test_http_proposal_nonce_lookup_and_authoritative_actor(tmp_path, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    from jaeger_ai.core.instance.instance import InstanceLayout
+    from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml
+    layout = InstanceLayout(root=tmp_path/'instance'); layout.ensure_dirs()
+    dump_yaml(layout.config_path, Config(instance_name='proposal-fixture', model=ModelConfig(model_path='/dev/null')))
+    monkeypatch.setenv('JAEGER_INSTANCE_DIR', str(layout.root))
+    gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.sqlite3'))
+    gateway.store.ensure_session('owned-proposal-home', metadata={'agent_id': 'native:builder'})
+    body = {'session_id': 'owned-proposal-home', 'request_id': 'owned-proposal-nonce', 'goal': 'Review supplied material', 'proposal': True, 'execution': {'caller': 'forged-actor'}}
+    async with TestClient(TestServer(gateway.app), headers=client_headers('webui')) as client:
+        response = await client.post('/v1/tasks', json=body)
+        assert response.status == 201
+        receipt = await response.json()
+        assert receipt['request_id'] == body['request_id'] and receipt['origin_session_id'] == body['session_id']
+        task = gateway.task_owner.store.get_task(receipt['task_id'])
+        assert task.payload['execution']['caller'] == 'owner:webui'
+        assert task.agent_id == 'native:builder' and task.state is TaskState.PAUSED
+        repeated = await client.post('/v1/tasks', json=body)
+        assert repeated.status == 200 and (await repeated.json())['task_id'] == task.task_id
+        assert (await client.post('/v1/tasks', json={**body, 'goal': 'Changed command'})).status == 409
+        lookup = await client.get('/v1/task-submissions/owned-proposal-nonce', params={'session_id': body['session_id']})
+        found = await lookup.json()
+        assert found['session_id'] == body['session_id'] and found['request_id'] == body['request_id']
+        assert [t['task_id'] for t in found['tasks']] == [task.task_id]
+        assert len(gateway.store.list_pending_approvals()) == 1
+        assert gateway.store.list_requests() == []
+    async with TestClient(TestServer(gateway.app), headers=client_headers('a2a')) as client:
+        assert (await client.get('/v1/task-submissions/owned-proposal-nonce', params={'session_id': body['session_id']})).status == 403
+        assert (await client.post('/v1/tasks', json=body)).status == 403
+
+
+@pytest.mark.asyncio
+async def test_skill_inspection_uses_exact_registry_identity_without_loading_tools(tmp_path, monkeypatch):
+    from aiohttp.test_utils import TestClient, TestServer
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    from jaeger_ai.core.gateway.caller_auth import client_headers
+    from jaeger_agent.skill_registry.playbook_skills import PlaybookSkill
+    import jaeger_agent.skill_registry.playbook_skills as skills
+    skill = PlaybookSkill('owned-skill', 'owned-category', 'Local fixture', tmp_path/'never-read.md', origin='user', requires_tools=['fixture_read'], requires_toolsets=['fixture-set'], requires_plugins=['fixture-plugin'])
+    monkeypatch.setattr(skills, 'discover_playbooks', lambda: [skill])
+    gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.sqlite3'))
+    async with TestClient(TestServer(gateway.app), headers=client_headers('webui')) as client:
+        response = await client.get('/v1/runtime/skills/detail', params={'name': skill.name, 'category': skill.category})
+        assert response.status == 200
+        data = await response.json()
+        assert data['requires_tools'] == ['fixture_read'] and data['origin'] == 'user'
+        assert data['availability'] == 'not_probed' and not data['execution_authorized'] and not data['origin_verified']
+        assert 'path' not in data and 'body' not in data and not skill.path.exists()
+        assert (await client.get('/v1/runtime/skills/detail', params={'name': skill.name, 'category': 'other'})).status == 404
+        assert (await client.get('/v1/runtime/skills/detail', params={'name': skill.name})).status == 400
+        monkeypatch.setattr(skills, 'discover_playbooks', lambda: [skill, skill])
+        assert (await client.get('/v1/runtime/skills/detail', params={'name': skill.name, 'category': skill.category})).status == 409
+    async with TestClient(TestServer(gateway.app), headers=client_headers('a2a')) as client:
+        assert (await client.get('/v1/runtime/skills/detail', params={'name': skill.name, 'category': skill.category})).status == 403

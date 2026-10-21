@@ -17,6 +17,7 @@ import { ArrowDownIcon, CloseIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIc
 import { ErrorState } from "../shell/ErrorState";
 import { badge, messageCount, unreadSince } from "./scrollFollow";
 import { RuntimeSettings } from "../settings/RuntimeSettings";
+import { SessionFiles } from "./SessionFiles";
 import { SessionQueue } from "./SessionQueue";
 import { WebHost } from "./webHost";
 import type { HomeEntry, HomeSessions } from "./homeSession";
@@ -190,6 +191,8 @@ export function showsProgress(turn: ChatTurn): boolean {
 const replyText = (turn: ChatTurn) => turn.parts.filter((p) => p.kind === "markdownContent").map((p) => (p as { text: string }).text).join("\n\n");
 
 export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessionId?: string; agents?: Agent[] }) {
+  const [filesOpen,setFilesOpen]=useState(false);
+  useEffect(()=>setFilesOpen(false),[sessionId]);
   const [session, setSession] = useState<ChatSession | null>(null);
   /** Home chat (Grok-style): summary + posted-result entries, and the cursor for the next older page. */
   const home: HomeSessions | undefined = host instanceof WebHost ? host.home : undefined;
@@ -619,6 +622,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   return (
     <div className={`jg-chat${dropping ? " is-dropping" : ""}`} style={tint} ref={chatRoot} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <div className="jg-chat__band" data-aether-window-drag-region>
+        {host.sessionFiles && sessionId && <button type="button" aria-expanded={filesOpen} onClick={()=>setFilesOpen(value=>!value)}>Files</button>}
         <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={Boolean(active)} />
         <div className="jg-agent-pill-wrap">
           <button ref={pill} type="button" className="jg-agent-pill" title={`${agent.name}`} aria-haspopup="menu" aria-expanded={menuOpen}
@@ -633,6 +637,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       </div>
       <div className="jg-chat__scroll" ref={scroller} onContextMenu={onMessageMenu} onScroll={onScroll} onWheel={markInput} onTouchMove={markInput} onPointerDown={markInput} onKeyDown={markInput}>
         <div className="jg-chat__column">
+          {filesOpen && host.sessionFiles && sessionId && <SessionFiles key={sessionId} files={host.sessionFiles} sessionId={sessionId} onClose={()=>setFilesOpen(false)}/>}
           {loadError && <ErrorState title="Couldn't load this chat" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
           {session && !session.turns.length && <p className="jg-chat__empty">What should we work on?</p>}
           {session && (older || olderError) && (

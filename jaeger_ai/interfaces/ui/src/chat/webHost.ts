@@ -95,6 +95,8 @@ export class WebHost implements ChatHost {
 
   constructor(protected readonly source: JaegerSource, private readonly backoffMs?: number[]) {}
 
+  get sessionFiles() { return this.source.sessionFiles; }
+
   setAgentNames(names: Map<string, string>) { this.agentNames = names; }
   private agentName = (id: string) => this.agentNames.get(id) ?? id;
 

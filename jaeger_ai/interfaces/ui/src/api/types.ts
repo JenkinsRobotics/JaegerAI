@@ -115,7 +115,7 @@ export interface Task {
   runner?: Runner | null;
   updated_at?: number;
   created_at?: number;
-  provenance?: { authorized?: boolean; session_id?: string; request_id?: string };
+  provenance?: { authorized?: boolean; session_id?: string; request_id?: string; submission_goal?: string };
   result?: unknown;
   error?: string | null;
   run_history?: unknown[];
