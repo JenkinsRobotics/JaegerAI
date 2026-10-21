@@ -307,6 +307,14 @@ def route(handler, parsed, method: str) -> bool:
             return False
         return _proxy(handler, "GET", "/v1/agents/" + quote(agent_id, safe="") + "/messages/search" + query)
 
+    if method == "GET" and path.startswith("/v1/agents/"):
+        from urllib.parse import quote, unquote
+        parts=path.split('/')
+        if len(parts)==6 and parts[4]=='messages' and parts[5].isdigit():
+            agent_id=unquote(parts[3])
+            if not agent_id or '/' in agent_id:return False
+            return _proxy(handler,'GET','/v1/agents/'+quote(agent_id,safe='')+'/messages/'+parts[5]+query)
+
     if method == "GET" and path == "/v1/agent-templates":
         return _proxy(handler, "GET", path)
     if path.startswith("/v1/agents/") and (path.endswith("/configuration") or path.endswith("/knowledge")) and method in {"GET", "PATCH"}:

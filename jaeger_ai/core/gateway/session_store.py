@@ -2364,22 +2364,50 @@ class GatewaySessionStore:
         Same metadata/legacy specialist binding as list_sessions(agent_id=...).
         """
         from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
+        if not isinstance(query,str) or not 1<=len(query)<=200 or before is not None and (type(before) is not int or not 1<=before<2**63):
+            raise ValueError('Invalid message search query/cursor')
         prefix = specialist_session(agent_id, '')
-        where = "(json_extract(s.metadata_json, '$.agent_id') = ? OR (json_extract(s.metadata_json, '$.agent_id') IS NULL AND substr(s.session_id, 1, ?) = ?)) AND instr(lower(m.content), lower(?)) > 0"
+        where = "(json_extract(s.metadata_json, '$.agent_id') = ? OR (json_extract(s.metadata_json, '$.agent_id') IS NULL AND substr(s.session_id, 1, ?) = ?)) AND instr(unicode_casefold(m.content), unicode_casefold(?)) > 0"
         params: list[Any] = [agent_id, len(prefix), prefix, query]
         if before is not None:
             where += ' AND m.id < ?'
             params.append(before)
         with self._get_conn() as conn:
+            conn.create_function('unicode_casefold', 1, lambda value: str(value or '').casefold(), deterministic=True)
             rows = conn.execute('SELECT m.id, m.session_id, m.role, m.kind, m.content, m.timestamp, s.title FROM messages m JOIN sessions s ON s.session_id=m.session_id WHERE ' + where + ' ORDER BY m.id DESC LIMIT ?', [*params, limit + 1]).fetchall()
         hits = []
         for row in rows[:limit]:
             content = str(row['content'] or '')
-            position = content.lower().find(query.lower())
+            folded_position = content.casefold().find(query.casefold())
+            position, consumed = 0, 0
+            for i, char in enumerate(content):
+                if consumed + len(char.casefold()) > folded_position:
+                    position = i
+                    break
+                consumed += len(char.casefold())
             start = max(0, position - 100)
             hits.append({'message_id': str(row['id']), 'session_id': row['session_id'], 'role': row['role'], 'kind': row['kind'], 'title': row['title'],
-                         'timestamp': row['timestamp'], 'snippet': content[start:start + 500], 'content': content[:8000], 'truncated': len(content) > 8000})
-        return {'agent_id': agent_id, 'matches': hits, 'next_before': str(rows[limit - 1]['id']) if len(rows) > limit else None, 'matching': 'literal_sqlite_lower'}
+                         'timestamp': row['timestamp'], 'match_offset':position, 'content_revision':hashlib.sha256(content.encode()).hexdigest(), 'snippet': content[start:start + 500], 'content': content[:8000], 'truncated': len(content) > 8000})
+        return {'agent_id': agent_id, 'matches': hits, 'next_before': str(rows[limit - 1]['id']) if len(rows) > limit else None, 'matching': 'literal_unicode_casefold'}
+
+    def agent_message_content(self, agent_id: str, message_id: int, *, offset: int = 0, expected_revision: str | None = None) -> dict[str, Any] | None:
+        """Bounded read of one exact agent-bound saved message; never selection/read mutation."""
+        from jaeger_ai.core.agent_registry.specialist_runtime import specialist_session
+        if type(message_id) is not int or not 1<=message_id<2**63 or type(offset) is not int or offset<0:
+            raise ValueError('Invalid message identity/offset')
+        prefix=specialist_session(agent_id,'')
+        with self._get_conn() as conn:
+            row=conn.execute("SELECT m.* FROM messages m JOIN sessions s ON s.session_id=m.session_id WHERE m.id=? AND (json_extract(s.metadata_json,'$.agent_id')=? OR (json_extract(s.metadata_json,'$.agent_id') IS NULL AND substr(s.session_id,1,?)=?))",(message_id,agent_id,len(prefix),prefix)).fetchone()
+        if row is None:return None
+        content=str(row['content'] or '')
+        revision=hashlib.sha256(content.encode()).hexdigest()
+        if expected_revision is not None and expected_revision!=revision:raise ValueError('Saved message revision changed; search again before reading it')
+        if offset>len(content):raise ValueError('Message offset exceeds retained text')
+        end=min(len(content),offset+8000)
+        return {'agent_id':agent_id,'message_id':str(message_id),'session_id':row['session_id'],
+                'role':row['role'],'kind':row['kind'],'content':content[offset:end],
+                'offset':offset,'end_offset':end,'total_chars':len(content),'revision':revision,
+                'next_offset':end if end<len(content) else None,'previous_offset':max(0,offset-8000) if offset else None}
 
     def diagnostics_snapshot(self) -> dict[str, Any]:
         """Read-only durable counts/unknown identities; no text, paths or retry."""

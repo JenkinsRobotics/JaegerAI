@@ -315,3 +315,10 @@ def test_episode_context_routes_are_explicit_and_preserve_query(overlay):
     for path in ('/v1/runtime/memory/episodes/evt-owned','/v1/runtime/memory/episode-operations/owned-operation'):
         assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
     assert not _route(overlay,'/v1/runtime/memory/episodes/evt-owned/delete','POST')
+
+
+def test_scoped_message_portion_proxy_preserves_preconditions(overlay):
+    path='/v1/agents/native%3Aowned/messages/123?offset=9000&revision=abc'
+    assert _route(overlay,path) and overlay._calls[-1]==('GET',path)
+    assert not _route(overlay,'/v1/agents/native%3Aowned/messages/123','POST')
+    assert not _route(overlay,'/v1/agents/native%3Aowned/messages/123/extra')

@@ -57,6 +57,7 @@ export class GatewayClient implements JaegerSource {
     mutate: (action, id, body) => this.json(action === "create" ? "/v1/library/documents" : `/v1/library/documents/${encodeURIComponent(id)}/${action}`, body),
     operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
   };
+  savedMessage(agentId:string,messageId:string,offset:number,revision?:string){return this.json<import('./source').SavedMessageChunk>(`/v1/agents/${encodeURIComponent(agentId)}/messages/${encodeURIComponent(messageId)}?offset=${offset}${revision?'&revision='+encodeURIComponent(revision):''}`);}
   searchMessages(agentId: string, query: string, before?: string) { return this.json<import("./source").MessageSearchPage>(`/v1/agents/${encodeURIComponent(agentId)}/messages/search?q=${encodeURIComponent(query)}${before ? `&before=${encodeURIComponent(before)}` : ""}`); }
   episodes:import('./source').EpisodeControls={
     list:(query,before)=>this.json('/v1/runtime/memory/episodes?q='+encodeURIComponent(query)+(before?'&before='+before:'')),
