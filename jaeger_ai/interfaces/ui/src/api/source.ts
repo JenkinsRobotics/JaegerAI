@@ -120,11 +120,15 @@ export interface WorkflowControls {
   operation(id: string): Promise<{ receipt: WorkflowReceipt | null }>;
 }
 export interface ChannelSnapshot {
-  channels: { id: string; name: string; catalog_maturity: string; adapter_registered: boolean; bridge_registered: boolean; thread_state: string; connection_health: "not_probed"; delivery_verified: false; actions: string[] }[];
+  channels: { binding?: {revision:number;agent_id:string|null}|null; active_binding?: {revision:number;agent_id:string|null}|null; active_handlers?:number; id: string; name: string; catalog_maturity: string; adapter_registered: boolean; bridge_registered: boolean; thread_state: string; connection_health: "not_probed"; delivery_verified: false; actions: string[] }[];
   scope: "current_gateway_process_only";
 }
 export interface TaskProposalReceipt { task_id: string; status: string; replayed: boolean; request_id: string; origin_session_id: string }
 export interface JaegerSource {
+  channelControls?: {
+    mutate(id:string,action:'bind'|'connect'|'disconnect',body:Record<string,unknown>):Promise<ControlResult>;
+    operation(id:string):Promise<{receipt:ControlResult|null}>;
+  };
   channels?(): Promise<ChannelSnapshot>;
   workflows?: WorkflowControls;
   agentKnowledge?: AgentKnowledgeControls;

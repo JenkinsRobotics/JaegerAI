@@ -150,7 +150,7 @@ def _row_meta(raw: str | None) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-MESSAGE_KINDS = frozenset({"message", "summary", "handoff_request", "handoff_result", "task_result"})
+MESSAGE_KINDS = frozenset({"message", "channel_message", "summary", "handoff_request", "handoff_result", "task_result"})
 MESSAGES_PAGE_MAX = 200
 
 
@@ -179,6 +179,10 @@ def _part_view(part: Any) -> Any:
     return part
 
 
+def _channel_message_view(extra: dict[str, Any]) -> dict[str, str]:
+    return {key: extra[key] for key in ('channel_id','provider_conversation_id','external_message_id','authority') if isinstance(extra.get(key),str)}
+
+
 def message_dict(m: Any, session_id: str | None = None) -> dict[str, Any]:
     """One transcript row in the sessions-contract shape (plus the legacy keys)."""
     keys = m.keys() if hasattr(m, "keys") else []
@@ -204,6 +208,8 @@ def message_dict(m: Any, session_id: str | None = None) -> dict[str, Any]:
     for key in ("request_id", "turn_id"):
         if isinstance(extra.get(key), str):
             out[key] = extra[key]
+    if out["kind"] == "channel_message":
+        out["channel"] = _channel_message_view(extra)
     if out["kind"] == "summary" and isinstance(extra.get("summary"), dict):
         out["summary"] = extra["summary"]
     return out
@@ -224,6 +230,8 @@ def _typed_fields(m: Any) -> dict[str, Any]:
         extra = _row_meta(m["meta_json"])
         if isinstance(extra.get("status"), str):
             out["status"] = extra["status"]
+        if kind == "channel_message":
+            out["channel"] = _channel_message_view(extra)
         if kind == "summary" and isinstance(extra.get("summary"), dict):
             out["summary"] = extra["summary"]
     if "sender_agent_id" in keys and m["sender_agent_id"]:
@@ -2278,6 +2286,26 @@ class GatewaySessionStore:
                 })
             return out
 
+
+    def append_channel_message_once(self, session_id: str, *, channel: str, conversation_id: str, external_id: str, text: str) -> dict:
+        """Provider message identity, durable inbox delivery only; never run a turn."""
+        key = json.dumps(['channel_inbox',channel,conversation_id,external_id])
+        digest = input_fingerprint(json.dumps({'session_id':session_id,'text':text},sort_keys=True))
+        with self._immediate() as conn:
+            old = conn.execute('SELECT digest,receipt_json FROM background_deliveries WHERE delivery_key=?',(key,)).fetchone()
+            if old:
+                if old['digest'] != digest:
+                    raise ValueError('Provider message identity conflicts with existing delivery; original preserved')
+                return {**json.loads(old['receipt_json']),'replayed':True}
+            if not conn.execute('SELECT 1 FROM sessions WHERE session_id=?',(session_id,)).fetchone():
+                raise ValueError('Bound conversation unavailable')
+            # Attribution is literal data, never an authenticated owner claim.
+            content = '['+channel+' incoming · '+conversation_id[:160]+']\n'+text
+            mid = self.append_message(session_id,'user',content,kind='channel_message',
+                meta={'channel_id':channel,'provider_conversation_id':conversation_id,'external_message_id':external_id,'authority':'incoming_data_only'},conn=conn)
+            receipt={'message_id':mid,'session_id':session_id,'execution_admitted':False}
+            conn.execute('INSERT INTO background_deliveries(delivery_key,digest,receipt_json) VALUES(?,?,?)',(key,digest,json.dumps(receipt)))
+            return {**receipt,'replayed':False}
 
     def append_handoff_post_once(self, session_id: str, role: str, text: str, *, kind: str, sender_agent_id: str | None, links: dict, meta: dict, parts=None) -> int:
         """Transcript delivery only; reuse the durable delivery receipt/transaction owner."""

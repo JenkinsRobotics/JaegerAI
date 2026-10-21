@@ -247,6 +247,12 @@ def route(handler, parsed, method: str) -> bool:
     if path == '/v1/notifications' and method in {'GET','PATCH'}:
         return _proxy(handler, method, path, _body_bytes(handler) if method == 'PATCH' else None)
 
+    if method == 'POST' and path.startswith('/v1/channels/'):
+        segments=path.split('/')
+        if len(segments)==5 and segments[3] in {'discord','telegram','imessage'} and segments[4] in {'bind','connect','disconnect'}:
+            return _proxy(handler,'POST',path,_body_bytes(handler))
+        return False
+
     if method == "GET" and path == "/v1/channels":
         return _proxy(handler, "GET", path)
 

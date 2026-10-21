@@ -83,8 +83,11 @@ class IMessageBridge:
 
     # ----- lifecycle -----
     def start(self) -> None:
-        if self._thread is not None:
+        if self._thread is not None and self._thread.is_alive():
             return
+        from .._messaging import resume_handlers
+        resume_handlers(self)
+        self._stop.clear()
         if not self._allowed:
             print(
                 "[imessage] refusing to start: set IMESSAGE_ALLOWED_HANDLES to "
@@ -118,11 +121,18 @@ class IMessageBridge:
             self._awaiting.pop(recipient, None)
 
     def stop(self) -> None:
-        from .. import deregister_bridge
-        deregister_bridge("imessage")
+        from .._messaging import stop_handlers
+        stop_handlers(self)
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=5)
+            if self._thread.is_alive():
+                raise RuntimeError('iMessage transport did not stop; registration retained')
+        from .. import deregister_bridge
+        deregister_bridge('imessage', expected=self)
+        if self._bus is not None:
+            from jaeger_ai.core.messages import AgentRequest
+            self._bus.unsubscribe(AgentRequest.topic, self._on_agent_request)
 
     # ----- outbound: agent-initiated messages -----
     def send(self, recipient: str, text: str) -> dict[str, Any]:
@@ -232,17 +242,18 @@ class IMessageBridge:
         try:
             if self._llm_lock is not None:
                 with self._llm_lock:
-                    reply = self._call_handler(text, session_key) or ""
+                    reply = self._call_handler(text, session_key, str(row["rowid"])) or ""
             else:
-                reply = self._call_handler(text, session_key) or ""
+                reply = self._call_handler(text, session_key, str(row["rowid"])) or ""
         except Exception as exc:
             reply = f"(agent error: {type(exc).__name__}: {exc})"
         if reply:
             self._send(handle, reply)
 
-    def _call_handler(self, text: str, session_key: str) -> str:
-        from .._messaging import call_handler_once
-        return call_handler_once(self._handler, text, session_key=session_key) or ""
+    def _call_handler(self, text: str, session_key: str, message_id: str | None = None) -> str:
+        from .._messaging import call_handler_once, handler_admission
+        with handler_admission(self):
+            return call_handler_once(self._handler, text, session_key=session_key, message_id=message_id) or ""
 
     def _send(self, handle: str, message: str) -> None:
         # AppleScript via osascript; quote the strings the AppleScript way

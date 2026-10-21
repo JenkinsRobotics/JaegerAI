@@ -89,16 +89,25 @@ class TelegramBridge:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._ready = threading.Event()
+        self._stop_requested = threading.Event()
+        self._shutdown_event: asyncio.Event | None = None
+        self._shutdown_error = None
 
     # ----- lifecycle -----
     def start(self) -> None:
-        if self._thread is not None:
+        if self._thread is not None and self._thread.is_alive():
             return
+        from .._messaging import resume_handlers
+        resume_handlers(self)
+        self._ready.clear()
+        self._stop_requested.clear()
+        self._shutdown_error = None
         self._thread = threading.Thread(target=self._run, daemon=True, name="telegram-bridge")
         self._thread.start()
         # Wait briefly so register_bridge happens after the loop exists; the
         # send() call needs `self._loop` to be set.
-        self._ready.wait(timeout=15)
+        if not self._ready.wait(timeout=15) or not self._thread.is_alive() or self._shutdown_error:
+            raise RuntimeError("Telegram transport readiness unconfirmed")
         from .. import register_bridge
         register_bridge("telegram", self)
         # Answer mid-turn approval prompts for our own chats over the bus.
@@ -110,15 +119,20 @@ class TelegramBridge:
                 pass
 
     def stop(self) -> None:
+        from .._messaging import stop_handlers
+        stop_handlers(self)
+        self._stop_requested.set()
+        if self._loop is not None and self._loop.is_running() and self._shutdown_event is not None:
+            self._loop.call_soon_threadsafe(self._shutdown_event.set)
+        if self._thread is not None:
+            self._thread.join(timeout=15)
+            if self._thread.is_alive() or self._shutdown_error:
+                raise RuntimeError('Telegram shutdown unconfirmed; registration retained')
         from .. import deregister_bridge
-        deregister_bridge("telegram")
-        if self._app is None or self._loop is None:
-            return
-        try:
-            fut = asyncio.run_coroutine_threadsafe(self._app.stop(), self._loop)
-            fut.result(timeout=10)
-        except Exception:
-            pass
+        deregister_bridge('telegram', expected=self)
+        if self._bus is not None:
+            from jaeger_ai.core.messages import AgentRequest
+            self._bus.unsubscribe(AgentRequest.topic, self._on_agent_request)
 
     # ----- outbound: agent-initiated messages -----
     def send(self, recipient: str, text: str) -> dict[str, Any]:
@@ -201,6 +215,7 @@ class TelegramBridge:
         from telegram.ext import Application, MessageHandler, filters
 
         async def _bootstrap() -> None:
+            self._shutdown_event = asyncio.Event()
             app = Application.builder().token(self._token).build()
             self._app = app
 
@@ -272,7 +287,7 @@ class TelegramBridge:
                 started = time.perf_counter()
                 try:
                     reply = await asyncio.to_thread(
-                        self._safe_handle, preview, f"telegram:{chat_id}"
+                        self._safe_handle, preview, f"telegram:{chat_id}", str(msg.message_id)
                     )
                 finally:
                     typing_task.cancel()
@@ -286,31 +301,34 @@ class TelegramBridge:
 
             app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_message))
 
-            await app.initialize()
-            await app.start()
-            # poll_interval=0 + timeout=25 = long-poll: Telegram holds the
-            # request open until a message arrives, then returns instantly.
-            # No "tick rate" between messages — perceived delivery latency is
-            # network-bound (sub-second) and reply latency is bounded only by
-            # LLM inference time.
-            await app.updater.start_polling(
-                poll_interval=0.0,
-                timeout=25,
-                allowed_updates=Update.ALL_TYPES,
-            )
-            print(f"[telegram] connected (long-poll, instant delivery); allowlist: "
-                  f"{sorted(self._allowed) if self._allowed else 'OPEN (set TELEGRAM_ALLOWED_CHAT_IDS to restrict)'}",
-                  flush=True)
-            self._ready.set()
-
-            # Park forever until stop() is called.
+            initialized = started = polling = False
             try:
-                await asyncio.Event().wait()
+                await app.initialize()
+                initialized = True
+                await app.start()
+                started = True
+                await app.updater.start_polling(poll_interval=0.0,timeout=25,allowed_updates=Update.ALL_TYPES)
+                polling = True
+                self._ready.set()
+                if self._stop_requested.is_set():
+                    self._shutdown_event.set()
+                await self._shutdown_event.wait()
             finally:
-                try:
-                    await app.updater.stop()
-                except Exception:
-                    pass
+                if polling:
+                    try:
+                        await app.updater.stop()
+                    except Exception:
+                        self._shutdown_error = 'polling shutdown failed'
+                if started:
+                    try:
+                        await app.stop()
+                    except Exception:
+                        self._shutdown_error = 'application shutdown failed'
+                if initialized:
+                    try:
+                        await app.shutdown()
+                    except Exception:
+                        self._shutdown_error = 'transport shutdown failed'
 
         loop = asyncio.new_event_loop()
         self._loop = loop
@@ -318,6 +336,7 @@ class TelegramBridge:
         try:
             loop.run_until_complete(_bootstrap())
         except Exception as exc:
+            self._shutdown_error = "transport startup or shutdown failed"
             print(f"[telegram] bridge crashed: {exc}", flush=True)
         finally:
             self._ready.set()  # unblock anyone waiting even on error
@@ -326,15 +345,16 @@ class TelegramBridge:
             except Exception:
                 pass
 
-    def _safe_handle(self, text: str, session_key: str | None = None) -> str:
+    def _safe_handle(self, text: str, session_key: str | None = None, message_id: str | None = None) -> str:
         try:
             if self._llm_lock is not None:
                 with self._llm_lock:
-                    return self._call_handler(text, session_key) or ""
-            return self._call_handler(text, session_key) or ""
+                    return self._call_handler(text, session_key, message_id) or ""
+            return self._call_handler(text, session_key, message_id) or ""
         except Exception as exc:
             return f"(agent error: {type(exc).__name__}: {exc})"
 
-    def _call_handler(self, text: str, session_key: str | None) -> str:
-        from .._messaging import call_handler_once
-        return call_handler_once(self._handler, text, session_key=session_key) or ""
+    def _call_handler(self, text: str, session_key: str | None, message_id: str | None = None) -> str:
+        from .._messaging import call_handler_once, handler_admission
+        with handler_admission(self):
+            return call_handler_once(self._handler, text, session_key=session_key, message_id=message_id) or ""

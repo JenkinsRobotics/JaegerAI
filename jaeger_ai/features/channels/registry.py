@@ -19,6 +19,11 @@ class ChannelRegistry:
             raise ValueError("adapter.channel_id is required")
         self._adapters[channel_id] = adapter
 
+    def unregister(self, channel_id: str, *, expected_bridge: Any) -> None:
+        adapter = self._adapters.get(channel_id)
+        if getattr(adapter, '_bridge', None) is expected_bridge:
+            del self._adapters[channel_id]
+
     def get(self, channel_id: str) -> ChannelAdapter | None:
         return self._adapters.get((channel_id or "").strip().lower())
 
