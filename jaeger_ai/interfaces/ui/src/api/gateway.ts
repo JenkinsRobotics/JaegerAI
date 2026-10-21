@@ -243,6 +243,8 @@ export class GatewayClient implements JaegerSource {
     original:(id,rid)=>this.json(`/v1/agents/${encodeURIComponent(id)}/handoff-commands/${encodeURIComponent(rid)}`),
   };
   managedSkills:NonNullable<JaegerSource['managedSkills']>={
+    review:body=>this.json('/v1/runtime/skills/managed/review',body),
+    content:name=>this.json(`/v1/runtime/skills/managed/content?name=${encodeURIComponent(name)}`),
     list:()=>this.json('/v1/runtime/skills/managed'),
     change:body=>this.json('/v1/runtime/skills/managed/change',body),
     original:op=>this.json(`/v1/runtime/skills/managed/operations/${encodeURIComponent(op)}`),

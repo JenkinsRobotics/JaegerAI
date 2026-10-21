@@ -84,6 +84,7 @@ def _move_to_archive(root: Path, d: Path, *, validate=None, before_move=None) ->
         # Validate under the same lock immediately before the atomic move.
         if validate is not None:validate()
         if before_move is not None:before_move(dest.name)
+        if validate is not None:validate()
         # Same instance filesystem: atomic move; never purge an older version.
         os.rename(d,dest)
     return dest.name

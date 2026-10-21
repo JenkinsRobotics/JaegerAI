@@ -153,3 +153,73 @@ async def test_planned_but_unproven_move_stays_unknown_and_blocks_fresh_resource
     assert calls==['fixture'] and service.get_skill(layout,'fixture')['content']==content
     assert await (await http.post(path+'/change',json=body)).json()==value
     assert calls==['fixture']
+
+
+@pytest.mark.asyncio
+async def test_review_import_update_retain_original_version_and_explicit_rollback(gw,tmp_path,monkeypatch):
+    import hashlib
+    app,http=gw;layout=InstanceLayout(root=tmp_path/'owned-editor');layout.root.mkdir()
+    dump_yaml(layout.config_path,Config(instance_name='owned',model=ModelConfig(model_path='/dev/null')))
+    bundled=tmp_path/'empty-editor';bundled.mkdir()
+    monkeypatch.setattr(app,'_instance_root',lambda:layout.root)
+    monkeypatch.setattr(service._playbook_module(),'_SKILLS_DIR',bundled)
+    monkeypatch.setattr(service,'_code_rows',lambda _:[])
+    path='/v1/runtime/skills/managed';first='---\nname: fixture\n---\nSafe owned original'
+    preview={'name':'fixture','content':first,'category':'owned','expected_revision':'missing'}
+    review=await (await http.post(path+'/review',json=preview)).json()
+    assert review['content_sha256']==hashlib.sha256(first.encode()).hexdigest()
+    assert not (layout.skills_dir/'owned'/'fixture').exists()
+    command={**preview,'operation_id':'owned-import','action':'save','review_digest':review['content_sha256']}
+    created=await (await http.post(path+'/change',json=command)).json()
+    assert created['outcome']=='saved' and created['result']['state']=='installed'
+    assert 'content' not in created['command'] and created['command']['content_sha256']==review['content_sha256']
+    assert await (await http.post(path+'/change',json=command)).json()==created
+    asset=layout.skills_dir/'owned'/'fixture'/'asset.txt';asset.write_text('preserve owned asset')
+    loaded=await (await http.get(path+'/content?name=fixture')).json()
+    assert loaded['name']=='fixture' and loaded['content']==first and not loaded['content_redacted']
+    new='---\nname: fixture\n---\nSafe revised owned text'
+    update={**command,'operation_id':'owned-update','content':new,'expected_revision':loaded['revision'],'review_digest':hashlib.sha256(new.encode()).hexdigest()}
+    changed=await (await http.post(path+'/change',json=update)).json()
+    assert changed['outcome']=='saved' and changed['result']['state']=='updated'
+    archive=layout.skills_dir/'.archive'/changed['result']['archive_name']
+    assert (archive/'SKILL.md').read_text()==first and (archive/'asset.txt').read_text()=='preserve owned asset'
+    stale=await (await http.post(path+'/change',json={**update,'operation_id':'owned-stale-update'})).json()
+    assert stale['outcome']=='rejected' and asset.read_text()=='preserve owned asset'
+    occupied=await (await http.post(path+'/change',json={'action':'restore','restore_from':'owned-update','operation_id':'owned-occupied-rollback'})).json()
+    assert occupied['outcome']=='rejected' and service.get_skill(layout,'fixture')['content']==new
+    removed=await (await http.post(path+'/change',json={'action':'remove','name':'fixture','expected_revision':changed['result']['revision'],'operation_id':'owned-remove-updated'})).json()
+    assert removed['outcome']=='saved'
+    restored=await (await http.post(path+'/change',json={'action':'restore','restore_from':'owned-update','operation_id':'owned-version-rollback'})).json()
+    assert restored['outcome']=='saved' and restored['result']['revision']==loaded['revision']
+    assert asset.read_text()=='preserve owned asset' and service.get_skill(layout,'fixture')['content']==first
+    assert (await http.post(path+'/review',json=preview,headers=client_headers('jaegerd'))).status==403
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('updating',[False,True])
+async def test_saved_markdown_crash_recovery_never_repeats_import_or_update(gw,tmp_path,monkeypatch,updating):
+    import hashlib
+    app,http=gw;layout=InstanceLayout(root=tmp_path/'owned-save-crash');layout.root.mkdir()
+    dump_yaml(layout.config_path,Config(instance_name='owned',model=ModelConfig(model_path='/dev/null')))
+    bundled=tmp_path/'empty-save-crash';bundled.mkdir()
+    monkeypatch.setattr(app,'_instance_root',lambda:layout.root)
+    monkeypatch.setattr(service._playbook_module(),'_SKILLS_DIR',bundled)
+    monkeypatch.setattr(service,'_code_rows',lambda _:[])
+    previous='missing'
+    if updating:
+        service.install_skill(layout,'fixture','---\nname: fixture\n---\nprevious owned version')
+        previous=service.skill_revision(layout.skills_dir/'fixture')
+    content='---\nname: fixture\n---\nnew owned saved version'
+    body={'action':'save','operation_id':'owned-save-crash','name':'fixture','category':'','content':content,'expected_revision':previous,'review_digest':hashlib.sha256(content.encode()).hexdigest()}
+    finish=app.store.finish_control_operation
+    def crash(*a,**k):raise OSError('owned fixture lost receipt after saved file')
+    monkeypatch.setattr(app.store,'finish_control_operation',crash)
+    assert (await http.post('/v1/runtime/skills/managed/change',json=body)).status==500
+    assert service.get_skill(layout,'fixture')['content']==content
+    monkeypatch.setattr(app.store,'finish_control_operation',finish)
+    monkeypatch.setattr(service,'save_playbook',lambda *a,**k:pytest.fail('Original recovery cannot repeat a save'))
+    result=await (await http.get('/v1/runtime/skills/managed/operations/owned-save-crash')).json()
+    assert result['outcome']=='saved' and result['recovered']
+    assert result['result']['state']==('updated' if updating else 'installed')
+    assert 'content' not in result['command'] and result['command']['content_sha256']==body['review_digest']
+    assert await (await http.post('/v1/runtime/skills/managed/change',json=body)).json()==result
