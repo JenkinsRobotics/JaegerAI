@@ -1,0 +1,11 @@
+import { useEffect, useState } from 'react';
+import type { ChannelSnapshot, JaegerSource } from '../api/source';
+export function ChannelsPanel({ source }: { source: JaegerSource }) {
+  const [snapshot, setSnapshot] = useState<ChannelSnapshot>(), [attempt, setAttempt] = useState(0), [error, setError] = useState<string>();
+  useEffect(()=>{let live=true;void source.channels?.().then(value=>{if(live){setSnapshot(value);setError(undefined);}},e=>{if(live)setError(String(e));});return()=>{live=false;};},[source,attempt]);
+  return <section aria-label="Messaging channels"><p>Registrations in the current Gateway. Connection health and message delivery have not been checked. Other running processes are outside this view.</p>
+    <button type="button" onClick={()=>setAttempt(n=>n+1)}>Refresh channel status</button>
+    {error&&<p role="alert">Could not read channels: {error}. Previous status retained.</p>}{!snapshot&&!error&&<p role="status">Reading channel status…</p>}
+    {snapshot?.channels.map(channel=><article className="jg-card" key={channel.id}><strong>{channel.name}</strong><p>{channel.bridge_registered?'Bridge registered':channel.adapter_registered?'Adapter registered; bridge unobserved':'Not registered in this Gateway'}</p><small>Catalog: {channel.catalog_maturity} · Transport thread: {channel.thread_state}</small><p>Connection setup and bot bindings are unavailable in this build.</p></article>)}
+  </section>;
+}

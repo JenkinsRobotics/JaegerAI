@@ -3,6 +3,7 @@ acts the same on Telegram / Discord / iMessage (approvals + /mode + admin gate).
 """
 
 import time
+import pytest
 
 from jaeger_ai.plugins import _messaging
 
@@ -54,3 +55,33 @@ def test_reply_as_approval_publishes_response() -> None:
 def test_parse_admin_ids() -> None:
     assert _messaging.parse_admin_ids("123, 456 ,789") == {"123", "456", "789"}
     assert _messaging.parse_admin_ids("") == set()
+
+
+@pytest.mark.parametrize('bridge_path', ['discord', 'telegram', 'imessage'])
+def test_bridge_handler_type_error_after_effect_is_never_replayed(bridge_path):
+    import importlib
+    module=importlib.import_module('jaeger_ai.plugins.'+bridge_path+'.bridge')
+    cls=getattr(module,{'discord':'DiscordBridge','telegram':'TelegramBridge','imessage':'IMessageBridge'}[bridge_path])
+    bridge=cls.__new__(cls)
+    calls=[]
+    def handler(text,session_key=None):
+        calls.append((text,session_key))
+        raise TypeError('owned error after admitted effect')
+    bridge._handler=handler
+    with pytest.raises(TypeError,match='after admitted effect'):
+        bridge._call_handler('owned text','owned-session')
+    assert calls==[('owned text','owned-session')]
+
+
+def test_handler_signature_is_selected_without_executing_a_probe():
+    from jaeger_ai.plugins._messaging import call_handler_once
+    calls=[]
+    def legacy(text):
+        calls.append(text);return 'owned reply'
+    assert call_handler_once(legacy,'owned text',session_key='owned-session')=='owned reply'
+    assert calls==['owned text']
+    def unsupported(text,required_other_argument):
+        calls.append('must not run')
+    with pytest.raises(TypeError):
+        call_handler_once(unsupported,'owned text',session_key='owned-session')
+    assert calls==['owned text']

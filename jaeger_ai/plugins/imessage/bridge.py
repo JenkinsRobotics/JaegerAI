@@ -241,10 +241,8 @@ class IMessageBridge:
             self._send(handle, reply)
 
     def _call_handler(self, text: str, session_key: str) -> str:
-        try:
-            return self._handler(text, session_key=session_key) or ""
-        except TypeError:
-            return self._handler(text) or ""
+        from .._messaging import call_handler_once
+        return call_handler_once(self._handler, text, session_key=session_key) or ""
 
     def _send(self, handle: str, message: str) -> None:
         # AppleScript via osascript; quote the strings the AppleScript way

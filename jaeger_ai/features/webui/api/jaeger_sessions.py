@@ -237,6 +237,9 @@ def route(handler, parsed, method: str) -> bool:
         # The gateway serves /health, NOT /v1/health — the latter 404s.
         return _proxy(handler, "GET", "/health")
 
+    if method == "GET" and path == "/v1/channels":
+        return _proxy(handler, "GET", path)
+
     if path == "/v1/workflows" or path.startswith("/v1/workflows/"):
         if method == "GET":
             return _proxy(handler, "GET", path + query)

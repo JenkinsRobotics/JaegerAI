@@ -120,3 +120,24 @@ def autonomy_command(text: str) -> dict:
 
 SLASH_DENIED = "⛔ commands are owner-only — you have conversation access."
 SLASH_UNKNOWN = "unknown command — try /mode"
+
+
+def call_handler_once(handler: Any, text: str, *, session_key: str | None = None) -> Any:
+    """Select the supported callback shape before invocation; never replay errors.
+
+    A TypeError raised by the handler can occur after admission or an external
+    effect. It is an execution outcome, not evidence to try a second signature.
+    """
+    import inspect
+    if inspect.iscoroutinefunction(handler):
+        raise TypeError('Messaging bridges require a synchronous handler')
+    try:
+        signature = inspect.signature(handler)
+    except (TypeError, ValueError) as exc:
+        raise TypeError('Messaging callback needs an inspectable text/session_key signature') from exc
+    try:
+        signature.bind(text, session_key=session_key)
+    except TypeError:
+        signature.bind(text)  # Validation only: no callback has run yet.
+        return handler(text)
+    return handler(text, session_key=session_key)

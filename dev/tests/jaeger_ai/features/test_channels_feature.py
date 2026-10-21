@@ -109,3 +109,19 @@ def test_slack_gateway_event_handling():
         }
 
     asyncio.run(run_test())
+
+
+def test_status_distinguishes_registration_thread_and_delivery_without_start(monkeypatch):
+    import jaeger_ai.plugins as plugins
+    from types import SimpleNamespace
+    from jaeger_ai.features.channels.status import snapshot
+    from jaeger_ai.features.channels import status
+    registry=ChannelRegistry();registry.register(_StubAdapter())
+    monkeypatch.setattr(status,'get_registry',lambda:registry)
+    monkeypatch.setattr(plugins,'list_bridges',lambda:['telegram'])
+    monkeypatch.setattr(plugins,'get_bridge',lambda name:SimpleNamespace(_thread=SimpleNamespace(is_alive=lambda:True)) if name=='telegram' else None)
+    rows={row['id']:row for row in snapshot()['channels']}
+    assert rows['telegram']['bridge_registered'] and rows['telegram']['thread_state']=='running'
+    assert rows['signal']['adapter_registered'] and not rows['signal']['bridge_registered']
+    assert all(row['delivery_verified'] is False and row['connection_health']=='not_probed' for row in rows.values())
+    assert not registry.get('signal').started

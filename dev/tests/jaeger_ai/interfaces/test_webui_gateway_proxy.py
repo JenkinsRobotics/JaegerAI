@@ -217,3 +217,9 @@ def test_workflow_routes_use_gateway_and_reject_unadvertised_mutations(overlay):
         assert _route(overlay, '/v1/workflows/owned/'+action, 'POST')
     assert not _route(overlay, '/v1/workflows/owned/delete', 'POST')
     assert not _route(overlay, '/v1/workflows/owned', 'DELETE')
+
+
+def test_channel_status_proxy_does_not_accept_lifecycle_mutations(overlay):
+    assert _route(overlay,'/v1/channels')
+    assert overlay._calls[-1]==('GET','/v1/channels')
+    assert not _route(overlay,'/v1/channels/telegram/connect','POST')
