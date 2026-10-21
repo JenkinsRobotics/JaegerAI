@@ -349,3 +349,10 @@ def test_resumable_upload_routes_preserve_original_operation_and_scope(overlay):
     for method,path in [('POST','/v1/sessions/owned/uploads'),('GET','/v1/sessions/owned/uploads?operation_id=original'),('POST','/v1/sessions/owned/uploads/chunk'),('POST','/v1/sessions/owned/uploads/finish')]:
         assert _route(overlay,path,method)
         assert overlay._calls[-1]==(method,path)
+
+
+def test_owner_handoff_and_reply_command_routes(overlay):
+    paths=[('/v1/agents/native%3Abuilder/handoff-commands','POST'),('/v1/agents/native%3Abuilder/handoff-commands/owned','GET'),('/v1/handoffs/parent/reply-commands','POST'),('/v1/handoffs/parent/reply-commands/owned','GET')]
+    for path,method in paths:
+        assert _route(overlay,path,method)
+        assert overlay._calls[-1]==(method,path)

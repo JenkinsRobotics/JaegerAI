@@ -15,6 +15,7 @@ export interface AgentSkill {
 export type Runner = "native" | `delegate:${string}` | string;
 
 export interface Agent {
+  delegation?: {can_request:boolean;background:"durable";per_request_model:boolean;tools:string};
   /** Explicit server-supported menu actions; omitted/false means unavailable. */
   ui_actions?: Partial<import("./agentActions").AgentCaps>;
   id: string;
@@ -129,7 +130,10 @@ export interface Task {
   run_history?: unknown[];
 }
 
+export interface HandoffCommandReceipt {scope:"handoff_request"|"handoff_reply";resource_id:string;request_id:string;outcome:"saved"|"rejected"|"unknown";command?:Record<string,unknown>|null;handoff:Handoff|null;error?:string|null}
 export interface Handoff {
+  request_id?:string;
+  metadata?:{requested_model?:string|null;model_choice?:{model:string;provider:string}|null;reply_to_handoff_id?:string|null;background?:boolean;timeout_seconds?:number;[key:string]:unknown};
   id: string;
   from_agent_id?: string;
   to_agent_id?: string;
