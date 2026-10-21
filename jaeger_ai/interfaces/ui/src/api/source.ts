@@ -179,6 +179,16 @@ export interface AgentKnowledgeControls {
   read(id: string): Promise<AgentKnowledgeSnapshot>;
   save(id: string, body: { expected_revision: number; document_ids: string[] }): Promise<AgentKnowledgeSnapshot>;
 }
+export interface WebhookDefinition { name: string; provider: 'generic' | 'github'; events: string[]; senders: string[]; session_id: string; objective: string; enabled: boolean; archived: boolean }
+export interface WebhookSubscription extends WebhookDefinition { id: string; revision: number; agent_id: string; updated_at: number }
+export interface WebhookDelivery { delivery_id: string; subscription_id: string; provider: string; received_at: number; ok: boolean; status: string; reason?: string; task_id?: string; approval_id?: string; task_state?: string; request_status?: string | null; authorized?: boolean }
+export interface WebhookReceipt extends ControlResult { scope: 'webhook.subscription'; subscription?: WebhookSubscription; http_status: number }
+export interface WebhookControls {
+  list(): Promise<{ subscriptions: WebhookSubscription[]; listener: string; credential_status: string; transport: string; admission: string; remote_sender_authority: string }>;
+  save(id: string, body: {operation_id: string; expected_revision: number; definition: WebhookDefinition}): Promise<WebhookReceipt>;
+  history(id: string): Promise<{ subscription_id: string; deliveries: WebhookDelivery[] }>;
+  operation(id: string): Promise<{receipt: WebhookReceipt | null}>;
+}
 export interface WorkflowDefinition { format: string; name: string; description: string; steps: { title: string; instruction: string }[] }
 export interface WorkflowDocument { id: string; revision: number; digest: string; archived: boolean; definition: WorkflowDefinition }
 export type WorkflowAction = "create" | "save" | "archive" | "restore" | "propose";
@@ -209,6 +219,7 @@ export interface JaegerSource {
   channelDeliveries?(before?:number):Promise<ChannelDeliveries>;
   channels?(): Promise<ChannelSnapshot>;
   workflows?: WorkflowControls;
+  webhooks?: WebhookControls;
   agentKnowledge?: AgentKnowledgeControls;
   savedMessage?(agentId:string,messageId:string,offset:number,revision?:string):Promise<SavedMessageChunk>;
   searchMessages?(agentId: string, query: string, before?: string): Promise<MessageSearchPage>;

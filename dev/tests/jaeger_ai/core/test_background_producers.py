@@ -138,7 +138,7 @@ def test_partial_start_failure_stops_started_producers_and_releases_lease(tmp_pa
     successor.stop()
 
 
-def test_webhook_delivery_id_replays_instead_of_a_second_turn(tmp_path, monkeypatch):
+def test_unscoped_webhook_refuses_turn_and_repeated_identity(tmp_path, monkeypatch):
     lay = _layout(tmp_path)
     monkeypatch.setenv("JAEGER_TEST_HEADLESS", "1")
     monkeypatch.setenv("JAEGER_BACKGROUND_PRODUCERS", "1")
@@ -160,9 +160,8 @@ def test_webhook_delivery_id_replays_instead_of_a_second_turn(tmp_path, monkeypa
         )
         with urlopen(req, timeout=5) as resp:
             payload = json.loads(resp.read().decode())
-        assert payload["fired"] == "turn"
-        assert payload["request_id"] == "webhook:wh-1"
-    assert [t["request_id"] for t in sink.turns] == ["webhook:wh-1", "webhook:wh-1"]
+        assert payload == {"ok": False, "status": "rejected", "reason": "subscription_required"}
+    assert sink.turns == []
     producers.stop()
 
 
@@ -189,7 +188,7 @@ def test_unauthorized_webhook_is_rejected(tmp_path, monkeypatch):
     producers.stop()
 
 
-def test_duplicate_board_webhook_does_not_add_a_second_card(tmp_path, monkeypatch):
+def test_unscoped_board_webhook_cannot_enqueue_even_when_repeated(tmp_path, monkeypatch):
     lay = _layout(tmp_path)
     monkeypatch.setenv("JAEGER_BACKGROUND_PRODUCERS", "1")
     monkeypatch.setenv("JAEGER_WEBHOOK_PORT", "0")
@@ -202,6 +201,8 @@ def test_duplicate_board_webhook_does_not_add_a_second_card(tmp_path, monkeypatc
     body = json.dumps({
         "action": "board", "title": "blocker", "prompt": "look", "delivery_id": "board-1",
     }).encode()
+    from jaeger_agent.background.board import board_for_layout
+    before = [card.id for card in board_for_layout(lay).list()]
     cards = []
     for _ in range(2):
         req = Request(
@@ -210,9 +211,9 @@ def test_duplicate_board_webhook_does_not_add_a_second_card(tmp_path, monkeypatc
         )
         with urlopen(req, timeout=5) as resp:
             cards.append(json.loads(resp.read().decode()))
-    assert cards[0]["fired"] == "board"
-    assert cards[1]["replayed"] is True
-    assert cards[0]["card_id"] == cards[1]["card_id"]
+    assert cards == [{"ok": False, "status": "rejected", "reason": "subscription_required"}] * 2
+    assert [card.id for card in board_for_layout(lay).list()] == before
+    assert producers.sink.turns == []
     producers.stop()
     req = Request(
         f"http://127.0.0.1:{producers.webhook_port}/hook", data=body,

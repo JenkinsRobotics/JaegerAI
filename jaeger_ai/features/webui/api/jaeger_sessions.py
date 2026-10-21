@@ -316,6 +316,13 @@ def route(handler, parsed, method: str) -> bool:
     if method == "GET" and path == "/v1/channels":
         return _proxy(handler, "GET", path)
 
+    if path == "/v1/webhooks" or path.startswith("/v1/webhooks/"):
+        if method == "GET":
+            return _proxy(handler, "GET", path + query)
+        if method == "POST" and path.count('/') == 3:
+            return _proxy(handler, "POST", path, _body_bytes(handler))
+        return False
+
     if path == "/v1/workflows" or path.startswith("/v1/workflows/"):
         if method == "GET":
             return _proxy(handler, "GET", path + query)

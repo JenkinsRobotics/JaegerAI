@@ -220,6 +220,12 @@ export class GatewayClient implements JaegerSource {
   async updateSession(id: string, body: { title?: string; archived?: boolean }) {
     await this.json(`/v1/sessions/${encodeURIComponent(id)}`, body, "PATCH");
   }
+  readonly webhooks: import('./source').WebhookControls = {
+    list: () => this.json('/v1/webhooks'),
+    save: (id, body) => this.json(`/v1/webhooks/${encodeURIComponent(id)}`, body),
+    history: id => this.json(`/v1/webhooks/${encodeURIComponent(id)}/deliveries`),
+    operation: id => this.json(`/v1/control-operations/${encodeURIComponent(id)}`),
+  };
   readonly workflows: import("./source").WorkflowControls = {
     list: () => this.json("/v1/workflows"),
     runs: id => this.json(`/v1/workflows/${encodeURIComponent(id)}/runs`),

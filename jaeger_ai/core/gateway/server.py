@@ -1083,6 +1083,20 @@ class JaegerGatewayApp:
                     salience=salience, allowed_tools=allowed_tools,
                 )
 
+            def propose_webhook(self, event):
+                loop = app._loop
+                if loop is None or not loop.is_running():
+                    return {'ok': False, 'status': 'unavailable', 'error': 'Gateway loop unavailable; delivery not admitted'}
+                async def accept():
+                    from jaeger_ai.features.webhooks.owner import receive
+                    return receive(app, event, blocked=bool(_control_plane_block()))
+                # A timeout is uncertain; never create a new event identity.
+                future = asyncio.run_coroutine_threadsafe(accept(), loop)
+                try:
+                    return future.result(timeout=10)
+                except Exception:
+                    return {'ok': False, 'status': 'admission_unknown', 'error': 'Inspect delivery receipts; do not generate a new event identity'}
+
             def deliver_proactive(self, text: str, *, initiative: Any, request_id: str) -> dict[str, Any]:
                 return app.deliver_proactive(text, initiative=initiative, request_id=request_id)
 
@@ -1298,6 +1312,8 @@ class JaegerGatewayApp:
         register_library(self)
         from jaeger_ai.features.workflows.routes import register as register_workflows
         register_workflows(self)
+        from jaeger_ai.features.webhooks.routes import register as register_webhooks
+        register_webhooks(self)
         from jaeger_ai.plugins.mcp.routes import register as register_mcp_controls
         register_mcp_controls(self)
         from jaeger_ai.plugins.control_routes import register as register_plugin_controls

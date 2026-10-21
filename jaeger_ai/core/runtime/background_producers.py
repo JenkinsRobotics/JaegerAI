@@ -37,6 +37,9 @@ class BackgroundTurnSink(Protocol):
     ) -> dict[str, Any]:
         """Run one background turn and return text/error/halt_reason."""
 
+    def propose_webhook(self, event: dict[str, Any]) -> dict[str, Any]:
+        """Persist an approval-bound subscription delivery; never execute ingress."""
+
     def current_tier(self) -> str:
         """Current interaction tier; sensors are Tier 3 only."""
 
@@ -697,32 +700,10 @@ class BackgroundProducers:
     def _handle_webhook(self, interpreted: dict[str, str]) -> dict[str, Any]:
         if not self._accepting:
             return {"ok": False, "error": "producers stopped", "fired": None}
-        action = interpreted.get("action") or "board"
-        title = interpreted.get("title") or "webhook"
-        prompt = interpreted.get("prompt") or title
-        delivery_id = (interpreted.get("delivery_id") or "").strip()
-        if action == "turn":
-            request_id = webhook_request_id(interpreted.get("delivery_id"))
-            result = self.sink.submit_turn(
-                prompt, session="webhook", request_id=request_id, source="webhook",
-            )
-            return {
-                "fired": "turn",
-                "text": (result.get("text") or "")[:500],
-                "request_id": request_id,
-                "replayed": bool(result.get("replayed")),
-                "status": result.get("status"),
-            }
-        prior = _lookup_webhook_delivery(self.layout, delivery_id)
-        if prior is not None:
-            return {"fired": "board", "card_id": prior, "replayed": True, "request_id": webhook_request_id(delivery_id)}
-        from jaeger_agent.background.board import board_for_layout
-        card = board_for_layout(self.layout).add(
-            title, description=prompt, column="ready",
-            source="schedule", created_by="agent",
-        )
-        _remember_webhook_delivery(self.layout, delivery_id, card.id)
-        return {"fired": "board", "card_id": card.id, "replayed": False}
+        callback = getattr(self.sink, 'propose_webhook', None)
+        if not callable(callback):
+            return {'ok': False, 'status': 'unavailable', 'error': 'Gateway subscription owner unavailable; nothing admitted'}
+        return callback(interpreted)
 
 
 def _restore_claimed_schedule(name: str) -> None:
@@ -747,44 +728,6 @@ def _restore_claimed_schedule(name: str) -> None:
             )
     except Exception as exc:  # noqa: BLE001
         print(f"[background] could not restore schedule {name}: {exc}", flush=True)
-
-
-def _delivery_path(layout: Any):
-    mem = getattr(layout, "memory_dir", None)
-    if mem is None:
-        return None
-    return mem / "webhook_deliveries.json"
-
-
-def _lookup_webhook_delivery(layout: Any, delivery_id: str) -> str | None:
-    if not delivery_id:
-        return None
-    path = _delivery_path(layout)
-    if path is None or not path.is_file():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    value = data.get(delivery_id) if isinstance(data, dict) else None
-    return str(value) if value else None
-
-
-def _remember_webhook_delivery(layout: Any, delivery_id: str, card_id: str) -> None:
-    if not delivery_id:
-        return
-    path = _delivery_path(layout)
-    if path is None:
-        return
-    try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {}
-    except (OSError, json.JSONDecodeError):
-        data = {}
-    if not isinstance(data, dict):
-        data = {}
-    data[delivery_id] = card_id
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data), encoding="utf-8")
 
 
 def other_holder_pid(layout: Any) -> int | None:

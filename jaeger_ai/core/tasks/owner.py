@@ -158,6 +158,29 @@ class GatewayTaskOwner:
         return {'ok': True, 'task_id': tid, 'status': task.state.value, 'replayed': replayed,
                 'session_id': f'task:{tid}', 'authorized': task.provenance.get('authorized', False)}
 
+    def propose_inbound(self, conn, *, delivery_id, subscription, goal, execution):
+        """Compose a paused task + one approval with the caller's delivery transaction.
+
+        Only an internal validated subscription owner calls this. Incoming data
+        supplies neither caller identity nor tools, workspace or approval state.
+        """
+        tid = 'task_' + hashlib.sha256(('webhook:' + delivery_id).encode()).hexdigest()[:24]
+        parent = subscription['session_id']
+        task = DurableTask(tid, 'native:jaeger', goal, kind=TaskKind.LONG_RUNNING,
+            state=TaskState.PAUSED, payload={'execution': execution, 'artifacts': []},
+            agent_id=subscription['agent_id'], notification_policy=NotificationPolicy(recipient_session_id=parent),
+            provenance={'source': 'webhook', 'authorized': False, 'session_id': parent,
+                        'request_id': delivery_id, 'webhook_subscription_id': subscription['id'],
+                        'webhook_revision': subscription['revision'], 'webhook_delivery_id': delivery_id})
+        task, replayed = self.store.admit_task_in_transaction(conn, task)
+        if replayed:
+            raise ValueError('Inbound admission exists without its receipt; inspect without replay')
+        approval = self.gateway.store.create_approval(kind='background_task',
+            prompt='Review inbound webhook task before running:\n' + goal, options=['once', 'deny'],
+            session_id=parent, metadata={'task_id': tid}, approval_id='approval_' + delivery_id,
+            connection=conn)
+        return task, approval
+
     def edit_proposal(self, task_id: str, *, goal: str, expected_updated_at: float) -> dict:
         """Edit only an unstarted, unapproved proposal, under the owner's transaction."""
         if not goal.strip():
@@ -539,6 +562,16 @@ class GatewayTaskOwner:
         return self.gateway.store.ensure_session(sid, title=task.goal[:100], profile='jaeger',
             workspace=str(task.payload['execution'].get('workspace') or ''), metadata=metadata)
 
+    def _inbound_admission_guard(self, conn, task):
+        """Revalidate revocation/cancellation in the canonical request commit."""
+        row = conn.execute('SELECT task_json FROM durable_tasks WHERE task_id=?', (task.task_id,)).fetchone()
+        current = DurableTask.from_dict(json.loads(row[0])) if row else None
+        if current is None or current.is_terminal or current.cancellation or not current.provenance.get('authorized'):
+            raise ValueError('Task authorization or cancellation changed before admission; no dispatch')
+        from jaeger_ai.features.webhooks.owner import execution_allowed
+        if self.gateway._current_tier() == 'chat' or not execution_allowed(self.gateway, current, connection=conn):
+            raise ValueError('Webhook subscription revoked or changed before admission; no dispatch')
+
     async def _execute(self, task_id):
         task = self.store.get_task(task_id)
         if task is None or task.is_terminal:
@@ -554,6 +587,10 @@ class GatewayTaskOwner:
         row = self.gateway.store.get_request(rid)
         if row is None or row.get('status') in {'admitted', 'running'} and rid not in self.gateway._running_tasks:
             try:
+                if task.provenance.get('webhook_subscription_id'):
+                    from jaeger_ai.features.webhooks.owner import execution_allowed
+                    if not execution_allowed(self.gateway, task):
+                        raise ValueError('Webhook subscription revoked or changed; inspect proposal before dispatch')
                 self._execution_session(task, admitted=row is not None)
                 if task.agent_id:
                     # Current registry execution protections still apply after a
@@ -589,7 +626,21 @@ class GatewayTaskOwner:
             self._deliver(task)
             return
         if row is None:
-            admitted = self.gateway.store.admit_request(sid, prompt, request_id=rid, requested=execution)
+            try:
+                admitted = self.gateway.store.admit_request(sid, prompt, request_id=rid, requested=execution,
+                    **({'admission_guard': lambda conn: self._inbound_admission_guard(conn, task)}
+                       if task.provenance.get('webhook_subscription_id') else {}))
+            except ValueError as exc:
+                if not task.provenance.get('webhook_subscription_id'):
+                    raise
+                reason = str(exc)
+                def hold_admission(current):
+                    if not current.is_terminal:
+                        authoritative_transition(current, TaskState.PAUSED, error=reason)
+                held = self.store.update_task(task_id, hold_admission)
+                self.gateway.event_bus.publish(task.notification_policy.recipient_session_id or sid,
+                    'task.updated', {'task': held.to_dict()})
+                return
             if task.payload.get('native_run_id'):
                 from jaeger_ai.core.gateway.server import OWNER_RUN_SESSION_PREFIX
                 self.gateway.store.bind_native(rid, native_run_id=task.payload['native_run_id'], native_session=f'{OWNER_RUN_SESSION_PREFIX}{sid}')
