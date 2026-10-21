@@ -13,6 +13,7 @@ import AppKit
 import JaegerShellCore
 import ServiceManagement
 import WebKit
+import UserNotifications
 import os
 
 private let shellLogger = Logger(subsystem: "com.jenkinsrobotics.JaegerAI.uirebuild", category: "shell")
@@ -24,8 +25,9 @@ func shellLog(_ message: String) {
 }
 
 final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate,
-    WKUIDelegate, WKDownloadDelegate
+    WKUIDelegate, WKDownloadDelegate, UNUserNotificationCenterDelegate
 {
+    let notificationNavigation = NotificationNavigationMailbox()
     private var window: NSWindow?
     private var webView: WKWebView?
     private var loadAttempts = 0
@@ -126,6 +128,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             NSApp.terminate(nil)
             return
         }
+        UNUserNotificationCenter.current().delegate = self
         if VisibleChecker.enabled {
             shellLog("[shell][visible-check] enabled")
             let checker = VisibleChecker(app: self)
@@ -145,6 +148,23 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             }
         } else {
             stack.acquireLeaseIfStackRunning()
+        }
+    }
+
+    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+                                withCompletionHandler completionHandler: @escaping () -> Void) {
+        guard response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+              let destination = NotificationDestination.parse(response.notification.request.content.userInfo) else {
+            completionHandler(); return
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { completionHandler(); return }
+            // One pending UI destination, consumed by the trusted renderer after
+            // mount. Showing the existing window never reloads or starts services.
+            self.notificationNavigation.receive(destination)
+            self.showWindow()
+            self.bridge?.send(["type": "notification.open"])
+            completionHandler()
         }
     }
 

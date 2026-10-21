@@ -15,7 +15,9 @@ protocol BridgeHost: AnyObject {
     func bridgeToggleWindow()
     func bridgeSetPinned(_ pinned: Bool)
     func bridgeNotificationStatus(_ done: @escaping ([String: Any]) -> Void)
-    func bridgeNotify(title: String, body: String, done: @escaping BridgeDone)
+    func bridgeNotify(title: String, body: String, sessionId: String?, done: @escaping BridgeDone)
+    func bridgeAcknowledgeNotificationNavigation(_ id: String) -> Bool
+    func bridgeNotificationNavigation() -> [String: Any]
     func bridgeOpenLink(_ url: URL)
     func bridgeReveal(_ url: URL)
     func bridgeAppInfo() -> [String: Any]
@@ -104,7 +106,9 @@ final class NativeBridge: NSObject, WKScriptMessageHandler {
         case .windowToggle: host.bridgeToggleWindow(); reply(id, [:])
         case .windowSetPinned(let pinned): host.bridgeSetPinned(pinned); reply(id, ["pinned": pinned])
         case .notificationStatus: host.bridgeNotificationStatus { [weak self] result in self?.reply(id, result) }
-        case .notify(let title, let body): host.bridgeNotify(title: title, body: body) { [weak self] result, error in self?.finish(id, result, error) }
+        case .notificationNavigation: reply(id, host.bridgeNotificationNavigation())
+        case .notificationNavigationAck(let navigationId): reply(id, ["cleared": host.bridgeAcknowledgeNotificationNavigation(navigationId)])
+        case .notify(let title, let body, let sessionId): host.bridgeNotify(title: title, body: body, sessionId: sessionId) { [weak self] result, error in self?.finish(id, result, error) }
         case .linkOpen(let url): host.bridgeOpenLink(url); reply(id, ["opened": url.absoluteString])
         case .fileReveal(let url): host.bridgeReveal(url); reply(id, ["revealed": url.path])
         case .appInfo: reply(id, host.bridgeAppInfo())
@@ -204,6 +208,16 @@ extension JaegerShellApplication: BridgeHost {
         return status
     }
 
+    func bridgeAcknowledgeNotificationNavigation(_ id: String) -> Bool {
+        notificationNavigation.acknowledge(id)
+    }
+
+    func bridgeNotificationNavigation() -> [String: Any] {
+        let navigation = notificationNavigation.payload
+        if let navigation { return ["navigation": navigation] }
+        return ["navigation": NSNull()]
+    }
+
     func bridgeNotificationStatus(_ done: @escaping ([String: Any]) -> Void) {
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             let status: String
@@ -218,7 +232,7 @@ extension JaegerShellApplication: BridgeHost {
         }
     }
 
-    func bridgeNotify(title: String, body: String, done: @escaping BridgeDone) {
+    func bridgeNotify(title: String, body: String, sessionId: String?, done: @escaping BridgeDone) {
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { settings in
             guard [.authorized, .provisional].contains(settings.authorizationStatus) else {
@@ -228,6 +242,7 @@ extension JaegerShellApplication: BridgeHost {
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
+            content.userInfo = (sessionId.map(NotificationDestination.conversation) ?? .inbox).payload
             let identifier = UUID().uuidString
             center.add(UNNotificationRequest(identifier: identifier, content: content, trigger: nil)) { error in
                 DispatchQueue.main.async {

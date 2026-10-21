@@ -359,8 +359,10 @@ final class Snapshotter: NSObject, BridgeHost {
     func bridgeHideWindow() { calls.append("window.hide") }
     func bridgeToggleWindow() { calls.append("window.toggle") }
     func bridgeSetPinned(_ pinned: Bool) { calls.append("window.setPinned") }
+    func bridgeAcknowledgeNotificationNavigation(_ id: String) -> Bool { false }
+    func bridgeNotificationNavigation() -> [String: Any] { ["navigation": NSNull()] }
     func bridgeNotificationStatus(_ done: @escaping ([String: Any]) -> Void) { done(["authorization": "unknown", "permission_requested": false]) }
-    func bridgeNotify(title: String, body: String, done: @escaping BridgeDone) { calls.append("notify"); done(["accepted": true, "delivery_proven": false], nil) }
+    func bridgeNotify(title: String, body: String, sessionId: String?, done: @escaping BridgeDone) { calls.append("notify"); done(["accepted": true, "delivery_proven": false], nil) }
     func bridgeOpenLink(_ url: URL) { calls.append("link.open (recorded)") }
     func bridgeReveal(_ url: URL) { calls.append("file.reveal (recorded)") }
     func bridgeAppInfo() -> [String: Any] { calls.append("app.info"); return ShellEnvironment.appInfo(app.start) }

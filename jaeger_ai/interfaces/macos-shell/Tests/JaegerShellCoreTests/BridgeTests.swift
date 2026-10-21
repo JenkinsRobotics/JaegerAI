@@ -56,7 +56,12 @@ final class BridgeTests: XCTestCase {
         XCTAssertNotNil(cmd("tts.speak", ["text": "hi", "voice": 3]).failureValue)
         XCTAssertNotNil(cmd("tts.speak", ["text": String(repeating: "a", count: 10001)]).failureValue)
         XCTAssertEqual(cmd("tts.stop").successValue, .ttsStop)
-        XCTAssertEqual(cmd("notify", ["title": "Hi", "body": "there"]).successValue, .notify(title: "Hi", body: "there"))
+        XCTAssertEqual(cmd("notify", ["title": "Hi", "body": "there"]).successValue, .notify(title: "Hi", body: "there", sessionId: nil))
+        XCTAssertEqual(cmd("notify", ["title": "Hi", "session_id": "owned:home"]).successValue, .notify(title: "Hi", body: "", sessionId: "owned:home"))
+        for invalid in ["https://example.com", "../other", "owned\nother", String(repeating: "x", count: 257)] {
+            XCTAssertNotNil(cmd("notify", ["title": "Hi", "session_id": invalid]).failureValue)
+        }
+        XCTAssertEqual(cmd("notifications.navigation").successValue, .notificationNavigation)
         XCTAssertNotNil(cmd("notify", [:]).failureValue)
         XCTAssertEqual(cmd("notifications.status").successValue, .notificationStatus)
         XCTAssertEqual(BridgeCommand.notificationStatus.name, "notifications.status")

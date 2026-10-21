@@ -1,3 +1,5 @@
+import {useNotificationNavigation} from './platform/useNotificationNavigation';
+import {notificationConversation} from './platform/notificationNavigation';
 import {TaskArtifacts} from './library/TaskArtifacts';
 import {EntityMemoryPanel} from './settings/EntityMemoryPanel';
 import {useNativeNotifications} from './platform/useNativeNotifications';
@@ -97,6 +99,8 @@ export function App({ source }: { source: JaegerSource }) {
   const [sessionError, setSessionError] = useState<string>();
   const [sessionAttempt, setSessionAttempt] = useState(0);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [settingsRequest,setSettingsRequest]=useState<{tab:"notifications";sequence:number}>();
+  const notificationGeneration=useRef(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsCaps, setSettingsCaps] = useState<HostCapabilities>(() => capabilitiesOf(host));
   useEffect(() => {
@@ -183,6 +187,19 @@ export function App({ source }: { source: JaegerSource }) {
     await store.refresh(); newChat(result.receipt.agent.id);
     return { failed: undefined };
   }, [source, store.refresh, newChat]);
+
+  const openNotificationConversation=useCallback(async(id:string)=>{
+    const generation=++notificationGeneration.current;
+    try{
+      const selected=await notificationConversation(source.session.bind(source),store.agents,id);
+      if(generation!==notificationGeneration.current)return;
+      setSettingsOpen(false);setDetailsAgentId(null);setHistoryAgentId(null);setSelection(selected);setPhoneView('chat');
+    }catch(e){if(generation===notificationGeneration.current)setSessionError("Couldn't open notification conversation: "+message(e));}
+  },[source,store.agents]);
+  useNotificationNavigation(initialReady&&!store.loading&&!store.error,route=>{
+    if(route.target==='conversation')void openNotificationConversation(route.session_id);
+    else{setSettingsRequest(prior=>({tab:'notifications',sequence:(prior?.sequence??0)+1}));setSettingsOpen(true);}
+  });
 
   // A handoff marker opens the specialist's side of that exchange: its own
   // chat, selected under its agent in the sidebar.
@@ -372,7 +389,7 @@ export function App({ source }: { source: JaegerSource }) {
       {configurationAgentId && source.specialistControls && <SpecialistConfiguration key={configurationAgentId} agentId={configurationAgentId} controls={source.specialistControls} onClose={() => setConfigurationAgentId(undefined)} onSaved={() => { void store.refresh(); }} />}
       <ConnectAppsDialog open={connectOpen} source={source} onClose={() => setConnectOpen(false)} />
       {artifactTask&&source.taskArtifacts&&<div role="dialog" aria-label="Task artifact references"><button type="button" onClick={()=>setArtifactTask(undefined)}>Close task artifact references</button><TaskArtifacts controls={source.taskArtifacts} taskId={artifactTask}/></div>}
-      <SettingsDialog memoryPanel={source.semanticClaims&&<EntityMemoryPanel source={source}/>} notificationsPanel={source.notifications && <NotificationsPanel controls={source.notifications} agents={store.agents} onOpen={(id)=>{setSettingsOpen(false);host.openChat?.(id);}}/>} channelsPanel={source.channels ? <ChannelsPanel source={source} agents={store.agents} /> : undefined} workflowsPanel={source.workflows ? <WorkflowsPanel source={source} agents={store.agents} /> : undefined} diagnosticsPanel={source.diagnostics ? <DiagnosticsPanel source={source} /> : undefined} toolsPanel={source.tools ? <ToolsPanel source={source} sessionId={sessionId} /> : undefined} open={settingsOpen} onClose={() => setSettingsOpen(false)} capabilities={settingsCaps} automationsPanel={source.schedules ? <AutomationsPanel controls={source.schedules} /> : undefined} skillsPanel={source.skills ? <SkillsPanel source={source} /> : undefined} libraryPanel={source.library ? <LibraryPanel controls={source.library} artifacts={source.taskArtifacts} /> : undefined} agentsPanel={<AgentManagement onMemory={source.agentMemory?agent=>{setSettingsOpen(false);setMemoryAgentId(agent.id);}:undefined} onKnowledge={source.agentKnowledge ? agent => { setSettingsOpen(false); setKnowledgeAgentId(agent.id); } : undefined} onSearch={source.searchMessages ? agent => { setSettingsOpen(false); setMessageSearchAgent(agent); } : undefined} onConfigure={source.specialistControls ? agent => { setSettingsOpen(false); setConfigurationAgentId(agent.id); } : undefined} onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived, ...(!archived ? { deleted: false } : {}) })} />} />
+      <SettingsDialog requestedTab={settingsRequest} memoryPanel={source.semanticClaims&&<EntityMemoryPanel source={source}/>} notificationsPanel={source.notifications && <NotificationsPanel controls={source.notifications} agents={store.agents} onOpen={(id)=>{void openNotificationConversation(id);}}/>} channelsPanel={source.channels ? <ChannelsPanel source={source} agents={store.agents} /> : undefined} workflowsPanel={source.workflows ? <WorkflowsPanel source={source} agents={store.agents} /> : undefined} diagnosticsPanel={source.diagnostics ? <DiagnosticsPanel source={source} /> : undefined} toolsPanel={source.tools ? <ToolsPanel source={source} sessionId={sessionId} /> : undefined} open={settingsOpen} onClose={() => {setSettingsOpen(false);setSettingsRequest(undefined);}} capabilities={settingsCaps} automationsPanel={source.schedules ? <AutomationsPanel controls={source.schedules} /> : undefined} skillsPanel={source.skills ? <SkillsPanel source={source} /> : undefined} libraryPanel={source.library ? <LibraryPanel controls={source.library} artifacts={source.taskArtifacts} /> : undefined} agentsPanel={<AgentManagement onMemory={source.agentMemory?agent=>{setSettingsOpen(false);setMemoryAgentId(agent.id);}:undefined} onKnowledge={source.agentKnowledge ? agent => { setSettingsOpen(false); setKnowledgeAgentId(agent.id); } : undefined} onSearch={source.searchMessages ? agent => { setSettingsOpen(false); setMessageSearchAgent(agent); } : undefined} onConfigure={source.specialistControls ? agent => { setSettingsOpen(false); setConfigurationAgentId(agent.id); } : undefined} onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived, ...(!archived ? { deleted: false } : {}) })} />} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
         onAgent={(agentId) => { newChat(agentId); if (phone) setPhoneView("chat"); }}

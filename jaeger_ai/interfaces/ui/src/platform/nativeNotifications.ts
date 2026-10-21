@@ -50,7 +50,9 @@ export class NativeNotificationConsumer{
    const current=nativeNotificationPreferences();if(!this.active||!current.enabled||(current.revision??0)!==(prefs.revision??0))return;
    // Claim the cursor before native IPC. Lost/unknown replies are never retried after reload.
    write('submission_unknown');
-   const receipt=await this.bridge.post('notify',{title:incoming.length===1?incoming[0].title:'Jaeger activity updates',body:`${incoming.length} new activity notification${incoming.length===1?'':'s'}. Open Jaeger to review.`}) as {accepted?:boolean;permission_requested?:boolean;notification_id?:string};
+   const sessions=[...new Set(incoming.map(n=>n.session_id))];
+   const sessionId=sessions.length===1&&/^[A-Za-z0-9_.:-]{1,256}$/.test(sessions[0])?sessions[0]:undefined;
+   const receipt=await this.bridge.post('notify',{...(sessionId?{session_id:sessionId}:{}),title:incoming.length===1?incoming[0].title:'Jaeger activity updates',body:`${incoming.length} new activity notification${incoming.length===1?'':'s'}. Open Jaeger to review.`}) as {accepted?:boolean;permission_requested?:boolean;notification_id?:string};
    if(receipt?.accepted!==true||receipt.permission_requested!==false)throw Error('Native submission not acknowledged; no automatic retry');
    write('accepted',receipt.notification_id);this.report('macOS accepted an activity notification request; visible delivery unverified.');
   }catch(e){this.report(`${String(e)}. No automatic notification replay.`);}finally{this.busy=false;}
