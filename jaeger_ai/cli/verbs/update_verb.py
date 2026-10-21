@@ -34,6 +34,8 @@ from pathlib import Path
 
 from typing import Any
 
+from jaeger_ai.contract.updates import DEFAULT_UPDATE_CHANNEL, UPDATE_CHANNELS
+
 
 def _detect_method() -> str:
     """Same detection as ``instance.detect_install_method`` —
@@ -467,7 +469,7 @@ def _cmd_update_argv(argv: list[str]) -> int:
                         help="run the framework upgrade but skip migration scan")
     parser.add_argument("--ref", default=None,
                         help="exact version/tag/branch to install (overrides --channel)")
-    parser.add_argument("--channel", choices=("stable", "latest"), default="stable",
+    parser.add_argument("--channel", choices=UPDATE_CHANNELS, default=DEFAULT_UPDATE_CHANNEL,
                         help="stable = newest release tag (default); "
                              "latest = development HEAD (master)")
     parser.add_argument("--rollback", action="store_true",

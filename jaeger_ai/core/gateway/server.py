@@ -1403,6 +1403,14 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/runtime/diagnostics", self.handle_runtime_diagnostics)
         from .diagnostic_capture import register as register_diagnostic_capture
         register_diagnostic_capture(self)
+        from jaeger_ai.core.instance.update_status import snapshot as update_snapshot
+        from jaeger_ai.contract.updates import DEFAULT_UPDATE_CHANNEL
+        async def update_plan(request):
+            try:
+                return web.json_response(await asyncio.to_thread(update_snapshot, self, channel=request.query.get('channel', DEFAULT_UPDATE_CHANNEL)))
+            except ValueError as exc:
+                return web.json_response({'error': str(exc)}, status=400)
+        self.app.router.add_get('/v1/runtime/updates/plan', update_plan)
         self.app.router.add_post("/v1/sessions/{id}/ide/{ide_request_id}", self.handle_ide_result)
         self.app.router.add_get("/v1/runtime/autonomy", self.handle_get_autonomy)
         self.app.router.add_post("/v1/runtime/autonomy", self.handle_set_autonomy)

@@ -228,6 +228,9 @@ def route(handler, parsed, method: str) -> bool:
     except Exception:
         pass
 
+    if path == '/v1/runtime/updates/plan' and method == 'GET':
+        return _proxy(handler, method, path + query)
+
     if path.startswith('/v1/tasks/'):
         segments=path.split('/')
         if len(segments)==5 and segments[4]=='presentation' and method=='POST':return _proxy(handler,method,path,_body_bytes(handler))

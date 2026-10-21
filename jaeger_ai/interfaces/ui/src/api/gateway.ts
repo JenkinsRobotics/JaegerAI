@@ -130,6 +130,7 @@ export class GatewayClient implements JaegerSource {
       void this.json('/v1/runtime/diagnostics/capture/report',{capture_id:active.id,event_id:eventId,code,...(sessionId?{session_id:sessionId}:{}),...(sessionId&&requestId?{request_id:requestId}:{})}).catch(()=>{});
     }catch{/* unavailable storage/report transport cannot affect execution */}
   }
+  updatePlan(channel:"stable"|"latest"){return this.json<import("./source").UpdatePlan>("/v1/runtime/updates/plan?channel="+channel);}
   diagnostics() { return this.json<import("./source").GatewayDiagnostics>("/v1/runtime/diagnostics"); }
   tools(query = "") { return this.json<import("./source").ToolInventory>(`/v1/runtime/tools?q=${encodeURIComponent(query)}`); }
   readonly notifications: import('./source').Notifications = {
