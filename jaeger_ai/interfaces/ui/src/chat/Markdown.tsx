@@ -58,13 +58,15 @@ const textOf = (n: HastNode): string => n.type === "text" ? (n.value ?? "") : (n
 function CodeBlock({ code, lang, closed, handlers }: { code: string; lang: string; closed: boolean; handlers: HandlersRef }) {
   const [html, setHtml] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => { if (copiedTimer.current) clearTimeout(copiedTimer.current); }, []);
   const supported = Boolean(resolveLang(lang));
   useEffect(() => {
     setHtml(null);
     if (!closed || !supported) return;
-    let live = true;
-    highlight(code, lang).then((h) => { if (live) setHtml(h); }, () => { /* stay plain */ });
-    return () => { live = false; };
+    let live = true; const controller = new AbortController();
+    highlight(code, lang, controller.signal).then((h) => { if (live) setHtml(h); }, () => { /* stay plain */ });
+    return () => { live = false; controller.abort(); };
   }, [code, lang, closed, supported]);
   const onCopy = handlers.current.onCopy;
   return (
@@ -73,7 +75,7 @@ function CodeBlock({ code, lang, closed, handlers }: { code: string; lang: strin
         <span>{lang}</span>
         {onCopy && (
           <button type="button" className="jg-codeblock__copy" aria-label="Copy code"
-            onClick={() => { handlers.current.onCopy?.(code); setCopied(true); setTimeout(() => setCopied(false), 1500); }}>
+            onClick={() => { handlers.current.onCopy?.(code); setCopied(true); if (copiedTimer.current) clearTimeout(copiedTimer.current); copiedTimer.current = setTimeout(() => setCopied(false), 1500); }}>
             {copied ? "Copied" : "Copy"}
           </button>
         )}
@@ -129,8 +131,21 @@ const Block = memo(function Block({ text, handlers }: { text: string; handlers: 
   return <ReactMarkdown remarkPlugins={remarkPlugins} components={components(text, handlers)}>{text}</ReactMarkdown>;
 }, (a, b) => a.text === b.text && a.handlers === b.handlers);
 
+export const MARKDOWN_UNITS_MAX = 65536;
+const PLAIN_PORTION = 16383; // Boundary adjustment may add one UTF-16 unit.
+/** Large messages remain intact in the transcript owner. Bound only the DOM and
+ * parser work; all portions and full-source Copy remain explicitly available. */
+function PlainPortions({text, handlers}: {text:string;handlers:HandlersRef}) {
+  const [page,setPage] = useState(0);
+  const pages = Math.ceil(text.length / PLAIN_PORTION), current = Math.min(page, pages - 1);
+  const boundary = (offset:number) => offset > 0 && /[\uDC00-\uDFFF]/.test(text[offset] ?? '') && /[\uD800-\uDBFF]/.test(text[offset - 1]) ? offset - 1 : offset;
+  const start = boundary(current * PLAIN_PORTION), end = boundary(Math.min(text.length, (current + 1) * PLAIN_PORTION));
+  return <section aria-label="Large message bounded preview"><p>Large message shown as plain text in bounded portions. Full source is retained. Portion {current + 1} of {pages}.</p><pre aria-label="Large message plain portion" style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{text.slice(start,end)}</pre><button type="button" disabled={current===0} onClick={()=>setPage(current-1)}>Previous message portion</button><button type="button" disabled={current===pages-1} onClick={()=>setPage(current+1)}>Next message portion</button>{handlers.current.onCopy&&<button type="button" onClick={()=>handlers.current.onCopy?.(text)}>Copy full message</button>}</section>;
+}
+
 export function Markdown({ text, onCopy, onOpen }: { text: string } & MarkdownHandlers): ReactNode {
   const handlers = useRef<MarkdownHandlers>({ onCopy, onOpen });
   handlers.current = { onCopy, onOpen };
+  if (text.length > MARKDOWN_UNITS_MAX) return <PlainPortions text={text} handlers={handlers}/>;
   return <>{splitBlocks(text).map((block, i) => <Block key={i} text={block} handlers={handlers} />)}</>;
 }
