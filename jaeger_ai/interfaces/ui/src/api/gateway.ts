@@ -57,6 +57,7 @@ export class GatewayClient implements JaegerSource {
     preview:(taskId,id,page)=>this.json(`/v1/library/artifacts/${encodeURIComponent(taskId)}/${encodeURIComponent(id)}?view=preview${page?'&page='+page:''}`),
   };
   library: LibraryControls = {
+    exportDocument:(id,revision,digest)=>this.json(`/v1/library/documents/${encodeURIComponent(id)}/export?revision=${revision}&digest=${encodeURIComponent(digest)}`),
     list: () => this.json("/v1/library"),
     search: query => this.json(`/v1/library/search?q=${encodeURIComponent(query)}`),
     read: id => this.json(`/v1/library/documents/${encodeURIComponent(id)}`),

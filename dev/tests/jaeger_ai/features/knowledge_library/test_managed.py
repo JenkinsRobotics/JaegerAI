@@ -29,3 +29,20 @@ def test_versions_conflicts_recoverable_archive_and_same_command(tmp_path):
     assert reopened.managed_document(original['id'])['revision'] == 5
     assert reopened.search('First revision')[0]['id'] == original['id']
     reopened.close()
+
+
+def test_export_uses_reviewed_saved_revision_without_access_grants_or_mutation(tmp_path):
+    from jaeger_ai.features.knowledge_library import KnowledgeLibrary
+    lib=KnowledgeLibrary(tmp_path/'owned-export.db')
+    try:
+        doc=lib.create_document(title='Owned export',content='Literal saved content',command_id='owned-export')
+        snapshot=lib.export_document(doc['id'],expected_revision=1,expected_digest=doc['digest'])
+        assert snapshot['format']=='jaeger.document.snapshot' and snapshot['access']=='manual_local_export_no_recipient_grant'
+        assert snapshot['document']['content']=='Literal saved content' and snapshot['document']['revision']==1
+        assert set(snapshot['document'])=={'id','title','content','revision','digest','archived'}
+        lib.save_document(doc['id'],title='Owned export',content='Newer content',expected_revision=1)
+        from jaeger_ai.features.knowledge_library.managed import DocumentConflict
+        with pytest.raises(DocumentConflict):lib.export_document(doc['id'],expected_revision=1,expected_digest=doc['digest'])
+        assert lib.managed_document(doc['id'])['content']=='Newer content'
+        assert len(lib.document_versions(doc['id']))==2
+    finally:lib.close()

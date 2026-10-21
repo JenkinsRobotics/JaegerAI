@@ -53,12 +53,16 @@ export function LibraryPanel({ controls, artifacts }: { controls: LibraryControl
     if (!receipt.ok) { localStorage.removeItem(OP); setPending(undefined); throw Error(receipt.error ?? "Document action rejected"); }
     if (!receipt.document?.id || typeof receipt.document.revision !== "number") throw Error("Document receipt has no verified identity/revision");
     const current = await controls.read(receipt.document.id);
+    if(current.id!==receipt.document.id||typeof current.revision!=='number'||current.revision<receipt.document.revision)throw Error('Saved document read does not match the operation receipt; original action retained');
+    const advanced=current.revision!==receipt.document.revision;
+    if(!advanced&&(current.digest!==receipt.document.digest||current.archived!==receipt.document.archived))throw Error('Saved document content does not match the operation receipt');
     const raw = localStorage.getItem(draftKey(intent.documentId));
-    const next = (intent.action === "archive" || intent.action === "restore") && raw ? { ...JSON.parse(raw), revision: current.revision } : current;
+    const next = advanced&&raw?JSON.parse(raw): (intent.action === "archive" || intent.action === "restore") && raw ? { ...JSON.parse(raw), revision: current.revision } : current;
     storeDraft(current.id, next);
     if (intent.action === "create") localStorage.removeItem(draftKey("new"));
     localStorage.removeItem(OP); setPending(undefined);
     setSelected(current.id); setDocument(current); setDraft(next); setVersions(undefined); setAttempt(n => n + 1);
+    if(advanced)setError(`Document advanced to revision ${current.revision} after this action. Your draft is preserved with its original base; review the saved document before merging.`);
     setNotice(`Document action saved at revision ${receipt.document.revision}.${intent.action === "version" ? " Previous unsaved draft backup retained." : ""}`);
   };
   const mutate = async (action: Intent["action"], revision?: number) => {
@@ -104,12 +108,31 @@ export function LibraryPanel({ controls, artifacts }: { controls: LibraryControl
     } catch (e) { if (owner === generation.current) setError(`Text import failed: ${String((e as Error).message ?? e)}. No document was submitted.`); }
     finally { locked.current = false; if (owner === generation.current) setBusy(false); }
   };
+  const exportSaved = async () => {
+    if(!document?.editable||!document.revision||!controls.exportDocument||locked.current||pending)return;
+    locked.current=true;setBusy(true);setError(undefined);setNotice(undefined);
+    let url:string|undefined;const owner=generation.current;
+    try{
+      const snapshot=await controls.exportDocument(document.id,document.revision,document.digest), saved=snapshot.document;
+      if(owner!==generation.current)return;
+      if(snapshot.format!=='jaeger.document.snapshot'||snapshot.schema_version!==1||snapshot.access!=='manual_local_export_no_recipient_grant'||saved.id!==document.id||saved.revision!==document.revision||saved.digest!==document.digest||typeof saved.content!=='string')throw Error('Export identity/revision mismatch; download withheld');
+      const digest=[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(saved.content)))].map(n=>n.toString(16).padStart(2,'0')).join('');
+      if(owner!==generation.current)return;
+      if(digest!==saved.digest)throw Error('Export digest mismatch; download withheld');
+      url=URL.createObjectURL(new Blob([JSON.stringify(snapshot,null,2)],{type:'application/json'}));
+      const link=window.document.createElement('a');link.href=url;link.download=saved.title.replace(/[\\/\x00-\x1f]/g,'_').slice(0,120)+'.jaeger-document.json';link.click();
+      setNotice(`Download requested for saved revision ${saved.revision}; OS file delivery is unconfirmed. Unsaved draft unchanged. No recipient or public access was granted.`);
+    }catch(e){setError(String((e as Error).message??e));}
+    finally{if(url)URL.revokeObjectURL(url);locked.current=false;setBusy(false);}
+  };
   const ready = selected === "new" || Boolean(document);
   const editable = selected === "new" || document?.editable === true;
   return <section aria-label="Library">
     {artifacts&&<TaskArtifacts controls={artifacts}/>}
     {document?.provenance&&<details><summary>Imported reference provenance</summary><pre>{JSON.stringify(document.provenance,null,2)}</pre><p>Recorded at import; subsequent edits can change document content. Not a publisher verification or access grant.</p></details>}
     <p>Managed Jaeger documents are editable. Existing indexed collections stay read-only; no new folder access is granted here.</p>
+    {catalog?.write_policy&&<p>Writes use a revision check and a {catalog.write_policy.seconds}-second server commit window. This is not an exclusive editor lock; expired commands are rolled back and drafts remain local.</p>}
+    {catalog?.sharing&&<p>Sharing scope: {catalog.sharing.scope}. {catalog.sharing.reason}</p>}
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {pending && <p role="alert">Document action needs reconciliation. <button type="button" disabled={busy} onClick={() => void reconcile()}>Check saved document action</button></p>}
     <button type="button" disabled={busy || Boolean(pending)} onClick={() => void open("new")}>New document</button><button type="button" disabled={busy} onClick={() => setAttempt(n => n + 1)}>Refresh library</button>
@@ -123,6 +146,7 @@ export function LibraryPanel({ controls, artifacts }: { controls: LibraryControl
       <label>Title <input aria-label="Document title" value={draft.title} disabled={!editable || busy || Boolean(pending) || Boolean(document?.archived)} onChange={e => update({ ...draft, title: e.target.value })} /></label>
       <label>Content <textarea aria-label="Document content" rows={12} value={draft.content} readOnly={!editable || Boolean(document?.archived)} disabled={busy || Boolean(pending)} onChange={e => update({ ...draft, content: e.target.value })} style={{ width: "100%", boxSizing: "border-box" }} /></label>
       {editable && !document?.archived && <button type="button" disabled={busy || Boolean(pending) || !draft.title.trim()} onClick={() => void mutate(selected === "new" ? "create" : "save")}>Save document</button>}
+      {document?.editable&&controls.exportDocument&&<button type="button" disabled={busy||Boolean(pending)} onClick={()=>void exportSaved()}>Export saved document</button>}
       {document?.editable && <><button type="button" disabled={busy || Boolean(pending)} onClick={() => void mutate(document.archived ? "restore" : "archive")}>{document.archived ? "Restore document" : "Archive document"}</button><button type="button" disabled={busy} onClick={() => { const owner = generation.current; void controls.versions(document.id).then(value => { if (owner === generation.current) setVersions(value.versions); }, e => { if (owner === generation.current) setError(String(e)); }); }}>Version history</button></>}
       {document && <button type="button" disabled={busy} onClick={() => void open(selected)}>Refresh saved preview (keep draft)</button>}
       {document && <details><summary>Current saved document (your draft stays above)</summary><pre style={{ whiteSpace: "pre-wrap" }}>{document.content}</pre></details>}

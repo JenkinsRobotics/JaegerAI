@@ -2,9 +2,10 @@
 from __future__ import annotations
 import hashlib
 import json
+import time
 from aiohttp import web
 from .managed import DocumentConflict
-from jaeger_ai.contract.knowledge import MANAGED_DOCUMENT_MAX_BYTES
+from jaeger_ai.contract.knowledge import DOCUMENT_WRITE_WINDOW_SECONDS, MANAGED_DOCUMENT_MAX_BYTES
 from .store import LibraryError
 
 
@@ -20,7 +21,13 @@ def register(gateway):
     async def read(request):
         document_id = request.match_info.get('document_id')
         try:
+            if request.path.endswith('/export'):
+                raw_revision = request.query.get('revision', '')
+                if not 1 <= len(raw_revision) <= 16 or not raw_revision.isascii() or not raw_revision.isdecimal():
+                    return web.json_response({'error': 'Reviewed saved revision required'}, status=400)
+                return web.json_response(use(lambda lib: lib.export_document(document_id, expected_revision=int(raw_revision), expected_digest=request.query.get('digest', ''))))
             if request.path.endswith('/versions'):
+
                 return web.json_response({'versions': use(lambda lib: lib.document_versions(document_id))})
             if document_id:
                 def document(lib):
@@ -32,13 +39,16 @@ def register(gateway):
             if request.path.endswith('/search'):
                 query = request.query.get('q', '')[:1000]
                 return web.json_response({'results': use(lambda lib: lib.search(query))})
-            return web.json_response(use(lambda lib: {'collections': lib.list(), 'documents': lib.managed_documents(include_archived=True), 'limits': {'document_bytes': MANAGED_DOCUMENT_MAX_BYTES}}))
+            return web.json_response(use(lambda lib: {'collections': lib.list(), 'documents': lib.managed_documents(include_archived=True), 'limits': {'document_bytes': MANAGED_DOCUMENT_MAX_BYTES}, 'write_policy': {'kind': 'revision_cas_and_server_write_window', 'seconds': DOCUMENT_WRITE_WINDOW_SECONDS, 'exclusive_editor_lock': False}, 'sharing': {'scope': 'single_local_operator', 'manual_export': True, 'recipient_grants': False, 'public_links': False, 'reason': 'No cross-account principal or recipient-access authority is configured; export does not grant Library access.'}}))
+        except DocumentConflict as exc:
+            return web.json_response({'error': str(exc)}, status=409)
         except (LibraryError, KeyError):
             return web.json_response({'error': 'Document not found'}, status=404)
         except (RuntimeError, OSError) as exc:
             return web.json_response({'error': str(exc)}, status=503)
 
     async def mutate(request):
+        write_deadline = time.monotonic() + DOCUMENT_WRITE_WINDOW_SECONDS
         action = request.match_info.get('action', 'create')
         if action not in {'create', 'save', 'archive', 'restore', 'version'}:
             raise web.HTTPNotFound()
@@ -63,10 +73,10 @@ def register(gateway):
                 if action == 'create':
                     return lib.create_document(title=body['title'], content=body['content'], command_id=oid)
                 if action == 'save':
-                    return lib.save_document(document_id, title=body['title'], content=body['content'], expected_revision=body['expected_revision'])
+                    return lib.save_document(document_id, title=body['title'], content=body['content'], expected_revision=body['expected_revision'], write_deadline=write_deadline)
                 if action == 'version':
-                    return lib.restore_document_version(document_id, revision=body['revision'], expected_revision=body['expected_revision'])
-                return lib.archive_document(document_id, archived=action == 'archive', expected_revision=body['expected_revision'])
+                    return lib.restore_document_version(document_id, revision=body['revision'], expected_revision=body['expected_revision'], write_deadline=write_deadline)
+                return lib.archive_document(document_id, archived=action == 'archive', expected_revision=body['expected_revision'], write_deadline=write_deadline)
             result = use(apply)
             receipt = {'ok': True, 'operation_id': oid, 'http_status': 200, 'document': {k: result[k] for k in ('id', 'revision', 'digest', 'archived')}}
         except DocumentConflict as exc:
@@ -96,5 +106,6 @@ def register(gateway):
     gateway.app.router.add_get('/v1/library/search', read)
     gateway.app.router.add_get('/v1/library/documents/{document_id}', read)
     gateway.app.router.add_get('/v1/library/documents/{document_id}/versions', read)
+    gateway.app.router.add_get('/v1/library/documents/{document_id}/export', read)
     gateway.app.router.add_post('/v1/library/documents', mutate)
     gateway.app.router.add_post('/v1/library/documents/{document_id}/{action}', mutate)

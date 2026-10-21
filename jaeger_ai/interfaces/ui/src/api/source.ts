@@ -65,8 +65,10 @@ export interface ScheduleControls {
   operation(id: string): Promise<{ receipt: ControlResult | null }>;
 }
 export interface LibraryDocument { id: string; title: string; content: string; digest: string; revision?: number; archived?: boolean; editable?: boolean; provenance?:Record<string,unknown> }
+export interface DocumentExport {format:'jaeger.document.snapshot';schema_version:1;document:LibraryDocument & {revision:number;archived:boolean};access:'manual_local_export_no_recipient_grant'}
 export interface LibraryControls {
-  list(): Promise<{ limits?: { document_bytes: number }; documents: Omit<LibraryDocument, "content">[]; collections: { id: string; label: string; kind: string }[] }>;
+  exportDocument?(id:string,revision:number,digest:string):Promise<DocumentExport>;
+  list(): Promise<{ write_policy?:{kind:string;seconds:number;exclusive_editor_lock:boolean}; sharing?:{scope:string;manual_export:boolean;recipient_grants:boolean;public_links:boolean;reason:string}; limits?: { document_bytes: number }; documents: Omit<LibraryDocument, "content">[]; collections: { id: string; label: string; kind: string }[] }>;
   search(query: string): Promise<{ results: { id: string; title: string; snippet: string }[] }>;
   read(id: string): Promise<LibraryDocument>;
   versions(id: string): Promise<{ versions: { revision: number; title: string; created_at: number }[] }>;

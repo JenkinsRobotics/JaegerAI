@@ -146,3 +146,66 @@ async def test_custom_agent_knowledge_pins_context_and_preserves_policy(tmp_path
         assert len(store.get_session(sid)['messages']) == 2
     async with TestClient(TestServer(gateway.app), headers=client_headers('a2a')) as client:
         assert (await client.get(path)).status == 403
+
+
+@pytest.mark.asyncio
+async def test_saved_export_scope_revision_and_no_public_link(tmp_path,monkeypatch):
+    monkeypatch.setattr(tools,'_library',lambda:KnowledgeLibrary(tmp_path/'export.db'))
+    gateway=JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.db'));gateway.app.on_startup.clear()
+    async with TestClient(TestServer(gateway.app),headers=client_headers('webui')) as client:
+        created=await (await client.post('/v1/library/documents',json={'operation_id':'export-doc','title':'Owned','content':'Owned saved text'})).json()
+        doc=created['document'];url=f"/v1/library/documents/{doc['id']}/export?revision=1&digest={doc['digest']}"
+        assert (await client.get(url)).status==200
+        catalog=await (await client.get('/v1/library')).json()
+        assert catalog['sharing']['manual_export'] and not catalog['sharing']['public_links'] and not catalog['sharing']['recipient_grants']
+        assert (await client.get(url,headers=client_headers('a2a'))).status==403
+        assert (await client.get(url.replace('revision=1','revision=2'))).status==409
+        assert (await client.get(url.replace('revision=1','revision='))).status==400
+        assert (await client.post(f"/v1/library/documents/{doc['id']}/share",json={})).status==404
+
+
+@pytest.mark.asyncio
+async def test_archive_restore_replay_lineage_and_read_only_mutation_denial(tmp_path,monkeypatch):
+    path=tmp_path/'lineage.db';monkeypatch.setattr(tools,'_library',lambda:KnowledgeLibrary(path))
+    gateway=JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.db'));gateway.app.on_startup.clear()
+    async with TestClient(TestServer(gateway.app),headers=client_headers('webui')) as client:
+        created=await (await client.post('/v1/library/documents',json={'operation_id':'lineage-create','title':'Owned','content':'Preserved content'})).json()
+        doc=created['document'];base=f"/v1/library/documents/{doc['id']}"
+        archive={'operation_id':'lineage-archive','expected_revision':1}
+        tombstone=await (await client.post(base+'/archive',json=archive)).json()
+        assert tombstone['ok'] and tombstone['document']['archived'] and tombstone['document']['revision']==2
+        restore={'operation_id':'lineage-restore','expected_revision':2}
+        restoration=await (await client.post(base+'/restore',json=restore)).json()
+        assert restoration['ok'] and restoration['document']['id']==doc['id'] and restoration['document']['revision']==3
+        assert await (await client.post(base+'/archive',json=archive)).json()==tombstone
+        assert await (await client.post(base+'/restore',json=restore)).json()==restoration
+        for action,body in [('save',{'operation_id':'readonly-edit','expected_revision':3,'title':'Forbidden','content':'Overwrite'}),('archive',{'operation_id':'readonly-hide','expected_revision':3}),('share',{'operation_id':'readonly-grant','recipient':'other'})]:
+            response=await client.post(base+'/'+action,json=body,headers=client_headers('jaegerd'))
+            assert response.status==403
+        final=await (await client.get(base)).json();assert final['digest']==doc['digest'] and final['revision']==3 and not final['archived']
+        versions=(await (await client.get(base+'/versions')).json())['versions'];assert [r['revision'] for r in versions]==[3,2,1]
+        for oid in ('readonly-edit','readonly-hide','readonly-grant'):assert gateway.store.control_operation(oid) is None
+
+
+@pytest.mark.asyncio
+async def test_expired_final_commit_is_durable_rejection_without_replay(tmp_path,monkeypatch):
+    from jaeger_ai.features.knowledge_library import managed
+    path=tmp_path/'expired-command.db';monkeypatch.setattr(tools,'_library',lambda:KnowledgeLibrary(path))
+    gateway=JaegerGatewayApp(store=GatewaySessionStore(tmp_path/'gateway.db'));gateway.app.on_startup.clear()
+    async with TestClient(TestServer(gateway.app),headers=client_headers('webui')) as client:
+        doc=(await (await client.post('/v1/library/documents',json={'operation_id':'expired-create','title':'Owned','content':'Original'})).json())['document']
+        read=managed.ManagedDocuments.managed_document;clock=managed._write_time
+        def expire(self,document_id):
+            row=read(self,document_id)
+            if row['revision']==2:monkeypatch.setattr(managed,'_write_time',lambda:clock()+10)
+            return row
+        monkeypatch.setattr(managed.ManagedDocuments,'managed_document',expire)
+        body={'operation_id':'expired-save','expected_revision':1,'title':'Expired','content':'Must roll back'}
+        response=await client.post(f"/v1/library/documents/{doc['id']}/save",json=body);assert response.status==409
+        rejection=await response.json();assert not rejection['ok'] and 'expired before commit' in rejection['error']
+        monkeypatch.setattr(managed.ManagedDocuments,'save_document',lambda *a,**k:pytest.fail('Rejected original operation must not run again'))
+        repeated=await client.post(f"/v1/library/documents/{doc['id']}/save",json=body)
+        assert repeated.status==409 and await repeated.json()==rejection
+        current=await (await client.get(f"/v1/library/documents/{doc['id']}")).json()
+        assert current['revision']==1 and current['content']=='Original' and current['digest']==doc['digest']
+        assert len((await (await client.get(f"/v1/library/documents/{doc['id']}/versions")).json())['versions'])==1
