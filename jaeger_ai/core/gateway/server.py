@@ -1414,6 +1414,8 @@ class JaegerGatewayApp:
         register_upload_chunks(self)
         from .handoff_controls import register as register_handoff_controls
         register_handoff_controls(self)
+        from .skill_controls import register as register_skill_controls
+        register_skill_controls(self)
         self.app.router.add_get("/v1/tasks", self.handle_tasks)
         self.app.router.add_post("/v1/tasks", self.handle_tasks)
         self.app.router.add_get("/v1/tasks/{id}", self.handle_task)

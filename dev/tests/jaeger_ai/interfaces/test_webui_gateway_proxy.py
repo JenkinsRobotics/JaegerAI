@@ -369,3 +369,13 @@ def test_owned_handoff_stop_reaches_real_gateway_owner(overlay,path,method):
     overlay._proxy=lambda h,m,p,b=None:bodies.append((m,p,b)) or True
     assert _route(overlay,path,method) is True
     assert bodies==[(method,path,b'{}' if method=='POST' else None)]
+
+
+@pytest.mark.parametrize(('path','method'),[
+    ('/v1/runtime/skills/managed','GET'),
+    ('/v1/runtime/skills/managed/change','POST'),
+    ('/v1/runtime/skills/managed/operations/owned-op','GET'),
+])
+def test_managed_skill_controls_use_existing_authenticated_proxy(overlay,path,method):
+    assert _route(overlay,path,method) is True
+    assert overlay._calls[-1]==(method,path)
