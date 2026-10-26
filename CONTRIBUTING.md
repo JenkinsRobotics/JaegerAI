@@ -4,12 +4,12 @@ Jaeger is a persistent-agent platform. The LLM is a replaceable cognition
 provider. Please read [docs/architecture/ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md)
 before changing execution, authority, state, or clients.
 
-Current continuation state: [`docs/CONTINUE_FROM_HERE.md`](docs/CONTINUE_FROM_HERE.md).
+Current product definition: [`docs/PRODUCT.md`](docs/PRODUCT.md).
 
 ## Branch policy
 
-- Work on `0.13-dev` (or a topic branch based on it).
-- Do not merge `0.13-dev` into `master` unless the operator asks.
+- Work on `master` (or a topic branch based on it).
+- Do not push `master` to a public remote without operator authorization.
 - Do not rewrite published git history.
 - Do not write runtime state into the repository tree. State belongs in
   `~/.jaeger` or `$JAEGER_STATE_DIR`.

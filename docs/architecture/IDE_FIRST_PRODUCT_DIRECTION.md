@@ -1,5 +1,5 @@
 > **Classification:** HISTORICAL.
-> **Superseded by:** [`docs/CONTINUE_FROM_HERE.md`](../../docs/CONTINUE_FROM_HERE.md) (or `../../../docs/CONTINUE_FROM_HERE.md` from `dev/docs`).
+> **Superseded by:** [`docs/docs/PRODUCT.md`](../../docs/docs/PRODUCT.md) (or `../../../docs/docs/PRODUCT.md` from `dev/docs`).
 > This is dated evidence. It may reference an old branch, HEAD, dirty worktree, or schedule. Do not treat it as current status, implementation order, or release qualification.
 
 # Jaeger: IDE daily workspace, native controls, interchangeable connections
@@ -15,7 +15,7 @@ voice, avatar and pill code remain preserved but hidden behind explicit QA opt-i
 a full native chat redesign remains deferred. Qualify the existing local Jaeger IDE extension
 and make bounded transcript/composer improvements, not a new IDE.
 Preserve the usable WebUI appearance and repair its conversation lifecycle.
-[CONTINUE_FROM_HERE.md](../CONTINUE_FROM_HERE.md) is authoritative for
+[docs/PRODUCT.md](docs/PRODUCT.md) is authoritative for
 implementation order. Human IDE use and Jaeger-controlled IDE
 workers are distinct; both are part of the intended product. The earlier blanket
 worker deferral was too broad. After RC1–RC3, RC7 requires one actual existing

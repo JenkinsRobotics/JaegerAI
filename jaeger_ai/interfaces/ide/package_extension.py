@@ -21,7 +21,7 @@ from pathlib import Path
 # rather than committed a second time into interfaces/ide. Pinned by hash so
 # an upstream WebUI vendor bump is a visible packaging failure, not a silent
 # extension-side version drift.
-_SMD_SOURCE = "jaeger_ai/features/webui/static/vendor/smd.min.js"
+_SMD_SOURCE = "jaeger_ai/interfaces/ide/media/vendor/smd.min.js"
 _SMD_SHA384 = "T6r95ocN9t3W8tUK2Fa6FPaO7bJryyjyW0WCalrUnpgtm2qXr5xcN4vwPYEJ6vHa"
 
 

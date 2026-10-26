@@ -835,29 +835,14 @@ def _schedule_row_to_dict(row: Any) -> dict[str, Any]:
         "next_run_at": row["next_fire_at"],
         "last_run_at": row["last_fired_at"],
         "cancelled": row["status"] == "cancelled",
-        "timezone": row["timezone"],
-        "config_revision": row["config_revision"],
     }
 
 
 ONCE_CRON = "@once"   # sentinel in the cron column: fire once, then done
 
 
-def schedule_timezone(value: str | None):
-    """Validated explicit IANA zone; None retains the legacy host-local policy."""
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-    if value is None or value == "":
-        return None
-    if not isinstance(value, str) or len(value) > 100:
-        raise ValueError("A valid IANA timezone is required")
-    try:
-        return ZoneInfo(value)
-    except (ZoneInfoNotFoundError, ValueError):
-        raise ValueError("A valid IANA timezone is required") from None
-
-
 def add_schedule(cron_expr: str, prompt: str, name: str | None = None,
-                 at: str | None = None, timezone_name: str | None = None) -> dict[str, Any]:
+                 at: str | None = None) -> dict[str, Any]:
     """Register a new scheduled prompt. Same contract as the
     JSONL-era function; returns the row in legacy dict shape.
 
@@ -879,8 +864,7 @@ def add_schedule(cron_expr: str, prompt: str, name: str | None = None,
     # here shifted every fire by the UTC offset (a "remind me in 1 minute"
     # fired hours late). Store next_fire_at in UTC so the string-ordered
     # comparison in claim_due_schedules stays consistent.
-    zone = schedule_timezone(timezone_name)
-    now_local = datetime.now().astimezone(zone)
+    now_local = datetime.now().astimezone()
     if at:
         try:
             nxt = datetime.fromisoformat(str(at).strip())
@@ -904,14 +888,14 @@ def add_schedule(cron_expr: str, prompt: str, name: str | None = None,
         # where a later row would shadow the earlier one).
         conn.execute(
             "INSERT INTO schedules "
-            "(schedule_id, cron, prompt, next_fire_at, status, created_at, timezone) "
-            "VALUES (?, ?, ?, ?, 'active', ?, ?) "
+            "(schedule_id, cron, prompt, next_fire_at, status, created_at) "
+            "VALUES (?, ?, ?, ?, 'active', ?) "
             "ON CONFLICT(schedule_id) DO UPDATE SET "
             "  cron = excluded.cron, "
             "  prompt = excluded.prompt, "
             "  next_fire_at = excluded.next_fire_at, "
-            "  status = 'active', timezone = excluded.timezone, config_revision = schedules.config_revision + 1",
-            (name, cron_expr, prompt, next_fire, created_at, zone.key if zone else None),
+            "  status = 'active'",
+            (name, cron_expr, prompt, next_fire, created_at),
         )
     return {
         "name": name,
@@ -921,8 +905,6 @@ def add_schedule(cron_expr: str, prompt: str, name: str | None = None,
         "next_run_at": next_fire,
         "last_run_at": None,
         "cancelled": False,
-        "timezone": zone.key if zone else None,
-        "config_revision": sqlite_store.connection().execute("SELECT config_revision FROM schedules WHERE schedule_id=?", (name,)).fetchone()[0],
     }
 
 
@@ -947,8 +929,8 @@ def cancel_schedule(name: str) -> bool:
     from jaeger_agent.memory import sqlite_store
     with sqlite_store.writer() as conn:
         cur = conn.execute(
-            "UPDATE schedules SET status = 'cancelled', config_revision = config_revision + 1 "
-            "WHERE schedule_id = ? AND status IN ('active', 'paused')",
+            "UPDATE schedules SET status = 'cancelled' "
+            "WHERE schedule_id = ? AND status = 'active'",
             (name,),
         )
         return cur.rowcount > 0
@@ -992,14 +974,14 @@ def claim_due_schedules(now: Any = None) -> list[dict[str, Any]]:
                 # flip to done, never recompute.
                 conn.execute(
                     "UPDATE schedules SET status = 'done', "
-                    "next_fire_at = NULL, last_fired_at = ?, config_revision = config_revision + 1 WHERE id = ?",
+                    "next_fire_at = NULL, last_fired_at = ? WHERE id = ?",
                     (fired_at, row["id"]),
                 )
                 continue
             try:
                 # Recompute the next fire in LOCAL wall-clock (matching
                 # add_schedule), then store it back in UTC.
-                nxt = croniter(row["cron"], now_dt.astimezone(schedule_timezone(row["timezone"]))).get_next(datetime)
+                nxt = croniter(row["cron"], now_dt.astimezone()).get_next(datetime)
             except Exception:  # noqa: BLE001 — malformed cron, leave alone
                 continue
             conn.execute(

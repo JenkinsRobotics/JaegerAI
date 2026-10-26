@@ -1,11 +1,7 @@
 """Transport submission truth for the existing approval/tool/effect-ledger path."""
 from __future__ import annotations
 from jaeger_ai.core.redaction import redact_text
-from jaeger_agent.cognition.effects import EffectOutcomeUnknown
-
-
-class ChannelDeliveryUnknown(EffectOutcomeUnknown):
-    execution_unknown=True
+from jaeger_agent.cognition.effects import ChannelDeliveryUnknown
 
 
 def checked_receipt(result):
@@ -29,3 +25,10 @@ def checked_receipt(result):
     if isinstance(result.get('message_ids'),list):
         receipt['message_ids']=[redact_text(str(v))[:200] for v in result['message_ids'][:100] if isinstance(v,(str,int)) and not isinstance(v,bool)]
     return receipt
+
+
+# This module is the one home of the product's receipt validator; importing
+# it installs the validator the agent's messaging tool consumes.
+from jaeger_agent.tools.messaging import register_receipt_checker
+
+register_receipt_checker(checked_receipt)

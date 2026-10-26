@@ -23,7 +23,7 @@ def registry():
 def test_device_pairing_and_authentication(registry: DeviceRegistry):
     """Device pairs, receives secret, and authenticates successfully."""
     device, secret = registry.pair_device(
-        name="Matthew's iPhone",
+        name="Alice's iPhone",
         device_type=DeviceType.PHONE,
         owner_entity="agent:jaeger",
         capabilities=[

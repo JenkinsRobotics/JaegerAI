@@ -21,7 +21,7 @@ from datetime import datetime
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
-SOURCES_DIR = "/Volumes/Jenkins_Robotics-1/Alexandria/sources"
+SOURCES_DIR = "${JAEGER_SOURCES_DIR:-/Volumes/JAEGER_NAS/sources}"
 LOG_FILE = "/tmp/alexandria_apple_export.log"
 PROGRESS_FILE = "/tmp/alexandria_apple_export_progress.json"
 CLAUDE_PATH = "/opt/homebrew/bin/claude"

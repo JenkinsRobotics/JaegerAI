@@ -1,0 +1,959 @@
+/* ============================================================
+   JAEGER AI — APPLE NATIVE COMPONENTS
+   
+   ChatGPT-style message design + Apple HIG components
+   
+   Key changes from Aether:
+   - Assistant messages: NO bubble (transparent)
+   - User messages: subtle gray bubble (iMessage style)
+   - SF Pro typography
+   - System colors
+   - SF Symbols
+   - Materials (blur)
+   ============================================================ */
+
+@import './apple-tokens.css';
+
+/* ============================================================
+   APP SHELL — Apple Layout
+   ============================================================ */
+
+.app-shell {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--system-background);
+}
+
+/* ============================================================
+   SIDEBAR — macOS Native Style
+   ============================================================ */
+
+.sidebar {
+  width: var(--sidebar-width);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--secondary-system-background);
+  border-right: 1px solid var(--separator);
+  
+  /* Vibrancy effect */
+  background: var(--vibrancy-sidebar);
+  backdrop-filter: blur(40px) saturate(180%);
+  -webkit-backdrop-filter: blur(40px) saturate(180%);
+}
+
+.sidebar-header {
+  height: var(--header-height);
+  padding: 0 var(--space-3);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--separator);
+  -webkit-app-region: drag; /* macOS window drag */
+}
+
+.sidebar-logo {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: var(--system-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--text-caption-1);
+  box-shadow: var(--shadow-blue);
+}
+
+.sidebar-title {
+  font-size: var(--text-headline);
+  font-weight: var(--font-weight-semibold);
+  color: var(--label);
+  letter-spacing: -0.01em;
+}
+
+/* Sidebar search — iOS style */
+.sidebar-search {
+  margin: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  height: 36px;
+  background: var(--tertiary-system-fill);
+  border: none;
+  border-radius: var(--radius-lg);
+  font-family: var(--font-family-system);
+  font-size: var(--text-subhead);
+  color: var(--label);
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.sidebar-search::placeholder {
+  color: var(--tertiary-label);
+}
+
+.sidebar-search:focus {
+  outline: none;
+  background: var(--system-fill);
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.25);
+}
+
+/* Navigation */
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-2);
+}
+
+.nav-section {
+  margin-bottom: var(--space-4);
+}
+
+.nav-section-title {
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-caption-1);
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tertiary-label);
+}
+
+.nav-item {
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--secondary-label);
+  font-family: var(--font-family-system);
+  font-size: var(--text-subhead);
+  font-weight: var(--font-weight-regular);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+  width: 100%;
+  text-align: left;
+}
+
+.nav-item:hover {
+  background: var(--tertiary-system-fill);
+  color: var(--label);
+}
+
+.nav-item.active {
+  background: var(--system-blue);
+  color: white;
+}
+
+/* Agent list — iMessage style */
+.agent-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.agent-list-item:hover {
+  background: var(--tertiary-system-fill);
+}
+
+.agent-list-item.active {
+  background: rgba(0, 122, 255, 0.15);
+}
+
+.agent-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: var(--system-blue);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--text-subhead);
+  position: relative;
+}
+
+.agent-avatar.online::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  background: var(--system-green);
+  border: 2px solid var(--secondary-system-background);
+  border-radius: var(--radius-full);
+}
+
+.agent-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-name {
+  font-weight: var(--font-weight-semibold);
+  color: var(--label);
+  font-size: var(--text-subhead);
+  line-height: 1.3;
+}
+
+.agent-status {
+  font-size: var(--text-footnote);
+  color: var(--tertiary-label);
+  line-height: 1.3;
+}
+
+/* ============================================================
+   MAIN CONTENT
+   ============================================================ */
+
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--system-background);
+}
+
+.main-header {
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--separator);
+  background: var(--material-thin);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  -webkit-app-region: drag;
+}
+
+.header-title {
+  font-size: var(--text-headline);
+  font-weight: var(--font-weight-semibold);
+  color: var(--label);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  -webkit-app-region: no-drag;
+}
+
+.icon-button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--secondary-label);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.icon-button:hover {
+  background: var(--tertiary-system-fill);
+  color: var(--label);
+}
+
+/* ============================================================
+   CHAT — ChatGPT Style Messages
+   ============================================================ */
+
+.chat-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  max-width: var(--content-max-width);
+  width: 100%;
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-6) 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Message Group — consecutive messages from same sender */
+.message-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.message-group.user {
+  align-items: flex-end;
+}
+
+/* Individual Message */
+.message {
+  display: flex;
+  gap: var(--space-2);
+  animation: messageAppear var(--duration-normal) var(--ease-decelerate);
+}
+
+@keyframes messageAppear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message.user {
+  flex-direction: row-reverse;
+}
+
+/* Avatar — only shown on first message of group */
+.message-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-full);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  
+  /* Hide on grouped messages */
+  opacity: 1;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.message.grouped .message-avatar {
+  opacity: 0;
+  width: 0;
+}
+
+.message.user .message-avatar {
+  background: var(--system-blue);
+  color: white;
+}
+
+.message.assistant .message-avatar {
+  background: var(--tertiary-system-fill);
+  color: var(--label);
+}
+
+.message-content {
+  max-width: 85%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.message.user .message-content {
+  align-items: flex-end;
+}
+
+/* ============================================================
+   USER MESSAGE BUBBLE — iMessage Style
+   ============================================================ */
+
+.message-bubble.user {
+  background: var(--chat-user-bubble);
+  color: var(--chat-user-text);
+  padding: var(--space-2) var(--space-3);
+  border-radius: 18px;
+  border-bottom-right-radius: 4px; /* iMessage tail */
+  font-size: var(--text-body);
+  line-height: var(--line-height-normal);
+  max-width: 75%;
+  word-wrap: break-word;
+}
+
+/* ============================================================
+   ASSISTANT MESSAGE — ChatGPT Style (NO BUBBLE!)
+   ============================================================ */
+
+.message-prose {
+  /* NO background, NO border — pure text like ChatGPT */
+  padding: 0;
+  font-size: var(--text-body);
+  line-height: var(--line-height-relaxed);
+  color: var(--chat-assistant-text);
+  max-width: 100%;
+}
+
+/* Grouped messages: indent to align with first message */
+.message.grouped .message-content {
+  margin-left: 38px; /* Avatar width (30px) + gap (8px) */
+}
+
+.message.user.grouped .message-content {
+  margin-left: 0;
+  margin-right: 38px;
+}
+
+/* Message meta (timestamp, actions) */
+.message-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-footnote);
+  color: var(--tertiary-label);
+  padding: 0 var(--space-2);
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard);
+}
+
+.message:hover .message-meta {
+  opacity: 1;
+}
+
+.message.user .message-meta {
+  flex-direction: row-reverse;
+}
+
+.message-actions {
+  display: flex;
+  gap: var(--space-1);
+}
+
+.message-action-button {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-md);
+  border: none;
+  background: transparent;
+  color: var(--tertiary-label);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.message-action-button:hover {
+  background: var(--tertiary-system-fill);
+  color: var(--label);
+}
+
+/* ============================================================
+   TYPING INDICATOR — ChatGPT Style
+   ============================================================ */
+
+.typing-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: var(--space-2) 0;
+}
+
+.typing-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--tertiary-label);
+  border-radius: var(--radius-full);
+  animation: typingBounce 1.4s ease-in-out infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingBounce {
+  0%, 60%, 100% { 
+    transform: translateY(0); 
+    opacity: 0.4; 
+  }
+  30% { 
+    transform: translateY(-4px); 
+    opacity: 1; 
+  }
+}
+
+/* Streaming caret */
+.streaming-caret {
+  display: inline-block;
+  width: 2px;
+  height: 1.2em;
+  background: var(--label);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: caretBlink 1s step-end infinite;
+}
+
+@keyframes caretBlink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
+}
+
+/* ============================================================
+   CHAT INPUT — iOS Style Composer
+   ============================================================ */
+
+.chat-input-container {
+  padding: var(--space-3) 0;
+  background: var(--material-thin);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border-top: 1px solid var(--separator);
+}
+
+.chat-input-wrapper {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--secondary-system-background);
+  border-radius: 18px;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.chat-input-wrapper:focus-within {
+  box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.25);
+}
+
+.chat-input {
+  flex: 1;
+  min-height: 24px;
+  max-height: 200px;
+  padding: var(--space-1) 0;
+  border: none;
+  background: transparent;
+  font-family: var(--font-family-system);
+  font-size: var(--text-body);
+  color: var(--label);
+  resize: none;
+  outline: none;
+}
+
+.chat-input::placeholder {
+  color: var(--placeholder-text);
+}
+
+/* Input action buttons — SF Symbols style */
+.input-action-button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  border: none;
+  background: transparent;
+  color: var(--secondary-label);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+}
+
+.input-action-button:hover {
+  background: var(--tertiary-system-fill);
+  color: var(--label);
+}
+
+/* Send button — iOS style */
+.send-button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-full);
+  border: none;
+  background: var(--system-blue);
+  color: white;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+  box-shadow: var(--shadow-blue);
+}
+
+.send-button:hover:not(:disabled) {
+  transform: scale(1.05);
+}
+
+.send-button:active:not(:disabled) {
+  transform: scale(0.95);
+}
+
+.send-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Stop button */
+.stop-button {
+  background: var(--system-red);
+}
+
+/* ============================================================
+   VOICE ORB — ChatGPT Style
+   ============================================================ */
+
+.voice-orb {
+  position: relative;
+  width: 200px;
+  height: 200px;
+  border-radius: var(--radius-full);
+  overflow: hidden;
+  
+  /* ChatGPT gradient */
+  background: conic-gradient(
+    from 0deg,
+    #5EEAD4 0%,      /* Teal */
+    #3B82F6 25%,     /* Blue */
+    #8B5CF6 50%,     /* Purple */
+    #EC4899 75%,     /* Pink */
+    #5EEAD4 100%     /* Teal */
+  );
+  
+  animation: orbRotate 3s linear infinite;
+  
+  /* Glow effect */
+  box-shadow: 
+    0 0 40px rgba(94, 234, 212, 0.3),
+    0 0 80px rgba(59, 130, 246, 0.2),
+    0 0 120px rgba(139, 92, 246, 0.1);
+}
+
+.voice-orb.idle {
+  animation: orbPulse 2s ease-in-out infinite;
+}
+
+.voice-orb.thinking {
+  animation: orbRotate 1s linear infinite;
+}
+
+.voice-orb.speaking {
+  /* Audio reactive scale set via CSS variable */
+  transform: scale(var(--orb-scale, 1));
+  transition: transform 0.1s ease-out;
+}
+
+.voice-orb.listening {
+  animation: orbPulse 1s ease-in-out infinite;
+}
+
+@keyframes orbRotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes orbPulse {
+  0%, 100% { 
+    transform: scale(1); 
+    opacity: 0.8; 
+  }
+  50% { 
+    transform: scale(1.05); 
+    opacity: 1; 
+  }
+}
+
+/* Voice orb inner glow */
+.voice-orb::after {
+  content: '';
+  position: absolute;
+  inset: 10%;
+  border-radius: var(--radius-full);
+  background: radial-gradient(
+    circle at 30% 30%,
+    rgba(255, 255, 255, 0.3) 0%,
+    transparent 70%
+  );
+}
+
+/* Small voice indicator (in composer) */
+.voice-indicator {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-full);
+  background: var(--system-red);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: recordingPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes recordingPulse {
+  0%, 100% { 
+    box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.4); 
+  }
+  50% { 
+    box-shadow: 0 0 0 8px rgba(255, 59, 48, 0); 
+  }
+}
+
+/* ============================================================
+   BUTTONS — iOS Style
+   ============================================================ */
+
+.btn {
+  height: 44px; /* iOS minimum touch target */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-ios-button);
+  font-family: var(--font-family-system);
+  font-size: var(--text-body);
+  font-weight: var(--font-weight-semibold);
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+  border: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-primary {
+  background: var(--system-blue);
+  color: white;
+  box-shadow: var(--shadow-blue);
+}
+
+.btn-primary:hover {
+  background: #0066D6;
+}
+
+.btn-primary:active {
+  background: #0051A8;
+  transform: scale(0.98);
+}
+
+.btn-secondary {
+  background: var(--secondary-system-background);
+  color: var(--label);
+}
+
+.btn-secondary:hover {
+  background: var(--tertiary-system-background);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--system-blue);
+  font-weight: var(--font-weight-regular);
+}
+
+.btn-ghost:hover {
+  background: var(--tertiary-system-fill);
+}
+
+.btn-danger {
+  background: var(--system-red);
+  color: white;
+}
+
+.btn-sm {
+  height: 32px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-subhead);
+}
+
+.btn-lg {
+  height: 50px;
+  padding: 0 var(--space-6);
+  font-size: var(--text-headline);
+}
+
+/* ============================================================
+   EMPTY STATE — ChatGPT/Grok Style
+   ============================================================ */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: var(--space-8);
+  flex: 1;
+}
+
+.empty-state-icon {
+  width: 80px;
+  height: 80px;
+  margin-bottom: var(--space-4);
+  background: var(--secondary-system-background);
+  border-radius: var(--radius-2xl);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--secondary-label);
+}
+
+.empty-state-title {
+  font-size: var(--text-title-2);
+  font-weight: var(--font-weight-semibold);
+  color: var(--label);
+  margin-bottom: var(--space-2);
+  max-width: 400px;
+}
+
+.empty-state-subtitle {
+  font-size: var(--text-body);
+  color: var(--secondary-label);
+  margin-bottom: var(--space-6);
+  max-width: 500px;
+}
+
+.suggestion-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-3);
+  max-width: 600px;
+  width: 100%;
+}
+
+.suggestion-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  background: var(--secondary-system-background);
+  border-radius: var(--radius-xl);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: all var(--duration-fast) var(--ease-standard);
+  text-align: left;
+}
+
+.suggestion-card:hover {
+  background: var(--tertiary-system-background);
+  border-color: var(--separator);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.suggestion-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-lg);
+  background: var(--tertiary-system-fill);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--system-blue);
+}
+
+.suggestion-title {
+  font-weight: var(--font-weight-semibold);
+  color: var(--label);
+  font-size: var(--text-subhead);
+}
+
+.suggestion-description {
+  font-size: var(--text-footnote);
+  color: var(--tertiary-label);
+}
+
+/* ============================================================
+   RESPONSIVE — Apple Breakpoints
+   ============================================================ */
+
+/* iPad */
+@media (max-width: 1024px) and (min-width: 768px) {
+  .sidebar {
+    width: var(--sidebar-width-ipad);
+  }
+}
+
+/* iPhone */
+@media (max-width: 767px) {
+  .app-shell {
+    flex-direction: column;
+  }
+  
+  .sidebar {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    z-index: var(--z-modal);
+    transform: translateX(-100%);
+    transition: transform var(--duration-normal) var(--ease-standard);
+  }
+  
+  .sidebar.open {
+    transform: translateX(0);
+  }
+  
+  .main-header {
+    padding-top: var(--safe-area-inset-top);
+  }
+  
+  .chat-input-container {
+    padding-bottom: calc(var(--space-3) + var(--safe-area-inset-bottom));
+  }
+  
+  .message-content {
+    max-width: 90%;
+  }
+  
+  .suggestion-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   ANIMATIONS — Apple Spring
+   ============================================================ */
+
+/* Modal appear */
+@keyframes modalAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Sheet slide up (iOS) */
+@keyframes sheetSlideUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Sidebar slide */
+@keyframes sidebarSlide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+/* Popover appear */
+@keyframes popoverAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.9) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}

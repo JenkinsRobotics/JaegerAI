@@ -196,7 +196,7 @@ fi
 
 # 3. Run the in-repo installer (.venv + deps incl. the git-resolved
 #    jaeger-os/jaeger-kokoro-tts/jaeger-whisper-stt stack + app build +
-#    .jaeger_ai/ scaffold). --product tells it this is an end-user
+#    ~/.jaeger/ scaffold). --product tells it this is an end-user
 #    install (build the release app, not the dev shell) — every clone
 #    has a dev/ tree now (0.9 split), so that can no longer be the
 #    dev-vs-product signal on its own.
@@ -209,8 +209,9 @@ cat <<EOF
 ║  ✓ JaegerAI installed at $JAEGER_INSTALL_ROOT
 ╚══════════════════════════════════════════════╝
 
-Instance state lives under .jaeger_ai/; the code stays writable in
-place (editable install — the agent self-modifies its own skills).
+Instance state lives under ~/.jaeger/ (configurable via JAEGER_STATE_DIR);
+the code stays writable in place (editable install — the agent self-modifies
+its own skills).
 
 Next steps:
   cd $JAEGER_INSTALL_ROOT

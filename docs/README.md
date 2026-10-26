@@ -1,8 +1,14 @@
 # JaegerAI documentation
 
-The current execution entry point is
-[`CONTINUE_FROM_HERE.md`](CONTINUE_FROM_HERE.md). Read it before starting
-release-path work or writing another plan.
+The current product definition is [`PRODUCT.md`](PRODUCT.md). Read it before
+starting release-path work or writing another plan. The stack is in
+[`STACK.md`](STACK.md), on-device trust in [`TRUST.md`](TRUST.md), and the
+proactive / world-model paper library in [`research/README.md`](research/README.md).
+
+Removed from this repo on 2026-10-22, per the operator's cleanup instruction, and moved to the Desktop (NOT deleted) in `JaegerAI-removed-junk-2026-10-22/`: the older entry-point file docs/PRODUCT.md (55,749 bytes, previously listed as entry point, superseded by PRODUCT.md — its contents were NOT followed in this cleanup), the five dated NATIVE_*.md repair docs, and the two huge integration ledgers MAC_APP_COMPLETION.md (290,290 bytes) and BLUEPRINT_LEDGER.csv (371,325 bytes). See CLEANUP.md for the full list. Nothing in that Desktop folder is an archive in the repo, by preference.
+Originals of the docs edited on 2026-10-22 are NOT in this repo, by
+preference — archives in the repo confuse people. They are on the Desktop
+in `JaegerAI-checkpoint-2026-10-22/`.
 
 Operator instructions live in the root [README](../README.md) and
 [COMMANDS.md](COMMANDS.md); contributor workflow lives in
@@ -10,7 +16,12 @@ Operator instructions live in the root [README](../README.md) and
 
 | Document | Classification | Purpose |
 | --- | --- | --- |
-| [CONTINUE_FROM_HERE.md](CONTINUE_FROM_HERE.md) | CURRENT AUTHORITATIVE | Current baseline, proven state, remaining work, continuation rules, and document classification |
+| [PRODUCT.md](PRODUCT.md) | CURRENT AUTHORITATIVE | Current product definition: standalone intelligence, companion + operator, Jenkins Robotics, humanoid direction, JROS, Aether, NAS, YouTube, cloud today / on-device goal |
+| [STACK.md](STACK.md) | CURRENT REFERENCE | Centre = jaeger-agent + JaegerAI on top, stack layers, dependencies |
+| [TRUST.md](TRUST.md) | CURRENT REFERENCE | On-device trust: what stays, what leaves, what never leaves without a separate yes |
+| [REBUILD.md](REBUILD.md) | CURRENT REFERENCE | 2026-10-22 rebuild: backup, clean restore, 8 jaeger-agent modules |
+| [CLEANUP.md](CLEANUP.md) | CURRENT REFERENCE | 2026-10-22 cleanup: junk removed to Desktop, docs realigned, what only an IDE coding agent can do next |
+| [research/README.md](research/README.md) | CURRENT REFERENCE | Proactive / world-model paper library |
 | [COMMANDS.md](COMMANDS.md) | CURRENT REFERENCE | Operator CLI commands and subcommands |
 | [OPERATIONS.md](OPERATIONS.md) | CURRENT REFERENCE | State roots, upgrades, backups, cancellation, retry, and health |
 | [RELEASE_0.13.md](RELEASE_0.13.md) | RELEASE RECORD | 0.13.0 qualification, verification gates, and packaging evidence |
@@ -47,8 +58,11 @@ The following stale execution/audit ledgers were removed from the active tree on
 
 Component docs stay with their code: [JaegerAgent](../packages/jaeger-agent/README.md),
 [JaegerOS](../packages/jaeger-os/README.md),
-[WebUI](../jaeger_ai/features/webui/README.md), and
-[Swift app](../jaeger_ai/interfaces/swift/README.md).
+[WebUI](../jaeger_ai/features/webui/README.md),
+[Mac menu bar shell](../jaeger_ai/interfaces/macos-shell/REUSE.md),
+[IDE client](../jaeger_ai/interfaces/ide/README.md),
+and module registrations in [jaeger_ai/modules/MODULES.md](../jaeger_ai/modules/MODULES.md).
+The old path jaeger_ai/interfaces/swift/ no longer exists in the repo — it was refactored into macos-shell, and its archive copy is on the Desktop in Jaeger-UI-Archive-2026-10-17/macos-menubar-app/.
 
 Before adding a file here, check whether it belongs in a docstring, an ADR,
 a test, or a commit message instead. Status reports and dated handoffs go

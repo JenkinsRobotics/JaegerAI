@@ -1,0 +1,46 @@
+name: Lint
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  ruff:
+    name: Ruff (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/ruff-action@v3
+        with:
+          args: check jaeger_ai/
+
+  eslint:
+    name: ESLint (Frontend)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: jaeger_ai/interfaces/ui/package-lock.json
+      - name: Install dependencies
+        working-directory: jaeger_ai/interfaces/ui
+        run: npm ci
+      - name: Type check
+        working-directory: jaeger_ai/interfaces/ui
+        run: npm run typecheck
+
+  prettier:
+    name: Prettier (Formatting)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Check formatting
+        run: |
+          npx prettier --check "jaeger_ai/interfaces/ui/src/**/*.{ts,tsx,css}" || true

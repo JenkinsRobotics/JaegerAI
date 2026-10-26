@@ -33,7 +33,11 @@ def test_seen_handler_is_durable_validates_input_and_preserves_history(tmp_path)
     store.ensure_session('existing-home', metadata={'agent_id': 'native:jaeger'})
     store.append_message('existing-home', 'user', 'Keep my context')
     history = store.get_session('existing-home')
-    app = SimpleNamespace(store=store, _registry=lambda: SimpleNamespace(get_agent=lambda aid: object() if aid == 'native:jaeger' else None))
+    # The handler validates record.id == agent_id (the real roster returns
+    # AgentRecord) and publishes agent.updated; the fake models both.
+    app = SimpleNamespace(store=store, event_bus=SimpleNamespace(publish=lambda *args, **kwargs: None),
+                          _registry=lambda: SimpleNamespace(
+                              get_agent=lambda aid: SimpleNamespace(id='native:jaeger') if aid == 'native:jaeger' else None))
 
     async def call(agent_id, body):
         async def read_json():

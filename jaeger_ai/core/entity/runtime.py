@@ -59,6 +59,33 @@ from .verification import (
 logger = logging.getLogger("jaeger.entity.runtime")
 
 
+def load_instance_config_or_default(layout: Any) -> Any:
+    """The instance's ``config.yaml``, or the wizard's defaults when absent.
+
+    A first-boot instance has no ``config.yaml`` yet — the wizard (``jaeger
+    setup``) writes it. A Gateway turn against such an instance used to die
+    with ``FileNotFoundError`` at boot. This loader reads what exists and
+    falls back to the SAME defaults ``main.py`` / ``setup_wizard.py`` write
+    (registry model name, not a resolved path), so turn one reaches the
+    agent instead of failing at admission. The wizard remains the one
+    authoritative writer; nothing here persists a default to disk.
+    """
+    from jaeger_ai.core.instance.schemas import (
+        Config, DisplayConfig, ModelConfig, SkillsConfig, load_yaml,
+    )
+
+    if getattr(layout, "config_path", None) and Path(layout.config_path).is_file():
+        return load_yaml(layout.config_path, Config)
+    from jaeger_ai.core.models.model_resolver import DEFAULT_MODEL
+
+    return Config(
+        instance_name=getattr(layout, "name", None) or "default",
+        model=ModelConfig(model_path=DEFAULT_MODEL),
+        display=DisplayConfig(show_help_on_start=False),
+        skills=SkillsConfig(run_smoke_tests=True),
+    )
+
+
 @dataclass(frozen=True)
 class PreparedTurn:
     """A turn ready for the main loop: ``prompt`` is the request plus fenced memory."""
@@ -977,7 +1004,14 @@ class EntityRuntime:
             client = continuation_state["client"]
             cfg = continuation_state["config"]
         else:
-            cfg = load_yaml(layout.config_path, Config)
+            # First-boot instance (no config.yaml yet — operator has not run
+            # the wizard): load the same defaults the wizard writes rather
+            # than crashing the turn. A missing config previously turned
+            # every first-boot turn into a request-level failure
+            # (FileNotFoundError), which is how a scratch instance dies on
+            # turn one. The wizard/`jaeger setup` remains the authoritative
+            # writer; this only reads what does not exist yet.
+            cfg = load_instance_config_or_default(layout)
             client = ExternalModelClient(cfg.external_model, layout)
             if model:
                 from jaeger_ai.core.models.router import select_client
@@ -1141,11 +1175,11 @@ class EntityRuntime:
 
     def subordinate_model_name(self) -> str:
         """The model :meth:`run_subordinate_react` calls, as its provider names it."""
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
+        from jaeger_ai.core.entity.runtime import load_instance_config_or_default
 
         if self.layout is None:
             return ""
-        external = load_yaml(self.layout.config_path, Config).external_model
+        external = load_instance_config_or_default(self.layout).external_model
         return f"{external.provider}:{external.model}" if external.enabled else "local"
 
     # ── Specialized Ingress Helpers ───────────────────────────────────

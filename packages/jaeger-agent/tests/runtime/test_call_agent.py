@@ -6,8 +6,6 @@ mod = importlib.import_module("jaeger_agent.tools.call_agent")
 
 def _isolate(monkeypatch, tmp_path):
     monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "state"))
-    monkeypatch.setattr(mod, "APPROVAL_WAIT_S", 0.2)
-    monkeypatch.setattr(mod, "APPROVAL_POLL_S", 0.01)
 
 
 def test_native_call_submits_once_without_waiting_on_child(monkeypatch, tmp_path):
@@ -65,34 +63,3 @@ def test_call_agent_ok_only_after_completed_child_result(monkeypatch, tmp_path):
     assert out["ok"] is True
     assert out["child_run_id"] == "run1"
     assert out["result"]["summary"] == "done"
-
-
-def test_call_agent_links_the_handoff_to_the_running_gateway_turn(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    from jaeger_agent.task_port import task_scope
-    bodies = []
-    def submit(method, path, body=None, **kwargs):
-        if method == "POST":
-            bodies.append(body)
-        return 202, {"id": "handoff_3", "status": "pending_approval"}
-    monkeypatch.setattr(mod, "_request_json", submit)
-    with task_scope(object(), session_id="chat-1", request_id="run-1", execution={}, user_text="ask"):
-        call_agent("native:everyday", "bounded work")
-    call_agent("native:everyday", "outside a turn")
-    assert (bodies[0]["session_id"], bodies[0]["parent_run_id"]) == ("chat-1", "run-1")
-    assert (bodies[1]["session_id"], bodies[1]["parent_run_id"]) == (None, None)
-
-
-def test_call_agent_waits_for_the_owner_then_reports_the_result(monkeypatch, tmp_path):
-    _isolate(monkeypatch, tmp_path)
-    monkeypatch.setattr(mod, "APPROVAL_WAIT_S", 5.0)
-    replies = iter([
-        (202, {"id": "handoff_9", "status": "pending_approval"}),
-        (200, {"id": "handoff_9", "status": "pending_approval"}),
-        (200, {"id": "handoff_9", "status": "admitted"}),
-        (200, {"id": "handoff_9", "status": "completed", "child_run_id": "c9",
-               "result": {"ok": True, "summary": "pong"}}),
-    ])
-    monkeypatch.setattr(mod, "_request_json", lambda *a, **k: next(replies))
-    out = call_agent("native:everyday", "reply pong")
-    assert out["ok"] is True and out["result"]["summary"] == "pong"

@@ -166,7 +166,7 @@ def test_model_swap_carries_the_conversation_across_the_rebuild(monkeypatch):
             self.messages = list(msgs)
 
     turns = [
-        {"role": "user", "content": "my name is Matthew"},
+        {"role": "user", "content": "my name is Alice"},
         {"role": "assistant", "content": "noted"},
     ]
     monkeypatch.setattr(

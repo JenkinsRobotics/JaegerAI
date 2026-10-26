@@ -1,7 +1,7 @@
 // Snapshot.swift — `--snapshot <dir>`: headless screenshots of the main window (Jaeger original, 2026-10-17).
 //
 // Loads the effective main-screen origin in a real 1040×760 window placed far off every display (never on
-// Matthew's screen; no menu, status item, hotkey or activation), then for light and dark: sets the window
+// the user's screen; no menu, status item, hotkey or activation), then for light and dark: sets the window
 // appearance, waits for the page to restyle, takes WKWebView.takeSnapshot and composites the real traffic-light
 // buttons (cacheDisplay) at their window frames with the window's corner radius. Writes
 // <dir>/jaeger-light.png and <dir>/jaeger-dark.png, prints one JSON line (chrome report + page probe), exits.

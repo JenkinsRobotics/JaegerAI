@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from jaeger_ai.features.shared_memory.honcho_client import HonchoClient
+from jaeger_ai.features._stubs.shared_memory import HonchoClient  # Deprecated: use stub
 from .grants import _audit, _require, get_current_identity
 
 

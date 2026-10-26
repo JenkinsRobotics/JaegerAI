@@ -624,7 +624,7 @@ def create_character(name: str, *, role: str = "", custom_instructions: str = ""
     card = generate_card(folder, name)
     doc = {
         "schema": CHARACTER_SCHEMA, "character": cid, "name": name,
-        "version": "0.1.0", "author": "Jenkins Robotics",
+        "version": "0.1.0", "author": "JaegerAI",
         "license": "Unspecified", "description": "",
         "kind": "clip_set",
         "assets": {

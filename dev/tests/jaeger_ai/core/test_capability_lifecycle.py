@@ -79,9 +79,9 @@ def test_full_candidate_lifecycle_to_promotion(lifecycle_env):
     assert cand.provenance.evaluation_score >= 0.8
 
     # 5. Promotion
-    installed = pipeline.promote_to_trusted(cand.candidate_id, authority="operator_matthew")
+    installed = pipeline.promote_to_trusted(cand.candidate_id, authority="operator_alice")
     assert cand.stage == LifecycleStage.INSTALLED
-    assert cand.provenance.promotion_authority == "operator_matthew"
+    assert cand.provenance.promotion_authority == "operator_alice"
     assert registry.get("cap.integration.csv_parser") is not None
 
 

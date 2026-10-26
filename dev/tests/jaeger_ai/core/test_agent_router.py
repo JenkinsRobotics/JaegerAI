@@ -65,10 +65,10 @@ def test_specialist_sees_only_its_own_notes(tmp_path, monkeypatch):
     ev = SimpleNamespace(id="native:everyday",role=SimpleNamespace(value="specialist"),display_name="Everyday",name="everyday",metadata={"specialty":"everyday"})
     gw = SimpleNamespace(id="native:gateway",name="gateway")
     d = JaegerGatewayApp.agent_memory_dir(ev); d.mkdir(parents=True)
-    (d / "NOTES.md").write_text("Matthew prefers mornings.")
+    (d / "NOTES.md").write_text("Alice prefers mornings.")
     other = JaegerGatewayApp.agent_memory_dir(gw); other.mkdir(parents=True)
     (other / "NOTES.md").write_text("gateway secret plan")
     prompt = JaegerGatewayApp._system_prompt_for_agent(ev)
-    assert "Matthew prefers mornings." in prompt and "gateway secret plan" not in prompt
+    assert "Alice prefers mornings." in prompt and "gateway secret plan" not in prompt
     assert JaegerGatewayApp.agent_memory_dir(ev)!=JaegerGatewayApp.agent_memory_dir(gw)
     assert JaegerGatewayApp.agent_memory_dir(ev).parent.name=="by-id"

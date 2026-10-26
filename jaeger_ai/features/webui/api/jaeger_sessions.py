@@ -22,6 +22,8 @@ proxies server-side. Routes mirror the gateway exactly (audited from
     GET    /v1/sessions/{id}/events         durable event log
     POST   /v1/sessions/{id}/attachments/upload  staged upload (JSON/base64 body)
     POST   /v1/sessions/{id}/ide/{ide_request_id}  answer an ide.request
+    GET    /v1/sessions/{id}/clarify        clarify form (?clarify_id=, ?include_resolved=true)
+    POST   /v1/sessions/{id}/clarify/{cid}  answer a clarify form (revision + response)
     POST   /v1/approvals/{id}               resolve an approval
     GET    /v1/approvals                    list pending approvals
     GET    /health                          gateway liveness (NOT /v1/health)
@@ -514,6 +516,15 @@ def route(handler, parsed, method: str) -> bool:
     if len(parts) == 2 and method == "POST" and parts[1] == "handoff":
         return _proxy(
             handler, "POST", f"/v1/sessions/{session_id}/handoff", _body_bytes(handler),
+        )
+
+    # /v1/sessions/{id}/clarify — GET (query relays clarify_id / include_resolved)
+    # and POST /v1/sessions/{id}/clarify/{clarify_id} (revision + response, GB-033)
+    if len(parts) == 2 and parts[1] == "clarify" and method == "GET":
+        return _proxy(handler, "GET", f"/v1/sessions/{session_id}/clarify{query}")
+    if len(parts) == 3 and parts[1] == "clarify" and method == "POST":
+        return _proxy(
+            handler, "POST", f"/v1/sessions/{session_id}/clarify/{parts[2]}", _body_bytes(handler),
         )
 
     # /v1/sessions/{id}/requests/{request_id}

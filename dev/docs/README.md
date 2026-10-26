@@ -3,7 +3,7 @@
 Only notes that code or tests cite as rationale, plus assets used by tooling.
 Product and architecture documentation is in [`docs/`](../../docs/README.md).
 The current execution entry point is
-[`docs/CONTINUE_FROM_HERE.md`](../../docs/CONTINUE_FROM_HERE.md).
+[`docs/docs/PRODUCT.md`](../../docs/docs/PRODUCT.md).
 
 | Path | Classification | Why it exists |
 | --- | --- | --- |

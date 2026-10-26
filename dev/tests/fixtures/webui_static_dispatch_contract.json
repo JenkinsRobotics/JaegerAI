@@ -2,25 +2,70 @@
   "schema_version": 1,
   "scope": "jaeger_ai/features/webui/api/routes.py named HTTP dispatchers",
   "evidence": "Python AST only",
-  "route_count": 256,
+  "route_count": 258,
   "method_counts": {
     "DELETE": 3,
-    "GET": 103,
+    "GET": 104,
     "PATCH": 2,
-    "POST": 147,
+    "POST": 148,
     "PUT": 1
   },
-  "route_fingerprint_sha256": "292e0124f0acbd415e365814398ede467312146d175ed4d08df248f9dea5b7e8",
+  "route_fingerprint_sha256": "2dc67237e4439970948eb9fa7df141326595469c4d35e8d3fe196611d70d65be",
   "required_routes": [
-    ["GET", "reference", "/health", "handle_get"],
-    ["GET", "reference", "/api/auth/status", "handle_get"],
-    ["GET", "reference", "/api/models", "handle_get"],
-    ["GET", "reference", "/api/profiles", "handle_get"],
-    ["GET", "reference", "/api/sessions", "handle_get"],
-    ["POST", "reference", "/api/auth/login", "handle_post"],
-    ["POST", "reference", "/api/chat/start", "handle_post"],
-    ["POST", "reference", "/api/upload", "handle_post"],
-    ["DELETE", "prefix", "/api/mcp/servers/", "handle_delete"]
+    [
+      "GET",
+      "reference",
+      "/health",
+      "handle_get"
+    ],
+    [
+      "GET",
+      "reference",
+      "/api/auth/status",
+      "handle_get"
+    ],
+    [
+      "GET",
+      "reference",
+      "/api/models",
+      "handle_get"
+    ],
+    [
+      "GET",
+      "reference",
+      "/api/profiles",
+      "handle_get"
+    ],
+    [
+      "GET",
+      "reference",
+      "/api/sessions",
+      "handle_get"
+    ],
+    [
+      "POST",
+      "reference",
+      "/api/auth/login",
+      "handle_post"
+    ],
+    [
+      "POST",
+      "reference",
+      "/api/chat/start",
+      "handle_post"
+    ],
+    [
+      "POST",
+      "reference",
+      "/api/upload",
+      "handle_post"
+    ],
+    [
+      "DELETE",
+      "prefix",
+      "/api/mcp/servers/",
+      "handle_delete"
+    ]
   ],
   "unverified": [
     "delegated and computed routes",

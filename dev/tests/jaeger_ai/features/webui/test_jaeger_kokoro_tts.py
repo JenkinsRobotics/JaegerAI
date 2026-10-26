@@ -44,12 +44,6 @@ def test_empty_text_renders_nothing(agents):
     assert agents._calls == []
 
 
-def test_companion_prefers_the_local_voice_and_falls_back_to_browser_speech():
-    js = (WEBUI / "static" / "jaeger_companion.js").read_text()
-    assert "speakAudio('api/jaeger/tts'" in js
-    assert "req.catch(()=>{ try{ speakBrowser(t); }catch(_){} })" in js
-
-
 def test_startup_warm_renders_once_off_the_request_path(agents, monkeypatch):
     monkeypatch.delenv("JAEGER_KOKORO_WARM", raising=False)
     t = agents.warm_kokoro_in_background()

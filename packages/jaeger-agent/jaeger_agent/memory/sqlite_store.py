@@ -50,7 +50,7 @@ from typing import Any
 # ``core/memory/migrations/`` apply each step from the on-disk version
 # up to ``SCHEMA_VERSION``; the store refuses to open a DB written by
 # a newer SCHEMA_VERSION than the current code knows about.
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 6
 
 _DB_FILENAME = "state.db"
 
@@ -278,9 +278,7 @@ _SCHEMA_STATEMENTS: tuple[str, ...] = (
         status          TEXT NOT NULL DEFAULT 'active',
         session_key     TEXT,
         created_at      TEXT NOT NULL,
-        last_fired_at   TEXT,
-        timezone        TEXT,
-        config_revision INTEGER NOT NULL DEFAULT 0
+        last_fired_at   TEXT
     )""",
     "CREATE INDEX IF NOT EXISTS idx_schedules_status ON schedules (status, next_fire_at)",
 
@@ -809,21 +807,12 @@ def _migrate_run_lineage(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_root ON runs (root_run_id, created_at)")
 
 
-def _migrate_schedule_timezone(conn: sqlite3.Connection) -> None:
-    # Some minimal historical fixture databases lack schedules entirely.
-    if not conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='schedules'").fetchone():
-        return # Current CREATE statements below establish the full fresh shape.
-    conn.execute("ALTER TABLE schedules ADD COLUMN timezone TEXT")
-    conn.execute("ALTER TABLE schedules ADD COLUMN config_revision INTEGER NOT NULL DEFAULT 0")
-
-
 _MIGRATIONS: dict[int, tuple[str, Callable[[sqlite3.Connection], None]]] = {
     2: ("facts-subject-source-tags-note", lambda conn: _migrate_facts_table(conn)),
     3: ("commitments", _migrate_commitments),
     4: ("runtime-runs-checkpoints-effects", _migrate_runtime),
     5: ("cognitive-knowledge-foundation", _migrate_knowledge),
     6: ("durable-run-lineage", _migrate_run_lineage),
-    7: ("schedule-timezone-revision", _migrate_schedule_timezone),
 }
 
 

@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from jaeger_agent.cognition.effects import ChannelDeliveryUnknown
+
 from .adapter import OutboundMessage
+from .receipts import checked_receipt
 
 
 class PluginBridgeAdapter:
@@ -39,7 +42,6 @@ class PluginBridgeAdapter:
         send = getattr(self._bridge, "send", None)
         if not callable(send):
             return {"sent": False, "effect": "not_started", "error": f"{self.channel_id} bridge has no send()"}
-        from .receipts import checked_receipt, ChannelDeliveryUnknown
         try:result = send(message.recipient_id, message.text)
         except Exception:raise ChannelDeliveryUnknown('Transport submission outcome unknown; do not retry') from None
         return checked_receipt(result)

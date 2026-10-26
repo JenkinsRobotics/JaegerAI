@@ -1,0 +1,174 @@
+name: v0.13.0 Feature Tests
+
+on:
+  push:
+    branches: [main, develop, master]
+    paths:
+      - 'jaeger_ai/interfaces/ui/**'
+      - 'jaeger_ai/interfaces/ide/**'
+      - 'jaeger_ai/core/memory/dreaming.py'
+      - 'jaeger_ai/core/gateway/websocket.py'
+      - '.github/workflows/v013-tests.yml'
+  pull_request:
+    branches: [main, develop, master]
+    paths:
+      - 'jaeger_ai/interfaces/ui/**'
+      - 'jaeger_ai/interfaces/ide/**'
+      - 'jaeger_ai/core/memory/dreaming.py'
+      - 'jaeger_ai/core/gateway/websocket.py'
+      - '.github/workflows/v013-tests.yml'
+
+env:
+  PYTHONDONTWRITEBYTECODE: 1
+  PYTHONPYCACHEPREFIX: ${{ github.workspace }}/.cache/pycache
+  FORCE_COLOR: 1
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Frontend Unit Tests (Vitest)
+  # ─────────────────────────────────────────────────────────────
+  frontend-unit:
+    name: Frontend Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: jaeger_ai/interfaces/ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: jaeger_ai/interfaces/ui
+        run: npm ci
+
+      - name: Run type check
+        working-directory: jaeger_ai/interfaces/ui
+        run: npx tsc --noEmit
+
+      - name: Run unit tests
+        working-directory: jaeger_ai/interfaces/ui
+        run: npx vitest run --reporter=verbose
+
+      - name: Build production bundle
+        working-directory: jaeger_ai/interfaces/ui
+        run: npm run build
+
+  # ─────────────────────────────────────────────────────────────
+  # Frontend E2E Tests (Playwright)
+  # ─────────────────────────────────────────────────────────────
+  frontend-e2e:
+    name: Frontend E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: jaeger_ai/interfaces/ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: jaeger_ai/interfaces/ui
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: jaeger_ai/interfaces/ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Run E2E tests
+        working-directory: jaeger_ai/interfaces/ui
+        run: npx playwright test --project=chromium --reporter=line
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            jaeger_ai/interfaces/ui/playwright-report/
+            jaeger_ai/interfaces/ui/test-results/
+
+  # ─────────────────────────────────────────────────────────────
+  # IDE Extension Tests
+  # ─────────────────────────────────────────────────────────────
+  ide-extension:
+    name: IDE Extension Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate package.json
+        working-directory: jaeger_ai/interfaces/ide
+        run: |
+          node -e "const p = require('./package.json'); console.log('✅', p.name, 'v' + p.version)"
+
+      - name: Syntax check
+        working-directory: jaeger_ai/interfaces/ide
+        run: |
+          node -c extension.js && echo "✅ extension.js"
+          node -c controller.js && echo "✅ controller.js"
+          node -c gateway.js && echo "✅ gateway.js"
+
+      - name: Run controller unit tests
+        working-directory: jaeger_ai/interfaces/ide
+        run: node --test tests/controller.test.js
+
+  # ─────────────────────────────────────────────────────────────
+  # Backend Module Tests (Dreaming + WebSocket)
+  # ─────────────────────────────────────────────────────────────
+  backend-modules:
+    name: Backend Module Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install pytest pytest-asyncio
+
+      - name: Test dreaming engine
+        run: |
+          pytest dev/tests/unit/python/test_dreaming_engine.py -v --tb=short
+
+      - name: Test WebSocket module
+        run: |
+          pytest dev/tests/unit/python/test_websocket_module.py -v --tb=short
+
+  # ─────────────────────────────────────────────────────────────
+  # Integration: All tests summary
+  # ─────────────────────────────────────────────────────────────
+  all-green:
+    name: ✅ All Tests Pass
+    needs: [frontend-unit, frontend-e2e, ide-extension, backend-modules]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summary
+        run: |
+          echo "🎉 All v0.13.0 feature tests passed!"
+          echo ""
+          echo "✅ Frontend Unit Tests (Vitest)"
+          echo "✅ Frontend E2E Tests (Playwright)"
+          echo "✅ IDE Extension Tests (Node.js)"
+          echo "✅ Backend Module Tests (Pytest)"
+          echo ""
+          echo "🚀 Ready for release!"

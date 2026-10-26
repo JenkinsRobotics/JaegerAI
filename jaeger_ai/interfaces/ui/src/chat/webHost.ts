@@ -9,7 +9,7 @@ import type { PersistedPart, SessionMessage } from "../api/types";
 import { bytesUploadEnabled, UPLOAD_MAX_BYTES, UPLOAD_TOO_LARGE, type RejectedAttachment } from "./composer";
 import { followTurn } from "./followTurn";
 import type { HomeSessions } from "./homeSession";
-import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, HostKind, StartTurnRequest, ToolInvocationState, TurnHandle, TurnState } from "./host";
+import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, ClarifyAnswerResult, HostKind, StartTurnRequest, ToolInvocationState, TurnHandle, TurnState } from "./host";
 import type { HostAttachment, HostCapabilities } from "./hostH8";
 
 const KEY = (id: string) => `jaeger.ui.session.${id}`;
@@ -329,10 +329,34 @@ export class WebHost implements ChatHost {
 
   pendingApprovals = (sessionId: string) => this.source.pendingApprovals?.(sessionId) ?? Promise.resolve([]);
 
-  get answerClarify(): ((sessionId: string, clarifyId: string, revision: number, response: string) => Promise<void>) | undefined {
+  get answerClarify(): ((sessionId: string, clarifyId: string, revision: number, response: string) => Promise<ClarifyAnswerResult>) | undefined {
     const source = this.source;
-    return source.answerClarify ? (sessionId, clarifyId, revision, response) => source.answerClarify!(sessionId, clarifyId, revision, response) : undefined;
+    if (!source.answerClarify) return undefined;
+    return async (sessionId, clarifyId, revision, response) => {
+      try {
+        await source.answerClarify!(sessionId, clarifyId, revision, response);
+        return { status: "answered", answer: response };
+      } catch (error) {
+        try {
+          const current = await source.clarificationStatus?.(sessionId, clarifyId);
+          if (current?.session_id === sessionId && current.clarify_id === clarifyId && current.revision === revision) {
+            if (current.status === "answered" && typeof current.answer === "string") return { status: "answered", answer: current.answer };
+            if (current.status === "cancelled" || current.status === "expired") return { status: current.status };
+          }
+        } catch { /* preserve the original unknown outcome */ }
+        throw error;
+      }
+    };
   }
+
+  clarifications = (sessionId: string) => {
+    if (!this.source.clarifications) return Promise.reject(new Error("Clarification history is unavailable from this source"));
+    return this.source.clarifications(sessionId);
+  };
+  clarificationStatus = (sessionId: string, clarifyId: string) => {
+    if (!this.source.clarificationStatus) return Promise.reject(new Error("Clarification status lookup is unavailable"));
+    return this.source.clarificationStatus(sessionId, clarifyId);
+  };
 
   async respondToConfirmation(turnId: string, callId: string, decision: "approve" | "deny") {
     await this.source.approve(turnId, callId, decision === "approve");

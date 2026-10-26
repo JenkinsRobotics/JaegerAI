@@ -1339,8 +1339,6 @@ class JaegerGatewayApp:
         register_workflows(self)
         from jaeger_ai.features.webhooks.routes import register as register_webhooks
         register_webhooks(self)
-        from jaeger_ai.features.finance.routes import register as register_finance
-        register_finance(self)
         from jaeger_ai.plugins.mcp.routes import register as register_mcp_controls
         register_mcp_controls(self)
         from jaeger_ai.plugins.control_routes import register as register_plugin_controls
@@ -1359,6 +1357,17 @@ class JaegerGatewayApp:
         register_native_controls(self)
         from jaeger_ai.features.agent_bridge.routes import register
         register(self)
+
+        # WebSocket support for real-time bidirectional communication
+        # Matches Hermes (7+ WS endpoints) and OpenClaw (primary WS transport)
+        try:
+            from .websocket import register_websocket_routes
+            self.ws_handler = register_websocket_routes(self.app, self)
+            logger.info("WebSocket support enabled at /ws")
+        except ImportError as e:
+            logger.warning(f"WebSocket support unavailable: {e}")
+            self.ws_handler = None
+
         self.app.router.add_get("/health", self.handle_health)
         self.app.router.add_get("/v1/stop", self.handle_stop_status)
         self.app.router.add_post("/v1/stop", self.handle_engage_stop)
@@ -6037,7 +6046,14 @@ class JaegerGatewayApp:
     async def handle_list_clarify(self, request: web.Request) -> web.Response:
         """GET /v1/sessions/{id}/clarify → pending forms (reload/reconnect recovery)."""
         sid = request.match_info["id"]
-        return web.json_response({"forms": self.store.list_clarify(sid)})
+        clarify_id = str(request.query.get("clarify_id") or "").strip()
+        if clarify_id:
+            form = self.store.get_clarify(clarify_id)
+            if not form or form["session_id"] != sid:
+                return web.json_response({"error": "Clarify form not found"}, status=404)
+            return web.json_response({"form": form})
+        include_resolved = request.query.get("include_resolved") == "true"
+        return web.json_response({"forms": self.store.list_clarify(sid, pending_only=not include_resolved)})
 
     async def handle_answer_clarify(self, request: web.Request) -> web.Response:
         """POST /v1/sessions/{id}/clarify/{clarify_id} {revision, response}: resolve exactly once.

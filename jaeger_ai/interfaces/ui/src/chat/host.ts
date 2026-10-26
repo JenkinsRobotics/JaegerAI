@@ -51,6 +51,7 @@ export interface StartTurnRequest {
 }
 
 export type TurnState = "complete" | "cancelled" | "failed" | "needs_input" | "unknown";
+export type ClarifyAnswerResult = { status: "answered"; answer: string } | { status: "cancelled" | "expired" };
 
 export interface TurnHandle {
   cancel(): void;
@@ -100,7 +101,11 @@ export interface ChatHost {
   startTurn(request: StartTurnRequest, onPart: (part: ChatPart) => void): TurnHandle;
   respondToConfirmation(turnId: string, callId: string, decision: "approve" | "deny", scope?: "once" | "session"): Promise<void>;
   /** Answer a server clarify form once (GB-033). Absent: the card is display-only. */
-  answerClarify?(sessionId: string, clarifyId: string, revision: number, response: string): Promise<void>;
+  answerClarify?(sessionId: string, clarifyId: string, revision: number, response: string): Promise<ClarifyAnswerResult>;
+  /** Recover server forms and terminal outcomes after navigation or reload. */
+  clarifications?(sessionId: string): Promise<import("../api/source").ClarificationSnapshot[]>;
+  /** Read the original durable status after an uncertain answer acknowledgement. */
+  clarificationStatus?(sessionId: string, clarifyId: string): Promise<import("../api/source").ClarificationSnapshot>;
   sessions: {
     list(): Promise<ChatSessionSummary[]>;
     load(id: string): Promise<ChatSession>;

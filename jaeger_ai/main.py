@@ -1448,20 +1448,7 @@ def _register_builtins(client: Any) -> None:
     # Durable mission/goal/plan facade over the cognitive commitment store.
     from jaeger_ai.features.missions import tools as _mission_tools  # noqa: F401
 
-    # Idempotent import into the one canonical searchable session store.
-    from jaeger_ai.features.history_import import tools as _history_import_tools  # noqa: F401
-
-    from jaeger_ai.features.cost_tracking import tools as _cost_tools  # noqa: F401
-
     from jaeger_ai.features.knowledge_library import tools as _library_tools  # noqa: F401
-
-    from jaeger_ai.features.caldav import tools as _caldav_tools  # noqa: F401
-
-    from jaeger_ai.features.insta360 import tools as _insta360_tools  # noqa: F401
-
-    from jaeger_ai.features.ares_migration import tools as _ares_migration_tools  # noqa: F401
-
-    from jaeger_ai.features.finance import tools as _finance_tools  # noqa: F401
 
     # execute_with_tools — one script, many tool calls, one inference
     # turn. Same import-registers pattern. See

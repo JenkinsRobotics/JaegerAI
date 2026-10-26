@@ -9,10 +9,8 @@ touches a user-written skill. See dev/docs/history/SKILL_EVOLUTION_PLAN.md ยง6-ย
 
 from __future__ import annotations
 
-import os
 import re
-import uuid
-from contextlib import contextmanager
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -59,35 +57,14 @@ def _versions_of(root: Path, skill: str) -> list[tuple[int, Path]]:
     return out
 
 
-@contextmanager
-def archive_lock(root: Path):
-    """Serialize instance archive operations without replacing prior content."""
-    import fcntl
-
+def _move_to_archive(root: Path, d: Path) -> str:
     archive = root / ARCHIVE_DIR
-    if archive.is_symlink():
-        raise ValueError("Skill archive must remain inside its instance")
     archive.mkdir(parents=True, exist_ok=True)
-    descriptor=os.open(archive / ".lock",os.O_CREAT|os.O_RDWR|os.O_NOFOLLOW,0o600)
-    with os.fdopen(descriptor,"r+") as lock:
-        fcntl.flock(lock.fileno(),fcntl.LOCK_EX)
-        yield archive
-
-
-def _move_to_archive(root: Path, d: Path, *, validate=None, before_move=None) -> str:
-    if d.is_symlink() or not d.resolve().is_relative_to(root.resolve()):
-        raise ValueError("Skill archive must remain inside its instance")
-    with archive_lock(root) as archive:
-        dest = archive / d.name
-        if dest.exists() or dest.is_symlink():
-            dest=archive/(d.name+"-"+uuid.uuid4().hex)
-        # Validate under the same lock immediately before the atomic move.
-        if validate is not None:validate()
-        if before_move is not None:before_move(dest.name)
-        if validate is not None:validate()
-        # Same instance filesystem: atomic move; never purge an older version.
-        os.rename(d,dest)
-    return dest.name
+    dest = archive / d.name
+    if dest.exists():
+        shutil.rmtree(dest)
+    shutil.move(str(d), str(dest))
+    return d.name
 
 
 def archive_superseded_versions(layout: Any, skill: str, *, keep: int = 2) -> list[str]:

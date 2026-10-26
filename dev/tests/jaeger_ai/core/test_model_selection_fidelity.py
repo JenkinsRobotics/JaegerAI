@@ -205,7 +205,9 @@ def test_ollama_cloud_key_from_credential_file(monkeypatch, tmp_path, filename):
         monkeypatch.delenv(name, raising=False)
     creds = tmp_path / "credentials"
     creds.mkdir()
-    (creds / filename).write_text("stored-key\n", encoding="utf-8")
+    key = creds / filename
+    key.write_text("stored-key\n", encoding="utf-8")
+    key.chmod(0o600)
 
     ext = ExternalModelConfig(
         enabled=True, provider="ollama-cloud",
@@ -220,7 +222,9 @@ def test_credential_file_beats_env(monkeypatch, tmp_path):
     monkeypatch.setenv("OLLAMA_API_KEY", "from-env")
     creds = tmp_path / "credentials"
     creds.mkdir()
-    (creds / "ollama_cloud_api_key").write_text("from-store", encoding="utf-8")
+    key = creds / "ollama_cloud_api_key"
+    key.write_text("from-store", encoding="utf-8")
+    key.chmod(0o600)
     ext = ExternalModelConfig(
         enabled=True, provider="ollama-cloud",
         base_url="https://ollama.com/v1", model="qwen3.5:397b",

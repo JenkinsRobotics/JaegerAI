@@ -193,8 +193,6 @@ def _adapter_for_client(
             num_ctx=getattr(client, "num_ctx", None),
             timeout_s=timeout_s,
             max_tokens=max_tokens,
-            temperature=getattr(ext, "temperature", None),
-            top_p=getattr(ext, "top_p", None),
             reasoning_effort=reasoning_effort_for(provider, model, getattr(ext, "reasoning_effort", None)),
         )
 
@@ -259,14 +257,10 @@ def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
             provider = str(row.get("provider") or primary_provider)
             model = str(row.get("model") or "")
             base_url = row.get("base_url") or primary_base
-            fallback_temp = row.get("temperature")
-            fallback_top_p = row.get("top_p")
         else:
             provider = str(getattr(row, "provider", None) or primary_provider)
             model = str(getattr(row, "model", "") or "")
             base_url = getattr(row, "base_url", None) or primary_base
-            fallback_temp = getattr(row, "temperature", None)
-            fallback_top_p = getattr(row, "top_p", None)
         if not model or model == primary_model:
             continue
         if provider == "cli":
@@ -284,8 +278,6 @@ def _fallback_adapters_for(client: Any) -> list[ProviderAdapter]:
                 base_url=base_url or None, num_ctx=num_ctx,
                 timeout_s=timeout_s,
                 max_tokens=max_tokens,
-                temperature=fallback_temp,
-                top_p=fallback_top_p,
             ))
     return out
 
@@ -320,19 +312,6 @@ def _make_fast_finalize_finalizer(client: Any) -> Any:
     return _finalize
 
 
-#: Pre-first-token grace for local inference (see build_jaeger_agent).
-LOCAL_FIRST_PROGRESS_TIMEOUT_S = 600.0
-
-
-def _is_local_backend(adapter: Any) -> bool:
-    """In-process llama-cpp / MLX, or a local (non ``:cloud``) Ollama model."""
-    if adapter.__class__.__name__ in ("LocalLlamaAdapter", "MLXAdapter"):
-        return True
-    model = str(getattr(adapter, "model", "") or "").lower()
-    return (getattr(adapter, "provider", None) == "ollama"
-            and ":cloud" not in model and not model.endswith("-cloud"))
-
-
 def build_jaeger_agent(
     client: Any,
     *,
@@ -348,7 +327,6 @@ def build_jaeger_agent(
     completion_reserve: int | None = None,
     artifact_dir: Any = None,
     stale_call_timeout_s: float | None = None,
-    first_progress_timeout_s: float | None = None,
     context_summarizer: Any = None,
     turn_max_elapsed_s: float | None = None,
     turn_max_tokens: int | None = None,
@@ -455,10 +433,15 @@ def build_jaeger_agent(
     # and local adapters; network connect/read timeouts still catch dead peers.
     # The caller can override this for latency-sensitive surfaces.
     if stale_call_timeout_s is None:
-        # Between streamed tokens/chunks this is a pure no-progress timeout
-        # (CallProgress), so 120s catches a hung decode or socket on every
-        # backend without capping a long healthy answer.
-        stale_call_timeout_s = 120.0
+        if adapter.__class__.__name__ in ("LocalLlamaAdapter", "MLXAdapter"):
+            # Cold prefill on a 30B Q4 can take ~60s; allow headroom
+            # for an unusual prompt without false-positive stall
+            # alarms during legitimate slow decodes. The pathological
+            # hang we're guarding against is multi-minute, so 120s
+            # catches it cleanly while letting normal work finish.
+            stale_call_timeout_s = 120.0
+        else:
+            stale_call_timeout_s = 120.0
     agent = JaegerAgent(
         adapter=adapter,
         fallback_adapters=_fallback_adapters_for(client),
@@ -484,13 +467,6 @@ def build_jaeger_agent(
         ),
     )
     agent.stale_call_timeout_s = stale_call_timeout_s
-    if first_progress_timeout_s is None and _is_local_backend(adapter):
-        # Silence BEFORE the first token is prefill or a cold model load,
-        # not a hang: a local 26B at 32k context took 170-300s after a
-        # large tool result on Oct 9 and was killed at 120s. Allow it once
-        # per call; the per-token budget above applies after that.
-        first_progress_timeout_s = LOCAL_FIRST_PROGRESS_TIMEOUT_S
-    agent.first_progress_timeout_s = first_progress_timeout_s
     return agent
 
 

@@ -101,7 +101,7 @@ def test_routes_forbid_non_owner(tmp_path):
 
 
 def test_grant_routes_roundtrip(tmp_path):
-    gw, events = _gateway(tmp_path, OWNER, "owner:matthew")
+    gw, events = _gateway(tmp_path, OWNER, "owner:alice")
 
     async def f(c):
         body = {"connector": "gmail", "account_id": "work", "tools": ["send"], "scopes": ["mail.send"],
@@ -131,7 +131,7 @@ def test_preview_route_no_resident(tmp_path, monkeypatch):
     monkeypatch.setenv("JAEGER_LIFECYCLE_LEASE", str(tmp_path / "ll.json"))
     from jaeger_ai.core.entity.runtime import EntityRuntime
     monkeypatch.setattr(EntityRuntime, "_instance", None, raising=False)
-    gw, _ = _gateway(tmp_path, OWNER, "owner:matthew")
+    gw, _ = _gateway(tmp_path, OWNER, "owner:alice")
 
     async def f(c):
         ok = await c.post("/v1/authority/preview", json={"tool_name": "read_file", "arguments": {"path": "a"},
@@ -159,7 +159,7 @@ def test_preview_route_with_live_runtime_layout(tmp_path, monkeypatch):
     layout = InstanceLayout(root=tmp_path / "inst")
     ReviewRuleStore.for_instance(layout).save({"scope": "team", "subject": "write_file", "effect": "deny"})
     monkeypatch.setattr(EntityRuntime, "_instance", SimpleNamespace(layout=layout), raising=False)
-    gw, _ = _gateway(tmp_path, OWNER, "owner:matthew")
+    gw, _ = _gateway(tmp_path, OWNER, "owner:alice")
 
     async def f(c):
         p = await c.post("/v1/authority/preview", json={"tool_name": "write_file", "arguments": {"path": "a"}})

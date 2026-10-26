@@ -1,7 +1,8 @@
 """Local file-effect transport with real permission wrapper and SQLite effect owner."""
 from types import SimpleNamespace
 import pytest
-from jaeger_ai.features.channels.receipts import checked_receipt,ChannelDeliveryUnknown
+from jaeger_agent.cognition.effects import ChannelDeliveryUnknown
+from jaeger_ai.features.channels.receipts import checked_receipt
 
 
 def test_ambiguous_adapter_results_never_claim_success():

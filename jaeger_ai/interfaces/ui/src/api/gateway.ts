@@ -6,7 +6,7 @@ import type { AgentActions, Section } from "./agentActions";
  * proxy), which forwards /v1/* to the gateway and adds the caller token on the
  * server side. The browser never sees or sends a token. */
 import { decodeSSE, type SSEFrame } from "./sse";
-import type { JaegerSource, RequestSnapshot, PendingApproval, TurnReceipt , UploadedAttachment, ConnectAppsListing, ConnectedApp, ModelInventory, ScheduleControls, LibraryControls, ReactionSnapshot, SessionQueue } from "./source";
+import type { JaegerSource, RequestSnapshot, PendingApproval, ClarificationSnapshot, TurnReceipt , UploadedAttachment, ConnectAppsListing, ConnectedApp, ModelInventory, ScheduleControls, LibraryControls, ReactionSnapshot, SessionQueue } from "./source";
 import type { Agent, AgentSummary, GatewayEvent, Handoff, HandoffExchange, SessionDetail, SessionRow, Task } from "./types";
 
 /** The WebUI's session CSRF token (meta tag the server injects for a
@@ -334,6 +334,14 @@ export class GatewayClient implements JaegerSource {
   async pendingApprovals(sessionId: string): Promise<PendingApproval[]> {
     const data = await this.json<{ approvals: PendingApproval[] }>(`/v1/approvals?session_id=${encodeURIComponent(sessionId)}`);
     return data.approvals;
+  }
+  async clarifications(sessionId: string): Promise<ClarificationSnapshot[]> {
+    const data = await this.json<{ forms: ClarificationSnapshot[] }>(`/v1/sessions/${encodeURIComponent(sessionId)}/clarify?include_resolved=true`);
+    return data.forms;
+  }
+  async clarificationStatus(sessionId: string, clarifyId: string): Promise<ClarificationSnapshot> {
+    const data = await this.json<{ form: ClarificationSnapshot }>(`/v1/sessions/${encodeURIComponent(sessionId)}/clarify?clarify_id=${encodeURIComponent(clarifyId)}`);
+    return data.form;
   }
   async answerClarify(sessionId: string, clarifyId: string, revision: number, response: string) {
     await this.json(`/v1/sessions/${encodeURIComponent(sessionId)}/clarify/${encodeURIComponent(clarifyId)}`, { revision, response });

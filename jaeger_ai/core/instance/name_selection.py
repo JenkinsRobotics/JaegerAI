@@ -308,7 +308,7 @@ def _try_live_pick(
     stance_label = str((stance or {}).get("stance") or "")
     register = str((stance or {}).get("register") or record.get("register") or "")
     prompt = (
-        "You are naming a Jenkins Robotics Jaeger AI OS1 persona. "
+        "You are naming a Jaeger AI OS1 persona. "
         "Pick exactly one name from this list and explain why in 1-2 short "
         "sentences. Reply as JSON only: {\"name\": \"...\", \"why\": \"...\"}. "
         f"List: {listing}. "

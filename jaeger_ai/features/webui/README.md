@@ -3,7 +3,7 @@
 # Jaeger WebUI
 
 **Classification:** CURRENT REFERENCE
-**Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../../../docs/CONTINUE_FROM_HERE.md)
+**Current product definition: [`docs/PRODUCT.md`](docs/PRODUCT.md).
 
 The WebUI is a browser client of one persistent Jaeger Gateway. It does not own
 execution, entity identity, durable sessions, tools, approvals, or memory.
@@ -72,4 +72,4 @@ dev/scripts/run_tests.sh --unit \
 These tests prove the Gateway default, mirror semantics, admission, attachment
 scope, terminal usage, and tool/activity event boundaries. They do not prove a
 configured live provider or a physical phone. Live acceptance belongs to the
-Gateway/WebUI golden journey in `docs/CONTINUE_FROM_HERE.md`.
+Gateway/WebUI golden journey in `docs/docs/PRODUCT.md`.

@@ -521,6 +521,11 @@ def _resolve_read(path: str) -> Path:
                 if cand.exists():
                     full = cand
                     break
+    if "credentials" in full.parts[:-1]:
+        raise SandboxError(
+            "credentials/ is off-limits to direct reads — "
+            "use get_credential(name) instead"
+        )
     roots = _read_roots_var.get()
     if roots is not None:
         full = Path(os.path.realpath(str(full)))
@@ -530,11 +535,6 @@ def _resolve_read(path: str) -> Path:
                 "Reads are confined to the session folder; ask the operator to open "
                 "that folder as the workspace instead."
             )
-    if "credentials" in full.parts[:-1]:
-        raise SandboxError(
-            "credentials/ is off-limits to direct reads — "
-            "use get_credential(name) instead"
-        )
     # Reads are unconfined, but never an OS-level secret store —
     # ~/.ssh, .aws/credentials, a .env, … (audit A5).
     from jaeger_os.core.safety.file_safety import is_sensitive_path

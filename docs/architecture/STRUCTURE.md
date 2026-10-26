@@ -3,6 +3,8 @@
 > **A Plain-English Guide for Developers and Non-Coders**  
 > This document explains how `JaegerAI` is organized, where each feature lives, and how to find and edit code easily.
 
+> **Module status (2026-10-22, see docs/PRODUCT.md):** Not every folder below is in the current product. The 7 logical modules to work toward — identity-memory, proposer-checker, event-heartbeat, senses-companion, tools-jenkins, sim-body, clients-thin — each run and test alone before they bolt to the main runtime. `features/` currently has 33 folders, including IDE, roundtable, finance, and other non-stack features that are parked, not loaded by default, in the next cleanup step. `features/personality/` (14 characters) is not the product: the companion is one identity. No folder was moved in the 2026-10-22 docs alignment; originals are on the Desktop in `JaegerAI-checkpoint-2026-10-22/`, not in this repo.
+
 ---
 
 ## 🧭 "Where Do I Find...?" Quick Lookup

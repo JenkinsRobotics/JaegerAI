@@ -1,5 +1,5 @@
 > **Classification:** CURRENT AUTHORITATIVE.
-> **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../CONTINUE_FROM_HERE.md)
+> **Current product definition:** [`docs/PRODUCT.md`](../PRODUCT.md) — JaegerAI is the standalone intelligence stack, not a workspace hub. Thin clients -> Gateway (control plane only) -> intelligence (jaeger-agent + JaegerAI modules) -> JROS (body) / Aether (CAD/sim) / NAS (store), with a checker + approval gate separate from the turn loop.
 
 # Jaeger Architecture (surviving design)
 
@@ -96,7 +96,7 @@ PERSISTENT ENTITY RUNTIME   EntityRuntime (OWNER, resident=true)
 | Test tiers | **IMPLEMENTED** | [TEST_ARCHITECTURE.md](TEST_ARCHITECTURE.md) | |
 | Platform extension CLI | **IMPLEMENTED** | `jaeger capability validate`, `jaeger provider doctor`, `jaeger device inspect` | Validate/inspect public contracts; device registry is experimental |
 | Clean-machine install | **EXPERIMENTAL** | isolated `JAEGER_STATE_DIR` test | Not a wiped macOS VM |
-| Physical iPhone | **PLANNED** | P3 acceptance in [CONTINUE_FROM_HERE.md](../CONTINUE_FROM_HERE.md) | Software remote path exists |
+| Physical iPhone | **PLANNED** | P3 acceptance in [docs/PRODUCT.md](docs/PRODUCT.md) | Software remote path exists |
 
 ---
 

@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
  * the card collapses to one status line (local; the gateway's tool part carries the real outcome). */
 import type { KeyboardEvent } from "react";
 import { Icon } from "../icons/Icon";
+import type { ClarifyAnswerResult } from "./host";
 
 const SHELL_TOOLS = /^(execute_code|run_command|run_terminal|terminal|shell|bash|zsh|sh|exec|command)$/i;
 
@@ -56,34 +57,40 @@ export function ApprovalCard({ title, message, toolName, input, decided, onDecid
 /** An agent's question, in the approval card's shape: question icon + title, lettered options, the chosen one
  * checked and highlighted, and an "Answered" footer once a choice exists (the gateway records the answer).
  * A pending server clarify form (GB-033) is answerable once: a choice or free text, at its revision. */
-export function QuestionCard({ title, options, chosenId, status, onAnswer }: {
-  title: string; options: Array<{ id: string; label: string }>; chosenId?: string;
-  status?: "pending" | "answered" | "cancelled" | "expired"; onAnswer?: (response: string) => Promise<void>;
+export function QuestionCard({ title, options, chosenId, answer: savedAnswer, status, onAnswer }: {
+  title: string; options: Array<{ id: string; label: string }>; chosenId?: string; answer?: string | null;
+  status?: "pending" | "answered" | "cancelled" | "expired"; onAnswer?: (response: string) => Promise<void | ClarifyAnswerResult>;
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [sent, setSent] = useState<string>();
-  const open = status === "pending" && Boolean(onAnswer) && sent === undefined;
+  const [resolved, setResolved] = useState<"cancelled" | "expired">();
+  const open = status === "pending" && resolved === undefined && Boolean(onAnswer) && sent === undefined;
   const lock = useRef(false);  // synchronous: two clicks in one frame must not send twice
   const answer = async (response: string) => {
     const value = response.trim();
     if (!open || lock.current || !value || !onAnswer) return;
     lock.current = true; setBusy(true); setError("");
-    try { await onAnswer(value); setSent(value); }
+    try {
+      const result = await onAnswer(value);
+      if (result?.status === "cancelled" || result?.status === "expired") setResolved(result.status);
+      else setSent(result?.status === "answered" && typeof result.answer === "string" ? result.answer : value);
+    }
     catch (e) { setError(String((e as Error)?.message ?? e)); }
     finally { lock.current = false; setBusy(false); }
   };
-  const chosenLabel = sent ?? options.find((o) => o.id === chosenId)?.label;
-  const foot = sent !== undefined || status === "answered" || chosenId ? "Answered"
-    : status === "expired" ? "Expired: the bot continued without an answer"
-    : status === "cancelled" ? "Cancelled" : "";
+  const chosenLabel = sent ?? savedAnswer ?? options.find((o) => o.id === chosenId)?.label;
+  const finalStatus = resolved ?? status;
+  const foot = sent !== undefined || finalStatus === "answered" || chosenId ? "Answered"
+    : finalStatus === "expired" ? "Expired: the bot continued without an answer"
+    : finalStatus === "cancelled" ? "Cancelled" : "";
   return (
     <div className="jg-approval jg-question" role="group" aria-label={title} data-sender="assistant">
       <div className="jg-approval__head"><Icon name="question" size={15} /><span className="jg-approval__title">{title}</span></div>
       <ul className="jg-question__options">
         {options.map((o, i) => {
-          const chosen = o.id === chosenId || (sent !== undefined && o.label === sent);
+          const chosen = o.id === chosenId || (savedAnswer !== undefined && savedAnswer !== null && o.label === savedAnswer) || (sent !== undefined && o.label === sent);
           const inner = <><span className="jg-question__key">{String.fromCharCode(65 + i)}</span>
             <span className="jg-question__label">{o.label}</span>
             {chosen && <Icon name="check" size={14} className="jg-question__check" />}</>;
@@ -99,7 +106,7 @@ export function QuestionCard({ title, options, chosenId, status, onAnswer }: {
         <button type="submit" disabled={busy || !text.trim()}>Answer</button>
       </form>}
       {error && <p role="alert" className="jg-question__error">{error}</p>}
-      {foot && <div className="jg-question__foot">{foot}{chosenLabel && !chosenId && sent ? `: ${chosenLabel}` : ""}</div>}
+      {foot && <div className="jg-question__foot">{foot}{chosenLabel && !chosenId && (sent !== undefined || savedAnswer != null) ? `: ${chosenLabel}` : ""}</div>}
     </div>
   );
 }

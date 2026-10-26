@@ -2,7 +2,7 @@
 
 Telegraph style. Root rules only. Applies to all human contributors, subagents, and AI coding assistants.
 
-Current execution entry point: [`docs/CONTINUE_FROM_HERE.md`](docs/CONTINUE_FROM_HERE.md). Read it before planning or editing release-path work.
+Current product definition: [`docs/PRODUCT.md`](docs/PRODUCT.md). Read it before planning or editing release-path work. JaegerAI is the standalone intelligence stack for Jenkins Robotics — a proactive, world-model AI companion and operator, one identity, integrating with JROS, Aether Suite, the NAS, and YouTube. It is not a workspace hub, not a CAD suite, not a machine project, and not a local-model system by default (LLM work today is cloud-based; on-device is the goal). See docs/STACK.md and docs/TRUST.md.
 
 ---
 

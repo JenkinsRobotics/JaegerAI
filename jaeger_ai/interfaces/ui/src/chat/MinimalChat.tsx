@@ -27,9 +27,10 @@ import { PostMessage, SummaryCard } from "./HomeEntries";
 import { stageSavedMedia, addFiles, autoGrow, bytesUploadEnabled, readBase64, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
 import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
-import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type TurnHandle } from "./host";
+import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type ClarifyAnswerResult, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
 import { SessionApprovals } from "./SessionApprovals";
+import { SessionClarifications } from "./SessionClarifications";
 import { ApprovalCard, QuestionCard } from "./ApprovalCard";
 import { MessageMenu, Reactions, type MessageAction } from "./MessageMenu";
 import { useRevealedText } from "./reveal";
@@ -135,7 +136,7 @@ export function StepsFold({ tools, defaultOpen = false }: { tools: ToolPart[]; d
   );
 }
 
-function Card({ part, onDecide, onAnswer, tool, decided }: { part: CardPart; onDecide: Decide; onAnswer?: (clarifyId: string, revision: number, response: string) => Promise<void>; tool?: { toolName: string; input: unknown }; decided?: "approve" | "deny" }) {
+function Card({ part, onDecide, onAnswer, tool, decided }: { part: CardPart; onDecide: Decide; onAnswer?: (clarifyId: string, revision: number, response: string) => Promise<ClarifyAnswerResult>; tool?: { toolName: string; input: unknown }; decided?: "approve" | "deny" }) {
   if (part.kind === "question") return <QuestionCard title={part.title} options={part.options} chosenId={part.chosenId} status={part.status}
     onAnswer={onAnswer && part.status === "pending" ? (response) => onAnswer(part.callId, part.revision ?? 1, response) : undefined} />;
   return <ApprovalCard title={part.title} message={part.message} toolName={tool?.toolName} input={tool?.input} decided={decided} onDecide={(d) => onDecide(part.callId, d)} />;
@@ -725,6 +726,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
             </section>
           ))}
           {sessionId && host instanceof WebHost && <SessionApprovals key={sessionId} sessionId={sessionId} host={host} excludeIds={session?.turns.flatMap(t => t.parts.flatMap(p => p.kind === "confirmation" ? [p.callId] : []))} />}
+          {sessionId && host instanceof WebHost && <SessionClarifications key={`clarifications:${sessionId}`} sessionId={sessionId} host={host} excludeIds={session?.turns.flatMap(t => t.parts.flatMap(p => p.kind === "question" ? [p.callId] : []))} />}
         </div>
       </div>
       <button type="button" className={`jg-jump${atBottom ? "" : " is-visible"}`} onClick={jumpToLatest}

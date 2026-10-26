@@ -247,8 +247,8 @@ class OpenAIAdapter(ProviderAdapter):
         api_key: str | None = None,
         base_url: str | None = None,
         max_tokens: int = 4096,
-        temperature: float | None = None,
-        top_p: float | None = None,
+        temperature: float = 0.0,
+        top_p: float = 0.95,
         num_ctx: int | None = None,
         timeout_s: float = 60.0,
         stream_transport: bool = True,
@@ -260,8 +260,8 @@ class OpenAIAdapter(ProviderAdapter):
         self.api_key = api_key
         self.base_url = base_url
         self.max_tokens = int(max_tokens)
-        self.temperature = float(temperature) if temperature is not None else None
-        self.top_p = float(top_p) if top_p is not None else None
+        self.temperature = float(temperature)
+        self.top_p = float(top_p)
         self.num_ctx = int(num_ctx) if num_ctx is not None else None
         # ``reasoning_effort``: none|low|medium|high, or None to send nothing.
         self.reasoning_effort = (str(reasoning_effort).strip().lower() or None) if reasoning_effort else None
@@ -359,11 +359,9 @@ class OpenAIAdapter(ProviderAdapter):
             "model": self.model,
             "messages": wire,
             "max_tokens": self.max_tokens,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
         }
-        if self.temperature is not None:
-            kwargs["temperature"] = self.temperature
-        if self.top_p is not None:
-            kwargs["top_p"] = self.top_p
         if tools:
             kwargs["tools"] = [t.to_openai_schema() for t in tools]
         if (

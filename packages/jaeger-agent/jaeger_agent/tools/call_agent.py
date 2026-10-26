@@ -18,31 +18,9 @@ from urllib.request import Request, urlopen
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 
 
-#: Supplies the Gateway base URL. Like the credential below, the Gateway
-#: registers it at startup (``set_gateway_base``) so the port lives in one
-#: place (``jaeger_ai/contract/ports.py``); jaeger-agent never imports product
-#: code. ``JAEGER_GATEWAY_URL`` still wins when set.
-_GATEWAY_BASE: Callable[[], str] | None = None
-
-
-def set_gateway_base(provider: Callable[[], str] | None) -> None:
-    global _GATEWAY_BASE
-    _GATEWAY_BASE = provider
-
-
 def _gateway_base() -> str:
-    explicit = (os.environ.get("JAEGER_GATEWAY_URL") or "").strip()
-    if explicit:
-        return explicit.rstrip("/")
-    if _GATEWAY_BASE is not None:
-        return str(_GATEWAY_BASE() or "").rstrip("/")
-    return ""
+    return (os.environ.get("JAEGER_GATEWAY_URL") or "http://127.0.0.1:8810").rstrip("/")
 
-
-#: How long a handoff waits for the owner's approval decision before the
-#: tool reports ``pending_approval`` and the turn moves on.
-APPROVAL_WAIT_S = 300.0
-APPROVAL_POLL_S = 0.5
 
 #: Supplies jaegerd's Gateway caller credential. The Gateway registers it at
 #: startup (``set_gateway_auth``); jaeger-agent never imports product code or
@@ -72,10 +50,7 @@ def _caller_headers() -> dict[str, str]:
 
 
 def _request_json(method: str, path: str, body: dict[str, Any] | None = None, timeout: float = 10) -> tuple[int, dict[str, Any]]:
-    base = _gateway_base()
-    if not base:
-        return 503, {"error": "gateway URL not configured (set JAEGER_GATEWAY_URL)", "http_status": 503}
-    url = f"{base}{path}"
+    url = f"{_gateway_base()}{path}"
     raw = json.dumps(body or {}).encode("utf-8") if body is not None else None
     req = Request(url, data=raw, method=method)
     req.add_header("Accept", "application/json")
@@ -101,87 +76,6 @@ def _request_json(method: str, path: str, body: dict[str, Any] | None = None, ti
         return 503, {"error": f"gateway unreachable: {exc}", "http_status": 503}
 
 
-def _handoff_body(target: str, work: str, turn: dict[str, Any], *, from_agent_id: str,
-                  require_approval: bool, request_id: str, parent_run_id: str,
-                  permitted_context: str, timeout_seconds: int, tools: list[str],
-                  project_id: str) -> dict[str, Any]:
-    """One handoff request. The parent's project workspace rides along, so a
-    child without a project still works in the same root as its parent."""
-    execution = turn.get("execution") or {}
-    body: dict[str, Any] = {
-        "task": work,
-        "from_agent_id": from_agent_id or "native:jaeger",
-        "require_approval": bool(require_approval),
-        "request_id": request_id,
-        "parent_run_id": parent_run_id or turn.get("request_id") or None,
-        "session_id": turn.get("session_id") or None,
-        "permitted_context": permitted_context,
-        "timeout_seconds": int(timeout_seconds),
-        "allowed_tools": tools,
-    }
-    if project_id:
-        body["project_id"] = project_id.strip()
-    elif execution.get("workspace"):
-        body["workspace"] = str(execution["workspace"])
-    return body
-
-
-_TERMINAL = {"completed", "failed", "cancelled", "denied", "execution_unknown"}
-
-
-@register_tool_from_function(name="run_team", side_effect="external")
-def run_team(assignments: str, project_id: str = "", timeout_seconds: int = 1800) -> dict[str, Any]:
-    """Supervisor fan-out: hand several tasks to specialists at once and WAIT for all.
-
-    ``assignments`` is a JSON list: [{"agent_id": "native:researcher", "task": "..."}, ...].
-    All run in parallel (within the project's fan-out limit) in the project root
-    when ``project_id`` is given. Returns every specialist's result; each result
-    is also posted into this chat. Verify the results before you report."""
-    try:
-        items = json.loads(assignments) if isinstance(assignments, str) else list(assignments or [])
-    except (TypeError, ValueError) as exc:
-        return {"ok": False, "error": f"assignments must be a JSON list: {exc}"}
-    if not isinstance(items, list) or not items or not all(
-            isinstance(i, dict) and i.get("agent_id") and i.get("task") for i in items):
-        return {"ok": False, "error": 'assignments must be [{"agent_id": ..., "task": ...}, ...]'}
-    from jaeger_agent.task_port import current_task_context
-    turn = current_task_context() or {}
-    submitted: list[dict[str, Any]] = []
-    for item in items:
-        rid = uuid.uuid4().hex
-        status, payload = _request_json(
-            "POST", f"/v1/agents/{str(item['agent_id']).strip()}/handoff",
-            _handoff_body(str(item["agent_id"]).strip(), str(item["task"]).strip(), turn,
-                          from_agent_id="native:jaeger", require_approval=True, request_id=rid,
-                          parent_run_id="", permitted_context=str(item.get("context") or ""),
-                          timeout_seconds=int(timeout_seconds), tools=[], project_id=project_id),
-            timeout=15)
-        submitted.append({"agent_id": item["agent_id"], "status_code": status, "handoff": payload})
-    deadline = time.monotonic() + max(1, int(timeout_seconds)) + APPROVAL_WAIT_S
-    pending = {s["handoff"].get("id") for s in submitted if s["handoff"].get("id")}
-    latest: dict[str, dict[str, Any]] = {s["handoff"]["id"]: s["handoff"] for s in submitted if s["handoff"].get("id")}
-    while pending and time.monotonic() < deadline:
-        for hid in list(pending):
-            _, current = _request_json("GET", f"/v1/handoffs/{hid}", timeout=10)
-            if current.get("id"):
-                latest[hid] = current
-            if str(current.get("status") or "") in _TERMINAL:
-                pending.discard(hid)
-        if pending:
-            time.sleep(1.0)
-    results = []
-    for s in submitted:
-        h = latest.get(s["handoff"].get("id") or "", s["handoff"])
-        res = h.get("result") or {}
-        results.append({
-            "agent_id": s["agent_id"], "handoff_id": h.get("id"), "status": h.get("status") or "rejected",
-            "ok": h.get("status") == "completed" and bool(res.get("ok", False)),
-            "summary": res.get("summary") or h.get("error") or "",
-        })
-    return {"ok": all(r["ok"] for r in results), "results": results,
-            "still_running": sorted(pending), "project_id": project_id or None}
-
-
 @register_tool_from_function(name="call_agent", side_effect="external")
 def call_agent(
     agent_id: str,
@@ -192,22 +86,14 @@ def call_agent(
     request_id: str = "",
     parent_run_id: str = "",
     permitted_context: str = "",
-    timeout_seconds: int = 900,
+    timeout_seconds: int = 120,
     allowed_tools: str = "",
-    project_id: str = "",
 ) -> dict[str, Any]:
     """Hand a bounded task to a standing specialist and return its evidence.
 
-    Team roles: native:reverse-engineer, native:builder, native:reviewer,
-    native:researcher, native:designer. Pass ``project_id`` so the specialist
-    works in the project's root; leave ``allowed_tools`` empty to give it its
-    standing tools. The result is also posted into this chat as a message.
-
     Uses Gateway ``POST /v1/agents/{id}/handoff``. Approval, timeout, cancel
     and specialist failure are explicit. This is not complete until a child
-    run result is persisted. ``require_approval=False`` is honoured only when
-    the owner's autonomy is ``auto``; otherwise the owner approves in the chat,
-    and retrying with it off does not skip that.
+    run result is persisted.
     """
     target = (agent_id or "").strip()
     work = (task or "").strip()
@@ -230,7 +116,7 @@ def call_agent(
             return {
                 "ok": False,
                 "error": f"unknown agent: {target}",
-                "hint": "Use native:reverse-engineer, native:builder, native:reviewer, native:researcher, native:designer, native:surfaces, native:gateway or native:everyday",
+                "hint": "Use native:surfaces, native:gateway, or native:everyday",
             }
         target = record.id
     except Exception:
@@ -238,39 +124,34 @@ def call_agent(
 
     rid = (request_id or "").strip() or uuid.uuid4().hex
     tools = [part.strip() for part in str(allowed_tools or "").split(",") if part.strip()]
-    # The Gateway-owned turn this tool runs in, so the handoff (its markers and
-    # approval card) belongs to that chat. Set by the host, never by the model.
-    from jaeger_agent.task_port import current_task_context
-    turn = current_task_context() or {}
     status, payload = _request_json(
         "POST",
         f"/v1/agents/{target}/handoff",
-        _handoff_body(target, work, turn, from_agent_id=from_agent_id, require_approval=require_approval,
-                      request_id=rid, parent_run_id=parent_run_id, permitted_context=permitted_context,
-                      timeout_seconds=timeout_seconds, tools=tools, project_id=project_id),
+        {
+            "task": work,
+            "from_agent_id": from_agent_id or "native:jaeger",
+            "require_approval": bool(require_approval),
+            "request_id": rid,
+            "parent_run_id": parent_run_id or None,
+            "permitted_context": permitted_context,
+            "timeout_seconds": int(timeout_seconds),
+            "allowed_tools": tools,
+        },
         timeout=15,
     )
     if status >= 400 or payload.get("error"):
         return {"ok": False, "status": payload.get("status") or "failed", **payload}
     handoff_id = payload.get("id")
-    current = payload
-    # Keep the turn open while the owner decides on the approval card in the
-    # chat, so the lead can relay the specialist's reply in the same turn.
-    approval_deadline = time.monotonic() + APPROVAL_WAIT_S
-    while current.get("status") == "pending_approval" and time.monotonic() < approval_deadline:
-        time.sleep(APPROVAL_POLL_S)
-        _, current = _request_json("GET", f"/v1/handoffs/{handoff_id}", timeout=10)
-        if current.get("error"):
-            return {"ok": False, "status": "failed", **current, "request_id": rid}
-    if current.get("status") == "pending_approval":
+    if payload.get("status") == "pending_approval":
         return {
             "ok": False,
             "status": "pending_approval",
             "error": "Specialist is waiting for an explicit approval decision",
-            "handoff": current,
+            "handoff": payload,
             "request_id": rid,
         }
     deadline = time.monotonic() + max(1, int(timeout_seconds))
+    current = payload
     if native_parent and current.get("status") in {"admitted", "running"}:
         return {"ok": True, "completed": False, "status": current["status"],
                 "handoff_id": handoff_id, "request_id": rid,

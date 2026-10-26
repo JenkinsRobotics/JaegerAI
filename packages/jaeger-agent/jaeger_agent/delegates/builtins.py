@@ -5,6 +5,7 @@ from .codex import create_runtime as create_codex
 from .cursor import create_runtime as create_cursor
 from .gemini import create_runtime as create_gemini
 from .grok import create_runtime as create_grok
+from .hermes import create_runtime as create_hermes
 from .ollama import create_runtime as create_ollama
 from .openclaw import create_runtime as create_openclaw
 from .opencode import create_runtime as create_opencode
@@ -21,6 +22,7 @@ def register_builtin_delegates(
         create_cursor,
         create_gemini,
         create_grok,
+        create_hermes,
         create_ollama,
         create_openclaw,
         create_opencode,

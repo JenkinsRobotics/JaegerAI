@@ -29,103 +29,7 @@ import pytest
 pytestmark = [pytest.mark.integration, pytest.mark.subprocess]
 REPO = Path(__file__).resolve().parents[4]
 
-
-class OwnedGateway:
-    def __init__(self, root, *, webui=False):
-        self.root = root
-        self.process = None
-        self.log = None
-        self.url = ""
-        self.identity = None
-        self.webui = webui
-        self.webui_url = None
-
-    def start(self):
-        ready = self.root / "listener.json"
-        ready.unlink(missing_ok=True)
-        self.log = (self.root / "gateway.log").open("a", encoding="utf-8")
-        # This suite is the approval contract: prompts, grants, denials.
-        # Pin the saved autonomy to "ask" before the worker boots so no
-        # test inherits the product-wide "auto" default.
-        instance = self.root / "instances" / "contract"
-        instance.mkdir(parents=True, exist_ok=True)
-        from jaeger_ai.core.instance.schemas import (
-            Config, ExternalModelConfig, ModelConfig, dump_yaml)
-        # Same external_model surface the worker would write, so the
-        # model-override contracts keep their scripted provider, plus the
-        # pinned autonomy for the approval contracts.
-        cfg = Config(instance_name="contract",
-                     model=ModelConfig(model_path="/dev/null"),
-                     external_model=ExternalModelConfig(
-                         enabled=True, provider="openai", model="contract-model",
-                         base_url="http://127.0.0.1:9/v1",
-                         api_key_env="JAEGER_CONTRACT_API_KEY"),
-                     automation={"autonomy": "ask"})
-        dump_yaml(instance / "config.yaml", cfg)
-        environment = {
-            **os.environ, "PYTHONDONTWRITEBYTECODE": "1",
-            "PYTHONPATH": os.pathsep.join([
-                str(REPO),
-                str(REPO / "packages/jaeger-agent"),
-                str(REPO / "packages/jaeger-os"),
-                str(REPO / "packages/jaeger-kokoro-tts"),
-                str(REPO / "packages/jaeger-whisper-stt"),
-            ]),
-            "JAEGER_STATE_DIR": str(self.root),
-            "JAEGER_HOME": str(self.root),
-            "JAEGER_INSTANCE_DIR": str(self.root / "instances" / "contract"),
-            "JAEGER_CRON_POLL_S": "0.2",
-            "JAEGER_IDLE_POLL_S": "0.2",
-            "JAEGER_BACKGROUND_PRODUCERS": "1",
-            "JAEGER_WEBHOOK_PORT": "0",
-        }
-        command = [sys.executable, str(REPO / "dev/tests/fixtures/gateway_contract_worker.py"), str(self.root)]
-        if self.webui:
-            command.append("--webui")
-        self.process = subprocess.Popen(
-            command,
-            cwd=self.root, env=environment, stdout=self.log, stderr=subprocess.STDOUT,
-        )
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline:
-            if ready.exists():
-                listener = json.loads(ready.read_text(encoding="utf-8"))
-                assert listener["pid"] == self.process.pid
-                assert listener["mode"] == "owner"
-                assert listener["resident"] is True
-                self.identity = listener["entity_id"]
-                self.url = f"http://127.0.0.1:{listener['port']}"
-                if self.webui:
-                    self.webui_url = f"http://127.0.0.1:{listener['webui_port']}"
-                return
-            if self.process.poll() is not None:
-                break
-            time.sleep(0.05)
-        raise AssertionError((self.root / "gateway.log").read_text(encoding="utf-8"))
-
-    def stop(self):
-        if self.process is not None and self.process.poll() is None:
-            self.process.kill()
-            self.process.wait(timeout=5)
-        if self.log is not None:
-            self.log.close()
-
-    def request(self, path, body=None, caller="cli"):
-        request = Request(
-            self.url + path, data=None if body is None else json.dumps(body).encode(),
-            headers={"Content-Type": "application/json", **_auth(caller)},
-        )
-        with urlopen(request, timeout=5) as response:
-            return response.status, json.load(response)
-
-    def wait_for_terminal(self, session, request_id):
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline:
-            _, row = self.request(f"/v1/sessions/{session}/requests/{request_id}")
-            if row["status"] in {"completed", "failed", "execution_unknown", "cancelled"}:
-                return row
-            time.sleep(0.05)
-        raise AssertionError((self.root / "gateway.log").read_text())
+from dev.tests.fixtures.owned_gateway import OwnedGateway, auth as _auth
 
 
 @pytest.fixture
@@ -747,6 +651,100 @@ def test_owned_browser_multiturn_render_cancel_and_reload(tmp_path):
                 (tmp_path / "browser-errors.json").write_text(json.dumps(page_errors, indent=2))
                 page.screenshot(path=str(tmp_path / "browser-failure.png"), full_page=True)
                 raise
+            finally:
+                browser.close()
+    finally:
+        stack.stop()
+
+
+def test_owned_browser_clarification_survives_reload_and_answers_once(tmp_path, monkeypatch):
+    """Chromium -> authenticated WebUI -> owned Gateway -> durable form; provider is scripted."""
+    playwright = pytest.importorskip("playwright.sync_api")
+    from jaeger_ai.core.gateway.caller_auth import TOKEN_DIR_ENV, ensure_tokens
+
+    monkeypatch.setenv(TOKEN_DIR_ENV, str(tmp_path / "caller-tokens"))
+    ensure_tokens()
+    stack = OwnedGateway(tmp_path, webui=True)
+    try:
+        stack.start()
+        _, home = stack.request("/v1/agents/native:jaeger/home", caller="webui")
+        session_id = home["session_id"]
+        with playwright.sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            context = browser.new_context(viewport={"width": 1280, "height": 900})
+            context.route("**/*", lambda route: route.continue_()
+                          if route.request.url.startswith(stack.webui_url + "/") else route.abort())
+            cookies = CookieJar()
+            login_client = build_opener(HTTPCookieProcessor(cookies))
+            login = Request(
+                stack.webui_url + "/api/auth/login",
+                data=json.dumps({"password": "synthetic-contract-password"}).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+            with login_client.open(login, timeout=5) as response:
+                assert json.load(response) == {"ok": True}
+            session_cookie = next(cookie for cookie in cookies if cookie.name == "hermes_session")
+            context.add_cookies([{"name": session_cookie.name, "value": session_cookie.value, "url": stack.webui_url}])
+            page = context.new_page()
+            page_errors = []
+            api_trace = []
+            page.on("pageerror", lambda error: page_errors.append(error.stack or str(error)))
+            page.on("request", lambda request: api_trace.append(("request", request.method, request.url.split("?", 1)[0])) if any(path in request.url for path in ("/api/", "/v1/")) else None)
+            def record_response(response):
+                if not any(path in response.url for path in ("/api/", "/v1/")):
+                    return
+                row = ("response", response.status, response.url.split("?", 1)[0])
+                if response.status == 403 and response.url.endswith("/seen"):
+                    try:
+                        row += (response.text()[:240],)
+                    except Exception:
+                        pass
+                api_trace.append(row)
+            page.on("response", record_response)
+            try:
+                page.goto(stack.webui_url + "/", wait_until="domcontentloaded")
+                assert any(cookie["name"] == "hermes_session" for cookie in context.cookies())
+                assert page.locator('meta[name="jaeger-csrf"]').get_attribute("content")
+                composer = page.locator('textarea[aria-label="Message"]')
+                playwright.expect(composer).to_be_enabled(timeout=20000)
+                composer.fill("CONTRACT-CLARIFY")
+                send = page.locator('button.jg-send[aria-label="Send"]')
+                playwright.expect(send).to_be_enabled(timeout=10000)
+                send.click()
+                question = page.get_by_role("group", name="Which environment should be used?")
+                try:
+                    # The card arrives on the session SSE chain (WebUI proxy -> gateway);
+                    # a tight wait raced the relay. 20s matches the other SSE waits here.
+                    playwright.expect(question).to_be_visible(timeout=20000)
+                except AssertionError as error:
+                    raise AssertionError(f"{error}\nAPI trace: {api_trace}\nPage errors: {page_errors}") from error
+                playwright.expect(question.locator("input[aria-label='Your answer']")).to_be_visible()
+
+                page.reload(wait_until="domcontentloaded")
+                question = page.get_by_role("group", name="Which environment should be used?")
+                playwright.expect(question).to_be_visible(timeout=20000)
+                question.locator("input[aria-label='Your answer']").fill("staging")
+                question.get_by_role("button", name="Answer").click()
+                playwright.expect(question).to_contain_text("Answered: staging", timeout=10000)
+                # The follow-up turn replays after the reload; the SSE relay
+                # paces in the observed 10-15s range, so do not tighten this.
+                # The rendered transcript places the tool steps block after the
+                # answer text, so scope by text, not by the last assistant node.
+                playwright.expect(page.get_by_text("CLARIFICATION-ANSWER-RECEIVED")).to_be_visible(timeout=40000)
+
+                _, forms = stack.request(f"/v1/sessions/{session_id}/clarify?include_resolved=true", caller="webui")
+                (form,) = forms["forms"]
+                assert form["status"] == "answered" and form["answer"] == "staging"
+                with pytest.raises(HTTPError) as repeated:
+                    stack.request(f"/v1/sessions/{session_id}/clarify/{form['clarify_id']}",
+                                  {"revision": form["revision"], "response": "prod"}, caller="webui")
+                assert repeated.value.code == 409
+
+                page.reload(wait_until="domcontentloaded")
+                restored = page.get_by_role("group", name="Which environment should be used?")
+                playwright.expect(restored).to_contain_text("Answered: staging", timeout=40000)
+                assert restored.locator("input").count() == 0
+                assert not page_errors, page_errors
             finally:
                 browser.close()
     finally:

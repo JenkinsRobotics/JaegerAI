@@ -27,20 +27,38 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, quote, unquote, urlparse
 from urllib.request import Request as _HttpRequest, build_opener
 
-from jaeger_ai.features.oidc import (
-    OIDCAuthError,
-    OIDCConfigError,
-    build_authorization_redirect,
-    complete_authorization_code_flow,
-    is_oidc_enabled,
-)
-from jaeger_ai.features.passkeys import (
-    PasskeyError,
-    authentication_options,
-    passkeys_available,
-    registered_credentials,
-    registration_options,
-)
+try:
+    from jaeger_ai.features.oidc import (
+        OIDCAuthError,
+        OIDCConfigError,
+        build_authorization_redirect,
+        complete_authorization_code_flow,
+        is_oidc_enabled,
+    )
+except ImportError:
+    # OIDC is deprecated
+    def is_oidc_enabled() -> bool:
+        return False
+    class OIDCAuthError(Exception): pass
+    class OIDCConfigError(Exception): pass
+    def build_authorization_redirect(*args, **kwargs): return None
+    def complete_authorization_code_flow(*args, **kwargs): return None
+try:
+    from jaeger_ai.features.passkeys import (
+        PasskeyError,
+        authentication_options,
+        passkeys_available,
+        registered_credentials,
+        registration_options,
+    )
+except ImportError:
+    # Passkeys are deprecated
+    def passkeys_available() -> bool:
+        return False
+    class PasskeyError(Exception): pass
+    def authentication_options(*args, **kwargs): return None
+    def registered_credentials(*args, **kwargs): return []
+    def registration_options(*args, **kwargs): return None
 from jaeger_ai.features.passkeys import (
     bind_state_dir as bind_passkey_state_dir,
 )
@@ -637,10 +655,13 @@ class RunnerBroker:
         return {"ok": True, "status": "accepted"}
 
     def respond_clarify(self, run_id: str, clarify_id: str, response: str) -> dict[str, Any]:
-        """Unblock a mid-turn clarify waiting on this native run.
+        """Answer a mid-turn clarify form through its Gateway contract (GB-033).
 
-        The clarify card is a first-class Gateway event (clarify.request); the
-        answer rides the Gateway as a normal turn on the same session.
+        The form is a revisioned Gateway entity on the run's session; the
+        answer resolves it exactly once at POST /v1/sessions/{id}/clarify/
+        {clarify_id}. The revision is read from the same form record the
+        Gateway published to the browser, so a stale or already-answered form
+        fails closed on 409 instead of silently opening a second turn.
         """
         status = self.run_status(run_id)
         session_id = str(status.get("session_id") or "").strip()
@@ -652,24 +673,41 @@ class RunnerBroker:
                 "clarify_id": clarify_id,
                 "run_id": run_id,
             }
+        http_status, form = gateway_request(
+            "GET",
+            f"/v1/sessions/{quote(session_id, safe='')}/clarify"
+            f"?clarify_id={quote(clarify_id, safe='')}",
+        )
+        if http_status >= 400 or not isinstance(form, dict) or not form.get("form"):
+            return {
+                "ok": False,
+                "status": "not-active",
+                "message": "Clarification is no longer active.",
+                "clarify_id": clarify_id,
+                "run_id": run_id,
+            }
+        revision = int(form["form"]["revision"])
         http_status, payload = gateway_request(
-            "POST", f"/v1/sessions/{quote(session_id, safe='')}/turns",
-            body={"text": response, "options": {"clarify_id": clarify_id}},
+            "POST",
+            f"/v1/sessions/{quote(session_id, safe='')}/clarify"
+            f"/{quote(clarify_id, safe='')}",
+            body={"revision": revision, "response": response},
         )
         if http_status >= 400:
             return {
                 "ok": False,
-                "status": "error",
+                "status": "not-active" if http_status == 404 else "error",
                 "message": str(payload.get("error") or f"HTTP {http_status}"),
                 "clarify_id": clarify_id,
                 "run_id": run_id,
             }
         return {
             "ok": True,
-            "status": "accepted",
+            "status": "answered",
             "clarify_id": clarify_id,
             "run_id": run_id,
-            "request_id": payload.get("request_id"),
+            "revision": revision,
+            "delivered": bool(payload.get("delivered")),
         }
 
     def reconcile(self, run_id: str) -> dict[str, Any]:

@@ -7,7 +7,7 @@ certify the current installed build.
 ## Current release qualification
 
 The current release scope and remaining work are in
-[CONTINUE_FROM_HERE.md](CONTINUE_FROM_HERE.md). It is **not yet qualified**.
+[docs/PRODUCT.md](docs/PRODUCT.md). It is **not yet qualified**.
 Do not infer live-provider conversation, live voice, off-LAN phone access, or
 IDE-worker steering from source files or scripted tests. Final handoff must
 identify the external `.app` and VSIX artifacts, exact startup/configuration,

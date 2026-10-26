@@ -1,18 +1,29 @@
 """Inventory cannot connect/probe/grant or expose loaded transport credentials."""
 from types import SimpleNamespace
+import threading
 import json
 from jaeger_ai.core.gateway.tool_inventory import collect
 from jaeger_os.core.tools import tool_registry
 
 
 def test_loaded_inventory_redacts_transport_secrets_without_probing(monkeypatch):
-    from jaeger_ai.plugins.mcp import client
+    from jaeger_ai.plugins.mcp import client as client_mod
     secret = 'owned-fixture-private-value'
     spec = SimpleNamespace(agent_name='mcp__owned__read', server_name='owned', description='Description ' + secret)
     config = SimpleNamespace(headers={'Authorization': secret}, env={'API_KEY': secret}, command='/private/command', url='http://private-endpoint')
-    registry = SimpleNamespace(_clients={'owned': SimpleNamespace(config=config)}, list_tools=lambda: [spec])
-    monkeypatch.setattr(client, 'get_registry', lambda: registry)
-    monkeypatch.setattr(client, 'connection_errors', lambda: {'failed': 'Authorization: ' + secret})
+    # Model the registry surface runtime_inventory reads (commit b4491c84):
+    # a lifecycle lock plus the disconnected/state/active-call ledgers.
+    registry = SimpleNamespace(
+        _lifecycle_lock=threading.RLock(),
+        _clients={'owned': SimpleNamespace(config=config, resources_advertised=False)},
+        _disconnected={},
+        _server_states={},
+        _active_calls={},
+        list_tools=lambda: [spec],
+        control_id=client_mod.MCPRegistry.control_id,
+    )
+    monkeypatch.setattr(client_mod, 'get_registry', lambda: registry)
+    monkeypatch.setattr(client_mod, 'connection_errors', lambda: {'failed': 'Authorization: ' + secret})
     def forbidden():
         raise AssertionError('Inventory must not probe or execute anything')
     tool = SimpleNamespace(name=spec.agent_name, description=spec.description, toolset='mcp:owned', side_effect='read', permission_tier='explicit', beta=False, dangerous=False, check_fn=forbidden, fn=forbidden)
@@ -20,7 +31,11 @@ def test_loaded_inventory_redacts_transport_secrets_without_probing(monkeypatch)
     result = collect('owned')
     assert result['count'] == 1 and result['execution_authorized'] is False
     assert result['tools'][0]['availability'] == 'not_probed'
-    assert result['servers'] == [{'name': 'owned', 'state': 'loaded_not_probed', 'tool_count': 1}, {'name': 'failed', 'state': 'connection_failed', 'tool_count': 0}]
+    assert result['servers'] == [
+        {'id': client_mod.MCPRegistry.control_id('owned'), 'name': 'owned', 'state': 'loaded_not_probed',
+         'tool_count': 1, 'active_calls': 0, 'resources_advertised': False, 'actions': ['disconnect']},
+        {'name': 'failed', 'state': 'connection_failed', 'tool_count': 0},
+    ]
     wire = json.dumps(result)
     assert secret not in wire and config.command not in wire and config.url not in wire
     assert result['tools'][0]['description'] == 'Description ********'

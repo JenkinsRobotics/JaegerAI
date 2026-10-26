@@ -1,5 +1,5 @@
 > **Classification:** BACKLOG / DEFERRED.
-> **Current execution entry point:** [`docs/CONTINUE_FROM_HERE.md`](../../docs/CONTINUE_FROM_HERE.md).
+> **Current product definition: [`docs/PRODUCT.md`](docs/PRODUCT.md).
 > These are deferred ideas, not current release scope. Full Codex parity, every slash command, universal provider/worker support, and exhaustive donor cleanup are explicitly deferred.
 
 # Codex parity backlog
