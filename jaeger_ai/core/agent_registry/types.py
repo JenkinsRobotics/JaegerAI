@@ -24,13 +24,19 @@ class AgentKind(str, Enum):
 
 
 class AgentRole(str, Enum):
-    """Product role for Grok-shaped lead + specialists chrome.
+    """Product role for Grok-shaped lead + specialists + characters chrome.
 
     Orthogonal to ``AgentKind`` (native vs third-party adapter face).
+    
+    LEAD: Primary companion, plans and delegates to specialists
+    SPECIALIST: Task expert with tool allowlist (Builder, Reviewer, etc.)
+    CHARACTER: Conversational persona (Jarvis, Lilith, etc.) — tools off by default
+    RUNTIME: Background/runtime agent (hidden from sidebar)
     """
 
     LEAD = "lead"
     SPECIALIST = "specialist"
+    CHARACTER = "character"  # NEW: Conversational persona with personality
     RUNTIME = "runtime"
 
 
@@ -200,3 +206,167 @@ def is_native(record: AgentRecord) -> bool:
 
 def is_third_party(record: AgentRecord) -> bool:
     return record.kind is AgentKind.THIRD_PARTY
+
+
+# ─────────────────────────────────────────────────────────────────
+# V2: Character Personality System
+# ─────────────────────────────────────────────────────────────────
+
+@dataclass(slots=True)
+class CharacterPersonality:
+    """Personality overlay from the character library.
+
+    Attached to any agent (LEAD, SPECIALIST, or CHARACTER role).
+    Provides rich personality traits, voice, and backstory.
+    """
+    template_id: str | None = None      # "jarvis", "lilith", etc. (None = custom)
+    name: str = ""                       # Display name
+    role_description: str = ""           # "the operator's AI butler"
+    voice_tone: str = ""                 # "crisp, dry, British-butler"
+    voice_id: str = "af_heart"           # For TTS
+    backstory: str = ""                  # Short version for prompt
+    soul: str = ""                       # Core narrative (if exists)
+    speech_patterns: tuple[str, ...] = ()
+    quotes: tuple[str, ...] = ()
+    
+    # Trait scores (0.0 - 1.0)
+    hexaco_openness: float = 0.5
+    hexaco_conscientiousness: float = 0.5
+    hexaco_extraversion: float = 0.5
+    hexaco_agreeableness: float = 0.5
+    hexaco_neuroticism: float = 0.5
+    hexaco_honesty_humility: float = 0.5
+    special_strength: float = 0.5
+    special_perception: float = 0.5
+    special_endurance: float = 0.5
+    special_charisma: float = 0.5
+    special_intelligence: float = 0.5
+    special_agility: float = 0.5
+    special_luck: float = 0.5
+    expr_sarcasm: float = 0.0
+    expr_warmth: float = 0.5
+    expr_verbosity: float = 0.5
+    expr_formality: float = 0.5
+    expr_directness: float = 0.5
+    expr_humor: float = 0.3
+    expr_empathy: float = 0.5
+    expr_aggression: float = 0.0
+    
+    # Rendering
+    card_url: str | None = None          # "/v1/characters/jarvis/card"
+    card_thumbnail_url: str | None = None
+    
+    # Version tracking for template updates
+    personality_version: int = 1
+    
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to dict for storage in agent metadata."""
+        return {
+            "template_id": self.template_id,
+            "name": self.name,
+            "role_description": self.role_description,
+            "voice_tone": self.voice_tone,
+            "voice_id": self.voice_id,
+            "backstory": self.backstory,
+            "soul": self.soul,
+            "speech_patterns": list(self.speech_patterns),
+            "quotes": list(self.quotes),
+            "traits": {
+                "hexaco": {
+                    "openness": self.hexaco_openness,
+                    "conscientiousness": self.hexaco_conscientiousness,
+                    "extraversion": self.hexaco_extraversion,
+                    "agreeableness": self.hexaco_agreeableness,
+                    "neuroticism": self.hexaco_neuroticism,
+                    "honesty_humility": self.hexaco_honesty_humility,
+                },
+                "special": {
+                    "strength": self.special_strength,
+                    "perception": self.special_perception,
+                    "endurance": self.special_endurance,
+                    "charisma": self.special_charisma,
+                    "intelligence": self.special_intelligence,
+                    "agility": self.special_agility,
+                    "luck": self.special_luck,
+                },
+                "expression": {
+                    "sarcasm": self.expr_sarcasm,
+                    "warmth": self.expr_warmth,
+                    "verbosity": self.expr_verbosity,
+                    "formality": self.expr_formality,
+                    "directness": self.expr_directness,
+                    "humor": self.expr_humor,
+                    "empathy": self.expr_empathy,
+                    "aggression": self.expr_aggression,
+                },
+            },
+            "card_url": self.card_url,
+            "card_thumbnail_url": self.card_thumbnail_url,
+            "personality_version": self.personality_version,
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CharacterPersonality:
+        """Deserialize from agent metadata dict."""
+        traits = data.get("traits", {})
+        hexaco = traits.get("hexaco", {})
+        special = traits.get("special", {})
+        expr = traits.get("expression", {})
+        
+        return cls(
+            template_id=data.get("template_id"),
+            name=data.get("name", ""),
+            role_description=data.get("role_description", ""),
+            voice_tone=data.get("voice_tone", ""),
+            voice_id=data.get("voice_id", "af_heart"),
+            backstory=data.get("backstory", ""),
+            soul=data.get("soul", ""),
+            speech_patterns=tuple(data.get("speech_patterns", [])),
+            quotes=tuple(data.get("quotes", [])),
+            hexaco_openness=hexaco.get("openness", 0.5),
+            hexaco_conscientiousness=hexaco.get("conscientiousness", 0.5),
+            hexaco_extraversion=hexaco.get("extraversion", 0.5),
+            hexaco_agreeableness=hexaco.get("agreeableness", 0.5),
+            hexaco_neuroticism=hexaco.get("neuroticism", 0.5),
+            hexaco_honesty_humility=hexaco.get("honesty_humility", 0.5),
+            special_strength=special.get("strength", 0.5),
+            special_perception=special.get("perception", 0.5),
+            special_endurance=special.get("endurance", 0.5),
+            special_charisma=special.get("charisma", 0.5),
+            special_intelligence=special.get("intelligence", 0.5),
+            special_agility=special.get("agility", 0.5),
+            special_luck=special.get("luck", 0.5),
+            expr_sarcasm=expr.get("sarcasm", 0.0),
+            expr_warmth=expr.get("warmth", 0.5),
+            expr_verbosity=expr.get("verbosity", 0.5),
+            expr_formality=expr.get("formality", 0.5),
+            expr_directness=expr.get("directness", 0.5),
+            expr_humor=expr.get("humor", 0.3),
+            expr_empathy=expr.get("empathy", 0.5),
+            expr_aggression=expr.get("aggression", 0.0),
+            card_url=data.get("card_url"),
+            card_thumbnail_url=data.get("card_thumbnail_url"),
+            personality_version=data.get("personality_version", 1),
+        )
+
+
+def get_personality(record: AgentRecord) -> CharacterPersonality | None:
+    """Extract personality from agent metadata, or None if not set."""
+    meta = record.metadata or {}
+    personality_data = meta.get("personality")
+    if personality_data and isinstance(personality_data, dict):
+        return CharacterPersonality.from_dict(personality_data)
+    return None
+
+
+def set_personality(record: AgentRecord, personality: CharacterPersonality | None) -> None:
+    """Set personality on agent metadata."""
+    if record.metadata is None:
+        record.metadata = {}
+    if personality is None:
+        record.metadata.pop("personality", None)
+        record.metadata.pop("character_template", None)
+    else:
+        record.metadata["personality"] = personality.to_dict()
+        if personality.template_id:
+            record.metadata["character_template"] = personality.template_id

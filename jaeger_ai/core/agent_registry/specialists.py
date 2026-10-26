@@ -320,6 +320,85 @@ def scoped_skill_names(agent) -> list[str] | None:
     return list(dict.fromkeys([*own, *SHARED_SKILLS]))
 
 
+# ─────────────────────────────────────────────────────────────────
+# V2: Effective Tools — Security-Enforced Tool Policy
+# ─────────────────────────────────────────────────────────────────
+
+def effective_tools(agent: Any) -> list[str] | None:
+    """The tools this agent can actually use (V2 security model).
+
+    Returns:
+        None: Inherit from parent/context (lead, runtime, third-party)
+        []:   Model-only (character with no tools — ENFORCED)
+        [...]: Explicit allowlist
+
+    Precedence:
+        1. metadata["tool_allowlist"] — Explicit per-agent override
+           (None = inherit, [] = no tools, [...] = specific tools)
+        2. CHARACTER role default: [] (no tools — conversational only)
+        3. SPECIALIST: standing tools or explicit set
+        4. LEAD/RUNTIME: None (inherit — no restriction)
+
+    SECURITY: This is enforced by AllowlistToolExecutor at runtime.
+    A character with tools=[] CANNOT call tools, even via prompt injection.
+    """
+    meta = getattr(agent, "metadata", None) or {}
+    if not isinstance(meta, dict):
+        meta = {}
+    
+    # 1. Explicit per-agent override (from tool toggle UI)
+    if "tool_allowlist" in meta:
+        tools = meta["tool_allowlist"]
+        if tools is None:
+            return None  # Inherit
+        if isinstance(tools, list):
+            return [str(t) for t in tools]
+        return None
+    
+    # 2. CHARACTER role default: NO TOOLS (conversational only)
+    role = _role_value(agent)
+    if role == "character":
+        return []  # Empty list = model-only, ENFORCED
+    
+    # 3. SPECIALIST: standing tools or explicit set
+    if role == "specialist":
+        return specialist_tools(agent)
+    
+    # 4. LEAD/RUNTIME/THIRD_PARTY: inherit (None = no restriction)
+    return None
+
+
+def tool_scope_description(agent: Any) -> str:
+    """Human-readable description of the agent's tool scope."""
+    tools = effective_tools(agent)
+    role = _role_value(agent)
+    
+    if tools is None:
+        return "inherit" if role in ("lead", "runtime") else "unrestricted"
+    if len(tools) == 0:
+        return "model-only (no tools)"
+    if len(tools) <= 5:
+        return f"{len(tools)} tools: {', '.join(tools[:5])}"
+    return f"{len(tools)} tools: {', '.join(tools[:5])}..."
+
+
+def set_tool_allowlist(agent: Any, tools: list[str] | None) -> None:
+    """Set explicit tool allowlist on agent metadata.
+
+    Args:
+        tools: None = inherit, [] = no tools, [...] = specific tools
+    """
+    meta = getattr(agent, "metadata", None)
+    if not isinstance(meta, dict):
+        meta = {}
+        agent.metadata = meta
+    
+    if tools is None:
+        meta.pop("tool_allowlist", None)
+    else:
+        meta["tool_allowlist"] = list(tools)
+
+
 def agent_skill_names(agent) -> list[str]:
     """Every skill listed on an agent record (own + shared, lead included)."""
     own = specialist_skills(agent) or []
