@@ -1177,6 +1177,19 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   Character Library Overlay
+   ───────────────────────────────────────────────────────────── */
+
+.character-library-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--background);
+  z-index: 900;
+  overflow-y: auto;
+  animation: fadeIn 0.2s ease;
+}
+
+/* ─────────────────────────────────────────────────────────────
    V2 Sidebar Enhancements (Pinning, Character Cards, Context Menu)
    ───────────────────────────────────────────────────────────── */
 

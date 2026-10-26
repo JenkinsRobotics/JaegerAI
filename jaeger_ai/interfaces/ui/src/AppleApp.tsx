@@ -19,6 +19,7 @@ import remarkGfm from 'remark-gfm'
 import { GatewayClient } from './lib/gateway-client'
 import { VoiceOrb, VoiceButton, Waveform, useAudioLevel } from './components/VoiceOrb'
 import { CreateAgentModal } from './components/CreateAgentModal'
+import { CharacterLibrary } from './components/CharacterLibrary'
 import { PinnedAgents, usePins, type PinnableAgent } from './components/PinnedAgents'
 import { AgentContextMenu, useContextMenu, type ContextMenuAgent } from './components/AgentContextMenu'
 import { SearchPalette, useSearchPalette } from './components/SearchPalette'
@@ -304,6 +305,7 @@ function Sidebar({
   onSelectAgent,
   onNewChat,
   onCreateAgent,
+  onBrowseCharacters,
   onSearch,
   collapsed,
   onToggleCollapse,
@@ -318,6 +320,7 @@ function Sidebar({
   onSelectAgent: (id: string) => void
   onNewChat: () => void
   onCreateAgent: () => void
+  onBrowseCharacters: () => void
   onSearch: () => void
   collapsed: boolean
   onToggleCollapse: () => void
@@ -397,6 +400,34 @@ function Sidebar({
           {!collapsed && <span>Create Agent</span>}
         </button>
       </div>
+
+      {/* Browse Characters Button */}
+      {!collapsed && (
+        <div className="sidebar-content" style={{ paddingTop: 0 }}>
+          <button 
+            className="browse-characters-button"
+            onClick={onBrowseCharacters}
+            style={{ 
+              width: '100%',
+              padding: 'var(--space-3) var(--space-4)',
+              background: 'var(--tertiary-fill)',
+              border: '1px solid var(--separator)',
+              borderRadius: 'var(--radius-md)',
+              color: 'var(--label)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              fontSize: 'var(--text-subhead)',
+              fontWeight: 'var(--weight-medium)'
+            }}
+          >
+            <span style={{ fontSize: 18 }}>🎭</span>
+            <span>Browse Characters</span>
+            <span style={{ marginLeft: 'auto', color: 'var(--tertiary-label)', fontSize: 13 }}>20</span>
+          </button>
+        </div>
+      )}
 
       {/* Pinned Strip (Grok-style) */}
       {!collapsed && (leadAgent || pinnedAgents.length > 0) && (
@@ -855,6 +886,7 @@ function AppleAppContent() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [client, setClient] = useState<GatewayClient | null>(null)
   const [showCreateAgentModal, setShowCreateAgentModal] = useState(false)
+  const [showCharacterLibrary, setShowCharacterLibrary] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // V2 Hooks: Pins, Context Menu, Search Palette
@@ -1203,6 +1235,7 @@ function AppleAppContent() {
           }}
           onNewChat={() => setMessages([])}
           onCreateAgent={() => setShowCreateAgentModal(true)}
+          onBrowseCharacters={() => setShowCharacterLibrary(true)}
           onSearch={openSearch}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
@@ -1221,6 +1254,21 @@ function AppleAppContent() {
         onCreateAgent={handleCreateAgent}
         gatewayUrl="http://127.0.0.1:33418"
       />
+
+      {/* Character Library — Full page overlay */}
+      {showCharacterLibrary && (
+        <div className="character-library-overlay">
+          <CharacterLibrary
+            onClose={() => setShowCharacterLibrary(false)}
+            onCreateAgent={(character) => {
+              setShowCharacterLibrary(false)
+              // Open create agent modal with this character pre-selected
+              setShowCreateAgentModal(true)
+            }}
+            gatewayUrl="http://127.0.0.1:33418"
+          />
+        </div>
+      )}
 
       {/* Search Palette (⌘K) */}
       <SearchPalette
