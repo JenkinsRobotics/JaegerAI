@@ -346,15 +346,6 @@ export const FolderInput = createIcon(
   'FolderInput'
 )
 
-export const Volume2 = createIcon(
-  <>
-    <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-    <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-    <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
-  </>,
-  'Volume2'
-)
-
 export const Command = createIcon(
   <path d="M15 6v12a3 3 0 1 0 3-3H6a3 3 0 1 0 3 3V6a3 3 0 1 0-3 3h12a3 3 0 1 0-3-3" />,
   'Command'

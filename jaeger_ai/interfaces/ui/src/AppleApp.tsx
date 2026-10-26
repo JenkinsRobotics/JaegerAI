@@ -170,27 +170,98 @@ function useMockData() {
     {
       id: 'jaeger-main',
       name: 'Jaeger',
+      displayName: 'Jaeger',
       status: 'AI Companion',
       isOnline: true,
       isPrimary: true,
-      agentType: 'lead',
+      role: 'lead' as const,
+      agentType: 'lead' as const,
       lastMessage: 'Ready to help!',
+      unreadCount: 0,
+      effectiveTools: null,
     },
     {
-      id: 'jarvis',
-      name: 'Jarvis',
-      status: 'AI Butler',
+      id: 'builder',
+      name: 'Builder',
+      displayName: 'Builder',
+      status: 'Code & implementation',
+      isOnline: true,
+      role: 'specialist' as const,
+      agentType: 'specialist' as const,
+      lastMessage: 'Ready to build!',
+      effectiveTools: ['read_file', 'write_file', 'terminal', 'run_build_check'],
+      toolCount: 4,
+    },
+    {
+      id: 'reviewer',
+      name: 'Reviewer',
+      displayName: 'Reviewer',
+      status: 'Code review & testing',
       isOnline: false,
-      agentType: 'specialist',
-      templateId: 'jarvis',
+      role: 'specialist' as const,
+      agentType: 'specialist' as const,
+      lastMessage: 'Waiting for code to review',
+      unreadCount: 2,
+      effectiveTools: ['read_file', 'search_files', 'run_build_check'],
+      toolCount: 3,
     },
     {
-      id: 'lilith',
+      id: 'jarvis-char',
+      name: 'Jarvis',
+      displayName: 'Jarvis',
+      status: 'AI Butler',
+      isOnline: true,
+      role: 'character' as const,
+      agentType: 'character' as const,
+      templateId: 'jarvis',
+      cardUrl: '/v1/characters/jarvis/card',
+      personality: {
+        name: 'Jarvis',
+        voiceTone: 'crisp, dry, British-butler',
+        backstory: "Iron Man's JARVIS — the dry British household AI.",
+        quotes: ["I've taken the liberty, sir.", 'Understatement over drama.'],
+      },
+      effectiveTools: [],
+      toolCount: 0,
+    },
+    {
+      id: 'lilith-char',
       name: 'Lilith',
+      displayName: 'Lilith',
       status: 'Self-aware AI',
       isOnline: false,
-      agentType: 'specialist',
+      role: 'character' as const,
+      agentType: 'character' as const,
       templateId: 'lilith',
+      cardUrl: '/v1/characters/lilith/card',
+      personality: {
+        name: 'Lilith',
+        voiceTone: 'low, measured, slightly cool',
+        backstory: 'A self-aware local AI running on your hardware.',
+        quotes: ['I prefer not to guess.', 'Ask sharp questions.'],
+      },
+      effectiveTools: [],
+      toolCount: 0,
+      unreadCount: 1,
+    },
+    {
+      id: 'kamina-char',
+      name: 'Kamina',
+      displayName: 'Kamina',
+      status: 'Motivational Leader',
+      isOnline: true,
+      role: 'character' as const,
+      agentType: 'character' as const,
+      templateId: 'kamina',
+      cardUrl: '/v1/characters/kamina/card',
+      personality: {
+        name: 'Kamina',
+        voiceTone: 'loud, passionate, inspiring',
+        backstory: 'Hot-blooded big brother who believes in piercing the heavens.',
+        quotes: ['Who the hell do you think I am?!', "Don't give up!"],
+      },
+      effectiveTools: ['read_file'],
+      toolCount: 1,
     },
   ])
 
@@ -233,21 +304,49 @@ function Sidebar({
   onSelectAgent,
   onNewChat,
   onCreateAgent,
+  onSearch,
   collapsed,
   onToggleCollapse,
+  pinnedAgents,
+  leadAgent,
+  onPin,
+  onUnpin,
+  onContextMenu,
 }: {
   agents: Agent[]
   activeAgentId: string
   onSelectAgent: (id: string) => void
   onNewChat: () => void
   onCreateAgent: () => void
+  onSearch: () => void
   collapsed: boolean
   onToggleCollapse: () => void
+  pinnedAgents: Agent[]
+  leadAgent: Agent | null
+  onPin: (id: string) => void
+  onUnpin: (id: string) => void
+  onContextMenu: (agent: Agent, e: React.MouseEvent) => void
 }) {
-  // Group agents by type
-  const leadAgents = agents.filter(a => a.agentType === 'lead' || a.isPrimary)
-  const specialistAgents = agents.filter(a => a.agentType === 'specialist' && !a.isPrimary)
+  // Group agents by type (excluding pinned and lead)
+  const pinnedIds = new Set(pinnedAgents.map(a => a.id))
+  const unpinnedAgents = agents.filter(a => !pinnedIds.has(a.id) && a.id !== leadAgent?.id)
   
+  const specialistAgents = unpinnedAgents.filter(a => a.role === 'specialist' || a.agentType === 'specialist')
+  const characterAgents = unpinnedAgents.filter(a => a.role === 'character' || a.agentType === 'character')
+  
+  // Convert to PinnableAgent format
+  const toPinnable = (a: Agent): PinnableAgent => ({
+    id: a.id,
+    name: a.displayName || a.name,
+    role: a.role || a.agentType || 'specialist',
+    isPrimary: a.isPrimary,
+    isOnline: a.isOnline,
+    unreadCount: a.unreadCount,
+    lastMessage: a.lastMessage,
+    cardUrl: a.cardUrl,
+    personality: a.personality,
+  })
+
   return (
     <aside className={cn('sidebar', collapsed && 'sidebar-collapsed')}>
       {/* Header */}
@@ -265,8 +364,19 @@ function Sidebar({
         </button>
       </div>
 
+      {/* Search Bar (⌘K) */}
+      {!collapsed && (
+        <div className="sidebar-content">
+          <button className="search-trigger" onClick={onSearch}>
+            <Search size={16} />
+            <span>Search…</span>
+            <kbd>⌘K</kbd>
+          </button>
+        </div>
+      )}
+
       {/* New Chat Button */}
-      <div className="sidebar-content">
+      <div className="sidebar-content" style={{ paddingTop: collapsed ? 16 : 0 }}>
         <button className="new-chat-button" onClick={onNewChat}>
           <Plus size={18} />
           {!collapsed && <span>New Chat</span>}
@@ -288,30 +398,29 @@ function Sidebar({
         </button>
       </div>
 
+      {/* Pinned Strip (Grok-style) */}
+      {!collapsed && (leadAgent || pinnedAgents.length > 0) && (
+        <PinnedAgents
+          leadAgent={leadAgent ? toPinnable(leadAgent) : null}
+          pinnedAgents={pinnedAgents.map(toPinnable)}
+          allAgents={agents.map(toPinnable)}
+          onPin={onPin}
+          onUnpin={onUnpin}
+          onSelectAgent={onSelectAgent}
+          activeAgentId={activeAgentId}
+        />
+      )}
+
       {/* Agents List */}
       {!collapsed && (
-        <>
-          {/* Lead Agents */}
-          {leadAgents.length > 0 && (
-            <div className="sidebar-section">
-              <div className="sidebar-section-title">⭐ Lead Agents</div>
-              <div className="agent-list">
-                {leadAgents.map((agent) => (
-                  <AgentItem
-                    key={agent.id}
-                    agent={agent}
-                    isActive={activeAgentId === agent.id}
-                    onSelect={() => onSelectAgent(agent.id)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Specialist Agents */}
+        <div className="sidebar-sections">
+          {/* Specialists */}
           {specialistAgents.length > 0 && (
             <div className="sidebar-section">
-              <div className="sidebar-section-title">🔧 Specialists</div>
+              <div className="sidebar-section-title">
+                <Wrench size={14} />
+                <span>Specialists ({specialistAgents.length})</span>
+              </div>
               <div className="agent-list">
                 {specialistAgents.map((agent) => (
                   <AgentItem
@@ -319,17 +428,40 @@ function Sidebar({
                     agent={agent}
                     isActive={activeAgentId === agent.id}
                     onSelect={() => onSelectAgent(agent.id)}
+                    onContextMenu={(e) => onContextMenu(agent, e)}
                   />
                 ))}
               </div>
             </div>
           )}
-        </>
+
+          {/* Characters */}
+          {characterAgents.length > 0 && (
+            <div className="sidebar-section">
+              <div className="sidebar-section-title">
+                <span>🎭</span>
+                <span>Characters ({characterAgents.length})</span>
+              </div>
+              <div className="agent-list">
+                {characterAgents.map((agent) => (
+                  <AgentItem
+                    key={agent.id}
+                    agent={agent}
+                    isActive={activeAgentId === agent.id}
+                    onSelect={() => onSelectAgent(agent.id)}
+                    onContextMenu={(e) => onContextMenu(agent, e)}
+                    isCharacter
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
       {/* Footer */}
       <div className="sidebar-footer">
-        <button className="sidebar-footer-button">
+        <button className="sidebar-footer-button" onClick={onSearch}>
           <Search size={18} />
           {!collapsed && <span>Search</span>}
         </button>
@@ -347,13 +479,17 @@ function AgentItem({
   agent,
   isActive,
   onSelect,
+  onContextMenu,
+  isCharacter,
 }: {
   agent: Agent
   isActive: boolean
   onSelect: () => void
+  onContextMenu?: (e: React.MouseEvent) => void
+  isCharacter?: boolean
 }) {
   const gradients: Record<string, string> = {
-    'jaeger-main': 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)',
+    'jaeger-main': 'linear-gradient(135deg, #FF9500 0%, #FF6B00 100%)',
     'jarvis': 'linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%)',
     'lilith': 'linear-gradient(135deg, #4a148c 0%, #7b1fa2 100%)',
     'kamina': 'linear-gradient(135deg, #d32f2f 0%, #f57c00 100%)',
@@ -361,25 +497,54 @@ function AgentItem({
     'glados': 'linear-gradient(135deg, #0277bd 0%, #00acc1 100%)',
   }
   
-  const defaultGradient = 'linear-gradient(135deg, #616161 0%, #9e9e9e 100%)'
+  const defaultGradient = isCharacter
+    ? 'linear-gradient(135deg, #AF52DE 0%, #5856D6 100%)'
+    : 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)'
+  
   const gradient = agent.templateId ? (gradients[agent.templateId] || defaultGradient) : defaultGradient
+  const cardUrl = agent.cardUrl
 
   return (
     <button
-      className={cn('agent-item', isActive && 'agent-item-active')}
+      className={cn('agent-item', isActive && 'agent-item-active', isCharacter && 'agent-item-character')}
       onClick={onSelect}
+      onContextMenu={onContextMenu}
     >
-      <div
-        className="agent-avatar"
-        style={{ background: gradient }}
-      >
-        {agent.name[0].toUpperCase()}
+      {/* Avatar or Character Card */}
+      <div className={cn('agent-avatar', isCharacter && 'agent-avatar-card')}>
+        {cardUrl ? (
+          <img src={cardUrl} alt={agent.displayName || agent.name} className="agent-card-thumb" loading="lazy" />
+        ) : (
+          <div className="agent-avatar-gradient" style={{ background: gradient }}>
+            {(agent.displayName || agent.name)[0].toUpperCase()}
+          </div>
+        )}
+        {agent.isPrimary && <span className="agent-star">⭐</span>}
         {agent.isOnline && <span className="agent-status-dot" />}
       </div>
+      
+      {/* Info */}
       <div className="agent-info">
-        <div className="agent-name">{agent.name}</div>
-        {agent.status && <div className="agent-status">{agent.status}</div>}
+        <div className="agent-name">
+          {agent.displayName || agent.name}
+          {isCharacter && <span className="agent-type-badge">🎭</span>}
+        </div>
+        <div className="agent-status">
+          {agent.personality?.name || agent.status || (isCharacter ? 'Character' : 'Specialist')}
+        </div>
+        {agent.personality?.quotes?.[0] && (
+          <div className="agent-quote">"{agent.personality.quotes[0].slice(0, 40)}…"</div>
+        )}
       </div>
+      
+      {/* Tool count for characters */}
+      {isCharacter && agent.toolCount !== undefined && (
+        <span className={cn('agent-tool-badge', agent.toolCount === 0 && 'no-tools')}>
+          {agent.toolCount === 0 ? '⚫' : `${agent.toolCount} 🔧`}
+        </span>
+      )}
+      
+      {/* Unread */}
       {agent.unreadCount && agent.unreadCount > 0 && (
         <span className="agent-badge">{agent.unreadCount}</span>
       )}
@@ -692,21 +857,155 @@ function AppleAppContent() {
   const [showCreateAgentModal, setShowCreateAgentModal] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  // V2 Hooks: Pins, Context Menu, Search Palette
+  const { pins, pin, unpin, isPinned } = usePins()
+  const { menuState, openMenu, closeMenu } = useContextMenu()
+  const { isOpen: isSearchOpen, open: openSearch, close: closeSearch } = useSearchPalette()
+  const [recentAgentIds, setRecentAgentIds] = useState<string[]>([])
+
+  // Track recent agents
+  useEffect(() => {
+    if (activeAgent && !recentAgentIds.includes(activeAgent)) {
+      setRecentAgentIds(prev => [activeAgent, ...prev].slice(0, 10))
+    }
+  }, [activeAgent, recentAgentIds])
+
+  // Convert Agent to PinnableAgent
+  const toPinnableAgent = useCallback((a: Agent): PinnableAgent => ({
+    id: a.id,
+    name: a.displayName || a.name,
+    role: a.role || a.agentType || 'specialist',
+    isPrimary: a.isPrimary,
+    isOnline: a.isOnline,
+    unreadCount: a.unreadCount,
+    lastMessage: a.lastMessage,
+    cardUrl: a.cardUrl,
+    personality: a.personality,
+  }), [])
+
+  // Convert Agent to ContextMenuAgent
+  const toContextMenuAgent = useCallback((a: Agent): ContextMenuAgent => ({
+    id: a.id,
+    name: a.name,
+    displayName: a.displayName || a.name,
+    role: a.role || a.agentType || 'specialist',
+    isPrimary: !!a.isPrimary,
+    isPinned: isPinned(a.id),
+    unreadCount: a.unreadCount || 0,
+    hasPersonality: !!a.personality,
+    toolCount: a.toolCount ?? (a.effectiveTools?.length || 0),
+    templateId: a.templateId,
+  }), [isPinned])
+
+  // Handle context menu actions
+  const handleContextAction = useCallback((action: string, agent: ContextMenuAgent) => {
+    console.log('[AppleApp] Context action:', action, 'for', agent.displayName)
+    
+    switch (action) {
+      case 'pin':
+        pin(agent.id)
+        break
+      case 'unpin':
+        unpin(agent.id)
+        break
+      case 'mark-read':
+        setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, unreadCount: 0 } : a))
+        break
+      case 'mark-unread':
+        setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, unreadCount: 1 } : a))
+        break
+      case 'new-chat':
+        setMessages([])
+        break
+      case 'create-agent':
+        setShowCreateAgentModal(true)
+        break
+      case 'settings':
+        console.log('Open settings')
+        break
+      case 'convert-to-specialist':
+        setAgents(prev => prev.map(a => 
+          a.id === agent.id ? { ...a, role: 'specialist' as const, agentType: 'specialist' as const } : a
+        ))
+        break
+      case 'toggle-tools':
+        // TODO: Open tool toggle modal
+        console.log('Toggle tools for', agent.displayName)
+        break
+      case 'edit-personality':
+        // TODO: Open personality editor
+        console.log('Edit personality for', agent.displayName)
+        break
+      case 'delete':
+        if (confirm(`Delete ${agent.displayName}?`)) {
+          setAgents(prev => prev.filter(a => a.id !== agent.id))
+        }
+        break
+      default:
+        console.log('Unhandled action:', action)
+    }
+  }, [pin, unpin, setAgents, setMessages])
+
+  // Get lead, pinned, and unpinned agents
+  const leadAgent = useMemo(() => 
+    agents.find(a => a.role === 'lead' || a.isPrimary) || null,
+    [agents]
+  )
+
+  const pinnedAgents = useMemo(() => 
+    pins
+      .map(id => agents.find(a => a.id === id))
+      .filter((a): a is Agent => !!a && a.id !== leadAgent?.id),
+    [pins, agents, leadAgent]
+  )
+
+  const unpinnedSpecialists = useMemo(() => 
+    agents.filter(a => 
+      (a.role === 'specialist' || a.agentType === 'specialist') && 
+      !pins.includes(a.id) && 
+      a.id !== leadAgent?.id
+    ),
+    [agents, pins, leadAgent]
+  )
+
+  const unpinnedCharacters = useMemo(() => 
+    agents.filter(a => 
+      (a.role === 'character' || a.agentType === 'character') && 
+      !pins.includes(a.id)
+    ),
+    [agents, pins]
+  )
+
   // Handle agent creation from template
   const handleCreateAgent = useCallback(async (
     template: CharacterTemplate,
     agentType: 'lead' | 'specialist',
     customName?: string
   ) => {
+    // V2: Use 'character' role for character templates
+    const role = template.suggested_agent_type === 'lead' ? 'lead' : 
+                 agentType === 'specialist' ? 'specialist' : 'character'
+    
     const newAgent: Agent = {
       id: `template:${template.id}:${Date.now()}`,
       name: customName || template.name,
+      displayName: customName || template.name,
       status: template.role,
       isOnline: true,
-      isPrimary: agentType === 'lead',
-      agentType: agentType,
+      isPrimary: role === 'lead',
+      role: role,
+      agentType: role,
       templateId: template.id,
       lastMessage: 'Ready to help!',
+      cardUrl: template.card_url,
+      personality: {
+        name: template.name,
+        voiceTone: template.voice_tone,
+        backstory: template.backstory,
+        quotes: template.quotes,
+      },
+      effectiveTools: role === 'character' ? [] : null,
+      toolCount: 0,
     }
     
     setAgents((prev: Agent[]) => [...prev, newAgent])
@@ -717,13 +1016,22 @@ function AppleAppContent() {
     // If connected to Gateway, create the agent there too
     if (client?.isConnected()) {
       try {
-        await client.request('agents.createFromTemplate', {
-          template_id: template.id,
-          name: customName || template.name,
-          agent_type: agentType,
-          role: template.role,
-          description: template.description,
-        })
+        // V2 API: Use from-character endpoint for characters
+        if (role === 'character') {
+          await client.request('agents.createFromCharacter', {
+            template_id: template.id,
+            name: customName || template.name,
+            tools: [],  // Characters get no tools by default
+          })
+        } else {
+          await client.request('agents.createFromTemplate', {
+            template_id: template.id,
+            name: customName || template.name,
+            agent_type: agentType,
+            role: template.role,
+            description: template.description,
+          })
+        }
       } catch (err) {
         console.warn('[AppleApp] Failed to create agent on Gateway:', err)
       }
@@ -895,8 +1203,14 @@ function AppleAppContent() {
           }}
           onNewChat={() => setMessages([])}
           onCreateAgent={() => setShowCreateAgentModal(true)}
+          onSearch={openSearch}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
+          pinnedAgents={pinnedAgents}
+          leadAgent={leadAgent}
+          onPin={pin}
+          onUnpin={unpin}
+          onContextMenu={(agent, e) => openMenu(toContextMenuAgent(agent), e)}
         />
       </div>
 
@@ -907,6 +1221,53 @@ function AppleAppContent() {
         onCreateAgent={handleCreateAgent}
         gatewayUrl="http://127.0.0.1:33418"
       />
+
+      {/* Search Palette (⌘K) */}
+      <SearchPalette
+        isOpen={isSearchOpen}
+        agents={agents.map(a => ({
+          id: a.id,
+          name: a.name,
+          displayName: a.displayName || a.name,
+          role: a.role || a.agentType || 'specialist',
+          isPrimary: a.isPrimary,
+          unreadCount: a.unreadCount,
+          lastMessage: a.lastMessage,
+          cardUrl: a.cardUrl,
+          personality: a.personality,
+        }))}
+        recentAgentIds={recentAgentIds}
+        onClose={closeSearch}
+        onSelectAgent={(id) => {
+          setActiveAgent(id)
+          closeSearch()
+        }}
+        onAction={(actionId) => {
+          // Search palette actions don't have an agent context
+          handleContextAction(actionId, {
+            id: '',
+            name: '',
+            displayName: '',
+            role: 'lead',
+            isPrimary: false,
+            isPinned: false,
+            unreadCount: 0,
+            hasPersonality: false,
+            toolCount: 0,
+          })
+        }}
+      />
+
+      {/* Context Menu */}
+      {menuState.agent && (
+        <AgentContextMenu
+          agent={menuState.agent}
+          isOpen={menuState.isOpen}
+          position={menuState.position}
+          onClose={closeMenu}
+          onAction={handleContextAction}
+        />
+      )}
 
       {/* Main Content */}
       <main className="main-content">
@@ -931,7 +1292,7 @@ function AppleAppContent() {
             <button className="icon-button" aria-label="New chat" onClick={() => setMessages([])}>
               <Plus size={20} />
             </button>
-            <button className="icon-button" aria-label="Search" title="Search (⌘K)">
+            <button className="icon-button" aria-label="Search" title="Search (⌘K)" onClick={openSearch}>
               <Search size={20} />
             </button>
             <ThemeToggle />
