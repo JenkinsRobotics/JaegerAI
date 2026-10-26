@@ -56,7 +56,7 @@ jobs:
           npx --yes @vscode/vsce package --no-dependencies || echo "VSIX packaging skipped"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/*
