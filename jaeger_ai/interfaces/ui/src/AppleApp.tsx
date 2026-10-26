@@ -18,6 +18,8 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { GatewayClient } from './lib/gateway-client'
 import { VoiceOrb, VoiceButton, Waveform, useAudioLevel } from './components/VoiceOrb'
+import { CreateAgentModal } from './components/CreateAgentModal'
+import type { CharacterTemplate } from './components/CharacterGallery'
 import './theme/apple-app.css'
 import {
   Send,
@@ -39,6 +41,7 @@ import {
   Moon,
   ChevronLeft,
   ChevronRight,
+  UserPlus,
 } from './components/Icons'
 
 // ─────────────────────────────────────────────────────────────
@@ -64,6 +67,19 @@ interface Agent {
   isPrimary?: boolean
   lastMessage?: string
   unreadCount?: number
+  agentType?: 'lead' | 'specialist'
+  templateId?: string
+}
+
+interface AgentDetails {
+  id: string
+  name: string
+  role: string
+  agentType: 'lead' | 'specialist'
+  templateId: string
+  description: string
+  voiceTone: string
+  avatarGradient: string
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -144,33 +160,38 @@ function SparklesIcon({ size = 24, className = '' }: { size?: number; className?
 // ─────────────────────────────────────────────────────────────
 
 function useMockData() {
-  const [agents] = useState<Agent[]>([
+  const [agents, setAgents] = useState<Agent[]>([
     {
       id: 'jaeger-main',
       name: 'Jaeger',
       status: 'AI Companion',
       isOnline: true,
       isPrimary: true,
+      agentType: 'lead',
       lastMessage: 'Ready to help!',
     },
     {
       id: 'jarvis',
       name: 'Jarvis',
-      status: 'Assistant',
+      status: 'AI Butler',
       isOnline: false,
+      agentType: 'specialist',
+      templateId: 'jarvis',
     },
     {
       id: 'lilith',
       name: 'Lilith',
-      status: 'Creative',
+      status: 'Self-aware AI',
       isOnline: false,
+      agentType: 'specialist',
+      templateId: 'lilith',
     },
   ])
 
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
 
-  return { agents, messages, setMessages, isGenerating, setIsGenerating }
+  return { agents, setAgents, messages, setMessages, isGenerating, setIsGenerating }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -205,6 +226,7 @@ function Sidebar({
   activeAgentId,
   onSelectAgent,
   onNewChat,
+  onCreateAgent,
   collapsed,
   onToggleCollapse,
 }: {
@@ -212,9 +234,14 @@ function Sidebar({
   activeAgentId: string
   onSelectAgent: (id: string) => void
   onNewChat: () => void
+  onCreateAgent: () => void
   collapsed: boolean
   onToggleCollapse: () => void
 }) {
+  // Group agents by type
+  const leadAgents = agents.filter(a => a.agentType === 'lead' || a.isPrimary)
+  const specialistAgents = agents.filter(a => a.agentType === 'specialist' && !a.isPrimary)
+  
   return (
     <aside className={cn('sidebar', collapsed && 'sidebar-collapsed')}>
       {/* Header */}
@@ -240,35 +267,58 @@ function Sidebar({
         </button>
       </div>
 
+      {/* Create Agent Button */}
+      <div className="sidebar-content" style={{ paddingTop: 0 }}>
+        <button 
+          className="new-chat-button create-agent-button"
+          onClick={onCreateAgent}
+          style={{ 
+            background: 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)',
+            color: 'white'
+          }}
+        >
+          <UserPlus size={18} />
+          {!collapsed && <span>Create Agent</span>}
+        </button>
+      </div>
+
       {/* Agents List */}
       {!collapsed && (
-        <div className="sidebar-section">
-          <div className="sidebar-section-title">Agents</div>
-          <div className="agent-list">
-            {agents.map((agent) => (
-              <button
-                key={agent.id}
-                className={cn(
-                  'agent-item',
-                  activeAgentId === agent.id && 'agent-item-active'
-                )}
-                onClick={() => onSelectAgent(agent.id)}
-              >
-                <div className="agent-avatar">
-                  {agent.name[0]}
-                  {agent.isOnline && <span className="agent-status-dot" />}
-                </div>
-                <div className="agent-info">
-                  <div className="agent-name">{agent.name}</div>
-                  {agent.status && <div className="agent-status">{agent.status}</div>}
-                </div>
-                {agent.unreadCount && agent.unreadCount > 0 && (
-                  <span className="agent-badge">{agent.unreadCount}</span>
-                )}
-              </button>
-            ))}
-          </div>
-        </div>
+        <>
+          {/* Lead Agents */}
+          {leadAgents.length > 0 && (
+            <div className="sidebar-section">
+              <div className="sidebar-section-title">⭐ Lead Agents</div>
+              <div className="agent-list">
+                {leadAgents.map((agent) => (
+                  <AgentItem
+                    key={agent.id}
+                    agent={agent}
+                    isActive={activeAgentId === agent.id}
+                    onSelect={() => onSelectAgent(agent.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Specialist Agents */}
+          {specialistAgents.length > 0 && (
+            <div className="sidebar-section">
+              <div className="sidebar-section-title">🔧 Specialists</div>
+              <div className="agent-list">
+                {specialistAgents.map((agent) => (
+                  <AgentItem
+                    key={agent.id}
+                    agent={agent}
+                    isActive={activeAgentId === agent.id}
+                    onSelect={() => onSelectAgent(agent.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Footer */}
@@ -283,6 +333,51 @@ function Sidebar({
         </button>
       </div>
     </aside>
+  )
+}
+
+/** Individual Agent Item in Sidebar */
+function AgentItem({
+  agent,
+  isActive,
+  onSelect,
+}: {
+  agent: Agent
+  isActive: boolean
+  onSelect: () => void
+}) {
+  const gradients: Record<string, string> = {
+    'jaeger-main': 'linear-gradient(135deg, #007AFF 0%, #5856D6 100%)',
+    'jarvis': 'linear-gradient(135deg, #1e3a5f 0%, #2d5a87 100%)',
+    'lilith': 'linear-gradient(135deg, #4a148c 0%, #7b1fa2 100%)',
+    'kamina': 'linear-gradient(135deg, #d32f2f 0%, #f57c00 100%)',
+    'bender': 'linear-gradient(135deg, #616161 0%, #9e9e9e 100%)',
+    'glados': 'linear-gradient(135deg, #0277bd 0%, #00acc1 100%)',
+  }
+  
+  const defaultGradient = 'linear-gradient(135deg, #616161 0%, #9e9e9e 100%)'
+  const gradient = agent.templateId ? (gradients[agent.templateId] || defaultGradient) : defaultGradient
+
+  return (
+    <button
+      className={cn('agent-item', isActive && 'agent-item-active')}
+      onClick={onSelect}
+    >
+      <div
+        className="agent-avatar"
+        style={{ background: gradient }}
+      >
+        {agent.name[0].toUpperCase()}
+        {agent.isOnline && <span className="agent-status-dot" />}
+      </div>
+      <div className="agent-info">
+        <div className="agent-name">{agent.name}</div>
+        {agent.status && <div className="agent-status">{agent.status}</div>}
+      </div>
+      {agent.unreadCount && agent.unreadCount > 0 && (
+        <span className="agent-badge">{agent.unreadCount}</span>
+      )}
+    </button>
   )
 }
 
@@ -582,13 +677,54 @@ function ChatInput({
 // ─────────────────────────────────────────────────────────────
 
 function AppleAppContent() {
-  const { agents, messages, setMessages, isGenerating, setIsGenerating } = useMockData()
+  const { agents, messages, setMessages, isGenerating, setIsGenerating, setAgents } = useMockData()
   const [input, setInput] = useState('')
   const [activeAgent, setActiveAgent] = useState(agents[0]?.id || '')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [client, setClient] = useState<GatewayClient | null>(null)
+  const [showCreateAgentModal, setShowCreateAgentModal] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Handle agent creation from template
+  const handleCreateAgent = useCallback(async (
+    template: CharacterTemplate,
+    agentType: 'lead' | 'specialist',
+    customName?: string
+  ) => {
+    const newAgent: Agent = {
+      id: `template:${template.id}:${Date.now()}`,
+      name: customName || template.name,
+      status: template.role,
+      isOnline: true,
+      isPrimary: agentType === 'lead',
+      agentType: agentType,
+      templateId: template.id,
+      lastMessage: 'Ready to help!',
+    }
+    
+    setAgents((prev: Agent[]) => [...prev, newAgent])
+    
+    // Select the new agent
+    setActiveAgent(newAgent.id)
+    
+    // If connected to Gateway, create the agent there too
+    if (client?.isConnected()) {
+      try {
+        await client.request('agents.createFromTemplate', {
+          template_id: template.id,
+          name: customName || template.name,
+          agent_type: agentType,
+          role: template.role,
+          description: template.description,
+        })
+      } catch (err) {
+        console.warn('[AppleApp] Failed to create agent on Gateway:', err)
+      }
+    }
+    
+    console.log('[AppleApp] Created agent:', newAgent)
+  }, [client, setAgents])
 
   // Initialize Gateway client
   useEffect(() => {
@@ -752,10 +888,19 @@ function AppleAppContent() {
             setMobileSidebarOpen(false)
           }}
           onNewChat={() => setMessages([])}
+          onCreateAgent={() => setShowCreateAgentModal(true)}
           collapsed={sidebarCollapsed}
           onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
         />
       </div>
+
+      {/* Create Agent Modal */}
+      <CreateAgentModal
+        isOpen={showCreateAgentModal}
+        onClose={() => setShowCreateAgentModal(false)}
+        onCreateAgent={handleCreateAgent}
+        gatewayUrl="http://127.0.0.1:33418"
+      />
 
       {/* Main Content */}
       <main className="main-content">

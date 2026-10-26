@@ -1374,6 +1374,14 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/stop/release", self.handle_release_stop)
         self.app.router.add_get("/v1/runtime/status", self.handle_runtime_status)
         self.app.router.add_get("/version", self.handle_version)
+        
+        # Character Library — templates for creating agents (Grok-style bot picker)
+        try:
+            from jaeger_ai.core.gateway.character_routes import register_character_routes
+            register_character_routes(self.app)
+        except ImportError as e:
+            logger.warning(f"Character library routes unavailable: {e}")
+        
         # Agent catalog — persistence spine for Mac app + WebUI clients.
         self.app.router.add_get("/v1/agents", self.handle_list_agents)
         self.app.router.add_get("/v1/frameworks", self.handle_list_frameworks)
