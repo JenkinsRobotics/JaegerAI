@@ -215,7 +215,7 @@ function useMockData() {
       role: 'character' as const,
       agentType: 'character' as const,
       templateId: 'jarvis',
-      cardUrl: '/v1/characters/jarvis/card',
+      cardUrl: '/characters/jarvis.png',
       personality: {
         name: 'Jarvis',
         voiceTone: 'crisp, dry, British-butler',
@@ -234,7 +234,7 @@ function useMockData() {
       role: 'character' as const,
       agentType: 'character' as const,
       templateId: 'lilith',
-      cardUrl: '/v1/characters/lilith/card',
+      cardUrl: '/characters/lilith.png',
       personality: {
         name: 'Lilith',
         voiceTone: 'low, measured, slightly cool',
@@ -254,7 +254,7 @@ function useMockData() {
       role: 'character' as const,
       agentType: 'character' as const,
       templateId: 'kamina',
-      cardUrl: '/v1/characters/kamina/card',
+      cardUrl: '/characters/kamina.png',
       personality: {
         name: 'Kamina',
         voiceTone: 'loud, passionate, inspiring',
