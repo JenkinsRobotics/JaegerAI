@@ -1,14 +1,65 @@
 {
-  "name": "Jaeger",
+  "name": "Jaeger — AI Companion",
   "short_name": "Jaeger",
-  "start_url": "/",
+  "description": "Your persistent AI companion. Chat with voice, code, and creativity.",
+  "start_url": "/?ui=apple",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#121212",
-  "theme_color": "#121212",
+  "orientation": "any",
+  "background_color": "#000000",
+  "theme_color": "#007AFF",
+  "categories": ["productivity", "utilities", "developer"],
   "icons": [
-    { "src": "/jaeger-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "/jaeger-icon-180.png", "sizes": "180x180", "type": "image/png" },
-    { "src": "/jaeger-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
-  ]
+    {
+      "src": "/jaeger-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/jaeger-icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/jaeger-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "New Chat",
+      "short_name": "New",
+      "description": "Start a new conversation",
+      "url": "/?ui=apple&action=new",
+      "icons": [{ "src": "/jaeger-icon-180.png", "sizes": "180x180" }]
+    },
+    {
+      "name": "Voice Input",
+      "short_name": "Voice",
+      "description": "Start voice input",
+      "url": "/?ui=apple&action=voice",
+      "icons": [{ "src": "/jaeger-icon-180.png", "sizes": "180x180" }]
+    }
+  ],
+  "share_target": {
+    "action": "/?ui=apple&share",
+    "method": "GET",
+    "params": {
+      "title": "title",
+      "text": "text",
+      "url": "url"
+    }
+  },
+  "protocol_handlers": [
+    {
+      "protocol": "web+jaeger",
+      "url": "/?ui=apple&link=%s"
+    }
+  ],
+  "prefer_related_applications": false,
+  "related_applications": []
 }
