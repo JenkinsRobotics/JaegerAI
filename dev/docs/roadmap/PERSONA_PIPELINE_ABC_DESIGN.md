@@ -1,5 +1,5 @@
 > **Classification:** HISTORICAL.
-> **Superseded by:** [`docs/CONTINUE_FROM_HERE.md`](../../../docs/CONTINUE_FROM_HERE.md) (or `../../../docs/CONTINUE_FROM_HERE.md` from `dev/docs`).
+> **Superseded by:** [`docs/docs/PRODUCT.md`](../../../docs/docs/PRODUCT.md) (or `../../../docs/docs/PRODUCT.md` from `dev/docs`).
 > This is dated evidence. It may reference an old branch, HEAD, dirty worktree, or schedule. Do not treat it as current status, implementation order, or release qualification.
 
 # Persona pipeline A / B / C — design (operator review; no implementation until OK)

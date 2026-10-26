@@ -1,15 +1,16 @@
 {
 	"name": "jaeger-ide",
 	"displayName": "Jaeger",
-	"description": "A local IDE conversation surface for your persistent Jaeger Gateway.",
-	"version": "0.1.6",
+	"description": "Controller for your Jaeger AI agent. Quick actions, code context, and status — the chat lives in the Apple-Native UI.",
+	"version": "0.2.0",
 	"publisher": "jenkins-robotics",
 	"icon": "media/jaeger.png",
 	"engines": {
 		"vscode": "^1.96.0"
 	},
 	"categories": [
-		"Other"
+		"Other",
+		"Machine Learning"
 	],
 	"extensionKind": [
 		"ui"
@@ -20,6 +21,7 @@
 		"gateway.js",
 		"conversation.js",
 		"commands.js",
+		"controller.js",
 		"contract.json",
 		"media/**",
 		"README.md",
@@ -29,7 +31,8 @@
 		"build.json"
 	],
 	"activationEvents": [
-		"onView:jaeger.conversation"
+		"onView:jaeger.controller",
+		"onStartupFinished"
 	],
 	"capabilities": {
 		"untrustedWorkspaces": {
@@ -39,20 +42,63 @@
 	"contributes": {
 		"commands": [
 			{
-				"command": "jaeger.open",
-				"title": "Jaeger: Open Sidebar"
+				"command": "jaeger.openChat",
+				"title": "Jaeger: Open Chat",
+				"icon": "$(comment-discussion)"
 			},
 			{
-				"command": "jaeger.openChatTab",
-				"title": "Jaeger: Open Chat Tab"
+				"command": "jaeger.ask",
+				"title": "Jaeger: Ask Agent",
+				"icon": "$(sparkle)"
+			},
+			{
+				"command": "jaeger.explainCode",
+				"title": "Jaeger: Explain Code",
+				"icon": "$(info)"
+			},
+			{
+				"command": "jaeger.fixCode",
+				"title": "Jaeger: Fix Code",
+				"icon": "$(wrench)"
+			},
+			{
+				"command": "jaeger.writeTests",
+				"title": "Jaeger: Write Tests",
+				"icon": "$(beaker)"
+			},
+			{
+				"command": "jaeger.refactorCode",
+				"title": "Jaeger: Refactor Code",
+				"icon": "$(refactor)"
+			},
+			{
+				"command": "jaeger.documentCode",
+				"title": "Jaeger: Add Documentation",
+				"icon": "$(book)"
+			},
+			{
+				"command": "jaeger.reviewCode",
+				"title": "Jaeger: Review Code",
+				"icon": "$(eye)"
+			},
+			{
+				"command": "jaeger.runTests",
+				"title": "Jaeger: Run Tests",
+				"icon": "$(run-all)"
+			},
+			{
+				"command": "jaeger.checkStatus",
+				"title": "Jaeger: Check Status",
+				"icon": "$(pulse)"
+			},
+			{
+				"command": "jaeger.open",
+				"title": "Jaeger: Open Controller Panel"
 			},
 			{
 				"command": "jaeger.settings",
-				"title": "Jaeger: Connection Settings"
-			},
-			{
-				"command": "jaeger.diagnostics",
-				"title": "Jaeger: Connection Diagnostics"
+				"title": "Jaeger: Settings",
+				"icon": "$(gear)"
 			},
 			{
 				"command": "jaeger.setToken",
@@ -60,30 +106,7 @@
 			},
 			{
 				"command": "jaeger.selectModel",
-				"title": "Jaeger: Select Default Model"
-			},
-			{
-				"command": "jaeger.onboarding",
-				"title": "Jaeger: New Device Setup Guide"
-			},
-			{
-				"command": "jaeger.openSession",
-				"title": "Jaeger: Open Conversation by ID"
-			},
-			{
-				"command": "jaeger.newConversation",
-				"title": "Jaeger: New Chat",
-				"icon": "$(add)"
-			},
-			{
-				"command": "jaeger.refreshConversation",
-				"title": "Jaeger: Refresh Conversation",
-				"icon": "$(refresh)"
-			},
-			{
-				"command": "jaeger.showHistory",
-				"title": "Jaeger: Show Conversations",
-				"icon": "$(history)"
+				"title": "Jaeger: Select Model"
 			}
 		],
 		"viewsContainers": {
@@ -99,17 +122,246 @@
 			"jaeger": [
 				{
 					"type": "webview",
+					"id": "jaeger.controller",
+					"name": "Agent Status",
+					"icon": "media/jaeger.svg",
+					"contextualTitle": "Jaeger Agent"
+				},
+				{
+					"type": "webview",
 					"id": "jaeger.conversation",
-					"name": "Jaeger AI"
+					"name": "Legacy Chat",
+					"visibility": "collapsed"
 				}
 			]
+		},
+		"viewsWelcome": [
+			{
+				"view": "jaeger.controller",
+				"contents": "Jaeger Agent Controller\n\n[Open Chat](command:jaeger.openChat)\n\nThe chat interface lives in the Apple-Native UI. This panel shows agent status and provides quick actions.\n\n[Set Up Connection](command:jaeger.settings)"
+			}
+		],
+		"menus": {
+			"editor/context": [
+				{
+					"command": "jaeger.explainCode",
+					"when": "editorHasSelection",
+					"group": "jaeger@1"
+				},
+				{
+					"command": "jaeger.fixCode",
+					"when": "editorHasSelection",
+					"group": "jaeger@2"
+				},
+				{
+					"command": "jaeger.writeTests",
+					"when": "editorHasSelection",
+					"group": "jaeger@3"
+				},
+				{
+					"command": "jaeger.refactorCode",
+					"when": "editorHasSelection",
+					"group": "jaeger@4"
+				},
+				{
+					"command": "jaeger.documentCode",
+					"when": "editorHasSelection",
+					"group": "jaeger@5"
+				},
+				{
+					"command": "jaeger.reviewCode",
+					"when": "editorHasSelection",
+					"group": "jaeger@6"
+				},
+				{
+					"submenu": "jaeger.askJaeger",
+					"when": "editorTextFocus",
+					"group": "jaeger@0"
+				},
+				{
+					"command": "jaeger.openChat",
+					"when": "editorTextFocus",
+					"group": "jaeger@7"
+				}
+			],
+			"editor/title": [
+				{
+					"command": "jaeger.explainCode",
+					"when": "resourceLangId =~ /javascript|typescript|python|rust|go|java|swift/",
+					"group": "navigation@1"
+				}
+			],
+			"view/title": [
+				{
+					"command": "jaeger.openChat",
+					"when": "view == jaeger.controller",
+					"group": "navigation@1"
+				},
+				{
+					"command": "jaeger.ask",
+					"when": "view == jaeger.controller",
+					"group": "navigation@2"
+				},
+				{
+					"command": "jaeger.checkStatus",
+					"when": "view == jaeger.controller",
+					"group": "2_settings@1"
+				},
+				{
+					"command": "jaeger.settings",
+					"when": "view == jaeger.controller",
+					"group": "2_settings@2"
+				}
+			],
+			"commandPalette": [
+				{
+					"command": "jaeger.openChat",
+					"when": "editorTextFocus || workspaceFolderCount >= 1"
+				},
+				{
+					"command": "jaeger.explainCode",
+					"when": "editorHasSelection"
+				},
+				{
+					"command": "jaeger.fixCode",
+					"when": "editorHasSelection"
+				},
+				{
+					"command": "jaeger.writeTests",
+					"when": "editorHasSelection"
+				},
+				{
+					"command": "jaeger.refactorCode",
+					"when": "editorHasSelection"
+				},
+				{
+					"command": "jaeger.documentCode",
+					"when": "editorHasSelection"
+				},
+				{
+					"command": "jaeger.reviewCode",
+					"when": "editorHasSelection"
+				},
+				{
+					"command": "jaeger.runTests",
+					"when": "workspaceFolderCount >= 1"
+				}
+			],
+			"jaeger.askJaeger": [
+				{
+					"command": "jaeger.explainCode",
+					"when": "editorHasSelection",
+					"group": "1_explain@1"
+				},
+				{
+					"command": "jaeger.fixCode",
+					"when": "editorHasSelection",
+					"group": "2_fix@1"
+				},
+				{
+					"command": "jaeger.writeTests",
+					"when": "editorHasSelection",
+					"group": "3_test@1"
+				},
+				{
+					"command": "jaeger.refactorCode",
+					"when": "editorHasSelection",
+					"group": "4_refactor@1"
+				},
+				{
+					"command": "jaeger.documentCode",
+					"when": "editorHasSelection",
+					"group": "5_document@1"
+				},
+				{
+					"command": "jaeger.reviewCode",
+					"when": "editorHasSelection",
+					"group": "6_review@1"
+				},
+				{
+					"command": "jaeger.ask",
+					"group": "7_ask@1"
+				}
+			]
+		},
+		"submenus": [
+			{
+				"id": "jaeger.askJaeger",
+				"label": "Ask Jaeger",
+				"icon": "$(sparkle)"
+			}
+		],
+		"keybindings": [
+			{
+				"command": "jaeger.openChat",
+				"key": "ctrl+shift+j",
+				"mac": "cmd+shift+j",
+				"when": "editorTextFocus"
+			},
+			{
+				"command": "jaeger.ask",
+				"key": "ctrl+shift+'",
+				"mac": "cmd+shift+'",
+				"when": "editorTextFocus"
+			},
+			{
+				"command": "jaeger.explainCode",
+				"key": "ctrl+shift+e",
+				"mac": "cmd+shift+e",
+				"when": "editorHasSelection"
+			}
+		],
+		"configuration": {
+			"title": "Jaeger",
+			"properties": {
+				"jaeger.gatewayUrl": {
+					"type": "string",
+					"default": "",
+					"scope": "machine",
+					"description": "Gateway URL (e.g. \"http://127.0.0.1:33418\"). Empty = local default."
+				},
+				"jaeger.webuiUrl": {
+					"type": "string",
+					"default": "",
+					"scope": "machine",
+					"description": "WebUI URL for opening chat (e.g. \"http://127.0.0.1:8790\"). Empty = derived from gatewayUrl."
+				},
+				"jaeger.callerToken": {
+					"type": "string",
+					"default": "",
+					"scope": "machine",
+					"description": "Gateway caller token (use 'Jaeger: Set Caller Token' for secure storage)."
+				},
+				"jaeger.autoStartGateway": {
+					"type": "boolean",
+					"default": false,
+					"scope": "application",
+					"description": "Start Gateway daemon automatically when needed."
+				},
+				"jaeger.showStatusBar": {
+					"type": "boolean",
+					"default": true,
+					"description": "Show Jaeger agent status in the status bar."
+				},
+				"jaeger.openChatInBrowser": {
+					"type": "boolean",
+					"default": false,
+					"description": "Open chat in external browser instead of VS Code Simple Browser."
+				},
+				"jaeger.model": {
+					"type": "string",
+					"default": "",
+					"scope": "window",
+					"description": "Default model for new turns (\"provider::model\")."
+				}
+			}
 		},
 		"chatParticipants": [
 			{
 				"id": "jaeger.chatParticipant",
 				"name": "jaeger",
 				"fullName": "Jaeger AI",
-				"description": "Jaeger AI conversation and agent workspace",
+				"description": "Routes to your Jaeger agent. Full chat opens in Apple-Native UI.",
 				"icon": "media/jaeger.svg",
 				"commands": [
 					{
@@ -121,70 +373,19 @@
 						"description": "Check Jaeger Gateway and agent health"
 					},
 					{
-						"name": "skills",
-						"description": "List loaded skills and capabilities"
+						"name": "explain",
+						"description": "Explain the current file or selection"
+					},
+					{
+						"name": "fix",
+						"description": "Fix errors in the current file"
+					},
+					{
+						"name": "test",
+						"description": "Write tests for the current file"
 					}
 				]
 			}
-		],
-		"configuration": {
-			"title": "Jaeger",
-			"properties": {
-				"jaeger.testCommand": {
-					"type": "string",
-					"default": "",
-					"scope": "application",
-					"description": "Optional custom command to run for the verification test suite (e.g. 'npm test', 'pytest', 'cargo test'). User settings only: a workspace cannot choose a shell command."
-				},
-				"jaeger.autoStartGateway": {
-					"type": "boolean",
-					"default": false,
-					"scope": "application",
-					"description": "Start a local Jaeger Gateway daemon when the panel opens and none is answering. User settings only."
-				},
-				"jaeger.gatewayUrl": {
-					"type": "string",
-					"default": "",
-					"scope": "machine",
-					"description": "Gateway URL for this device (e.g. \"http://127.0.0.1:33418\" or Tailscale host \"http://home-mac.ts.net:33418\"). Empty = the local Gateway on its contract port. Per-device connection setting; not synced across devices."
-				},
-				"jaeger.callerToken": {
-					"type": "string",
-					"default": "",
-					"scope": "machine",
-					"description": "Optional Gateway caller token fallback. Use \"Jaeger: Set Caller Token\" to store your token securely in OS SecretStorage instead of settings. Not synced across devices."
-				},
-				"jaeger.model": {
-					"type": "string",
-					"default": "",
-					"scope": "window",
-					"description": "Default provider/model for new turns (\"provider::model\" or \"@provider:model\"). Eligible for Settings Sync when user-settings sync is enabled and this key is not excluded. Validated against the connected Gateway catalog; empty preserves the server/Gateway default."
-				}
-			}
-		},
-		"menus": {
-			"view/title": [
-				{
-					"command": "jaeger.newConversation",
-					"when": "view == jaeger.conversation",
-					"group": "navigation@1"
-				},
-				{
-					"command": "jaeger.showHistory",
-					"when": "view == jaeger.conversation",
-					"group": "navigation@2"
-				},
-				{
-					"command": "jaeger.settings",
-					"when": "view == jaeger.conversation",
-					"group": "2_settings@1"
-				},
-				{
-					"command": "jaeger.refreshConversation",
-					"when": "view == jaeger.conversation",
-					"group": "2_settings@2"
-				}
-			]
-		}
+		]
 	}
 }

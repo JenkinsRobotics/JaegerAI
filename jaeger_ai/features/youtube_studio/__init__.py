@@ -1,4 +1,4 @@
-"""YouTube studio — the first slice of the "Matthew Walks the Way" pipeline.
+"""YouTube studio — a configurable video content pipeline.
 
 Three standalone steps, each a thin layer over a tool the repo already ships:
 
@@ -10,6 +10,9 @@ Three standalone steps, each a thin layer over a tool the repo already ships:
                    transcribed with the offline Whisper module, captions as SRT
                    plus a soft subtitle track in the MP4.
 
-Nothing here uploads, publishes, or touches an account. Matthew films, approves
-the script, and presses publish himself.
+Channel configuration (name, host description, privacy rules) is loaded from
+``~/.jaeger/instances/<name>/youtube.toml`` — see :mod:`.channel_config`.
+
+Nothing here uploads, publishes, or touches an account. The operator films,
+approves the script, and presses publish themselves.
 """

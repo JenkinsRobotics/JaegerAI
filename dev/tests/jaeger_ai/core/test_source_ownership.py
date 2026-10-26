@@ -14,7 +14,7 @@ def test_runtime_sources_have_no_machine_specific_or_retired_state_defaults():
     # Match actual ownership facts, not generic cross-platform path examples,
     # persisted schema identifiers, or intentional product capabilities such
     # as the Minecraft integration.
-    forbidden = ("/users/matthewjenkins", ".jaeger_os")
+    forbidden = ("/users/testuser", ".jaeger_os")
     findings: list[str] = []
     for root in roots:
         for path in root.rglob("*"):

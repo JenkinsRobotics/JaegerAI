@@ -101,7 +101,7 @@ class BenchJob:
             "log": [e.as_dict() for e in self.log],
             "recommendation": self.recommendation,
             "error": self.error,
-            "brand": "Jenkins Robotics Jaeger AI OS1",
+            "brand": "Jaeger AI OS1",
         }
 
 
@@ -123,7 +123,7 @@ def status(job_id: str | None = None) -> dict[str, Any]:
             return _JOBS[job_id].as_dict()
         # latest
         if not _JOBS:
-            return {"status": "idle", "brand": "Jenkins Robotics Jaeger AI OS1"}
+            return {"status": "idle", "brand": "Jaeger AI OS1"}
         latest = max(_JOBS.values(), key=lambda j: j.started_at)
         return latest.as_dict()
 

@@ -9,5 +9,5 @@
 
 ## Not in this commit
 
-- Renaming leftover `ares-*` launchd labels (deferred per Matthew).
+- Renaming leftover `ares-*` launchd labels (deferred per operator).
 - Loading/unloading LaunchAgents from disk.

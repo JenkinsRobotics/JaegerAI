@@ -56,7 +56,7 @@ WEBUI_WORKSPACES = (
     ("/mnt/host/GitHub", "GitHub"),
     ("/mnt/host/Desktop", "Desktop"),
     ("/mnt/host/Documents", "Documents"),
-    ("/mnt/nas/Jenkins_Robotics", "Jenkins Robotics NAS"),
+    ("/mnt/nas/JAEGER_NAS", "NAS (configure in operator.toml)"),
     ("/mnt/nas/Personal-Drive", "Personal Drive NAS"),
 )
 
@@ -69,7 +69,7 @@ def _shared_workspace_roots(home: Path | None = None) -> list[Path]:
         home / "GitHub",
         home / "Desktop",
         home / "Documents",
-        Path("/Volumes/Jenkins_Robotics"),
+        Path("/Volumes/JAEGER_NAS"),
         Path("/Volumes/Personal-Drive"),
     ]
 
@@ -387,7 +387,10 @@ def _configure_agent_connectivity(home: Path | None = None) -> list[Path]:
 
 def _configure_honcho(home: Path | None = None) -> list[Path]:
     """Configure persistent, profile-isolated peers on the rack LAN Honcho."""
+    from jaeger_ai.core.instance.host_context import operator_name
     home = (home or Path.home()).expanduser().resolve()
+    # Use operator's name from OS, fall back to "operator"
+    peer_name = operator_name() or "operator"
     identities = {"hermes": "hermes", **{name: name for name in SERVICES}}
     written: list[Path] = []
     for profile, ai_peer in identities.items():
@@ -401,7 +404,7 @@ def _configure_honcho(home: Path | None = None) -> list[Path]:
             "baseUrl": HONCHO_LAN_URL,
             "hosts": {
                 host_key: {
-                    "peerName": "Matthew",
+                    "peerName": peer_name,
                     "aiPeer": ai_peer,
                     "workspace": HONCHO_WORKSPACE,
                     "enabled": True,

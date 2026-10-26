@@ -99,10 +99,6 @@ class AgentCallbacks:
     # inactivity timers paused during long generations.
     heartbeat: Callable[[float], None] | None = None
 
-    # Content-free formatted-input outline, immediately before each adapter call.
-    model_input: Callable[[dict[str, Any]], None] | None = None
-    context_references: tuple[Any, ...] = ()
-
     # Dependency Inversion: Injected usage telemetry callbacks
     record_skill_route: Callable[..., None] | None = None
     record_skill: Callable[..., None] | None = None
@@ -110,6 +106,12 @@ class AgentCallbacks:
     record_model_usage: Callable[..., None] | None = None
     record_tool: Callable[..., None] | None = None
 
+    # Content-free formatted-input outline, immediately before each adapter
+    # call. 2026-10-22 seam note: the host Gateway subscribes to this for its
+    # context receipts (cognition_router / knowledge_library reference
+    # provenance). Payload is content-free — see input_outline.
+    model_input: Callable[[dict[str, Any]], None] | None = None
+    context_references: tuple[Any, ...] = ()
 
     # ── safe-invocation helpers ──────────────────────────────────────
     # Always call these from the agent loop rather than reaching for the
@@ -122,7 +124,7 @@ class AgentCallbacks:
         try:
             from .input_outline import input_outline
             self.model_input(input_outline(payload, references=self.context_references))
-        except Exception:  # observer cannot affect execution or retry
+        except Exception:  # noqa: BLE001 — observer cannot affect execution or retry
             pass
 
     def on_tool_progress(self, name: str, phase: str, data: Any) -> None:

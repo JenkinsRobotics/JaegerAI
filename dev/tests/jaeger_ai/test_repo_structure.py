@@ -125,6 +125,10 @@ def test_interfaces_holds_only_client_surfaces() -> None:
         # Shared React main screen (UI-PLAN steps 3-5): a client surface served by
         # the WebUI and loaded by macos-shell; it runs no agent work.
         "ui",
+        # Extracted bridge-socket adapter + device diagnostics from the archived
+        # Qt frontend (`jaeger multimodal --check`). Adapter/diagnostics only —
+        # no window, host, identity, or runtime owner.
+        "native_multimodal",
     }
     unexpected = sorted(
         d.name for d in interfaces.iterdir()

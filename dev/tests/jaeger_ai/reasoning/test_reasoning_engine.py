@@ -46,16 +46,16 @@ def test_epistemic_context_retention(temp_ares_env):
 
     # Record goals and insights
     ctx.record_goal("goal-1", "Stabilize autonomous test suite")
-    ctx.add_insight("Matthew prefers concise executive summaries")
+    ctx.add_insight("Alice prefers concise executive summaries")
 
     assert len(ctx.current.active_goals) == 1
     assert ctx.current.active_goals[0].description == "Stabilize autonomous test suite"
-    assert "Matthew prefers concise executive summaries" in ctx.current.recent_insights
+    assert "Alice prefers concise executive summaries" in ctx.current.recent_insights
 
     # Simulate reload from disk (verifying unbroken persistence)
     ctx_reloaded = EpistemicContext(cache_dir=data_dir)
     assert len(ctx_reloaded.current.active_goals) == 1
-    assert "Matthew prefers concise executive summaries" in ctx_reloaded.current.recent_insights
+    assert "Alice prefers concise executive summaries" in ctx_reloaded.current.recent_insights
 
     # Mark goal completed
     ctx_reloaded.mark_goal_completed("goal-1")

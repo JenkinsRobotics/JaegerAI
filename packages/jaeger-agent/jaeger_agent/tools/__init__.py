@@ -103,8 +103,7 @@ from .credentials import get_credential, list_credentials
 
 # Coordination / meta
 from .delegation import CAPABILITY_SUMMARY, ask_user, help_me
-from .call_agent import call_agent, get_agent_result, run_team
-from .build_check import run_build_check
+from .call_agent import call_agent, get_agent_result
 
 # Plugin awareness
 from .plugins import list_plugins, setup_plugin

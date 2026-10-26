@@ -17,7 +17,7 @@ HOST: Welcome to the garage workshop.
 **ROBOT:** Power is nominal.
 - HOST: Let's build.
 
-## Open questions for Matthew
+## Open questions for the operator
 HOST: ignored
 """
 

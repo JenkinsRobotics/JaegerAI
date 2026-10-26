@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
+from aiohttp.test_utils import TestClient, TestServer
 
 from jaeger_ai.core.gateway import server as gw
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
@@ -19,6 +20,7 @@ class _Req:
 
     def __init__(self, sid: str, cid: str, body: dict):
         self.match_info = {"id": sid, "clarify_id": cid}
+        self.query = {}
         self._body = body
 
     def get(self, key, default=None):  # aiohttp Request is a mapping; no authenticated caller
@@ -76,6 +78,62 @@ async def test_parked_turn_receives_exactly_one_answer(tmp_path, monkeypatch):
     assert await asyncio.wait_for(waiter, 5) == "staging"
     assert app.store.get_clarify(cid)["answer"] == "staging"
     assert [e.event for e in app.event_bus.get_replay_events("s1", since_event_id=0)].count("clarify.resolved") == 1
+
+
+@pytest.mark.asyncio
+async def test_exact_status_lookup_recovers_only_a_form_from_its_session(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch)
+    form = app.store.create_clarify(session_id="s1", request_id="r1", question="Where?")
+    app.store.resolve_clarify(form["clarify_id"], revision=1, status="answered", answer="staging")
+    request = _Req("s1", form["clarify_id"], {})
+    request.query = {"clarify_id": form["clarify_id"]}
+    recovered = await app.handle_list_clarify(request)
+    assert recovered.status == 200
+    assert json.loads(recovered.body)["form"]["status"] == "answered"
+    assert json.loads(recovered.body)["form"]["answer"] == "staging"
+    request.match_info["id"] = "other"
+    assert (await app.handle_list_clarify(request)).status == 404
+
+
+@pytest.mark.asyncio
+async def test_session_list_includes_terminal_forms_only_when_requested(tmp_path, monkeypatch):
+    app = _app(tmp_path, monkeypatch)
+    form = app.store.create_clarify(session_id="s1", request_id="r1", question="Where?")
+    app.store.resolve_clarify(form["clarify_id"], revision=1, status="answered", answer="staging")
+    request = _Req("s1", form["clarify_id"], {})
+    pending = await app.handle_list_clarify(request)
+    request.query = {"include_resolved": "true"}
+    complete = await app.handle_list_clarify(request)
+    assert json.loads(pending.body)["forms"] == []
+    assert json.loads(complete.body)["forms"][0]["answer"] == "staging"
+
+
+@pytest.mark.asyncio
+async def test_http_reload_answer_and_original_status_roundtrip(tmp_path, monkeypatch):
+    from jaeger_ai.core.gateway.caller_auth import TOKEN_DIR_ENV, client_headers, ensure_tokens
+
+    monkeypatch.setenv(TOKEN_DIR_ENV, str(tmp_path / "tokens"))
+    ensure_tokens()
+    app = _app(tmp_path, monkeypatch)
+    app._loop = asyncio.get_running_loop()
+    app.app.on_startup.clear()
+    monkeypatch.setattr(gw, "CLARIFY_WAIT_S", 1)
+    async with TestClient(TestServer(app.app), headers=client_headers("webui")) as client:
+        waiter = asyncio.create_task(asyncio.to_thread(app._clarify_sink("s1", "r1"), "clarify", "Which environment?", ("staging", "prod")))
+        for _ in range(100):
+            if app.store.list_clarify("s1"):
+                break
+            await asyncio.sleep(0.02)
+        (form,) = app.store.list_clarify("s1")
+        listed = await client.get("/v1/sessions/s1/clarify?include_resolved=true")
+        assert listed.status == 200
+        assert (await listed.json())["forms"][0]["clarify_id"] == form["clarify_id"]
+        answered = await client.post(f"/v1/sessions/s1/clarify/{form['clarify_id']}", json={"revision": form["revision"], "response": "staging"})
+        assert answered.status == 200 and (await answered.json())["status"] == "answered"
+        assert await asyncio.wait_for(waiter, 5) == "staging"
+        receipt = await client.get(f"/v1/sessions/s1/clarify?clarify_id={form['clarify_id']}")
+        assert receipt.status == 200 and (await receipt.json())["form"]["answer"] == "staging"
+        assert (await client.post(f"/v1/sessions/s1/clarify/{form['clarify_id']}", json={"revision": form["revision"], "response": "prod"})).status == 409
 
 
 @pytest.mark.asyncio

@@ -10,7 +10,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-ORIGIN = "https://matthews-mac-studio.tail80f206.ts.net:8443"
+ORIGIN = "https://${TAILSCALE_HOST:-test-host.tail1234.ts.net}:8443"
 import sys as _sys
 from pathlib import Path as _Path
 

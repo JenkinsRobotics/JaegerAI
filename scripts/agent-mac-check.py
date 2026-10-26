@@ -135,7 +135,7 @@ def main():
     if args.write_probe:
         checks["write"] = write_probe
         if args.all_workspaces:
-            for root in ("/mnt/host/Desktop", "/mnt/host/Documents", "/mnt/nas/Jenkins_Robotics", "/mnt/nas/Personal-Drive"):
+            for root in ("/mnt/host/Desktop", "/mnt/host/Documents", "/mnt/nas/JAEGER_NAS", "/mnt/nas/Personal-Drive"):
                 checks[f"write:{root}"] = lambda root=root: write_probe(Path(root))
     for name, fn in checks.items():
         start = time.monotonic()

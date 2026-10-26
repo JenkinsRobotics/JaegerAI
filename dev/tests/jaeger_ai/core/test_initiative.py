@@ -254,7 +254,7 @@ def test_ntfy_is_tailnet_only_and_off_by_default(monkeypatch):
 
     monkeypatch.delenv("JAEGER_NTFY_URL", raising=False)
     assert notifier.fan_out({"body": "x"}) == []
-    assert notifier.tailnet_only("https://matthews-mac-studio.tail80f206.ts.net:8443/ntfy/j")
+    assert notifier.tailnet_only("https://test-host.tail1234.ts.net:8443/ntfy/j")
     assert notifier.tailnet_only("http://100.74.2.15:2586/j")
     assert notifier.tailnet_only("http://127.0.0.1:2586/j")
     assert not notifier.tailnet_only("https://ntfy.sh/jaeger")

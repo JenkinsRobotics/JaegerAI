@@ -1,12 +1,12 @@
-"""jaegerd-owned outbound channels for speak-first messages to the owner.
+"""jaegerd-owned outbound channels for speak-first messages to the operator.
 
-The Gateway already delivers into the owner's conversation (SSE + the
+The Gateway already delivers into the operator's conversation (SSE + the
 durable /v1/notifications feed). This adds optional push adapters. Only
-channels that reach Matthew himself live here; messaging anyone else stays
-an owner-approved external effect.
+channels that reach the operator themselves live here; messaging anyone else
+stays an operator-approved external effect.
 
 ntfy (self-hosted, over Tailscale): set ``JAEGER_NTFY_URL`` to a topic URL
-such as ``https://matthews-mac-studio.tail80f206.ts.net:8443/ntfy/jaeger``.
+such as ``https://<your-host>.ts.net:8443/ntfy/jaeger``.
 Unset means off. The URL must be loopback, a ``*.ts.net`` name or a
 Tailscale 100.64.0.0/10 address, so message bodies never leave the tailnet.
 An optional token comes from ``JAEGER_NTFY_TOKEN`` and is never logged.

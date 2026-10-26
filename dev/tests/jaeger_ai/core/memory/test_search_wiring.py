@@ -42,10 +42,10 @@ def test_index_initialization_does_not_commit_callers_transaction():
 def test_setup_facts_are_persistent_idempotent_and_do_not_rebind(tmp_path):
     layout = SimpleNamespace(memory_dir=tmp_path / 'memory')
     original = dict(sqlite_store._state)
-    sqlite_store.seed_facts(layout, {'name': 'Matthew', 'custom_prime_directive': 'Be useful'})
+    sqlite_store.seed_facts(layout, {'name': 'Alice', 'custom_prime_directive': 'Be useful'})
     sqlite_store.seed_facts(layout, {'name': 'Different'})
     assert sqlite_store._state == original
     with sqlite3.connect(layout.memory_dir / 'state.db') as conn:
         assert dict(conn.execute('SELECT key, value FROM facts')) == {
-            'name': 'Matthew', 'custom_prime_directive': 'Be useful'}
+            'name': 'Alice', 'custom_prime_directive': 'Be useful'}
         assert conn.execute('SELECT count(*) FROM fact_log').fetchone()[0] == 2

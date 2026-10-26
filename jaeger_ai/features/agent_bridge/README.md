@@ -156,7 +156,7 @@ or Hopper context is used.
    in this task. Old messages are not automatically forwarded.
 2. Review any queued messages before activating outbound delivery. Select one
    approved HTTPS endpoint and exact host. URL/key provisioning is a **separate
-   final step** Matthew performs in secure Keychain entry: generic-password
+   final step** The operator performs in secure Keychain entry: generic-password
    service `ai.jaeger.bridge.webhook`, accounts `grokbot-url` and `grokbot-key`.
    Do not put values in shell history, source, command arguments, logs or chats.
 3. In the separately approved Gateway environment, set

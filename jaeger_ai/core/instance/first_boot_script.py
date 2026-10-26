@@ -7,7 +7,7 @@ arrive fully defined; the neutral Assistant uses one question per turn for
 its calibration. The handoff works because the installer's voice stops and
 the SI's begins.
 
-The hybrid conversational sequence (Matthew / OS1):
+The hybrid conversational sequence (operator / OS1):
 
 1. Hello
 2. live hardware bench (what / scores / ETA) — UI streams progress

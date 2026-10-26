@@ -52,6 +52,20 @@ class EffectOutcomeUnknown(EffectError):
         self.receipt = receipt
 
 
+class ChannelDeliveryUnknown(EffectOutcomeUnknown):
+    """Transport submission outcome unknown — the message may have left.
+
+    2026-10-22 restore note: the pre-restore JaegerAI product
+    (features/channels/receipts.py) and its Gateway durability tests key off
+    this exception to keep a possibly-delivered send pending. HOST SEAM: the
+    product raises this after a transport call whose outcome cannot be
+    proven; the loop's non-retryable handling keys off ``execution_unknown``.
+    The receipt argument is evidence for the pending ledger claim, never
+    settlement — the host-supplied receipt validator decides.
+    """
+    execution_unknown = True
+
+
 class EffectIndeterminate(EffectError):
     """A claim exists with no recorded outcome. A human or a checker
     decides; the runtime will not guess."""
@@ -143,13 +157,6 @@ class InMemoryEffectLedger:
             effect.completed_at = _now()
             return effect
 
-    def annotate_pending(self, key: str, receipt: Any) -> None:
-        with self._lock:
-            effect=self._items.get(key)
-            if effect is None:raise EffectError(f'no effect {key!r}')
-            _settled(effect)
-            effect.result=receipt
-
     def abandon(self, key: str) -> None:
         with self._lock:
             effect = self._items.get(key)
@@ -158,12 +165,28 @@ class InMemoryEffectLedger:
             _settled(effect)
             del self._items[key]
 
+    def annotate_pending(self, key: str, receipt: Any) -> None:
+        """Preserve a partial receipt on a still-pending claim.
+
+        An uncertain effect (``EffectOutcomeUnknown``) may carry evidence —
+        e.g. partial message ids. The claim stays pending and the run's
+        outcome stays unknown; this only attaches the evidence so a human
+        or checker can reconcile. Does not settle.
+        """
+        with self._lock:
+            effect = self._items.get(key)
+            if effect is None:
+                raise EffectError(f"no effect {key!r}")
+            _settled(effect)
+            effect.result = receipt
+
 
 __all__ = [
     "Effect",
     "EffectError",
-    "EffectIndeterminate",
     "EffectOutcomeUnknown",
+    "ChannelDeliveryUnknown",
+    "EffectIndeterminate",
     "EffectLedger",
     "InMemoryEffectLedger",
 ]

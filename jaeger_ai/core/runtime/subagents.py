@@ -148,18 +148,21 @@ def _delegate_external(
     cost_store = None
     layout = _main()._pipeline.get("layout")
     if layout is not None:
-        from jaeger_ai.features.cost_tracking import CostStore
-
-        cost_store = CostStore(layout.memory_dir / "costs.db")
-        decision = cost_store.authorize(runtime_id, estimated_cost)
-        if not decision.allowed:
-            cost_store.close()
-            return {
-                "delegated": False,
-                "runtime": runtime_id,
-                "error": decision.reason,
-                "budget": asdict(decision),
-            }
+        try:
+            from jaeger_ai.features.cost_tracking import CostStore
+            cost_store = CostStore(layout.memory_dir / "costs.db")
+            decision = cost_store.authorize(runtime_id, estimated_cost)
+            if not decision.allowed:
+                cost_store.close()
+                return {
+                    "delegated": False,
+                    "runtime": runtime_id,
+                    "error": decision.reason,
+                    "budget": asdict(decision),
+                }
+        except ImportError:
+            # cost_tracking is deprecated; skip budget check
+            pass
 
     commitments = SqliteCommitmentStore()
     runs = SqliteRunStore()

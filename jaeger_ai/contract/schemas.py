@@ -752,7 +752,7 @@ class Device(BaseContract):
     )
     name: str = Field(
         ...,
-        description="Device display name (e.g. Matthew's iPhone)",
+        description="Device display name (e.g. Operator's iPhone)",
     )
     device_type: Literal["mac", "web", "phone", "vision_pro", "robot", "sensor", "cli"] = Field(
         default="web",

@@ -1,7 +1,7 @@
 <!-- JAEGER-MAC-CONNECTION-BEGIN -->
 ## Mac connection and shared source checkout
 
-You are running in a Linux Apple container on Matthew's Mac, not on the rack PC.
+You are running in a Linux Apple container on the host Mac, not on a separate PC.
 Your terminal/exec tool runs in Linux. For macOS operations use your authenticated
 host MCP tools. Discover their actual names with the MCP inventory: look for
 `host_environment`, `capabilities_inspect`, `workspace_read`, `workspace_write`,

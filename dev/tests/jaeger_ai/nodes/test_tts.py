@@ -337,8 +337,9 @@ def test_speech_stop_interrupts_in_flight_speak(bus):
 
 
 def test_speech_stop_without_in_flight_speech_is_safe(bus):
-    """A SpeechStop arriving when nothing is playing must not crash
-    the node — stop() runs against an idle synth."""
+    """A SpeechStop arriving when nothing is playing must not crash the
+    node. Only the matching active producer may touch the synthesizer,
+    so an idle stop is a no-op: no synth.stop(), no crash, node healthy."""
     synth = _StoppableSynth()
     node = TTSNode(bus=bus, synthesizer=synth, name="tts",
                    install_signal_handlers=False)
@@ -349,8 +350,8 @@ def test_speech_stop_without_in_flight_speech_is_safe(bus):
     try:
         bus.publish(topics.SpeechStop(reason="idle stop"))
         time.sleep(0.2)
-        # stop() still ran (synth recorded it); node still healthy.
-        assert synth.stops_received == 1
+        # Scoped-stop contract: an idle synth is never touched.
+        assert synth.stops_received == 0
         assert node.state.value == "running"
     finally:
         node.stop()

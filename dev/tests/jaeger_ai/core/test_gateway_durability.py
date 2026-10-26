@@ -9,6 +9,33 @@ from jaeger_ai.core.gateway.server import JaegerGatewayApp
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
 
+@pytest.fixture(autouse=True)
+def isolated_entity_runtime(tmp_path, monkeypatch):
+    """Turn tests must never inherit a resident OWNER runtime or instance
+    config left by another test in the same process (pytest-randomly orders
+    files differently every run — the flake source fixed here, 2026-10-22).
+    Same contract as test_gateway_daemon.py's fixture."""
+    from jaeger_ai.core.entity.resident import release_resident
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+    from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+    from jaeger_ai.core.instance.schemas import Config, ModelConfig, dump_yaml
+
+    monkeypatch.setenv("JAEGER_STATE_DIR", str(tmp_path / "state"))
+    monkeypatch.delenv("JAEGER_OWNER_REACT", raising=False)
+    monkeypatch.delenv("JAEGER_RUNTIME_MODE", raising=False)
+    monkeypatch.delenv("JAEGER_LEGACY_PATHS", raising=False)
+    EntityRuntime.reset_singleton()
+    release_resident()
+    layout = InstanceLayout(root=resolve_instance_dir())
+    layout.ensure_dirs()
+    dump_yaml(layout.config_path, Config(
+        instance_name="default", model=ModelConfig(model_path="/dev/null"),
+    ))
+    yield
+    EntityRuntime.reset_singleton()
+    release_resident()
+
+
 def test_completed_receipt_cannot_be_overwritten(tmp_path):
     store = GatewaySessionStore(tmp_path / "sessions.db")
     store.admit_request("s", "work", request_id="immutable")
@@ -99,9 +126,24 @@ async def test_foreign_owner_prevents_startup_and_cleanup_mutations(tmp_path):
 async def test_native_type_error_does_not_execute_twice(tmp_path, monkeypatch):
     monkeypatch.setenv("JAEGER_LEGACY_PATHS", "1")  # the native-MCP-first path is isolated by default
     store = GatewaySessionStore(tmp_path / "sessions.db")
-    row = store.admit_request("s", "work", request_id="one-dispatch")
+    row = store.admit_request("s", "do the actual work", request_id="one-dispatch")
     app = JaegerGatewayApp(store=store)
     calls = []
+    # The request must end bound to the run that claimed effects. The owner
+    # react fallback re-binds native_session/native_run_id via on_run when it
+    # boots its own run, so the claim is planted under THAT run id, matching
+    # what the settle logic later queries. Previously this test passed only
+    # when some unrelated test left the process-wide sqlite_store broken
+    # (fail-closed ledger read), and never created the indeterminate effect
+    # it asserted on.
+    from types import SimpleNamespace
+    from jaeger_agent.memory import sqlite_store
+    from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+    from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+    layout = InstanceLayout(root=resolve_instance_dir())
+    layout.ensure_dirs()
+    sqlite_store.bind(SimpleNamespace(memory_dir=layout.memory_dir))
     async def native(*args, **kwargs):
         calls.append(kwargs)
         store.bind_native(
@@ -111,11 +153,39 @@ async def test_native_type_error_does_not_execute_twice(tmp_path, monkeypatch):
             status="running",
         )
         raise TypeError("after effect")
+    owner_run_ids: list[str] = []
+    runtime = EntityRuntime.get_singleton()
+    orig_react = runtime.run_subordinate_react
+
+    def react_with_run(*args, **kwargs):
+        real_on_run = kwargs.get("on_run")
+
+        def on_run(run_id: str):
+            owner_run_ids.append(run_id)
+            def boom():
+                raise RuntimeError("claimed but never resolved")
+            try:
+                SqliteEffectLedger().once(
+                    "owned-pending-send", "send_message", boom, run_id=run_id)
+            except RuntimeError:
+                pass  # the claim row stays pending by design
+            if real_on_run is not None:
+                return real_on_run(run_id)
+        kwargs["on_run"] = on_run
+        return orig_react(*args, **kwargs)
+
+    monkeypatch.setattr(runtime, "run_subordinate_react", react_with_run)
     monkeypatch.setattr(app, "_resolve_session_agent", lambda _: None)
     monkeypatch.setattr(app, "_native_lead_turn", native)
-    await app._execute_turn("s", row["turn_id"], "work", request_id=row["request_id"])
-    assert len(calls) == 1
-    assert store.get_request(row["request_id"])["status"] == "execution_unknown"
+    try:
+        await app._execute_turn("s", row["turn_id"], "do the actual work", request_id=row["request_id"])
+        assert len(calls) == 1
+        assert owner_run_ids, "owner react must bind its own run id"
+        bound = store.get_request(row["request_id"])
+        assert bound["native_session"].startswith("owner:")
+        assert bound["status"] == "execution_unknown"
+    finally:
+        sqlite_store.close()
 
 
 @pytest.mark.asyncio

@@ -26,7 +26,7 @@ def _snapshot(root: Path):
     return sorted((str(p), p.stat().st_mtime_ns) for p in root.rglob("*"))
 
 
-def prop(tool="write_file", actor="owner:matthew", **ctx):
+def prop(tool="write_file", actor="owner:alice", **ctx):
     return ProposedAction(tool_name=tool, arguments={"path": "notes.txt"}, actor=actor, context=ctx)
 
 

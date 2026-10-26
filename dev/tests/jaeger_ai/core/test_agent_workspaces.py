@@ -218,7 +218,7 @@ def test_write_probe_cleanup_does_not_mask_failed_operation(monkeypatch, tmp_pat
 
 
 @pytest.mark.parametrize('target', [
-    '/Volumes/Jenkins_Robotics', '/Users/matthewjenkins/Documents',
+    '/Volumes/JAEGER_NAS', '/Users/testuser/Documents',
     '/Volumes/Personal-Drive/.jaeger-mcp-probe-' + 'a' * 32 + '/../user-file',
 ])
 def test_host_nas_probe_refuses_non_probe_targets(target):

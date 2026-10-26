@@ -696,7 +696,7 @@ def host_workspace(workspace):
     home = Path.home()
     roots = {"/workspace": home / "workspace", "/mnt/host/GitHub": home / "GitHub",
              "/mnt/host/Desktop": home / "Desktop", "/mnt/host/Documents": home / "Documents",
-             "/mnt/nas/Jenkins_Robotics": Path("/Volumes/Jenkins_Robotics"),
+             "/mnt/nas/JAEGER_NAS": Path("/Volumes/JAEGER_NAS"),
              "/mnt/nas/Personal-Drive": Path("/Volumes/Personal-Drive")}
     for prefix, host in roots.items():
         if workspace == prefix or workspace.startswith(prefix + "/"):

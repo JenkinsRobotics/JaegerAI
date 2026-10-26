@@ -1,0 +1,410 @@
+/* ============================================================
+   JAEGER DESIGN SYSTEM v1.0 — Aether + Modern Hybrid
+   
+   Merges:
+   - Aether Engineering Design Language (Jenkins Robotics)
+   - Modern AI Assistant patterns (Linear, Vercel, ChatGPT)
+   
+   This is THE design system for all JaegerAI UIs.
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ============================================================
+   DARK MODE (Default — Aether Dark)
+   ============================================================ */
+:root,
+[data-theme="dark"] {
+  /* ─────────────────────────────────────────────────────────
+     AETHER BACKGROUNDS (engineering precision)
+     ───────────────────────────────────────────────────────── */
+  --aether-bg-app: #0e1013;
+  --aether-bg-shell: #171a20;
+  --aether-bg-bar: #171a20;
+  --aether-bg-panel: #171a20;
+  --aether-bg-rail: #171a20;
+  --aether-bg-inset: #1e222a;
+  --aether-bg-control: #0f1216;
+  
+  /* Modern aliases */
+  --bg-primary: var(--aether-bg-app);
+  --bg-secondary: var(--aether-bg-shell);
+  --bg-tertiary: var(--aether-bg-inset);
+  --bg-elevated: var(--aether-bg-panel);
+  
+  /* Surfaces */
+  --surface-primary: var(--aether-bg-panel);
+  --surface-secondary: var(--aether-bg-shell);
+  --surface-tertiary: var(--aether-bg-inset);
+  --surface-hover: #29313a;
+  --surface-active: rgba(76, 157, 255, 0.12);
+  
+  /* ─────────────────────────────────────────────────────────
+     AETHER BORDERS
+     ───────────────────────────────────────────────────────── */
+  --aether-border: #303640;
+  --aether-border-control: #3a424d;
+  --aether-border-subtle: #252c35;
+  
+  --border-primary: var(--aether-border);
+  --border-secondary: var(--aether-border-control);
+  --border-subtle: var(--aether-border-subtle);
+  
+  /* ─────────────────────────────────────────────────────────
+     AETHER TEXT
+     ───────────────────────────────────────────────────────── */
+  --aether-text: #e7edf3;
+  --aether-text-soft: #cbd5df;
+  --aether-text-dim: #8b96a5;
+  --aether-text-faint: #6f7b89;
+  
+  --text-primary: var(--aether-text);
+  --text-secondary: var(--aether-text-soft);
+  --text-tertiary: var(--aether-text-dim);
+  --text-muted: var(--aether-text-faint);
+  --text-inverse: #0e1013;
+  
+  /* ─────────────────────────────────────────────────────────
+     AETHER ACCENT COLORS (the brand)
+     ───────────────────────────────────────────────────────── */
+  --aether-accent: #4c9dff;           /* Primary blue */
+  --aether-accent-strong: #126fba;    /* Pressed/active */
+  --aether-accent-hover: #6bb3ff;     /* Hover state */
+  --aether-part: #36d6c3;             /* Teal — secondary */
+  --aether-joint: #8b87ff;            /* Purple — tertiary */
+  --aether-hardware: #ff8a3d;         /* Orange — hardware */
+  
+  --brand-primary: var(--aether-accent);
+  --brand-primary-hover: var(--aether-accent-hover);
+  --brand-primary-active: var(--aether-accent-strong);
+  --brand-secondary: var(--aether-joint);
+  --brand-accent: var(--aether-part);
+  
+  /* Selection */
+  --aether-selection-bg: #174b72;
+  --aether-selection-text: #ffffff;
+  
+  /* ─────────────────────────────────────────────────────────
+     SEMANTIC COLORS (Aether)
+     ───────────────────────────────────────────────────────── */
+  --aether-ok: #32cf84;
+  --aether-warn: #e7a843;
+  --aether-error: #ff5a62;
+  
+  --success: var(--aether-ok);
+  --success-bg: rgba(50, 207, 132, 0.15);
+  --warning: var(--aether-warn);
+  --warning-bg: rgba(231, 168, 67, 0.15);
+  --error: var(--aether-error);
+  --error-bg: rgba(255, 90, 98, 0.15);
+  --info: var(--aether-accent);
+  --info-bg: rgba(76, 157, 255, 0.15);
+  
+  /* ─────────────────────────────────────────────────────────
+     CHAT SPECIFIC
+     ───────────────────────────────────────────────────────── */
+  --chat-user-bg: linear-gradient(135deg, #4c9dff 0%, #8b87ff 100%);
+  --chat-user-text: #ffffff;
+  --chat-assistant-bg: #1e222a;
+  --chat-assistant-text: #e7edf3;
+  
+  /* ─────────────────────────────────────────────────────────
+     TYPOGRAPHY — Aether + Modern
+     ───────────────────────────────────────────────────────── */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', 'Fira Code', Monaco, monospace;
+  
+  /* Aether sizes (denser) + Modern scale */
+  --text-xs: 0.6875rem;    /* 11px — Aether caption */
+  --text-sm: 0.75rem;      /* 12px — Aether body */
+  --text-base: 0.8125rem;  /* 13px — Aether body+ */
+  --text-md: 0.875rem;     /* 14px — Modern body */
+  --text-lg: 1rem;         /* 16px */
+  --text-xl: 1.125rem;     /* 18px */
+  --text-2xl: 1.375rem;    /* 22px */
+  --text-3xl: 1.75rem;     /* 28px */
+  
+  --font-light: 300;
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+  --font-extrabold: 800;
+  
+  --leading-tight: 1.25;
+  --leading-snug: 1.375;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.625;
+  
+  /* ─────────────────────────────────────────────────────────
+     SPACING — Aether 4px grid + Modern scale
+     ───────────────────────────────────────────────────────── */
+  --space-0: 0;
+  --space-px: 1px;
+  --space-0-5: 0.125rem;   /* 2px */
+  --space-1: 0.25rem;      /* 4px — Aether grid */
+  --space-1-5: 0.375rem;   /* 6px */
+  --space-2: 0.5rem;       /* 8px */
+  --space-2-5: 0.625rem;   /* 10px */
+  --space-3: 0.75rem;      /* 12px */
+  --space-4: 1rem;         /* 16px */
+  --space-5: 1.25rem;      /* 20px */
+  --space-6: 1.5rem;       /* 24px */
+  --space-7: 1.75rem;      /* 28px */
+  --space-8: 2rem;         /* 32px */
+  --space-10: 2.5rem;      /* 40px */
+  --space-12: 3rem;        /* 48px */
+  --space-16: 4rem;        /* 64px */
+  
+  /* ─────────────────────────────────────────────────────────
+     BORDER RADIUS — Aether geometry
+     ───────────────────────────────────────────────────────── */
+  --radius-none: 0;
+  --radius-sm: 0.25rem;    /* 4px */
+  --radius-md: 0.375rem;   /* 6px — Aether field */
+  --radius-lg: 0.4375rem;  /* 7px — Aether control */
+  --radius-xl: 0.5rem;     /* 8px — Aether button */
+  --radius-2xl: 0.75rem;   /* 12px */
+  --radius-3xl: 1rem;      /* 16px */
+  --radius-full: 9999px;
+  
+  /* Aether aliases */
+  --aether-radius-control: var(--radius-lg);
+  --aether-radius-button: var(--radius-xl);
+  --aether-radius-field: var(--radius-md);
+  
+  /* ─────────────────────────────────────────────────────────
+     SHADOWS — Aether depth + Modern softness
+     ───────────────────────────────────────────────────────── */
+  --aether-shadow-color: #060809;
+  
+  --shadow-xs: 0 1px 2px 0 rgba(6, 8, 9, 0.3);
+  --shadow-sm: 0 1px 3px 0 rgba(6, 8, 9, 0.4), 0 1px 2px -1px rgba(6, 8, 9, 0.4);
+  --shadow-md: 0 4px 6px -1px rgba(6, 8, 9, 0.5), 0 2px 4px -2px rgba(6, 8, 9, 0.5);
+  --shadow-lg: 0 10px 15px -3px rgba(6, 8, 9, 0.6), 0 4px 6px -4px rgba(6, 8, 9, 0.6);
+  --shadow-xl: 0 20px 25px -5px rgba(6, 8, 9, 0.7), 0 8px 10px -6px rgba(6, 8, 9, 0.7);
+  --shadow-2xl: 0 25px 50px -12px rgba(6, 8, 9, 0.8);
+  
+  /* Brand shadow (Aether blue glow) */
+  --shadow-brand: 0 4px 14px 0 rgba(76, 157, 255, 0.3);
+  --shadow-brand-lg: 0 8px 30px 0 rgba(76, 157, 255, 0.4);
+  
+  /* ─────────────────────────────────────────────────────────
+     ANIMATIONS — Modern smoothness
+     ───────────────────────────────────────────────────────── */
+  --duration-instant: 75ms;
+  --duration-fast: 150ms;
+  --duration-normal: 250ms;
+  --duration-slow: 350ms;
+  --duration-slower: 500ms;
+  
+  --ease-linear: linear;
+  --ease-in: cubic-bezier(0.4, 0, 1, 1);
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  --ease-spring: cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  --ease-smooth: cubic-bezier(0.4, 0.0, 0.2, 1);
+  
+  /* ─────────────────────────────────────────────────────────
+     GEOMETRY — Aether layout tokens
+     ───────────────────────────────────────────────────────── */
+  --aether-size-topbar: 56px;
+  --aether-size-statusbar: 27px;
+  --aether-size-rail: 42px;
+  --aether-size-sidebar: 250px;
+  --aether-size-row: 36px;
+  --aether-size-icon-slot: 36px;
+  --aether-size-grid: 4px;
+  
+  --sidebar-width: var(--aether-size-sidebar);
+  --sidebar-collapsed-width: var(--aether-size-rail);
+  --header-height: var(--aether-size-topbar);
+  --rail-width: var(--aether-size-rail);
+  --row-height: var(--aether-size-row);
+  --max-content-width: 768px;
+  
+  /* ─────────────────────────────────────────────────────────
+     Z-INDEX SCALE
+     ───────────────────────────────────────────────────────── */
+  --z-base: 0;
+  --z-dropdown: 10;
+  --z-sticky: 20;
+  --z-fixed: 30;
+  --z-modal-backdrop: 40;
+  --z-modal: 50;
+  --z-popover: 60;
+  --z-tooltip: 70;
+  --z-toast: 80;
+  --z-max: 9999;
+  
+  /* ─────────────────────────────────────────────────────────
+     ICONOGRAPHY — Aether grammar
+     ───────────────────────────────────────────────────────── */
+  --icon-stroke-width: 1.7px;
+  --icon-viewbox: 24px;
+}
+
+/* ============================================================
+   LIGHT MODE — Aether Light
+   ============================================================ */
+[data-theme="light"] {
+  /* Backgrounds */
+  --aether-bg-app: #ececee;
+  --aether-bg-shell: #f6f6f7;
+  --aether-bg-bar: #f6f6f7;
+  --aether-bg-panel: #fbfbfc;
+  --aether-bg-rail: #f1f1f3;
+  --aether-bg-inset: #ececef;
+  --aether-bg-control: #ffffff;
+  
+  --bg-primary: var(--aether-bg-app);
+  --bg-secondary: var(--aether-bg-shell);
+  --bg-tertiary: var(--aether-bg-inset);
+  --bg-elevated: var(--aether-bg-panel);
+  
+  --surface-primary: var(--aether-bg-panel);
+  --surface-secondary: var(--aether-bg-shell);
+  --surface-tertiary: var(--aether-bg-inset);
+  --surface-hover: #e7e9ec;
+  --surface-active: rgba(47, 127, 224, 0.1);
+  
+  /* Borders */
+  --aether-border: #d6d8db;
+  --aether-border-control: #c8cbd0;
+  --aether-border-subtle: #e3e6ea;
+  
+  /* Text */
+  --aether-text: #1c1e21;
+  --aether-text-soft: #33373c;
+  --aether-text-dim: #5c6269;
+  --aether-text-faint: #878d95;
+  
+  /* Accent */
+  --aether-accent: #2f7fe0;
+  --aether-accent-strong: #1d5fc4;
+  --aether-accent-hover: #4c9dff;
+  
+  /* Shadows (lighter) */
+  --aether-shadow-color: #30343a;
+  --shadow-sm: 0 1px 3px 0 rgba(48, 52, 58, 0.1);
+  --shadow-md: 0 4px 6px -1px rgba(48, 52, 58, 0.15);
+  --shadow-lg: 0 10px 15px -3px rgba(48, 52, 58, 0.2);
+  --shadow-brand: 0 4px 14px 0 rgba(47, 127, 224, 0.2);
+  
+  /* Chat */
+  --chat-assistant-bg: #ececef;
+  --chat-assistant-text: #1c1e21;
+}
+
+/* ============================================================
+   SYSTEM PREFERENCE FALLBACK
+   ============================================================ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+  }
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    color-scheme: light;
+  }
+}
+
+/* ============================================================
+   BASE STYLES
+   ============================================================ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+body {
+  font-family: var(--font-sans);
+  font-size: var(--text-md);
+  line-height: var(--leading-normal);
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
+  transition: background-color var(--duration-normal) var(--ease-smooth),
+              color var(--duration-normal) var(--ease-smooth);
+}
+
+/* ============================================================
+   SCROLLBAR — Aether styled
+   ============================================================ */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--aether-border-control);
+  border-radius: var(--radius-full);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--aether-text-faint);
+  background-clip: padding-box;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--aether-border-control) transparent;
+}
+
+/* ============================================================
+   SELECTION — Aether
+   ============================================================ */
+
+::selection {
+  background-color: var(--aether-selection-bg);
+  color: var(--aether-selection-text);
+}
+
+/* ============================================================
+   FOCUS — Accessible
+   ============================================================ */
+
+:focus-visible {
+  outline: 2px solid var(--aether-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ============================================================
+   SMOOTH THEME TRANSITION
+   ============================================================ */
+
+.theme-transition,
+.theme-transition *,
+.theme-transition *::before,
+.theme-transition *::after {
+  transition: background-color var(--duration-normal) var(--ease-smooth),
+              border-color var(--duration-normal) var(--ease-smooth),
+              color var(--duration-normal) var(--ease-smooth),
+              box-shadow var(--duration-normal) var(--ease-smooth) !important;
+}

@@ -94,7 +94,7 @@ backend = "inproc"
 #   Deep-think coder         : kimi-k2.7-code:cloud
 #   Local fallback           : gemma-4-26b:latest   (when cloud unreachable /
 #                                                    sensitivity_gate → private)
-# Cloud tags ride Matthew's Ollama Max subscription — no API keys in repo.
+# Cloud tags ride the operator's Ollama subscription — no API keys in repo.
 # Do not put model weights, session DBs, or credentials in this tree.
 
 # ── Nodes ─────────────────────────────────────────────────────────

@@ -37,10 +37,27 @@ from typing import Any
 _MAX_PER_TURN = 5
 
 
+def _has_gateway_schema(path) -> bool:
+    if not path.exists():
+        return False
+    with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True)) as conn:
+        row = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE name='schema_meta'"
+        ).fetchone()
+    return row is not None
+
+
 def _connect():
     # The same durable owner database, not a process-local queue.
-    from jaeger_ai.core.gateway.session_store import default_store_path
-    conn = sqlite3.connect(default_store_path(), timeout=10)
+    from jaeger_ai.core.gateway.session_store import GatewaySessionStore, default_store_path
+    path = default_store_path()
+    if not _has_gateway_schema(path):
+        # The Gateway's schema initializes this file before any shared-table
+        # writer touches it. Bare-creating it with only the completion outbox
+        # left other readers (plugin startup policy) seeing a session store
+        # with no schema_meta — indistinguishable from a corrupted database.
+        GatewaySessionStore(path)
+    conn = sqlite3.connect(path, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("""CREATE TABLE IF NOT EXISTS completion_outbox (
         id TEXT PRIMARY KEY, payload TEXT NOT NULL, created_at REAL NOT NULL,

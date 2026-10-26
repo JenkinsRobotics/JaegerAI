@@ -83,7 +83,7 @@ class EpistemicContext:
     def _maybe_honcho(self) -> Any | None:
         """Honcho is optional — import/connectivity failures never raise."""
         try:
-            from jaeger_ai.features.shared_memory.honcho_client import HonchoClient
+            from jaeger_ai.features._stubs.shared_memory import HonchoClient  # Deprecated: use stub
 
             return HonchoClient()
         except Exception as exc:  # noqa: BLE001

@@ -1,4 +1,4 @@
-/* Phone layout (≤ 700px or touch), rebuilt from Matthew's description of Grok Bot's iOS app — no window chrome.
+/* Phone layout (≤ 700px or touch), rebuilt from a reference description of Grok Bot's iOS app — no window chrome.
  * List: top bar (user avatar + presence dot; round Search and New buttons), the lead featured large with a star
  * badge, then full-width agent rows (avatar + active dot, bold name, time, a one-line preview with a type icon,
  * unread dot) and a floating "N unread" pill that jumps to the first unread row.

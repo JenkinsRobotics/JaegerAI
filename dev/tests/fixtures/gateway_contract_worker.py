@@ -67,6 +67,19 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
             stream.write(json.dumps({"model": self.model}) + "\n")
         messages = formatted.get("messages", [])
         request = current_request(messages)
+        if "CONTRACT-CLARIFY" in request:
+            # Wire tool messages carry tool_call_id, not name (OpenAI chat
+            # format, openai.py format_messages). Match the result by the id
+            # the clarify call was issued with, not by a name field the wire
+            # format does not have.
+            answers = [m for m in messages if m.get("role") == "tool" and m.get("tool_call_id") == "contract-clarify"]
+            if not answers:
+                return {"choices": [{"message": {"role": "assistant", "content": None, "tool_calls": [{
+                    "id": "contract-clarify", "type": "function", "function": {
+                        "name": "clarify", "arguments": json.dumps({"question": "Which environment should be used?"}),
+                    },
+                }]}, "finish_reason": "tool_calls"}]}
+            return {"choices": [{"message": {"role": "assistant", "content": "CLARIFICATION-ANSWER-RECEIVED", "tool_calls": []}, "finish_reason": "stop"}]}
         if 'CONTRACT-DURABLE' in request:
             # Script only the provider boundary; ledger, file tool, Gateway,
             # approvals, checkpoints and result delivery are production code.

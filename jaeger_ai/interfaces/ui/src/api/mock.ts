@@ -190,6 +190,7 @@ export class MockSource implements JaegerSource {
     this.timers = [];
     this.emit(sessionId, { event: "turn.cancelled", request_id: requestId, payload: {} });
   }
+  async clarifications() { return []; }
   async approve() { /* mock: accepted */ }
   async updateSession() { /* mock: accepted */ }
   async createAgent(body: { name: string; display_name?: string }) {

@@ -1,1414 +1,365 @@
+/**
+ * Jaeger VS Code Extension — Controller (v0.2.0)
+ *
+ * ARCHITECTURE: Centralized Brain + Thin Clients
+ * ────────────────────────────────────────────────
+ * The Apple-Native Web UI is the ONE chat interface.
+ * This extension is a CONTROLLER — it sends context and
+ * quick actions to the Gateway, shows agent status,
+ * and opens the chat when you need to see/talk.
+ *
+ * What this extension does:
+ * - Status bar: Shows what Jaeger is doing (idle/thinking/working)
+ * - Sidebar: Agent state, quick actions, recent tasks
+ * - Code actions: Right-click → "Ask Jaeger" (explain, fix, test, refactor)
+ * - @jaeger: Chat participant that routes to the agent
+ * - Opens main chat: Click status bar or press Cmd+Shift+J
+ *
+ * What this extension does NOT do:
+ * - No chat UI (the web UI is the chat)
+ * - No conversation state (Gateway owns it)
+ * - No model calls (Gateway + Ollama Cloud handle that)
+ */
+
 'use strict';
+
 const vscode = require('vscode');
-const { randomBytes, randomUUID } = require('node:crypto');
-const { execFile, spawn } = require('node:child_process');
-const util = require('node:util');
-const fs = require('node:fs');
-const path = require('node:path');
-const os = require('node:os');
-const { Gateway } = require('./gateway');
-const { Conversation } = require('./conversation');
-const { observeNativeTurn, renderNativeOutcome } = require('./native-turn');
-const { parseProviderModel, selectableModels, providerModelValue, modelSelectionAvailable } = require('./media/presentation');
-const commands = require('./commands');
-const execFileAsync = util.promisify(execFile);
+const { Gateway, GatewayError, callerToken } = require('./gateway');
+const {
+  JaegerController,
+  JaegerCodeActionProvider,
+  JaegerInlineCompletionsProvider,
+  JaegerSidebarProvider,
+} = require('./controller');
 
-// Packaged builds get contract.json (gatewayUrl) generated from
-// jaeger_ai/contract/ports.py; this is only the unpackaged default.
-let build = { sourceRevision: 'unpackaged', contentSha256: 'unavailable' };
-try { build = require('./build.json'); } catch (_) {}
-let contract = { gatewayUrl: 'http://127.0.0.1:33418' };
-try { contract = require('./contract.json'); } catch (_) {}
+// ─────────────────────────────────────────────────────────────
+// Activation
+// ─────────────────────────────────────────────────────────────
 
-// Sniffed from the extension, not the filesystem: this list only decides
-// what the Gateway's attachment record says the file is, it never gates
-// which files can be picked. Unknown extensions fall back honestly to
-// application/octet-stream rather than guessing.
-const MIME_BY_EXTENSION = {
-  '.txt': 'text/plain', '.md': 'text/markdown', '.json': 'application/json',
-  '.csv': 'text/csv', '.py': 'text/x-python', '.js': 'text/javascript',
-  '.ts': 'text/typescript', '.html': 'text/html', '.css': 'text/css',
-  '.yaml': 'application/yaml', '.yml': 'application/yaml',
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml',
-  '.pdf': 'application/pdf',
-};
+/** @type {JaegerController | null} */
+let controller = null;
+
+/** @type {vscode.OutputChannel} */
+let output;
 
 function activate(context) {
-  const output = vscode.window.createOutputChannel('Jaeger'); context.subscriptions.push(output);
-  let view, controller, lastViewState = null, viewReady = false, requestedSession = '';
-  const postToView = message => {
-    if (message && typeof message === 'object' && ('connected' in message || 'status' in message)) lastViewState = message;
-    return view?.webview.postMessage(message);
-  };
-  // What the operator has open right now. The active editor stays "active" while the
-  // Jaeger panel has focus, so this reflects their file, not the panel.
-  // The permission pill: what the agent may do without asking, saved on the instance.
-  const sendAutonomy = async mode => {
-    try {
-      const gw = controller?.gateway || gatewayClient();
-      const result = mode ? await gw.setAutonomy(mode) : await gw.autonomy();
-      view?.webview.postMessage({ autonomy: { mode: result.autonomy, options: result.options } });
-    } catch (error) { view?.webview.postMessage({ autonomy: { mode: null, options: [], error: error.message } }); if (mode) throw error; }
-  };
-  const sendTier = async tier => {
-    try {
-      const gw = controller?.gateway || gatewayClient();
-      const result = tier ? await gw.setTier(tier) : await gw.tier();
-      view?.webview.postMessage({ tier: { current: result.tier, options: result.options } });
-    } catch (error) { view?.webview.postMessage({ tier: { current: null, options: [], error: error.message } }); if (tier) throw error; }
-  };
-  const runTestSuite = async () => {
-    const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-    if (!root) throw new Error('Open a workspace folder first.');
-    const detected = detectTestRunner(root);
-    if (!detected) throw new Error('No supported test runner found in this workspace.');
-    const { stdout, stderr } = await execFileAsync(detected.executable, detected.args, {
-      cwd: root, timeout: 120000, maxBuffer: 1024 * 1024 * 5,
-      env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1',
-        PYTHONPYCACHEPREFIX: path.join(os.tmpdir(), 'jaeger', 'pycache') },
-    });
-    const text = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
-    const lines = text ? text.split(/\r?\n/).filter(Boolean).slice(-30) : ['Verification suite completed with no output.'];
-    view?.webview.postMessage({ info: { title: 'Verification suite', lines } });
-  };
-  // Settings that run commands or start processes are read from user (global)
-  // scope only, even on hosts that would let a workspace override them.
-  function userSetting(key) {
-    const info = vscode.workspace.getConfiguration('jaeger').inspect(key);
-    if (!info) return undefined;
-    return info.globalValue !== undefined ? info.globalValue : info.defaultValue;
-  }
-  function detectTestRunner(root) {
-    const configured = userSetting('testCommand');
-    if (typeof configured === 'string' && configured.trim()) {
-      const command = configured.trim();
-      return { name: 'configured', command, executable: 'bash', args: ['-lc', command] };
-    }
-    const candidates = [
-      ['scripts/verify.sh', 'verify', 'bash', ['scripts/verify.sh']],
-      ['package.json', 'npm test', 'npm', ['test']],
-      ['pyproject.toml', 'pytest', 'pytest', []],
-      ['pytest.ini', 'pytest', 'pytest', []],
-      ['Cargo.toml', 'cargo test', 'cargo', ['test']],
-      ['go.mod', 'go test', 'go', ['test', './...']],
-    ];
-    const found = candidates.find(([relative]) => fs.existsSync(path.join(root, relative)));
-    return found
-      ? { name: found[1], command: `${found[2]} ${found[3].join(' ')}`.trim(), executable: found[2], args: found[3] }
-      : null;
-  }
-  // What the agent's ide_* tools can ask of the editor. Reads are bounded; opening a
-  // file only changes what the operator is looking at.
-  const contextRoot = () => selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-  const canonicalPath = file => fs.realpathSync(file);
-  const ideCall = async (kind, args, root = contextRoot()) => {
-    const roots = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
-    const absolute = file => (path.isAbsolute(file) ? file : path.join(root, file));
-    const shown = file => { const root = roots.find(r => file.startsWith(r + path.sep)); return root ? file.slice(root.length + 1) : file; };
-    if (kind === 'context') return ideContext(root) || { note: 'Nothing is open in the editor' };
-    if (kind === 'open_file') {
-      const file = absolute(String(args.path || ''));
-      if (!commands.isWorkspacePath(file, root, canonicalPath)) throw new Error('Editor request is outside the selected workspace.');
-      const editor = await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(vscode.Uri.file(file)), { preview: false });
-      const line = Number(args.line) > 0 ? Number(args.line) - 1 : -1;
-      if (line >= 0) {
-        const position = new vscode.Position(Math.min(line, editor.document.lineCount - 1), 0);
-        editor.selection = new vscode.Selection(position, position);
-        editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
-      }
-      return { opened: shown(file), line: line >= 0 ? line + 1 : null };
-    }
-    if (kind === 'diagnostics') return diagnosticsSnapshot(args.path ? absolute(String(args.path)) : '', root);
-    throw new Error(`Unsupported IDE request: ${kind}`);
-  };
-  const diagnosticsSnapshot = (only = '', root = contextRoot()) => {
-    const roots = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
-    const levels = ['error', 'warning', 'info', 'hint'];
-    const found = [];
-    for (const [uri, list] of vscode.languages.getDiagnostics()) {
-      if (uri.scheme !== 'file' || (only && uri.fsPath !== only) || !commands.isWorkspacePath(uri.fsPath, root, canonicalPath)) continue;
-      const shownPath = (() => { const root = roots.find(r => uri.fsPath.startsWith(r + path.sep)); return root ? uri.fsPath.slice(root.length + 1) : uri.fsPath; })();
-      for (const item of list) found.push({ path: shownPath, severity: levels[item.severity] || 'info',
-        line: item.range.start.line + 1, message: String(item.message).slice(0, 300), source: item.source || '' });
-    }
-    found.sort((a, b) => levels.indexOf(a.severity) - levels.indexOf(b.severity));
-    return { count: found.length, diagnostics: found.slice(0, 60), truncated: found.length > 60 };
-  };
-  const ideContext = (root = contextRoot()) => {
-    if (!root) return null;
-    // Untitled documents and unresolved/deleted backing files never contribute text.
-    const activeEditor = vscode.window.activeTextEditor;
-    const editor = activeEditor?.document.uri.scheme === 'file' && commands.isWorkspacePath(activeEditor.document.uri.fsPath, root, canonicalPath) ? activeEditor : null;
-    const chosen = editor && !editor.selection.isEmpty ? editor.selection : null;
-    const fileTabs = (vscode.window.tabGroups?.all || []).flatMap(group => group.tabs)
-      .map(tab => tab.input?.uri).filter(uri => uri?.scheme === 'file').map(uri => uri.fsPath);
-    return commands.buildIdeContext({
-      folders: (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath),
-      selectedRoot: root,
-      canonicalPath,
-      active: editor && editor.document.uri.scheme === 'file' ? {
-        path: editor.document.uri.fsPath, language: editor.document.languageId,
-        selectionText: chosen ? editor.document.getText(chosen).slice(0, 4001) : '',
-        startLine: chosen ? chosen.start.line + 1 : 0, endLine: chosen ? chosen.end.line + 1 : 0,
-        cursorLine: editor.selection.active.line + 1,
-      } : null,
-      openPaths: fileTabs,
-    });
-  };
-  const computeDynamicSuggestions = async () => {
-    const root = contextRoot();
-    const activeEditor = vscode.window.activeTextEditor;
-    const editor = activeEditor?.document.uri.scheme === 'file' && commands.isWorkspacePath(activeEditor.document.uri.fsPath, root, canonicalPath) ? activeEditor : null;
-    const chosen = editor && !editor.selection.isEmpty ? editor.selection : null;
-    const activeDoc = editor?.document;
-    const isRealFile = activeDoc && activeDoc.uri?.scheme === 'file';
-    const suggestions = [];
+  output = vscode.window.createOutputChannel('Jaeger');
+  context.subscriptions.push(output);
+  output.appendLine('[jaeger] Extension activating (Controller mode)...');
 
-    // 1. Diagnostics context
-    const diagSnapshot = diagnosticsSnapshot();
-    const activeRelPath = isRealFile && root ? path.relative(root, activeDoc.uri.fsPath) : '';
-    const activeDiags = isRealFile
-      ? diagSnapshot.diagnostics.filter(d => d.path === activeRelPath || d.path === path.basename(activeDoc.uri.fsPath))
-      : [];
+  // Create gateway client
+  const gateway = createGatewayClient();
 
-    if (activeDiags.length > 0) {
-      const errorCount = activeDiags.filter(d => d.severity === 'error').length;
-      const baseName = path.basename(activeDoc.uri.fsPath);
-      const label = errorCount > 0
-        ? `Fix ${errorCount} error${errorCount === 1 ? '' : 's'} in ${baseName}`
-        : `Fix ${activeDiags.length} warning${activeDiags.length === 1 ? '' : 's'} in ${baseName}`;
-      const errorList = activeDiags.slice(0, 3).map(d => `- Line ${d.line}: ${d.message}`).join('\n');
-      suggestions.push({
-        id: 'fix-active-diag',
-        label,
-        title: `Fix diagnostics in ${baseName}`,
-        icon: 'warning',
-        kind: 'prompt',
-        prompt: `Fix the following issue${activeDiags.length === 1 ? '' : 's'} in ${activeRelPath || baseName}:\n${errorList}\n\nPlease analyze the root cause and provide the fix.`,
-      });
-    } else if (diagSnapshot.count > 0 && diagSnapshot.diagnostics.length > 0) {
-      const topDiag = diagSnapshot.diagnostics[0];
-      suggestions.push({
-        id: 'fix-workspace-diag',
-        label: `Fix ${diagSnapshot.count} workspace problem${diagSnapshot.count === 1 ? '' : 's'}`,
-        title: 'Analyze and resolve workspace diagnostics',
-        icon: 'warning',
-        kind: 'prompt',
-        prompt: `Diagnose and fix the ${diagSnapshot.count} problem${diagSnapshot.count === 1 ? '' : 's'} reported in the workspace, beginning with ${topDiag.path}:${topDiag.line} (${topDiag.message}).`,
-      });
-    }
+  // Create controller
+  controller = new JaegerController(context, gateway);
+  controller.activate();
+  context.subscriptions.push(controller);
 
-    // 2. Editor Selection Context
-    if (isRealFile && chosen && !chosen.isEmpty) {
-      const selectedText = activeDoc.getText(chosen).trim();
-      const startLine = chosen.start.line + 1;
-      const endLine = chosen.end.line + 1;
-      const lineSpan = startLine === endLine ? `Line ${startLine}` : `Lines ${startLine}–${endLine}`;
-      const baseName = path.basename(activeDoc.uri.fsPath);
+  // ─────────────────────────────────────────────────────────
+  // Commands
+  // ─────────────────────────────────────────────────────────
 
-      suggestions.push({
-        id: 'explain-selection',
-        label: `Explain selection (${lineSpan})`,
-        title: `Explain selected lines in ${baseName}`,
-        icon: 'sparkle',
-        kind: 'prompt',
-        prompt: `Explain the selected logic in ${baseName} (${lineSpan}):\n\`\`\`${activeDoc.languageId}\n${selectedText.slice(0, 2000)}\n\`\`\`\nHighlight edge cases, dependencies, and assumptions.`,
-      });
-
-      suggestions.push({
-        id: 'refactor-selection',
-        label: `Refactor selection (${lineSpan})`,
-        title: `Refactor selected code in ${baseName}`,
-        icon: 'tool',
-        kind: 'prompt',
-        prompt: `Refactor the selected code in ${baseName} (${lineSpan}) for improved clarity, maintainability, and error handling:\n\`\`\`${activeDoc.languageId}\n${selectedText.slice(0, 2000)}\n\`\`\``,
-      });
-
-      suggestions.push({
-        id: 'test-selection',
-        label: 'Write tests for selection',
-        title: `Generate unit tests for selected code in ${baseName}`,
-        icon: 'beaker',
-        kind: 'prompt',
-        prompt: `Write unit tests covering the selected code in ${baseName} (${lineSpan}):\n\`\`\`${activeDoc.languageId}\n${selectedText.slice(0, 2000)}\n\`\`\``,
-      });
-    } else if (isRealFile) {
-      // 3. Active File Context (no selection)
-      const baseName = path.basename(activeDoc.uri.fsPath);
-      suggestions.push({
-        id: 'review-active-file',
-        label: `Review ${baseName}`,
-        title: `Review ${baseName} for bugs and optimization`,
-        icon: 'search',
-        kind: 'prompt',
-        prompt: `Review ${activeRelPath || baseName} in detail. Check for potential logic bugs, edge cases, security considerations, and performance bottlenecks.`,
-      });
-
-      suggestions.push({
-        id: 'generate-tests',
-        label: `Generate tests for ${baseName}`,
-        title: `Generate unit tests for ${baseName}`,
-        icon: 'beaker',
-        kind: 'prompt',
-        prompt: `Generate a unit test suite for ${activeRelPath || baseName} covering primary execution paths and failure modes.`,
-      });
-    }
-
-    // 4. Git diff / uncommitted changes (only if real .git dir exists)
-    if (root && fs.existsSync(path.join(root, '.git'))) {
-      try {
-        const { stdout: gitStatus } = await execFileAsync('git', ['status', '--porcelain'], { cwd: root, timeout: 3000 });
-        const changedFiles = gitStatus.split('\n').filter(Boolean);
-        if (changedFiles.length > 0) {
-          suggestions.push({
-            id: 'review-git-diff',
-            label: `Review Git Diff (${changedFiles.length} file${changedFiles.length === 1 ? '' : 's'})`,
-            title: `Review uncommitted changes in ${changedFiles.length} file${changedFiles.length === 1 ? '' : 's'}`,
-            icon: 'diff',
-            kind: 'action',
-            action: 'reviewChanges',
-          });
-          suggestions.push({
-            id: 'generate-commit-msg',
-            label: 'Draft Commit Message',
-            title: 'Generate a conventional commit message from diff',
-            icon: 'git',
-            kind: 'prompt',
-            prompt: 'Inspect the uncommitted git diff across this workspace and draft a concise, conventional git commit message.',
-          });
-        }
-      } catch (_) {}
-    }
-
-    // 5. Test Suite Action
-    const detected = detectTestRunner(root);
-    if (detected) {
-      suggestions.push({
-        id: 'run-test-suite',
-        label: `Run Tests (${detected.name})`,
-        title: `Run ${detected.command}`,
-        icon: 'play',
-        kind: 'action',
-        action: 'runTestSuite',
-      });
-    }
-
-    // Fallback if needed
-    if (suggestions.length < 3) {
-      suggestions.push({
-        id: 'plan-architecture',
-        label: 'Plan Next Milestone',
-        title: 'Generate technical plan for next steps',
-        icon: 'plan',
-        kind: 'prompt',
-        prompt: 'Analyze this workspace and generate a structured blueprint with prioritized implementation steps.',
-      });
-    }
-
-    return suggestions.slice(0, 4);
-  };
-  let contextDebounce = null;
-  const postContext = () => {
-    view?.webview.postMessage({
-      ideContext: ideContext(), diagnostics: diagnosticsSnapshot().count,
-    });
-    void computeDynamicSuggestions().then(suggestions => {
-      if (suggestions && suggestions.length) view?.webview.postMessage({ suggestions });
-    }).catch(() => {});
-  };
-  const debouncedPostContext = () => {
-    if (contextDebounce) clearTimeout(contextDebounce);
-    contextDebounce = setTimeout(() => { postContext(); }, 200);
-  };
-  let changes = { files: [] }, wasBusy = false, changeKey = '', changeGeneration = 0, selectedChangeRequest = '';
-  const diffDocuments = new Map();
-  const changesUrl = () => {
-    const sid = controller?.state.session?.session_id;
-    const rid = selectedChangeRequest || controller?.workBySession[sid]?.at(-1)?.requestId;
-    return sid && rid ? `/v1/sessions/${encodeURIComponent(sid)}/requests/${encodeURIComponent(rid)}/changes` : '';
-  };
-  async function refreshChanges() {
-    const generation = ++changeGeneration, url = changesUrl();
-    let next;
-    try { next = url ? await controller.gateway.json(url) : { files: [] }; }
-    catch (error) { next = { files: [], error: `Change tracking unavailable: ${error.message}` }; }
-    if (generation !== changeGeneration || url !== changesUrl()) return;
-    changes = next;
-    view?.webview.postMessage({ changes });
-  }
-  context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('jaeger-baseline', {
-    async provideTextDocumentContent(uri) {
-      if (!diffDocuments.has(uri.query)) throw new Error('Reopen this review to reload its snapshots.');
-      return diffDocuments.get(uri.query);
-    },
-  }));
-  const storageKey = () => `connection:${endpoint()}`;
-  const endpoint = () => vscode.workspace.getConfiguration('jaeger').get('gatewayUrl') || contract.gatewayUrl;
-  const callerTokenSetting = () => (vscode.workspace.getConfiguration('jaeger').get('callerToken') || '').trim();
-  let currentCallerToken = callerTokenSetting();
-  const getStoredCallerToken = async () => {
-    const fallback = callerTokenSetting();
-    if (!context.secrets || typeof context.secrets.get !== 'function') return fallback;
-    const timeout = new Promise(resolve => setTimeout(() => resolve(fallback), 2000));
-    const read = (async () => {
-      const secretGet = key => context.secrets.get(key);
-      const ep = endpoint();
-      const scopedSecret = await secretGet(`jaeger.callerToken:${ep}`);
-      if (typeof scopedSecret === 'string' && scopedSecret.trim()) return scopedSecret.trim();
-
-      const pairedEndpoint = await secretGet('jaeger.pairedEndpoint');
-      if (pairedEndpoint && pairedEndpoint !== ep) {
-        // Changed endpoint: do not leak or reuse credential across unrelated servers
-        return '';
-      }
-      const secret = await secretGet('jaeger.callerToken');
-      return typeof secret === 'string' && secret.trim() ? secret.trim() : fallback;
-    })().catch(() => fallback);
-    try {
-      return await Promise.race([read, timeout]);
-    } catch (_) { return fallback; }
-  };
-  void getStoredCallerToken().then(tok => {
-    if (tok && tok !== currentCallerToken) {
-      currentCallerToken = tok;
-      if (controller) {
-        const selected = createController();
-        void controller.refresh(selected);
-      }
-    }
-  });
-  if (context.secrets && typeof context.secrets.onDidChange === 'function') {
-    context.subscriptions.push(context.secrets.onDidChange(async event => {
-      if (event.key === 'jaeger.callerToken') {
-        currentCallerToken = await getStoredCallerToken();
-        if (controller) {
-          const selected = createController();
-          await controller.refresh(selected);
-        }
-      }
-    }));
-  }
-  const gatewayClient = () => new Gateway(endpoint(), { callerToken: currentCallerToken, nativeLoopback: true });
-  const settings = () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:jenkins-robotics.jaeger-ide');
-  const configuredModel = () => vscode.workspace.getConfiguration('jaeger').get('model') || '';
-  const workspaceStorageKey = () => `workspace:${endpoint()}`;
-  let selectedWorkspace = '';
-  const restoreWorkspace = () => {
-    const stored = context.workspaceState.get(workspaceStorageKey(), '');
-    selectedWorkspace = (typeof stored === 'string' && stored)
-      || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
-      || '';
-    return selectedWorkspace;
-  };
-  const selectWorkspace = async () => {
-    const key = workspaceStorageKey();
-    const picked = await vscode.window.showWorkspaceFolderPick({
-      placeHolder: 'Choose the workspace Jaeger should use',
-    });
-    if (!picked) return;
-    if (key !== workspaceStorageKey()) throw new Error('Gateway connection changed. Choose the workspace again.');
-    selectedWorkspace = picked.uri.fsPath;
-    await context.workspaceState.update(workspaceStorageKey(), selectedWorkspace);
-    view?.webview.postMessage({ selectedWorkspace });
-    postContext();
-  };
-  const openPermissions = async () => {
-    const gw = controller?.gateway || gatewayClient();
-    const current = await gw.autonomy();
-    const modes = {
-      ask: ['Ask before actions', 'Ask before outward, hardware, or destructive actions.'],
-      scoped: ['Scoped permissions', 'Use existing grants; ask before actions outside their scope.'],
-      auto: ['Automatic permissions', 'Automatically approve actions for admin sessions.'],
-    };
-    const items = (current.options || []).filter(mode => modes[mode]).map(mode => ({
-      label: `${mode === current.autonomy ? '$(check) ' : ''}${modes[mode][0]}`,
-      description: mode === current.autonomy ? 'Current Gateway setting' : '',
-      detail: modes[mode][1], mode,
-    }));
-    if (!items.length) throw new Error('The Gateway did not report any editable permission modes.');
-    const picked = await vscode.window.showQuickPick(items, { title: 'Gateway permissions', placeHolder: 'Applies to the connected Gateway instance and its clients' });
-    if (!picked || picked.mode === current.autonomy) { await sendAutonomy(); return; }
-    const ranks = { ask: 0, scoped: 1, auto: 2 };
-    if (ranks[picked.mode] > (ranks[current.autonomy] ?? 0)) {
-      const confirmed = await vscode.window.showWarningMessage(
-        `${modes[picked.mode][0]} changes approval behavior for the connected Gateway instance, including other clients. ${modes[picked.mode][1]}`,
-        { modal: true }, 'Apply permissions');
-      if (confirmed !== 'Apply permissions') return;
-    }
-    if (gw.url !== new URL(endpoint()).origin) throw new Error('Gateway connection changed. Open permissions again.');
-    await sendAutonomy(picked.mode);
-  };
-  const openAgency = async () => {
-    const gw = controller?.gateway || gatewayClient();
-    const current = await gw.tier();
-    const items = (current.options || []).map(option => typeof option === 'string' ? option : option.id || option.tier).filter(Boolean)
-      .map(tier => ({ label: `${tier === current.tier ? '$(check) ' : ''}${tier}`, tier }));
-    const picked = await vscode.window.showQuickPick(items, { title: 'Gateway agency', placeHolder: 'Choose the interaction tier for this Gateway instance' });
-    if (gw.url !== new URL(endpoint()).origin) throw new Error('Gateway connection changed. Open agency settings again.');
-    if (picked && picked.tier !== current.tier) await sendTier(picked.tier);
-  };
-  const openExecutionMenu = async () => {
-    const gw = controller?.gateway || gatewayClient();
-    const items = [
-      { label: '$(folder-opened) Choose open workspace', description: selectedWorkspace || 'No workspace selected', action: 'workspace' },
-      { label: '$(folder) Browse for workspace…', action: 'browse' },
-      { label: '$(git-branch) Choose existing worktree…', action: 'worktree' },
-      { label: '$(settings-gear) Gateway connection settings…', description: gw.url, action: 'connection' },
-    ];
-    const picked = await vscode.window.showQuickPick(items, { title: 'Execution location', placeHolder: `Gateway: ${gw.url} · Workspace: ${selectedWorkspace || 'none'}` });
-    if (!picked) return;
-    if (gw.url !== new URL(endpoint()).origin) throw new Error('Gateway connection changed. Choose the execution location again.');
-    if (picked.action === 'workspace') return selectWorkspace();
-    if (picked.action === 'worktree') return selectWorktree();
-    if (picked.action === 'connection') return settings();
-    if (picked.action === 'browse') {
-      const folders = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false, openLabel: 'Use workspace' });
-      if (!folders?.length) return;
-      if (gw.url !== new URL(endpoint()).origin) throw new Error('Gateway connection changed. Choose the workspace again.');
-      const folder = fs.realpathSync(folders[0].fsPath);
-      if (!fs.statSync(folder).isDirectory()) throw new Error('Choose an existing workspace directory.');
-      selectedWorkspace = folder;
-      await context.workspaceState.update(workspaceStorageKey(), selectedWorkspace);
-      view?.webview.postMessage({ selectedWorkspace });
-      postContext();
-    }
-  };
-  const listWorktrees = async () => {
-    const root = selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    if (!root) return [];
-    try {
-      const { stdout } = await execFileAsync('git', ['worktree', 'list', '--porcelain'], {
-        cwd: root,
-        timeout: 5000,
-        maxBuffer: 1024 * 1024,
-      });
-      return commands.parseWorktrees(stdout);
-    } catch {
-      return [];
-    }
-  };
-
-  const selectWorktree = async () => {
-    const worktrees = await listWorktrees();
-    if (!worktrees.length) {
-      view?.webview.postMessage({ error: 'No git worktrees found for the selected workspace.' });
-      return;
-    }
-    const items = worktrees.map(row => ({
-      label: row.branch || row.head.slice(0, 12) || 'detached',
-      description: row.path,
-      row,
-    }));
-    const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Select an existing git worktree',
-      matchOnDescription: true,
-    });
-    if (!picked) return;
-    selectedWorkspace = picked.row.path;
-    await context.workspaceState.update(workspaceStorageKey(), selectedWorkspace);
-    view?.webview.postMessage({ selectedWorkspace });
-  };
-
-  const mentionFile = async () => {
-    const root = selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-    if (!root) {
-      view?.webview.postMessage({ error: 'Open a workspace folder before mentioning a file.' });
-      return;
-    }
-    const files = await vscode.workspace.findFiles(new vscode.RelativePattern(root, '**/*'), '**/node_modules/**', 200);
-    const items = files.map(uri => {
-      const filePath = uri.fsPath;
-      const relative = path.relative(root, filePath);
-      return { label: path.basename(filePath), description: relative, uri };
-    }).filter(item => item.description && !item.description.startsWith('..'));
-    const picked = await vscode.window.showQuickPick(items, {
-      placeHolder: 'Mention a file from the selected workspace',
-      matchOnDescription: true,
-    });
-    if (!picked) return;
-    if (!controller.state.session) await controller.newSession('New conversation', selectedWorkspace);
-    const filePath = picked.uri.fsPath;
-    const ext = path.extname(filePath).toLowerCase();
-    let size = 0;
-    try { size = fs.statSync(filePath).size; } catch { /* let the Gateway report the real boundary */ }
-    await controller.addAttachment({
-      path: filePath,
-      name: path.basename(filePath),
-      mime: MIME_BY_EXTENSION[ext] || 'application/octet-stream',
-      size,
-    });
-    view?.webview.postMessage({ mention: `@${picked.description}` });
-  };
-  const selectedModel = value => {
-    if (value === 'config') return parseProviderModel(configuredModel());
-    if (typeof value === 'string' && value) return parseProviderModel(value);
-    return { model: '', provider: '' };
-  };
-  const validateModelSelection = (model, provider) => {
-    if (!model) return; // Server/Gateway default is permitted
-    if (!controller?.state?.models || controller.state.modelsError) {
-      throw new Error('Could not verify the selected model against the connected Gateway catalog. Reconnect to reload it; the selected model has been preserved.');
-    }
-    if (!modelSelectionAvailable(provider ? providerModelValue(provider, model) : model, controller.state.models)) {
-      const provStr = provider ? ` (${provider})` : '';
-      throw new Error(`The selected model "${model}"${provStr} is unavailable or ambiguous on the connected Gateway. The client will not switch to another model. Please select an available model.`);
-    }
-  };
-  let daemonProcess = null;
-  let runtimeStartPromise = null;
-
-  function findGatewayDaemonExecutable(workspaceRoots) {
-    // The Gateway daemon owns sessions and SSE. `stack up` bootstraps launchd
-    // services but intentionally does not start this daemon.
-    const daemonArgs = ['gateway', 'daemon'];
-    const venvRoot = process.env.JAEGER_VENV || path.join(os.homedir(), '.jaeger', 'venv');
-    const venvPython = path.join(venvRoot, 'bin', 'python');
-    if (fs.existsSync(venvPython)) {
-      return { cmd: venvPython, args: ['-m', 'jaeger_ai.core.gateway.server'] };
-    }
-    for (const root of workspaceRoots || []) {
-      const jaegerScript = path.join(root, 'jaeger');
-      if (fs.existsSync(jaegerScript)) return { cmd: jaegerScript, args: daemonArgs };
-    }
-    return { cmd: 'jaeger', args: daemonArgs };
-  }
-
-  async function checkGatewayHealth(gw) {
-    try {
-      const res = await gw.json('/health');
-      return Boolean(res);
-    } catch (_) {
-      return false;
-    }
-  }
-
-  async function ensureGatewayDaemon(gw) {
-    if (await checkGatewayHealth(gw)) return null;
-    try {
-      const u = new URL(gw.url);
-      if (!['127.0.0.1', 'localhost', '::1'].includes(u.hostname)) return null;
-    } catch (_) {
-      return null;
-    }
-    if (runtimeStartPromise) {
-      await runtimeStartPromise;
-      return daemonProcess;
-    }
-    if (daemonProcess && !daemonProcess.killed) {
-      const start = Date.now();
-      while (Date.now() - start < 8000) {
-        await new Promise(r => setTimeout(r, 200));
-        if (await checkGatewayHealth(gw)) return daemonProcess;
-      }
-      return daemonProcess;
-    }
-    const workspaceRoots = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);
-    output.appendLine(`[jaeger] Gateway at ${gw.url} is unavailable. Starting the Jaeger Gateway daemon (without the macOS app)...`);
-    const exec = findGatewayDaemonExecutable(workspaceRoots);
-    runtimeStartPromise = new Promise(resolve => {
-      let starter;
-      try {
-        const root = workspaceRoots[0] || '';
-        const pythonPath = [
-          root,
-          path.join(root, 'packages', 'jaeger-agent'),
-          path.join(root, 'packages', 'jaeger-os'),
-          process.env.PYTHONPATH || '',
-        ].filter(Boolean).join(path.delimiter);
-        starter = spawn(exec.cmd, exec.args, {
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: {
-            ...process.env,
-            PYTHONDONTWRITEBYTECODE: '1',
-            PYTHONPYCACHEPREFIX: path.join(os.homedir(), '.cache', 'jaeger', 'pycache'),
-            ...(pythonPath ? { PYTHONPATH: pythonPath } : {}),
-          },
-        });
-        starter.stdout?.on('data', chunk => output.appendLine(`[runtime] ${chunk.toString().trim()}`));
-        starter.stderr?.on('data', chunk => output.appendLine(`[runtime:err] ${chunk.toString().trim()}`));
-        starter.on('error', err => {
-          output.appendLine(`[jaeger] Failed to start headless runtime: ${err.message}`);
-          resolve();
-        });
-        daemonProcess = starter;
-        starter.on('exit', code => {
-          output.appendLine(`[runtime] Gateway daemon exited with code ${code}`);
-          if (daemonProcess === starter) daemonProcess = null;
-        });
-      } catch (err) {
-        output.appendLine(`[jaeger] Failed to start headless runtime: ${err.message}`);
-        resolve();
-      }
-      const start = Date.now();
-      const wait = async () => {
-        while (Date.now() - start < 15000) {
-          if (await checkGatewayHealth(gw)) {
-            output.appendLine('[jaeger] Headless Jaeger runtime is healthy.');
-            resolve();
-            return;
-          }
-          await new Promise(r => setTimeout(r, 250));
-        }
-        output.appendLine('[jaeger] Headless Jaeger runtime did not become healthy in time.');
-        resolve();
-      };
-      void wait();
-    }).finally(() => { runtimeStartPromise = null; });
-    await runtimeStartPromise;
-    return daemonProcess;
-  }
-
-  function createController() {
-    controller?.dispose();
-    controller = undefined;
-    postToView({ connected: false, busy: false, session: null, sessions: [], text: '',
-      reasoning: '', activity: [], approvals: [], staged: [], models: null, modelsError: null,
-      status: 'Connecting…', error: '', autonomy: null, tier: null, queue: [], openSessionIds: [], selectedWorkspace: restoreWorkspace(), configuredModel: configuredModel() });
-    const key = storageKey(), restored = context.workspaceState.get(key, {});
-    const gw = gatewayClient();
-    controller = new Conversation(gw, state => {
-      if (state.changes) changes = state.changes;
-      postToView(state);
-      const key = `${state.session?.session_id || ''}:${state.workTurns?.at(-1)?.requestId || ''}`;
-      if (key !== changeKey) selectedChangeRequest = '';
-      if ((wasBusy && !state.busy) || key !== changeKey) { changeKey = key; void refreshChanges(); }
-      wasBusy = state.busy;
-    },
-      state => context.workspaceState.update(key, state), restored);
-    return restored.selected;
-  }
-  async function report(action) {
-    try { await action(); } catch (error) {
-      output.appendLine(`${new Date().toISOString()} ${error.message}`);
-      postToView({ error: error.message });
-    }
-  }
-  const provider = {
-    resolveWebviewView(resolved) {
-      view = resolved;
-      viewReady = false;
-      const media = vscode.Uri.joinPath(context.extensionUri, 'media');
-      view.webview.options = { enableScripts: true, localResourceRoots: [media] };
-      const nonce = randomBytes(24).toString('hex');
-      let html = fs.readFileSync(path.join(context.extensionPath, 'media', 'index.html'), 'utf8');
-      const asset = name => view.webview.asWebviewUri(vscode.Uri.joinPath(media, name)).toString();
-      const values = {
-        CSP: view.webview.cspSource, NONCE: nonce,
-        CSS: asset('view.css'), MOTION: asset('motion.css'), SLASH: asset('slash-commands.js'), LOGO: asset('jaeger.svg'), FRAME_QUEUE: asset('frame-queue.js'),
-        TIMELINE: asset('timeline.js'), KEYED_RENDERER: asset('keyed-renderer.js'),
-        PRESENTATION: asset('presentation.js'),
-        DURATION: asset('turn-duration.js'),
-        MARKDOWN: asset('markdown.js'), JS: asset('view.js'),
-        // May not exist in an unpackaged dev checkout — see THIRD_PARTY_NOTICES.md.
-        // A 404 on this URI is expected there; view.js's dynamic import()
-        // catches it and falls back to plain-text rendering.
-        SMD: asset('vendor/smd.min.js'),
-      };
-      html = html.replace(/\{\{(CSP|NONCE|CSS|MOTION|SLASH|LOGO|FRAME_QUEUE|TIMELINE|KEYED_RENDERER|PRESENTATION|DURATION|MARKDOWN|JS|SMD)\}\}/g, (_, key) => values[key]);
-      let selected;
-      const messageSubscription = view.webview.onDidReceiveMessage(message => report(async () => {
-        if (!message || typeof message.type !== 'string') return;
-        if (message.type === 'gatewayPermissions') return openPermissions();
-        if (message.type === 'gatewayAgency') return openAgency();
-        if (message.type === 'executionLocation') return openExecutionMenu();
-        if (message.type === 'refreshModels') {
-          if (controller) { controller.modelsLoaded = false; await controller.loadModels(); controller.emit(); }
-          await Promise.all([sendAutonomy(), sendTier()]);
-          return;
-        }
-        if (message.type === 'settings') return settings();
-        if (message.type === 'editDraft' && typeof message.text === 'string') {
-          const answer = await vscode.window.showWarningMessage('Replace your current draft with this message?', { modal: true }, 'Replace draft');
-          if (answer === 'Replace draft') view?.webview.postMessage({ editDraft: message.text });
-          return;
-        }
-        if (message.type === 'editMessage' && typeof message.text === 'string') {
-          const id = controller?.state.session?.session_id;
-          if (!id) throw new Error('Open a conversation first.');
-          if (controller.state.busy || controller.sending) throw new Error('Wait for the current turn to finish before editing.');
-          const text = message.text.trim();
-          if (!text || message.messageId == null) throw new Error('That message cannot be edited.');
-          const branch = await controller.gateway.branch(id, { message_id: message.messageId });
-          if (!branch?.session_id) throw new Error('Jaeger could not create an edit branch.');
-          await controller.refresh(branch.session_id);
-          await controller.send(text);
-          if (controller.state.error && !controller.state.busy) throw new Error(controller.state.error);
-          view?.webview.postMessage({ info: {
-            title: 'Edited message sent', lines: ['A new conversation branch was created; the original thread is unchanged.'],
-          } });
-          return;
-        }
-        if (message.type === 'ready') {
-          output.appendLine(`[debug] webview ready; endpoint=${endpoint()}`);
-          // Resolve the existing OS-stored IDE pairing before the first
-          // Gateway request. Starting refresh first creates a race where an
-          // authenticated SecretStorage result replaces the controller while
-          // its initial fetch is still in flight.
-          const storedToken = await getStoredCallerToken();
-          output.appendLine(`[debug] secure caller token available=${Boolean(storedToken)}`);
-          if (storedToken) currentCallerToken = storedToken;
-          selected = createController();
-          if (requestedSession) selected = requestedSession;
-          // Replay the latest control state after the webview's listener has
-          // installed. This covers retained/reloaded webviews that miss a
-          // postMessage during the HTML/script boot window.
-          if (lastViewState) await new Promise(resolve => setTimeout(resolve, 0)).then(() => postToView(lastViewState));
-          controller.ideHandler = ideCall;
-          void refreshChanges();
-          void sendAutonomy();
-          void sendTier();
-          postContext();
-          if (userSetting('autoStartGateway') === true) await ensureGatewayDaemon(controller.gateway);
-          await controller.refresh(selected);
-          if (requestedSession && requestedSession !== selected) await controller.refresh(requestedSession, true);
-          requestedSession = '';
-          viewReady = true;
-          output.appendLine(`[debug] initial refresh settled; connected=${controller.state.connected}; status=${controller.state.status}; error=${controller.state.error || '(none)'}`);
-          // The refresh callback may publish several states while a retained
-          // webview is still attaching. Replay the final state after refresh,
-          // not only the initial Connecting snapshot.
-          if (lastViewState) await postToView(lastViewState);
-          return;
-        }
-        if (message.type === 'turnChanges' && !controller?.state.busy) {
-          const turns = controller?.workBySession[controller?.state.session?.session_id] || [];
-          if (!turns.some(turn => turn.requestId === message.requestId)) return;
-          selectedChangeRequest = message.requestId;
-          return refreshChanges();
-        }
-        if (message.type === 'previewChange' && typeof message.path === 'string') {
-          const url = changesUrl();
-          if (!url) return;
-          const data = await controller.gateway.json(url + '?contents=1');
-          if (url !== changesUrl()) return;
-          const file = data.files.find(item => item.path === message.path);
-          if (file) view?.webview.postMessage({ preview: { ...file, requestId: data.requestId } });
-          return;
-        }
-        if (message.type === 'reviewChanges') {
-          let filePath = message.path;
-          if (!filePath) filePath = (await vscode.window.showQuickPick(changes.files.map(f => ({ label: path.basename(f.path), description: f.path, path: f.path })), { title: 'Review this turn’s edits' }))?.path;
-          if (!filePath) return;
-          const data = await controller.gateway.json(changesUrl() + '?contents=1');
-          const file = data.files.find(item => item.path === filePath);
-          if (!file) throw new Error('Change no longer available. Reload chats to refresh.');
-          const token = randomBytes(12).toString('hex');
-          const uris = ['before', 'after'].map(side => {
-            const key = `${token}:${side}`; diffDocuments.set(key, file[side]);
-            return vscode.Uri.from({ scheme: 'jaeger-baseline', path: '/' + path.basename(file.path), query: key });
-          });
-          while (diffDocuments.size > 100) diffDocuments.delete(diffDocuments.keys().next().value);
-          return vscode.commands.executeCommand('vscode.diff', ...uris, `${path.basename(file.path)} — This turn`);
-        }
-        if (message.type === 'undoChanges') {
-          if (controller?.state.busy) throw new Error('Wait for the turn to finish before undoing.');
-          const url = changesUrl();
-          if (!url) return;
-          if (vscode.workspace.textDocuments?.some(doc => doc.isDirty && changes.files.some(f => f.path === doc.uri.fsPath))) throw new Error('Save or discard unsaved editor changes before Undo.');
-          const answer = await vscode.window.showWarningMessage('Undo the file edits recorded for this turn?', { modal: true, detail: 'Only recorded files are restored. Undo will refuse if any file has changed since the agent edited it. Backup contents remain in the Gateway state directory.' }, 'Undo edits');
-          if (answer !== 'Undo edits' || url !== changesUrl()) return;
-          await controller.gateway.json(url + '/undo', {});
-          await refreshChanges();
-          return;
-        }
-        if (!controller) return;
-        if (message.type === 'home') { postToView({ showHistory: true }); return controller.refresh(null); }
-        if (message.type === 'refresh') { void refreshChanges(); return controller.refresh(undefined, true); }
-        if (message.type === 'searchChats' && typeof message.query === 'string') return controller.searchSessions(message.query);
-        if (message.type === 'select' && typeof message.id === 'string') {
-          if (controller.sending) throw new Error('Wait for request admission before switching.');
-          return controller.refresh(message.id);
-        }
-        if (message.type === 'selectWorkspace') return selectWorkspace();
-        if (message.type === 'selectWorktree') return selectWorktree();
-        if (message.type === 'closeSession' && typeof message.id === 'string') {
-          if (controller.sending && controller.state.session?.session_id === message.id) {
-            throw new Error('Wait for request admission before closing this tab.');
-          }
-          return controller.closeSession(message.id);
-        }
-        if (message.type === 'new') {
-          postToView({ showHistory: false });
-          await controller.newSession('New conversation', selectedWorkspace);
-        }
-        if (message.type === 'send' && typeof message.text === 'string') {
-          const { model, provider } = selectedModel(message.model);
-          validateModelSelection(model, provider);
-          const allowedTools = message.planOnly ? ['update_plan'] : null;
-          const options = message.deepThink ? { deep_think: true, reasoning_effort: 'high' } : null;
-          const workspace = contextRoot();
-          const ide = message.ideContext === false ? null : commands.filterIdeContext(ideContext(workspace), message.contextExclusions);
-          const sent = controller.send(message.text, model, provider, workspace, ide, allowedTools, options);
-          postContext();
-          return sent;
-        }
-        if (message.type === 'queue' && typeof message.text === 'string') {
-          const { model, provider } = selectedModel(message.model);
-          validateModelSelection(model, provider);
-          const allowedTools = message.planOnly ? ['update_plan'] : null;
-          const options = message.deepThink ? { deep_think: true, reasoning_effort: 'high' } : null;
-          const workspace = contextRoot();
-          const ide = message.ideContext === false ? null : commands.filterIdeContext(ideContext(workspace), message.contextExclusions);
-          const queued = controller.queue(message.text, model, provider, workspace, ide, allowedTools, options);
-          postContext();
-          return queued;
-        }
-        if (message.type === 'queueUpdate' && typeof message.id === 'string') {
-          const patch = {};
-          if (typeof message.text === 'string') patch.text = message.text;
-          if (message.status === 'queued' || message.status === 'paused') patch.status = message.status;
-          if (!Object.keys(patch).length) throw new Error('Nothing to update in the queued request.');
-          return controller.queueUpdate(message.id, patch);
-        }
-        if (message.type === 'queueDelete' && typeof message.id === 'string') return controller.queueDelete(message.id);
-        if (message.type === 'queueReorder' && Array.isArray(message.order)) return controller.queueReorder(message.order);
-        // Slash commands that need the Gateway or a file dialog. Each maps to a real
-        // capability; the panel never lists one whose backend is missing.
-        if (message.type === 'setAutonomy' && typeof message.mode === 'string') return sendAutonomy(message.mode);
-        if (message.type === 'setTier' && typeof message.tier === 'string') return sendTier(message.tier);
-        if (message.type === 'runTestSuite') return runTestSuite();
-        if (message.type === 'compactSession') {
-          if (controller.state.busy) throw new Error('Wait for the current turn to finish before compacting.');
-          const focus = String(message.focus || '').trim();
-          const text = [
-            'Summarize the prior conversation into a compact digest and use that as context going forward.',
-            focus ? `Focus: ${focus}` : '',
-          ].filter(Boolean).join(' ');
-          const sent = controller.send(text);
-          if (!sent) throw new Error('Jaeger could not accept the compaction request.');
-          return sent;
-        }
-        if (message.type === 'rename' && typeof message.title === 'string') {
-          const id = controller.state.session?.session_id;
-          if (!id) throw new Error('Open a conversation first.');
-          const title = message.title.trim();
-          if (!title) throw new Error('Give the conversation a name, e.g. /rename Fix the login loop');
-          await controller.gateway.rename(id, title.slice(0, 200));
-          return controller.refresh(id, true);
-        }
-        if (message.type === 'archive') {
-          const id = controller.state.session?.session_id;
-          if (!id) throw new Error('Open a conversation first.');
-          return controller.setArchived(id, true);
-        }
-        if (message.type === 'messageFeedback') {
-          const id = controller.state.session?.session_id;
-          if (!id || !['positive', 'negative'].includes(message.rating)) return;
-          await controller.gateway.feedback(id, {
-            message_id: message.messageId ?? null,
-            rating: message.rating,
-          });
-          view?.webview.postMessage({ feedback: {
-            messageId: message.messageId ?? null, rating: message.rating,
-          } });
-          view?.webview.postMessage({ info: {
-            title: 'Feedback saved', lines: ['Thanks — Jaeger recorded your response feedback.'],
-          } });
-          return;
-        }
-        if (message.type === 'branchSession') {
-          const id = controller.state.session?.session_id;
-          if (!id) throw new Error('Open a conversation first.');
-          const branch = await controller.gateway.branch(id, {
-            ...(message.messageId != null ? { message_id: message.messageId } : {}),
-          });
-          if (branch?.session_id) {
-            await controller.refresh(branch.session_id);
-            view?.webview.postMessage({ info: {
-              title: 'Conversation forked', lines: ['A new conversation was created from this thread.'],
-            } });
-          }
-          return;
-        }
-        if (message.type === 'retrySession') {
-          if (!controller.state.session?.session_id) throw new Error('Open a conversation first.');
-          const retried = await controller.retry();
-          if (!retried) throw new Error(controller.state.error || 'Jaeger could not retry the response.');
-          return;
-        }
-        if (message.type === 'unarchive') {
-          const id = controller.state.session?.session_id;
-          if (!id) throw new Error('Open a conversation first.');
-          return controller.setArchived(id, false);
-        }
-        if (message.type === 'exportChat') {
-          const session = controller.state.session;
-          if (!session?.messages?.length) throw new Error('Nothing to export yet.');
-          const folder = vscode.workspace.workspaceFolders?.[0]?.uri;
-          const target = await vscode.window.showSaveDialog({
-            title: 'Export conversation', filters: { Markdown: ['md'] },
-            defaultUri: folder ? vscode.Uri.joinPath(folder, `${commands.slug(session.title)}.md`) : undefined,
-          });
-          if (!target) return;
-          await vscode.workspace.fs.writeFile(target, Buffer.from(commands.exportMarkdown(session), 'utf8'));
-          view?.webview.postMessage({ info: { title: 'Exported', lines: [target.fsPath] } });
-          return;
-        }
-        if (message.type === 'info' && ['status', 'skills', 'agent', 'workers', 'diagnostics', 'cognitiveRouting'].includes(message.what)) {
-          let title, lines;
-          if (message.what === 'status') {
-            const version = await controller.gateway.json('/version');
-            let autonomy = null, tier = null, capabilities = null;
-            try {
-              const [a, t, c] = await Promise.all([
-                controller.gateway.autonomy().catch(() => null),
-                controller.gateway.tier().catch(() => null),
-                controller.gateway.capabilities ? controller.gateway.capabilities().catch(() => null) : controller.gateway.json('/v1/runtime/capabilities').catch(() => null),
-              ]);
-              autonomy = a?.autonomy;
-              tier = t?.tier;
-              capabilities = c;
-            } catch (_) {}
-            let isLocal = false;
-            try { isLocal = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(new URL(controller.gateway.url).hostname); } catch (_) {}
-            const connectionHealth = controller.state.connected
-              ? (isLocal ? 'connected (local loopback)' : 'connected (remote Tailscale/LAN)')
-              : 'disconnected';
-            title = 'Status';
-            lines = commands.statusLines({
-              version,
-              endpoint: controller.gateway.url,
-              session: controller.state.session,
-              model: configuredModel() || controller.state.session?.metadata?.model || '',
-              autonomy,
-              tier,
-              capabilities,
-              connectionHealth,
-              scopes: true,
-            });
-          } else if (message.what === 'skills') {
-            const query = String(message.query || '').trim().slice(0, 60);
-            const found = await controller.gateway.skills(query);
-            title = 'Skills'; lines = commands.skillLines(found.skills, query);
-          } else if (message.what === 'diagnostics') {
-            title = 'Problems'; lines = commands.diagnosticsLines(await ideCall('diagnostics', {}));
-          } else if (message.what === 'workers') {
-            title = 'Workers';
-            lines = controller.state.workersError
-              ? [`Workers unavailable: ${controller.state.workersError}`]
-              : commands.workerLines(controller.state.workers || []);
-          } else if (message.what === 'cognitiveRouting') {
-            const [tier, autonomy, models] = await Promise.all([
-              controller.gateway.tier(), controller.gateway.autonomy(), controller.gateway.models(),
-            ]);
-            title = 'Cognitive routing';
-            lines = [
-              `Agency tier: ${tier.tier}`,
-              `Autonomy: ${autonomy.autonomy}`,
-              `Configured model: ${configuredModel() || 'Gateway default'}`,
-              `Available models: ${Array.isArray(models?.models) ? models.models.length : 'unknown'}`,
-            ];
-          } else {
-            title = 'Agents and tasks'; lines = commands.taskLines(await controller.gateway.tasks());
-          }
-          view?.webview.postMessage({ info: { title, lines } });
-          return;
-        }
-        if (message.type === 'cancelBackgroundTask' && typeof message.id === 'string') return controller.cancelBackgroundTask(message.id);
-        if (message.type === 'cancel') return controller.cancel();
-        if (message.type === 'approve' && typeof message.id === 'string' && typeof message.approved === 'boolean') return controller.approve(message.id, message.approved);
-        // Mid-turn steering: ask the Gateway to inject into the active agent;
-        // it queues locally only when the owner honestly reports no ReAct agent.
-        if (message.type === 'steer' && typeof message.text === 'string') {
-          const accepted = await controller.steer(message.text);
-          if (!accepted) view?.webview.postMessage({ steerRejected: message.text });
-          return;
-        }
-        if (message.type === 'mentionFile') return mentionFile();
-        if (message.type === 'attach') {
-          const picked = await vscode.window.showOpenDialog({
-            canSelectMany: true, openLabel: 'Attach to conversation',
-            title: 'Attach a file from your Jaeger workspace',
-          });
-          if (picked?.length && !controller.state.session) await controller.newSession('New conversation', vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '');
-          for (const uri of picked || []) {
-            const filePath = uri.fsPath, ext = path.extname(filePath).toLowerCase();
-            let size = 0;
-            try { size = fs.statSync(filePath).size; } catch { /* let the Gateway's own check report it */ }
-            // eslint-disable-next-line no-await-in-loop -- attachments register one at a time, in the order picked
-            await controller.addAttachment({
-              path: filePath, name: path.basename(filePath),
-              mime: MIME_BY_EXTENSION[ext] || 'application/octet-stream', size,
-            });
-          }
-          return;
-        }
-        if (message.type === 'pasteAttachment' && typeof message.data === 'string') {
-          const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
-          if (!controller.state.session) await controller.newSession('New conversation', workspaceRoot);
-          const mime = String(message.mime || 'image/png');
-          const ext = mime.includes('/') ? mime.split('/')[1] : 'png';
-          // Clipboard data is runtime state. Keep it outside the workspace so
-          // a paste cannot pollute the repository or accidentally become a
-          // tracked project file. Also reduce the name to a safe leaf.
-          const requestedName = path.basename(String(message.name || ''));
-          const filename = requestedName.replace(/[^a-zA-Z0-9._-]/g, '_') || `image-${Date.now()}.${ext}`;
-          const match = message.data.match(/^data:[^;]+;base64,(.+)$/);
-          const buffer = match ? Buffer.from(match[1], 'base64') : Buffer.from(message.data);
-
-          let targetDir = context.globalStorageUri?.fsPath
-            ? path.join(context.globalStorageUri.fsPath, 'attachments') : null;
-          let targetPath = null;
-          if (targetDir) {
-            try {
-              fs.mkdirSync(targetDir, { recursive: true });
-              targetPath = path.join(targetDir, filename);
-              fs.writeFileSync(targetPath, buffer);
-            } catch (_) {
-              targetPath = null;
-            }
-          }
-          if (!targetPath) {
-            targetDir = path.join(os.tmpdir(), 'jaeger', 'attachments');
-            fs.mkdirSync(targetDir, { recursive: true });
-            targetPath = path.join(targetDir, filename);
-            fs.writeFileSync(targetPath, buffer);
-          }
-
-          await controller.addAttachment({
-            path: targetPath,
-            name: filename,
-            mime,
-            size: buffer.length,
-            data_url: message.data,
-          });
-          return;
-        }
-        if (message.type === 'removeAttachment' && typeof message.id === 'string') {
-          return controller.removeStagedAttachment(message.id);
-        }
-        if (message.type === 'copy' && typeof message.text === 'string') {
-          return vscode.env.clipboard.writeText(message.text);
-        }
-      }));
-      view.onDidDispose(() => {
-        messageSubscription.dispose();
-        controller?.dispose();
-        view = undefined;
-      }, undefined, context.subscriptions);
-      // Install the receiver before assigning HTML so the ready handshake
-      // cannot race the extension-host listener registration.
-      view.webview.html = html;
-    }
-  };
+  // Open main chat (Apple-Native UI)
   context.subscriptions.push(
-    ...(typeof vscode.window?.registerWebviewViewProvider === 'function' ? [
-      vscode.window.registerWebviewViewProvider('jaeger.conversation', provider, { webviewOptions: { retainContextWhenHidden: true } })
-    ] : []),
-    vscode.commands.registerCommand('jaeger.open', async () => {
-      if (typeof vscode.commands?.executeCommand === 'function') {
-        try {
-          return await vscode.commands.executeCommand('jaeger.conversation.focus');
-        } catch {
-          return await vscode.commands.executeCommand('workbench.action.chat.open').catch(() => {});
-        }
+    vscode.commands.registerCommand('jaeger.openChat', async () => {
+      output.appendLine('[jaeger] Opening chat...');
+      await controller.openChat();
+    })
+  );
+
+  // Quick ask (prompts for input)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.ask', async () => {
+      const input = await vscode.window.showInputBox({
+        prompt: 'Ask Jaeger',
+        placeHolder: 'What do you want to know or do?',
+        ignoreFocusOut: true,
+      });
+      if (input) {
+        await controller.ask(input);
       }
-    }),
-    vscode.commands.registerCommand('jaeger.newConversation', () => report(async () => {
-      await vscode.commands.executeCommand('jaeger.conversation.focus');
-      postToView({ showHistory: false });
-      if (controller) await controller.newSession('New conversation', selectedWorkspace);
-    })),
-    vscode.commands.registerCommand('jaeger.refreshConversation', () => report(async () => { if (controller) await controller.refresh(undefined, true); })),
-    vscode.commands.registerCommand('jaeger.showHistory', () => report(async () => { postToView({ showHistory: true }); if (controller) await controller.refresh(null); })),
-    vscode.commands.registerCommand('jaeger.openSession', sessionId => report(async () => {
-      if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 200) throw new Error('Invalid conversation identifier.');
-      requestedSession = sessionId;
-      await vscode.commands.executeCommand('jaeger.conversation.focus');
-      if (viewReady && controller) {
-        await controller.refresh(sessionId, true);
-        requestedSession = '';
-      }
-    })),
-    vscode.commands.registerCommand('jaeger.openChatTab', async () => {
-      if (typeof vscode.commands?.executeCommand === 'function') {
-        try {
-          return await vscode.commands.executeCommand('workbench.action.chat.openInEditor');
-        } catch {
-          return await vscode.commands.executeCommand('workbench.action.chat.open').catch(() => {});
-        }
-      }
-    }),
-    vscode.commands.registerCommand('jaeger.settings', settings),
+    })
+  );
+
+  // Explain selected code
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.explainCode', async () => {
+      output.appendLine('[jaeger] Explain code action...');
+      await controller.explainCode();
+    })
+  );
+
+  // Fix selected code
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.fixCode', async () => {
+      output.appendLine('[jaeger] Fix code action...');
+      await controller.fixCode();
+    })
+  );
+
+  // Write tests for selected code
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.writeTests', async () => {
+      output.appendLine('[jaeger] Write tests action...');
+      await controller.writeTests();
+    })
+  );
+
+  // Refactor selected code
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.refactorCode', async () => {
+      output.appendLine('[jaeger] Refactor code action...');
+      await controller.refactorCode();
+    })
+  );
+
+  // Document selected code
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.documentCode', async () => {
+      output.appendLine('[jaeger] Document code action...');
+      await controller.documentCode();
+    })
+  );
+
+  // Review selected code
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.reviewCode', async () => {
+      output.appendLine('[jaeger] Review code action...');
+      await controller.reviewCode();
+    })
+  );
+
+  // Run project tests
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.runTests', async () => {
+      output.appendLine('[jaeger] Run tests action...');
+      await controller.runTests();
+    })
+  );
+
+  // Check agent status
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.checkStatus', async () => {
+      await controller.checkStatus();
+    })
+  );
+
+  // Open controller panel
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.open', () => {
+      vscode.commands.executeCommand('jaeger.controller.focus');
+    })
+  );
+
+  // Settings
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.settings', () => {
+      vscode.commands.executeCommand('workbench.action.openSettings', 'jaeger');
+    })
+  );
+
+  // Set caller token (secure storage)
+  context.subscriptions.push(
     vscode.commands.registerCommand('jaeger.setToken', async () => {
-      const current = currentCallerToken || (await getStoredCallerToken());
       const token = await vscode.window.showInputBox({
-        title: 'Jaeger Gateway Caller Token',
-        prompt: 'Enter the Gateway caller token for the IDE (e.g. from `jaeger auth status` or ~/.jaeger/caller_tokens/ide.token on your host). Stored securely in SecretStorage.',
-        value: current,
+        prompt: 'Gateway Caller Token',
+        placeHolder: 'Paste your token (stored in OS SecretStorage)',
         password: true,
         ignoreFocusOut: true,
       });
-      if (token !== undefined) {
-        const trimmed = token.trim();
-        if (context.secrets && typeof context.secrets.store === 'function') {
-          const ep = endpoint();
-          if (trimmed) {
-            await context.secrets.store('jaeger.callerToken', trimmed);
-            await context.secrets.store(`jaeger.callerToken:${ep}`, trimmed);
-            await context.secrets.store('jaeger.pairedEndpoint', ep);
-          } else if (typeof context.secrets.delete === 'function') {
-            await context.secrets.delete('jaeger.callerToken');
-            await context.secrets.delete(`jaeger.callerToken:${ep}`);
-            await context.secrets.delete('jaeger.pairedEndpoint');
-          }
-        }
-        const config = vscode.workspace.getConfiguration('jaeger');
-        if (config.get('callerToken')) {
-          await config.update('callerToken', undefined, vscode.ConfigurationTarget.Global);
-        }
-        currentCallerToken = trimmed;
-        vscode.window.showInformationMessage('Jaeger caller token saved securely in SecretStorage.');
-        if (controller) {
-          const selected = createController();
-          await controller.refresh(selected);
-        }
+      if (token) {
+        await context.secrets.store('jaeger.callerToken', token);
+        vscode.window.showInformationMessage('Jaeger: Token saved securely.');
       }
-    }),
+    })
+  );
+
+  // Select model
+  context.subscriptions.push(
     vscode.commands.registerCommand('jaeger.selectModel', async () => {
-      const gw = gatewayClient();
-      let catalog;
       try {
-        catalog = await gw.models();
-      } catch (err) {
-        vscode.window.showErrorMessage(`Could not fetch models from Gateway: ${err.message}`);
+        const models = await gateway.models();
+        const items = (models.models || models || []).map(m => ({
+          label: m.name || m.id,
+          description: m.provider || m.type,
+          detail: m.id,
+        }));
+        const picked = await vscode.window.showQuickPick(items, {
+          placeHolder: 'Select default model',
+        });
+        if (picked) {
+          await vscode.workspace.getConfiguration('jaeger').update('model', picked.detail, true);
+          vscode.window.showInformationMessage(`Jaeger: Model set to ${picked.label}`);
+        }
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to load models: ${error.message}`);
+      }
+    })
+  );
+
+  // Implement TODO (from inline completion)
+  context.subscriptions.push(
+    vscode.commands.registerCommand('jaeger.implementTodo', async (document, position, textBefore) => {
+      const line = document.lineAt(position.line);
+      await controller.ask(
+        `Implement this TODO in ${document.uri.fsPath}:\n\n${line.text}\n\nProvide the complete implementation.`
+      );
+    })
+  );
+
+  // ─────────────────────────────────────────────────────────
+  // Providers
+  // ─────────────────────────────────────────────────────────
+
+  // Code actions (right-click menu)
+  context.subscriptions.push(
+    vscode.languages.registerCodeActionsProvider(
+      { scheme: 'file' },
+      new JaegerCodeActionProvider(controller),
+      {
+        providedCodeActionKinds: [
+          vscode.CodeActionKind.QuickFix,
+          vscode.CodeActionKind.Refactor,
+          vscode.CodeActionKind.RefactorRewrite,
+          vscode.CodeActionKind.RefactorExtract,
+        ],
+      }
+    )
+  );
+
+  // Inline completions (ghost text)
+  context.subscriptions.push(
+    vscode.languages.registerInlineCompletionItemProvider(
+      { scheme: 'file' },
+      new JaegerInlineCompletionsProvider(controller)
+    )
+  );
+
+  // Sidebar view (agent status, not chat)
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      'jaeger.controller',
+      new JaegerSidebarProvider(controller),
+      { webviewOptions: { retainContextWhenHidden: true } }
+    )
+  );
+
+  // ─────────────────────────────────────────────────────────
+  // Chat Participant (@jaeger)
+  // ─────────────────────────────────────────────────────────
+
+  const chatParticipant = vscode.chat.createChatParticipant('jaeger.chatParticipant', async (request, context, stream, token) => {
+    output.appendLine(`[jaeger] @jaeger invoked: ${request.command || 'message'}`);
+
+    try {
+      // Handle slash commands locally
+      if (request.command === 'status') {
+        const health = await gateway.json('/health');
+        stream.markdown(`**Jaeger Gateway Status**\n\n` +
+          `- Status: ${health.status}\n` +
+          `- Version: ${health.version}\n` +
+          `- Model: ${health.model || 'default'}\n` +
+          `- Endpoint: ${gateway.url}\n\n` +
+          `[Open Full Chat](command:jaeger.openChat)`);
         return;
       }
-      const rows = selectableModels(catalog);
-      const items = [
-        { label: 'Gateway Default', description: 'Use the default model configured on the server', modelValue: '' },
-      ];
-      for (const row of rows) {
-        const isCloud = row.provider.includes('cloud') || row.id.includes(':cloud');
-        items.push({
-          label: row.id,
-          description: `${row.provider}${isCloud ? ' · Cloud' : ''}`,
-          modelValue: providerModelValue(row.provider, row.id),
-        });
-      }
-      const picked = await vscode.window.showQuickPick(items, {
-        title: 'Jaeger: Select Default Model',
-        placeHolder: 'Choose a model from the connected Gateway catalog',
-      });
-      if (picked) {
-        await vscode.workspace.getConfiguration('jaeger').update('model', picked.modelValue, vscode.ConfigurationTarget.Global);
-        vscode.window.showInformationMessage(`Jaeger default model set to ${picked.label}`);
-        if (view) view.webview.postMessage({ configuredModel: picked.modelValue });
-      }
-    }),
-    vscode.commands.registerCommand('jaeger.onboarding', async () => {
-      const lines = [
-        '# Jaeger Thin IDE Client — Remote Setup Guide',
-        '',
-        'Jaeger is a thin client that connects to your persistent Jaeger Gateway on your server (e.g. home Mac) over Tailscale.',
-        '',
-        '## Thin Client Architecture',
-        '- Zero local models are downloaded, installed, or executed on this laptop/device.',
-        '- No local RAM is consumed for model weights.',
-        '- All models (including Ollama Cloud models) run on or are accessed by your remote server.',
-        '- The client never silently falls back to local models or alters your chosen model.',
-        '',
-        '## VS Code Settings Sync Reality',
-        '- If enabled for your profile, VS Code Settings Sync can sync nonsecret user preferences such as `jaeger.model`, unless excluded.',
-        '- The machine-scoped Gateway endpoint and caller-token fallback are not synced. SecretStorage is encrypted and not synced across machines.',
-        '- Do not assume a private/local VSIX installs on another device. Install this client explicitly using the supported distribution path:',
-        '  Extensions: Install from VSIX…',
-        '',
-        '## Configuration Steps for This Device',
-        '1. Gateway Endpoint (per-device setting, not synced):',
-        '   Open Settings -> search for `jaeger.gatewayUrl`.',
-        '   Use the existing server endpoint supplied by its owner. Do not expose a port or change network policy as part of client setup.',
-        '2. Caller Token (securely stored in OS SecretStorage):',
-        '   Run `Jaeger: Set Caller Token` from the Command Palette.',
-        '   Use an owner-provisioned, revocable credential scoped to this device. This guide does not create or activate pairing.',
-        '   This token is stored in your OS keychain via VS Code SecretStorage and is NEVER synced to the cloud.',
-        '3. Model Selection (eligible for user-settings sync):',
-        '   Run `Jaeger: Select Default Model` to save a default. The footer picker overrides the current client selection.',
-        '   Choose any model exposed by your server (including Ollama Cloud models).',
-        '   A missing model or failed catalog lookup is an error, not permission to fall back to another provider.',
-      ];
-      output.clear();
-      output.appendLine(lines.join('\n'));
-      output.show(true);
-    }),
-    vscode.commands.registerCommand('jaeger.diagnostics', () => report(async () => {
-      output.appendLine(JSON.stringify({ extensionVersion: context.extension?.packageJSON?.version || require('./package.json').version, build }, null, 2));
-      output.show(true);
-      const gw = gatewayClient(), version = await gw.json('/version').catch(error => ({ error: error.message }));
-      const tokenPresent = Boolean(gw.auth().Authorization);
-      let isLoopback = false;
-      try { isLoopback = ['localhost', '127.0.0.1', '::1', '[::1]'].includes(new URL(gw.url).hostname); } catch (_) {}
-      let catalogSummary = null;
-      try {
-        const cat = await gw.models();
-        const rows = selectableModels(cat);
-        const cloudCount = rows.filter(r => r.provider.includes('cloud') || r.id.includes(':cloud')).length;
-        catalogSummary = { totalModels: rows.length, cloudModels: cloudCount };
-      } catch (err) {
-        catalogSummary = { error: err.message };
-      }
-      let capabilitiesSummary = null;
-      try {
-        const caps = await gw.capabilities();
-        capabilitiesSummary = {
-          audio: Boolean(caps?.audio?.available),
-          vision: Boolean(caps?.vision?.available),
-          frameworks: Boolean(caps?.frameworks?.available),
-        };
-      } catch (err) {
-        capabilitiesSummary = { error: err.message };
-      }
-      output.appendLine(JSON.stringify({
-        extensionVersion: context.extension?.packageJSON?.version || require('./package.json').version,
-        build,
-        endpoint: gw.url,
-        connectionType: isLoopback ? 'local-loopback' : 'remote-tailscale',
-        clientArchitecture: 'thin-ide-client (no local models loaded)',
-        version,
-        tokenConfigured: tokenPresent,
-        configuredModel: configuredModel() || 'Gateway default',
-        catalog: catalogSummary,
-        capabilities: capabilitiesSummary,
-        settingsScopes: {
-          gatewayUrl: 'machine (per-device connection, not synced)',
-          callerToken: 'machine / OS SecretStorage (never synced)',
-          model: 'window (syncable user setting)',
-        },
-        selected: controller?.state.session?.session_id || null,
-      }, null, 2));
-      output.show(true);
-    })),
-    ...(typeof vscode.window?.onDidChangeActiveTextEditor === 'function' ? [vscode.window.onDidChangeActiveTextEditor(() => debouncedPostContext())] : []),
-    ...(typeof vscode.window?.onDidChangeTextEditorSelection === 'function' ? [vscode.window.onDidChangeTextEditorSelection(() => debouncedPostContext())] : []),
-    ...(typeof vscode.languages?.onDidChangeDiagnostics === 'function' ? [vscode.languages.onDidChangeDiagnostics(() => debouncedPostContext())] : []),
-    ...(typeof vscode.workspace?.onDidSaveTextDocument === 'function' ? [vscode.workspace.onDidSaveTextDocument(() => debouncedPostContext())] : []),
-    vscode.workspace.onDidChangeConfiguration(event => {
-      if ((event.affectsConfiguration('jaeger.gatewayUrl') || event.affectsConfiguration('jaeger.callerToken')) && view) report(async () => {
-        const selected = createController(); await controller.refresh(selected);
-      });
-      if (event.affectsConfiguration('jaeger.model') && view) {
-        view.webview.postMessage({ configuredModel: configuredModel() });
-      }
-    }),
-    // Register Microsoft VS Code native Chat Participant (@jaeger) if supported by host
-    ...(typeof vscode.chat?.createChatParticipant === 'function' ? [
-      vscode.chat.createChatParticipant('jaeger.chatParticipant', async (request, chatContext, stream, token) => {
-        let sessionId = '', requestId = '';
-        let cancellation;
-        const requestAbort = new AbortController();
-        try {
-          const workspace = contextRoot();
-          const ide = request.command ? null : ideContext(workspace);
-          const model = parseProviderModel(configuredModel());
-          const storedToken = await getStoredCallerToken();
-          if (storedToken) currentCallerToken = storedToken;
-          const gw = controller?.gateway || gatewayClient();
-          const history = Array.isArray(chatContext?.history) ? chatContext.history : [];
-          sessionId = [...history].reverse().find(turn => turn?.result?.metadata?.jaegerSessionId)
-            ?.result.metadata.jaegerSessionId || '';
-          if (request.command === 'verify') {
-            stream.progress('Running verification test suite...');
-            const root = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-            if (!root) {
-              stream.markdown('*(No workspace folder open)*');
-              return;
-            }
-            const runner = detectTestRunner(root);
-            if (!runner) {
-              stream.markdown('*(No supported test runner found in this workspace)*');
-              return;
-            }
-            const { stdout, stderr } = await execFileAsync(runner.executable, runner.args, {
-              cwd: root, timeout: 120000, maxBuffer: 1024 * 1024 * 5,
-              env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1',
-                PYTHONPYCACHEPREFIX: path.join(os.tmpdir(), 'jaeger', 'pycache') },
-            });
-            const out = `${stdout || ''}${stderr ? `\n${stderr}` : ''}`.trim();
-            stream.markdown('```\n' + (out.slice(-2000) || 'Verification completed.') + '\n```');
-            return;
-          }
-          if (request.command === 'status') {
-            const health = await gw.json('/health').catch(err => ({ error: err.message }));
-            stream.markdown('**Jaeger Gateway Status:** `' + (health.gateway?.ok ? 'available' : 'unavailable') + '`\n\n' +
-              '- Endpoint: `' + gw.url + '`\n' +
-              '- Model: `' + (configuredModel() || 'Gateway default') + '`' +
-              (health.error ? '\n- Error: ' + health.error : ''));
-            return;
-          }
-          if (request.command === 'skills') {
-            const catalog = await gw.skills().catch(() => ({ skills: [] }));
-            const skills = catalog.skills || [];
-            if (!skills.length) {
-              stream.markdown('No skills reported by the connected Gateway.');
-              return;
-            }
-            stream.markdown('**Loaded Skills (' + skills.length + '):**\n\n' +
-              skills.map(s => '- **' + (s.name || s.id) + '**: ' + (s.description || '')).join('\n'));
-            return;
-          }
 
-          const prompt = String(request.prompt || '').trim();
-          if (!prompt) return;
-          if (!sessionId) {
-            const created = await gw.create({
-              session_id: randomUUID(), title: prompt.replace(/\s+/g, ' ').slice(0, 72),
-              workspace, source: 'ide',
-            });
-            sessionId = created.session_id;
-          }
-          requestId = randomUUID();
-          stream.progress('Connecting to Jaeger...');
-          let cancelRequested = false, admittedRequest = false, cancelSent = false;
-          const requestCancel = () => {
-            cancelRequested = true;
-            requestAbort.abort();
-            if (!admittedRequest || cancelSent) return;
-            cancelSent = true;
-            void gw.cancel(sessionId, requestId).catch(error => output.appendLine(`[jaeger] Chat cancellation not confirmed: ${error.message}`));
-          };
-          cancellation = token?.onCancellationRequested?.(requestCancel);
-          const admitted = await gw.send(sessionId, {
-            text: prompt, request_id: requestId, workspace,
-            ...(model.model ? { model: model.model, ...(model.provider ? { provider: model.provider } : {}) } : {}),
-            ...(ide ? { options: { ide } } : {}),
-          });
-          admittedRequest = true;
-          if (cancelRequested || token?.isCancellationRequested) requestCancel();
-          stream.progress(cancelRequested ? 'Cancellation requested · Checking Gateway outcome...' : 'Jaeger is working...');
-          const openConversation = () => stream.button?.({ command: 'jaeger.openSession', title: 'Open Jaeger conversation', arguments: [sessionId] });
-          const outcome = await observeNativeTurn({
-            gateway: gw, sessionId, requestId, admitted, signal: requestAbort.signal,
-            stream, ideHandler: (kind, args) => ideCall(kind, args, workspace),
-            onApproval: () => {
-              stream.progress('Waiting for your approval in the Jaeger conversation panel');
-              openConversation();
-            },
-          });
-          renderNativeOutcome(stream, outcome, cancelRequested);
-          if (!outcome.receipt || !['completed', 'failed', 'cancelled', 'execution_unknown'].includes(outcome.receipt.status)) openConversation();
-          return { metadata: { jaegerSessionId: sessionId, jaegerRequestId: requestId } };
-
-        } catch (err) {
-          stream.markdown('**Jaeger Gateway Error:** ' + err.message);
-          if (requestId) {
-            stream.markdown('\n\nThe execution outcome is not confirmed. Check this conversation before resending the task.');
-            stream.button?.({ command: 'jaeger.openSession', title: 'Open Jaeger conversation', arguments: [sessionId] });
-          }
-          return sessionId ? { metadata: { jaegerSessionId: sessionId, ...(requestId ? { jaegerRequestId: requestId } : {}) } } : undefined;
-        } finally {
-          cancellation?.dispose();
-          requestAbort.abort();
-        }
-      })
-    ] : []),
-    { dispose: () => {
-      controller?.dispose();
-      if (daemonProcess) {
-        try { daemonProcess.kill('SIGTERM'); } catch (_) {}
-        daemonProcess = null;
+      if (request.command === 'verify') {
+        stream.progress('Running verification suite...');
+        // Delegate to controller's runTests
+        await controller.runTests();
+        stream.markdown('Verification request sent. See chat for results.');
+        return { metadata: { command: 'verify' } };
       }
-    } },
-  );
+
+      if (request.command === 'explain') {
+        await controller.explainCode();
+        stream.markdown('Explanation request sent. Opening chat...');
+        return { metadata: { command: 'explain' } };
+      }
+
+      if (request.command === 'fix') {
+        await controller.fixCode();
+        stream.markdown('Fix request sent. Opening chat...');
+        return { metadata: { command: 'fix' } };
+      }
+
+      if (request.command === 'test') {
+        await controller.writeTests();
+        stream.markdown('Test generation request sent. Opening chat...');
+        return { metadata: { command: 'test' } };
+      }
+
+      // Regular message — send to agent
+      const prompt = request.prompt;
+      if (!prompt) return;
+
+      stream.progress('Sending to Jaeger...');
+      await controller.ask(prompt, {
+        includeCode: true,
+        chatRequest: request,
+      });
+
+      stream.markdown(`Request sent to Jaeger. [Open chat to see the response](command:jaeger.openChat)`);
+
+      return { metadata: { command: request.command } };
+    } catch (error) {
+      stream.markdown(`**Error:** ${error.message}\n\nIs the Gateway running? Try \`jaeger gateway daemon\`.`);
+      return { metadata: { error: error.message } };
+    }
+  });
+
+  chatParticipant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'jaeger.svg');
+  context.subscriptions.push(chatParticipant);
+
+  // ─────────────────────────────────────────────────────────
+  // Status bar click → open chat
+  // ─────────────────────────────────────────────────────────
+
+  // Already handled by controller's status bar item
+
+  output.appendLine('[jaeger] Extension activated successfully.');
+  output.appendLine('[jaeger] Chat UI: Open with Cmd+Shift+J or click status bar.');
+
+  return {
+    controller,
+    getGateway: () => gateway,
+  };
 }
-module.exports = { activate };
+
+function deactivate() {
+  output?.appendLine('[jaeger] Extension deactivating...');
+  controller?.dispose();
+  controller = null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// Gateway Client Factory
+// ─────────────────────────────────────────────────────────────
+
+function createGatewayClient() {
+  const config = vscode.workspace.getConfiguration('jaeger');
+  const url = config.get('gatewayUrl') || contract.gatewayUrl;
+
+  return new Gateway(url, {
+    token: async (caller) => {
+      // Try secure storage first
+      const stored = await vscode.workspace.getConfiguration('jaeger').get('callerToken');
+      if (stored) return stored;
+      // Fall back to keychain/file
+      return callerToken(caller);
+    },
+    nativeLoopback: true,
+  });
+}
+
+// Packaged builds get contract.json (gatewayUrl) generated from
+// jaeger_ai/contract/ports.py; this is only the unpackaged default.
+let contract = { gatewayUrl: 'http://127.0.0.1:33418' };
+try { contract = require('./contract.json'); } catch (_) {}
+
+// ─────────────────────────────────────────────────────────────
+// Exports
+// ─────────────────────────────────────────────────────────────
+
+module.exports = { activate, deactivate };

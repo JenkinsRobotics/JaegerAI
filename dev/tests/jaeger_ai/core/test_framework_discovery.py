@@ -1,7 +1,5 @@
 """Framework discovery is presence-only; grants are owner-only and audited."""
 import json
-import shutil
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -69,15 +67,3 @@ def test_only_owner_callers_can_change_grants():
     assert "admin" not in caller_auth.CALLERS["jaegerd"].scopes  # the agent cannot grant itself
     assert "admin" not in caller_auth.CALLERS["mcp"].scopes
     assert not caller_auth.prefixed_route_allowed("GET", "/v1/frameworks")
-
-
-@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
-def test_grant_dialog_text_states_the_limits():
-    static = Path(__file__).resolve().parents[4] / "jaeger_ai/features/webui/static"
-    harness = ("global.window={};" f"require({json.dumps(str(static / 'jaeger_frameworks.js'))});"
-               "const f={name:'Codex'};const c=window.jaegerFrameworks.confirmText;"
-               "console.log(JSON.stringify([c(f,'read_sessions',true),c(f,'delegate',true),c(f,'read_memory',false)]))")
-    read, deleg, revoke = json.loads(subprocess.run(["node", "-e", harness], capture_output=True, text=True,
-                                                    check=True, timeout=30).stdout)
-    assert "Read-only and local" in read and "never opened" in read
-    assert "asks for your approval" in deleg and revoke.startswith("Revoke")

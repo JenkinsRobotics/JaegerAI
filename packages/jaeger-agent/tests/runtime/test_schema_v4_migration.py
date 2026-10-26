@@ -48,7 +48,7 @@ CREATE TABLE commitments (
 );
 INSERT INTO schema_version VALUES (1, 3, '2026-01-01T00:00:00+00:00',
                                       '2026-01-01T00:00:00+00:00');
-INSERT INTO facts (subject, key, value) VALUES ('user', 'name', 'Matthew');
+INSERT INTO facts (subject, key, value) VALUES ('user', 'name', 'Alice');
 INSERT INTO commitments VALUES ('c-old-1', 'finish the archive', 'active',
     'goal', '{"note": "pre-existing"}', '2026-01-01T00:00:00+00:00',
     '2026-01-02T00:00:00+00:00');
@@ -93,7 +93,7 @@ def test_existing_rows_survive_the_upgrade(v3_db):
         fact = conn.execute(
             "SELECT value FROM facts WHERE key = 'name'"
         ).fetchone()
-        assert fact["value"] == "Matthew"
+        assert fact["value"] == "Alice"
 
         commitment = SqliteCommitmentStore().get("c-old-1")
         assert commitment.title == "finish the archive"

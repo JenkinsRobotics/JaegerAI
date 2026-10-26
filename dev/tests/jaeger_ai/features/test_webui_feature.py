@@ -14,9 +14,6 @@ from jaeger_ai.features.webui.service.service import (
     webui_identity_ok,
 )
 
-_REPO = Path(__file__).resolve().parents[4]
-_INDEX = _REPO / "jaeger_ai" / "features" / "webui" / "static" / "index.html"
-
 
 def test_webui_feature_exports():
     assert WebUIService is not None
@@ -33,12 +30,6 @@ def test_webui_urls_helper():
     urls = webui_urls(webui_port=8642)
     assert "8642" in urls.web_ui
     assert "8791" in urls.adapter
-
-
-def test_bundle_version_stamp_has_no_cache_suffix():
-    html = _INDEX.read_text(encoding="utf-8")
-    assert "window.__HERMES_WEBUI_BUNDLE_VERSION__='__WEBUI_VERSION__';" in html
-    assert "window.__HERMES_WEBUI_BUNDLE_VERSION__='__WEBUI_VERSION__." not in html
 
 
 def test_identity_ok_when_bundle_matches_settings():

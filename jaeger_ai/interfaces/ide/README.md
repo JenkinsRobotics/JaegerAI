@@ -1,197 +1,207 @@
-# Jaeger IDE client
+# Jaeger for VS Code — Controller Extension
 
-A small, local VS Code-compatible sidebar over the existing Jaeger Gateway.
-No donor agent runtime, new database, paid SDK, or Marketplace publication.
-The UI selectively adapts Kilo Code's MIT-licensed frame queue and stable-key
-transcript mechanisms; exact provenance is in `THIRD_PARTY_NOTICES.md`.
+**The IDE extension is a controller, not a chat UI.**
 
-## Build and local installation
+The Apple-Native Web UI is the ONE chat. This extension sends context, provides quick actions, and shows agent status.
 
-Requires Python 3, Node 22+, npm, and VS Code 1.96+ (or a compatible host).
-The packager downloads pinned Microsoft VSCE tooling into an external cache;
-the extension itself has no npm runtime dependencies or build step.
+---
 
-```sh
-PYTHONDONTWRITEBYTECODE=1 python3 jaeger_ai/interfaces/ide/package_extension.py \
-  --output-root /tmp/jaeger-ide-build
+## Architecture
+
+```
+┌─────────────────────────────────────────┐
+│     ONE Chat UI (Apple-Native Web)      │  ← The conversation happens HERE
+│     127.0.0.1:8790/?ui=apple            │
+└─────────────────────────────────────────┘
+                   ▲
+                   │ (Gateway :33418 — SSE/WebSocket)
+                   ▼
+┌─────────────────────────────────────────┐
+│         Jaeger Agent (The Brain)        │  ← Single source of truth
+│    (Memory, Tools, Skills, Personality) │
+└─────────────────────────────────────────┘
+                   ▲
+    ┌─────────────┼─────────────┐
+    │             │             │
+    ▼             ▼             ▼
+┌────────┐  ┌──────────┐  ┌─────────┐
+│ VS Code│  │  macOS   │  │   TUI   │
+│Extension│ │   App    │  │         │
+│(Controller)│(Controller)│(Controller)│
+└────────┘  └──────────┘  └─────────┘
 ```
 
-Install the printed VSIX with **Extensions: Install from VSIX…**. No Marketplace
-account is required. Open **Jaeger: Open Conversation**; move its view to the
-Secondary Sidebar using the host's Move View controls for the right-hand column.
-Antigravity compatibility must be verified in the installed host; don't assume
-all VS Code APIs or other agents' private APIs are available there.
+---
 
-`--stage-only` produces an external extension directory for an isolated extension
-development host. Do not run npm install, package caches or build outputs here.
-Canonical default Gateway port is generated from `jaeger_ai/contract/ports.py`.
+## What This Extension Does
 
-The IDE is independently launchable: when the configured loopback Gateway is
-unavailable, the extension starts the managed headless Jaeger runtime with
-`jaeger stack up`. This brings up the Gateway,
-bridge, and native MCP services without requiring `JaegerAI.app`. **Jaeger:
-Connection Settings** selects the local Gateway URL; an optional model setting
-applies to new requests only. Empty model means the Gateway/session chooses.
-Never put credentials in the URL. This initial client rejects non-loopback URLs;
-remote access requires a separate authenticated deployment, not exposing the
-unauthenticated Gateway.
+### 1. Status Bar
+Shows what Jaeger is doing:
+- `○ Jaeger` — Idle
+- `⟳ Jaeger: Thinking...` — Processing
+- `⚙ Jaeger: Running tests...` — Working
+- `💬 Jaeger: Needs input` — Waiting for you
 
-## Behavior and boundaries
+**Click the status bar to open the chat.**
 
-- Type and send directly from a blank composer to create a Gateway conversation,
-  or select an existing one. Histories are
-  fetched from the owner, not copied into a new transcript database.
-- Send, stream Markdown, inspect compact activity, approve/deny,
-  request cancellation, reload history and reconnect. Enter sends; Shift+Enter
-  inserts a newline; IME composition does not submit. Long content wraps; code
-  scrolls horizontally. Colors and focus rings follow the IDE theme.
-- During a live turn, Enter steers the active ReAct request through the Gateway.
-  **Queue next** adds a durable Gateway-owned follow-up request; queue cards
-  support edit, pause/resume, reorder, and delete. The IDE does not keep a
-  second client-side follow-up queue.
-- **Plan** and `/plan <request>` send a plan-only turn by setting the
-  Gateway-enforced grant to `update_plan`. File, shell, and browser tools are
-  not admitted for that turn; the model must produce a plan, not execute it.
-- `/workers` lists the Gateway’s orchestration worker catalog with availability,
-  capabilities, and probe failures. It is a truthful catalog, not a claim that
-  worker task execution or IDE-panel steering is already qualified.
-- Context chips above the composer show the active file, selection, open files,
-  and workspace problem count. `/diagnostics` opens a bounded Problems card.
-  The chips are projections of the existing `ideContext()` and diagnostics APIs;
-  they do not create a second context owner.
-- Session tabs support multiple open conversations. Closing a tab only closes
-  the client view; the Gateway session remains in the chat list and can be reopened.
-  Tab order is client state, not a second session database.
-- `/archive` and `/unarchive` move a conversation between the active and archived
-  sections. Archive state is Gateway-owned session metadata, not a client-side flag.
-- Chat search queries the Gateway-owned session projection by title, workspace,
-  session ID, or transcript content. Results remain Gateway-owned; the client
-  only projects the returned list.
-- The workspace button and `/workspace` command choose which open folder Jaeger
-  uses. The selection is persisted per Gateway endpoint and sent through the
-  Gateway admission `workspace` field for new chats, immediate turns, and queued work.
-- The `@` control picks a workspace file, stages it through the Gateway
-  attachment contract, and inserts the mention into the composer for the next turn.
-- `/worktree` and the Worktree control select an existing git worktree reported
-  by `git worktree list`. The chosen path becomes the Gateway admission workspace.
-  This slice does not create, merge, or prune worktrees.
-- Pending request IDs persist in IDE workspace storage keyed by Gateway URL;
-  drafts stay in webview state. State is outside the source tree. Failed admission
-  never triggers blind automatic resend. An ambiguous missing receipt needs
-  investigation; the client intentionally retains its pending identity.
-- Reconnecting observes an existing request. Closing the panel stops observation,
-  not the owner's work. EOF is not completion; a durable receipt is required.
-- Shared identity/knowledge remain backend responsibilities. Conversations retain
-  their own transcript and focus; no indiscriminate cross-session merging or
-  simulated personality controls are added here.
-- Attachment registration and model selection use the Gateway contracts. The
-  orchestration client methods exist, but the panel does not yet expose a
-  qualified real-worker task flow. There is no automatic context forking.
-  The selected session observes turns started by other clients and restores
-  active requests from durable history after switching, reload or reconnect. Stop only
-  targets the request ID this client knows, never unrelated work.
-- Diagnostics report the endpoint/version/selected ID, not prompts or secrets.
-  No generic shell/file/command bridge is exposed to webview content.
+### 2. Sidebar Panel
+- Agent status orb (animated)
+- Current task
+- Quick action buttons (Explain, Fix, Test, Review)
+- "Open Full Chat" button
 
-## Verification
+### 3. Code Actions (Right-Click)
+Select code → Right-click → **Ask Jaeger**:
+- **Explain** — Understand what the code does
+- **Fix** — Fix errors and bugs
+- **Write Tests** — Generate unit tests
+- **Refactor** — Improve code quality
+- **Add Documentation** — Generate docs/comments
+- **Review** — Code review for issues
 
-```sh
-node --test jaeger_ai/interfaces/ide/tests/*.test.js
-dev/scripts/run_tests.sh --integration dev/tests/jaeger_ai/core/test_ide_gateway_client.py
+### 4. @jaeger Chat Participant
+Type `@jaeger` in VS Code Chat:
+- `@jaeger explain this` — Explain current selection
+- `@jaeger fix` — Fix errors in current file
+- `@jaeger test` — Write tests
+- `@jaeger status` — Check agent status
+- `@jaeger <anything>` — Send to agent (opens main chat)
+
+### 5. Keyboard Shortcuts
+| Shortcut | Action |
+|----------|--------|
+| `Cmd+Shift+J` | Open chat |
+| `Cmd+Shift+'` | Quick ask |
+| `Cmd+Shift+E` | Explain selection |
+
+### 6. Inline Completions
+Type `// TODO:` and get a ghost text suggestion to ask Jaeger to implement it.
+
+---
+
+## What This Extension Does NOT Do
+
+- ❌ No chat UI (the web UI is the chat)
+- ❌ No conversation history (Gateway owns it)
+- ❌ No model calls (Gateway + Ollama Cloud handle that)
+- ❌ No file editing UI (agent does that via tools)
+
+---
+
+## Setup
+
+### 1. Install the Extension
+```bash
+# From the repo
+cd jaeger_ai/interfaces/ide
+npm install
 ```
 
-The Python test owns an isolated real Gateway with a scripted provider and runs
-the JavaScript client through it. It does not use the operator's daemon or paid
-models. UI/host acceptance and real-provider behavior must be reported separately.
-See `VERIFICATION.md` for the latest measured results and external artifact paths.
+Or install the `.vsix` from releases.
 
-## Design/maintenance
+### 2. Start the Gateway
+```bash
+jaeger gateway daemon  # Runs on 127.0.0.1:33418
+```
 
-### Conversation experience
+### 3. Start the WebUI (for chat)
+```bash
+./scripts/run-jaeger-webui.sh  # Runs on 127.0.0.1:8790
+```
 
-The active turn shows elapsed time, readable streamed commentary, collapsed
-model reasoning, and adjacent tool calls grouped into muted disclosures.
-Completion collapses work history above the authoritative final answer.
-Progress and continuation checkpoints remain separate from that answer.
-The Gateway retains session activity beyond its bounded SSE reconnect buffer;
-the client loads every 500-event page with a loading indicator. The bounded
-local cache is only a fallback, not the authoritative history. Events pruned
-before this archive was introduced cannot be reconstructed retroactively.
-Opening an older work disclosure loads that turn's recorded file edits.
-File rows open an inline line-numbered diff; Review opens immutable before/after
-snapshots in the IDE diff editor. Undo requires confirmation, a settled Gateway,
-no dirty matching editor buffers, and unchanged on-disk postimages.
+### 4. Set Up the Extension
+- Open VS Code
+- The Jaeger icon appears in the activity bar
+- Click it to see agent status
+- **Set your caller token**: `Cmd+Shift+P` → "Jaeger: Set Caller Token"
+- **Open chat**: `Cmd+Shift+J` or click status bar
 
-Change tracking covers the native `write_file`, `append_file`, `patch`,
-`delete_file`, `move_file`, and `copy_file` tools for regular UTF-8 files up to
-2 MiB. Arbitrary shell/MCP edits and binaries are not claimed as reversible.
-Private snapshots live beside the Gateway database, outside the source tree.
-Message actions include copy, edit-and-resend on a Gateway branch, retry,
-positive/negative feedback with durable readback, and fork-at-message.
-Edit-message deliberately means **edit and resend**, not history rewriting.
+---
 
-Design references: the operator's Codex screenshots; OpenAI's
-[run lifecycle](https://developers.openai.com/api/docs/guides/agents/running-agents)
-and [approval lifecycle](https://developers.openai.com/api/docs/guides/agents/guardrails-approvals).
-These are behavioral references, not a claim of a mandated OpenAI minimum
-feature list, private Codex source reuse, or complete product parity.
+## Usage Examples
 
-`extension.js` adapts IDE messaging and settings; `conversation.js` owns only
-client projection/observation; `gateway.js` implements HTTP/SSE. `media/` is the
-presentation. Stream snapshots are frame-batched, events reduce into one ordered
-timeline, and keyed rows keep settled DOM stable. There is no agent execution in
-the extension. Keep future worker,
-task, memory and fork logic behind owner APIs, shared with Web and Mac settings.
-Large-history virtualization is a measured follow-on. Never render provider/tool
-HTML directly.
+### Explain Code
+```
+1. Select a function in your editor
+2. Right-click → "Ask Jaeger" → "Explain"
+3. Chat opens with the explanation
+```
 
-API references: https://code.visualstudio.com/api/extension-guides/webview and
-https://code.visualstudio.com/api/working-with-extensions/publishing-extension.
+### Fix Errors
+```
+1. See a red squiggle
+2. Select the problematic code
+3. Right-click → "Ask Jaeger" → "Fix"
+4. Chat opens with the fix
+```
 
-## Remote device and Tailscale setup (Thin IDE Client)
+### Quick Ask
+```
+1. Press Cmd+Shift+' (or Cmd+Shift+J then type)
+2. Type: "How do I add authentication to this API?"
+3. Chat opens with the agent's response
+```
 
-Jaeger operates as a **thin IDE client** on laptops or remote machines, connecting
-over Tailscale to your persistent Jaeger Gateway running on your home server/Mac:
+### @jaeger in Chat
+```
+@jaeger explain this function
+@jaeger fix the type error on line 42
+@jaeger write tests for this class
+@jaeger status
+```
 
-- **Zero local models:** No local LLM weights or models are loaded or executed on
-  the laptop (preserving RAM and battery). The client communicates strictly with the
-  remote Gateway and never silently falls back to local models.
-- **Dynamic model selection:** Available models—including Ollama Cloud models exposed
-  by the server—are queried directly from the Gateway's `/v1/runtime/models` catalog.
-- **VS Code Settings Sync reality:** VS Code Settings Sync synchronizes user settings
-  (such as model preference `jaeger.model`) across your machines, but Settings Sync
-  *only* auto-installs extensions published to the public VS Code Marketplace. For
-  private VSIX builds, install the `.vsix` once on each machine via **Extensions: Install from VSIX…**.
+---
 
-### Setup steps on a new device
+## Configuration
 
-1. **Install extension:** Install the Jaeger VSIX via **Extensions: Install from VSIX…**.
-2. **Configure Gateway URL:** Set `jaeger.gatewayUrl` in Settings to your server's Tailscale
-   address (e.g. `http://home-mac.ts.net:33418` or `http://100.x.y.z:33418`). This setting has
-   `application` scope and is retained per-device (not synced).
-3. **Configure Caller Token:** Run **Jaeger: Set Caller Token** from the Command Palette.
-   Paste the token from `jaeger auth status` on your server. This token is saved in OS
-   SecretStorage via `context.secrets` and is never written to plaintext settings or synced.
-4. **Choose default model:** Run **Jaeger: Select Default Model** or click the model picker
-   in the footer to choose from the server's available models (including Ollama Cloud models).
+| Setting | Description | Default |
+|---------|-------------|---------|
+| `jaeger.gatewayUrl` | Gateway endpoint | `http://127.0.0.1:33418` |
+| `jaeger.webuiUrl` | Chat UI endpoint | Derived from gatewayUrl |
+| `jaeger.showStatusBar` | Show status bar item | `true` |
+| `jaeger.openChatInBrowser` | Open chat externally | `false` |
+| `jaeger.autoStartGateway` | Start Gateway automatically | `false` |
+| `jaeger.model` | Default model | Gateway default |
 
+---
 
-## 0.1.4 candidate: native chat and build identity
+## Why This Architecture?
 
-Native `@jaeger` chat streams answer deltas, reconnects observation from its last
-cursor without resending the task, and distinguishes a cancellation request from
-a confirmed cancelled receipt. Pending approvals provide an **Open Jaeger
-conversation** button for the existing panel's approval controls. The native
-participant and panel use the same editor-request responder.
+| Approach | Distributed Chat | Centralized Chat + Controllers |
+|----------|---------------|-------------------------------|
+| **UX** | Each feels different | One polished experience |
+| **Dev Speed** | 4x the UI work | Focus on one great UI |
+| **Features** | Land in some UIs first | Instantly everywhere |
+| **Context** | Split across apps | One conversation thread |
+| **Voice/Streaming** | Hard in VS Code | Native in web/desktop |
+| **Mobile** | No mobile chat | PWA works everywhere |
 
-Automatic editor context and diagnostics are restricted to the selected workspace;
-agent-requested file opens outside that canonical root are refused. Explicit file
-mentions search the selected workspace/worktree, including one outside the open
-VS Code folders. Existing selected-file/selection chips show the resulting context.
+**The agent is the product. The interfaces are just ways to talk to it.**
 
-**Jaeger: Connection Diagnostics** prints the local extension version and packaged
-build identity before checking the Gateway. `build.json` records the source
-revision, whether source inputs were dirty, and hashes of the staged files; an
-unpackaged checkout identifies itself as unpackaged. Version 0.1.4 distinguishes
-this candidate from the installed 0.1.3 build. Packaging alone does not install or
-reload an extension.
+---
+
+## Development
+
+```bash
+cd jaeger_ai/interfaces/ide
+npm install
+# Press F5 in VS Code to launch Extension Development Host
+```
+
+### File Structure
+```
+ide/
+├── extension.js      # Main entry — registers commands, providers
+├── controller.js     # JaegerController — the brain of the extension
+├── gateway.js        # HTTP client for Jaeger Gateway
+├── conversation.js   # Legacy (to be removed)
+├── commands.js       # Slash command helpers
+├── package.json      # Extension manifest
+└── media/            # Icons, webview assets
+```
+
+---
+
+## License
+
+Same as JaegerAI — see root LICENSE.

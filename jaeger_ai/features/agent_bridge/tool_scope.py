@@ -129,3 +129,12 @@ def confined_arguments(tool, arguments):
     for name in PATH_ARGUMENTS[tool.name]:
         args[name] = confined_path(args.get(name))
     return args
+
+
+# A goal scope can only ever exist inside this module (goal_scope() opens it),
+# so registering here at import keeps confinement exactly as live as the
+# lazy-import check it replaces — no executor sees confinement without the
+# module that owns the scope being loaded.
+from jaeger_agent.tool_executor import register_goal_confinement
+
+register_goal_confinement(confined_arguments)

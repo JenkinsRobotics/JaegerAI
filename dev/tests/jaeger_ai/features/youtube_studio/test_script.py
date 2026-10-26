@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from jaeger_ai.features.youtube_studio import script
+from jaeger_ai.features.youtube_studio.channel_config import ChannelConfig, load_channel_config
 
 
 class _Resp(io.BytesIO):
@@ -36,7 +37,7 @@ x
 | # | Shot | Source | Notes |
 ## Narration
 HOST: Hello.
-## Open questions for Matthew
+## Open questions for the operator
 - ?
 ```"""
 
@@ -48,12 +49,50 @@ def test_settings_read_only_url_and_model(tmp_path: Path) -> None:
     assert script.load_model_settings(tmp_path / "missing.yaml") == script.ModelSettings()
 
 
+def test_channel_config_defaults_are_generic() -> None:
+    """Default config has no personal references."""
+    cfg = load_channel_config(Path("/nonexistent"))
+    assert cfg.channel_name == "Your Channel Name"
+    prompt = cfg.build_system_prompt()
+    assert "ROBOT" in prompt
+    assert "[TBD]" in prompt
+    assert "never mention age" in prompt
+    # No personal names in defaults
+    assert "Matthew" not in prompt
+    assert "Jenkins" not in prompt
+
+
+def test_channel_config_custom_values() -> None:
+    """Custom channel config generates custom prompt."""
+    cfg = ChannelConfig(
+        channel_name="My Build Channel",
+        channel_description="a show about woodworking and robotics",
+        host_description="an AI host that guides the build",
+        robot_description="a sarcastic robot assistant",
+    )
+    prompt = cfg.build_system_prompt()
+    assert "My Build Channel" in prompt
+    assert "woodworking" in prompt
+    assert "AI host that guides the build" in prompt
+    assert "sarcastic robot assistant" in prompt
+
+
 def test_prompt_keeps_show_off_personal_life() -> None:
+    """Default prompt keeps personal life off the show."""
     messages = script.build_messages("brief text", ["log one"], "Episode 1")
     system = messages[0]["content"]
-    assert "AI version of Matthew" in system and "ROBOT" in system
-    assert "NOT a show" in system and "[TBD]" in system
+    assert "ROBOT" in system
+    assert "never mention age" in system and "[TBD]" in system
     assert "log one" in messages[1]["content"] and "brief text" in messages[1]["content"]
+
+
+def test_prompt_uses_custom_channel_config() -> None:
+    """Custom channel config is used in generated messages."""
+    cfg = ChannelConfig(channel_name="Test Channel", project_name="Test Project")
+    messages = script.build_messages("brief", [], "Ep", channel_config=cfg)
+    system = messages[0]["content"]
+    assert "Test Channel" in system
+    assert "Test Project" in system
 
 
 def test_generate_script_writes_markdown_and_posts_to_configured_model(tmp_path: Path) -> None:

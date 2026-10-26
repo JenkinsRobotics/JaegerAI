@@ -15,19 +15,35 @@ instance, one word now.)
 | `jaeger "one-shot prompt"` | Single prompt, print the reply, exit |
 | `jaeger --stream` | Streaming mode (OBS/YouTube renderer WebSocket) |
 
+## Creating your first agent
+
+**New users:** Run this one command to create your first AI agent:
+
+```bash
+jaeger agent create
+```
+
+This opens an **interactive setup wizard** that guides you through:
+1. **Character** — Choose a personality (Assistant, Jarvis, Lilith, or custom)
+2. **Model** — Pick a local model (Ollama, llama.cpp) or cloud API (OpenAI, Anthropic, etc.)
+3. **Permissions** — Set how much control the agent has (ask-first recommended)
+4. **Interface** — Choose Mac app, terminal, or voice
+
+> 💡 **Tip:** Add `--tui` to force the terminal wizard if you're not on macOS or prefer the terminal: `jaeger agent create --tui`
+
 ## Agents (create / manage)
 
 | Command | What it does |
 |---|---|
-| `jaeger setup [name]` | Create an agent — opens the app's setup window (GUI-first) |
-| `jaeger setup tui [name]` | Same, but force the terminal wizard |
-| `jaeger agent create [--name N] [--tui] [--force]` | What `setup` routes to; `--force` rebuilds an existing agent |
-| `jaeger agent list` | Every agent, active one starred |
-| `jaeger agent use <name>` | Set the sticky default agent |
-| `jaeger agent inspect [name]` | Identity + config + manifest, no model boot (default: active) |
+| `jaeger agent create [--name N] [--tui] [--force]` | **Create a new agent** — runs the interactive setup wizard |
+| `jaeger agent list` | List all agents, active one starred |
+| `jaeger agent use <name>` | Set the default agent |
+| `jaeger agent inspect [name]` | Show agent identity + config (no model boot) |
 | `jaeger agent delete <name> [-f]` | Remove an agent |
 | `jaeger agent clear <name> [-f]` | Wipe memory + logs, keep identity/config |
 | `jaeger migrate [--agent N]` | Apply pending per-agent migrations |
+
+> **Note:** `jaeger setup` is a legacy alias for `jaeger agent create`. Use `jaeger agent create` for new agents.
 
 ## Operator console
 

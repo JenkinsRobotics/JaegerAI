@@ -43,7 +43,7 @@ def workspace_mounts(home: Path | None = None, *, include_personal: bool = False
     return mounts + [
         (home / "Desktop", "/mnt/host/Desktop"),
         (home / "Documents", "/mnt/host/Documents"),
-        (Path("/Volumes/Jenkins_Robotics"), "/mnt/nas/Jenkins_Robotics"),
+        (Path("/Volumes/JAEGER_NAS"), "/mnt/nas/JAEGER_NAS"),
         (Path("/Volumes/Personal-Drive"), "/mnt/nas/Personal-Drive"),
     ]
 

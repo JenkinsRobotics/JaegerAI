@@ -62,6 +62,25 @@ def _jaeger_ai_installed() -> bool:
         return False
 
 
+_goal_confinement = None
+
+
+def register_goal_confinement(fn) -> None:
+    """Host-bound bridge-goal confinement (dependency inversion).
+
+    The durable admission scope lives in the host product, which cannot be
+    imported by this package; the host registers its confiner here instead.
+    Unregistered (standalone package) means no goal scope can exist — the
+    same pass-through the previous import guard gave.
+
+    2026-10-22 seam note: JaegerAI's ``features/agent_bridge/tool_scope.py``
+    registers its ``confined_arguments`` here at import. The confiner raises
+    to deny; denial is fail-closed at the call site.
+    """
+    global _goal_confinement
+    _goal_confinement = fn
+
+
 def _owner_approves(tool_name: str, args: Mapping[str, Any], reason: str) -> bool:
     """Ask the owner through the live confirmation provider (approval card).
 
@@ -204,14 +223,10 @@ class HookedToolExecutor:
 
         # An authenticated bridge goal uses the same authority/executor stack,
         # with an additional host-bound resource ceiling (never model flags).
-        def confine(values):
-            if not _jaeger_ai_installed():
-                return dict(values)
-            from jaeger_ai.features.agent_bridge.tool_scope import confined_arguments
-            return confined_arguments(tool, values)
-
+        # The confiner is registered by the host product (features/agent_bridge).
+        confine = _goal_confinement
         try:
-            args = confine(args)
+            args = confine(tool, args) if confine is not None else dict(args)
         except Exception:
             return {"ok": False, "error": "Bridge goal resource denied",
                     "error_type": "permission_denied", "retryable": False}
@@ -340,8 +355,9 @@ class HookedToolExecutor:
 
         # Approval can take arbitrarily long; recheck symlinks, kill switch and
         # operator-hook rewrites immediately before real dispatch.
+        confine = _goal_confinement
         try:
-            args = confine(args)
+            args = confine(tool, args) if confine is not None else dict(args)
         except Exception:
             return {"ok": False, "error": "Bridge goal resource denied",
                     "error_type": "permission_denied", "retryable": False}
@@ -521,18 +537,25 @@ class LedgerToolExecutor:
                 run_id=self._run_id,
             )
         except Exception as exc:
-            from jaeger_agent.cognition.effects import EffectOutcomeUnknown
-            if isinstance(exc,EffectOutcomeUnknown) and exc.receipt is not None:
-                annotate=getattr(self._ledger,'annotate_pending',None)
-                if callable(annotate):
-                    try:annotate(key,exc.receipt)
-                    except Exception:logger.warning('Could not preserve partial effect receipt; claim remains pending',exc_info=True)
             name = type(exc).__name__
             if name in {"PermissionDenied", "HumanOverrideRequired"}:
                 try:
                     self._ledger.abandon(key)
                 except Exception:
                     pass
+            try:
+                from jaeger_agent.cognition.effects import EffectOutcomeUnknown
+                if isinstance(exc, EffectOutcomeUnknown) and getattr(exc, "receipt", None) is not None:
+                    annotate = getattr(self._ledger, "annotate_pending", None)
+                    if callable(annotate):
+                        try:
+                            annotate(key, exc.receipt)
+                        except Exception:  # noqa: BLE001
+                            logger.warning(
+                                "could not preserve partial effect receipt; claim remains pending",
+                                exc_info=True)
+            except Exception:  # noqa: BLE001 — never mask the original failure
+                pass
             raise
         return result
 

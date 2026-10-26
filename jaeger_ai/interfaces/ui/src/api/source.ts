@@ -30,6 +30,12 @@ export interface PendingApproval {
   task?: string; status: string;
 }
 
+export interface ClarificationSnapshot {
+  clarify_id: string; session_id: string; request_id: string | null; question: string;
+  choices: string[]; revision: number;
+  status: "pending" | "answered" | "cancelled" | "expired"; answer: string | null;
+}
+
 export interface CancellationReceipt {session_id:string;request_id:string;status:string;cancel_requested:boolean;cancellation_confirmed?:boolean;unconfirmed_task_ids?:string[];already_terminal?:boolean}
 
 export interface RequestSnapshot {
@@ -310,6 +316,10 @@ export interface JaegerSource {
   uploadAttachment?(sessionId: string, body: { name: string; mime: string; data_base64: string }, idempotencyKey?: string, options?:import("./chunkUpload").UploadOptions): Promise<UploadedAttachment>;
   cancel(sessionId: string, requestId?: string): Promise<CancellationReceipt|void>;
   pendingApprovals?(sessionId: string): Promise<PendingApproval[]>;
+  /** GET /v1/sessions/{id}/clarify: recover form and terminal status without resubmitting the turn. */
+  clarifications?(sessionId: string): Promise<ClarificationSnapshot[]>;
+  /** Read one original clarification receipt after an uncertain answer acknowledgement. */
+  clarificationStatus?(sessionId: string, clarifyId: string): Promise<ClarificationSnapshot>;
   approve(sessionId: string, approvalId: string, approved: boolean): Promise<void>;
   /** POST /v1/sessions/{id}/clarify/{clarify_id}: resolves once; rejects on 409 stale/already resolved. */
   answerClarify?(sessionId: string, clarifyId: string, revision: number, response: string): Promise<void>;

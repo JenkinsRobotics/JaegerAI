@@ -33,7 +33,7 @@ def _clean(candidate: str | None) -> str | None:
     text = candidate.strip()
     if not text or text.lower() in _REJECTED:
         return None
-    # Full names arrive as "Matthew Jenkins"; address uses the first part.
+    # Full names arrive as "Jane Smith"; address uses the first part.
     first = text.split()[0]
     # Reject anything that is not plausibly a name — digits, service
     # suffixes, single letters.

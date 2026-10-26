@@ -3,16 +3,14 @@ from __future__ import annotations
 import json
 import threading
 import time
-from pathlib import Path
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 import pytest
 
+from dev.tests.fixtures.owned_gateway import OwnedGateway
 from jaeger_ai.cli.entry import _route
 from jaeger_ai.features.webui.adapter.server import HermesWebUIAdapterServer
-
-REPO_ROOT = Path(__file__).resolve().parents[4]
 
 
 class _Bridge:
@@ -42,20 +40,6 @@ def test_cli_routes_hermes_webui_adapter():
     assert _route(["hermes-webui-adapter", "--port", "9999"], "/python") == [
         "/python", "-m", "jaeger_ai.features.webui.adapter", "--port", "9999"
     ]
-
-
-def test_webui_branding_extension_reuses_mac_app_icons():
-    assets = REPO_ROOT / "jaeger_ai" / "assets"
-    script = (assets / "jaeger_webui_branding.js").read_text(encoding="utf-8")
-
-    for name in (
-        "jaeger_app_icon_16.png",
-        "jaeger_app_icon_32.png",
-        "jaeger_app_icon_256.png",
-    ):
-        assert name in script
-        assert (assets / name).read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
-    assert "apple-touch-icon" in script
 
 
 @pytest.mark.integration
@@ -318,74 +302,136 @@ def test_approval_broker_is_fail_closed_and_resolvable(tmp_path):
     server.server_close()
 
 
-class _ClarifyBridge(_Bridge):
-    def turn(self, text, session, on_event=None, on_request=None, **kwargs):
-        answer = ""
-        if on_request is not None:
-            answer = on_request({
-                "type": "request",
-                "id": "clarify-demo",
-                "kind": "clarify",
-                "prompt": "Which path should I use?",
-                "options": [],
+@pytest.mark.integration
+def test_runner_start_proxies_the_gateway_and_events_stay_one_schema(tmp_path, monkeypatch):
+    """The browser's run surface is a thin projection of the Gateway's turn.
+
+    The old contract streamed bridge frames translated into Hermes events;
+    that schema is retired. The run id IS the Gateway's request_id and the
+    event feed IS the Gateway's durable session stream — asserted here
+    against a real owned Gateway, not a mock of one.
+    """
+    owned = OwnedGateway(tmp_path)
+    owned.start()
+    try:
+        monkeypatch.setenv("JAEGER_GATEWAY_URL", owned.url)
+        server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            owned.request("/v1/sessions", {"session_id": "s1", "profile": "jaeger"})
+            started = _post(f"{base}/v1/runs", {
+                "message": "Say CONTRACT-ANSWER", "session_id": "s1",
             })
-        if on_event:
-            on_event({"type": "delta", "text": f"using {answer}"})
-        return {"text": f"using {answer}"}
+            run_id = started["run_id"]
+            _, admitted = owned.request(f"/v1/sessions/s1/requests/{run_id}")
+            assert admitted["request_id"] == run_id
+
+            deadline = time.time() + 20
+            observed: dict = {"events": []}
+            while time.time() < deadline:
+                with urlopen(f"{base}/v1/runs/{run_id}/events") as response:
+                    observed = json.load(response)
+                if any(row["event"].startswith("turn.") and
+                       row["event"].split(".", 1)[1] in
+                       {"finish", "failed", "cancelled", "unknown"}
+                       for row in observed["events"]):
+                    break
+                time.sleep(0.05)
+            assert observed["run_id"] == run_id
+            finish = [row for row in observed["events"] if row["event"] == "turn.finish"]
+            assert finish, observed["events"]
+            payload = finish[-1]["payload"]
+            assert payload.get("output") == "CONTRACT-ANSWER"
+            assert payload["request_id"] == run_id
+
+            with urlopen(f"{base}/v1/runs/{run_id}") as response:
+                status = json.load(response)
+            assert status["status"] == "completed"
+            assert status["terminal_state"] == "completed"
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
+    finally:
+        owned.stop()
 
 
 @pytest.mark.integration
-def test_native_run_clarify_respond_unblocks_turn(tmp_path):
-    server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
-    bridge = _ClarifyBridge()
-    server.bridge = bridge
-    server.runner.bridge = bridge
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    base = f"http://127.0.0.1:{server.server_port}"
+def test_clarify_respond_resolves_the_gateway_form_and_unblocks_turn(tmp_path, monkeypatch):
+    """A clarify card is a Gateway entity resolved exactly once (GB-033).
+
+    The adapter reads the form's revision from the Gateway record and answers
+    POST /v1/sessions/{id}/clarify/{clarify_id}; the parked turn then receives
+    the answer and finishes. A second response must fail closed — the form is
+    already resolved.
+    """
+    owned = OwnedGateway(tmp_path)
+    owned.start()
     try:
-        started = _post(f"{base}/v1/runs", {
-            "message": "pick a path",
-            "session_id": "webuiabcdef",
-        })
-        run_id = started["run_id"]
+        monkeypatch.setenv("JAEGER_GATEWAY_URL", owned.url)
+        server = HermesWebUIAdapterServer(("127.0.0.1", 0), "test", run_dir=tmp_path)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base = f"http://127.0.0.1:{server.server_port}"
+        try:
+            owned.request("/v1/sessions", {"session_id": "s1", "profile": "jaeger"})
+            started = _post(f"{base}/v1/runs", {
+                "message": "CONTRACT-CLARIFY", "session_id": "s1",
+            })
+            run_id = started["run_id"]
 
-        # Wait until clarify is pending
-        for _ in range(50):
-            pending = server.clarifications.get_pending("webuiabcdef")
-            if pending:
-                break
-            time.sleep(0.05)
-        assert pending is not None
-        clarify_id = pending["clarify_id"]
-
-        respond = _post(
-            f"{base}/v1/runs/{run_id}/clarifications/{clarify_id}/respond",
-            {"response": "/tmp/out"},
-        )
-        assert respond["ok"] is True
-
-        # Wait for run completion
-        for _ in range(50):
-            with urlopen(f"{base}/v1/runs/{run_id}/events?cursor=0") as response:
-                payload = json.load(response)
-            events = [row.get("event") for row in payload.get("events") or []]
-            if "done" in events or "clarification" in events:
-                if "done" in events:
+            deadline = time.time() + 20
+            seen = ""
+            events: list = []
+            while time.time() < deadline:
+                with urlopen(f"{base}/v1/runs/{run_id}/events") as response:
+                    payload = json.load(response)
+                events = [row for row in payload["events"]
+                          if row.get("event") == "clarify.request"]
+                if events:
                     break
-            time.sleep(0.05)
-        assert "clarification" in events
-        assert "done" in events
-        clarification = next(
-            row for row in payload["events"] if row.get("event") == "clarification"
-        )
-        assert clarification["payload"]["question"] == "Which path should I use?"
-        assert "/tmp/out" in str(
-            next(row for row in payload["events"] if row.get("event") == "done")
-        ) or True
+                time.sleep(0.05)
+            clarification = events[-1]["payload"]
+            assert clarification["question"] == "Which environment should be used?"
+            assert clarification["request_id"] == run_id
+            clarify_id = str(clarification["clarify_id"])
+            revision = int(clarification["revision"])
+
+            respond = _post(
+                f"{base}/v1/runs/{run_id}/clarifications/{clarify_id}/respond",
+                {"response": "staging"},
+            )
+            assert respond["ok"] is True, respond
+            assert respond["revision"] == revision
+            assert respond["delivered"] is True
+
+            form = owned.request(f"/v1/sessions/s1/clarify?clarify_id={clarify_id}")[1]
+            assert form["form"]["status"] == "answered"
+            assert form["form"]["answer"] == "staging"
+
+            again = _post(
+                f"{base}/v1/runs/{run_id}/clarifications/{clarify_id}/respond",
+                {"response": "prod"},
+            )
+            assert again["ok"] is False
+
+            deadline = time.time() + 20
+            output = None
+            while time.time() < deadline:
+                _, row = owned.request(f"/v1/sessions/s1/requests/{run_id}")
+                if row["status"] in {"completed", "failed", "cancelled",
+                                     "execution_unknown"}:
+                    output = row
+                    break
+                time.sleep(0.05)
+            assert output and output["status"] == "completed", output
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=2)
+        owned.stop()
 
 

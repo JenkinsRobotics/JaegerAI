@@ -1,30 +1,47 @@
 <h1 align="center">JaegerAI</h1>
 
 <p align="center">
-  <em>A persistent artificial entity with one continuing identity — it thinks
-  through different models, acts through software and physical devices,
-  remembers its life, learns capabilities, and appears through whatever body
-  or interface is available.</em>
+  <strong>A local-first AI assistant platform with persistent memory, tools, skills, and multi-interface support</strong><br>
+  <em>Mac app · Web UI · Terminal · Voice — one AI companion across all your devices</em>
 </p>
 
 <p align="center">
-  <a href="https://github.com/JenkinsRobotics/JaegerAI/releases"><img src="https://img.shields.io/badge/version-0.12.0-2EA44F?style=for-the-badge" alt="Version"></a>
+  <a href="#quick-start"><img src="https://img.shields.io/badge/▶_Get_Started-37B679?style=for-the-badge" alt="Get Started"></a>
+  <a href="docs/getting-started.md"><img src="https://img.shields.io/badge/📖_Guide-5865F2?style=for-the-badge" alt="Guide"></a>
+  <a href="https://github.com/JenkinsRobotics/JaegerAI/releases"><img src="https://img.shields.io/badge/version-0.13.0-2EA44F?style=for-the-badge" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-2EA44F?style=for-the-badge" alt="License"></a>
-  <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/python-3.11--3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.11-3.12">
+</p>
+
+<p align="center">
+  <a href="https://github.com/JenkinsRobotics/JaegerAI/stargazers"><img src="https://img.shields.io/github/stars/JenkinsRobotics/JaegerAI?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/JenkinsRobotics/JaegerAI/network/members"><img src="https://img.shields.io/github/forks/JenkinsRobotics/JaegerAI?style=social" alt="GitHub forks"></a>
+  <a href="https://github.com/JenkinsRobotics/JaegerAI/issues"><img src="https://img.shields.io/github/issues/JenkinsRobotics/JaegerAI" alt="GitHub issues"></a>
 </p>
 
 ---
 
-> **Jaeger ecosystem identity**
-> ID: `org.jenkinsrobotics.app.jaeger-ai` · Type: **application** ·
-> Role: reference intelligent application and module host
+> **JaegerAI** — A persistent AI companion for your computer
+> Local-first · Privacy-focused · Open source (Apache 2.0)
 
 ## What it is
 
-The goal is a persistent artificial entity: one continuing identity that
-thinks through different models, acts through software and physical devices,
-remembers its life, learns capabilities, and appears through whatever body or
-interface is available.
+JaegerAI is a persistent AI companion that lives on your computer. It remembers your work, helps with projects, runs tasks in the background, and talks to you through a Mac app, web browser, terminal, or voice — with the same memory and personality everywhere.
+
+Under the hood, it's a persistent artificial entity with one continuing identity — it thinks through different models, acts through software and physical devices, remembers its life, learns capabilities, and appears through whatever body or interface is available.
+
+**Current product definition (2026-10-22, see docs/PRODUCT.md):** JaegerAI is
+a standalone intelligence stack — a platform for proactive, world-model AI
+companions and operators. It is one identity that listens, sees live,
+speaks to you, remembers you and your work, helps day to day, runs your
+projects, and eventually moves in a robotic body, with the same memory and
+the same approval gate in every case. It integrates with robot operating
+systems (JROS/JaegerOS), CAD and simulation tools (Aether Suite or alternatives),
+your NAS or file storage, and YouTube (real engineering work, the fastest
+revenue engine). It is not a workspace hub, not a CAD suite, and not
+a machine project. The app/runtime runs locally on your hardware,
+but LLM work today uses cloud models — on-device is the goal to build
+toward, not a current local-model claim. See docs/TRUST.md and docs/STACK.md.
 
 That shapes every design decision here. The model is a component the entity
 thinks with, not the thing itself — swap Ollama for Claude and the same
@@ -127,10 +144,48 @@ Optional engine modules ([JaegerKokoroTTS](https://github.com/JenkinsRobotics/Ja
 are independently usable components. They allow deployments to add speech
 without coupling the underlying runtime to the complete assistant product.
 
+## Quick start
+
+**New to JaegerAI?** Here's the fastest path from zero to your first conversation:
+
+```bash
+# 1. Clone and install (macOS: double-click "Install Jaeger AI.command" instead)
+git clone https://github.com/JenkinsRobotics/JaegerAI.git
+cd JaegerAI
+./install.sh
+
+# 2. Create your first AI agent (interactive setup wizard)
+./jaeger agent create
+
+# 3. Start chatting
+./jaeger                    # Mac app (if built) or terminal UI
+# OR
+./jaeger webui start        # Browser interface at http://localhost:8790
+```
+
+**What you'll need:**
+- **macOS 12+** or **Linux** (Ubuntu 22.04+ recommended)
+- **Python 3.11 or 3.12** ([download](https://www.python.org/downloads/) or `brew install python@3.12`)
+- **Xcode Command Line Tools** (macOS only): `xcode-select --install`
+- **~15 GB free disk** (for local models, Playwright browser, and Python packages)
+- **8 GB+ RAM** (16 GB recommended for local models)
+
+> **No local GPU?** No problem. JaegerAI works with cloud models (OpenAI, Anthropic, Ollama Cloud, etc.). You can also use local models via Ollama, llama.cpp, or MLX on Apple Silicon.
+
+---
+
 ## Install
 
 The standard method is the same as pre-split JaegerAI: clone, run
 `./install.sh`, keep current with `jaeger update`.
+
+**Choose your installation method:**
+
+| Method | Best For | Command |
+|--------|----------|---------|
+| **Double-click installer** | macOS users who want the easiest path | Double-click `Install Jaeger AI.command` |
+| **Clone + install** | Developers, Linux users, customization | `git clone ... && ./install.sh` |
+| **One-line curl** | CI, servers, minimal interaction | `curl -fsSL https://raw.githubusercontent.com/JenkinsRobotics/JaegerAI/master/scripts/install.sh \| bash` |
 
 ```bash
 git clone https://github.com/JenkinsRobotics/JaegerAI.git
@@ -168,32 +223,51 @@ The application installs JaegerAgent's `multimodal-duplex` dependencies by
 default. The standalone JaegerAgent library keeps neural audio optional.
 There are no `kokoro_tts` or `whisper_stt` extras on the JaegerAI package.
 
-## Quick start
+## Your first AI agent
+
+<details open>
+<summary><strong>🎯 Create your AI companion in 3 commands</strong></summary>
 
 ```bash
-./jaeger agent create              # opens the setup wizard (character, model, permissions)
-                                    # --tui for the terminal wizard
-./jaeger                           # launch the default agent
-./jaeger multimodal --check        # preflight models, mic, camera, engine
-./jaeger multimodal --audio full --check  # also require the duplex AEC runtime
-./jaeger multimodal                # attach the multimodal face to a running Jaeger AI
-# Or double-click "Jaeger AI.app" at the repository root.
-# Install a Spotlight/Launchpad launcher with one command:
-./jaeger launcher install
+# 1. Create your agent (interactive wizard)
+./jaeger agent create
+
+# 2. Start chatting
+./jaeger                 # Mac app or terminal
+./jaeger webui start     # Or browser at http://localhost:8790
 ```
 
-Manage multiple agents — a character is the persona; an agent is a
-deployed AI that plays one, with its own memory + config:
+The wizard guides you through: **character** → **model** → **permissions** → **interface**.
+
+</details>
+
+**Quick reference:**
 
 ```bash
-./jaeger agent list                # list agents / mark the default
-./jaeger agent --help              # create | list | use | inspect | delete | clear
-./jaeger --agent <name>            # launch a named agent
-./jaeger --agent <name> --no-voice # text-only (no mic, no TTS warm)
+./jaeger agent list          # List all agents
+./jaeger agent use <name>    # Switch default agent
+./jaeger --agent <name>      # Launch specific agent
+./jaeger "one-shot prompt"   # Quick question, print answer, exit
+./jaeger --voice             # Voice mode (mic + speech)
 ```
 
-`jaeger` is the one operator command — installed on `PATH` after
-`install.sh`, or run as `./jaeger` from the clone.
+**System checks:**
+
+```bash
+./jaeger multimodal --check              # Verify mic, camera, models
+./jaeger multimodal --audio full --check # Also verify voice duplex
+./jaeger doctor                          # Full environment check
+./jaeger status                          # See what's running
+```
+
+**Advanced:**
+
+```bash
+./jaeger multimodal                # Attach voice to running agent
+./jaeger launcher install          # Add to Applications/Launchpad
+./jaeger agent inspect             # View agent config (no model boot)
+./jaeger agent delete <name>       # Remove an agent
+```
 
 ### Jaeger WebUI
 
@@ -369,13 +443,46 @@ from) and [JP01_Firmware](https://github.com/JenkinsRobotics/JP01_Firmware)
 (the robot's Mac + Jetson body-side code JP01's headless install of this
 repo ultimately talks to).
 
-## Development
+## Community & Support
 
-Current continuation state and remaining release work: [`docs/CONTINUE_FROM_HERE.md`](docs/CONTINUE_FROM_HERE.md).
+JaegerAI is an open-source project. We'd love to have you join us!
+
+| Resource | Link | What You'll Find |
+|----------|------|------------------|
+| 💬 **Discussions** | [GitHub Discussions](https://github.com/JenkinsRobotics/JaegerAI/discussions) | Ask questions, share setups, show off your agents |
+| 🐛 **Bug Reports** | [GitHub Issues](https://github.com/JenkinsRobotics/JaegerAI/issues) | Report bugs, request features |
+| 📖 **Documentation** | [docs/](docs/) | Guides, architecture, API reference |
+| 💡 **Ideas & Roadmap** | [GitHub Projects](https://github.com/JenkinsRobotics/JaegerAI/projects) | What we're building next |
+| 🤝 **Contributing** | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute code, docs, or ideas |
+| 📜 **Changelog** | [CHANGELOG.md](CHANGELOG.md) | What's new in each release |
+
+### Getting Help
+
+1. **Check the docs** — [Getting Started](docs/getting-started.md), [Commands](docs/COMMANDS.md), [Troubleshooting](docs/OPERATIONS.md)
+2. **Run diagnostics** — `./jaeger doctor` checks your setup
+3. **Search existing issues** — Your question might already be answered
+4. **Ask in Discussions** — For usage questions and community help
+5. **Open an issue** — For confirmed bugs or feature requests
+
+### Contributing
+
+We welcome contributions of all kinds:
+- 🐛 **Bug fixes** — Fix issues, improve stability
+- ✨ **Features** — New tools, interfaces, integrations
+- 📝 **Documentation** — Guides, examples, clarifications
+- 🎨 **Design** — UI/UX improvements, icons, branding
+- 🧪 **Testing** — Test coverage, benchmarks, scenarios
+- 💬 **Community** — Answer questions, review PRs
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full guide.
+
+---
+
+## Development
 
 ```bash
 pytest dev/tests -m smoke          # ~30s sanity check
-pytest dev/tests                   # full suite (204 test files)
+pytest dev/tests                   # full suite
 ./dev/benchmark/bench.py           # routing corpus — the ≥79/81 gate for any agentic-pipeline change
 ./dev/benchmark/scenarios.py       # 51-case hermetic full-system scenario suite
 ./dev/benchmark/scenarios.py --lane security   # the 15 security gates only
