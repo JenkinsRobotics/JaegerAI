@@ -1382,6 +1382,13 @@ class JaegerGatewayApp:
         except ImportError as e:
             logger.warning(f"Character library routes unavailable: {e}")
         
+        # V2 Agent Management — role, tools, personality (operator-only)
+        try:
+            from jaeger_ai.core.gateway.agent_v2_routes import register_agent_v2_routes
+            register_agent_v2_routes(self.app)
+        except ImportError as e:
+            logger.warning(f"V2 agent management routes unavailable: {e}")
+        
         # Agent catalog — persistence spine for Mac app + WebUI clients.
         self.app.router.add_get("/v1/agents", self.handle_list_agents)
         self.app.router.add_get("/v1/frameworks", self.handle_list_frameworks)
