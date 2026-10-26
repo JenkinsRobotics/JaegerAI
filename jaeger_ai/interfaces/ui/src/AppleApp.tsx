@@ -19,6 +19,9 @@ import remarkGfm from 'remark-gfm'
 import { GatewayClient } from './lib/gateway-client'
 import { VoiceOrb, VoiceButton, Waveform, useAudioLevel } from './components/VoiceOrb'
 import { CreateAgentModal } from './components/CreateAgentModal'
+import { PinnedAgents, usePins, type PinnableAgent } from './components/PinnedAgents'
+import { AgentContextMenu, useContextMenu, type ContextMenuAgent } from './components/AgentContextMenu'
+import { SearchPalette, useSearchPalette } from './components/SearchPalette'
 import type { CharacterTemplate } from './components/CharacterGallery'
 import './theme/apple-app.css'
 import {
@@ -42,6 +45,8 @@ import {
   ChevronLeft,
   ChevronRight,
   UserPlus,
+  Star,
+  Wrench,
 } from './components/Icons'
 
 // ─────────────────────────────────────────────────────────────
@@ -61,25 +66,26 @@ interface ChatMessage {
 interface Agent {
   id: string
   name: string
+  displayName?: string
   avatar?: string
   status?: string
   isOnline?: boolean
   isPrimary?: boolean
+  isPinned?: boolean
   lastMessage?: string
   unreadCount?: number
-  agentType?: 'lead' | 'specialist'
+  role: 'lead' | 'specialist' | 'character' | 'runtime'
+  agentType?: 'lead' | 'specialist' | 'character'
   templateId?: string
-}
-
-interface AgentDetails {
-  id: string
-  name: string
-  role: string
-  agentType: 'lead' | 'specialist'
-  templateId: string
-  description: string
-  voiceTone: string
-  avatarGradient: string
+  cardUrl?: string | null
+  personality?: {
+    name: string
+    voiceTone: string
+    backstory?: string
+    quotes?: string[]
+  }
+  effectiveTools?: string[] | null
+  toolCount?: number
 }
 
 // ─────────────────────────────────────────────────────────────
