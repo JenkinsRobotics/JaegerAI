@@ -4,10 +4,10 @@
 # Core testing
 pytest>=8.0
 pytest-asyncio>=0.23
-pytest-cov>=4.1
-pytest-xdist>=3.5  # Parallel test execution
-pytest-timeout>=2.2
-pytest-mock>=3.12
+pytest-cov>=7.1.0
+pytest-xdist>=3.8.0  # Parallel test execution
+pytest-timeout>=2.4.0
+pytest-mock>=3.17.0
 
 # HTTP/WebSocket testing
 httpx>=0.26
@@ -16,16 +16,16 @@ aiohttp>=3.9
 
 # Browser automation (E2E)
 playwright>=1.40
-pytest-playwright>=0.4
+pytest-playwright>=0.10.0
 
 # Code quality
-ruff>=0.1
-mypy>=1.7
+ruff>=0.17.2
+mypy>=2.4.0
 
 # Test utilities
-faker>=22.0
-freezegun>=1.4
-responses>=0.24  # Mock HTTP requests
+faker>=40.43.0
+freezegun>=1.5.5
+responses>=0.26.3  # Mock HTTP requests
 
 # Swift testing helpers (via subprocess)
 # No direct Python package needed
@@ -34,11 +34,11 @@ responses>=0.24  # Mock HTTP requests
 # Uses @vscode/test-electron (Node.js)
 
 # Coverage reporting
-coverage[toml]>=7.3
+coverage[toml]>=7.17.0
 
 # Performance testing
-pytest-benchmark>=4.0
+pytest-benchmark>=5.3.0
 
 # Security testing
-bandit>=1.7
-safety>=2.3
+bandit>=1.9.4
+safety>=3.8.1
