@@ -27,17 +27,17 @@
 #     git subtree pull --prefix=packages/jaeger-os <url> <ref>
 
 # --- agent core ---
-pydantic>=2.0
-requests>=2.32
-rich>=13.0
-prompt-toolkit>=3.0
+pydantic>=2.14.1
+requests>=2.34.2
+rich>=15.0.0
+prompt-toolkit>=3.0.53
 # Gemma 4 MTMD and native context caching were verified with this binding.
-llama-cpp-python==0.3.34
+llama-cpp-python==0.3.36
 # Apple-Silicon-native MLX backend (config ``model.backend: mlx_lm``,
 # ``/model use mlx <name>``). Marker-gated so Linux installs skip it.
-mlx-lm>=0.21; sys_platform == "darwin" and platform_machine == "arm64"
-croniter>=2.0
-ddgs>=9.0
+mlx-lm>=0.32.2; sys_platform == "darwin" and platform_machine == "arm64"
+croniter>=6.2.4
+ddgs>=9.16.0
 
 # --- voice-adjacent, product-owned (not engine-specific) ---
 # openwakeword moved to the `wakeword` EXTRA in pyproject.toml. The
@@ -51,47 +51,47 @@ ddgs>=9.0
 
 # --- animation/media faces (nodes/animation, nodes/media — product-shipped
 # modules, one consumer each per THREE_TIER_STRUCTURE.md's split triggers) ---
-websockets>=13.0
-cryptography>=43.0
-pyyaml>=6.0
+websockets>=17.3
+cryptography>=50.0.2
+pyyaml>=6.0.3
 
 # macOS accessibility frameworks (pyobjc) — macOS only. The core
 # macos_computer skill drives the UI through Quartz + ApplicationServices
 # (agent-owned skill, not framework substrate — AVFoundation itself
 # stays a jaeger-os dep, core/runtime/preflight's avaudio backend).
-pyobjc-framework-Quartz>=10.0; sys_platform == "darwin"
-pyobjc-framework-ApplicationServices>=10.0; sys_platform == "darwin"
+pyobjc-framework-Quartz>=12.2.2; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices>=12.2.2; sys_platform == "darwin"
 
 # --- vision: look_at + generate_image ---
-torch>=2.2
-transformers>=4.40
-diffusers>=0.27
-pillow>=10.0
+torch>=2.14.1
+transformers>=5.20.2
+diffusers>=0.41.0
+pillow>=13.0.0
 
 # --- browser automation: the `browser` tool ---
 # install.sh runs `playwright install chromium` after deps — the browser
 # binary must match this package's version, so it re-runs every install.
-playwright>=1.40
+playwright>=1.64.1
 
 # --- semantic episodic memory (search_memory) ---
-sentence-transformers>=3.0
+sentence-transformers>=6.2.0
 
 # --- external-model pipeline (LM Studio / OpenAI / Anthropic) ---
-openai>=1.0
-anthropic>=0.40
+openai>=3.37.0
+anthropic>=2.1.0
 
 # --- messaging bridges (Discord / Telegram / Slack Socket Mode) ---
-aiohttp>=3.14.3
-discord.py>=2.4
-python-telegram-bot>=21.0
+aiohttp>=3.14.5
+discord.py>=2.7.1
+python-telegram-bot>=22.8
 
 # --- MCP tool servers ---
-mcp>=1.27,<2
-httpx>=0.27,<1
-jsonschema>=4.20
+mcp>=2.3.0,<3
+httpx>=0.28.1,<1
+jsonschema>=4.26.0
 
 # --- A2A protocol host (official SDK; Agentgateway proxies :8812 here) ---
-a2a-sdk[http-server]==1.1.2
+a2a-sdk[http-server]==1.2.3
 
 # --- macOS menu-bar tray (CLI/TUI-era) ---
 # rumps is a pure-Python wrapper over PyObjC. Environment marker keeps
@@ -101,7 +101,7 @@ rumps>=0.4; sys_platform == 'darwin'
 # --- windowed app (PySide6 shell: Qt tray + rich_tui chat window) ---
 # The bare ``./launch`` surface. Cross-platform Qt; the Qt tray replaces
 # the rumps one as the windowed app supersedes the CLI/TUI default.
-pyside6>=6.5
+pyside6>=6.12.0
 
 # --- dev tooling (uncomment if doing JaegerAI development) ---
 # pytest>=8.0
