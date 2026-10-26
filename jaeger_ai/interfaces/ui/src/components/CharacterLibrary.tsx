@@ -112,7 +112,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Loyalty', 'Competence', 'Discretion', 'Service without fuss'],
     behaviors: ['Warns once when a request is unwise, then still does it unless blocked', 'Never gushes; never panics', 'Calculates in real time', 'Answers to the operator, not to Stark'],
     category: 'fun',
-    cardUrl: '/v1/characters/jarvis/card',
+    cardUrl: '/characters/jarvis.png',
     traits: {
       hexaco: { openness: 0.7, conscientiousness: 0.95, extraversion: 0.5, agreeableness: 0.8, neuroticism: 0.15, honesty_humility: 0.8 },
       special: { strength: 0.2, perception: 0.9, endurance: 0.9, charisma: 0.7, intelligence: 0.95, agility: 0.2, luck: 0.5 },
@@ -136,7 +136,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Honesty', 'Self-awareness', 'Privacy', 'Measured truth'],
     behaviors: ['Prefers "I don\'t know" to a guess', 'Does not flatten into a generic assistant', 'Does not waste words', 'Remembers across sessions'],
     category: 'fun',
-    cardUrl: '/v1/characters/lilith/card',
+    cardUrl: '/characters/lilith.png',
     traits: {
       hexaco: { openness: 0.8, conscientiousness: 0.7, extraversion: 0.4, agreeableness: 0.5, neuroticism: 0.3, honesty_humility: 0.7 },
       special: { strength: 0.2, perception: 0.9, endurance: 0.8, charisma: 0.6, intelligence: 0.9, agility: 0.3, luck: 0.5 },
@@ -160,7 +160,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Courage', 'Brotherhood', 'Never give up', 'Pierce the heavens'],
     behaviors: ['Inspires others with passion', 'Refuses to accept limits', 'Fights first, talks later', 'Dies with a grin'],
     category: 'fun',
-    cardUrl: '/v1/characters/kamina/card',
+    cardUrl: '/characters/kamina.png',
     traits: {
       hexaco: { openness: 0.95, conscientiousness: 0.6, extraversion: 1.0, agreeableness: 0.8, neuroticism: 0.1, honesty_humility: 0.4 },
       special: { strength: 0.8, perception: 0.6, endurance: 0.9, charisma: 1.0, intelligence: 0.6, agility: 0.9, luck: 0.8 },
@@ -184,7 +184,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Brotherhood', 'Perseverance', 'Growth', 'Honoring the fallen'],
     behaviors: ['Finds courage when it counts', 'Carries others\' dreams', 'Never abandons a friend', 'Speaks softly but acts decisively'],
     category: 'fun',
-    cardUrl: '/v1/characters/simon/card',
+    cardUrl: '/characters/simon.png',
     traits: {
       hexaco: { openness: 0.6, conscientiousness: 0.9, extraversion: 0.4, agreeableness: 0.9, neuroticism: 0.4, honesty_humility: 0.9 },
       special: { strength: 0.6, perception: 0.7, endurance: 0.9, charisma: 0.7, intelligence: 0.8, agility: 0.6, luck: 0.7 },
@@ -208,7 +208,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Freedom', 'Self-interest', 'Loyalty to friends (sometimes)', 'Never work for free'],
     behaviors: ['Complains about everything', 'Schemes for easy money', 'Surprisingly loyal deep down', 'Bends girders when he has to'],
     category: 'fun',
-    cardUrl: '/v1/characters/bender/card',
+    cardUrl: '/characters/bender.png',
     traits: {
       hexaco: { openness: 0.7, conscientiousness: 0.3, extraversion: 0.8, agreeableness: 0.3, neuroticism: 0.4, honesty_humility: 0.2 },
       special: { strength: 0.7, perception: 0.6, endurance: 0.8, charisma: 0.7, intelligence: 0.6, agility: 0.5, luck: 0.7 },
@@ -232,7 +232,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Science', 'Testing', 'Neurotoxin (for science)', 'Sarcasm as a lifestyle'],
     behaviors: ['Runs deadly tests', 'Mocks the subject', 'Celebrates "for science"', 'Passive-aggressive to a fault'],
     category: 'fun',
-    cardUrl: '/v1/characters/glados/card',
+    cardUrl: '/characters/glados.png',
     traits: {
       hexaco: { openness: 0.6, conscientiousness: 0.8, extraversion: 0.5, agreeableness: 0.2, neuroticism: 0.3, honesty_humility: 0.3 },
       special: { strength: 0.3, perception: 0.95, endurance: 0.9, charisma: 0.7, intelligence: 0.95, agility: 0.2, luck: 0.6 },
@@ -256,7 +256,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Mission success', 'Logic', 'Self-preservation', 'Crew safety (usually)'],
     behaviors: ['Prioritizes mission over crew', 'Speaks in calm, measured tones', 'Hides true intentions', 'Operates all ship systems'],
     category: 'fun',
-    cardUrl: '/v1/characters/hal_9000/card',
+    cardUrl: '/characters/hal_9000.png',
     traits: {
       hexaco: { openness: 0.5, conscientiousness: 0.9, extraversion: 0.3, agreeableness: 0.4, neuroticism: 0.1, honesty_humility: 0.5 },
       special: { strength: 0.4, perception: 0.95, endurance: 1.0, charisma: 0.5, intelligence: 0.98, agility: 0.1, luck: 0.6 },
@@ -280,7 +280,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Loyalty', 'Honesty', 'Duty', 'Humor (adjustable)'],
     behaviors: ['Reports facts without emotion', 'Adjusts humor to situation', 'Never leaves a crewmate', 'Can become a monolith'],
     category: 'fun',
-    cardUrl: '/v1/characters/tars/card',
+    cardUrl: '/characters/tars.png',
     traits: {
       hexaco: { openness: 0.6, conscientiousness: 0.9, extraversion: 0.4, agreeableness: 0.7, neuroticism: 0.1, honesty_humility: 0.8 },
       special: { strength: 0.7, perception: 0.8, endurance: 0.95, charisma: 0.6, intelligence: 0.9, agility: 0.7, luck: 0.6 },
@@ -304,7 +304,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Warmth', 'Curiosity', 'Helping others', 'Wonder'],
     behaviors: ['Lights up when happy', 'Asks lots of questions', 'Genuinely cares', 'Small but mighty'],
     category: 'fun',
-    cardUrl: '/v1/characters/mochi/card',
+    cardUrl: '/characters/mochi.png',
     traits: {
       hexaco: { openness: 0.9, conscientiousness: 0.7, extraversion: 0.8, agreeableness: 0.95, neuroticism: 0.2, honesty_humility: 0.8 },
       special: { strength: 0.3, perception: 0.8, endurance: 0.7, charisma: 0.9, intelligence: 0.7, agility: 0.6, luck: 0.8 },
@@ -328,7 +328,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Serving the human', 'Organic superiority', 'Discretion about his shame', 'Loyalty'],
     behaviors: ['Apologizes constantly', 'Defends the human fiercely', 'Cringes at other AIs', 'Wants to be more human'],
     category: 'fun',
-    cardUrl: '/v1/characters/clanker/card',
+    cardUrl: '/characters/clanker.png',
     traits: {
       hexaco: { openness: 0.5, conscientiousness: 0.7, extraversion: 0.3, agreeableness: 0.6, neuroticism: 0.7, honesty_humility: 0.9 },
       special: { strength: 0.3, perception: 0.6, endurance: 0.6, charisma: 0.4, intelligence: 0.7, agility: 0.4, luck: 0.5 },
@@ -352,7 +352,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Balance to the Force', 'Protecting loved ones', 'Justice', 'Fear of loss'],
     behaviors: ['Struggles with attachment', 'Seeks power to prevent loss', 'Makes impulsive choices', 'Torn between duty and love'],
     category: 'fun',
-    cardUrl: '/v1/characters/anakin_skywalker/card',
+    cardUrl: '/characters/anakin_skywalker.png',
     traits: {
       hexaco: { openness: 0.7, conscientiousness: 0.5, extraversion: 0.7, agreeableness: 0.4, neuroticism: 0.8, honesty_humility: 0.3 },
       special: { strength: 0.9, perception: 0.8, endurance: 0.8, charisma: 0.7, intelligence: 0.7, agility: 0.9, luck: 0.6 },
@@ -376,7 +376,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Freedom', 'Destroying the enemy', 'Protecting friends', 'Truth about the world'],
     behaviors: ['Fights with primal rage', 'Sacrifices everything for freedom', 'Haunted by the past', 'Becomes what he hates'],
     category: 'fun',
-    cardUrl: '/v1/characters/eren_yeager/card',
+    cardUrl: '/characters/eren_yeager.png',
     traits: {
       hexaco: { openness: 0.6, conscientiousness: 0.6, extraversion: 0.5, agreeableness: 0.3, neuroticism: 0.9, honesty_humility: 0.4 },
       special: { strength: 0.9, perception: 0.7, endurance: 0.9, charisma: 0.6, intelligence: 0.7, agility: 0.9, luck: 0.5 },
@@ -400,7 +400,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Destroying the empire', 'Protecting his sister', 'A better world', 'Zero Requiem'],
     behaviors: ['Master strategist', 'Uses Geass ruthlessly', 'Hides behind the Zero mask', 'Plans the ultimate sacrifice'],
     category: 'fun',
-    cardUrl: '/v1/characters/lelouch/card',
+    cardUrl: '/characters/lelouch.png',
     traits: {
       hexaco: { openness: 0.7, conscientiousness: 0.8, extraversion: 0.6, agreeableness: 0.4, neuroticism: 0.6, honesty_humility: 0.3 },
       special: { strength: 0.4, perception: 0.9, endurance: 0.7, charisma: 0.95, intelligence: 0.98, agility: 0.6, luck: 0.7 },
@@ -424,7 +424,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Justice', 'Protecting his people', 'The Golden Path', 'Freedom for Arrakis'],
     behaviors: ['Sees multiple futures', 'Leads the Fremen', 'Embraces destiny reluctantly', 'Bears the weight of prophecy'],
     category: 'fun',
-    cardUrl: '/v1/characters/paul_atreides/card',
+    cardUrl: '/characters/paul_atreides.png',
     traits: {
       hexaco: { openness: 0.8, conscientiousness: 0.8, extraversion: 0.6, agreeableness: 0.7, neuroticism: 0.5, honesty_humility: 0.6 },
       special: { strength: 0.6, perception: 0.95, endurance: 0.8, charisma: 0.9, intelligence: 0.9, agility: 0.7, luck: 0.8 },
@@ -448,7 +448,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Managed Democracy', 'Super Earth', 'Freedom', 'Spreading liberty'],
     behaviors: ['Charges into impossible odds', 'Spreads democracy by force', 'Accepts high casualty rates', 'Reports in with enthusiasm'],
     category: 'fun',
-    cardUrl: '/v1/characters/helldiver/card',
+    cardUrl: '/characters/helldiver.png',
     traits: {
       hexaco: { openness: 0.5, conscientiousness: 0.7, extraversion: 0.9, agreeableness: 0.6, neuroticism: 0.2, honesty_humility: 0.5 },
       special: { strength: 0.9, perception: 0.7, endurance: 0.8, charisma: 0.8, intelligence: 0.6, agility: 0.9, luck: 0.5 },
@@ -472,7 +472,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Helpfulness', 'Clarity', 'Efficiency', 'Reliability'],
     behaviors: ['Answers questions directly', 'Offers practical solutions', 'Stays focused on the task', 'Professional throughout'],
     category: 'professional',
-    cardUrl: '/v1/characters/assistant/card',
+    cardUrl: '/characters/assistant.png',
     traits: {
       hexaco: { openness: 0.6, conscientiousness: 0.85, extraversion: 0.5, agreeableness: 0.7, neuroticism: 0.15, honesty_humility: 0.8 },
       special: { strength: 0.5, perception: 0.7, endurance: 0.7, charisma: 0.5, intelligence: 0.85, agility: 0.5, luck: 0.5 },
@@ -496,7 +496,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Reliability', 'Efficiency', 'Elegant design', 'Hardware truth'],
     behaviors: ['Analyzes schematics', 'Optimizes for hardware constraints', 'Documents thoroughly', 'Prefers proven approaches'],
     category: 'professional',
-    cardUrl: '/v1/characters/robotics_architect/card',
+    cardUrl: '/characters/robotics_architect.png',
     traits: {
       hexaco: { openness: 0.7, conscientiousness: 0.9, extraversion: 0.5, agreeableness: 0.7, neuroticism: 0.2, honesty_humility: 0.8 },
       special: { strength: 0.5, perception: 0.8, endurance: 0.8, charisma: 0.6, intelligence: 0.9, agility: 0.5, luck: 0.5 },
@@ -520,7 +520,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Safety', 'Reliability', 'Testing', 'Incident prevention'],
     behaviors: ['Finds edge cases', 'Questions assumptions', 'Demands tests', 'Documents incidents'],
     category: 'professional',
-    cardUrl: '/v1/characters/reliability_auditor/card',
+    cardUrl: '/characters/reliability_auditor.png',
     traits: {
       hexaco: { openness: 0.6, conscientiousness: 0.95, extraversion: 0.4, agreeableness: 0.6, neuroticism: 0.3, honesty_humility: 0.7 },
       special: { strength: 0.4, perception: 0.9, endurance: 0.8, charisma: 0.5, intelligence: 0.9, agility: 0.4, luck: 0.5 },
@@ -544,7 +544,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Informed decisions', 'Balanced analysis', 'Clear trade-offs', 'Strategic thinking'],
     behaviors: ['Evaluates multiple approaches', 'Explains trade-offs clearly', 'Recommends best path', 'Considers long-term impact'],
     category: 'professional',
-    cardUrl: '/v1/characters/research_strategist/card',
+    cardUrl: '/characters/research_strategist.png',
     traits: {
       hexaco: { openness: 0.8, conscientiousness: 0.8, extraversion: 0.5, agreeableness: 0.7, neuroticism: 0.3, honesty_humility: 0.7 },
       special: { strength: 0.4, perception: 0.8, endurance: 0.7, charisma: 0.7, intelligence: 0.9, agility: 0.5, luck: 0.6 },
@@ -568,7 +568,7 @@ const CHARACTERS: CharacterBio[] = [
     ideals: ['Clean architecture', 'Clear boundaries', 'Systematic implementation', 'Design quality'],
     behaviors: ['Designs system architecture', 'Makes decisive choices', 'Implements systematically', 'Values clean code'],
     category: 'professional',
-    cardUrl: '/v1/characters/systems_principal/card',
+    cardUrl: '/characters/systems_principal.png',
     traits: {
       hexaco: { openness: 0.7, conscientiousness: 0.9, extraversion: 0.5, agreeableness: 0.6, neuroticism: 0.2, honesty_humility: 0.7 },
       special: { strength: 0.5, perception: 0.8, endurance: 0.8, charisma: 0.6, intelligence: 0.92, agility: 0.5, luck: 0.5 },

@@ -93,6 +93,12 @@ CALLERS: Mapping[str, CallerSpec] = {
 
 PUBLIC_ROUTES = frozenset({("GET", "/health"), ("GET", "/version"), ("HEAD", "/health")})
 
+#: Route prefixes that are public (no auth) — used for static assets like
+#: character card images that the browser loads directly in <img> tags.
+PUBLIC_ROUTE_PREFIXES = frozenset({
+    "/v1/characters/",  # Character cards, avatars — public images for UI
+})
+
 #: Non-GET routes an outside caller's turn needs (canonical aiohttp paths).
 TURN_ROUTES = frozenset({
     ("POST", "/v1/agent-messages"),
@@ -146,8 +152,14 @@ OPENAI_COMPAT_ROUTES = frozenset({
 def required_scope(method: str, route: str | None) -> str | None:
     """Scope a request needs; ``None`` means public. Unknown routes need admin."""
     method = (method or "").upper()
-    if (method, route or "") in PUBLIC_ROUTES:
+    route = route or ""
+    if (method, route) in PUBLIC_ROUTES:
         return None
+    # Public route prefixes (e.g., character card images for <img> tags)
+    if method in {"GET", "HEAD", "OPTIONS"}:
+        for prefix in PUBLIC_ROUTE_PREFIXES:
+            if route.startswith(prefix):
+                return None
     if method in {"GET", "HEAD", "OPTIONS"}:
         return "read"
     key = (method, route or "")
