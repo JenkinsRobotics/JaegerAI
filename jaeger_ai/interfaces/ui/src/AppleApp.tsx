@@ -355,7 +355,7 @@ function Sidebar({
       {/* Header */}
       <div className="sidebar-header">
         <div className="sidebar-logo">
-          <SparklesIcon size={24} />
+          <SparklesIcon size={20} />
           {!collapsed && <span className="sidebar-title">Jaeger</span>}
         </div>
         <button
@@ -363,7 +363,7 @@ function Sidebar({
           onClick={onToggleCollapse}
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >
-          {collapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
+          {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
       </div>
 
@@ -371,7 +371,7 @@ function Sidebar({
       {!collapsed && (
         <div className="sidebar-content">
           <button className="search-trigger" onClick={onSearch}>
-            <Search size={16} />
+            <Search size={14} />
             <span>Search…</span>
             <kbd>⌘K</kbd>
           </button>
@@ -379,9 +379,9 @@ function Sidebar({
       )}
 
       {/* New Chat Button */}
-      <div className="sidebar-content" style={{ paddingTop: collapsed ? 16 : 0 }}>
+      <div className="sidebar-content" style={{ paddingTop: collapsed ? 12 : 0 }}>
         <button className="new-chat-button" onClick={onNewChat}>
-          <Plus size={18} />
+          <Plus size={16} />
           {!collapsed && <span>New Chat</span>}
         </button>
       </div>
@@ -396,7 +396,7 @@ function Sidebar({
             color: 'white'
           }}
         >
-          <UserPlus size={18} />
+          <UserPlus size={16} />
           {!collapsed && <span>Create Agent</span>}
         </button>
       </div>
@@ -422,9 +422,9 @@ function Sidebar({
               fontWeight: 'var(--weight-medium)'
             }}
           >
-            <span style={{ fontSize: 18 }}>🎭</span>
+            <span style={{ fontSize: 16 }}>🎭</span>
             <span>Browse Characters</span>
-            <span style={{ marginLeft: 'auto', color: 'var(--tertiary-label)', fontSize: 13 }}>20</span>
+            <span style={{ marginLeft: 'auto', color: 'var(--tertiary-label)', fontSize: 12 }}>20</span>
           </button>
         </div>
       )}
@@ -645,12 +645,17 @@ function MessageActions({ message, onRegenerate }: { message: ChatMessage; onReg
 function Message({ message, onRegenerate }: { message: ChatMessage; onRegenerate: () => void }) {
   const isUser = message.role === 'user'
   const isStreaming = message.isStreaming
+  const avatarUrl = (message as any).avatarUrl // Character card URL if available
 
   return (
     <div className={cn('message', isUser ? 'message-user' : 'message-assistant')}>
       {!isUser && !message.isGrouped && (
-        <div className="message-avatar">
-          <SparklesIcon size={18} />
+        <div className={cn('message-avatar', avatarUrl && 'message-avatar-card')}>
+          {avatarUrl ? (
+            <img src={avatarUrl} alt="" loading="lazy" />
+          ) : (
+            <SparklesIcon size={14} />
+          )}
         </div>
       )}
       <div className="message-content-wrapper">
@@ -1338,14 +1343,14 @@ function AppleAppContent() {
           </div>
           <div className="header-actions">
             <button className="icon-button" aria-label="New chat" onClick={() => setMessages([])}>
-              <Plus size={20} />
+              <Plus size={18} />
             </button>
             <button className="icon-button" aria-label="Search" title="Search (⌘K)" onClick={openSearch}>
-              <Search size={20} />
+              <Search size={18} />
             </button>
             <ThemeToggle />
             <button className="icon-button" aria-label="Settings">
-              <Settings size={20} />
+              <Settings size={18} />
             </button>
           </div>
         </header>
