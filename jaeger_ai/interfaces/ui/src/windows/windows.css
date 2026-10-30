@@ -19,7 +19,7 @@
   width: 100%;
   flex: 1;
   overflow: hidden;
-  background-color: var(--background, #ffffff); /* literal-ok */
+  background-color: var(--jg-color-pane);
 }
 
 .app-window__content {
@@ -440,27 +440,27 @@
   height: 120px;
   margin-bottom: 24px;
   border-radius: 24px;
-  background: var(--tertiary-fill, rgba(118, 118, 128, 0.12));
-  color: var(--system-blue, #007aff);
+  background: var(--jg-color-hover);
+  color: var(--jg-color-accent-text);
 }
 
 .placeholder-page__title {
   font-size: 28px;
   font-weight: 600;
-  color: var(--label, #000000);
+  color: var(--jg-color-text);
   margin-bottom: 8px;
 }
 
 .placeholder-page__description {
   font-size: 17px;
-  color: var(--secondary-label, rgba(60, 60, 67, 0.6));
+  color: var(--jg-color-text-secondary);
   max-width: 400px;
   margin-bottom: 8px;
 }
 
 .placeholder-page__hint {
   font-size: 13px;
-  color: var(--tertiary-label, rgba(60, 60, 67, 0.3));
+  color: var(--jg-color-text-tertiary);
   margin-top: 24px;
 }
 
@@ -479,8 +479,8 @@
   gap: 12px;
   padding: 12px 0;
   font-size: 15px;
-  color: var(--secondary-label, rgba(60, 60, 67, 0.6));
-  border-bottom: 1px solid var(--separator, rgba(60, 60, 67, 0.1));
+  color: var(--jg-color-text-secondary);
+  border-bottom: 1px solid var(--jg-color-border);
 }
 
 .placeholder-page__features li:last-child {
@@ -494,8 +494,8 @@
   justify-content: center;
   width: 24px;
   height: 24px;
-  background: rgba(52, 199, 89, 0.15);
-  color: var(--system-green, #34c759);
+  background: color-mix(in srgb, var(--jg-avatar-green) 15%, transparent);
+  color: var(--jg-avatar-green);
   border-radius: 50%;
   font-size: 14px;
   font-weight: 600;

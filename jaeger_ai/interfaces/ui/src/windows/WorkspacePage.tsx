@@ -1,5 +1,5 @@
 /**
- * HomePage (Jenkins Robotics, 2026-10-29).
+ * WorkspacePage (was HomePage; Jenkins Robotics, 2026-10-29): the customizable widget dashboard at /workspace.
  *
  * The Home tab is a thin wrapper: it supplies the real `JaegerSource` and the
  * gateway-backed layout transport to the widget platform's page host. No data, no
@@ -12,16 +12,16 @@ import { gatewayLayoutTransport } from "../widgets/gatewayLayout";
 import "../widgets/definitions"; // registers the widget kinds
 import "../widgets/host/host.css";
 
-export interface HomePageProps {
+export interface WorkspacePageProps {
   source?: JaegerSource;
   onOpenWindow?: (id: string) => void;
   onStartChat?: (agentId?: string) => void;
 }
 
-export function HomePage({ source }: HomePageProps) {
+export function WorkspacePage({ source }: WorkspacePageProps) {
   // One transport per mount; identity is stable so PageHost loads the layout once.
   const transport = useMemo(() => gatewayLayoutTransport(), []);
   return <PageHost source={source} transport={transport} />;
 }
 
-export default HomePage;
+export default WorkspacePage;

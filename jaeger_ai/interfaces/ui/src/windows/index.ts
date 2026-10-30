@@ -3,7 +3,6 @@
  */
 
 export { AppWindow, default as AppWindowDefault } from './AppWindow'
-export { ChatPage } from './ChatPage'
 export { WindowDock } from './WindowDock'
 export {
   useWindowManager,

@@ -8,7 +8,7 @@
 
 import { useRef, useEffect, useState, useCallback } from 'react'
 import { WINDOW_DEFINITIONS as windowDefinitions, type WindowInstance, type WindowId } from './WindowManager'
-import { X, ChevronLeft, ChevronRight } from '../components/Icons'
+import { X, ChevronLeft, ChevronRight, Search, MoreHorizontal } from '../components/Icons'
 
 interface WindowDockProps {
   windows: WindowInstance[]
@@ -19,6 +19,44 @@ interface WindowDockProps {
   onOpenWindow?: (id: WindowId) => void
   /** Every tab the app ships. All of them are shown; unopened ones open on click. */
   availableWindows?: WindowId[]
+  /** Phone / narrow: the same pages as a bottom tab bar (first tabs + More). */
+  phone?: boolean
+  /** Opens the ⌘K palette. */
+  onSearch?: () => void
+}
+
+/** Bottom tab bar: the phone tabs, then "More" with every other page. */
+function PhoneTabs({ activeWindowId, onFocusWindow, availableWindows, onSearch }: Pick<WindowDockProps, 'activeWindowId' | 'onFocusWindow' | 'availableWindows' | 'onSearch'>) {
+  const [more, setMore] = useState(false)
+  const all = availableWindows ?? []
+  const tabs = all.filter((id) => windowDefinitions[id].phoneTab)
+  const rest = all.filter((id) => !windowDefinitions[id].phoneTab)
+  const moreActive = rest.includes(activeWindowId)
+  const pick = (id: WindowId) => { setMore(false); onFocusWindow(id) }
+  return (
+    <>
+      {more && (
+        <div className="phone-tabs__more" role="menu" aria-label="More pages" onClick={() => setMore(false)}>
+          <div className="phone-tabs__sheet" onClick={(e) => e.stopPropagation()}>
+            {onSearch && <button type="button" role="menuitem" className="phone-tabs__more-item" onClick={() => { setMore(false); onSearch() }}><Search size={18} /> Search</button>}
+            {rest.map((id) => { const Icon = windowDefinitions[id].icon; return (
+              <button key={id} type="button" role="menuitem" className={`phone-tabs__more-item${id === activeWindowId ? ' is-active' : ''}`} onClick={() => pick(id)}><Icon size={18} /> {windowDefinitions[id].title}</button>
+            ) })}
+          </div>
+        </div>
+      )}
+      <nav className="phone-tabs" aria-label="Pages">
+        {tabs.map((id) => { const Icon = windowDefinitions[id].icon; const on = id === activeWindowId; return (
+          <button key={id} type="button" className={`phone-tabs__tab${on ? ' is-active' : ''}`} aria-current={on ? 'page' : undefined} onClick={() => pick(id)}>
+            <Icon size={22} /><span>{windowDefinitions[id].title}</span>
+          </button>
+        ) })}
+        <button type="button" className={`phone-tabs__tab${moreActive || more ? ' is-active' : ''}`} aria-expanded={more} onClick={() => setMore((v) => !v)}>
+          <MoreHorizontal size={22} /><span>More</span>
+        </button>
+      </nav>
+    </>
+  )
 }
 
 export function WindowDock({
@@ -27,6 +65,8 @@ export function WindowDock({
   onFocusWindow,
   onCloseWindow,
   availableWindows = [],
+  phone = false,
+  onSearch,
 }: WindowDockProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [hasOverflow, setHasOverflow] = useState(false)
@@ -113,6 +153,8 @@ export function WindowDock({
     return () => window.removeEventListener('resize', handleResize)
   }, [checkOverflow])
 
+  if (phone) return <PhoneTabs activeWindowId={activeWindowId} onFocusWindow={onFocusWindow} availableWindows={availableWindows} onSearch={onSearch} />
+
   return (
     <div className={`window-dock${hasOverflow ? ' has-overflow' : ''}`} role="toolbar" aria-label="App windows">
       {/* Left scroll button */}
@@ -178,6 +220,12 @@ export function WindowDock({
           )
         })}
       </div>
+
+      {onSearch && (
+        <button type="button" className="window-dock__search" onClick={onSearch} aria-label="Search (⌘K)" title="Search (⌘K)">
+          <Search size={16} /><kbd>⌘K</kbd>
+        </button>
+      )}
 
       {/* Right scroll button */}
       {canScrollRight && (

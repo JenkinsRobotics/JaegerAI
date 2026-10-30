@@ -9,42 +9,24 @@ import "./chat/chat.css";
 import "./settings/settings.css";
 import "./tasks/tasks.css";
 import "./shell/motion.css";
-// Apple-Native Design System (v0.13.0) — Self-contained
-// Loaded only when ?ui=apple or jaeger.ui.apple=1
-// The AppleApp component imports its own styles via apple-app.css
+// One app: the unified shell (dock pages at real routes). The old `?ui=apple|windows|default`
+// switch and its localStorage flags are retired; old links land on the matching page.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { App } from "./App";
 import { createSource } from "./api";
+import { AppWindow } from "./windows/AppWindow";
+import { clearLegacyFlags, legacyRedirect } from "./shell/router";
+import { applyAppearance, storedAppearance } from "./settings/SettingsDialog";
 
-// Feature flags for different UI modes
-const USE_APPLE_UI = new URLSearchParams(window.location.search).get("ui") === "apple" ||
-                     localStorage.getItem("jaeger.ui.apple") === "1";
-const USE_WINDOWS_UI = new URLSearchParams(window.location.search).get("ui") === "windows" ||
-                       localStorage.getItem("jaeger.ui.windows") === "1";
+const redirect = legacyRedirect(location.pathname, location.search);
+if (redirect) history.replaceState(null, "", redirect + location.hash);
+clearLegacyFlags();
+applyAppearance(storedAppearance());
 
 const source = await createSource();
 
-// Render the appropriate UI based on flags
-if (USE_WINDOWS_UI) {
-  // Multi-window app system (Grok-style App windows)
-  const { AppWindow } = await import("./windows/AppWindow");
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-      <AppWindow source={source} />
-    </StrictMode>,
-  );
-} else if (USE_APPLE_UI) {
-  const { AppleApp } = await import("./AppleApp");
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-      <AppleApp />
-    </StrictMode>,
-  );
-} else {
-  createRoot(document.getElementById("root")!).render(
-    <StrictMode>
-      <App source={source} />
-    </StrictMode>,
-  );
-}
+createRoot(document.getElementById("root")!).render(
+  <StrictMode>
+    <AppWindow source={source} />
+  </StrictMode>,
+);

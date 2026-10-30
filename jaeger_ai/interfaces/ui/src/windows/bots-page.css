@@ -246,7 +246,7 @@
   font-size: 64px;
   font-weight: 700;
   color: white;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  text-shadow: 0 2px 8px color-mix(in srgb, var(--jg-color-shadow) 30%, transparent);
 }
 
 /* Info */
@@ -493,8 +493,8 @@
 }
 
 .bot-modal__category--fun {
-  background: color-mix(in srgb, #AF52DE 20%, transparent);
-  color: #AF52DE;
+  background: color-mix(in srgb, var(--jg-avatar-purple) 20%, transparent);
+  color: var(--jg-avatar-purple);
 }
 
 .bot-modal__category--professional {
