@@ -8,7 +8,7 @@
  */
 import type React from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { MessageSquare, Cpu, Cloud, Home, Zap, Users, Settings, Sparkles, BarChart, Image } from '../components/Icons'
+import { MessageSquare, Cpu, Cloud, Home, Zap, Users, Settings, Sparkles, BarChart, Image, Database, Workflow, Compass, FileText } from '../components/Icons'
 import { PAGES, type PageId } from '../shell/router'
 
 export type WindowId = PageId
@@ -41,6 +41,10 @@ export const WINDOW_DEFINITIONS: Record<WindowId, WindowDefinition> = {
   sharepoint: { id: 'sharepoint', title: 'SharePoint', icon: Cloud, description: 'Document libraries and artifacts', closable: true },
   workspace: { id: 'workspace', title: 'Workspace', icon: BarChart, description: 'Your own widget dashboard', closable: true },
   studio: { id: 'studio', title: 'Studio', icon: Image, description: 'Generate images, asset library and board', closable: true },
+  models: { id: 'models', title: 'Models', icon: Database, description: 'Local Ollama models, sizes and fit for this Mac', closable: true },
+  compare: { id: 'compare', title: 'Compare', icon: Workflow, description: 'One prompt, two models, side by side', closable: true },
+  research: { id: 'research', title: 'Research', icon: Compass, description: 'Deep research runs as an approved task with a report', closable: true },
+  documents: { id: 'documents', title: 'Documents', icon: FileText, description: 'Markdown documents with AI edit actions', closable: true },
   settings: { id: 'settings', title: 'Settings', icon: Settings, description: 'Settings, grouped by category (⌘,)', closable: true },
 }
 

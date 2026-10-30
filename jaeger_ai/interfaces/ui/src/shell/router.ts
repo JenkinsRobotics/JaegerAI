@@ -7,9 +7,9 @@
  */
 import { useEffect, useState } from "react";
 
-export type PageId = "home" | "chat" | "agents" | "characters" | "tasks" | "machine" | "sharepoint" | "settings" | "workspace" | "studio";
+export type PageId = "home" | "chat" | "agents" | "characters" | "tasks" | "machine" | "sharepoint" | "settings" | "workspace" | "studio" | "models" | "compare" | "research" | "documents";
 
-export const PAGES: readonly PageId[] = ["home", "chat", "agents", "characters", "tasks", "machine", "sharepoint", "settings", "workspace", "studio"];
+export const PAGES: readonly PageId[] = ["home", "chat", "agents", "characters", "tasks", "machine", "sharepoint", "settings", "workspace", "studio", "models", "compare", "research", "documents"];
 
 export interface Route { page: PageId; /** Path after the page segment, e.g. a settings tab or agent id. */ rest: string; params: URLSearchParams }
 
