@@ -14,6 +14,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { JaegerSource } from "../api/source";
 import type { TaskArtifact } from "../api/source";
 import { Search, Zap, RefreshCw, X } from "../components/Icons";
+import "../windows/bots-page.css"; // shared card/grid styles (needed now that pages are code-split)
 import "./sharepoint.css";
 
 export interface SharePointPanelProps {
