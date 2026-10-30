@@ -19,6 +19,7 @@ import { AgentKnowledge } from "../agents/AgentKnowledge";
 import { AgentFace } from "./AgentFace";
 import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast } from "./ui";
 import { createSpecialist } from "./agentCreate";
+import { CharacterRoster } from "./CharacterRoster";
 
 const statusTone = (s?: string) => (s === "working" ? "ok" : s === "waiting_approval" ? "warn" : s === "error" || s === "blocked" ? "bad" : undefined);
 const when = (t?: number | null) => (t ? new Date((t > 1e12 ? t : t * 1000)).toLocaleString() : "–");
@@ -63,6 +64,7 @@ export function AgentsRoster({ source, store, refresh, onNavigate }: { source: J
           <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => setCreating(true)}>New agent</button>
         </div>
       </header>
+      <CharacterRoster onNavigate={onNavigate} />
       {store.error && <p className="jg-u-error" role="alert">Gateway unreachable: {store.error}</p>}
       <div className="jg-ui-split">
         <ul className="jg-u-roster" aria-label="Agents">
