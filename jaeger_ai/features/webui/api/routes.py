@@ -13434,6 +13434,12 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/v1/dashboard":
         from api import dashboard_store
         return j(handler, dashboard_store.read())
+    if parsed.path == "/v1/system/metrics":
+        from api import system_metrics
+        return j(handler, system_metrics.metrics())
+    if parsed.path == "/v1/system/status":
+        from api import system_metrics
+        return j(handler, system_metrics.status())
     if parsed.path == "/v1/gateway-health":
         return _proxy_jaeger_gateway(handler, "GET", "/health")
 

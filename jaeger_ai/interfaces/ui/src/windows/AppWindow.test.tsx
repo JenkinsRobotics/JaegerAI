@@ -54,7 +54,8 @@ it("lists every page in the dock and persists which pages are open", async () =>
 it("Home shows the approvals section and the ⌘K palette offers pages and characters", async () => {
   await mount("/");
   expect(front()).toBe("Home");
-  expect(document.querySelector('[aria-label="Pending approvals"]')).not.toBeNull();
+  expect(document.querySelector('[aria-label="Approvals"]')).not.toBeNull();
+  expect(document.querySelector('[aria-label="Control Center"]')).not.toBeNull();
   await flush(() => dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true })));
   const rows = [...document.querySelectorAll(".jg-palette__label")].map((r) => r.textContent);
   expect(rows).toContain("Go to Characters");
