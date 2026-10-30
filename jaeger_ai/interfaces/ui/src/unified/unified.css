@@ -65,7 +65,7 @@
 @keyframes jg-robot-pulse { 50% { opacity: .35; } }
 
 /* Approvals tray: reachable from every page. */
-.jg-u-tray { position: fixed; right: 16px; bottom: 84px; z-index: 50; display: grid; justify-items: end; gap: 8px; }
+.jg-u-tray { position: fixed; right: 16px; bottom: 96px; z-index: 50; display: grid; justify-items: end; gap: 8px; }
 .jg-u-tray__button { font: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 999px; border: 0; cursor: pointer; background: var(--jg-primary-yellow); color: var(--jg-color-shade); box-shadow: var(--jg-shadow-card); }
 .jg-u-tray__panel { width: min(420px, calc(100vw - 32px)); max-height: 60vh; overflow: auto; padding: 14px; border-radius: 14px; background: var(--jg-color-elevated); border: 1px solid var(--jg-color-border); box-shadow: var(--jg-shadow-card); order: -1; }
 .app-window--phone .jg-u-tray { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); right: 10px; }
