@@ -16,8 +16,12 @@ export function loadPins(): string[] {
   }
 }
 
+/** Fired after device pins change, so every page (sidebar, Agents, palette) shows the one pin list. */
+export const PINS_EVENT = "jaeger:pins";
+
 export function savePins(pins: string[]) {
   try { localStorage.setItem(PINS_KEY, JSON.stringify(pins)); } catch { /* storage unavailable */ }
+  if (typeof dispatchEvent === "function") dispatchEvent(new Event(PINS_EVENT));
 }
 
 /** Pin `id` at `index` (end by default); pinning an already pinned agent moves it. */
