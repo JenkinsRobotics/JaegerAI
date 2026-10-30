@@ -47,7 +47,7 @@ it("shows Settings as a grouped page and deep-links a tab", async () => {
 it("lists every page in the dock and persists which pages are open", async () => {
   await mount("/tasks");
   const dock = [...document.querySelectorAll(".window-dock__label")].map((l) => l.textContent);
-  expect(dock).toEqual(["Home", "Chat", "Agents", "Characters", "Tasks", "Machine Control", "SharePoint", "Settings", "Workspace"]);
+  expect(dock).toEqual(["Home", "Chat", "Agents", "Characters", "Tasks", "Machine Control", "SharePoint", "Settings", "Workspace", "Studio"]);
   expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!).open).toContain("tasks");
 });
 

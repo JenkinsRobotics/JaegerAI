@@ -18,6 +18,7 @@ import { WorkspacePage } from './WorkspacePage'
 import { MachineControlPanel } from '../machine-control/MachineControlPanel'
 import { SharePointPanel } from '../sharepoint/SharePointPanel'
 import { TasksWorkspace } from '../unified/TasksWorkspace'
+import { StudioPage } from '../unified/StudioPage'
 import { useAgentsStore } from '../agents/agentsStore'
 import { visible } from '../agents/agentsLogic'
 import { JumpTo, type JumpAction } from '../agents/JumpTo'
@@ -84,6 +85,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
       case 'machine': return <MachineControlPanel source={source} />
       case 'sharepoint': return <SharePointPanel source={source} />
       case 'workspace': return <WorkspacePage source={source} />
+      case 'studio': return <StudioPage source={source} agents={store.agents} onNavigate={go} />
       default: return null
     }
   }

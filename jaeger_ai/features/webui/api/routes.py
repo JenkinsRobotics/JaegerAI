@@ -13431,6 +13431,9 @@ def handle_get(handler, parsed) -> bool:
         return _handle_memory_read(handler, parsed)
 
     # ── Unified UI: workspace layout + gateway liveness (WebUI-owned, minimal) ──
+    from api import unified_api
+    if unified_api.route(handler, parsed, "GET", read_body, j):
+        return True
     if parsed.path == "/v1/dashboard":
         from api import dashboard_store
         return j(handler, dashboard_store.read())
@@ -13771,6 +13774,9 @@ def handle_post(handler, parsed) -> bool:
             return True
     if not _csrf_exempt_path(parsed.path) and not _check_csrf(handler):
         return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
+    from api import unified_api
+    if unified_api.route(handler, parsed, "POST", read_body, j):
+        return True
     try:
         from api.jaeger_agents import route as jaeger_agents_route
         if jaeger_agents_route(handler, parsed, "POST"):
@@ -16640,6 +16646,9 @@ def handle_delete(handler, parsed) -> bool:
     """Handle all DELETE routes. Returns True if handled, False for 404."""
     if not _check_csrf(handler):
         return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
+    from api import unified_api
+    if unified_api.route(handler, parsed, "DELETE", read_body, j):
+        return True
     try:
         from api.jaeger_agents import route as jaeger_agents_route
         if jaeger_agents_route(handler, parsed, "DELETE"):
@@ -16682,6 +16691,9 @@ def handle_put(handler, parsed) -> bool:
     """Handle all PUT routes. Returns True if handled, False for 404."""
     if not _check_csrf(handler):
         return j(handler, {"error": "Cross-origin request rejected"}, status=403)
+    from api import unified_api
+    if unified_api.route(handler, parsed, "PUT", read_body, j):
+        return True
     proxy_result = _handle_extension_sidecar_proxy(
         handler,
         parsed,

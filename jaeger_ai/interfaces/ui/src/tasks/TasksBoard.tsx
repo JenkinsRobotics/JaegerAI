@@ -257,8 +257,16 @@ export function TasksBoard({ source, agents, view = "board", filter, initialTask
       {operationError && <p role="alert">{operationError}</p>}
       {proposalError && <p role="alert">{proposalError}</p>}
 
-      <OwnedHandoffs source={source} />
-      {source.delegation && source.agentHome && <SpecialistHandoff source={source} agents={agents} />}
+      {bare ? (
+        <details className="jg-u-card jg-tasks__handoffs">
+          <summary>Specialist hand-offs</summary>
+          <OwnedHandoffs source={source} />
+          {source.delegation && source.agentHome && <SpecialistHandoff source={source} agents={agents} />}
+        </details>
+      ) : (<>
+        <OwnedHandoffs source={source} />
+        {source.delegation && source.agentHome && <SpecialistHandoff source={source} agents={agents} />}
+      </>)}
 
       {composer && source.taskActions && source.agentHome && (
         <form
