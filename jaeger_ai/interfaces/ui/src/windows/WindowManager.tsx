@@ -8,7 +8,7 @@
  */
 import type React from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { MessageSquare, Cpu, Cloud, Home, Zap, Users, Settings, Sparkles, BarChart } from '../components/Icons'
+import { MessageSquare, Cpu, Cloud, Home, Zap, Users, Settings, Sparkles, BarChart, Image } from '../components/Icons'
 import { PAGES, type PageId } from '../shell/router'
 
 export type WindowId = PageId
@@ -40,6 +40,7 @@ export const WINDOW_DEFINITIONS: Record<WindowId, WindowDefinition> = {
   machine: { id: 'machine', title: 'Machine Control', icon: Cpu, description: 'Local computer control, screen and permissions', closable: true },
   sharepoint: { id: 'sharepoint', title: 'SharePoint', icon: Cloud, description: 'Document libraries and artifacts', closable: true },
   workspace: { id: 'workspace', title: 'Workspace', icon: BarChart, description: 'Your own widget dashboard', closable: true },
+  studio: { id: 'studio', title: 'Studio', icon: Image, description: 'Generate images, asset library and board', closable: true },
   settings: { id: 'settings', title: 'Settings', icon: Settings, description: 'Settings, grouped by category (⌘,)', closable: true },
 }
 
