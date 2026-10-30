@@ -148,3 +148,20 @@ def test_without_a_build_root_files_stay_legacy(tmp_path, monkeypatch):
     mod = _load()
     for path in ("/manifest.webmanifest", "/manifest.json", "/jaeger-icon.svg"):
         assert _get(mod, path)[0] is False
+
+
+def test_unified_ui_page_routes_serve_the_index(dist):
+    mod = _load()
+    for path in ("/chat", "/characters", "/settings/voice", "/tasks/gallery", "/agents/"):
+        out, h = _get(mod, path)
+        assert out is True and h.status == 200 and b"./assets/app.js" in h.wfile.getvalue(), path
+
+
+def test_page_routes_never_shadow_files_or_unknown_paths(dist):
+    mod = _load()
+    assert not mod.is_page_route("/characters/jarvis.png")
+    assert not mod.is_page_route("/chat/../secret.txt")
+    assert not mod.is_page_route("/v1/agents")
+    assert not mod.is_page_route("/nope")
+    out, h = _get(mod, "/characters/jarvis.png")
+    assert out is False or h.status == 404
