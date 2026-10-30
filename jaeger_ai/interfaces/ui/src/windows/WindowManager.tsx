@@ -8,7 +8,7 @@
  */
 import type React from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { MessageSquare, Cpu, Cloud, Home, Zap, Users, Settings, Sparkles, BarChart, Image, Database, Workflow, Compass, FileText } from '../components/Icons'
+import { MessageSquare, Cpu, Cloud, Home, Zap, Users, Settings, Sparkles, BarChart, Image, Database, Workflow, Compass, FileText, Brain, Puzzle, Clock } from '../components/Icons'
 import { PAGES, type PageId } from '../shell/router'
 
 export type WindowId = PageId
@@ -45,6 +45,9 @@ export const WINDOW_DEFINITIONS: Record<WindowId, WindowDefinition> = {
   compare: { id: 'compare', title: 'Compare', icon: Workflow, description: 'One prompt, two models, side by side', closable: true },
   research: { id: 'research', title: 'Research', icon: Compass, description: 'Deep research runs as an approved task with a report', closable: true },
   documents: { id: 'documents', title: 'Documents', icon: FileText, description: 'Markdown documents with AI edit actions', closable: true },
+  knowledge: { id: 'knowledge', title: 'Memory & Skills', icon: Brain, description: 'Skills, agent memory and the document library', closable: true },
+  integrations: { id: 'integrations', title: 'Integrations', icon: Puzzle, description: 'MCP servers, tools and connected apps', closable: true },
+  calendar: { id: 'calendar', title: 'Calendar', icon: Clock, description: 'Scheduled jobs and task due dates', closable: true },
   settings: { id: 'settings', title: 'Settings', icon: Settings, description: 'Settings, grouped by category (⌘,)', closable: true },
 }
 

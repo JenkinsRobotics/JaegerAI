@@ -13,6 +13,14 @@ import { CHARACTERS } from "../components/CharacterLibrary";
 let root: Root | undefined;
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; localStorage.clear(); document.body.innerHTML = ""; history.replaceState(null, "", "/"); });
 const flush = async (fn: () => void = () => {}) => act(async () => { fn(); await new Promise((r) => setTimeout(r, 0)); });
+/** Pages are code-split (React.lazy): wait until the visible page has replaced its loading fallback. */
+const settle = async () => {
+  for (let i = 0; i < 80; i++) {
+    await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
+    if (!document.querySelector(".app-window__page--active > .jg-u-page > [role=status][aria-label=Loading]")) break;
+  }
+  await flush();
+};
 const front = () => document.querySelector(".app-window__page--active")?.getAttribute("aria-label");
 
 async function mount(path: string, source = new MockSource()) {
@@ -20,7 +28,7 @@ async function mount(path: string, source = new MockSource()) {
   const el = document.createElement("div"); document.body.append(el);
   root = createRoot(el);
   await flush(() => root!.render(<AppWindow source={source} />));
-  await flush();
+  await settle();
   return source;
 }
 
@@ -29,6 +37,7 @@ it("opens the page the URL names and follows navigation and back/forward", async
   expect(front()).toBe("Characters");
   expect(document.body.textContent).toContain("Jarvis");
   await flush(() => navigate("/agents"));
+  await settle();
   expect(location.pathname).toBe("/agents");
   expect(front()).toBe("Agents");
   await flush(() => { history.back(); });
@@ -47,7 +56,7 @@ it("shows Settings as a grouped page and deep-links a tab", async () => {
 it("lists every page in the dock and persists which pages are open", async () => {
   await mount("/tasks");
   const dock = [...document.querySelectorAll(".window-dock__label")].map((l) => l.textContent);
-  expect(dock).toEqual(["Home", "Chat", "Agents", "Characters", "Tasks", "Machine Control", "SharePoint", "Settings", "Workspace", "Studio", "Models", "Compare", "Research", "Documents"]);
+  expect(dock).toEqual(["Home", "Chat", "Agents", "Tasks", "Research", "Documents", "Studio", "Compare", "Models", "Memory & Skills", "Integrations", "Calendar", "Characters", "Workspace", "Machine Control", "SharePoint", "Settings"]);
   expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!).open).toContain("tasks");
 });
 

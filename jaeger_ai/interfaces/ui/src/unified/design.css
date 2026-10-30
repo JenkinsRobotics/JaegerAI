@@ -196,3 +196,18 @@ button.jg-cc__tile:active { transform: scale(.97); }
 .jg-docs__panes:not([data-mode="split"]) { grid-template-columns: 1fr; }
 .jg-docs__panes textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: var(--jg-text-body); line-height: 1.6; padding: var(--jg-space-3); border-radius: var(--jg-radius-m); border: 1px solid var(--jg-color-border-tertiary); background: var(--jg-color-pane); color: var(--jg-color-text); resize: vertical; min-height: 480px; }
 .jg-docs__preview { padding: var(--jg-space-3); font-size: var(--jg-text-callout); line-height: 1.6; overflow: auto; }
+.jg-kn__group { margin-bottom: var(--jg-space-4); }
+.jg-kn__group h3 { margin: 0 0 var(--jg-space-2); font-size: var(--jg-text-footnote); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--jg-color-text-tertiary); }
+.jg-kn__match { font-size: var(--jg-text-body); padding: var(--jg-space-1) 0; }
+.jg-kn__match small { color: var(--jg-color-text-tertiary); margin-right: var(--jg-space-2); }
+.jg-cal__item { display: flex; gap: var(--jg-space-3); align-items: center; padding: var(--jg-space-2) 0; }
+.jg-cal__item time { width: 72px; flex: none; font-size: var(--jg-text-footnote); font-variant-numeric: tabular-nums; color: var(--jg-color-text-secondary); }
+.jg-cal__job { display: grid; gap: 4px; padding: var(--jg-space-3) 0; border-bottom: 1px solid var(--jg-color-border-tertiary); font-size: var(--jg-text-body); }
+.jg-cal__job small { color: var(--jg-color-text-tertiary); font-size: var(--jg-text-caption); }
+.jg-cal__prompt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wg-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; font-size: var(--jg-text-body); }
+.wg-list li { display: flex; justify-content: space-between; gap: var(--jg-space-2); padding: var(--jg-space-1) 0; border-bottom: 1px solid var(--jg-color-border-tertiary); }
+.wg-list li strong { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wg-list li span { flex: none; color: var(--jg-color-text-tertiary); font-size: var(--jg-text-footnote); }
+.wg-list__empty { color: var(--jg-color-text-tertiary); font-size: var(--jg-text-body); }
+.wg-metrics p { margin: 0 0 var(--jg-space-2); font-size: var(--jg-text-body); }
