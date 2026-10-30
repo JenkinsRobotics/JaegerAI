@@ -31,6 +31,8 @@ import { CharactersPage } from '../unified/CharactersPage'
 import { ApprovalTray } from '../unified/ApprovalTray'
 import './windows.css'
 import '../unified/unified.css'
+import '../unified/design.css'
+import { ToastProvider } from '../unified/ui'
 
 export function AppWindow({ source }: { source: JaegerSource }) {
   const route = useRoute()
@@ -91,6 +93,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
   const chatOpen = windows.some((w) => w.id === 'chat')
 
   return (
+    <ToastProvider>
     <div className={`app-window${phone ? ' app-window--phone' : ''}`} data-page={active}>
       <div className="app-window__content">
         {chatOpen && (
@@ -122,6 +125,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
       <JumpTo open={paletteOpen} agents={store.agents.filter(visible)} summaries={store.summaries} seen={store.seen}
         onClose={() => setPaletteOpen(false)} onAgent={(id) => go(`/chat?agent=${encodeURIComponent(id)}`)} actions={paletteActions} />
     </div>
+    </ToastProvider>
   )
 }
 
