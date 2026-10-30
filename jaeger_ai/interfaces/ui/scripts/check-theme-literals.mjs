@@ -13,8 +13,7 @@ const walk = (dir) => readdirSync(dir).flatMap((name) => {
   const path = join(dir, name);
   if (statSync(path).isDirectory()) return walk(path);
   if (!name.endsWith(".css")) return [];
-  // Apple-Native UI and Grok-style Windows UI use self-contained system tokens and custom CSS.
-  if (path.includes("/theme/apple-") || path.includes("/theme/aether-modern") || path.includes("/theme/modern") || path.includes("/windows/")) return [];
+  // Unified UI: no exemptions — every stylesheet (shell, windows, characters) uses the Jaeger tokens.
   return [path];
 });
 let violations = 0;

@@ -4,8 +4,8 @@
  * Verifies orb rendering, state transitions, and audio reactivity.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
+import { render, fireEvent, waitFor } from '@testing-library/react'
 import { VoiceOrb, VoiceButton, Waveform, useAudioLevel } from '../VoiceOrb'
 import { renderHook } from '@testing-library/react'
 
@@ -232,7 +232,6 @@ describe('Waveform', () => {
 
   it('updates bars based on audio level', async () => {
     const { container, rerender } = render(<Waveform audioLevel={0} />)
-    const barsBefore = container.querySelectorAll('.waveform > div')
 
     rerender(<Waveform audioLevel={1} />)
 
