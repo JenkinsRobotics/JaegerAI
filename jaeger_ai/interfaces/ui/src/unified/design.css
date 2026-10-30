@@ -114,3 +114,29 @@ button.jg-cc__tile:active { transform: scale(.97); }
 .jg-home__move { position: absolute; top: var(--jg-space-2); right: var(--jg-space-2); display: flex; gap: var(--jg-space-1); z-index: 1; }
 .jg-home__foot { margin: 0; font-size: var(--jg-text-caption); color: var(--jg-color-text-tertiary); }
 .jg-ui-spark { display: block; }
+
+/* Tasks list view + page integration. */
+.jg-u-tasks .jg-tasks { background: none; }
+.jg-tasklist { display: grid; border: 1px solid var(--jg-color-border-tertiary); border-radius: var(--jg-radius-l); overflow: hidden; background: var(--jg-color-elevated); min-width: 0; flex: 1; }
+.jg-tasklist__row { display: grid; grid-template-columns: minmax(0, 3fr) 140px 160px 180px; gap: var(--jg-space-3); align-items: center; padding: var(--jg-space-3) var(--jg-space-4); border: 0; border-top: 1px solid var(--jg-color-border-tertiary); background: none; color: inherit; font: inherit; font-size: var(--jg-text-body); text-align: left; cursor: pointer; }
+.jg-tasklist__row:hover, .jg-tasklist__row[aria-selected="true"] { background: var(--jg-color-hover); }
+.jg-tasklist__head { border-top: 0; cursor: default; font-size: var(--jg-text-caption); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--jg-color-text-tertiary); }
+.jg-tasklist__head:hover { background: none; }
+.jg-tasklist__goal { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) { .jg-tasklist__row { grid-template-columns: minmax(0, 1fr) auto; } .jg-tasklist__row > :nth-child(n+3) { display: none; } }
+
+/* Chat inside the unified shell: the AppShell is the page, not a floating window in a window. */
+.app-window__page--chat .jg-shell { border: 0; border-radius: 0; box-shadow: none; margin: 0; width: 100%; max-width: none; height: 100%; }
+.app-window__page--chat .jg-shell__sidebar { background: var(--jg-material-thick); -webkit-backdrop-filter: var(--jg-material-blur); backdrop-filter: var(--jg-material-blur); }
+.app-window__page--chat .jg-desktop { padding: 0; background: var(--jg-color-pane); }
+
+/* Agents split view. */
+.jg-ui-split > .jg-u-roster { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); align-content: start; }
+.jg-u-agent[aria-current] { border-color: var(--jg-color-accent); box-shadow: 0 0 0 1px var(--jg-color-accent); }
+.jg-agent-hero { display: flex; gap: var(--jg-space-3); align-items: center; }
+.jg-agent-hero > div { display: grid; min-width: 0; }
+.jg-agent-hero strong { font-size: var(--jg-text-title3); font-weight: 700; }
+.jg-agent-hero span { font-size: var(--jg-text-footnote); color: var(--jg-color-text-secondary); }
+.jg-robot-pick { display: flex; gap: var(--jg-space-2); margin-top: var(--jg-space-2); }
+.jg-robot-pick button { padding: var(--jg-space-1); border-radius: var(--jg-radius-m); border: 2px solid transparent; background: var(--jg-color-hover); cursor: pointer; }
+.jg-robot-pick button[aria-checked="true"] { border-color: var(--jg-color-accent); }

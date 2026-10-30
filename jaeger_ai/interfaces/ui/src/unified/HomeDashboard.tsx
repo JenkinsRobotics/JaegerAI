@@ -145,7 +145,7 @@ export function HomeDashboard({ source, store, onNavigate }: { source: JaegerSou
     cpu: { title: "CPU", body: metricPanel("CPU", "cpu", `${m?.now.cores ?? "–"} cores · last hour`) },
     mem: { title: "Memory", body: metricPanel("Memory", "mem", `${gb(m?.now.mem_used)} of ${gb(m?.now.mem_total)}`) },
     gpu: { title: "GPU", body: metricPanel("GPU", "gpu", "Apple GPU device utilisation") },
-    disk: { title: "Disk", body: metricPanel("Disk", "disk", `${gb(m?.now.disk_used)} of ${gb(m?.now.disk_total)} on /`) },
+    disk: { title: "Disk", body: metricPanel("Disk", "disk", `${gb(m?.now.disk_used)} of ${gb(m?.now.disk_total)} on the data volume`) },
     agents: { title: "Agent activity", body: (
       <>
         <h2>Agent activity <Badge tone={active.length ? "ok" : undefined}>{active.length} active</Badge></h2>

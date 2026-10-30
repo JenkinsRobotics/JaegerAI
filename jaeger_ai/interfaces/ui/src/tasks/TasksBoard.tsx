@@ -6,7 +6,7 @@ import { TaskWidget } from "./TaskWidget";
 import { TaskInspector } from "./TaskInspector";
 import { GatewayError } from "../api/gateway";
 /** Projection of the existing Gateway durable task owner; never a second scheduler. */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { label } from "../agents/agentsLogic";
 import type { JaegerSource } from "../api/source";
 import type { Agent, Task } from "../api/types";
@@ -25,7 +25,21 @@ const PROPOSAL_INTENTS = 'jaeger.ui.task-proposal.intent.v1.';
 const editKey = (id: string) => 'jaeger.ui.task-proposal.edit.v1.' + encodeURIComponent(id);
 const savedProposals = (): ProposalIntent[] => keysWithPrefix(PROPOSAL_INTENTS).map(key=>{const value=JSON.parse(localStorage.getItem(key)!);if(!value.requestId||!value.sessionId||!value.origin||typeof value.goal!=='string')throw Error('Invalid saved task identity; original retained');return value as ProposalIntent;});
 
-export function TasksBoard({ source, agents }: { source: JaegerSource; agents: Agent[] }) {
+export interface TasksBoardOptions {
+  /** Board (status columns) or a flat sortable list. */
+  view?: "board" | "list";
+  /** Show only tasks the page's filters keep. */
+  filter?: (t: Task) => boolean;
+  /** Select this task once it's loaded (deep link ?task=). */
+  initialTaskId?: string | null;
+  /** Show the new-task proposal form (the unified Tasks page toggles it from its toolbar). */
+  composer?: boolean;
+  /** Hide the legacy title band (the unified page has its own header). */
+  bare?: boolean;
+  onCount?: (shown: number, total: number) => void;
+}
+
+export function TasksBoard({ source, agents, view = "board", filter, initialTaskId, composer = true, bare = false, onCount }: { source: JaegerSource; agents: Agent[] } & TasksBoardOptions) {
   const [artifactTask, setArtifactTask] = useState<string>();
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string>();
@@ -216,12 +230,19 @@ export function TasksBoard({ source, agents }: { source: JaegerSource; agents: A
 
   // Active selected task resolution
   const selectedTask = tasks?.find(t => t.task_id === selectedTaskId);
+  const shown = useMemo(() => (tasks && filter ? tasks.filter(filter) : tasks), [tasks, filter]);
+  useEffect(() => { if (tasks && onCount) onCount(shown?.length ?? 0, tasks.length); }, [tasks, shown, onCount]);
+  const wanted = useRef<string | null | undefined>(initialTaskId);
+  useEffect(() => { wanted.current = initialTaskId; }, [initialTaskId]);
+  useEffect(() => {
+    if (tasks && wanted.current && tasks.some(t => t.task_id === wanted.current)) { setSelectedTaskId(wanted.current); wanted.current = null; }
+  }, [tasks, initialTaskId]);
 
   return (
     <div className="jg-tasks">
-      <div className="jg-tasks__band" data-aether-window-drag-region>
+      {!bare && <div className="jg-tasks__band" data-aether-window-drag-region>
         <span className="jg-title-pill">Tasks</span>
-      </div>
+      </div>}
 
       {error && (
         <ErrorState
@@ -239,7 +260,7 @@ export function TasksBoard({ source, agents }: { source: JaegerSource; agents: A
       <OwnedHandoffs source={source} />
       {source.delegation && source.agentHome && <SpecialistHandoff source={source} agents={agents} />}
 
-      {source.taskActions && source.agentHome && (
+      {composer && source.taskActions && source.agentHome && (
         <form
           className="jg-task-form"
           aria-label="New task proposal"
@@ -291,12 +312,30 @@ export function TasksBoard({ source, agents }: { source: JaegerSource; agents: A
 
       {tasks === null && !error && <p role="status">Loading tasks…</p>}
 
-      {tasks !== null && (
+      {shown !== null && (
         <div className="jg-tasks-workspace">
-          {/* Master List: Mission widgets grouped by category */}
+          {view === "list" ? (
+            <div className="jg-tasklist" role="table" aria-label="Tasks list">
+              <div className="jg-tasklist__row jg-tasklist__head" role="row">
+                <span role="columnheader">Task</span><span role="columnheader">State</span><span role="columnheader">Agent</span><span role="columnheader">Updated</span>
+              </div>
+              {shown.length === 0 && <p className="jg-muted" role="row" style={{ padding: 16 }}>No tasks match these filters.</p>}
+              {[...shown].sort((a, b) => Number(b.updated_at ?? 0) - Number(a.updated_at ?? 0)).map(t => {
+                const a = agents.find(x => x.id === (t.agent_id ?? t.owning_agent));
+                return (
+                  <button key={t.task_id} type="button" role="row" className="jg-tasklist__row" aria-selected={selectedTaskId === t.task_id} onClick={() => setSelectedTaskId(t.task_id)}>
+                    <span role="cell" className="jg-tasklist__goal">{t.goal ?? t.task_id}</span>
+                    <span role="cell"><span className={`jg-task-widget__dot jg-task-widget__dot--${String(t.state)}`} /> {String(t.state ?? "queued").replace(/_/g, " ")}</span>
+                    <span role="cell">{a ? label(a) : t.agent_id ?? t.owning_agent ?? "Unassigned"}</span>
+                    <span role="cell">{t.updated_at ? new Date(t.updated_at * 1000).toLocaleString() : "–"}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
           <div className="jg-board">
             {columns.map(col => {
-              const items = tasks
+              const items = shown
                 .filter(t => col.id === "other" ? !known.includes(String(t.state)) : col.states.includes(String(t.state)))
                 .sort((a, b) => Number(Boolean(b.presentation?.pinned)) - Number(Boolean(a.presentation?.pinned)));
               if (col.id === "other" && !items.length) return null;
@@ -347,6 +386,7 @@ export function TasksBoard({ source, agents }: { source: JaegerSource; agents: A
               );
             })}
           </div>
+          )}
 
           {/* Detail Inspector Pane. Rendered only when a task is selected: an
               always-open 420px pane left the board 474px wide, which forced the

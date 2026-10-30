@@ -9,6 +9,7 @@ when unavailable. GET /v1/system/status -> gateway + Tailscale (read-only `tails
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -56,7 +57,7 @@ def sample() -> dict:
     s: dict = {"t": time.time(), "gpu": _gpu(), "gateway": gateway_probe()}
     if psutil:
         vm = psutil.virtual_memory()
-        du = psutil.disk_usage("/")
+        du = psutil.disk_usage("/System/Volumes/Data" if os.path.isdir("/System/Volumes/Data") else "/")
         s.update(cpu=psutil.cpu_percent(interval=None), mem=vm.percent, mem_used=vm.used, mem_total=vm.total,
                  disk=du.percent, disk_used=du.used, disk_total=du.total, cores=psutil.cpu_count())
     else:
