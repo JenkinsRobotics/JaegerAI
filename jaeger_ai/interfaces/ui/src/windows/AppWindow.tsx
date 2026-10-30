@@ -1,132 +1,126 @@
 /**
- * AppWindow — Main multi-window app container (Grok-style)
+ * AppWindow — the one Jaeger shell (unified UI, Jenkins Robotics 2026-10-30).
  *
- * This is the new main window for Jaeger. It manages multiple app windows
- * (Chat, Settings, Library, etc.) with a macOS-style dock at the bottom.
- *
- * Each window is a self-contained page that can be opened, closed,
- * minimized, and switched between.
+ * The Windows UI's dock is the frame; every feature is a dock page at a real route
+ * (/, /chat, /agents, /characters, /tasks, /machine, /sharepoint, /workspace, /settings).
+ * Open pages stay mounted (chat streams, drafts and approvals keep running while you look
+ * elsewhere); the URL decides which one is in front. ⌘K opens the one command palette,
+ * ⌘, opens Settings, and pending approvals are reachable from every page. On a phone or
+ * narrow window the dock becomes a bottom tab bar.
  */
-
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { JaegerSource } from '../api/source'
-import { useWindowManager, type WindowId } from './WindowManager'
+import { App } from '../App'
+import { useWindowManager, WINDOW_DEFINITIONS, type WindowId } from './WindowManager'
 import { WindowDock } from './WindowDock'
-import { NavPage } from './NavPage'
 import { TasksPage } from './TasksPage'
-import { ChatPage } from './ChatPage'
-import { HomePage } from './HomePage'
-import { AboutPage } from './AboutPage'
-import { FeaturesPage } from './FeaturesPage'
-import { AgentsPage } from './AgentsPage'
+import { WorkspacePage } from './WorkspacePage'
 import { MachineControlPanel } from '../machine-control/MachineControlPanel'
 import { SharePointPanel } from '../sharepoint/SharePointPanel'
+import { TasksBoard } from '../tasks/TasksBoard'
+import { useAgentsStore } from '../agents/agentsStore'
+import { visible } from '../agents/agentsLogic'
+import { JumpTo, type JumpAction } from '../agents/JumpTo'
+import { CHARACTERS } from '../components/CharacterLibrary'
+import { usePhone } from '../phone/usePhone'
+import { navigate, useRoute, PAGES } from '../shell/router'
+import { isSettingsTab, type Tab as SettingsTab } from '../settings/SettingsDialog'
+import { HomeDashboard } from '../unified/HomeDashboard'
+import { AgentsRoster } from '../unified/AgentsRoster'
+import { CharactersPage } from '../unified/CharactersPage'
+import { ApprovalTray } from '../unified/ApprovalTray'
 import './windows.css'
-import './bots-page.css'
+import '../unified/unified.css'
 
+export function AppWindow({ source }: { source: JaegerSource }) {
+  const route = useRoute()
+  const active = route.page as WindowId
+  const { windows, visibleWindows, dockWindows, closeWindow } = useWindowManager(active)
+  const store = useAgentsStore(source)
+  const phone = usePhone()
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const go = useCallback((to: string) => navigate(to), [])
 
-// ─────────────────────────────────────────────────────────────
-// AppWindow — Main Component
-// ─────────────────────────────────────────────────────────────
+  useEffect(() => {
+    document.title = `${WINDOW_DEFINITIONS[active].title} · Jaeger`
+  }, [active])
 
-export function AppWindow({ source }: { source?: JaegerSource }) {
-  const {
-    windows,
-    activeWindowId,
-    visibleWindows,
-    dockWindows,
-    openWindow,
-    closeWindow,
-    focusWindow,
-  } = useWindowManager()
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen((v) => !v) }
+      else if ((e.metaKey || e.ctrlKey) && e.key === ',' && active !== 'chat') { e.preventDefault(); go('/settings') }
+    }
+    addEventListener('keydown', onKey)
+    return () => removeEventListener('keydown', onKey)
+  }, [go, active])
 
-  // Render the content for a specific window
-  const renderWindowContent = (windowId: WindowId) => {
-    switch (windowId) {
-      case 'home':
-        return (
-          <HomePage
-            source={source}
-            onOpenWindow={(id) => openWindow(id as WindowId)}
-            onStartChat={() => openWindow('chat')}
-          />
-        )
-      case 'nav':
-        return <NavPage source={source} onOpenWindow={(id) => openWindow(id as WindowId)} onStartChat={() => openWindow('chat')} />
-      case 'chat':
-        return <ChatPage source={source} onOpenWindow={(id) => openWindow(id as WindowId)} />
-      case 'machine':
-        return <MachineControlPanel source={source} />
-      case 'sharepoint':
-        return <SharePointPanel source={source} />
-      case 'tasks':
-        return <TasksPage source={source} />
-      case 'agents':
-        return (
-          <AgentsPage
-            onStartChat={() => {
-              // Switch to chat
-              openWindow('chat')
-            }}
-          />
-        )
-      case 'about':
-        return <AboutPage />
-      case 'features':
-        return <FeaturesPage onOpenWindow={(id) => openWindow(id as WindowId)} />
-      case 'library':
-      case 'skills':
-      case 'workflows':
-      case 'tools':
-        // Settings-hub panels: real windows, no dock tab. Each gets a page as
-        // its content is built; until then an honest empty state.
-        return (
-          <div className="panel-page">
-            <div className="jg-band wg-band" data-aether-window-drag-region>
-              <span className="jg-traffic-lights" aria-hidden="true"><i /><i /><i /></span>
-              <h1 className="wg-page__title">{windowId}</h1>
-            </div>
-            <p className="panel-page__note">
-              This panel moved into Settings. Its content surface is being rebuilt —
-              nothing is lost, it opens from Settings instead of the dock.
-            </p>
+  const close = (id: WindowId) => {
+    closeWindow(id)
+    if (id === active) go('/')
+  }
+
+  const settingsTab: SettingsTab | undefined = isSettingsTab(route.rest) ? route.rest : undefined
+  const paletteActions = useMemo<JumpAction[]>(() => [
+    { id: 'new', label: 'New chat', shortcut: '⌘N', run: () => go('/chat') },
+    ...PAGES.map((p) => ({ id: `page:${p}`, label: `Go to ${WINDOW_DEFINITIONS[p].title}`, hint: WINDOW_DEFINITIONS[p].description, shortcut: p === 'settings' ? '⌘,' : undefined, run: () => go(p === 'home' ? '/' : `/${p}`) })),
+    { id: 'settings:agents', label: 'Manage agents', hint: 'Settings → Agents', run: () => go('/settings/agents') },
+    { id: 'settings:general', label: 'Appearance and text size', hint: 'Settings → General', run: () => go('/settings/general') },
+    ...CHARACTERS.map((c) => ({ id: `character:${c.id}`, label: `New agent: ${c.name}`, hint: c.role, run: () => go(`/characters?character=${encodeURIComponent(c.id)}`) })),
+  ], [go])
+
+  const render = (id: WindowId) => {
+    switch (id) {
+      case 'home': return <HomeDashboard source={source} store={store} onNavigate={go} />
+      case 'agents': return <AgentsRoster source={source} store={store} refresh={store.refresh} onNavigate={go} />
+      case 'characters': return <CharactersPage characterId={active === 'characters' ? route.params.get('character') : null} source={source} refresh={store.refresh} onNavigate={go} />
+      case 'tasks': return route.rest === 'gallery'
+        ? <TasksPage source={source} />
+        : <div className="jg-u-page jg-u-page--flush">
+            <nav className="jg-u-subnav" aria-label="Tasks views"><button type="button" aria-current="page">Board</button><button type="button" onClick={() => go('/tasks/gallery')}>Gallery</button></nav>
+            <TasksBoard source={source} agents={store.agents} />
           </div>
-        )
-      default:
-        return null
+      case 'machine': return <MachineControlPanel source={source} />
+      case 'sharepoint': return <SharePointPanel source={source} />
+      case 'workspace': return <WorkspacePage source={source} />
+      default: return null
     }
   }
 
+  // Chat and Settings share one App instance (its stores, streams, dialogs and settings panels).
+  const appView = active === 'settings' ? 'settings' : 'chat'
+  const chatOpen = windows.some((w) => w.id === 'chat')
+
   return (
-    <div className="app-window">
-      {/* Window Content Area */}
+    <div className={`app-window${phone ? ' app-window--phone' : ''}`} data-page={active}>
       <div className="app-window__content">
-        {visibleWindows.map((window) => (
-          <div
-            key={window.id}
-            className={`app-window__page${window.id === activeWindowId ? ' app-window__page--active' : ''}`}
-            style={{ zIndex: window.id === activeWindowId ? 10 : 1 }}
-            /* Refocus only when the page is backgrounded: on the active page
-               this handler would fire after every inner action (a Settings row
-               opening a panel) and steal focus right back. */
-            onClick={(e) => {
-              if (window.id !== activeWindowId) focusWindow(window.id)
-              else e.stopPropagation()
-            }}
-          >
-            {renderWindowContent(window.id)}
+        {chatOpen && (
+          <div className={`app-window__page app-window__page--chat${active === 'chat' || active === 'settings' ? ' app-window__page--active' : ''}`}
+            hidden={active !== 'chat' && active !== 'settings'} aria-label={active === 'settings' ? 'Settings' : 'Chat'}>
+            <App source={source} view={appView} settingsTab={settingsTab} onSettingsTab={(t) => navigate(`/settings/${t}`, { replace: true })}
+              onNavigate={go} requestedAgent={active === 'chat' ? route.params.get('agent') : null} onOpenPalette={() => setPaletteOpen(true)} />
+          </div>
+        )}
+        {visibleWindows.filter((w) => w.id !== 'chat' && w.id !== 'settings').map((w) => (
+          <div key={w.id} className={`app-window__page${w.id === active ? ' app-window__page--active' : ''}`} hidden={w.id !== active} aria-label={w.definition.title}>
+            {render(w.id)}
           </div>
         ))}
       </div>
 
-      {/* Window Dock — operator tabs only; panels open from Settings */}
+      <ApprovalTray source={source} onOpenChat={(agentId) => go(agentId ? `/chat?agent=${encodeURIComponent(agentId)}` : '/chat')} />
+
       <WindowDock
         windows={windows}
-        activeWindowId={activeWindowId}
-        onFocusWindow={focusWindow}
-        onCloseWindow={closeWindow}
-        onOpenWindow={openWindow}
+        activeWindowId={active}
+        onFocusWindow={(id) => go(id === 'home' ? '/' : id === 'settings' && settingsTab ? `/settings/${settingsTab}` : `/${id}`)}
+        onCloseWindow={close}
         availableWindows={dockWindows}
+        phone={phone}
+        onSearch={() => setPaletteOpen(true)}
       />
+
+      <JumpTo open={paletteOpen} agents={store.agents.filter(visible)} summaries={store.summaries} seen={store.seen}
+        onClose={() => setPaletteOpen(false)} onAgent={(id) => go(`/chat?agent=${encodeURIComponent(id)}`)} actions={paletteActions} />
     </div>
   )
 }

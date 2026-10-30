@@ -1,5 +1,5 @@
 import type { SidebarControl } from "../shell/AppShell";
-import { CpuIcon, GlyphBranch, GlyphCode, GlyphCube, GrokIcon, PlusIcon, SearchIcon, SharePointIcon, SidebarIcon, TasksIcon } from "../icons";
+import { GlyphBranch, GlyphCode, GlyphCube, PlusIcon, SearchIcon, SidebarIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
 import type { SessionRow } from "../api/types";
 import type { AgentsState } from "./agentsStore";
@@ -104,22 +104,8 @@ export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewCha
         </SpecialistList>
       </>
     ),
-    sections: (
-      <>
-        <button type="button" className={`jg-nav-entry${selection.type === "grok" ? " is-selected" : ""}`} onClick={() => onSelect({ type: "grok" })}>
-          <GrokIcon width={14} height={14} /> <span>Grok UI</span>
-        </button>
-        <button type="button" className={`jg-nav-entry${selection.type === "tasks" ? " is-selected" : ""}`} onClick={() => onSelect({ type: "tasks" })}>
-          <TasksIcon width={14} height={14} /> <span>Tasks</span>
-        </button>
-        <button type="button" className={`jg-nav-entry${selection.type === "machine" ? " is-selected" : ""}`} onClick={() => onSelect({ type: "machine" })}>
-          <CpuIcon width={14} height={14} /> <span>Machine Control</span>
-        </button>
-        <button type="button" className={`jg-nav-entry${selection.type === "sharepoint" ? " is-selected" : ""}`} onClick={() => onSelect({ type: "sharepoint" })}>
-          <SharePointIcon width={14} height={14} /> <span>SharePoint</span>
-        </button>
-      </>
-    ),
+    /* Tasks, Machine Control, SharePoint and Workspace are dock pages in the unified shell. */
+    sections: null,
     footer: (
       <div className="jg-sidebar-footer">
         <button type="button" className="jg-user-chip" aria-label={`Account · ${status.label}`} title={`${status.label} · Settings (⌘,)`} onClick={onSettings}>

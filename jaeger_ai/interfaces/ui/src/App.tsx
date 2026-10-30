@@ -6,7 +6,9 @@ import {NativeClipboardPanel} from './settings/NativeClipboardPanel';
 import {UpdatePlanPanel} from './settings/UpdatePlanPanel';
 import {MachineControlPanel} from './machine-control/MachineControlPanel';
 import {SharePointPanel} from './sharepoint/SharePointPanel';
-import {AppWindow} from './windows/AppWindow';
+import { DangerReset } from './settings/DangerReset';
+import type { Tab as SettingsTab } from './settings/SettingsDialog';
+import { VoiceDictation } from './chat/VoiceDictation';
 import {useNotificationNavigation} from './platform/useNotificationNavigation';
 import {localConversationLink,notificationConversation} from './platform/notificationNavigation';
 import {TaskArtifacts} from './library/TaskArtifacts';
@@ -31,7 +33,7 @@ import { agentsSidebarSlots, type Selection } from "./agents/AgentsSidebar";
 import { useAgentsStore } from "./agents/agentsStore";
 import { label, visible } from "./agents/agentsLogic";
 import { agentSlug, NewChatMenu } from "./agents/NewChatMenu";
-import { loadPins, pin, savePins, unpin, MAX_PINS } from "./agents/pins";
+import { loadPins, pin, savePins, unpin, MAX_PINS, PINS_EVENT } from "./agents/pins";
 import { HistoryPanel } from "./agents/HistoryPanel";
 import { ChatPane } from "./chat/ChatPane";
 import { autoHome, contractHome, fallbackHome, httpGetJson, type HomeSessions } from "./chat/homeSession";
@@ -67,7 +69,21 @@ function forcesFallback(): boolean {
 
 const message = (error: unknown) => String((error as Error)?.message ?? error);
 
-export function App({ source }: { source: JaegerSource }) {
+export interface AppProps {
+  source: JaegerSource;
+  /** Unified shell: which page this instance is showing. Standalone (tests, Mac app) is "chat". */
+  view?: "chat" | "settings";
+  settingsTab?: SettingsTab;
+  onSettingsTab?: (tab: SettingsTab) => void;
+  /** Shell navigation (dock pages). Without it the old in-pane panels render. */
+  onNavigate?: (to: string) => void;
+  /** `/chat?agent=<id>` from a deep link, the ⌘K palette or the Home dashboard. */
+  requestedAgent?: string | null;
+  /** The shell owns ⌘K; when set, App's own palette defers to it. */
+  onOpenPalette?: () => void;
+}
+
+export function App({ source, view = "chat", settingsTab, onSettingsTab, onNavigate, requestedAgent, onOpenPalette }: AppProps) {
   useDevicePreferences(); // Reformat visible timestamps without recreating source/streams.
   useNativeNotifications(source.notifications);
   const hostKind = detectHost();
@@ -105,6 +121,9 @@ export function App({ source }: { source: JaegerSource }) {
       setInitialReady(true);
     }
   }, [initialReady, store.agents, defaultAgentId]);
+  useEffect(() => {
+    if (requestedAgent && initialReady && store.agents.some((a) => a.id === requestedAgent)) { setSelection({ type: "agent", agentId: requestedAgent }); setPhoneView("chat"); }
+  }, [requestedAgent, initialReady, store.agents]);
   const [sessionBinding, setSessionBinding] = useState<{ key: string; id: string }>();
   const [sessionError, setSessionError] = useState<string>();
   const [sessionAttempt, setSessionAttempt] = useState(0);
@@ -139,6 +158,7 @@ export function App({ source }: { source: JaegerSource }) {
   const devicePins = loadPins().filter((id) => store.agents.some((a) => a.id === id && a.ui_actions?.pin));
   const pinSignature = JSON.stringify(projectedPins);
   useEffect(() => { if (sharedPins) setPins(JSON.parse(pinSignature) as string[]); }, [sharedPins, pinSignature]);
+  useEffect(() => { if (sharedPins) return; const sync = () => setPins(loadPins()); addEventListener(PINS_EVENT, sync); return () => removeEventListener(PINS_EVENT, sync); }, [sharedPins]);
   const updatePins = useCallback((next: (cur: string[]) => string[]) => {
     if (!sharedPins || !source.agentActions?.savePins) {
       setPins((cur) => { const n = next(cur); savePins(n); return n; });
@@ -236,13 +256,14 @@ export function App({ source }: { source: JaegerSource }) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); setSettingsOpen(true); return; }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setJumpOpen((v) => !v); return; }
+      if ((event.metaKey || event.ctrlKey) && event.key === ",") { event.preventDefault(); if (onNavigate) onNavigate("/settings"); else setSettingsOpen(true); return; }
+      if (onOpenPalette) { if (view !== "chat") return; }
+      else if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") { event.preventDefault(); setJumpOpen((v) => !v); return; }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "n") { event.preventDefault(); newChat(selectedAgentId ?? defaultAgentId); }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [newChat, selectedAgentId, defaultAgentId]);
+  }, [newChat, selectedAgentId, defaultAgentId, onNavigate, onOpenPalette, view]);
 
   const actions = source.agentActions;
   const caps = agentCaps(agentMenu ? store.agents.filter((a) => a.id === agentMenu.agentId) : store.agents, actions);
@@ -317,15 +338,16 @@ export function App({ source }: { source: JaegerSource }) {
     selection: selection.type === "agent" ? { ...selection, sessionId } : selection,
     chats: [],
     onSelect: (next) => {
+      if (onNavigate && next.type !== "agent") { onNavigate(next.type === "grok" ? "/workspace" : `/${next.type}`); return; }
       if (next.type === "agent" && next.agentId === selectedAgentId) void store.seeAgent(next.agentId);
       setSelection(next);
     },
     onNewChatMenu: setNewChatAnchor,
     onRenameChat: () => {},
     onArchiveChat: () => {},
-    onSearch: () => setJumpOpen(true),
+    onSearch: () => (onOpenPalette ? onOpenPalette() : setJumpOpen(true)),
     onConnectApps: () => setConnectOpen(true),
-    onSettings: () => setSettingsOpen(true),
+    onSettings: () => (onNavigate ? onNavigate("/settings") : setSettingsOpen(true)),
     onRetry: () => void store.refresh(),
     userInitials: "MJ",
     pins,
@@ -344,31 +366,27 @@ export function App({ source }: { source: JaegerSource }) {
   const historyAgent = store.agents.find((a) => a.id === historyAgentId);
   const chatBody = sessionError
     ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
-    : <ChatPane host={host} sessionId={sessionId} agents={store.agents} />;
+    : <div className="jg-chat-voice-host"><ChatPane host={host} sessionId={sessionId} agents={store.agents} /><VoiceDictation /></div>;
   const phoneAgent = store.agents.find((a) => a.id === (selectedAgentId ?? defaultAgentId));
   const main = phone
     ? (phoneView === "chat"
       ? <PhoneChat agentId={phoneAgent?.id ?? LEAD_ID} agentName={phoneAgent ? label(phoneAgent) : "Jaeger"} avatarUrl={phoneAgent?.avatar_url}
           onBack={() => { setPhoneView("list"); void store.refresh(); }} onInfo={() => host.openDetails?.(phoneAgent?.id ?? LEAD_ID)}>{chatBody}</PhoneChat>
       : <PhoneList state={store} userInitials="MJ" statusOk={!store.error} onOpen={(agentId) => { newChat(agentId); setPhoneView("chat"); }}
-          onSearch={() => setJumpOpen(true)} onNew={setNewChatAnchor} onSettings={() => setSettingsOpen(true)} onAgentMenu={openAgentMenu} />)
+          onSearch={() => (onOpenPalette ? onOpenPalette() : setJumpOpen(true))} onNew={setNewChatAnchor} onSettings={() => (onNavigate ? onNavigate("/settings") : setSettingsOpen(true))} onAgentMenu={openAgentMenu} />)
     : null;
   return (
     <>
-      {phone ? main : <AppShell top={slots.top} primary={slots.primary} sections={slots.sections} footer={slots.footer}>
+      {view === "settings" ? null : phone ? main : <AppShell top={slots.top} primary={slots.primary} sections={slots.sections} footer={slots.footer}>
         {selection.type === "tasks" ? (
           <TasksBoard source={source} agents={store.agents} />
-        ) : selection.type === "grok" ? (
-          <AppWindow source={source} />
         ) : selection.type === "machine" ? (
           <MachineControlPanel source={source} />
         ) : selection.type === "sharepoint" ? (
           <SharePointPanel source={source} />
         ) : (
           <div className="jg-main-row">
-              {sessionError
-                ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
-                : <ChatPane host={host} sessionId={sessionId} agents={store.agents} />}
+              {chatBody}
               {detailsAgent && (
                 <AgentDetails onCopyConversationLink={()=>{void conversationIdForAgent(detailsAgent.id,id=>home.home(id),selectedAgentId&&explicitSessionId?{agentId:selectedAgentId,sessionId:explicitSessionId}:undefined).then(id=>copy(localConversationLink(id),"Local conversation link copied; it grants no access and requires the registered Jaeger handler"),fail("resolve the conversation link")).catch(fail("copy the conversation link"));}} onSearch={source.searchMessages ? () => setMessageSearchAgent(detailsAgent) : undefined} agent={detailsAgent} activityAvailable={!store.loading && !store.error} summary={store.summaries.find((s) => s.id === detailsAgent.id)}
                   onOpenHistory={() => { setDetailsAgentId(null); setHistoryAgentId(detailsAgent.id); }} onClose={() => setDetailsAgentId(null)} />
@@ -405,14 +423,14 @@ export function App({ source }: { source: JaegerSource }) {
       {configurationAgentId && source.specialistControls && <SpecialistConfiguration key={configurationAgentId} agentId={configurationAgentId} controls={source.specialistControls} onClose={() => setConfigurationAgentId(undefined)} onSaved={() => { void store.refresh(); }} />}
       <ConnectAppsDialog open={connectOpen} source={source} onClose={() => setConnectOpen(false)} />
       {artifactTask&&source.taskArtifacts&&<div role="dialog" aria-label="Task artifact references"><button type="button" onClick={()=>setArtifactTask(undefined)}>Close task artifact references</button><TaskArtifacts controls={source.taskArtifacts} taskId={artifactTask}/></div>}
-      <SettingsDialog financePanel={source.finance&&<FinancePanel controls={source.finance}/>} computerPanel={<LocalComputerPanel source={source}/>} clipboardPanel={<NativeClipboardPanel/>} updatesPanel={source.updatePlan&&<UpdatePlanPanel source={source}/>} requestedTab={settingsRequest} memoryPanel={source.semanticClaims&&<EntityMemoryPanel source={source}/>} notificationsPanel={source.notifications && <NotificationsPanel controls={source.notifications} agents={store.agents} onOpen={(id)=>{void openNotificationConversation(id);}}/>} channelsPanel={source.channels ? <ChannelsPanel source={source} agents={store.agents} /> : undefined} workflowsPanel={source.workflows ? <WorkflowsPanel source={source} agents={store.agents} /> : undefined} diagnosticsPanel={source.diagnostics ? <DiagnosticsPanel source={source} /> : undefined} toolsPanel={source.tools ? <ToolsPanel source={source} sessionId={sessionId} /> : undefined} open={settingsOpen} onClose={() => {setSettingsOpen(false);setSettingsRequest(undefined);}} capabilities={settingsCaps} automationsPanel={source.schedules || source.webhooks ? <>{source.schedules && <AutomationsPanel controls={source.schedules}/>}{source.webhooks && <WebhooksPanel source={source} agents={store.agents}/>}</> : undefined} skillsPanel={source.skills ? <SkillsPanel source={source} /> : undefined} libraryPanel={source.library ? <LibraryPanel controls={source.library} artifacts={source.taskArtifacts} /> : undefined} agentsPanel={<AgentManagement onMemory={source.agentMemory?agent=>{setSettingsOpen(false);setMemoryAgentId(agent.id);}:undefined} onKnowledge={source.agentKnowledge ? agent => { setSettingsOpen(false); setKnowledgeAgentId(agent.id); } : undefined} onSearch={source.searchMessages ? agent => { setSettingsOpen(false); setMessageSearchAgent(agent); } : undefined} onConfigure={source.specialistControls ? agent => { setSettingsOpen(false); setConfigurationAgentId(agent.id); } : undefined} onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived, ...(!archived ? { deleted: false } : {}) })} />} />
+      <SettingsDialog inline={view === "settings"} tab={view === "settings" ? settingsTab : undefined} onTab={onSettingsTab} resetPanel={<DangerReset />} financePanel={source.finance&&<FinancePanel controls={source.finance}/>} computerPanel={<LocalComputerPanel source={source}/>} clipboardPanel={<NativeClipboardPanel/>} updatesPanel={source.updatePlan&&<UpdatePlanPanel source={source}/>} requestedTab={settingsRequest} memoryPanel={source.semanticClaims&&<EntityMemoryPanel source={source}/>} notificationsPanel={source.notifications && <NotificationsPanel controls={source.notifications} agents={store.agents} onOpen={(id)=>{void openNotificationConversation(id);}}/>} channelsPanel={source.channels ? <ChannelsPanel source={source} agents={store.agents} /> : undefined} workflowsPanel={source.workflows ? <WorkflowsPanel source={source} agents={store.agents} /> : undefined} diagnosticsPanel={source.diagnostics ? <DiagnosticsPanel source={source} /> : undefined} toolsPanel={source.tools ? <ToolsPanel source={source} sessionId={sessionId} /> : undefined} open={settingsOpen} onClose={() => {setSettingsOpen(false);setSettingsRequest(undefined);}} capabilities={settingsCaps} automationsPanel={source.schedules || source.webhooks ? <>{source.schedules && <AutomationsPanel controls={source.schedules}/>}{source.webhooks && <WebhooksPanel source={source} agents={store.agents}/>}</> : undefined} skillsPanel={source.skills ? <SkillsPanel source={source} /> : undefined} libraryPanel={source.library ? <LibraryPanel controls={source.library} artifacts={source.taskArtifacts} /> : undefined} agentsPanel={<AgentManagement onMemory={source.agentMemory?agent=>{setSettingsOpen(false);setMemoryAgentId(agent.id);}:undefined} onKnowledge={source.agentKnowledge ? agent => { setSettingsOpen(false); setKnowledgeAgentId(agent.id); } : undefined} onSearch={source.searchMessages ? agent => { setSettingsOpen(false); setMessageSearchAgent(agent); } : undefined} onConfigure={source.specialistControls ? agent => { setSettingsOpen(false); setConfigurationAgentId(agent.id); } : undefined} onIcon={(agent, icon_preset) => void changePresentation(agent, { icon_preset })} agents={store.agents} onPrimary={(a) => void changePrimary(a.id, defaultAgentId)} onProfile={(a) => { setSettingsOpen(false); host.openDetails?.(a.id); }} onHistory={(a) => { setSettingsOpen(false); host.openHistory?.(a.id); }} busy={managementBusy} onImportPins={sharedPins && devicePins.some((id) => !projectedPins.includes(id)) ? () => updatePins((cur) => [...new Set([...cur, ...devicePins])].slice(0, MAX_PINS)) : undefined} onRename={(agent) => setAgentPrompt({ kind: "rename", agent })} onResetName={(agent) => void changePresentation(agent, { display_name: null })} onPin={(agent, pinned) => updatePins((cur) => pinned ? pin(cur, agent.id) : unpin(cur, agent.id))} onArchive={(agent, archived) => void changePresentation(agent, { archived, ...(!archived ? { deleted: false } : {}) })} />} />
       <JumpTo open={jumpOpen} agents={store.agents.filter(visible)} onClose={() => setJumpOpen(false)}
         summaries={store.summaries} seen={store.seen} currentAgentId={selectedAgentId}
         onAgent={(agentId) => { newChat(agentId); if (phone) setPhoneView("chat"); }}
         actions={[
           { id: "new", label: "New chat", shortcut: "⌘N", run: () => newChat(selectedAgentId ?? defaultAgentId) },
           { id: "history", label: "Chat history", run: () => host.openHistory?.(selectedAgentId ?? defaultAgentId) },
-          { id: "tasks", label: "Tasks", run: () => setSelection({ type: "tasks" }) },
+          { id: "tasks", label: "Tasks", run: () => (onNavigate ? onNavigate("/tasks") : setSelection({ type: "tasks" })) },
           { id: "settings", label: "Settings", shortcut: "⌘,", run: () => setSettingsOpen(true) },
         ]} />
     </>

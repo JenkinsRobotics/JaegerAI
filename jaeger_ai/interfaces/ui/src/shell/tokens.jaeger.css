@@ -159,3 +159,28 @@ body {
   --jg-scrim: rgba(0, 0, 0, .5);   /* measured: Grok dims 245 → 122 */
 }
 :root:not(.aether-light-theme) { color-scheme: dark; }
+
+/* Unified UI (2026-10-30): one design language. The Apple / Windows pages were written against
+ * Apple-style names (--label, --system-blue …); they now resolve to the Jaeger tokens above, so
+ * every page follows the same neutral grays, accent and light/dark switch. Status hues reuse the
+ * agent palette. Don't add new uses of these names — use --jg-* directly. */
+:root,
+:root.aether-light-theme {
+  --background: var(--jg-color-pane);
+  --secondary-background: var(--jg-color-elevated);
+  --label: var(--jg-color-text);
+  --secondary-label: var(--jg-color-text-secondary);
+  --tertiary-label: var(--jg-color-text-tertiary);
+  --separator: var(--jg-color-border);
+  --secondary-fill: var(--jg-color-active);
+  --tertiary-fill: var(--jg-color-hover);
+  --system-blue: var(--jg-color-accent);
+  --system-green: var(--jg-avatar-green);
+  --system-orange: var(--jg-avatar-orange);
+  --system-red: var(--jg-avatar-red);
+  --system-purple: var(--jg-avatar-purple);
+  --system-gray: var(--jg-color-text-tertiary);
+  --jg-status-working: var(--jg-color-accent);
+  --jg-status-approval: var(--jg-primary-yellow);
+  --jg-status-error: var(--jg-avatar-red);
+}
