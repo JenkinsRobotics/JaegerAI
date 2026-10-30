@@ -13,7 +13,7 @@
  *   <VoiceOrb state="speaking" audioLevel={0.5} />
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 export type VoiceOrbState = 'idle' | 'listening' | 'processing' | 'speaking' | 'muted'
 
