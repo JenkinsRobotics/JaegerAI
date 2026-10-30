@@ -1,0 +1,86 @@
+/* All colors inherit the shared Aether theme; scenery is local presentation. */
+.jg-scene {
+  --scene-wall: var(--aether-color-bg-control, #242a32);
+  --scene-floor: var(--aether-color-bg-rail, #151a21);
+  --scene-ink: var(--aether-color-text, #e5e9ef);
+  --scene-accent: var(--aether-color-accent, #72a7d8);
+  --scene-warning: var(--jg-avatar-orange, #e6ad65);
+  --scene-desk: color-mix(in srgb, var(--scene-accent) 24%, var(--scene-floor));
+  border: 1px solid var(--aether-color-border); border-radius: 16px; overflow: hidden;
+  background: var(--scene-floor); color: var(--scene-ink); width: 100%; isolation: isolate;
+}
+.jg-scene__stage { position: relative; height: 250px; overflow: hidden; background: radial-gradient(ellipse at 65% 25%, color-mix(in srgb, var(--scene-accent) 12%, transparent), transparent 70%), linear-gradient(var(--scene-wall) 0 77%, var(--scene-floor) 77%); }
+.jg-scene__stage *, .jg-scene__stage *::before, .jg-scene__stage *::after { box-sizing: border-box; }
+.jg-scene__background { position: absolute; width: 100%; height: 100%; object-fit: cover; }
+.jg-scene__window { position: absolute; right: 9%; top: 22px; width: 65px; height: 85px; border: 5px solid var(--scene-desk); border-radius: 30px 30px 3px 3px; background: linear-gradient(145deg, color-mix(in srgb, var(--scene-accent) 45%, var(--scene-floor)), var(--scene-wall)); box-shadow: 0 0 45px color-mix(in srgb, var(--scene-accent) 12%, transparent); }
+.jg-scene__window::before, .jg-scene__window::after { content: ''; position: absolute; background: var(--scene-desk); }
+.jg-scene__window::before { width: 3px; height: 100%; left: 50%; }
+.jg-scene__window::after { height: 3px; width: 100%; top: 55%; }
+.jg-scene__shelf { position: absolute; top: 66px; left: 8%; width: 74px; height: 8px; background: var(--scene-desk); display: flex; gap: 5px; align-items: end; }
+.jg-scene__shelf i { width: 9px; height: 26px; background: var(--scene-accent); border-radius: 2px; opacity: .65; }
+.jg-scene__shelf i:nth-child(2) { height: 33px; opacity: .35; transform: rotate(-9deg); }
+.jg-scene__shelf i:nth-child(3) { height: 22px; opacity: .8; }
+.jg-scene__chair { position: absolute; left: calc(50% - 37px); top: 98px; width: 74px; height: 104px; border-radius: 30px 30px 12px 12px; background: color-mix(in srgb, var(--scene-ink) 10%, var(--scene-floor)); }
+.jg-scene__actor { position: absolute; left: calc(50% - 50px); width: 100px; height: 130px; top: 68px; animation: scene-breathe 5s ease-in-out infinite; transform-origin: 50% 100%; }
+.jg-scene__head { position: absolute; left: 9px; top: 0; width: 82px; height: 82px; transform-origin: 50% 90%; z-index: 2; transition: transform .35s ease; }
+.jg-scene__head > img { width: 100%; height: 100%; object-fit: cover; object-position: center 20%; border-radius: 40%; box-shadow: 0 3px 15px color-mix(in srgb, var(--scene-floor) 70%, transparent); }
+.jg-scene__torso { position: absolute; left: 22px; top: 65px; width: 56px; height: 59px; border-radius: 24px 24px 8px 8px; background: linear-gradient(120deg, var(--scene-accent), var(--scene-desk)); }
+.jg-scene__arm { position: absolute; top: 78px; height: 53px; width: 16px; border-radius: 12px; background: var(--scene-accent); transform-origin: 50% 8px; z-index: 3; }
+.jg-scene__arm--left { left: 13px; transform: rotate(-20deg); }
+.jg-scene__arm--right { right: 13px; transform: rotate(20deg); }
+.jg-scene__desk { position: absolute; left: 9%; right: 9%; height: 12px; top: 193px; border-radius: 4px; background: var(--scene-desk); box-shadow: 0 6px 0 color-mix(in srgb, var(--scene-floor) 65%, var(--scene-desk)); }
+.jg-scene__desk::before, .jg-scene__desk::after { content: ''; position: absolute; top: 12px; width: 8px; height: 55px; background: var(--scene-desk); }
+.jg-scene__desk::before { left: 8%; }.jg-scene__desk::after { right: 8%; }
+.jg-scene__monitor { position: absolute; right: 20%; bottom: 5px; width: 63px; height: 43px; padding: 7px; border: 4px solid var(--scene-desk); background: var(--scene-floor); border-radius: 5px; transform: perspective(200px) rotateY(-12deg); }
+.jg-scene__monitor i { display: block; width: 80%; height: 2px; margin: 4px 0; background: var(--scene-accent); opacity: .65; }
+.jg-scene__monitor i:nth-child(2) { width: 50%; }
+.jg-scene__book { position: absolute; left: 20%; bottom: 1px; width: 43px; height: 7px; border-radius: 3px; background: var(--scene-ink); opacity: .7; }
+.jg-scene__cup { position: absolute; left: 8%; bottom: 0; width: 17px; height: 21px; border-radius: 2px 2px 6px 6px; background: var(--scene-warning); }
+.jg-scene__cup::after { content: ''; position: absolute; right: -7px; top: 3px; width: 9px; height: 11px; border: 3px solid var(--scene-warning); border-radius: 6px; }
+.jg-scene__plant { position: absolute; right: 3%; bottom: 0; height: 19px; width: 20px; border-radius: 2px 2px 7px 7px; background: var(--scene-wall); }
+.jg-scene__plant i { position: absolute; width: 9px; height: 22px; bottom: 16px; left: 7px; border-radius: 100% 0; background: var(--scene-accent); transform: rotate(-30deg); }
+.jg-scene__plant i:nth-child(2) { left: 11px; height: 29px; transform: rotate(20deg); }
+.jg-scene__plant i:nth-child(3) { left: 0; height: 17px; transform: rotate(-60deg); }
+.jg-scene__clip { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.jg-scene__attention { position: absolute; left: 67%; top: 66px; width: 25px; height: 25px; display: grid; place-items: center; border-radius: 50%; background: var(--scene-warning); color: var(--scene-floor); font-weight: bold; }
+.jg-scene__caption { display: flex; gap: 12px; flex-wrap: wrap; align-items: baseline; padding: 12px 16px 4px; font-size: 13px; }
+.jg-scene__caption span { opacity: .7; font-size: 12px; }
+.jg-scene__controls { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 8px 16px 14px; font-size: 12px; }
+.jg-scene__controls select, .jg-scene__controls button { font: inherit; padding: 5px 8px; border: 1px solid var(--aether-color-border); border-radius: 7px; color: inherit; background: var(--scene-wall); }
+.jg-scene__controls button { cursor: pointer; }
+.jg-scene__controls :focus-visible { outline: 2px solid var(--scene-accent); outline-offset: 2px; }
+.jg-scene[data-layout=workbench] { --scene-desk: color-mix(in srgb, var(--scene-ink) 20%, var(--scene-floor)); }
+.jg-scene[data-layout=workbench] .jg-scene__window { border-radius: 4px; height: 55px; width: 80px; }
+.jg-scene[data-layout=workbench] .jg-scene__book { height: 16px; width: 35px; background: var(--scene-warning); border: 3px solid var(--scene-desk); }
+.jg-scene[data-layout=portrait] .jg-scene__desk, .jg-scene[data-layout=portrait] .jg-scene__chair, .jg-scene[data-layout=portrait] .jg-scene__shelf { display: none; }
+.jg-scene[data-layout=portrait] .jg-scene__actor { top: 78px; transform: scale(1.35); }
+.jg-scene[data-action=read] .jg-scene__head { animation: scene-think 6s ease-in-out infinite; }
+.jg-scene[data-action=type] .jg-scene__arm--left { animation: scene-type .65s ease-in-out infinite alternate; }
+.jg-scene[data-action=type] .jg-scene__arm--right { animation: scene-type .65s -.3s ease-in-out infinite alternate-reverse; }
+.jg-scene[data-action=check] .jg-scene__head { animation: scene-look 3s ease-in-out infinite; }
+.jg-scene[data-action=attention] .jg-scene__arm--right { transform: rotate(-150deg); }
+.jg-scene[data-action=celebrate] .jg-scene__head { animation: scene-nod .8s ease-in-out 2; }
+.jg-scene[data-action=blocked] .jg-scene__head { transform: rotate(-10deg) translateY(5px); }
+.jg-scene[data-action=offline] .jg-scene__actor { opacity: .55; animation: none; }
+.jg-scene[data-action=offline] .jg-scene__monitor { opacity: .4; }
+.jg-scene[data-action=look] .jg-scene__head { animation: scene-look 3.8s ease-in-out; }
+.jg-scene[data-action=stretch] .jg-scene__arm--left { animation: scene-stretch 3.8s ease-in-out; }
+.jg-scene[data-action=stretch] .jg-scene__arm--right { animation: scene-stretch 3.8s ease-in-out reverse; }
+.jg-scene[data-action=sip] .jg-scene__arm--left { animation: scene-sip 3.8s ease-in-out; }
+.jg-scene[data-action=sip] .jg-scene__head { animation: scene-think 3.8s ease-in-out; }
+.jg-scene[data-action=sip] .jg-scene__arm--left::after { content: ''; position: absolute; bottom: 0; width: 17px; height: 21px; border-radius: 3px 3px 6px 6px; background: var(--scene-warning); }
+.jg-scene[data-action=sip] .jg-scene__cup { visibility: hidden; }
+.jg-scene[data-action=speak] .jg-scene__head { animation: scene-nod .7s ease-in-out infinite; }
+.jg-scene[data-playing=false] .jg-scene__stage *, .jg-scene[data-playing=false] .jg-scene__stage *::after { animation-play-state: paused !important; transition: none !important; }
+.jg-scene-dialog { width: min(620px, 92vw); max-height: 92vh; padding: 16px; background: var(--aether-color-bg-rail); color: var(--aether-color-text); border: 1px solid var(--aether-color-border); border-radius: 20px; overflow: auto; }
+.jg-scene-dialog::backdrop { background: color-mix(in srgb, var(--aether-color-bg-rail) 70%, transparent); backdrop-filter: blur(8px); }
+.jg-scene-dialog .jg-scene__stage { height: 300px; }
+.jg-scene-dialog__close { display: block; margin: 0 0 12px auto; padding: 6px 10px; border: 1px solid var(--aether-color-border); border-radius: 8px; background: var(--aether-color-bg-control); color: inherit; cursor: pointer; }
+@keyframes scene-breathe { 0%, 100% { translate: 0 0; } 50% { translate: 0 -2px; } }
+@keyframes scene-think { 0%,100% { rotate: 0deg; } 40%,70% { rotate: -9deg; translate: -2px 1px; } }
+@keyframes scene-type { from { rotate: -18deg; translate: 0 0; } to { rotate: -35deg; translate: 0 3px; } }
+@keyframes scene-look { 0%,100% { translate: 0 0; rotate: 0deg; } 35%,65% { translate: 7px -1px; rotate: 7deg; } }
+@keyframes scene-nod { 0%,100% { translate: 0 0; } 50% { translate: 0 5px; } }
+@keyframes scene-stretch { 0%,100% { rotate: 0deg; } 35%,65% { rotate: 150deg; } }
+@keyframes scene-sip { 0%,100% { rotate: 0deg; } 30%,65% { rotate: 120deg; translate: -4px -7px; } }
+@media (prefers-reduced-motion: reduce) { .jg-scene__stage * { animation: none !important; transition: none !important; } }

@@ -17,14 +17,24 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { createSource } from "./api";
 
-// Feature flag: Set to true to use the new Apple-native UI
+// Feature flags for different UI modes
 const USE_APPLE_UI = new URLSearchParams(window.location.search).get("ui") === "apple" ||
                      localStorage.getItem("jaeger.ui.apple") === "1";
+const USE_WINDOWS_UI = new URLSearchParams(window.location.search).get("ui") === "windows" ||
+                       localStorage.getItem("jaeger.ui.windows") === "1";
 
 const source = await createSource();
 
-// Render Apple UI or Classic UI based on flag
-if (USE_APPLE_UI) {
+// Render the appropriate UI based on flags
+if (USE_WINDOWS_UI) {
+  // Multi-window app system (Grok-style App windows)
+  const { AppWindow } = await import("./windows/AppWindow");
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <AppWindow source={source} />
+    </StrictMode>,
+  );
+} else if (USE_APPLE_UI) {
   const { AppleApp } = await import("./AppleApp");
   createRoot(document.getElementById("root")!).render(
     <StrictMode>

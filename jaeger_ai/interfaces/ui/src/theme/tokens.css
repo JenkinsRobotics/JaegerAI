@@ -401,14 +401,14 @@ body {
 
 /* Glass effect */
 .glass {
-  background: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.7); /* literal-ok */
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
 
 .dark .glass,
 [data-theme="dark"] .glass {
-  background: rgba(17, 17, 23, 0.7);
+  background: rgba(17, 17, 23, 0.7); /* literal-ok */
 }
 
 /* Gradient text */

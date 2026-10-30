@@ -11694,6 +11694,9 @@ def _proxy_jaeger_gateway(handler, method: str, path: str, body: bytes | None = 
 
 def handle_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
+    from api.character_scenes import route as character_scene_route
+    if character_scene_route(handler, parsed):
+        return True
     from api.native_panel_context import check_profile as check_native_panel_profile
     if (parsed.path.startswith("/api/crons") or parsed.path.startswith("/api/kanban/")) and not check_native_panel_profile(handler):
         return True

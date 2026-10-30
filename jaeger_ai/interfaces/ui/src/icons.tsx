@@ -22,3 +22,6 @@ export const WaveIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><p
 export const GlyphCode = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="m6 4.5-3.5 3.5L6 11.5M10 4.5l3.5 3.5-3.5 3.5" /></svg>;
 export const GlyphBranch = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><circle cx="5" cy="3.5" r="1.5" /><circle cx="5" cy="12.5" r="1.5" /><circle cx="11" cy="6" r="1.5" /><path d="M5 5v6M11 7.5c0 2-2 2.5-6 3.5" /></svg>;
 export const GlyphCube = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="M8 2 13.5 5v6L8 14 2.5 11V5zM2.5 5 8 8l5.5-3M8 8v6" /></svg>;
+export const GrokIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><rect x="2" y="2" width="12" height="12" rx="2" /><path d="M2 6h12M6 6v8" /></svg>;
+export const CpuIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><rect x="3.5" y="3.5" width="9" height="9" rx="1.5" /><path d="M6 6h4v4H6zM6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2" /></svg>;
+export const SharePointIcon = (p: SVGProps<SVGSVGElement>) => <svg {...base} {...p}><path d="M12 7.5a3.5 3.5 0 0 0-6.8-1.1A2.5 2.5 0 0 0 3 8.8a2.5 2.5 0 0 0 2.5 2.7h6.7a2.8 2.8 0 0 0 0-5.5z" /></svg>;

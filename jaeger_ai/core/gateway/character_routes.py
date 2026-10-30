@@ -26,6 +26,24 @@ from jaeger_ai.features.personality.character import (
 logger = logging.getLogger(__name__)
 
 
+async def handle_character_scene(request: web.Request) -> web.StreamResponse:
+    """Read a validated presentation or one declared pack asset."""
+    from jaeger_ai.features.personality.scene import MEDIA, scene_asset, scene_presentation
+    root = characters_root().resolve()
+    folder = (root / request.match_info["id"]).resolve()
+    if not folder.is_relative_to(root) or folder == root or not (folder / "character.yaml").is_file():
+        raise web.HTTPNotFound()
+    char = load_character(folder)
+    key = request.match_info.get("asset")
+    if key is None:
+        return web.json_response(scene_presentation(char), headers={"Cache-Control": "no-cache"})
+    asset = scene_asset(char, key)
+    if asset is None:
+        raise web.HTTPNotFound()
+    return web.FileResponse(asset, headers={"Content-Type": MEDIA[asset.suffix.lower()],
+        "X-Content-Type-Options": "nosniff", "Cache-Control": "no-cache"})
+
+
 def character_to_dict(char: Character) -> dict[str, Any]:
     """Convert a Character to a JSON-serializable dict for the API."""
     personality = char.personality
@@ -296,6 +314,8 @@ def register_character_routes(app: web.Application) -> None:
     app.router.add_get("/v1/characters", handle_list_characters)
     app.router.add_get("/v1/characters/{id}", handle_get_character)
     app.router.add_get("/v1/characters/{id}/card", handle_character_card)
+    app.router.add_get("/v1/characters/{id}/scene", handle_character_scene)
+    app.router.add_get("/v1/characters/{id}/scene/assets/{asset}", handle_character_scene)
     app.router.add_post("/v1/agents/from-template", handle_create_agent_from_template)
     
     logger.info("Character library routes registered: /v1/characters, /v1/agents/from-template")

@@ -1,3 +1,4 @@
+import {keysWithPrefix} from '../lib/storageKeys';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {afterEach, expect, it, vi} from 'vitest';
@@ -7,7 +8,7 @@ import {MinimalChat, needsSeparator, separatorLabel} from '../chat/MinimalChat';
 import {useStreamStyle} from '../chat/streamStyle';
 import type {ChatHost} from '../chat/host';
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT = true;
-afterEach(() => {vi.restoreAllMocks(); vi.unstubAllGlobals(); for(const key of Object.keys(localStorage)) if(key.startsWith(DEVICE_PREF_KEY)) localStorage.removeItem(key); applyDevicePreferences(DEFAULT_DEVICE_PREFERENCES);});
+afterEach(() => {vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const key of keysWithPrefix(DEVICE_PREF_KEY)) localStorage.removeItem(key); applyDevicePreferences(DEFAULT_DEVICE_PREFERENCES);});
 const fill = async (element: HTMLElement, label: string, value: string) => {
   const field = element.querySelector<HTMLInputElement | HTMLSelectElement>(`[aria-label="${label}"]`)!;
   await act(async () => {Object.getOwnPropertyDescriptor(field instanceof HTMLSelectElement ? HTMLSelectElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event(field instanceof HTMLSelectElement ? 'change' : 'input', {bubbles: true}));});
@@ -28,7 +29,7 @@ it('preserves malformed originals and refuses to claim/apply persistence on stor
   expect(devicePreferenceSnapshot().error).toBeTruthy();
   expect(localStorage.getItem(DEVICE_PREF_KEY)).toBe('original-invalid-settings');
   saveDevicePreferences(DEFAULT_DEVICE_PREFERENCES);
-  const backup = Object.keys(localStorage).find(key => key.startsWith(DEVICE_PREF_KEY + '.recovery.'))!;
+  const backup = keysWithPrefix(DEVICE_PREF_KEY + '.recovery.')[0]!;
   expect(localStorage.getItem(backup)).toBe('original-invalid-settings');
   vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {throw Error('Storage blocked');});
   expect(() => saveDevicePreferences({...DEFAULT_DEVICE_PREFERENCES, motion:'reduce'})).toThrow('Storage blocked');

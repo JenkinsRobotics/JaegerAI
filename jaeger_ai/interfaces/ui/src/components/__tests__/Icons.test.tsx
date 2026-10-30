@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render } from '@testing-library/react'
 import * as Icons from '../Icons'
 
 describe('Icons', () => {
@@ -42,6 +42,8 @@ describe('Icons', () => {
     'Star',
     'MessageSquare',
     'MoreHorizontal',
+    'Cpu',
+    'Cloud',
   ]
 
   iconNames.forEach((name) => {

@@ -1,6 +1,7 @@
 import { WorkflowRuns } from "./WorkflowRuns";
 import { GatewayError } from "../api/gateway";
 import { useEffect, useRef, useState } from 'react';
+import { keysWithPrefix } from "../lib/storageKeys";
 import type { JaegerSource, WorkflowAction, WorkflowDocument, WorkflowReceipt, WorkflowDefinition } from '../api/source';
 import type { Agent } from '../api/types';
 interface Draft { raw: string; revision?: number }
@@ -9,7 +10,7 @@ const draftKey = (id: string) => `jaeger.ui.workflow.draft.v1.${encodeURICompone
 const OP = 'jaeger.ui.workflow.operation.v1';
 const journalKey = (id: string) => OP + '.pending.' + id;
 const savedIntents = (): Intent[] => {
-  const raw = [localStorage.getItem(OP), ...Object.keys(localStorage).filter(key=>key.startsWith(OP+'.pending.')).map(key=>localStorage.getItem(key))];
+  const raw = [localStorage.getItem(OP), ...keysWithPrefix(OP+'.pending.').map(key=>localStorage.getItem(key))];
   const found = new Map<string,Intent>();
   for(const record of raw){if(!record)continue;const value=JSON.parse(record);if(!value.operationId||!value.action||!value.id||typeof value.draft?.raw!=='string')throw Error('Invalid workflow operation record; original retained');found.set(value.operationId,value);}
   return [...found.values()];
@@ -20,7 +21,7 @@ const settleIntent = (intent: Intent): Intent | undefined => {
   if(pointer?.operationId===intent.operationId)localStorage.removeItem(OP);
   return savedIntents()[0];
 };
-const backups = () => { try { return Object.keys(localStorage).filter(key=>key.startsWith(draftKey('new')+'.backup.')).reverse().slice(0,10); } catch { return []; } };
+const backups = () => { try { return keysWithPrefix(draftKey('new')+'.backup.').reverse().slice(0,10); } catch { return []; } };
 export function WorkflowsPanel({ source, agents }: { source: JaegerSource; agents: Agent[] }) {
   const controls = source.workflows!;
   const [catalog, setCatalog] = useState<Awaited<ReturnType<typeof controls.list>>>(), [attempt, setAttempt] = useState(0);

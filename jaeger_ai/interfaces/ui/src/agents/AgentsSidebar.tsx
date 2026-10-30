@@ -1,5 +1,5 @@
 import type { SidebarControl } from "../shell/AppShell";
-import { GlyphBranch, GlyphCode, GlyphCube, PlusIcon, SearchIcon, SidebarIcon, TasksIcon } from "../icons";
+import { CpuIcon, GlyphBranch, GlyphCode, GlyphCube, GrokIcon, PlusIcon, SearchIcon, SharePointIcon, SidebarIcon, TasksIcon } from "../icons";
 import { ErrorState } from "../shell/ErrorState";
 import type { SessionRow } from "../api/types";
 import type { AgentsState } from "./agentsStore";
@@ -12,8 +12,13 @@ import { AGENT_DRAG_TYPE, splitPinned } from "./pins";
 import { SpecialistList } from "./SpecialistList";
 import { isUnread } from "./unread";
 
-/** An agent, optionally one of its chats; or the Tasks board. */
-export type Selection = { type: "agent"; agentId: string; sessionId?: string } | { type: "tasks" };
+/** An agent, optionally one of its chats; or the Tasks board, Grok UI, Machine Control, or SharePoint tab. */
+export type Selection =
+  | { type: "agent"; agentId: string; sessionId?: string }
+  | { type: "tasks" }
+  | { type: "grok" }
+  | { type: "machine" }
+  | { type: "sharepoint" };
 
 interface Props {
   state: AgentsState;
@@ -100,9 +105,20 @@ export function agentsSidebarSlots({ state, selection, chats, onSelect, onNewCha
       </>
     ),
     sections: (
+      <>
+        <button type="button" className={`jg-nav-entry${selection.type === "grok" ? " is-selected" : ""}`} onClick={() => onSelect({ type: "grok" })}>
+          <GrokIcon width={14} height={14} /> <span>Grok UI</span>
+        </button>
         <button type="button" className={`jg-nav-entry${selection.type === "tasks" ? " is-selected" : ""}`} onClick={() => onSelect({ type: "tasks" })}>
           <TasksIcon width={14} height={14} /> <span>Tasks</span>
         </button>
+        <button type="button" className={`jg-nav-entry${selection.type === "machine" ? " is-selected" : ""}`} onClick={() => onSelect({ type: "machine" })}>
+          <CpuIcon width={14} height={14} /> <span>Machine Control</span>
+        </button>
+        <button type="button" className={`jg-nav-entry${selection.type === "sharepoint" ? " is-selected" : ""}`} onClick={() => onSelect({ type: "sharepoint" })}>
+          <SharePointIcon width={14} height={14} /> <span>SharePoint</span>
+        </button>
+      </>
     ),
     footer: (
       <div className="jg-sidebar-footer">

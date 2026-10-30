@@ -85,6 +85,10 @@ traits:
 card: card.png
 kind: clip_set
 assets:
+  icon:
+    file: assets/heads/mochi-head-2d-512.png
+    type: image
+    adapter: image
   primary:
     file: card.png
     type: image
@@ -94,6 +98,8 @@ assets:
     type: avatar
 default_asset: primary
 render:
+  scene:
+    layout: desk
   adapter: image
   asset: card.png
   ideal_size: [320, 420]

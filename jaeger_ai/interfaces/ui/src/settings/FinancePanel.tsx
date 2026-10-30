@@ -1,9 +1,10 @@
 import {useEffect,useRef,useState} from 'react';
 import {GatewayError} from '../api/gateway';
 import type {FinanceAction,FinanceControls,FinanceReceipt} from '../api/source';
+import {keysWithPrefix} from '../lib/storageKeys';
 const PREFIX='jaeger.ui.finance.review.v1.';
 interface Intent {operation_id:string;action_id:string;expected_revision:string;decision:'record_review'|'deny'}
-const intents=():Intent[]=>Object.keys(localStorage).filter(k=>k.startsWith(PREFIX)).map(k=>{const v=JSON.parse(localStorage.getItem(k)!);if(!v.operation_id||!v.action_id||!v.expected_revision||!['record_review','deny'].includes(v.decision))throw Error('Saved finance review invalid; original retained');return v;});
+const intents=():Intent[]=>keysWithPrefix(PREFIX).map(k=>{const v=JSON.parse(localStorage.getItem(k)!);if(!v.operation_id||!v.action_id||!v.expected_revision||!['record_review','deny'].includes(v.decision))throw Error('Saved finance review invalid; original retained');return v;});
 /** Local review metadata only. There is no charge/card/link/payment action. */
 export function FinancePanel({controls}:{controls:FinanceControls}){
  const [snapshot,setSnapshot]=useState<Awaited<ReturnType<typeof controls.status>>>(),[pending,setPending]=useState<Intent[]>([]),[selected,setSelected]=useState<{row:FinanceAction;decision:Intent['decision']}>();

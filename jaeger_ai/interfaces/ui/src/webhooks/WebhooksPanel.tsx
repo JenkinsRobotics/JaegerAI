@@ -1,18 +1,19 @@
 import {useEffect, useRef, useState} from 'react';
 import {GatewayError} from '../api/gateway';
 import type {Agent} from '../api/types';
+import {keysWithPrefix} from '../lib/storageKeys';
 import type {JaegerSource, WebhookDefinition, WebhookDelivery, WebhookReceipt, WebhookSubscription} from '../api/source';
 
 const DRAFT = 'jaeger.ui.webhook.draft.v1';
 const OP = 'jaeger.ui.webhook.command.v1.';
 interface Editor {id: string; revision: number; agentId: string; definition: WebhookDefinition}
 interface Intent {id: string; operationId: string; editor: Editor; definition: WebhookDefinition}
-const pendingCommands = (): Intent[] => Object.keys(localStorage).filter(k => k.startsWith(OP)).map(k => {
+const pendingCommands = (): Intent[] => keysWithPrefix(OP).map(k => {
   const value = JSON.parse(localStorage.getItem(k)!);
   if (typeof value.operationId !== 'string' || typeof value.id !== 'string' || !value.editor || !value.definition) throw Error('Saved webhook command invalid; original retained');
   return value as Intent;
 });
-const savedDraftKeys = () => {try {return Object.keys(localStorage).filter(key => key.startsWith(DRAFT + '.saved.'));} catch {return [];}};
+const savedDraftKeys = () => {try {return keysWithPrefix(DRAFT + '.saved.');} catch {return [];}};
 const empty = (): Editor => ({id: crypto.randomUUID(), revision: 0, agentId: '', definition: {name: '', provider: 'generic', events: [], senders: [], session_id: '', objective: '', enabled: false, archived: false}});
 
 /** Setup definitions and receipts only. No test-send, listener or credential mutation. */

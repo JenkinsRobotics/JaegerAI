@@ -1448,6 +1448,15 @@ def _register_builtins(client: Any) -> None:
     # Durable mission/goal/plan facade over the cognitive commitment store.
     from jaeger_ai.features.missions import tools as _mission_tools  # noqa: F401
 
+    # Operator goals/projects with goal-aligned tool-bundle caps — same
+    # import-registers pattern. Registers goal_* / project_status / task_spawn.
+    from jaeger_ai.features.goals import tools as _goal_tools  # noqa: F401
+
+    # Seed durable goals from operator.toml [[projects]] tables. Idempotent;
+    # a config error must never break boot.
+    from jaeger_ai.features.goals import seed_operator_goals as _seed_goals
+    _seed_goals()
+
     from jaeger_ai.features.knowledge_library import tools as _library_tools  # noqa: F401
 
     # execute_with_tools — one script, many tool calls, one inference

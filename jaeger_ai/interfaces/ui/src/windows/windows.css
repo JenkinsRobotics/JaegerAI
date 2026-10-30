@@ -1,0 +1,789 @@
+/**
+ * windows.css — Styles for the multi-window app system
+ *
+ * Provides styling for:
+ * - App window container
+ * - Window dock (macOS-style)
+ * - Window pages (content areas)
+ * - Placeholder pages
+ */
+
+/* ─────────────────────────────────────────────────────────────
+   App Window Container
+   ───────────────────────────────────────────────────────────── */
+
+.app-window {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  flex: 1;
+  overflow: hidden;
+  background-color: var(--background, #ffffff); /* literal-ok */
+}
+
+.app-window__content {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  z-index: 1;
+}
+
+.app-window__page {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 0.2s ease, visibility 0.2s ease;
+  overflow-y: auto;
+  overflow-x: hidden;
+  /* A page that fills its frame scrolls internally instead of growing the window.
+     Pages that size themselves (flex children like .jg-tasks) need this to be a
+     flex container or their children see an unbounded height. */
+  display: flex;
+  flex-direction: column;
+}
+
+.app-window__page--active {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Window Dock (macOS-style) - Responsive & Scrollable
+   ───────────────────────────────────────────────────────────── */
+
+.window-dock {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--jg-color-sidebar);
+  border-top: 1px solid var(--jg-color-border);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10000; /* above every page surface so the "+" menu is never clipped */
+  width: 100%;
+  overflow: visible; /* the dropdown opens upward and must not be cut off */
+}
+
+.dark .window-dock {
+  background: var(--jg-color-sidebar);
+  border-top-color: var(--jg-color-border);
+}
+
+.window-dock__items {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--jg-color-hover);
+  border-radius: 14px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  /* Scrollable when many items. `overflow-y: visible` is impossible with
+     `overflow-x: auto`, so the "+" dropdown is rendered via a portal at the
+     document root instead — see WindowDock.tsx. */
+  max-width: calc(100vw - 32px);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+  /* Smooth scrolling */
+  scroll-behavior: smooth;
+}
+
+.window-dock__items::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+.dark .window-dock__items {
+  background: var(--jg-color-hover);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Window Dock Item - Compact sizing
+   ───────────────────────────────────────────────────────────── */
+
+.window-dock__item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 6px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  user-select: none;
+  flex-shrink: 0; /* Prevent items from shrinking */
+  min-width: fit-content;
+}
+
+.window-dock__item:hover {
+  background: var(--jg-color-hover);
+  transform: translateY(-3px) scale(1.05);
+}
+
+.window-dock__item:active {
+  transform: translateY(-1px) scale(1.02);
+}
+
+.window-dock__item--active {
+  background: var(--jg-color-active);
+}
+
+.window-dock__item--active::after {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--jg-color-accent);
+}
+
+.window-dock__item--minimized {
+  opacity: 0.6;
+}
+
+.window-dock__item--minimized:hover {
+  opacity: 1;
+}
+
+.window-dock__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  color: var(--jg-color-text);
+  border-radius: 9px;
+  background: var(--jg-color-elevated);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--jg-color-shadow) 8%, transparent);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.dark .window-dock__icon {
+  background: var(--jg-color-elevated);
+  box-shadow: 0 1px 4px color-mix(in srgb, var(--jg-color-shadow) 30%, transparent);
+}
+
+.window-dock__item:hover .window-dock__icon {
+  box-shadow: 0 3px 12px color-mix(in srgb, var(--jg-color-shadow) 12%, transparent);
+}
+
+.window-dock__label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--jg-color-text-secondary);
+  white-space: nowrap;
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.window-dock__minimized-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--jg-avatar-orange);
+}
+
+/* Close button (shows on hover) */
+.window-dock__close {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: var(--jg-avatar-red);
+  color: var(--jg-color-on-badge);
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all 0.15s ease;
+}
+
+.window-dock__item:hover .window-dock__close {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.window-dock__close:hover {
+  background: var(--jg-avatar-red);
+  transform: scale(1.1);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Add Button & Dropdown
+   ───────────────────────────────────────────────────────────── */
+
+.window-dock__item--add {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.window-dock__dropdown {
+  position: relative;
+}
+
+.window-dock__add-button {
+  border: 2px dashed var(--jg-color-border);
+  background: transparent;
+  cursor: pointer;
+}
+
+.window-dock__add-icon {
+  font-size: 20px;
+  font-weight: 300;
+  color: var(--jg-color-text-secondary);
+  line-height: 1;
+}
+
+.window-dock__item--add:hover .window-dock__add-button {
+  border-color: var(--jg-color-accent);
+}
+
+.window-dock__item--add:hover .window-dock__add-icon {
+  color: var(--jg-color-accent);
+}
+
+/* Dropdown menu */
+.window-dock__menu {
+  min-width: 180px;
+  max-height: 300px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--jg-color-elevated);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px color-mix(in srgb, var(--jg-color-shadow) 15%, transparent);
+  z-index: 10001;
+}
+
+/* Portaled menu (rendered at <body>): position is set inline from the "+" button's
+   rect, opens upward, always visible on hover/focus of the add item. */
+.window-dock__menu--portal {
+  position: fixed;
+  transform: translateX(-50%);
+}
+
+/* Hover reveal only applies to the legacy in-dock variant; the portaled menu is
+   driven by React state (menuPos) instead. */
+.window-dock__item--add:hover .window-dock__menu:not(.window-dock__menu--portal),
+.window-dock__item--add:focus-within .window-dock__menu:not(.window-dock__menu--portal) {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(0);
+}
+
+.dark .window-dock__menu {
+  background: var(--jg-color-elevated);
+  box-shadow: 0 8px 32px color-mix(in srgb, var(--jg-color-shadow) 40%, transparent);
+}
+
+.window-dock__menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--jg-color-text);
+  font-size: 13px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s ease;
+  white-space: nowrap;
+}
+
+.window-dock__menu-item:hover {
+  background: var(--jg-color-hover);
+}
+
+.window-dock__menu-item svg {
+  color: var(--jg-color-text-secondary);
+}
+
+/* Scroll indicators for dock */
+.window-dock__scroll-left,
+.window-dock__scroll-right {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--jg-color-elevated);
+  border: 1px solid var(--jg-color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+  z-index: 10;
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--jg-color-shadow) 10%, transparent);
+}
+
+.window-dock__scroll-left {
+  left: 8px;
+}
+
+.window-dock__scroll-right {
+  right: 8px;
+}
+
+.window-dock.has-overflow .window-dock__scroll-left,
+.window-dock.has-overflow .window-dock__scroll-right {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.window-dock__scroll-left:hover,
+.window-dock__scroll-right:hover {
+  background: var(--jg-color-hover);
+}
+
+.window-dock__scroll-left svg,
+.window-dock__scroll-right svg {
+  width: 16px;
+  height: 16px;
+  color: var(--jg-color-text-secondary);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Responsive: Smaller dock on narrow screens
+   ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .window-dock {
+    padding: 6px 8px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+  
+  .window-dock__items {
+    gap: 4px;
+    padding: 3px 8px;
+    max-width: calc(100vw - 16px);
+  }
+  
+  .window-dock__item {
+    padding: 4px 6px;
+    gap: 2px;
+  }
+  
+  .window-dock__icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+  }
+  
+  .window-dock__label {
+    font-size: 9px;
+    max-width: 50px;
+  }
+}
+
+@media (max-width: 480px) {
+  .window-dock__label {
+    display: none; /* Hide labels on very small screens */
+  }
+  
+  .window-dock__item {
+    padding: 6px;
+  }
+  
+  .window-dock__icon {
+    width: 28px;
+    height: 28px;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Placeholder Page
+   ───────────────────────────────────────────────────────────── */
+
+.placeholder-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 40px;
+  text-align: center;
+}
+
+.placeholder-page__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 120px;
+  height: 120px;
+  margin-bottom: 24px;
+  border-radius: 24px;
+  background: var(--tertiary-fill, rgba(118, 118, 128, 0.12));
+  color: var(--system-blue, #007aff);
+}
+
+.placeholder-page__title {
+  font-size: 28px;
+  font-weight: 600;
+  color: var(--label, #000000);
+  margin-bottom: 8px;
+}
+
+.placeholder-page__description {
+  font-size: 17px;
+  color: var(--secondary-label, rgba(60, 60, 67, 0.6));
+  max-width: 400px;
+  margin-bottom: 8px;
+}
+
+.placeholder-page__hint {
+  font-size: 13px;
+  color: var(--tertiary-label, rgba(60, 60, 67, 0.3));
+  margin-top: 24px;
+}
+
+/* Placeholder page features list */
+.placeholder-page__features {
+  list-style: none;
+  padding: 0;
+  margin: 24px 0;
+  text-align: left;
+  max-width: 400px;
+}
+
+.placeholder-page__features li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  font-size: 15px;
+  color: var(--secondary-label, rgba(60, 60, 67, 0.6));
+  border-bottom: 1px solid var(--separator, rgba(60, 60, 67, 0.1));
+}
+
+.placeholder-page__features li:last-child {
+  border-bottom: none;
+}
+
+.placeholder-page__features li::before {
+  content: '✓';
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: rgba(52, 199, 89, 0.15);
+  color: var(--system-green, #34c759);
+  border-radius: 50%;
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.placeholder-page .btn {
+  margin-top: 8px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Demo Page Animations
+   ───────────────────────────────────────────────────────────── */
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.home-page .hero__content > * {
+  animation: fadeInUp 0.6s ease-out backwards;
+}
+
+.home-page .hero__badge { animation-delay: 0.1s; }
+.home-page .hero__title { animation-delay: 0.2s; }
+.home-page .hero__subtitle { animation-delay: 0.3s; }
+.home-page .hero__actions { animation-delay: 0.4s; }
+.home-page .hero__stats { animation-delay: 0.5s; }
+
+.home-page .feature-card,
+.home-page .use-case-card {
+  animation: scaleIn 0.4s ease-out backwards;
+}
+
+.home-page .feature-card:nth-child(1) { animation-delay: 0.1s; }
+.home-page .feature-card:nth-child(2) { animation-delay: 0.2s; }
+.home-page .feature-card:nth-child(3) { animation-delay: 0.3s; }
+.home-page .feature-card:nth-child(4) { animation-delay: 0.4s; }
+.home-page .feature-card:nth-child(5) { animation-delay: 0.5s; }
+.home-page .feature-card:nth-child(6) { animation-delay: 0.6s; }
+
+
+/* ─────────────────────────────────────────────────────────────
+   Nav page — the "Navigate" tab: agents / chats / work lists.
+   Left-list pattern per Apple HIG Sidebars + ChatGPT/Codex rail.
+   ───────────────────────────────────────────────────────────── */
+
+.navp {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--jg-color-chrome);
+  color: var(--jg-color-text);
+}
+
+.navp__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 14px 24px;
+}
+
+.navp__section { margin-bottom: 14px; }
+
+.navp__section-title {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  background: transparent;
+  color: var(--jg-color-text-secondary);
+  font-size: var(--jg-font-tiny);
+  font-weight: var(--jg-font-weight-medium);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.navp__section-title:hover { background: var(--jg-color-hover); }
+
+.navp__section-body { padding: 3px 0 4px; }
+
+.navp__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+
+.navp__row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--jg-color-text);
+  font-size: var(--jg-font-small);
+  font-weight: var(--jg-font-weight-base);
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+.navp__row:hover { background: var(--jg-color-hover); }
+.navp__row svg { flex: none; color: var(--jg-color-text-secondary); }
+
+.navp__label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.navp__meta {
+  flex: none;
+  font-size: var(--jg-font-tiny);
+  color: var(--jg-color-text-secondary);
+}
+
+.navp__dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--jg-color-accent);
+}
+
+.navp__new {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  margin: 2px 0 5px;
+  padding: 7px 9px;
+  border: 1px dashed var(--jg-color-border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--jg-color-text-secondary);
+  font-size: var(--jg-font-small);
+  cursor: pointer;
+}
+.navp__new:hover { background: var(--jg-color-hover); color: var(--jg-color-text); }
+
+.navp__note {
+  margin: 2px 0 6px;
+  padding: 0 9px;
+  font-size: var(--jg-font-tiny);
+  color: var(--jg-color-text-secondary);
+}
+
+/* A tab that is listed but not currently open in the window manager. */
+.window-dock__item--closed .window-dock__icon,
+.window-dock__item--closed .window-dock__label {
+  opacity: 0.55;
+}
+
+.window-dock__item--closed:hover .window-dock__icon,
+.window-dock__item--closed:hover .window-dock__label {
+  opacity: 1;
+}
+
+/* ── App shell (unused legacy; kept out of the chrome) ─────────
+   The sidebar pattern now lives in the Navigate tab (NavPage). The
+   .shell* rules below are retained for reference and not mounted. ── */
+/* Settings-hub panels: real windows without dock tabs. */
+.panel-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+.panel-page__note {
+  margin: 24px;
+  font-size: var(--jg-font-small);
+  color: var(--jg-color-text-secondary);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Responsive
+   ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .window-dock__label {
+    display: none;
+  }
+
+  .window-dock__item {
+    padding: 8px;
+  }
+
+  .window-dock__icon {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   ChatPage — real chat on the proven stack (chat/*). Left rail =
+   this conversation's history; no agent persona lists (Agents tab).
+   ───────────────────────────────────────────────────────────── */
+.cpage { display: flex; flex-direction: row; height: 100%; min-height: 0; overflow: hidden; }
+.cpage-rail {
+  flex: none; width: 248px; display: flex; flex-direction: column;
+  background: var(--jg-color-sidebar); border-right: 1px solid var(--jg-color-border);
+}
+.cpage-rail__header { flex: none; height: var(--jg-band-height); display: flex; align-items: center; padding-left: 10px; }
+.cpage-rail__actions { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px 8px; }
+.cpage-rail__icon {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border: none; border-radius: 8px;
+  background: transparent; color: var(--jg-color-text-secondary); cursor: pointer;
+}
+.cpage-rail__icon:hover:not(:disabled) { background: var(--jg-color-hover); color: var(--jg-color-text); }
+.cpage-rail__icon:disabled { opacity: 0.5; cursor: default; }
+.cpage-rail__icon--end { margin-left: auto; }
+.cpage-rail__search { flex: none; padding: 0 10px 8px; position: relative; }
+.cpage-rail__search input {
+  width: 100%; padding: 7px 26px 7px 10px; font: inherit; font-size: var(--jg-font-small);
+  color: var(--jg-color-text); background: var(--jg-color-elevated);
+  border: 1px solid var(--jg-color-border); border-radius: 8px; box-sizing: border-box;
+}
+.cpage-rail__search input:focus { outline: 2px solid var(--jg-color-accent); outline-offset: -1px; }
+.cpage-rail__clear {
+  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; border: none; border-radius: 50%;
+  background: var(--jg-color-hover); color: var(--jg-color-text-secondary); cursor: pointer;
+}
+.cpage-rail__scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 8px 10px; }
+/* The rail has no 54px avatar gutter (that indent belongs to the agent tree). */
+.cpage-rail__scroll .jg-chat-list { padding-left: 0; }
+.cpage-rail__note { margin: 4px 8px 8px; font-size: var(--jg-font-tiny); color: var(--jg-color-text-secondary); }
+.cpage-rail__footer { flex: none; border-top: 1px solid var(--jg-color-border); padding: 6px 10px; }
+.cpage-rail__foot-btn {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 7px 9px; border: none; border-radius: 8px; background: transparent;
+  color: var(--jg-color-text-secondary); font-size: var(--jg-font-small); cursor: pointer;
+}
+.cpage-rail__foot-btn:hover { background: var(--jg-color-hover); color: var(--jg-color-text); }
+.cpage-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.cpage-main__note { margin: auto; font-size: var(--jg-font-small); color: var(--jg-color-text-secondary); }
+.cpage-main .jg-chat-mount { flex: 1; min-height: 0; }
+
+/* Settings hub: Danger zone — reset to default */
+.navp-reset { display: flex; flex-direction: column; gap: 10px; }
+.navp-reset__explain { margin: 0; font-size: var(--jg-font-tiny); color: var(--jg-color-text-secondary); line-height: 1.5; max-width: 640px; }
+.navp-reset__memory { display: flex; align-items: center; gap: 8px; font-size: var(--jg-font-small); color: var(--jg-color-text); cursor: pointer; user-select: none; }
+.navp-reset__memory input { accent-color: var(--jg-color-accent); }
+.navp-reset__btn {
+  align-self: flex-start;
+  padding: 7px 14px; font: inherit; font-size: var(--jg-font-small); font-weight: var(--jg-font-weight-medium);
+  color: var(--jg-color-text); background: var(--jg-color-elevated);
+  border: 1px solid var(--jg-color-border); border-radius: 8px; cursor: pointer;
+}
+.navp-reset__btn:hover:not(:disabled) { background: var(--jg-color-control-hover); }
+.navp-reset__btn:disabled { opacity: 0.5; cursor: default; }
+.navp-reset__btn--danger {
+  color: var(--jg-color-on-accent); background: var(--jg-color-accent); border-color: transparent;
+}
+.navp-reset__btn--danger:hover:not(:disabled) { filter: brightness(1.08); background: var(--jg-color-accent); }
+.navp-reset__confirm { display: flex; flex-direction: column; gap: 8px; }
+.navp-reset__confirm p { margin: 0; font-size: var(--jg-font-small); color: var(--jg-color-text); }
+.navp-reset__confirm-row { display: flex; gap: 8px; align-items: center; }
+.navp-reset__confirm-row input {
+  width: 140px; padding: 7px 10px; font: inherit; font-size: var(--jg-font-small);
+  color: var(--jg-color-text); background: var(--jg-color-elevated);
+  border: 1px solid var(--jg-color-border); border-radius: 8px; box-sizing: border-box;
+}
+.navp-reset__confirm-row input:focus { outline: 2px solid var(--jg-color-accent); outline-offset: -1px; }
+.navp-reset__status { margin: 0; font-size: var(--jg-font-tiny); color: var(--jg-color-text-secondary); }
+.navp-reset__status--ok { color: var(--jg-color-text); }
+.navp-reset__status--err { color: var(--jg-color-accent-text); }

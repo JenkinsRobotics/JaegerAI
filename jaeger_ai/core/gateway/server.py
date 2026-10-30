@@ -1388,6 +1388,20 @@ class JaegerGatewayApp:
             register_agent_v2_routes(self.app)
         except ImportError as e:
             logger.warning(f"V2 agent management routes unavailable: {e}")
+
+        # AI-generated dashboard widgets — POST /v1/widgets/generate (operator/admin).
+        try:
+            from jaeger_ai.core.gateway.widget_routes import register_widget_routes
+            register_widget_routes(self.app)
+        except ImportError as e:
+            logger.warning(f"Widget generation routes unavailable: {e}")
+
+        # App reset — POST /v1/app-reset (admin; archives first, deletes sessions).
+        try:
+            from jaeger_ai.core.gateway.reset_routes import register as register_app_reset
+            register_app_reset(self)
+        except ImportError as e:
+            logger.warning(f"App reset route unavailable: {e}")
         
         # Agent catalog — persistence spine for Mac app + WebUI clients.
         self.app.router.add_get("/v1/agents", self.handle_list_agents)

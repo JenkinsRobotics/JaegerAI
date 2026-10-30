@@ -57,6 +57,12 @@ class OperatorConfig:
     # Extra context for prompts (user-defined)
     custom_context: str = ""  # Added to system prompt context
 
+    # Static project seeds. Each entry is a table from ``[[operator.projects]]``
+    # in operator.toml: {name, root, build_cmd, tool_bundle}. These are the
+    # operator's standing projects — the runtime goal store
+    # (jaeger_ai/features/goals) is the source of truth once goals are created.
+    projects: tuple[dict[str, Any], ...] = field(default_factory=tuple)
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "OperatorConfig":
         """Build from a config dict, ignoring unknown keys."""
@@ -66,6 +72,11 @@ class OperatorConfig:
         for key in ("never_list", "allowed_paths"):
             if key in filtered and isinstance(filtered[key], list):
                 filtered[key] = tuple(filtered[key])
+        if "projects" in filtered and isinstance(filtered["projects"], list):
+            filtered["projects"] = tuple(
+                dict(p) if isinstance(p, dict) else {"name": str(p)}
+                for p in filtered["projects"]
+            )
         return cls(**filtered)
 
     @property
@@ -84,6 +95,18 @@ class OperatorConfig:
             lines.append(f"NAS: {self.nas_path}")
         if self.youtube_channel_name and self.youtube_channel_name != "Your Channel Name":
             lines.append(f"YouTube channel: {self.youtube_channel_name}")
+        if self.projects:
+            lines.append("Active projects:")
+            for project in self.projects:
+                name = str(project.get("name", "")).strip()
+                if not name:
+                    continue
+                bits = [f"- {name}"]
+                if project.get("tool_bundle"):
+                    bits.append(f"(tools: {project['tool_bundle']})")
+                if project.get("build_cmd"):
+                    bits.append(f"build: {project['build_cmd']}")
+                lines.append(" ".join(bits))
         if self.custom_context:
             lines.append(f"Additional context: {self.custom_context}")
         return "\n".join(lines) if lines else ""
@@ -205,6 +228,19 @@ def write_default_config(path: Path | None = None, *, force: bool = False) -> Pa
 
 # Custom context added to system prompts
 # custom_context = "I work on robotics projects. I prefer concise answers."
+
+# Standing projects — surfaced to the agent as active context and used to
+# seed goal-aligned tool bundles. Each [[operator.projects]] table:
+#   name         = display name
+#   root         = working directory for the project
+#   build_cmd    = how to build/test it (surfaced to robotics_build)
+#   tool_bundle  = cap on tools agents may use on this project
+#                  (see jaeger_ai/contract/tool_bundles.py)
+# [[operator.projects]]
+# name = "Robot Arm v2"
+# root = "/Users/alex/projects/robot-arm"
+# build_cmd = "swift test"
+# tool_bundle = "robotics.build"
 """
     path.write_text(template, encoding="utf-8")
     path.chmod(0o600)  # Config may contain tokens

@@ -1,13 +1,14 @@
 import {Dialog} from '@aether/ui';
 import {useEffect,useRef,useState} from 'react';
 import type {MCPResources as Controls,ResourceCatalog,ResourceSnapshot,ResourceReceipt} from '../api/source';
+import {keysWithPrefix} from '../lib/storageKeys';
 type Action='list'|'read'|'import';
 interface Intent {operation_id:string;action:Action}
 export function MCPResources({controls,server,onClose}:{controls:Controls;server:{id:string;name:string};onClose:()=>void}){
  const prefix='jaeger.ui.mcp-resource.operation.v1.'+server.id+'.';
  const [catalog,setCatalog]=useState<ResourceCatalog>(),[snapshot,setSnapshot]=useState<ResourceSnapshot>(),[pending,setPending]=useState<Intent>(),[busy,setBusy]=useState(false),[error,setError]=useState<string>(),[notice,setNotice]=useState<string>(),[confirmImport,setConfirmImport]=useState(false);
  const lock=useRef(false),live=useRef(true);
- const saved=()=>Object.keys(localStorage).filter(k=>k.startsWith(prefix)).map(k=>{const value=JSON.parse(localStorage.getItem(k)!);if(typeof value.operation_id!=='string'||!['list','read','import'].includes(value.action))throw Error('Invalid resource operation journal; original retained');return value as Intent;});
+ const saved=()=>keysWithPrefix(prefix).map(k=>{const value=JSON.parse(localStorage.getItem(k)!);if(typeof value.operation_id!=='string'||!['list','read','import'].includes(value.action))throw Error('Invalid resource operation journal; original retained');return value as Intent;});
  useEffect(()=>{live.current=true;try{setPending(saved()[0]);}catch(e){setError(String(e));}return()=>{live.current=false;};},[prefix]);
  const finish=async(receipt:ResourceReceipt,intent:Intent)=>{
   if(receipt.operation_id!==intent.operation_id)throw Error('Resource receipt identity mismatch');

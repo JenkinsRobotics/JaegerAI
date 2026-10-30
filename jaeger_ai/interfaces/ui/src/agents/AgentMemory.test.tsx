@@ -1,3 +1,4 @@
+import {keysWithPrefix} from '../lib/storageKeys';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {expect,it,vi} from 'vitest';
@@ -21,7 +22,7 @@ it('preserves an unknown notes save and reconciles only its receipt without repl
   await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Check saved memory action')!.click());
   expect(operation).toHaveBeenCalledExactlyOnceWith(draft.pending);expect(mutate).toHaveBeenCalledTimes(1);
   expect(localStorage.getItem(prefix+draft.pending)).toBeNull();expect(JSON.parse(localStorage.getItem(key)!).base).toBe('new-revision');
- }finally{await act(async()=>root.unmount());host.remove();for(const k of Object.keys(localStorage))if(k===key||k.startsWith(prefix))localStorage.removeItem(k);}
+ }finally{await act(async()=>root.unmount());host.remove();for(const k of keysWithPrefix(''))if(k===key||k.startsWith(prefix))localStorage.removeItem(k);}
 });
 it('confirms restore in app and preserves the independently unsaved draft',async()=>{
  const id='owned-restore',key='jaeger.ui.agent-memory.draft.v1.'+id,prefix='jaeger.ui.agent-memory.operation.v1.'+id+'.';
@@ -37,7 +38,7 @@ it('confirms restore in app and preserves the independently unsaved draft',async
   await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Confirm notes restore')!.click());
   const saved=JSON.parse(localStorage.getItem(key)!);expect(saved.text).toBe('Unsent unique memory draft');expect(saved.base).toBe('current-revision');expect(saved.pending).toBeUndefined();
   expect(document.body.textContent).toContain('Existing draft retained separately');expect(document.body.textContent).toContain('Earlier saved notes');
- }finally{await act(async()=>root.unmount());host.remove();for(const k of Object.keys(localStorage))if(k===key||k.startsWith(prefix))localStorage.removeItem(k);}
+ }finally{await act(async()=>root.unmount());host.remove();for(const k of keysWithPrefix(''))if(k===key||k.startsWith(prefix))localStorage.removeItem(k);}
 });
 it('requires recoverable-forget confirmation and preserves a separate correction draft',async()=>{
  const id='owned-forget',key='jaeger.ui.agent-memory.draft.v1.'+id;
@@ -53,5 +54,5 @@ it('requires recoverable-forget confirmation and preserves a separate correction
   expect(mutate.mock.calls[0][1]).toMatchObject({expected_revision:'current',action:'forget'});
   expect(JSON.parse(localStorage.getItem(key)!).text).toBe('Unsent correction draft');
   expect(host.textContent).toContain('Existing draft retained separately');
- }finally{await act(async()=>root.unmount());host.remove();for(const k of Object.keys(localStorage))if(k===key||k.startsWith('jaeger.ui.agent-memory.operation.v1.'+id+'.'))localStorage.removeItem(k);}
+ }finally{await act(async()=>root.unmount());host.remove();for(const k of keysWithPrefix(''))if(k===key||k.startsWith('jaeger.ui.agent-memory.operation.v1.'+id+'.'))localStorage.removeItem(k);}
 });
