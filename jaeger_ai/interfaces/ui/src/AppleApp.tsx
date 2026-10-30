@@ -17,13 +17,17 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { GatewayClient } from './lib/gateway-client'
-import { VoiceOrb, VoiceButton, Waveform, useAudioLevel } from './components/VoiceOrb'
+import { VoiceButton, Waveform, useAudioLevel } from './components/VoiceOrb'
 import { CreateAgentModal } from './components/CreateAgentModal'
 import { CharacterLibrary } from './components/CharacterLibrary'
 import { PinnedAgents, usePins, type PinnableAgent } from './components/PinnedAgents'
 import { AgentContextMenu, useContextMenu, type ContextMenuAgent } from './components/AgentContextMenu'
 import { SearchPalette, useSearchPalette } from './components/SearchPalette'
 import type { CharacterTemplate } from './components/CharacterGallery'
+import { CharacterSceneWindow, LiveCharacterScene } from './scenes/CharacterScene'
+import { AppWindow } from './windows/AppWindow'
+import { MachineControlPanel } from './machine-control/MachineControlPanel'
+import { SharePointPanel } from './sharepoint/SharePointPanel'
 import './theme/apple-app.css'
 import {
   Send,
@@ -46,8 +50,10 @@ import {
   ChevronLeft,
   ChevronRight,
   UserPlus,
-  Star,
   Wrench,
+  Cpu,
+  Cloud,
+  Sparkles,
 } from './components/Icons'
 
 // ─────────────────────────────────────────────────────────────
@@ -302,6 +308,8 @@ function ThemeToggle() {
 function Sidebar({
   agents,
   activeAgentId,
+  activeTab,
+  onSelectTab,
   onSelectAgent,
   onNewChat,
   onCreateAgent,
@@ -317,6 +325,8 @@ function Sidebar({
 }: {
   agents: Agent[]
   activeAgentId: string
+  activeTab: 'chat' | 'grok' | 'machine' | 'sharepoint'
+  onSelectTab: (tab: 'chat' | 'grok' | 'machine' | 'sharepoint') => void
   onSelectAgent: (id: string) => void
   onNewChat: () => void
   onCreateAgent: () => void
@@ -366,6 +376,98 @@ function Sidebar({
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
       </div>
+
+      {/* Navigation Tabs (Chat, Grok, Machine Control, SharePoint) */}
+      {!collapsed && (
+        <div className="sidebar-content" style={{ paddingTop: 0, paddingBottom: 4 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 6 }}>
+            <button
+              className={cn('browse-characters-button', activeTab === 'chat' && 'active')}
+              onClick={() => onSelectTab('chat')}
+              style={{
+                padding: '6px 8px',
+                background: activeTab === 'chat' ? 'var(--system-blue, #007AFF)' : 'var(--tertiary-fill)',
+                color: activeTab === 'chat' ? '#ffffff' : 'var(--label)',
+                borderRadius: 'var(--radius-md)',
+                fontSize: 12,
+                fontWeight: 600,
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+              }}
+            >
+              <Sparkles size={13} />
+              <span>Chat</span>
+            </button>
+            <button
+              className={cn('browse-characters-button', activeTab === 'grok' && 'active')}
+              onClick={() => onSelectTab('grok')}
+              style={{
+                padding: '6px 8px',
+                background: activeTab === 'grok' ? 'var(--system-blue, #007AFF)' : 'var(--tertiary-fill)',
+                color: activeTab === 'grok' ? '#ffffff' : 'var(--label)',
+                borderRadius: 'var(--radius-md)',
+                fontSize: 12,
+                fontWeight: 600,
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+              }}
+            >
+              <span style={{ fontSize: 13 }}>🪟</span>
+              <span>Grok UI</span>
+            </button>
+            <button
+              className={cn('browse-characters-button', activeTab === 'machine' && 'active')}
+              onClick={() => onSelectTab('machine')}
+              style={{
+                padding: '6px 8px',
+                background: activeTab === 'machine' ? 'var(--system-blue, #007AFF)' : 'var(--tertiary-fill)',
+                color: activeTab === 'machine' ? '#ffffff' : 'var(--label)',
+                borderRadius: 'var(--radius-md)',
+                fontSize: 12,
+                fontWeight: 600,
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+              }}
+            >
+              <Cpu size={13} />
+              <span>Machine</span>
+            </button>
+            <button
+              className={cn('browse-characters-button', activeTab === 'sharepoint' && 'active')}
+              onClick={() => onSelectTab('sharepoint')}
+              style={{
+                padding: '6px 8px',
+                background: activeTab === 'sharepoint' ? 'var(--system-blue, #007AFF)' : 'var(--tertiary-fill)',
+                color: activeTab === 'sharepoint' ? '#ffffff' : 'var(--label)',
+                borderRadius: 'var(--radius-md)',
+                fontSize: 12,
+                fontWeight: 600,
+                border: 'none',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 5,
+              }}
+            >
+              <Cloud size={13} />
+              <span>SharePoint</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Search Bar (⌘K) */}
       {!collapsed && (
@@ -889,9 +991,11 @@ function AppleAppContent() {
   const [activeAgent, setActiveAgent] = useState(agents[0]?.id || '')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState<'chat' | 'grok' | 'machine' | 'sharepoint'>('chat')
   const [client, setClient] = useState<GatewayClient | null>(null)
   const [showCreateAgentModal, setShowCreateAgentModal] = useState(false)
   const [showCharacterLibrary, setShowCharacterLibrary] = useState(false)
+  const [showCharacterScene, setShowCharacterScene] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   // V2 Hooks: Pins, Context Menu, Search Palette
@@ -906,19 +1010,6 @@ function AppleAppContent() {
       setRecentAgentIds(prev => [activeAgent, ...prev].slice(0, 10))
     }
   }, [activeAgent, recentAgentIds])
-
-  // Convert Agent to PinnableAgent
-  const toPinnableAgent = useCallback((a: Agent): PinnableAgent => ({
-    id: a.id,
-    name: a.displayName || a.name,
-    role: a.role || a.agentType || 'specialist',
-    isPrimary: a.isPrimary,
-    isOnline: a.isOnline,
-    unreadCount: a.unreadCount,
-    lastMessage: a.lastMessage,
-    cardUrl: a.cardUrl,
-    personality: a.personality,
-  }), [])
 
   // Convert Agent to ContextMenuAgent
   const toContextMenuAgent = useCallback((a: Agent): ContextMenuAgent => ({
@@ -994,23 +1085,6 @@ function AppleAppContent() {
       .map(id => agents.find(a => a.id === id))
       .filter((a): a is Agent => !!a && a.id !== leadAgent?.id),
     [pins, agents, leadAgent]
-  )
-
-  const unpinnedSpecialists = useMemo(() => 
-    agents.filter(a => 
-      (a.role === 'specialist' || a.agentType === 'specialist') && 
-      !pins.includes(a.id) && 
-      a.id !== leadAgent?.id
-    ),
-    [agents, pins, leadAgent]
-  )
-
-  const unpinnedCharacters = useMemo(() => 
-    agents.filter(a => 
-      (a.role === 'character' || a.agentType === 'character') && 
-      !pins.includes(a.id)
-    ),
-    [agents, pins]
   )
 
   // Handle agent creation from template
@@ -1234,6 +1308,8 @@ function AppleAppContent() {
         <Sidebar
           agents={agents}
           activeAgentId={activeAgent}
+          activeTab={activeTab}
+          onSelectTab={setActiveTab}
           onSelectAgent={(id) => {
             setActiveAgent(id)
             setMobileSidebarOpen(false)
@@ -1265,7 +1341,7 @@ function AppleAppContent() {
         <div className="character-library-overlay">
           <CharacterLibrary
             onClose={() => setShowCharacterLibrary(false)}
-            onCreateAgent={(character) => {
+            onCreateAgent={(_character) => {
               setShowCharacterLibrary(false)
               // Open create agent modal with this character pre-selected
               setShowCreateAgentModal(true)
@@ -1323,68 +1399,89 @@ function AppleAppContent() {
       )}
 
       {/* Main Content */}
-      <main className="main-content">
-        {/* Header */}
-        <header className="main-header">
-          <div className="header-left">
-            <button
-              className="icon-button mobile-menu-button"
-              onClick={() => setMobileSidebarOpen(true)}
-              aria-label="Open menu"
-            >
-              <Menu size={20} />
-            </button>
-            <h1 className="header-title">
-              {activeAgentData?.name || 'Jaeger'}
-            </h1>
-            {activeAgentData?.isOnline && (
-              <span className="header-status">● Online</span>
-            )}
-          </div>
-          <div className="header-actions">
-            <button className="icon-button" aria-label="New chat" onClick={() => setMessages([])}>
-              <Plus size={18} />
-            </button>
-            <button className="icon-button" aria-label="Search" title="Search (⌘K)" onClick={openSearch}>
-              <Search size={18} />
-            </button>
-            <ThemeToggle />
-            <button className="icon-button" aria-label="Settings">
-              <Settings size={18} />
-            </button>
-          </div>
-        </header>
+      {activeTab === 'grok' ? (
+        <main className="main-content" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+          <AppWindow />
+        </main>
+      ) : activeTab === 'machine' ? (
+        <main className="main-content" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'auto' }}>
+          <MachineControlPanel />
+        </main>
+      ) : activeTab === 'sharepoint' ? (
+        <main className="main-content" style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'auto' }}>
+          <SharePointPanel />
+        </main>
+      ) : (
+        <main className="main-content">
+          {/* Header */}
+          <header className="main-header">
+            <div className="header-left">
+              <button
+                className="icon-button mobile-menu-button"
+                onClick={() => setMobileSidebarOpen(true)}
+                aria-label="Open menu"
+              >
+                <Menu size={20} />
+              </button>
+              <h1 className="header-title">
+                {activeAgentData?.name || 'Jaeger'}
+              </h1>
+              {activeAgentData?.isOnline && (
+                <span className="header-status">● Online</span>
+              )}
+            </div>
+            <div className="header-actions">
+              <button className="icon-button" aria-label="Open character window" title="Open character window" disabled={!activeAgentData} onClick={() => setShowCharacterScene(true)}>
+                <span aria-hidden="true">◉</span>
+              </button>
+              <button className="icon-button" aria-label="New chat" onClick={() => setMessages([])}>
+                <Plus size={18} />
+              </button>
+              <button className="icon-button" aria-label="Search" title="Search (⌘K)" onClick={openSearch}>
+                <Search size={18} />
+              </button>
+              <ThemeToggle />
+              <button className="icon-button" aria-label="Settings">
+                <Settings size={18} />
+              </button>
+            </div>
+          </header>
 
-        {/* Chat Area */}
-        <div className="chat-container">
-          {/* Messages */}
-          <div className="chat-messages" role="log" aria-live="polite" aria-label="Conversation">
-            {groupedMessages.length === 0 ? (
-              <EmptyState onSuggestionClick={setInput} />
-            ) : (
-              <>
-                {groupedMessages.map((message, i) => (
-                  <Message
-                    key={message.id}
-                    message={message}
-                    onRegenerate={handleRegenerate}
-                  />
-                ))}
-                <div ref={messagesEndRef} />
-              </>
-            )}
-          </div>
+          {showCharacterScene && activeAgentData && <CharacterSceneWindow name={activeAgentData.displayName || activeAgentData.name} onClose={() => setShowCharacterScene(false)}>
+            <LiveCharacterScene key={activeAgentData.id} id={activeAgentData.id} name={activeAgentData.displayName || activeAgentData.name} src={activeAgentData.cardUrl || activeAgentData.avatar} characterId={activeAgentData.templateId} />
+          </CharacterSceneWindow>}
 
-          {/* Input */}
-          <ChatInput
-            value={input}
-            onChange={setInput}
-            onSend={handleSend}
-            onStop={handleStop}
-            isGenerating={isGenerating}
-          />
-        </div>
-      </main>
+          {/* Chat Area */}
+          <div className="chat-container">
+            {/* Messages */}
+            <div className="chat-messages" role="log" aria-live="polite" aria-label="Conversation">
+              {groupedMessages.length === 0 ? (
+                <EmptyState onSuggestionClick={setInput} />
+              ) : (
+                <>
+                  {groupedMessages.map((message) => (
+                    <Message
+                      key={message.id}
+                      message={message}
+                      onRegenerate={handleRegenerate}
+                    />
+                  ))}
+                  <div ref={messagesEndRef} />
+                </>
+              )}
+            </div>
+
+            {/* Input */}
+            <ChatInput
+              value={input}
+              onChange={setInput}
+              onSend={handleSend}
+              onStop={handleStop}
+              isGenerating={isGenerating}
+            />
+          </div>
+        </main>
+      )}
     </div>
   )
 }

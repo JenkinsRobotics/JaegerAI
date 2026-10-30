@@ -65,6 +65,7 @@ _INTENT_PATTERNS: dict[str, tuple[str, ...]] = {
     "scheduling": (r"\b(schedule|cron|remind|recurring)\b",),
     "background": (r"\b(background|long[- ]running|process|job)\b",),
     "identity": (r"\b(your name|identity|soul|persona)\b",),
+    "goals": (r"\b(goal|objective|project status|spawn task|my projects?)\b",),
     "skills": (r"\b(skill|deep think|reflection)\b",),
     "computer_use": (r"\b(click|screen|browser|website|open app|computer)\b",),
     "credentials": (r"\b(credential|api key|secret|password)\b",),
@@ -233,7 +234,9 @@ TOOLSETS: dict[str, frozenset[str]] = {
     # A specialist agent's own NOTES.md (bound by the Gateway per turn).
     "agent_notes": frozenset({"agent_notes"}),
     # Other agent frameworks on this Mac (owner grants; see core/frameworks).
-    "frameworks": frozenset({"framework_read", "framework_delegate"}),
+    "frameworks": frozenset({
+        "framework_read", "framework_delegate", "framework_apply_diff",
+    }),
     # Ask the operator's editor: open a file at a line, list Problems, read what is open.
     "ide": frozenset({"ide_context", "ide_open_file", "ide_diagnostics"}),
     "sessions": frozenset({"session_search"}),
@@ -322,6 +325,11 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "missions": frozenset({
         "mission_create", "mission_list", "mission_status", "mission_transition",
     }),
+    # Operator goals/projects with goal-aligned tool-bundle caps.
+    "goals": frozenset({
+        "goal_create", "goal_list", "goal_status", "goal_update",
+        "project_status", "task_spawn",
+    }),
     "history_import": frozenset({"history_import_scan", "history_import"}),
     "cost_tracking": frozenset({"budget_set", "budget_status"}),
     "knowledge_library": frozenset({
@@ -381,6 +389,7 @@ TOOLSET_SUMMARY: dict[str, str] = {
     "delegates": "inspect runtimes and request standing specialist handoffs",
     "finance": "inspect financial summaries, audit results and transactions",
     "missions": "create and track durable missions, goals, and plan steps",
+    "goals": "create, list, update operator goals/projects; spawn durable goal tasks",
     "history_import": "scan and import ARES and external-agent transcripts",
     "cost_tracking": "configure and inspect runtime usage and cost budgets",
     "knowledge_library": "register, index, search, and read local document collections",

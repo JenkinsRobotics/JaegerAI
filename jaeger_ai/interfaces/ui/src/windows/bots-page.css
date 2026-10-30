@@ -1,0 +1,892 @@
+/**
+ * bots-page.css — Character/Bot gallery styles
+ *
+ * Beautiful grid of character cards with images, like the Character Library.
+ */
+
+/* ─────────────────────────────────────────────────────────────
+   Page Container
+   ───────────────────────────────────────────────────────────── */
+
+.bots-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--jg-color-chrome);
+  color: var(--jg-color-text);
+  overflow: hidden;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Header
+   ───────────────────────────────────────────────────────────── */
+
+.bots-header {
+  flex-shrink: 0;
+  padding: 24px 32px;
+  border-bottom: 1px solid var(--jg-color-border);
+  background: var(--jg-color-elevated);
+}
+
+.bots-header__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.bots-title {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.bots-title svg {
+  color: var(--jg-color-accent);
+}
+
+.bots-title h1 {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0;
+  letter-spacing: -0.5px;
+}
+
+.bots-title p {
+  font-size: 14px;
+  color: var(--jg-color-text-secondary);
+  margin: 4px 0 0 0;
+}
+
+/* Category Stats */
+.bots-stats {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 24px;
+  background: var(--jg-color-chrome);
+  border: 1px solid var(--jg-color-border);
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 100px;
+}
+
+.stat-btn:hover {
+  background: var(--jg-color-hover);
+  border-color: var(--jg-color-text-tertiary);
+}
+
+.stat-btn.active {
+  background: var(--jg-color-accent);
+  border-color: var(--jg-color-accent);
+  color: var(--jg-color-on-accent);
+}
+
+.stat-btn__value {
+  font-size: 24px;
+  font-weight: 700;
+}
+
+.stat-btn__label {
+  font-size: 12px;
+  color: var(--jg-color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.stat-btn.active .stat-btn__label {
+  color: var(--jg-color-on-accent);
+  opacity: 0.8;
+}
+
+/* Search */
+.bots-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--jg-color-chrome);
+  border: 1px solid var(--jg-color-border);
+  border-radius: 12px;
+  max-width: 480px;
+  transition: border-color 0.2s ease;
+}
+
+.bots-search:focus-within {
+  border-color: var(--jg-color-accent);
+}
+
+.bots-search svg {
+  color: var(--jg-color-text-tertiary);
+  flex-shrink: 0;
+}
+
+.bots-search input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  color: var(--jg-color-text);
+}
+
+.bots-search input::placeholder {
+  color: var(--jg-color-text-tertiary);
+}
+
+.bots-search__clear {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: var(--jg-color-hover);
+  border: none;
+  border-radius: 50%;
+  color: var(--jg-color-text-secondary);
+  font-size: 18px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.bots-search__clear:hover {
+  background: var(--jg-color-active);
+  color: var(--jg-color-text);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Grid Container
+   ───────────────────────────────────────────────────────────── */
+
+.bots-grid-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 24px 32px;
+}
+
+.bots-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 20px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Bot Card
+   ───────────────────────────────────────────────────────────── */
+
+.bot-card {
+  position: relative;
+  background: var(--jg-color-elevated);
+  border: 1px solid var(--jg-color-border);
+  border-radius: 16px;
+  overflow: hidden;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.bot-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--jg-color-shadow) 15%, transparent);
+  border-color: var(--jg-color-accent);
+}
+
+/* Category badge */
+.bot-card__category {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 2;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--jg-color-elevated) 90%, transparent);
+  backdrop-filter: blur(8px);
+  border-radius: 8px;
+  font-size: 16px;
+}
+
+/* Character Image */
+.bot-card__image {
+  position: relative;
+  aspect-ratio: 1;
+  background: var(--jg-color-chrome);
+  overflow: hidden;
+}
+
+.bot-card__image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.bot-card:hover .bot-card__image img {
+  transform: scale(1.05);
+}
+
+.bot-card__fallback {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bot-card__initial {
+  font-size: 64px;
+  font-weight: 700;
+  color: white;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* Info */
+.bot-card__info {
+  padding: 16px;
+}
+
+.bot-card__name {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 4px 0;
+  color: var(--jg-color-text);
+}
+
+.bot-card__role {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--jg-color-accent);
+  margin: 0 0 8px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.bot-card__desc {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--jg-color-text-secondary);
+  margin: 0 0 12px 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Voice */
+.bot-card__voice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--jg-color-text-tertiary);
+  margin-bottom: 8px;
+}
+
+/* Stats */
+.bot-card__stats {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--jg-color-text-tertiary);
+}
+
+/* Hover Actions */
+.bot-card__actions {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 16px;
+  background: linear-gradient(transparent, var(--jg-color-elevated) 30%);
+  display: flex;
+  justify-content: flex-end;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: all 0.2s ease;
+}
+
+.bot-card__actions.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.bot-card__btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.bot-card__btn--primary {
+  background: var(--jg-color-accent);
+  color: var(--jg-color-on-accent);
+}
+
+.bot-card__btn--primary:hover {
+  filter: brightness(1.1);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Empty State
+   ───────────────────────────────────────────────────────────── */
+
+.bots-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 40px;
+  text-align: center;
+  color: var(--jg-color-text-tertiary);
+}
+
+.bots-empty svg {
+  margin-bottom: 16px;
+  opacity: 0.3;
+}
+
+.bots-empty h3 {
+  font-size: 18px;
+  color: var(--jg-color-text);
+  margin: 0 0 8px 0;
+}
+
+.bots-empty p {
+  font-size: 14px;
+  margin: 0 0 20px 0;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Character Modal
+   ───────────────────────────────────────────────────────────── */
+
+.bot-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--jg-color-shade) 50%, transparent);
+  backdrop-filter: blur(8px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  animation: fadeIn 0.2s ease;
+}
+
+.bot-modal {
+  position: relative;
+  width: 100%;
+  max-width: 900px;
+  max-height: 90vh;
+  background: var(--jg-color-elevated);
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px color-mix(in srgb, var(--jg-color-shadow) 30%, transparent);
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.bot-modal__close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--jg-color-elevated) 80%, transparent);
+  backdrop-filter: blur(8px);
+  border: none;
+  border-radius: 50%;
+  color: var(--jg-color-text);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.bot-modal__close:hover {
+  background: var(--jg-color-hover);
+}
+
+.bot-modal__layout {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  min-height: 500px;
+}
+
+/* Modal Image */
+.bot-modal__image {
+  background: var(--jg-color-chrome);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.bot-modal__image img {
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px color-mix(in srgb, var(--jg-color-shadow) 20%, transparent);
+}
+
+.bot-modal__fallback {
+  width: 100%;
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 12px;
+  font-size: 96px;
+  font-weight: 700;
+  color: white;
+}
+
+/* Modal Content */
+.bot-modal__content {
+  padding: 32px;
+  overflow-y: auto;
+  max-height: 80vh;
+}
+
+.bot-modal__header {
+  margin-bottom: 16px;
+}
+
+.bot-modal__header h2 {
+  font-size: 28px;
+  font-weight: 700;
+  margin: 0 0 8px 0;
+}
+
+.bot-modal__category {
+  display: inline-block;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 100px;
+}
+
+.bot-modal__category--fun {
+  background: color-mix(in srgb, #AF52DE 20%, transparent);
+  color: #AF52DE;
+}
+
+.bot-modal__category--professional {
+  background: color-mix(in srgb, var(--jg-color-accent) 20%, transparent);
+  color: var(--jg-color-accent);
+}
+
+.bot-modal__role {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--jg-color-accent);
+  margin: 0 0 12px 0;
+}
+
+.bot-modal__desc {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--jg-color-text-secondary);
+  margin: 0 0 24px 0;
+}
+
+.bot-modal__section {
+  margin-bottom: 24px;
+}
+
+.bot-modal__section h4 {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--jg-color-text-secondary);
+  margin: 0 0 8px 0;
+}
+
+.bot-modal__section p {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--jg-color-text);
+  margin: 0;
+}
+
+.bot-modal__section ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.bot-modal__section li {
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--jg-color-text);
+  margin-bottom: 4px;
+}
+
+.bot-modal__quotes blockquote {
+  font-size: 14px;
+  font-style: italic;
+  color: var(--jg-color-text-secondary);
+  margin: 8px 0;
+  padding-left: 16px;
+  border-left: 3px solid var(--jg-color-accent);
+}
+
+.bot-modal__footer {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  padding-top: 24px;
+  border-top: 1px solid var(--jg-color-border);
+  margin-top: 24px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Task gallery — the same card format applied to tasks (state
+   hero instead of character image; same header/search/grid/modal).
+   ───────────────────────────────────────────────────────────── */
+
+/* Task gallery cards: status-card layout (glance row / goal / metrics / foot) */
+.task-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* State dot: colour = status. Sources: apple-app.css system colors are NOT
+   loaded on every window, so statuses ground in the shell's own accent for
+   attention and aether error for failure; idle states stay neutral. */
+.task-card__dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--jg-color-text-tertiary);
+}
+.task-card__dot--running {
+  background: var(--jg-color-accent);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--jg-color-accent) 70%, transparent);
+  animation: taskPulse 2s infinite ease-in-out;
+}
+.task-card__dot--queued { background: var(--jg-color-text-tertiary); }
+.task-card__dot--needs { background: var(--jg-color-accent); }
+.task-card__dot--failed { background: var(--jg-color-accent); opacity: 0.55; }
+.task-card__dot--done { background: var(--jg-color-accent); opacity: 0.7; }
+.task-card__dot--other { background: var(--jg-color-text-tertiary); }
+
+@keyframes taskPulse {
+  0% { transform: scale(0.95); opacity: 0.8; }
+  50% { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.8; }
+}
+
+/* Hero block: state banner — modal only. On the card the status row carries
+   glance info; a big banner with no real content is wasted space. */
+.task-card__hero {
+  aspect-ratio: 5 / 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.task-card__hero-inner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: relative;
+}
+
+.task-card__state {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--jg-color-text-secondary);
+  text-transform: capitalize;
+  letter-spacing: 0.3px;
+}
+
+/* ── Status-card anatomy (card body) ───────────────────────── */
+
+/* Glance row: dot · state · age */
+.task-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.task-card__head .task-card__state {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--jg-color-text);
+}
+
+.task-card__age {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--jg-color-text-tertiary);
+  white-space: nowrap;
+}
+
+/* Title row: [tag] chip + single-line objective with ellipsis */
+.task-card__title-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.task-card__chip--tag {
+  flex: none;
+  max-width: 45%;
+  font-size: 10px;
+  color: var(--jg-color-accent-text);
+  border-color: color-mix(in srgb, var(--jg-color-accent) 35%, transparent);
+  background: color-mix(in srgb, var(--jg-color-accent) 7%, transparent);
+}
+
+/* Objective: one line, ellipsis (cards in Linear/GitHub never wrap-titling) */
+.task-card__goal {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--jg-color-text);
+}
+
+/* Metric row — real counts only */
+.task-card__metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.task-card__metric {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--jg-color-text-secondary);
+  white-space: nowrap;
+}
+.task-card__metric strong { font-weight: 600; color: var(--jg-color-text); }
+.task-card__metric--error { color: var(--jg-color-accent-text); font-weight: 600; }
+.task-card__metric--result {
+  color: var(--jg-color-accent-text);
+  border: 1px solid color-mix(in srgb, var(--jg-color-accent) 40%, transparent);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+/* Footer: bot + id */
+.task-card__foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.task-card__foot-id {
+  margin-left: auto;
+  font-size: 10px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  color: var(--jg-color-text-tertiary);
+}
+
+/* Chips */
+.task-card__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: var(--jg-color-chrome);
+  border: 1px solid var(--jg-color-border);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--jg-color-text-secondary);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Template-workshop note (sits inside the grid while the cap is active) */
+.bots-grid__note {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 12px;
+  color: var(--jg-color-text-secondary);
+}
+.task-card__chip--needs {
+  background: color-mix(in srgb, var(--jg-color-accent) 14%, transparent);
+  border-color: color-mix(in srgb, var(--jg-color-accent) 40%, transparent);
+  color: var(--jg-color-accent-text);
+  font-weight: 600;
+}
+.task-card__chip--result {
+  border-color: var(--jg-color-accent);
+  color: var(--jg-color-accent-text);
+}
+
+/* Modal meta grid + long-form content */
+.task-modal .bot-modal__layout { grid-template-columns: 220px 1fr; }
+.task-modal__goal {
+  font-size: 20px !important;
+  line-height: 1.3 !important;
+}
+.task-modal__meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 16px 0;
+}
+.task-modal__meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  background: var(--jg-color-chrome);
+  border-radius: 10px;
+  min-width: 0;
+}
+.task-modal__meta-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--jg-color-text-tertiary);
+}
+.task-modal__meta code,
+.task-modal__meta span {
+  font-size: 12px;
+  color: var(--jg-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-modal__meta code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+}
+.task-modal__error {
+  background: color-mix(in srgb, var(--jg-color-accent) 8%, transparent);
+  border-radius: 10px;
+  padding: 12px;
+}
+.task-modal__error h4 { color: var(--jg-color-accent-text); }
+.task-modal__muted { font-size: 13px; color: var(--jg-color-text-secondary); }
+.task-modal__result {
+  max-height: 220px;
+  overflow-y: auto;
+  background: var(--jg-color-chrome);
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--jg-color-text);
+  margin: 8px 0 0 0;
+}
+
+@media (max-width: 640px) {
+  .task-modal .bot-modal__layout { grid-template-columns: 1fr; }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Responsive
+   ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .bots-header {
+    padding: 16px 20px;
+  }
+
+  .bots-title h1 {
+    font-size: 22px;
+  }
+
+  .bots-title p {
+    font-size: 13px;
+  }
+
+  .bots-stats {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .stat-btn {
+    min-width: 80px;
+    padding: 10px 16px;
+  }
+
+  .bots-grid-container {
+    padding: 16px 20px;
+  }
+
+  .bots-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 16px;
+  }
+
+  .bot-modal__layout {
+    grid-template-columns: 1fr;
+  }
+
+  .bot-modal__image {
+    max-height: 280px;
+  }
+
+  .bot-modal__content {
+    padding: 24px;
+  }
+}
+
+@media (max-width: 480px) {
+  .bots-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+
+  .bot-card__name {
+    font-size: 15px;
+  }
+
+  .bot-card__desc {
+    display: none;
+  }
+
+  .bot-card__info {
+    padding: 12px;
+  }
+
+  .bot-card__stats {
+    display: none;
+  }
+}

@@ -37,7 +37,8 @@ export function saveDevicePreferences(value: DevicePreferences): DevicePreferenc
   const prior = devicePreferenceSnapshot();
   const raw = localStorage.getItem(DEVICE_PREF_KEY);
   if (raw && prior.error) localStorage.setItem(DEVICE_PREF_KEY + '.recovery.' + crypto.randomUUID(), raw);
-  // Failed storage must not claim persistence or apply a different live state.
+  // Failed storage must not claim persistence or apply a different live state:
+  // write FIRST (so a throw means nothing was applied), then apply + announce.
   localStorage.setItem(DEVICE_PREF_KEY, JSON.stringify(p));
   applyDevicePreferences(p);
   window.dispatchEvent(new Event(DEVICE_PREF_EVENT));

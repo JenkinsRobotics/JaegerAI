@@ -1,0 +1,277 @@
+/**
+ * composer-context-menu.css — ChatGPT-style context menu for the "+" button
+ *
+ * BUG-002 FIX: All colors now use CSS variables from the Jaeger design system.
+ * No raw color literals.
+ */
+
+/* ─────────────────────────────────────────────────────────────
+   Menu-specific CSS Variables
+   ───────────────────────────────────────────────────────────── */
+
+.composer-context-menu {
+  /* Menu colors - always dark like ChatGPT, but theme-aware */
+  --menu-bg: color-mix(in srgb, var(--jg-color-shade) 92%, var(--jg-color-elevated));
+  --menu-text: color-mix(in srgb, var(--jg-color-on-badge) 92%, transparent);
+  --menu-text-secondary: color-mix(in srgb, var(--jg-color-on-badge) 60%, transparent);
+  --menu-border: color-mix(in srgb, var(--jg-color-on-badge) 10%, transparent);
+  --menu-hover: color-mix(in srgb, var(--jg-color-on-badge) 10%, transparent);
+  --menu-active: color-mix(in srgb, var(--jg-color-on-badge) 15%, transparent);
+  --menu-icon-bg: color-mix(in srgb, var(--jg-color-on-badge) 8%, transparent);
+  --menu-icon-hover: color-mix(in srgb, var(--jg-color-on-badge) 12%, transparent);
+  --menu-shadow: 0 8px 32px color-mix(in srgb, var(--jg-color-shadow) 40%, transparent);
+  --menu-success: var(--jg-avatar-green);
+  --menu-error: var(--jg-avatar-red);
+
+  min-width: 320px;
+  max-width: 400px;
+  max-height: 480px;
+  overflow-y: auto;
+  background: var(--menu-bg);
+  border: 1px solid var(--menu-border);
+  border-radius: 12px;
+  box-shadow: var(--menu-shadow);
+  padding: 8px;
+  animation: contextMenuFadeIn 0.15s ease-out;
+}
+
+@keyframes contextMenuFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.composer-context-menu__content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Menu Items
+   ───────────────────────────────────────────────────────────── */
+
+.composer-context-menu__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s ease;
+  color: var(--menu-text);
+}
+
+.composer-context-menu__item:hover:not(:disabled) {
+  background: var(--menu-hover);
+}
+
+.composer-context-menu__item:active:not(:disabled) {
+  background: var(--menu-active);
+}
+
+.composer-context-menu__item:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.composer-context-menu__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  color: var(--menu-text-secondary);
+  background: var(--menu-icon-bg);
+  border-radius: 8px;
+}
+
+.composer-context-menu__item:hover:not(:disabled) .composer-context-menu__icon {
+  background: var(--menu-icon-hover);
+  color: var(--menu-text);
+}
+
+.composer-context-menu__text {
+  flex: 1;
+  min-width: 0;
+}
+
+.composer-context-menu__label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--menu-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composer-context-menu__badge {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  background: color-mix(in srgb, var(--menu-success) 20%, transparent);
+  color: var(--menu-success);
+  border-radius: 4px;
+}
+
+.composer-context-menu__description {
+  font-size: 12px;
+  color: var(--menu-text-secondary);
+  margin-top: 2px;
+}
+
+.composer-context-menu__shortcut {
+  font-size: 12px;
+  color: var(--menu-text-secondary);
+  font-family: var(--font-mono, monospace);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Separator
+   ───────────────────────────────────────────────────────────── */
+
+.composer-context-menu__separator {
+  height: 1px;
+  background: var(--menu-border);
+  margin: 6px 8px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Attachment Chips
+   ───────────────────────────────────────────────────────────── */
+
+.attachment-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 0;
+  margin-bottom: 8px;
+}
+
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 6px;
+  background: var(--jg-color-hover);
+  border: 1px solid var(--jg-color-border);
+  border-radius: 8px;
+  max-width: 200px;
+  animation: chipFadeIn 0.2s ease-out;
+}
+
+.attachment-chip--image {
+  padding: 4px;
+}
+
+@keyframes chipFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.attachment-chip__preview {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.attachment-chip__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  background: var(--jg-color-hover);
+  border-radius: 6px;
+  color: var(--jg-color-text-secondary);
+}
+
+.attachment-chip__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.attachment-chip__name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--jg-color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.attachment-chip__size {
+  font-size: 11px;
+  color: var(--jg-color-text-secondary);
+}
+
+.attachment-chip__remove {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: var(--jg-color-text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.attachment-chip__remove:hover {
+  background: color-mix(in srgb, var(--jg-avatar-red) 20%, transparent);
+  color: var(--jg-avatar-red);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Light theme variant
+   ───────────────────────────────────────────────────────────── */
+
+.composer-context-menu--light {
+  --menu-bg: var(--jg-color-elevated);
+  --menu-text: var(--jg-color-text);
+  --menu-text-secondary: var(--jg-color-text-secondary);
+  --menu-border: var(--jg-color-border);
+  --menu-hover: var(--jg-color-hover);
+  --menu-active: var(--jg-color-active);
+  --menu-icon-bg: var(--jg-color-hover);
+  --menu-icon-hover: var(--jg-color-active);
+  --menu-shadow: var(--jg-shadow-card);
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Responsive
+   ───────────────────────────────────────────────────────────── */
+
+@media (max-width: 640px) {
+  .composer-context-menu {
+    min-width: 280px;
+    left: 8px !important;
+    right: 8px;
+  }
+
+  .composer-context-menu__description {
+    display: none;
+  }
+}

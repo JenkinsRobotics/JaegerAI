@@ -1,12 +1,13 @@
 import {displayDate} from "../settings/devicePreferences";
 import {Dialog} from '@aether/ui';
 import {useEffect,useRef,useState} from 'react';
+import {keysWithPrefix} from '../lib/storageKeys';
 import type {AgentMemoryControls,AgentMemorySnapshot,ControlResult} from '../api/source';
 interface Draft {text:string;base:string;pending?:string;restore?:string;forget?:boolean}
 export function AgentMemory({agentId,controls,onClose}:{agentId:string;controls:AgentMemoryControls;onClose:()=>void}){
  const key='jaeger.ui.agent-memory.draft.v1.'+encodeURIComponent(agentId);
  const operationPrefix='jaeger.ui.agent-memory.operation.v1.'+encodeURIComponent(agentId)+'.';
- const savedIntents=()=>Object.keys(localStorage).filter(k=>k.startsWith(operationPrefix)).map(k=>{const value=JSON.parse(localStorage.getItem(k)!);if(typeof value.text!=='string'||typeof value.base!=='string'||typeof value.pending!=='string')throw Error('Invalid saved memory operation; original retained');return value as Draft;});
+ const savedIntents=()=>keysWithPrefix(operationPrefix).map(k=>{const value=JSON.parse(localStorage.getItem(k)!);if(typeof value.text!=='string'||typeof value.base!=='string'||typeof value.pending!=='string')throw Error('Invalid saved memory operation; original retained');return value as Draft;});
  const [row,setRow]=useState<AgentMemorySnapshot>(),[draft,setDraft]=useState<Draft>(),[error,setError]=useState<string>(),[notice,setNotice]=useState<string>(),[busy,setBusy]=useState(false),[restoreChoice,setRestoreChoice]=useState<string>(),[forgetChoice,setForgetChoice]=useState(false),[query,setQuery]=useState('');
  const locked=useRef(false),volatile=useRef(false),live=useRef(true);
  const persist=(next:Draft)=>{localStorage.setItem(key,JSON.stringify(next));setDraft(next);volatile.current=false;};

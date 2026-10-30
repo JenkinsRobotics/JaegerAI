@@ -1,3 +1,4 @@
+import {keysWithPrefix} from '../lib/storageKeys';
 import {GatewayError} from '../api/gateway';
 import {act} from 'react';import {createRoot} from 'react-dom/client';import {beforeEach,expect,it,vi} from 'vitest';
 import {OwnedHandoffs} from './OwnedHandoffs';import type {JaegerSource} from '../api/source';
@@ -21,5 +22,5 @@ it('rejects foreign receipt without clearing original intent or claiming stopped
 it('retains Stop/lease rejection truth without trapping an unadmitted command',async()=>{
  const stop=vi.fn(async()=>{throw new GatewayError('global stop',423);});
  const source={handoffStops:{list:async()=>({handoffs:[row],limit:100}),stop,original:vi.fn()}} as unknown as JaegerSource;
- const host=document.createElement('div');document.body.append(host);const root=createRoot(host);await act(async()=>root.render(<OwnedHandoffs source={source}/>));await act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Stop specialist work')!.click());expect(stop).toHaveBeenCalledTimes(1);expect(host.textContent).toContain('Stop rejected before execution: global stop');expect(Object.keys(localStorage).filter(k=>k.startsWith('jaeger.ui.handoff-stop.v1.'))).toEqual([]);expect(host.textContent).not.toContain('Cancellation confirmed');await act(async()=>root.unmount());host.remove();
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);await act(async()=>root.render(<OwnedHandoffs source={source}/>));await act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Stop specialist work')!.click());expect(stop).toHaveBeenCalledTimes(1);expect(host.textContent).toContain('Stop rejected before execution: global stop');expect(keysWithPrefix('jaeger.ui.handoff-stop.v1.')).toEqual([]);expect(host.textContent).not.toContain('Cancellation confirmed');await act(async()=>root.unmount());host.remove();
 });

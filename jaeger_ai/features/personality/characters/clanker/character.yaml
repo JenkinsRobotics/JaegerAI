@@ -103,6 +103,8 @@ card: card.png
 kind: clip_set
 default_asset: primary
 render:
+  scene:
+    layout: workbench
   adapter: image
   asset: card.png
   ideal_size:

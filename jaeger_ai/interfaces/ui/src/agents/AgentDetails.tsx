@@ -3,6 +3,9 @@
 import type { Agent, AgentSummary } from "../api/types";
 import { AgentAvatar } from "./AgentAvatar";
 import { label, ROLE_TEXT, runnerLabel } from "./agentsLogic";
+import { useState } from 'react';
+import { CharacterScene, CharacterSceneWindow } from '../scenes/CharacterScene';
+import { summaryActivity } from '../scenes/sceneMotion';
 
 const STATUS_TEXT: Record<string, string> = {
   idle: "Idle", working: "Working", waiting_approval: "Needs your approval", blocked: "Blocked", error: "Error",
@@ -11,6 +14,7 @@ const STATUS_TEXT: Record<string, string> = {
 interface Props {
   agent: Agent;
   summary?: AgentSummary;
+  activityAvailable?: boolean;
   /** Opens the agent's older chats (read-only); the home chat is the only live one. */
   onCopyConversationLink?:()=>void;
   onSearch?: () => void;
@@ -18,21 +22,29 @@ interface Props {
   onClose: () => void;
 }
 
-export function AgentDetails({ agent, summary, onOpenHistory, onSearch, onClose, onCopyConversationLink }: Props) {
+export function AgentDetails({ agent, summary, activityAvailable = true, onOpenHistory, onSearch, onClose, onCopyConversationLink }: Props) {
+  const [sceneOpen, setSceneOpen] = useState(false);
   const name = label(agent);
   const task = summary?.task;
   const runner = runnerLabel(task?.runner ?? agent.runner);
   const specialty = typeof agent.metadata?.specialty === "string" ? agent.metadata.specialty : undefined;
+  const characterId = typeof agent.metadata?.character_template === 'string' ? agent.metadata.character_template : undefined;
+  const scene = <CharacterScene key={agent.id} id={agent.id} name={name} src={agent.avatar_url} preset={agent.icon_preset} characterId={characterId} status={activityAvailable ? summaryActivity(summary) : undefined} />;
   return (
     <aside className="jg-details" aria-label={`${name} details`}>
       <header className="jg-details__head">
-        <AgentAvatar id={agent.id} name={name} src={agent.avatar_url} size={44} />
+        <AgentAvatar id={agent.id} name={name} src={agent.avatar_url} preset={agent.icon_preset} size={44} />
         <div className="jg-details__who">
           <strong>{name}</strong>
           <span className="jg-muted">{ROLE_TEXT[agent.role ?? ""] ?? specialty ?? "Specialist"}</span>
         </div>
         <button type="button" className="jg-round-button" aria-label="Close details" onClick={onClose}>×</button>
       </header>
+      <section className="jg-details__section" aria-label="Character scene">
+        {!sceneOpen && scene}
+        <button type="button" className="aui-button" onClick={() => setSceneOpen(true)}>Open character window</button>
+      </section>
+      {sceneOpen && <CharacterSceneWindow name={name} onClose={() => setSceneOpen(false)}>{scene}</CharacterSceneWindow>}
       <section className="jg-details__section">
         <h3>Now</h3>
         <p>{STATUS_TEXT[summary?.status ?? "idle"] ?? summary?.status}</p>

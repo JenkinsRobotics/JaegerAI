@@ -295,7 +295,46 @@ def register_context_documents() -> bool:
                 break
     else:
         _insert_after(fragments, DIRECTIVES_FRAGMENT, facts_frag)
+
+    goals_frag = assemble.PromptFragment(
+        OPERATOR_CONTEXT_FRAGMENT, "dynamic", "~/.jaeger/operator.toml",
+        lambda _ctx: load_operator_context(),
+        assemble._non_subagent,  # noqa: SLF001
+        "operator identity, standing projects, and custom context from operator.toml",
+    )
+    if OPERATOR_CONTEXT_FRAGMENT in present:
+        for index, existing in enumerate(fragments):
+            if existing.name == OPERATOR_CONTEXT_FRAGMENT:
+                fragments[index] = goals_frag
+                break
+    else:
+        _insert_after(fragments, DIRECTIVES_FRAGMENT, goals_frag)
     return True
+
+
+OPERATOR_CONTEXT_FRAGMENT = "operator_context"
+OPERATOR_CONTEXT_MAX_CHARS = 2_000
+
+
+def load_operator_context(cap: int = OPERATOR_CONTEXT_MAX_CHARS) -> str:
+    """Render the operator's ``operator.toml`` context block for the prompt.
+
+    This is the first wiring of :meth:`OperatorConfig.to_prompt_context` into
+    the assembled system prompt — previously the method was defined but never
+    called. Returns ``""`` when no operator config is set, so the prompt is
+    unchanged for default installs.
+    """
+    try:
+        from jaeger_ai.core.instance.operator_config import load_operator_config
+        cfg = load_operator_config()
+    except Exception:  # noqa: BLE001 — config load must never break the prompt
+        return ""
+    text = cfg.to_prompt_context().strip()
+    if not text:
+        return ""
+    if len(text) > cap:
+        text = text[:cap].rstrip() + "\n…(operator context truncated)"
+    return "[OPERATOR CONTEXT]\n" + text
 
 
 INSTANCE_FACTS_FRAGMENT = "instance_facts"

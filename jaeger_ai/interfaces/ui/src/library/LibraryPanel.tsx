@@ -1,9 +1,10 @@
 import {TaskArtifacts} from './TaskArtifacts';
 import { useEffect, useRef, useState } from "react";
 import type { LibraryControls, LibraryDocument, TaskArtifacts as ArtifactControls } from "../api/source";
+import { keysWithPrefix } from "../lib/storageKeys";
 const draftKey = (id: string) => `jaeger.ui.library.draft.v1.${encodeURIComponent(id)}`;
 const OP = "jaeger.ui.library.operation.v1";
-const backupKeys = (id: string) => { try { return Object.keys(localStorage).filter(key => key.startsWith(draftKey(id) + '.backup.')); } catch { return []; } };
+const backupKeys = (id: string) => { try { return keysWithPrefix(draftKey(id) + '.backup.'); } catch { return []; } };
 type Draft = Pick<LibraryDocument, "title" | "content" | "revision">;
 type Intent = { operationId: string; action: "create" | "save" | "archive" | "restore" | "version"; documentId: string };
 /** Native documents only; indexed corpus previews cannot gain edit/file access. */

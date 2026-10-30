@@ -95,9 +95,10 @@ interface CharacterLibraryProps {
 
 // ─────────────────────────────────────────────────────────────
 // Full Character Data — All 20 Characters with Real Bios
+// Exported so other components can reuse the same character data
 // ─────────────────────────────────────────────────────────────
 
-const CHARACTERS: CharacterBio[] = [
+export const CHARACTERS: CharacterBio[] = [
   {
     id: 'jarvis',
     name: 'Jarvis',

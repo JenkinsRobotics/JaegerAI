@@ -1,0 +1,284 @@
+/* machine-control.css — Clean styling for Machine Control and Telemetry */
+
+.machine-control-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  padding: 24px;
+  overflow-y: auto;
+  box-sizing: border-box;
+  background: var(--background, var(--aether-bg-canvas, #ffffff)); /* literal-ok */
+  color: var(--label, var(--aether-text-primary, #111111)); /* literal-ok */
+}
+
+.machine-control-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24px;
+  gap: 16px;
+}
+
+.machine-control-header__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  background: var(--tertiary-fill, rgba(118, 118, 128, 0.12)); /* literal-ok */
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.machine-control-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.machine-control-status-dot.online {
+  background-color: var(--system-green, #34c759); /* literal-ok */
+}
+
+.machine-control-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 6px 0;
+  letter-spacing: -0.02em;
+}
+
+.machine-control-subtitle {
+  font-size: 14px;
+  color: var(--secondary-label, #666666); /* literal-ok */
+  margin: 0;
+  max-width: 640px;
+  line-height: 1.5;
+}
+
+.machine-control-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.machine-control-button {
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: var(--system-blue, #007aff); /* literal-ok */
+  color: #ffffff; /* literal-ok */
+  font-weight: 600;
+  font-size: 13px;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s ease;
+}
+
+.machine-control-button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+
+.machine-control-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.machine-control-notice {
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: rgba(52, 199, 89, 0.12); /* literal-ok */
+  color: var(--system-green, #28a745); /* literal-ok */
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.machine-control-error {
+  padding: 12px 16px;
+  border-radius: 8px;
+  background: rgba(255, 59, 48, 0.12); /* literal-ok */
+  color: var(--system-red, #dc3545); /* literal-ok */
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.machine-control-nav {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--separator, rgba(60, 60, 67, 0.2)); /* literal-ok */
+  margin-bottom: 24px;
+  padding-bottom: 8px;
+}
+
+.machine-control-nav-tab {
+  padding: 6px 14px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--secondary-label, #888888); /* literal-ok */
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.machine-control-nav-tab:hover {
+  background: var(--tertiary-fill, rgba(118, 118, 128, 0.08)); /* literal-ok */
+  color: var(--label, #111111); /* literal-ok */
+}
+
+.machine-control-nav-tab.active {
+  background: var(--tertiary-fill, rgba(118, 118, 128, 0.16)); /* literal-ok */
+  color: var(--label, #000000); /* literal-ok */
+  font-weight: 600;
+}
+
+.machine-control-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 20px;
+}
+
+.machine-control-card {
+  padding: 20px;
+  border-radius: 12px;
+  background: var(--secondary-background, rgba(0, 0, 0, 0.03)); /* literal-ok */
+  border: 1px solid var(--separator, rgba(0, 0, 0, 0.08)); /* literal-ok */
+  display: flex;
+  flex-direction: column;
+}
+
+.machine-control-card.full-width {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.machine-control-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.machine-control-card__header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.machine-control-card__desc {
+  font-size: 13px;
+  color: var(--secondary-label, #666666); /* literal-ok */
+  margin: 0 0 16px 0;
+  line-height: 1.4;
+}
+
+.machine-control-stat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.machine-control-stat-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--separator, rgba(0, 0, 0, 0.06)); /* literal-ok */
+}
+
+.machine-control-stat-row .label {
+  color: var(--secondary-label, #777777); /* literal-ok */
+}
+
+.machine-control-stat-row .value {
+  font-weight: 600;
+}
+
+.machine-control-stat-row .value.granted {
+  color: var(--system-green, #28a745); /* literal-ok */
+}
+
+.machine-control-stat-row .value.pending {
+  color: var(--system-orange, #fd7e14); /* literal-ok */
+}
+
+.machine-control-card__actions,
+.machine-control-card__buttons {
+  display: flex;
+  gap: 10px;
+  margin-top: auto;
+}
+
+.machine-control-btn-primary {
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: var(--system-blue, #007aff); /* literal-ok */
+  color: #ffffff; /* literal-ok */
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+}
+
+.machine-control-btn-secondary {
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: var(--tertiary-fill, rgba(118, 118, 128, 0.12)); /* literal-ok */
+  color: var(--label, #111111); /* literal-ok */
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  cursor: pointer;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-weight: 600;
+}
+
+.badge-success {
+  background: rgba(52, 199, 89, 0.2); /* literal-ok */
+  color: var(--system-green, #28a745); /* literal-ok */
+}
+
+.badge-warning {
+  background: rgba(255, 149, 0, 0.2); /* literal-ok */
+  color: var(--system-orange, #d37300); /* literal-ok */
+}
+
+.badge-info {
+  background: rgba(0, 122, 255, 0.2); /* literal-ok */
+  color: var(--system-blue, #007aff); /* literal-ok */
+}
+
+.machine-control-policy-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.policy-stat {
+  display: flex;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.policy-stat-label {
+  font-weight: 600;
+}
+
+.policy-list ul {
+  margin: 8px 0 0 20px;
+  padding: 0;
+  font-size: 13px;
+}
+
+.machine-control-empty {
+  color: var(--secondary-label, #888888); /* literal-ok */
+  font-style: italic;
+  font-size: 13px;
+}
+

@@ -37,7 +37,12 @@ export interface GatewayConfig {
   token?: string
   autoReconnect?: boolean
   reconnectDelay?: number
+  maxReconnectAttempts?: number
 }
+
+// BUG-001 FIX: Prevent infinite WebSocket reconnection spam
+const MAX_RECONNECT_ATTEMPTS = 5
+const MAX_BACKOFF_MS = 30000
 
 export interface Session {
   id: string
@@ -105,21 +110,6 @@ interface WSRequest {
   params?: Record<string, any>
 }
 
-interface WSResponse {
-  type: 'res'
-  id: string
-  ok: boolean
-  payload?: any
-  error?: { message: string; code: number }
-}
-
-interface WSEvent {
-  type: 'event'
-  event: string
-  payload?: any
-  seq?: number
-}
-
 // ─────────────────────────────────────────────────────────────
 // Gateway Client
 // ─────────────────────────────────────────────────────────────
@@ -148,6 +138,8 @@ export class GatewayClient {
   public agents: AgentsAPI
   public models: ModelsAPI
 
+  private maxReconnectAttempts: number
+
   constructor(config: GatewayConfig) {
     this.config = {
       baseUrl: config.baseUrl,
@@ -155,7 +147,10 @@ export class GatewayClient {
       token: config.token || '',
       autoReconnect: config.autoReconnect ?? true,
       reconnectDelay: config.reconnectDelay || 3000,
+      maxReconnectAttempts: config.maxReconnectAttempts ?? MAX_RECONNECT_ATTEMPTS,
     }
+    // BUG-001 FIX: Limit reconnection attempts to prevent console spam
+    this.maxReconnectAttempts = this.config.maxReconnectAttempts
 
     // Initialize resource APIs
     this.sessions = new SessionsAPI(this)
@@ -178,16 +173,17 @@ export class GatewayClient {
         this.ws.onopen = () => {
           this.connected = true
           this.reconnectAttempts = 0
-          console.log('[Gateway] WebSocket connected')
+          if (import.meta.env.DEV) console.log('[Gateway] WebSocket connected')
           resolve()
         }
         this.ws.onclose = (event) => {
           this.connected = false
-          console.log('[Gateway] WebSocket closed:', event.code, event.reason)
+          if (import.meta.env.DEV) console.log('[Gateway] WebSocket closed:', event.code)
           this._handleDisconnect()
         }
-        this.ws.onerror = (error) => {
-          console.error('[Gateway] WebSocket error:', error)
+        this.ws.onerror = () => {
+          // BUG-001 FIX: Only log errors in dev mode to prevent console spam
+          if (import.meta.env.DEV) console.error('[Gateway] WebSocket error')
           if (!this.connected) {
             reject(new Error('WebSocket connection failed'))
           }
@@ -219,20 +215,36 @@ export class GatewayClient {
 
   private _handleDisconnect(): void {
     // Reject pending requests
-    for (const [id, pending] of this.pendingRequests) {
+    for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout)
       pending.reject(new Error('Connection lost'))
     }
     this.pendingRequests.clear()
 
-    // Reconnect
-    if (this.config.autoReconnect) {
+    // BUG-001 FIX: Limit reconnection attempts to prevent infinite spam
+    if (this.config.autoReconnect && this.reconnectAttempts < this.maxReconnectAttempts) {
       this.reconnectAttempts++
-      const delay = this.config.reconnectDelay * Math.min(this.reconnectAttempts, 5)
-      console.log(`[Gateway] Reconnecting in ${delay}ms... (attempt ${this.reconnectAttempts})`)
+      // Exponential backoff: 1s, 2s, 4s, 8s, 16s (capped at 30s)
+      const delay = Math.min(
+        this.config.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+        MAX_BACKOFF_MS
+      )
+      if (import.meta.env.DEV) {
+        console.log(`[Gateway] Reconnecting in ${delay}ms... (attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
+      }
       this.reconnectTimer = setTimeout(() => {
-        this.connect().catch(console.error)
+        this.connect().catch(() => {
+          // Silent catch - reconnection will be attempted again if under limit
+          if (this.reconnectAttempts >= this.maxReconnectAttempts && import.meta.env.DEV) {
+            console.warn('[Gateway] Max reconnection attempts reached. Gateway may be unavailable.')
+          }
+        })
       }, delay)
+    } else if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      // Max attempts reached - stop trying, app will run in mock mode
+      if (import.meta.env.DEV) {
+        console.warn('[Gateway] Gateway unavailable - running in offline/mock mode')
+      }
     }
   }
 
@@ -331,7 +343,6 @@ export class GatewayClient {
   private async _httpRequest<T>(method: string, params?: Record<string, any>): Promise<T> {
     // Convert RPC method to HTTP endpoint
     // e.g., "sessions.list" → GET /v1/sessions
-    const [resource, action] = method.split('.')
     const endpoint = this._methodToEndpoint(method)
 
     const headers: Record<string, string> = {
@@ -344,6 +355,7 @@ export class GatewayClient {
     let url = `${this.config.baseUrl}${endpoint}`
     let options: RequestInit = { headers }
 
+    const action = method.split('.')[1]
     if (action === 'list' || action === 'get' || !params) {
       options.method = 'GET'
       if (params) {

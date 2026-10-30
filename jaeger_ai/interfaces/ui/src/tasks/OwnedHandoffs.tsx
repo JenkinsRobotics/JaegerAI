@@ -1,10 +1,11 @@
 import {useEffect,useRef,useState} from 'react';
 import {GatewayError} from '../api/gateway';
 import type {JaegerSource} from '../api/source';
+import {keysWithPrefix} from '../lib/storageKeys';
 import type {HandoffStopReceipt,HandoffStopRow} from '../api/types';
 const KEY='jaeger.ui.handoff-stop.v1.';
 interface Intent {id:string;request_id:string;operation_id:string}
-function retained():Intent[]{return Object.keys(localStorage).filter(k=>k.startsWith(KEY)).map(k=>{const v=JSON.parse(localStorage.getItem(k)!);if(!v||typeof v.id!=='string'||typeof v.request_id!=='string'||typeof v.operation_id!=='string'||k!==KEY+v.operation_id)throw Error('Invalid saved Stop identity; original retained');return v;});}
+function retained():Intent[]{return keysWithPrefix(KEY).map(k=>{const v=JSON.parse(localStorage.getItem(k)!);if(!v||typeof v.id!=='string'||typeof v.request_id!=='string'||typeof v.operation_id!=='string'||k!==KEY+v.operation_id)throw Error('Invalid saved Stop identity; original retained');return v;});}
 /** Stop only existing owned work; never claims an ACK proves effect cleanup. */
 export function OwnedHandoffs({source}:{source:JaegerSource}){
  const [rows,setRows]=useState<HandoffStopRow[]>([]),[pending,setPending]=useState<Intent[]>([]),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[ready,setReady]=useState(false),[generation,setGeneration]=useState(0);const lock=useRef(false);

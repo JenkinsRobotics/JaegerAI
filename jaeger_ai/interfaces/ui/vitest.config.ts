@@ -8,6 +8,9 @@
 import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import path from 'path'
+import { fileURLToPath } from 'node:url'
+
+const here = (p: string) => fileURLToPath(new URL(p, import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
@@ -53,8 +56,14 @@ export default defineConfig({
   },
 
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
+    alias: [
+      // Mirror vite.config.ts so tests resolve the vendored Aether UI the
+      // same way the app build does.
+      { find: /^@aether\/ui\/tokens\.css$/, replacement: here('./vendor/aether-ui/tokens/tokens.css') },
+      { find: /^@aether\/ui\/home\.css$/, replacement: here('./vendor/aether-ui/tokens/home.css') },
+      { find: /^@aether\/ui\/widgets\.css$/, replacement: here('./vendor/aether-ui/src/widgets.css') },
+      { find: /^@aether\/ui$/, replacement: here('./vendor/aether-ui/src/index.ts') },
+      { find: '@', replacement: path.resolve(__dirname, './src') },
+    ],
   },
 })

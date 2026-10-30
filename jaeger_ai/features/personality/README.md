@@ -28,3 +28,10 @@ than raw numbers.
 callable tools, and `__init__.py` lists what the rest of Jaeger is allowed to
 import. Tools are registered in `jaeger_ai/main.py` and surfaced over MCP by
 `jaeger_ai/interfaces/mcp_server.py`.*
+
+## Living character scenes
+
+Character packs may declare `render.scene` for the shared UI's layered scenes
+and action media. See [scene renderer and pack format](../../interfaces/ui/src/scenes/README.md).
+`scene.py` validates pack-contained assets and returns browser-safe metadata;
+rendering is owned by the client. Existing static packs remain usable.

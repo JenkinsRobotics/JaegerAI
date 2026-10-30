@@ -1,3 +1,4 @@
+import {keysWithPrefix} from '../lib/storageKeys';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {it,expect,vi} from 'vitest';
@@ -6,7 +7,7 @@ import type {MCPResources as Controls} from '../api/source';
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?:boolean}).IS_REACT_ACT_ENVIRONMENT=true;
 const server={id:'owned-resources',name:'Owned fixture'};
 const button=(text:string)=>[...document.querySelectorAll('button')].find(b=>b.textContent===text)!;
-async function mounted(controls:Controls,run:()=>Promise<void>){const host=document.createElement('div');document.body.append(host);const root=createRoot(host);try{await act(async()=>root.render(<MCPResources controls={controls} server={server} onClose={()=>{}}/>));await run();}finally{await act(async()=>root.unmount());host.remove();for(const key of Object.keys(localStorage))if(key.startsWith('jaeger.ui.mcp-resource.operation.v1.'+server.id))localStorage.removeItem(key);}}
+async function mounted(controls:Controls,run:()=>Promise<void>){const host=document.createElement('div');document.body.append(host);const root=createRoot(host);try{await act(async()=>root.render(<MCPResources controls={controls} server={server} onClose={()=>{}}/>));await run();}finally{await act(async()=>root.unmount());host.remove();for(const key of keysWithPrefix('jaeger.ui.mcp-resource.operation.v1.'+server.id))localStorage.removeItem(key);}}
 it('requires explicit catalog, read, review and import, using the staged digest without granting context',async()=>{
  const staged={id:'snapshot',server_id:server.id,resource_id:'resource',title:'Owned text',text:'literal <script>reference</script>',digest:'owned-digest',redacted:false,observed_at:1,source:'configured_mcp_resource',authority:'reference_data_only'};
  const mutate=vi.fn(async(_server:string,action:string,body:Record<string,unknown>)=>({ok:true,operation_id:String(body.operation_id),result:action==='list'?{catalog:{server_id:server.id,resources:[{id:'resource',title:'Owned text',description:'Reference only',mime:'text/plain'}],next_page:null,truncated:false}}:action==='read'?{snapshot:staged}:{document:{id:'owned-document',revision:1}}}));

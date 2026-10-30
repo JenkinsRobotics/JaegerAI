@@ -42,7 +42,11 @@ run_git() {
 
 run_hygiene() {
   echo "[hygiene] Running CI hygiene tripwires (root allowlist, features READMEs, zero in-repo state)..."
-  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ci_hygiene.py -q --no-header
+  # -p no:cacheprovider + PYTHONDONTWRITEBYTECODE keep the run from dropping
+  # .pytest_cache / __pycache__ into the repo root (AGENTS.md §1: zero in-repo
+  # state). cache_dir in pyproject.toml is a fallback, not a guarantee when
+  # pytest is invoked with an explicit test path.
+  "${VENV_PY}" -B "${VENV_PYTEST}" dev/tests/jaeger_ai/core/test_ci_hygiene.py -q --no-header -p no:cacheprovider
   echo "[+] CI hygiene tripwires passed."
 }
 

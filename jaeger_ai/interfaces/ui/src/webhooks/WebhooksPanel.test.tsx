@@ -1,3 +1,4 @@
+import {keysWithPrefix} from '../lib/storageKeys';
 import {act} from 'react';
 import {createRoot} from 'react-dom/client';
 import {afterEach, expect, it, vi} from 'vitest';
@@ -6,7 +7,7 @@ import type {JaegerSource, WebhookDefinition, WebhookSubscription} from '../api/
 import type {Agent} from '../api/types';
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT = true;
 const prefix = 'jaeger.ui.webhook.';
-afterEach(() => {for (const key of Object.keys(localStorage)) if (key.startsWith(prefix)) localStorage.removeItem(key);});
+afterEach(() => {for (const key of keysWithPrefix('')) if (key.startsWith(prefix)) localStorage.removeItem(key);});
 const def: WebhookDefinition = {name: 'Owned webhook', provider: 'generic', events: ['changed'], senders: ['owner-fixture'], session_id: 'home-owned', objective: 'Review fixture event', enabled: false, archived: false};
 const row: WebhookSubscription = {...def, id: 'owned-sub', agent_id: 'owned-bot', revision: 1, updated_at: 1};
 const catalog = (subscriptions: WebhookSubscription[] = []) => ({subscriptions, listener: 'not_observed_running', credential_status: 'not_observed', transport: 'existing_shared_secret_required', admission: 'per_delivery_task_approval', remote_sender_authority: 'not_verified'});
@@ -43,7 +44,7 @@ it('retains unknown command and concrete binding across reload; reconciliation n
  expect(save).not.toHaveBeenCalled();
  await act(async () => button('Confirm subscription state').click());
  expect(save).toHaveBeenCalledOnce();
- const key = Object.keys(localStorage).find(k => k.startsWith(prefix + 'command.v1.'))!;
+ const key = keysWithPrefix(prefix + 'command.v1.')[0]!;
  const intent = JSON.parse(localStorage.getItem(key)!);
  expect(intent.definition.session_id).toBe('home-owned');
  expect(intent.definition.enabled).toBe(true);

@@ -4,6 +4,9 @@ import {WebhooksPanel} from './webhooks/WebhooksPanel';
 import {LocalComputerPanel} from './settings/LocalComputerPanel';
 import {NativeClipboardPanel} from './settings/NativeClipboardPanel';
 import {UpdatePlanPanel} from './settings/UpdatePlanPanel';
+import {MachineControlPanel} from './machine-control/MachineControlPanel';
+import {SharePointPanel} from './sharepoint/SharePointPanel';
+import {AppWindow} from './windows/AppWindow';
 import {useNotificationNavigation} from './platform/useNotificationNavigation';
 import {localConversationLink,notificationConversation} from './platform/notificationNavigation';
 import {TaskArtifacts} from './library/TaskArtifacts';
@@ -353,15 +356,21 @@ export function App({ source }: { source: JaegerSource }) {
   return (
     <>
       {phone ? main : <AppShell top={slots.top} primary={slots.primary} sections={slots.sections} footer={slots.footer}>
-        {selection.type === "tasks"
-          ? <TasksBoard source={source} agents={store.agents} />
-          : (
-            <div className="jg-main-row">
+        {selection.type === "tasks" ? (
+          <TasksBoard source={source} agents={store.agents} />
+        ) : selection.type === "grok" ? (
+          <AppWindow source={source} />
+        ) : selection.type === "machine" ? (
+          <MachineControlPanel source={source} />
+        ) : selection.type === "sharepoint" ? (
+          <SharePointPanel source={source} />
+        ) : (
+          <div className="jg-main-row">
               {sessionError
                 ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
                 : <ChatPane host={host} sessionId={sessionId} agents={store.agents} />}
               {detailsAgent && (
-                <AgentDetails onCopyConversationLink={()=>{void conversationIdForAgent(detailsAgent.id,id=>home.home(id),selectedAgentId&&explicitSessionId?{agentId:selectedAgentId,sessionId:explicitSessionId}:undefined).then(id=>copy(localConversationLink(id),"Local conversation link copied; it grants no access and requires the registered Jaeger handler"),fail("resolve the conversation link")).catch(fail("copy the conversation link"));}} onSearch={source.searchMessages ? () => setMessageSearchAgent(detailsAgent) : undefined} agent={detailsAgent} summary={store.summaries.find((s) => s.id === detailsAgent.id)}
+                <AgentDetails onCopyConversationLink={()=>{void conversationIdForAgent(detailsAgent.id,id=>home.home(id),selectedAgentId&&explicitSessionId?{agentId:selectedAgentId,sessionId:explicitSessionId}:undefined).then(id=>copy(localConversationLink(id),"Local conversation link copied; it grants no access and requires the registered Jaeger handler"),fail("resolve the conversation link")).catch(fail("copy the conversation link"));}} onSearch={source.searchMessages ? () => setMessageSearchAgent(detailsAgent) : undefined} agent={detailsAgent} activityAvailable={!store.loading && !store.error} summary={store.summaries.find((s) => s.id === detailsAgent.id)}
                   onOpenHistory={() => { setDetailsAgentId(null); setHistoryAgentId(detailsAgent.id); }} onClose={() => setDetailsAgentId(null)} />
               )}
               {historyAgent && (
