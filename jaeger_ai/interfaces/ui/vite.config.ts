@@ -18,7 +18,7 @@ export default defineConfig(({ mode }) => {
   }
   const proxy = { "/v1": { target, changeOrigin: false }, "/api": { target, changeOrigin: false } };
   return {
-    base: "./",
+    base: "/",
     plugins: [react()],
     resolve: {
       alias: [

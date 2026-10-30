@@ -129,6 +129,19 @@ def _root_file(root: Path, path: str) -> Path | None:
     return target
 
 
+# Unified UI pages (interfaces/ui/src/shell/router.ts). A GET for one of these paths, or a
+# dot-free sub-path such as /settings/voice, is a client-side route: answer with index.html so
+# deep links and reloads work. Anything with a file extension is never treated as a page.
+UI_PAGES = frozenset({"home", "chat", "agents", "characters", "tasks", "machine", "sharepoint", "settings", "workspace"})
+
+
+def is_page_route(path: str) -> bool:
+    parts = [p for p in path.split("/") if p]
+    if not parts or parts[0] not in UI_PAGES or len(parts) > 3:
+        return False
+    return all(p.replace("-", "").replace("_", "").isalnum() for p in parts)
+
+
 def _not_found(handler) -> bool:
     body = b'{"error": "not found"}'
     handler.send_response(404)
@@ -156,7 +169,7 @@ def serve(handler, parsed) -> bool:
             handler.wfile.write(body)
             return True
         return False
-    if path in ("/", "/index.html") or (path.startswith("/session/") and path.count("/") == 2):
+    if path in ("/", "/index.html") or (path.startswith("/session/") and path.count("/") == 2) or is_page_route(path):
         return _send_index(handler, root / "index.html")
     if path in ("/sw.js", "/static/sw.js"):
         return _send_kill_switch(handler)
@@ -179,4 +192,4 @@ def serve(handler, parsed) -> bool:
     return False
 
 
-__all__ = ["KILL_SWITCH_SW", "dist_root", "serve"]
+__all__ = ["KILL_SWITCH_SW", "UI_PAGES", "dist_root", "is_page_route", "serve"]
