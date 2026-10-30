@@ -8,21 +8,10 @@
  * ⌘, opens Settings, and pending approvals are reachable from every page. On a phone or
  * narrow window the dock becomes a bottom tab bar.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import type { JaegerSource } from '../api/source'
-import { App } from '../App'
 import { useWindowManager, WINDOW_DEFINITIONS, type WindowId } from './WindowManager'
 import { WindowDock } from './WindowDock'
-import { TasksPage } from './TasksPage'
-import { WorkspacePage } from './WorkspacePage'
-import { MachineControlPanel } from '../machine-control/MachineControlPanel'
-import { SharePointPanel } from '../sharepoint/SharePointPanel'
-import { TasksWorkspace } from '../unified/TasksWorkspace'
-import { StudioPage } from '../unified/StudioPage'
-import { ModelsPage } from '../unified/ModelsPage'
-import { ComparePage } from '../unified/ComparePage'
-import { ResearchPage } from '../unified/ResearchPage'
-import { DocumentsPage } from '../unified/DocumentsPage'
 import { useAgentsStore } from '../agents/agentsStore'
 import { visible } from '../agents/agentsLogic'
 import { JumpTo, type JumpAction } from '../agents/JumpTo'
@@ -31,13 +20,30 @@ import { usePhone } from '../phone/usePhone'
 import { navigate, useRoute, PAGES } from '../shell/router'
 import { isSettingsTab, type Tab as SettingsTab } from '../settings/SettingsDialog'
 import { HomeDashboard } from '../unified/HomeDashboard'
-import { AgentsRoster } from '../unified/AgentsRoster'
-import { CharactersPage } from '../unified/CharactersPage'
 import { ApprovalTray } from '../unified/ApprovalTray'
 import './windows.css'
 import '../unified/unified.css'
 import '../unified/design.css'
-import { ToastProvider } from '../unified/ui'
+import { ToastProvider, SkeletonRows } from '../unified/ui'
+
+// Route-level code splitting: every page but Home loads on first open.
+const App = lazy(() => import('../App').then((m) => ({ default: m.App })))
+const TasksPage = lazy(() => import('./TasksPage').then((m) => ({ default: m.TasksPage })))
+const WorkspacePage = lazy(() => import('./WorkspacePage').then((m) => ({ default: m.WorkspacePage })))
+const MachineControlPanel = lazy(() => import('../machine-control/MachineControlPanel').then((m) => ({ default: m.MachineControlPanel })))
+const SharePointPanel = lazy(() => import('../sharepoint/SharePointPanel').then((m) => ({ default: m.SharePointPanel })))
+const AgentsRoster = lazy(() => import('../unified/AgentsRoster').then((m) => ({ default: m.AgentsRoster })))
+const CharactersPage = lazy(() => import('../unified/CharactersPage').then((m) => ({ default: m.CharactersPage })))
+const TasksWorkspace = lazy(() => import('../unified/TasksWorkspace').then((m) => ({ default: m.TasksWorkspace })))
+const StudioPage = lazy(() => import('../unified/StudioPage').then((m) => ({ default: m.StudioPage })))
+const ModelsPage = lazy(() => import('../unified/ModelsPage').then((m) => ({ default: m.ModelsPage })))
+const ComparePage = lazy(() => import('../unified/ComparePage').then((m) => ({ default: m.ComparePage })))
+const ResearchPage = lazy(() => import('../unified/ResearchPage').then((m) => ({ default: m.ResearchPage })))
+const DocumentsPage = lazy(() => import('../unified/DocumentsPage').then((m) => ({ default: m.DocumentsPage })))
+const KnowledgePage = lazy(() => import('../unified/KnowledgePage').then((m) => ({ default: m.KnowledgePage })))
+const IntegrationsPage = lazy(() => import('../unified/IntegrationsPage').then((m) => ({ default: m.IntegrationsPage })))
+const CalendarPage = lazy(() => import('../unified/CalendarPage').then((m) => ({ default: m.CalendarPage })))
+const PageFallback = () => <div className="jg-u-page"><SkeletonRows n={6} /></div>
 
 export function AppWindow({ source }: { source: JaegerSource }) {
   const route = useRoute()
@@ -93,6 +99,9 @@ export function AppWindow({ source }: { source: JaegerSource }) {
       case 'compare': return <ComparePage />
       case 'research': return <ResearchPage source={source} agents={store.agents} onNavigate={go} />
       case 'documents': return <DocumentsPage params={route.params} />
+      case 'knowledge': return <KnowledgePage source={source} agents={store.agents} />
+      case 'integrations': return <IntegrationsPage source={source} />
+      case 'calendar': return <CalendarPage source={source} onNavigate={go} />
       case 'studio': return <StudioPage source={source} agents={store.agents} onNavigate={go} />
       default: return null
     }
@@ -109,13 +118,13 @@ export function AppWindow({ source }: { source: JaegerSource }) {
         {chatOpen && (
           <div className={`app-window__page app-window__page--chat${active === 'chat' || active === 'settings' ? ' app-window__page--active' : ''}`}
             hidden={active !== 'chat' && active !== 'settings'} aria-label={active === 'settings' ? 'Settings' : 'Chat'}>
-            <App source={source} view={appView} settingsTab={settingsTab} onSettingsTab={(t) => navigate(`/settings/${t}`, { replace: true })}
-              onNavigate={go} requestedAgent={active === 'chat' ? route.params.get('agent') : null} onOpenPalette={() => setPaletteOpen(true)} />
+            <Suspense fallback={<PageFallback />}><App source={source} view={appView} settingsTab={settingsTab} onSettingsTab={(t) => navigate(`/settings/${t}`, { replace: true })}
+              onNavigate={go} requestedAgent={active === 'chat' ? route.params.get('agent') : null} onOpenPalette={() => setPaletteOpen(true)} /></Suspense>
           </div>
         )}
         {visibleWindows.filter((w) => w.id !== 'chat' && w.id !== 'settings').map((w) => (
           <div key={w.id} className={`app-window__page${w.id === active ? ' app-window__page--active' : ''}`} hidden={w.id !== active} aria-label={w.definition.title}>
-            {render(w.id)}
+            <Suspense fallback={<PageFallback />}>{render(w.id)}</Suspense>
           </div>
         ))}
       </div>
