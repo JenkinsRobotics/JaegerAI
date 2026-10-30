@@ -4,10 +4,14 @@
  * decision made here is the same gateway call (POST approve) and disappears from the chat too.
  */
 import { useEffect, useState } from "react";
-import type { JaegerSource } from "../api/source";
+import type { JaegerSource, PendingApproval } from "../api/source";
 import { SessionApprovals } from "../chat/SessionApprovals";
 
 const RECENT_SESSIONS = 12;
+
+/** Same rule SessionApprovals renders by, so the count never promises a card that isn't shown. */
+export const isDecidable = (r: PendingApproval, sessionId: string) =>
+  r.status === "pending" && ["handoff", "tool", "tool_confirm"].includes(r.kind) && r.session_id === sessionId;
 
 export function useApprovalSessions(source: JaegerSource, pollMs = 5000) {
   const [pending, setPending] = useState<{ sessionId: string; count: number; title?: string; agentId?: string | null }[]>([]);
@@ -19,7 +23,7 @@ export function useApprovalSessions(source: JaegerSource, pollMs = 5000) {
         const sessions = (await source.sessions()).slice(0, RECENT_SESSIONS);
         const rows = await Promise.all(sessions.map(async (s) => {
           const list = await source.pendingApprovals!(s.session_id).catch(() => []);
-          return { sessionId: s.session_id, title: s.title, agentId: s.agent_id, count: list.filter((r) => r.status === "pending").length };
+          return { sessionId: s.session_id, title: s.title, agentId: s.agent_id, count: list.filter((r) => isDecidable(r, s.session_id)).length };
         }));
         if (live) setPending(rows.filter((r) => r.count > 0));
       } catch { /* gateway unreachable: keep the last read */ }
