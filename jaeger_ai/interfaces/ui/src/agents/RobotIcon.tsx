@@ -12,7 +12,20 @@ const EVENT = "jaeger:robot-icons";
 export const ROBOT_VARIANTS = ["dome", "box", "antenna", "visor"] as const;
 export type RobotVariant = (typeof ROBOT_VARIANTS)[number];
 
+/** Per-device robot head chosen in the Agents inspector (falls back to the id hash). */
+export const ROBOT_VARIANT_KEY = "jaeger.ui.robot-variant";
+function chosen(): Record<string, RobotVariant> {
+  try { return JSON.parse(localStorage.getItem(ROBOT_VARIANT_KEY) ?? "{}"); } catch { return {}; }
+}
+export function setRobotVariant(id: string, variant: RobotVariant | null): void {
+  const map = chosen();
+  if (variant) map[id] = variant; else delete map[id];
+  try { localStorage.setItem(ROBOT_VARIANT_KEY, JSON.stringify(map)); } catch { /* */ }
+  dispatchEvent(new Event(EVENT));
+}
 export function robotVariant(id: string): RobotVariant {
+  const pick = chosen()[id];
+  if (pick && (ROBOT_VARIANTS as readonly string[]).includes(pick)) return pick;
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
   return ROBOT_VARIANTS[h % ROBOT_VARIANTS.length];
@@ -32,8 +45,10 @@ const HEADS: Record<RobotVariant, ReactElement> = {
   visor: <><rect x="4" y="7.5" width="16" height="11.5" rx="5.75" /></>,
 };
 
-export function RobotIcon({ id, name, size = 28, status }: { id: string; name: string; size?: number; status?: string }) {
-  const variant = robotVariant(id);
+export function RobotIcon({ id, name, size = 28, status, variant: forced }: { id: string; name: string; size?: number; status?: string; variant?: RobotVariant }) {
+  const [, bump] = useState(0);
+  useEffect(() => { const sync = () => bump((n) => n + 1); addEventListener(EVENT, sync); return () => removeEventListener(EVENT, sync); }, []);
+  const variant = forced ?? robotVariant(id);
   const ring = status === "working" ? "working" : status === "waiting_approval" ? "approval" : status === "error" || status === "blocked" ? "error" : undefined;
   return (
     <span className="jg-robot" data-variant={variant} data-ring={ring} title={name} role="img" aria-label={name}

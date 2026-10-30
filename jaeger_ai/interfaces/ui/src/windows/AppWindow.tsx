@@ -17,7 +17,7 @@ import { TasksPage } from './TasksPage'
 import { WorkspacePage } from './WorkspacePage'
 import { MachineControlPanel } from '../machine-control/MachineControlPanel'
 import { SharePointPanel } from '../sharepoint/SharePointPanel'
-import { TasksBoard } from '../tasks/TasksBoard'
+import { TasksWorkspace } from '../unified/TasksWorkspace'
 import { useAgentsStore } from '../agents/agentsStore'
 import { visible } from '../agents/agentsLogic'
 import { JumpTo, type JumpAction } from '../agents/JumpTo'
@@ -76,11 +76,11 @@ export function AppWindow({ source }: { source: JaegerSource }) {
       case 'agents': return <AgentsRoster source={source} store={store} refresh={store.refresh} onNavigate={go} />
       case 'characters': return <CharactersPage characterId={active === 'characters' ? route.params.get('character') : null} source={source} refresh={store.refresh} onNavigate={go} />
       case 'tasks': return route.rest === 'gallery'
-        ? <TasksPage source={source} />
-        : <div className="jg-u-page jg-u-page--flush">
-            <nav className="jg-u-subnav" aria-label="Tasks views"><button type="button" aria-current="page">Board</button><button type="button" onClick={() => go('/tasks/gallery')}>Gallery</button></nav>
-            <TasksBoard source={source} agents={store.agents} />
+        ? <div className="jg-u-page jg-u-page--flush">
+            <nav className="jg-u-subnav" aria-label="Tasks views"><button type="button" onClick={() => go('/tasks')}>Board</button><button type="button" aria-current="page">Gallery</button></nav>
+            <TasksPage source={source} />
           </div>
+        : <TasksWorkspace source={source} agents={store.agents} params={route.params} onNavigate={go} />
       case 'machine': return <MachineControlPanel source={source} />
       case 'sharepoint': return <SharePointPanel source={source} />
       case 'workspace': return <WorkspacePage source={source} />
