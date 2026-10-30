@@ -231,3 +231,9 @@ section[aria-label="Manage agents"] button:disabled { opacity: .5; cursor: defau
 
 /* In a browser (not the native macOS host) the traffic-light reserve is decoration with no window behind it. */
 html:not([data-jaeger-host="macos"]) .app-window .jg-traffic-lights { display: none; }
+/* Phone: Control Center as a 2-up tile grid, like iOS. */
+@media (max-width: 760px) {
+  .jg-cc { grid-template-columns: 1fr 1fr; gap: var(--jg-space-2); }
+  .jg-cc__tile { min-height: 56px; padding: var(--jg-space-2) var(--jg-space-3); gap: var(--jg-space-2); border-radius: var(--jg-radius-l); }
+  .jg-cc__icon { width: 30px; height: 30px; }
+}
