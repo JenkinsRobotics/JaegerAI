@@ -10,7 +10,18 @@ import { isUnread } from "./unread";
 import { AgentAvatar } from "./AgentAvatar";
 import { label } from "./agentsLogic";
 
-export interface JumpAction { id: string; label: string; shortcut?: string; run: () => void }
+export interface JumpAction { id: string; label: string; shortcut?: string; run: () => void; /** Second line, e.g. a page or character description. */ hint?: string }
+
+/** Fuzzy score (merged from the Apple UI's SearchPalette): substring hits rank by position, otherwise every
+ * query character must appear in order. 0 = no match. */
+export function fuzzyMatch(query: string, text: string): number {
+  const q = query.toLowerCase(), t = text.toLowerCase();
+  if (!q) return 1;
+  if (t.includes(q)) return 100 - t.indexOf(q);
+  let score = 0, qi = 0;
+  for (let ti = 0; ti < t.length && qi < q.length; ti++) if (t[ti] === q[qi]) { score += 10; qi++; }
+  return qi === q.length ? score : 0;
+}
 type Row = { kind: "agent"; id: string; label: string; agent: Agent } | { kind: "action"; id: string; label: string; action: JumpAction };
 
 /** One line under the name: the agent's own description when it has one, else its latest activity, else its role. */
@@ -30,12 +41,14 @@ export function JumpTo({ open, agents, actions, onAgent, onClose, summaries = []
   useExclusivePopup(open, onClose);
   useEffect(() => { if (open) { setQuery(""); setIndex(0); requestAnimationFrame(() => input.current?.focus()); } }, [open]);
   const rows = useMemo<Row[]>(() => {
-    const q = query.trim().toLowerCase();
-    const hit = (s: string) => !q || s.toLowerCase().includes(q);
+    const q = query.trim();
     const desc = (a: Agent) => describe(a, summaries.find((x) => x.id === a.id));
+    const agentScore = (a: Agent) => Math.max(fuzzyMatch(q, label(a)), q.length > 2 && desc(a).toLowerCase().includes(q.toLowerCase()) ? 1 : 0);
+    const actionScore = (a: JumpAction) => Math.max(fuzzyMatch(q, a.label), q.length > 2 && a.hint?.toLowerCase().includes(q.toLowerCase()) ? 1 : 0);
+    const byScore = <T,>(items: T[], score: (t: T) => number) => q ? items.map((t) => [t, score(t)] as const).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]).map(([t]) => t) : items;
     return [
-      ...agents.filter((a) => hit(label(a)) || hit(desc(a))).map((a) => ({ kind: "agent" as const, id: a.id, label: label(a), agent: a })),
-      ...actions.filter((a) => hit(a.label)).map((a) => ({ kind: "action" as const, id: a.id, label: a.label, action: a })),
+      ...byScore(agents, agentScore).map((a) => ({ kind: "agent" as const, id: a.id, label: label(a), agent: a })),
+      ...byScore(actions, actionScore).map((a) => ({ kind: "action" as const, id: a.id, label: a.label, action: a })),
     ];
   }, [query, agents, actions, summaries]);
   if (!open) return null;
@@ -60,7 +73,7 @@ export function JumpTo({ open, agents, actions, onAgent, onClose, summaries = []
           {rows.length === 0 && <p className="jg-palette__empty">No matches for "{query.trim()}"</p>}
           {rows.map((row, i) => {
             const summary = row.kind === "agent" ? summaries.find((x) => x.id === row.id) : undefined;
-            const description = row.kind === "agent" ? describe(row.agent, summary) : "";
+            const description = row.kind === "agent" ? describe(row.agent, summary) : row.action.hint ?? "";
             const unread = row.kind === "agent" && row.id !== currentAgentId
               && isUnread(row.id, summary?.last_activity_at ?? 0, seen, summary?.unseen);
             return (
