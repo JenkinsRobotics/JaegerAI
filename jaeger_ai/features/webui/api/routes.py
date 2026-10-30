@@ -13430,6 +13430,13 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/memory":
         return _handle_memory_read(handler, parsed)
 
+    # ── Unified UI: workspace layout + gateway liveness (WebUI-owned, minimal) ──
+    if parsed.path == "/v1/dashboard":
+        from api import dashboard_store
+        return j(handler, dashboard_store.read())
+    if parsed.path == "/v1/gateway-health":
+        return _proxy_jaeger_gateway(handler, "GET", "/health")
+
     # ── Jaeger Gateway agents (GET) — Surfaces spine parity with the Gateway ──
     if parsed.path in {"/api/agents", "/v1/agents"}:
         qs = ("?" + parsed.query) if parsed.query else ""
@@ -16683,6 +16690,12 @@ def handle_put(handler, parsed) -> bool:
     if parsed.path.startswith("/api/mcp/servers/"):
         name = parsed.path[len("/api/mcp/servers/"):]
         return _handle_mcp_server_update(handler, name, body)
+    if parsed.path == "/v1/dashboard":
+        from api import dashboard_store
+        try:
+            return j(handler, dashboard_store.write(body))
+        except ValueError as exc:
+            return j(handler, {"error": str(exc)}, status=400)
     return False
 
 # ── GET route helpers ─────────────────────────────────────────────────────────

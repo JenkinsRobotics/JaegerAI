@@ -12,6 +12,7 @@
  * says so in plain words. Raw status codes are never surfaced to the UI.
  */
 import { emptyDoc } from "./layoutStore";
+import { csrfHeader } from "../api/gateway";
 import type { DashboardDoc } from "./types";
 
 const PATH = "/v1/dashboard";
@@ -57,7 +58,7 @@ export function gatewayLayoutTransport(): GatewayLayoutTransport {
     async write(doc) {
       const response = await fetch(PATH, {
         method: "PUT",
-        headers: jsonHeaders,
+        headers: { ...jsonHeaders, ...csrfHeader("PUT") },
         credentials: "include",
         body: JSON.stringify(doc),
       });
