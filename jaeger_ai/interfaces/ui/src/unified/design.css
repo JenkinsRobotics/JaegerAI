@@ -211,3 +211,23 @@ button.jg-cc__tile:active { transform: scale(.97); }
 .wg-list li span { flex: none; color: var(--jg-color-text-tertiary); font-size: var(--jg-text-footnote); }
 .wg-list__empty { color: var(--jg-color-text-tertiary); font-size: var(--jg-text-body); }
 .wg-metrics p { margin: 0 0 var(--jg-space-2); font-size: var(--jg-text-body); }
+
+/* Settings → Agents (AgentManagement): one card per agent, name left, actions as pill buttons. */
+section[aria-label="Manage agents"] { display: grid; gap: var(--jg-space-3); }
+section[aria-label="Manage agents"] > p { margin: 0; font-size: var(--jg-text-footnote); color: var(--jg-color-text-tertiary); }
+section[aria-label="Manage agents"] > p:first-of-type { margin-bottom: 0; }
+section[aria-label="Manage agents"] > section > h3 { margin: var(--jg-space-4) 0 0; font-size: var(--jg-text-footnote); text-transform: uppercase; letter-spacing: .04em; color: var(--jg-color-text-tertiary); }
+section[aria-label="Manage agents"] .jg-sheet__card { border-radius: var(--jg-radius-l); border: 1px solid var(--jg-color-border-tertiary); background: var(--jg-color-elevated); padding: var(--jg-space-3) var(--jg-space-4); }
+section[aria-label="Manage agents"] .jg-sheet__row { display: grid; grid-template-columns: minmax(160px, 220px) minmax(0, 1fr); gap: var(--jg-space-4); align-items: start; }
+@media (max-width: 760px) { section[aria-label="Manage agents"] .jg-sheet__row { grid-template-columns: 1fr; } }
+section[aria-label="Manage agents"] .jg-sheet__row-label { display: grid; gap: 2px; min-width: 0; }
+section[aria-label="Manage agents"] .jg-sheet__row-label strong { font-size: var(--jg-text-callout); }
+section[aria-label="Manage agents"] .jg-sheet__row-label small { font-size: var(--jg-text-caption); color: var(--jg-color-text-tertiary); overflow-wrap: anywhere; }
+.jg-agent-management-actions { display: flex; flex-wrap: wrap; gap: var(--jg-space-2); align-items: center; justify-content: flex-end; }
+section[aria-label="Manage agents"] :is(button, select) { font: inherit; font-size: var(--jg-text-footnote); min-height: 28px; padding: 0 var(--jg-space-3); border-radius: 999px; border: 1px solid var(--jg-color-border); background: var(--jg-color-pane); color: var(--jg-color-text); cursor: pointer; }
+section[aria-label="Manage agents"] :is(button, select):hover { background: var(--jg-color-hover); }
+section[aria-label="Manage agents"] button:disabled { opacity: .5; cursor: default; }
+.jg-agent-management-actions label { display: inline-flex; align-items: center; gap: var(--jg-space-2); font-size: var(--jg-text-footnote); color: var(--jg-color-text-secondary); }
+
+/* In a browser (not the native macOS host) the traffic-light reserve is decoration with no window behind it. */
+html:not([data-jaeger-host="macos"]) .app-window .jg-traffic-lights { display: none; }
