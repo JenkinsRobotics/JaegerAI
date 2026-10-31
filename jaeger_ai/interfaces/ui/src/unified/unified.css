@@ -4,7 +4,7 @@
 .app-window__page[hidden] { display: block; }
 .app-window__page--chat > * { height: 100%; }
 
-.jg-u-page { height: 100%; overflow: auto; padding: 28px 32px 40px; box-sizing: border-box; background: var(--jg-color-pane); }
+.jg-u-page { height: 100%; overflow: auto; padding: var(--jg-space-5) var(--jg-space-6) var(--jg-space-6); box-sizing: border-box; background: var(--jg-color-pane); }
 .jg-u-page--flush { padding: 0; display: flex; flex-direction: column; }
 .jg-u-page__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 .jg-u-page__head h1 { font-size: 22px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }

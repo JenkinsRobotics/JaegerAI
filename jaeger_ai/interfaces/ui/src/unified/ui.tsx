@@ -20,7 +20,7 @@ export function Segmented<T extends string>({ value, options, onChange, label }:
 
 export const Skeleton = ({ w = "100%", h = 12 }: { w?: number | string; h?: number }) => <span className="jg-ui-skel" style={{ width: w, height: h }} aria-hidden="true" />;
 export const SkeletonRows = ({ n = 3 }: { n?: number }) => (
-  <div role="status" aria-label="Loading" style={{ display: "grid", gap: 10 }}>{Array.from({ length: n }, (_, i) => <Skeleton key={i} w={`${90 - i * 12}%`} h={14} />)}</div>
+  <div className="jg-stack jg-stack--tight" role="status" aria-label="Loading">{Array.from({ length: n }, (_, i) => <Skeleton key={i} w={`${90 - i * 12}%`} h={14} />)}</div>
 );
 
 export function Empty({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { JaegerSource, ScheduleJob } from "../api/source";
 import type { Task } from "../api/types";
-import { Badge, Empty, Sheet, SkeletonRows, useToast } from "./ui";
+import { Badge, Empty, Sheet, SkeletonRows, useToast, PageHead } from "./ui";
 
 const dayKey = (d: Date) => d.toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" });
 
@@ -42,10 +42,7 @@ export function CalendarPage({ source, onNavigate }: { source: JaegerSource; onN
   };
   return (
     <div className="jg-u-page">
-      <header className="jg-u-page__head">
-        <div><h1>Calendar</h1><p>Scheduled agent jobs and task due dates.</p></div>
-        <div className="jg-ui-toolbar"><button type="button" className="jg-u-btn" onClick={() => onNavigate("/work/tasks")}>Tasks</button>{source.schedules && <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => setCreating(true)}>New schedule</button>}</div>
-      </header>
+      <PageHead title="Calendar" subtitle="Scheduled agent jobs and task due dates." actions={<><button type="button" className="jg-u-btn" onClick={() => onNavigate("/work/tasks")}>Tasks</button>{source.schedules && <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => setCreating(true)}>New schedule</button>}</>} />
       {err && <p className="jg-u-error" role="alert">{err}</p>}
       <div className="jg-ui-split">
         <section className="jg-u-card" aria-label="Agenda">
@@ -72,7 +69,7 @@ export function CalendarPage({ source, onNavigate }: { source: JaegerSource; onN
       </div>
       {creating && (
         <Sheet title="New schedule" onClose={() => setCreating(false)}>
-          <form onSubmit={(e) => { e.preventDefault(); void mutate("create"); }} style={{ display: "grid", gap: 16 }}>
+          <form className="jg-stack" onSubmit={(e) => { e.preventDefault(); void mutate("create"); }}>
             <label className="jg-ui-field">Name<input required maxLength={80} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} placeholder="Morning briefing" /></label>
             <label className="jg-ui-field">What should Jaeger do?<textarea required rows={4} value={f.prompt} onChange={(e) => setF({ ...f, prompt: e.target.value })} /></label>
             <label className="jg-ui-field">Schedule (cron)<input required value={f.schedule} onChange={(e) => setF({ ...f, schedule: e.target.value })} /></label>

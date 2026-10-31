@@ -2,7 +2,7 @@
  * the gateway exposes, and Connect-apps connectors with their status. Gateway APIs only. */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ConnectAppsListing, JaegerSource, ToolInventory } from "../api/source";
-import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast } from "./ui";
+import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast, PageHead } from "./ui";
 
 const tone = (s: string) => (/connect|ready|running|ok|active|installed/i.test(s) ? "ok" : /error|fail|disconnect/i.test(s) ? "bad" : "warn") as "ok" | "bad" | "warn";
 
@@ -30,25 +30,22 @@ export function IntegrationsPage({ source }: { source: JaegerSource }) {
   };
   return (
     <div className="jg-u-page">
-      <header className="jg-u-page__head">
-        <div><h1>MCP &amp; Integrations</h1><p>{inv ? `${inv.servers.length} MCP servers · ${inv.count} tools` : "Connected tools and connectors."}{apps ? ` · ${apps.connected_count} apps connected` : ""}</p></div>
-        <div className="jg-ui-toolbar">
+      <PageHead title={<>MCP &amp; Integrations</>} subtitle={<>{inv ? `${inv.servers.length} MCP servers · ${inv.count} tools` : "Connected tools and connectors."}{apps ? ` · ${apps.connected_count} apps connected` : ""}</>} actions={<>
           {tab === "tools" && <input className="jg-u-search" type="search" placeholder="Search tools" aria-label="Search tools" value={q} onChange={(e) => setQ(e.target.value)} />}
           <Segmented label="Section" value={tab} onChange={setTab} options={[{ value: "servers", label: "MCP servers" }, { value: "tools", label: "Tools" }, { value: "apps", label: "Apps" }]} />
           <button type="button" className="jg-u-btn" onClick={load}>Refresh</button>
-        </div>
-      </header>
+        </>} />
       {err && <p className="jg-u-error" role="alert">{err}</p>}
       {!source.tools && <Empty title="Tool inventory unavailable" />}
       {tab === "servers" && (!inv ? <SkeletonRows n={4} /> : !inv.servers.length ? <Empty title="No MCP servers configured">{inv.mcp_initialized ? "" : "MCP has not initialised yet."}</Empty> : (
-        <ul className="jg-studio__grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))" }}>{inv.servers.map((s) => (
+        <ul className="jg-studio__grid jg-u-grid--m">{inv.servers.map((s) => (
           <li key={s.id ?? s.name} className="jg-u-card"><h2>{s.name} <Badge tone={tone(s.state)}>{s.state}</Badge></h2>
             <p className="jg-u-note">{s.tool_count} tools{s.active_calls ? ` · ${s.active_calls} running` : ""}{s.resources_advertised ? " · resources" : ""}</p>
             {source.mcpControls && s.id && <div className="jg-ui-toolbar">{(s.actions ?? []).filter((a): a is "disconnect" | "reconnect" => a === "disconnect" || a === "reconnect").map((a) => (
               <button key={a} type="button" className="jg-u-btn" onClick={() => setAsk({ id: s.id!, name: s.name, action: a, state: s.state })}>{a === "reconnect" ? "Reconnect" : "Disconnect"}</button>))}</div>}
           </li>))}</ul>))}
       {tab === "tools" && (!inv ? <SkeletonRows n={6} /> : (
-        <section className="jg-u-card" style={{ padding: 0, overflow: "hidden" }}>
+        <section className="jg-u-card jg-u-card--flush">
           <table className="jg-table"><thead><tr><th>Tool</th><th>Toolset</th><th>Source</th><th>Tier</th></tr></thead>
             <tbody>{tools.slice(0, 400).map((t) => (
               <tr key={`${t.server ?? t.source}/${t.name}`}><td><strong>{t.name}</strong>{t.dangerous && <> <Badge tone="bad">dangerous</Badge></>}{t.beta && <> <Badge>beta</Badge></>}<br /><small>{t.description}</small></td>
@@ -56,7 +53,7 @@ export function IntegrationsPage({ source }: { source: JaegerSource }) {
           {!tools.length && <Empty title="No tools match" />}
         </section>))}
       {tab === "apps" && (!apps ? <SkeletonRows n={4} /> : !apps.apps.length ? <Empty title="No connectors available">{source.connectApps ? "" : "This gateway doesn't expose Connect apps."}</Empty> : (
-        <ul className="jg-studio__grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}>{apps.apps.map((a) => (
+        <ul className="jg-studio__grid jg-u-grid--s">{apps.apps.map((a) => (
           <li key={a.id} className="jg-u-card"><h2>{a.name} <Badge tone={tone(a.state.value)}>{a.state.value}</Badge></h2>
             <p className="jg-u-note">{a.description ?? a.category}</p>{a.state.detail && <p className="jg-u-note">{a.state.detail}</p>}
             {a.actions.includes("install") && <button type="button" className="jg-u-btn" onClick={() => setAsk({ install: a.id, name: a.name })}>Connect…</button>}

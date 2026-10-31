@@ -5,7 +5,7 @@
  * own default-model setting; pull and remove go through /v1/models and always confirm first.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast } from "./ui";
+import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast, PageHead } from "./ui";
 import { sendJson } from "./webui";
 import { CLI_STATE, loadCliProviders, type CliProvider, fit, gb, inventory, isCloud, isDefault, isEmbedding, loadCatalog, loadHardware, loadModels, loadProviderKeys, setDefaultModel,
   type Catalog, type Hardware, type LocalModel, type ProviderKey, type Pull, type Row } from "./models";
@@ -66,14 +66,11 @@ export function ModelsPage() {
 
   return (
     <div className="jg-u-page jg-models">
-      <header className="jg-u-page__head">
-        <div><h1>Models</h1><p>{loading ? "Loading models…" : `${total} models across ${groups.length} provider${groups.length === 1 ? "" : "s"} · ${gb(totalLocal)} on this Mac`}</p></div>
-        <div className="jg-ui-toolbar">
+      <PageHead title="Models" subtitle={<>{loading ? "Loading models…" : `${total} models across ${groups.length} provider${groups.length === 1 ? "" : "s"} · ${gb(totalLocal)} on this Mac`}</>} actions={<>
           <input className="jg-u-search" type="search" placeholder="Search name, family, quant, capability" aria-label="Search models" value={q} onChange={(e) => setQ(e.target.value)} />
           <Segmented label="Show" value={kind} onChange={setKind} options={[{ value: "all", label: "All" }, { value: "local", label: "Local" }, { value: "cloud", label: "Cloud" }, { value: "loaded", label: "Loaded" }, { value: "embedding", label: "Embedding" }]} />
           <button type="button" className="jg-u-btn" onClick={() => void load()}>Refresh</button>
-        </div>
-      </header>
+        </>} />
       {catalog?.default_model && <p className="jg-models__default">Default model <strong>{catalog.default_model}</strong> <span>via {groups.find((g) => g.id === catalog.active_provider)?.title ?? catalog.active_provider}</span></p>}
       {err.ollama && <p className="jg-u-error" role="alert">Ollama: {err.ollama}. Local models can't be listed, pulled or removed until it's running.</p>}
       {err.catalog && <p className="jg-u-error" role="alert">Provider catalog unavailable: {err.catalog}</p>}
@@ -147,7 +144,7 @@ export function ModelsPage() {
             </dl>)}
           <p className="jg-u-note">{hw?.note}</p>
           <h3>Pull from Ollama</h3>
-          <form onSubmit={(e) => { e.preventDefault(); if (pullName.trim()) setAsk({ op: "pull", name: pullName.trim() }); }} style={{ display: "grid", gap: 8 }}>
+          <form className="jg-stack jg-stack--tight" onSubmit={(e) => { e.preventDefault(); if (pullName.trim()) setAsk({ op: "pull", name: pullName.trim() }); }}>
             <label className="jg-ui-field">Model name<input value={pullName} onChange={(e) => setPullName(e.target.value)} placeholder="qwen3:8b" disabled={!!err.ollama} /></label>
             <div className="jg-ui-actions"><button className="jg-u-btn jg-u-btn--primary" disabled={!pullName.trim() || !!err.ollama}>Pull…</button></div>
           </form>

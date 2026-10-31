@@ -6,7 +6,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Markdown } from "../chat/Markdown";
-import { Badge, Empty, SkeletonRows, useToast } from "./ui";
+import { Badge, Empty, SkeletonRows, useToast, PageHead } from "./ui";
 import { loadCliProviders, modelLabel, runnableCli, cliModelId, type CliProvider, deleteRun, fmtCost, isCloud, isEmbedding, loadModels, loadRuns, saveRun, streamCompare, voteRun,
   type CompareRun, type LocalModel, type Metrics, type RunResult } from "./models";
 
@@ -82,7 +82,7 @@ export function ComparePage() {
 
   return (
     <div className="jg-u-page jg-cmp">
-      <header className="jg-u-page__head"><div><h1>Compare</h1><p>One prompt, up to four models (Ollama and your signed-in CLIs), streamed side by side with real timings.</p></div></header>
+      <PageHead title="Compare" subtitle="One prompt, up to four models (Ollama and your signed-in CLIs), streamed side by side with real timings." />
       {err && <p className="jg-u-error" role="alert">Ollama: {err}. Start Ollama to compare local models.</p>}
       <div className="jg-cmp__layout">
         <div className="jg-cmp__main">
