@@ -1880,17 +1880,8 @@ class JaegerGatewayApp:
         )
         all_green = required_ok
         status = "ok" if all_green else "unhealthy"
-        git_commit = "unknown"
-        try:
-            import subprocess
-            git_commit = subprocess.check_output(
-                ["git", "rev-parse", "HEAD"],
-                cwd=Path(__file__).resolve().parent,
-                text=True,
-                timeout=2,
-            ).strip()
-        except Exception:
-            pass
+        from jaeger_ai.core.gateway.git_info import git_commit as _git_commit
+        git_commit = _git_commit(str(Path(__file__).resolve().parent))
 
         active_model = "unknown"
         try:
