@@ -20,12 +20,13 @@ import { AgentFace } from "./AgentFace";
 import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast, PageHead } from "./ui";
 import { createSpecialist } from "./agentCreate";
 import { CharacterRoster } from "./CharacterRoster";
+import { AvatarStudio } from "../avatar/AvatarStudio";
 
 const statusTone = (s?: string) => (s === "working" ? "ok" : s === "waiting_approval" ? "warn" : s === "error" || s === "blocked" ? "bad" : undefined);
 const when = (t?: number | null) => (t ? new Date((t > 1e12 ? t : t * 1000)).toLocaleString() : "–");
 type Show = "active" | "archived";
 
-export function AgentsRoster({ source, store, refresh, onNavigate }: { source: JaegerSource; store: AgentsState; refresh: () => Promise<void> | void; onNavigate: (to: string) => void }) {
+export function AgentsRoster({ source, store, refresh, onNavigate, avatarFor }: { source: JaegerSource; store: AgentsState; refresh: () => Promise<void> | void; onNavigate: (to: string) => void; avatarFor?: string | null }) {
   const toast = useToast();
   const [query, setQuery] = useState("");
   const [show, setShow] = useState<Show>("active");
@@ -52,6 +53,12 @@ export function AgentsRoster({ source, store, refresh, onNavigate }: { source: J
     } catch (e) { toast(`Couldn't save pins: ${(e as Error).message}`, "error"); }
   };
 
+  const avatarAgent = avatarFor ? store.agents.find((a) => a.id === avatarFor) : undefined;
+  if (avatarFor) {
+    return avatarAgent
+      ? <AvatarStudio key={avatarAgent.id} agent={avatarAgent} presence={status(avatarAgent.id)} onBack={() => onNavigate("/agents")} />
+      : <div className="jg-u-page"><Empty title={store.loading ? "Loading agent…" : "Agent not found"}>{avatarFor}</Empty></div>;
+  }
   return (
     <div className="jg-u-page">
       <PageHead title="Agents" subtitle={<>{store.agents.filter(visible).length} agents · select one to inspect it.</>} actions={<>
@@ -132,6 +139,7 @@ function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, on
       </div>
       <div className="jg-ui-toolbar">
         <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => onNavigate(`/chat?agent=${encodeURIComponent(agent.id)}`)}>Open chat</button>
+        <button type="button" className="jg-u-btn" onClick={() => onNavigate(`/agents/${encodeURIComponent(agent.id)}/avatar`)}>Avatar</button>
         {!agent.primary && <button type="button" className="jg-u-btn" aria-pressed={pinned} onClick={onPin}>{pinned ? "Unpin" : "Pin"}</button>}
         {caps.rename && actions && <button type="button" className="jg-u-btn" onClick={() => setPanel("rename")}>Rename</button>}
         {caps.hide && actions && !agent.primary && <button type="button" className="jg-u-btn" disabled={busy} onClick={() => void patch({ archived: !archived }, archived ? "Restored" : "Archived")}>{archived ? "Restore" : "Archive"}</button>}

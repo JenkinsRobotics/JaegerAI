@@ -36,6 +36,8 @@ import { agentSlug, NewChatMenu } from "./agents/NewChatMenu";
 import { loadPins, pin, savePins, unpin, MAX_PINS, PINS_EVENT } from "./agents/pins";
 import { HistoryPanel } from "./agents/HistoryPanel";
 import { ChatPane } from "./chat/ChatPane";
+import { AvatarPanel } from "./avatar/AvatarPanel";
+import { useSizeClass } from "./shell/breakpoints";
 import { autoHome, contractHome, fallbackHome, httpGetJson, type HomeSessions } from "./chat/homeSession";
 import { NativeHost } from "./chat/nativeHost";
 import { WebHost } from "./chat/webHost";
@@ -116,6 +118,8 @@ export function App({ source, view = "chat", settingsTab, onSettingsTab, onNavig
   const [initialReady, setInitialReady] = useState(false);
   const [primaryPicker, setPrimaryPicker] = useState<{ expectedId: string } | null>(null);
   const defaultAgentId = store.agents.find((a) => a.primary)?.id ?? LEAD_ID;
+  const avatarHost = useRef<HTMLDivElement>(null);
+  const avatarSize = useSizeClass(avatarHost);
   useEffect(() => {
     if (!initialReady && store.agents.length) {
       setSelection({ type: "agent", agentId: defaultAgentId });
@@ -365,9 +369,11 @@ export function App({ source, view = "chat", settingsTab, onSettingsTab, onNavig
 
   const detailsAgent = store.agents.find((a) => a.id === detailsAgentId);
   const historyAgent = store.agents.find((a) => a.id === historyAgentId);
+  const avatarAgent = store.agents.find((a) => a.id === (selectedAgentId ?? defaultAgentId));
   const chatBody = sessionError
     ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
-    : <div className="jg-chat-voice-host"><ChatPane host={host} sessionId={sessionId} agents={store.agents} /><VoiceDictation /></div>;
+    : <div className="jg-av-chat" ref={avatarHost}><div className="jg-chat-voice-host"><ChatPane host={host} sessionId={sessionId} agents={store.agents} /><VoiceDictation /></div>
+        {avatarAgent && <AvatarPanel size={avatarSize} agent={avatarAgent} presence={store.summaries.find((s) => s.id === avatarAgent.id)?.status} onOpenAgents={onNavigate ? (id) => onNavigate(`/agents/${encodeURIComponent(id)}/avatar`) : undefined} />}</div>;
   const phoneAgent = store.agents.find((a) => a.id === (selectedAgentId ?? defaultAgentId));
   const main = phone
     ? (phoneView === "chat"
