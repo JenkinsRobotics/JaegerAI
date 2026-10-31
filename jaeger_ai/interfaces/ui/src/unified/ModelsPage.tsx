@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast } from "./ui";
 import { sendJson } from "./webui";
-import { fit, gb, inventory, isCloud, isDefault, isEmbedding, loadCatalog, loadHardware, loadModels, loadProviderKeys, setDefaultModel,
+import { CLI_STATE, loadCliProviders, type CliProvider, fit, gb, inventory, isCloud, isDefault, isEmbedding, loadCatalog, loadHardware, loadModels, loadProviderKeys, setDefaultModel,
   type Catalog, type Hardware, type LocalModel, type ProviderKey, type Pull, type Row } from "./models";
 
 const FIT_TEXT = { good: ["ok", "Fits well"], tight: ["warn", "Tight fit"], "too-big": ["bad", "Too big"], cloud: [undefined, "Cloud"], unknown: [undefined, "–"] } as const;
@@ -26,6 +26,7 @@ export function ModelsPage() {
   const [models, setModels] = useState<LocalModel[] | null>(null);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [keys, setKeys] = useState<ProviderKey[]>([]);
+  const [clis, setClis] = useState<CliProvider[]>([]);
   const [pulls, setPulls] = useState<Pull[]>([]);
   const [hw, setHw] = useState<Hardware>();
   const [err, setErr] = useState<{ ollama?: string; catalog?: string }>({});
@@ -37,7 +38,7 @@ export function ModelsPage() {
   const loadLocal = useCallback(() => loadModels().then((r) => { setModels(r.models); setPulls(r.pulls); setErr((e) => ({ ...e, ollama: undefined })); }, (e: Error) => { setModels([]); setErr((x) => ({ ...x, ollama: e.message })); }), []);
   const loadCat = useCallback(() => loadCatalog().then((c) => { setCatalog(c); setErr((e) => ({ ...e, catalog: undefined })); }, (e: Error) => setErr((x) => ({ ...x, catalog: e.message }))), []);
   const load = useCallback(() => Promise.all([loadLocal(), loadCat()]), [loadLocal, loadCat]);
-  useEffect(() => { void load(); loadHardware().then(setHw, () => {}); loadProviderKeys().then((r) => setKeys(r.providers ?? []), () => {}); }, [load]);
+  useEffect(() => { void load(); loadHardware().then(setHw, () => {}); loadProviderKeys().then((r) => setKeys(r.providers ?? []), () => {}); loadCliProviders().then((r) => setClis(r.providers ?? []), () => {}); }, [load]);
   const running = pulls.some((p) => p.state === "running");
   useEffect(() => { if (!running) return; const t = setInterval(() => void loadLocal(), 1500); return () => clearInterval(t); }, [running, loadLocal]);
   // Refresh the catalog once a pull finishes so the new model is listed.
@@ -110,6 +111,27 @@ export function ModelsPage() {
                   })}</tbody>
                 </table>
               </section>))}
+          {!loading && clis.some((p) => p.installed) && (kind === "all" || kind === "cloud") && clis.filter((p) => p.installed).map((p) => {
+            const [tone, text] = CLI_STATE[p.state];
+            const rows = p.models.filter((m) => !q || `${m.id} ${m.label}`.toLowerCase().includes(q.toLowerCase()));
+            if (q && !rows.length) return null;
+            return (
+              <section key={p.id} className="jg-u-card jg-models__group jg-models__cli" aria-label={p.label}>
+                <header className="jg-models__ghead">
+                  <span className="jg-models__dot" data-status={p.state === "ready" ? "online" : p.state} aria-hidden="true" />
+                  <h2>{p.label}</h2> <Badge tone={tone}>{text}</Badge>{!p.enabled && <Badge>Off</Badge>}
+                  <span className="jg-models__gmeta">CLI · {p.version ?? "?"} · your subscription, no API key</span>
+                </header>
+                {rows.length ? (
+                  <table className="jg-table">
+                    <thead><tr><th>Model</th><th>Context</th><th>In Compare</th></tr></thead>
+                    <tbody>{rows.map((m) => (
+                      <tr key={m.id}><td><strong>{m.label}</strong><br /><small>{m.id}</small></td><td>{m.context ? `${Math.round(m.context / 1000)}K` : "–"}</td>
+                        <td>{p.enabled && p.selected_models.includes(m.id) ? <Badge tone="ok">Offered</Badge> : <Badge>Hidden</Badge>}</td></tr>))}</tbody>
+                  </table>) : null}
+                <p className="jg-u-note">{p.state === "needs-sign-in" ? `Needs sign-in: run ${p.login_command} in Terminal.` : p.last_error ? `Last run failed: ${p.last_error}` : p.status_note}. Manage in Settings → Providers.</p>
+              </section>);
+          })}
           {!loading && <p className="jg-u-note">{keyed.length ? `Keys stored for: ${keyed.map((k) => k.id).join(", ")}.` : "No cloud API keys are stored; Ollama Cloud models run through this Mac's Ollama sign-in."} Add providers in Settings → Providers.</p>}
         </div>
         <aside className="jg-ui-inspector" aria-label="This Mac">

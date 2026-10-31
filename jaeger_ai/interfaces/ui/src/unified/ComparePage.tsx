@@ -1,13 +1,13 @@
 /**
  * Compare (unified UI): one prompt to 2–4 models, streamed side by side from Ollama through the
- * WebUI's /v1/compare/stream. Metrics are Ollama's own counters (tokens, eval time, load time);
+ * WebUI's /v1/compare/stream, or through a signed-in subscription CLI (Codex, Claude Code, Cursor, Gemini). Metrics are Ollama's own counters (tokens, eval time, load time);
  * cost is $0 for local models and unknown for cloud ones. Finished runs are saved to
  * /v1/compare/history with an optional winner vote.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Markdown } from "../chat/Markdown";
 import { Badge, Empty, SkeletonRows, useToast } from "./ui";
-import { deleteRun, fmtCost, isCloud, isEmbedding, loadModels, loadRuns, saveRun, streamCompare, voteRun,
+import { loadCliProviders, modelLabel, runnableCli, cliModelId, type CliProvider, deleteRun, fmtCost, isCloud, isEmbedding, loadModels, loadRuns, saveRun, streamCompare, voteRun,
   type CompareRun, type LocalModel, type Metrics, type RunResult } from "./models";
 
 export interface Slot { model: string; text: string; thinking: string; state: "idle" | "running" | "done" | "error" | "stopped"; metrics?: Metrics; error?: string }
@@ -25,6 +25,7 @@ export function ComparePage() {
   const [prompt, setPrompt] = useState("");
   const [slots, setSlots] = useState<Slot[]>([blank(""), blank("")]);
   const [runs, setRuns] = useState<CompareRun[]>([]);
+  const [clis, setClis] = useState<CliProvider[]>([]);
   const [current, setCurrent] = useState<CompareRun>();
   const ctl = useRef<AbortController[]>([]);
   const slotsRef = useRef(slots); slotsRef.current = slots;
@@ -32,6 +33,7 @@ export function ComparePage() {
   useEffect(() => {
     loadModels().then((r) => { const chat = r.models.filter((m) => !isEmbedding(m)); setModels(chat); const d = pickDefaults(chat); setSlots([blank(d[0] ?? ""), blank(d[1] ?? d[0] ?? "")]); }, (e: Error) => { setModels([]); setErr(e.message); });
     loadRuns().then((r) => setRuns(r.runs), () => {});
+    loadCliProviders().then((r) => setClis(r.providers ?? []), () => {});
   }, []);
   const patch = (i: number, f: (s: Slot) => Slot) => setSlots((xs) => xs.map((x, j) => (j === i ? f(x) : x)));
 
@@ -71,7 +73,7 @@ export function ComparePage() {
   };
   const open = (r: CompareRun) => { stop(); setCurrent(r); setPrompt(r.prompt); setSlots(r.results.map((x) => ({ model: x.model, text: x.response, thinking: "", state: x.error ? "error" : "done", error: x.error, metrics: x.elapsed_s != null ? (x as Metrics) : undefined }))); };
   const remove = async (r: CompareRun) => { try { await deleteRun(r.id); setRuns((xs) => xs.filter((x) => x.id !== r.id)); if (current?.id === r.id) setCurrent(undefined); } catch (e) { toast((e as Error).message, "error"); } };
-  const copy = async (s: Slot) => { try { await navigator.clipboard.writeText(s.text); toast(`Copied ${s.model}'s answer`); } catch { toast("Clipboard unavailable", "error"); } };
+  const copy = async (s: Slot) => { try { await navigator.clipboard.writeText(s.text); toast(`Copied ${modelLabel(s.model, clis)}'s answer`); } catch { toast("Clipboard unavailable", "error"); } };
 
   const busy = slots.some((s) => s.state === "running");
   const fastest = slots.filter((s) => s.metrics?.tokens_per_s).sort((a, b) => (b.metrics!.tokens_per_s ?? 0) - (a.metrics!.tokens_per_s ?? 0))[0]?.model;
@@ -80,7 +82,7 @@ export function ComparePage() {
 
   return (
     <div className="jg-u-page jg-cmp">
-      <header className="jg-u-page__head"><div><h1>Compare</h1><p>One prompt, up to four models, streamed side by side with Ollama's real timings.</p></div></header>
+      <header className="jg-u-page__head"><div><h1>Compare</h1><p>One prompt, up to four models (Ollama and your signed-in CLIs), streamed side by side with real timings.</p></div></header>
       {err && <p className="jg-u-error" role="alert">Ollama: {err}. Start Ollama to compare local models.</p>}
       <div className="jg-cmp__layout">
         <div className="jg-cmp__main">
@@ -96,7 +98,7 @@ export function ComparePage() {
           {current && slots.some((s) => s.state === "done") && (
             <div className="jg-cmp__vote" role="group" aria-label="Pick a winner">
               <span>Which answer was best?</span>
-              {slots.map((s) => <button key={s.model} type="button" className="jg-u-btn" aria-pressed={current.winner === s.model} onClick={() => void vote(s.model)}>{s.model}</button>)}
+              {slots.map((s) => <button key={s.model} type="button" className="jg-u-btn" aria-pressed={current.winner === s.model} onClick={() => void vote(s.model)}>{modelLabel(s.model, clis)}</button>)}
               <button type="button" className="jg-u-btn" aria-pressed={current.winner === "tie"} onClick={() => void vote("tie")}>Tie</button>
             </div>)}
           <div className="jg-compare" data-count={slots.length}>
@@ -107,6 +109,8 @@ export function ComparePage() {
                     {!models?.length && <option value="">No models</option>}
                     {local.length > 0 && <optgroup label="On this Mac">{local.map((m) => <option key={m.name} value={m.name}>{m.name}{m.parameters ? ` · ${m.parameters}` : ""}</option>)}</optgroup>}
                     {cloud.length > 0 && <optgroup label="Ollama Cloud">{cloud.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}</optgroup>}
+                    {runnableCli(clis).map(({ provider, models: ms }) => <optgroup key={provider.id} label={`${provider.label} (CLI)`}>{ms.map((m) => <option key={m.id} value={cliModelId(provider.id, m.id)}>{m.label}</option>)}</optgroup>)}
+                    {s.model.startsWith("cli:") && !runnableCli(clis).some(({ provider, models: ms }) => ms.some((m) => cliModelId(provider.id, m.id) === s.model)) && <option value={s.model}>{modelLabel(s.model, clis)}</option>}
                   </select>
                   <div className="jg-cmp__tools">
                     <button type="button" className="jg-u-icon-btn" disabled={!s.text} onClick={() => void copy(s)} aria-label={`Copy ${s.model}'s answer`}>Copy</button>
@@ -138,8 +142,8 @@ export function ComparePage() {
               <li key={r.id} className="jg-cmp__run" aria-current={current?.id === r.id || undefined}>
                 <button type="button" onClick={() => open(r)}>
                   <strong>{r.prompt.slice(0, 80)}</strong>
-                  <span>{r.results.map((x) => x.model).join(" vs ")}</span>
-                  <small>{new Date(r.created_at * 1000).toLocaleString()}{r.winner ? ` · ${r.winner === "tie" ? "Tie" : `🏆 ${r.winner}`}` : ""}</small>
+                  <span>{r.results.map((x) => modelLabel(x.model, clis)).join(" vs ")}</span>
+                  <small>{new Date(r.created_at * 1000).toLocaleString()}{r.winner ? ` · ${r.winner === "tie" ? "Tie" : `🏆 ${modelLabel(r.winner, clis)}`}` : ""}</small>
                 </button>
                 <button type="button" className="jg-u-icon-btn" aria-label="Delete run" onClick={() => void remove(r)}>✕</button>
               </li>))}</ul>)}

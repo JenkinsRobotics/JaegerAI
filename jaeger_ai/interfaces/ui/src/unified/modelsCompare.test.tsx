@@ -56,32 +56,35 @@ describe("compare helpers", () => {
 const ndjson = (lines: unknown[]) => new Response(new ReadableStream({ start(c) { for (const l of lines) c.enqueue(new TextEncoder().encode(JSON.stringify(l) + "\n")); c.close(); } }), { headers: { "Content-Type": "application/x-ndjson" } });
 
 describe("Compare page", () => {
-  it("streams each model's answer with real metrics, saves the run and votes", async () => {
+  it("streams an Ollama model and a CLI model side by side with real metrics, saves the run and votes", async () => {
     const calls: { url: string; body?: unknown; method?: string }[] = [];
     vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined; calls.push({ url, body, method: init?.method });
       if (url === "/v1/models/local") return Response.json({ models: local, pulls: [] });
       if (url === "/v1/compare/history" && !init?.method) return Response.json({ runs: [] });
-      if (url === "/v1/compare/stream") return ndjson([{ type: "start", model: body.model, local: true }, { type: "delta", text: `Answer from ${body.model}` }, { type: "done", model: body.model, elapsed_s: 1.5, ttft_s: 0.3, eval_count: 30, prompt_eval_count: 9, tokens_per_s: body.model === "qwen3:4b" ? 40 : 12, load_s: 0.1, cost_usd: 0 }]);
+      if (url === "/v1/providers/cli") return Response.json({ providers: [{ id: "codex", label: "OpenAI Codex", installed: true, path: "/x", version: "1", signed_in: true, status_note: "", login_command: "", streams: "messages", models: [{ id: "gpt-6-luna", label: "GPT-6-Luna" }], enabled: true, selected_models: ["gpt-6-luna"], state: "ready" }] });
+      if (url === "/v1/compare/stream") return ndjson([{ type: "start", model: body.model, local: true }, { type: "delta", text: `Answer from ${body.model}` }, { type: "done", model: body.model, elapsed_s: 1.5, ttft_s: 0.3, eval_count: 30, prompt_eval_count: 9, tokens_per_s: body.model === "qwen3:4b" ? 40 : null, load_s: body.model === "qwen3:4b" ? 0.1 : null, cost_usd: body.model === "qwen3:4b" ? 0 : null }]);
       if (url === "/v1/compare/history") return Response.json({ id: "abcdefabcdef", created_at: 1, prompt: body.prompt, results: body.results, winner: null }, { status: 201 });
       if (url.startsWith("/v1/compare/history/")) return Response.json({ id: "abcdefabcdef", created_at: 1, prompt: "p", results: [], winner: body.winner });
       return new Response("{}", { status: 404 });
     }));
     render(<ToastProvider><ComparePage /></ToastProvider>);
     await waitFor(() => expect((screen.getAllByRole("combobox")[0] as HTMLSelectElement).value).toBe("qwen3:4b"));
+    await waitFor(() => expect(screen.getAllByRole("option", { name: "GPT-6-Luna" }).length).toBe(2));
+    fireEvent.change(screen.getAllByRole("combobox")[1], { target: { value: "cli:codex:gpt-6-luna" } });
     fireEvent.change(screen.getByLabelText("Prompt"), { target: { value: "hi" } });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Run 2" })); });
-    await waitFor(() => expect(screen.getByText("Answer from gemma4:12b")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Answer from cli:codex:gpt-6-luna")).toBeTruthy());
     expect(screen.getByText("Answer from qwen3:4b")).toBeTruthy();
     expect(screen.getAllByText("40 tok/s").length).toBe(1);
     expect(screen.getByText("Fastest")).toBeTruthy();
-    expect(screen.getAllByText("$0 (local)")).toHaveLength(2);
+    expect(screen.getAllByText("$0 (local)")).toHaveLength(1);
     await waitFor(() => expect(calls.some((c) => c.url === "/v1/compare/history" && c.method === "POST")).toBe(true));
     const saved = calls.find((c) => c.url === "/v1/compare/history" && c.method === "POST")!.body as { results: { model: string; eval_count: number }[] };
-    expect(saved.results.map((r) => r.model)).toEqual(["qwen3:4b", "gemma4:12b"]);
+    expect(saved.results.map((r) => r.model)).toEqual(["qwen3:4b", "cli:codex:gpt-6-luna"]);
     expect(saved.results[0].eval_count).toBe(30);
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "gemma4:12b" })); });
-    expect(calls.at(-1)).toMatchObject({ url: "/v1/compare/history/abcdefabcdef", method: "PUT", body: { winner: "gemma4:12b" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "OpenAI Codex · GPT-6-Luna" })); });
+    expect(calls.at(-1)).toMatchObject({ url: "/v1/compare/history/abcdefabcdef", method: "PUT", body: { winner: "cli:codex:gpt-6-luna" } });
   });
 });
 

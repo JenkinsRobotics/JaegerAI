@@ -4,6 +4,7 @@
  * (streamStyle.ts, per device), file uploads (composer BYTES_UPLOAD_FLAG); Voice and Connection are read-only
  * status. Esc / a click outside / ⌘, again close it (popup coordinator). Icons: codicons (MIT). */
 import {DevicePreferencesPanel} from "./DevicePreferencesPanel";
+import { ProvidersPanel } from "./ProvidersPanel";
 import { useEffect, useState, type ReactNode } from "react";
 import { useExclusivePopup } from "../popups/coordinator";
 import { Icon, type IconName } from "../icons/Icon";
@@ -31,7 +32,7 @@ export function applyAppearance(mode: Appearance) {
   document.documentElement.dataset.appearance = mode;
 }
 
-export type Tab = "finance" | "memory" | "notifications" | "agents" | "general" | "voice" | "connection" | "about" | "automations" | "skills" | "library" | "tools" | "diagnostics" | "workflows" | "channels" | "reset";
+export type Tab = "finance" | "memory" | "notifications" | "agents" | "general" | "voice" | "connection" | "about" | "automations" | "skills" | "library" | "tools" | "diagnostics" | "workflows" | "channels" | "reset" | "providers";
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   {id:"finance",label:"Financial policy",icon:"info"},
   {id:"memory",label:"Memory",icon:"info"},
@@ -40,6 +41,7 @@ const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: "agents", label: "Agents", icon: "account" },
   { id: "voice", label: "Voice", icon: "mic" },
   { id: "connection", label: "Connection", icon: "server" },
+  { id: "providers", label: "Providers", icon: "server" },
   { id: "channels", label: "Channels", icon: "server" },
   { id: "workflows", label: "Workflows", icon: "settings-gear" },
   { id: "automations", label: "Automations", icon: "settings-gear" },
@@ -55,7 +57,7 @@ export const SETTINGS_GROUPS: { id: string; label: string; tabs: Tab[] }[] = [
   { id: "personal", label: "You", tabs: ["general", "voice", "notifications"] },
   { id: "agents", label: "Agents", tabs: ["agents", "memory", "skills", "library"] },
   { id: "automation", label: "Automation", tabs: ["workflows", "automations", "channels"] },
-  { id: "connections", label: "Connections", tabs: ["connection", "tools"] },
+  { id: "connections", label: "Connections", tabs: ["providers", "connection", "tools"] },
   { id: "money", label: "Money", tabs: ["finance"] },
   { id: "system", label: "System", tabs: ["diagnostics", "about", "reset"] },
 ];
@@ -150,6 +152,7 @@ export function SettingsDialog({ inline, tab: controlledTab, onTab, resetPanel, 
             </Section>
           </>}
           {tab === "agents" && (agentsPanel ?? <p>Agent management is not available from this host.</p>)}
+          {tab === "providers" && <ProvidersPanel />}
           {tab === "automations" && automationsPanel}
           {tab === "skills" && skillsPanel}
           {tab === "notifications" && notificationsPanel}
