@@ -24,6 +24,7 @@ export function SpecialistStatusList({ team, selected, onSelect }: { team: Agent
               <span className="jg-orch-dot" data-tone={statusTone(t.status)} aria-label={t.status.replace(/_/g, " ")} />
               {t.currentTask?.eta != null && <span>{String(t.currentTask.eta)}</span>}
               {runnerText(t.runner) && <span className="jg-orch-runner">{runnerText(t.runner)}</span>}
+              {t.offRoster && <span className="jg-orch-runner" title="Hidden or archived in the roster; shown because it worked on handoffs or tasks">hidden</span>}
             </span>
           </button>
         </li>

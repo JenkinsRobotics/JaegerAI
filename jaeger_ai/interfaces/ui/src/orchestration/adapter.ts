@@ -50,13 +50,18 @@ export function pageRows(page: ActivityPage, names: (id: string) => string) {
 }
 
 /** G1 against `GET /v1/activity` (same origin, caller auth via the proxy). */
+/** Bases whose gateway answered 404/405/501 on /v1/activity this page session. */
+const NO_ACTIVITY = new Set<string>();
+export const resetActivityProbe = () => NO_ACTIVITY.clear();
+
 export function gatewayActivity(base = "", fetchImpl: typeof fetch = (...a) => fetch(...a)): NonNullable<GapProvider["activity"]> {
   return async ({ before, names }) => {
+    if (NO_ACTIVITY.has(base)) return { rows: [] };
     const qs = new URLSearchParams({ limit: "50" });
     if (before != null) qs.set("before", String(before));
     const res = await fetchImpl(`${base}/v1/activity?${qs}`, { headers: { Accept: "application/json" }, credentials: "same-origin" });
     // Older gateways: no G1 route → history comes from the snapshot backfill only.
-    if (res.status === 404 || res.status === 405 || res.status === 501) return { rows: [] };
+    if (res.status === 404 || res.status === 405 || res.status === 501) { NO_ACTIVITY.add(base); return { rows: [] }; }
     if (!res.ok) throw new Error(`activity ${res.status}`);
     return pageRows((await res.json()) as ActivityPage, names);
   };
@@ -80,7 +85,13 @@ export function liveAdapter(source: JaegerSource, gaps: GapProvider = derivedGap
 /** Lead first, then specialists with live work, then the rest by name. */
 export function agentsLive(s: OrchestrationSnapshot, gaps: GapProvider, statusOverrides: Record<string, string> = {}): AgentLive[] {
   const byId = new Map(s.summaries.map((x) => [x.id, x]));
-  const rows = s.agents.filter(visible).map((agent): AgentLive => {
+  // The shared visible() rule is for the roster (hides hidden/archived, runtime
+  // roles, third-party and internal agents). Here an agent also belongs on the
+  // team if it took part in a handoff or owns a task, even when hidden.
+  const worked = new Set<string>();
+  for (const h of s.handoffs) { if (h.to_agent_id) worked.add(h.to_agent_id); if (h.from_agent_id) worked.add(h.from_agent_id); }
+  for (const t of s.tasks) { const id = t.agent_id ?? t.owning_agent; if (id) worked.add(id); }
+  const rows = s.agents.filter((a) => !a.deleted && (visible(a) || worked.has(a.id))).map((agent): AgentLive => {
     const summary = byId.get(agent.id);
     const task = summary?.task ?? s.tasks.find((t) => (t.agent_id ?? t.owning_agent) === agent.id && ACTIVE.has(String(t.state)));
     return {
@@ -88,6 +99,7 @@ export function agentsLive(s: OrchestrationSnapshot, gaps: GapProvider, statusOv
       status: statusOverrides[agent.id] ?? summary?.status ?? (task && ACTIVE.has(String(task.state)) ? "working" : "idle"),
       runner: gaps.runner(agent, s.tasks),
       currentTask: task ? { task_id: task.task_id, goal: task.goal, eta: task.eta, state: task.state } : undefined,
+      offRoster: !visible(agent) || undefined,
     };
   });
   const rank = (r: AgentLive) => (r.agent.id === LEAD_ID || r.agent.role === "lead" ? 0 : r.status === "idle" ? 2 : 1);

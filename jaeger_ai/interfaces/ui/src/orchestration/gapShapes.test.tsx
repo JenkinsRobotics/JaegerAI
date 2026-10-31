@@ -1,7 +1,7 @@
 import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Handoff } from "../api/types";
-import { gatewayActivity } from "./adapter";
+import { gatewayActivity, resetActivityProbe } from "./adapter";
 import { activityItemRow, artifactsFor, checkFor, eventRow, parseEvidence, statusTone } from "./feed";
 import { mockAdapter, mockFrames, mockSnapshotData } from "./mockOrchestration";
 import { OutputLinkView } from "./OutputLinkView";
@@ -53,6 +53,7 @@ describe("gateway G1–G6 shapes", () => {
     expect(fetchImpl).toHaveBeenCalledWith("/v1/activity?limit=50&before=81200", expect.anything());
     const missing = vi.fn(async () => new Response("{}", { status: 404 }));
     expect(await gatewayActivity("", missing as unknown as typeof fetch)({ names })).toEqual({ rows: [] });
+    resetActivityProbe();
     const broken = vi.fn(async () => new Response("{}", { status: 500 }));
     await expect(gatewayActivity("", broken as unknown as typeof fetch)({ names })).rejects.toThrow("activity 500");
     const adapter = mockAdapter();
