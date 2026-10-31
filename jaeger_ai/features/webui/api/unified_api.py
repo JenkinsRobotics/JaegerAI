@@ -400,7 +400,7 @@ def compare_stream_events(body: dict, opener=None):
     if mc:
         if not prompt.strip() or len(prompt) > 20000:
             raise ApiError(400, "need a model and a prompt (≤20000 chars)")
-        if mc.group(1) not in _cli().SPECS:
+        if not _cli().known(mc.group(1)):
             raise ApiError(400, f"unknown CLI provider {mc.group(1)}")
         yield from _cli().stream(mc.group(1), mc.group(2), prompt)
         return
