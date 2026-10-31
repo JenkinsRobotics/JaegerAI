@@ -89,7 +89,7 @@ export const fmtCost = (c?: number | null) => (c == null ? "–" : c === 0 ? "$0
 
 // ── Subscription CLIs (no API keys): Codex, Claude Code, Cursor agent, Gemini ──
 export interface CliModel { id: string; label: string; context?: number | null }
-export interface CliProvider { id: string; label: string; installed: boolean; path: string | null; version: string | null; signed_in: boolean | null; status_note: string; login_command: string; streams: "tokens" | "messages"; models: CliModel[]; enabled: boolean; selected_models: string[]; state: "ready" | "needs-sign-in" | "error" | "not-installed"; last_error?: string | null }
+export interface CliProvider { id: string; label: string; installed: boolean; path: string | null; version: string | null; signed_in: boolean | null; status_note: string; login_command: string; streams: "tokens" | "messages"; models: CliModel[]; enabled: boolean; selected_models: string[]; state: "ready" | "needs-sign-in" | "needs-consent" | "not-running" | "error" | "not-installed"; last_error?: string | null; kind?: "cli" | "vscode"; bridge?: string; install_command?: string | null }
 export const loadCliProviders = (refresh = false) => getJson<{ providers: CliProvider[] }>(`/v1/providers/cli${refresh ? "?refresh=1" : ""}`);
 export const updateCliProvider = (id: string, body: { enabled?: boolean; models?: string[] }) => sendJson<CliProvider>("PUT", `/v1/providers/cli/${id}`, body);
 export const cliModelId = (provider: string, model: string) => `cli:${provider}:${model}`;
@@ -100,6 +100,6 @@ export function modelLabel(id: string, providers?: CliProvider[]): string {
   const p = providers?.find((x) => x.id === m[1]);
   return `${p?.label ?? m[1]} · ${p?.models.find((x) => x.id === m[2])?.label ?? m[2]}`;
 }
-export const CLI_STATE: Record<CliProvider["state"], ["ok" | "warn" | "bad" | undefined, string]> = { ready: ["ok", "Ready"], "needs-sign-in": ["warn", "Needs sign-in"], error: ["bad", "Error"], "not-installed": [undefined, "Not installed"] };
+export const CLI_STATE: Record<CliProvider["state"], ["ok" | "warn" | "bad" | undefined, string]> = { ready: ["ok", "Ready"], "needs-sign-in": ["warn", "Needs sign-in"], error: ["bad", "Error"], "not-installed": [undefined, "Not installed"], "not-running": [undefined, "Not running"], "needs-consent": ["warn", "Needs your OK"] };
 /** Models Compare may run: enabled, installed, not known to need sign-in, and picked in Settings. */
-export const runnableCli = (ps: CliProvider[]) => ps.filter((p) => p.enabled && p.installed && p.signed_in !== false).map((p) => ({ provider: p, models: p.models.filter((m) => p.selected_models.includes(m.id)) })).filter((x) => x.models.length);
+export const runnableCli = (ps: CliProvider[]) => ps.filter((p) => p.enabled && p.installed && p.signed_in !== false && p.state !== "not-running").map((p) => ({ provider: p, models: p.models.filter((m) => p.selected_models.includes(m.id)) })).filter((x) => x.models.length);

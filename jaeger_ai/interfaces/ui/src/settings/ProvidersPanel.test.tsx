@@ -38,3 +38,32 @@ describe("Settings → Providers", () => {
     expect(document.body.textContent).not.toMatch(/secret|oauth_creds/i);
   });
 });
+
+describe("VS Code Copilot card", () => {
+  const vs = (state: CliProvider["state"], extra: Partial<CliProvider> = {}): CliProvider => ({ ...codex, id: "vscode", label: "VS Code Copilot", kind: "vscode", version: "VS Code 1.143.0", installed: state !== "not-installed", signed_in: state === "ready" ? true : null, state, models: [], selected_models: [], enabled: state === "ready", status_note: "", ...extra });
+  const show = async (p: CliProvider) => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => url.startsWith("/v1/providers/cli") ? Response.json({ providers: [p] }) : Response.json({ models: [], pulls: [] })));
+    render(<ProvidersPanel />);
+    await waitFor(() => expect(screen.getByRole("article", { name: "VS Code Copilot" })).toBeTruthy());
+  };
+  it("shows the install command and the consent step when the bridge isn't installed", async () => {
+    await show(vs("not-installed", { install_command: 'code --install-extension "/Users/m/.jaeger/ide-dist/jaeger-ide-0.3.0.vsix"' }));
+    expect(screen.getByText(/code --install-extension/)).toBeTruthy();
+    expect(screen.getByText(/Allow Copilot for Jaeger/)).toBeTruthy();
+    expect((screen.getByRole("switch", { name: "Use VS Code Copilot" }) as HTMLInputElement).disabled).toBe(true);
+  });
+  it("explains VS Code not running and needs-consent", async () => {
+    await show(vs("not-running"));
+    expect(screen.getByText("Not running")).toBeTruthy();
+    expect(screen.getByText(/Open VS Code to use Copilot/)).toBeTruthy();
+    cleanup();
+    await show(vs("needs-consent", { installed: true }));
+    expect(screen.getByText("Needs your OK")).toBeTruthy();
+  });
+  it("only offers a running, enabled bridge in Compare", () => {
+    const ready = vs("ready", { models: [{ id: "gpt-5.6-luna", label: "GPT-5.6 Luna" }], selected_models: ["gpt-5.6-luna"] });
+    expect(runnableCli([ready]).map((x) => x.provider.id)).toEqual(["vscode"]);
+    expect(runnableCli([{ ...ready, state: "not-running" }])).toEqual([]);
+    expect(modelLabel("cli:vscode:gpt-5.6-luna", [ready])).toBe("VS Code Copilot · GPT-5.6 Luna");
+  });
+});
