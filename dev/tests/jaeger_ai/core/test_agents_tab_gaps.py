@@ -178,3 +178,28 @@ async def test_g4_agents_endpoint_carries_runner(tmp_path):
         agents = (await (await c.get("/v1/agents")).json())
         rows = agents.get("agents", agents) if isinstance(agents, dict) else agents
         assert rows and all(a.get("runner") in ("native",) or str(a.get("runner")).startswith("delegate:") for a in rows)
+
+
+# ── G6 ───────────────────────────────────────────────────────────────
+def _status_events(g):
+    import json
+    with g.store._immediate() as conn:
+        return [json.loads(r[0]) for r in conn.execute(
+            "SELECT data_json FROM events WHERE event='agent.status.changed' ORDER BY event_id")]
+
+
+def test_g6_status_changed_only_on_real_change(tmp_path):
+    from jaeger_ai.core.gateway.agents_tab_routes import agent_statuses
+    g = gw(tmp_path)
+    statuses = agent_statuses(g)
+    target = next(a for a in statuses if a != g.store.primary_agent_id()) if len(statuses) > 1 else next(iter(statuses))
+    g.agent_status_watcher.cache = statuses
+    rec = g.store.save_handoff({**H("h1"), "to_agent_id": target})
+    g._publish_handoff("agent.handoff", rec)
+    evs = _status_events(g)
+    assert len(evs) == 1 and evs[0]["agent_id"] == target and evs[0]["status"] == "working"
+    assert evs[0]["previous"] == statuses[target] and evs[0]["reason"] == "agent.handoff" and evs[0]["handoff_id"] == "h1"
+    g._publish_handoff("agent.handoff", rec)  # no change → no event
+    assert len(_status_events(g)) == 1
+    acts = g.store.agent_activity(kinds=["agent.status.changed"])["items"]
+    assert acts and acts[0]["agent_id"] == target
