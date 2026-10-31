@@ -33,8 +33,10 @@ describe("orchestration panes", () => {
   });
 
   it("labels derived checks", () => {
-    render(<CheckBadge check={{ state: "passed", source: "derived" }} />);
+    render(<CheckBadge check={{ state: "passed", source: "derived", evidence: { kind: "task", label: "t", href: "/work/tasks?task=t" } }} />);
     expect(screen.getByText("Checked · task")).toBeTruthy();
+    render(<CheckBadge check={{ state: "failed", source: "derived", evidence: { kind: "handoff", label: "x", href: "handoff:x" } }} />);
+    expect(screen.getByText("Check failed · status")).toBeTruthy();
   });
 
   it("inspector picks up agent.handoff.checked without a refetch", async () => {
