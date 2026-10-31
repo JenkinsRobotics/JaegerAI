@@ -6,18 +6,20 @@ import type { Agent } from "../api/types";
 import { label, visible } from "../agents/agentsLogic";
 import { AgentMemory } from "../agents/AgentMemory";
 import { Markdown } from "../chat/Markdown";
+import { NotesSources } from "./NotesSources";
 import { Badge, Empty, Segmented, SkeletonRows, PageHead } from "./ui";
 
 type Skill = { name: string; category: string; description: string; lifecycle: string };
 
 export function KnowledgePage({ source, agents }: { source: JaegerSource; agents: Agent[] }) {
-  const [tab, setTab] = useState<"skills" | "memory" | "library">("skills");
+  const [tab, setTab] = useState<"skills" | "memory" | "library" | "notes">("skills");
   return (
     <div className="jg-u-page">
-      <PageHead title={<>Memory &amp; Skills</>} subtitle="What your agents know and can do." actions={<><Segmented label="Section" value={tab} onChange={setTab} options={[{ value: "skills", label: "Skills" }, { value: "memory", label: "Memory" }, { value: "library", label: "Library" }]} /></>} />
+      <PageHead title={<>Memory &amp; Skills</>} subtitle="What your agents know and can do." actions={<><Segmented label="Section" value={tab} onChange={setTab} options={[{ value: "skills", label: "Skills" }, { value: "memory", label: "Memory" }, { value: "library", label: "Library" }, { value: "notes", label: "Notes" }]} /></>} />
       {tab === "skills" && <Skills source={source} />}
       {tab === "memory" && <Memory source={source} agents={agents.filter(visible)} />}
       {tab === "library" && <Library source={source} />}
+      {tab === "notes" && <NotesSources />}
     </div>
   );
 }
