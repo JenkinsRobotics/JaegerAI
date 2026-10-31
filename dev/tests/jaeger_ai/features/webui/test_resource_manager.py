@@ -74,3 +74,11 @@ def test_status_and_cleanup(mod, tmp_path):
         (d / n).write_bytes(b"x")
     mod.cleanup_temp(d)
     assert [p.name for p in d.iterdir()] == ["keep.json"]
+
+
+def test_own_model_gpu_load_does_not_block_but_foreign_does(mod, tmp_path):
+    rm, _ = make(mod, tmp_path, [OK])
+    hot = {**OK, "gpu_util": 97}
+    assert rm.check("vlm", "qwen3-vl:8b", {**hot, "ollama_loaded": ["qwen3-vl:8b"]}) == []
+    assert rm.check("vlm", "qwen3-vl:8b", {**hot, "ollama_loaded": []})  # nothing of ours loaded -> someone else's GPU work
+    assert rm.check("vlm", "qwen3-vl:8b", {**hot, "ollama_loaded": ["other:7b"]})

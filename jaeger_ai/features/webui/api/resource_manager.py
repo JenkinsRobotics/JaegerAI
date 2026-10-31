@@ -112,7 +112,8 @@ class ResourceManager:
             why.append(f"memory pressure level {s['mem_pressure']}")
         if s.get("cpu_load") is not None and s["cpu_load"] > c["max_cpu_load"] * strict:
             why.append(f"CPU load {s['cpu_load']:.2f}")
-        if heavy and s.get("gpu_util") is not None and s["gpu_util"] > c["max_gpu_util_pct"] * strict:
+        own_gpu = bool(model) and set(s.get("ollama_loaded") or []) <= {model} and (s.get("ollama_loaded") or self._recent_own())
+        if heavy and not own_gpu and s.get("gpu_util") is not None and s["gpu_util"] > c["max_gpu_util_pct"] * strict:
             why.append(f"GPU {s['gpu_util']}%")
         if s.get("disk_free_gb") is not None and s["disk_free_gb"] < c["min_free_disk_gb"]:
             why.append(f"disk {s['disk_free_gb']:.0f} GB free")
@@ -123,6 +124,10 @@ class ResourceManager:
         if s.get("on_battery") and (s.get("battery_pct") or 0) < c["min_battery_pct"]:
             why.append(f"battery {s.get('battery_pct')}%")
         return why
+
+    def _recent_own(self, window_s: float = 15.0) -> bool:
+        """GPU load right after our own heavy step is ours, not the user's."""
+        return self._clock() - getattr(self, "_last_heavy_end", -1e9) < window_s
 
     # ── queue ─────────────────────────────────────────────────────────
     def _klass(self, kind: str) -> str:
@@ -174,6 +179,8 @@ class ResourceManager:
                 self._heap = [h for h in self._heap if h[1] != ticket]; heapq.heapify(self._heap)
                 a = self._active.pop(ticket, None)
                 self._cv.notify_all()
+            if a and klass == "heavy":
+                self._last_heavy_end = self._clock()
             if a:
                 st = usage["steps"].setdefault(kind, {"count": 0, "busy_s": 0.0})
                 st["count"] += 1
