@@ -10,10 +10,11 @@ import type { StreamState } from "./useOrchestration";
 type Filter = "all" | "needs" | "handoffs";
 const STREAM_TEXT: Record<StreamState, string> = { connecting: "Connecting…", live: "Live", reconnecting: "Reconnecting…", polling: "Updating every 15s" };
 
-export function ActivityFeed({ rows, names, stream, agentFilter, selectedHandoff, onOpenHandoff, onNavigate, now }: {
+export function ActivityFeed({ rows, names, stream, agentFilter, selectedHandoff, onOpenHandoff, onNavigate, now, onLoadOlder }: {
   rows: ActivityRow[]; names: (id: string) => string; stream: StreamState; agentFilter?: string;
-  selectedHandoff?: string; onOpenHandoff: (id: string) => void; onNavigate: Navigate; now?: number;
+  selectedHandoff?: string; onOpenHandoff: (id: string) => void; onNavigate: Navigate; now?: number; onLoadOlder?: () => Promise<void>;
 }) {
+  const [older, setOlder] = useState<"idle" | "loading" | "error">("idle");
   const [filter, setFilter] = useState<Filter>("all");
   const shown = useMemo(() => rows.filter((r) =>
     (!agentFilter || r.agentId === agentFilter) &&
@@ -43,6 +44,7 @@ export function ActivityFeed({ rows, names, stream, agentFilter, selectedHandoff
           ))}
         </ol>
       )}
+      {onLoadOlder && <button type="button" className="jg-orch-older" disabled={older === "loading"} onClick={() => { setOlder("loading"); onLoadOlder().then(() => setOlder("idle"), () => setOlder("error")); }}>{older === "loading" ? "Loading…" : older === "error" ? "Couldn't load, try again" : "Load older"}</button>}
     </section>
   );
 }

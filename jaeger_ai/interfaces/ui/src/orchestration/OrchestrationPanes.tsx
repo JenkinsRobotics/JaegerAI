@@ -32,7 +32,7 @@ export function OrchestrationPanes({ adapter, onNavigate, now }: { adapter: Orch
           {s.status === "loading" ? <SkeletonRows n={4} /> : <><LeadCard lead={lead} team={team} rows={s.rows} /><SpecialistStatusList team={team} selected={agentFilter} onSelect={setAgentFilter} /></>}
         </nav>
         <main className="jg-orch-main">
-          {s.status === "loading" ? <SkeletonRows n={6} /> : <ActivityFeed rows={s.rows} names={names} stream={s.stream} agentFilter={agentFilter} selectedHandoff={handoffId} onOpenHandoff={setHandoffId} onNavigate={onNavigate} now={now} />}
+          {s.status === "loading" ? <SkeletonRows n={6} /> : <ActivityFeed rows={s.rows} names={names} stream={s.stream} agentFilter={agentFilter} selectedHandoff={handoffId} onOpenHandoff={setHandoffId} onNavigate={onNavigate} now={now} onLoadOlder={s.loadOlder} />}
         </main>
         {handoff && <>
           <div className="jg-orch-scrim" onClick={() => setHandoffId(undefined)} aria-hidden />

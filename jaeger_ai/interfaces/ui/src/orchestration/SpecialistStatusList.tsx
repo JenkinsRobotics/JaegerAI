@@ -1,5 +1,6 @@
 import { AgentAvatar } from "../agents/AgentAvatar";
 import { label } from "../agents/agentsLogic";
+import { statusTone } from "./feed";
 import type { AgentLive } from "./types";
 
 export function runnerText(runner?: string) {
@@ -17,10 +18,10 @@ export function SpecialistStatusList({ team, selected, onSelect }: { team: Agent
             <AgentAvatar id={t.agent.id} name={label(t.agent)} src={t.agent.avatar_url} size={28} />
             <span className="jg-orch-member-text">
               <span className="jg-orch-member-name">{label(t.agent)}</span>
-              <span className="jg-orch-member-sub">{t.currentTask?.goal ?? (t.status === "idle" ? "Idle" : t.status)}</span>
+              <span className="jg-orch-member-sub">{t.currentTask?.goal ?? (t.status === "idle" ? "Idle" : t.status.replace(/_/g, " "))}</span>
             </span>
             <span className="jg-orch-member-meta">
-              <span className="jg-orch-dot" data-status={t.status} aria-label={t.status} />
+              <span className="jg-orch-dot" data-tone={statusTone(t.status)} aria-label={t.status.replace(/_/g, " ")} />
               {t.currentTask?.eta != null && <span>{String(t.currentTask.eta)}</span>}
               {runnerText(t.runner) && <span className="jg-orch-runner">{runnerText(t.runner)}</span>}
             </span>
