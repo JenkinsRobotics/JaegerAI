@@ -862,6 +862,18 @@ def _avatar():
     return av
 
 
+def _machine():
+    try:
+        from api import machine_api as mc  # type: ignore
+    except ImportError:  # loaded standalone (tests)
+        import importlib.util, sys
+        mc = sys.modules.get("_machine_api")
+        if mc is None:
+            spec = importlib.util.spec_from_file_location("_machine_api", Path(__file__).with_name("machine_api.py"))
+            mc = importlib.util.module_from_spec(spec); sys.modules["_machine_api"] = mc; spec.loader.exec_module(mc)
+    return mc
+
+
 # ── Router ───────────────────────────────────────────────────────────
 
 def _inbox():
@@ -899,6 +911,9 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
     av = _avatar()
     if av.handles(p):
         return av.route(handler, parsed, method, read_body, j)
+    mc = _machine()
+    if mc.handles(p):
+        return mc.route(handler, parsed, method, read_body, j)
     if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p.startswith("/v1/providers/cli") or p == "/v1/pipeline" or p.startswith("/v1/pipeline/") or p == "/v1/resources" or p == "/v1/jobs/runner" or p == "/v1/research/youtube" or p.startswith("/v1/research/youtube/") or p == "/v1/documents" or p.startswith("/v1/documents/")):
         return False
     try:
