@@ -16,7 +16,7 @@ def test_app_callers_are_untrusted_and_prefixed():
         spec = CALLERS[name]
         assert spec.session_prefix == f"{name}:"
         assert spec.actor == f"mcp:{name}"
-        assert spec.scopes == frozenset({"read", "turn", "handoff"})
+        assert spec.scopes == frozenset({"read", "turn", "handoff", "search"})
         assert not spec.scopes & {"approve", "delegate", "admin", "stop", "ide"}
 
 
@@ -42,9 +42,9 @@ class _FakeMCP:
     def __init__(self):
         self.tools = {}
 
-    def tool(self):
+    def tool(self, name=None):
         def deco(fn):
-            self.tools[fn.__name__] = fn
+            self.tools[name or fn.__name__] = fn
             return fn
         return deco
 
