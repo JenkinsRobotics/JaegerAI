@@ -40,3 +40,10 @@ async def test_gateway_get_routes_no_5xx(tmp_path, monkeypatch):
                 bad.append((route, r.status))
     assert len(routes) > 50
     assert bad == []
+
+
+def test_gateway_only_404_on_webui_is_flagged_as_gap():
+    assert smoke.classify(404, None, False, "gateway") == "GAP-webui"
+    assert smoke.classify(404, None, False, "webui") == "NOT-MOUNTED"
+    assert smoke.classify(404, None, True, "gateway") == "OK-404"
+    assert smoke.classify(200, None, False, "gateway") == "OK"
