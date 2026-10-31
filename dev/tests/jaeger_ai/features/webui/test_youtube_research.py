@@ -301,3 +301,12 @@ def test_download_retries_other_player_client(yt):
     yt.bind(run=run)
     run_sync(yt)
     assert json.loads((vd(yt, "aaaaaaaaaaa") / "cuts.json").read_text())["download_client"] == "mweb"
+
+
+def test_retried_transcript_unblocks_later_steps(yt):
+    yt.bind(which=lambda n: None if n == "whisper-cli" else f"/usr/bin/{n}")
+    run_sync(yt)
+    yt.bind(which=lambda n: f"/usr/bin/{n}")
+    yt.start(TID)
+    v = next(v for v in yt.status(TID)["videos"] if v["id"] == "bbbbbbbbbbb")
+    assert v["steps"]["transcript"]["status"] == "done" and v["steps"]["analysis"]["status"] == "done"

@@ -830,7 +830,7 @@ def _do_step(tid: str, v: dict, step: str, j: dict, force: set, stop) -> bool:
     """Run one step for one video. Returns False when the video is blocked."""
     cur = next(x for x in _job(tid)["videos"] if x["id"] == v["id"])
     st = cur["steps"][step].get("status")
-    if st == "blocked":
+    if st == "blocked" and not (_vdir(tid, v["id"]) / _OUT[STEPS[STEPS.index(step) - 1]]).is_file():
         return False
     out = _vdir(tid, v["id"]) / _OUT[step]
     if out.is_file() and step not in force:
@@ -855,6 +855,14 @@ def _do_step(tid: str, v: dict, step: str, j: dict, force: set, stop) -> bool:
             info = globals()["step_" + step](tid, v)
         sk = info.get("skipped")
         _set_step(tid, v["id"], step, "skipped" if sk else "done", **({"reason": sk} if sk else info))
+        if step in _HARD:  # a retried hard step that now works unblocks the steps after it
+            def unblock(jj):
+                for x in jj["videos"]:
+                    if x["id"] == v["id"]:
+                        for rest in STEPS[STEPS.index(step) + 1:]:
+                            if x["steps"][rest].get("status") == "blocked" and x["steps"][rest].get("error") == f"needs {step}":
+                                x["steps"][rest] = {"status": "pending"}
+            _update(tid, unblock)
         return True
     except Exception as exc:  # noqa: BLE001
         _set_step(tid, v["id"], step, "error", str(exc)[:500])
