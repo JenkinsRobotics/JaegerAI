@@ -76,3 +76,43 @@ def test_gateway_failure_is_reported_not_raised(ib):
     ib._st.jobs = {"health": "ok", "jobs": [{"task_id": "T1", "state": "error"}]}
     out = ib.poll_once()
     assert out["events"] == [] and out["errors"] == [{"source": "gateway", "error": "OSError"}]
+
+
+def _inbox_fixture(ib):
+    st = ib._st
+    st.gw = [{"approval_id": "g1", "status": "pending", "created_at": 2, "risk": "low", "type": "design_review"}]
+    st.local = [{"approval_id": "w1", "session_id": "s", "tool": "read_file", "description": "Read a file", "created_at": 3},
+                {"approval_id": "w2", "session_id": "s", "tool": "rm -rf build", "created_at": 1}]
+    st.responded = []
+    ib.gateway_approvals = lambda: list(st.gw)
+    ib.local_approvals = lambda: list(st.local)
+    ib.respond_local = lambda h, sid, aid, choice: st.responded.append((aid, choice))
+    out = {}
+    j = lambda h, payload, status=200: out.update(status=status, body=payload)
+    return st, out, j
+
+
+def test_one_inbox_merges_webui_approvals_with_same_fields(ib):
+    st, out, j = _inbox_fixture(ib)
+    ib.route(object(), urlparse("/v1/approvals/inbox"), "GET", lambda h: {}, j)
+    items = {i["approval_id"]: i for i in out["body"]["approvals"]}
+    assert [i["approval_id"] for i in out["body"]["approvals"]] == ["w1", "g1", "w2"]
+    assert items["g1"]["backend"] == "gateway" and items["w1"]["backend"] == "webui"
+    for k in ("type", "risk", "expires_at", "options", "batchable", "requires_step_up", "approve_on_mac"):
+        assert k in items["w1"]
+    assert items["w1"]["risk"] == "low" and items["w2"]["risk"] == "high"
+
+
+def test_decisions_route_to_the_right_backend(ib):
+    st, out, j = _inbox_fixture(ib)
+    call_ = lambda path, body: ib.route(object(), urlparse(path), "POST", lambda h: body, j)
+    call_("/v1/approvals/inbox/w1/decide", {"decision": "deny"})
+    assert out["status"] == 400 and out["body"]["code"] == "reason_required"
+    call_("/v1/approvals/inbox/w1/decide", {"decision": "approve"})
+    assert st.responded == [("w1", "once")]
+    call_("/v1/approvals/inbox/g1/decide", {"decision": "approve"})
+    assert st.proxied[-1][:2] == ("POST", "/v1/approvals/g1/decide")
+    st.responded.clear()
+    call_("/v1/approvals/inbox/batch", {"ids": ["w1", "w2"], "decision": "approve"})
+    res = {r["approval_id"]: r for r in out["body"]["results"]}
+    assert res["w1"]["ok"] and res["w2"]["code"] == "not_batchable"
