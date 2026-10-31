@@ -10996,6 +10996,9 @@ from api.route_insights import (
     _handle_project_os_dashboard,
     _build_llm_wiki_status,
     _LLM_WIKI_DOCS_URL,
+    _LLM_WIKI_MAX_PAGE_BYTES,
+    _llm_wiki_allowlisted_entries,
+    _llm_wiki_resolve_path,
 )
 
 # ── MCP and Notes endpoints (extracted to api.route_mcp and api.route_notes) ──
@@ -11019,6 +11022,7 @@ from api.route_notes import (
     _joplin_api_get,
     _joplin_search_notes,
     _joplin_get_note,
+    _webui_truthy,
 )
 
 # ── TTS endpoint (extracted to api.route_tts) ─────────────────────────────────
@@ -20264,13 +20268,21 @@ def _handle_live_models(handler, parsed):
         return j(handler, {"error": str(_e), "models": []})
 
 
+def _cron_output_dir():
+    """OUTPUT_DIR of the agent's optional cron package, or None when it is not installed."""
+    try:
+        from cron.jobs import OUTPUT_DIR
+    except ImportError:
+        return None
+    return OUTPUT_DIR
+
+
 def _handle_cron_history(handler, parsed):
     """List cron run output files with metadata (no content).
 
     Returns lightweight file listing so the frontend can render a run history
     without fetching full output for every run.
     """
-    from cron.jobs import OUTPUT_DIR as CRON_OUT
     import re as _re
 
     qs = parse_qs(parsed.query)
@@ -20284,6 +20296,9 @@ def _handle_cron_history(handler, parsed):
     # (Opus pre-release advisor finding.)
     if not _re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,63}", job_id) or job_id in (".", ".."):
         return j(handler, {"error": "invalid job_id"}, status=400)
+    CRON_OUT = _cron_output_dir()
+    if CRON_OUT is None:
+        return j(handler, {"error": "cron scheduler not available: the agent cron package is not installed"}, status=503)
     # Reject malformed offset/limit instead of letting int() raise ValueError
     # and surface as a confusing 500. Clamp to safe ranges.
     try:
@@ -20426,7 +20441,6 @@ def _cron_output_snippet(text: str, limit: int = 600) -> str:
 
 
 def _handle_cron_output(handler, parsed):
-    from cron.jobs import OUTPUT_DIR as CRON_OUT
     import re as _re
 
     qs = parse_qs(parsed.query)
@@ -20438,6 +20452,9 @@ def _handle_cron_output(handler, parsed):
     # markdown outputs, so reject traversal-shaped IDs before path resolution.
     if not _re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.-]{0,63}", job_id):
         return j(handler, {"error": "invalid job_id"}, status=400)
+    CRON_OUT = _cron_output_dir()
+    if CRON_OUT is None:
+        return j(handler, {"error": "cron scheduler not available: the agent cron package is not installed"}, status=503)
     # Reject malformed limit instead of letting int() raise ValueError and
     # surface as a confusing 500. Clamp to a safe range; a negative value must
     # never reach the slice below — files is sorted newest-first, so a negative
