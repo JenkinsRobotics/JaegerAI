@@ -87,3 +87,51 @@ export function Sparkline({ values, max, height = 56, label, color = "var(--jg-c
     </svg>
   );
 }
+
+// ── Page shell (one per page): title, subtitle, actions; merged tabs add sub-tabs above ──
+
+/** The one page header: h1 title, optional subtitle, actions on the right (wraps on phone). */
+export function PageHead({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children?: ReactNode }) {
+  return (
+    <header className="jg-u-page__head">
+      <div className="jg-u-page__title"><h1>{title}</h1>{subtitle != null && subtitle !== false && <p>{subtitle}</p>}</div>
+      {actions && <div className="jg-ui-toolbar">{actions}</div>}
+      {children}
+    </header>
+  );
+}
+
+/** Sub-tabs of a merged page: a segmented tab strip; each tab is a real route. */
+export function SubTabs({ label, tabs, active, onPick }: { label: string; tabs: readonly { id: string; title: string }[]; active: string; onPick: (id: string) => void }) {
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const idx = Math.max(0, tabs.findIndex((t) => t.id === active));
+  const move = (d: number) => { const n = (idx + d + tabs.length) % tabs.length; onPick(tabs[n].id); refs.current[n]?.focus(); };
+  return (
+    <nav className="jg-subtabs" aria-label={label}>
+      <div className="jg-ui-seg" role="tablist" aria-label={label}
+        onKeyDown={(e) => { if (e.key === "ArrowRight") { e.preventDefault(); move(1); } else if (e.key === "ArrowLeft") { e.preventDefault(); move(-1); } }}>
+        {tabs.map((t, i) => (
+          <button key={t.id} ref={(el) => { refs.current[i] = el; }} type="button" role="tab" aria-selected={t.id === active} aria-checked={t.id === active}
+            tabIndex={t.id === active ? 0 : -1} onClick={() => onPick(t.id)}>{t.title}</button>
+        ))}
+      </div>
+    </nav>
+  );
+}
+
+/** A merged page: sub-tab strip + the active sub-page. Visited sub-pages stay mounted so streams and drafts survive. */
+export function TabbedPage({ label, tabs, active, onPick, render, banner }: { label: string; tabs: readonly { id: string; title: string }[]; active: string; onPick: (id: string) => void; render: (id: string) => ReactNode; banner?: ReactNode }) {
+  const [seen, setSeen] = useState<string[]>([active]);
+  useEffect(() => { setSeen((s) => (s.includes(active) ? s : [...s, active])); }, [active]);
+  return (
+    <div className="jg-tabbed">
+      <SubTabs label={label} tabs={tabs} active={active} onPick={onPick} />
+      {banner}
+      <div className="jg-tabbed__body">
+        {tabs.filter((t) => seen.includes(t.id) || t.id === active).map((t) => (
+          <div key={t.id} className="jg-tabbed__pane" role="tabpanel" aria-label={t.title} hidden={t.id !== active}>{render(t.id)}</div>
+        ))}
+      </div>
+    </div>
+  );
+}
