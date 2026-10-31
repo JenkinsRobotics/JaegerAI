@@ -21,7 +21,9 @@ KINDS = ("agent.handoff", "agent.handoff.finished", "agent.handoff.checked", "ag
 CALLER_KINDS = ("turn.start", "turn.finish", "turn.failed", "turn.cancelled", "turn.unknown")
 _CALLER_STATUS = {"turn.start": "running", "turn.finish": "completed", "turn.failed": "failed",
                   "turn.cancelled": "cancelled", "turn.unknown": "execution_unknown"}
-ALL_KINDS = KINDS + CALLER_KINDS
+#: Agent-bridge inbox handoffs between apps (handoff_task to a peer, post_result back).
+BRIDGE_KINDS = ("handoff.sent", "handoff.result")
+ALL_KINDS = KINDS + CALLER_KINDS + BRIDGE_KINDS
 MAX_ROWS = 50_000
 MAX_LIMIT = 200
 _ready: set[int] = set()
@@ -113,6 +115,12 @@ def classify(kind: str, data: dict) -> dict[str, Any]:
             "project_id": data.get("project_id"),
             "session_id": (h.get("result") or {}).get("worker_session_id") or data.get("session_id")}
     caller = data.get("caller") if isinstance(data.get("caller"), dict) else {}
+    if kind in BRIDGE_KINDS:
+        refs.update(handoff_id=data.get("handoff_id"), thread=data.get("thread"), message_id=data.get("message_id"),
+                    caller_id=caller.get("caller_id"), caller_kind=caller.get("caller_kind"),
+                    recipient=data.get("recipient"), session_id=None)
+        return {"agent_id": data.get("recipient"), "actor_id": caller.get("caller_id"), "refs": refs,
+                "entity": f"{caller.get('caller_id')}:{data.get('message_id')}" if data.get("message_id") else None}
     if kind in CALLER_KINDS and caller:
         refs.update(session_id=caller.get("session_id"), request_id=caller.get("request_id"),
                     goal_id=caller.get("goal_id"), thread=caller.get("thread"),
@@ -155,7 +163,7 @@ def record(conn: sqlite3.Connection, event_id: int, session_id: str, kind: str, 
         if tag is None:
             return
         data = {**data, "caller": tag}
-    elif kind not in KINDS:
+    elif kind not in KINDS and kind not in BRIDGE_KINDS:
         return
     c = classify(kind, data)
     dedupe = f"{kind}|{c['entity']}" if c["entity"] else f"{kind}|#{event_id}"
@@ -177,6 +185,12 @@ def _summary(kind: str, data: dict) -> str:
         what = f"goal {caller.get('goal_id')}" if caller.get("goal_id") else "session turn"
         text = f": {str(data.get('text') or '')[:120]}" if kind == "turn.start" and data.get("text") else ""
         return f"{caller.get('caller_id')} ({caller.get('caller_kind')}) {what} {caller.get('status')}{text}"
+    if kind in BRIDGE_KINDS:
+        frm = (data.get("caller") or {}).get("caller_id") if isinstance(data.get("caller"), dict) else None
+        title = f": {str(data.get('title') or '')[:120]}" if data.get("title") else ""
+        if kind == "handoff.sent":
+            return f"{frm} handed off {data.get('handoff_id')} to {data.get('recipient')}{title}"
+        return f"{frm} posted result for {data.get('handoff_id')} to {data.get('recipient')} [{data.get('status')}]{title}"
     h = _handoff(data)
     if h:
         who = h.get("to_agent_id") or "?"
