@@ -17,6 +17,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     private let webUIItem = NSMenuItem(title: "Main screen: …", action: nil, keyEquivalent: "")
     private let gatewayItem = NSMenuItem(title: "Gateway: …", action: nil, keyEquivalent: "")
     private let loginItem = NSMenuItem(title: "Launch at Login", action: nil, keyEquivalent: "")
+    private let shellItem = NSMenuItem(title: "Shell: active", action: nil, keyEquivalent: "")
+    private let pauseItem = NSMenuItem(title: "Pause Jaeger Shell", action: nil, keyEquivalent: "")
     private let runningIcon = StatusItemController.loadIcon("jaeger_icon_22")
     private var lastRunning = true
     private var activityBadge: ActivityBadgeState = .off
@@ -58,8 +60,18 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         renderStatusIcon()
     }
 
+    func renderPauseState() {
+        let state = app.pauseState
+        shellItem.title = state.statusTitle
+        pauseItem.title = state.menuTitle
+        renderStatusIcon()
+    }
+
+    @objc private func togglePause(_ sender: Any?) { app.setPaused(!app.pauseState.paused) }
+
     private func renderStatusIcon() {
-        let base = (lastRunning ? runningIcon : offIcon)
+        let paused = app.pauseState.paused
+        let base = ((lastRunning && !paused) ? runningIcon : offIcon)
             ?? NSImage(systemSymbolName: "circle.hexagongrid", accessibilityDescription: "Jaeger")
         if let base, activityBadge == .present || activityBadge == .unknown {
             let state = activityBadge
@@ -72,8 +84,9 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             }
         } else { statusItem.button?.image = base }
         let suffix = activityBadge == .present ? " — unread retained activity" : activityBadge == .unknown ? " — unread activity unknown" : ""
-        statusItem.button?.toolTip = "Jaeger" + (lastRunning ? "" : " — WebUI not running") + suffix
-        statusItem.button?.setAccessibilityLabel("Jaeger" + suffix)
+        let pausedNote = paused ? " — paused" : ""
+        statusItem.button?.toolTip = "Jaeger" + pausedNote + (lastRunning ? "" : " — WebUI not running") + suffix
+        statusItem.button?.setAccessibilityLabel("Jaeger" + pausedNote + suffix)
     }
 
     /// One read-only probe of the WebUI to pick the icon (normal launch only).
@@ -94,6 +107,8 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
         webUIItem.isEnabled = false; menu.addItem(webUIItem)
         gatewayItem.isEnabled = false; menu.addItem(gatewayItem)
+        shellItem.isEnabled = false; menu.addItem(shellItem)
+        pauseItem.target = self; pauseItem.action = #selector(togglePause(_:)); menu.addItem(pauseItem)
         _ = add("Start Jaeger stack…", #selector(startStack(_:)))
         _ = add("Stop Jaeger stack…", #selector(stopStack(_:)))
         menu.addItem(.separator())
@@ -138,7 +153,7 @@ final class StatusItemController: NSObject, NSMenuDelegate {
     func debugSnapshot() -> [String: Any] {
         let image = statusItem.button?.image
         let icon = image == nil ? "none" : (image === runningIcon ? "running" : (image === offIcon ? "off" : "fallback"))
-        return ["present": isPresent, "icon": icon, "titles": menu.items.filter { !$0.isSeparatorItem }.map(\.title)]
+        return ["present": isPresent, "icon": icon, "paused": app.pauseState.paused, "titles": menu.items.filter { !$0.isSeparatorItem }.map(\.title)]
     }
 
     @objc private func toggle(_ sender: Any?) { app.toggleWindow() }

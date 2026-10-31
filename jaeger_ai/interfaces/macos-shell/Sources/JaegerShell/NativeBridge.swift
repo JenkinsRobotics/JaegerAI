@@ -279,9 +279,13 @@ extension JaegerShellApplication {
     func bridgeVoiceStatus() -> [String: Any] {
         VoiceController.status(state: voiceController?.state ?? "idle", speaking: voiceController?.tts.isSpeaking ?? false)
     }
-    func bridgeMicStart(mode: String, done: @escaping BridgeDone) { voice().micStart(mode: mode, done: done) }
+    func bridgeMicStart(mode: String, done: @escaping BridgeDone) {
+        if pauseState.paused { done(nil, "shell_paused"); return }
+        voice().micStart(mode: mode, done: done)
+    }
     func bridgeMicStop(done: @escaping BridgeDone) { voice().micStop(done: done) }
     func bridgeTTSSpeak(text: String, voice choice: String?, done: @escaping BridgeDone) {
+        if pauseState.paused { done(nil, "shell_paused"); return }
         voice().speak(text: text, voice: choice, done: done)
     }
     func bridgeTTSStop() { voiceController?.stopSpeaking() }
