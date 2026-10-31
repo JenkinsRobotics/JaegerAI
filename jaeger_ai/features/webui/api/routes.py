@@ -706,12 +706,7 @@ def _active_skills_dir() -> Path:
 
         return Path(get_active_hermes_home()) / "skills"
     except Exception:
-        try:
-            from tools.skills_tool import SKILLS_DIR
-
-            return Path(SKILLS_DIR)
-        except Exception:
-            return Path(os.getenv("HERMES_HOME", str(Path.home() / ".jaeger" / "hermes"))).expanduser() / "skills"
+        return Path(os.getenv("HERMES_HOME", str(Path.home() / ".jaeger" / "hermes"))).expanduser() / "skills"
 
 
 def _skill_path_within(base_dir: Path, candidate: Path) -> bool:
@@ -755,14 +750,7 @@ def _skill_category_from_path(
 
 
 def _active_skill_search_dirs(skills_dir: Path) -> list[Path]:
-    dirs = [skills_dir]
-    try:
-        from agent.skill_utils import get_external_skills_dirs
-
-        dirs.extend(Path(p) for p in get_external_skills_dirs())
-    except Exception:
-        pass
-    return [p for p in dirs if p.exists()]
+    return [p for p in [skills_dir] if p.exists()]
 
 
 def _worktree_retained_payload(session) -> dict:
@@ -850,17 +838,9 @@ def _parse_config_string_list(value) -> list:
     panel show every skill as enabled and makes the toggle write a destructive
     single-entry list (hermes-webui#7120).
 
-    Reuses ``agent.skill_utils.parse_config_string_list`` (hermes-agent #86661
-    fix) when the bundled agent source is importable, and mirrors its logic
-    otherwise so the two surfaces cannot drift. A scalar string still means one
-    name.
+    Mirrors hermes ``parse_config_string_list`` (hermes-agent #86661 fix).
+    A scalar string still means one name.
     """
-    try:
-        from agent.skill_utils import parse_config_string_list
-
-        return parse_config_string_list(value)
-    except ImportError:
-        pass
     import ast
 
     if value is None:
@@ -896,13 +876,13 @@ def _skills_list_from_dir(skills_dir: Path, category: str | None = None) -> dict
     scan root explicit so per-client WebUI profile switches do not race on or
     leak through the skills tool's module-global ``SKILLS_DIR``.
     """
-    from agent.skill_utils import iter_skill_index_files
-    from tools.skills_tool import (
+    from .skill_scan import (
+        EXCLUDED_SKILL_DIRS as _EXCLUDED_SKILL_DIRS,
         MAX_DESCRIPTION_LENGTH,
-        _EXCLUDED_SKILL_DIRS,
-        _parse_frontmatter,
-        _sort_skills,
+        iter_skill_index_files,
+        parse_frontmatter as _parse_frontmatter,
         skill_matches_platform,
+        sort_skills as _sort_skills,
     )
 
     if not skills_dir.exists():
@@ -978,8 +958,8 @@ def _skills_list_from_dir(skills_dir: Path, category: str | None = None) -> dict
 
 def _find_skill_in_dirs(name: str, skills_dirs: list[Path]) -> tuple[Path | None, Path | None]:
     """Resolve a WebUI skill name inside explicit skills directories."""
-    from agent.skill_utils import iter_skill_index_files
-    from tools.skills_tool import _EXCLUDED_SKILL_DIRS, _parse_frontmatter
+    from .skill_scan import EXCLUDED_SKILL_DIRS as _EXCLUDED_SKILL_DIRS
+    from .skill_scan import iter_skill_index_files, parse_frontmatter as _parse_frontmatter
 
     raw_name = str(name or "").strip().strip("/")
     if not raw_name:
@@ -1077,7 +1057,8 @@ def _linked_files_for_skill(skill_dir: Path | None) -> dict:
 
 
 def _skill_view_from_file(skill_dir: Path | None, skill_md: Path) -> dict:
-    from tools.skills_tool import _parse_frontmatter, _parse_tags, skill_matches_platform
+    from .skill_scan import parse_frontmatter as _parse_frontmatter
+    from .skill_scan import parse_tags as _parse_tags, skill_matches_platform
 
     content = skill_md.read_text(encoding="utf-8")
     frontmatter, _body = _parse_frontmatter(content)
@@ -1109,28 +1090,10 @@ def _skill_view_from_file(skill_dir: Path | None, skill_md: Path) -> dict:
 
 
 def _skill_view_from_active_dir(name: str) -> dict:
-    from tools.skills_tool import skill_view as _skill_view
-
     skills_dir = _active_skills_dir()
     search_dirs = _active_skill_search_dirs(skills_dir)
     skill_dir, skill_md = _find_skill_in_dirs(name, search_dirs)
     if not skill_md:
-        # Preserve plugin-qualified skill viewing without falling back to the
-        # startup/root profile's local skills tree for ordinary missing skills.
-        if ":" in str(name or ""):
-            try:
-                from agent.skill_utils import is_valid_namespace, parse_qualified_name
-                from hermes_cli.plugins import discover_plugins, get_plugin_manager
-
-                namespace, _bare = parse_qualified_name(name)
-                if is_valid_namespace(namespace):
-                    discover_plugins()
-                    pm = get_plugin_manager()
-                    if pm.find_plugin_skill(name) is not None or pm.list_plugin_skills(namespace):
-                        raw = _skill_view(name)
-                        return json.loads(raw) if isinstance(raw, str) else raw
-            except Exception:
-                pass
         return _skill_not_found_payload(name, skills_dir)
     return _skill_view_from_file(skill_dir, skill_md)
 
