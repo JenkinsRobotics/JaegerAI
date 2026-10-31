@@ -197,12 +197,19 @@ def required_scope(method: str, route: str | None) -> str | None:
     return "admin"
 
 
-def prefixed_route_allowed(method: str, route: str | None) -> bool:
+#: Extra read-only GET routes for one named outside caller (not every prefixed caller).
+#: grokbot reads the Agents-tab activity feed (handoff.sent / handoff.result rows).
+CALLER_READ_ROUTES: Mapping[str, frozenset[str]] = {
+    "grokbot": frozenset({"/v1/activity"}),
+}
+
+
+def prefixed_route_allowed(method: str, route: str | None, caller: str | None = None) -> bool:
     """Routes an outside caller may use at all (session id checked separately)."""
     method = (method or "").upper()
     route = route or ""
     if method in {"GET", "HEAD"}:
-        return route in PREFIXED_READ_ROUTES
+        return route in PREFIXED_READ_ROUTES or route in CALLER_READ_ROUTES.get(caller or "", ())
     return (method, route) in TURN_ROUTES or (method, route) in STOP_ROUTES
 
 

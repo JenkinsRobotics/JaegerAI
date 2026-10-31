@@ -107,7 +107,59 @@ def register(gateway):
 
     @wrap("send_message")
     async def send(request, caller):
-        return web.json_response(service.send(caller, await read_json(request)))
+        body = await read_json(request)
+        fresh = isinstance(body, dict) and _unsent(caller, body.get("id"))
+        message = service.send(caller, body)
+        if fresh:
+            _handoff_activity(caller, message)
+        return web.json_response(message)
+
+    def _unsent(caller, ident):
+        try:
+            with gateway.store._get_conn() as conn:
+                return conn.execute("SELECT 1 FROM agent_messages WHERE sender=? AND id=?",
+                                    (caller, ident)).fetchone() is None
+        except Exception:  # noqa: BLE001 - tables not created yet: nothing sent before
+            return True
+
+    def _handoff_activity(caller, message):
+        """handoff.sent / handoff.result rows on the global "*" stream (GET /v1/activity).
+
+        A ``task`` message into another app's inbox is a handoff (handoff_task);
+        a ``result`` message is its reply (post_result). Never fails the send.
+        """
+        kind = {"task": "handoff.sent", "result": "handoff.result"}.get(message.get("kind"))
+        if kind is None or message.get("to") == "jaegerd":
+            return  # handoffs to Jaeger itself are already goal rows (turn.* + data.caller)
+        try:
+            from jaeger_ai.core.gateway.caller_auth import CALLERS
+            spec = CALLERS.get(caller)
+            actor = getattr(spec, "actor", "") or ""
+            caller_kind = "a2a" if actor == "a2a" else "owner" if actor.startswith("owner:") else "mcp"
+            handoff_id = message.get("id")
+            if kind == "handoff.result":
+                handoff_id = message.get("reply_to")
+                if not handoff_id:  # the thread's task message is the handoff it answers
+                    with gateway.store._get_conn() as conn:
+                        for row in conn.execute("SELECT payload FROM agent_messages WHERE thread=? ORDER BY seq",
+                                                (message.get("thread"),)):
+                            prior = json.loads(row[0])
+                            if prior.get("kind") == "task":
+                                handoff_id = prior.get("id")
+                                break
+            gateway.event_bus.publish("*", kind, {
+                "caller": {"caller_id": caller, "caller_kind": caller_kind},
+                "recipient": message.get("to"),
+                "handoff_id": handoff_id,
+                "message_id": message.get("id"),
+                "thread": message.get("thread"),
+                "title": str(message.get("title") or "")[:200],
+                "status": message.get("status_line") or ("sent" if kind == "handoff.sent" else "done"),
+                "refs": list(message.get("refs") or [])[:16],
+                "at": message.get("created_at"),
+            })
+        except Exception:  # noqa: BLE001
+            __import__("logging").getLogger(__name__).warning("handoff activity failed", exc_info=True)
 
     @wrap("list_messages")
     async def listing(request, caller):
