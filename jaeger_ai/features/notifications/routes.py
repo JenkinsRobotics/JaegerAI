@@ -9,12 +9,64 @@ NOTIFICATION_EVENTS=('approval.request','task.updated','agent.handoff.finished',
 CATEGORIES={'all':('All activity',NOTIFICATION_EVENTS),'approvals':('Approvals',('approval.request',)),'tasks':('Tasks',('task.updated',)),'delegates':('Delegated work',('agent.handoff.finished',)),'errors':('Conversation failures and unknowns',('turn.failed','turn.unknown')),'proactive':('Proactive notifications',('notification.proactive',))}
 
 
+# Settings › Notifications matrix (APPROVALS-NOTIFICATIONS-SPEC §5). Keys are fixed.
+CATEGORY_DEFAULTS={
+    'approvals_urgent':{'label':'Approvals critical/high','in_app':True,'push':True,'sound':True,'breaks_quiet_hours':True},
+    'approvals_routine':{'label':'Approvals medium/low','in_app':True,'push':True,'sound':False,'batched':True},
+    'code_merged':{'label':'Code merged','in_app':True,'push':False,'sound':False},
+    'spend_send':{'label':'Spend and sends','in_app':True,'push':True,'sound':True},
+    'task_failed':{'label':'Task failed/blocked','in_app':True,'push':True,'sound':False},
+    'bot_finished':{'label':'Bot finished','in_app':True,'push':False,'sound':False,'digest':True},
+    'design_reviews':{'label':'Design reviews','in_app':True,'push':True,'sound':False},
+}
+QUIET_DEFAULT={'enabled':True,'start':'22:00','end':'07:30','tz':'America/Los_Angeles','allow':['critical','expiring']}
+PREVIEWS=('full','title_only','hidden')
+EXTENDED=('categories','quiet_hours','preview','digest_at')
+
+
+def _hhmm(v):
+    import re
+    if not isinstance(v,str) or not re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d',v):raise ValueError('time must be HH:MM')
+    return v
+
+
+def _with_defaults(value):
+    import copy
+    cats=value.get('categories') if isinstance(value.get('categories'),dict) else {}
+    value['categories']={k:{**copy.deepcopy(d),**{f:v for f,v in (cats.get(k) or {}).items() if f in ('in_app','push','sound')}} for k,d in CATEGORY_DEFAULTS.items()}
+    value['quiet_hours']={**QUIET_DEFAULT,**(value.get('quiet_hours') if isinstance(value.get('quiet_hours'),dict) else {})}
+    value.setdefault('preview','title_only');value.setdefault('digest_at','18:00')
+    return value
+
+
+def _apply_extended(current,body):
+    if 'categories' in body:
+        cats=body['categories']
+        if not isinstance(cats,dict) or any(k not in CATEGORY_DEFAULTS or not isinstance(v,dict) or any(f not in ('in_app','push','sound') or type(x) is not bool for f,x in v.items()) for k,v in cats.items()):raise ValueError('Invalid categories')
+        for k,v in cats.items():current['categories'][k].update(v)
+    if 'quiet_hours' in body:
+        q=body['quiet_hours']
+        if not isinstance(q,dict) or set(q)-{'enabled','start','end','tz','allow'}:raise ValueError('Invalid quiet hours')
+        merged={**current['quiet_hours'],**q}
+        from zoneinfo import ZoneInfo
+        _hhmm(merged['start']);_hhmm(merged['end'])
+        try:ZoneInfo(str(merged['tz']))
+        except Exception as exc:raise ValueError('Unknown time zone') from exc
+        if type(merged['enabled']) is not bool or not isinstance(merged['allow'],list) or set(merged['allow'])-{'critical','expiring'}:raise ValueError('Invalid quiet hours')
+        current['quiet_hours']=merged
+    if 'preview' in body:
+        if body['preview'] not in PREVIEWS:raise ValueError('Invalid preview')
+        current['preview']=body['preview']
+    if 'digest_at' in body:
+        current['digest_at']=None if body['digest_at'] is None else _hhmm(body['digest_at'])
+
+
 def settings(conn):
     row=conn.execute('SELECT value FROM schema_meta WHERE key=?',(KEY,)).fetchone()
     value=json.loads(row[0]) if row else {'revision':0,'enabled':True,'muted_agent_ids':[],'read_through':0}
     if not isinstance(value,dict) or type(value.get('revision')) is not int or type(value.get('enabled')) is not bool or not isinstance(value.get('muted_agent_ids'),list) or type(value.get('read_through')) is not int:
         raise ValueError('Invalid saved notification preferences; original preserved')
-    return value
+    return _with_defaults(value)
 
 
 def write(conn,value):
@@ -58,7 +110,9 @@ def feed(store,*,before=None,category='all'):
                 presence = 'present'
             elif result or scanned < 500:
                 presence = 'absent'  # newest visible row is at/below read watermark
-        return {'retained_unread_presence':presence,'preferences':prefs,'notifications':result,'privacy':'metadata_only_no_message_preview','scope':'local_operator','enabled':prefs['enabled'],'observed_through':observed,'next_before':last if last and (len(result)==50 or scanned==500) else None,'category':category,'categories':[{'id':key,'label':value[0]} for key,value in CATEGORIES.items()],'pagination_scope':'retained_activity_per_page_entity_dedupe'}
+        unread=conn.execute("SELECT COUNT(*) FROM (SELECT 1 FROM activity_history WHERE event_id>? AND event IN ("+','.join('?' for _ in NOTIFICATION_EVENTS)+") LIMIT 1000)",(prefs['read_through'],*NOTIFICATION_EVENTS)).fetchone()[0] if prefs['enabled'] else 0
+        pending=conn.execute("SELECT COUNT(*) FROM approvals WHERE status='pending'").fetchone()[0]
+        return {'unread_count':unread,'pending_approvals':pending,'badge':unread+pending,'retained_unread_presence':presence,'preferences':prefs,'notifications':result,'privacy':'metadata_only_no_message_preview','scope':'local_operator','enabled':prefs['enabled'],'observed_through':observed,'next_before':last if last and (len(result)==50 or scanned==500) else None,'category':category,'categories':[{'id':key,'label':value[0]} for key,value in CATEGORIES.items()],'pagination_scope':'retained_activity_per_page_entity_dedupe'}
 
 
 def register(gateway):
@@ -80,11 +134,18 @@ def register(gateway):
                     if type(cursor) is not int or not 0<=cursor<=maximum:raise ValueError('Read cursor must reference observed durable events')
                     current['read_through']=max(current['read_through'],cursor)
                 else:
-                    if set(body)!={'expected_revision','enabled','muted_agent_ids'} or type(body['enabled']) is not bool or not isinstance(body['muted_agent_ids'],list) or len(body['muted_agent_ids'])>512 or any(not isinstance(v,str) for v in body['muted_agent_ids']):raise ValueError('Invalid notification preferences')
+                    allowed={'expected_revision','enabled','muted_agent_ids',*EXTENDED}
+                    if 'expected_revision' not in body or not set(body)<=allowed or len(body)<2:raise ValueError('Invalid notification preferences')
+                    if 'enabled' in body and type(body['enabled']) is not bool:raise ValueError('Invalid notification preferences')
+                    if 'muted_agent_ids' in body and (not isinstance(body['muted_agent_ids'],list) or len(body['muted_agent_ids'])>512 or any(not isinstance(v,str) for v in body['muted_agent_ids'])):raise ValueError('Invalid notification preferences')
                     if type(body['expected_revision']) is not int or body['expected_revision']!=current['revision']:return web.json_response({'error':'Notification preferences changed; reload before saving'},status=409)
-                    registry=gateway._registry()
-                    if any(registry.get_agent(v) is None for v in body['muted_agent_ids']):raise ValueError('Unknown muted agent identity')
-                    current.update(enabled=body['enabled'],muted_agent_ids=sorted(set(body['muted_agent_ids'])),revision=current['revision']+1)
+                    if body.get('muted_agent_ids'):
+                        registry=gateway._registry()
+                        if any(registry.get_agent(v) is None for v in body['muted_agent_ids']):raise ValueError('Unknown muted agent identity')
+                    _apply_extended(current,body)
+                    if 'enabled' in body:current['enabled']=body['enabled']
+                    if 'muted_agent_ids' in body:current['muted_agent_ids']=sorted(set(body['muted_agent_ids']))
+                    current['revision']+=1
                 write(conn,current)
             gateway.event_bus.publish('*','notifications.changed',{'revision':current['revision']})
             return web.json_response({'preferences':current})

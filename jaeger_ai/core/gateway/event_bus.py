@@ -13,11 +13,12 @@ projection of this stream.
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, Callable
 
 from jaeger_ai.contract.presence import ACTIVITY_STATES, DISPLAY
 
@@ -117,6 +118,7 @@ class GatewayEventBus:
         self._buffer: deque[GatewayEvent] = deque(maxlen=ring_buffer_size)
         self._subscribers: dict[asyncio.Event, tuple[str, asyncio.AbstractEventLoop]] = {}
         self.store = store
+        self._observers: list[Callable[[GatewayEvent], None]] = []
         if store is not None:
             store.event_listener = self.fanout
 
@@ -176,7 +178,18 @@ class GatewayEventBus:
         self._fanout(evt)
         return evt
 
+    def add_observer(self, fn: Callable[[GatewayEvent], None]) -> None:
+        """In-process observer called for every published event (may repeat an
+        event_id; observers dedupe). Must be cheap and non-blocking."""
+        if fn not in self._observers:
+            self._observers.append(fn)
+
     def _fanout(self, evt: GatewayEvent) -> None:
+        for fn in list(self._observers):
+            try:
+                fn(evt)
+            except Exception:  # noqa: BLE001 - an observer never breaks publishing
+                logging.getLogger(__name__).warning("event observer failed", exc_info=True)
         # Notifications are coalesced; the durable log remains the source of
         # events. Slow clients never silently lose a queue entry or hang.
         with self._lock:
