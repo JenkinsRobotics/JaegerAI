@@ -53,10 +53,54 @@ def gateway_contract(repo: Path) -> dict:
         raise SystemExit(f"ports.py is missing {sorted(missing)}")
     return constants
 
+def write_vsix(stage: Path, target: Path) -> None:
+    """Minimal VSIX (OPC zip): [Content_Types].xml, extension.vsixmanifest, extension/<files>."""
+    import zipfile
+    from xml.sax.saxutils import escape
+    pkg = json.loads((stage / "package.json").read_text())
+    ident = f'{pkg["publisher"]}.{pkg["name"]}'
+    manifest = f"""<?xml version="1.0" encoding="utf-8"?>
+<PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
+  <Metadata>
+    <Identity Language="en-US" Id="{escape(pkg["name"])}" Version="{escape(pkg["version"])}" Publisher="{escape(pkg["publisher"])}" />
+    <DisplayName>{escape(pkg.get("displayName", pkg["name"]))}</DisplayName>
+    <Description xml:space="preserve">{escape(pkg.get("description", ""))}</Description>
+    <Tags></Tags>
+    <Categories>{escape(",".join(pkg.get("categories", [])))}</Categories>
+    <GalleryFlags>Public</GalleryFlags>
+    <Properties>
+      <Property Id="Microsoft.VisualStudio.Code.Engine" Value="{escape(pkg["engines"]["vscode"])}" />
+      <Property Id="Microsoft.VisualStudio.Code.ExtensionDependencies" Value="" />
+      <Property Id="Microsoft.VisualStudio.Code.ExtensionPack" Value="" />
+      <Property Id="Microsoft.VisualStudio.Code.ExtensionKind" Value="workspace" />
+    </Properties>
+  </Metadata>
+  <Installation>
+    <InstallationTarget Id="Microsoft.VisualStudio.Code" />
+  </Installation>
+  <Dependencies />
+  <Assets>
+    <Asset Type="Microsoft.VisualStudio.Code.Manifest" Path="extension/package.json" Addressable="true" />
+  </Assets>
+</PackageManifest>
+"""
+    types = """<?xml version="1.0" encoding="utf-8"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension=".json" ContentType="application/json" /><Default Extension=".vsixmanifest" ContentType="text/xml" /><Default Extension=".js" ContentType="application/javascript" /><Default Extension=".md" ContentType="text/markdown" /><Default Extension=".html" ContentType="text/html" /><Default Extension=".css" ContentType="text/css" /><Default Extension=".png" ContentType="image/png" /><Default Extension=".svg" ContentType="image/svg+xml" /><Default Extension=".ttf" ContentType="font/ttf" /><Default Extension=".woff" ContentType="font/woff" /><Default Extension=".woff2" ContentType="font/woff2" /><Default Extension=".txt" ContentType="text/plain" /></Types>
+"""
+    with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("[Content_Types].xml", types)
+        z.writestr("extension.vsixmanifest", manifest)
+        for p in sorted(stage.rglob("*")):
+            if p.is_file() and not p.name.endswith(".vsix"):
+                z.write(p, "extension/" + str(p.relative_to(stage)))
+    print(f"identity={ident}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-root", required=True, type=Path)
     parser.add_argument("--stage-only", action="store_true")
+    parser.add_argument("--zip", action="store_true", help="write the .vsix with Python's zipfile (no npx/vsce download)")
     args = parser.parse_args()
     source = Path(__file__).resolve().parent
     repo = source.parents[2]
@@ -65,7 +109,7 @@ def main() -> None:
         parser.error("output-root must be outside the repository")
     output.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix="jaeger-ide-", dir=output))
-    for name in ("package.json", "extension.js", "gateway.js", "conversation.js", "commands.js", "native-turn.js",
+    for name in ("package.json", "extension.js", "gateway.js", "conversation.js", "commands.js", "native-turn.js", "copilot-bridge.js", "controller.js",
                  "README.md", "VERIFICATION.md", "THIRD_PARTY_NOTICES.md"):
         shutil.copy2(source / name, stage / name)
     # Editors and patch tools may leave rejected/backup files beside live
@@ -74,17 +118,23 @@ def main() -> None:
         source / "media", stage / "media",
         ignore=shutil.ignore_patterns("*.orig", "*.rej", ".DS_Store"),
     )
-    smd_bytes = (repo / _SMD_SOURCE).read_bytes()
-    actual = base64.b64encode(hashlib.sha384(smd_bytes).digest()).decode()
-    if actual != _SMD_SHA384:
-        parser.error(
-            f"{_SMD_SOURCE} does not match the pinned streaming-markdown "
-            f"build (expected sha384 {_SMD_SHA384}, got {actual}). The "
-            "WebUI's vendored copy moved; update _SMD_SHA384 here after "
-            "confirming the new file's license and version, and vice versa."
-        )
-    (stage / "media" / "vendor").mkdir(parents=True, exist_ok=True)
-    (stage / "media" / "vendor" / "smd.min.js").write_bytes(smd_bytes)
+    smd_path = repo / _SMD_SOURCE
+    if not smd_path.exists():
+        # Only extension-legacy.js (not shipped) loads the streaming-markdown renderer; the controller
+        # build doesn't need it, so a checkout without the untracked vendor copy can still package.
+        print(f"note: {_SMD_SOURCE} not present; packaging without the legacy renderer", flush=True)
+    else:
+        smd_bytes = smd_path.read_bytes()
+        actual = base64.b64encode(hashlib.sha384(smd_bytes).digest()).decode()
+        if actual != _SMD_SHA384:
+            parser.error(
+                f"{_SMD_SOURCE} does not match the pinned streaming-markdown "
+                f"build (expected sha384 {_SMD_SHA384}, got {actual}). The "
+                "WebUI's vendored copy moved; update _SMD_SHA384 here after "
+                "confirming the new file's license and version, and vice versa."
+            )
+        (stage / "media" / "vendor").mkdir(parents=True, exist_ok=True)
+        (stage / "media" / "vendor" / "smd.min.js").write_bytes(smd_bytes)
     constants = gateway_contract(repo)
     (stage / "contract.json").write_text(json.dumps({
         "gatewayUrl": f"http://{constants['LOOPBACK']}:{constants['GATEWAY_PORT']}",
@@ -106,6 +156,12 @@ def main() -> None:
         "contentSha256": content_hash, "files": hashes,
     }, sort_keys=True, indent=2) + "\n")
     print(f"STAGE={stage}", flush=True)
+    if args.zip and not args.stage_only:
+        version = json.loads((stage / "package.json").read_text())["version"]
+        target = output / f"jaeger-ide-{version}.vsix"
+        write_vsix(stage, target)
+        print(f"VSIX={target}")
+        return
     if not args.stage_only:
         # The version lives in package.json only; the file name follows it.
         version = json.loads((stage / "package.json").read_text())["version"]
