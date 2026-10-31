@@ -8,13 +8,17 @@ import collections
 import json
 import logging
 import os
+import sqlite3
+import stat as _stat
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 from urllib.parse import parse_qs
 
 from api.helpers import j
 from api.models import SESSION_DIR
+from api.workspace import get_last_workspace, git_info_for_workspace, read_file_content
 
 logger = logging.getLogger(__name__)
 
