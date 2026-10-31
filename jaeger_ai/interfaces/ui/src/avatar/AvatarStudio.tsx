@@ -67,7 +67,7 @@ export function AvatarStudio({ agent, presence, onBack }: { agent: Agent; presen
   };
   const fromLibrary = async (file: string, nm: string) => {
     setBusy(true);
-    try { const blob = await (await fetch(`/avatars/${file}`)).blob(); const a = await avatarApi.upload(`${nm}.jpg`, blob); setBusy(false); await useAsset(a); }
+    try { const blob = await (await fetch(`/${file}`)).blob(); const a = await avatarApi.upload(`${nm}.jpg`, blob); setBusy(false); await useAsset(a); }
     catch (e) { setBusy(false); toast((e as Error).message, "error"); }
   };
   const state = preview ?? avatarStateFor(presence);
@@ -163,7 +163,7 @@ export function AvatarStudio({ agent, presence, onBack }: { agent: Agent; presen
             <header><strong>Swap avatar</strong><button type="button" className="jg-u-btn" onClick={() => setSwap(false)}>Close</button></header>
             <p className="jg-av-hint">Placeholders (portraits). 3D/2D models: upload .vrm (1.0), .glb or .riv. Live2D is pending licence review.</p>
             <ul className="jg-av-library">
-              {LIBRARY.map((l) => <li key={l.file}><button type="button" disabled={busy} onClick={() => void fromLibrary(l.file, l.name)}><img src={`/avatars/${l.file}`} alt="" /><span>{l.name}</span><small>{l.kind}</small></button></li>)}
+              {LIBRARY.map((l) => <li key={l.file}><button type="button" disabled={busy} onClick={() => void fromLibrary(l.file, l.name)}><img src={`/${l.file}`} alt="" /><span>{l.name}</span><small>{l.kind}</small></button></li>)}
             </ul>
             <label className="jg-u-btn jg-u-btn--primary">Upload file…<input type="file" hidden accept=".vrm,.glb,.riv,.png,.webp,.jpg,.jpeg" onChange={(e) => { const f = e.target.files?.[0]; if (f) void upload(f); e.target.value = ""; }} /></label>
           </div>

@@ -31,9 +31,9 @@ export function syncThemeColor() {
 }
 
 export const BUILTIN_ICONS = [
-  { id: "shield-blue", label: "Shield J Blue", src: "/icons/shield-blue-512.png", touch: "/icons/shield-blue-180.png" },
-  { id: "shield-dark", label: "Shield J Dark", src: "/icons/shield-dark-512.png" },
-  { id: "shield-light", label: "Shield J Light", src: "/icons/shield-light-512.png" },
+  { id: "shield-blue", label: "Shield J Blue", src: "/icon-shield-blue-512.png", touch: "/icon-shield-blue-180.png" },
+  { id: "shield-dark", label: "Shield J Dark", src: "/icon-shield-dark-512.png" },
+  { id: "shield-light", label: "Shield J Light", src: "/icon-shield-light-512.png" },
   { id: "classic", label: "Classic J", src: "/jaeger-icon-512.png", touch: "/jaeger-icon-180.png" },
 ] as const;
 export interface IconChoice { id: string; label: string; src: string; touch?: string; custom?: boolean }

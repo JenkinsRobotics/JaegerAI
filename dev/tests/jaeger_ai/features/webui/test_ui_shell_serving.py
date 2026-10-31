@@ -165,3 +165,11 @@ def test_page_routes_never_shadow_files_or_unknown_paths(dist):
     assert not mod.is_page_route("/nope")
     out, h = _get(mod, "/characters/jarvis.png")
     assert out is False or h.status == 404
+
+
+def test_page_routes_accept_agent_ids_but_not_dots():
+    import importlib.util, pathlib
+    spec = importlib.util.spec_from_file_location("_ui_shell_t", pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/features/webui/api/ui_shell.py")
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    assert mod.is_page_route("/agents/native%3Ajaeger/avatar") and mod.is_page_route("/agents/native:jaeger/avatar")
+    assert not mod.is_page_route("/agents/../etc") and not mod.is_page_route("/agents/a.html")
