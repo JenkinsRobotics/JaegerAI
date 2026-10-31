@@ -8,6 +8,7 @@ import type { Task } from "../api/types";
 import { Badge, Empty, PageHead, SkeletonRows, useToast } from "./ui";
 import { getJson } from "./webui";
 import { STAGES, STAGE_LABEL, nextStage, pipelineApi, stagePath, type Attachment, type AttachKind, type PipelineRecord, type Stage } from "./pipeline";
+import { RunnerQueue } from "./RunnerQueue";
 
 const title = (t?: Task) => (t?.goal || t?.task_id || "Task").replace(/^Deep research: /, "");
 const stateTone = (s?: string) => (s === "succeeded" ? "ok" : s === "failed" || s === "cancelled" ? "bad" : s === "running" ? "warn" : undefined);
@@ -68,6 +69,7 @@ export function PipelinePage({ source, params, onNavigate }: { source: JaegerSou
           <select className="jg-ui-input" value={filter} onChange={(e) => setFilter(e.target.value as "active" | "all")} aria-label="Show"><option value="active">Not done</option><option value="all">All tasks</option></select>
           <button type="button" className="jg-u-btn" onClick={() => void load()}>Refresh</button>
         </>} />
+      <RunnerQueue onNavigate={onNavigate} />
       <div className="jg-pipe-summary" aria-label="Tasks per stage">{STAGES.map((s, i) => <span key={s}><strong>{counts[i]}</strong> {STAGE_LABEL[s]}</span>)}</div>
       {err && <p className="jg-u-error" role="alert">{err}</p>}
       {!tasks && !err && <SkeletonRows n={4} />}
