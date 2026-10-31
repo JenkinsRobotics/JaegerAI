@@ -81,9 +81,9 @@ export const assetUrl = (uri?: string) => { const m = /^jaeger-asset:\/\/([a-f0-
 
 /** Designer placeholders bundled with the UI (GenerateImage originals, AVATAR-SPEC "Art"). */
 export const LIBRARY = [
-  { name: "Nova", file: "char-nova.jpg", kind: "character" },
-  { name: "Atlas", file: "bot-atlas.jpg", kind: "bot" },
-  { name: "Relay", file: "bot-relay.jpg", kind: "bot" },
+  { name: "Nova", file: "avatar-placeholder-nova.jpg", kind: "character" },
+  { name: "Atlas", file: "avatar-placeholder-atlas.jpg", kind: "bot" },
+  { name: "Relay", file: "avatar-placeholder-relay.jpg", kind: "bot" },
 ] as const;
 
 /** A minimal valid extension for a portrait (image) or an uploaded model + portrait fallback. */

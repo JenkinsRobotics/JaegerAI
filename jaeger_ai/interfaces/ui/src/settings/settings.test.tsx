@@ -48,7 +48,7 @@ describe("Settings (TAB-01)", () => {
     const icons = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="App icon"] [role="radio"]')];
     await act(async () => { icons[1].click(); });
     expect(localStorage.getItem("appearance.icon")).toBe("shield-dark");
-    expect(document.querySelector<HTMLLinkElement>('link[rel="icon"]')!.getAttribute("href")).toBe("/icons/shield-dark-512.png");
+    expect(document.querySelector<HTMLLinkElement>('link[rel="icon"]')!.getAttribute("href")).toBe("/icon-shield-dark-512.png");
   });
   it("search finds rows and opens the right panel; Models & Providers has no key fields", async () => {
     await mount(<SettingsDialog open onClose={() => {}} />);

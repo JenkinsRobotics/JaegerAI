@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 _DIST_DEFAULT = Path.home() / ".cache/jaeger/ui-rebuild-mainscreen/dist"
@@ -140,7 +141,8 @@ def is_page_route(path: str) -> bool:
     parts = [p for p in path.split("/") if p]
     if not parts or parts[0] not in UI_PAGES or len(parts) > 3:
         return False
-    return all(p.replace("-", "").replace("_", "").isalnum() for p in parts)
+    # Segments may carry agent ids such as native:jaeger (percent-encoded on the wire); still no dots or slashes.
+    return all(re.fullmatch(r"[A-Za-z0-9_:%-]+", p) is not None for p in parts)
 
 
 def _not_found(handler) -> bool:
