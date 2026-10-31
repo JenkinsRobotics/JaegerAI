@@ -110,7 +110,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
       case 'home': return tabbed('home', (t) => t === 'widgets' ? <WorkspacePage source={source} /> : <HomeDashboard source={source} store={store} onNavigate={go} />)
       case 'agents': return tabbed('agents', (t) => t === 'characters'
         ? <CharactersPage characterId={active === 'agents' && route.sub === 'characters' ? route.params.get('character') : null} source={source} refresh={store.refresh} onNavigate={go} />
-        : <AgentsRoster source={source} store={store} refresh={store.refresh} onNavigate={go} />)
+        : <AgentsRoster source={source} store={store} refresh={store.refresh} onNavigate={go} avatarFor={active === 'agents' ? (/^(.+)\/avatar$/.exec(route.rest)?.[1] ?? null) : null} />)
       case 'work': return tabbed('work', (t) => {
         switch (t) {
           case 'tasks': return active === 'work' && route.sub === 'tasks' && route.rest === 'gallery'

@@ -50,8 +50,8 @@ export class NativeHost extends WebHost implements VoiceHost, PickFilesHost {
       void postNative("mic.stop").then((reply) => { if (reply === undefined) { off(); resolve(""); } });
     });
   }
-  speak(text: string) { if (text.trim()) void postNative("tts.speak", { text }); }
-  stopSpeaking() { void postNative("tts.stop"); }
+  speak(text: string) { if (text.trim()) { void postNative("tts.speak", { text }); window.dispatchEvent(new CustomEvent("jaeger:tts", { detail: { speaking: true, text } })); } }
+  stopSpeaking() { void postNative("tts.stop"); window.dispatchEvent(new CustomEvent("jaeger:tts", { detail: { speaking: false } })); }
 
   override openExternal(url: string) {
     if (nativeBridge()) void postNative("open.external", { url });
