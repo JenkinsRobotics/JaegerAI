@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { mockAdapter } from "./mockOrchestration";
 import { OrchestrationPanes } from "./OrchestrationPanes";
@@ -7,7 +8,7 @@ import { CheckBadge } from "./CheckBadge";
 describe("orchestration panes", () => {
   it("renders lead, team, feed, and opens a handoff inspector", async () => {
     const nav = vi.fn();
-    render(<OrchestrationPanes adapter={mockAdapter()} onNavigate={nav} />);
+    render(<StrictMode><OrchestrationPanes adapter={mockAdapter()} onNavigate={nav} /></StrictMode>);
     await screen.findByLabelText("Lead agent");
     expect(screen.getByText(/Coordinating/)).toBeTruthy();
     expect(screen.getByText("via codex")).toBeTruthy();
