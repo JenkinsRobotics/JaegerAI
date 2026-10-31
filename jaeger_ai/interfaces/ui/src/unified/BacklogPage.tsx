@@ -111,7 +111,7 @@ export function BacklogPage({ params }: { params: URLSearchParams }) {
               </select>
               <select className="jg-ui-input" aria-label={`Assign ${t.title}`} value="" disabled={busy === t.id || t.status === "done"}
                 onChange={(e) => { const w = e.target.value; if (w) void act(t.id, () => backlogApi.assign(t.id, w), `Handed to ${workerLabel(w)}`); }}>
-                <option value="">{t.worker ? "Reassign…" : "Assign to…"}</option>
+                <option value="">{t.handoff_id ? "Reassign…" : "Assign to…"}</option>
                 {WORKERS.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
               </select>
             </div>
