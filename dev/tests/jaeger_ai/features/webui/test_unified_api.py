@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import importlib.util
 import pathlib
 
@@ -59,3 +60,46 @@ def test_generate_refuses_unavailable_provider(api, monkeypatch):
     with pytest.raises(api.ApiError) as e:
         api.generate({"provider": "p", "prompt": "cat"})
     assert e.value.status == 409 and e.value.payload["note"] == "set up"
+
+
+class _Resp:
+    def __init__(self, lines):
+        self.lines = [json.dumps(x).encode() + b"\n" for x in lines]
+
+    def __enter__(self):
+        return iter(self.lines)
+
+    def __exit__(self, *a):
+        return False
+
+
+def test_compare_stream_emits_deltas_and_real_metrics(api):
+    lines = [{"message": {"content": "Hel"}}, {"message": {"content": "lo"}},
+             {"done": True, "eval_count": 20, "eval_duration": 2_000_000_000, "prompt_eval_count": 7, "load_duration": 500_000_000}]
+    evs = list(api.compare_stream_events({"model": "qwen3:4b", "prompt": "hi"}, opener=lambda req, timeout: _Resp(lines)))
+    assert [e["type"] for e in evs] == ["start", "delta", "delta", "done"]
+    done = evs[-1]
+    assert done["tokens_per_s"] == 10.0 and done["eval_count"] == 20 and done["prompt_eval_count"] == 7 and done["load_s"] == 0.5
+    assert done["cost_usd"] == 0.0 and done["ttft_s"] is not None
+
+
+def test_compare_stream_cloud_cost_unknown_and_errors(api):
+    evs = list(api.compare_stream_events({"model": "glm-5.3:cloud", "prompt": "hi"}, opener=lambda req, timeout: _Resp([{"done": True}])))
+    assert evs[-1]["cost_usd"] is None and evs[-1]["tokens_per_s"] is None
+    evs = list(api.compare_stream_events({"model": "x:1", "prompt": "hi"}, opener=lambda req, timeout: _Resp([{"error": "model not found"}])))
+    assert evs[-1]["type"] == "error" and "model not found" in evs[-1]["error"]
+    with pytest.raises(api.ApiError):
+        next(api.compare_stream_events({"model": "a b", "prompt": "hi"}))
+
+
+def test_compare_history_and_votes(api, tmp_path):
+    run = api.save_run({"prompt": "p", "results": [{"model": "a:1", "response": "x", "elapsed_s": 1, "junk": 1}, {"model": "b:2", "response": "y"}]})
+    assert "junk" not in run["results"][0] and api.list_runs()[0]["id"] == run["id"]
+    assert api.update_run(run["id"], {"winner": "b:2"})["winner"] == "b:2"
+    assert api.update_run(run["id"], {"winner": "tie"})["winner"] == "tie"
+    with pytest.raises(api.ApiError):
+        api.update_run(run["id"], {"winner": "c:3"})
+    with pytest.raises(api.ApiError):
+        api.save_run({"prompt": "p", "results": [{"model": "m:1"}] * 5})
+    api.delete_run(run["id"])
+    assert api.list_runs() == [] and (tmp_path / "compare/history.json").exists()
