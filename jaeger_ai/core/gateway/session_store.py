@@ -15,10 +15,12 @@ import sqlite3
 import time
 import uuid
 from pathlib import Path
+import logging
 import threading
 from typing import Any, Callable, Iterator
 
 from jaeger_ai.core.gateway import agent_activity as _agent_activity
+from jaeger_ai.core.gateway import handoff_outputs as _handoff_outputs
 
 
 SCHEMA_VERSION = 15
@@ -2186,6 +2188,14 @@ class GatewaySessionStore:
 
     def save_handoff(self, record: dict[str, Any]) -> dict[str, Any]:
         now = time.time()
+        if record.get("status") in _handoff_outputs.TERMINAL:  # G3 typed outputs, computed outside the write lock
+            try:
+                lookup = getattr(self, "task_lookup", None)
+                result = dict(record.get("result") or record.get("result_json") or {})
+                result["artifact_refs"] = _handoff_outputs.normalize({**record, "result": result}, task_exists=lookup)
+                record = {**record, "result": result}
+            except Exception:  # noqa: BLE001 - outputs never block the terminal write
+                logging.getLogger(__name__).warning("artifact refs failed for %s", record.get("id"), exc_info=True)
         with self._immediate() as conn:
             prior = conn.execute("SELECT * FROM handoffs WHERE id=?", (record["id"],)).fetchone()
             if prior and prior["status"] in {"completed", "failed", "cancelled", "denied"}:
@@ -2480,7 +2490,34 @@ class GatewaySessionStore:
                            else row["session_id"] if "session_id" in keys else None),
             "created_at": row["created_at"],
             "updated_at": row["updated_at"],
-        }
+            "task_id": meta.get("task_id"),  # G5
+        } | {"check": _handoff_outputs.check_of({"id": row["id"], "status": row["status"],
+                                                   "updated_at": row["updated_at"], "metadata": meta})}  # G2
+
+    def set_handoff_check(self, handoff_id: str, check: dict[str, Any], *,
+                          expected_state: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
+        """G2: record an owner check on a terminal handoff (the only post-terminal metadata write).
+        Returns (handoff, None) or (current_or_None, 'not_found'|'not_terminal'|'stale')."""
+        with self._immediate() as conn:
+            row = conn.execute("SELECT * FROM handoffs WHERE id=?", (handoff_id,)).fetchone()
+            if row is None:
+                return None, "not_found"
+            current = self._handoff_row(row)
+            if row["status"] not in _handoff_outputs.TERMINAL:
+                return current, "not_terminal"
+            if expected_state is not None and current["check"]["state"] != expected_state:
+                return current, "stale"
+            meta = _row_meta(row["metadata_json"])
+            meta["check"] = check
+            conn.execute("UPDATE handoffs SET metadata_json=? WHERE id=?", (json.dumps(meta), handoff_id))
+            return self._handoff_row(conn.execute("SELECT * FROM handoffs WHERE id=?", (handoff_id,)).fetchone()), None
+
+    def handoff_for_task(self, task_id: str) -> str | None:
+        """G5: newest handoff linked to a task (join-on-read)."""
+        with self._get_conn() as conn:
+            row = conn.execute("SELECT id FROM handoffs WHERE json_extract(metadata_json, '$.task_id')=? "
+                               "ORDER BY created_at DESC LIMIT 1", (task_id,)).fetchone()
+        return row[0] if row else None
 
     def add_attachment(self, session_id: str, record: dict[str, Any]) -> dict[str, Any]:
         now = time.time()
