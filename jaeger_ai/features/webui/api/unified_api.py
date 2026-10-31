@@ -876,11 +876,26 @@ def _inbox():
     return ib
 
 
+def _widgets():
+    try:
+        from api import widgets_api as wg  # type: ignore
+    except ImportError:  # loaded standalone (tests)
+        import importlib.util, sys
+        wg = sys.modules.get("_widgets_api")
+        if wg is None:
+            spec = importlib.util.spec_from_file_location("_widgets_api", Path(__file__).with_name("widgets_api.py"))
+            wg = importlib.util.module_from_spec(spec); sys.modules["_widgets_api"] = wg; spec.loader.exec_module(wg)
+    return wg
+
+
 def route(handler, parsed, method: str, read_body, j) -> bool:
     p = parsed.path
     ib = _inbox()
     if ib.handles(p):
         return ib.route(handler, parsed, method, read_body, j)
+    wg = _widgets()
+    if wg.handles(p):
+        return wg.route(handler, parsed, method, read_body, j)
     av = _avatar()
     if av.handles(p):
         return av.route(handler, parsed, method, read_body, j)

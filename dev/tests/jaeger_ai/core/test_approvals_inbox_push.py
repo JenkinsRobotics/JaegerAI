@@ -373,3 +373,20 @@ def test_changes_reason_is_posted_to_agent_session(tmp_path):
     ai.decide(g, "d1", {"decision": "changes", "reason": "contrast too low"})
     last = g.store.get_session("s1")["messages"][-1]
     assert last["role"] == "user" and "contrast too low" in last["content"] and "Hero art" in last["content"]
+
+
+@pytest.mark.asyncio
+async def test_widget_action_request_creates_projected_approval(tmp_path):
+    g = gw(tmp_path)
+    async with TestClient(TestServer(g.app), headers=client_headers("webui")) as c:
+        r = await c.post("/v1/approvals/requests", json={"source": "widget", "title": "Cancel task T1", "risk": "low",
+                                                         "action": {"widget": "tasks.running", "id": "cancel"}, "host": "page"})
+        assert r.status == 201
+        aid = (await r.json())["approval"]["approval_id"]
+        row = g.store.get_approval(aid)
+        assert row["kind"] == "widget_action" and row["status"] == "pending"
+        assert events(g, "approval.request")[-1]["approval_id"] == aid
+        assert (await c.post("/v1/approvals/requests", json={"source": "evil", "title": "x", "risk": "low"})).status == 400
+        assert (await c.post("/v1/approvals/requests", json={"source": "widget", "title": "x", "risk": "bogus"})).status == 400
+        r = await c.post(f"/v1/approvals/{aid}/decide", json={"decision": "approve"})
+        assert r.status == 200 and g.store.get_approval(aid)["status"] == "resolved"
