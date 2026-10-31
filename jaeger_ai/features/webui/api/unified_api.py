@@ -722,7 +722,7 @@ def _rmmod():
 
 
 def _rm():
-    return _rmmod().shared(state_root())
+    return _rmmod().shared(state_root)
 
 
 def _is_local(model: str) -> bool:
