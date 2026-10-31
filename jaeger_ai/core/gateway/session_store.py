@@ -1775,7 +1775,7 @@ class GatewaySessionStore:
         if session_id != "*":
             conn.execute("INSERT INTO activity_history VALUES (?, ?, ?, ?, ?)",
                          (event_id, session_id, event, json.dumps(data), now))
-        if event in _agent_activity.KINDS:
+        if event in _agent_activity.ALL_KINDS:
             try:  # G1: the Agents tab's durable activity row (never blocks the event)
                 _agent_activity.ensure(conn)
                 _agent_activity.record(conn, event_id, session_id, event, data, now)
