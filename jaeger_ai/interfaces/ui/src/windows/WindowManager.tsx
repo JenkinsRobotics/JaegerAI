@@ -8,7 +8,7 @@
  */
 import type React from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { MessageSquare, Cpu, Cloud, Home, Zap, Users, Settings, Sparkles, BarChart, Image, Database, Workflow, Compass, FileText, Brain, Puzzle, Clock } from '../components/Icons'
+import { MessageSquare, Cpu, Home, Zap, Users, Settings, Image, Database, Compass } from '../components/Icons'
 import { PAGES, type PageId } from '../shell/router'
 
 export type WindowId = PageId
@@ -32,24 +32,20 @@ export interface WindowInstance {
 }
 
 export const WINDOW_DEFINITIONS: Record<WindowId, WindowDefinition> = {
-  home: { id: 'home', title: 'Home', icon: Home, description: 'Active agents, approvals, recent chats and tasks', closable: false, phoneTab: true },
+  home: { id: 'home', title: 'Home', icon: Home, description: 'Overview of agents, approvals and tasks, plus your widgets', closable: false, phoneTab: true },
   chat: { id: 'chat', title: 'Chat', icon: MessageSquare, description: 'Chat with Jaeger and your specialists', closable: false, phoneTab: true },
-  agents: { id: 'agents', title: 'Agents', icon: Users, description: 'Your agents and specialists', closable: true, phoneTab: true },
-  characters: { id: 'characters', title: 'Characters', icon: Sparkles, description: 'Create a new agent from a character', closable: true },
-  tasks: { id: 'tasks', title: 'Tasks', icon: Zap, description: 'Tasks, runs and artifacts', closable: true, phoneTab: true },
-  machine: { id: 'machine', title: 'Machine Control', icon: Cpu, description: 'Local computer control, screen and permissions', closable: true },
-  sharepoint: { id: 'sharepoint', title: 'SharePoint', icon: Cloud, description: 'Document libraries and artifacts', closable: true },
-  workspace: { id: 'workspace', title: 'Workspace', icon: BarChart, description: 'Your own widget dashboard', closable: true },
+  agents: { id: 'agents', title: 'Agents', icon: Users, description: 'Your agents, and new agents from characters', closable: true, phoneTab: true },
+  work: { id: 'work', title: 'Work', icon: Zap, description: 'Task pipeline, tasks, production deliverables and calendar', closable: true, phoneTab: true },
+  research: { id: 'research', title: 'Research', icon: Compass, description: 'Research runs, documents, memory & skills and SharePoint', closable: true },
   studio: { id: 'studio', title: 'Studio', icon: Image, description: 'Generate images, asset library and board', closable: true },
-  models: { id: 'models', title: 'Models', icon: Database, description: 'Local Ollama models, sizes and fit for this Mac', closable: true },
-  compare: { id: 'compare', title: 'Compare', icon: Workflow, description: 'One prompt, two models, side by side', closable: true },
-  research: { id: 'research', title: 'Research', icon: Compass, description: 'Deep research runs as an approved task with a report', closable: true },
-  documents: { id: 'documents', title: 'Documents', icon: FileText, description: 'Markdown documents with AI edit actions', closable: true },
-  knowledge: { id: 'knowledge', title: 'Memory & Skills', icon: Brain, description: 'Skills, agent memory and the document library', closable: true },
-  integrations: { id: 'integrations', title: 'Integrations', icon: Puzzle, description: 'MCP servers, tools and connected apps', closable: true },
-  calendar: { id: 'calendar', title: 'Calendar', icon: Clock, description: 'Scheduled jobs and task due dates', closable: true },
-  settings: { id: 'settings', title: 'Settings', icon: Settings, description: 'Settings, grouped by category (⌘,)', closable: true },
+  models: { id: 'models', title: 'Models', icon: Database, description: 'Model inventory and side-by-side compare', closable: true },
+  machine: { id: 'machine', title: 'Machine', icon: Cpu, description: 'Local computer control, screen and permissions', closable: true },
+  settings: { id: 'settings', title: 'Settings', icon: Settings, description: 'Settings, integrations and providers (⌘,)', closable: true },
 }
+
+/** Pages retired by the 9-tab consolidation → the tab that holds them now (for saved layouts). */
+const LEGACY_IDS: Record<string, WindowId> = { characters: 'agents', tasks: 'work', calendar: 'work', documents: 'research', knowledge: 'research', sharepoint: 'research', compare: 'models', integrations: 'settings', workspace: 'home' }
+const upgrade = (ids: unknown[] | undefined): WindowId[] => (ids ?? []).map((v) => (typeof v === 'string' && LEGACY_IDS[v]) || v).filter(isPage)
 
 export const LAYOUT_KEY = 'jaeger.shell.layout.v1'
 
@@ -57,18 +53,18 @@ export interface StoredLayout { open: WindowId[]; minimized: WindowId[]; order: 
 
 const DEFAULT_LAYOUT: StoredLayout = { open: ['home', 'chat'], minimized: [], order: [...PAGES] }
 
-const isPage = (v: unknown): v is WindowId => typeof v === 'string' && (PAGES as readonly string[]).includes(v)
+function isPage(v: unknown): v is WindowId { return typeof v === 'string' && (PAGES as readonly string[]).includes(v) }
 
 export function loadLayout(storage: Pick<Storage, 'getItem'> | undefined = globalThis.localStorage): StoredLayout {
   try {
     const raw = storage?.getItem(LAYOUT_KEY)
     if (!raw) return DEFAULT_LAYOUT
     const parsed = JSON.parse(raw) as Partial<StoredLayout>
-    const open = (parsed.open ?? []).filter(isPage)
-    const order = (parsed.order ?? []).filter(isPage)
+    const open = upgrade(parsed.open)
+    const order = upgrade(parsed.order)
     for (const id of ['home', 'chat'] as WindowId[]) if (!open.includes(id)) open.unshift(id)
     for (const id of PAGES) if (!order.includes(id)) order.push(id)
-    return { open: [...new Set(open)], minimized: (parsed.minimized ?? []).filter(isPage), order: [...new Set(order)] }
+    return { open: [...new Set(open)], minimized: [...new Set(upgrade(parsed.minimized))], order: [...new Set(order)] }
   } catch { return DEFAULT_LAYOUT }
 }
 
