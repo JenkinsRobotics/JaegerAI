@@ -64,7 +64,8 @@ export type ActivityKind =
   | "task.updated"
   | "approval.requested"
   | "approval.resolved"
-  | "agent.status";
+  | "agent.status"
+  | "project.checked";
 
 export interface ActivityRow {
   /** Stable key for dedupe: `<kind>:<resource id>[:<state>]`. */
