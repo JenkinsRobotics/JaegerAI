@@ -89,13 +89,6 @@
 .jg-notice--error { color: var(--aether-color-text); background: color-mix(in srgb, var(--aether-color-error) 14%, transparent); }
 
 /* Answered question / confirmation card. */
-.jg-card-widget {
-  align-self: flex-start; box-sizing: border-box; width: min(80%, 560px, calc(100% - 82px)); padding: 14px 16px; border-radius: 18px;
-  background: var(--aether-color-bg-control); border: 1px solid color-mix(in srgb, var(--aether-color-border) 80%, transparent);
-  box-shadow: var(--jg-shadow-card);
-}
-.jg-card-widget__title { color: var(--jg-color-text-secondary); font-size: 15px; line-height: 22px; margin-bottom: 10px; }
-.jg-card-widget__message { color: var(--aether-color-text-dim); margin-bottom: 10px; }
 .jg-options { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .jg-option { display: flex; align-items: center; gap: 10px; padding: 6px 4px; border-radius: 8px; color: var(--aether-color-text-dim); }
 .jg-option__key { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 5px; font-size: var(--jg-font-tiny); background: color-mix(in srgb, var(--aether-color-text-faint) 22%, transparent); color: var(--aether-color-text-dim); }

@@ -103,12 +103,10 @@ html[data-jaeger-host="macos"] .jg-traffic-lights i { visibility: hidden; }
 .jg-shell.is-rail .jg-agent-row__text,
 .jg-shell.is-rail .jg-chat-list,
 .jg-shell.is-rail .jg-supervisor__label,
-.jg-shell.is-rail .jg-nav-entry > span,
 .jg-shell.is-rail .jg-sidebar-footer .jg-pill { display: none; }
 .jg-shell.is-rail .jg-shell__primary { padding: 0 8px 12px; }
 .jg-shell.is-rail .jg-agent-row { position: relative; justify-content: center; min-height: 52px; padding: 6px 0; }
 .jg-shell.is-rail .jg-unread-dot { position: absolute; top: 8px; right: 12px; }
 .jg-shell.is-rail .jg-supervisor { width: 64px; padding: 6px; }
 .jg-shell.is-rail .jg-supervisor-art { transform: scale(0.72); margin: -8px 0; }
-.jg-shell.is-rail .jg-nav-entry { justify-content: center; }
 .jg-shell.is-rail .jg-shell__footer { display: flex; justify-content: center; padding: 12px 0 16px; }
