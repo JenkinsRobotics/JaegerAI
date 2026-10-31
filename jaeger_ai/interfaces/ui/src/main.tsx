@@ -3,6 +3,7 @@ import "@aether/ui/tokens.css";
 import "@aether/ui/widgets.css";
 import "@aether/ui/home.css";
 import "./shell/tokens.jaeger.css";
+import "./shell/feels.css";
 import "./shell/shell.css";
 import "./agents/agents.css";
 import "./chat/chat.css";
@@ -17,11 +18,15 @@ import { createSource } from "./api";
 import { AppWindow } from "./windows/AppWindow";
 import { clearLegacyFlags, legacyRedirect } from "./shell/router";
 import { applyAppearance, storedAppearance } from "./settings/SettingsDialog";
+import { applyDensity, applyFeel, applyIcon, storedDensity, storedFeel, storedIcon } from "./settings/appearance";
 
 const redirect = legacyRedirect(location.pathname, location.search);
 if (redirect) history.replaceState(null, "", redirect + location.hash);
 clearLegacyFlags();
 applyAppearance(storedAppearance());
+applyFeel(storedFeel());
+applyIcon(storedIcon());
+applyDensity(storedDensity());
 
 const source = await createSource();
 
