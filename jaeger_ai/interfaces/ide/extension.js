@@ -31,6 +31,7 @@ const {
   JaegerInlineCompletionsProvider,
   JaegerSidebarProvider,
 } = require('./controller');
+const { activateBridge } = require('./copilot-bridge');
 
 // ─────────────────────────────────────────────────────────────
 // Activation
@@ -317,6 +318,9 @@ function activate(context) {
   // ─────────────────────────────────────────────────────────
 
   // Already handled by controller's status bar item
+
+  // Copilot bridge: Jaeger on this Mac can use VS Code's Copilot models (no API keys).
+  activateBridge(vscode, context, (line) => output.appendLine(line));
 
   output.appendLine('[jaeger] Extension activated successfully.');
   output.appendLine('[jaeger] Chat UI: Open with Cmd+Shift+J or click status bar.');

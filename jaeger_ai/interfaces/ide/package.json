@@ -1,391 +1,407 @@
 {
-	"name": "jaeger-ide",
-	"displayName": "Jaeger",
-	"description": "Controller for your Jaeger AI agent. Quick actions, code context, and status — the chat lives in the Apple-Native UI.",
-	"version": "0.2.0",
-	"publisher": "jenkins-robotics",
-	"icon": "media/jaeger.png",
-	"engines": {
-		"vscode": "^1.96.0"
-	},
-	"categories": [
-		"Other",
-		"Machine Learning"
-	],
-	"extensionKind": [
-		"ui"
-	],
-	"main": "./extension.js",
-	"files": [
-		"extension.js",
-		"gateway.js",
-		"conversation.js",
-		"commands.js",
-		"controller.js",
-		"contract.json",
-		"media/**",
-		"README.md",
-		"VERIFICATION.md",
-		"THIRD_PARTY_NOTICES.md",
-		"native-turn.js",
-		"build.json"
-	],
-	"activationEvents": [
-		"onView:jaeger.controller",
-		"onStartupFinished"
-	],
-	"capabilities": {
-		"untrustedWorkspaces": {
-			"supported": false
-		}
-	},
-	"contributes": {
-		"commands": [
-			{
-				"command": "jaeger.openChat",
-				"title": "Jaeger: Open Chat",
-				"icon": "$(comment-discussion)"
-			},
-			{
-				"command": "jaeger.ask",
-				"title": "Jaeger: Ask Agent",
-				"icon": "$(sparkle)"
-			},
-			{
-				"command": "jaeger.explainCode",
-				"title": "Jaeger: Explain Code",
-				"icon": "$(info)"
-			},
-			{
-				"command": "jaeger.fixCode",
-				"title": "Jaeger: Fix Code",
-				"icon": "$(wrench)"
-			},
-			{
-				"command": "jaeger.writeTests",
-				"title": "Jaeger: Write Tests",
-				"icon": "$(beaker)"
-			},
-			{
-				"command": "jaeger.refactorCode",
-				"title": "Jaeger: Refactor Code",
-				"icon": "$(refactor)"
-			},
-			{
-				"command": "jaeger.documentCode",
-				"title": "Jaeger: Add Documentation",
-				"icon": "$(book)"
-			},
-			{
-				"command": "jaeger.reviewCode",
-				"title": "Jaeger: Review Code",
-				"icon": "$(eye)"
-			},
-			{
-				"command": "jaeger.runTests",
-				"title": "Jaeger: Run Tests",
-				"icon": "$(run-all)"
-			},
-			{
-				"command": "jaeger.checkStatus",
-				"title": "Jaeger: Check Status",
-				"icon": "$(pulse)"
-			},
-			{
-				"command": "jaeger.open",
-				"title": "Jaeger: Open Controller Panel"
-			},
-			{
-				"command": "jaeger.settings",
-				"title": "Jaeger: Settings",
-				"icon": "$(gear)"
-			},
-			{
-				"command": "jaeger.setToken",
-				"title": "Jaeger: Set Caller Token"
-			},
-			{
-				"command": "jaeger.selectModel",
-				"title": "Jaeger: Select Model"
-			}
-		],
-		"viewsContainers": {
-			"activitybar": [
-				{
-					"id": "jaeger",
-					"title": "Jaeger AI",
-					"icon": "media/jaeger.svg"
-				}
-			]
-		},
-		"views": {
-			"jaeger": [
-				{
-					"type": "webview",
-					"id": "jaeger.controller",
-					"name": "Agent Status",
-					"icon": "media/jaeger.svg",
-					"contextualTitle": "Jaeger Agent"
-				},
-				{
-					"type": "webview",
-					"id": "jaeger.conversation",
-					"name": "Legacy Chat",
-					"visibility": "collapsed"
-				}
-			]
-		},
-		"viewsWelcome": [
-			{
-				"view": "jaeger.controller",
-				"contents": "Jaeger Agent Controller\n\n[Open Chat](command:jaeger.openChat)\n\nThe chat interface lives in the Apple-Native UI. This panel shows agent status and provides quick actions.\n\n[Set Up Connection](command:jaeger.settings)"
-			}
-		],
-		"menus": {
-			"editor/context": [
-				{
-					"command": "jaeger.explainCode",
-					"when": "editorHasSelection",
-					"group": "jaeger@1"
-				},
-				{
-					"command": "jaeger.fixCode",
-					"when": "editorHasSelection",
-					"group": "jaeger@2"
-				},
-				{
-					"command": "jaeger.writeTests",
-					"when": "editorHasSelection",
-					"group": "jaeger@3"
-				},
-				{
-					"command": "jaeger.refactorCode",
-					"when": "editorHasSelection",
-					"group": "jaeger@4"
-				},
-				{
-					"command": "jaeger.documentCode",
-					"when": "editorHasSelection",
-					"group": "jaeger@5"
-				},
-				{
-					"command": "jaeger.reviewCode",
-					"when": "editorHasSelection",
-					"group": "jaeger@6"
-				},
-				{
-					"submenu": "jaeger.askJaeger",
-					"when": "editorTextFocus",
-					"group": "jaeger@0"
-				},
-				{
-					"command": "jaeger.openChat",
-					"when": "editorTextFocus",
-					"group": "jaeger@7"
-				}
-			],
-			"editor/title": [
-				{
-					"command": "jaeger.explainCode",
-					"when": "resourceLangId =~ /javascript|typescript|python|rust|go|java|swift/",
-					"group": "navigation@1"
-				}
-			],
-			"view/title": [
-				{
-					"command": "jaeger.openChat",
-					"when": "view == jaeger.controller",
-					"group": "navigation@1"
-				},
-				{
-					"command": "jaeger.ask",
-					"when": "view == jaeger.controller",
-					"group": "navigation@2"
-				},
-				{
-					"command": "jaeger.checkStatus",
-					"when": "view == jaeger.controller",
-					"group": "2_settings@1"
-				},
-				{
-					"command": "jaeger.settings",
-					"when": "view == jaeger.controller",
-					"group": "2_settings@2"
-				}
-			],
-			"commandPalette": [
-				{
-					"command": "jaeger.openChat",
-					"when": "editorTextFocus || workspaceFolderCount >= 1"
-				},
-				{
-					"command": "jaeger.explainCode",
-					"when": "editorHasSelection"
-				},
-				{
-					"command": "jaeger.fixCode",
-					"when": "editorHasSelection"
-				},
-				{
-					"command": "jaeger.writeTests",
-					"when": "editorHasSelection"
-				},
-				{
-					"command": "jaeger.refactorCode",
-					"when": "editorHasSelection"
-				},
-				{
-					"command": "jaeger.documentCode",
-					"when": "editorHasSelection"
-				},
-				{
-					"command": "jaeger.reviewCode",
-					"when": "editorHasSelection"
-				},
-				{
-					"command": "jaeger.runTests",
-					"when": "workspaceFolderCount >= 1"
-				}
-			],
-			"jaeger.askJaeger": [
-				{
-					"command": "jaeger.explainCode",
-					"when": "editorHasSelection",
-					"group": "1_explain@1"
-				},
-				{
-					"command": "jaeger.fixCode",
-					"when": "editorHasSelection",
-					"group": "2_fix@1"
-				},
-				{
-					"command": "jaeger.writeTests",
-					"when": "editorHasSelection",
-					"group": "3_test@1"
-				},
-				{
-					"command": "jaeger.refactorCode",
-					"when": "editorHasSelection",
-					"group": "4_refactor@1"
-				},
-				{
-					"command": "jaeger.documentCode",
-					"when": "editorHasSelection",
-					"group": "5_document@1"
-				},
-				{
-					"command": "jaeger.reviewCode",
-					"when": "editorHasSelection",
-					"group": "6_review@1"
-				},
-				{
-					"command": "jaeger.ask",
-					"group": "7_ask@1"
-				}
-			]
-		},
-		"submenus": [
-			{
-				"id": "jaeger.askJaeger",
-				"label": "Ask Jaeger",
-				"icon": "$(sparkle)"
-			}
-		],
-		"keybindings": [
-			{
-				"command": "jaeger.openChat",
-				"key": "ctrl+shift+j",
-				"mac": "cmd+shift+j",
-				"when": "editorTextFocus"
-			},
-			{
-				"command": "jaeger.ask",
-				"key": "ctrl+shift+'",
-				"mac": "cmd+shift+'",
-				"when": "editorTextFocus"
-			},
-			{
-				"command": "jaeger.explainCode",
-				"key": "ctrl+shift+e",
-				"mac": "cmd+shift+e",
-				"when": "editorHasSelection"
-			}
-		],
-		"configuration": {
-			"title": "Jaeger",
-			"properties": {
-				"jaeger.gatewayUrl": {
-					"type": "string",
-					"default": "",
-					"scope": "machine",
-					"description": "Gateway URL (e.g. \"http://127.0.0.1:33418\"). Empty = local default."
-				},
-				"jaeger.webuiUrl": {
-					"type": "string",
-					"default": "",
-					"scope": "machine",
-					"description": "WebUI URL for opening chat (e.g. \"http://127.0.0.1:8790\"). Empty = derived from gatewayUrl."
-				},
-				"jaeger.callerToken": {
-					"type": "string",
-					"default": "",
-					"scope": "machine",
-					"description": "Gateway caller token (use 'Jaeger: Set Caller Token' for secure storage)."
-				},
-				"jaeger.autoStartGateway": {
-					"type": "boolean",
-					"default": false,
-					"scope": "application",
-					"description": "Start Gateway daemon automatically when needed."
-				},
-				"jaeger.showStatusBar": {
-					"type": "boolean",
-					"default": true,
-					"description": "Show Jaeger agent status in the status bar."
-				},
-				"jaeger.openChatInBrowser": {
-					"type": "boolean",
-					"default": false,
-					"description": "Open chat in external browser instead of VS Code Simple Browser."
-				},
-				"jaeger.model": {
-					"type": "string",
-					"default": "",
-					"scope": "window",
-					"description": "Default model for new turns (\"provider::model\")."
-				}
-			}
-		},
-		"chatParticipants": [
-			{
-				"id": "jaeger.chatParticipant",
-				"name": "jaeger",
-				"fullName": "Jaeger AI",
-				"description": "Routes to your Jaeger agent. Full chat opens in Apple-Native UI.",
-				"icon": "media/jaeger.svg",
-				"commands": [
-					{
-						"name": "verify",
-						"description": "Run the project verification test suite"
-					},
-					{
-						"name": "status",
-						"description": "Check Jaeger Gateway and agent health"
-					},
-					{
-						"name": "explain",
-						"description": "Explain the current file or selection"
-					},
-					{
-						"name": "fix",
-						"description": "Fix errors in the current file"
-					},
-					{
-						"name": "test",
-						"description": "Write tests for the current file"
-					}
-				]
-			}
-		]
-	}
+  "name": "jaeger-ide",
+  "displayName": "Jaeger",
+  "description": "Controller for your Jaeger AI agent. Quick actions, code context, and status \u2014 the chat lives in the Apple-Native UI.",
+  "version": "0.3.0",
+  "publisher": "jenkins-robotics",
+  "icon": "media/jaeger.png",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning"
+  ],
+  "extensionKind": [
+    "ui"
+  ],
+  "main": "./extension.js",
+  "files": [
+    "extension.js",
+    "gateway.js",
+    "conversation.js",
+    "commands.js",
+    "controller.js",
+    "contract.json",
+    "media/**",
+    "README.md",
+    "VERIFICATION.md",
+    "THIRD_PARTY_NOTICES.md",
+    "native-turn.js",
+    "build.json",
+    "copilot-bridge.js"
+  ],
+  "activationEvents": [
+    "onView:jaeger.controller",
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "jaeger.openChat",
+        "title": "Jaeger: Open Chat",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "jaeger.ask",
+        "title": "Jaeger: Ask Agent",
+        "icon": "$(sparkle)"
+      },
+      {
+        "command": "jaeger.explainCode",
+        "title": "Jaeger: Explain Code",
+        "icon": "$(info)"
+      },
+      {
+        "command": "jaeger.fixCode",
+        "title": "Jaeger: Fix Code",
+        "icon": "$(wrench)"
+      },
+      {
+        "command": "jaeger.writeTests",
+        "title": "Jaeger: Write Tests",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "jaeger.refactorCode",
+        "title": "Jaeger: Refactor Code",
+        "icon": "$(refactor)"
+      },
+      {
+        "command": "jaeger.documentCode",
+        "title": "Jaeger: Add Documentation",
+        "icon": "$(book)"
+      },
+      {
+        "command": "jaeger.reviewCode",
+        "title": "Jaeger: Review Code",
+        "icon": "$(eye)"
+      },
+      {
+        "command": "jaeger.runTests",
+        "title": "Jaeger: Run Tests",
+        "icon": "$(run-all)"
+      },
+      {
+        "command": "jaeger.checkStatus",
+        "title": "Jaeger: Check Status",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "jaeger.open",
+        "title": "Jaeger: Open Controller Panel"
+      },
+      {
+        "command": "jaeger.settings",
+        "title": "Jaeger: Settings",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "jaeger.setToken",
+        "title": "Jaeger: Set Caller Token"
+      },
+      {
+        "command": "jaeger.selectModel",
+        "title": "Jaeger: Select Model"
+      },
+      {
+        "command": "jaeger.copilotBridge.allow",
+        "title": "Allow Copilot for Jaeger",
+        "category": "Jaeger"
+      },
+      {
+        "command": "jaeger.copilotBridge.toggle",
+        "title": "Turn Copilot bridge on/off",
+        "category": "Jaeger"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "jaeger",
+          "title": "Jaeger AI",
+          "icon": "media/jaeger.svg"
+        }
+      ]
+    },
+    "views": {
+      "jaeger": [
+        {
+          "type": "webview",
+          "id": "jaeger.controller",
+          "name": "Agent Status",
+          "icon": "media/jaeger.svg",
+          "contextualTitle": "Jaeger Agent"
+        },
+        {
+          "type": "webview",
+          "id": "jaeger.conversation",
+          "name": "Legacy Chat",
+          "visibility": "collapsed"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "jaeger.controller",
+        "contents": "Jaeger Agent Controller\n\n[Open Chat](command:jaeger.openChat)\n\nThe chat interface lives in the Apple-Native UI. This panel shows agent status and provides quick actions.\n\n[Set Up Connection](command:jaeger.settings)"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "jaeger.explainCode",
+          "when": "editorHasSelection",
+          "group": "jaeger@1"
+        },
+        {
+          "command": "jaeger.fixCode",
+          "when": "editorHasSelection",
+          "group": "jaeger@2"
+        },
+        {
+          "command": "jaeger.writeTests",
+          "when": "editorHasSelection",
+          "group": "jaeger@3"
+        },
+        {
+          "command": "jaeger.refactorCode",
+          "when": "editorHasSelection",
+          "group": "jaeger@4"
+        },
+        {
+          "command": "jaeger.documentCode",
+          "when": "editorHasSelection",
+          "group": "jaeger@5"
+        },
+        {
+          "command": "jaeger.reviewCode",
+          "when": "editorHasSelection",
+          "group": "jaeger@6"
+        },
+        {
+          "submenu": "jaeger.askJaeger",
+          "when": "editorTextFocus",
+          "group": "jaeger@0"
+        },
+        {
+          "command": "jaeger.openChat",
+          "when": "editorTextFocus",
+          "group": "jaeger@7"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "jaeger.explainCode",
+          "when": "resourceLangId =~ /javascript|typescript|python|rust|go|java|swift/",
+          "group": "navigation@1"
+        }
+      ],
+      "view/title": [
+        {
+          "command": "jaeger.openChat",
+          "when": "view == jaeger.controller",
+          "group": "navigation@1"
+        },
+        {
+          "command": "jaeger.ask",
+          "when": "view == jaeger.controller",
+          "group": "navigation@2"
+        },
+        {
+          "command": "jaeger.checkStatus",
+          "when": "view == jaeger.controller",
+          "group": "2_settings@1"
+        },
+        {
+          "command": "jaeger.settings",
+          "when": "view == jaeger.controller",
+          "group": "2_settings@2"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "jaeger.openChat",
+          "when": "editorTextFocus || workspaceFolderCount >= 1"
+        },
+        {
+          "command": "jaeger.explainCode",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "jaeger.fixCode",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "jaeger.writeTests",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "jaeger.refactorCode",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "jaeger.documentCode",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "jaeger.reviewCode",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "jaeger.runTests",
+          "when": "workspaceFolderCount >= 1"
+        }
+      ],
+      "jaeger.askJaeger": [
+        {
+          "command": "jaeger.explainCode",
+          "when": "editorHasSelection",
+          "group": "1_explain@1"
+        },
+        {
+          "command": "jaeger.fixCode",
+          "when": "editorHasSelection",
+          "group": "2_fix@1"
+        },
+        {
+          "command": "jaeger.writeTests",
+          "when": "editorHasSelection",
+          "group": "3_test@1"
+        },
+        {
+          "command": "jaeger.refactorCode",
+          "when": "editorHasSelection",
+          "group": "4_refactor@1"
+        },
+        {
+          "command": "jaeger.documentCode",
+          "when": "editorHasSelection",
+          "group": "5_document@1"
+        },
+        {
+          "command": "jaeger.reviewCode",
+          "when": "editorHasSelection",
+          "group": "6_review@1"
+        },
+        {
+          "command": "jaeger.ask",
+          "group": "7_ask@1"
+        }
+      ]
+    },
+    "submenus": [
+      {
+        "id": "jaeger.askJaeger",
+        "label": "Ask Jaeger",
+        "icon": "$(sparkle)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "jaeger.openChat",
+        "key": "ctrl+shift+j",
+        "mac": "cmd+shift+j",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "jaeger.ask",
+        "key": "ctrl+shift+'",
+        "mac": "cmd+shift+'",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "jaeger.explainCode",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "editorHasSelection"
+      }
+    ],
+    "configuration": {
+      "title": "Jaeger",
+      "properties": {
+        "jaeger.gatewayUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Gateway URL (e.g. \"http://127.0.0.1:33418\"). Empty = local default."
+        },
+        "jaeger.webuiUrl": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "WebUI URL for opening chat (e.g. \"http://127.0.0.1:8790\"). Empty = derived from gatewayUrl."
+        },
+        "jaeger.callerToken": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Gateway caller token (use 'Jaeger: Set Caller Token' for secure storage)."
+        },
+        "jaeger.autoStartGateway": {
+          "type": "boolean",
+          "default": false,
+          "scope": "application",
+          "description": "Start Gateway daemon automatically when needed."
+        },
+        "jaeger.showStatusBar": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show Jaeger agent status in the status bar."
+        },
+        "jaeger.openChatInBrowser": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open chat in external browser instead of VS Code Simple Browser."
+        },
+        "jaeger.model": {
+          "type": "string",
+          "default": "",
+          "scope": "window",
+          "description": "Default model for new turns (\"provider::model\")."
+        },
+        "jaeger.copilotBridge.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Let Jaeger on this Mac use your VS Code Copilot models over a private loopback bridge (127.0.0.1, new token each VS Code start, ~/.jaeger/run/vscode-bridge.json). No API keys."
+        }
+      }
+    },
+    "chatParticipants": [
+      {
+        "id": "jaeger.chatParticipant",
+        "name": "jaeger",
+        "fullName": "Jaeger AI",
+        "description": "Routes to your Jaeger agent. Full chat opens in Apple-Native UI.",
+        "icon": "media/jaeger.svg",
+        "commands": [
+          {
+            "name": "verify",
+            "description": "Run the project verification test suite"
+          },
+          {
+            "name": "status",
+            "description": "Check Jaeger Gateway and agent health"
+          },
+          {
+            "name": "explain",
+            "description": "Explain the current file or selection"
+          },
+          {
+            "name": "fix",
+            "description": "Fix errors in the current file"
+          },
+          {
+            "name": "test",
+            "description": "Write tests for the current file"
+          }
+        ]
+      }
+    ]
+  }
 }
