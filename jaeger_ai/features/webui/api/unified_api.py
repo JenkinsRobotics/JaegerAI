@@ -26,6 +26,7 @@ setup note.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import os
 import re
@@ -36,7 +37,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote
 
 OLLAMA = "http://127.0.0.1:11434"
 MAX_ASSET = 14 * 1024 * 1024  # base64 must fit read_body's 20 MB cap
@@ -704,7 +705,7 @@ def _yt():
     if not yt._deps.get("_bound_by_webui"):
         rm = _rm()
         yt.bind(_bound_by_webui=True, state_root=state_root, llm=llm_text, vision=_vision, ollama_models=lambda: [m.get("name") for m in _ollama("/api/tags").get("models", [])],
-                set_stage=set_stage, attach=add_attachment, get_record=lambda tid: _pipeline().get(tid), save_doc=save_doc, rm=rm,
+                set_stage=set_stage, attach=add_attachment, get_record=lambda tid: _pipeline().get(tid), save_doc=save_doc, rm=rm, usage=lambda: getattr(_usage, "last", None),
                 cleanup=lambda d: _rmmod().cleanup_temp(d, older_than_s=0))
     return yt
 
@@ -725,6 +726,9 @@ def _rm():
     return _rmmod().shared(state_root)
 
 
+_usage = threading.local()
+
+
 def _is_local(model: str) -> bool:
     return not model.startswith("cli:") and not re.search(r"(^|[-:])cloud\b", model)
 
@@ -735,7 +739,9 @@ def llm_text(model: str, prompt: str) -> str:
     if _is_local(model):
         r = _ollama("/api/chat", {"model": model, "messages": [{"role": "user", "content": prompt}], "stream": False, "think": False,
                                   "options": {"num_ctx": 16384}}, timeout=1800)
+        _usage.last = {"prompt": r.get("prompt_eval_count"), "output": r.get("eval_count")}
         return (r.get("message") or {}).get("content", "")
+    _usage.last = None
     out = []
     for ev in compare_stream_events({"model": model, "prompt": prompt}):
         if ev.get("type") == "delta":
@@ -747,17 +753,27 @@ def llm_text(model: str, prompt: str) -> str:
 
 def _vision(model: str, prompt: str, images) -> str:
     imgs = [images] if isinstance(images, str) else list(images)
-    return _ollama("/api/generate", {"model": model, "prompt": prompt, "images": imgs, "stream": False, "think": False,
-                                     "options": {"num_ctx": 8192}}, timeout=600).get("response", "")
+    r = _ollama("/api/generate", {"model": model, "prompt": prompt, "images": imgs, "stream": False, "think": False,
+                                  "options": {"num_ctx": 8192}}, timeout=600)
+    _usage.last = {"prompt": r.get("prompt_eval_count"), "output": r.get("eval_count")}
+    return r.get("response", "")
 
 
-def _yt_route(handler, p: str, method: str, body: dict, j) -> bool:
+def _yt_route(handler, p: str, method: str, body: dict, j, parsed_query: str = "") -> bool:
     yt = _yt()
     try:
         if p == "/v1/research/youtube/tools" and method == "GET":
             return j(handler, yt.tools()) or True
         if p == "/v1/research/youtube" and method == "GET":
             return j(handler, {"jobs": yt.list_jobs()}) or True
+        if p == "/v1/research/youtube/preview" and method == "POST":
+            return j(handler, yt.preview(body)) or True
+        if p == "/v1/research/youtube/techniques" and method == "GET":
+            qs = parse_qs(parsed_query or "")
+            return j(handler, yt.techniques(q=(qs.get("q") or [""])[0], type_=(qs.get("type") or [""])[0], creator=(qs.get("creator") or [""])[0])) or True
+        mv = re.match(r"^/v1/research/youtube/([^/]+)/videos/([A-Za-z0-9_-]{11})$", p)
+        if mv and method == "GET":
+            return j(handler, yt.video_detail(unquote(mv.group(1)), mv.group(2))) or True
         if p == "/v1/research/youtube" and method == "POST":
             return j(handler, yt.ingest(body), status=202) or True
         mf = re.match(r"^/v1/research/youtube/([^/]+)/videos/([A-Za-z0-9_-]{11})/frames/((?:seq/)?[fs]\d{2,3}(?:_\d)?\.jpg)$", p)
@@ -766,7 +782,7 @@ def _yt_route(handler, p: str, method: str, body: dict, j) -> bool:
             handler.send_response(200); handler.send_header("Content-Type", "image/jpeg"); handler.send_header("Content-Length", str(len(data)))
             handler.send_header("X-Content-Type-Options", "nosniff"); handler.end_headers(); handler.wfile.write(data)
             return True
-        m = re.match(r"^/v1/research/youtube/([^/]+)(?:/(run|cancel|style-guide|draft|drafts|watch|import|poll))?$", p)
+        m = re.match(r"^/v1/research/youtube/([^/]+)(?:/(run|cancel|style-guide|draft|drafts|watch|import|poll|pause|resume|reorder))?$", p)
         if m:
             tid, act = unquote(m.group(1)), m.group(2)
             if act is None and method == "GET":
@@ -786,6 +802,10 @@ def _yt_route(handler, p: str, method: str, body: dict, j) -> bool:
                 return j(handler, yt.draft(tid, body), status=201) or True
             if act == "watch" and method == "POST":
                 return j(handler, yt.watch(tid, bool(body.get("enabled", True)), int(body.get("interval_s") or 3600))) or True
+            if act in ("pause", "resume") and method == "POST":
+                return j(handler, yt.pause(tid, act == "pause")) or True
+            if act == "reorder" and method == "POST":
+                return j(handler, yt.reorder(tid, body.get("video_ids"))) or True
             if act == "import" and method == "POST":
                 return j(handler, yt.import_existing(tid)) or True
             if act == "poll" and method == "POST":
@@ -869,9 +889,12 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
             except KeyError as exc:
                 raise ApiError(404, "unknown CLI provider") from exc
         if p == "/v1/resources" and method == "GET":
-            return j(handler, _rm().status()) or True
+            st = _rm().status()
+            with contextlib.suppress(Exception):
+                st["tokens"] = {x["task_id"]: _yt().status(x["task_id"]).get("tokens", {}) for x in _yt().list_jobs()}
+            return j(handler, st) or True
         if p == "/v1/research/youtube" or p.startswith("/v1/research/youtube/"):
-            return _yt_route(handler, p, method, body, j)
+            return _yt_route(handler, p, method, body, j, parsed.query)
         if p == "/v1/pipeline" and method == "GET":
             return j(handler, list_pipeline()) or True
         mt = re.match(r"^/v1/pipeline/([^/]+)(?:/attachments(?:/([a-f0-9]{12}))?)?$", p)
