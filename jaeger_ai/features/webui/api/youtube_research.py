@@ -848,8 +848,8 @@ def _do_step(tid: str, v: dict, step: str, j: dict, force: set, stop) -> bool:
         return True
     if any(cur["steps"][h].get("status") == "error" for h in _HARD if STEPS.index(h) < STEPS.index(step)):
         return False
-    while _paused.get(tid) and not stop.is_set():
-        time.sleep(1)
+    while (_paused.get(tid) or _job(tid).get("paused")) and not stop.is_set():  # persisted: works across processes
+        time.sleep(2)
     if stop.is_set():
         return False
     _set_step(tid, v["id"], step, "running")
@@ -891,7 +891,9 @@ def _job_thread(tid: str, force: set, with_style: bool, stop: threading.Event) -
         for pi, steps in enumerate(PHASES, 1):
             _update(tid, lambda j: j.update(phase=pi))
             j = _job(tid)
-            workers = IO_WORKERS if pi == 1 else 1
+            iw = _deps.get("io_workers")
+            workers = (max(1, min(int(iw()), 4)) if iw else IO_WORKERS) if pi == 1 else 1
+            _update(tid, lambda j, w=workers: j.update(workers=w))
 
             claimed, cl_lock = set(), threading.Lock()
 
@@ -940,8 +942,27 @@ def _job_thread(tid: str, force: set, with_style: bool, stop: threading.Event) -
             _running.pop(tid, None)
 
 
+RUNNER_FRESH_S = 120
+
+
+def runner_heartbeat():
+    hb = _rj(Path(_d("state_root")()) / "jobs" / "runner.json")
+    if isinstance(hb, dict) and time.time() - float(hb.get("at") or 0) < RUNNER_FRESH_S:
+        return hb
+    return None
+
+
+def runner_owns(tid: str) -> bool:
+    if _deps.get("is_runner"):
+        return False
+    hb = runner_heartbeat()
+    return bool(hb and tid in (hb.get("owned") or []))
+
+
 def start(tid: str, force=None, style_guide: bool = True, wait: bool = False) -> dict:
     _job(tid)
+    if runner_owns(tid):
+        return {"started": False, "reason": "owned by the 24/7 job runner (com.jenkinsrobotics.jaeger-jobs)"}
     with _glock:
         if tid in _running:
             return {"started": False, "reason": "already running"}
@@ -952,6 +973,27 @@ def start(tid: str, force=None, style_guide: bool = True, wait: bool = False) ->
     if wait:
         t.join()
     return {"started": True}
+
+
+def extend(tid: str, n: int) -> int:
+    """Grow the job to the first n playlist videos (keeps order, adds only unseen ids). Returns videos added."""
+    j = _job(tid)
+    if n <= len(j["videos"]):
+        return 0
+    pl = list_playlist(j["playlist_id"], n)
+    have = {v["id"] for v in j["videos"]}
+    add = [_video(e) for e in pl["entries"] if e["id"] not in have]
+    _update(tid, lambda x: (x["videos"].extend(add), x.update(max_videos=n, item_count=pl.get("item_count") or x.get("item_count"))))
+    return len(add)
+
+
+def batch_done(j: dict) -> bool:
+    fin = ("done", "skipped", "error", "blocked")
+    return all(all(v["steps"][s].get("status") in fin for s in STEPS) for v in j["videos"])
+
+
+def last_progress_at(j: dict) -> float:
+    return max([float(j.get("updated_at") or 0)] + [float(s.get("at") or 0) for v in j["videos"] for s in v["steps"].values()])
 
 
 def pause(tid: str, paused: bool = True) -> dict:
@@ -985,6 +1027,10 @@ def status(tid: str) -> dict:
     j = _job(tid)
     with _glock:
         running = tid in _running
+    hb = None if running else runner_heartbeat()
+    if hb and tid in (hb.get("active") or []):
+        running = True
+        j["owner"] = "job-runner"
     if not running and j.get("state") in ("running", "queued"):
         j["state"] = "interrupted"
     total = len(j["videos"]) * len(STEPS)
