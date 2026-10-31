@@ -375,9 +375,35 @@ def _metrics(ev: dict, elapsed: float, ttft: float | None, local: bool) -> dict:
             "cost_usd": 0.0 if local else None}
 
 
+_CLI_MODEL = re.compile(r"^cli:([a-z]+):([A-Za-z0-9][A-Za-z0-9._\[\]=,-]{0,80})$")
+
+
+def _valid_model(name: str) -> bool:
+    return bool(_NAME.match(name) or _CLI_MODEL.match(name))
+
+
+def _cli():
+    try:
+        from api import cli_providers  # type: ignore
+    except ImportError:  # loaded standalone (tests)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("_cli_providers", Path(__file__).with_name("cli_providers.py"))
+        cli_providers = importlib.util.module_from_spec(spec); spec.loader.exec_module(cli_providers)
+    return cli_providers
+
+
 def compare_stream_events(body: dict, opener=None):
-    """Yield NDJSON-able events for one model: {type:start}, {type:delta,text}, {type:done,...metrics} or {type:error}."""
+    """Yield NDJSON-able events for one model: {type:start}, {type:delta,text}, {type:done,...metrics} or {type:error}.
+    Ollama names go to 127.0.0.1:11434; `cli:<provider>:<model>` runs that signed-in CLI as a subprocess."""
     model, prompt = str(body.get("model", "")), str(body.get("prompt", ""))
+    mc = _CLI_MODEL.match(model)
+    if mc:
+        if not prompt.strip() or len(prompt) > 20000:
+            raise ApiError(400, "need a model and a prompt (≤20000 chars)")
+        if mc.group(1) not in _cli().SPECS:
+            raise ApiError(400, f"unknown CLI provider {mc.group(1)}")
+        yield from _cli().stream(mc.group(1), mc.group(2), prompt)
+        return
     if not _NAME.match(model) or not prompt.strip() or len(prompt) > 20000:
         raise ApiError(400, "need a model and a prompt (≤20000 chars)")
     local = not re.search(r"(^|[-:])cloud\b", model)
@@ -457,7 +483,7 @@ def save_run(body: dict) -> dict:
     keep = ("model", "response", "elapsed_s", "ttft_s", "eval_count", "prompt_eval_count", "tokens_per_s", "load_s", "cost_usd", "error")
     clean = []
     for r in results:
-        if not isinstance(r, dict) or not _NAME.match(str(r.get("model", ""))):
+        if not isinstance(r, dict) or not _valid_model(str(r.get("model", ""))):
             raise ApiError(400, "each result needs a valid model")
         c = {k: r.get(k) for k in keep if k in r}
         if isinstance(c.get("response"), str):
@@ -571,7 +597,7 @@ def ai_edit(body: dict) -> dict:
 
 def route(handler, parsed, method: str, read_body, j) -> bool:
     p = parsed.path
-    if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p == "/v1/documents" or p.startswith("/v1/documents/")):
+    if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p.startswith("/v1/providers/cli") or p == "/v1/documents" or p.startswith("/v1/documents/")):
         return False
     try:
         body = read_body(handler) if method in ("POST", "PUT") else {}
@@ -628,6 +654,14 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
             first = next(events)
             _stream(handler, _chain(first, events))
             return True
+        if p == "/v1/providers/cli" and method == "GET":
+            return j(handler, {"providers": _cli().detect(refresh="refresh=1" in (parsed.query or ""))}) or True
+        mp = re.match(r"^/v1/providers/cli/([a-z]+)$", p)
+        if mp and method == "PUT":
+            try:
+                return j(handler, _cli().update(mp.group(1), body)) or True
+            except KeyError as exc:
+                raise ApiError(404, "unknown CLI provider") from exc
         if p == "/v1/compare/history":
             if method == "GET":
                 return j(handler, {"runs": list_runs()}) or True
@@ -653,7 +687,7 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
                 return j(handler, save_doc(md.group(1), body)) or True
             if method == "DELETE":
                 return j(handler, delete_doc(md.group(1))) or True
-        raise ApiError(405 if p.startswith(("/v1/studio/", "/v1/models/", "/v1/documents", "/v1/compare/")) else 404, "method not allowed")
+        raise ApiError(405 if p.startswith(("/v1/studio/", "/v1/models/", "/v1/documents", "/v1/compare/", "/v1/providers/cli")) else 404, "method not allowed")
     except ApiError as exc:
         j(handler, exc.payload, status=exc.status)
         return True
