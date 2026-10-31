@@ -864,8 +864,23 @@ def _avatar():
 
 # ── Router ───────────────────────────────────────────────────────────
 
+def _inbox():
+    try:
+        from api import inbox_api as ib  # type: ignore
+    except ImportError:  # loaded standalone (tests)
+        import importlib.util, sys
+        ib = sys.modules.get("_inbox_api")
+        if ib is None:
+            spec = importlib.util.spec_from_file_location("_inbox_api", Path(__file__).with_name("inbox_api.py"))
+            ib = importlib.util.module_from_spec(spec); sys.modules["_inbox_api"] = ib; spec.loader.exec_module(ib)
+    return ib
+
+
 def route(handler, parsed, method: str, read_body, j) -> bool:
     p = parsed.path
+    ib = _inbox()
+    if ib.handles(p):
+        return ib.route(handler, parsed, method, read_body, j)
     av = _avatar()
     if av.handles(p):
         return av.route(handler, parsed, method, read_body, j)
