@@ -1359,6 +1359,8 @@ class JaegerGatewayApp:
         register(self)
         from jaeger_ai.features.web_search.routes import register as register_web_search
         register_web_search(self)
+        from jaeger_ai.features.oss_stack.routes import register as register_oss_stack
+        register_oss_stack(self)
 
         # WebSocket support for real-time bidirectional communication
         # Matches Hermes (7+ WS endpoints) and OpenClaw (primary WS transport)

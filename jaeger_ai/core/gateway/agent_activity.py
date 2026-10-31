@@ -24,7 +24,7 @@ _CALLER_STATUS = {"turn.start": "running", "turn.finish": "completed", "turn.fai
 #: Agent-bridge inbox handoffs between apps (handoff_task to a peer, post_result back).
 BRIDGE_KINDS = ("handoff.sent", "handoff.result")
 #: Shared web search calls (POST /v1/search, /v1/fetch), attributed to the caller.
-SEARCH_KINDS = ("search.query", "search.fetch")
+SEARCH_KINDS = ("search.query", "search.fetch", "model.route", "tool.call", "docs.search")
 ALL_KINDS = KINDS + CALLER_KINDS + BRIDGE_KINDS + SEARCH_KINDS
 MAX_ROWS = 50_000
 MAX_LIMIT = 200
@@ -192,6 +192,14 @@ def _summary(kind: str, data: dict) -> str:
         return f"{caller.get('caller_id')} ({caller.get('caller_kind')}) {what} {caller.get('status')}{text}"
     if kind in SEARCH_KINDS:
         who = (data.get("caller") or {}).get("caller_id") if isinstance(data.get("caller"), dict) else None
+        if kind == "model.route":
+            why = f" ({data.get('reason')})" if data.get("reason") else ""
+            err = f": {str(data.get('error'))[:120]}" if data.get("error") else ""
+            return f"{who} model {data.get('model') or '?'} -> {data.get('target') or '?'} [{data.get('status')}]{why}{err}"
+        if kind == "tool.call":
+            return f"{who} tool {data.get('server')}.{data.get('tool')} [{data.get('status')}]"
+        if kind == "docs.search":
+            return f"{who} searched Documents: {str(data.get('query') or '')[:120]} ({data.get('results')} results)"
         if kind == "search.query":
             return f"{who} searched: {str(data.get('query') or '')[:120]} ({data.get('results')} results{', cached' if data.get('cached') else ''})"
         return f"{who} fetched {str(data.get('url') or '')[:160]}{' (cached)' if data.get('cached') else ''}"
