@@ -957,7 +957,7 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
             _stream(handler, _chain(first, events))
             return True
         if p == "/v1/providers/cli" and method == "GET":
-            return j(handler, {"providers": _cli().detect(refresh="refresh=1" in (parsed.query or ""))}) or True
+            return j(handler, _cli().detect_status(refresh="refresh=1" in (parsed.query or ""))) or True
         mp = re.match(r"^/v1/providers/cli/([a-z]+)$", p)
         if mp and method == "PUT":
             try:

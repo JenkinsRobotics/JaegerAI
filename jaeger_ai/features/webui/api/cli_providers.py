@@ -268,24 +268,79 @@ def _settings() -> dict:
         return {}
 
 
+_bg: dict = {"thread": None}
+
+
+def _probe_all() -> list[dict]:
+    data = []
+    for pid, spec in SPECS.items():
+        path = _which(spec["bin"])
+        row = {"id": pid, "label": spec["label"], "kind": "cli", "installed": bool(path), "path": path, "version": None,
+               "signed_in": None, "status_note": "Not installed", "login_command": spec["login"], "streams": spec["streams"], "models": []}
+        if path:
+            code, out = _run([path, "--version"], timeout=10)
+            row["version"] = _first_line(out) if code == 0 else None
+            row["signed_in"], row["status_note"] = spec["signin"](path)
+            row["models"] = spec["models"](path) if row["signed_in"] is not False else []
+        data.append(row)
+    data.append(_vscode_row())
+    return data
+
+
+def _placeholder() -> list[dict]:
+    """Instant first answer: PATH lookup only (no subprocesses); filled in by the background probe."""
+    return [{"id": pid, "label": spec["label"], "kind": "cli", "installed": bool(_which(spec["bin"])), "path": _which(spec["bin"]),
+             "version": None, "signed_in": None, "status_note": "Checking…", "login_command": spec["login"],
+             "streams": spec["streams"], "models": []} for pid, spec in SPECS.items()]
+
+
+def _refresh_bg() -> bool:
+    """Start one background probe unless one is running. Returns True while a probe is in flight."""
+    with _lock:
+        t = _bg["thread"]
+        if t is not None and t.is_alive():
+            return True
+
+        def run():
+            try:
+                data = _probe_all()
+                with _lock:
+                    _cache.update(at=time.time(), data=data)
+            finally:
+                _bg["thread"] = None
+        t = threading.Thread(target=run, name="cli-providers-probe", daemon=True)
+        _bg["thread"] = t
+        t.start()
+        return True
+
+
+def detect_status(refresh: bool = False) -> dict:
+    """Fast GET: cached rows (possibly stale) + a background refresh. refresh=True probes synchronously."""
+    if refresh:
+        detect(refresh=True)
+    with _lock:
+        data, at = _cache["data"], _cache["at"]
+        running = _bg["thread"] is not None and _bg["thread"].is_alive()
+    stale = data is None or time.time() - at >= TTL
+    if stale and not running:
+        running = _refresh_bg()
+    rows = _decorate(data) if data is not None else [{**r, "state": "checking"} for r in _decorate(_placeholder())]
+    return {"providers": rows, "stale": stale,
+            "refreshing": running, "checked_at": at or None}
+
+
 def detect(refresh: bool = False) -> list[dict]:
     with _lock:
-        if not refresh and _cache["data"] is not None and time.time() - _cache["at"] < TTL:
-            data = _cache["data"]
-        else:
-            data = []
-            for pid, spec in SPECS.items():
-                path = _which(spec["bin"])
-                row = {"id": pid, "label": spec["label"], "kind": "cli", "installed": bool(path), "path": path, "version": None,
-                       "signed_in": None, "status_note": "Not installed", "login_command": spec["login"], "streams": spec["streams"], "models": []}
-                if path:
-                    code, out = _run([path, "--version"], timeout=10)
-                    row["version"] = _first_line(out) if code == 0 else None
-                    row["signed_in"], row["status_note"] = spec["signin"](path)
-                    row["models"] = spec["models"](path) if row["signed_in"] is not False else []
-                data.append(row)
-            data.append(_vscode_row())
+        fresh = not refresh and _cache["data"] is not None and time.time() - _cache["at"] < TTL
+        data = _cache["data"] if fresh else None
+    if data is None:
+        data = _probe_all()
+        with _lock:
             _cache.update(at=time.time(), data=data)
+    return _decorate(data)
+
+
+def _decorate(data: list[dict]) -> list[dict]:
     st = _settings()
     out = []
     for row in data:
