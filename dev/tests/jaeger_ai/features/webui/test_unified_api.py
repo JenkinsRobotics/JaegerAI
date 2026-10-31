@@ -103,3 +103,18 @@ def test_compare_history_and_votes(api, tmp_path):
         api.save_run({"prompt": "p", "results": [{"model": "m:1"}] * 5})
     api.delete_run(run["id"])
     assert api.list_runs() == [] and (tmp_path / "compare/history.json").exists()
+
+
+def test_compare_routes_cli_models_and_history_accepts_them(api, monkeypatch):
+    class Fake:
+        SPECS = {"codex": {}}
+        @staticmethod
+        def stream(pid, model, prompt):
+            yield {"type": "start", "model": f"cli:{pid}:{model}"}
+            yield {"type": "done", "model": f"cli:{pid}:{model}"}
+    monkeypatch.setattr(api, "_cli", lambda: Fake)
+    assert [e["type"] for e in api.compare_stream_events({"model": "cli:codex:gpt-6-luna", "prompt": "hi"})] == ["start", "done"]
+    with pytest.raises(api.ApiError):
+        list(api.compare_stream_events({"model": "cli:evil:x", "prompt": "hi"}))
+    run = api.save_run({"prompt": "p", "results": [{"model": "cli:codex:gpt-6-luna", "response": "a"}, {"model": "qwen3:4b", "response": "b"}]})
+    assert api.update_run(run["id"], {"winner": "cli:codex:gpt-6-luna"})["winner"] == "cli:codex:gpt-6-luna"
