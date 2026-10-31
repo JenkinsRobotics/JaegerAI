@@ -1,0 +1,42 @@
+/* Research › YouTube. Tokens only (RESPONSIVE-SYSTEM classes: compact <600, medium 600–839, regular 840–1199, expanded ≥1200). */
+.jg-yt { display: grid; grid-template-columns: 260px minmax(0, 1fr) minmax(320px, 420px); gap: var(--jg-space-4); align-items: start; min-height: 0; }
+.jg-yt__jobs { display: grid; gap: var(--jg-space-2); }
+.jg-yt__job, .jg-yt__video { display: grid; gap: var(--jg-space-1); width: 100%; text-align: left; padding: var(--jg-space-3); border-radius: var(--jg-radius-m); border: 1px solid var(--jg-color-border-tertiary); background: var(--jg-color-elevated); color: var(--jg-color-text); font: inherit; cursor: pointer; min-height: 44px; }
+.jg-yt__job[aria-current="true"], .jg-yt__video[aria-current="true"] { border-color: var(--jg-color-accent); box-shadow: 0 0 0 1px var(--jg-color-accent); }
+.jg-yt__job:focus-visible, .jg-yt__video:focus-visible { outline: 2px solid var(--jg-color-accent); outline-offset: 2px; }
+.jg-yt__job-title, .jg-yt__vtitle { font-weight: 600; font-size: var(--jg-text-body); }
+.jg-yt__meter { display: block; height: 4px; border-radius: 999px; background: var(--jg-color-hover); overflow: hidden; }
+.jg-yt__meter > span { display: block; height: 100%; background: var(--jg-color-accent); }
+.jg-yt__main, .jg-yt__video-pane { display: grid; gap: var(--jg-space-3); min-width: 0; }
+.jg-yt__video-pane { position: sticky; top: 0; max-height: calc(100vh - 160px); overflow: auto; background: var(--jg-color-elevated); border: 1px solid var(--jg-color-border-tertiary); border-radius: var(--jg-radius-l); padding: var(--jg-space-4); }
+.jg-yt__head { display: flex; justify-content: space-between; gap: var(--jg-space-3); flex-wrap: wrap; align-items: flex-start; }
+.jg-yt__head h2, .jg-yt__detail h3 { margin: 0; font-size: var(--jg-text-title, 17px); }
+.jg-yt__sub { margin: 0; font-size: var(--jg-text-footnote); color: var(--jg-color-text-secondary); font-variant-numeric: tabular-nums; }
+.jg-yt__videos, .jg-yt__tech, .jg-yt__ev { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--jg-space-2); }
+.jg-yt__video { grid-template-columns: 2.2em minmax(0, 1fr) auto; align-items: center; }
+.jg-yt__vt { display: grid; min-width: 0; }
+.jg-yt__vtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-yt__pos, .jg-yt__t { color: var(--jg-color-text-tertiary); font-size: var(--jg-text-footnote); font-variant-numeric: tabular-nums; }
+.jg-yt__detail { display: grid; gap: var(--jg-space-3); }
+.jg-yt__back { display: none; justify-self: start; }
+.jg-yt__strip { display: flex; gap: var(--jg-space-2); overflow-x: auto; padding-bottom: var(--jg-space-1); scroll-snap-type: x proximity; }
+.jg-yt__strip figure { margin: 0; flex: 0 0 auto; scroll-snap-align: start; }
+.jg-yt__strip img { display: block; height: 72px; border-radius: var(--jg-radius-s); background: var(--jg-color-hover); }
+.jg-yt__strip figcaption { font-size: var(--jg-text-caption); color: var(--jg-color-text-tertiary); text-align: center; font-variant-numeric: tabular-nums; }
+.jg-yt__ev li { display: grid; grid-template-columns: 3.4em auto 1fr; gap: var(--jg-space-2); align-items: baseline; font-size: var(--jg-text-body); }
+.jg-yt__ev li p, .jg-yt__tech p { margin: 0; grid-column: 1 / -1; color: var(--jg-color-text); }
+.jg-yt__style { white-space: pre-wrap; font: inherit; font-size: var(--jg-text-body); margin: 0; max-width: 72ch; }
+/* regular (840–1199): job list becomes a scrollable row; video detail docks right. */
+@media (max-width: 1199px) {
+  .jg-yt { grid-template-columns: minmax(0, 1fr) minmax(300px, 380px); }
+  .jg-yt__jobs { grid-column: 1 / -1; grid-auto-flow: column; grid-auto-columns: minmax(220px, 1fr); overflow-x: auto; }
+}
+/* compact + medium (<840): push navigation, list then detail with a back button. */
+@media (max-width: 839px) {
+  .jg-yt { grid-template-columns: minmax(0, 1fr); }
+  .jg-yt[data-detail="list"] .jg-yt__video-pane { display: none; }
+  .jg-yt[data-detail="video"] .jg-yt__main, .jg-yt[data-detail="video"] .jg-yt__jobs { display: none; }
+  .jg-yt__video-pane { position: static; max-height: none; border: 0; padding: 0; background: none; }
+  .jg-yt__back { display: inline-flex; }
+}
+@media (prefers-reduced-motion: reduce) { .jg-yt__strip { scroll-behavior: auto; } }

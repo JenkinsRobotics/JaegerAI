@@ -19,8 +19,8 @@ export const SUBTABS: Partial<Record<PageId, readonly { id: string; title: strin
   home: [{ id: "overview", title: "Overview" }, { id: "widgets", title: "My widgets" }],
   agents: [{ id: "roster", title: "Agents" }, { id: "characters", title: "Characters" }],
   work: [{ id: "pipeline", title: "Pipeline" }, { id: "tasks", title: "Tasks" }, { id: "production", title: "Production" }, { id: "calendar", title: "Calendar" }],
-  research: [{ id: "runs", title: "Research" }, { id: "documents", title: "Documents" }, { id: "knowledge", title: "Memory & Skills" }, { id: "sharepoint", title: "SharePoint" }],
-  models: [{ id: "library", title: "Models" }, { id: "compare", title: "Compare" }],
+  research: [{ id: "runs", title: "Research" }, { id: "youtube", title: "YouTube" }, { id: "documents", title: "Documents" }, { id: "knowledge", title: "Memory & Skills" }, { id: "sharepoint", title: "SharePoint" }],
+  models: [{ id: "library", title: "Models" }, { id: "compare", title: "Compare" }, { id: "usage", title: "Usage" }],
 };
 
 /** Every retired top-level path → its new home (path after the page segment is kept). */

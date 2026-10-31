@@ -42,6 +42,8 @@ const StudioPage = lazy(() => import('../unified/StudioPage').then((m) => ({ def
 const ModelsPage = lazy(() => import('../unified/ModelsPage').then((m) => ({ default: m.ModelsPage })))
 const ComparePage = lazy(() => import('../unified/ComparePage').then((m) => ({ default: m.ComparePage })))
 const ResearchPage = lazy(() => import('../unified/ResearchPage').then((m) => ({ default: m.ResearchPage })))
+const YouTubePage = lazy(() => import('../research/YouTubePage').then((m) => ({ default: m.YouTubePage })))
+const UsagePage = lazy(() => import('../unified/UsagePage').then((m) => ({ default: m.UsagePage })))
 const DocumentsPage = lazy(() => import('../unified/DocumentsPage').then((m) => ({ default: m.DocumentsPage })))
 const KnowledgePage = lazy(() => import('../unified/KnowledgePage').then((m) => ({ default: m.KnowledgePage })))
 const CalendarPage = lazy(() => import('../unified/CalendarPage').then((m) => ({ default: m.CalendarPage })))
@@ -129,12 +131,13 @@ export function AppWindow({ source }: { source: JaegerSource }) {
       case 'research': return tabbed('research', (t) => {
         switch (t) {
           case 'documents': return <DocumentsPage params={active === 'research' && route.sub === 'documents' ? route.params : new URLSearchParams()} />
+          case 'youtube': return <YouTubePage params={active === 'research' && route.sub === 'youtube' ? route.params : new URLSearchParams()} onNavigate={go} />
           case 'knowledge': return <KnowledgePage source={source} agents={store.agents} />
           case 'sharepoint': return <SharePointPanel source={source} />
           default: return <ResearchPage source={source} agents={store.agents} onNavigate={go} />
         }
       }, (() => { const t = taskFor('research'); return t ? <Suspense fallback={null}><TaskBanner source={source} taskId={t} stage="research" onNavigate={go} clearTo={pathOf('research', route.sub)} /></Suspense> : undefined })())
-      case 'models': return tabbed('models', (t) => t === 'compare' ? <ComparePage /> : <ModelsPage />)
+      case 'models': return tabbed('models', (t) => t === 'compare' ? <ComparePage /> : t === 'usage' ? <UsagePage /> : <ModelsPage />)
       case 'machine': return <MachineControlPanel source={source} />
       case 'studio': return <div className="jg-tabbed">{banner('studio', 'studio')}<div className="jg-tabbed__body"><StudioPage source={source} agents={store.agents} onNavigate={go} /></div></div>
       default: return null
