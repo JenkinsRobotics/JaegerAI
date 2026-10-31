@@ -164,3 +164,8 @@ def test_router(av):
     assert av.route(_H(), P("/v1/agents/jaeger/avatar"), "GET", None, j) and got["data"]["avatar"] is None
     assert av.route(_H(), P("/v1/agents/jaeger/avatar"), "PUT", lambda h: {"avatar": {"schema": "bad"}}, j) and got["status"] == 422
     assert not av.route(_H(), P("/v1/agents/jaeger/sessions"), "GET", None, j)
+
+
+def test_gateway_agent_proxy_leaves_avatar_paths_to_webui():
+    src = (pathlib.Path(__file__).resolve().parents[5] / "jaeger_ai/features/webui/api/jaeger_agents.py").read_text()
+    assert 'r"^/v1/agents/[^/]+/avatar(/.*)?$"' in src and "return False" in src.split("def route", 1)[1][:600]
