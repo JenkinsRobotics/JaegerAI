@@ -129,10 +129,10 @@ def _root_file(root: Path, path: str) -> Path | None:
     return target
 
 
-# Unified UI pages (interfaces/ui/src/shell/router.ts). A GET for one of these paths, or a
+# Unified UI pages (interfaces/ui/src/shell/router.ts) plus the retired paths it redirects. A GET for one of these paths, or a
 # dot-free sub-path such as /settings/voice, is a client-side route: answer with index.html so
 # deep links and reloads work. Anything with a file extension is never treated as a page.
-UI_PAGES = frozenset({"home", "chat", "agents", "characters", "tasks", "machine", "sharepoint", "settings", "workspace",
+UI_PAGES = frozenset({"home", "chat", "agents", "work", "characters", "tasks", "machine", "sharepoint", "settings", "workspace",
                       "studio", "models", "compare", "research", "documents", "knowledge", "integrations", "calendar"})
 
 
