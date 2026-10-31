@@ -759,6 +759,37 @@ def _vision(model: str, prompt: str, images) -> str:
     return r.get("response", "")
 
 
+def runner_status() -> dict:
+    """24/7 job runner health + queue + per-job progress (read from its heartbeat and the job files)."""
+    yt = _yt()
+    jd = state_root() / "jobs"
+    try:
+        hb = json.loads((jd / "runner.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        hb = None
+    age = time.time() - float(hb.get("at") or 0) if hb else None
+    health = "down" if hb is None or age > yt.RUNNER_FRESH_S else hb.get("health", "ok")
+    try:
+        queue = json.loads((jd / "queue.json").read_text("utf-8"))
+    except (OSError, ValueError):
+        queue = []
+    jobs = []
+    for q in queue if isinstance(queue, list) else []:
+        try:
+            s = yt.status(q["task_id"])
+        except Exception as exc:  # noqa: BLE001
+            jobs.append({**q, "error": str(exc)[:200]}); continue
+        idle = time.time() - yt.last_progress_at(s)
+        errs = [{"video_id": v["id"], "step": k, "error": (x.get("error") or "")[:200]} for v in s["videos"] for k, x in v["steps"].items() if x.get("status") == "error"]
+        jobs.append({**q, "title": s.get("playlist_title"), "state": s.get("state"), "phase": s.get("phase"), "paused": bool(s.get("paused")),
+                     "running": s.get("running"), "videos_in_job": len(s["videos"]), "item_count": s.get("item_count"), "progress": s.get("progress"),
+                     "videos_done": sum(1 for v in s["videos"] if v["steps"]["analysis"].get("status") == "done"),
+                     "last_progress_s": round(idle), "stuck": bool(s.get("running") and idle > 3600), "errors": errs[:20], "error_count": len(errs),
+                     "tokens": s.get("tokens"), "style_guide": s.get("style_guide", {}).get("status"), "kb": (s.get("kb") or {}).get("status"), "workers": s.get("workers")})
+    return {"service": "com.jenkinsrobotics.jaeger-jobs", "health": health, "heartbeat_age_s": round(age) if age is not None else None,
+            "runner": {k: hb.get(k) for k in ("pid", "started_at", "active", "owned", "retries", "next_try", "events")} if hb else None, "jobs": jobs}
+
+
 def _yt_route(handler, p: str, method: str, body: dict, j, parsed_query: str = "") -> bool:
     yt = _yt()
     try:
@@ -823,7 +854,7 @@ def _yt_route(handler, p: str, method: str, body: dict, j, parsed_query: str = "
 
 def route(handler, parsed, method: str, read_body, j) -> bool:
     p = parsed.path
-    if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p.startswith("/v1/providers/cli") or p == "/v1/pipeline" or p.startswith("/v1/pipeline/") or p == "/v1/resources" or p == "/v1/research/youtube" or p.startswith("/v1/research/youtube/") or p == "/v1/documents" or p.startswith("/v1/documents/")):
+    if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p.startswith("/v1/providers/cli") or p == "/v1/pipeline" or p.startswith("/v1/pipeline/") or p == "/v1/resources" or p == "/v1/jobs/runner" or p == "/v1/research/youtube" or p.startswith("/v1/research/youtube/") or p == "/v1/documents" or p.startswith("/v1/documents/")):
         return False
     try:
         body = read_body(handler) if method in ("POST", "PUT") else {}
@@ -888,6 +919,8 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
                 return j(handler, _cli().update(mp.group(1), body)) or True
             except KeyError as exc:
                 raise ApiError(404, "unknown CLI provider") from exc
+        if p == "/v1/jobs/runner" and method == "GET":
+            return j(handler, runner_status()) or True
         if p == "/v1/resources" and method == "GET":
             st = _rm().status()
             with contextlib.suppress(Exception):
