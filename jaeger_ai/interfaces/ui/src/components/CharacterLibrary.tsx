@@ -629,7 +629,7 @@ function CharacterCard({ character, onClick }: { character: CharacterBio; onClic
           </div>
         )}
         <div className="library-card-category">
-          {character.category === 'fun' ? '🎭 Fun' : '💼 Professional'}
+          {character.category === 'fun' ? '🎭 Character' : '🤖 Bot'}
         </div>
       </div>
       <div className="library-card-info">
@@ -692,7 +692,7 @@ function CharacterDetail({ character, onClose, onCreateAgent }: {
             <div className="detail-header">
               <h2>{character.name}</h2>
               <span className={`detail-category ${character.category}`}>
-                {character.category === 'fun' ? '🎭 Fun Character' : '💼 Professional'}
+                {character.category === 'fun' ? '🎭 Character' : '🤖 Bot'}
               </span>
             </div>
             
@@ -877,7 +877,7 @@ export function CharacterLibrary({
               className={`filter-btn ${filter === f ? 'active' : ''}`}
               onClick={() => setFilter(f)}
             >
-              {f === 'all' ? '✨ All' : f === 'fun' ? '🎭 Fun' : '💼 Professional'}
+              {f === 'all' ? '✨ All' : f === 'fun' ? '🎭 Characters' : '🤖 Bots'}
             </button>
           ))}
         </div>
