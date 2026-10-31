@@ -149,6 +149,9 @@ def register(mcp, client_for_context):
         ] + [
             {"id": "ares", "label": "ARES (OpenAI Codex worker: runs handed-off tasks with codex exec)",
              "worker": True},
+            {"id": "rackpc", "worker": True, "compute": "rackpc",
+             "label": "Rack PC (Ollama on GTX 1080 Ti 11 GB: local models up to ~14B; "
+                      "start the task with 'model: <name>' to pick one)"},
             {"id": "grokbot", "label": "Grok Bot (lead; its Grok bots)"},
             {"id": "jaegerd", "label": "Jaeger (lead agent inbox)"},
         ]
