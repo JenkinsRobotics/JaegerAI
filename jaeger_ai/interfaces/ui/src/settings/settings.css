@@ -93,3 +93,55 @@
 .jg-device-preferences label.jg-device-check { display: flex; align-items: center; }
 .jg-device-preferences dt { font-weight: 600; margin-top: 12px; }
 .jg-device-preferences dd { margin: 4px 0 0; }
+
+/* ── TAB-01 Settings (2026-10-31): search, groups, pickers, push nav. Tokens only; container queries per RESPONSIVE-SYSTEM. ── */
+.jg-sheet__inline { container: settings / inline-size; }
+.jg-set-search { position: relative; margin: 0 0 var(--jg-space-2); }
+.jg-set-search__input { width: 100%; box-sizing: border-box; height: 32px; padding: 0 44px 0 var(--jg-space-3); border-radius: var(--jg-radius-s); border: 1px solid var(--jg-color-border); background: var(--jg-color-pane); color: var(--jg-color-text); font: inherit; }
+.jg-set-search kbd { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: var(--jg-font-tiny); color: var(--jg-color-text-tertiary); }
+.jg-set-result span { display: flex; flex-direction: column; align-items: flex-start; line-height: 1.25; }
+.jg-set-result small { color: var(--jg-color-text-secondary); font-size: var(--jg-font-tiny); }
+.jg-sheet__nav .jg-sheet__tab.is-active { background: var(--jg-color-accent); color: var(--jg-color-on-accent); }
+.jg-sheet__nav .jg-sheet__tab.is-active .jg-icon { opacity: 1; }
+.jg-sheet__group-title { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--jg-color-text-tertiary); }
+.jg-sheet--inline .jg-sheet__page .jg-page-header { margin-bottom: var(--jg-space-5); }
+.jg-page-header[data-embedded] { margin-bottom: var(--jg-space-3); }
+.jg-page-header__back { border: 0; background: none; color: var(--jg-color-accent-text); font: inherit; min-height: 44px; padding: 0; cursor: pointer; align-self: flex-start; }
+[data-flash] { animation: jg-set-flash 600ms var(--jg-ease-out-quint, ease-out); border-radius: var(--jg-radius-s); }
+@keyframes jg-set-flash { from { background: color-mix(in srgb, var(--jg-color-accent) 12%, transparent); } }
+@media (prefers-reduced-motion: reduce) { [data-flash] { animation: none; outline: 2px solid var(--jg-color-accent); } }
+.jg-set-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--jg-radius-s); background: var(--jg-color-active); }
+.jg-set-seg .jg-set-tile { min-height: 28px; padding: 0 var(--jg-space-3); border: 0; border-radius: 6px; background: none; color: var(--jg-color-text); font: inherit; cursor: pointer; }
+.jg-set-seg .jg-set-tile[data-on] { background: var(--jg-color-pane); box-shadow: var(--jg-shadow-control); }
+.jg-set-seg--tabs { margin-bottom: var(--jg-space-4); flex-wrap: wrap; }
+.jg-set-feels { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--jg-space-3); padding: var(--jg-space-3); }
+.jg-set-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: var(--jg-space-3); padding: var(--jg-space-3); }
+.jg-set-feels .jg-set-tile, .jg-set-icons .jg-set-tile { position: relative; display: flex; flex-direction: column; align-items: center; gap: var(--jg-space-2); padding: var(--jg-space-2); border: 1px solid var(--jg-color-border); border-radius: var(--jg-radius-m); background: var(--jg-color-pane); color: var(--jg-color-text); font: inherit; font-size: var(--jg-font-small); cursor: pointer; }
+.jg-set-tile[data-on] { outline: 2px solid var(--jg-color-accent); outline-offset: 1px; }
+.jg-set-tile:focus-visible { box-shadow: var(--jg-focus); }
+.jg-set-icons img { width: 48px; height: 48px; border-radius: 11px; object-fit: cover; }
+.jg-set-check { position: absolute; top: 4px; right: 6px; color: var(--jg-color-accent-text); }
+.jg-set-feel__swatch { width: 100%; max-width: 96px; height: 64px; border-radius: var(--jg-radius-s); display: grid; grid-template-columns: 28% 1fr; grid-template-rows: 1fr 10px; overflow: hidden; background: var(--pv-bg); border: 1px solid var(--jg-color-border); }
+.jg-set-feel__swatch i:nth-child(1) { grid-row: 1 / 3; background: var(--pv-side); }
+.jg-set-feel__swatch i:nth-child(2) { margin: 10px 8px 0; height: 6px; border-radius: 3px; background: var(--pv-text); opacity: .7; }
+.jg-set-feel__swatch i:nth-child(3) { margin: 0 8px 4px; border-radius: 3px; background: var(--pv-accent); }
+.jg-set-icons__actions { display: flex; flex-wrap: wrap; gap: var(--jg-space-2); padding: 0 var(--jg-space-3) var(--jg-space-3); }
+.jg-set-danger { border: 1px solid color-mix(in srgb, var(--jg-bad) 40%, transparent); border-radius: var(--jg-radius-m); padding: var(--jg-space-3); }
+.jg-set-list-title { margin: var(--jg-space-2) 0 var(--jg-space-3); font-size: 28px; }
+.jg-set-chev { margin-left: auto; color: var(--jg-color-text-tertiary); }
+.jg-sheet__nav { width: 248px; }
+[data-density="compact"] .jg-sheet__row { min-height: 40px; }
+@container settings (max-width: 1199px) { .jg-sheet__nav { width: 224px; } .jg-set-feels { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@container settings (max-width: 839px) { .jg-set-feels { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); } .jg-sheet--inline .jg-sheet__page { padding: 20px; } }
+@container settings (max-width: 599px) {
+  .jg-sheet--inline { flex-direction: column; }
+  .jg-sheet--inline .jg-sheet__nav { width: auto; display: grid; overflow: visible; border-right: 0; padding: max(12px, env(safe-area-inset-top)) 16px calc(72px + env(safe-area-inset-bottom)); }
+  .jg-sheet--inline .jg-sheet__tab { height: 52px; flex-shrink: 1; }
+  .jg-sheet--inline .jg-sheet__page { padding: max(12px, env(safe-area-inset-top)) 16px calc(72px + env(safe-area-inset-bottom)); }
+  .jg-set-feels { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; }
+  .jg-set-feels .jg-set-tile { flex: 0 0 calc((100% - 24px) / 3); scroll-snap-align: start; }
+  .jg-set-icons { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .jg-sheet__row { min-height: 52px; flex-wrap: wrap; }
+}
+@media (max-height: 499px) { .jg-sheet--inline .jg-page-header p { display: none; } }
+@media (pointer: coarse) { .jg-set-search__input, .jg-ui-field input { font-size: max(16px, 1rem); min-height: 44px; } .jg-sheet__tab, .jg-set-seg .jg-set-tile { min-height: 44px; } }
