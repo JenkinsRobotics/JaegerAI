@@ -378,6 +378,7 @@ class Handler(BaseHTTPRequestHandler):
             set_request_profile(cookie_profile)
         try:
             parsed = urlparse(self.path)
+            _legacy_hit(self.command, parsed.path)
             if not check_auth(self, parsed): return
             result = handle_get(self, parsed)
             if result is False:
@@ -408,6 +409,7 @@ class Handler(BaseHTTPRequestHandler):
             set_request_profile(cookie_profile)
         try:
             parsed = urlparse(self.path)
+            _legacy_hit(self.command, parsed.path)
             _is_csp_report_post = (
                 parsed.path == "/api/csp-report" and self.command == "POST"
             )
@@ -458,6 +460,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self) -> None:
         self._handle_write(handle_delete)
+
+
+def _legacy_hit(method: str, path: str) -> None:
+    """Removal stage 2: count legacy /api/* traffic (never affects the request)."""
+    if path.startswith("/api/"):
+        try:
+            from api.legacy_hits import record
+            record(method, path)
+        except Exception:
+            pass
 
 
 def _raise_fd_soft_limit(target: int = 4096) -> dict:
