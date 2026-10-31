@@ -2580,6 +2580,7 @@ class JaegerGatewayApp:
             "approval_id": approval_id,
             "result": {},
             "metadata": {
+                "task_id": str(body.get("task_id") or "").strip()[:128] or None,  # G5
                 "reply_to_handoff_id": reply_parent["id"] if reply_parent else None,
                 "thread_handoff_id": ((reply_parent.get("metadata") or {}).get("thread_handoff_id") or reply_parent["id"]) if reply_parent else handoff_id,
                 "caller_actor": actor,
@@ -2970,12 +2971,15 @@ class JaegerGatewayApp:
             return web.json_response({"error": "since must be epoch seconds and limit an integer"}, status=400)
         if limit is not None and not 1 <= limit <= 500:
             return web.json_response({"error": "limit must be between 1 and 500"}, status=400)
+        task_id = (query.get("task_id") or "").strip()
         records = self.store.list_handoffs(
             agent_id=query.get("agent_id") or None,
             session_id=query.get("session_id") or None,
             since=since,
-            limit=limit,
+            limit=500 if task_id else limit,
         )
+        if task_id:  # G5
+            records = [r for r in records if r.get("task_id") == task_id][:limit or None]
         return web.json_response({"handoffs": records, "count": len(records)})
 
     async def handle_handoff_reply(self, request: web.Request) -> web.Response:
@@ -6911,6 +6915,8 @@ class JaegerGatewayApp:
         if request.method == 'GET':
             from jaeger_ai.core.tasks.presentation import view
             tasks = [view(self, t) for t in self.task_owner.store.list_tasks()]
+            for t in tasks:  # G5 join-on-read
+                t['handoff_id'] = self.store.handoff_for_task(str(t.get('task_id') or t.get('id') or ''))
             agent_filter = request.query.get('agent_id')
             if agent_filter:
                 tasks = [t for t in tasks if t.get('agent_id') == agent_filter]
@@ -6943,7 +6949,9 @@ class JaegerGatewayApp:
     async def handle_task(self, request: web.Request) -> web.Response:
         task = self.task_owner.store.get_task(request.match_info['id'])
         from jaeger_ai.core.tasks.presentation import view
-        return web.json_response(view(self, task) if task else {'error': 'Task not found'}, status=200 if task else 404)
+        if not task:
+            return web.json_response({'error': 'Task not found'}, status=404)
+        return web.json_response({**view(self, task), 'handoff_id': self.store.handoff_for_task(request.match_info['id'])})
 
     async def handle_task_presentation(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.tasks.presentation import change
