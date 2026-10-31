@@ -33,7 +33,7 @@ describe("Settings sheet", () => {
   it("has Grok's sidebar of tabs, switches pages, and only real settings (theme, stream style, uploads)", async () => {
     await mount(<SettingsDialog open onClose={() => {}} capabilities={{ voice: true, dictation: true, voiceChat: false }} />);
     const tabs = [...document.querySelectorAll(".jg-sheet__tab")].map((t) => t.textContent!.replace(/[\uE000-\uF8FF]/g, ""));
-    expect(tabs).toEqual(["General", "Voice", "Agents", "Connection", "About"]);
+    expect(tabs).toEqual(["General", "Voice", "Agents", "Connection", "Providers", "About"]);
     const theme = document.querySelector<HTMLSelectElement>('select[aria-label="Theme"]')!;
     await act(async () => { theme.value = "dark"; theme.dispatchEvent(new Event("change", { bubbles: true })); });
     expect(localStorage.getItem("aether-appearance")).toBe("dark");

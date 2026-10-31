@@ -282,3 +282,15 @@ html:not([data-jaeger-host="macos"]) .app-window .jg-traffic-lights { display: n
 .jg-cmp__run span, .jg-cmp__run small { font-size: var(--jg-text-caption); color: var(--jg-color-text-tertiary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 1100px) { .jg-cmp__layout { grid-template-columns: 1fr; } .jg-compare[data-count="3"] { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 700px) { .jg-compare[data-count] { grid-template-columns: 1fr; } .jg-cmp__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .jg-models__group .jg-table th:nth-child(3), .jg-models__group .jg-table td:nth-child(3) { display: none; } }
+
+/* Settings → Providers */
+.jg-prov { display: grid; gap: var(--jg-space-5); }
+.jg-prov__head { display: flex; align-items: center; justify-content: space-between; }
+.jg-prov__card { display: grid; gap: var(--jg-space-2); margin-top: var(--jg-space-3); }
+.jg-prov__card header { display: flex; align-items: center; gap: var(--jg-space-2); }
+.jg-prov__toggle { margin-left: auto; }
+.jg-prov__card code { font-size: var(--jg-text-caption); word-break: break-all; }
+.jg-prov__models { border: 0; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: var(--jg-space-2) var(--jg-space-4); }
+.jg-prov__models legend { font-size: var(--jg-text-caption); color: var(--jg-color-text-tertiary); margin-bottom: var(--jg-space-1); }
+.jg-prov__models small { color: var(--jg-color-text-tertiary); }
+.jg-models__cli .jg-u-note { padding: 0 var(--jg-space-4) var(--jg-space-3); margin: 0; }
