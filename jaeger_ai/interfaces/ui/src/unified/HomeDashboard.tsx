@@ -157,7 +157,7 @@ export function HomeDashboard({ source, store, onNavigate }: { source: JaegerSou
               <span className="jg-u-row__text"><strong>{label(a)}</strong><span>{statusOf(a.id) ?? "idle"}</span></span>
             </button></li>))}
         </ul>
-        {!agents.length && (store.loading ? <SkeletonRows /> : <Empty title="No agents yet" action={<button type="button" className="jg-u-btn" onClick={() => onNavigate("/characters")}>Create one</button>} />)}
+        {!agents.length && (store.loading ? <SkeletonRows /> : <Empty title="No agents yet" action={<button type="button" className="jg-u-btn" onClick={() => onNavigate("/agents/characters")}>Create one</button>} />)}
       </>) },
     tasks: { title: "Tasks", body: (
       <>
@@ -165,7 +165,7 @@ export function HomeDashboard({ source, store, onNavigate }: { source: JaegerSou
         <Sparkline values={taskSeries} label="Open tasks" />
         <ul className="jg-u-list">
           {openTasks.slice(0, 4).map((t) => (
-            <li key={t.task_id}><button type="button" className="jg-u-row" onClick={() => onNavigate(`/tasks?task=${encodeURIComponent(t.task_id)}`)}>
+            <li key={t.task_id}><button type="button" className="jg-u-row" onClick={() => onNavigate(`/work/tasks?task=${encodeURIComponent(t.task_id)}`)}>
               <span className="jg-u-row__text"><strong>{t.goal || t.task_id}</strong><span>{[t.state, name(t.agent_id ?? t.owning_agent)].filter(Boolean).join(" · ")}</span></span>
             </button></li>))}
         </ul>
@@ -208,9 +208,9 @@ export function HomeDashboard({ source, store, onNavigate }: { source: JaegerSou
         <Tile icon={<Globe size={18} />} title="Tailscale" value={!ts ? "Checking…" : !ts.available ? "Not available" : `${ts.online ? "Online" : ts.state ?? "Offline"} · ${ts.peers_online ?? 0}/${ts.peers ?? 0} peers`} tone={ts?.available ? (ts.online ? "ok" : "warn") : undefined} hint={ts?.host ? `This Mac: ${ts.host} (read-only)` : "Read-only"} />
         <Tile icon={<Moon size={18} />} title="Focus" value={!source.notifications ? "Unavailable" : !prefs ? "…" : focusOn ? "On · notifications paused" : "Off"} on={focusOn} onClick={source.notifications && prefs ? () => void toggleFocus() : undefined} />
         <Tile icon={<Mic size={18} />} title="Voice" value="Voice settings" onClick={() => onNavigate("/settings/voice")} />
-        <Tile icon={<Sparkles size={18} />} title="Approvals" value={`${pendingCount + needsYou.length} need you`} tone={pendingCount + needsYou.length ? "warn" : "ok"} onClick={() => onNavigate("/tasks?filter=needs")} />
+        <Tile icon={<Sparkles size={18} />} title="Approvals" value={`${pendingCount + needsYou.length} need you`} tone={pendingCount + needsYou.length ? "warn" : "ok"} onClick={() => onNavigate("/work/tasks?filter=needs")} />
         <Tile icon={<MessageSquare size={18} />} title="New chat" value="Talk to Jaeger" onClick={() => chat()} />
-        <Tile icon={<Cloud size={18} />} title="New agent" value="From a character" onClick={() => onNavigate("/characters")} />
+        <Tile icon={<Cloud size={18} />} title="New agent" value="From a character" onClick={() => onNavigate("/agents/characters")} />
       </section>
 
       <div className="jg-home__grid" data-editing={editing || undefined}>

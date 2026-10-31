@@ -49,7 +49,7 @@ export function TasksWorkspace({ source, agents, params, onNavigate }: { source:
           </select>
           <Segmented label="Status" value={status} onChange={setStatus} options={[{ value: "all", label: "All" }, { value: "needs", label: "Needs you" }, { value: "active", label: "Active" }, { value: "finished", label: "Finished" }]} />
           <Segmented label="View" value={view} onChange={setView} options={[{ value: "board", label: "Board" }, { value: "list", label: "List" }]} />
-          <button type="button" className="jg-u-btn" onClick={() => onNavigate("/tasks/gallery")}>Gallery</button>
+          <button type="button" className="jg-u-btn" onClick={() => onNavigate("/work/tasks/gallery")}>Gallery</button>
           {source.taskActions && source.agentHome && <button type="button" className="jg-u-btn jg-u-btn--primary" aria-pressed={composer} onClick={() => setComposer((v) => !v)}>{composer ? "Close" : "New task"}</button>}
         </div>
       </header>

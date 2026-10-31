@@ -51,7 +51,7 @@ export function ResearchPage({ source, agents, onNavigate }: { source: JaegerSou
   };
   const act = async (fn: () => Promise<void>, ok: string) => { setBusy(true); try { await fn(); toast(ok); await load(); } catch (e) { toast((e as Error).message, "error"); } finally { setBusy(false); } };
   const saveDoc = async (t: Task) => {
-    try { const d = await sendJson<{ id: string }>("POST", "/v1/documents", { title: `Research: ${question(t)}`.slice(0, 200), body: resultText(t.result) }); toast("Saved to Documents"); onNavigate(`/documents?doc=${d.id}`); }
+    try { const d = await sendJson<{ id: string }>("POST", "/v1/documents", { title: `Research: ${question(t)}`.slice(0, 200), body: resultText(t.result) }); toast("Saved to Documents"); onNavigate(`/research/documents?doc=${d.id}`); }
     catch (e) { toast((e as Error).message, "error"); }
   };
   return (
@@ -87,7 +87,7 @@ export function ResearchPage({ source, agents, onNavigate }: { source: JaegerSou
               {isProposal(task) && source.taskActions && typeof task.updated_at === "number" && <button type="button" className="jg-u-btn jg-u-btn--primary" disabled={busy} onClick={() => void act(() => source.taskActions!.approve(task.task_id, task.updated_at!), "Approved — research started")}>Approve &amp; start</button>}
               {!["done", "failed", "cancelled"].includes(String(task.state)) && source.taskActions && <button type="button" className="jg-u-btn jg-u-btn--danger" disabled={busy} onClick={() => void act(() => source.taskActions!.cancel(task.task_id), "Cancellation requested")}>Cancel</button>}
               {task.result != null && <button type="button" className="jg-u-btn" onClick={() => void saveDoc(task)}>Save to Documents</button>}
-              <button type="button" className="jg-u-btn" onClick={() => onNavigate(`/tasks?task=${encodeURIComponent(task.task_id)}`)}>Open task</button>
+              <button type="button" className="jg-u-btn" onClick={() => onNavigate(`/work/tasks?task=${encodeURIComponent(task.task_id)}`)}>Open task</button>
             </div>
             {task.error && <p className="jg-u-error">{task.error}</p>}
             {task.result != null ? <div className="jg-research__report"><Markdown text={resultText(task.result)} /></div>

@@ -17,7 +17,7 @@ const flush = async (fn: () => void = () => {}) => act(async () => { fn(); await
 const settle = async () => {
   for (let i = 0; i < 80; i++) {
     await act(async () => { await new Promise((r) => setTimeout(r, 25)); });
-    if (!document.querySelector(".app-window__page--active > .jg-u-page > [role=status][aria-label=Loading]")) break;
+    if (!document.querySelector(".app-window__page--active .jg-tabbed__pane:not([hidden]) > .jg-u-page > [role=status][aria-label=Loading], .app-window__page--active > .jg-u-page > [role=status][aria-label=Loading]")) break;
   }
   await flush();
 };
@@ -32,17 +32,41 @@ async function mount(path: string, source = new MockSource()) {
   return source;
 }
 
-it("opens the page the URL names and follows navigation and back/forward", async () => {
+const subtab = () => document.querySelector('.app-window__page--active .jg-subtabs [role=tab][aria-selected=true]')?.textContent;
+
+it("opens the page the URL names, redirects retired paths to sub-tabs and follows back/forward", async () => {
   await mount("/characters");
-  expect(front()).toBe("Characters");
+  expect(location.pathname).toBe("/agents/characters");
+  expect(front()).toBe("Agents");
+  expect(subtab()).toBe("Characters");
   expect(document.body.textContent).toContain("Jarvis");
   await flush(() => navigate("/agents"));
   await settle();
   expect(location.pathname).toBe("/agents");
-  expect(front()).toBe("Agents");
+  expect(subtab()).toBe("Agents");
+  await flush(() => navigate("/compare"));
+  await settle();
+  expect(location.pathname).toBe("/models/compare");
+  expect(front()).toBe("Models");
+  expect(subtab()).toBe("Compare");
   await flush(() => { history.back(); });
   await flush(() => dispatchEvent(new PopStateEvent("popstate")));
-  expect(["Characters", "Agents"]).toContain(front());
+  expect(["Agents", "Models"]).toContain(front());
+});
+
+it("switches sub-tabs through the URL and keeps the sub-tab bar consistent", async () => {
+  await mount("/work");
+  expect(subtab()).toBe("Pipeline");
+  const tabs = [...document.querySelectorAll(".app-window__page--active .jg-subtabs [role=tab]")].map((t) => t.textContent);
+  expect(tabs).toEqual(["Pipeline", "Tasks", "Production", "Calendar"]);
+  await flush(() => (document.querySelectorAll(".app-window__page--active .jg-subtabs [role=tab]")[3] as HTMLButtonElement).click());
+  await settle();
+  expect(location.pathname).toBe("/work/calendar");
+  expect(document.title).toBe("Calendar · Work · Jaeger");
+  await flush(() => navigate("/integrations"));
+  await settle();
+  expect(location.pathname).toBe("/settings/integrations");
+  expect(front()).toBe("Settings");
 });
 
 it("shows Settings as a grouped page and deep-links a tab", async () => {
@@ -53,11 +77,12 @@ it("shows Settings as a grouped page and deep-links a tab", async () => {
   expect(document.querySelector(".jg-sheet__title")?.textContent).toBe("Voice");
 });
 
-it("lists every page in the dock and persists which pages are open", async () => {
+it("lists the nine tabs in the dock and persists which pages are open", async () => {
   await mount("/tasks");
+  expect(location.pathname).toBe("/work/tasks");
   const dock = [...document.querySelectorAll(".window-dock__label")].map((l) => l.textContent);
-  expect(dock).toEqual(["Home", "Chat", "Agents", "Tasks", "Research", "Documents", "Studio", "Compare", "Models", "Memory & Skills", "Integrations", "Calendar", "Characters", "Workspace", "Machine Control", "SharePoint", "Settings"]);
-  expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!).open).toContain("tasks");
+  expect(dock).toEqual(["Home", "Chat", "Agents", "Work", "Research", "Studio", "Models", "Machine", "Settings"]);
+  expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!).open).toContain("work");
 });
 
 it("Home shows the approvals section and the ⌘K palette offers pages and characters", async () => {
@@ -68,6 +93,8 @@ it("Home shows the approvals section and the ⌘K palette offers pages and chara
   await flush(() => dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true })));
   const rows = [...document.querySelectorAll(".jg-palette__label")].map((r) => r.textContent);
   expect(rows).toContain("Go to Characters");
+  expect(rows).toContain("Go to Compare");
+  expect(rows).toContain("Go to Work");
   expect(rows).toContain("New agent: Jarvis");
 });
 

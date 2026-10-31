@@ -18,6 +18,6 @@ describe("character roster", () => {
     expect(list.querySelectorAll("li")).toHaveLength(20);
     for (const n of NAMES) expect(screen.getAllByText(n).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByTitle(/^Jarvis/));
-    expect(go).toHaveBeenCalledWith("/characters?character=jarvis");
+    expect(go).toHaveBeenCalledWith("/agents/characters?character=jarvis");
   });
 });

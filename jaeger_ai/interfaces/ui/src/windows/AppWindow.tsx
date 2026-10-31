@@ -2,12 +2,14 @@
  * AppWindow — the one Jaeger shell (unified UI, Jenkins Robotics 2026-10-30).
  *
  * The Windows UI's dock is the frame; every feature is a dock page at a real route
- * (/, /chat, /agents, /characters, /tasks, /machine, /sharepoint, /workspace, /settings).
+ * Nine tabs: Home, Chat, Agents, Work, Research, Studio, Models, Machine, Settings. Merged tabs
+ * carry sub-tabs at /<tab>/<sub> (e.g. /work/calendar); retired paths (/tasks, /compare …) redirect.
  * Open pages stay mounted (chat streams, drafts and approvals keep running while you look
  * elsewhere); the URL decides which one is in front. ⌘K opens the one command palette,
  * ⌘, opens Settings, and pending approvals are reachable from every page. On a phone or
  * narrow window the dock becomes a bottom tab bar.
  */
+import type React from 'react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import type { JaegerSource } from '../api/source'
 import { useWindowManager, WINDOW_DEFINITIONS, type WindowId } from './WindowManager'
@@ -17,14 +19,14 @@ import { visible } from '../agents/agentsLogic'
 import { JumpTo, type JumpAction } from '../agents/JumpTo'
 import { CHARACTERS } from '../components/CharacterLibrary'
 import { usePhone } from '../phone/usePhone'
-import { navigate, useRoute, PAGES } from '../shell/router'
+import { navigate, useRoute, PAGES, SUBTABS, pathOf, type PageId } from '../shell/router'
 import { isSettingsTab, type Tab as SettingsTab } from '../settings/SettingsDialog'
 import { HomeDashboard } from '../unified/HomeDashboard'
 import { ApprovalTray } from '../unified/ApprovalTray'
 import './windows.css'
 import '../unified/unified.css'
 import '../unified/design.css'
-import { ToastProvider, SkeletonRows } from '../unified/ui'
+import { ToastProvider, SkeletonRows, TabbedPage } from '../unified/ui'
 
 // Route-level code splitting: every page but Home loads on first open.
 const App = lazy(() => import('../App').then((m) => ({ default: m.App })))
@@ -41,8 +43,10 @@ const ComparePage = lazy(() => import('../unified/ComparePage').then((m) => ({ d
 const ResearchPage = lazy(() => import('../unified/ResearchPage').then((m) => ({ default: m.ResearchPage })))
 const DocumentsPage = lazy(() => import('../unified/DocumentsPage').then((m) => ({ default: m.DocumentsPage })))
 const KnowledgePage = lazy(() => import('../unified/KnowledgePage').then((m) => ({ default: m.KnowledgePage })))
-const IntegrationsPage = lazy(() => import('../unified/IntegrationsPage').then((m) => ({ default: m.IntegrationsPage })))
 const CalendarPage = lazy(() => import('../unified/CalendarPage').then((m) => ({ default: m.CalendarPage })))
+const PipelinePage = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.PipelinePage })))
+const ProductionPage = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.ProductionPage })))
+const TaskBanner = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.TaskBanner })))
 const PageFallback = () => <div className="jg-u-page"><SkeletonRows n={6} /></div>
 
 export function AppWindow({ source }: { source: JaegerSource }) {
@@ -55,8 +59,9 @@ export function AppWindow({ source }: { source: JaegerSource }) {
   const go = useCallback((to: string) => navigate(to), [])
 
   useEffect(() => {
-    document.title = `${WINDOW_DEFINITIONS[active].title} · Jaeger`
-  }, [active])
+    const sub = SUBTABS[active]?.find((t) => t.id === route.sub)
+    document.title = `${sub && sub.id !== SUBTABS[active]![0].id ? `${sub.title} · ` : ''}${WINDOW_DEFINITIONS[active].title} · Jaeger`
+  }, [active, route.sub])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -67,6 +72,10 @@ export function AppWindow({ source }: { source: JaegerSource }) {
     return () => removeEventListener('keydown', onKey)
   }, [go, active])
 
+  // Each merged tab remembers the sub-tab you were last on (dock click returns there).
+  const [lastSub, setLastSub] = useState<Partial<Record<PageId, string>>>({})
+  useEffect(() => { if (SUBTABS[active]) setLastSub((m) => (m[active] === route.sub ? m : { ...m, [active]: route.sub })) }, [active, route.sub])
+
   const close = (id: WindowId) => {
     closeWindow(id)
     if (id === active) go('/')
@@ -75,34 +84,57 @@ export function AppWindow({ source }: { source: JaegerSource }) {
   const settingsTab: SettingsTab | undefined = isSettingsTab(route.rest) ? route.rest : undefined
   const paletteActions = useMemo<JumpAction[]>(() => [
     { id: 'new', label: 'New chat', shortcut: '⌘N', run: () => go('/chat') },
-    ...PAGES.map((p) => ({ id: `page:${p}`, label: `Go to ${WINDOW_DEFINITIONS[p].title}`, hint: WINDOW_DEFINITIONS[p].description, shortcut: p === 'settings' ? '⌘,' : undefined, run: () => go(p === 'home' ? '/' : `/${p}`) })),
+    ...PAGES.map((p) => ({ id: `page:${p}`, label: `Go to ${WINDOW_DEFINITIONS[p].title}`, hint: WINDOW_DEFINITIONS[p].description, shortcut: p === 'settings' ? '⌘,' : undefined, run: () => go(pathOf(p)) })),
+    ...PAGES.flatMap((p) => (SUBTABS[p] ?? []).slice(1).map((t) => ({ id: `sub:${p}:${t.id}`, label: `Go to ${t.title}`, hint: `${WINDOW_DEFINITIONS[p].title} › ${t.title}`, run: () => go(pathOf(p, t.id)) }))),
+    { id: 'settings:integrations', label: 'Integrations', hint: 'Settings → Integrations', run: () => go('/settings/integrations') },
     { id: 'settings:agents', label: 'Manage agents', hint: 'Settings → Agents', run: () => go('/settings/agents') },
     { id: 'settings:general', label: 'Appearance and text size', hint: 'Settings → General', run: () => go('/settings/general') },
-    ...CHARACTERS.map((c) => ({ id: `character:${c.id}`, label: `New agent: ${c.name}`, hint: c.role, run: () => go(`/characters?character=${encodeURIComponent(c.id)}`) })),
+    ...CHARACTERS.map((c) => ({ id: `character:${c.id}`, label: `New agent: ${c.name}`, hint: c.role, run: () => go(`/agents/characters?character=${encodeURIComponent(c.id)}`) })),
   ], [go])
+
+  // Sub-tab of a merged page: the route's sub when that page is in front, else its default.
+  const subOf = (p: PageId) => (active === p ? route.sub : SUBTABS[p]![0].id)
+  const paramsOf = (p: PageId) => (active === p ? route.params : new URLSearchParams())
+  const tabbed = (p: PageId, body: (sub: string) => React.ReactNode, banner?: React.ReactNode) => (
+    <TabbedPage label={`${WINDOW_DEFINITIONS[p].title} sections`} tabs={SUBTABS[p]!} active={subOf(p)}
+      onPick={(t) => go(pathOf(p, t))} render={(t) => <Suspense fallback={<PageFallback />}>{body(t)}</Suspense>} banner={banner} />
+  )
+  const taskFor = (p: PageId, sub?: string) => (active === p && (!sub || route.sub === sub) ? route.params.get('task') : null)
+  const banner = (p: PageId, stage: 'research' | 'studio' | 'production', sub?: string) => {
+    const t = taskFor(p, sub)
+    return t ? <Suspense fallback={null}><TaskBanner source={source} taskId={t} stage={stage} onNavigate={go} clearTo={pathOf(p, sub)} /></Suspense> : undefined
+  }
 
   const render = (id: WindowId) => {
     switch (id) {
-      case 'home': return <HomeDashboard source={source} store={store} onNavigate={go} />
-      case 'agents': return <AgentsRoster source={source} store={store} refresh={store.refresh} onNavigate={go} />
-      case 'characters': return <CharactersPage characterId={active === 'characters' ? route.params.get('character') : null} source={source} refresh={store.refresh} onNavigate={go} />
-      case 'tasks': return route.rest === 'gallery'
-        ? <div className="jg-u-page jg-u-page--flush">
-            <nav className="jg-u-subnav" aria-label="Tasks views"><button type="button" onClick={() => go('/tasks')}>Board</button><button type="button" aria-current="page">Gallery</button></nav>
-            <TasksPage source={source} />
-          </div>
-        : <TasksWorkspace source={source} agents={store.agents} params={route.params} onNavigate={go} />
+      case 'home': return tabbed('home', (t) => t === 'widgets' ? <WorkspacePage source={source} /> : <HomeDashboard source={source} store={store} onNavigate={go} />)
+      case 'agents': return tabbed('agents', (t) => t === 'characters'
+        ? <CharactersPage characterId={active === 'agents' && route.sub === 'characters' ? route.params.get('character') : null} source={source} refresh={store.refresh} onNavigate={go} />
+        : <AgentsRoster source={source} store={store} refresh={store.refresh} onNavigate={go} />)
+      case 'work': return tabbed('work', (t) => {
+        switch (t) {
+          case 'tasks': return active === 'work' && route.sub === 'tasks' && route.rest === 'gallery'
+            ? <div className="jg-u-page jg-u-page--flush">
+                <nav className="jg-u-subnav" aria-label="Tasks views"><button type="button" onClick={() => go('/work/tasks')}>Board</button><button type="button" aria-current="page">Gallery</button></nav>
+                <TasksPage source={source} />
+              </div>
+            : <TasksWorkspace source={source} agents={store.agents} params={paramsOf('work')} onNavigate={go} />
+          case 'production': return <ProductionPage source={source} params={active === 'work' && route.sub === 'production' ? route.params : new URLSearchParams()} onNavigate={go} />
+          case 'calendar': return <CalendarPage source={source} onNavigate={go} />
+          default: return <PipelinePage source={source} params={active === 'work' && route.sub === 'pipeline' ? route.params : new URLSearchParams()} onNavigate={go} />
+        }
+      }, banner('work', 'production', 'production'))
+      case 'research': return tabbed('research', (t) => {
+        switch (t) {
+          case 'documents': return <DocumentsPage params={active === 'research' && route.sub === 'documents' ? route.params : new URLSearchParams()} />
+          case 'knowledge': return <KnowledgePage source={source} agents={store.agents} />
+          case 'sharepoint': return <SharePointPanel source={source} />
+          default: return <ResearchPage source={source} agents={store.agents} onNavigate={go} />
+        }
+      }, (() => { const t = taskFor('research'); return t ? <Suspense fallback={null}><TaskBanner source={source} taskId={t} stage="research" onNavigate={go} clearTo={pathOf('research', route.sub)} /></Suspense> : undefined })())
+      case 'models': return tabbed('models', (t) => t === 'compare' ? <ComparePage /> : <ModelsPage />)
       case 'machine': return <MachineControlPanel source={source} />
-      case 'sharepoint': return <SharePointPanel source={source} />
-      case 'workspace': return <WorkspacePage source={source} />
-      case 'models': return <ModelsPage />
-      case 'compare': return <ComparePage />
-      case 'research': return <ResearchPage source={source} agents={store.agents} onNavigate={go} />
-      case 'documents': return <DocumentsPage params={route.params} />
-      case 'knowledge': return <KnowledgePage source={source} agents={store.agents} />
-      case 'integrations': return <IntegrationsPage source={source} />
-      case 'calendar': return <CalendarPage source={source} onNavigate={go} />
-      case 'studio': return <StudioPage source={source} agents={store.agents} onNavigate={go} />
+      case 'studio': return <div className="jg-tabbed">{banner('studio', 'studio')}<div className="jg-tabbed__body"><StudioPage source={source} agents={store.agents} onNavigate={go} /></div></div>
       default: return null
     }
   }
@@ -134,7 +166,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
       <WindowDock
         windows={windows}
         activeWindowId={active}
-        onFocusWindow={(id) => go(id === 'home' ? '/' : id === 'settings' && settingsTab ? `/settings/${settingsTab}` : `/${id}`)}
+        onFocusWindow={(id) => go(id === 'settings' && settingsTab ? `/settings/${settingsTab}` : id === active ? pathOf(id) : pathOf(id, lastSub[id]))}
         onCloseWindow={close}
         availableWindows={dockWindows}
         phone={phone}
