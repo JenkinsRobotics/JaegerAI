@@ -23,7 +23,9 @@ _CALLER_STATUS = {"turn.start": "running", "turn.finish": "completed", "turn.fai
                   "turn.cancelled": "cancelled", "turn.unknown": "execution_unknown"}
 #: Agent-bridge inbox handoffs between apps (handoff_task to a peer, post_result back).
 BRIDGE_KINDS = ("handoff.sent", "handoff.result")
-ALL_KINDS = KINDS + CALLER_KINDS + BRIDGE_KINDS
+#: Shared web search calls (POST /v1/search, /v1/fetch), attributed to the caller.
+SEARCH_KINDS = ("search.query", "search.fetch")
+ALL_KINDS = KINDS + CALLER_KINDS + BRIDGE_KINDS + SEARCH_KINDS
 MAX_ROWS = 50_000
 MAX_LIMIT = 200
 _ready: set[int] = set()
@@ -115,6 +117,9 @@ def classify(kind: str, data: dict) -> dict[str, Any]:
             "project_id": data.get("project_id"),
             "session_id": (h.get("result") or {}).get("worker_session_id") or data.get("session_id")}
     caller = data.get("caller") if isinstance(data.get("caller"), dict) else {}
+    if kind in SEARCH_KINDS:
+        refs.update(caller_id=caller.get("caller_id"), caller_kind=caller.get("caller_kind"), session_id=None)
+        return {"agent_id": None, "actor_id": caller.get("caller_id"), "refs": refs, "entity": None}
     if kind in BRIDGE_KINDS:
         refs.update(handoff_id=data.get("handoff_id"), thread=data.get("thread"), message_id=data.get("message_id"),
                     caller_id=caller.get("caller_id"), caller_kind=caller.get("caller_kind"),
@@ -163,7 +168,7 @@ def record(conn: sqlite3.Connection, event_id: int, session_id: str, kind: str, 
         if tag is None:
             return
         data = {**data, "caller": tag}
-    elif kind not in KINDS and kind not in BRIDGE_KINDS:
+    elif kind not in KINDS and kind not in BRIDGE_KINDS and kind not in SEARCH_KINDS:
         return
     c = classify(kind, data)
     dedupe = f"{kind}|{c['entity']}" if c["entity"] else f"{kind}|#{event_id}"
@@ -185,6 +190,11 @@ def _summary(kind: str, data: dict) -> str:
         what = f"goal {caller.get('goal_id')}" if caller.get("goal_id") else "session turn"
         text = f": {str(data.get('text') or '')[:120]}" if kind == "turn.start" and data.get("text") else ""
         return f"{caller.get('caller_id')} ({caller.get('caller_kind')}) {what} {caller.get('status')}{text}"
+    if kind in SEARCH_KINDS:
+        who = (data.get("caller") or {}).get("caller_id") if isinstance(data.get("caller"), dict) else None
+        if kind == "search.query":
+            return f"{who} searched: {str(data.get('query') or '')[:120]} ({data.get('results')} results{', cached' if data.get('cached') else ''})"
+        return f"{who} fetched {str(data.get('url') or '')[:160]}{' (cached)' if data.get('cached') else ''}"
     if kind in BRIDGE_KINDS:
         frm = (data.get("caller") or {}).get("caller_id") if isinstance(data.get("caller"), dict) else None
         title = f": {str(data.get('title') or '')[:120]}" if data.get("title") else ""

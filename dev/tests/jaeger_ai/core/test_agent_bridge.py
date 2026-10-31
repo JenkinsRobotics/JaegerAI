@@ -682,7 +682,7 @@ async def test_dedicated_callers_cannot_access_each_others_private_work(bridge):
                 )
             ).status == 403
     for caller in ("ares", "grokbot"):
-        assert caller_auth.CALLERS[caller].scopes == frozenset({"read", "turn"})
+        assert caller_auth.CALLERS[caller].scopes == frozenset({"read", "turn", "search"})
         for route in ("/v1/approvals/nope", "/v1/tasks/nope/approve"):
             assert (
                 await client.post(
