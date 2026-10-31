@@ -46,6 +46,7 @@ _deps: dict = {}
 _locks: dict = {}
 _running: dict = {}
 _watchers: dict = {}
+_paused: dict = {}
 _glock = threading.Lock()
 
 
@@ -271,6 +272,33 @@ def _list_ytdlp(lid: str, limit: int) -> dict:
     return {"title": d.get("title"), "channel": d.get("channel") or d.get("uploader"), "item_count": d.get("playlist_count"), "entries": ents[:limit], "listing": "yt-dlp"}
 
 
+_CHAN = re.compile(r"^/(@[A-Za-z0-9._-]{2,100}|channel/UC[A-Za-z0-9_-]{22}|c/[A-Za-z0-9._-]+|user/[A-Za-z0-9._-]+)(/videos|/shorts|/streams|/featured)?/?$")
+
+
+def resolve_list(url: str) -> str:
+    """Playlist URL -> list id. Channel URL (@handle, /channel/UC..., /c/, /user/) -> its uploads playlist (UU...)."""
+    u = urlparse(str(url).strip())
+    if u.scheme == "https" and u.hostname in ("www.youtube.com", "youtube.com", "m.youtube.com") and not parse_qs(u.query).get("list"):
+        m = _CHAN.match(u.path)
+        if m:
+            ch = m.group(1)
+            if ch.startswith("channel/"):
+                return "UU" + ch[len("channel/") + 2:]
+            key = _api_key()
+            if key and ch.startswith("@"):
+                with contextlib.suppress(Exception):
+                    it = _http_json("https://www.googleapis.com/youtube/v3/channels?" + urllib.parse.urlencode({"part": "contentDetails", "forHandle": ch, "key": key})).get("items") or []
+                    if it:
+                        return it[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+            r = _run(["yt-dlp", "--flat-playlist", "-J", "--no-warnings", "--playlist-end", "1", f"https://www.youtube.com/{ch}/videos"], timeout=120)
+            with contextlib.suppress(ValueError):
+                cid = json.loads(r.stdout or "{}").get("channel_id") or ""
+                if cid.startswith("UC"):
+                    return "UU" + cid[2:]
+            raise YtError(422, "could not resolve the channel's uploads playlist")
+    return playlist_id(url)
+
+
 def playlist_id(url: str) -> str:
     u = urlparse(str(url).strip())
     if u.scheme != "https" or u.hostname not in ("www.youtube.com", "youtube.com", "m.youtube.com", "music.youtube.com"):
@@ -287,7 +315,7 @@ def _video(e: dict) -> dict:
 
 
 def ingest(body: dict) -> dict:
-    lid = playlist_id(body.get("playlist_url", ""))
+    lid = resolve_list(body.get("playlist_url") or body.get("url") or "")
     url = f"https://www.youtube.com/playlist?list={lid}"
     tid = str(body.get("task_id") or f"yt:{lid}")
     if not re.match(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$", tid):
@@ -332,6 +360,24 @@ def ingest(body: dict) -> dict:
 
 
 # -- phase 1 steps --
+
+CLIENTS = (None, "mweb", "web_safari")
+
+
+def _ytdlp_dl(fmt: str, out_tmpl: str, url: str, glob_dir: Path, glob_pat: str, timeout: float):
+    """yt-dlp media download; on 403/format errors retry with other player clients (YouTube often 403s the default)."""
+    errs = []
+    for c in CLIENTS:
+        for f in glob_dir.glob(glob_pat):
+            f.unlink(missing_ok=True)
+        cmd = ["yt-dlp", "-f", fmt, "--no-playlist", "--no-warnings"] + (["--extractor-args", f"youtube:player_client={c}"] if c else []) + ["-o", out_tmpl, url]
+        r = _run(cmd, timeout=timeout)
+        got = next(iter(sorted(p for p in glob_dir.glob(glob_pat) if not p.name.endswith((".part", ".ytdl")))), None)
+        if r.returncode == 0 and got:
+            return got, c
+        errs.append(f"{c or 'default'}: {_last_line(r.stderr, 120)}")
+    raise RuntimeError("download failed (" + " | ".join(errs) + ")")
+
 
 def step_meta(tid: str, v: dict) -> dict:
     with _rm_slot("download", tid):
@@ -432,10 +478,7 @@ def step_transcript(tid: str, v: dict) -> dict:
     if not (_which("whisper-cli") and wm and _which("ffmpeg")):
         raise RuntimeError("no transcript: " + " | ".join(tried) + " | local whisper.cpp/ffmpeg unavailable")
     with _rm_slot("download", tid):
-        a = _run(["yt-dlp", "-f", "bestaudio/best", "--no-playlist", "--no-warnings", "-o", str(d / "audio.%(ext)s"), v["url"]], timeout=900)
-    src = next(iter(sorted(d.glob("audio.*"))), None)
-    if a.returncode != 0 or not src:
-        raise RuntimeError(f"audio download failed: {(a.stderr or '').strip()[-200:]}")
+        src, _client = _ytdlp_dl("bestaudio/best", str(d / "audio.%(ext)s"), v["url"], d, "audio.*", 900)
     wav = d / "audio16k.wav"
     try:
         c = _run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-ar", "16000", "-ac", "1", str(wav)], timeout=900)
@@ -489,12 +532,11 @@ def step_frames(tid: str, v: dict) -> dict:
     if not dur:
         _wj(d / "frames.json", {"skipped": "unknown duration", "frames": []})
         return {"skipped": "unknown duration"}
+    for f in ("ocr.json", "shot_notes.json", "audio.json"):
+        if ((_rj(d / f, {}) or {}).get("skipped") or "") == "frames failed":
+            (d / f).unlink(missing_ok=True)
     with _rm_slot("download", tid):
-        r = _run(["yt-dlp", "-f", "18/worst[ext=mp4][height>=240]/worst[ext=mp4]/worst", "--no-playlist", "--no-warnings",
-                  "-o", str(d / "lowres.%(ext)s"), v["url"]], timeout=1800)
-    vf = next(iter(sorted(d.glob("lowres.*"))), None)
-    if r.returncode != 0 or not vf:
-        raise RuntimeError(f"low-res download failed: {(r.stderr or '').strip()[-200:]}")
+        vf, client = _ytdlp_dl("18/bv*[height<=480][ext=mp4]+ba/b[height<=480]/worst", str(d / "lowres.%(ext)s"), v["url"], d, "lowres.*", 1800)
     try:
         cuts = _scene_cuts(vf, tid)
         later = [c for c in cuts if c > 1.0]
@@ -520,7 +562,8 @@ def step_frames(tid: str, v: dict) -> dict:
         raise RuntimeError("ffmpeg produced no frames")
     mins = dur / 60
     _wj(d / "cuts.json", {"threshold": SCENE_THRESHOLD, "cuts": cuts, "count": len(cuts), "cuts_per_minute": round(len(cuts) / mins, 2) if mins else None,
-                          "avg_shot_s": round(dur / (len(cuts) + 1), 2), "frames_sampled": len(frames),
+                          "avg_shot_s": round(dur / (len(cuts) + 1), 2), "frames_sampled": len(frames), "download_client": client or "default",
+                          "shots": [{"t": a, "shot_len_s": round(b - a, 2)} for a, b in zip([0.0] + cuts, cuts + [float(dur)])],
                           "sampled_from": "all cuts" if len(points) <= MAX_FRAMES else f"{MAX_FRAMES} of {len(points)} evenly"})
     _wj(d / "sequences.json", seqs)
     _wj(d / "frames.json", {"frames": frames})
@@ -600,6 +643,7 @@ def step_shot_notes(tid: str, v: dict, vlm) -> dict:
         imgs = [base64.b64encode((d / f).read_bytes()).decode() for f in s["files"]]
         with _rm_slot("vlm", tid, model=vlm):
             txt = _d("vision")(vlm, SHOT_PROMPT.format(n=len(imgs)), imgs)
+            _tokens(tid, "vlm")
         notes.append({"t": s["t"], "note": " ".join(str(txt).split())[:800]})
     _wj(d / "shot_notes.json", {"model": vlm, "notes": notes})
     return {"model": vlm, "count": len(notes)}
@@ -647,11 +691,28 @@ def extract_json(text: str):
     raise ValueError("model did not return JSON")
 
 
-def _ask_json(model: str, prompt: str, tid: str = "") -> dict:
+def _tokens(tid: str, kind: str) -> None:
+    """Record Ollama token counts (prompt_eval_count/eval_count) of the last call on this thread."""
+    u = _deps.get("usage")
+    got = u() if u else None
+    if not tid or not got:
+        return
+
+    def f(j):
+        t = j.setdefault("tokens", {}).setdefault(kind, {"calls": 0, "prompt": 0, "output": 0})
+        t["calls"] += 1
+        t["prompt"] += int(got.get("prompt") or 0)
+        t["output"] += int(got.get("output") or 0)
+    with contextlib.suppress(Exception):
+        _update(tid, f)
+
+
+def _ask_json(model: str, prompt: str, tid: str = "", kind: str = "llm") -> dict:
     last = None
     for attempt in range(2):
         with _rm_slot("llm", tid, model=model):
             out = _d("llm")(model, prompt if attempt == 0 else prompt + "\n\nReturn ONLY a single valid JSON object. No prose, no code fences.")
+            _tokens(tid, kind)
         try:
             j = extract_json(out)
             if isinstance(j, dict):
@@ -747,11 +808,12 @@ TRANSCRIPT / NOTES ({tr.get('source')}):
     b = _ask_json(model, f"""Score and mine this YouTube video for Jenkins Robotics (a solo robotics/AI maker channel). Use ONLY the data. Return JSON:
  "scores": {{"channel_context": 1-5, "self_interest": 1-5, "style_copy": 1-5}}, "score_why": {{same keys: string}},
  "flags": {{"substance": bool, "hype": bool, "actionable": bool, "needs_visual_review": bool}}, "confidence": 0-1,
+ "metrics": {{ "pacing", "cut_rhythm", "retention_proxy", "text_on_screen", "hook", "cta_clarity": each {{"value": 1-5, "reason": string, "evidence_t": ["m:ss", ...]}} }},
  "channel_idea": string, "self_interest_action": string, "style_note": string, "key_insights": [string], "tools_detected": [string],
  "areas": {{ {", ".join(f'"{x}"' for x in AREAS)}: [2-5 of {{"technique": string, "detail": string, "why_it_matters": string,
    "apply_for_jr": string, "quote": exact short quote from transcript or "", "timestamp": "m:ss"}}] (use [] if the video has nothing for that area) }}
 {ctx}""", tid)
-    a.update({k: b.get(k) for k in ("scores", "score_why", "flags", "confidence", "channel_idea", "self_interest_action", "style_note", "key_insights", "tools_detected", "areas")})
+    a.update({k: b.get(k) for k in ("metrics", "scores", "score_why", "flags", "confidence", "channel_idea", "self_interest_action", "style_note", "key_insights", "tools_detected", "areas")})
     a["measured"] = facts
     a["_meta"] = {"provenance": "jaeger-youtube-research-v2", "model": model, "video_id": v["id"], "title": meta.get("title"),
                   "transcript_source": tr.get("source"), "shot_notes": shots != "(none)", "at": time.time()}
@@ -779,6 +841,8 @@ def _do_step(tid: str, v: dict, step: str, j: dict, force: set, stop) -> bool:
         return True
     if any(cur["steps"][h].get("status") == "error" for h in _HARD if STEPS.index(h) < STEPS.index(step)):
         return False
+    while _paused.get(tid) and not stop.is_set():
+        time.sleep(1)
     if stop.is_set():
         return False
     _set_step(tid, v["id"], step, "running")
@@ -814,12 +878,21 @@ def _job_thread(tid: str, force: set, with_style: bool, stop: threading.Event) -
             j = _job(tid)
             workers = IO_WORKERS if pi == 1 else 1
 
-            def per_video(v, steps=steps, j=j):
-                for s in steps:
-                    if not _do_step(tid, v, s, j, force, stop):
-                        return
+            claimed, cl_lock = set(), threading.Lock()
+
+            def worker(steps=steps, j=j, claimed=claimed, cl_lock=cl_lock):
+                while not stop.is_set():
+                    with cl_lock:  # current job order each time, so POST .../reorder takes effect for unstarted videos
+                        v = next((x for x in _job(tid)["videos"] if x["id"] not in claimed), None)
+                        if v is None:
+                            return
+                        claimed.add(v["id"])
+                    for s in steps:
+                        if not _do_step(tid, v, s, j, force, stop):
+                            break
             with ThreadPoolExecutor(max_workers=workers) as ex:
-                list(ex.map(per_video, j["videos"]))
+                for f in [ex.submit(worker) for _ in range(workers)]:
+                    f.result()
             if stop.is_set():
                 _update(tid, lambda j: j.update(state="cancelled"))
                 return
@@ -866,6 +939,25 @@ def start(tid: str, force=None, style_guide: bool = True, wait: bool = False) ->
     return {"started": True}
 
 
+def pause(tid: str, paused: bool = True) -> dict:
+    _job(tid)
+    _paused[tid] = bool(paused)
+    _update(tid, lambda j: j.update(paused=bool(paused)))
+    return {"paused": bool(paused), "note": "running steps finish; no new step starts while paused"}
+
+
+def reorder(tid: str, video_ids) -> dict:
+    if not isinstance(video_ids, list) or not all(isinstance(x, str) for x in video_ids):
+        raise YtError(400, "video_ids must be a list of video ids")
+
+    def f(j):
+        pos = {vid: i for i, vid in enumerate(video_ids)}
+        orig = {v["id"]: i for i, v in enumerate(j["videos"])}
+        j["videos"].sort(key=lambda v: pos.get(v["id"], len(pos) + orig[v["id"]]))
+    _update(tid, f)
+    return {"order": [v["id"] for v in _job(tid)["videos"]]}
+
+
 def cancel(tid: str) -> dict:
     with _glock:
         r = _running.get(tid)
@@ -883,6 +975,9 @@ def status(tid: str) -> dict:
     total = len(j["videos"]) * len(STEPS)
     fin = sum(1 for v in j["videos"] for s in v["steps"].values() if s.get("status") in ("done", "skipped", "error", "blocked"))
     j["running"] = running
+    j["paused"] = bool(_paused.get(tid))
+    if running and j["paused"]:
+        j["state"] = "paused"
     j["progress"] = {"steps_finished": fin, "steps_total": total,
                      "videos_analysed": sum(1 for v in j["videos"] if v["steps"]["analysis"].get("status") == "done"),
                      "videos_with_errors": sum(1 for v in j["videos"] if any(s.get("status") == "error" for s in v["steps"].values())),
@@ -907,10 +1002,10 @@ def list_jobs() -> list:
 
 # -- style guide --
 
-GUIDE_KEYS = ("voice_and_tone", "hooks", "structure_template", "pacing", "editing", "visuals", "sound", "titles_and_thumbnails", "calls_to_action", "dos", "donts", "example_lines")
+GUIDE_KEYS = ("text_styles", "music", "palette_notes", "voice_and_tone", "hooks", "structure_template", "pacing", "editing", "visuals", "sound", "titles_and_thumbnails", "calls_to_action", "dos", "donts", "example_lines")
 
 
-def style_prompt(analyses: list, channel) -> str:
+def style_prompt(analyses: list, channel, visual=None) -> str:
     compact = json.dumps([{k: a.get(k) for k in ANALYSIS_KEYS if k not in ("summary", "key_ideas")} | {"title": a["_meta"]["title"], "measured": a.get("measured"), "style_note": a.get("style_note")} for a in analyses], ensure_ascii=False)
     return f"""Below are per-video analyses (with MEASURED facts: wpm, cuts/min, LUFS, silences, OCR) of {len(analyses)} videos from "{channel or 'unknown'}".
 Write a reusable STYLE GUIDE. Generalise; cite measured ranges (e.g. cuts/min, wpm, LUFS) where they exist. Return JSON with keys:
@@ -918,9 +1013,11 @@ Write a reusable STYLE GUIDE. Generalise; cite measured ranges (e.g. cuts/min, w
  "structure_template": [{{"section": string, "share_pct": number, "purpose": string}}],
  "pacing": {{"target_wpm": number or null, "cuts_per_minute": string, "notes": string}}, "editing": [string], "visuals": [string], "sound": [string],
  "titles_and_thumbnails": {{"title_formulas": [string], "thumbnail_notes": string}},
- "calls_to_action": [string], "dos": [string], "donts": [string], "example_lines": [string]
+ "calls_to_action": [string], "dos": [string], "donts": [string], "example_lines": [string],
+ "text_styles": [{{"use": string, "look": string}}], "music": string, "palette_notes": string
+MEASURED VISUALS (palette from frames, on-screen text from OCR, music from librosa): {{visual}}
 ANALYSES:
-{_clip(compact, 17000)}"""
+{_clip(compact, 16000)}""".replace("{visual}", _clip(json.dumps(visual or {}), 1500))
 
 
 def _stats(used: list) -> dict:
@@ -939,6 +1036,13 @@ def render_guide_md(g: dict, job: dict, used: list) -> str:
     for k, s in (g.get("_measured") or {}).items():
         L.append(f"- **{k}**: median {s['median']} (range {s['min']}-{s['max']}, n={s['n']})")
     L.append("")
+    vis = g.get("_visual") or {}
+    if vis.get("palette"):
+        L += ["## Palette (measured from frames)", " ".join(f"`{c['hex']}` {round(c['share'] * 100)}%" for c in vis["palette"]), ""]
+    if vis.get("text"):
+        L += ["## On-screen text (measured from OCR)", "```json", json.dumps(vis["text"], indent=1), "```", ""]
+    if vis.get("music"):
+        L += ["## Music / sound (measured)", "```json", json.dumps(vis["music"], indent=1), "```", ""]
 
     def sec(title, val):
         if not val:
@@ -968,8 +1072,10 @@ def build_style_guide(tid: str, force: bool = False, model=None) -> dict:
         raise RuntimeError("no analysed videos yet")
     _update(tid, lambda x: x["style_guide"].update(status="running", error=None))
     m = model or j["model"]
-    g = _ask_json(m, style_prompt(used, j.get("channel")), tid)
+    vis = _visual_stats(tid, j)
+    g = _ask_json(m, style_prompt(used, j.get("channel"), vis), tid)
     g["_measured"] = _stats(used)
+    g["_visual"] = vis
     g["_meta"] = {"model": m, "videos": [a["_meta"]["video_id"] for a in used], "at": time.time()}
     md = render_guide_md(g, j, used)
     _wj(td / "style_guide.json", g)
@@ -1033,6 +1139,27 @@ def draft(tid: str, body: dict) -> dict:
     j = _job(tid)
     m = str(body.get("model") or j["model"])
     guide = {k: v for k, v in g.items() if not k.startswith("_meta")}
+    techs = body.get("techniques") or []
+    clips = body.get("clips") or []
+    length = body.get("length_s")
+    if not isinstance(techs, list) or not isinstance(clips, list) or len(techs) > 30 or len(clips) > 30:
+        raise YtError(400, "techniques and clips must be lists (max 30)")
+    lib = {t["id"]: t for t in techniques()["techniques"]}
+    tsel = [lib[t] if isinstance(t, str) and t in lib else t for t in techs]
+    csel = []
+    for c in clips:
+        if not isinstance(c, dict) or not _VID.match(str(c.get("video_id", ""))):
+            raise YtError(400, "clips need {video_id, t, t_end}")
+        tr = _rj(_vdir(tid, c["video_id"]) / "transcript.json", {}) or {}
+        t0, t1 = float(c.get("t") or 0), float(c.get("t_end") or (float(c.get("t") or 0) + 15))
+        csel.append({**c, "said": " ".join(x["text"] for x in tr.get("segments") or [] if t0 <= (x.get("start") or 0) <= t1)[:600]})
+    extra = ""
+    if tsel:
+        extra += "\nUSE THESE TECHNIQUES (in this order): " + _clip(json.dumps([{k: t.get(k) for k in ("name", "type", "description")} if isinstance(t, dict) else t for t in tsel], ensure_ascii=False), 3000)
+    if csel:
+        extra += "\nREFERENCE CLIPS (style to echo, do not copy words): " + _clip(json.dumps(csel, ensure_ascii=False), 3000)
+    if length:
+        extra += f"\nTARGET LENGTH: about {int(length)} seconds; est_seconds must add up to it."
     out = _ask_json(m, f"""{VOICE_RULES}
 Using this STYLE GUIDE, draft a new YouTube video on: "{topic}". Draft for review; it will not be published.
 Return JSON: "titles": [5 strings], "hook": string, "script": [{{"section": string, "est_seconds": number, "voiceover": string}}],
@@ -1040,8 +1167,9 @@ Return JSON: "titles": [5 strings], "hook": string, "script": [{{"section": stri
 "thumbnail_ideas": [{{"concept": string, "text": string, "composition": string}}], "call_to_action": string, "description": string,
 "chapters": [string], "tags": [string]
 STYLE GUIDE:
-{_clip(json.dumps(guide, ensure_ascii=False), 13000)}""", tid)
+{_clip(json.dumps(guide, ensure_ascii=False), 11000)}{extra}""", tid)
     out = enforce_seo(out)
+    out["_inputs"] = {"techniques": [t.get("id") if isinstance(t, dict) else t for t in tsel], "clips": clips, "length_s": length}
     did = time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:4]
     out["_meta"] = {"id": did, "topic": topic, "model": m, "at": time.time(), "style_guide_at": g["_meta"]["at"], "published": False}
     td = _tdir(tid) / "drafts"
@@ -1286,3 +1414,141 @@ def write_kb(tid: str) -> int:
     pids = set(_rj(kb / "processed_ids.json", []) or []) | {vid for vid, _, _ in index}
     _wj(kb / "processed_ids.json", sorted(pids))
     return written
+
+
+# -- spec API: preview/estimate, per-video detail, technique library --
+
+def _visual_stats(tid: str, j: dict) -> dict:
+    td = _tdir(tid)
+    frames = [str(td / v["id"] / f["file"]) for v in j["videos"] for f in ((_rj(td / v["id"] / "frames.json", {}) or {}).get("frames") or [])[::3]][:300]
+    out = {}
+    py = research_python()
+    if frames and py:
+        r = _run([py, str(TOOLS_DIR / "palette.py"), str(td / "palette.json")] + frames, timeout=600)
+        pal = _rj(td / "palette.json") if r.returncode == 0 else None
+        if pal:
+            out["palette"] = pal["palette"]
+    ocr = [(o, v["id"]) for v in j["videos"] for o in ((_rj(td / v["id"] / "ocr.json", {}) or {}).get("frames") or [])]
+    lines = [ln for o, _ in ocr for ln in o.get("lines") or []]
+    if ocr:
+        hs = sorted(ln["bbox"][3] for ln in lines if isinstance(ln.get("bbox"), list) and len(ln["bbox"]) == 4) if lines else []
+        ys = [ln["bbox"][1] for ln in lines if isinstance(ln.get("bbox"), list) and len(ln["bbox"]) == 4]
+        txt = [ln.get("text", "") for ln in lines]
+        spans = [s for v in j["videos"] for s in ocr_spans(tid, v["id"])]
+        out["text"] = {"frames_with_text_pct": round(100 * sum(1 for o, _ in ocr if o.get("text")) / len(ocr), 1),
+                       "median_line_height_rel": hs[len(hs) // 2] if hs else None,
+                       "position": {k: sum(1 for y in ys if f(y)) for k, f in (("bottom", lambda y: y < 0.33), ("middle", lambda y: 0.33 <= y < 0.66), ("top", lambda y: y >= 0.66))},
+                       "uppercase_pct": round(100 * sum(1 for t in txt if t.isupper()) / len(txt), 1) if txt else None,
+                       "median_hold_s": sorted(s["t_end"] - s["t"] for s in spans)[len(spans) // 2] if spans else None,
+                       "note": "Apple Vision bbox (normalised, origin bottom-left); font/colour not measured"}
+    aus = [_rj(td / v["id"] / "audio.json", {}) or {} for v in j["videos"]]
+    lb = [a.get("librosa") or {} for a in aus if a.get("librosa")]
+    if aus:
+        tempos = sorted(x["tempo_bpm"] for x in lb if isinstance(x.get("tempo_bpm"), (int, float)))
+        lufs = sorted(x for a in aus if isinstance(x := (a.get("ffmpeg") or {}).get("integrated_lufs"), (int, float)))
+        out["music"] = {"videos_music_likely": sum(1 for x in lb if x.get("music_likely")), "videos_with_audio_features": len(lb),
+                        "median_tempo_bpm": tempos[len(tempos) // 2] if tempos else None, "median_integrated_lufs": lufs[len(lufs) // 2] if lufs else None,
+                        "note": "music_likely is a beat-strength heuristic, not a classifier"}
+    return out
+
+
+def ocr_spans(tid: str, vid: str) -> list:
+    """Merge consecutive OCR frames with the same text into spans {t, t_end, text}."""
+    fr = sorted(((_rj(_vdir(tid, vid) / "ocr.json", {}) or {}).get("frames") or []), key=lambda o: o.get("t") or 0)
+    cuts = (_rj(_vdir(tid, vid) / "cuts.json", {}) or {}).get("cuts") or []
+    dur = (_rj(_vdir(tid, vid) / "meta.json", {}) or {}).get("duration") or 0
+    spans = []
+    for i, o in enumerate(fr):
+        txt = " ".join((o.get("text") or "").split())
+        nxt = fr[i + 1]["t"] if i + 1 < len(fr) else (next((c for c in cuts if c > (o.get("t") or 0)), dur) or (o.get("t") or 0))
+        if not txt:
+            continue
+        if spans and spans[-1]["text"] == txt and abs(spans[-1]["t_end"] - (o.get("t") or 0)) < 0.5:
+            spans[-1]["t_end"] = round(nxt, 2)
+        else:
+            spans.append({"t": o.get("t"), "t_end": round(nxt, 2), "text": txt[:300]})
+    return spans
+
+
+def video_detail(tid: str, vid: str) -> dict:
+    if not _VID.match(vid):
+        raise YtError(404, "no such video")
+    j = _job(tid)
+    v = next((x for x in j["videos"] if x["id"] == vid), None)
+    if not v:
+        raise YtError(404, "no such video in this job")
+    d = _vdir(tid, vid)
+    cuts = _rj(d / "cuts.json", {}) or {}
+    return {"video": v, "meta": _rj(d / "meta.json"), "transcript": _rj(d / "transcript.json"), "words": _rj(d / "words.json"),
+            "frames": (_rj(d / "frames.json", {}) or {}).get("frames"), "cuts": {k: cuts.get(k) for k in ("count", "cuts_per_minute", "avg_shot_s", "threshold")},
+            "cut_list": cuts.get("shots") or [], "ocr_spans": ocr_spans(tid, vid), "ocr": _rj(d / "ocr.json"), "audio": _rj(d / "audio.json"),
+            "shot_notes": _rj(d / "shot_notes.json"), "timeline": _rj(d / "timeline.json"), "analysis": _rj(d / "analysis.json"),
+            "media": {"playable": False, "open_url": v["url"], "note": "no local video is kept (temp files are deleted); use frames or open on YouTube at a timestamp (&t=<s>s)"}}
+
+
+def techniques(q: str = "", type_: str = "", creator: str = "") -> dict:
+    """Technique library across every job: one entry per (area, slug) with timestamped examples."""
+    lib = {}
+    root = _root()
+    for jp in sorted(root.glob("*/job.json")) if root.is_dir() else []:
+        j = _rj(jp)
+        if not isinstance(j, dict):
+            continue
+        for v in j["videos"]:
+            a = _rj(jp.parent / v["id"] / "analysis.json")
+            if not a:
+                continue
+            ch = (_rj(jp.parent / v["id"] / "meta.json", {}) or {}).get("channel") or v.get("channel")
+            for area, items in (a.get("areas") or {}).items():
+                for t in items or []:
+                    if not isinstance(t, dict) or not t.get("technique"):
+                        continue
+                    tid_ = f"{area}/{slug(t['technique'])}"
+                    e = lib.setdefault(tid_, {"id": tid_, "name": t["technique"], "type": area, "description": t.get("detail") or "", "examples": [], "creators": set(), "sources": {}})
+                    e["examples"].append({"task_id": j["task_id"], "video_id": v["id"], "title": a["_meta"].get("title"), "t": t.get("timestamp"), "quote": t.get("quote"),
+                                          "why_it_matters": t.get("why_it_matters"), "apply_for_jr": t.get("apply_for_jr")})
+                    if ch:
+                        e["creators"].add(ch)
+                    e["sources"][j["task_id"]] = e["sources"].get(j["task_id"], 0) + 1
+    out = []
+    ql = q.lower()
+    for e in lib.values():
+        if type_ and e["type"] != type_:
+            continue
+        if creator and creator not in e["creators"]:
+            continue
+        if ql and ql not in (e["name"] + " " + e["description"]).lower():
+            continue
+        out.append({**e, "creators": sorted(e["creators"]), "clips": len(e["examples"]), "sources": [{"task_id": k, "count": c} for k, c in e["sources"].items()]})
+    out.sort(key=lambda e: (-e["clips"], e["name"]))
+    return {"techniques": out, "count": len(out), "types": list(AREAS)}
+
+
+EST = {"meta_s": 4, "captions_s": 6, "whisper_rtf": 0.12, "frames_s_per_min": 6, "ocr_s_per_frame": 0.4, "audio_s_per_min": 3,
+       "vlm_s_per_seq": 25, "llm_s_per_call": 70, "lowres_mb_per_min": 6, "kept_mb_per_video": 4, "tokens_per_llm_call": 6000}
+
+
+def preview(body: dict) -> dict:
+    """Title/count/duration before starting, plus a rough estimate (heuristic constants in EST; not measured)."""
+    lid = resolve_list(body.get("playlist_url") or body.get("url") or "")
+    n = max(1, min(int(body.get("max_videos") or 40), 5000))
+    pl = list_playlist(lid, n)
+    ents = pl["entries"]
+    mins = sum((e.get("duration") or 0) for e in ents) / 60
+    e = EST
+    whisper_share = float(body.get("assume_whisper_share", 0.5))
+    secs = (len(ents) * (e["meta_s"] + e["captions_s"] + SEQ_CUTS * e["vlm_s_per_seq"] + 3 * e["llm_s_per_call"] + MAX_FRAMES * e["ocr_s_per_frame"])
+            + mins * 60 * e["whisper_rtf"] * whisper_share + mins * (e["frames_s_per_min"] + e["audio_s_per_min"])
+            + sum(e["llm_s_per_call"] * ((d or 0) // 600) for d in (x.get("duration") for x in ents)))
+    cfg = {}
+    rm = _deps.get("rm")
+    if rm:
+        with contextlib.suppress(Exception):
+            cfg = rm.config()["model_gb"]
+    return {"playlist_id": lid, "title": pl.get("title"), "channel": pl.get("channel"), "item_count": pl.get("item_count"), "listing": pl.get("listing"),
+            "videos": len(ents), "capped_at": n, "total_minutes": round(mins, 1), "longest_s": max((x.get("duration") or 0) for x in ents) if ents else 0,
+            "entries": ents[:200],
+            "estimate": {"minutes": round(secs / 60), "disk_gb_peak_temp": round(max((x.get("duration") or 0) for x in ents) / 60 * e["lowres_mb_per_min"] * IO_WORKERS / 1024, 2) if ents else 0,
+                         "disk_gb_kept": round(len(ents) * e["kept_mb_per_video"] / 1024, 2), "tokens": int(len(ents) * 3 * e["tokens_per_llm_call"]),
+                         "peak_mem_gb": max(cfg.get("gemma4:12b", 9.5), cfg.get("qwen3-vl:8b", 7.0)), "basis": "heuristic constants (EST), not a measurement",
+                         "assume_whisper_share": whisper_share}}
