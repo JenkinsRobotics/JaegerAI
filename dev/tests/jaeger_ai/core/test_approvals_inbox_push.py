@@ -350,3 +350,26 @@ async def test_job_events_ingest_pushes_stuck(tmp_path):
         assert (await c.post("/v1/push/job-events", json={"task_id": "T2", "state": "done"})).status == 202
     d.tick()
     assert [p["title"] for p in sent] == ["Task needs attention"]  # bot_finished is in-app only by default
+
+
+@pytest.mark.asyncio
+async def test_step_up_items_refused_for_api_approve_but_deny_works(tmp_path):
+    g = gw(tmp_path)
+    mk(g, "pay", type="spend", payload={"amount": 5, "limit": 100})
+    mk(g, "perm", type="permission", payload={"duration": "always"})
+    async with TestClient(TestServer(g.app), headers=client_headers("webui")) as c:
+        items = {i["approval_id"]: i for i in (await (await c.get("/v1/approvals")).json())["approvals"]}
+        assert items["pay"]["approve_on_mac"] and items["perm"]["approve_on_mac"]
+        r = await c.post("/v1/approvals/pay/decide", json={"decision": "approve"})
+        assert r.status == 403 and (await r.json())["code"] == "step_up_required"
+        assert g.store.get_approval("pay")["status"] == "pending"
+        assert (await c.post("/v1/approvals/pay/decide", json={"decision": "deny", "reason": "not this month"})).status == 200
+        assert (await c.post("/v1/approvals/perm/decide", json={"decision": "changes", "reason": "one hour only"})).status == 200
+
+
+def test_changes_reason_is_posted_to_agent_session(tmp_path):
+    g = gw(tmp_path)
+    mk(g, "d1", type="design_review", title="Hero art")
+    ai.decide(g, "d1", {"decision": "changes", "reason": "contrast too low"})
+    last = g.store.get_session("s1")["messages"][-1]
+    assert last["role"] == "user" and "contrast too low" in last["content"] and "Hero art" in last["content"]
