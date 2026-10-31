@@ -379,6 +379,7 @@ html:not([data-jaeger-host="macos"]) .app-window .jg-traffic-lights { display: n
 /* Work › Backlog */
 .jg-backlog__filters { display: flex; flex-wrap: wrap; gap: var(--jg-space-2); align-items: center; margin-bottom: var(--jg-space-4); }
 .jg-backlog__filters .jg-ui-seg { max-width: 100%; overflow-x: auto; }
+.jg-backlog__filters .jg-ui-seg button { white-space: nowrap; }
 .jg-backlog__list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--jg-space-3); grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); }
 .jg-backlog__card { display: grid; gap: var(--jg-space-2); min-width: 0; }
 .jg-backlog__card[data-status="needs_ok"] { border-color: color-mix(in srgb, var(--jg-warn) 55%, var(--jg-color-border)); }
