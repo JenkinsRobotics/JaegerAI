@@ -300,6 +300,9 @@ def research_usage_gb(path: Path) -> float:
 TEMP_PATTERNS = ("lowres.*", "audio.*", "audio16k.wav", "audio22k.wav", "*.part", "*.ytdl", "*.tmp")
 
 
+KEEP_SUFFIXES = {".json", ".md", ".jpg", ".txt"}
+
+
 def cleanup_temp(path: Path, older_than_s: float = 0, clock=time.time) -> int:
     """Delete leftover downloads/intermediate audio under the research tree. Returns bytes freed."""
     freed = 0
@@ -308,6 +311,8 @@ def cleanup_temp(path: Path, older_than_s: float = 0, clock=time.time) -> int:
     for pat in TEMP_PATTERNS:
         for p in path.rglob(pat):
             try:
+                if p.suffix in KEEP_SUFFIXES:  # results (audio.json etc.) are never temp
+                    continue
                 if p.is_file() and clock() - p.stat().st_mtime >= older_than_s:
                     freed += p.stat().st_size; p.unlink()
             except OSError:

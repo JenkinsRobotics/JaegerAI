@@ -609,6 +609,13 @@ def _ffmpeg_audio(wav: Path, tid: str) -> dict:
 def step_audio(tid: str, v: dict) -> dict:
     d = _vdir(tid, v["id"])
     wav = d / "audio22k.wav"
+    if not wav.is_file() and _which("ffmpeg"):  # temp wav gone (resume): fetch audio again
+        with _rm_slot("download", tid):
+            src, _c = _ytdlp_dl("bestaudio/best", str(d / "audio.%(ext)s"), v["url"], d, "audio.[!j]*", 900)
+        try:
+            _run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-vn", "-ac", "1", "-ar", "22050", str(wav)], timeout=900)
+        finally:
+            src.unlink(missing_ok=True)
     if not wav.is_file():
         _wj(d / "audio.json", {"skipped": "no audio extracted"})
         return {"skipped": "no audio"}

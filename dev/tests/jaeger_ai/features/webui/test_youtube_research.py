@@ -310,3 +310,11 @@ def test_retried_transcript_unblocks_later_steps(yt):
     yt.start(TID)
     v = next(v for v in yt.status(TID)["videos"] if v["id"] == "bbbbbbbbbbb")
     assert v["steps"]["transcript"]["status"] == "done" and v["steps"]["analysis"]["status"] == "done"
+
+
+def test_audio_refetches_when_temp_wav_gone(yt):
+    run_sync(yt)
+    d = vd(yt, "aaaaaaaaaaa")
+    (d / "audio.json").unlink()
+    yt.start(TID)
+    assert json.loads((d / "audio.json").read_text())["ffmpeg"]["integrated_lufs"] == -14.2

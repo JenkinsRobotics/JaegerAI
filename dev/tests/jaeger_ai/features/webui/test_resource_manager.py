@@ -70,10 +70,12 @@ def test_status_and_cleanup(mod, tmp_path):
     s = rm.status()
     assert set(s) >= {"snapshot", "config", "can_start", "active", "queued", "jobs"}
     d = tmp_path / "v"; d.mkdir()
-    for n in ("lowres.mp4", "audio22k.wav", "x.part", "keep.json"):
+    for n in ("lowres.mp4", "audio22k.wav", "x.part", "keep.json", "audio.m4a"):
         (d / n).write_bytes(b"x")
     mod.cleanup_temp(d)
-    assert [p.name for p in d.iterdir()] == ["keep.json"]
+    (d / "audio.json").write_text("{}")
+    mod.cleanup_temp(d)
+    assert sorted(p.name for p in d.iterdir()) == ["audio.json", "keep.json"]
 
 
 def test_own_model_gpu_load_does_not_block_but_foreign_does(mod, tmp_path):
