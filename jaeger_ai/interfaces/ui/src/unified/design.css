@@ -294,3 +294,8 @@ html:not([data-jaeger-host="macos"]) .app-window .jg-traffic-lights { display: n
 .jg-prov__models legend { font-size: var(--jg-text-caption); color: var(--jg-color-text-tertiary); margin-bottom: var(--jg-space-1); }
 .jg-prov__models small { color: var(--jg-color-text-tertiary); }
 .jg-models__cli .jg-u-note { padding: 0 var(--jg-space-4) var(--jg-space-3); margin: 0; }
+/* Slots never overflow their column: single shrinkable track, wrapping tools. */
+.jg-cmp__slot { grid-template-columns: minmax(0, 1fr); overflow: hidden; }
+.jg-cmp__slothead { flex-wrap: wrap; }
+.jg-cmp__out { overflow-wrap: anywhere; }
+.jg-compare[data-count="3"] .jg-cmp__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
