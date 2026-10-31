@@ -67,7 +67,7 @@ def concrete(route: str) -> str:
     return re.sub(r"\{[^}]+\}", PARAM, route)
 
 
-def classify(status: int | None, err: str | None, templated: bool) -> str:
+def classify(status: int | None, err: str | None, templated: bool, source: str = "") -> str:
     if err == "down":
         return "DOWN"
     if status is None:
@@ -77,7 +77,10 @@ def classify(status: int | None, err: str | None, templated: bool) -> str:
     if status in (401, 403):
         return "AUTH"
     if status == 404:
-        return "OK-404" if templated else "NOT-MOUNTED"
+        if templated:
+            return "OK-404"
+        # The Gateway serves it but the WebUI answers 404: a missing passthrough.
+        return "GAP-webui" if source == "gateway" else "NOT-MOUNTED"
     if status in (400, 405, 409, 422, 503):
         return "OK-" + str(status)  # route exists, refuses GET or missing input/upstream
     if status >= 500:
@@ -130,7 +133,7 @@ def main(argv=None) -> int:
             r.update(status=None, result="SKIP-" + r["skip"], ms=0)
             continue
         st, err, ms = probe(a.base, concrete(r["route"]), a.timeout)
-        r.update(status=st, result=classify(st, err, "{" in r["route"]), ms=ms, error=err)
+        r.update(status=st, result=classify(st, err, "{" in r["route"], r["source"]), ms=ms, error=err)
     if a.json:
         print(json.dumps(rows, indent=1))
     else:
@@ -143,6 +146,9 @@ def main(argv=None) -> int:
             k = r["result"].split("-")[0]
             tally[k] = tally.get(k, 0) + 1
         print("\nTOTAL", len(rows), " ".join(f"{k}={v}" for k, v in sorted(tally.items())))
+        gaps = [r["route"] for r in rows if r["result"] == "GAP-webui"]
+        if gaps:
+            print("WEBUI GAPS (gateway serves, :8790 404):", " ".join(gaps))
     return 1 if any(r["result"] in ("FAIL", "ERR") for r in rows) else 0
 
 

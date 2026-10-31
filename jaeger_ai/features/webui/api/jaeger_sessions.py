@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -214,6 +215,41 @@ def _proxy_stream(handler, session_id: str, query: str, *, upstream_path: str | 
 PREFIXES = ("/api/jaeger/sessions", "/v1/sessions")
 
 
+# ── Gateway passthrough allowlist ─────────────────────────────────────
+# Gateway-served routes the WebUI relays unchanged (method, query, JSON body; webui caller
+# auth via _proxy). One table instead of per-route code. Only routes the Gateway actually
+# serves belong here; WebUI-owned routes (/v1/approvals/inbox*, /v1/widgets*, /v1/machine/*,
+# /v1/robots*, /v1/research/*, /v1/automations/*, /v1/providers/cli, /v1/resources, /v1/usage)
+# are answered locally by unified_api. Live events for these come over /v1/events/stream.
+_ID = r"(?!inbox(?:/|$))[A-Za-z0-9_.:-]+"
+GATEWAY_PASSTHROUGH: tuple[tuple[frozenset, "re.Pattern[str]"], ...] = tuple(
+    (frozenset(methods), re.compile(rx)) for methods, rx in (
+        ({"GET"}, r"^/v1/activity$"),
+        ({"POST"}, rf"^/v1/handoffs/{_ID}/check$"),
+        ({"GET"}, r"^/v1/approvals/counts$"),
+        ({"GET"}, rf"^/v1/approvals/{_ID}/events$"),
+        ({"POST"}, r"^/v1/approvals/(?:batch|requests)$"),
+        ({"POST"}, rf"^/v1/approvals/{_ID}/(?:decide|viewed)$"),
+        ({"GET", "PATCH"}, r"^/v1/notifications$"),
+        ({"GET"}, r"^/v1/push/(?:queue|subscriptions|vapid-public-key)$"),
+        ({"POST"}, r"^/v1/push/(?:subscriptions|test|job-events)$"),
+        ({"DELETE"}, r"^/v1/push/subscriptions/[A-Za-z0-9_-]+$"),
+    )
+)
+
+
+def passthrough_match(path: str, method: str) -> bool:
+    return any(method in methods and rx.match(path) for methods, rx in GATEWAY_PASSTHROUGH)
+
+
+def _passthrough(handler, path: str, query: str, method: str) -> bool:
+    if not passthrough_match(path, method):
+        return False
+    if method in {"GET", "DELETE"}:
+        return _proxy(handler, method, path + query)
+    return _proxy(handler, method, path + query, _body_bytes(handler))
+
+
 def route(handler, parsed, method: str) -> bool:
     """Dispatch a WebUI request to the gateway. ``False`` = not ours.
 
@@ -229,6 +265,9 @@ def route(handler, parsed, method: str) -> bool:
             return True
     except Exception:
         pass
+
+    if _passthrough(handler, path, query, method):
+        return True
 
     if path in {'/v1/runtime/updates/plan','/v1/runtime/computers','/v1/runtime/policy-sources'} and method == 'GET':
         return _proxy(handler, method, path + query)
