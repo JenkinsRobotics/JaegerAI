@@ -12,6 +12,8 @@ Minimal, local-only backends the gateway doesn't provide:
             POST /v1/models/pull {name}          background `ollama pull`; GET /v1/models/pulls
             DELETE /v1/models/local/<name>       `ollama rm` equivalent (UI confirms first)
   Compare   POST /v1/compare/run {model, prompt} one non-streamed Ollama completion with timing
+            POST /v1/compare/stream {model, prompt}  NDJSON: start, thinking/delta…, done{metrics} | error
+            GET/POST /v1/compare/history; PUT {winner} / DELETE /v1/compare/history/<id>
   Documents GET/POST /v1/documents, GET/PUT/DELETE /v1/documents/<id>; POST /v1/documents/ai-edit
 Everything is stored under <state>/studio or <state>/documents (default ~/.jaeger). Ollama is
 reached on 127.0.0.1:11434 only. Nothing is fabricated: unavailable providers return 409 with a
@@ -363,6 +365,135 @@ def compare_run(body: dict) -> dict:
             "load_s": round(r.get("load_duration", 0) / 1e9, 2)}
 
 
+def _metrics(ev: dict, elapsed: float, ttft: float | None, local: bool) -> dict:
+    ec, ed = ev.get("eval_count"), ev.get("eval_duration")
+    return {"elapsed_s": round(elapsed, 2), "ttft_s": None if ttft is None else round(ttft, 2),
+            "eval_count": ec, "prompt_eval_count": ev.get("prompt_eval_count"),
+            "tokens_per_s": round(ec / (ed / 1e9), 1) if ec and ed else None,
+            "load_s": round(ev.get("load_duration", 0) / 1e9, 2),
+            # Local Ollama runs cost nothing per token; Ollama cloud pricing isn't exposed, so unknown.
+            "cost_usd": 0.0 if local else None}
+
+
+def compare_stream_events(body: dict, opener=None):
+    """Yield NDJSON-able events for one model: {type:start}, {type:delta,text}, {type:done,...metrics} or {type:error}."""
+    model, prompt = str(body.get("model", "")), str(body.get("prompt", ""))
+    if not _NAME.match(model) or not prompt.strip() or len(prompt) > 20000:
+        raise ApiError(400, "need a model and a prompt (≤20000 chars)")
+    local = not re.search(r"(^|[-:])cloud\b", model)
+    req = urllib.request.Request(OLLAMA + "/api/chat", data=json.dumps({"model": model, "stream": True, "messages": [{"role": "user", "content": prompt}]}).encode(),
+                                 headers={"Content-Type": "application/json"})
+    t0 = time.perf_counter(); ttft = None
+    yield {"type": "start", "model": model, "local": local}
+    try:
+        with (opener or urllib.request.urlopen)(req, timeout=600) as r:
+            for line in r:
+                if not line.strip():
+                    continue
+                ev = json.loads(line)
+                if ev.get("error"):
+                    yield {"type": "error", "error": f"Ollama: {ev['error']}"[:300]}
+                    return
+                msg = ev.get("message") or {}
+                text = msg.get("content") or ""
+                think = msg.get("thinking") or ""
+                if (text or think) and ttft is None:
+                    ttft = time.perf_counter() - t0
+                if think:
+                    yield {"type": "thinking", "text": think}
+                if text:
+                    yield {"type": "delta", "text": text}
+                if ev.get("done"):
+                    yield {"type": "done", "model": model, **_metrics(ev, time.perf_counter() - t0, ttft, local)}
+                    return
+    except urllib.error.HTTPError as exc:
+        yield {"type": "error", "error": f"Ollama {exc.code}: {exc.read()[:200].decode(errors='replace')}"}
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        yield {"type": "error", "error": f"Ollama is not reachable on 127.0.0.1:11434 ({exc.__class__.__name__})"}
+
+
+def _chain(first, rest):
+    yield first
+    yield from rest
+
+
+def _stream(handler, events) -> None:
+    handler.send_response(200)
+    handler.send_header("Content-Type", "application/x-ndjson")
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("X-Accel-Buffering", "no")
+    handler.send_header("Transfer-Encoding", "chunked")
+    handler.end_headers()
+    try:
+        for ev in events:
+            data = (json.dumps(ev) + "\n").encode()
+            handler.wfile.write(b"%x\r\n%s\r\n" % (len(data), data))
+            handler.wfile.flush()
+        handler.wfile.write(b"0\r\n\r\n")
+        handler.wfile.flush()
+    except (BrokenPipeError, ConnectionResetError):
+        pass
+
+
+# ── Compare history ──────────────────────────────────────────────────
+_RUN_ID = re.compile(r"^[a-f0-9]{12}$")
+MAX_RUNS = 100
+
+
+def _history_path() -> Path:
+    return state_root() / "compare" / "history.json"
+
+
+def list_runs() -> list[dict]:
+    runs = _read_json(_history_path(), [])
+    return runs if isinstance(runs, list) else []
+
+
+def save_run(body: dict) -> dict:
+    prompt = str(body.get("prompt", ""))[:20000]
+    results = body.get("results")
+    if not prompt.strip() or not isinstance(results, list) or not 1 <= len(results) <= 4:
+        raise ApiError(400, "need a prompt and 1–4 results")
+    keep = ("model", "response", "elapsed_s", "ttft_s", "eval_count", "prompt_eval_count", "tokens_per_s", "load_s", "cost_usd", "error")
+    clean = []
+    for r in results:
+        if not isinstance(r, dict) or not _NAME.match(str(r.get("model", ""))):
+            raise ApiError(400, "each result needs a valid model")
+        c = {k: r.get(k) for k in keep if k in r}
+        if isinstance(c.get("response"), str):
+            c["response"] = c["response"][:200000]
+        clean.append(c)
+    run = {"id": uuid.uuid4().hex[:12], "created_at": time.time(), "prompt": prompt, "results": clean, "winner": None}
+    with _lock:
+        _write_json(_history_path(), ([run] + list_runs())[:MAX_RUNS])
+    return run
+
+
+def update_run(rid: str, body: dict) -> dict:
+    if not _RUN_ID.match(rid):
+        raise ApiError(404, "no such run")
+    with _lock:
+        runs = list_runs()
+        run = next((r for r in runs if r.get("id") == rid), None)
+        if not run:
+            raise ApiError(404, "no such run")
+        w = body.get("winner")
+        if w is not None and w not in {r.get("model") for r in run["results"]} and w != "tie":
+            raise ApiError(400, "winner must be one of the run's models, 'tie', or null")
+        run["winner"] = w
+        _write_json(_history_path(), runs)
+    return run
+
+
+def delete_run(rid: str) -> dict:
+    with _lock:
+        runs = list_runs()
+        if not any(r.get("id") == rid for r in runs):
+            raise ApiError(404, "no such run")
+        _write_json(_history_path(), [r for r in runs if r.get("id") != rid])
+    return {"deleted": rid}
+
+
 # ── Documents ────────────────────────────────────────────────────────
 
 def _docs() -> Path:
@@ -440,7 +571,7 @@ def ai_edit(body: dict) -> dict:
 
 def route(handler, parsed, method: str, read_body, j) -> bool:
     p = parsed.path
-    if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p == "/v1/documents" or p.startswith("/v1/documents/")):
+    if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p == "/v1/documents" or p.startswith("/v1/documents/")):
         return False
     try:
         body = read_body(handler) if method in ("POST", "PUT") else {}
@@ -492,6 +623,21 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
             return j(handler, remove_model(unquote(p[len("/v1/models/local/"):]))) or True
         if p == "/v1/compare/run" and method == "POST":
             return j(handler, compare_run(body)) or True
+        if p == "/v1/compare/stream" and method == "POST":
+            events = compare_stream_events(body)  # validates before headers go out
+            first = next(events)
+            _stream(handler, _chain(first, events))
+            return True
+        if p == "/v1/compare/history":
+            if method == "GET":
+                return j(handler, {"runs": list_runs()}) or True
+            if method == "POST":
+                return j(handler, save_run(body), status=201) or True
+        mr = re.match(r"^/v1/compare/history/([a-f0-9]{12})$", p)
+        if mr and method == "PUT":
+            return j(handler, update_run(mr.group(1), body)) or True
+        if mr and method == "DELETE":
+            return j(handler, delete_run(mr.group(1))) or True
         if p == "/v1/documents":
             if method == "GET":
                 return j(handler, {"documents": list_docs()}) or True
@@ -507,7 +653,7 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
                 return j(handler, save_doc(md.group(1), body)) or True
             if method == "DELETE":
                 return j(handler, delete_doc(md.group(1))) or True
-        raise ApiError(405 if p.startswith(("/v1/studio/", "/v1/models/", "/v1/documents")) else 404, "method not allowed")
+        raise ApiError(405 if p.startswith(("/v1/studio/", "/v1/models/", "/v1/documents", "/v1/compare/")) else 404, "method not allowed")
     except ApiError as exc:
         j(handler, exc.payload, status=exc.status)
         return True
