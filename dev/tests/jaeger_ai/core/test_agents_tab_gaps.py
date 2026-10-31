@@ -156,3 +156,25 @@ async def test_g5_handoff_task_link_and_filter(tmp_path):
     async with TestClient(TestServer(g.app), headers=client_headers("webui")) as c:
         out = await (await c.get("/v1/handoffs?task_id=T1")).json()
         assert [h["id"] for h in out["handoffs"]] == ["h1"]
+
+
+# ── G4 ───────────────────────────────────────────────────────────────
+def test_g4_runner_on_agent_records():
+    from jaeger_ai.core.agent_registry.types import AgentKind, AgentRecord, runner_of
+    assert runner_of(AgentKind.NATIVE, "native:jaeger", {}) == "native"
+    assert runner_of(AgentKind.THIRD_PARTY, "tp:codex", {"cli": "codex"}) == "delegate:codex"
+    assert runner_of(AgentKind.THIRD_PARTY, "tp:x", {"adapter": "openclaw"}) == "delegate:openclaw"
+    assert runner_of(AgentKind.THIRD_PARTY, "tp:x", {}) == "delegate:tp:x"
+    assert runner_of(AgentKind.NATIVE, "a", {"runner": "delegate:claude"}) == "delegate:claude"
+    assert runner_of(AgentKind.NATIVE, "a", {"runner": "rm -rf /"}) == "native"
+    rec = AgentRecord.from_dict({"id": "tp:codex", "name": "Codex", "kind": "third_party", "metadata": {"cli": "codex"}})
+    assert rec.to_dict()["runner"] == "delegate:codex"
+
+
+@pytest.mark.asyncio
+async def test_g4_agents_endpoint_carries_runner(tmp_path):
+    g = gw(tmp_path)
+    async with TestClient(TestServer(g.app), headers=client_headers("webui")) as c:
+        agents = (await (await c.get("/v1/agents")).json())
+        rows = agents.get("agents", agents) if isinstance(agents, dict) else agents
+        assert rows and all(a.get("runner") in ("native",) or str(a.get("runner")).startswith("delegate:") for a in rows)

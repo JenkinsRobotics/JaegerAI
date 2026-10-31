@@ -11,6 +11,8 @@ create/list paths always force it False.
 
 from __future__ import annotations
 
+import re
+
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
@@ -115,6 +117,22 @@ BUILTIN_THIRD_PARTY: tuple[dict[str, Any], ...] = (
 )
 
 
+_RUNNER = re.compile(r"^(native|delegate:[A-Za-z0-9_.:-]{1,80})$")
+
+
+def runner_of(kind: Any, agent_id: str, metadata: dict[str, Any] | None) -> str:
+    """G4: "native" or "delegate:<cli|adapter|id>"; a valid metadata.runner wins."""
+    meta = metadata or {}
+    explicit = str(meta.get("runner") or "")
+    if _RUNNER.match(explicit):
+        return explicit
+    k = kind.value if isinstance(kind, AgentKind) else str(kind or "")
+    if k == AgentKind.THIRD_PARTY.value:
+        tail = re.sub(r"[^A-Za-z0-9_.:-]", "-", str(meta.get("cli") or meta.get("adapter") or agent_id))[:80]
+        return f"delegate:{tail}"
+    return "native"
+
+
 @dataclass(slots=True)
 class AgentRecord:
     """Serializable agent catalog entry (native or third-party)."""
@@ -150,6 +168,7 @@ class AgentRecord:
         raw["switchable"] = True if self.switchable or not self.fundamentals_gated else self.switchable
         raw["switchable"] = True
         raw["fundamentals_gated"] = False
+        raw["runner"] = runner_of(self.kind, self.id, self.metadata)
         return raw
 
     @classmethod

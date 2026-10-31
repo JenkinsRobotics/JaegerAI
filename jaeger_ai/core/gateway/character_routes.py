@@ -234,6 +234,7 @@ async def handle_create_agent_from_template(request: web.Request) -> web.Respons
     """
     try:
         body = await request.json()
+        from jaeger_ai.core.agent_registry.types import runner_of
         template_id = body.get("template_id")
         
         if not template_id:
@@ -276,7 +277,7 @@ async def handle_create_agent_from_template(request: web.Request) -> web.Respons
             "description": agent_description,
             "agent_type": agent_type,
             "kind": "jaeger_native",
-            "runner": "native",
+            "runner": runner_of("native", agent_id, {"runner": body.get("runner")}),  # G4
             "template_id": template_id,
             "template_source": "character_library",
             "personality": {
