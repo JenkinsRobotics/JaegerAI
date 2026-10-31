@@ -21,6 +21,13 @@ MAX_ATTEMPTS = 5
 LEASE_SECONDS = 60
 REQUEST_TIMEOUT = 10
 KEYCHAIN_SERVICE = "ai.jaeger.bridge.webhook"
+#: Wake payloads stay small: the receiver reads the full message from the hub.
+MAX_WAKE_BODY_BYTES = 4096
+#: At most this many POSTs per rolling minute (others wait, they are not dropped).
+RATE_PER_MINUTE = 20
+#: Rows older than this when first claimed are marked ``expired``, never sent, so
+#: turning delivery on does not replay a stale backlog as a burst of wakes.
+MAX_AGE_SECONDS = 2 * 3600
 
 
 class OutboxPayloadError(ValueError):
@@ -59,8 +66,18 @@ def enqueue(conn, message):
         "correlation",
         "created_at",
     )
+    projected = {field: message[field] for field in fields if field in message}
+    body = projected.get("body")
+    if isinstance(body, str) and len(body.encode("utf-8")) > MAX_WAKE_BODY_BYTES:
+        projected["body"] = body.encode("utf-8")[:MAX_WAKE_BODY_BYTES].decode("utf-8", "ignore")
+        projected["truncated"] = True
+    task_id = message.get("reply_to") if message.get("kind") == "result" else None
+    if message.get("kind") == "task":
+        task_id = message.get("id")
+    if task_id:
+        projected["task_id"] = task_id
     payload = json.dumps(
-        {field: message[field] for field in fields if field in message},
+        projected,
         ensure_ascii=False,
         separators=(",", ":"),
         allow_nan=False,
@@ -168,11 +185,22 @@ class OutboxWorker:
         )
         self.transport = transport if transport is not None else https_post
         self.clock = clock
+        self._sent_at = []
+
+    def _rate_limited(self):
+        now = self.clock()
+        self._sent_at = [t for t in self._sent_at if now - t < 60]
+        return len(self._sent_at) >= RATE_PER_MINUTE
 
     def _claim(self):
         now = self.clock()
         with self.store._get_conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            conn.execute(
+                "UPDATE agent_webhook_outbox SET status='expired',finished_at=? "
+                "WHERE status='pending' AND attempts=0 AND created_at<?",
+                (now, now - MAX_AGE_SECONDS),
+            )
             conn.execute(
                 "UPDATE agent_webhook_outbox SET status='failed',finished_at=?,lease_token=NULL,lease_until=NULL "
                 "WHERE attempts>=? AND (status='pending' OR (status='sending' AND lease_until<=?))",
@@ -214,10 +242,13 @@ class OutboxWorker:
             return False
         if os.environ.get("JAEGER_AGENT_BRIDGE", "1") == "0":
             return False
+        if self._rate_limited():
+            return False
         claim = self._claim()
         if claim is None:
             return False
         row, token = claim
+        self._sent_at.append(self.clock())
         status = None
         try:
             if os.environ.get("JAEGER_AGENT_BRIDGE", "1") != "0":

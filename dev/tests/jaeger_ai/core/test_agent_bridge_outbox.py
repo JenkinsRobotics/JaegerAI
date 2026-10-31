@@ -66,7 +66,8 @@ def test_enqueue_atomic_bounded_namespace_projection(store):
     assert "attachments" not in json.loads(rows(store)[0]["payload"])
     with pytest.raises(outbox.OutboxPayloadError), store._get_conn() as conn:
         conn.execute("INSERT INTO agent_threads VALUES('rollback','ares','grokbot')")
-        outbox.enqueue(conn, message(id="large", body="é" * 8192))
+        # Bodies are truncated for the wake payload; an oversize envelope still rolls back.
+        outbox.enqueue(conn, message(id="large", title="é" * 9000))
     with store._get_conn() as conn:
         assert (
             conn.execute(
