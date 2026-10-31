@@ -76,7 +76,7 @@ missing feature hidden from the operator.
 
 The request bubble and input container rules in `media/view.css` adapt
 Microsoft VS Code 1.142.0 `src/vs/workbench/contrib/chat/browser/widget/media/chat.css`,
-preserved in `dev/prototypes/ide-donors/vscode-chat-1.142.0`.
+(the donor copy that lived in `dev/prototypes/ide-donors/vscode-chat-1.142.0` is in git history at f8909bef).
 Copyright (c) Microsoft Corporation. All rights reserved. Licensed under MIT
 (the MIT license text in this file applies). Selectors and platform-token
 fallbacks are adapted for Jaeger's webview. The host's built-in Chat code,
