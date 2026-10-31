@@ -453,7 +453,7 @@ async def _authenticate_caller(request: web.Request, handler: Any) -> web.Stream
     if scope not in spec.scopes:
         return web.json_response({"error": f"Caller {spec.name!r} lacks scope {scope!r}"}, status=403)
     if spec.session_prefix is not None:
-        if not caller_auth.prefixed_route_allowed(request.method, route):
+        if not caller_auth.prefixed_route_allowed(request.method, route, spec.name):
             return web.json_response({"error": f"Caller {spec.name!r} may not use this route"}, status=403)
         if (route or "").startswith("/v1/sessions/{id}") and not caller_auth.session_allowed(
                 spec, request.match_info.get("id")):
