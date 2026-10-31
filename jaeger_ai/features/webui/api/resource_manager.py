@@ -6,7 +6,7 @@
   It blocks (backing off 5 s → 60 s) while limits say no, records why, and resumes by itself.
   For model work it keeps ONE large model resident: other loaded Ollama models are unloaded
   (keep_alive 0) before the next one loads. release_models() unloads at the end of a job.
-- Limits live in <state>/resources.json (created with defaults on first use; edit to tune).
+- Limits live in <state>/resources.json (optional; defaults apply when it is absent; reads never create it).
 - disk budget for <state>/research and cleanup of temp media files.
 Everything is injectable (probe, sleep, clock, ollama) so tests run without a Mac.
 """
@@ -68,10 +68,8 @@ class ResourceManager:
             user = json.loads(p.read_text("utf-8"))
         except (OSError, ValueError):
             user = None
-        if user is None:
-            p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(json.dumps(DEFAULTS, indent=2), "utf-8")
-            user = {}
+        if not isinstance(user, dict):
+            user = {}  # reads never write: defaults apply until the owner saves a resources.json
         cfg = {**DEFAULTS, **{k: v for k, v in user.items() if k in DEFAULTS}}
         cfg["concurrency"] = {**DEFAULTS["concurrency"], **(user.get("concurrency") or {})}
         cfg["model_gb"] = {**DEFAULTS["model_gb"], **(user.get("model_gb") or {})}

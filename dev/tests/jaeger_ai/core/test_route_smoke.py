@@ -18,7 +18,8 @@ spec.loader.exec_module(smoke)
 def test_enumeration_covers_new_routes():
     routes = {r["route"]: r for r in smoke.enumerate_routes()}
     for r in ("/v1/activity", "/v1/approvals/inbox", "/v1/widgets", "/v1/machine/health", "/v1/robots",
-              "/v1/automations/n8n/status", "/v1/research/youtube/progress", "/v1/push/vapid-public-key"):
+              "/v1/automations/n8n/status", "/v1/research/youtube/progress", "/v1/push/vapid-public-key",
+              "/v1/resources", "/v1/providers/cli", "/api/crons/history", "/api/memory", "/api/wiki/page"):
         assert r in routes and not routes[r]["skip"], r
     assert smoke.UNSAFE.search("/v1/robots/arm1/estop") and smoke.UNSAFE.search("/v1/widgets/actions")
     assert smoke.main(["--base", "http://example.com", "--list"]) == 2  # loopback only

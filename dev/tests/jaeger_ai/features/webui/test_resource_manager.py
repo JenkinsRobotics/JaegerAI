@@ -36,10 +36,21 @@ def make(mod, tmp_path, snaps):
     return rm, state
 
 
-def test_config_file_created_with_defaults(mod, tmp_path):
+def test_reads_return_defaults_without_writing(mod, tmp_path):
     rm, _ = make(mod, tmp_path, [OK])
     c = rm.config()
-    assert json.loads((tmp_path / "resources.json").read_text())["min_free_mem_gb"] == 4.0 and c["concurrency"]["heavy"] == 1
+    assert c["min_free_mem_gb"] == 4.0 and c["concurrency"]["heavy"] == 1
+    rm.status()
+    assert not (tmp_path / "resources.json").exists() and list(tmp_path.iterdir()) == []
+
+
+def test_owner_resources_json_still_applies(mod, tmp_path):
+    (tmp_path / "resources.json").write_text(json.dumps({"min_free_mem_gb": 8, "concurrency": {"heavy": 2}}))
+    rm, _ = make(mod, tmp_path, [OK])
+    c = rm.config()
+    assert c["min_free_mem_gb"] == 8 and c["concurrency"]["heavy"] == 2
+    (tmp_path / "resources.json").write_text("not json")
+    assert rm.config()["min_free_mem_gb"] == 4.0
 
 
 def test_check_reasons(mod, tmp_path):

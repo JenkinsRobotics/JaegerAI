@@ -35,7 +35,7 @@ UNSAFE = re.compile(
     r"/branch|/duplicate|/truncate|/undo|/retry|/compress|/repair|/restore|/share|/complete|/setup|/probe|"
     r"/authorize|/register|/options|/oidc|/csp-report|/client-events|/ack|-ack|/decide|/requests$|/actions$|"
     r"/change$|/capture|/preview$|/ai-edit|/update$|/pause|/resume|/yolo|/pin$|/regenerate|/anchor-scene|"
-    r"/sidecar|/ws$|^/ws|/api/v1$|^/v1/resources$|oauth|callback)", re.I)
+    r"/sidecar|/ws$|^/ws|/api/v1$|oauth|callback)", re.I)
 STREAM = re.compile(r"(stream|/events$|sse|/watch|/live|/tail)", re.I)
 PARAM = "smoke-missing"
 
