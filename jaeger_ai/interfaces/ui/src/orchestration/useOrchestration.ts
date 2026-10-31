@@ -50,8 +50,9 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
 
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     const onEvent = (e: GatewayEvent) => {
-      if (typeof e.event_id === "number") { if (seen.current.has(e.event_id)) return; seen.current.add(e.event_id); }
+      if (!alive) return;
       setStream("live");
+      if (typeof e.event_id === "number") { if (seen.current.has(e.event_id)) return; seen.current.add(e.event_id); }
       if (e.event === "agent.status.changed") {
         const p = e.payload ?? {};
         const id = String(p.agent_id ?? ""); if (id) setOverrides((o) => ({ ...o, [id]: String(p.status ?? "idle") }));
