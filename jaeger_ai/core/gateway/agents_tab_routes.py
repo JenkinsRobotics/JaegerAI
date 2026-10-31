@@ -5,10 +5,74 @@
 """
 from __future__ import annotations
 
+import logging
+import threading
+import time
+
 from aiohttp import web
+
+TRIGGERS = ("agent.handoff", "agent.handoff.finished", "agent.handoff.checked", "task.created", "task.updated",
+            "approval.request", "approval.resolved")
+
+
+def agent_statuses(gateway) -> dict[str, str]:
+    """Same computation as GET /v1/agents/summary (agent_summary.summarize_agents)."""
+    from jaeger_ai.core.gateway.agent_summary import summarize_agents
+    registry = gateway._registry()
+    agents = [a.to_dict() for a in registry.list_agents() if a.role.value in {"lead", "specialist"}]
+    tasks = [t.to_dict() for t in gateway.task_owner.store.list_tasks()] if gateway.task_owner else []
+    out = summarize_agents(agents, tasks=tasks, handoffs=gateway.store.list_handoffs(limit=500),
+                           sessions=gateway.store.list_sessions(), seen={},
+                           requests=[r for st in ("admitted", "queued", "running", "awaiting_approval", "cancelling")
+                                     for r in gateway.store.list_requests(status=st)])
+    return {row["id"] if "id" in row else row.get("agent_id"): row.get("status") for row in out["agents"]}
+
+
+class StatusWatcher:
+    """G6: publish agent.status.changed on a real change after handoff/task/approval events."""
+    def __init__(self, gateway):
+        self.gw, self.cache, self._busy = gateway, None, threading.local()
+
+    def observe(self, evt) -> None:
+        if getattr(evt, "event", None) not in TRIGGERS or getattr(self._busy, "on", False):
+            return
+        self._busy.on = True
+        try:
+            now = agent_statuses(self.gw)
+            if self.cache is None:
+                self.cache = now
+                return
+            data = evt.data or {}
+            h = data.get("handoff") if isinstance(data.get("handoff"), dict) else {}
+            t = data.get("task") if isinstance(data.get("task"), dict) else {}
+            for aid, status in now.items():
+                prev = self.cache.get(aid)
+                if prev is not None and status != prev:
+                    self.gw.event_bus.publish("*", "agent.status.changed", {
+                        "agent_id": aid, "status": status, "previous": prev, "reason": evt.event,
+                        "handoff_id": h.get("id") or data.get("handoff_id"),
+                        "task_id": t.get("task_id") or h.get("task_id") or data.get("task_id"), "at": time.time()})
+            self.cache = {**self.cache, **now}
+        except Exception:  # noqa: BLE001 - status events never break publishing
+            logging.getLogger(__name__).debug("agent status watch failed", exc_info=True)
+        finally:
+            self._busy.on = False
 
 
 def register(gateway) -> None:
+    watcher = StatusWatcher(gateway)
+    gateway.agent_status_watcher = watcher
+    add = getattr(gateway.event_bus, "add_observer", None)
+    if add:
+        add(watcher.observe)
+
+    async def _prime(_app):  # baseline so the first real change is evented
+        try:
+            watcher.cache = agent_statuses(gateway)
+        except Exception:  # noqa: BLE001
+            pass
+    gateway.app.on_startup.append(_prime)
+
     async def activity(request):
         q = request.query
         try:
