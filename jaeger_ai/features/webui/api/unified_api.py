@@ -16,6 +16,8 @@ Minimal, local-only backends the gateway doesn't provide:
             GET/POST /v1/compare/history; PUT {winner} / DELETE /v1/compare/history/<id>
   Pipeline  GET /v1/pipeline; PUT /v1/pipeline/<task_id> {stage, expected_revision?};
             POST /v1/pipeline/<task_id>/attachments {kind, ref?, label?, text?}; DELETE …/attachments/<id>
+  YouTube   GET /v1/research/youtube[/tools|/<task>|/<task>/style-guide|/<task>/drafts]; POST /v1/research/youtube
+            {playlist_url, task_id?, model?, max_videos?}; POST /<task>/run {force?}|/cancel|/style-guide|/draft {topic}
   Documents GET/POST /v1/documents, GET/PUT/DELETE /v1/documents/<id>; POST /v1/documents/ai-edit
 Everything is stored under <state>/studio or <state>/documents (default ~/.jaeger). Ollama is
 reached on 127.0.0.1:11434 only. Nothing is fabricated: unavailable providers return 409 with a
@@ -688,11 +690,85 @@ def ai_edit(body: dict) -> dict:
     return {"text": out, "model": model, "elapsed_s": r["elapsed_s"]}
 
 
+# ── YouTube research (jobs in youtube_research.py) ──────────────────
+
+def _yt():
+    try:
+        from api import youtube_research as yt  # type: ignore
+    except ImportError:  # loaded standalone (tests)
+        import importlib.util, sys
+        yt = sys.modules.get("_youtube_research")
+        if yt is None:
+            spec = importlib.util.spec_from_file_location("_youtube_research", Path(__file__).with_name("youtube_research.py"))
+            yt = importlib.util.module_from_spec(spec); sys.modules["_youtube_research"] = yt; spec.loader.exec_module(yt)
+    if not yt._deps.get("_bound_by_webui"):
+        yt.bind(_bound_by_webui=True, state_root=state_root, llm=llm_text, vision=_vision, ollama_models=lambda: [m.get("name") for m in _ollama("/api/tags").get("models", [])],
+                set_stage=set_stage, attach=add_attachment, get_record=lambda tid: _pipeline().get(tid), save_doc=save_doc)
+    return yt
+
+
+def llm_text(model: str, prompt: str) -> str:
+    """One prompt through the provider layer (Ollama local/cloud, or cli:<provider>:<model>); returns the full text."""
+    out = []
+    for ev in compare_stream_events({"model": model, "prompt": prompt}):
+        if ev.get("type") == "delta":
+            out.append(ev.get("text", ""))
+        elif ev.get("type") == "error":
+            raise RuntimeError(f"{model}: {ev.get('error') or ev.get('message') or 'provider error'}")
+    return "".join(out)
+
+
+def _vision(model: str, prompt: str, image_b64: str) -> str:
+    return _ollama("/api/generate", {"model": model, "prompt": prompt, "images": [image_b64], "stream": False}, timeout=240).get("response", "")
+
+
+def _yt_route(handler, p: str, method: str, body: dict, j) -> bool:
+    yt = _yt()
+    try:
+        if p == "/v1/research/youtube/tools" and method == "GET":
+            return j(handler, yt.tools()) or True
+        if p == "/v1/research/youtube" and method == "GET":
+            return j(handler, {"jobs": yt.list_jobs()}) or True
+        if p == "/v1/research/youtube" and method == "POST":
+            return j(handler, yt.ingest(body), status=202) or True
+        mf = re.match(r"^/v1/research/youtube/([^/]+)/videos/([A-Za-z0-9_-]{11})/frames/(f\d{2}\.jpg)$", p)
+        if mf and method == "GET":
+            data = yt.frame_file(unquote(mf.group(1)), mf.group(2), mf.group(3)).read_bytes()
+            handler.send_response(200); handler.send_header("Content-Type", "image/jpeg"); handler.send_header("Content-Length", str(len(data)))
+            handler.send_header("X-Content-Type-Options", "nosniff"); handler.end_headers(); handler.wfile.write(data)
+            return True
+        m = re.match(r"^/v1/research/youtube/([^/]+)(?:/(run|cancel|style-guide|draft|drafts))?$", p)
+        if m:
+            tid, act = unquote(m.group(1)), m.group(2)
+            if act is None and method == "GET":
+                return j(handler, yt.status(tid)) or True
+            if act == "run" and method == "POST":
+                force = body.get("force") or []
+                if not isinstance(force, list) or not set(force) <= set(yt.STEPS) | {"style_guide"}:
+                    raise ApiError(400, f"force must list steps from {list(yt.STEPS) + ['style_guide']}")
+                return j(handler, yt.start(tid, force=force, style_guide=body.get("style_guide", True) is not False), status=202) or True
+            if act == "cancel" and method == "POST":
+                return j(handler, yt.cancel(tid)) or True
+            if act == "style-guide" and method == "GET":
+                return j(handler, yt.style_guide(tid)) or True
+            if act == "style-guide" and method == "POST":
+                return j(handler, yt.build_style_guide(tid, force=True, model=body.get("model"))) or True
+            if act == "draft" and method == "POST":
+                return j(handler, yt.draft(tid, body), status=201) or True
+            if act == "drafts" and method == "GET":
+                return j(handler, {"drafts": yt.status(tid).get("drafts", [])}) or True
+        raise ApiError(404, "unknown YouTube research endpoint")
+    except yt.YtError as exc:
+        raise ApiError(exc.status, str(exc), **exc.extra) from exc
+    except RuntimeError as exc:
+        raise ApiError(502, str(exc)) from exc
+
+
 # ── Router ───────────────────────────────────────────────────────────
 
 def route(handler, parsed, method: str, read_body, j) -> bool:
     p = parsed.path
-    if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p.startswith("/v1/providers/cli") or p == "/v1/pipeline" or p.startswith("/v1/pipeline/") or p == "/v1/documents" or p.startswith("/v1/documents/")):
+    if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p.startswith("/v1/providers/cli") or p == "/v1/pipeline" or p.startswith("/v1/pipeline/") or p == "/v1/research/youtube" or p.startswith("/v1/research/youtube/") or p == "/v1/documents" or p.startswith("/v1/documents/")):
         return False
     try:
         body = read_body(handler) if method in ("POST", "PUT") else {}
@@ -757,6 +833,8 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
                 return j(handler, _cli().update(mp.group(1), body)) or True
             except KeyError as exc:
                 raise ApiError(404, "unknown CLI provider") from exc
+        if p == "/v1/research/youtube" or p.startswith("/v1/research/youtube/"):
+            return _yt_route(handler, p, method, body, j)
         if p == "/v1/pipeline" and method == "GET":
             return j(handler, list_pipeline()) or True
         mt = re.match(r"^/v1/pipeline/([^/]+)(?:/attachments(?:/([a-f0-9]{12}))?)?$", p)
