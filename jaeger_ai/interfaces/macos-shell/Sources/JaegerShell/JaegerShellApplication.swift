@@ -53,6 +53,7 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     private var visibleChecker: VisibleChecker?
     var hotkeyLabel: String { hotkeyChoice.spec.label }
     private(set) var voiceController: VoiceController?
+    private(set) var pauseState = ShellPauseState()
     private var appearanceObservation: NSKeyValueObservation?
     private(set) lazy var stack = StackController(app: self)
 
@@ -198,6 +199,21 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
             self?.toggleWindow()
             self?.bridge?.send(["type": "hotkey"])
         }
+    }
+
+    /// Shell-level pause (reuses Hotkey.register/unregister and VoiceController.shutdown). Never touches
+    /// the gateway, the WebUI or launchd.
+    func setPaused(_ value: Bool) {
+        guard pauseState.set(value) else { return }
+        if value {
+            Hotkey.shared.unregister()
+            voiceController?.shutdown()
+        } else {
+            registerHotkey()
+        }
+        shellLog("[shell][pause] \(value ? "paused (hotkey unregistered, voice stopped)" : "resumed (hotkey registered)")")
+        statusController?.renderPauseState()
+        bridge?.send(["type": "shell.paused", "paused": value])
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -346,7 +362,9 @@ final class JaegerShellApplication: NSObject, NSApplicationDelegate, NSWindowDel
     }
 
     func toggleWindow() {
-        if let window, window.isVisible, NSApp.isActive, window.isKeyWindow {
+        // Visibility only: an LSUIElement status-item click never makes the app active, so the old
+        // isActive/isKeyWindow condition made the second click re-show instead of hide.
+        if WindowToggle.action(windowVisible: window?.isVisible ?? false) == .hide {
             hideWindow()
         } else {
             showWindow()
