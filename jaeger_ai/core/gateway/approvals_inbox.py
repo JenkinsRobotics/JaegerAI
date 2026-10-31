@@ -401,7 +401,30 @@ def register(gateway) -> None:
                                 headers={"Content-Disposition": f'attachment; filename="{aid}-audit.csv"'})
         return web.json_response({"approval_id": aid, "events": evs})
 
+    async def create_request(request):
+        """Owner-surface actions (widgets, automations) ask through the inbox.
+        {source: widget|automation, title, summary?, type?, risk: low|medium|high|critical, payload?, action:{...}}"""
+        try:
+            body = await _json(request)
+            source = body.get("source")
+            title = str(body.get("title") or "").strip()[:160]
+            if source not in ("widget", "automation") or not title or body.get("risk") not in RISKS:
+                raise ValueError
+        except (ValueError, TypeError):
+            return web.json_response({"error": "source (widget|automation), title and risk are required"}, status=400)
+        typ = body.get("type") if body.get("type") in TYPES else "permission"
+        meta = {"type": typ, "title": title, "summary": str(body.get("summary") or title)[:500],
+                "policy_risk": body["risk"], "risk_reasons": [f"{source} action"], "agent_id": source,
+                "payload": body.get("payload") if isinstance(body.get("payload"), dict) else {},
+                "source": source, "action": body.get("action") if isinstance(body.get("action"), dict) else {},
+                "host": str(body.get("host") or "page")[:20], "batch_group": None,
+                "expires_at": time.time() + 3600, "on_expire": "deny"}
+        row = gateway.store.create_approval(kind=f"{source}_action", prompt=title, options=["once", "deny"], metadata=meta)
+        gateway.event_bus.publish("*", "approval.request", {**row, "agent_id": source})
+        return web.json_response({"approval": project(row)}, status=201)
+
     r = gateway.app.router
+    r.add_post("/v1/approvals/requests", create_request)
     r.add_get("/v1/approvals/counts", list_counts)
     r.add_post("/v1/approvals/batch", batch)
     r.add_post("/v1/approvals/{id}/decide", decide_one)
