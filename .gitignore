@@ -151,3 +151,4 @@ packages/jaeger-agent/.build/
 /notes/
 /skills/
 /*.png
+.venv-research/
