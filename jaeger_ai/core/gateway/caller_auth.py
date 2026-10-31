@@ -50,8 +50,8 @@ KEYCHAIN_SERVICE = "ai.jaeger.gateway.caller"
 TOKEN_DIR_ENV = "JAEGER_CALLER_TOKEN_DIR"
 SECURITY_BIN = "/usr/bin/security"
 
-ALL_SCOPES = frozenset({"read", "turn", "delegate", "approve", "ide", "stop", "admin", "handoff"})
-_OWNER = frozenset({"read", "turn", "delegate", "approve", "stop", "admin"})
+ALL_SCOPES = frozenset({"read", "turn", "delegate", "approve", "ide", "stop", "admin", "handoff", "search"})
+_OWNER = frozenset({"read", "turn", "delegate", "approve", "stop", "admin", "search"})
 
 
 @dataclass(frozen=True)
@@ -73,7 +73,7 @@ APP_CALLERS: Mapping[str, str] = {
     "vscode": "VS Code / Copilot", "opencode": "OpenCode", "continue": "Continue",
     "cline": "Cline", "openclaw": "OpenClaw", "cagent": "cagent", "muse": "Muse",
 }
-APP_CALLER_SCOPES = frozenset({"read", "turn", "handoff"})
+APP_CALLER_SCOPES = frozenset({"read", "turn", "handoff", "search"})
 
 #: The closed set of Gateway callers. Adding a caller is a code change.
 CALLERS: Mapping[str, CallerSpec] = {
@@ -89,9 +89,9 @@ CALLERS: Mapping[str, CallerSpec] = {
                    description="jaegerd's own tools calling back into the Gateway"),
         CallerSpec("mcp", "mcp", frozenset({"read", "turn", "stop"}), session_prefix="mcp:",
                    description="Jaeger MCP server (agentgateway, OpenClaw, Hermes, other AIs)"),
-        CallerSpec("ares", "mcp:ares", frozenset({"read", "turn"}), session_prefix="ares:",
+        CallerSpec("ares", "mcp:ares", frozenset({"read", "turn", "search"}), session_prefix="ares:",
                    description="ARES agent bridge client; dedicated credential required"),
-        CallerSpec("grokbot", "mcp:grokbot", frozenset({"read", "turn"}), session_prefix="grokbot:",
+        CallerSpec("grokbot", "mcp:grokbot", frozenset({"read", "turn", "search"}), session_prefix="grokbot:",
                    description="GrokBot local bridge client; dedicated credential required"),
         CallerSpec("a2a", "a2a", frozenset({"read", "turn", "stop"}), session_prefix="a2a:",
                    description="Jaeger A2A server"),
@@ -142,6 +142,8 @@ APPROVE_ROUTES = frozenset({("POST", "/v1/approvals/{id}"), ("POST", "/v1/approv
                             ("POST", "/v1/sessions/{id}/clarify/{clarify_id}")})
 IDE_ROUTES = frozenset({("POST", "/v1/sessions/{id}/ide/{ide_request_id}")})
 STOP_ROUTES = frozenset({("POST", "/v1/stop")})
+#: Shared web search (local SearXNG) and safe page fetch: the ``search`` grant.
+SEARCH_ROUTES = frozenset({("POST", "/v1/search"), ("POST", "/v1/fetch")})
 #: Lead → specialist handoff (``call_agent``): owners and jaegerd, never outside callers.
 DELEGATE_ROUTES = frozenset({("POST", "/v1/agents/{id}/handoff")})
 #: GET routes an outside (prefixed) caller may use; all are session-scoped.
@@ -184,6 +186,8 @@ def required_scope(method: str, route: str | None) -> str | None:
     if method in {"GET", "HEAD", "OPTIONS"}:
         return "read"
     key = (method, route or "")
+    if key in SEARCH_ROUTES:
+        return "search"
     if key in TURN_ROUTES or key in OPENAI_COMPAT_ROUTES:
         return "turn"
     if key in APPROVE_ROUTES:
@@ -210,7 +214,7 @@ def prefixed_route_allowed(method: str, route: str | None, caller: str | None = 
     route = route or ""
     if method in {"GET", "HEAD"}:
         return route in PREFIXED_READ_ROUTES or route in CALLER_READ_ROUTES.get(caller or "", ())
-    return (method, route) in TURN_ROUTES or (method, route) in STOP_ROUTES
+    return (method, route) in TURN_ROUTES or (method, route) in STOP_ROUTES or (method, route) in SEARCH_ROUTES
 
 
 # ── token storage ──────────────────────────────────────────────────────
