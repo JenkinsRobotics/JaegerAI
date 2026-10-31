@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JaegerSource } from "../api/source";
 import type { Agent } from "../api/types";
 import { label, visible } from "../agents/agentsLogic";
-import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast } from "./ui";
+import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast, PageHead } from "./ui";
 import { getJson, sendJson } from "./webui";
 
 export interface Provider { id: string; name: string; kind: string; available: boolean; cost: string; note: string | null }
@@ -40,14 +40,11 @@ export function StudioPage({ source, agents, onNavigate }: { source: JaegerSourc
   };
   return (
     <div className="jg-u-page jg-studio">
-      <header className="jg-u-page__head">
-        <div><h1>Studio</h1><p>Generate images, keep an asset library and lay ideas out on a board.</p></div>
-        <div className="jg-ui-toolbar">
+      <PageHead title="Studio" subtitle="Generate images, keep an asset library and lay ideas out on a board." actions={<>
           <Segmented label="Studio section" value={tab} onChange={setTab} options={[{ value: "create", label: "Generate" }, { value: "library", label: `Library${assets ? ` (${assets.length})` : ""}` }, { value: "board", label: "Board" }]} />
           <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={(e) => { void importFiles(e.target.files); e.target.value = ""; }} />
           <button type="button" className="jg-u-btn" onClick={() => fileInput.current?.click()}>Import images</button>
-        </div>
-      </header>
+        </>} />
       {err && <p className="jg-u-error" role="alert">Studio storage unavailable: {err}</p>}
       {tab === "create" && <Generate onMade={async () => { await load(); }} assets={assets} />}
       {tab === "library" && <Library assets={assets} reload={load} source={source} agents={agents} onNavigate={onNavigate} />}
@@ -112,7 +109,7 @@ function Library({ assets, reload, source, agents, onNavigate }: { assets: Asset
   const shown = (assets ?? []).filter((a) => (!tag || a.tags.includes(tag)) && (!q || `${a.name} ${a.prompt ?? ""} ${a.tags.join(" ")}`.toLowerCase().includes(q.toLowerCase())));
   return (
     <>
-      <div className="jg-ui-toolbar" style={{ marginBottom: 16 }}>
+      <div className="jg-ui-toolbar jg-mb-4">
         <input className="jg-u-search" type="search" placeholder="Search assets" aria-label="Search assets" value={q} onChange={(e) => setQ(e.target.value)} />
         {tags.length > 0 && <Segmented label="Tag" value={tag} onChange={setTag} options={[{ value: "", label: "All" }, ...tags.slice(0, 8).map((t) => ({ value: t, label: t }))]} />}
       </div>
@@ -167,11 +164,11 @@ function AssetSheet({ asset, onClose, reload, source, agents, onNavigate }: { as
         <dt>Added</dt><dd>{new Date(asset.created_at * 1000).toLocaleString()}</dd>
       </dl>
       <form onSubmit={(e) => { e.preventDefault(); void saveTags(); }} className="jg-ui-toolbar">
-        <label className="jg-ui-field" style={{ flex: 1 }}>Tags (comma separated)<input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
-        <button className="jg-u-btn" style={{ alignSelf: "end" }}>Save tags</button>
+        <label className="jg-ui-field jg-grow">Tags (comma separated)<input value={tags} onChange={(e) => setTags(e.target.value)} /></label>
+        <button className="jg-u-btn jg-self-end">Save tags</button>
       </form>
       {canSend && (
-        <form onSubmit={(e) => { e.preventDefault(); void sendToChat(); }} style={{ display: "grid", gap: 8 }}>
+        <form className="jg-stack jg-stack--tight" onSubmit={(e) => { e.preventDefault(); void sendToChat(); }}>
           <label className="jg-ui-field">Send to<select value={agentId} onChange={(e) => setAgentId(e.target.value)}>{agents.filter(visible).map((a) => <option key={a.id} value={a.id}>{label(a)}</option>)}</select></label>
           <label className="jg-ui-field">Message<input value={note} onChange={(e) => setNote(e.target.value)} /></label>
           <div className="jg-ui-actions"><button className="jg-u-btn jg-u-btn--primary" disabled={busy || !agentId || !note.trim()}>{busy ? "Sending…" : "Send to chat"}</button></div>
@@ -220,7 +217,7 @@ export function Board({ assets }: { assets: Asset[] }) {
   const byId = new Map(assets.map((a) => [a.id, a]));
   return (
     <>
-      <div className="jg-ui-toolbar" style={{ marginBottom: 16 }}>
+      <div className="jg-ui-toolbar jg-mb-4">
         <button type="button" className="jg-u-btn" onClick={() => add({ kind: "note", text: "", color: "yellow", w: 200, h: 140 })}>Add note</button>
         <button type="button" className="jg-u-btn" disabled={!assets.length} onClick={() => setPicking(true)}>Add asset</button>
         <span className="jg-u-note">Drag to move, drag the corner to resize, arrow keys nudge. Saved automatically.</span>

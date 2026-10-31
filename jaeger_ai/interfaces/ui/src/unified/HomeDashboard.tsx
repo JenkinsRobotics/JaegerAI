@@ -12,7 +12,7 @@ import type { AgentsState } from "../agents/agentsStore";
 import { label, visible } from "../agents/agentsLogic";
 import { AgentFace } from "./AgentFace";
 import { ApprovalList, useApprovalSessions } from "./ApprovalTray";
-import { Badge, Empty, SkeletonRows, Sparkline, useToast, type Tone } from "./ui";
+import { Badge, Empty, SkeletonRows, Sparkline, useToast, type Tone, PageHead } from "./ui";
 import { getJson, type Metrics, type SystemStatus } from "./webui";
 import { loadPanels, movePanel, savePanels, type HomePanel } from "./homeLayout";
 import { Cloud, Globe, Mic, MessageSquare, Moon, Sparkles, Zap, ChevronLeft, ChevronRight } from "../components/Icons";
@@ -193,13 +193,10 @@ export function HomeDashboard({ source, store, onNavigate }: { source: JaegerSou
 
   return (
     <div className="jg-u-page jg-u-home">
-      <header className="jg-u-page__head">
-        <div><h1>Home</h1><p>Live status of this Mac, the gateway and your agents.</p></div>
-        <div className="jg-ui-toolbar">
+      <PageHead title="Home" subtitle="Live status of this Mac, the gateway and your agents." actions={<>
           <button type="button" className="jg-u-btn" aria-pressed={editing} onClick={() => setEditing((v) => !v)}>{editing ? "Done" : "Edit layout"}</button>
           <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => chat()}>New chat</button>
-        </div>
-      </header>
+        </>} />
       {store.error && <p className="jg-u-error" role="alert">Gateway unreachable: {store.error}</p>}
       {metricsErr && <p className="jg-u-error" role="alert">Metrics unavailable: {metricsErr}</p>}
 

@@ -349,3 +349,20 @@ html:not([data-jaeger-host="macos"]) .app-window .jg-traffic-lights { display: n
 /* Shared form control (selects, text inputs) — matches .jg-u-search */
 .jg-ui-input { font: inherit; font-size: var(--jg-text-body); min-height: 30px; padding: 0 var(--jg-space-3); border-radius: var(--jg-radius-s); border: 1px solid var(--jg-color-border); background: var(--jg-color-elevated); color: var(--jg-color-text); }
 .jg-ui-input:focus-visible, .jg-u-search:focus-visible, .jg-u-btn:focus-visible { outline: 2px solid var(--jg-focus); outline-offset: 1px; }
+
+/* Layout utilities (replace one-off inline styles; spacing from the --jg-space scale) */
+.jg-stack { display: grid; gap: var(--jg-space-4); }
+.jg-stack--tight { gap: var(--jg-space-2); }
+.jg-row { display: flex; align-items: center; gap: var(--jg-space-1); }
+.jg-row--wrap { flex-wrap: wrap; }
+.jg-spread { justify-content: space-between; }
+.jg-grow { flex: 1; min-width: 0; }
+.jg-self-end { align-self: end; }
+.jg-m-0 { margin: 0; }
+.jg-mt-1 { margin-top: var(--jg-space-1); } .jg-mt-2 { margin-top: var(--jg-space-2); } .jg-mt-4 { margin-top: var(--jg-space-4); }
+.jg-mb-3 { margin-bottom: var(--jg-space-3); } .jg-mb-4 { margin-bottom: var(--jg-space-4); }
+.jg-minw-select { min-width: 150px; }
+.jg-scroll-half { max-height: 50vh; overflow: auto; }
+.jg-u-grid--m { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.jg-u-grid--s { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+.jg-u-card--flush { padding: 0; overflow: hidden; }

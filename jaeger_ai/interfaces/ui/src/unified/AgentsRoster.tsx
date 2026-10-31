@@ -17,7 +17,7 @@ import { SpecialistConfiguration } from "../agents/SpecialistConfiguration";
 import { AgentMemory } from "../agents/AgentMemory";
 import { AgentKnowledge } from "../agents/AgentKnowledge";
 import { AgentFace } from "./AgentFace";
-import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast } from "./ui";
+import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast, PageHead } from "./ui";
 import { createSpecialist } from "./agentCreate";
 import { CharacterRoster } from "./CharacterRoster";
 
@@ -54,16 +54,13 @@ export function AgentsRoster({ source, store, refresh, onNavigate }: { source: J
 
   return (
     <div className="jg-u-page">
-      <header className="jg-u-page__head">
-        <div><h1>Agents</h1><p>{store.agents.filter(visible).length} agents · select one to inspect it.</p></div>
-        <div className="jg-ui-toolbar">
+      <PageHead title="Agents" subtitle={<>{store.agents.filter(visible).length} agents · select one to inspect it.</>} actions={<>
           <input className="jg-u-search" type="search" placeholder="Filter agents" aria-label="Filter agents" value={query} onChange={(e) => setQuery(e.target.value)} />
           <Segmented label="Show" value={show} onChange={(v) => { setShow(v); setSelected(undefined); }} options={[{ value: "active", label: "Active" }, { value: "archived", label: "Archived" }]} />
           <label className="jg-u-check"><input type="checkbox" checked={robots} onChange={(e) => setRobots(e.target.checked)} /> Robot icons</label>
           <button type="button" className="jg-u-btn" onClick={() => onNavigate("/agents/characters")}>From character</button>
           <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => setCreating(true)}>New agent</button>
-        </div>
-      </header>
+        </>} />
       <CharacterRoster onNavigate={onNavigate} />
       {store.error && <p className="jg-u-error" role="alert">Gateway unreachable: {store.error}</p>}
       <div className="jg-ui-split">
@@ -130,7 +127,7 @@ function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, on
         <div>
           <strong>{label(agent)}</strong>
           <span>{(typeof agent.metadata?.specialty === "string" && agent.metadata.specialty) || (agent.role ? ROLE_TEXT[agent.role] ?? agent.role : "Specialist")}</span>
-          <span style={{ display: "flex", gap: 4, marginTop: 4 }}><Badge tone={statusTone(status)}>{status ?? "idle"}</Badge>{agent.primary && <Badge>Primary</Badge>}{archived && <Badge tone="warn">Archived</Badge>}</span>
+          <span className="jg-row jg-mt-1"><Badge tone={statusTone(status)}>{status ?? "idle"}</Badge>{agent.primary && <Badge>Primary</Badge>}{archived && <Badge tone="warn">Archived</Badge>}</span>
         </div>
       </div>
       <div className="jg-ui-toolbar">
@@ -148,11 +145,11 @@ function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, on
         </dl>
       </section>
       <section><h3>Skills &amp; tools</h3>
-        {agent.skills?.length ? <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>{agent.skills.map((s) => <Badge key={s.id}>{s.name}</Badge>)}</div>
+        {agent.skills?.length ? <div className="jg-row jg-row--wrap jg-mt-2">{agent.skills.map((s) => <Badge key={s.id}>{s.name}</Badge>)}</div>
           : <p className="jg-u-note">No skills reported for this agent.{agent.delegation ? ` Tools: ${agent.delegation.tools}.` : ""}</p>}
       </section>
       <section><h3>Configure</h3>
-        <div className="jg-ui-toolbar" style={{ marginTop: 8 }}>
+        <div className="jg-ui-toolbar jg-mt-2">
           {source.specialistControls && <button type="button" className="jg-u-btn" onClick={() => setPanel("config")}>Instructions</button>}
           {source.agentMemory && <button type="button" className="jg-u-btn" onClick={() => setPanel("memory")}>Memory</button>}
           {source.agentKnowledge && <button type="button" className="jg-u-btn" onClick={() => setPanel("knowledge")}>Knowledge</button>}
@@ -180,7 +177,7 @@ function AgentInspector({ source, agent, status, refresh, onNavigate, pinned, on
       {panel === "knowledge" && source.agentKnowledge && <AgentKnowledge agentId={agent.id} controls={source.agentKnowledge} onClose={() => setPanel(undefined)} onSaved={() => toast("Knowledge saved")} />}
       {panel === "rename" && (
         <Sheet title={`Rename ${label(agent)}`} onClose={() => setPanel(undefined)}>
-          <form onSubmit={(e) => { e.preventDefault(); void patch({ display_name: name.trim() || null }, "Renamed").then(() => setPanel(undefined)); }} style={{ display: "grid", gap: 16 }}>
+          <form className="jg-stack" onSubmit={(e) => { e.preventDefault(); void patch({ display_name: name.trim() || null }, "Renamed").then(() => setPanel(undefined)); }}>
             <label className="jg-ui-field">Display name<input value={name} maxLength={80} onChange={(e) => setName(e.target.value)} /></label>
             <div className="jg-ui-actions"><button type="button" className="jg-u-btn" onClick={() => setPanel(undefined)}>Cancel</button><button className="jg-u-btn jg-u-btn--primary" disabled={busy || !name.trim()}>Save</button></div>
           </form>
@@ -205,7 +202,7 @@ function CreateAgentSheet({ source, onClose, onCreated }: { source: JaegerSource
   };
   return (
     <Sheet title="New agent" onClose={onClose}>
-      <form onSubmit={(e) => { e.preventDefault(); void submit(); }} style={{ display: "grid", gap: 16 }}>
+      <form className="jg-stack" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
         <label className="jg-ui-field">Name<input required maxLength={80} value={f.displayName} onChange={set("displayName")} placeholder="Research assistant" /></label>
         <label className="jg-ui-field">Specialty<input maxLength={200} value={f.specialty} onChange={set("specialty")} placeholder="What it's good at" /></label>
         <label className="jg-ui-field">Summary<input maxLength={2000} value={f.summary} onChange={set("summary")} /></label>

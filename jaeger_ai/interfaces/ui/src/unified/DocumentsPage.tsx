@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Markdown } from "../chat/Markdown";
-import { Empty, Segmented, Sheet, SkeletonRows, useToast } from "./ui";
+import { Empty, Segmented, Sheet, SkeletonRows, useToast, PageHead } from "./ui";
 import { getJson, sendJson } from "./webui";
 import { isCloud, isEmbedding, loadModels, type LocalModel } from "./models";
 
@@ -57,10 +57,7 @@ export function DocumentsPage({ params }: { params: URLSearchParams }) {
   };
   return (
     <div className="jg-u-page">
-      <header className="jg-u-page__head">
-        <div><h1>Documents</h1><p>Markdown documents with AI editing on your local models.</p></div>
-        <div className="jg-ui-toolbar"><button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => void create()}>New document</button></div>
-      </header>
+      <PageHead title="Documents" subtitle="Markdown documents with AI editing on your local models." actions={<><button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => void create()}>New document</button></>} />
       {err && <p className="jg-u-error" role="alert">{err}</p>}
       <div className="jg-docs">
         <nav className="jg-u-card jg-docs__list" aria-label="Documents">
@@ -72,7 +69,7 @@ export function DocumentsPage({ params }: { params: URLSearchParams }) {
         </nav>
         {!doc ? <section className="jg-u-card"><Empty title="Open or create a document" action={<button type="button" className="jg-u-btn" onClick={() => void create()}>New document</button>} /></section> : (
           <section className="jg-u-card jg-docs__editor" aria-label="Editor">
-            <div className="jg-ui-toolbar" style={{ justifyContent: "space-between" }}>
+            <div className="jg-ui-toolbar jg-spread">
               <input className="jg-docs__title" aria-label="Title" value={draft.title} maxLength={200} onChange={(e) => setDraft((d) => ({ ...d, title: e.target.value }))} />
               <div className="jg-ui-toolbar">
                 <Segmented label="Layout" value={mode} onChange={setMode} options={[{ value: "edit", label: "Edit" }, { value: "split", label: "Split" }, { value: "preview", label: "Preview" }]} />
@@ -83,8 +80,8 @@ export function DocumentsPage({ params }: { params: URLSearchParams }) {
             <div className="jg-ui-toolbar jg-docs__ai" aria-label="AI edit">
               <select className="jg-u-search" aria-label="AI model" value={model} onChange={(e) => setModel(e.target.value)} disabled={!models.length}>{models.map((m) => <option key={m.name} value={m.name}>{m.name}</option>)}</select>
               {ACTIONS.map(([id, text]) => <button key={id} type="button" className="jg-u-icon-btn" disabled={!model || Boolean(ai && !ai.text && !ai.error)} onClick={() => void runAi(id)}>{text}</button>)}
-              <form onSubmit={(e) => { e.preventDefault(); if (custom.trim()) void runAi("custom", custom); }} style={{ display: "flex", gap: 4 }}>
-                <input className="jg-u-search" placeholder="Custom instruction…" aria-label="Custom AI instruction" value={custom} onChange={(e) => setCustom(e.target.value)} style={{ minWidth: 160 }} />
+              <form className="jg-row" onSubmit={(e) => { e.preventDefault(); if (custom.trim()) void runAi("custom", custom); }}>
+                <input className="jg-u-search jg-minw-select" placeholder="Custom instruction…" aria-label="Custom AI instruction" value={custom} onChange={(e) => setCustom(e.target.value)} />
               </form>
               <span className="jg-u-note">Applies to the selection, or the whole document.</span>
             </div>
@@ -96,7 +93,7 @@ export function DocumentsPage({ params }: { params: URLSearchParams }) {
       </div>
       {ai && (
         <Sheet title={`AI: ${ai.action}`} onClose={() => setAi(undefined)}>
-          {!ai.text && !ai.error ? <SkeletonRows n={4} /> : ai.error ? <p className="jg-u-error" role="alert">{ai.error}</p> : <div className="jg-docs__preview" style={{ maxHeight: "50vh", overflow: "auto" }}><Markdown text={ai.text!} /></div>}
+          {!ai.text && !ai.error ? <SkeletonRows n={4} /> : ai.error ? <p className="jg-u-error" role="alert">{ai.error}</p> : <div className="jg-docs__preview jg-scroll-half"><Markdown text={ai.text!} /></div>}
           <div className="jg-ui-actions"><button type="button" className="jg-u-btn" onClick={() => setAi(undefined)}>Discard</button>
             <button type="button" className="jg-u-btn jg-u-btn--primary" disabled={!ai.text} onClick={() => { setDraft((d) => ({ ...d, body: d.body.slice(0, ai.from) + ai.text + d.body.slice(ai.to) })); setAi(undefined); }}>Replace {ai.from === 0 && ai.to === draft.body.length ? "document" : "selection"}</button></div>
         </Sheet>)}

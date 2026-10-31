@@ -6,7 +6,7 @@ import type { Agent } from "../api/types";
 import { label, visible } from "../agents/agentsLogic";
 import { AgentMemory } from "../agents/AgentMemory";
 import { Markdown } from "../chat/Markdown";
-import { Badge, Empty, Segmented, SkeletonRows } from "./ui";
+import { Badge, Empty, Segmented, SkeletonRows, PageHead } from "./ui";
 
 type Skill = { name: string; category: string; description: string; lifecycle: string };
 
@@ -14,10 +14,7 @@ export function KnowledgePage({ source, agents }: { source: JaegerSource; agents
   const [tab, setTab] = useState<"skills" | "memory" | "library">("skills");
   return (
     <div className="jg-u-page">
-      <header className="jg-u-page__head">
-        <div><h1>Memory &amp; Skills</h1><p>What your agents know and can do.</p></div>
-        <div className="jg-ui-toolbar"><Segmented label="Section" value={tab} onChange={setTab} options={[{ value: "skills", label: "Skills" }, { value: "memory", label: "Memory" }, { value: "library", label: "Library" }]} /></div>
-      </header>
+      <PageHead title={<>Memory &amp; Skills</>} subtitle="What your agents know and can do." actions={<><Segmented label="Section" value={tab} onChange={setTab} options={[{ value: "skills", label: "Skills" }, { value: "memory", label: "Memory" }, { value: "library", label: "Library" }]} /></>} />
       {tab === "skills" && <Skills source={source} />}
       {tab === "memory" && <Memory source={source} agents={agents.filter(visible)} />}
       {tab === "library" && <Library source={source} />}
@@ -41,8 +38,8 @@ function Skills({ source }: { source: JaegerSource }) {
   return (
     <div className="jg-ui-split">
       <section className="jg-u-card" aria-label="Skills">
-        <div className="jg-ui-toolbar" style={{ justifyContent: "space-between", marginBottom: 12 }}>
-          <h2 style={{ margin: 0 }}>Skills {skills && <Badge>{skills.length}</Badge>}</h2>
+        <div className="jg-ui-toolbar jg-spread jg-mb-3">
+          <h2 className="jg-m-0">Skills {skills && <Badge>{skills.length}</Badge>}</h2>
           <input className="jg-u-search" type="search" placeholder="Search skills" aria-label="Search skills" value={q} onChange={(e) => setQ(e.target.value)} />
         </div>
         {err ? <p className="jg-u-error">{err}</p> : !skills ? <SkeletonRows n={6} /> : !groups.length ? <Empty title="No skills match" /> : groups.map(([cat, list]) => (
@@ -53,7 +50,7 @@ function Skills({ source }: { source: JaegerSource }) {
       </section>
       <aside className="jg-ui-inspector" aria-label="Skill details">
         {!sel ? <Empty title="Select a skill" /> : (<>
-          <h3>{sel.category}</h3><strong>{sel.name}</strong><p className="jg-u-note" style={{ margin: 0 }}>{sel.description}</p>
+          <h3>{sel.category}</h3><strong>{sel.name}</strong><p className="jg-u-note jg-m-0">{sel.description}</p>
           <span><Badge>{sel.lifecycle}</Badge></span>
           {detail === undefined && source.skillDetail ? <SkeletonRows /> : detail ? (
             <dl className="jg-ui-kv">
@@ -86,7 +83,7 @@ function Memory({ source, agents }: { source: JaegerSource; agents: Agent[] }) {
   return (
     <div className="jg-ui-split">
       <section className="jg-u-card" aria-label="Memory">
-        <div className="jg-ui-toolbar" style={{ marginBottom: 12 }}>
+        <div className="jg-ui-toolbar jg-mb-3">
           <select className="jg-u-search" aria-label="Agent" value={agentId} onChange={(e) => setAgentId(e.target.value)}>{agents.map((a) => <option key={a.id} value={a.id}>{label(a)}</option>)}</select>
           <input className="jg-u-search" type="search" placeholder="Search memory" aria-label="Search memory" value={q} onChange={(e) => setQ(e.target.value)} />
           {snap?.editable && <button type="button" className="jg-u-btn" onClick={() => setEditing(true)}>Edit</button>}
@@ -121,7 +118,7 @@ function Library({ source }: { source: JaegerSource }) {
   return (
     <div className="jg-ui-split">
       <section className="jg-u-card" aria-label="Library">
-        <input className="jg-u-search" type="search" placeholder="Search library" aria-label="Search library" value={q} onChange={(e) => setQ(e.target.value)} style={{ marginBottom: 12 }} />
+        <input className="jg-u-search jg-mb-3" type="search" placeholder="Search library" aria-label="Search library" value={q} onChange={(e) => setQ(e.target.value)} />
         {err ? <p className="jg-u-error">{err}</p> : !docs ? <SkeletonRows /> : !docs.length ? <Empty title={q ? "No results" : "Library is empty"} /> : (
           <ul className="jg-u-list">{docs.map((d) => <li key={d.id}><button type="button" className="jg-u-row" aria-current={doc?.id === d.id || undefined} onClick={() => source.library!.read(d.id).then(setDoc, (e: Error) => setErr(e.message))}><span className="jg-u-row__text"><strong>{d.title}</strong></span></button></li>)}</ul>)}
       </section>
