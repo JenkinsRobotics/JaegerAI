@@ -280,7 +280,8 @@ def step_transcript(tid: str, v: dict) -> dict:
     if w.returncode != 0 or not txt.is_file():
         raise RuntimeError(f"whisper.cpp failed: {(w.stderr or '').strip()[-200:]}")
     text = " ".join(txt.read_text("utf-8", errors="replace").split())
-    _wj(d / "transcript.json", {"source": f"whisper.cpp ({wm.name})", "segments": [], "text": text})
+    why = "no English captions" if r.returncode == 0 else f"captions download failed: {(r.stderr or '').strip().splitlines()[-1][:200] if (r.stderr or '').strip() else 'unknown'}"
+    _wj(d / "transcript.json", {"source": f"whisper.cpp ({wm.name})", "fallback_reason": why, "segments": [], "text": text})
     return {"source": "whisper.cpp"}
 
 
