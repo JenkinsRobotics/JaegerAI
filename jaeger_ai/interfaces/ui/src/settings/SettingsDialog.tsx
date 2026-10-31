@@ -32,7 +32,7 @@ export function applyAppearance(mode: Appearance) {
   document.documentElement.dataset.appearance = mode;
 }
 
-export type Tab = "finance" | "memory" | "notifications" | "agents" | "general" | "voice" | "connection" | "about" | "automations" | "skills" | "library" | "tools" | "diagnostics" | "workflows" | "channels" | "reset" | "providers";
+export type Tab = "finance" | "memory" | "notifications" | "agents" | "general" | "voice" | "connection" | "about" | "automations" | "skills" | "library" | "tools" | "diagnostics" | "workflows" | "channels" | "reset" | "providers" | "integrations";
 const TABS: { id: Tab; label: string; icon: IconName }[] = [
   {id:"finance",label:"Financial policy",icon:"info"},
   {id:"memory",label:"Memory",icon:"info"},
@@ -42,6 +42,7 @@ const TABS: { id: Tab; label: string; icon: IconName }[] = [
   { id: "voice", label: "Voice", icon: "mic" },
   { id: "connection", label: "Connection", icon: "server" },
   { id: "providers", label: "Providers", icon: "server" },
+  { id: "integrations", label: "Integrations", icon: "server" },
   { id: "channels", label: "Channels", icon: "server" },
   { id: "workflows", label: "Workflows", icon: "settings-gear" },
   { id: "automations", label: "Automations", icon: "settings-gear" },
@@ -57,7 +58,7 @@ export const SETTINGS_GROUPS: { id: string; label: string; tabs: Tab[] }[] = [
   { id: "personal", label: "You", tabs: ["general", "voice", "notifications"] },
   { id: "agents", label: "Agents", tabs: ["agents", "memory", "skills", "library"] },
   { id: "automation", label: "Automation", tabs: ["workflows", "automations", "channels"] },
-  { id: "connections", label: "Connections", tabs: ["providers", "connection", "tools"] },
+  { id: "connections", label: "Connections", tabs: ["integrations", "providers", "connection", "tools"] },
   { id: "money", label: "Money", tabs: ["finance"] },
   { id: "system", label: "System", tabs: ["diagnostics", "about", "reset"] },
 ];
@@ -73,8 +74,9 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
   return <button type="button" role="switch" aria-label={label} aria-checked={checked} className={`jg-switch${checked ? " is-on" : ""}`} onClick={() => onChange(!checked)}><span /></button>;
 }
 
-export function SettingsDialog({ inline, tab: controlledTab, onTab, resetPanel, open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel, computerPanel, financePanel }: {
+export function SettingsDialog({ inline, tab: controlledTab, onTab, resetPanel, open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel, computerPanel, financePanel, integrationsPanel }: {
   /** Render as a page (the /settings route) instead of a modal sheet. */ inline?: boolean; tab?: Tab; onTab?: (tab: Tab) => void; resetPanel?: ReactNode;
+  /** Settings › Integrations (Microsoft 365, MCP, channels status — the former /integrations page). */ integrationsPanel?: ReactNode;
   financePanel?:ReactNode;computerPanel?:ReactNode;clipboardPanel?:ReactNode;updatesPanel?:ReactNode;requestedTab?:{tab:Tab;sequence:number}; open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode; toolsPanel?: ReactNode; diagnosticsPanel?: ReactNode; workflowsPanel?: ReactNode; channelsPanel?: ReactNode; notificationsPanel?: ReactNode; memoryPanel?:ReactNode;
 }) {
   const [ownTab, setOwnTab] = useState<Tab>("general");
@@ -96,7 +98,7 @@ export function SettingsDialog({ inline, tab: controlledTab, onTab, resetPanel, 
   const current = useStreamStyle().id;
   useExclusivePopup(open && !inline, onClose);
   if (!open && !inline) return null;
-  const available = (id: Tab) => (id !== "finance" || financePanel) && (id !== "memory" || memoryPanel) && (id !== "notifications" || notificationsPanel) && (id !== "automations" || automationsPanel) && (id !== "skills" || skillsPanel) && (id !== "library" || libraryPanel) && (id !== "tools" || toolsPanel) && (id !== "diagnostics" || diagnosticsPanel) && (id !== "workflows" || workflowsPanel) && (id !== "channels" || channelsPanel) && (id !== "reset" || resetPanel);
+  const available = (id: Tab) => (id !== "finance" || financePanel) && (id !== "memory" || memoryPanel) && (id !== "notifications" || notificationsPanel) && (id !== "automations" || automationsPanel) && (id !== "skills" || skillsPanel) && (id !== "library" || libraryPanel) && (id !== "tools" || toolsPanel) && (id !== "diagnostics" || diagnosticsPanel) && (id !== "workflows" || workflowsPanel) && (id !== "channels" || channelsPanel) && (id !== "reset" || resetPanel) && (id !== "integrations" || integrationsPanel);
   const title = TABS.find((t) => t.id === tab)!.label;
   const yes = (v?: boolean) => (v === undefined ? "Not checked" : v ? "Available" : "Not available");
   return (
@@ -153,6 +155,7 @@ export function SettingsDialog({ inline, tab: controlledTab, onTab, resetPanel, 
           </>}
           {tab === "agents" && (agentsPanel ?? <p>Agent management is not available from this host.</p>)}
           {tab === "providers" && <ProvidersPanel />}
+          {tab === "integrations" && integrationsPanel}
           {tab === "automations" && automationsPanel}
           {tab === "skills" && skillsPanel}
           {tab === "notifications" && notificationsPanel}

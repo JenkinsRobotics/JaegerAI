@@ -44,7 +44,7 @@ export function CalendarPage({ source, onNavigate }: { source: JaegerSource; onN
     <div className="jg-u-page">
       <header className="jg-u-page__head">
         <div><h1>Calendar</h1><p>Scheduled agent jobs and task due dates.</p></div>
-        <div className="jg-ui-toolbar"><button type="button" className="jg-u-btn" onClick={() => onNavigate("/tasks")}>Tasks</button>{source.schedules && <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => setCreating(true)}>New schedule</button>}</div>
+        <div className="jg-ui-toolbar"><button type="button" className="jg-u-btn" onClick={() => onNavigate("/work/tasks")}>Tasks</button>{source.schedules && <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => setCreating(true)}>New schedule</button>}</div>
       </header>
       {err && <p className="jg-u-error" role="alert">{err}</p>}
       <div className="jg-ui-split">

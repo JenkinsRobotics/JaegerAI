@@ -60,7 +60,7 @@ export function AgentsRoster({ source, store, refresh, onNavigate }: { source: J
           <input className="jg-u-search" type="search" placeholder="Filter agents" aria-label="Filter agents" value={query} onChange={(e) => setQuery(e.target.value)} />
           <Segmented label="Show" value={show} onChange={(v) => { setShow(v); setSelected(undefined); }} options={[{ value: "active", label: "Active" }, { value: "archived", label: "Archived" }]} />
           <label className="jg-u-check"><input type="checkbox" checked={robots} onChange={(e) => setRobots(e.target.checked)} /> Robot icons</label>
-          <button type="button" className="jg-u-btn" onClick={() => onNavigate("/characters")}>From character</button>
+          <button type="button" className="jg-u-btn" onClick={() => onNavigate("/agents/characters")}>From character</button>
           <button type="button" className="jg-u-btn jg-u-btn--primary" onClick={() => setCreating(true)}>New agent</button>
         </div>
       </header>
