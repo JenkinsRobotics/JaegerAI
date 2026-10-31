@@ -12,7 +12,6 @@ import os
 import re
 import uuid
 import stat
-from pathlib import Path
 from aiohttp import web
 
 CHUNK_BYTES=256*1024

@@ -71,7 +71,6 @@ def register(gateway: Any) -> None:
         owner = getattr(gateway, "task_owner", None)
         if owner is not None and getattr(owner, "store", None) is not None:
             task_store = owner.store
-            from jaeger_ai.core.tasks.models import TaskState
             for task in task_store.list_tasks():
                 state = str(task.state.value if hasattr(task.state, "value") else task.state)
                 if state in ("paused", "running", "queued", "needs_owner"):

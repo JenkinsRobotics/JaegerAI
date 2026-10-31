@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from ..models import Account, AccountType, Category, CategoryBudget, Transaction
-from ..monarch_service import MonarchError, MonarchService
+from ..monarch_service import MonarchService
 from ..security import SecuritySanitizer
 
 logger = logging.getLogger("jaeger_ai.features.finance.providers.monarch")

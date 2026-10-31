@@ -29,7 +29,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import hashlib
 import logging
-from pathlib import Path
 import time
 from typing import Any, Callable
 import uuid
@@ -43,7 +42,7 @@ from jaeger_ai.contract.schemas import (
     VerificationResult,
     VerificationStatus,
 )
-from jaeger_ai.core.entity.verification import VerificationContract, VerificationRegistry
+from jaeger_ai.core.entity.verification import VerificationRegistry
 
 logger = logging.getLogger("jaeger.core.effects.pipeline")
 

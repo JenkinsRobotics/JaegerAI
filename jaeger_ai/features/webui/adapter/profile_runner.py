@@ -5,7 +5,6 @@ only the browser's replayable event stream and conversation presentation.
 """
 from __future__ import annotations
 
-import hashlib
 import threading
 import time
 from pathlib import Path

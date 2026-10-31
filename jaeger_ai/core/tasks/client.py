@@ -1,6 +1,5 @@
 """Background task client for CLI/TUI surfaces. Only the Gateway executes work."""
 from __future__ import annotations
-import json
 import uuid
 from jaeger_ai.core.gateway.client import GatewayTurnClient
 

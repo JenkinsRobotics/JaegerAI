@@ -269,7 +269,6 @@ class CommissioningCoordinator:
         commissioning = doc.get("commissioning") if isinstance(doc.get("commissioning"), dict) else {}
         from jaeger_ai.core.instance.provider_certification import load_matrix
         from jaeger_ai.core.instance.integration_registry import load_integrations
-        from jaeger_ai.core.instance.capability_discovery import load_registry
 
         matrix = load_matrix(self.root)
         identity = self._entity_id()

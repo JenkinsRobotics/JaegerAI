@@ -7,10 +7,9 @@ are represented as normalized JaegerEvent records.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from enum import Enum
 import hashlib
-import json
 import time
 from typing import Any
 import uuid

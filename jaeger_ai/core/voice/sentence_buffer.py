@@ -9,7 +9,6 @@ synthesis can start while the rest of the turn is still generating.
 from __future__ import annotations
 
 import re
-from typing import Generator
 
 from jaeger_os.core.voice import clean_voice_reply
 

@@ -7,7 +7,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from .models import CategoryBudget
 from .store import FinanceStore
 
 logger = logging.getLogger("jaeger_ai.features.finance.budget")

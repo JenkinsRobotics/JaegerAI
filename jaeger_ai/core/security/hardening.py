@@ -13,7 +13,6 @@ import io
 import os
 from pathlib import Path
 import re
-from typing import Any
 import zipfile
 
 

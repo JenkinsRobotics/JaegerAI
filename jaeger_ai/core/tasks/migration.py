@@ -16,7 +16,6 @@ The migration is:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 import json
 import logging
 import sqlite3
@@ -24,7 +23,7 @@ import time
 
 from .models import DurableTask, TaskKind, TaskState
 from .store import SqliteDurableTaskStore
-from .unified import UnifiedScheduler, TaskCard
+from .unified import UnifiedScheduler
 
 logger = logging.getLogger(__name__)
 

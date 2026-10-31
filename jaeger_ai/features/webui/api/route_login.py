@@ -5,7 +5,6 @@ Extracted from routes.py to isolate self-contained presentation and security log
 from __future__ import annotations
 
 import html as _html
-import os
 import re
 from urllib.parse import parse_qs, quote, unquote
 

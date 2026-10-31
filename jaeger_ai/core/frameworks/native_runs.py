@@ -479,7 +479,6 @@ def _jaeger_gateway_turn(run, session_id: str) -> dict | None:
     """Talk to the resident Gateway OWNER. The AF_UNIX bridge is a client and
     can sit in ``queued`` forever while Roundtable members appear silent."""
     import json
-    import os
     import time
     import urllib.error
     import urllib.request

@@ -32,7 +32,6 @@ from jaeger_agent.dialects import (
     render_tools_for,
     strip_reasoning_channels,
     extract_think_blocks,
-    strip_think_blocks,
     textify_tool_history,
 )
 from jaeger_agent.loop.interrupt import (

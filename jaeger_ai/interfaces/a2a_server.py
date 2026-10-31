@@ -33,7 +33,6 @@ from a2a.types import (
     TaskState,
 )
 from starlette.applications import Starlette
-from starlette.responses import RedirectResponse
 from starlette.routing import Route
 
 from jaeger_ai.contract.ports import A2A_PORT, A2A_URL, LOOPBACK

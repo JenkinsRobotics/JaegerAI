@@ -24,7 +24,6 @@ codebase without re-implementing the bus wiring.
 
 from __future__ import annotations
 
-from typing import Any
 
 from jaeger_os.transport import topics
 from jaeger_os.transport import Bus

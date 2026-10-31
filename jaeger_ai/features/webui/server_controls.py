@@ -8,7 +8,6 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
-import time
 from urllib.error import HTTPError
 from urllib.request import urlopen
 

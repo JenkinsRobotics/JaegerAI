@@ -12,7 +12,6 @@ from pathlib import Path
 from typing import Any
 
 from ..models import Account, AccountType, Category, CategoryBudget, Transaction
-from ..security import SecuritySanitizer
 
 logger = logging.getLogger("jaeger_ai.features.finance.providers.importer")
 

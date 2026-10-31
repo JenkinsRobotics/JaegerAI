@@ -24,7 +24,6 @@ masters the skill, unlocking L2 sprite adapters.
 
 from __future__ import annotations
 
-from typing import Any
 
 from PIL import Image
 

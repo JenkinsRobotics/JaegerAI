@@ -19,7 +19,6 @@ Settings (see :class:`jaeger_os.core.instance.schemas.VoiceConfig`):
 
 from __future__ import annotations
 
-import os
 import queue
 import re
 import threading

@@ -24,7 +24,6 @@ existing argument plumbing stays unchanged.
 from __future__ import annotations
 
 import os
-from typing import Any
 
 from jaeger_ai.core.instance.instance import InstanceLayout
 

@@ -9,7 +9,6 @@ under the ``goals`` toolset in
 
 from __future__ import annotations
 
-from typing import Any
 
 from jaeger_agent.cognition.commitments import CommitmentError
 from jaeger_agent.cognition.sqlite_commitments import SqliteCommitmentStore

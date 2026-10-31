@@ -8,7 +8,6 @@ Subcommands:
 
 from __future__ import annotations
 
-import argparse
 from typing import Any
 
 from . import _common as c

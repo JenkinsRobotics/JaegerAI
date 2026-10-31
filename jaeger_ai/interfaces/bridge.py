@@ -1923,10 +1923,20 @@ def _attach_gateway(proto: TextIO, ctx: _Ctx) -> None:
     """
     from jaeger_os.contract import protocol
 
-    from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
+    from jaeger_ai.core.gateway.client import GatewayTurnClient
 
     ctx.gateway = GatewayTurnClient(caller="bridge")
-    if _probe_attached_gateway(ctx):
+    # Bounded wait for the Gateway (launchd boot-order race) before failing;
+    # JAEGER_BRIDGE_GATEWAY_WAIT_S (default 90, 0 = old fail-fast behaviour).
+    try:
+        wait_s = float(os.environ.get("JAEGER_BRIDGE_GATEWAY_WAIT_S", "90"))
+    except ValueError:
+        wait_s = 90.0
+    deadline = time.monotonic() + max(0.0, wait_s)
+    while not _probe_attached_gateway(ctx) and time.monotonic() < deadline:
+        print("[bridge] waiting for Gateway...", file=sys.stderr, flush=True)
+        time.sleep(2.0)
+    if ctx.boot_error is None:
         _emit(proto, protocol.agent_state_frame("ready", agent_name=_agent_name(ctx)))
     else:
         _emit(proto, protocol.agent_state_frame("failed", error=ctx.boot_error))

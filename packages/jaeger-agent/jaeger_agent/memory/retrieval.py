@@ -4,14 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 from jaeger_agent.memory.knowledge_port import (
-    BeliefStore,
-    ClaimStore,
     CognitiveRetriever,
-    EntityStore,
-    EvidenceStore,
     KnowledgeStore,
 )
-from jaeger_agent.memory.models import Belief, BeliefStatus, Claim, Entity, ProvenanceKind
+from jaeger_agent.memory.models import Belief, BeliefStatus, Claim, ProvenanceKind
 
 
 class KnowledgeRetriever(CognitiveRetriever):

@@ -19,7 +19,6 @@ jaeger_os.main`` in the old pip-install model.
 
 from __future__ import annotations
 
-import sys
 
 from jaeger_ai.main import main as _main
 

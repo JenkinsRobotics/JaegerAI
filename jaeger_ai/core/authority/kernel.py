@@ -30,7 +30,7 @@ import logging
 from pathlib import Path
 import re
 import time
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 import uuid
 
 logger = logging.getLogger("jaeger.core.authority.kernel")
@@ -944,8 +944,6 @@ class ReviewRuleStore:
     ) -> tuple[ReviewRule, bool]:
         """Store one rule revision. Returns ``(rule, created)``."""
         import fcntl
-        import json
-        import os
 
         rule = ReviewRule.build(raw, revision=0, provenance=provenance, created_at=0.0)
         self.path.parent.mkdir(parents=True, exist_ok=True)

@@ -33,7 +33,6 @@ from jaeger_agent.core.workspace import (
     _display_path,
     _require_layout,
     _resolve_read,
-    _resolve_under,
     _resolve_write,
     git_autocommit,
 )

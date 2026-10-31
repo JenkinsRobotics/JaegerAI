@@ -29,7 +29,6 @@ import json
 import logging
 import secrets
 import time
-import hashlib
 
 logger = logging.getLogger(__name__)
 

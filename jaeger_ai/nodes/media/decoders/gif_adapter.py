@@ -23,7 +23,6 @@ Mastering this unlocks ``animation.video`` (L4).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 from PIL import Image, ImageSequence
 

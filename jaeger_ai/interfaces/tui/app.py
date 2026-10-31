@@ -956,7 +956,6 @@ class JaegerTUI:
         a Rich ``Live`` — a ``Live`` on this worker thread would fight
         the input line the main thread renders. ``source`` is "text" or
         "goal"."""
-        from jaeger_ai.main import _DEFAULT_SESSION_KEY, run_for_voice
 
         self._render_turn_header(user_text, source=source)
         started = time.perf_counter()
@@ -1215,7 +1214,6 @@ class JaegerTUI:
             clean_voice_reply,
             is_non_speech_marker,
         )
-        from jaeger_ai.main import _DEFAULT_SESSION_KEY, run_for_voice
 
         self._render_turn_header(user_text, source="voice")
         started = time.perf_counter()

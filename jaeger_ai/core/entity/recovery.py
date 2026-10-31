@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import logging
-from typing import Any
 
 logger = logging.getLogger("jaeger.entity.recovery")
 
@@ -27,7 +26,6 @@ class RecoveryManager:
         try:
             from jaeger_agent.cognition.sqlite_runs import SqliteEffectLedger, SqliteRunStore
             from jaeger_agent.cognition.effects import EffectIndeterminate
-            import os
         except Exception as exc:
             report.errors.append(f"durable cognition unavailable: {exc}")
             return report

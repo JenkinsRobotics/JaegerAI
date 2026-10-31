@@ -219,7 +219,7 @@ def restore_instance(archive: Path, *,
         )
 
     from jaeger_ai.core.instance.instance import (
-        InstanceLayout, resolve_instance_dir,
+        resolve_instance_dir,
     )
     target = resolve_instance_dir(name)
     target = Path(target)

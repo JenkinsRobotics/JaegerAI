@@ -38,7 +38,6 @@ from api.config import (
     _coerce_provider_cost_budget,
     _configured_model_ids,
     _custom_provider_slug_from_name,
-    _get_label_for_model,
     _models_from_live_provider_ids,
     _pool_entry_payloads,
     _read_live_provider_model_ids,

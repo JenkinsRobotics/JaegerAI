@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import logging
 import time
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
 from jaeger_ai.core.entity.events import JaegerEvent
 
