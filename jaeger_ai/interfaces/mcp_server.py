@@ -140,7 +140,9 @@ def _mcp_session(session_id: str = "", caller: str = "mcp") -> str:
 #: Gateway caller tokens the MCP HTTP server accepts inbound. ``mcp`` is
 #: what outside agents present (via agentgateway's backendAuth); ``jaegerd``
 #: is jaegerd's own native-lead/specialist client. Values stay in the Keychain.
-MCP_INBOUND_CALLERS = ("mcp", "ares", "grokbot", "jaegerd")
+from jaeger_ai.core.gateway.caller_auth import APP_CALLERS as _APP_CALLERS
+
+MCP_INBOUND_CALLERS = ("mcp", "ares", "grokbot", "jaegerd", *_APP_CALLERS)
 
 
 def resolve_inbound_tokens() -> dict[str, str]:
@@ -196,7 +198,7 @@ def _stdio_agent_caller() -> tuple[str, str]:
     if not token:
         raise PermissionError("Existing caller authorization required")
     spec = CallerAuthenticator().authenticate(bearer(token).get("Authorization"))
-    if spec is None or spec.name not in {"mcp", "ares", "grokbot"}:
+    if spec is None or spec.name not in {"mcp", "ares", "grokbot", *_APP_CALLERS}:
         raise PermissionError("Invalid agent bridge caller authorization")
     return spec.name, token
 
@@ -681,6 +683,35 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args([] if argv is None else argv)
 
 
+def _wait_for_backend(bridge: Any, *, wait_s: float | None = None, poll_s: float = 2.0) -> dict:
+    """Bounded startup wait for the bridge or the Gateway instead of exiting at
+    once (launchd boot-order race). ``JAEGER_MCP_BACKEND_WAIT_S`` (default 90)."""
+    if wait_s is None:
+        try:
+            wait_s = float(os.environ.get("JAEGER_MCP_BACKEND_WAIT_S", "90"))
+        except ValueError:
+            wait_s = 90.0
+    deadline = time.monotonic() + max(0.0, wait_s)
+    while True:
+        try:
+            health = dict(bridge.health() or {})
+        except Exception:  # noqa: BLE001
+            health = {}
+        if health.get("ok"):
+            return health
+        try:
+            from jaeger_ai.core.gateway.client import GatewayTurnClient
+            probe = GatewayTurnClient(caller="mcp").probe()
+            if probe.get("service") == "jaeger-gateway" or probe.get("component") == "jaeger-gateway":
+                return health
+        except Exception:  # noqa: BLE001
+            pass
+        if time.monotonic() >= deadline:
+            return health
+        print("[jaeger-mcp] waiting for bridge/Gateway...", file=sys.stderr, flush=True)
+        time.sleep(poll_s)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     instance = args.instance or args.instance_name
@@ -691,7 +722,7 @@ def main(argv: list[str] | None = None) -> int:
 
         instance = instance or default_instance_name()
         bridge = BridgeClient(instance=instance)
-        health = bridge.health()
+        health = _wait_for_backend(bridge)
         if health.get("ok"):
             model = None
             try:

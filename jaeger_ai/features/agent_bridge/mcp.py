@@ -121,3 +121,125 @@ def register(mcp, client_for_context):
     def cancel_goal(id: str, ctx: Context | None = None) -> dict:
         """Request cancellation through the existing Gateway cancellation owner."""
         return call(ctx, "POST", f"/v1/agent-goals/{key(id)}/cancel", {})
+
+    # ── Hub collaboration helpers (2026-10-31) ─────────────────────────────
+    # Thin, identity-preserving wrappers over the routes above plus two
+    # read-only Gateway routes. Peers (other local apps) receive handoffs as
+    # inbox ``task`` messages; Jaeger agents receive them as goals that run
+    # through the normal Gateway owner, PolicyKernel and approval cards, so a
+    # risky handoff becomes an owner approval rather than being executed.
+    import uuid as _uuid
+
+    from jaeger_ai.core.gateway.caller_auth import APP_CALLERS, CALLERS
+
+    def _new_id(prefix):
+        return f"{prefix}-{_uuid.uuid4().hex[:16]}"
+
+    @mcp.tool()
+    @_off_event_loop
+    def list_agents(ctx: Context | None = None) -> dict:
+        """List Jaeger's agents and the peer apps you can message or hand off to."""
+        try:
+            roster = call(ctx, "GET", "/v1/agents")
+        except Exception as exc:  # noqa: BLE001 - peers stay listable
+            roster = {"error": str(exc)}
+        peers = [
+            {"id": name, "label": label}
+            for name, label in APP_CALLERS.items()
+        ] + [{"id": "jaegerd", "label": "Jaeger (lead agent inbox)"}]
+        return {"jaeger_agents": roster, "peers": peers}
+
+    @mcp.tool()
+    @_off_event_loop
+    def handoff_task(
+        to: str,
+        task: str,
+        title: str = "",
+        thread: str = "",
+        workspace_folder: str = "",
+        refs: list[str] | None = None,
+        id: str = "",
+        ctx: Context | None = None,
+    ) -> dict:
+        """Hand a task to a peer app (``to`` = codex, claude, cursor, ... or
+        jaegerd) or to Jaeger itself (``to`` = "jaeger" with ``workspace_folder``).
+
+        Peers get an inbox ``task`` message they pick up with list_messages.
+        Jaeger gets a goal that runs under the Gateway's normal approvals: risky
+        work waits for Matthew in the Approvals inbox. Returns ids to poll with
+        task_status / task_result.
+        """
+        thread = thread or _new_id("thread")
+        ident = id or _new_id("handoff")
+        if to == "jaeger":
+            if not workspace_folder:
+                raise ValueError("workspace_folder is required when handing off to Jaeger")
+            goal = call(
+                ctx, "POST", "/v1/agent-goals",
+                {"id": ident, "thread": thread, "goal": task,
+                 "workspace_folder": workspace_folder, "rea_tools": []},
+            )
+            return {"kind": "goal", "id": ident, "thread": thread, "goal": goal}
+        if to not in CALLERS:
+            raise ValueError(f"Unknown recipient {to!r}; see list_agents().peers")
+        message = call(
+            ctx, "POST", "/v1/agent-messages",
+            {"id": ident, "thread": thread, "to": to, "kind": "task",
+             "title": (title or task)[:200], "body": task, "refs": refs or [],
+             "status_line": "handoff"},
+        )
+        return {"kind": "message", "id": ident, "thread": thread, "message": message}
+
+    @mcp.tool()
+    @_off_event_loop
+    def task_status(id: str, thread: str = "", ctx: Context | None = None) -> dict:
+        """Status of a handoff: a Jaeger goal id, or a peer handoff's thread."""
+        if thread:
+            return call(ctx, "GET", f"/v1/agent-threads/{key(thread)}?" + urlencode({"after": 0, "limit": 50}))
+        return call(ctx, "GET", f"/v1/agent-goals/{key(id)}")
+
+    @mcp.tool()
+    @_off_event_loop
+    def task_result(id: str, thread: str = "", ctx: Context | None = None) -> dict:
+        """Result of a handoff. For peers, returns the ``result`` messages on the thread."""
+        if thread:
+            data = call(ctx, "GET", f"/v1/agent-threads/{key(thread)}?" + urlencode({"after": 0, "limit": 100}))
+            items = (data.get("messages") or data.get("items") or []) if isinstance(data, dict) else []
+            return {"thread": thread, "results": [m for m in items if isinstance(m, dict) and m.get("kind") == "result"], "raw": data}
+        return call(ctx, "GET", f"/v1/agent-goals/{key(id)}")
+
+    @mcp.tool()
+    @_off_event_loop
+    def post_result(
+        to: str,
+        thread: str,
+        body: str,
+        title: str = "Result",
+        artifacts: list[str] | None = None,
+        reply_to: str | None = None,
+        ctx: Context | None = None,
+    ) -> dict:
+        """Post a result (and artifact paths/URLs in ``artifacts``) back on a thread."""
+        return call(
+            ctx, "POST", "/v1/agent-messages",
+            {"id": _new_id("result"), "thread": thread, "to": to, "kind": "result",
+             "title": title[:200], "body": body, "refs": artifacts or [],
+             "status_line": "done",
+             **({"reply_to": reply_to} if reply_to else {})},
+        )
+
+    @mcp.tool()
+    @_off_event_loop
+    def list_approvals(approval_id: str = "", ctx: Context | None = None) -> dict:
+        """Pending approval totals, or one approval's status (yours only).
+        Deciding approvals stays with Matthew."""
+        if approval_id:
+            return call(ctx, "GET", f"/v1/approvals/{key(approval_id)}")
+        return call(ctx, "GET", "/v1/approvals/counts")
+
+    @mcp.tool()
+    @_off_event_loop
+    def receipts(after: int = 0, limit: int = 50, ctx: Context | None = None) -> dict:
+        """Your delivery receipts: messages you sent or received (status/result/task)."""
+        data = call(ctx, "GET", "/v1/agent-messages?" + urlencode({"after": after, "limit": limit}))
+        return data

@@ -77,6 +77,10 @@ def test_no_mcp_tool_can_reach_any_bridge_command(cmd):
         rejects_invalid_input = tool.name in {
             "bridge_query", "send_message", "list_messages", "get_thread",
             "start_goal", "goal_status", "goal_result", "cancel_goal",
+            # Hub collaboration wrappers: same Gateway relay, so empty or
+            # non-list input is rejected before any call.
+            "handoff_task", "task_status", "task_result",
+            "post_result", "list_approvals", "receipts",
         }
         with pytest.raises(Exception) if rejects_invalid_input else _nullcontext():
             _call(server, tool.name, args)
