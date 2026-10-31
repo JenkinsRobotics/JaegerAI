@@ -197,7 +197,8 @@ class Indexer:
             seen.add(key)
             st_m, st_s = self._mtime(p), (p.stat().st_size if p.exists() else 0)
             sig = hashlib.sha1(f"{st_m}:{st_s}".encode()).hexdigest()[:12]
-            if files.get(key, {}).get("sig") == sig:
+            prev = files.get(key, {})
+            if prev.get("sig") == sig or prev.get("tries", 0) >= 3:
                 continue
             while (why := self.gate()):
                 log("hold", reasons=why)
@@ -215,7 +216,7 @@ class Indexer:
                 added += n
             except Exception as exc:  # noqa: BLE001 - one bad file never stops the pass
                 errors += 1
-                files[key] = {"sig": sig, "chunks": 0, "error": str(exc)[:200]}
+                files[key] = {"sig": "", "chunks": 0, "error": str(exc)[:200], "tries": files.get(key, {}).get("tries", 0) + 1}
                 log("file_error", path=key, error=str(exc)[:200])
             done += 1
             if done % 20 == 0:
