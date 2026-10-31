@@ -91,9 +91,12 @@ def test_handoff_to_jaeger_is_goal_through_gateway_approvals(tmp_path):
     tools, client = _register()
     _run(tools["handoff_task"], to="jaeger", task="summarise", thread="t2", id="g1",
          workspace_folder=str(tmp_path))
+    assert client.calls[-2][1] == "/v1/agent-messages"
+    assert client.calls[-2][2]["to"] == "jaegerd"
     method, path, body = client.calls[-1]
     assert (method, path) == ("POST", "/v1/agent-goals")
     assert body["workspace_folder"] == str(tmp_path)
+    assert body["source_message_id"] == client.calls[-2][2]["id"]
 
 
 def test_handoff_rejects_unknown_recipient():
@@ -147,3 +150,18 @@ def test_mcp_backend_wait_returns_when_bridge_ok(monkeypatch):
             return {"ok": B.n >= 2}
 
     assert _wait_for_backend(B(), wait_s=5, poll_s=0.01)["ok"]
+
+
+def test_whoami_reports_caller_and_grants(monkeypatch, tmp_path):
+    from jaeger_ai.features.agent_bridge import mcp as bridge_mcp
+
+    class C(_FakeClient):
+        caller = "codex"
+
+    monkeypatch.setenv("JAEGER_AGENT_WORKSPACES", '{"codex": ["%s"]}' % tmp_path)
+    fake = _FakeMCP()
+    bridge_mcp.register(fake, lambda ctx: C())
+    out = _run(fake.tools["whoami"])
+    assert out["caller"] == "codex" and out["session_prefix"] == "codex:"
+    assert out["workspace_roots"] == [str(tmp_path)]
+    assert "approve" not in out["scopes"]
