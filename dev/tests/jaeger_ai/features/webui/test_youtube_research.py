@@ -254,3 +254,50 @@ def test_frame_file_rejects_traversal(yt):
 def test_slug_word_boundary(yt):
     s = yt.slug("word " * 40)
     assert len(s) <= 80 and not s.endswith("-") and s.endswith("word")
+
+
+def test_spec_api_detail_spans_techniques_pause_reorder(yt):
+    run_sync(yt)
+    d = yt.video_detail(TID, "aaaaaaaaaaa")
+    assert d["cut_list"][0] == {"t": 0.0, "shot_len_s": 3.5} and d["media"]["playable"] is False
+    lib = yt.techniques(q="jump")
+    assert lib["count"] == 1 and lib["techniques"][0]["clips"] == 2 and lib["techniques"][0]["examples"][0]["t"] == "0:00"
+    assert yt.reorder(TID, ["bbbbbbbbbbb"])["order"] == ["bbbbbbbbbbb", "aaaaaaaaaaa"]
+    assert yt.pause(TID)["paused"] and not yt.pause(TID, False)["paused"]
+
+
+def test_ocr_spans_merge(yt):
+    run_sync(yt)
+    d = vd(yt, "aaaaaaaaaaa")
+    (d / "ocr.json").write_text(json.dumps({"frames": [{"t": 0.5, "text": "HELLO"}, {"t": 3.5, "text": "HELLO"}, {"t": 7.25, "text": ""}, {"t": 12.0, "text": "BYE"}]}))
+    sp = yt.ocr_spans(TID, "aaaaaaaaaaa")
+    assert sp[0]["text"] == "HELLO" and sp[0]["t"] == 0.5 and sp[1]["text"] == "BYE"
+
+
+def test_channel_url_resolves_to_uploads(yt):
+    assert yt.resolve_list("https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv") == "UUabcdefghijklmnopqrstuv"
+    assert yt.resolve_list(URL) == "PLabcdefghij12345"
+
+
+def test_preview_estimate(yt):
+    p = yt.preview({"playlist_url": URL, "max_videos": 40})
+    assert p["videos"] == 2 and p["total_minutes"] == 3.0 and p["estimate"]["basis"].startswith("heuristic")
+
+
+def test_draft_takes_techniques_clips_length(yt):
+    run_sync(yt)
+    tid_ = yt.techniques()["techniques"][0]["id"]
+    out = yt.draft(TID, {"topic": "arm", "techniques": [tid_], "clips": [{"video_id": "aaaaaaaaaaa", "t": 0, "t_end": 5}], "length_s": 60})
+    assert out["draft"]["_inputs"]["techniques"] == [tid_]
+    assert "REFERENCE CLIPS" in yt._calls["llm"][-1] and "Stop scrolling" in yt._calls["llm"][-1]
+
+
+def test_download_retries_other_player_client(yt):
+    base = yt._deps["run"]
+    def run(cmd, timeout):
+        if cmd[0] == "yt-dlp" and "-f" in cmd and "--extractor-args" not in cmd:
+            return subprocess.CompletedProcess(cmd, 1, "", "ERROR: HTTP Error 403: Forbidden")
+        return base(cmd, timeout)
+    yt.bind(run=run)
+    run_sync(yt)
+    assert json.loads((vd(yt, "aaaaaaaaaaa") / "cuts.json").read_text())["download_client"] == "mweb"
