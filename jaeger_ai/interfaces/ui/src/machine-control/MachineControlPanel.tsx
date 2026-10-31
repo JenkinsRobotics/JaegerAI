@@ -3,6 +3,8 @@ import type { ComputerSnapshot, JaegerSource, PolicySources } from '../api/sourc
 import { nativeBridge } from '../platform/native'
 import { LocalComputerPanel } from '../settings/LocalComputerPanel'
 import './machine-control.css'
+import { ResourcesCard } from '../machine/ResourcesCard'
+import { LogsPanel } from '../machine/LogsPanel'
 
 interface NativeStatus {
   scope: 'native_shell_process'
@@ -22,7 +24,7 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState<string>()
   const [error, setError] = useState<string>()
-  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'permissions' | 'policy' | 'legacy'>('overview')
+  const [activeSubTab, setActiveSubTab] = useState<'overview' | 'logs' | 'permissions' | 'policy' | 'legacy'>('overview')
   const locked = useRef(false)
   const generation = useRef(0)
 
@@ -134,6 +136,13 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
         </button>
         <button
           type="button"
+          className={`machine-control-nav-tab ${activeSubTab === 'logs' ? 'active' : ''}`}
+          onClick={() => setActiveSubTab('logs')}
+        >
+          Logs
+        </button>
+        <button
+          type="button"
           className={`machine-control-nav-tab ${activeSubTab === 'permissions' ? 'active' : ''}`}
           onClick={() => setActiveSubTab('permissions')}
         >
@@ -158,6 +167,8 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
       </div>
 
       <div className="machine-control-content">
+        {activeSubTab === 'overview' && <ResourcesCard />}
+        {activeSubTab === 'logs' && <LogsPanel />}
         {activeSubTab === 'overview' && (
           <div className="machine-control-grid">
             <div className="machine-control-card">
