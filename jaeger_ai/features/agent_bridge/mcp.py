@@ -146,7 +146,12 @@ def register(mcp, client_for_context):
         peers = [
             {"id": name, "label": label}
             for name, label in APP_CALLERS.items()
-        ] + [{"id": "jaegerd", "label": "Jaeger (lead agent inbox)"}]
+        ] + [
+            {"id": "ares", "label": "ARES (OpenAI Codex worker: runs handed-off tasks with codex exec)",
+             "worker": True},
+            {"id": "grokbot", "label": "Grok Bot (lead; its Grok bots)"},
+            {"id": "jaegerd", "label": "Jaeger (lead agent inbox)"},
+        ]
         return {"jaeger_agents": roster, "peers": peers}
 
     @mcp.tool()
