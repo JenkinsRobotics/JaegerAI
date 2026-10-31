@@ -18,8 +18,11 @@ from pathlib import Path
 import threading
 from typing import Any, Callable, Iterator
 
+from jaeger_ai.core.gateway import agent_activity as _agent_activity
+
 
 SCHEMA_VERSION = 15
+
 MAX_RETAINED_EVENTS = 5000
 REQUEST_ID_MAX = 128
 MAX_QUEUE_PER_SESSION = 100
@@ -1770,6 +1773,12 @@ class GatewaySessionStore:
         if session_id != "*":
             conn.execute("INSERT INTO activity_history VALUES (?, ?, ?, ?, ?)",
                          (event_id, session_id, event, json.dumps(data), now))
+        if event in _agent_activity.KINDS:
+            try:  # G1: the Agents tab's durable activity row (never blocks the event)
+                _agent_activity.ensure(conn)
+                _agent_activity.record(conn, event_id, session_id, event, data, now)
+            except Exception:  # noqa: BLE001
+                __import__("logging").getLogger(__name__).warning("agent activity record failed for %s", event, exc_info=True)
         overflow = conn.execute("SELECT COUNT(*) AS n FROM events").fetchone()["n"] - MAX_RETAINED_EVENTS
         if overflow > 0:
             conn.execute(
@@ -1918,6 +1927,11 @@ class GatewaySessionStore:
             if previous != active:
                 event = self._insert_event(conn, session_id, 'message.reaction', {'request_id': request_id, 'role': role, 'emoji': emoji, 'active': active})
         return {**self.message_reactions(session_id), '_event': event}
+
+    def agent_activity(self, **filters: Any) -> dict[str, Any]:
+        """G1: newest-first agent activity across all sessions (``GET /v1/activity``)."""
+        with self._immediate() as conn:
+            return _agent_activity.query(conn, **filters)
 
     def activity_history(self, session_id: str, after: int = 0, limit: int = 500) -> dict[str, Any]:
         """Paged durable work history; independent of the bounded SSE replay window."""

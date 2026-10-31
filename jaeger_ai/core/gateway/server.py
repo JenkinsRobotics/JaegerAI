@@ -1474,6 +1474,8 @@ class JaegerGatewayApp:
         from .approvals_inbox import register as register_approvals_inbox
         from .push_routes import register as register_push
         register_approvals_inbox(self)  # literal /v1/approvals/* paths before /{id}
+        from .agents_tab_routes import register as register_agents_tab
+        register_agents_tab(self)
         register_push(self)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_post("/v1/approvals/{id}/decision", self.handle_resolve_approval)
@@ -2623,6 +2625,7 @@ class JaegerGatewayApp:
                 "approval_id": approval_id,
                 "handoff_id": handoff_id,
                 "kind": "handoff",
+                "agent_id": from_id,  # the agent asking (Agents tab G1)
                 "from_agent_id": from_id,
                 "to_agent_id": target.id,
                 "task": task,
@@ -6009,6 +6012,9 @@ class JaegerGatewayApp:
         the parent chat's stream too (same approval_id, with ``origin``)."""
         if origin:
             payload = {**payload, "origin": origin}
+        if not payload.get("agent_id"):  # Agents tab: every approval.request names its agent
+            payload = {**payload, "agent_id": (origin or {}).get("agent_id")
+                       or self._session_agent_id(self.store.get_session(session_id)) or "native:jaeger"}
         self.event_bus.publish(session_id, "approval.request", payload)
         if origin and origin.get("parent_session_id"):
             self.event_bus.publish(origin["parent_session_id"], "approval.request", payload)
