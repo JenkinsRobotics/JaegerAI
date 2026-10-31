@@ -17,7 +17,7 @@ for (const [name, width, height, open] of shots) {
   page.on("pageerror", (e) => errors.push(`${name}: ${e.message}`));
   await page.goto(url);
   await page.getByText("Live", { exact: true }).waitFor();
-  if (open) { await page.getByRole("button", { name: /Exchange/ }).first().click(); await page.getByLabel("Handoff details").waitFor(); }
+  if (open) { await page.getByRole("button", { name: /Exchange/ }).first().click(); await page.getByLabel("Handoff details").waitFor(); await page.waitForTimeout(500); }
   await page.screenshot({ path: `${out}/orchestration-${name}.png` });
   await page.close();
 }
