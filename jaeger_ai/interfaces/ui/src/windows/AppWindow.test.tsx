@@ -72,9 +72,10 @@ it("switches sub-tabs through the URL and keeps the sub-tab bar consistent", asy
 it("shows Settings as a grouped page and deep-links a tab", async () => {
   await mount("/settings/voice");
   expect(front()).toBe("Settings");
-  const groups = [...document.querySelectorAll(".jg-sheet__group-title")].map((g) => g.textContent);
-  expect(groups).toEqual(expect.arrayContaining(["You", "Agents", "System"]));
-  expect(document.querySelector(".jg-sheet__title")?.textContent).toBe("Voice");
+  // jsdom has no layout width → compact class → push navigation: the panel alone, with an in-app back.
+  expect([...document.querySelectorAll(".jg-sheet__page h1")].map((h) => h.textContent)).toEqual(["Voice & audio"]);
+  expect(document.querySelector(".jg-page-header__back")?.textContent).toContain("Settings");
+  expect(document.querySelector(".jg-sheet__title")).toBeNull();
 });
 
 it("lists the nine tabs in the dock and persists which pages are open", async () => {

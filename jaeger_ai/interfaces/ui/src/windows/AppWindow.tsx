@@ -20,7 +20,7 @@ import { JumpTo, type JumpAction } from '../agents/JumpTo'
 import { CHARACTERS } from '../components/CharacterLibrary'
 import { usePhone } from '../phone/usePhone'
 import { navigate, useRoute, PAGES, SUBTABS, pathOf, type PageId } from '../shell/router'
-import { isSettingsTab, type Tab as SettingsTab } from '../settings/SettingsDialog'
+import { parseSettingsRest, type Tab as SettingsTab } from '../settings/SettingsDialog'
 import { HomeDashboard } from '../unified/HomeDashboard'
 import { ApprovalTray } from '../unified/ApprovalTray'
 import './windows.css'
@@ -81,7 +81,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
     if (id === active) go('/')
   }
 
-  const settingsTab: SettingsTab | undefined = isSettingsTab(route.rest) ? route.rest : undefined
+  const { tab: settingsTab, segment: settingsSegment } = parseSettingsRest(route.rest) as { tab?: SettingsTab; segment?: string }
   const paletteActions = useMemo<JumpAction[]>(() => [
     { id: 'new', label: 'New chat', shortcut: '⌘N', run: () => go('/chat') },
     ...PAGES.map((p) => ({ id: `page:${p}`, label: `Go to ${WINDOW_DEFINITIONS[p].title}`, hint: WINDOW_DEFINITIONS[p].description, shortcut: p === 'settings' ? '⌘,' : undefined, run: () => go(pathOf(p)) })),
@@ -150,7 +150,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
         {chatOpen && (
           <div className={`app-window__page app-window__page--chat${active === 'chat' || active === 'settings' ? ' app-window__page--active' : ''}`}
             hidden={active !== 'chat' && active !== 'settings'} aria-label={active === 'settings' ? 'Settings' : 'Chat'}>
-            <Suspense fallback={<PageFallback />}><App source={source} view={appView} settingsTab={settingsTab} onSettingsTab={(t) => navigate(`/settings/${t}`, { replace: true })}
+            <Suspense fallback={<PageFallback />}><App source={source} view={appView} settingsTab={settingsTab} settingsSegment={settingsSegment} onSettingsTab={(t) => navigate(t ? `/settings/${t}` : '/settings', { replace: !!t && !!settingsTab })}
               onNavigate={go} requestedAgent={active === 'chat' ? route.params.get('agent') : null} onOpenPalette={() => setPaletteOpen(true)} /></Suspense>
           </div>
         )}

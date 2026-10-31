@@ -7,6 +7,7 @@
  * paths from before the 9-tab consolidation are rewritten to their sub-tab (LEGACY_PATHS).
  */
 import { useEffect, useState } from "react";
+import { LEGACY_SETTINGS } from "../settings/registry";
 
 export type PageId = "home" | "chat" | "agents" | "work" | "research" | "studio" | "models" | "machine" | "settings";
 
@@ -53,6 +54,7 @@ export function pathOf(page: PageId, sub?: string): string {
 /** Old top-level paths (/characters, /tasks/gallery?x=1 …) → the new path, or null when already current. */
 export function canonicalPath(pathname: string, search = ""): string | null {
   const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
+  if (parts[0] === "settings" && parts[1] && LEGACY_SETTINGS[parts[1]]) return `/settings/${LEGACY_SETTINGS[parts[1]]}${search}`;
   const target = parts[0] ? LEGACY_PATHS[parts[0]] : undefined;
   if (!target) return null;
   const tail = parts.slice(1).join("/");
