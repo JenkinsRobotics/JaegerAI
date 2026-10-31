@@ -97,3 +97,4 @@
 .jg-orch-history-error { max-width: 72ch; margin: 0 0 var(--jg-space-3); padding: var(--jg-space-2) var(--jg-space-3); border-radius: var(--jg-radius-m); border: 1px solid color-mix(in srgb, var(--jg-warn) 55%, transparent); color: var(--jg-color-text-secondary); font-size: var(--jg-text-footnote); }
 .jg-orch-row-body p { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
 .jg-orch-inspector dd.jg-orch-fulltext { display: block; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow: auto; }
+.jg-orch-caller { min-height: var(--jg-target-min, 28px); padding: 0 var(--jg-space-2); border: 1px solid var(--jg-color-border-tertiary); border-radius: var(--jg-radius-m); background: var(--jg-color-pane); color: var(--jg-color-text); font: inherit; font-size: var(--jg-text-footnote); }

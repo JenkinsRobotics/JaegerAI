@@ -20,7 +20,7 @@ export function AgentsActivityPage({ source, onNavigate }: { source: JaegerSourc
     <div className="jg-u-page jg-orch-page">
       <PageHead title="Activity" subtitle="What the lead handed off, who's working, and whether results were checked." actions={
         <button type="button" className="jg-u-btn" onClick={() => onNavigate("/agents")}>Roster</button>} />
-      <OrchestrationPanes adapter={adapter} onNavigate={onNavigate} />
+      <OrchestrationPanes adapter={adapter} onNavigate={onNavigate} initialCaller={new URLSearchParams(location.search).get("agent_id") ?? undefined} />
     </div>
   );
 }

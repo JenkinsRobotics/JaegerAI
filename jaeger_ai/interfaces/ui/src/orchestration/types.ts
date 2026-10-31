@@ -65,7 +65,8 @@ export type ActivityKind =
   | "approval.requested"
   | "approval.resolved"
   | "agent.status"
-  | "project.checked";
+  | "project.checked"
+  | "caller.goal";
 
 export interface ActivityRow {
   /** Stable key for dedupe: `<kind>:<resource id>[:<state>]`. */
@@ -82,6 +83,10 @@ export interface ActivityRow {
   check?: HandoffCheck;
   /** Rows that need the user (approvals, failed checks). */
   needsYou?: boolean;
+  /** Outside app (MCP/A2A caller id) the row came from. */
+  callerId?: string;
+  /** Lifecycle pill for non-check rows (caller goals). */
+  statusPill?: { text: string; tone?: "ok" | "warn" | "bad" };
 }
 
 /** Live view of one specialist for the status list. */

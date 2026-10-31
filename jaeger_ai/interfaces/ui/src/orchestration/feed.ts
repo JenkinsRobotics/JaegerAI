@@ -181,6 +181,9 @@ export function eventRow(e: GatewayEvent, names: Names): ActivityRow | null {
         output: hid ? { kind: "handoff", label: "Exchange", href: `handoff:${hid}` } : tid ? taskLink({ task_id: tid }) : undefined,
         needsYou: str(p.status) === "waiting_approval" || undefined } : null;
     }
+    case "turn.start": case "turn.finish": case "turn.failed": case "turn.cancelled": case "turn.unknown": {
+      return callerGoalRow(e, p, at, names);
+    }
     case "project.checked": { // {project_id, result{ok, status?, checked_at}}
       const r = (p.result && typeof p.result === "object" ? p.result : {}) as { ok?: boolean; status?: string; checked_at?: number; agent_id?: string; checked_by?: string };
       const project = str(p.project_id);
@@ -211,6 +214,36 @@ export function mergeRows(current: ActivityRow[], incoming: ActivityRow[], cap =
 
 export function backfill(snapshot: { handoffs: Handoff[]; tasks: Task[] }, names: Names): ActivityRow[] {
   return mergeRows([], [...snapshot.handoffs.flatMap((h) => handoffRows(h, snapshot.tasks, names)), ...snapshot.tasks.map(taskRow)]);
+}
+
+const GOAL_STATUS: Record<string, { text: string; tone?: "ok" | "warn" | "bad" }> = {
+  running: { text: "Running", tone: "warn" }, completed: { text: "Completed", tone: "ok" }, failed: { text: "Failed", tone: "bad" },
+  cancelled: { text: "Cancelled", tone: "bad" }, execution_unknown: { text: "Outcome unknown", tone: "bad" },
+};
+const TURN_STATUS: Record<string, string> = { "turn.start": "running", "turn.finish": "completed", "turn.failed": "failed", "turn.cancelled": "cancelled", "turn.unknown": "execution_unknown" };
+
+/** "codex" → "Codex"; A2A callers are marked. */
+export function callerName(id: string, kind?: string): string {
+  const base = id.replace(/^agent:/, "").split(":")[0] || id;
+  return base.charAt(0).toUpperCase() + base.slice(1) + (kind === "a2a" ? " (A2A)" : "");
+}
+
+/** turn.* rows for outside-caller sessions (MCP/A2A goals). Owner chat turns
+ * have no data.caller and are ignored. */
+function callerGoalRow(e: GatewayEvent, p: Record<string, unknown>, at: number, names: Names): ActivityRow | null {
+  const c = (p.caller && typeof p.caller === "object" ? p.caller : null) as { caller_id?: string; caller_kind?: string; session_id?: string; request_id?: string; status?: string; goal_id?: string | null; thread?: string | null; agent_id?: string | null } | null;
+  if (!c?.caller_id) return null;
+  const status = c.status || TURN_STATUS[e.event] || "running";
+  const to = c.agent_id || LEAD_ID;
+  const id = c.goal_id || c.request_id || c.session_id || String(e.event_id ?? at);
+  const text = typeof p.error === "string" ? p.error : typeof p.text === "string" ? p.text : "";
+  return {
+    key: `goal:${id}:${status}`, kind: "caller.goal", agentId: c.caller_id, callerId: c.caller_id, at,
+    action: `${c.caller_kind === "a2a" ? "(A2A) " : ""}→ ${names(to)} goal${c.goal_id ? ` ${c.goal_id}` : ""}${c.thread ? ` (${c.thread})` : ""}${text ? `: ${text.slice(0, 300)}` : ""}`,
+    statusPill: GOAL_STATUS[status] ?? { text: status.replace(/_/g, " ") },
+    output: sessionLink(to, `Open ${names(to)}`),
+    needsYou: status === "failed" || status === "execution_unknown" || undefined,
+  };
 }
 
 /** G1 item → row: same mapper as the live stream, plus the gateway's
@@ -246,5 +279,5 @@ export function relativeTime(at: number, now = Date.now() / 1000): string {
 
 export const namesFrom = (agents: Agent[]): Names => {
   const map = new Map<string, string>([["widget", "A widget"], ["automation", "An automation"], ...agents.map((a): [string, string] => [a.id, label(a)])]);
-  return (id) => map.get(id) ?? id;
+  return (id) => map.get(id) ?? (/^(native|specialist|tp):/.test(id) ? id : callerName(id));
 };

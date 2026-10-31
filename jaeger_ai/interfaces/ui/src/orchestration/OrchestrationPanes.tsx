@@ -15,8 +15,9 @@ import { useOrchestration } from "./useOrchestration";
  * (content) · handoff inspector (docked ≥1200, trailing overlay 840–1199,
  * bottom sheet <840). Layout is driven by container queries on .jg-orch, so
  * it behaves the same inside the Agents tab or the harness. */
-export function OrchestrationPanes({ adapter, onNavigate, now }: { adapter: OrchestrationAdapter; onNavigate: Navigate; now?: number }) {
-  const s = useOrchestration(adapter);
+export function OrchestrationPanes({ adapter, onNavigate, now, initialCaller }: { adapter: OrchestrationAdapter; onNavigate: Navigate; now?: number; initialCaller?: string }) {
+  const [caller, setCaller] = useState<string | undefined>(initialCaller);
+  const s = useOrchestration(adapter, { callerId: caller });
   const [agentFilter, setAgentFilter] = useState<string>();
   const [handoffId, setHandoffId] = useState<string>();
   const names = useMemo(() => namesFrom(s.snapshot?.agents ?? []), [s.snapshot]);
@@ -32,7 +33,7 @@ export function OrchestrationPanes({ adapter, onNavigate, now }: { adapter: Orch
           {s.status === "loading" ? <SkeletonRows n={4} /> : <><LeadCard lead={lead} team={team} rows={s.rows} /><SpecialistStatusList team={team} selected={agentFilter} onSelect={setAgentFilter} /></>}
         </nav>
         <main className="jg-orch-main">
-          {s.status === "loading" ? <SkeletonRows n={6} /> : <ActivityFeed rows={s.rows} names={names} stream={s.stream} agentFilter={agentFilter} selectedHandoff={handoffId} onOpenHandoff={setHandoffId} onNavigate={onNavigate} now={now} onLoadOlder={s.loadOlder} historyError={s.historyError} />}
+          {s.status === "loading" ? <SkeletonRows n={6} /> : <ActivityFeed rows={s.rows} names={names} stream={s.stream} agentFilter={agentFilter} selectedHandoff={handoffId} onOpenHandoff={setHandoffId} onNavigate={onNavigate} now={now} onLoadOlder={s.loadOlder} historyError={s.historyError} caller={caller} onCaller={setCaller} />}
         </main>
         {handoff && <>
           <div className="jg-orch-scrim" onClick={() => setHandoffId(undefined)} aria-hidden />

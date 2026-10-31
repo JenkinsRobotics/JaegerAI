@@ -18,6 +18,6 @@ const root = document.getElementById("root")!;
 root.style.height = "100dvh";
 createRoot(root).render(
   <StrictMode>
-    <OrchestrationPanes adapter={adapter} onNavigate={(href) => { document.title = `nav:${href}`; }} />
+    <OrchestrationPanes adapter={adapter} initialCaller={q.get("agent_id") ?? undefined} onNavigate={(href) => { document.title = `nav:${href}`; }} />
   </StrictMode>,
 );

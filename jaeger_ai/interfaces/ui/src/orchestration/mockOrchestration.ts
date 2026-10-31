@@ -56,6 +56,10 @@ export function mockActivity(t0 = now()): ActivityItem[] {
       data: { handoff: { id: "h-art", from_agent_id: "native:jaeger", to_agent_id: "native:design", task: "Draft onboarding art", status: "completed", created_at: t0 - 90000, check: { state: "pending" } } } },
     { event_id: 880, kind: "project.checked", ts: t0 - 90000, agent_id: "native:reviewer", summary: "project release-1.4 check passed", needs_me: false, refs: { task_id: null },
       data: { project_id: "release-1.4", result: { ok: true, status: "passed", checked_at: t0 - 90000, agent_id: "native:reviewer" } } },
+    { event_id: 870, kind: "turn.finish", ts: t0 - 95000, agent_id: "native:jaeger", actor_id: "codex", session_id: "codex:bridge-t1", summary: "codex (mcp) goal g-17 completed", needs_me: false,
+      refs: { session_id: "codex:bridge-t1" }, data: { caller: { caller_id: "codex", caller_kind: "mcp", session_id: "codex:bridge-t1", request_id: "rq-17", status: "completed", goal_id: "g-17", thread: "t1", agent_id: "native:jaeger" } } },
+    { event_id: 860, kind: "turn.failed", ts: t0 - 96000, agent_id: "native:jaeger", actor_id: "partner-bot", session_id: "agent:partner-bot:x", summary: "partner-bot (a2a) goal g-9 failed", needs_me: false,
+      refs: { session_id: "agent:partner-bot:x" }, data: { error: "quota exceeded", caller: { caller_id: "partner-bot", caller_kind: "a2a", session_id: "agent:partner-bot:x", request_id: "rq-9", status: "failed", goal_id: "g-9", agent_id: "native:jaeger" } } },
     { event_id: 850, kind: "task.created", ts: t0 - 172800, agent_id: "native:mac", summary: "Task created", needs_me: false, refs: { task_id: "t-old" },
       data: { task: { task_id: "t-old", goal: "Bump Sparkle", state: "queued", agent_id: "native:mac" } } },
   ];
@@ -64,9 +68,9 @@ export function mockActivity(t0 = now()): ActivityItem[] {
 export const mockGaps: GapProvider = {
   kind: "mock",
   runner: derivedGaps.runner,
-  activity: async ({ before, names }) => {
-    const all = mockActivity();
-    const items = all.filter((i) => before == null || i.event_id < before).slice(0, 2);
+  activity: async ({ before, agentId, names }) => {
+    const all = mockActivity().filter((i) => !agentId || i.agent_id === agentId || i.actor_id === agentId);
+    const items = all.filter((i) => before == null || i.event_id < before).slice(0, 4);
     const last = items.at(-1);
     const page: ActivityPage = { items, has_more: !!last && all.some((i) => i.event_id < last.event_id), next_before: last?.event_id ?? null };
     return pageRows(page, names);
