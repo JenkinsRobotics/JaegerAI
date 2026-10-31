@@ -11,13 +11,14 @@
 import type { JaegerSource } from "../api/source";
 import type { Agent, GatewayEvent, HandoffExchange, Task } from "../api/types";
 import { visible } from "../agents/agentsLogic";
-import { LEAD_ID } from "./feed";
-import type { ActivityRow, AgentLive, OrchestrationSnapshot } from "./types";
+import { activityItemRow, LEAD_ID } from "./feed";
+import type { ActivityPage, ActivityRow, AgentLive, OrchestrationSnapshot } from "./types";
 
 export interface GapProvider {
   kind: "derived" | "mock" | "gateway";
-  /** G1: server-side history. Undefined → backfill from the snapshot. */
-  activity?(): Promise<ActivityRow[]>;
+  /** G1: server-side history, newest first; `before` = previous page's
+   * `next_before`. Undefined → backfill from the snapshot only. */
+  activity?(q: { before?: number; names: (id: string) => string }): Promise<{ rows: ActivityRow[]; nextBefore?: number }>;
   /** G4: agent-level runner. */
   runner(agent: Agent, tasks: Task[]): string | undefined;
 }
@@ -42,6 +43,25 @@ export const derivedGaps: GapProvider = {
     return task?.runner ?? undefined;
   },
 };
+
+/** G1 page → rows. Shared by the gateway and mock providers. */
+export function pageRows(page: ActivityPage, names: (id: string) => string) {
+  return { rows: page.items.flatMap((i) => activityItemRow(i, names) ?? []), nextBefore: page.has_more && page.next_before != null ? page.next_before : undefined };
+}
+
+/** G1 against `GET /v1/activity` (same origin, caller auth via the proxy). */
+export function gatewayActivity(base = "", fetchImpl: typeof fetch = (...a) => fetch(...a)): NonNullable<GapProvider["activity"]> {
+  return async ({ before, names }) => {
+    const qs = new URLSearchParams({ limit: "50" });
+    if (before != null) qs.set("before", String(before));
+    const res = await fetchImpl(`${base}/v1/activity?${qs}`, { headers: { Accept: "application/json" }, credentials: "same-origin" });
+    if (!res.ok) throw new Error(`activity ${res.status}`);
+    return pageRows((await res.json()) as ActivityPage, names);
+  };
+}
+
+/** Use once the gateway ships G1–G6; until then `derivedGaps`. */
+export const gatewayGaps: GapProvider = { ...derivedGaps, kind: "gateway", activity: gatewayActivity() };
 
 export function liveAdapter(source: JaegerSource, gaps: GapProvider = derivedGaps): OrchestrationAdapter {
   return {
