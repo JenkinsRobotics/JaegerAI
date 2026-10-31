@@ -72,6 +72,7 @@ APP_CALLERS: Mapping[str, str] = {
     "claude": "Claude Code", "codex": "Codex", "cursor": "Cursor", "gemini": "Gemini",
     "vscode": "VS Code / Copilot", "opencode": "OpenCode", "continue": "Continue",
     "cline": "Cline", "openclaw": "OpenClaw", "cagent": "cagent", "muse": "Muse",
+    "geminidesktop": "Gemini desktop app",
 }
 APP_CALLER_SCOPES = frozenset({"read", "turn", "handoff", "search"})
 
