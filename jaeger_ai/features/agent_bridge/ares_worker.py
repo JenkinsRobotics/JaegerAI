@@ -37,6 +37,11 @@ CODEX = os.environ.get("ARES_CODEX_BIN", "/opt/homebrew/bin/codex")
 MODEL = os.environ.get("ARES_CODEX_MODEL", "gpt-6-sol")
 TIMEOUT_S = int(os.environ.get("ARES_JOB_TIMEOUT_S", "900"))
 POLL_S = int(os.environ.get("ARES_POLL_S", "15"))
+# Every hub call is bounded so a hub that is down, half-up or restarting can
+# never wedge the loop; failures retry with capped exponential backoff.
+HUB_TIMEOUT_S = float(os.environ.get("ARES_HUB_TIMEOUT_S", "20"))
+HUB_RETRIES = int(os.environ.get("ARES_HUB_RETRIES", "3"))
+BACKOFF_MAX_S = float(os.environ.get("ARES_BACKOFF_MAX_S", "300"))
 # Single switch for the busy-Mac hold: "1" (default) waits while resources.json
 # limits say the device is busy; "0" exempts ARES (Codex runs in OpenAI's cloud).
 RESOURCE_GATE = os.environ.get("ARES_RESOURCE_GATE", "1") != "0"
@@ -97,21 +102,42 @@ async def _call(tool: str, args: dict) -> dict:
     from mcp.client.streamable_http import streamablehttp_client
 
     headers = {"Authorization": "Bearer " + _token()}
-    async with streamablehttp_client(HUB_URL, headers=headers) as (r, w, _):
+    async with streamablehttp_client(HUB_URL, headers=headers, timeout=HUB_TIMEOUT_S,
+                                     sse_read_timeout=HUB_TIMEOUT_S) as (r, w, _):
         async with ClientSession(r, w) as session:
             await session.initialize()
             res = await session.call_tool(tool, args)
             text = "".join(getattr(c, "text", "") for c in res.content)
             if res.isError:
-                raise RuntimeError(f"{tool} failed: {text[:500]}")
+                raise HubToolError(f"{tool} failed: {text[:500]}")
             try:
                 return json.loads(text)
             except ValueError:
                 return {"text": text}
 
 
-def call(tool: str, args: dict) -> dict:
-    return asyncio.run(_call(tool, args))
+class HubToolError(RuntimeError):
+    """The hub answered but the tool failed; retrying will not help."""
+
+
+def _backoff(attempt: int, base: float = 1.0) -> float:
+    return min(BACKOFF_MAX_S, base * (2 ** attempt))
+
+
+def call(tool: str, args: dict, retries: int | None = None) -> dict:
+    """One hub tool call, hard-bounded by HUB_TIMEOUT_S, retried on transport errors."""
+    retries = HUB_RETRIES if retries is None else retries
+    for attempt in range(retries + 1):
+        try:
+            return asyncio.run(asyncio.wait_for(_call(tool, args), HUB_TIMEOUT_S))
+        except HubToolError:
+            raise
+        except BaseException as exc:  # noqa: BLE001 - incl. TimeoutError, ExceptionGroup
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)) or attempt >= retries:
+                raise RuntimeError(f"hub unreachable ({tool}): {type(exc).__name__}: {str(exc)[:200]}") from None
+            _log("hub_retry", tool=tool, attempt=attempt + 1, error=type(exc).__name__)
+            time.sleep(_backoff(attempt))
+    raise AssertionError("unreachable")
 
 
 def device_ok() -> list[str]:
@@ -211,14 +237,24 @@ def main(argv=None) -> int:
         return 1
     state = State(WORKER_DIR / "state.json")
     _log("worker_start", workspace=str(WORKSPACE), timeout_s=TIMEOUT_S)
+    fails = 0
     while True:
         try:
             tick(state)
+            if fails:
+                _log("hub_recovered", after_failures=fails)
+            fails = 0
         except Exception as exc:  # noqa: BLE001 - hub restarts must not kill the worker
-            _log("tick_error", error=str(exc)[:500])
+            fails += 1
+            _log("tick_error", error=str(exc)[:500], failures=fails)
         if a.once:
             return 0
-        time.sleep(POLL_S)
+        time.sleep(next_sleep(fails))
+
+
+def next_sleep(fails: int) -> float:
+    """Poll interval, backing off (capped) while the hub keeps failing."""
+    return POLL_S if fails == 0 else max(POLL_S, _backoff(fails - 1, POLL_S))
 
 
 if __name__ == "__main__":
