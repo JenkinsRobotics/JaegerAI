@@ -54,7 +54,8 @@ export function mockActivity(t0 = now()): ActivityItem[] {
     { event_id: 900, kind: "agent.handoff.finished", ts: t0 - 86400, agent_id: "native:design", actor_id: "native:jaeger", session_id: "*", summary: "Design finished: Draft onboarding art", needs_me: false,
       refs: { handoff_id: "h-art", task_id: null, approval_id: null, session_id: "native:design:req-art" },
       data: { handoff: { id: "h-art", from_agent_id: "native:jaeger", to_agent_id: "native:design", task: "Draft onboarding art", status: "completed", created_at: t0 - 90000, check: { state: "pending" } } } },
-    { event_id: 880, kind: "project.checked", ts: t0 - 90000, agent_id: "native:reviewer", summary: "Reviewer checked the release checklist", needs_me: false, refs: { task_id: "t-review" }, data: {} },
+    { event_id: 880, kind: "project.checked", ts: t0 - 90000, agent_id: "native:reviewer", summary: "project release-1.4 check passed", needs_me: false, refs: { task_id: null },
+      data: { project_id: "release-1.4", result: { ok: true, status: "passed", checked_at: t0 - 90000, agent_id: "native:reviewer" } } },
     { event_id: 850, kind: "task.created", ts: t0 - 172800, agent_id: "native:mac", summary: "Task created", needs_me: false, refs: { task_id: "t-old" },
       data: { task: { task_id: "t-old", goal: "Bump Sparkle", state: "queued", agent_id: "native:mac" } } },
   ];

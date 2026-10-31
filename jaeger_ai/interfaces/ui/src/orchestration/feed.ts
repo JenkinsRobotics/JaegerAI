@@ -25,8 +25,11 @@ export function sessionLink(agentId: string, label = "Conversation"): OutputLink
 /** GAP G5: explicit handoff↔task link. Until it ships, match the task whose
  * provenance request_id equals the handoff's request_id. */
 export function taskForHandoff(h: Handoff, tasks: Task[]): Task | undefined {
-  const linked = (h as Handoff & { task_id?: string }).task_id;
+  // G5 (real): handoff.task_id, then task.handoff_id; fallback: request_id match.
+  const linked = (h as Handoff & { task_id?: string | null }).task_id ?? (h.metadata?.task_id as string | undefined);
   if (linked) return tasks.find((t) => t.task_id === linked);
+  const back = tasks.find((t) => (t as Task & { handoff_id?: string | null }).handoff_id === h.id);
+  if (back) return back;
   if (!h.request_id) return undefined;
   return tasks.find((t) => t.provenance?.request_id === h.request_id);
 }
@@ -163,11 +166,11 @@ export function eventRow(e: GatewayEvent, names: Names): ActivityRow | null {
     }
     case "approval.request": {
       const id = str(p.approval_id ?? p.id);
-      return id ? { key: `approval:${id}`, kind: "approval.requested", agentId: str(p.agent_id) || LEAD_ID, at, action: `asked for approval${str(p.title ?? p.tool) ? `: ${str(p.title ?? p.tool)}` : ""}`, needsYou: true, output: { kind: "approval", label: "Review", href: e.session_id && e.session_id !== "*" ? `/chat?agent=${encodeURIComponent(str(p.agent_id) || LEAD_ID)}` : "/home" } } : null;
+      return id ? { key: `approval:${id}`, kind: "approval.requested", agentId: str(p.agent_id) || LEAD_ID, at, action: `asked for approval${str(p.title ?? p.prompt ?? p.tool ?? p.task) ? `: ${str(p.title ?? p.prompt ?? p.tool ?? p.task).slice(0, 160)}` : ""}`, needsYou: true, output: { kind: "approval", label: "Review", href: e.session_id && e.session_id !== "*" ? `/chat?agent=${encodeURIComponent(str(p.agent_id) || LEAD_ID)}` : "/home" } } : null;
     }
     case "approval.resolved": {
       const id = str(p.approval_id ?? p.id);
-      return id ? { key: `approval:${id}:resolved`, kind: "approval.resolved", agentId: str(p.agent_id) || LEAD_ID, at, action: `approval ${str(p.decision) || "resolved"}` } : null;
+      return id ? { key: `approval:${id}:resolved`, kind: "approval.resolved", agentId: str(p.agent_id) || LEAD_ID, at, action: `approval ${str(p.decision) || (p.approved === true ? "granted" : p.approved === false ? "declined" : "resolved")}` } : null;
     }
     case "agent.status.changed": { // G6 event; time in payload.at
       const id = str(p.agent_id ?? p.id);
@@ -177,6 +180,19 @@ export function eventRow(e: GatewayEvent, names: Names): ActivityRow | null {
         handoffId: hid || undefined, taskId: tid || undefined,
         output: hid ? { kind: "handoff", label: "Exchange", href: `handoff:${hid}` } : tid ? taskLink({ task_id: tid }) : undefined,
         needsYou: str(p.status) === "waiting_approval" || undefined } : null;
+    }
+    case "project.checked": { // {project_id, result{ok, status?, checked_at}}
+      const r = (p.result && typeof p.result === "object" ? p.result : {}) as { ok?: boolean; status?: string; checked_at?: number; agent_id?: string; checked_by?: string };
+      const project = str(p.project_id);
+      if (!project) return null;
+      const state: CheckState = r.ok === true ? "passed" : r.ok === false ? "failed" : "pending";
+      const when = sec(r.checked_at) || at;
+      const by = r.agent_id || (r.checked_by && !r.checked_by.startsWith("owner:") ? r.checked_by : "") || LEAD_ID;
+      return {
+        key: `project.checked:${project}:${e.event_id ?? Math.floor(when)}`, kind: "project.checked", agentId: by, at: when,
+        action: `checked project ${project}: ${r.status || (state === "pending" ? "checked" : state)}`,
+        check: { state, source: "gateway", checkedBy: r.checked_by, checkedAt: when }, needsYou: state === "failed" || undefined,
+      };
     }
     default:
       return null;
@@ -229,6 +245,6 @@ export function relativeTime(at: number, now = Date.now() / 1000): string {
 }
 
 export const namesFrom = (agents: Agent[]): Names => {
-  const map = new Map(agents.map((a) => [a.id, label(a)]));
+  const map = new Map<string, string>([["widget", "A widget"], ["automation", "An automation"], ...agents.map((a): [string, string] => [a.id, label(a)])]);
   return (id) => map.get(id) ?? id;
 };
