@@ -7,6 +7,18 @@ import { useCallback, useEffect, useState } from "react";
 import { CLI_STATE, loadCliProviders, loadModels, updateCliProvider, isCloud, type CliProvider, type LocalModel } from "../unified/models";
 import { Badge, SkeletonRows } from "../unified/ui";
 
+function VscodeHelp({ p }: { p: CliProvider }) {
+  if (p.state === "not-installed") return (
+    <div className="jg-u-note">
+      <p>Uses the Copilot models you're already signed in to in VS Code, through a private bridge on this Mac (127.0.0.1 only, new token each time VS Code starts). Install the Jaeger IDE extension yourself:</p>
+      {p.install_command ? <code className="jg-prov__cmd">{p.install_command}</code> : <p>Build the Jaeger IDE extension 0.3.0 first.</p>}
+      <p>Then reload VS Code, run “Jaeger: Allow Copilot for Jaeger” from the Command Palette and click Allow, and press Re-check.</p>
+    </div>);
+  if (p.state === "not-running") return <p className="jg-u-note">Open VS Code to use Copilot here. If it's open, check the setting “Jaeger › Copilot Bridge: Enabled”.</p>;
+  if (p.state === "needs-consent") return <p className="jg-u-note">In VS Code, run “Jaeger: Allow Copilot for Jaeger” and click Allow. Copilot Free limits apply.</p>;
+  return <p className="jg-u-note">Copilot Free limits apply. Turn the bridge off in VS Code with “Jaeger: Turn Copilot bridge on/off”.</p>;
+}
+
 export function ProvidersPanel() {
   const [ps, setPs] = useState<CliProvider[] | null>(null);
   const [err, setErr] = useState<string>();
@@ -25,7 +37,7 @@ export function ProvidersPanel() {
   return (
     <div className="jg-prov">
       <section className="jg-sheet__section">
-        <div className="jg-prov__head"><h3 className="jg-sheet__section-title">Subscription CLIs</h3>
+        <div className="jg-prov__head"><h3 className="jg-sheet__section-title">Subscription apps (no API keys)</h3>
           <button type="button" className="jg-u-btn" onClick={() => { setPs(null); void load(true); }}>Re-check</button></div>
         <p className="jg-u-note">Jaeger runs these apps the way you would in Terminal, using the account you're already signed in with. No API keys, and Jaeger never reads or copies their credentials.</p>
         {err && <p className="jg-u-error" role="alert">{err}</p>}
@@ -43,8 +55,9 @@ export function ProvidersPanel() {
                 <dt>Account</dt><dd>{p.status_note}</dd>
                 {p.last_error && <><dt>Last run</dt><dd className="jg-u-error">{p.last_error}</dd></>}
               </dl>
+              {p.kind === "vscode" ? <VscodeHelp p={p} /> : <>
               {p.state === "needs-sign-in" && <p className="jg-u-note">Sign in yourself in Terminal: <code>{p.login_command}</code>, then press Re-check.</p>}
-              {p.state === "not-installed" && <p className="jg-u-note">Install the {p.label} CLI, sign in, then press Re-check.</p>}
+              {p.state === "not-installed" && <p className="jg-u-note">Install the {p.label} CLI, sign in, then press Re-check.</p>}</>}
               {p.models.length > 0 && (
                 <fieldset className="jg-prov__models" disabled={!p.enabled || saving === p.id}>
                   <legend>Models to offer in Compare</legend>

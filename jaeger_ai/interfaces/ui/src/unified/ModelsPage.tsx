@@ -111,7 +111,7 @@ export function ModelsPage() {
                   })}</tbody>
                 </table>
               </section>))}
-          {!loading && clis.some((p) => p.installed) && (kind === "all" || kind === "cloud") && clis.filter((p) => p.installed).map((p) => {
+          {!loading && clis.some((p) => p.installed || p.kind === "vscode") && (kind === "all" || kind === "cloud") && clis.filter((p) => p.installed || p.kind === "vscode").map((p) => {
             const [tone, text] = CLI_STATE[p.state];
             const rows = p.models.filter((m) => !q || `${m.id} ${m.label}`.toLowerCase().includes(q.toLowerCase()));
             if (q && !rows.length) return null;
@@ -120,7 +120,7 @@ export function ModelsPage() {
                 <header className="jg-models__ghead">
                   <span className="jg-models__dot" data-status={p.state === "ready" ? "online" : p.state} aria-hidden="true" />
                   <h2>{p.label}</h2> <Badge tone={tone}>{text}</Badge>{!p.enabled && <Badge>Off</Badge>}
-                  <span className="jg-models__gmeta">CLI · {p.version ?? "?"} · your subscription, no API key</span>
+                  <span className="jg-models__gmeta">{p.kind === "vscode" ? "VS Code bridge" : "CLI"} · {p.version ?? "?"} · your subscription, no API key</span>
                 </header>
                 {rows.length ? (
                   <table className="jg-table">
@@ -129,7 +129,7 @@ export function ModelsPage() {
                       <tr key={m.id}><td><strong>{m.label}</strong><br /><small>{m.id}</small></td><td>{m.context ? `${Math.round(m.context / 1000)}K` : "–"}</td>
                         <td>{p.enabled && p.selected_models.includes(m.id) ? <Badge tone="ok">Offered</Badge> : <Badge>Hidden</Badge>}</td></tr>))}</tbody>
                   </table>) : null}
-                <p className="jg-u-note">{p.state === "needs-sign-in" ? `Needs sign-in: run ${p.login_command} in Terminal.` : p.last_error ? `Last run failed: ${p.last_error}` : p.status_note}. Manage in Settings → Providers.</p>
+                <p className="jg-u-note">{p.kind === "vscode" && p.state !== "ready" ? p.status_note : p.state === "needs-sign-in" ? `Needs sign-in: run ${p.login_command} in Terminal.` : p.last_error ? `Last run failed: ${p.last_error}` : p.status_note}. Manage in Settings → Providers.</p>
               </section>);
           })}
           {!loading && <p className="jg-u-note">{keyed.length ? `Keys stored for: ${keyed.map((k) => k.id).join(", ")}.` : "No cloud API keys are stored; Ollama Cloud models run through this Mac's Ollama sign-in."} Add providers in Settings → Providers.</p>}

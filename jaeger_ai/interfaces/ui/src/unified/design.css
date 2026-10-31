@@ -299,3 +299,4 @@ html:not([data-jaeger-host="macos"]) .app-window .jg-traffic-lights { display: n
 .jg-cmp__slothead { flex-wrap: wrap; }
 .jg-cmp__out { overflow-wrap: anywhere; }
 .jg-compare[data-count="3"] .jg-cmp__metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.jg-prov__cmd { display: block; margin: var(--jg-space-2) 0; padding: var(--jg-space-2); border-radius: 8px; background: var(--jg-color-hover); user-select: all; }
