@@ -174,10 +174,20 @@ def register(mcp, client_for_context):
         if to == "jaeger":
             if not workspace_folder:
                 raise ValueError("workspace_folder is required when handing off to Jaeger")
+            # Goals need an established thread with Jaeger: the task message to
+            # jaegerd opens it and is the goal's durable source.
+            source = f"{ident}-msg"
+            call(
+                ctx, "POST", "/v1/agent-messages",
+                {"id": source, "thread": thread, "to": "jaegerd", "kind": "task",
+                 "title": (title or task)[:200], "body": task, "refs": refs or [],
+                 "status_line": "handoff"},
+            )
             goal = call(
                 ctx, "POST", "/v1/agent-goals",
                 {"id": ident, "thread": thread, "goal": task,
-                 "workspace_folder": workspace_folder, "rea_tools": []},
+                 "workspace_folder": workspace_folder, "rea_tools": [],
+                 "source_message_id": source},
             )
             return {"kind": "goal", "id": ident, "thread": thread, "goal": goal}
         if to not in CALLERS:
@@ -243,3 +253,28 @@ def register(mcp, client_for_context):
         """Your delivery receipts: messages you sent or received (status/result/task)."""
         data = call(ctx, "GET", "/v1/agent-messages?" + urlencode({"after": after, "limit": limit}))
         return data
+
+    @mcp.tool()
+    @_off_event_loop
+    def whoami(ctx: Context | None = None) -> dict:
+        """Read-only: your authenticated caller identity, scopes, session prefix
+        and the workspace roots start_goal / handoff_task(to="jaeger") accept."""
+        import json as _json
+        import os as _os
+
+        client = client_for_context(ctx)
+        name = getattr(client, "caller", None)
+        spec = CALLERS.get(name) if name else None
+        try:
+            grants = _json.loads(_os.environ.get("JAEGER_AGENT_WORKSPACES", "{}") or "{}")
+        except ValueError:
+            grants = {}
+        roots = grants.get(name, []) if isinstance(grants, dict) else []
+        return {
+            "caller": name,
+            "actor": getattr(spec, "actor", None),
+            "scopes": sorted(getattr(spec, "scopes", ()) or ()),
+            "session_prefix": getattr(spec, "session_prefix", None),
+            "workspace_roots": roots if isinstance(roots, list) else [],
+            "note": "Grants mirror the Gateway's JAEGER_AGENT_WORKSPACES; the Gateway is authoritative.",
+        }
