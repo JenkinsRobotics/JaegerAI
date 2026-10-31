@@ -59,8 +59,27 @@ _TEST_STATE_HOME = Path(tempfile.mkdtemp(prefix="jaeger-tests-", dir="/tmp"))
 # so in-repo clients under test authenticate the way they do in production.
 _CALLER_TOKEN_DIR = _TEST_STATE_HOME / "caller-tokens"
 _CALLER_TOKEN_DIR.mkdir(mode=0o700)
-for _caller in ("menubar", "cli", "webui", "ide", "bridge", "jaegerd", "mcp", "a2a", "ares", "grokbot"):
-    import secrets as _secrets
+# Every caller in caller_auth.CALLERS (so new callers are covered automatically). The module
+# is loaded by file path (stdlib-only) so collection does not import the jaeger_ai package early.
+import importlib.util as _ilu
+import secrets as _secrets
+
+_ca_spec = _ilu.spec_from_file_location(
+    "_conftest_caller_auth", Path(__file__).resolve().parents[2] / "jaeger_ai/core/gateway/caller_auth.py")
+_ca = _ilu.module_from_spec(_ca_spec)
+import sys as _sys
+
+_sys.modules[_ca_spec.name] = _ca  # dataclasses resolve their module through sys.modules
+try:
+    _ca_spec.loader.exec_module(_ca)
+finally:
+    _sys.modules.pop(_ca_spec.name, None)
+FIXTURE_CALLERS = tuple(sorted(_ca.CALLERS))
+_REQUIRED_CALLERS = {"menubar", "cli", "webui", "ide", "bridge", "jaegerd", "mcp", "a2a", "ares", "grokbot",
+                     "claude", "codex", "cursor", "gemini", "vscode", "opencode", "continue", "cline",
+                     "openclaw", "cagent", "muse"}
+assert _REQUIRED_CALLERS <= set(FIXTURE_CALLERS), sorted(_REQUIRED_CALLERS - set(FIXTURE_CALLERS))
+for _caller in FIXTURE_CALLERS:
     _fd = os.open(_CALLER_TOKEN_DIR / f"{_caller}.token", os.O_WRONLY | os.O_CREAT, 0o600)
     os.write(_fd, _secrets.token_urlsafe(32).encode("ascii"))
     os.close(_fd)
