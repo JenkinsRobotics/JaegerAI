@@ -148,7 +148,10 @@ STOP_ROUTES = frozenset({("POST", "/v1/stop")})
 SEARCH_ROUTES = frozenset({("POST", "/v1/search"), ("POST", "/v1/fetch"),
                            # OSS stack (features.oss_stack): model router, shared MCP tools, Documents RAG
                            ("POST", "/v1/models/route"), ("POST", "/v1/models/generate"),
-                           ("POST", "/v1/tools/list"), ("POST", "/v1/tools/call"), ("POST", "/v1/docs/search")})
+                           ("POST", "/v1/tools/list"), ("POST", "/v1/tools/call"), ("POST", "/v1/docs/search"),
+                           # Backlog (features.backlog): read/add/update/assign; approve + import are owner-only in the handler
+                           ("POST", "/v1/backlog"), ("POST", "/v1/backlog/{id}"), ("POST", "/v1/backlog/{id}/assign"),
+                           ("POST", "/v1/backlog/import")})
 #: Lead → specialist handoff (``call_agent``): owners and jaegerd, never outside callers.
 DELEGATE_ROUTES = frozenset({("POST", "/v1/agents/{id}/handoff")})
 #: GET routes an outside (prefixed) caller may use; all are session-scoped.
@@ -209,7 +212,9 @@ def required_scope(method: str, route: str | None) -> str | None:
 #: Extra read-only GET routes for one named outside caller (not every prefixed caller).
 #: grokbot reads the Agents-tab activity feed (handoff.sent / handoff.result rows).
 CALLER_READ_ROUTES: Mapping[str, frozenset[str]] = {
-    "grokbot": frozenset({"/v1/activity"}),
+    "grokbot": frozenset({"/v1/activity", "/v1/backlog"}),
+    "ares": frozenset({"/v1/backlog"}),
+    "muse": frozenset({"/v1/backlog"}),
 }
 
 

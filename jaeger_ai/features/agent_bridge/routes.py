@@ -112,6 +112,8 @@ def register(gateway):
         message = service.send(caller, body)
         if fresh:
             _handoff_activity(caller, message)
+            from jaeger_ai.features.backlog.routes import on_message as backlog_on_message
+            backlog_on_message(gateway, caller, message)
         return web.json_response(message)
 
     def _unsent(caller, ident):

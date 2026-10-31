@@ -24,7 +24,7 @@ _CALLER_STATUS = {"turn.start": "running", "turn.finish": "completed", "turn.fai
 #: Agent-bridge inbox handoffs between apps (handoff_task to a peer, post_result back).
 BRIDGE_KINDS = ("handoff.sent", "handoff.result")
 #: Shared web search calls (POST /v1/search, /v1/fetch), attributed to the caller.
-SEARCH_KINDS = ("search.query", "search.fetch", "model.route", "tool.call", "docs.search")
+SEARCH_KINDS = ("search.query", "search.fetch", "model.route", "tool.call", "docs.search", "backlog.updated")
 ALL_KINDS = KINDS + CALLER_KINDS + BRIDGE_KINDS + SEARCH_KINDS
 MAX_ROWS = 50_000
 MAX_LIMIT = 200
@@ -198,6 +198,8 @@ def _summary(kind: str, data: dict) -> str:
             return f"{who} model {data.get('model') or '?'} -> {data.get('target') or '?'} [{data.get('status')}]{why}{err}"
         if kind == "tool.call":
             return f"{who} tool {data.get('server')}.{data.get('tool')} [{data.get('status')}]"
+        if kind == "backlog.updated":
+            return f"{who} {data.get('action') or 'updated'} backlog task: {str(data.get('title') or '')[:120]} ({data.get('status')})"
         if kind == "docs.search":
             return f"{who} searched Documents: {str(data.get('query') or '')[:120]} ({data.get('results')} results)"
         if kind == "search.query":
