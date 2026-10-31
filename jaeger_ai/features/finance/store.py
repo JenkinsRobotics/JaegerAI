@@ -15,7 +15,6 @@ from .models import (
     Account,
     AccountType,
     ApprovalTier,
-    Category,
     CategoryBudget,
     PendingAction,
     ReviewStatus,

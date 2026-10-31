@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import json
-import os
 import time
 from typing import Any
 import urllib.error

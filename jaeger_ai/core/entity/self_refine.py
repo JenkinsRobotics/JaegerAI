@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import logging
 import time
-from typing import Any, Callable
+from typing import Callable
 
 logger = logging.getLogger("jaeger.entity.self_refine")
 

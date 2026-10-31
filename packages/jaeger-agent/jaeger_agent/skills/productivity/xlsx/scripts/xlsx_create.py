@@ -72,7 +72,7 @@ from openpyxl.comments import Comment
 from openpyxl.formatting.rule import CellIsRule, ColorScaleRule
 from openpyxl.styles import (Alignment, Border, Font, PatternFill,
                              Protection, Side)
-from openpyxl.utils import column_index_from_string, range_boundaries
+from openpyxl.utils import range_boundaries
 from openpyxl.workbook.defined_name import DefinedName
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.worksheet.table import Table, TableStyleInfo

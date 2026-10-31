@@ -22,7 +22,6 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
-from pathlib import Path
 
 
 def _cmd_skill_argv(argv: list[str]) -> int:

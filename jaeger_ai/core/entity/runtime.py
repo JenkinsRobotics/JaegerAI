@@ -35,14 +35,14 @@ from typing import Any, Callable
 from jaeger_ai.core.instance.instance import operator_state_root
 from .ownership import EntityRuntimeMode, infer_runtime_mode, instance_layout, runtime_state_root
 from .attention import AttentionDecision, SalienceEngine
-from .authority import AuthorityDecision, AuthorityLayer, ProposedAction
+from .authority import AuthorityLayer
 from .cognition_router import CognitionRouter
 from .deliberate_planner import DeliberatePlanner
 from .events import EventType, JaegerEvent
 from .event_store import SqliteEventStore
-from .executive import CognitiveStrategy, ExecutiveDecision, ExecutiveStrategySelector
+from .executive import CognitiveStrategy, ExecutiveStrategySelector
 from .identity import EntityIdentity, resolve_entity_identity  # load_from_file used in ATTACHED_CLIENT
-from .learning import LearningDecision, LearningPipeline
+from .learning import LearningPipeline
 from .memory import MemorySubsystem
 from .reducer import reduce_event, replay_events
 from .reflection import ReflexionStore
@@ -953,7 +953,6 @@ class EntityRuntime:
         turn commitments, and execution tracking across all clients.
         """
         import os
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
         from jaeger_ai.core.models.external_model import ExternalModelClient
         from jaeger_agent.cognition.executive import TurnExecutive
         from jaeger_agent.cognition.sqlite_runs import SqliteRunStore

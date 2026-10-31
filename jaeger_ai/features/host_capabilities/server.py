@@ -6,8 +6,6 @@ via FastMCP over stdio.
 
 from __future__ import annotations
 
-import sys
-from typing import Any
 
 try:
     from mcp.server.fastmcp import FastMCP

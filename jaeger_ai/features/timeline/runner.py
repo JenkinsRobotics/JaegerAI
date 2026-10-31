@@ -29,11 +29,9 @@ Publishes :class:`jaeger_os.transport.topics.TimelineProgress` events:
 
 from __future__ import annotations
 
-import json
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any
 
 from jaeger_os.transport import topics
 from jaeger_ai.features.timeline.schema import (

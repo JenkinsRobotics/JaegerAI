@@ -6,8 +6,6 @@ Apple Shortcuts CLI (`shortcuts`), and native Spotlight indexing (`mdfind`).
 
 from __future__ import annotations
 
-import json
-import os
 import subprocess
 from typing import Any
 

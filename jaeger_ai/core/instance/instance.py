@@ -25,7 +25,6 @@ import fcntl
 import os
 import shutil
 import sys
-import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,7 +37,6 @@ from jaeger_ai.core.instance.schemas import (
     Identity,
     Manifest,
     dump_json,
-    dump_yaml,
     load_json,
     load_yaml,
 )

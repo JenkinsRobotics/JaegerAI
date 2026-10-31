@@ -9,7 +9,6 @@ Usage:
     python extract_pymupdf.py document.pdf --tables
     python extract_pymupdf.py document.pdf --metadata
 """
-import sys
 import json
 
 def extract_text(path, pages=None):

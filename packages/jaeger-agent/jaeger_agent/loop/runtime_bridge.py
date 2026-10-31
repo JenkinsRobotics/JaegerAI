@@ -37,7 +37,6 @@ from jaeger_agent.adapters.cli_backend import CliBackendAdapter
 from jaeger_agent.adapters.local_llama import LocalLlamaAdapter
 from jaeger_agent.adapters.openai import OpenAIAdapter
 from jaeger_agent.schemas.message_types import Message
-from jaeger_agent.loop.loop_backstop import MAX_TOOL_CALLS
 from jaeger_agent.loop.turn_budget import TurnBudgetLimits
 
 

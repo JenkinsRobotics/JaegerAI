@@ -23,7 +23,6 @@ one's explicitly setting state.
 from __future__ import annotations
 
 import threading
-from typing import Any
 
 from jaeger_os.transport import topics
 from jaeger_os.transport import Bus

@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Any
 
 from .models import Rule
 from .store import FinanceStore

@@ -330,7 +330,6 @@ def execute_heartbeat_event(
       cognition truthfully with system event provenance.
     """
     from jaeger_ai.core.entity.runtime import EntityRuntime
-    from jaeger_ai.core.entity.events import JaegerEvent
 
     clock = now or datetime.now()
     kind = briefing_kind(now=clock)

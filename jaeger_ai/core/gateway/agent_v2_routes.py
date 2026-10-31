@@ -12,7 +12,6 @@ Agents cannot modify their own role, tools, or personality.
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from aiohttp import web
 
@@ -291,7 +290,7 @@ async def handle_set_agent_personality(request: web.Request) -> web.Response:
         
         try:
             registry.save()
-        except Exception as e:
+        except Exception:
             return web.json_response({"error": "Failed to persist"}, status=500)
         
         return web.json_response({
@@ -373,7 +372,7 @@ async def handle_set_agent_personality(request: web.Request) -> web.Response:
     # Persist
     try:
         registry.save()
-    except Exception as e:
+    except Exception:
         return web.json_response({"error": "Failed to persist"}, status=500)
     
     personality = get_personality(agent)

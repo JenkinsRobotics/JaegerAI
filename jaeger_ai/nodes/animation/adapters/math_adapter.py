@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
-from typing import Any, Callable
+from typing import Any
 
 import numpy as np
 

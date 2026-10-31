@@ -698,7 +698,7 @@ MAC_SHELL_DIR = REPO / "jaeger_ai" / "interfaces" / "macos-shell"
 
 def _boot_mac_shell(env: dict[str, str], dev: bool = False) -> int | None:
     """Build/run only macos-shell. Never fall back to an old Mac bundle."""
-    from jaeger_ai.cli._common import mac_app_bundle, mac_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     package = REPO / "jaeger_ai/interfaces/macos-shell"
     try:
         bundle = mac_app_bundle(REPO)
@@ -749,7 +749,7 @@ def cmd_update() -> int:
     # Staleness beats "what did THIS pull change": the bundle's build-commit
     # stamp catches pulls done by hand outside this command and rebuilds that
     # failed last time — a diff-keyed check misses both.
-    from jaeger_ai.cli._common import mac_app_bundle, mac_app_is_stale
+    from jaeger_ai.cli._common import mac_app_is_stale
     try:
         _dev_bundle = mac_app_bundle(REPO)
     except ValueError as _e:

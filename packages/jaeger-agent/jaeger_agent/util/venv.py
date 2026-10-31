@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import re
 import subprocess
-import sys
 import venv as _stdlib_venv
 from pathlib import Path
 from typing import Any

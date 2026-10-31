@@ -219,7 +219,7 @@ def commissioning_authority_policy(proposal: ProposedAction) -> AuthorityDecisio
     return AuthorityDecision(status=AuthorizationStatus.APPROVED, policy_name="commissioning_authority")
 
 
-from ..authority import AuthorityDecisionType, PolicyKernel
+from ..authority import PolicyKernel
 
 
 class AuthorityLayer:

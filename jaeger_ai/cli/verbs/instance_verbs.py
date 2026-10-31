@@ -272,7 +272,7 @@ def _cmd_agent_argv(argv: list[str]) -> int:
 
 def _instance_list(argv: list[str]) -> int:
     from jaeger_ai.core.instance.instance import (
-        active_instance_path, default_instance_name, read_active_instance,
+        default_instance_name, read_active_instance,
         user_instances_root,
     )
     from jaeger_ai.core.instance.schemas import Identity, load_yaml

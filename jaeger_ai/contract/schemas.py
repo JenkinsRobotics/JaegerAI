@@ -12,7 +12,7 @@ from enum import Enum
 import time
 from typing import Any, Literal
 import uuid
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 
 SCHEMA_VERSION: int = 1

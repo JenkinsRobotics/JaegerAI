@@ -20,9 +20,8 @@ from enum import Enum
 import json
 import logging
 from pathlib import Path
-import sqlite3
 import time
-from typing import Any, Mapping, Sequence
+from typing import Any, Sequence
 
 from .events import EventType, JaegerEvent
 from .event_store import SqliteEventStore

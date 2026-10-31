@@ -33,9 +33,8 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
-from typing import Any
 
-from jaeger_agent.skills.macos_computer_v1.engines import Action, Engine, EngineResult
+from jaeger_agent.skills.macos_computer_v1.engines import Action, EngineResult
 
 
 _NAME = "applescript"

@@ -5,7 +5,6 @@ Unsettled writes are never replayed automatically after a lost response/crash.
 """
 from __future__ import annotations
 
-import json
 from aiohttp import web
 
 

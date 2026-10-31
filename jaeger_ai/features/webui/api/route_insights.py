@@ -5,17 +5,15 @@ Extracted from routes.py to isolate analytics, wiki stats, and project status lo
 from __future__ import annotations
 
 import collections
-import html as _html
 import json
 import logging
 import os
-import re
 import threading
 import time
 from pathlib import Path
 from urllib.parse import parse_qs
 
-from api.helpers import bad, j
+from api.helpers import j
 from api.models import SESSION_DIR
 
 logger = logging.getLogger(__name__)
@@ -553,7 +551,6 @@ def _handle_llm_wiki_status(handler, parsed) -> bool:
 
 def _handle_insights(handler, parsed) -> bool:
     """Return usage analytics from local WebUI session data."""
-    import collections
     import time as _time
 
     from api.usage import prompt_cache_hit_percent

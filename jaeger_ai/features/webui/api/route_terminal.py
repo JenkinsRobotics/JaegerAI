@@ -6,7 +6,6 @@ Handles starting PTY sessions, writing input, resizing, closing, and streaming S
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import queue
 from typing import Any
 from urllib.parse import parse_qs

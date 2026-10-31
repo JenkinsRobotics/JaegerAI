@@ -8,7 +8,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
-from pathlib import Path
 import secrets
 import threading
 import time
@@ -16,7 +15,7 @@ from typing import Any, Literal
 import uuid
 
 from jaeger_ai.contract.schemas import Device
-from .models import DeviceCapability, DevicePairingSecret, DeviceTelemetry, DeviceType
+from .models import DeviceType
 
 logger = logging.getLogger("jaeger.core.devices.registry")
 

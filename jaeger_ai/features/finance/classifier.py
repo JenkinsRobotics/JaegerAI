@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime
 from typing import Any
 
-from .models import ReviewStatus, Rule, Transaction
+from .models import ReviewStatus, Transaction
 from .store import FinanceStore
 
 logger = logging.getLogger("jaeger_ai.features.finance.classifier")

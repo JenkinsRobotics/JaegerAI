@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 """SOUL.md and AGENTS.md — this instance's two context documents.
 
 Two documents, two jobs, and keeping them apart is the point:

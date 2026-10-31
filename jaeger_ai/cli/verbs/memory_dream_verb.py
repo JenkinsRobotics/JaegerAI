@@ -8,7 +8,6 @@ Commands:
 
 from __future__ import annotations
 
-from typing import Any
 import argparse
 import asyncio
 import json
@@ -19,7 +18,6 @@ from jaeger_ai.core.memory.dreaming import DreamingEngine, get_dreaming_status
 
 def cmd_memory_dream(args: argparse.Namespace) -> int:
     """Run a memory dreaming cycle."""
-    from pathlib import Path
     
     # Get memory subsystem
     try:
@@ -73,7 +71,6 @@ def cmd_memory_dream(args: argparse.Namespace) -> int:
 
 def cmd_memory_dream_status(args: argparse.Namespace) -> int:
     """Show dreaming system status."""
-    from pathlib import Path
     
     status = get_dreaming_status()
     

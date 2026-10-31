@@ -39,7 +39,6 @@ import asyncio
 import json
 import struct
 import threading
-from typing import Any
 
 import websockets
 from websockets.asyncio.server import ServerConnection, serve

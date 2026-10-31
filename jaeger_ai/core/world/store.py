@@ -17,9 +17,7 @@ from typing import Any
 import uuid
 
 from .model import (
-    BeliefStatus,
     EpistemicProvenance,
-    WorldBelief,
     WorldClaim,
     WorldEntity,
     WorldEvidence,

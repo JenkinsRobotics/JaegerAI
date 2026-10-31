@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 import threading
 import time
-from typing import Any, Callable
+from typing import Any
 
 from jaeger_ai.core.entity.identity import EntityIdentity
 from jaeger_ai.core.entity.runtime import EntityRuntime, EntityRuntimeMode

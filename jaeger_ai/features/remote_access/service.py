@@ -12,7 +12,6 @@ import os
 import re
 import secrets
 import shutil
-import socket
 import ssl
 import subprocess
 import time

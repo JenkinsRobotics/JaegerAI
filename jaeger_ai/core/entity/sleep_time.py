@@ -19,7 +19,7 @@ from enum import Enum
 import logging
 from pathlib import Path
 import time
-from typing import Any, Sequence
+from typing import Sequence
 
 from .consolidation import MemoryConsolidator
 from .events import EventType, JaegerEvent

@@ -9,9 +9,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 import time
 from typing import Any
-import uuid
 
-from jaeger_ai.contract.schemas import Device
 
 
 class DeviceCapability(str, Enum):
