@@ -73,6 +73,36 @@ MD = """# Jaeger Backlog
 """
 
 
+REAL = """# Jaeger Master Backlog
+
+## How to append
+- Add new rows at the **bottom** of the table; never renumber.
+- Priority: `P0` release blocker / `P1` / `P2`.
+
+| id | task | source bot | status | suggested worker | priority |
+|---|---|---|---|---|---|
+| J-004 | First-run onboarding flow (UI + text) - copy by Muse | Supervisor | in progress | ares (code) + muse (copy) | P0 |
+| J-005 | Mac app packaging + signing | Mac App | needs Matthew's OK | Jaeger Mac App | P0 |
+| J-007 | Copyrighted art review (Matthew: leave in place) | Design | open | Supervisor | P1 |
+"""
+
+
+def test_importer_real_master_backlog_shape(tmp_path):
+    items = importer.parse(REAL)
+    assert [i["ref"] for i in items] == ["J-004", "J-005", "J-007"]  # "How to append" bullets skipped
+    a, b, c = items
+    assert (a["worker"], a["status"], a["priority"]) == ("ares", "in_progress", "P0")
+    assert (b["worker"], b["status"]) == ("mac-app", "needs_ok")
+    assert c["worker"] == "grokbot" and c["title"] == "Copyrighted art review (Matthew: leave in place)"
+    f = tmp_path / "Jaeger-Backlog.md"
+    f.write_text(REAL)
+    s = BacklogStore(tmp_path / "b.sqlite3")
+    assert importer.import_file(s, f)["added"] == 3
+    f.write_text(REAL.replace("Mac app packaging + signing", "Mac app packaging and signing (renamed)"))
+    assert importer.import_file(s, f)["added"] == 0  # stable J-### ids dedupe
+    assert s.list(q="packaging")[0]["source"] == "Jaeger-Backlog.md: J-005 · Mac App"
+
+
 def test_importer_parses_bullets_tables_and_is_insert_only(tmp_path):
     items = importer.parse(MD)
     by = {i["title"]: i for i in items}
