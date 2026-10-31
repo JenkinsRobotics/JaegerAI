@@ -422,89 +422,7 @@
    Placeholder Page
    ───────────────────────────────────────────────────────────── */
 
-.placeholder-page {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  padding: 40px;
-  text-align: center;
-}
-
-.placeholder-page__icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 120px;
-  height: 120px;
-  margin-bottom: 24px;
-  border-radius: 24px;
-  background: var(--jg-color-hover);
-  color: var(--jg-color-accent-text);
-}
-
-.placeholder-page__title {
-  font-size: 28px;
-  font-weight: 600;
-  color: var(--jg-color-text);
-  margin-bottom: 8px;
-}
-
-.placeholder-page__description {
-  font-size: 17px;
-  color: var(--jg-color-text-secondary);
-  max-width: 400px;
-  margin-bottom: 8px;
-}
-
-.placeholder-page__hint {
-  font-size: 13px;
-  color: var(--jg-color-text-tertiary);
-  margin-top: 24px;
-}
-
 /* Placeholder page features list */
-.placeholder-page__features {
-  list-style: none;
-  padding: 0;
-  margin: 24px 0;
-  text-align: left;
-  max-width: 400px;
-}
-
-.placeholder-page__features li {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 0;
-  font-size: 15px;
-  color: var(--jg-color-text-secondary);
-  border-bottom: 1px solid var(--jg-color-border);
-}
-
-.placeholder-page__features li:last-child {
-  border-bottom: none;
-}
-
-.placeholder-page__features li::before {
-  content: '✓';
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  background: color-mix(in srgb, var(--jg-avatar-green) 15%, transparent);
-  color: var(--jg-avatar-green);
-  border-radius: 50%;
-  font-size: 14px;
-  font-weight: 600;
-  flex-shrink: 0;
-}
-
-.placeholder-page .btn {
-  margin-top: 8px;
-}
 
 /* ─────────────────────────────────────────────────────────────
    Demo Page Animations
@@ -532,28 +450,6 @@
   }
 }
 
-.home-page .hero__content > * {
-  animation: fadeInUp 0.6s ease-out backwards;
-}
-
-.home-page .hero__badge { animation-delay: 0.1s; }
-.home-page .hero__title { animation-delay: 0.2s; }
-.home-page .hero__subtitle { animation-delay: 0.3s; }
-.home-page .hero__actions { animation-delay: 0.4s; }
-.home-page .hero__stats { animation-delay: 0.5s; }
-
-.home-page .feature-card,
-.home-page .use-case-card {
-  animation: scaleIn 0.4s ease-out backwards;
-}
-
-.home-page .feature-card:nth-child(1) { animation-delay: 0.1s; }
-.home-page .feature-card:nth-child(2) { animation-delay: 0.2s; }
-.home-page .feature-card:nth-child(3) { animation-delay: 0.3s; }
-.home-page .feature-card:nth-child(4) { animation-delay: 0.4s; }
-.home-page .feature-card:nth-child(5) { animation-delay: 0.5s; }
-.home-page .feature-card:nth-child(6) { animation-delay: 0.6s; }
-
 
 /* ─────────────────────────────────────────────────────────────
    Nav page — the "Navigate" tab: agents / chats / work lists.
@@ -568,101 +464,6 @@
   overflow: hidden;
   background: var(--jg-color-chrome);
   color: var(--jg-color-text);
-}
-
-.navp__scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 10px 14px 24px;
-}
-
-.navp__section { margin-bottom: 14px; }
-
-.navp__section-title {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  padding: 4px 6px;
-  border: none;
-  background: transparent;
-  color: var(--jg-color-text-secondary);
-  font-size: var(--jg-font-tiny);
-  font-weight: var(--jg-font-weight-medium);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  cursor: pointer;
-  border-radius: 6px;
-}
-.navp__section-title:hover { background: var(--jg-color-hover); }
-
-.navp__section-body { padding: 3px 0 4px; }
-
-.navp__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
-
-.navp__row {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  width: 100%;
-  padding: 7px 9px;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--jg-color-text);
-  font-size: var(--jg-font-small);
-  font-weight: var(--jg-font-weight-base);
-  text-align: left;
-  cursor: pointer;
-  min-width: 0;
-}
-.navp__row:hover { background: var(--jg-color-hover); }
-.navp__row svg { flex: none; color: var(--jg-color-text-secondary); }
-
-.navp__label {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.navp__meta {
-  flex: none;
-  font-size: var(--jg-font-tiny);
-  color: var(--jg-color-text-secondary);
-}
-
-.navp__dot {
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--jg-color-accent);
-}
-
-.navp__new {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  margin: 2px 0 5px;
-  padding: 7px 9px;
-  border: 1px dashed var(--jg-color-border);
-  border-radius: 8px;
-  background: transparent;
-  color: var(--jg-color-text-secondary);
-  font-size: var(--jg-font-small);
-  cursor: pointer;
-}
-.navp__new:hover { background: var(--jg-color-hover); color: var(--jg-color-text); }
-
-.navp__note {
-  margin: 2px 0 6px;
-  padding: 0 9px;
-  font-size: var(--jg-font-tiny);
-  color: var(--jg-color-text-secondary);
 }
 
 /* A tab that is listed but not currently open in the window manager. */
@@ -680,17 +481,6 @@
    The sidebar pattern now lives in the Navigate tab (NavPage). The
    .shell* rules below are retained for reference and not mounted. ── */
 /* Settings-hub panels: real windows without dock tabs. */
-.panel-page {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-}
-.panel-page__note {
-  margin: 24px;
-  font-size: var(--jg-font-small);
-  color: var(--jg-color-text-secondary);
-}
 
 /* ─────────────────────────────────────────────────────────────
    Responsive
@@ -715,48 +505,7 @@
    ChatPage — real chat on the proven stack (chat/*). Left rail =
    this conversation's history; no agent persona lists (Agents tab).
    ───────────────────────────────────────────────────────────── */
-.cpage { display: flex; flex-direction: row; height: 100%; min-height: 0; overflow: hidden; }
-.cpage-rail {
-  flex: none; width: 248px; display: flex; flex-direction: column;
-  background: var(--jg-color-sidebar); border-right: 1px solid var(--jg-color-border);
-}
-.cpage-rail__header { flex: none; height: var(--jg-band-height); display: flex; align-items: center; padding-left: 10px; }
-.cpage-rail__actions { flex: none; display: flex; align-items: center; gap: 6px; padding: 6px 10px 8px; }
-.cpage-rail__icon {
-  flex: none; display: inline-flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border: none; border-radius: 8px;
-  background: transparent; color: var(--jg-color-text-secondary); cursor: pointer;
-}
-.cpage-rail__icon:hover:not(:disabled) { background: var(--jg-color-hover); color: var(--jg-color-text); }
-.cpage-rail__icon:disabled { opacity: 0.5; cursor: default; }
-.cpage-rail__icon--end { margin-left: auto; }
-.cpage-rail__search { flex: none; padding: 0 10px 8px; position: relative; }
-.cpage-rail__search input {
-  width: 100%; padding: 7px 26px 7px 10px; font: inherit; font-size: var(--jg-font-small);
-  color: var(--jg-color-text); background: var(--jg-color-elevated);
-  border: 1px solid var(--jg-color-border); border-radius: 8px; box-sizing: border-box;
-}
-.cpage-rail__search input:focus { outline: 2px solid var(--jg-color-accent); outline-offset: -1px; }
-.cpage-rail__clear {
-  position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; border: none; border-radius: 50%;
-  background: var(--jg-color-hover); color: var(--jg-color-text-secondary); cursor: pointer;
-}
-.cpage-rail__scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 8px 10px; }
 /* The rail has no 54px avatar gutter (that indent belongs to the agent tree). */
-.cpage-rail__scroll .jg-chat-list { padding-left: 0; }
-.cpage-rail__note { margin: 4px 8px 8px; font-size: var(--jg-font-tiny); color: var(--jg-color-text-secondary); }
-.cpage-rail__footer { flex: none; border-top: 1px solid var(--jg-color-border); padding: 6px 10px; }
-.cpage-rail__foot-btn {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 7px 9px; border: none; border-radius: 8px; background: transparent;
-  color: var(--jg-color-text-secondary); font-size: var(--jg-font-small); cursor: pointer;
-}
-.cpage-rail__foot-btn:hover { background: var(--jg-color-hover); color: var(--jg-color-text); }
-.cpage-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
-.cpage-main__note { margin: auto; font-size: var(--jg-font-small); color: var(--jg-color-text-secondary); }
-.cpage-main .jg-chat-mount { flex: 1; min-height: 0; }
 
 /* Settings hub: Danger zone — reset to default */
 .navp-reset { display: flex; flex-direction: column; gap: 10px; }

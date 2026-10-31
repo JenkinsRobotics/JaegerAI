@@ -27,7 +27,7 @@
 :where(.app-window) :where(button, a, input, select, textarea, [tabindex]):focus-visible { outline: none; box-shadow: var(--jg-focus); border-radius: var(--jg-radius-s); }
 
 /* Materials: dock, phone tabs, popovers, sheets and the inspector get vibrancy. */
-.window-dock__items, .phone-tabs, .jg-ui-popover, .jg-ui-sheet__panel, .jg-ui-toast {
+.window-dock__items, .phone-tabs, .jg-ui-sheet__panel, .jg-ui-toast {
   background: var(--jg-material) !important; -webkit-backdrop-filter: var(--jg-material-blur); backdrop-filter: var(--jg-material-blur);
 }
 
