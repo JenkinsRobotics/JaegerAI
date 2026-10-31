@@ -850,10 +850,25 @@ def _yt_route(handler, p: str, method: str, body: dict, j, parsed_query: str = "
         raise ApiError(502, str(exc)) from exc
 
 
+def _avatar():
+    try:
+        from api import avatar_api as av  # type: ignore
+    except ImportError:  # loaded standalone (tests)
+        import importlib.util, sys
+        av = sys.modules.get("_avatar_api")
+        if av is None:
+            spec = importlib.util.spec_from_file_location("_avatar_api", Path(__file__).with_name("avatar_api.py"))
+            av = importlib.util.module_from_spec(spec); sys.modules["_avatar_api"] = av; spec.loader.exec_module(av)
+    return av
+
+
 # ── Router ───────────────────────────────────────────────────────────
 
 def route(handler, parsed, method: str, read_body, j) -> bool:
     p = parsed.path
+    av = _avatar()
+    if av.handles(p):
+        return av.route(handler, parsed, method, read_body, j)
     if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p.startswith("/v1/providers/cli") or p == "/v1/pipeline" or p.startswith("/v1/pipeline/") or p == "/v1/resources" or p == "/v1/jobs/runner" or p == "/v1/research/youtube" or p.startswith("/v1/research/youtube/") or p == "/v1/documents" or p.startswith("/v1/documents/")):
         return False
     try:
