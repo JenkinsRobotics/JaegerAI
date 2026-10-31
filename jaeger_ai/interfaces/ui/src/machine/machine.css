@@ -1,0 +1,15 @@
+.jg-mc-card { display: grid; gap: var(--jg-space-3); padding: var(--jg-space-4); border-radius: var(--jg-radius-l); border: 1px solid var(--jg-color-border-tertiary); background: var(--jg-color-elevated); min-width: 0; }
+.jg-mc-card h3 { margin: 0; font-size: var(--jg-text-body); }
+.jg-mc-card__head { display: flex; justify-content: space-between; align-items: center; gap: var(--jg-space-2); flex-wrap: wrap; }
+.jg-mc-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--jg-space-2); }
+.jg-mc-metric { display: grid; gap: 2px; padding: var(--jg-space-2) var(--jg-space-3); border-radius: var(--jg-radius-m); background: var(--jg-color-hover); min-width: 0; }
+.jg-mc-metric span { font-size: var(--jg-text-caption); color: var(--jg-color-text-secondary); }
+.jg-mc-metric strong { font-size: var(--jg-text-body); font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-mc-why { margin: 0; padding-left: 1.2em; font-size: var(--jg-text-footnote); color: var(--jg-color-text-secondary); }
+.jg-mc-logbox { max-height: 60vh; overflow: auto; font-family: var(--jg-font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: var(--jg-text-footnote); line-height: 1.45; background: var(--jg-color-pane); border-radius: var(--jg-radius-m); padding: var(--jg-space-2) var(--jg-space-3); }
+.jg-mc-logline { white-space: pre-wrap; word-break: break-word; color: var(--jg-color-text); }
+.jg-mc-logline[data-level="error"] { color: var(--jg-bad); }
+.jg-mc-logline[data-level="warn"] { color: var(--jg-warn, var(--jg-color-text)); }
+.jg-mc-logline[data-level="debug"] { color: var(--jg-color-text-tertiary); }
+.jg-mc-note { margin: 0; font-size: var(--jg-text-caption); color: var(--jg-color-text-tertiary); }
+@media (max-width: 839px) { .jg-mc-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
