@@ -22,7 +22,7 @@ export interface OrchestrationState {
 const POLL_MS = 15000;
 const REFRESH_ON = new Set(["agent.handoff", "agent.handoff.finished", "task.created", "task.updated", "agent.created", "agent.updated"]);
 
-export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffMs?: number } = {}): OrchestrationState & { live: ReturnType<typeof agentsLive> } {
+export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffMs?: number; callerId?: string } = {}): OrchestrationState & { live: ReturnType<typeof agentsLive> } {
   const [snapshot, setSnapshot] = useState<OrchestrationSnapshot>();
   const [rows, setRows] = useState<ActivityRow[]>([]);
   const [status, setStatus] = useState<OrchestrationState["status"]>("loading");
@@ -48,17 +48,18 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
     let history: ActivityRow[] = [];
     if (adapter.gaps.activity) {
       try {
-        const page = await adapter.gaps.activity({ names });
+        const page = await adapter.gaps.activity({ names, agentId: opts.callerId });
         history = page.rows; if (initial) setNextBefore(page.nextBefore); // refreshes keep the paging cursor
         setHistoryError(undefined);
       } catch (e) { setHistoryError(e instanceof Error ? e.message : String(e)); }
     }
     setRows((cur) => mergeRows(cur, [...backfill(snap, names), ...history], 2000));
-  }, [adapter]);
+  }, [adapter, opts.callerId]);
 
   useEffect(() => {
     let alive = true;
     const ctl = new AbortController();
+    setRows([]); // a new caller filter starts a fresh feed
     setStatus("loading");
     load(true).then(() => alive && setStatus("ready"), (e: unknown) => {
       if (!alive) return;
@@ -107,10 +108,10 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
 
   const loadOlder = useCallback(async () => {
     if (!adapter.gaps.activity || nextBefore == null) return;
-    const page = await adapter.gaps.activity({ before: nextBefore, names: namesFrom(snapRef.current?.agents ?? []) });
+    const page = await adapter.gaps.activity({ before: nextBefore, agentId: opts.callerId, names: namesFrom(snapRef.current?.agents ?? []) });
     setNextBefore(page.nextBefore);
     setRows((cur) => mergeRows(cur, page.rows, 2000));
-  }, [adapter, nextBefore]);
+  }, [adapter, nextBefore, opts.callerId]);
 
   const live = useMemo(() => (snapshot ? agentsLive(snapshot, adapter.gaps, overrides) : []), [snapshot, adapter.gaps, overrides]);
   return { status, error, snapshot, rows, stream, live, historyError, retry: () => setNonce((n) => n + 1), loadOlder: nextBefore != null ? loadOlder : undefined };

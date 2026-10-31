@@ -18,7 +18,7 @@ export interface GapProvider {
   kind: "derived" | "mock" | "gateway";
   /** G1: server-side history, newest first; `before` = previous page's
    * `next_before`. Undefined → backfill from the snapshot only. */
-  activity?(q: { before?: number; names: (id: string) => string }): Promise<{ rows: ActivityRow[]; nextBefore?: number }>;
+  activity?(q: { before?: number; agentId?: string; names: (id: string) => string }): Promise<{ rows: ActivityRow[]; nextBefore?: number }>;
   /** G4: agent-level runner. */
   runner(agent: Agent, tasks: Task[]): string | undefined;
 }
@@ -55,10 +55,11 @@ const NO_ACTIVITY = new Set<string>();
 export const resetActivityProbe = () => NO_ACTIVITY.clear();
 
 export function gatewayActivity(base = "", fetchImpl: typeof fetch = (...a) => fetch(...a)): NonNullable<GapProvider["activity"]> {
-  return async ({ before, names }) => {
+  return async ({ before, agentId, names }) => {
     if (NO_ACTIVITY.has(base)) return { rows: [] };
     const qs = new URLSearchParams({ limit: "50" });
     if (before != null) qs.set("before", String(before));
+    if (agentId) qs.set("agent_id", agentId); // matches agent_id or actor_id (caller)
     const res = await fetchImpl(`${base}/v1/activity?${qs}`, { headers: { Accept: "application/json" }, credentials: "same-origin" });
     // Older gateways: no G1 route → history comes from the snapshot backfill only.
     if (res.status === 404 || res.status === 405 || res.status === 501) { NO_ACTIVITY.add(base); return { rows: [] }; }

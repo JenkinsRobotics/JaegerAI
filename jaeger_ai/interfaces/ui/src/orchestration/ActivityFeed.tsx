@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { AgentAvatar } from "../agents/AgentAvatar";
-import { Empty, Segmented } from "../unified/ui";
+import { Badge, Empty, Segmented } from "../unified/ui";
 import { CheckBadge } from "./CheckBadge";
 import { relativeTime } from "./feed";
 import { OutputLinkView, type Navigate } from "./OutputLinkView";
@@ -10,21 +10,28 @@ import type { StreamState } from "./useOrchestration";
 type Filter = "all" | "needs" | "handoffs";
 const STREAM_TEXT: Record<StreamState, string> = { connecting: "Connecting…", live: "Live", reconnecting: "Reconnecting…", polling: "Updating every 15s" };
 
-export function ActivityFeed({ rows, names, stream, agentFilter, selectedHandoff, onOpenHandoff, onNavigate, now, onLoadOlder, historyError }: {
+export function ActivityFeed({ rows, names, stream, agentFilter, selectedHandoff, onOpenHandoff, onNavigate, now, onLoadOlder, historyError, caller, onCaller }: {
   rows: ActivityRow[]; names: (id: string) => string; stream: StreamState; agentFilter?: string;
-  selectedHandoff?: string; onOpenHandoff: (id: string) => void; onNavigate: Navigate; now?: number; onLoadOlder?: () => Promise<void>; historyError?: string;
+  selectedHandoff?: string; onOpenHandoff: (id: string) => void; onNavigate: Navigate; now?: number; onLoadOlder?: () => Promise<void>; historyError?: string; caller?: string; onCaller?: (id: string | undefined) => void;
 }) {
   const [older, setOlder] = useState<"idle" | "loading" | "error">("idle");
   const [filter, setFilter] = useState<Filter>("all");
   const shown = useMemo(() => rows.filter((r) =>
-    (!agentFilter || r.agentId === agentFilter) &&
-    (filter === "all" || (filter === "needs" ? r.needsYou : r.kind.startsWith("handoff")))), [rows, filter, agentFilter]);
+    (!agentFilter || r.agentId === agentFilter) && (!caller || r.callerId === caller || r.agentId === caller) &&
+    (filter === "all" || (filter === "needs" ? r.needsYou : r.kind.startsWith("handoff")))), [rows, filter, agentFilter, caller]);
+  const callers = useMemo(() => [...new Set([...rows.flatMap((r) => (r.callerId ? [r.callerId] : [])), ...(caller ? [caller] : [])])].sort(), [rows, caller]);
   const go: Navigate = (href) => (href.startsWith("handoff:") ? onOpenHandoff(href.slice(8)) : onNavigate(href));
   return (
     <section className="jg-orch-feed" aria-label="Activity">
       <header className="jg-orch-feed-head">
         <h2>Activity{agentFilter ? ` · ${names(agentFilter)}` : ""}</h2>
         <span className="jg-orch-stream" data-state={stream} role="status">{STREAM_TEXT[stream]}</span>
+        {onCaller && callers.length > 0 && (
+          <select className="jg-orch-caller" aria-label="From app" value={caller ?? ""} onChange={(e) => onCaller(e.target.value || undefined)}>
+            <option value="">All sources</option>
+            {callers.map((c) => <option key={c} value={c}>{names(c)}</option>)}
+          </select>
+        )}
         <Segmented label="Filter activity" value={filter} onChange={setFilter} options={[{ value: "all", label: "All" }, { value: "needs", label: "Needs you" }, { value: "handoffs", label: "Handoffs" }]} />
       </header>
       {historyError && <p className="jg-orch-history-error" role="status">Older activity couldn't load ({historyError}). Showing current handoffs and tasks.</p>}
@@ -38,6 +45,7 @@ export function ActivityFeed({ rows, names, stream, agentFilter, selectedHandoff
                 <div className="jg-orch-row-meta">
                   <time>{relativeTime(r.at, now)}</time>
                   {r.check && <CheckBadge check={r.check} />}
+                  {r.statusPill && <Badge tone={r.statusPill.tone}>{r.statusPill.text}</Badge>}
                   {r.output && <OutputLinkView link={r.output} onNavigate={go} />}
                 </div>
               </div>
