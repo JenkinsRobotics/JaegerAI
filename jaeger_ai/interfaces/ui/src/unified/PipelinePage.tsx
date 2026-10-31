@@ -19,7 +19,10 @@ export function usePipeline(source: JaegerSource) {
   const load = useCallback(async () => {
     try {
       const [t, p] = await Promise.all([source.tasks(), pipelineApi.list()]);
-      setTasks(t); setItems(p.items); setErr(undefined);
+      // Pipeline tasks owned by WebUI jobs (e.g. YouTube research, id "yt:<playlist>") have no gateway task: list them too.
+      const known = new Set(t.map((x) => x.task_id));
+      const jobs = Object.values(p.items).filter((r) => !known.has(r.task_id)).map((r) => ({ task_id: r.task_id, goal: r.attachments.find((a) => a.kind === "source")?.label || r.task_id, state: "webui job" } as Task));
+      setTasks([...t, ...jobs]); setItems(p.items); setErr(undefined);
     } catch (e) { setErr((e as Error).message); }
   }, [source]);
   useEffect(() => { void load(); }, [load]);
