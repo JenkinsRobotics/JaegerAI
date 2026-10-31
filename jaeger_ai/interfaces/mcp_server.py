@@ -142,7 +142,7 @@ def _mcp_session(session_id: str = "", caller: str = "mcp") -> str:
 #: is jaegerd's own native-lead/specialist client. Values stay in the Keychain.
 from jaeger_ai.core.gateway.caller_auth import APP_CALLERS as _APP_CALLERS
 
-MCP_INBOUND_CALLERS = ("mcp", "ares", "grokbot", "jaegerd", *_APP_CALLERS)
+MCP_INBOUND_CALLERS = ("mcp", "ares", "grokbot", "rackpc", "jaegerd", *_APP_CALLERS)
 
 
 def resolve_inbound_tokens() -> dict[str, str]:
@@ -198,7 +198,7 @@ def _stdio_agent_caller() -> tuple[str, str]:
     if not token:
         raise PermissionError("Existing caller authorization required")
     spec = CallerAuthenticator().authenticate(bearer(token).get("Authorization"))
-    if spec is None or spec.name not in {"mcp", "ares", "grokbot", *_APP_CALLERS}:
+    if spec is None or spec.name not in {"mcp", "ares", "grokbot", "rackpc", *_APP_CALLERS}:
         raise PermissionError("Invalid agent bridge caller authorization")
     return spec.name, token
 

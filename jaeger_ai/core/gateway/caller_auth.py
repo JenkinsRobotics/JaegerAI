@@ -93,6 +93,8 @@ CALLERS: Mapping[str, CallerSpec] = {
                    description="ARES agent bridge client; dedicated credential required"),
         CallerSpec("grokbot", "mcp:grokbot", frozenset({"read", "turn"}), session_prefix="grokbot:",
                    description="GrokBot local bridge client; dedicated credential required"),
+        CallerSpec("rackpc", "mcp:rackpc", frozenset({"read", "turn"}), session_prefix="rackpc:",
+                   description="Rack PC Ollama worker (claims hub tasks, posts results only)"),
         CallerSpec("a2a", "a2a", frozenset({"read", "turn", "stop"}), session_prefix="a2a:",
                    description="Jaeger A2A server"),
         *(CallerSpec(name, f"mcp:{name}", APP_CALLER_SCOPES, session_prefix=f"{name}:",
@@ -204,10 +206,23 @@ CALLER_READ_ROUTES: Mapping[str, frozenset[str]] = {
 }
 
 
+#: Callers confined to an exact route allow-list (both reads and writes).
+#: rackpc is a job worker: it reads its inbox/threads and posts results, nothing else.
+CALLER_ONLY_ROUTES: Mapping[str, frozenset[tuple[str, str]]] = {
+    "rackpc": frozenset({
+        ("GET", "/v1/agent-messages"), ("GET", "/v1/agent-threads/{thread}"),
+        ("POST", "/v1/agent-messages"),
+    }),
+}
+
+
 def prefixed_route_allowed(method: str, route: str | None, caller: str | None = None) -> bool:
     """Routes an outside caller may use at all (session id checked separately)."""
     method = (method or "").upper()
     route = route or ""
+    only = CALLER_ONLY_ROUTES.get(caller or "")
+    if only is not None:
+        return ("GET" if method == "HEAD" else method, route) in only
     if method in {"GET", "HEAD"}:
         return route in PREFIXED_READ_ROUTES or route in CALLER_READ_ROUTES.get(caller or "", ())
     return (method, route) in TURN_ROUTES or (method, route) in STOP_ROUTES
