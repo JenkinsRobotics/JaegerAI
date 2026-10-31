@@ -52,7 +52,11 @@ def test_v13_upgrade_preserves_messages_without_backfill_and_atomic_limit(
     assert len(records(upgraded)) == 1
     assert records(upgraded)[0]["status"] == "pending"
     assert not records(upgraded)[0]["attempts"]
-    with pytest.raises(BridgeError) as failure:
+    # Long bodies are truncated to fit; force the oversize-envelope path to test rollback.
+    from jaeger_ai.features.agent_bridge import outbox as outbox_mod
+
+    with pytest.MonkeyPatch.context() as mp, pytest.raises(BridgeError) as failure:
+        mp.setattr(outbox_mod, "MAX_BODY_BYTES", 64)
         service.send(
             "ares", msg(id="too-big", thread="rollback-thread", body="é" * 8192)
         )

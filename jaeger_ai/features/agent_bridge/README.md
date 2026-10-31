@@ -200,3 +200,11 @@ retry started. Model completion is labeled `completed_unverified`; canonical
 owner verification remains available on goal status. Denials/blocked operations
 remain in the normal tool result, without claiming successful effects. No
 response-to-response dispatch, automatic approval or new peer credentials.
+
+## grokbot wake (live delivery)
+
+Wake payloads carry `task_id` (the task id, or `reply_to` for a result) and a body
+truncated to 4 KiB (`truncated: true`). The worker sends at most 20 POSTs per rolling
+minute (excess waits) and marks never-attempted rows older than 2 hours `expired`
+so enabling delivery does not replay a stale backlog. Dedupe stays on
+`(sender, message_id)` plus the `Idempotency-Key` header.
