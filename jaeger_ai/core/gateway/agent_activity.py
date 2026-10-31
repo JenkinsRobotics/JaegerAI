@@ -16,6 +16,12 @@ from typing import Any
 KINDS = ("agent.handoff", "agent.handoff.finished", "agent.handoff.checked", "agent.status.changed",
          "agent.updated", "task.created", "task.updated", "approval.request", "approval.resolved",
          "project.checked")
+#: Outside-caller (MCP app / A2A) sessions and goals reuse the existing turn lifecycle
+#: events; only rows whose session belongs to a caller are recorded (never Matthew's chats).
+CALLER_KINDS = ("turn.start", "turn.finish", "turn.failed", "turn.cancelled", "turn.unknown")
+_CALLER_STATUS = {"turn.start": "running", "turn.finish": "completed", "turn.failed": "failed",
+                  "turn.cancelled": "cancelled", "turn.unknown": "execution_unknown"}
+ALL_KINDS = KINDS + CALLER_KINDS
 MAX_ROWS = 50_000
 MAX_LIMIT = 200
 _ready: set[int] = set()
@@ -32,12 +38,17 @@ def ensure(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_activity_agent ON agent_activity(agent_id, event_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_activity_actor ON agent_activity(actor_id, event_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_agent_activity_kind ON agent_activity(kind, event_id)")
-    if not exists:
-        marks = ",".join("?" * len(KINDS))
+    conn.execute("CREATE TABLE IF NOT EXISTS agent_activity_meta (key TEXT PRIMARY KEY, value TEXT)")
+    backfill = KINDS if not exists else ()
+    if not conn.execute("SELECT 1 FROM agent_activity_meta WHERE key='caller_backfill_v1'").fetchone():
+        backfill = backfill + CALLER_KINDS
+        conn.execute("INSERT OR IGNORE INTO agent_activity_meta VALUES ('caller_backfill_v1', '1')")
+    if backfill:
+        marks = ",".join("?" * len(backfill))
         for table in ("activity_history", "events"):
             try:
                 rows = conn.execute(f"SELECT event_id, session_id, event, data_json, timestamp FROM {table} "
-                                    f"WHERE event IN ({marks}) ORDER BY event_id", KINDS).fetchall()
+                                    f"WHERE event IN ({marks}) ORDER BY event_id", backfill).fetchall()
             except sqlite3.OperationalError:
                 continue
             for r in rows:
@@ -54,6 +65,41 @@ def _handoff(data: dict) -> dict:
     return h if isinstance(h, dict) else {}
 
 
+def caller_of(session_id: str) -> tuple[str, str] | None:
+    """(caller_id, caller_kind) for an outside caller's session (``codex:…``, ``agent:codex:…``), else None."""
+    from jaeger_ai.core.gateway.caller_auth import CALLERS
+    sid = str(session_id or "")
+    for spec in CALLERS.values():
+        if spec.session_prefix and sid.startswith(spec.session_prefix):
+            return spec.name, ("a2a" if spec.actor == "a2a" else "mcp")
+    if sid.startswith("agent:"):
+        name = sid.split(":", 2)[1] if sid.count(":") >= 2 else ""
+        spec = CALLERS.get(name)
+        if spec is not None and spec.session_prefix:
+            return spec.name, ("a2a" if spec.actor == "a2a" else "mcp")
+    return None
+
+
+def _caller_tag(conn: sqlite3.Connection, session_id: str, kind: str, data: dict) -> dict | None:
+    who = caller_of(session_id)
+    if who is None:
+        return None
+    tag = {"caller_id": who[0], "caller_kind": who[1], "session_id": session_id,
+           "request_id": data.get("request_id"), "status": _CALLER_STATUS[kind]}
+    try:
+        g = conn.execute("SELECT id, thread FROM agent_goals WHERE request_id=?", (data.get("request_id"),)).fetchone()
+    except sqlite3.OperationalError:  # bridge tables not created in this store
+        g = None
+    if g is not None:
+        tag.update(goal_id=g[0], thread=g[1])
+    try:
+        meta = conn.execute("SELECT metadata_json FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+        tag["agent_id"] = (json.loads(meta[0] or "{}") if meta else {}).get("agent_id")
+    except (sqlite3.OperationalError, ValueError):
+        pass
+    return tag
+
+
 def classify(kind: str, data: dict) -> dict[str, Any]:
     """agent/actor ids, entity refs and a dedupe key for one event payload."""
     h = _handoff(data)
@@ -66,6 +112,14 @@ def classify(kind: str, data: dict) -> dict[str, Any]:
             "approval_id": data.get("approval_id"),
             "project_id": data.get("project_id"),
             "session_id": (h.get("result") or {}).get("worker_session_id") or data.get("session_id")}
+    caller = data.get("caller") if isinstance(data.get("caller"), dict) else {}
+    if kind in CALLER_KINDS and caller:
+        refs.update(session_id=caller.get("session_id"), request_id=caller.get("request_id"),
+                    goal_id=caller.get("goal_id"), thread=caller.get("thread"),
+                    caller_id=caller.get("caller_id"), caller_kind=caller.get("caller_kind"))
+        key = f"goal:{caller.get('caller_id')}:{caller.get('goal_id')}" if caller.get("goal_id") else f"request:{caller.get('request_id')}"
+        return {"agent_id": caller.get("agent_id") or data.get("agent_id"), "actor_id": caller.get("caller_id"), "refs": refs,
+                "entity": f"{key}:{caller.get('status')}" if caller.get("request_id") else None}
     agent = actor = None
     if h:
         agent, actor = h.get("to_agent_id"), h.get("from_agent_id")
@@ -96,7 +150,12 @@ def classify(kind: str, data: dict) -> dict[str, Any]:
 
 
 def record(conn: sqlite3.Connection, event_id: int, session_id: str, kind: str, data: dict, ts: float) -> None:
-    if kind not in KINDS:
+    if kind in CALLER_KINDS:
+        tag = _caller_tag(conn, session_id, kind, data)
+        if tag is None:
+            return
+        data = {**data, "caller": tag}
+    elif kind not in KINDS:
         return
     c = classify(kind, data)
     dedupe = f"{kind}|{c['entity']}" if c["entity"] else f"{kind}|#{event_id}"
@@ -113,6 +172,11 @@ def record(conn: sqlite3.Connection, event_id: int, session_id: str, kind: str, 
 
 
 def _summary(kind: str, data: dict) -> str:
+    caller = data.get("caller") if isinstance(data.get("caller"), dict) else None
+    if kind in CALLER_KINDS and caller:
+        what = f"goal {caller.get('goal_id')}" if caller.get("goal_id") else "session turn"
+        text = f": {str(data.get('text') or '')[:120]}" if kind == "turn.start" and data.get("text") else ""
+        return f"{caller.get('caller_id')} ({caller.get('caller_kind')}) {what} {caller.get('status')}{text}"
     h = _handoff(data)
     if h:
         who = h.get("to_agent_id") or "?"
