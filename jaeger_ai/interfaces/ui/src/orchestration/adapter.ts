@@ -55,6 +55,8 @@ export function gatewayActivity(base = "", fetchImpl: typeof fetch = (...a) => f
     const qs = new URLSearchParams({ limit: "50" });
     if (before != null) qs.set("before", String(before));
     const res = await fetchImpl(`${base}/v1/activity?${qs}`, { headers: { Accept: "application/json" }, credentials: "same-origin" });
+    // Older gateways: no G1 route → history comes from the snapshot backfill only.
+    if (res.status === 404 || res.status === 405 || res.status === 501) return { rows: [] };
     if (!res.ok) throw new Error(`activity ${res.status}`);
     return pageRows((await res.json()) as ActivityPage, names);
   };

@@ -15,6 +15,8 @@ export interface OrchestrationState {
   retry(): void;
   /** G1 paging: undefined when there's nothing older. */
   loadOlder?: () => Promise<void>;
+  /** G1 history failed; the feed still shows the snapshot backfill. */
+  historyError?: string;
 }
 
 const POLL_MS = 15000;
@@ -29,6 +31,7 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [nonce, setNonce] = useState(0);
   const [nextBefore, setNextBefore] = useState<number>();
+  const [historyError, setHistoryError] = useState<string>();
   const seen = useRef(new Set<number>());
   const eventHandoffs = useRef(new Map<string, Handoff>());
   const snapRef = useRef<OrchestrationSnapshot | undefined>(undefined);
@@ -44,8 +47,11 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
     const names = namesFrom(snap.agents);
     let history: ActivityRow[] = [];
     if (adapter.gaps.activity) {
-      const page = await adapter.gaps.activity({ names });
-      history = page.rows; if (initial) setNextBefore(page.nextBefore); // refreshes keep the paging cursor
+      try {
+        const page = await adapter.gaps.activity({ names });
+        history = page.rows; if (initial) setNextBefore(page.nextBefore); // refreshes keep the paging cursor
+        setHistoryError(undefined);
+      } catch (e) { setHistoryError(e instanceof Error ? e.message : String(e)); }
     }
     setRows((cur) => mergeRows(cur, [...backfill(snap, names), ...history], 2000));
   }, [adapter]);
@@ -107,7 +113,7 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
   }, [adapter, nextBefore]);
 
   const live = useMemo(() => (snapshot ? agentsLive(snapshot, adapter.gaps, overrides) : []), [snapshot, adapter.gaps, overrides]);
-  return { status, error, snapshot, rows, stream, live, retry: () => setNonce((n) => n + 1), loadOlder: nextBefore != null ? loadOlder : undefined };
+  return { status, error, snapshot, rows, stream, live, historyError, retry: () => setNonce((n) => n + 1), loadOlder: nextBefore != null ? loadOlder : undefined };
 }
 
 /** Handoff events carry the full record ({handoff}). */
