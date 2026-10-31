@@ -127,6 +127,8 @@ def project(row: dict) -> dict:
         "batchable": batchable,
         "requires_step_up": typ in ("spend", "send") or risk == "critical"
                             or (typ == "permission" and payload.get("duration") == "always"),
+        "approve_on_mac": typ in ("spend", "send") or risk == "critical"
+                          or (typ == "permission" and payload.get("duration") == "always"),
         "payload": payload,
         "revision": int(meta.get("revision") or 1),
         "reason": meta.get("decision_reason"),
@@ -234,6 +236,10 @@ def decide(gateway, approval_id: str, body: dict, *, actor: str = "owner", batch
     if batch and decision == "approve" and not item["batchable"]:
         raise DecisionError(422, "not_batchable",
                             f"Not batchable: {item['risk']} risk" + ("" if item["risk"] != "medium" else " without a batch group"), item)
+    if decision == "approve" and item["requires_step_up"]:
+        # No server-side passkey verifier yet (supervisor decision): approve these in the Mac app.
+        raise DecisionError(403, "step_up_required",
+                            "This approval needs step-up; approve it in the Jaeger app on the Mac", item)
     if decision == "approve":
         scope = str(body.get("scope") or "once")
         options = [o for o in row.get("options") or []]
@@ -260,6 +266,15 @@ def decide(gateway, approval_id: str, body: dict, *, actor: str = "owner", batch
     audit(store, approval_id, "changes_requested" if decision == "changes" else "decided", actor=actor, device=device,
           reason=reason or None, data={"decision": choice, "batch": batch})
     if decision == "changes":
+        if row.get("session_id"):
+            try:  # the existing session message path; the agent reads it as owner feedback
+                store.append_message(row["session_id"], "user",
+                                     f"Changes requested on '{item['title']}': {reason}",
+                                     meta={"approval_id": approval_id, "changes_requested": True,
+                                           "task_id": item["task_id"]})
+            except Exception:  # noqa: BLE001 - the decision itself is already durable
+                import logging
+                logging.getLogger(__name__).warning("changes message not posted for %s", approval_id, exc_info=True)
         gateway.event_bus.publish(row.get("session_id") or "*", "approval.changes_requested", {
             "approval_id": approval_id, "session_id": row.get("session_id"), "reason": reason,
             "task_id": item["task_id"], "agent_id": item["agent_id"],
