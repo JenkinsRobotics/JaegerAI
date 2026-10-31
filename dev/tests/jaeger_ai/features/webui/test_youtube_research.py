@@ -318,3 +318,58 @@ def test_audio_refetches_when_temp_wav_gone(yt):
     (d / "audio.json").unlink()
     yt.start(TID)
     assert json.loads((d / "audio.json").read_text())["ffmpeg"]["integrated_lufs"] == -14.2
+
+
+# -- 24/7 job runner (mocked: fake tools, fake clock; the real kill -9 test is run by hand on the Mac) --
+
+def _runner(yt, clock=None):
+    spec = importlib.util.spec_from_file_location("_runner_test", API / "jobs_runner.py")
+    m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+    exits = []
+    r = m.Runner(yt, yt._tmp, clock=clock or (lambda: __import__("time").time()), exit_fn=exits.append)
+    (yt._tmp / "jobs").mkdir(exist_ok=True)
+    (yt._tmp / "jobs/queue.json").write_text(json.dumps([{"task_id": TID, "target": "all", "batch": 1}]))
+    yt.bind(is_runner=True)
+    return r, exits
+
+
+def wait_idle(yt):
+    for t in list(yt._running.values()):
+        t["thread"].join(30)
+
+
+def test_runner_grows_job_in_batches_until_all(yt):
+    yt.ingest({"playlist_url": URL, "start": False, "max_videos": 1})
+    r, _ = _runner(yt)
+    assert r.tick()["active"] == [TID]
+    wait_idle(yt)
+    hb = json.loads((yt._tmp / "jobs/runner.json").read_text())
+    assert hb["owned"] == [TID] and hb["service"] == "com.jenkinsrobotics.jaeger-jobs"
+    yt._update(TID, lambda j: j.update(item_count=2))
+    r.tick(); wait_idle(yt)
+    j = yt.status(TID)
+    assert len(j["videos"]) == 2 and j["progress"]["videos_analysed"] == 2 and j["kb"]["status"] == "done"
+    r.tick()
+    assert not yt._running  # target reached: nothing to do
+
+
+def test_runner_stuck_job_cancelled_with_backoff(yt):
+    yt.ingest({"playlist_url": URL, "start": False})
+    now = [__import__("time").time()]
+    r, exits = _runner(yt, clock=lambda: now[0])
+    import threading
+    ev = threading.Event()
+    yt._running[TID] = {"thread": threading.Thread(target=ev.wait, daemon=True), "stop": ev}
+    yt._running[TID]["thread"].start()
+    now[0] += 3 * 3600
+    out = r.tick()
+    assert out["health"] == "stuck" and r.retries[TID] == 1 and r.next_try[TID] > now[0] and not exits
+
+
+def test_webui_defers_to_runner_and_pause_is_persisted(yt):
+    yt.ingest({"playlist_url": URL, "start": False})
+    (yt._tmp / "jobs").mkdir(exist_ok=True)
+    (yt._tmp / "jobs/runner.json").write_text(json.dumps({"at": __import__("time").time(), "owned": [TID], "active": [TID]}))
+    assert yt.start(TID)["started"] is False and yt.status(TID)["running"] is True
+    yt.pause(TID, True)
+    assert yt._job(TID)["paused"] is True
