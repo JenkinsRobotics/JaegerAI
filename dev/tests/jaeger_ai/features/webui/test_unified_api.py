@@ -108,6 +108,10 @@ def test_compare_history_and_votes(api, tmp_path):
 def test_compare_routes_cli_models_and_history_accepts_them(api, monkeypatch):
     class Fake:
         SPECS = {"codex": {}}
+
+        @staticmethod
+        def known(pid):
+            return pid in ("codex", "vscode")
         @staticmethod
         def stream(pid, model, prompt):
             yield {"type": "start", "model": f"cli:{pid}:{model}"}
