@@ -46,6 +46,7 @@ const YouTubePage = lazy(() => import('../research/YouTubePage').then((m) => ({ 
 const UsagePage = lazy(() => import('../unified/UsagePage').then((m) => ({ default: m.UsagePage })))
 const DocumentsPage = lazy(() => import('../unified/DocumentsPage').then((m) => ({ default: m.DocumentsPage })))
 const KnowledgePage = lazy(() => import('../unified/KnowledgePage').then((m) => ({ default: m.KnowledgePage })))
+const BacklogPage = lazy(() => import('../unified/BacklogPage').then((m) => ({ default: m.BacklogPage })))
 const CalendarPage = lazy(() => import('../unified/CalendarPage').then((m) => ({ default: m.CalendarPage })))
 const PipelinePage = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.PipelinePage })))
 const ProductionPage = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.ProductionPage })))
@@ -89,6 +90,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
     { id: 'new', label: 'New chat', shortcut: '⌘N', run: () => go('/chat') },
     ...PAGES.map((p) => ({ id: `page:${p}`, label: `Go to ${WINDOW_DEFINITIONS[p].title}`, hint: WINDOW_DEFINITIONS[p].description, shortcut: p === 'settings' ? '⌘,' : undefined, run: () => go(pathOf(p)) })),
     ...PAGES.flatMap((p) => (SUBTABS[p] ?? []).slice(1).map((t) => ({ id: `sub:${p}:${t.id}`, label: `Go to ${t.title}`, hint: `${WINDOW_DEFINITIONS[p].title} › ${t.title}`, run: () => go(pathOf(p, t.id)) }))),
+    { id: 'backlog:needs-ok', label: 'Backlog: needs my OK', hint: 'Work › Backlog', run: () => go('/work/backlog?status=needs_ok') },
     { id: 'settings:integrations', label: 'Integrations', hint: 'Settings → Integrations', run: () => go('/settings/integrations') },
     { id: 'settings:agents', label: 'Manage agents', hint: 'Settings → Agents', run: () => go('/settings/agents') },
     { id: 'settings:general', label: 'Appearance and text size', hint: 'Settings → General', run: () => go('/settings/general') },
@@ -125,6 +127,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
             : <TasksWorkspace source={source} agents={store.agents} params={paramsOf('work')} onNavigate={go} />
           case 'production': return <ProductionPage source={source} params={active === 'work' && route.sub === 'production' ? route.params : new URLSearchParams()} onNavigate={go} />
           case 'calendar': return <CalendarPage source={source} onNavigate={go} />
+          case 'backlog': return <BacklogPage params={paramsOf('work')} />
           default: return <PipelinePage source={source} params={active === 'work' && route.sub === 'pipeline' ? route.params : new URLSearchParams()} onNavigate={go} />
         }
       }, banner('work', 'production', 'production'))
