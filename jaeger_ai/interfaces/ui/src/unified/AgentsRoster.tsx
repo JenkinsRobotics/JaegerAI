@@ -53,7 +53,7 @@ export function AgentsRoster({ source, store, refresh, onNavigate, avatarFor }: 
     } catch (e) { toast(`Couldn't save pins: ${(e as Error).message}`, "error"); }
   };
 
-  if (avatarFor) { try { avatarFor = decodeURIComponent(avatarFor); } catch { /* keep raw */ } }
+  if (avatarFor) { for (let i = 0; i < 3 && /%[0-9A-Fa-f]{2}/.test(avatarFor); i++) { try { avatarFor = decodeURIComponent(avatarFor); } catch { break; } } }
   const avatarAgent = avatarFor ? store.agents.find((a) => a.id === avatarFor) : undefined;
   if (avatarFor) {
     return avatarAgent
