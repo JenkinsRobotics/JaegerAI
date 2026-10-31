@@ -122,3 +122,37 @@ def test_compare_routes_cli_models_and_history_accepts_them(api, monkeypatch):
         list(api.compare_stream_events({"model": "cli:evil:x", "prompt": "hi"}))
     run = api.save_run({"prompt": "p", "results": [{"model": "cli:codex:gpt-6-luna", "response": "a"}, {"model": "qwen3:4b", "response": "b"}]})
     assert api.update_run(run["id"], {"winner": "cli:codex:gpt-6-luna"})["winner"] == "cli:codex:gpt-6-luna"
+
+
+def test_pipeline_stage_history_attachments(api, tmp_path):
+    tid = "task:abc-123"
+    assert api.list_pipeline()["stages"] == ["intake", "research", "studio", "production", "review", "done"]
+    with pytest.raises(api.ApiError):
+        api.set_stage(tid, {"stage": "shipping"})
+    rec = api.set_stage(tid, {"stage": "intake"})
+    assert rec["revision"] == 1 and rec["history"][0]["to"] == "intake"
+    rec = api.set_stage(tid, {"stage": "research", "expected_revision": 1})
+    with pytest.raises(api.ApiError) as e:
+        api.set_stage(tid, {"stage": "studio", "expected_revision": 1})
+    assert e.value.status == 409
+    assert api.set_stage(tid, {"stage": "research"})["revision"] == 2  # same stage: no new history
+    n = api.add_attachment(tid, {"kind": "note", "text": "check the spec"})
+    assert n["stage"] == "research"
+    api.add_attachment(tid, {"kind": "source", "ref": "https://example.com/spec", "label": "Spec"})
+    with pytest.raises(api.ApiError):
+        api.add_attachment(tid, {"kind": "source", "ref": "javascript:alert(1)"})
+    with pytest.raises(api.ApiError):
+        api.add_attachment(tid, {"kind": "source", "ref": "https://example.com/spec"})
+    a = api.add_attachment(tid, {"kind": "asset", "ref": "asset-1", "label": "hero.png"})
+    api.remove_attachment(tid, a["id"])
+    saved = api.list_pipeline()["items"][tid]
+    assert [x["kind"] for x in saved["attachments"]] == ["note", "source"] and saved["stage"] == "research"
+    assert (tmp_path / "pipeline/tasks.json").exists()
+    with pytest.raises(api.ApiError):
+        api.set_stage("../etc", {"stage": "intake"})
+
+
+def test_attaching_to_a_new_task_starts_it_at_intake(api):
+    api.add_attachment("t2", {"kind": "note", "text": "brief"})
+    rec = api.list_pipeline()["items"]["t2"]
+    assert rec["stage"] == "intake" and rec["history"][0]["to"] == "intake"

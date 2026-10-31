@@ -14,6 +14,8 @@ Minimal, local-only backends the gateway doesn't provide:
   Compare   POST /v1/compare/run {model, prompt} one non-streamed Ollama completion with timing
             POST /v1/compare/stream {model, prompt}  NDJSON: start, thinking/delta…, done{metrics} | error
             GET/POST /v1/compare/history; PUT {winner} / DELETE /v1/compare/history/<id>
+  Pipeline  GET /v1/pipeline; PUT /v1/pipeline/<task_id> {stage, expected_revision?};
+            POST /v1/pipeline/<task_id>/attachments {kind, ref?, label?, text?}; DELETE …/attachments/<id>
   Documents GET/POST /v1/documents, GET/PUT/DELETE /v1/documents/<id>; POST /v1/documents/ai-edit
 Everything is stored under <state>/studio or <state>/documents (default ~/.jaeger). Ollama is
 reached on 127.0.0.1:11434 only. Nothing is fabricated: unavailable providers return 409 with a
@@ -520,6 +522,99 @@ def delete_run(rid: str) -> dict:
     return {"deleted": rid}
 
 
+# ── Task pipeline (Intake → Research → Studio → Production → Review → Done) ──
+# The gateway's task records have no writable stage field (only presentation flags), so the
+# pipeline stage and the task's attached sources/notes/assets/deliverables live here, keyed by the
+# gateway task_id, in <state>/pipeline/tasks.json. Stage changes are explicit user actions with a
+# history; nothing advances on its own.
+STAGES = ("intake", "research", "studio", "production", "review", "done")
+ATTACH_KINDS = ("note", "source", "document", "asset", "artifact", "deliverable")
+_TASK_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._-]{0,127}$")
+
+
+def _pipeline_path() -> Path:
+    return state_root() / "pipeline" / "tasks.json"
+
+
+def _pipeline() -> dict:
+    d = _read_json(_pipeline_path(), {})
+    return d if isinstance(d, dict) else {}
+
+
+def list_pipeline() -> dict:
+    return {"stages": list(STAGES), "items": _pipeline()}
+
+
+def _task_rec(items: dict, tid: str, create: bool = False) -> dict:
+    if not _TASK_ID.match(tid):
+        raise ApiError(400, "invalid task id")
+    rec = items.get(tid)
+    if rec is None:
+        if not create:
+            raise ApiError(404, "task is not in the pipeline")
+        rec = items[tid] = {"task_id": tid, "stage": None, "revision": 0, "history": [], "attachments": [], "created_at": time.time()}
+    return rec
+
+
+def set_stage(tid: str, body: dict) -> dict:
+    stage = body.get("stage")
+    if stage not in STAGES:
+        raise ApiError(400, f"stage must be one of {', '.join(STAGES)}")
+    with _lock:
+        items = _pipeline()
+        rec = _task_rec(items, tid, create=True)
+        exp = body.get("expected_revision")
+        if exp is not None and exp != rec["revision"]:
+            raise ApiError(409, "the task's stage changed elsewhere; reload", current=rec)
+        if rec["stage"] != stage:
+            rec["history"].append({"from": rec["stage"], "to": stage, "at": time.time(), "note": str(body.get("note", ""))[:500] or None})
+            rec["stage"] = stage
+            rec["revision"] += 1
+            rec["updated_at"] = time.time()
+        _write_json(_pipeline_path(), items)
+    return rec
+
+
+def add_attachment(tid: str, body: dict) -> dict:
+    kind = body.get("kind")
+    if kind not in ATTACH_KINDS:
+        raise ApiError(400, f"kind must be one of {', '.join(ATTACH_KINDS)}")
+    label = str(body.get("label", "")).strip()[:300]
+    ref = str(body.get("ref", "")).strip()[:2000]
+    text = str(body.get("text", ""))[:20000]
+    if kind == "note" and not text.strip():
+        raise ApiError(400, "a note needs text")
+    if kind == "source" and not re.match(r"^https?://", ref):
+        raise ApiError(400, "a source needs an http(s) URL")
+    if kind in ("document", "asset", "artifact", "deliverable") and not ref:
+        raise ApiError(400, f"a {kind} needs a ref")
+    with _lock:
+        items = _pipeline()
+        rec = _task_rec(items, tid, create=True)
+        if rec["stage"] is None:
+            rec["stage"] = "intake"; rec["history"].append({"from": None, "to": "intake", "at": time.time(), "note": None}); rec["revision"] += 1
+        if any(a["kind"] == kind and a.get("ref") == ref and ref for a in rec["attachments"]):
+            raise ApiError(409, "already attached")
+        att = {"id": uuid.uuid4().hex[:12], "kind": kind, "ref": ref or None, "label": label or None, "text": text or None,
+               "stage": body.get("stage") if body.get("stage") in STAGES else rec["stage"], "at": time.time()}
+        rec["attachments"].append(att)
+        rec["updated_at"] = time.time()
+        _write_json(_pipeline_path(), items)
+    return att
+
+
+def remove_attachment(tid: str, aid: str) -> dict:
+    with _lock:
+        items = _pipeline()
+        rec = _task_rec(items, tid)
+        before = len(rec["attachments"])
+        rec["attachments"] = [a for a in rec["attachments"] if a.get("id") != aid]
+        if len(rec["attachments"]) == before:
+            raise ApiError(404, "no such attachment")
+        _write_json(_pipeline_path(), items)
+    return {"deleted": aid}
+
+
 # ── Documents ────────────────────────────────────────────────────────
 
 def _docs() -> Path:
@@ -597,7 +692,7 @@ def ai_edit(body: dict) -> dict:
 
 def route(handler, parsed, method: str, read_body, j) -> bool:
     p = parsed.path
-    if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p.startswith("/v1/providers/cli") or p == "/v1/documents" or p.startswith("/v1/documents/")):
+    if not (p.startswith("/v1/studio/") or p.startswith("/v1/models/") or p == "/v1/compare/run" or p.startswith("/v1/compare/") or p.startswith("/v1/providers/cli") or p == "/v1/pipeline" or p.startswith("/v1/pipeline/") or p == "/v1/documents" or p.startswith("/v1/documents/")):
         return False
     try:
         body = read_body(handler) if method in ("POST", "PUT") else {}
@@ -662,6 +757,19 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
                 return j(handler, _cli().update(mp.group(1), body)) or True
             except KeyError as exc:
                 raise ApiError(404, "unknown CLI provider") from exc
+        if p == "/v1/pipeline" and method == "GET":
+            return j(handler, list_pipeline()) or True
+        mt = re.match(r"^/v1/pipeline/([^/]+)(?:/attachments(?:/([a-f0-9]{12}))?)?$", p)
+        if mt:
+            tid = unquote(mt.group(1))
+            if p.endswith("/attachments") and method == "POST":
+                return j(handler, add_attachment(tid, body), status=201) or True
+            if mt.group(2) and method == "DELETE":
+                return j(handler, remove_attachment(tid, mt.group(2))) or True
+            if "/attachments" not in p and method == "PUT":
+                return j(handler, set_stage(tid, body)) or True
+            if "/attachments" not in p and method == "GET":
+                return j(handler, _task_rec(_pipeline(), tid)) or True
         if p == "/v1/compare/history":
             if method == "GET":
                 return j(handler, {"runs": list_runs()}) or True
@@ -687,7 +795,7 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
                 return j(handler, save_doc(md.group(1), body)) or True
             if method == "DELETE":
                 return j(handler, delete_doc(md.group(1))) or True
-        raise ApiError(405 if p.startswith(("/v1/studio/", "/v1/models/", "/v1/documents", "/v1/compare/", "/v1/providers/cli")) else 404, "method not allowed")
+        raise ApiError(405 if p.startswith(("/v1/studio/", "/v1/models/", "/v1/documents", "/v1/compare/", "/v1/providers/cli", "/v1/pipeline")) else 404, "method not allowed")
     except ApiError as exc:
         j(handler, exc.payload, status=exc.status)
         return True
