@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GatewayEvent } from "../api/types";
+import type { GatewayEvent, Handoff } from "../api/types";
 import type { OrchestrationAdapter } from "./adapter";
 import { agentsLive } from "./adapter";
 import { backfill, eventRow, mergeRows, namesFrom } from "./feed";
@@ -30,10 +30,15 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
   const [nonce, setNonce] = useState(0);
   const [nextBefore, setNextBefore] = useState<number>();
   const seen = useRef(new Set<number>());
+  const eventHandoffs = useRef(new Map<string, Handoff>());
   const snapRef = useRef<OrchestrationSnapshot | undefined>(undefined);
 
   const load = useCallback(async (initial = false) => {
-    const snap = await adapter.snapshot();
+    let snap = await adapter.snapshot();
+    for (const h of eventHandoffs.current.values()) {
+      const cur = snap.handoffs.find((x) => x.id === h.id);
+      if (!cur || (cur.updated_at ?? 0) <= (h.updated_at ?? 0)) snap = patchHandoff(snap, h) ?? snap;
+    }
     snapRef.current = snap;
     setSnapshot(snap);
     const names = namesFrom(snap.agents);
@@ -63,6 +68,12 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
       if (e.event === "agent.status.changed") {
         const p = e.payload ?? {};
         const id = String(p.agent_id ?? ""); if (id) setOverrides((o) => ({ ...o, [id]: String(p.status ?? "idle") }));
+      }
+      const h = handoffOf(e);
+      if (h) {
+        eventHandoffs.current.set(h.id, h); // replayed onto snapshots that load later
+        const patched = patchHandoff(snapRef.current, h);
+        if (patched) { snapRef.current = patched; setSnapshot(patched); }
       }
       const row = eventRow(e, namesFrom(snapRef.current?.agents ?? []));
       if (row) setRows((cur) => mergeRows(cur, [row], 2000));
@@ -97,4 +108,20 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
 
   const live = useMemo(() => (snapshot ? agentsLive(snapshot, adapter.gaps, overrides) : []), [snapshot, adapter.gaps, overrides]);
   return { status, error, snapshot, rows, stream, live, retry: () => setNonce((n) => n + 1), loadOlder: nextBefore != null ? loadOlder : undefined };
+}
+
+/** Handoff events carry the full record ({handoff}). */
+export function handoffOf(e: GatewayEvent): Handoff | undefined {
+  if (!e.event.startsWith("agent.handoff")) return undefined;
+  const h = (e.payload as { handoff?: Handoff } | undefined)?.handoff;
+  return h && typeof h === "object" && h.id ? h : undefined;
+}
+
+/** Merge an event's handoff into the snapshot so the inspector updates with
+ * the feed row (no refetch). */
+export function patchHandoff(snap: OrchestrationSnapshot | undefined, h: Handoff): OrchestrationSnapshot | undefined {
+  if (!snap) return undefined;
+  const i = snap.handoffs.findIndex((x) => x.id === h.id);
+  const handoffs = i < 0 ? [h, ...snap.handoffs] : snap.handoffs.map((x, j) => (j === i ? { ...x, ...h } : x));
+  return { ...snap, handoffs };
 }
