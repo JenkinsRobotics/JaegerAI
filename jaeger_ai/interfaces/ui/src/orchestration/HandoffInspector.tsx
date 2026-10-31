@@ -27,6 +27,7 @@ export function HandoffInspector({ handoff, tasks, adapter, names, onNavigate, o
         <dt>Task</dt><dd>{handoff.task ?? "—"}</dd>
         <dt>Status</dt><dd>{handoff.status ?? "—"}</dd>
         <dt>Result check</dt><dd><CheckBadge check={check} />{check.evidence && <OutputLinkView link={check.evidence} onNavigate={onNavigate} />}</dd>
+        {check.note && <><dt>Check note</dt><dd>{check.note}</dd></>}
         <dt>Result</dt><dd>{ex === undefined ? <SkeletonRows n={1} /> : ex?.summary ?? handoff.result?.summary ?? (err ? `Couldn't load the exchange: ${err}` : "No result yet")}</dd>
       </dl>
       {outputs.length > 0 && <div className="jg-orch-outputs" aria-label="Outputs">{outputs.map((o) => <OutputLinkView key={o.href} link={o} onNavigate={onNavigate} />)}</div>}
