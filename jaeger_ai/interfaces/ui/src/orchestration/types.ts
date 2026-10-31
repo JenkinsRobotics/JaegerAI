@@ -14,6 +14,7 @@ export interface HandoffCheck {
   evidence?: OutputLink;
   checkedBy?: string;
   checkedAt?: number;
+  note?: string;
   /** "derived" = computed in the UI from task/approval state; "gateway" = G2 record. */
   source: "derived" | "gateway";
 }
@@ -28,7 +29,31 @@ export interface OutputLink {
    * in the inspector), or an external https URL. */
   href: string;
   sha?: string;
+  /** Not openable here (file path, commit SHA, http link): render as a copy chip of `href`. */
+  copy?: boolean;
+  /** G3 `verified` (gateway confirmed it exists). */
+  verified?: boolean;
 }
+
+/** G1 `GET /v1/activity` item (gateway proposal 2026-10-31). */
+export interface ActivityItem {
+  event_id: number;
+  kind: string;
+  ts: number;
+  agent_id: string;
+  actor_id?: string | null;
+  session_id?: string | null;
+  summary?: string;
+  needs_me?: boolean;
+  refs?: { handoff_id?: string | null; task_id?: string | null; approval_id?: string | null; session_id?: string | null };
+  data?: Record<string, unknown>;
+}
+export interface ActivityPage { items: ActivityItem[]; has_more: boolean; next_before?: number | null }
+
+/** G2 check record on handoffs. */
+export interface CheckRecord { state: CheckState; evidence_ref?: string | null; checked_by?: string | null; checked_at?: number | null; note?: string | null }
+/** G3 artifact ref on handoff.result.artifact_refs. */
+export interface ArtifactRef { kind: "file" | "commit" | "session" | "task" | "url"; ref: string; sha?: string | null; title?: string; verified?: boolean; url?: string | null }
 
 export type ActivityKind =
   | "handoff.started"

@@ -13,6 +13,8 @@ export interface OrchestrationState {
   rows: ActivityRow[];
   stream: StreamState;
   retry(): void;
+  /** G1 paging: undefined when there's nothing older. */
+  loadOlder?: () => Promise<void>;
 }
 
 const POLL_MS = 15000;
@@ -26,23 +28,28 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
   const [stream, setStream] = useState<StreamState>("connecting");
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   const [nonce, setNonce] = useState(0);
+  const [nextBefore, setNextBefore] = useState<number>();
   const seen = useRef(new Set<number>());
   const snapRef = useRef<OrchestrationSnapshot | undefined>(undefined);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (initial = false) => {
     const snap = await adapter.snapshot();
     snapRef.current = snap;
     setSnapshot(snap);
     const names = namesFrom(snap.agents);
-    const history = adapter.gaps.activity ? await adapter.gaps.activity() : [];
-    setRows((cur) => mergeRows(cur, [...backfill(snap, names), ...history]));
+    let history: ActivityRow[] = [];
+    if (adapter.gaps.activity) {
+      const page = await adapter.gaps.activity({ names });
+      history = page.rows; if (initial) setNextBefore(page.nextBefore); // refreshes keep the paging cursor
+    }
+    setRows((cur) => mergeRows(cur, [...backfill(snap, names), ...history], 2000));
   }, [adapter]);
 
   useEffect(() => {
     let alive = true;
     const ctl = new AbortController();
     setStatus("loading");
-    load().then(() => alive && setStatus("ready"), (e: unknown) => {
+    load(true).then(() => alive && setStatus("ready"), (e: unknown) => {
       if (!alive) return;
       setError(e instanceof Error ? e.message : String(e));
       setStatus("error");
@@ -58,7 +65,7 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
         const id = String(p.agent_id ?? ""); if (id) setOverrides((o) => ({ ...o, [id]: String(p.status ?? "idle") }));
       }
       const row = eventRow(e, namesFrom(snapRef.current?.agents ?? []));
-      if (row) setRows((cur) => mergeRows(cur, [row]));
+      if (row) setRows((cur) => mergeRows(cur, [row], 2000));
       if (REFRESH_ON.has(e.event)) { clearTimeout(refreshTimer); refreshTimer = setTimeout(() => { if (alive) load().catch(() => undefined); }, 400); }
     };
 
@@ -81,6 +88,13 @@ export function useOrchestration(adapter: OrchestrationAdapter, opts: { backoffM
     return () => { alive = false; ctl.abort(); clearInterval(pollTimer); clearTimeout(refreshTimer); };
   }, [adapter, load, nonce, opts.backoffMs]);
 
+  const loadOlder = useCallback(async () => {
+    if (!adapter.gaps.activity || nextBefore == null) return;
+    const page = await adapter.gaps.activity({ before: nextBefore, names: namesFrom(snapRef.current?.agents ?? []) });
+    setNextBefore(page.nextBefore);
+    setRows((cur) => mergeRows(cur, page.rows, 2000));
+  }, [adapter, nextBefore]);
+
   const live = useMemo(() => (snapshot ? agentsLive(snapshot, adapter.gaps, overrides) : []), [snapshot, adapter.gaps, overrides]);
-  return { status, error, snapshot, rows, stream, live, retry: () => setNonce((n) => n + 1) };
+  return { status, error, snapshot, rows, stream, live, retry: () => setNonce((n) => n + 1), loadOlder: nextBefore != null ? loadOlder : undefined };
 }

@@ -28,7 +28,7 @@ describe("orchestration adapter", () => {
     await waitFor(() => expect(result.current.status).toBe("ready"));
     await waitFor(() => expect(result.current.stream).toBe("live"));
     expect(result.current.rows.some((r) => r.kind === "approval.requested")).toBe(true);
-    expect(result.current.live.find((r) => r.agent.id === "native:reviewer")?.status).toBe("checking");
+    expect(result.current.live.find((r) => r.agent.id === "native:reviewer")?.status).toBe("working");
     const failing = mockAdapter({ fail: true });
     const bad = renderHook(() => useOrchestration(failing));
     await waitFor(() => expect(bad.result.current.status).toBe("error"));
