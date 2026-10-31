@@ -121,7 +121,9 @@ TURN_ROUTES = frozenset({
     ("POST", "/v1/sessions/{id}/retry"),
 })
 #: Owner decisions. Answering a clarify form is owner input, never an agent self-answer (GB-033).
-APPROVE_ROUTES = frozenset({("POST", "/v1/approvals/{id}"), ("POST", "/v1/approvals/{id}/decision"), ("POST", "/v1/tasks/{id}/approve"),
+APPROVE_ROUTES = frozenset({("POST", "/v1/approvals/{id}"), ("POST", "/v1/approvals/{id}/decision"),
+                            ("POST", "/v1/approvals/{id}/decide"), ("POST", "/v1/approvals/batch"), ("POST", "/v1/approvals/{id}/viewed"),
+                            ("POST", "/v1/tasks/{id}/approve"),
                             ("POST", "/v1/sessions/{id}/clarify/{clarify_id}")})
 IDE_ROUTES = frozenset({("POST", "/v1/sessions/{id}/ide/{ide_request_id}")})
 STOP_ROUTES = frozenset({("POST", "/v1/stop")})

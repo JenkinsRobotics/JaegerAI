@@ -881,16 +881,10 @@ class JaegerGatewayApp:
                 from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
                 inst = os.environ.get("JAEGER_INSTANCE_DIR")
                 layout = InstanceLayout(root=Path(inst) if inst else resolve_instance_dir())
-                # Bind the workspace first and on its own: Library, Workflows
-                # and other file-backed routes only need the layout, so a
-                # state.db problem must not leave them answering 503.
+                sqlite_store.bind(layout)
                 bind_workspace(layout)
             except Exception as exc:
-                logger.warning("workspace bind failed: %s", exc)
-            try:
-                sqlite_store.bind(layout)
-            except Exception as exc:
-                logger.warning("sqlite_store bind skipped: %s", exc)
+                logger.debug("sqlite_store/workspace bind skipped: %s", exc)
             rt = EntityRuntime.get_singleton(mode=EntityRuntimeMode.OWNER)
             runtime_for_producers = rt
             if not getattr(rt, "_gateway_cognition_handler_registered", False):
@@ -1477,6 +1471,10 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/handoffs/{id}", self.handle_get_handoff)
         self.app.router.add_get("/v1/handoffs/{id}/messages", self.handle_handoff_messages)
         self.app.router.add_post("/v1/handoffs/{id}/reply", self.handle_handoff_reply)
+        from .approvals_inbox import register as register_approvals_inbox
+        from .push_routes import register as register_push
+        register_approvals_inbox(self)  # literal /v1/approvals/* paths before /{id}
+        register_push(self)
         self.app.router.add_post("/v1/approvals/{id}", self.handle_resolve_approval)
         self.app.router.add_post("/v1/approvals/{id}/decision", self.handle_resolve_approval)
         self.app.router.add_get("/v1/approvals", self.handle_list_approvals)
@@ -6125,7 +6123,9 @@ class JaegerGatewayApp:
                                   "delivered": fut is not None})
 
     async def handle_list_approvals(self, request: web.Request) -> web.Response:
-        pending = [self._with_origin(row) for row in self.store.list_pending_approvals()]
+        from . import approvals_inbox
+        approvals_inbox.sweep_expired(self)
+        pending = approvals_inbox.pending_items(self)
         sid = (request.query.get("session_id") or "").strip()
         if sid:
             pending = [row for row in pending if row.get("session_id") == sid
@@ -6133,6 +6133,7 @@ class JaegerGatewayApp:
         request_id = (request.query.get("request_id") or "").strip()
         if request_id:
             pending = [row for row in pending if row.get("request_id") == request_id]
+        pending = approvals_inbox.filter_sort(pending, request.query)
         return web.json_response({"approvals": pending})
 
     async def handle_get_approval(self, request: web.Request) -> web.Response:
@@ -6506,24 +6507,39 @@ class JaegerGatewayApp:
         for key in ("expected_session_id", "expected_request_id", "expected_profile"):
             if key in body and (not isinstance(body[key], str) or not body[key].strip()):
                 return web.json_response({"error": "Invalid approval context"}, status=400)
-        resolved = self.store.resolve_approval(
-            approval_id, approved=approved, decision=decision,
-            **{key: body[key] for key in ("expected_session_id", "expected_request_id", "expected_profile") if key in body},
+        payload = JaegerGatewayApp.resolve_pending(
+            self, approval_id, approved=approved, decision=decision,
+            context={key: body[key] for key in ("expected_session_id", "expected_request_id", "expected_profile") if key in body},
         )
-        if resolved is None:
+        if payload is None:
             existing = self.store.get_approval(approval_id) or {}
             if existing.get("decision") == "cancelled":
                 return web.json_response(
                     {"error": "Request was cancelled; approval no longer applies"}, status=409,
                 )
             return web.json_response({"error": "Approval is stale, expired, or its permission context changed"}, status=409 if existing else 404)
+        return web.json_response(payload)
+
+    def resolve_pending(self, approval_id: str, *, approved: bool, decision: str,
+                        context: dict[str, str] | None = None, extra: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        """The one resolve path (HTTP decision, inbox decide/batch, expiry sweep).
+
+        First writer wins; returns None when stale. Wakes the waiting future,
+        task owner and handoff, then publishes ``approval.resolved``.
+        """
+        resolved = self.store.resolve_approval(approval_id, approved=approved, decision=decision, **(context or {}))
+        if resolved is None:
+            return None
         future = self.pending_approvals.pop(approval_id, None)
         if future is not None and not future.done():
             future.set_result(approved)
 
         handoff_row = None
         if resolved is not None and (resolved.get("metadata") or {}).get("task_id"):
-            self.task_owner.resolve(resolved["metadata"]["task_id"], approved)
+            try:
+                self.task_owner.resolve(resolved["metadata"]["task_id"], approved)
+            except KeyError:  # task gone; the decision itself is already durable
+                logger.warning("approval %s names unknown task %s", approval_id, resolved["metadata"]["task_id"])
         if resolved is not None:
             hid = (resolved.get("metadata") or {}).get("handoff_id")
             if hid:
@@ -6560,8 +6576,11 @@ class JaegerGatewayApp:
             payload["session_id"] = resolved.get("session_id")
         if row_origin:
             payload["origin"] = row_origin
+        for key, value in (extra or {}).items():
+            if value is not None:
+                payload[key] = value
         self.event_bus.publish("*", "approval.resolved", payload)
-        return web.json_response(payload)
+        return payload
 
     async def _execute_handoff(self, handoff_id: str) -> None:
         record = self.store.get_handoff(handoff_id)

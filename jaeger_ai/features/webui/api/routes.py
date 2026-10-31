@@ -16612,6 +16612,9 @@ def handle_patch(handler, parsed) -> bool:
     """Handle all PATCH routes. Returns True if handled, False for 404."""
     if not _check_csrf(handler):
         return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
+    from api import unified_api
+    if unified_api.route(handler, parsed, "PATCH", read_body, j):
+        return True
     try:
         from api.jaeger_agents import route as jaeger_agents_route
         if jaeger_agents_route(handler, parsed, "PATCH"):
