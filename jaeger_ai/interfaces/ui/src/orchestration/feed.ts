@@ -50,7 +50,13 @@ export function parseEvidence(ref?: string | null): OutputLink | undefined {
   }
 }
 
-/** G2: prefer the gateway's check record; else derive from the linked task. */
+/** Handoff statuses (gateway vocabulary) that end without a usable result. */
+export const HANDOFF_FAILED = new Set(["failed", "cancelled", "rejected", "denied", "execution_unknown"]);
+const HANDOFF_DONE = new Set(["completed", "done", "finished"]);
+
+/** G2: prefer the gateway's check record; else derive like the gateway's
+ * defaults (failed-ish → failed, completed → pending; never passed), with a
+ * linked task's state taking over when present. */
 export function checkFor(h: Handoff, tasks: Task[]): HandoffCheck {
   const recorded = (h as Handoff & { check?: CheckRecord | null }).check;
   if (recorded?.state) {
@@ -59,8 +65,10 @@ export function checkFor(h: Handoff, tasks: Task[]): HandoffCheck {
       note: recorded.note ?? undefined, evidence: parseEvidence(recorded.evidence_ref),
     };
   }
+  const status = String(h.status ?? "");
+  if (HANDOFF_FAILED.has(status)) return { state: "failed", source: "derived", evidence: handoffLink(h) };
   const task = taskForHandoff(h, tasks);
-  if (!task?.state) return { state: "unchecked", source: "derived" };
+  if (!task?.state) return { state: HANDOFF_DONE.has(status) ? "pending" : "unchecked", source: "derived" };
   const state: CheckState = PASSED.has(task.state) ? "passed" : FAILED.has(task.state) ? "failed" : PENDING.has(task.state) ? "pending" : "unchecked";
   return { state, source: "derived", evidence: taskLink(task), checkedAt: sec(task.updated_at) || undefined };
 }
@@ -83,9 +91,11 @@ export function artifactsFor(h: Handoff): OutputLink[] {
   });
 }
 
+const FAILED_TEXT: Record<string, string> = { denied: "was denied", execution_unknown: "ended with an unknown outcome", cancelled: "was cancelled", rejected: "was rejected" };
+
 function handoffKind(status?: string): ActivityKind {
-  if (status === "failed" || status === "cancelled" || status === "rejected") return "handoff.failed";
-  if (status === "completed" || status === "done" || status === "finished") return "handoff.finished";
+  if (HANDOFF_FAILED.has(String(status))) return "handoff.failed";
+  if (HANDOFF_DONE.has(String(status))) return "handoff.finished";
   return "handoff.started";
 }
 
@@ -95,14 +105,15 @@ export function handoffRows(h: Handoff, tasks: Task[], names: Names): ActivityRo
   const check = checkFor(h, tasks);
   const rows: ActivityRow[] = [{
     key: `handoff.started:${h.id}`, kind: "handoff.started", agentId: from, handoffId: h.id,
-    action: `handed off to ${names(to)}${h.task ? `: ${h.task}` : ""}`, at: sec(h.created_at ?? h.updated_at), output: handoffLink(h), check,
+    action: `handed off to ${names(to)}${h.status === "pending_approval" ? " (waiting for your approval)" : ""}${h.task ? `: ${h.task}` : ""}`, at: sec(h.created_at ?? h.updated_at), output: handoffLink(h), check,
+    needsYou: h.status === "pending_approval" || undefined,
   }];
   const kind = handoffKind(h.status);
   if (kind !== "handoff.started") {
     const artifact = artifactsFor(h)[0];
     rows.push({
       key: `${kind}:${h.id}`, kind, agentId: to, handoffId: h.id,
-      action: kind === "handoff.failed" ? `couldn't finish${h.result?.summary ? `: ${h.result.summary}` : ""}` : `finished${h.result?.summary ? `: ${h.result.summary}` : ""}`,
+      action: kind === "handoff.failed" ? `${FAILED_TEXT[String(h.status)] ?? "couldn't finish"}${h.result?.summary ? `: ${h.result.summary}` : ""}` : `finished${h.result?.summary ? `: ${h.result.summary}` : ""}`,
       at: sec(h.updated_at ?? h.created_at), output: artifact ?? handoffLink(h), check, needsYou: kind === "handoff.failed" || check.state === "failed",
     });
   }
