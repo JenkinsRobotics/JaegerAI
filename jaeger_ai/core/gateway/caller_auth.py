@@ -50,7 +50,7 @@ KEYCHAIN_SERVICE = "ai.jaeger.gateway.caller"
 TOKEN_DIR_ENV = "JAEGER_CALLER_TOKEN_DIR"
 SECURITY_BIN = "/usr/bin/security"
 
-ALL_SCOPES = frozenset({"read", "turn", "delegate", "approve", "ide", "stop", "admin"})
+ALL_SCOPES = frozenset({"read", "turn", "delegate", "approve", "ide", "stop", "admin", "handoff"})
 _OWNER = frozenset({"read", "turn", "delegate", "approve", "stop", "admin"})
 
 
@@ -62,6 +62,18 @@ class CallerSpec:
     session_prefix: str | None = None
     description: str = ""
 
+
+#: Local agent apps that reach Jaeger over loopback MCP (127.0.0.1:8792/mcp),
+#: one dedicated credential each so messages, goals and receipts are attributed
+#: per app. Same ceiling as ``ares``/``grokbot``: read + turn (agent-bridge
+#: messages and goals, which run through PolicyKernel and owner approvals) and
+#: the ``handoff`` label. Never approve, delegate, stop or admin.
+APP_CALLERS: Mapping[str, str] = {
+    "claude": "Claude Code", "codex": "Codex", "cursor": "Cursor", "gemini": "Gemini",
+    "vscode": "VS Code / Copilot", "opencode": "OpenCode", "continue": "Continue",
+    "cline": "Cline", "openclaw": "OpenClaw", "cagent": "cagent", "muse": "Muse",
+}
+APP_CALLER_SCOPES = frozenset({"read", "turn", "handoff"})
 
 #: The closed set of Gateway callers. Adding a caller is a code change.
 CALLERS: Mapping[str, CallerSpec] = {
@@ -83,6 +95,9 @@ CALLERS: Mapping[str, CallerSpec] = {
                    description="GrokBot local bridge client; dedicated credential required"),
         CallerSpec("a2a", "a2a", frozenset({"read", "turn", "stop"}), session_prefix="a2a:",
                    description="Jaeger A2A server"),
+        *(CallerSpec(name, f"mcp:{name}", APP_CALLER_SCOPES, session_prefix=f"{name}:",
+                     description=f"{label} (local MCP client, dedicated credential)")
+          for name, label in APP_CALLERS.items()),
     )
 }
 
@@ -139,6 +154,10 @@ PREFIXED_READ_ROUTES = frozenset({
     "/v1/sessions/{id}/messages",
     # Status of one approval; the handler limits it to the caller's sessions.
     "/v1/approvals/{id}",
+    # Hub collaboration: the agent roster and pending-approval totals carry no
+    # session content, so outside callers may read them.
+    "/v1/agents",
+    "/v1/approvals/counts",
 })
 
 
