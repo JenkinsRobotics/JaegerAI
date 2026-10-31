@@ -36,4 +36,13 @@ describe("orchestration panes", () => {
     render(<CheckBadge check={{ state: "passed", source: "derived" }} />);
     expect(screen.getByText("Checked · task")).toBeTruthy();
   });
+
+  it("inspector picks up agent.handoff.checked without a refetch", async () => {
+    render(<OrchestrationPanes adapter={mockAdapter()} onNavigate={() => undefined} />);
+    await screen.findByText("Live");
+    fireEvent.click(screen.getAllByRole("button", { name: /Exchange/ }).find((b) => b.closest(".jg-orch-row")?.textContent?.includes("handed off to Mac App"))!);
+    const insp = await screen.findByLabelText("Handoff details");
+    await waitFor(() => expect(within(insp).getByText(/^Checking/)).toBeTruthy());
+    expect(within(insp).getByText("waiting on CI")).toBeTruthy();
+  });
 });
