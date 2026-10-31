@@ -35,6 +35,7 @@ const WorkspacePage = lazy(() => import('./WorkspacePage').then((m) => ({ defaul
 const MachineControlPanel = lazy(() => import('../machine-control/MachineControlPanel').then((m) => ({ default: m.MachineControlPanel })))
 const SharePointPanel = lazy(() => import('../sharepoint/SharePointPanel').then((m) => ({ default: m.SharePointPanel })))
 const AgentsRoster = lazy(() => import('../unified/AgentsRoster').then((m) => ({ default: m.AgentsRoster })))
+const AgentsActivityPage = lazy(() => import('../orchestration/AgentsActivityPage').then((m) => ({ default: m.AgentsActivityPage })))
 const CharactersPage = lazy(() => import('../unified/CharactersPage').then((m) => ({ default: m.CharactersPage })))
 const TasksWorkspace = lazy(() => import('../unified/TasksWorkspace').then((m) => ({ default: m.TasksWorkspace })))
 const StudioPage = lazy(() => import('../unified/StudioPage').then((m) => ({ default: m.StudioPage })))
@@ -110,6 +111,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
       case 'home': return tabbed('home', (t) => t === 'widgets' ? <WorkspacePage source={source} /> : <HomeDashboard source={source} store={store} onNavigate={go} />)
       case 'agents': return tabbed('agents', (t) => t === 'characters'
         ? <CharactersPage characterId={active === 'agents' && route.sub === 'characters' ? route.params.get('character') : null} source={source} refresh={store.refresh} onNavigate={go} />
+        : active === 'agents' && route.rest === 'activity' ? <AgentsActivityPage source={source} onNavigate={go} />
         : <AgentsRoster source={source} store={store} refresh={store.refresh} onNavigate={go} avatarFor={active === 'agents' ? (/^(.+)\/avatar$/.exec(route.rest)?.[1] ?? null) : null} />)
       case 'work': return tabbed('work', (t) => {
         switch (t) {
