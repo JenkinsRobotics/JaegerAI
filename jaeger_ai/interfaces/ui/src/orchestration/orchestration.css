@@ -92,3 +92,6 @@
 .jg-orch-verified { color: var(--jg-ok); font-weight: 600; }
 .jg-orch-older { margin: var(--jg-space-3) 0; min-height: var(--jg-target-min, 28px); padding: 0 var(--jg-space-3); border: 1px solid var(--jg-color-border-tertiary); border-radius: 999px; background: transparent; color: var(--jg-color-text-secondary); font: inherit; cursor: pointer; }
 .jg-orch-older:hover { background: var(--jg-color-hover); }
+.jg-orch-page { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+.jg-orch-page > .jg-orch { flex: 1; min-height: 0; }
+.jg-orch-history-error { max-width: 72ch; margin: 0 0 var(--jg-space-3); padding: var(--jg-space-2) var(--jg-space-3); border-radius: var(--jg-radius-m); border: 1px solid color-mix(in srgb, var(--jg-warn) 55%, transparent); color: var(--jg-color-text-secondary); font-size: var(--jg-text-footnote); }

@@ -51,6 +51,10 @@ describe("gateway G1–G6 shapes", () => {
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ items: [], has_more: false, next_before: null })));
     await gatewayActivity("", fetchImpl as unknown as typeof fetch)({ before: 81200, names });
     expect(fetchImpl).toHaveBeenCalledWith("/v1/activity?limit=50&before=81200", expect.anything());
+    const missing = vi.fn(async () => new Response("{}", { status: 404 }));
+    expect(await gatewayActivity("", missing as unknown as typeof fetch)({ names })).toEqual({ rows: [] });
+    const broken = vi.fn(async () => new Response("{}", { status: 500 }));
+    await expect(gatewayActivity("", broken as unknown as typeof fetch)({ names })).rejects.toThrow("activity 500");
     const adapter = mockAdapter();
     const { result } = renderHook(() => useOrchestration(adapter));
     await waitFor(() => expect(result.current.loadOlder).toBeDefined());

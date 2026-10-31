@@ -45,4 +45,12 @@ describe("orchestration panes", () => {
     await waitFor(() => expect(within(insp).getByText(/^Checking/)).toBeTruthy());
     expect(within(insp).getByText("waiting on CI")).toBeTruthy();
   });
+
+  it("keeps the feed when G1 history fails, with a notice", async () => {
+    const base = mockAdapter();
+    const adapter = { ...base, gaps: { ...base.gaps, activity: async () => { throw new Error("activity 500"); } } };
+    render(<OrchestrationPanes adapter={adapter} onNavigate={() => undefined} />);
+    expect(await screen.findByText(/Older activity couldn't load \(activity 500\)/)).toBeTruthy();
+    expect(screen.getByLabelText("Lead agent")).toBeTruthy();
+  });
 });

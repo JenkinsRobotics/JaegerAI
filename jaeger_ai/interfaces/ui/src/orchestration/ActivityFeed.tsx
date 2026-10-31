@@ -10,9 +10,9 @@ import type { StreamState } from "./useOrchestration";
 type Filter = "all" | "needs" | "handoffs";
 const STREAM_TEXT: Record<StreamState, string> = { connecting: "Connecting…", live: "Live", reconnecting: "Reconnecting…", polling: "Updating every 15s" };
 
-export function ActivityFeed({ rows, names, stream, agentFilter, selectedHandoff, onOpenHandoff, onNavigate, now, onLoadOlder }: {
+export function ActivityFeed({ rows, names, stream, agentFilter, selectedHandoff, onOpenHandoff, onNavigate, now, onLoadOlder, historyError }: {
   rows: ActivityRow[]; names: (id: string) => string; stream: StreamState; agentFilter?: string;
-  selectedHandoff?: string; onOpenHandoff: (id: string) => void; onNavigate: Navigate; now?: number; onLoadOlder?: () => Promise<void>;
+  selectedHandoff?: string; onOpenHandoff: (id: string) => void; onNavigate: Navigate; now?: number; onLoadOlder?: () => Promise<void>; historyError?: string;
 }) {
   const [older, setOlder] = useState<"idle" | "loading" | "error">("idle");
   const [filter, setFilter] = useState<Filter>("all");
@@ -27,6 +27,7 @@ export function ActivityFeed({ rows, names, stream, agentFilter, selectedHandoff
         <span className="jg-orch-stream" data-state={stream} role="status">{STREAM_TEXT[stream]}</span>
         <Segmented label="Filter activity" value={filter} onChange={setFilter} options={[{ value: "all", label: "All" }, { value: "needs", label: "Needs you" }, { value: "handoffs", label: "Handoffs" }]} />
       </header>
+      {historyError && <p className="jg-orch-history-error" role="status">Older activity couldn't load ({historyError}). Showing current handoffs and tasks.</p>}
       {shown.length === 0 ? <Empty title="Nothing yet">Handoffs, tasks and approvals show up here as they happen.</Empty> : (
         <ol className="jg-orch-rows">
           {shown.map((r) => (
