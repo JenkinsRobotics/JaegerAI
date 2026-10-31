@@ -4,7 +4,7 @@ import { ErrorState } from "../shell/ErrorState";
 import { SkeletonRows } from "../unified/ui";
 import type { OrchestrationAdapter } from "./adapter";
 import { ActivityFeed } from "./ActivityFeed";
-import { LEAD_ID, namesFrom } from "./feed";
+import { handoffForId, LEAD_ID, namesFrom } from "./feed";
 import { HandoffInspector } from "./HandoffInspector";
 import { LeadCard } from "./LeadCard";
 import type { Navigate } from "./OutputLinkView";
@@ -23,7 +23,7 @@ export function OrchestrationPanes({ adapter, onNavigate, now, initialCaller }: 
   const names = useMemo(() => namesFrom(s.snapshot?.agents ?? []), [s.snapshot]);
   const lead = s.live.find((l) => l.agent.id === LEAD_ID || l.agent.role === "lead");
   const team = s.live.filter((l) => l !== lead);
-  const handoff = s.snapshot?.handoffs.find((h) => h.id === handoffId);
+  const handoff = handoffForId(handoffId, s.snapshot?.handoffs ?? [], s.rows);
 
   if (s.status === "error") return <div className="jg-orch"><ErrorState title="Couldn't load agent activity" error={s.error ?? "Unknown error"} onRetry={s.retry} /></div>;
   return (

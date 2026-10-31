@@ -87,6 +87,9 @@ export interface ActivityRow {
   callerId?: string;
   /** Lifecycle pill for non-check rows (caller goals). */
   statusPill?: { text: string; tone?: "ok" | "warn" | "bad" };
+  /** Hub handoff.sent/handoff.result rows carry a synthesized handoff so the
+   * details panel opens even when /v1/handoffs doesn't list it. */
+  handoff?: import("../api/types").Handoff;
 }
 
 /** Live view of one specialist for the status list. */

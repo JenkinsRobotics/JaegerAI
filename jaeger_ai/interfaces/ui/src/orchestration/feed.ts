@@ -148,6 +148,9 @@ export function eventRow(e: GatewayEvent, names: Names): ActivityRow | null {
       const [row] = handoffRows({ ...h, status, updated_at: at, created_at: h.created_at ?? at }, [], names).filter((r) => (done ? r.kind !== "handoff.started" : r.kind === "handoff.started"));
       return row ? { ...row, at } : null;
     }
+    case "handoff.sent":
+    case "handoff.result":
+      return hubHandoffRow(e.event, p, at, names);
     case "agent.handoff.checked": { // G2 event: {handoff: <handoff with check>}
       const h = (p.handoff && typeof p.handoff === "object" ? p.handoff : null) as (Handoff & { check?: CheckRecord }) | null;
       if (!h?.id || !h.check?.state) return null;
@@ -200,6 +203,50 @@ export function eventRow(e: GatewayEvent, names: Names): ActivityRow | null {
     default:
       return null;
   }
+}
+
+const HUB_FAILED = new Set([...HANDOFF_FAILED, "error", "blocked"]);
+
+/** Hub (Gateway & WebUI) handoff.sent / handoff.result → the same keys as
+ * agent.handoff rows (`handoff.started:<id>`, `handoff.finished|failed:<id>`)
+ * so mergeRows dedupes them. Sent: caller → recipient. Result: the caller is
+ * the worker posting back to the recipient (the original sender). */
+function hubHandoffRow(kind: string, p: Record<string, unknown>, at: number, names: Names): ActivityRow | null {
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const caller = (p.caller && typeof p.caller === "object" ? p.caller : {}) as { caller_id?: string; caller_kind?: string };
+  const id = str(p.handoff_id), by = str(caller.caller_id), recipient = str(p.recipient);
+  if (!id || !by) return null;
+  const title = str(p.title) || undefined;
+  const paths = Array.isArray(p.refs) ? p.refs.filter((r): r is string => typeof r === "string" && r.length > 0).slice(0, 16) : [];
+  const artifact_refs = paths.map((ref): ArtifactRef => (/^https?:\/\//i.test(ref) ? { kind: "url", ref } : { kind: "file", ref }));
+  const sent = kind === "handoff.sent";
+  const raw = str(p.status);
+  const status = sent ? "started" : HUB_FAILED.has(raw) ? (HANDOFF_FAILED.has(raw) ? raw : "failed") : "completed";
+  const h: Handoff = sent
+    ? { id, from_agent_id: by, to_agent_id: recipient, task: title, status: "running", created_at: at, updated_at: at }
+    : { id, from_agent_id: recipient, to_agent_id: by, status, result: { summary: title, artifact_refs } as Handoff["result"], created_at: at, updated_at: at };
+  const rows = handoffRows({ ...h, status }, [], names);
+  const row = sent ? rows.find((r) => r.kind === "handoff.started") : rows.find((r) => r.kind !== "handoff.started");
+  if (!row) return null;
+  const pill = !sent && raw && !HANDOFF_DONE.has(raw) && !HUB_FAILED.has(raw) ? { text: raw.replace(/_/g, " ") } : undefined;
+  return { ...row, at, handoff: h, callerId: by, ...(pill ? { statusPill: pill } : {}) };
+}
+
+/** Details-panel handoff for an id: the gateway record when listed, else one
+ * merged from hub rows (sent gives task/route, result gives status/outputs). */
+export function handoffForId(id: string | undefined, listed: Handoff[], rows: ActivityRow[]): Handoff | undefined {
+  if (!id) return undefined;
+  const hub = rows.filter((r) => r.handoffId === id && r.handoff).sort((a, b) => a.at - b.at).map((r) => r.handoff!);
+  const found = listed.find((h) => h.id === id);
+  const refs = hub.map((h) => (h.result as { artifact_refs?: ArtifactRef[] } | null | undefined)?.artifact_refs).find((r) => r?.length);
+  if (found) {
+    const own = (found.result as { artifact_refs?: ArtifactRef[] } | null | undefined)?.artifact_refs;
+    return refs && !own?.length ? { ...found, result: { ...(found.result ?? {}), artifact_refs: refs } as Handoff["result"] } : found;
+  }
+  if (!hub.length) return undefined;
+  const sent = hub.find((h) => h.task !== undefined);
+  const merged = hub.reduce((acc, h) => ({ ...acc, ...Object.fromEntries(Object.entries(h).filter(([, v]) => v !== undefined)) }), {} as Handoff);
+  return sent ? { ...merged, from_agent_id: sent.from_agent_id, to_agent_id: sent.to_agent_id, task: sent.task } : merged;
 }
 
 /** Merge rows by key (newer wins), newest first, capped. */
