@@ -5,6 +5,7 @@ process proxies server-side. Chat spine is Gateway — not ARES :8813.
 """
 from __future__ import annotations
 
+import re
 import json
 import os
 from urllib.error import HTTPError, URLError
@@ -259,6 +260,9 @@ def _gateway_json(method: str, path: str):
 
 def route(handler, parsed, method: str) -> bool:
     """Return True if this request was handled (success or error response)."""
+    # Agent avatars are WebUI-owned (api/avatar_api.py via unified_api), not gateway resources.
+    if re.match(r"^/v1/agents/[^/]+/avatar(/.*)?$", getattr(parsed, "path", "") or ""):
+        return False
     path = parsed.path or ""
     method = (method or "GET").upper()
 
