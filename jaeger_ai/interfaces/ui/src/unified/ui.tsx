@@ -1,3 +1,4 @@
+import { PageHeader } from "../components/PageHeader";
 /**
  * Unified UI primitives (2026-10-30): Segmented, Skeleton, Empty, Toasts, Sheet, Sparkline, Badge.
  * Styling in design.css; see DESIGN.md.
@@ -91,14 +92,9 @@ export function Sparkline({ values, max, height = 56, label, color = "var(--jg-c
 // ── Page shell (one per page): title, subtitle, actions; merged tabs add sub-tabs above ──
 
 /** The one page header: h1 title, optional subtitle, actions on the right (wraps on phone). */
-export function PageHead({ title, subtitle, actions, children }: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children?: ReactNode }) {
-  return (
-    <header className="jg-u-page__head">
-      <div className="jg-u-page__title"><h1>{title}</h1>{subtitle != null && subtitle !== false && <p>{subtitle}</p>}</div>
-      {actions && <div className="jg-ui-toolbar">{actions}</div>}
-      {children}
-    </header>
-  );
+/** Alias of components/PageHeader for one release (TAB-01 §1). */
+export function PageHead(props: { title: ReactNode; subtitle?: ReactNode; actions?: ReactNode; children?: ReactNode; embedded?: boolean }) {
+  return <PageHeader {...props} />;
 }
 
 /** Sub-tabs of a merged page: a segmented tab strip; each tab is a real route. */
