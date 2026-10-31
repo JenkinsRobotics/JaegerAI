@@ -13,7 +13,8 @@ import { label, visible } from "../agents/agentsLogic";
 import { AgentFace } from "./AgentFace";
 import { ApprovalList, useApprovalSessions } from "./ApprovalTray";
 import { Badge, Empty, SkeletonRows, Sparkline, useToast, type Tone, PageHead } from "./ui";
-import { getJson, type Metrics, type SystemStatus } from "./webui";
+import { getJson, sendJson, type Metrics, type SystemStatus } from "./webui";
+import { summarizeRunner, type RunnerStatus } from "./jobsRunner";
 import { loadPanels, movePanel, savePanels, type HomePanel } from "./homeLayout";
 import { Cloud, Globe, Mic, MessageSquare, Moon, Sparkles, Zap, ChevronLeft, ChevronRight } from "../components/Icons";
 
@@ -74,11 +75,30 @@ function Tile({ icon, title, value, tone, on, onClick, disabled, hint }: { icon:
     : <div className="jg-cc__tile" role="status" title={hint}>{body}</div>;
 }
 
+function useRunner() {
+  const [s, setS] = useState<RunnerStatus>();
+  const [err, setErr] = useState<string>();
+  const read = useCallback(() => { getJson<RunnerStatus>("/v1/jobs/runner").then((x) => { setS(x); setErr(undefined); }, (e: unknown) => setErr(String((e as Error).message ?? e))); }, []);
+  useEffect(() => { read(); const t = setInterval(read, 10000); return () => clearInterval(t); }, [read]);
+  return { s, err, read };
+}
+
 export function HomeDashboard({ source, store, onNavigate }: { source: JaegerSource; store: AgentsState; onNavigate: (to: string) => void }) {
   const toast = useToast();
   const approvals = useApprovalSessions(source);
   const { m, err: metricsErr } = useMetrics();
   const status = useStatus();
+  const runner = useRunner();
+  const rs = summarizeRunner(runner.s, runner.err);
+  const toggleJob = async () => {
+    const job = rs.job;
+    if (!job) return;
+    try {
+      await sendJson("POST", `/v1/research/youtube/${encodeURIComponent(job.task_id)}/${job.paused ? "resume" : "pause"}`, {});
+      toast(job.paused ? "Research job resumed" : "Research job paused: running steps finish, no new ones start");
+      runner.read();
+    } catch (e) { toast(`Couldn't change the job: ${(e as Error).message}`, "error"); }
+  };
   const [sessions, setSessions] = useState<SessionRow[] | null>(null);
   const [tasks, setTasks] = useState<Task[] | null>(null);
   const [sessionsErr, setSessionsErr] = useState<string>();
@@ -204,6 +224,7 @@ export function HomeDashboard({ source, store, onNavigate }: { source: JaegerSou
         <Tile icon={<Zap size={18} />} title="Gateway" value={gw ? (gw.ok ? `Healthy · ${gw.latency_ms} ms` : "Unreachable") : "Checking…"} tone={gw ? (gw.ok ? "ok" : "bad") : undefined} hint="Read-only: GET /health" />
         <Tile icon={<Globe size={18} />} title="Tailscale" value={!ts ? "Checking…" : !ts.available ? "Not available" : `${ts.online ? "Online" : ts.state ?? "Offline"} · ${ts.peers_online ?? 0}/${ts.peers ?? 0} peers`} tone={ts?.available ? (ts.online ? "ok" : "warn") : undefined} hint={ts?.host ? `This Mac: ${ts.host} (read-only)` : "Read-only"} />
         <Tile icon={<Moon size={18} />} title="Focus" value={!source.notifications ? "Unavailable" : !prefs ? "…" : focusOn ? "On · notifications paused" : "Off"} on={focusOn} onClick={source.notifications && prefs ? () => void toggleFocus() : undefined} />
+        <Tile icon={<Sparkles size={18} />} title="Research jobs" value={rs.value} tone={rs.tone} hint={rs.hint} on={rs.job?.paused} onClick={rs.job ? () => void toggleJob() : undefined} />
         <Tile icon={<Mic size={18} />} title="Voice" value="Voice settings" onClick={() => onNavigate("/settings/voice")} />
         <Tile icon={<Sparkles size={18} />} title="Approvals" value={`${pendingCount + needsYou.length} need you`} tone={pendingCount + needsYou.length ? "warn" : "ok"} onClick={() => onNavigate("/work/tasks?filter=needs")} />
         <Tile icon={<MessageSquare size={18} />} title="New chat" value="Talk to Jaeger" onClick={() => chat()} />
