@@ -156,3 +156,11 @@ def test_attaching_to_a_new_task_starts_it_at_intake(api):
     api.add_attachment("t2", {"kind": "note", "text": "brief"})
     rec = api.list_pipeline()["items"]["t2"]
     assert rec["stage"] == "intake" and rec["history"][0]["to"] == "intake"
+
+
+def test_consolidated_tabs_and_retired_paths_are_spa_routes():
+    from jaeger_ai.features.webui.api.ui_shell import is_page_route
+    for p in ("/work", "/work/production", "/research/knowledge", "/models/compare", "/home/widgets", "/settings/integrations",
+              "/characters", "/tasks/gallery", "/compare", "/workspace", "/integrations"):
+        assert is_page_route(p), p
+    assert not is_page_route("/work/app.js")
