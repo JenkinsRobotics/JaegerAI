@@ -117,3 +117,84 @@ def test_mcp_chat_refuses_muse_before_turn(monkeypatch):
     with pytest.raises(Exception):
         asyncio.run(server.call_tool("chat", {"message": "hello"}))
     assert not bridge.called
+
+
+@pytest.mark.parametrize("tool,args", [
+    ("agent_info", {}), ("capability_inventory_tool", {}),
+    ("bridge_health", {}), ("bridge_query", {"what": "identity"}),
+    ("list_delegates", {}), ("cancel_turn", {"request_id": "turn-1"}),
+])
+def test_mcp_muse_refused_before_bridge_access(monkeypatch, tool, args):
+    from jaeger_ai.interfaces import mcp_server
+
+    class Bridge:
+        def __init__(self):
+            self.calls = []
+
+        def query(self, *args, **kwargs):
+            self.calls.append("query")
+            return {}
+
+        def health(self):
+            self.calls.append("health")
+            return {}
+
+        def control(self, *args, **kwargs):
+            self.calls.append("control")
+            return {}
+
+    bridge = Bridge()
+    monkeypatch.setattr(mcp_server, "_presented_caller", lambda ctx: ("muse", "proved-token"))
+    server = mcp_server.build_server(None, "test", None, bridge=bridge)
+    with pytest.raises(Exception, match="muse"):
+        asyncio.run(server.call_tool(tool, args))
+    assert bridge.calls == []
+
+
+def test_mcp_muse_cancel_refused_before_bridge_local_fallback(monkeypatch):
+    from jaeger_ai.interfaces import mcp_server
+
+    class Bridge:
+        called = False
+
+        def control(self, *args, **kwargs):
+            self.called = True
+
+    bridge = Bridge()
+    monkeypatch.setattr(mcp_server, "_presented_caller", lambda ctx: ("muse", None))
+    server = mcp_server.build_server(None, "test", None, bridge=bridge)
+    with pytest.raises(Exception, match="muse"):
+        asyncio.run(server.call_tool("cancel_turn", {"request_id": "turn-1"}))
+    assert not bridge.called
+
+
+def test_mcp_other_callers_keep_info_and_bridge_access(monkeypatch):
+    from jaeger_ai.interfaces import mcp_server
+
+    class Bridge:
+        def __init__(self):
+            self.calls = []
+
+        def query(self, name, *args):
+            self.calls.append(name)
+            return {}
+
+        def health(self):
+            self.calls.append("health")
+            return {"ok": True}
+
+        def control(self, *args, **kwargs):
+            self.calls.append("control")
+
+    for caller in ("ares", "grokbot", "rackpc"):
+        bridge = Bridge()
+        monkeypatch.setattr(mcp_server, "_presented_caller", lambda ctx, caller=caller: (caller, None))
+        server = mcp_server.build_server(None, "test", None, bridge=bridge)
+        for tool, args in [
+            ("agent_info", {}), ("capability_inventory_tool", {}),
+            ("bridge_health", {}), ("bridge_query", {"what": "identity"}),
+            ("list_delegates", {}), ("cancel_turn", {"request_id": "turn-1"}),
+        ]:
+            asyncio.run(server.call_tool(tool, args))
+        assert "control" in bridge.calls
+        assert "health" in bridge.calls
