@@ -43,10 +43,18 @@ def _git_session(handler: Any, session_id: str):
 
 
 def _git_session_workspace(handler: Any, session_id: str) -> Path | None:
-    session = _git_session(handler, session_id)
-    if session is None:
+    if not session_id:
+        bad(handler, "session_id required")
         return None
-    return Path(session.workspace)
+    try:
+        return Path(_get_session(session_id).workspace)
+    except KeyError:
+        from .gateway_read_workspace import gateway_read_workspace
+        try:
+            return gateway_read_workspace(session_id)
+        except KeyError:
+            bad(handler, "Session not found", 404)
+            return None
 
 
 def _git_session_and_workspace(handler: Any, session_id: str) -> tuple[Any, Path | None]:
