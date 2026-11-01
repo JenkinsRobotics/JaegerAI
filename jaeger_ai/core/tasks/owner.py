@@ -748,6 +748,8 @@ class GatewayTaskOwner:
         receipts = [r for r in (completion.get('verification_receipts') or []) if r.get('kind') == 'file_sha256']
         if completion.get('ok') and receipts:
             root = GatewayTaskOwner._verify_root(task)
+            if root is None:
+                return False, 'No workspace to verify artifacts against'
             for receipt in receipts:
                 raw = receipt.get('resolved') or receipt.get('path') or ''
                 path = Path(raw).expanduser()
@@ -765,15 +767,19 @@ class GatewayTaskOwner:
         return False, UNVERIFIABLE
 
     @staticmethod
-    def _verify_root(task) -> Path:
+    def _verify_root(task) -> Path | None:
         """The admitted workspace, or (J-087) the owning instance's workspace when the task was admitted
         without one (chat proposals, workflow proposals). The empty path used to resolve to the Gateway's
         cwd, so every receipt the agent wrote in its own workspace read as 'outside workspace'."""
-        raw = str(task.payload.get('execution', {}).get('workspace') or '')
-        if raw:
-            return Path(raw).expanduser().resolve()
-        from jaeger_ai.core.instance.instance import resolve_instance_dir
-        return (Path(resolve_instance_dir(None)) / 'workspace').resolve()
+        raw = str((task.payload.get('execution') or {}).get('workspace') or '')
+        if not raw:
+            # Same root the turn ran in (Gateway & WebUI, 35ef8d96): the effective workspace, then the instance's.
+            try:
+                from jaeger_agent.core.workspace import get_effective_workspace_dir
+                raw = str(get_effective_workspace_dir() or '')
+            except Exception:  # noqa: BLE001
+                raw = ''
+        return Path(raw).expanduser().resolve() if raw else None
 
     @staticmethod
     def _named_path_receipts(task):
@@ -785,9 +791,9 @@ class GatewayTaskOwner:
         """
         from jaeger_ai.core.runtime.autonomous_runner import _required_paths
         names = _required_paths(task.goal or '')
-        if not names:
-            return None
         root = GatewayTaskOwner._verify_root(task)
+        if not names or root is None:
+            return None
         receipts, fresh = [], False
         for raw in names:
             path = Path(raw).expanduser()
