@@ -12,30 +12,37 @@ from pathlib import Path
 import tempfile
 import pytest
 
-# Try to import hypothesis
+# Try to import hypothesis. When it is missing, the decorated property tests
+# are skipped via HAS_HYPOTHESIS; the stubs below only need to let the module
+# import, so every hypothesis name used here must be defined.
 try:
-    from hypothesis import given, strategies as st, settings, HealthCheck
+    from hypothesis import HealthCheck, assume, given, settings, strategies as st
     HAS_HYPOTHESIS = True
 except ImportError:
     HAS_HYPOTHESIS = False
-    # Create dummy decorators if hypothesis not available
+
     def given(*args, **kwargs):
         def decorator(func):
             return func
         return decorator
+
     def settings(*args, **kwargs):
         def decorator(func):
             return func
         return decorator
-    class st:
-        @staticmethod
-        def text(*args, **kwargs): return None
-        @staticmethod
-        def integers(*args, **kwargs): return None
-        @staticmethod
-        def lists(*args, **kwargs): return None
-        @staticmethod
-        def one_of(*args, **kwargs): return None
+
+    def assume(condition):
+        return True
+
+    HealthCheck = ()  # list(HealthCheck) -> []
+
+    class _StrategiesStub:
+        """Any st.<name>(...) call returns None when hypothesis is absent."""
+
+        def __getattr__(self, name):
+            return lambda *args, **kwargs: None
+
+    st = _StrategiesStub()
 
 
 @pytest.fixture
