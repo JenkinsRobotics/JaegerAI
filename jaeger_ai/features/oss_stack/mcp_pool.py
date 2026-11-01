@@ -44,6 +44,18 @@ class ServerSpec:
 
 
 LOCAL_PORTS = (5678, 6333, 6334, 8090, 8790, 8791, 8792, 8793, 8796, 8811, 8888, 11434, 11435, 18792, 33418, 62518)
+CHROME_DEVTOOLS_MCP = os.environ.get("JAEGER_CHROME_DEVTOOLS_MCP", "chrome-devtools-mcp@1.12.0")  # pinned
+# Chrome for Testing from Playwright's cache: never Matthew's own Chrome or profile.
+DEVTOOLS_CHROME = os.environ.get(
+    "JAEGER_DEVTOOLS_CHROME",
+    str(HOME / "Library/Caches/ms-playwright/chromium-1252/chrome-mac-arm64/Google Chrome for Testing.app"
+        / "Contents/MacOS/Google Chrome for Testing"))
+DEVTOOLS_ALLOW = frozenset({
+    "click", "close_page", "drag", "emulate", "fill", "fill_form", "get_console_message", "get_css_styles",
+    "get_network_request", "handle_dialog", "hover", "lighthouse_audit", "list_console_messages",
+    "list_network_requests", "list_pages", "navigate_page", "new_page", "performance_analyze_insight",
+    "performance_start_trace", "performance_stop_trace", "press_key", "resize_page", "select_page",
+    "take_screenshot", "take_snapshot", "type_text", "wait_for"})  # no upload_file / heap snapshots / screencast
 BLOCKED_ORIGINS = ";".join(f"{s}://{h}:{p}" for s in ("http", "https") for h in ("127.0.0.1", "localhost")
                            for p in LOCAL_PORTS)
 
@@ -69,6 +81,15 @@ def default_specs() -> dict[str, ServerSpec]:
                    ["--headless", "--browser", "chromium", "--user-data-dir", pw_profile,
                     "--block-service-workers", "--blocked-origins", BLOCKED_ORIGINS, "--output-dir", str(OSS / "playwright-out")], None,
                    description="Shared headless Chromium (own profile, no network listener)"),
+        # Loopback-only: every non-loopback request is sent to a dead proxy (Chrome bypasses
+        # proxies for localhost/127.0.0.1 by default), so only local dev/WebUI pages load.
+        ServerSpec("devtools", os.environ.get("JAEGER_NPX", "/opt/homebrew/bin/npx"),
+                   ["-y", CHROME_DEVTOOLS_MCP, "--headless", "--isolated", "--executablePath", DEVTOOLS_CHROME,
+                    "--no-usage-statistics", "--no-performance-crux", "--javascriptEvaluation=false",
+                    "--fileNavigations=false", "--viewport", "1440x900",
+                    "--chrome-arg=--proxy-server=http://127.0.0.1:9", "--chrome-arg=--proxy-bypass-list=<-loopback>;localhost;127.0.0.1",
+                    "--chrome-arg=--no-first-run"], DEVTOOLS_ALLOW,
+                   description="Chrome DevTools (headless, temp profile, loopback-only, no JS eval)"),
     ]
     return {s.name: s for s in specs}
 

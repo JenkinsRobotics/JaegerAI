@@ -72,13 +72,19 @@ def test_routes_have_search_grant_and_activity_kinds():
 
 def test_default_specs_scope_and_no_network_fetch():
     s = default_specs()
-    assert set(s) == {"docs", "handoffs", "git", "memory", "time", "browser"}
+    assert set(s) == {"docs", "handoffs", "git", "memory", "time", "browser", "devtools"}
     assert s["docs"].args == [str(Path.home() / "Documents")] and "write_file" not in s["docs"].allow
     assert s["handoffs"].args[0].endswith("Documents/Jaeger-Handoffs") and "write_file" in s["handoffs"].allow
     assert "git_commit" not in s["git"].allow and "git_add" not in s["git"].allow
     b = s["browser"].args
     assert "--headless" in b and "--user-data-dir" in b and "http://127.0.0.1:8792" in b[b.index("--blocked-origins") + 1]
     assert "--port" not in b
+    d = s["devtools"].args
+    assert "--headless" in d and "--isolated" in d and "--javascriptEvaluation=false" in d
+    assert any(a.startswith("chrome-devtools-mcp@") and a.split("@")[1][0].isdigit() for a in d)  # pinned
+    assert "--autoConnect" not in d and "--user-data-dir" not in d and "Google Chrome.app" not in " ".join(d)
+    assert "--chrome-arg=--proxy-server=http://127.0.0.1:9" in d
+    assert "upload_file" not in s["devtools"].allow and "take_screenshot" in s["devtools"].allow
 
 
 def test_pool_allowlist_refuses_before_spawn():
