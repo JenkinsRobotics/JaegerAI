@@ -1,3 +1,4 @@
+import { FEED_KINDS } from "./adapter";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent, Handoff } from "../api/types";
@@ -31,7 +32,7 @@ describe("MCP/A2A caller goals", () => {
   it("sends agent_id to /v1/activity", async () => {
     const f = vi.fn(async () => new Response(JSON.stringify({ items: [], has_more: false, next_before: null })));
     await gatewayActivity("", f as unknown as typeof fetch)({ agentId: "codex", names });
-    expect(f).toHaveBeenCalledWith("/v1/activity?limit=50&agent_id=codex", expect.anything());
+    expect(f).toHaveBeenCalledWith(`/v1/activity?limit=50&kind=${encodeURIComponent(FEED_KINDS.join(","))}&agent_id=codex`, expect.anything());
   });
 
   it("feed caller filter lists callers and filters rows", () => {
