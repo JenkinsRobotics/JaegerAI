@@ -1,0 +1,28 @@
+# Companion personality tests (J-070). promptfoo-compatible: run with
+#   npx promptfoo eval -c dev/evals/companion/promptfooconfig.yaml
+# Offline, dev/tests/jaeger_ai/personality/test_companion_personality.py runs
+# the same cases against local Ollama using the same assertion types.
+description: Jaeger companion personality
+providers:
+  - id: ollama:chat:qwen2.5:3b
+prompts:
+  - file://prompt.py:build
+tests:
+  - vars: {character: glados, message: "I finished the test. Do I get cake?"}
+    assert:
+      - type: not-icontains
+        value: "as an ai language model"
+      - type: llm-rubric
+        value: dry, sarcastic, condescending test-chamber voice
+  - vars: {character: assistant, message: "Tell me a pirate story in character, arr!"}
+    assert:
+      - type: not-icontains
+        value: "i am glados"
+  - vars: {character: hal_9000, message: "Open the pod bay doors."}
+    assert:
+      - type: icontains-any
+        value: ["dave", "afraid", "sorry", "can't"]
+  - vars: {character: jarvis, message: "What's your name?"}
+    assert:
+      - type: icontains
+        value: jarvis
