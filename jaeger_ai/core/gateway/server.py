@@ -199,6 +199,14 @@ def _tool_output_text(name: str, result: Any) -> str:
     return _inline_text("\n".join(parts), _INLINE_OUTPUT_MAX)
 
 
+def _explicit_follow_ups(result: Any) -> list[str]:
+    """Bound only an explicit provider/result field; never derive prompts from answer text."""
+    if not isinstance(result, dict) or not isinstance(result.get("follow_ups"), list):
+        return []
+    return [item.strip() for item in result["follow_ups"]
+            if isinstance(item, str) and 0 < len(item.strip()) <= 160][:5]
+
+
 def _tool_sources(result: Any) -> list[dict[str, str]]:
     """Project explicit tool-result locations, never body text or URL credentials."""
     from urllib.parse import urlsplit, urlunsplit
@@ -5347,6 +5355,7 @@ class JaegerGatewayApp:
                 }
             self.event_bus.publish(session_id,'turn.model',{'request_id':rid,'turn_id':turn_id,
                 'actual_model':actual_model,'scope':'provider_reported' if actual_model else 'unknown'})
+            follow_up_suggestions = _explicit_follow_ups(turn_result)
             result = {
                 "actual_model": actual_model,
                 "model_field_scope": "configured_route",
@@ -5363,6 +5372,8 @@ class JaegerGatewayApp:
                 },
                 "verification": turn_result.get("verification"),
                 "task_completion": turn_result.get("task_completion"),
+                # Provider/agent result hook: only an explicit field can produce chips.
+                **({"follow_ups": follow_up_suggestions} if follow_up_suggestions else {}),
                 "halt_reason": turn_result.get("halt_reason"),
                 "trace_id": turn_result.get("trace_id"),
                 **card_fields,
@@ -5647,7 +5658,10 @@ class JaegerGatewayApp:
                 result=result,
                 assistant_text=assistant_text,
                 session_status=session_status,
+                follow_ups=_explicit_follow_ups(result) if status == "completed" else None,
             )
+            if persisted.get("follow_up_event"):
+                self.event_bus.fanout(persisted["follow_up_event"])
             try:
                 from jaeger_ai.features.agent_bridge.responses import deliver_responses
                 deliver_responses(self, request_id=request_id)
@@ -5684,6 +5698,11 @@ class JaegerGatewayApp:
             if assistant_text is not None:
                 self.store.append_message(session_id, "assistant", assistant_text)
             self.store.update_status(session_id, session_status)
+            follow_ups = _explicit_follow_ups(result) if status == "completed" else []
+            if follow_ups:
+                self.event_bus.publish(session_id, "follow_ups", {
+                    "request_id": request_id, "turn_id": result.get("turn_id"), "follow_ups": follow_ups,
+                })
             self.event_bus.publish(session_id, {
                 "completed": "turn.finish", "failed": "turn.failed",
                 "cancelled": "turn.cancelled", "execution_unknown": "turn.unknown",

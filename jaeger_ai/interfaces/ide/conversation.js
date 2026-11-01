@@ -68,7 +68,7 @@ class Conversation {
     this.state = { session: null, sessions: [], text: '', reasoning: '', activity: [], timeline: [],
       approvals: [], models: null, modelsError: null, workers: [], workersError: null,
       activeTask: null, backgroundTasks: [], busy: false, queue: [], openSessionIds: this.openSessionIds,
-      feedback: {}, connected: false, status: 'Not connected', error: '', endpoint: gateway.url };
+      feedback: {}, suggestions: [], connected: false, status: 'Not connected', error: '', endpoint: gateway.url };
     this.observer = null; this.epoch = 0; this.stagedGen = 0; this.sending = false;
     this.disposed = false;
   }
@@ -120,8 +120,17 @@ class Conversation {
     this.syncTimelineProjection();
   }
   applyTimelineEvent(event) {
+    this.applySuggestionsEvent(event);
     this.timelineState = applyEvents(this.timelineState, [event]);
     this.syncTimelineProjection();
+  }
+  applySuggestionsEvent(event) {
+    if (event.event === 'turn.start') this.state.suggestions = [];
+    if (event.event === 'follow_ups') {
+      this.state.suggestions = (Array.isArray(event.data?.follow_ups) ? event.data.follow_ups : [])
+        .filter(item => typeof item === 'string' && item.trim() && item.trim().length <= 160)
+        .slice(0, 5).map(prompt => ({ label: prompt.trim(), prompt: prompt.trim(), title: prompt.trim() }));
+    }
   }
   async persist() {
     if (this.disposed) return;
@@ -158,7 +167,7 @@ class Conversation {
       }
       // A conversation switch drops this client's staged (unsent) attachments —
       // they were picked for the previous conversation, not this one.
-      if (previousSession !== session?.session_id) { this.stagedGen++; this.staged = []; }
+      if (previousSession !== session?.session_id) { this.stagedGen++; this.staged = []; this.state.suggestions = []; }
       this.restoreCompletedTimeline(session?.session_id);
       if (session && this.gateway.activity) await this.loadHistory(selected, epoch);
       if (session) await this.loadQueue(selected, epoch);
@@ -208,6 +217,7 @@ class Conversation {
   }
   async loadHistory(sid, epoch) {
     let cursor = 0, timeline = createTimelineState();
+    this.state.suggestions = [];
     const works = [];
     let userIndex = -1, active = null;
     do {
@@ -215,6 +225,7 @@ class Conversation {
       if (epoch !== this.epoch) return;
       timeline = applyEvents(timeline, page.events);
       for (const event of page.events) {
+        this.applySuggestionsEvent(event);
         const rid = event.data?.request_id;
         if (event.event === 'turn.start') {
           userIndex++;
@@ -333,6 +344,7 @@ class Conversation {
   async send(text, model = '', provider = '', workspace = '', ide = null, allowedTools = null, options = null) {
     text = String(text).trim();
     if (!text || !this.state.connected || this.state.busy || this.sending) return;
+    this.state.suggestions = [];
     clearTimeout(this.reconnectTimer);
     this.observer?.abort();
     this.sending = true;

@@ -1643,6 +1643,7 @@ class GatewaySessionStore:
         assistant_text: str | None = None,
         session_status: str | None = None,
         event_name: str | None = None,
+        follow_ups: list[str] | None = None,
     ) -> dict[str, Any]:
         """Commit result, transcript and terminal event together, once."""
         event_name = event_name or {
@@ -1697,6 +1698,11 @@ class GatewaySessionStore:
             ).fetchone()
             payload = self._request_row(updated)
             payload["replayed"] = False
+            if follow_ups and status == "completed":
+                payload["follow_up_event"] = self._insert_event(
+                    conn, row["session_id"], "follow_ups",
+                    {"request_id": request_id, "turn_id": row["turn_id"], "follow_ups": follow_ups}, now,
+                )
             payload["event"] = self._insert_event(
                 conn, row["session_id"], event_name,
                 {**result, "request_id": request_id, "turn_id": row["turn_id"], "status": status}, now,

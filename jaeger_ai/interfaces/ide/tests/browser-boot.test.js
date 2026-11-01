@@ -48,6 +48,7 @@ function element() {
     setAttribute() {},
     removeAttribute() {},
     requestSubmit() {},
+    focus() {},
   };
 }
 
@@ -107,6 +108,19 @@ test('classic browser scripts share one context and boot the webview once', () =
   assert.equal(listeners.filter(item => item.name === 'message').length, 1);
   assert.equal(typeof context.window.JaegerPresentation.groupActivity, 'function');
   assert.equal(typeof context.window.JaegerMarkdown.renderMarkdownOnce, 'function');
+});
+
+test('follow-up chip composes a draft without sending it', () => {
+  const { nodes, messages, listeners } = bootView();
+  const receive = data => listeners.find(item => item.name === 'message').callback({ data });
+  receive({ connected: true, busy: false, suggestions: [
+    { label: 'Inspect the diff?', title: 'Inspect the diff?', prompt: 'Inspect the diff?' },
+  ] });
+  const chip = nodes.get('context-chips').children.find(item => item.title === 'Inspect the diff?');
+  assert.ok(chip);
+  chip.onclick();
+  assert.equal(nodes.get('prompt').value, 'Inspect the diff?');
+  assert.equal(messages.filter(item => item.type === 'send').length, 0);
 });
 
 test('webview applies replayed connection state and renders a real transport error', () => {
