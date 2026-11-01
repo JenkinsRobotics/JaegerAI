@@ -5,6 +5,8 @@ import { choosePreset, PRESETS, usePreset } from "../shell/layoutPresets";
 import { applyTextSize, currentTextSize } from "./textSize";
 import type { Appearance } from "./SettingsDialog";
 import { avatarApi } from "../avatar/avatarModel";
+import { LogoArt } from "../brand/JaegerMark";
+import { chooseLogo, LOGOS, uploadCustomLogo, useLogo } from "../brand/logo";
 
 /** Radiogroup with arrow-key roving selection. */
 function RadioGrid<T extends string>({ label, value, items, onPick, className, render }: { label: string; value: T; items: readonly { id: T; label: string }[]; onPick: (v: T) => void; className: string; render: (i: { id: T; label: string }, on: boolean) => ReactNode }) {
@@ -31,6 +33,9 @@ export function AppearancePanel({ appearance, onAppearance, Row, Section }: { ap
   const [customs, setCustoms] = useState<IconChoice[]>(customIcons);
   const [density, setDensity] = useState<Density>(storedDensity);
   const [textSize, setTextSize] = useState(currentTextSize);
+  const logo = useLogo();
+  const [logoMsg, setLogoMsg] = useState<{ tone: "ok" | "bad"; text: string }>();
+  const logoItems = [...LOGOS, ...(logo.custom ? [{ id: "custom" as const, label: "Custom", note: "Your upload" }] : [])];
   const [iconMsg, setIconMsg] = useState<{ tone: "ok" | "bad"; text: string }>();
   const icons: IconChoice[] = [...BUILTIN_ICONS, ...customs];
   const upload = async (f: File) => {
@@ -64,6 +69,16 @@ export function AppearancePanel({ appearance, onAppearance, Row, Section }: { ap
     <Section title="Feel" anchor="feel">
       <RadioGrid label="Feel" className="jg-set-feels" value={feel} items={FEELS} onPick={(f) => { setFeel(f); applyFeel(f); }}
         render={(i, on) => <><span className="jg-set-feel__swatch" data-feel-preview={i.id} aria-hidden="true"><i /><i /><i /></span><span>{i.label}</span>{on && <span className="jg-set-check" aria-hidden="true">✓</span>}</>} />
+    </Section>
+    <Section title="Logo" anchor="logo">
+      <RadioGrid label="Logo" className="jg-set-icons jg-set-logos" value={logo.id} items={logoItems}
+        onPick={(id) => { void chooseLogo(id).then((shared) => setLogoMsg({ tone: "ok", text: shared ? "Saved for every device" : "Saved on this device only (Gateway unreachable)" })); }}
+        render={(i, on) => <><span className="jg-set-logo__preview" aria-hidden="true"><LogoArt id={i.id} custom={logo.custom} /></span><span>{i.label}</span>{on && <span className="jg-set-check" aria-hidden="true">✓</span>}</>} />
+      <div className="jg-set-icons__actions">
+        <label className="jg-u-btn">Upload logo…<input type="file" hidden accept="image/svg+xml,image/png,image/webp,image/jpeg" onChange={(e) => { const f = e.target.files?.[0]; if (f) { setLogoMsg({ tone: "ok", text: "Checking…" }); void uploadCustomLogo(f).then(() => setLogoMsg({ tone: "ok", text: "Custom logo applied on every device" }), (err: Error) => setLogoMsg({ tone: "bad", text: err.message })); } e.target.value = ""; }} /></label>
+      </div>
+      {logoMsg && <p className={logoMsg.tone === "bad" ? "jg-u-error" : "jg-sheet__hint"} role="status">{logoMsg.text}</p>}
+      <p className="jg-sheet__hint">The mark on the Chat screen and in the top bar. Built-in marks follow your layout, feel and theme colors. Uploads: SVG, PNG, WebP or JPEG under 200 KB; SVGs are cleaned of scripts and links.</p>
     </Section>
     <Section title="App icon" anchor="icon">
       <RadioGrid label="App icon" className="jg-set-icons" value={icon} items={icons} onPick={(id) => { setIcon(id); applyIcon(id); }}

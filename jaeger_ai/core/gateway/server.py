@@ -1459,6 +1459,8 @@ class JaegerGatewayApp:
         register_engine_catalog(self)
         from jaeger_ai.features.ui_layout.routes import register as register_ui_layout
         register_ui_layout(self)
+        from jaeger_ai.features.ui_layout.logo import register as register_ui_logo
+        register_ui_logo(self)
         from jaeger_ai.features.app_control.routes import register as register_app_control
         register_app_control(self)
 
