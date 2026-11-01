@@ -2,15 +2,15 @@
   "schema_version": 1,
   "scope": "jaeger_ai/features/webui/api/routes.py named HTTP dispatchers",
   "evidence": "Python AST only",
-  "route_count": 258,
+  "route_count": 271,
   "method_counts": {
     "DELETE": 3,
-    "GET": 104,
+    "GET": 113,
     "PATCH": 2,
-    "POST": 148,
-    "PUT": 1
+    "POST": 151,
+    "PUT": 2
   },
-  "route_fingerprint_sha256": "2dc67237e4439970948eb9fa7df141326595469c4d35e8d3fe196611d70d65be",
+  "route_fingerprint_sha256": "6e13faab6000ecef125903ca9b106216fed77ef28ee395e4826227a066a55ed0",
   "required_routes": [
     [
       "GET",
