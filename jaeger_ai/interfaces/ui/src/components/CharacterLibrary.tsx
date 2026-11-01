@@ -16,6 +16,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import '../characters/characters.css'
 import { cardUrlFor } from '../characters/cards'
+import { CompanionChat } from '../characters/CompanionChat'
 import { Search, X } from './Icons'
 
 
@@ -698,6 +699,8 @@ function CharacterDetail({ character, onClose, onCreateAgent }: {
             
             <p className="detail-role">{character.role}</p>
             <p className="detail-description">{character.description}</p>
+            
+            <CompanionChat characterId={character.id} name={character.name} />
             
             <div className="detail-section">
               <h4>📖 Backstory</h4>

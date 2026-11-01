@@ -307,6 +307,75 @@ async def handle_create_agent_from_template(request: web.Request) -> web.Respons
         return web.json_response({"error": str(e)}, status=500)
 
 
+def _companion_character(cid: str) -> Character:
+    root = characters_root().resolve()
+    folder = (root / cid).resolve()
+    if not folder.is_relative_to(root) or folder == root or not (folder / "character.yaml").is_file():
+        raise web.HTTPNotFound()
+    return load_character(folder)
+
+
+_companion_memory = None
+
+
+def _memory():
+    global _companion_memory
+    if _companion_memory is None:
+        from jaeger_ai.features.personality.companion import CompanionMemory
+        _companion_memory = CompanionMemory()
+    return _companion_memory
+
+
+async def handle_companion_card(request: web.Request) -> web.Response:
+    """GET /v1/companion/{id}/ccv3 — export the sheet as Character Card V3."""
+    from jaeger_ai.features.personality.companion import to_ccv3
+    return web.json_response(to_ccv3(_companion_character(request.match_info["id"])))
+
+
+async def handle_companion_import(request: web.Request) -> web.Response:
+    """POST /v1/companion/import — body is a V2/V3 card (JSON or PNG bytes)."""
+    import asyncio
+
+    from jaeger_ai.features.personality.companion import (
+        CompanionError,
+        import_ccv3,
+        read_card_bytes,
+    )
+    raw = await request.read()
+    if not raw or len(raw) > 8 * 1024 * 1024:
+        return web.json_response({"error": "card must be 1 byte to 8 MB"}, status=400)
+    try:
+        char = await asyncio.to_thread(lambda: import_ccv3(read_card_bytes(raw)))
+    except CompanionError as e:
+        return web.json_response({"error": str(e)}, status=e.status)
+    return web.json_response(character_to_dict(char), status=201)
+
+
+async def handle_companion_chat(request: web.Request) -> web.Response:
+    """POST /v1/companion/{id}/chat {message, history?} — local-model reply."""
+    import asyncio
+
+    from jaeger_ai.features.personality.companion import CompanionError, chat
+    char = _companion_character(request.match_info["id"])
+    try:
+        body = await request.json()
+    except ValueError:
+        return web.json_response({"error": "invalid JSON"}, status=400)
+    try:
+        out = await asyncio.to_thread(chat, char, str(body.get("message") or ""),
+                                      body.get("history") if isinstance(body.get("history"), list) else None,
+                                      memory=_memory())
+    except CompanionError as e:
+        return web.json_response({"error": str(e)}, status=e.status)
+    return web.json_response(out)
+
+
+async def handle_companion_memories(request: web.Request) -> web.Response:
+    """GET /v1/companion/{id}/memories — what this companion remembers."""
+    char = _companion_character(request.match_info["id"])
+    return web.json_response({"memories": _memory().recent(char.id), "vector": _memory().vec})
+
+
 def register_character_routes(app: web.Application) -> None:
     """Register character library routes on the Gateway app."""
     app.router.add_get("/v1/characters", handle_list_characters)
@@ -315,5 +384,10 @@ def register_character_routes(app: web.Application) -> None:
     app.router.add_get("/v1/characters/{id}/scene", handle_character_scene)
     app.router.add_get("/v1/characters/{id}/scene/assets/{asset}", handle_character_scene)
     app.router.add_post("/v1/agents/from-template", handle_create_agent_from_template)
+    # Companion (J-070) lives outside the public /v1/characters/ prefix so it needs auth.
+    app.router.add_get("/v1/companion/{id}/ccv3", handle_companion_card)
+    app.router.add_post("/v1/companion/import", handle_companion_import)
+    app.router.add_post("/v1/companion/{id}/chat", handle_companion_chat)
+    app.router.add_get("/v1/companion/{id}/memories", handle_companion_memories)
     
     logger.info("Character library routes registered: /v1/characters, /v1/agents/from-template")
