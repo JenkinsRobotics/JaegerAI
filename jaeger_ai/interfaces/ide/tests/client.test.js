@@ -75,6 +75,21 @@ function fixture() {
   const client = new Conversation(gateway, () => {}, async value => { saved = structuredClone(value); });
   return { gateway, client, saved: () => saved };
 }
+test('explicit follow-ups replay into chips and clear on the next turn', async () => {
+  const { gateway, client } = fixture();
+  gateway.activity = async () => ({ events: [
+    { event_id: 1, event: 'turn.start', data: { request_id: 'r1' }, timestamp: 1 },
+    { event_id: 2, event: 'follow_ups', data: { request_id: 'r1', follow_ups: ['Inspect the diff?'] }, timestamp: 2 },
+    { event_id: 3, event: 'turn.finish', data: { request_id: 'r1' }, timestamp: 3 },
+  ], next_cursor: 3, has_more: false });
+  await client.refresh('one');
+  assert.deepEqual(client.state.suggestions, [{ label: 'Inspect the diff?', prompt: 'Inspect the diff?', title: 'Inspect the diff?' }]);
+  client.applyTimelineEvent({ event_id: 4, event: 'turn.start', data: { request_id: 'r2' } });
+  assert.deepEqual(client.state.suggestions, []);
+  client.applyTimelineEvent({ event_id: 5, event: 'follow_ups', data: { request_id: 'r2', follow_ups: ['A', 'B', 'C', 'D', 'E', 'F', 3] } });
+  assert.equal(client.state.suggestions.length, 5);
+  client.dispose();
+});
 test('publishes connected before an optional control-plane call stalls', async () => {
   const { gateway } = fixture();
   gateway.approvals = () => new Promise(() => {});
