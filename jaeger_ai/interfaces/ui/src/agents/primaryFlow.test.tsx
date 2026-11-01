@@ -48,7 +48,7 @@ it("replaces only primary, preserves open draft/history, copies exact home, hide
   try {
     await flush(() => root.render(<App source={source} />)); await flush();
     const field = el.querySelector<HTMLTextAreaElement>('textarea')!;
-    expect(field.placeholder).toBe('Message Fixture A');
+    expect(field.placeholder).toBe('Ask Fixture A');
     await flush(() => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, 'owned unsent draft'); field.dispatchEvent(new Event('input', { bubbles: true })); });
     await context('Fixture A'); await click('Replace with different Bot');
     await flush(() => { const choose = el.querySelector<HTMLSelectElement>('[aria-label="Primary bot candidate"]')!; choose.value = b.id; choose.dispatchEvent(new Event('change', { bubbles: true })); });
@@ -57,7 +57,7 @@ it("replaces only primary, preserves open draft/history, copies exact home, hide
     const starIds = () => [...new Set([...el.querySelectorAll<HTMLElement>('[data-primary-agent-id]')].map((n) => n.dataset.primaryAgentId))];
     expect(starIds()).toEqual([b.id]);
     expect(a.role).toBe('specialist'); expect(b.role).toBe('specialist'); expect(b.pinned).toBe(true);
-    expect(el.querySelector('textarea')).toBe(field); expect(field.value).toBe('owned unsent draft'); expect(field.placeholder).toBe('Message Fixture A');
+    expect(el.querySelector('textarea')).toBe(field); expect(field.value).toBe('owned unsent draft'); expect(field.placeholder).toBe('Ask Fixture A');
     await context('Fixture A');
     expect(el.querySelector('[role=menu]')?.textContent).toContain('Rename Bot');
     expect(el.querySelector('[role=menu]')?.textContent).not.toContain('Replace with different Bot');
@@ -86,7 +86,7 @@ it("replaces only primary, preserves open draft/history, copies exact home, hide
     expect(b.archived).toBe(false); expect(b.primary).toBe(true); expect(starIds()).toEqual([b.id]); expect(field.value).toBe('owned unsent draft');
     await flush(() => root.unmount()); root = createRoot(el);
     await flush(() => root.render(<App source={source} />)); await flush();
-    expect(el.querySelector<HTMLTextAreaElement>('textarea')!.placeholder).toBe('Message Fixture B');
+    expect(el.querySelector<HTMLTextAreaElement>('textarea')!.placeholder).toBe('Ask Fixture B');
     expect(starIds()).toEqual([b.id]);
     expect(markRead).toHaveBeenCalledWith(b.id, null); expect(unread[b.id]).toBe(false);
   } finally {

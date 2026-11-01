@@ -5,22 +5,24 @@ describe("router", () => {
   it("has the nine consolidated tabs", () => {
     expect(PAGES).toEqual(["home", "chat", "agents", "work", "research", "studio", "models", "machine", "settings"]);
   });
-  it("parses real page paths and falls back to home", () => {
-    expect(parseRoute("/").page).toBe("home");
+  it("opens / to Chat, keeps /home, and falls back to Chat", () => {
+    expect(parseRoute("/").page).toBe("chat");
+    expect(parseRoute("/home").page).toBe("home");
     expect(parseRoute("/chat").page).toBe("chat");
     expect(parseRoute("/settings/voice/").rest).toBe("voice");
-    expect(parseRoute("/nope").page).toBe("home");
+    expect(parseRoute("/nope").page).toBe("chat");
     expect(parseRoute("/chat", "?agent=native:jaeger").params.get("agent")).toBe("native:jaeger");
   });
   it("resolves sub-tabs, defaulting to the first", () => {
     expect(parseRoute("/work")).toMatchObject({ page: "work", sub: "pipeline", rest: "" });
     expect(parseRoute("/work/tasks/gallery")).toMatchObject({ page: "work", sub: "tasks", rest: "gallery" });
     expect(parseRoute("/research/knowledge").sub).toBe("knowledge");
-    expect(parseRoute("/").sub).toBe("overview");
+    expect(parseRoute("/home").sub).toBe("overview");
     expect(parseRoute("/home/widgets").sub).toBe("widgets");
   });
   it("maps every page and sub-tab to a path", () => {
-    expect(pathOf("home")).toBe("/");
+    expect(pathOf("chat")).toBe("/");
+    expect(pathOf("home")).toBe("/home");
     expect(pathOf("home", "widgets")).toBe("/home/widgets");
     expect(pathOf("agents", "characters")).toBe("/agents/characters");
     expect(pathOf("models", "library")).toBe("/models");
@@ -42,7 +44,7 @@ describe("router", () => {
   });
   it("rewrites the old ?ui= links to the matching page", () => {
     expect(legacyRedirect("/", "?ui=apple")).toBe("/agents/characters");
-    expect(legacyRedirect("/", "?ui=windows")).toBe("/");
+    expect(legacyRedirect("/", "?ui=windows")).toBe("/home");
     expect(legacyRedirect("/", "?ui=default&home=fallback")).toBe("/chat?home=fallback");
     expect(legacyRedirect("/", "")).toBeNull();
   });

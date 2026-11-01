@@ -24,6 +24,7 @@ import { SessionQueue } from "./SessionQueue";
 import { WebHost } from "./webHost";
 import type { HomeEntry, HomeSessions } from "./homeSession";
 import { PostMessage, SummaryCard } from "./HomeEntries";
+import { ChatHome } from "./ChatHome";
 import { stageSavedMedia, addFiles, autoGrow, bytesUploadEnabled, readBase64, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
 import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
@@ -672,10 +673,9 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   const primary = primaryAction({ running: Boolean(active), hasContent: hasText, voiceChat, dictation });
   const tint = { "--jg-agent-color": avatarColor(agent.id) } as CSSProperties;
   return (
-    <div className={`jg-chat${dropping ? " is-dropping" : ""}`} style={tint} ref={chatRoot} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
+    <div className={`jg-chat${session && !session.turns.length ? " is-home" : ""}${dropping ? " is-dropping" : ""}`} style={tint} ref={chatRoot} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <div className="jg-chat__band" data-aether-window-drag-region>
         {host.sessionFiles && sessionId && <button type="button" aria-expanded={filesOpen} onClick={()=>setFilesOpen(value=>!value)}>Files</button>}
-        <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={Boolean(active)} />
         <div className="jg-agent-pill-wrap">
           <button ref={pill} type="button" className="jg-agent-pill" title={`${agent.name}`} aria-haspopup="menu" aria-expanded={menuOpen}
             onClick={() => (host instanceof WebHost && host.openHistory ? setMenuOpen((o) => !o) : host.openDetails?.(agent.id))}>
@@ -691,7 +691,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         <div className="jg-chat__column">
           {filesOpen && host.sessionFiles && sessionId && <><SessionFiles key={sessionId} files={host.sessionFiles} sessionId={sessionId} onClose={()=>setFilesOpen(false)} onSelectMedia={bytesUploadEnabled()&&draftReady&&!active&&!recoveryBlocked?file=>{try{if(!sessionId||active||recoveryBlocked)return;stageSavedMedia([],sessionId,file);setFiles(current=>{const result=stageSavedMedia(current,sessionId,file);setFileNote(result.note);return result.files;});}catch(e){setFileNote(String(e));}}:undefined}/>{host.taskArtifacts&&<TaskArtifacts key={"artifacts:"+sessionId} controls={host.taskArtifacts} sessionId={sessionId}/>}</>}
           {loadError && <ErrorState title="Couldn't load this chat" error={loadError} onRetry={() => setAttempt((n) => n + 1)} />}
-          {session && !session.turns.length && <p className="jg-chat__empty">What should we work on?</p>}
+          {session && !session.turns.length && <ChatHome />}
           {session && (older || olderError) && (
             <div className="jg-older" role="status">
               {loadingOlder ? "Loading earlier messages…"
@@ -751,17 +751,20 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
           </div>
         )}
         <input ref={picker} type="file" multiple hidden tabIndex={-1} onChange={(e) => { takeFiles(e.currentTarget.files); e.currentTarget.value = ""; }} />
-        <button ref={plus} type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach file" title="Attach file" aria-haspopup="menu"
-          aria-expanded={composerMenu} onClick={() => setComposerMenu(true)}><PlusIcon /></button>
-        <Menu open={composerMenu} anchor={composerMenu ? plus.current : null} ariaLabel="Composer actions" placement="top-start" onClose={() => setComposerMenu(false)}
-          items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
-          onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
         {recoveryStatus !== "clear" && <div role="status" className="jg-recovery">{recoveryStatus === "checking" ? "Checking saved work…" : <>Previous request outcome unknown. It was not replayed. <button type="button" disabled={acknowledging || !unknownRequest} onClick={() => void continueWithoutReplay()}>Continue without replaying</button> <button type="button" onClick={() => void checkSavedRequest()}>Check again</button></>}</div>}
         {fileNote && !files.length && <div role="status">{fileNote}</div>}
         {quote && <div className="jg-chip" aria-label="Quoted reply"><span>{quote.text}</span><button type="button" aria-label="Cancel reply" onClick={() => setQuote(undefined)}>×</button></div>}
         {preparingFiles && <div role="status">Preparing attachments…</div>}
         {draftError && <div role="alert">{draftError}</div>}
-        <textarea spellCheck={devicePreferences.spellcheck} disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : `${typeof document !== "undefined" && document.documentElement.classList.contains("jg-phone") ? "Ask" : "Message"} ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
+        <textarea spellCheck={devicePreferences.spellcheck} disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : agent.id === "native:jaeger" ? "Ask Anything" : `Ask ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
+        <div className="jg-composer__bar">
+        <button ref={plus} type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach file" title="Attach file" aria-haspopup="menu"
+          aria-expanded={composerMenu} onClick={() => setComposerMenu(true)}><PlusIcon /></button>
+        <Menu open={composerMenu} anchor={composerMenu ? plus.current : null} ariaLabel="Composer actions" placement="top-start" onClose={() => setComposerMenu(false)}
+          items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
+          onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
+          <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={Boolean(active)} />
+          <span className="jg-composer__spacer" />
         {dictation && primary !== "dictate" && (
           <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
             aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
@@ -775,9 +778,10 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
               ? <button type="button" className={`jg-send${listening === "dictation" ? " is-listening" : ""}`}
                   aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
                   onClick={() => void toggleListening("dictation")}><MicIcon /></button>
-            : <button type="button" className={`jg-send${listening === "voice" ? " is-listening" : ""}`}
+            : <button type="button" className={`jg-send jg-send--speak${listening === "voice" ? " is-listening" : ""}`}
                 aria-label={listening === "voice" ? "Stop and send" : "Start voice chat"} aria-pressed={listening === "voice"}
-                disabled={listening === "dictation"} onClick={() => void toggleListening("voice")}><WaveIcon /></button>}
+                disabled={listening === "dictation"} onClick={() => void toggleListening("voice")}><WaveIcon /><span className="jg-send__label">{listening === "voice" ? "Send" : "Speak"}</span></button>}
+        </div>
       </form>
     </div>
   );

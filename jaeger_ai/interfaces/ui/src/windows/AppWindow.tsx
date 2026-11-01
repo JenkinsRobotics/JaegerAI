@@ -75,8 +75,10 @@ export function AppWindow({ source }: { source: JaegerSource }) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen((v) => !v) }
       else if ((e.metaKey || e.ctrlKey) && e.key === ',' && active !== 'chat') { e.preventDefault(); go('/settings') }
     }
+    const onPalette = () => setPaletteOpen(true)
     addEventListener('keydown', onKey)
-    return () => removeEventListener('keydown', onKey)
+    addEventListener('jaeger:palette', onPalette)
+    return () => { removeEventListener('keydown', onKey); removeEventListener('jaeger:palette', onPalette) }
   }, [go, active])
 
   // Each merged tab remembers the sub-tab you were last on (nav click returns there).
