@@ -428,6 +428,10 @@ def build_server(client: Any, instance: str, model: str | None,
         relay_caller, relay_token = _presented_caller(ctx)
         if relay_token is None and os.environ.get("JAEGER_MCP_TOKEN_FILE"):
             relay_caller, relay_token = _agent_bridge_caller(ctx)
+        if relay_caller == "muse":
+            from jaeger_ai.core.gateway.caller_auth import prefixed_route_allowed
+            if not prefixed_route_allowed("POST", "/v1/sessions/{id}/turns", relay_caller):
+                raise PermissionError("Caller 'muse' may not use chat")
         session = (session_id or "").strip() if relay_caller == "jaegerd" else _mcp_session(session_id, relay_caller or "mcp")
         if bridge is not None:
             return _bridge_chat(

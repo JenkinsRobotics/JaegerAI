@@ -29,6 +29,8 @@ def register(mcp, client_for_context):
         ctx: Context | None = None,
     ) -> dict:
         """Store untrusted message data; this never starts a goal or a tool."""
+        if getattr(client_for_context(ctx), "caller", None) == "muse":
+            raise PermissionError("Caller 'muse' may not use send_message")
         return call(
             ctx,
             "POST",
