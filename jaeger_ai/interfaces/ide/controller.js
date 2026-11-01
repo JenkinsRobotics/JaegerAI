@@ -29,6 +29,7 @@
 
 const vscode = require('vscode');
 const { Gateway, GatewayError } = require('./gateway');
+const { parseProviderModel } = require('./media/presentation');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
@@ -323,8 +324,10 @@ class JaegerController {
       },
     };
 
-    const model = vscode.workspace.getConfiguration('jaeger').get('model');
-    if (model) payload.model = model;
+    // jaeger.model holds the chat panel's provider::model value; send the same
+    // provider/model pair the panel and @jaeger admit.
+    const selected = parseProviderModel(vscode.workspace.getConfiguration('jaeger').get('model'));
+    if (selected.model) { payload.model = selected.model; if (selected.provider) payload.provider = selected.provider; }
 
     this._setState({ status: 'thinking' });
 

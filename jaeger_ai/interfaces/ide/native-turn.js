@@ -9,9 +9,14 @@ const endEvents = new Set(['turn.finish', 'turn.failed', 'turn.cancelled', 'turn
 async function observeNativeTurn({ gateway, sessionId, requestId, admitted, signal, stream, ideHandler, onApproval }) {
   let cursor = Math.max(0, Number(admitted.start_event_id || 1) - 1);
   let text = '', receipt = admitted, interrupted = false;
+  // Sources, follow-ups and the search count arrive before turn.finish (the
+  // Gateway stores them in the same transaction, with lower event ids).
+  const sources = [], seenSources = new Set();
+  let followUps = [], searchCount = null;
+  const extras = () => ({ sources, followUps, searchCount });
   if (terminal.has(receipt.status)) {
     try { receipt = await gateway.receipt(sessionId, requestId); }
-    catch { return { receipt: null, text, interrupted: true }; }
+    catch { return { receipt: null, text, interrupted: true, ...extras() }; }
   }
   for (let attempt = 0; attempt < 3 && !terminal.has(receipt.status); attempt++) {
     if (!signal.aborted) {
@@ -31,6 +36,14 @@ async function observeNativeTurn({ gateway, sessionId, requestId, admitted, sign
           else if (event.event === 'approval.resolved') stream.progress('Approval resolved · Jaeger is working...');
           else if (event.event === 'turn.progress') stream.progress(String(data.text || 'Jaeger is working...'));
           else if (event.event === 'tool.started') stream.progress(`Jaeger is using ${String(data.tool || 'a tool')}...`);
+          else if (event.event === 'sources') {
+            for (const item of parseSources(data)) {
+              const key = `${item.kind}:${item.location}`;
+              if (seenSources.has(key) || sources.length >= 20) continue;
+              seenSources.add(key); sources.push(item);
+            }
+          } else if (event.event === 'follow_ups') followUps = parseFollowUps(data);
+          else if (event.event === 'search.count') searchCount = parseSearchCount(data) || searchCount;
           if (endEvents.has(event.event)) break;
         }
       } catch (error) {
@@ -40,12 +53,59 @@ async function observeNativeTurn({ gateway, sessionId, requestId, admitted, sign
       }
     }
     try { receipt = await gateway.receipt(sessionId, requestId); }
-    catch { return { receipt: null, text, interrupted: true }; }
+    catch { return { receipt: null, text, interrupted: true, ...extras() }; }
     if (terminal.has(receipt.status) || signal.aborted) break;
     interrupted = true;
     if (attempt < 2) stream.progress('Connection interrupted · Reconnecting to the accepted request...');
   }
-  return { receipt, text, interrupted };
+  return { receipt, text, interrupted, ...extras() };
+}
+
+// Same filters as the panel (media/timeline.js and conversation.js) so both
+// surfaces show the same Sources and follow-ups.
+function parseSources(data) {
+  return (Array.isArray(data?.sources) ? data.sources : [])
+    .filter(item => ['url', 'file'].includes(item?.kind) && typeof item?.location === 'string' && item.location)
+    .map(item => ({ kind: item.kind, location: item.location, ...(typeof item.title === 'string' && item.title ? { title: item.title } : {}) }));
+}
+
+function parseFollowUps(data) {
+  return (Array.isArray(data?.follow_ups) ? data.follow_ups : [])
+    .filter(item => typeof item === 'string' && item.trim() && item.length <= 160)
+    .map(item => item.trim()).slice(0, 5);
+}
+
+function parseSearchCount(data) {
+  const searches = data?.searches, completed = data?.completed, failed = data?.failed;
+  if (!Number.isSafeInteger(searches) || searches < 1) return null;
+  if (![completed, failed].every(n => Number.isSafeInteger(n) && n >= 0 && n <= searches)) return null;
+  return { searches, completed, failed };
+}
+
+// Native chat equivalent of the panel's Sources row. stream.reference takes a
+// vscode.Uri; toUri is injected so this module stays free of the vscode API.
+function renderNativeSources(stream, { sources, searchCount } = {}, toUri) {
+  if (searchCount) {
+    const { searches, failed } = searchCount;
+    stream.markdown(`\n\n_Searched ${searches} time${searches === 1 ? '' : 's'}${failed ? ` (${failed} failed)` : ''}._`);
+  }
+  if (!sources?.length) return;
+  if (typeof stream.reference === 'function' && typeof toUri === 'function') {
+    for (const item of sources) {
+      try { stream.reference(toUri(item)); } catch { /* an unparseable location is skipped */ }
+    }
+    return;
+  }
+  const label = item => (item.title || item.location).replace(/[\[\]]/g, '');
+  stream.markdown(`\n\n**Sources**\n\n${sources.map(item => item.kind === 'url'
+    ? `- [${label(item)}](${item.location})` : `- \`${item.location.replace(/`/g, '')}\``).join('\n')}`);
+}
+
+// Native follow-ups: VS Code calls provideFollowups with the result returned by
+// the participant handler, so the list travels in result.metadata.
+function nativeFollowups(result) {
+  const list = Array.isArray(result?.metadata?.jaegerFollowUps) ? result.metadata.jaegerFollowUps : [];
+  return list.filter(item => typeof item === 'string' && item).slice(0, 5).map(prompt => ({ prompt, label: prompt }));
 }
 
 function renderNativeOutcome(stream, { receipt, text }, cancelled) {
@@ -68,4 +128,4 @@ function renderNativeOutcome(stream, { receipt, text }, cancelled) {
   }
 }
 
-module.exports = { observeNativeTurn, renderNativeOutcome };
+module.exports = { observeNativeTurn, renderNativeOutcome, renderNativeSources, nativeFollowups, parseSources, parseFollowUps, parseSearchCount };
