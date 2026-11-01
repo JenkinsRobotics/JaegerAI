@@ -881,6 +881,10 @@ class JaegerGatewayApp:
                 from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
                 inst = os.environ.get("JAEGER_INSTANCE_DIR")
                 layout = InstanceLayout(root=Path(inst) if inst else resolve_instance_dir())
+                # Classify before bind creates memory/state.db. Otherwise a
+                # fresh instance looks like an established one on its first GET.
+                from jaeger_ai.core.instance.first_boot import reserve_fresh_instance
+                reserve_fresh_instance(layout)
                 # Bind the workspace first and on its own: Library, Workflows
                 # and other file-backed routes only need the layout, so a
                 # state.db problem must not leave them answering 503.
@@ -1425,6 +1429,9 @@ class JaegerGatewayApp:
         self.app.router.add_post("/v1/stop", self.handle_engage_stop)
         self.app.router.add_post("/v1/stop/release", self.handle_release_stop)
         self.app.router.add_get("/v1/runtime/status", self.handle_runtime_status)
+        self.app.router.add_get("/v1/first-run", self.handle_first_run_status)
+        self.app.router.add_post("/v1/first-run/setup", self.handle_first_run_setup)
+        self.app.router.add_post("/v1/first-run/skip", self.handle_first_run_skip)
         self.app.router.add_get("/version", self.handle_version)
         
         # Character Library — templates for creating agents (Grok-style bot picker)
@@ -1993,6 +2000,78 @@ class JaegerGatewayApp:
                     "execution_verified": False}
         except Exception as exc:
             return {"ok": False, "error": type(exc).__name__, "execution_verified": False}
+
+    @staticmethod
+    def _first_run_layout():
+        from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
+        inst = os.environ.get("JAEGER_INSTANCE_DIR")
+        return InstanceLayout(root=Path(inst) if inst else resolve_instance_dir())
+
+    @staticmethod
+    def _first_run_mutation_allowed(request: web.Request) -> bool:
+        # Gateway auth runs before this handler. Only owner surfaces may change
+        # first run, and the socket peer must be local/private (no forwarded
+        # header can manufacture a local origin).
+        import ipaddress
+        caller = request.get("caller")
+        if getattr(caller, "name", None) not in {"webui", "menubar", "cli", "ide"}:
+            return False
+        try:
+            address = ipaddress.ip_address(request.remote or "")
+        except ValueError:
+            return False
+        return address.is_loopback or address.is_private
+
+    @staticmethod
+    def _first_run_payload(layout):
+        from jaeger_ai.core.instance import first_boot
+        first_boot.ensure_migrated(layout)
+        record = first_boot.snapshot(layout)
+        state = first_boot.status(layout)
+        return {"status": state.value,
+                "completed": state is first_boot.FirstBootStatus.COMPLETED,
+                "skipped": bool(record.get("skipped_at")),
+                "character_id": record.get("character_id"),
+                "model_selection": record.get("model_selection")}
+
+    async def handle_first_run_status(self, request: web.Request) -> web.Response:
+        return web.json_response(self._first_run_payload(self._first_run_layout()),
+                                 headers={"Cache-Control": "no-store"})
+
+    async def handle_first_run_setup(self, request: web.Request) -> web.Response:
+        if not self._first_run_mutation_allowed(request):
+            return web.json_response({"error": "Local owner access required"}, status=403)
+        layout = self._first_run_layout()
+        current = self._first_run_payload(layout)
+        if current["completed"]:
+            return web.json_response(current, headers={"Cache-Control": "no-store"})
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("Expected a JSON object")
+            # Expose only the existing setup choices, not arbitrary config edits.
+            allowed = {"character_id", "awake_provider", "awake_model"}
+            if set(body) - allowed:
+                raise ValueError("Unknown setup field")
+            if not all(str(body.get(key) or "").strip() for key in allowed):
+                raise ValueError("character_id, awake_provider and awake_model are required")
+            from jaeger_ai.core.instance.onboarding_setup import complete_setup
+            complete_setup(layout, body)
+        except (ValueError, TypeError) as exc:
+            return web.json_response({"error": str(exc)}, status=400)
+        return web.json_response(self._first_run_payload(layout),
+                                 headers={"Cache-Control": "no-store"})
+
+    async def handle_first_run_skip(self, request: web.Request) -> web.Response:
+        if not self._first_run_mutation_allowed(request):
+            return web.json_response({"error": "Local owner access required"}, status=403)
+        layout = self._first_run_layout()
+        current = self._first_run_payload(layout)
+        if not current["completed"]:
+            from jaeger_ai.core.instance.first_boot import skip
+            skip(layout)
+        return web.json_response(self._first_run_payload(layout),
+                                 headers={"Cache-Control": "no-store"})
 
     async def handle_runtime_status(self, request: web.Request) -> web.Response:
         from jaeger_ai.core.entity.runtime_status import collect_runtime_status
