@@ -28,13 +28,9 @@ SEARCH_KINDS = ("search.query", "search.fetch", "model.route", "tool.call", "doc
 ALL_KINDS = KINDS + CALLER_KINDS + BRIDGE_KINDS + SEARCH_KINDS
 MAX_ROWS = 50_000
 MAX_LIMIT = 200
-_ready: set[int] = set()
 
 
 def ensure(conn: sqlite3.Connection) -> None:
-    key = id(conn)
-    if key in _ready:
-        return
     exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='agent_activity'").fetchone()
     conn.execute("CREATE TABLE IF NOT EXISTS agent_activity (event_id INTEGER PRIMARY KEY, ts REAL NOT NULL, "
                  "kind TEXT NOT NULL, agent_id TEXT, actor_id TEXT, session_id TEXT NOT NULL, "
@@ -61,7 +57,6 @@ def ensure(conn: sqlite3.Connection) -> None:
                 except ValueError:
                     continue
                 record(conn, int(r[0]), str(r[1]), str(r[2]), data, float(r[4]))
-    _ready.add(key)
 
 
 def _handoff(data: dict) -> dict:
