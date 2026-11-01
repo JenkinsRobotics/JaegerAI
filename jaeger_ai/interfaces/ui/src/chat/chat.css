@@ -290,3 +290,41 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
   border: 1px solid var(--aether-color-border); background: var(--aether-color-bg-control); color: var(--aether-color-text); }
 .jg-question__error { margin: 8px 0 0; font-size: 12px; color: var(--aether-color-error); }
 .jg-question__foot { margin-top: 10px; font-size: 12px; color: var(--aether-color-text-muted); }
+
+/* Chat home + composer (2026-11-01, after the Grok iOS home). Tokens only, so each layout preset
+ * (Glass, Arc, Linear, Dia) restyles it. */
+.jg-chat-home { display: flex; flex-direction: column; align-items: center; gap: 18px; margin-top: 14vh; padding: 0 12px; text-align: center; }
+.jg-chat-home__mark { width: min(38vw, 168px); height: auto; opacity: 0.14; filter: grayscale(1); pointer-events: none; user-select: none; }
+.jg-chat-home__title { margin: 0; color: var(--aether-color-text-dim); font-size: calc(var(--jg-font-body) * 1.25); }
+.jg-chat-home__chips {
+  display: flex; gap: 8px; max-width: 100%; overflow-x: auto; padding: 2px 4px 6px; scrollbar-width: none;
+  justify-content: safe center; scroll-snap-type: x proximity;
+}
+.jg-chat-home__chips::-webkit-scrollbar { display: none; }
+.jg-chat-home__chip {
+  flex: none; display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border-radius: 999px; scroll-snap-align: start;
+  border: 0; background: var(--jg-color-elevated); color: var(--aether-color-text); font: inherit; font-size: var(--jg-font-small); font-weight: 500; white-space: nowrap; cursor: pointer;
+  box-shadow: 0 0 0 0.5px var(--aether-color-border);
+}
+.jg-chat-home__chip:hover { background: var(--aether-color-bg-hover); }
+.jg-chat-home__chip:focus-visible { outline: 2px solid var(--aether-color-border-focus); outline-offset: 1px; }
+.jg-chat-home__chip-icon { display: grid; place-items: center; color: var(--aether-color-text-dim); }
+.jg-chat-home__chip-icon svg { width: 15px; height: 15px; }
+
+.jg-composer { flex-direction: column; align-items: stretch; gap: 8px; padding: 12px 12px 10px; border-radius: 26px; }
+.jg-composer__input { padding: 4px 6px; min-height: 30px; }
+.jg-composer__bar { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.jg-composer__spacer { flex: 1; }
+.jg-composer__bar .jg-composer__icon { width: 36px; height: 36px; }
+.jg-composer__bar .jg-composer__icon--filled { background: transparent; box-shadow: 0 0 0 1px var(--aether-color-border); }
+.jg-composer__bar .jg-runtime-trigger {
+  position: static; max-width: 40%; height: 36px; padding: 0 14px; border-radius: 999px; border: 0;
+  background: transparent; color: var(--aether-color-text); box-shadow: 0 0 0 1px var(--aether-color-border); font-size: var(--jg-font-small);
+}
+.jg-composer__bar .jg-send { width: 36px; height: 36px; }
+.jg-send--speak { width: auto !important; display: inline-flex; gap: 6px; padding: 0 16px; border-radius: 999px; background: var(--aether-color-text); color: var(--aether-color-bg, var(--jg-color-shade)); font: inherit; font-weight: 600; font-size: var(--jg-font-small); }
+.jg-chat.is-home .jg-composer { margin-bottom: 20px; }
+@media (max-width: 600px) {
+  .jg-composer { width: calc(100% - 20px); }
+  .jg-chat-home { margin-top: 10vh; }
+}
