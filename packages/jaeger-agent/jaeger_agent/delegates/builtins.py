@@ -1,5 +1,8 @@
 """Registration of Jaeger's independently packaged delegate features."""
 
+import os
+
+from .opencode.http_runtime import create_http_runtime
 from .claude import create_runtime as create_claude
 from .codex import create_runtime as create_codex
 from .cursor import create_runtime as create_cursor
@@ -28,4 +31,6 @@ def register_builtin_delegates(
         create_opencode,
     ):
         target.register(factory(), replace=True)
+    if os.environ.get("JAEGER_OPENCODE_HTTP_ENABLED", "").strip().lower() in {"1", "true", "yes"}:
+        target.register(create_http_runtime(), replace=True)
     return target
