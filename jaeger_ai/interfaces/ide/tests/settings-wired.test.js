@@ -26,7 +26,8 @@ function fixture(settings = {}) {
   const mod = new Module(filename, module);
   mod.filename = filename;
   mod.paths = Module._nodeModulePaths(path.dirname(filename));
-  mod.require = request => request === 'vscode' ? vscode : request === './gateway' ? { Gateway: class {}, GatewayError: Error } : require(request);
+  mod.require = request => request === 'vscode' ? vscode : request === './gateway' ? { Gateway: class {}, GatewayError: Error }
+    : require(request.startsWith('./') ? path.join(path.dirname(filename), request) : request);
   mod._compile(fs.readFileSync(filename, 'utf8'), filename);
   const sent = [];
   const gateway = { create: async () => ({ id: 'session' }), send: async (_id, body) => { sent.push(body); return {}; } };
@@ -56,10 +57,14 @@ test('model setting reaches the Gateway turn body', async () => {
   const f = fixture({ model: 'ollama::test-model' });
   f.controller.openChat = async () => {};
   await f.controller.ask('hello');
-  assert.equal(f.sent[0].model, 'ollama::test-model');
+  // The panel's picker stores provider::model; the Gateway takes them apart.
+  assert.deepEqual([f.sent[0].provider, f.sent[0].model], ['ollama', 'test-model']);
+  f.settings.model = 'plain-model';
+  await f.controller.ask('plain');
+  assert.deepEqual([f.sent[1].provider, f.sent[1].model], [undefined, 'plain-model']);
   f.settings.model = '';
   await f.controller.ask('again');
-  assert.equal('model' in f.sent[1], false);
+  assert.equal('model' in f.sent[2], false);
 });
 
 test('webuiUrl overrides derived chat URL for normal and session chat', async () => {

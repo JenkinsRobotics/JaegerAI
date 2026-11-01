@@ -109,7 +109,7 @@ def main() -> None:
         parser.error("output-root must be outside the repository")
     output.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix="jaeger-ide-", dir=output))
-    for name in ("package.json", "extension.js", "gateway.js", "conversation.js", "commands.js", "native-turn.js", "copilot-bridge.js", "controller.js",
+    for name in ("package.json", "extension.js", "gateway.js", "conversation.js", "commands.js", "native-turn.js", "copilot-bridge.js", "controller.js", "chat-panel.js",
                  "README.md", "VERIFICATION.md", "THIRD_PARTY_NOTICES.md"):
         shutil.copy2(source / name, stage / name)
     # Editors and patch tools may leave rejected/backup files beside live
@@ -120,7 +120,7 @@ def main() -> None:
     )
     smd_path = repo / _SMD_SOURCE
     if not smd_path.exists():
-        # Only extension-legacy.js (not shipped) loads the streaming-markdown renderer; the controller
+        # Only chat-panel.js loads the streaming-markdown renderer; the controller
         # build doesn't need it, so a checkout without the untracked vendor copy can still package.
         print(f"note: {_SMD_SOURCE} not present; packaging without the legacy renderer", flush=True)
     else:
