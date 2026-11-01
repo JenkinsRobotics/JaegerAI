@@ -32,6 +32,7 @@ import { ToastProvider, SkeletonRows, TabbedPage } from '../unified/ui'
 const App = lazy(() => import('../App').then((m) => ({ default: m.App })))
 const TasksPage = lazy(() => import('./TasksPage').then((m) => ({ default: m.TasksPage })))
 const WorkspacePage = lazy(() => import('./WorkspacePage').then((m) => ({ default: m.WorkspacePage })))
+const CheckpointsView = lazy(() => import('../unified/CheckpointsView').then((m) => ({ default: m.CheckpointsView })))
 const WorkspaceBrowser = lazy(() => import('../unified/WorkspaceBrowser').then((m) => ({ default: m.WorkspaceBrowser })))
 const MachineControlPanel = lazy(() => import('../machine-control/MachineControlPanel').then((m) => ({ default: m.MachineControlPanel })))
 const SharePointPanel = lazy(() => import('../sharepoint/SharePointPanel').then((m) => ({ default: m.SharePointPanel })))
@@ -126,6 +127,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
           case 'production': return <ProductionPage source={source} params={active === 'work' && route.sub === 'production' ? route.params : new URLSearchParams()} onNavigate={go} />
           case 'calendar': return <CalendarPage source={source} onNavigate={go} />
           case 'backlog': return <BacklogPage params={paramsOf('work')} />
+          case 'checkpoints': return <CheckpointsView source={source} params={paramsOf('work')} />
           case 'workspace': return <WorkspaceBrowser source={source} params={paramsOf('work')} />
           default: return <PipelinePage source={source} params={active === 'work' && route.sub === 'pipeline' ? route.params : new URLSearchParams()} onNavigate={go} />
         }

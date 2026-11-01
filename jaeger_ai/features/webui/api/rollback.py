@@ -67,7 +67,7 @@ def _checkpoint_root() -> Path:
     return _hermes_home() / "checkpoints"
 
 
-def _resolve_workspace(workspace: str) -> str:
+def _resolve_workspace(workspace: str, *, trusted_workspace: bool = False) -> str:
     """Validate and return the canonical workspace path.
 
     Security: workspace must match a known configured workspace
@@ -79,6 +79,8 @@ def _resolve_workspace(workspace: str) -> str:
     resolved = os.path.realpath(workspace)
     if not os.path.isdir(resolved):
         raise ValueError(f"Workspace does not exist: {workspace}")
+    if trusted_workspace:
+        return resolved
     # Security: confirm workspace is in the known list
     try:
         from api.workspace import load_workspaces
@@ -211,7 +213,7 @@ def _read_workspace_text(workspace_root: Path, rel_path: str) -> str | None:
 # ── Public API functions (called from routes.py) ────────────────────────────
 
 
-def list_checkpoints(workspace: str) -> dict[str, Any]:
+def list_checkpoints(workspace: str, *, trusted_workspace: bool = False) -> dict[str, Any]:
     """List all checkpoints for a workspace.
 
     Returns a dict with:
@@ -219,7 +221,7 @@ def list_checkpoints(workspace: str) -> dict[str, Any]:
         workspace: resolved workspace path
         checkpoint_dir: the checkpoint directory path
     """
-    resolved = _resolve_workspace(workspace)
+    resolved = _resolve_workspace(workspace, trusted_workspace=trusted_workspace)
     ws_hash = _workspace_hash(resolved)
     ckpt_dir = _checkpoint_root() / ws_hash
 
@@ -295,14 +297,14 @@ def _inspect_checkpoint(ckpt_path: Path, git: str) -> dict[str, Any] | None:
         return None
 
 
-def get_checkpoint_diff(workspace: str, checkpoint: str) -> dict[str, Any]:
+def get_checkpoint_diff(workspace: str, checkpoint: str, *, trusted_workspace: bool = False) -> dict[str, Any]:
     """Show the diff between a checkpoint and the current workspace state.
 
     Returns a dict with:
         diff: unified diff text
         files_changed: list of changed file paths
     """
-    resolved = _resolve_workspace(workspace)
+    resolved = _resolve_workspace(workspace, trusted_workspace=trusted_workspace)
     checkpoint = _validate_checkpoint_id(checkpoint)
     ws_hash = _workspace_hash(resolved)
     ckpt_dir = _checkpoint_root() / ws_hash / checkpoint
