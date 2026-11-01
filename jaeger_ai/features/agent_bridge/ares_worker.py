@@ -39,11 +39,16 @@ HUB_MCP = tuple(n for n in os.environ.get("ARES_HUB_MCP_NAMES", "jaeger-ares,jae
 #: run (approval policy "never") may call them without an owner card. Everything else
 #: (send_message, handoff_task, goals, app/backlog writes...) stays on Codex's default gate.
 REPORT_TOOLS = ("post_result",)
+HUB_TOKEN_ENV = "ARES_HUB_TOKEN"
 
 
 def report_overrides() -> list[str]:
     out = []
     for server in HUB_MCP:
+        # Both configured hub entries must use the same authenticated ARES identity
+        # as this worker. A generic MCP credential cannot reply on an ARES thread.
+        out += ["-c", f'mcp_servers.{server}.url={json.dumps(HUB_URL)}']
+        out += ["-c", f'mcp_servers.{server}.bearer_token_env_var="{HUB_TOKEN_ENV}"']
         for tool in REPORT_TOOLS:
             out += ["-c", f'mcp_servers.{server}.tools.{tool}.approval_mode="approve"']
     return out
@@ -195,6 +200,7 @@ def run_job(m: dict) -> dict:
     cmd = [CODEX, "exec", "--skip-git-repo-check", "--sandbox", "workspace-write",
            *report_overrides(), "-C", str(WORKSPACE), "-m", MODEL, "-o", str(last), prompt]
     env = {k: v for k, v in os.environ.items() if not k.endswith("_API_KEY")}
+    env[HUB_TOKEN_ENV] = _token()
     t0 = time.time()
     status = "done"
     try:
