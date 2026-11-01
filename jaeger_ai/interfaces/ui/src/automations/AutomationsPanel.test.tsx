@@ -20,3 +20,19 @@ it('shows authoritative timezone and next run and submits the editor original re
  expect(mutate).toHaveBeenCalledWith('update',expect.objectContaining({timezone:'America/New_York',expected_revision:4,job_id:'zone-fixture'}));
  await act(async()=>root.unmount());el.remove();localStorage.clear();
 });
+it('maps list loading and read errors to cards and retains loaded jobs',async()=>{
+ let resolve!: (value:{jobs:unknown[];scheduler:string})=>void;
+ const job={id:'owned',name:'owned',prompt:'Saved objective',cron:'0 9 * * *',enabled:true,state:'active'};
+ const list=vi.fn().mockImplementationOnce(()=>new Promise(r=>{resolve=r;})).mockRejectedValueOnce(Error('offline'));
+ const controls={list,operation:vi.fn(),mutate:vi.fn(),history:vi.fn()}as unknown as ScheduleControls;
+ const el=document.createElement('div');document.body.append(el);const root=createRoot(el);
+ try {
+  await act(async()=>root.render(<AutomationsPanel controls={controls}/>));
+  expect(el.querySelector('[aria-label="Automations"][data-state="loading"]')).not.toBeNull();
+  await act(async()=>resolve({jobs:[job],scheduler:'jaeger'}));
+  expect(el.querySelector('[aria-label="owned"][data-state="ready"]')).not.toBeNull();
+  await act(async()=>[...el.querySelectorAll('button')].find(b=>b.textContent==='Refresh automations')!.click());
+  expect(el.textContent).toContain('offline');
+  expect(el.querySelector('[aria-label="owned"][data-state="ready"]')).not.toBeNull();
+ } finally {await act(async()=>root.unmount());el.remove();}
+});

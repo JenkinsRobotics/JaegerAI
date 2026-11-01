@@ -22,3 +22,23 @@ it('inspects exact skill metadata and rejects a mismatched identity', async()=>{
     expect(host.querySelector('[aria-label="Skill metadata"]')).toBeNull();
   } finally {await act(async()=>root.unmount());host.remove();}
 });
+it('maps catalog loading, empty, and read error to cards while retaining loaded skills', async()=>{
+  let resolve!: (value: {skills: SkillDetail[]; count: number})=>void;
+  const item={name:'owned',category:'fixture',description:'Local skill',lifecycle:'explicit'} as SkillDetail;
+  const skills=vi.fn().mockImplementationOnce(()=>new Promise(r=>{resolve=r;})).mockResolvedValueOnce({skills:[item],count:1}).mockRejectedValueOnce(Error('offline'));
+  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+  try {
+    await act(async()=>root.render(<SkillsPanel source={{skills} as unknown as JaegerSource}/>));
+    expect(host.querySelector('[aria-label="Skills"][data-state="loading"]')).not.toBeNull();
+    await act(async()=>{await new Promise(r=>setTimeout(r,180));resolve({skills:[],count:0});});
+    expect(host.querySelector('[aria-label="Skills"][data-state="empty"]')).not.toBeNull();
+    const search=host.querySelector<HTMLInputElement>('[aria-label="Find skill"]')!;
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(search,'owned');search.dispatchEvent(new Event('input',{bubbles:true}));});
+    await act(async()=>{await new Promise(r=>setTimeout(r,180));});
+    expect(host.querySelector('[aria-label="owned"][data-state="ready"]')).not.toBeNull();
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(search,'again');search.dispatchEvent(new Event('input',{bubbles:true}));});
+    await act(async()=>{await new Promise(r=>setTimeout(r,180));});
+    expect(host.textContent).toContain("Couldn't load skills: offline");
+    expect(host.querySelector('[aria-label="owned"][data-state="ready"]')).not.toBeNull();
+  } finally {await act(async()=>root.unmount());host.remove();}
+});

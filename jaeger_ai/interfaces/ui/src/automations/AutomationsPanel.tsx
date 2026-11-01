@@ -1,3 +1,4 @@
+import { WidgetCard } from "../widgets/primitives/WidgetCard";
 import { useEffect, useRef, useState } from "react";
 import type { ControlResult, ScheduleAction, ScheduleControls, ScheduleJob } from "../api/source";
 const KEY = "jaeger.ui.schedule-operation.v1";
@@ -55,8 +56,9 @@ export function AutomationsPanel({ controls }: { controls: ScheduleControls }) {
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {pending && <p role="alert">A previous {pending.action} operation needs reconciliation. <button type="button" disabled={busy} onClick={() => void reconcile()}>Check saved operation</button></p>}
     <button type="button" disabled={busy || Boolean(pending)} onClick={() => edit("new")}>New automation</button><button type="button" disabled={busy} onClick={() => setAttempt(n => n + 1)}>Refresh automations</button>
-    {!jobs && !error && <p role="status">Loading automations…</p>}
-    {jobs?.map(job => <article key={job.id} className="jg-card"><strong>{job.name}</strong><p>{job.prompt}</p><p>{job.cron} · {job.timezone_policy ?? job.timezone ?? "Gateway local"} · {job.state}{job.next_fire_at ? ` · Next ${job.next_fire_at}` : ""}</p>
+    {!jobs && <WidgetCard title="Automations" state={error ? "error" : "loading"} message={error ?? "Loading automations…"} />}
+    {jobs?.length === 0 && <WidgetCard title="Automations" state="empty" message="No automations" />}
+    {jobs?.map(job => <WidgetCard key={job.id} title={job.name}><p>{job.prompt}</p><p>{job.cron} · {job.timezone_policy ?? job.timezone ?? "Gateway local"} · {job.state}{job.next_fire_at ? ` · Next ${job.next_fire_at}` : ""}</p>
       {job.state === "cancelled" ? <button type="button" disabled={busy || Boolean(pending)} onClick={() => void mutate("restore", job)}>Restore paused</button> : <>
         <button type="button" disabled={busy || Boolean(pending)} onClick={() => edit(job)}>Edit automation</button>
         <button type="button" disabled={busy || Boolean(pending)} onClick={() => void mutate(job.enabled ? "pause" : "resume", job)}>{job.enabled ? "Pause" : "Resume"}</button>
@@ -64,7 +66,7 @@ export function AutomationsPanel({ controls }: { controls: ScheduleControls }) {
         <button type="button" disabled={busy || Boolean(pending)} onClick={() => setConfirm({ action: "delete", job })}>Cancel schedule…</button>
       </>}
       <button type="button" disabled={busy} onClick={() => { setHistory(undefined); void controls.history(job.name).then(data => setHistory({ name: job.name, data }), e => setError(String(e))); }}>Run history</button>
-    </article>)}
+    </WidgetCard>)}
     {editing && <form className="jg-task-form" aria-label="Automation editor" onSubmit={e => { e.preventDefault(); void mutate(editing === "new" ? "create" : "update", editing === "new" ? undefined : editing); }}>
       <label>Name <input aria-label="Automation name" disabled={busy || editing !== "new"} value={name} onChange={e => setName(e.target.value)} required /></label>
       <label>Objective <textarea aria-label="Automation objective" disabled={busy} value={prompt} onChange={e => setPrompt(e.target.value)} required /></label>
