@@ -228,6 +228,8 @@ GATEWAY_PASSTHROUGH: tuple[tuple[frozenset, "re.Pattern[str]"], ...] = tuple(
         ({"GET", "POST"}, r"^/v1/backlog$"),
         ({"POST"}, r"^/v1/backlog/(?:import|bl-[a-f0-9]{10}(?:/assign)?)$"),
         ({"POST"}, rf"^/v1/handoffs/{_ID}/check$"),
+        ({"GET"}, r"^/v1/companion/[a-z0-9_]+/(?:ccv3|memories)$"),
+        ({"POST"}, r"^/v1/companion/(?:import|[a-z0-9_]+/chat)$"),
         ({"GET"}, r"^/v1/approvals/counts$"),
         ({"GET"}, rf"^/v1/approvals/{_ID}/events$"),
         ({"POST"}, r"^/v1/approvals/(?:batch|requests)$"),
