@@ -1080,7 +1080,8 @@ def test_bridge_cancel_reaches_the_gateway_owned_turn(gateway, bridge):
     assert not (gateway.root / "provider-release").exists()
 
 
-def test_bridge_never_falls_back_to_a_local_agent_when_the_gateway_is_down(tmp_path):
+def test_bridge_never_falls_back_to_a_local_agent_when_the_gateway_is_down(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAEGER_BRIDGE_GATEWAY_WAIT_S", "0")
     state = tmp_path
     (state / "instances" / "contract").mkdir(parents=True)
     from jaeger_ai.core.instance.schemas import Config, ExternalModelConfig, ModelConfig, dump_yaml
