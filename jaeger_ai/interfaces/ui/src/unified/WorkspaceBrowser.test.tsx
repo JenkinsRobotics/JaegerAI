@@ -15,7 +15,7 @@ async function mount(reply: (url: string) => Response, params = "") {
   return { el, calls };
 }
 it("uses the selected Gateway session for read-only Git and file requests", async () => {
-  const { el, calls } = await mount(url => url.startsWith("/api/list") ? Response.json({ entries: [{ name: "readme.txt", path: "readme.txt", is_dir: false }] }) : url.startsWith("/api/git/status") ? Response.json({ git: { is_git: true, branch: "main", files: [{ path: "readme.txt", status: "M", staged: false, unstaged: true, untracked: false }] } }) : url.startsWith("/api/git/branches") ? Response.json({ branches: { current: "main", local: [{ name: "main" }], remote: [] } }) : url.startsWith("/api/file?") ? Response.json({ content: "hello" }) : Response.json({ diff: { diff: "+hello" } }), "session=gateway-1");
+  const { el, calls } = await mount(url => url.startsWith("/api/list") ? Response.json({ entries: [{ name: "docs", path: "docs", type: "dir" }, { name: "readme.txt", path: "readme.txt", type: "file" }] }) : url.startsWith("/api/git/status") ? Response.json({ git: { is_git: true, branch: "main", files: [{ path: "readme.txt", status: "M", staged: false, unstaged: true, untracked: false }] } }) : url.startsWith("/api/git/branches") ? Response.json({ branches: { current: "main", local: [{ name: "main" }], remote: [] } }) : url.startsWith("/api/file?") ? Response.json({ content: "hello" }) : Response.json({ diff: { diff: "+hello" } }), "session=gateway-1");
   expect(calls).toHaveLength(3);
   expect(calls.every(url => new URL(url, "http://localhost").searchParams.get("session_id") === "gateway-1")).toBe(true);
   await act(async () => { [...el.querySelectorAll("button")].find(b => b.textContent?.includes("readme.txt") && !b.textContent?.includes("Diff"))?.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
@@ -40,4 +40,11 @@ it("defaults to the first session that has a workspace", async () => {
   expect(calls.length).toBeGreaterThan(0);
   expect(calls.every(url => new URL(url, "http://localhost").searchParams.get("session_id") === "gateway-1")).toBe(true);
   expect([...el.querySelectorAll("option")].map(o => o.textContent)).not.toContain("No workspace");
+});
+it("opens folders reported with type dir", async () => {
+  const { el, calls } = await mount(url => url.startsWith("/api/list") ? Response.json({ entries: url.includes("path=docs") ? [] : [{ name: "docs", path: "docs", type: "dir" }] }) : url.startsWith("/api/git/status") ? Response.json({ git: { is_git: false } }) : Response.json({ branches: null }), "session=gateway-1");
+  expect(el.textContent).toContain("📁 docs");
+  await act(async () => { [...el.querySelectorAll("button")].find(b => b.textContent?.includes("docs"))?.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
+  expect(calls.some(url => url.includes("path=docs"))).toBe(true);
+  expect(calls.some(url => url.startsWith("/api/file?"))).toBe(false);
 });

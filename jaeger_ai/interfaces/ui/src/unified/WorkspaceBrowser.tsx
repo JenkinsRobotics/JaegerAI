@@ -6,7 +6,8 @@ import { Empty, PageHead, SkeletonRows } from "./ui";
 import { getJson } from "./webui";
 import "./workspaceBrowser.css";
 
-type Entry = { name: string; path: string; is_dir: boolean; target_outside_workspace?: boolean };
+type Entry = { name: string; path: string; type?: string; is_dir?: boolean; target_outside_workspace?: boolean };
+const isDir = (entry: Entry) => entry.type === "dir" || entry.is_dir === true;
 type GitFile = { path: string; status: string; staged: boolean; unstaged: boolean; untracked: boolean };
 type GitStatus = { is_git: boolean; branch?: string; files?: GitFile[]; truncated?: boolean };
 type Branches = { current: string; local: { name: string }[]; remote: { name: string }[] };
@@ -47,7 +48,7 @@ export function WorkspaceBrowser({ source, params }: { source: JaegerSource; par
     if (!sessionId || !selected) return;
     const controller = new AbortController(); setContent(""); setFileError("");
     getJson<{ content?: string }>(query("/api/file", { session_id: sessionId, path: selected }), controller.signal)
-      .then(data => { if (!controller.signal.aborted) setContent(data.content ?? "Preview unavailable for this file."); }, e => { if (!controller.signal.aborted) setFileError(errorText(e)); });
+      .then(data => { if (!controller.signal.aborted) setContent(data.content ?? "Preview unavailable for this file."); }, e => { if (!controller.signal.aborted) setFileError(String(e).includes("HTTP 404") ? "This file can't be opened here." : (e as Error).message); });
     return () => controller.abort();
   }, [sessionId, selected]);
   useEffect(() => {
@@ -69,7 +70,7 @@ export function WorkspaceBrowser({ source, params }: { source: JaegerSource; par
     {sessionId && !error && !loading && <div className="jg-workspace-browser__grid">
       <section className="jg-u-card" aria-label="File browser"><h3>Files</h3><p className="jg-workspace-browser__path">{folder}</p>{folder !== "." && <button type="button" onClick={() => setFolder(parent)}>.. Parent folder</button>}
         {entries.length === 0 && <p>This workspace folder is empty.</p>}
-        <ul>{entries.map(entry => <li key={entry.path}><button type="button" disabled={entry.target_outside_workspace} onClick={() => entry.is_dir ? (setFolder(entry.path), setSelected("")) : setSelected(entry.path)}>{entry.is_dir ? "📁" : "📄"} {entry.name}</button></li>)}</ul>
+        <ul>{entries.map(entry => <li key={entry.path}><button type="button" disabled={entry.target_outside_workspace} onClick={() => isDir(entry) ? (setFolder(entry.path), setSelected("")) : setSelected(entry.path)}>{isDir(entry) ? "📁" : "📄"} {entry.name}</button></li>)}</ul>
       </section>
       <section className="jg-u-card" aria-label="File viewer"><h3>{selected || "File viewer"}</h3>{selected ? <>{fileError && <p role="alert">{fileError}</p>}{!fileError && <pre>{content || "Loading file…"}</pre>}<a href={query("/api/file/raw", { session_id: sessionId, path: selected, download: "1" })}>Download original</a></> : <p>Select a file to read it.</p>}</section>
       <section className="jg-u-card" aria-label="Git status"><h3>Git status</h3>{status?.is_git ? <><p>Branch: {status.branch}</p>{status.files?.length ? <ul>{status.files.map(file => <li key={file.path}><span>{file.status} {file.path}</span>{file.staged && <button type="button" onClick={() => setDiffPath(`staged:${file.path}`)}>Staged diff</button>}{(file.unstaged || file.untracked) && <button type="button" onClick={() => setDiffPath(`unstaged:${file.path}`)}>Diff</button>}</li>)}</ul> : <p>No changes.</p>}{status.truncated && <p>Showing a limited set of changes.</p>}</> : <p>This workspace is not a Git repository.</p>}</section>
