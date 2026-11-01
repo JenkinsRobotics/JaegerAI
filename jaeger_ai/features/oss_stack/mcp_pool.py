@@ -16,6 +16,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .browser_proxy import start_proxy
+
 logger = logging.getLogger(__name__)
 HOME = Path.home()
 OSS = Path(os.environ.get("JAEGER_OSS_DIR", HOME / ".jaeger" / "oss"))
@@ -67,7 +69,8 @@ def default_specs() -> dict[str, ServerSpec]:
                    description="Current time and timezone conversion"),
         ServerSpec("browser", str(NODE_BIN / "playwright-mcp"),
                    ["--headless", "--browser", "chromium", "--user-data-dir", pw_profile,
-                    "--block-service-workers", "--blocked-origins", BLOCKED_ORIGINS, "--output-dir", str(OSS / "playwright-out")], None,
+                    "--block-service-workers", "--blocked-origins", BLOCKED_ORIGINS,
+                    "--proxy-server", "http://127.0.0.1:0", "--proxy-bypass", "<-loopback>", "--output-dir", str(OSS / "playwright-out")], None,
                    description="Shared headless Chromium (own profile, no network listener)"),
     ]
     return {s.name: s for s in specs}
@@ -93,9 +96,15 @@ class _Server:
 
         env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin") + ":/opt/homebrew/bin", "HOME": str(HOME),
                **self.spec.env}
-        params = StdioServerParameters(command=self.spec.command, args=self.spec.args, env=env,
-                                       cwd=str(OSS))
+        proxy = None
+        args = list(self.spec.args)
         try:
+            if self.spec.name == "browser":
+                proxy = await start_proxy()
+                port = proxy.sockets[0].getsockname()[1]
+                args[args.index("--proxy-server") + 1] = f"http://127.0.0.1:{port}"
+            params = StdioServerParameters(command=self.spec.command, args=args, env=env,
+                                           cwd=str(OSS))
             async with stdio_client(params) as (r, w), ClientSession(r, w) as session:
                 await session.initialize()
                 listed = await session.list_tools()
@@ -121,6 +130,9 @@ class _Server:
             if self.ready and not self.ready.done():
                 self.ready.set_exception(exc)
         finally:
+            if proxy:
+                proxy.close()
+                await proxy.wait_closed()
             self.task = None
 
     async def ensure(self):
