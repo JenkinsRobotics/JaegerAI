@@ -11,7 +11,7 @@ it('retains origin identity and displays a read failure without claiming a downl
   await act(async()=>root.render(<SessionFiles files={files} sessionId="owned-home" onClose={()=>{}}/>));
   await act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Preview fixture.txt')!.click());
   expect(files.read).toHaveBeenCalledExactlyOnceWith('owned-home','owned-file');
-  expect(host.textContent).toContain('Attachment changed; bytes withheld');
+  expect(host.querySelector('[aria-label="Conversation files status"][data-state="error"]')).not.toBeNull();expect(host.textContent).toContain('Attachment changed; bytes withheld');
   expect(host.querySelector('img')).toBeNull();expect(host.querySelector('a')).toBeNull();
  }finally{await act(async()=>root.unmount());host.remove();}
 });

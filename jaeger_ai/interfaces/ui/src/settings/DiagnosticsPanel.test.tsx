@@ -7,6 +7,7 @@ it('checks exact saved request and rejects a foreign receipt without a success l
   const element = document.createElement('div'); document.body.append(element); const root = createRoot(element);
   await act(async () => root.render(<DiagnosticsPanel source={source} />));
   await act(async () => { [...element.querySelectorAll('button')].find(b=>b.textContent==='Check saved request status')!.click(); });
+  expect(element.querySelector('[aria-label="owned-request"][data-state="ready"]')).not.toBeNull();
   expect(requestStatus).toHaveBeenCalledExactlyOnceWith('owned-session','owned-request');
   expect(element.textContent).toContain('Request identity mismatch'); expect(element.textContent).not.toContain('Saved request owned-request: completed');
   await act(async () => root.unmount()); element.remove();
