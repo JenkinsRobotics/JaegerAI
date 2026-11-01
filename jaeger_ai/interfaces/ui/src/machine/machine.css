@@ -13,3 +13,13 @@
 .jg-mc-logline[data-level="debug"] { color: var(--jg-color-text-tertiary); }
 .jg-mc-note { margin: 0; font-size: var(--jg-text-caption); color: var(--jg-color-text-tertiary); }
 @media (max-width: 839px) { .jg-mc-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Machine › Agent Apps */
+.jg-mc-apps { display: grid; gap: var(--jg-space-3); min-width: 0; }
+.jg-mc-appgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: var(--jg-space-2); }
+.jg-mc-app, .jg-mc-proposal { display: grid; gap: var(--jg-space-2); padding: var(--jg-space-3); border-radius: var(--jg-radius-m); background: var(--jg-color-hover); min-width: 0; }
+.jg-mc-row { display: flex; flex-wrap: wrap; gap: var(--jg-space-2); align-items: center; }
+.jg-mc-muted { font-size: var(--jg-text-footnote); color: var(--jg-color-text-secondary); overflow-wrap: anywhere; margin: 0; }
+.jg-mc-pre { margin: 0; max-height: 360px; overflow: auto; font-size: var(--jg-text-caption); white-space: pre-wrap; overflow-wrap: anywhere; }
+.jg-mc-diff { margin: 0; padding-left: 1.2em; font-size: var(--jg-text-footnote); overflow-wrap: anywhere; }
+.jg-mc-recent { border-top: 1px solid var(--jg-color-border-tertiary); padding-top: var(--jg-space-2); }
+@media (max-width: 599px) { .jg-mc-appgrid { grid-template-columns: 1fr; } .jg-mc-app .jg-u-btn, .jg-mc-proposal .jg-u-btn { min-height: 44px; flex: 1 1 auto; } }
