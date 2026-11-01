@@ -1,0 +1,174 @@
+/* Layout presets (Jenkins Robotics, 2026-10-31, original): Glass, Arc, Linear, Dia.
+ * <html data-layout> picks a token set; appchrome.css and the rules at the bottom of this file
+ * consume them, so one switch restyles chrome, page grid, stats, charts and controls.
+ * Colours are mixed from the Jaeger tokens; the only literals are custom-property values. */
+:root {
+  /* Chrome */
+  --jg-bar-h: 52px;
+  --jg-bar-bg: color-mix(in srgb, var(--jg-color-chrome) 82%, transparent);
+  --jg-bar-blur: saturate(160%) blur(20px);
+  --jg-titlebar-inset-left: 78px;
+  --jg-sidebar-w: 232px;
+  --jg-sidebar-rail: 60px;
+  --jg-sidebar-bg: var(--jg-color-sidebar);
+  --jg-sidebar-fg: var(--jg-color-text);
+  --jg-sidebar-fg-2: var(--jg-color-text-secondary);
+  --jg-nav-h: 32px;
+  --jg-nav-radius: 8px;
+  --jg-nav-active: color-mix(in srgb, var(--jg-color-accent) 14%, transparent);
+  --jg-capsule-bg: transparent;
+  --jg-capsule-border: transparent;
+  --jg-capsule-shadow: none;
+  --jg-cmd-w: 520px;
+  --jg-cmd-h: 34px;
+  --jg-cmd-radius: 10px;
+  --jg-cmd-bg: var(--jg-color-hover);
+  --jg-cmd-border: var(--jg-color-border-tertiary);
+  --jg-cmd-shadow: none;
+  --jg-content-radius: 0px;
+  --jg-content-inset: 0px;
+  /* Page grid */
+  --jg-page-pad-y: var(--jg-space-5);
+  --jg-page-pad-x: var(--jg-space-6);
+  --jg-grid-gap: 16px;
+  --jg-card-radius: var(--jg-radius-l);
+  --jg-card-pad: var(--jg-space-4);
+  --jg-card-bg: var(--jg-color-elevated);
+  --jg-card-border: var(--jg-color-border-tertiary);
+  --jg-card-shadow: none;
+  --jg-h1-size: var(--jg-text-title1);
+  --jg-h1-weight: 700;
+  /* Stats */
+  --jg-stat-size: 13px;
+  --jg-stat-weight: 600;
+  --jg-stat-tracking: 0;
+  --jg-stat-family: inherit;
+  /* Charts */
+  --jg-chart-color: var(--jg-color-accent);
+  --jg-chart-stroke: 1.75px;
+  --jg-chart-fill: 0.10;
+  --jg-chart-grid: transparent;
+  /* Controls */
+  --jg-ctl-h: 32px;
+  --jg-ctl-radius: 8px;
+  --jg-ctl-bg: var(--jg-color-elevated);
+  --jg-ctl-border: var(--jg-color-border);
+  --jg-ctl-shadow: none;
+  --jg-btn-primary-bg: var(--jg-color-accent);
+  --jg-btn-primary-fg: var(--jg-color-on-accent);
+}
+
+/* 1 · Glass: Liquid Glass capsules floating over content; big Raycast-style ⌘K. */
+:root[data-layout="glass"] {
+  --jg-bar-bg: transparent;
+  --jg-capsule-bg: color-mix(in srgb, var(--jg-color-elevated) 62%, transparent);
+  --jg-capsule-border: color-mix(in srgb, var(--jg-color-fg) 10%, transparent);
+  --jg-capsule-shadow: 0 8px 28px color-mix(in srgb, var(--jg-color-shade) 14%, transparent), inset 0 1px 0 color-mix(in srgb, var(--jg-color-elevated) 70%, transparent);
+  --jg-sidebar-bg: color-mix(in srgb, var(--jg-color-sidebar) 70%, transparent);
+  --jg-cmd-w: 620px; --jg-cmd-h: 40px; --jg-cmd-radius: 999px;
+  --jg-cmd-bg: color-mix(in srgb, var(--jg-color-elevated) 66%, transparent);
+  --jg-cmd-border: color-mix(in srgb, var(--jg-color-fg) 10%, transparent);
+  --jg-cmd-shadow: 0 10px 32px color-mix(in srgb, var(--jg-color-shade) 16%, transparent);
+  --jg-nav-radius: 10px;
+  --jg-card-radius: 20px;
+  --jg-card-bg: color-mix(in srgb, var(--jg-color-elevated) 72%, transparent);
+  --jg-card-shadow: 0 6px 24px color-mix(in srgb, var(--jg-color-shade) 8%, transparent);
+  --jg-stat-size: 15px; --jg-stat-weight: 650;
+  --jg-chart-stroke: 2.25px; --jg-chart-fill: 0.18;
+  --jg-ctl-radius: 999px; --jg-ctl-h: 34px;
+  --jg-ctl-bg: color-mix(in srgb, var(--jg-color-elevated) 70%, transparent);
+  --jg-ctl-shadow: 0 2px 10px color-mix(in srgb, var(--jg-color-shade) 8%, transparent);
+}
+
+/* 2 · Arc: no top bar; translucent sidebar holds everything; content is a floating card. */
+:root[data-layout="arc"] {
+  --jg-sidebar-bg: color-mix(in srgb, var(--jg-color-accent) 12%, var(--jg-color-sidebar));
+  --jg-content-radius: 14px; --jg-content-inset: 8px;
+  --jg-cmd-w: 100%; --jg-cmd-h: 36px; --jg-cmd-radius: 10px;
+  --jg-cmd-bg: color-mix(in srgb, var(--jg-color-elevated) 60%, transparent);
+  --jg-nav-radius: 10px; --jg-nav-h: 34px;
+  --jg-nav-active: color-mix(in srgb, var(--jg-color-elevated) 80%, transparent);
+  --jg-card-radius: 14px;
+  --jg-card-border: transparent;
+  --jg-card-bg: color-mix(in srgb, var(--jg-color-accent) 4%, var(--jg-color-elevated));
+  --jg-stat-size: 18px; --jg-stat-weight: 700; --jg-stat-tracking: -0.02em;
+  --jg-chart-color: color-mix(in srgb, var(--jg-color-accent) 70%, var(--jg-avatar-purple));
+  --jg-chart-stroke: 2.5px; --jg-chart-fill: 0.24;
+  --jg-ctl-radius: 10px; --jg-ctl-border: transparent;
+  --jg-ctl-bg: color-mix(in srgb, var(--jg-color-accent) 8%, var(--jg-color-elevated));
+  --jg-btn-primary-bg: color-mix(in srgb, var(--jg-color-accent) 80%, var(--jg-avatar-purple));
+}
+
+/* 3 · Linear: dark dense sidebar, breadcrumb row, ⌘K first; tight grid, thin traces with gridlines. */
+:root[data-layout="linear"] {
+  --jg-bar-h: 44px;
+  --jg-bar-bg: var(--jg-color-chrome);
+  --jg-sidebar-w: 216px;
+  --jg-sidebar-bg: #16171b;
+  --jg-sidebar-fg: #e6e6ea;
+  --jg-sidebar-fg-2: #a3a4ad;
+  --jg-nav-h: 28px; --jg-nav-radius: 6px;
+  --jg-nav-active: color-mix(in srgb, #ffffff 9%, transparent);
+  --jg-cmd-w: 420px; --jg-cmd-h: 30px; --jg-cmd-radius: 6px;
+  --jg-page-pad-y: var(--jg-space-4); --jg-page-pad-x: var(--jg-space-5);
+  --jg-grid-gap: 10px;
+  --jg-card-radius: 8px; --jg-card-pad: var(--jg-space-3);
+  --jg-card-border: var(--jg-color-border);
+  --jg-h1-size: var(--jg-text-title3); --jg-h1-weight: 600;
+  --jg-stat-size: 12px; --jg-stat-weight: 500;
+  --jg-stat-family: ui-monospace, "SF Mono", Menlo, monospace;
+  --jg-chart-stroke: 1.25px; --jg-chart-fill: 0;
+  --jg-chart-grid: var(--jg-color-border-tertiary);
+  --jg-chart-color: color-mix(in srgb, var(--jg-color-accent) 70%, var(--jg-avatar-purple));
+  --jg-ctl-h: 28px; --jg-ctl-radius: 6px;
+}
+
+/* 4 · Dia: warm, minimal bar; search and ask are one field; slim sidebar; soft rounded controls. */
+:root[data-layout="dia"] {
+  --jg-color-chrome: color-mix(in srgb, var(--jg-primary-yellow) 5%, var(--jg-color-pane));
+  --jg-bar-bg: var(--jg-color-chrome);
+  --jg-sidebar-w: 196px;
+  --jg-sidebar-bg: color-mix(in srgb, var(--jg-primary-yellow) 7%, var(--jg-color-sidebar));
+  --jg-nav-active: color-mix(in srgb, var(--jg-primary-yellow) 18%, transparent);
+  --jg-cmd-w: 560px; --jg-cmd-h: 38px; --jg-cmd-radius: 14px;
+  --jg-cmd-bg: var(--jg-color-elevated);
+  --jg-cmd-border: color-mix(in srgb, var(--jg-primary-yellow) 30%, var(--jg-color-border));
+  --jg-cmd-shadow: 0 1px 2px color-mix(in srgb, var(--jg-color-shade) 6%, transparent);
+  --jg-page-pad-y: var(--jg-space-6); --jg-page-pad-x: var(--jg-space-7);
+  --jg-grid-gap: 20px;
+  --jg-card-radius: 18px; --jg-card-pad: var(--jg-space-5);
+  --jg-card-bg: color-mix(in srgb, var(--jg-primary-yellow) 3%, var(--jg-color-elevated));
+  --jg-h1-weight: 600;
+  --jg-stat-size: 16px; --jg-stat-weight: 500;
+  --jg-stat-family: ui-serif, "New York", Georgia, serif;
+  --jg-chart-color: color-mix(in srgb, var(--jg-avatar-orange) 75%, var(--jg-avatar-brown));
+  --jg-chart-stroke: 2px; --jg-chart-fill: 0.14;
+  --jg-ctl-h: 36px; --jg-ctl-radius: 12px;
+  --jg-btn-primary-bg: color-mix(in srgb, var(--jg-avatar-orange) 55%, var(--jg-avatar-brown));
+}
+@media (max-width: 760px) { :root { --jg-page-pad-x: var(--jg-space-4); --jg-page-pad-y: var(--jg-space-4); } }
+
+/* ── Whole-app consumers (page grid, stats, charts, controls) ─────────────────────── */
+.app-window .jg-u-page { padding: var(--jg-page-pad-y) var(--jg-page-pad-x) var(--jg-space-7); }
+.app-window .jg-u-page__head h1 { font-size: var(--jg-h1-size); font-weight: var(--jg-h1-weight); }
+.app-window :is(.jg-u-grid, .jg-home, .wg-page__grid) { gap: var(--jg-grid-gap); }
+.app-window :is(.jg-u-card, .wg-frame) { border-radius: var(--jg-card-radius); background: var(--jg-card-bg); border-color: var(--jg-card-border); box-shadow: var(--jg-card-shadow); }
+.app-window .jg-u-card { padding: var(--jg-card-pad); }
+:root[data-glass="true"] .app-window :is(.jg-u-card, .wg-frame) { -webkit-backdrop-filter: var(--jg-material-blur); backdrop-filter: var(--jg-material-blur); }
+.app-window :is(.jg-ui-badge, .wg-health__value, .policy-stat-val, .wg-custom__bar-value, .jg-u-count, .machine-control-stat-row .value) {
+  font-size: var(--jg-stat-size); font-weight: var(--jg-stat-weight); letter-spacing: var(--jg-stat-tracking);
+  font-family: var(--jg-stat-family); font-variant-numeric: tabular-nums;
+}
+.jg-ui-spark__line { stroke-width: var(--jg-chart-stroke); }
+.jg-ui-spark__area { opacity: var(--jg-chart-fill); }
+.jg-ui-spark__grid { stroke: var(--jg-chart-grid); stroke-width: 1px; stroke-dasharray: 3 4; }
+.jg-ui-spark .jg-ui-spark__line[stroke="var(--jg-color-accent)"] { stroke: var(--jg-chart-color); }
+.jg-ui-spark .jg-ui-spark__area[fill="var(--jg-color-accent)"] { fill: var(--jg-chart-color); }
+.app-window :is(.jg-u-btn, .wg-btn, .jg-ui-input, .jg-u-search, .app-window select) {
+  min-height: var(--jg-ctl-h); border-radius: var(--jg-ctl-radius); box-shadow: var(--jg-ctl-shadow);
+}
+.app-window :is(.jg-u-btn, .wg-btn):not(.jg-u-btn--primary, .wg-btn--primary) { background: var(--jg-ctl-bg); border-color: var(--jg-ctl-border); }
+.app-window :is(.jg-u-btn--primary, .wg-btn--primary) { background: var(--jg-btn-primary-bg); color: var(--jg-btn-primary-fg); border-color: transparent; }
+.app-window .jg-ui-seg { border-radius: calc(var(--jg-ctl-radius) + 2px); }
+.app-window .jg-ui-seg button { border-radius: var(--jg-ctl-radius); }
+.app-window input[type="range"], .app-window input[type="checkbox"], .app-window input[type="radio"] { accent-color: var(--jg-btn-primary-bg); }

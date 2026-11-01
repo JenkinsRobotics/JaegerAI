@@ -1,19 +1,19 @@
 /**
  * AppWindow — the one Jaeger shell (unified UI, Jenkins Robotics 2026-10-30).
  *
- * The Windows UI's dock is the frame; every feature is a dock page at a real route
+ * AppChrome (sidebar + app bar, per layout preset) is the frame; every feature is a page at a real route
  * Nine tabs: Home, Chat, Agents, Work, Research, Studio, Models, Machine, Settings. Merged tabs
  * carry sub-tabs at /<tab>/<sub> (e.g. /work/calendar); retired paths (/tasks, /compare …) redirect.
  * Open pages stay mounted (chat streams, drafts and approvals keep running while you look
  * elsewhere); the URL decides which one is in front. ⌘K opens the one command palette,
  * ⌘, opens Settings, and pending approvals are reachable from every page. On a phone or
- * narrow window the dock becomes a bottom tab bar.
+ * narrow window the chrome becomes a compact top bar plus a bottom tab bar.
  */
 import type React from 'react'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import type { JaegerSource } from '../api/source'
 import { useWindowManager, WINDOW_DEFINITIONS, type WindowId } from './WindowManager'
-import { WindowDock } from './WindowDock'
+import { AppChrome } from '../shell/AppChrome'
 import { useAgentsStore } from '../agents/agentsStore'
 import { visible } from '../agents/agentsLogic'
 import { JumpTo, type JumpAction } from '../agents/JumpTo'
@@ -57,7 +57,7 @@ const PageFallback = () => <div className="jg-u-page"><SkeletonRows n={6} /></di
 export function AppWindow({ source }: { source: JaegerSource }) {
   const route = useRoute()
   const active = route.page as WindowId
-  const { windows, visibleWindows, dockWindows, closeWindow } = useWindowManager(active)
+  const { windows, visibleWindows, dockWindows } = useWindowManager(active)
   const store = useAgentsStore(source)
   const phone = usePhone()
   const [paletteOpen, setPaletteOpen] = useState(false)
@@ -77,14 +77,9 @@ export function AppWindow({ source }: { source: JaegerSource }) {
     return () => removeEventListener('keydown', onKey)
   }, [go, active])
 
-  // Each merged tab remembers the sub-tab you were last on (dock click returns there).
+  // Each merged tab remembers the sub-tab you were last on (nav click returns there).
   const [lastSub, setLastSub] = useState<Partial<Record<PageId, string>>>({})
   useEffect(() => { if (SUBTABS[active]) setLastSub((m) => (m[active] === route.sub ? m : { ...m, [active]: route.sub })) }, [active, route.sub])
-
-  const close = (id: WindowId) => {
-    closeWindow(id)
-    if (id === active) go('/')
-  }
 
   const { tab: settingsTab, segment: settingsSegment } = parseSettingsRest(route.rest) as { tab?: SettingsTab; segment?: string }
   const paletteActions = useMemo<JumpAction[]>(() => [
@@ -156,6 +151,8 @@ export function AppWindow({ source }: { source: JaegerSource }) {
   return (
     <ToastProvider>
     <div className={`app-window${phone ? ' app-window--phone' : ''}`} data-page={active}>
+      <AppChrome active={active} sub={route.sub} pages={dockWindows} phone={phone} onSearch={() => setPaletteOpen(true)}
+        onPick={(id) => go(id === 'settings' && settingsTab ? `/settings/${settingsTab}` : id === active ? pathOf(id) : pathOf(id, lastSub[id]))}>
       <div className="app-window__content">
         {chatOpen && (
           <div className={`app-window__page app-window__page--chat${active === 'chat' || active === 'settings' ? ' app-window__page--active' : ''}`}
@@ -170,18 +167,10 @@ export function AppWindow({ source }: { source: JaegerSource }) {
           </div>
         ))}
       </div>
+      </AppChrome>
 
       <ApprovalTray source={source} onOpenChat={(agentId) => go(agentId ? `/chat?agent=${encodeURIComponent(agentId)}` : '/chat')} />
 
-      <WindowDock
-        windows={windows}
-        activeWindowId={active}
-        onFocusWindow={(id) => go(id === 'settings' && settingsTab ? `/settings/${settingsTab}` : id === active ? pathOf(id) : pathOf(id, lastSub[id]))}
-        onCloseWindow={close}
-        availableWindows={dockWindows}
-        phone={phone}
-        onSearch={() => setPaletteOpen(true)}
-      />
 
       <JumpTo open={paletteOpen} agents={store.agents.filter(visible)} summaries={store.summaries} seen={store.seen}
         onClose={() => setPaletteOpen(false)} onAgent={(id) => go(`/chat?agent=${encodeURIComponent(id)}`)} actions={paletteActions} />

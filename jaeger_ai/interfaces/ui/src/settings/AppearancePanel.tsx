@@ -1,6 +1,7 @@
-/** Settings › Appearance (TAB-01 §3): theme, feel, app icon (+ custom upload), text size, density. Tokens only. */
+/** Settings › Appearance (TAB-01 §3): layout preset, theme, feel, app icon (+ custom upload), text size, density. Tokens only. */
 import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { applyDensity, applyFeel, applyIcon, BUILTIN_ICONS, customIcons, FEELS, iconProblem, saveCustomIcons, storedDensity, storedFeel, storedIcon, type Density, type Feel, type IconChoice } from "./appearance";
+import { choosePreset, PRESETS, usePreset } from "../shell/layoutPresets";
 import { applyTextSize, currentTextSize } from "./textSize";
 import type { Appearance } from "./SettingsDialog";
 import { avatarApi } from "../avatar/avatarModel";
@@ -23,6 +24,8 @@ function RadioGrid<T extends string>({ label, value, items, onPick, className, r
 }
 
 export function AppearancePanel({ appearance, onAppearance, Row, Section }: { appearance: Appearance; onAppearance: (a: Appearance) => void; Row: (p: { label: string; hint?: string; anchor?: string; children?: ReactNode }) => ReactNode; Section: (p: { title: string; anchor?: string; children: ReactNode }) => ReactNode }) {
+  const preset = usePreset();
+  const [layoutMsg, setLayoutMsg] = useState<string>();
   const [feel, setFeel] = useState<Feel>(storedFeel);
   const [icon, setIcon] = useState(storedIcon);
   const [customs, setCustoms] = useState<IconChoice[]>(customIcons);
@@ -46,6 +49,12 @@ export function AppearancePanel({ appearance, onAppearance, Row, Section }: { ap
   };
   const remove = (id: string) => { const next = customs.filter((x) => x.id !== id); saveCustomIcons(next); setCustoms(next); if (icon === id) { applyIcon("shield-blue"); setIcon("shield-blue"); } };
   return <>
+    <Section title="Layout" anchor="layout">
+      <RadioGrid label="Layout" className="jg-set-feels jg-set-layouts" value={preset.id} items={PRESETS}
+        onPick={(id) => { void choosePreset(id).then((shared) => setLayoutMsg(shared ? "Saved for every device" : "Saved on this device only (Gateway unreachable)")); }}
+        render={(i, on) => <><span className="jg-set-layout__preview" data-layout-preview={i.id} aria-hidden="true"><i /><i /></span><span>{i.label}</span><small className="jg-sheet__hint">{(i as (typeof PRESETS)[number]).note}</small>{on && <span className="jg-set-check" aria-hidden="true">✓</span>}</>} />
+      {layoutMsg && <p className="jg-sheet__hint" role="status">{layoutMsg}</p>}
+    </Section>
     <Section title="Theme" anchor="theme">
       <Row label="Theme" anchor="theme">
         <RadioGrid label="Theme" className="jg-set-seg" value={appearance} onPick={onAppearance}
