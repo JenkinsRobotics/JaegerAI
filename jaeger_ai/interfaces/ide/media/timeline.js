@@ -93,6 +93,16 @@
       return next;
     }
     if (event.event === 'turn.plan') return applyPlan(rows, event);
+    if (event.event === 'search.count') {
+      const rid = requestId(event), count = event.data?.searches;
+      if (!Number.isSafeInteger(count) || count < 1) return rows;
+      const completed = event.data?.completed, failed = event.data?.failed;
+      if (![completed, failed].every(n => Number.isSafeInteger(n) && n >= 0 && n <= count)) return rows;
+      const key = `search-count:${rid}`;
+      const row = { key, kind: 'search-count', requestId: rid, searches: count, completed, failed, live: false };
+      const index = rows.findIndex(item => item.key === key);
+      return index >= 0 ? replaceAt(rows, index, row) : [...rows, row];
+    }
     if (event.event === 'sources') {
       const sources = (Array.isArray(event.data?.sources) ? event.data.sources : [])
         .filter(item => ['url', 'file'].includes(item?.kind) && typeof item?.location === 'string')

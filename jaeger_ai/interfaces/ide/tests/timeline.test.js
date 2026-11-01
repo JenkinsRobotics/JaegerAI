@@ -158,3 +158,13 @@ test('a tool row keeps its command and output across started and completed event
   assert.equal(state.rows[0].input, 'ls -la');
   assert.equal(state.rows[0].output, 'total 8');
 });
+
+test('search count is a durable turn row and replays once', () => {
+  const event = { event_id: 4, event: 'search.count', data: {
+    session_id: 's', request_id: 'r', turn_id: 't', searches: 3, completed: 2, failed: 1,
+  } };
+  const first = applyEvents(createTimelineState(), [event]);
+  assert.deepEqual(first.rows[0], { key: 'search-count:r', kind: 'search-count',
+    requestId: 'r', searches: 3, completed: 2, failed: 1, live: false });
+  assert.strictEqual(applyEvents(first, [event]), first);
+});
