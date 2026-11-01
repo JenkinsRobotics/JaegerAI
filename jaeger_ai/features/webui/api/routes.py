@@ -13410,6 +13410,8 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/v1/system/status":
         from api import system_metrics
         return j(handler, system_metrics.status())
+    if parsed.path == "/v1/first-run":
+        return _proxy_jaeger_gateway(handler, "GET", "/v1/first-run")
     if parsed.path == "/v1/gateway-health":
         return _proxy_jaeger_gateway(handler, "GET", "/health")
 
@@ -15519,6 +15521,10 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path in {"/api/gateway/start", "/api/gateway/stop", "/api/gateway/restart"}:
         return _handle_gateway_lifecycle(handler, parsed.path.rsplit("/", 1)[-1], body)
+
+    if parsed.path in {"/v1/first-run/setup", "/v1/first-run/skip"}:
+        import json as _json
+        return _proxy_jaeger_gateway(handler, "POST", parsed.path, _json.dumps(body or {}).encode("utf-8"))
 
     # ── AppControl: proposals and Matthew's decisions (webui caller; CSRF-checked page) ──
     if parsed.path.startswith("/v1/apps/") and (parsed.path.endswith("/proposals") or parsed.path.endswith("/decision")
