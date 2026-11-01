@@ -301,6 +301,10 @@ def remove_skill(layout: Any, name: str, *, expected_revision: str | None = None
     original=str(managed_relative(str(folder.relative_to(Path(layout.skills_dir)))))
     def planned(archive_name):
         if before_move is not None:before_move({'name':normalized,'archive_name':archive_name,'original_relative':original,'revision':revision})
+        # The operator's hook may have mutated the live folder while we held the
+        # lock; re-check the revision AFTER the hook and BEFORE the move, so a
+        # concurrent replacement is never archived over.
+        unchanged()
     archive_name=_move_to_archive(Path(layout.skills_dir),folder,validate=unchanged,before_move=planned)
     return {"ok": True, "name": normalized, "owner": "jaeger",
             "state":"removed","archive_name":archive_name,"original_relative":original,"revision":revision,

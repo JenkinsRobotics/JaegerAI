@@ -204,3 +204,36 @@ def test_existing_store_without_clarify_table_gains_it_on_open(tmp_path):
         conn.execute("DROP TABLE clarify_forms")
     store = GatewaySessionStore(db)
     assert store.expire_orphaned_clarify() == 0
+
+
+@pytest.mark.asyncio
+async def test_terminal_client_answers_original_gateway_form_over_http(tmp_path, monkeypatch):
+    from jaeger_ai.core.gateway.client import GatewayTurnClient, GatewayUnavailable
+    from jaeger_ai.core.gateway.caller_auth import TOKEN_DIR_ENV, ensure_tokens
+
+    monkeypatch.setenv(TOKEN_DIR_ENV, str(tmp_path / 'caller-tokens'))
+    ensure_tokens()
+    app = _app(tmp_path, monkeypatch)
+    app._loop = asyncio.get_running_loop()
+    app.app.on_startup.clear()
+    monkeypatch.setattr(gw, 'CLARIFY_WAIT_S', 5)
+    async with TestServer(app.app) as server:
+        client = GatewayTurnClient(str(server.make_url('')).rstrip('/'), caller='cli')
+        waiter = asyncio.create_task(asyncio.to_thread(app._clarify_sink('s1', 'r1'), 'clarify', 'Which environment?', ('staging', 'prod')))
+        for _ in range(100):
+            forms = app.store.list_clarify('s1')
+            if forms:
+                break
+            await asyncio.sleep(0.01)
+        form, = forms
+        with pytest.raises(GatewayUnavailable):
+            await asyncio.to_thread(client.answer_clarify, 'foreign', form['clarify_id'], 1, 'prod')
+        with pytest.raises(GatewayUnavailable):
+            await asyncio.to_thread(client.answer_clarify, 's1', form['clarify_id'], 2, 'prod')
+        receipt = await asyncio.to_thread(client.answer_clarify, 's1', form['clarify_id'], 1, 'staging')
+        assert receipt['delivered'] is True
+        assert await asyncio.wait_for(waiter, 3) == 'staging'
+        with pytest.raises(GatewayUnavailable):
+            await asyncio.to_thread(client.answer_clarify, 's1', form['clarify_id'], 1, 'prod')
+        assert app.store.get_clarify(form['clarify_id'])['answer'] == 'staging'
+        assert app.store.list_requests() == []  # Answering never admits a second turn.

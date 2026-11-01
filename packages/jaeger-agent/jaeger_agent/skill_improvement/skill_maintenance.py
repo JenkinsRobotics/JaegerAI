@@ -9,8 +9,11 @@ touches a user-written skill. See dev/docs/history/SKILL_EVOLUTION_PLAN.md §6-�
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +22,26 @@ from jaeger_agent.skill_improvement import skill_notes, skill_revisions
 _VN = re.compile(r"^(?P<name>[A-Za-z][A-Za-z0-9_]*)_v(?P<v>\d+)$")
 ARCHIVE_DIR = ".archive"
 _WIN = "smooth"
+
+
+@contextmanager
+def archive_lock(root: Path):
+    """Serialize instance archive operations without replacing prior content.
+
+    Restored verbatim from commit b8afc5c3 — the symbol was dropped from this
+    module in a later refactor while jaeger_ai.core.skills.service still imports
+    it (six call sites), which made every managed skill write raise ImportError.
+    """
+    import fcntl
+
+    archive = root / ARCHIVE_DIR
+    if archive.is_symlink():
+        raise ValueError("Skill archive must remain inside its instance")
+    archive.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(archive / ".lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "r+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        yield archive
 
 
 def skills_root(layout: Any) -> Path:
@@ -57,14 +80,28 @@ def _versions_of(root: Path, skill: str) -> list[tuple[int, Path]]:
     return out
 
 
-def _move_to_archive(root: Path, d: Path) -> str:
-    archive = root / ARCHIVE_DIR
-    archive.mkdir(parents=True, exist_ok=True)
-    dest = archive / d.name
-    if dest.exists():
-        shutil.rmtree(dest)
-    shutil.move(str(d), str(dest))
-    return d.name
+def _move_to_archive(root: Path, d: Path, *, validate=None, before_move=None) -> str:
+    """Move ``d`` into ``<root>/.archive`` under the archive lock.
+
+    Restored from commit dd5ff9d7: both ``validate`` and ``before_move`` hooks
+    must run under the lock immediately before the atomic move, and a colliding
+    archive name gets a uuid suffix instead of being purged — callers rely on
+    all three.
+    """
+    if d.is_symlink() or not d.resolve().is_relative_to(root.resolve()):
+        raise ValueError("Skill archive must remain inside its instance")
+    with archive_lock(root) as archive:
+        dest = archive / d.name
+        if dest.exists() or dest.is_symlink():
+            dest = archive / (d.name + "-" + uuid.uuid4().hex)
+        # Validate under the same lock immediately before the atomic move.
+        if validate is not None:
+            validate()
+        if before_move is not None:
+            before_move(dest.name)
+        # Same instance filesystem: atomic move; never purge an older version.
+        os.rename(d, dest)
+    return dest.name
 
 
 def archive_superseded_versions(layout: Any, skill: str, *, keep: int = 2) -> list[str]:
@@ -120,6 +157,6 @@ def maintenance_sweep(layout: Any, *, keep: int = 2) -> dict:
 
 
 __all__ = [
-    "skills_root", "skill_score", "archive_superseded_versions",
+    "skills_root", "skill_score", "archive_lock", "archive_superseded_versions",
     "retire_candidates", "retire", "maintenance_sweep", "ARCHIVE_DIR",
 ]
