@@ -881,10 +881,16 @@ class JaegerGatewayApp:
                 from jaeger_ai.core.instance.instance import InstanceLayout, resolve_instance_dir
                 inst = os.environ.get("JAEGER_INSTANCE_DIR")
                 layout = InstanceLayout(root=Path(inst) if inst else resolve_instance_dir())
-                sqlite_store.bind(layout)
+                # Bind the workspace first and on its own: Library, Workflows
+                # and other file-backed routes only need the layout, so a
+                # state.db problem must not leave them answering 503.
                 bind_workspace(layout)
             except Exception as exc:
-                logger.debug("sqlite_store/workspace bind skipped: %s", exc)
+                logger.warning("workspace bind failed: %s", exc)
+            try:
+                sqlite_store.bind(layout)
+            except Exception as exc:
+                logger.warning("sqlite_store bind skipped: %s", exc)
             rt = EntityRuntime.get_singleton(mode=EntityRuntimeMode.OWNER)
             runtime_for_producers = rt
             if not getattr(rt, "_gateway_cognition_handler_registered", False):
