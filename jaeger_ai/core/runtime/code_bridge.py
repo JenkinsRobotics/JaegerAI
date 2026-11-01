@@ -433,14 +433,29 @@ def run_bridged_script(
         )
         server.start()
 
-        from jaeger_agent.tools.code import _sandboxed_python_command
+        from jaeger_agent.tools.code import _agent_workspace, _sandboxed_python_command, _unbound_run_cwd
+        # J-087: unbound runs from skills/ may also write the agent's own workspace, and run from the
+        # instance root so a relative ``workspace/...`` lands there instead of skills/workspace/.
+        agent_ws = run_cwd = None
+        try:
+            from jaeger_agent.core.workspace import _require_layout, get_project_root
+            layout = _require_layout()
+            if workspace is not None and get_project_root() is None and Path(workspace).resolve() == layout.skills_dir.resolve():
+                agent_ws = _agent_workspace(layout)
+                run_cwd = _unbound_run_cwd(layout, agent_ws)
+        except Exception:  # noqa: BLE001 - unbound/bench: unchanged behaviour
+            agent_ws = run_cwd = None
         command, sandbox_backend = _sandboxed_python_command(
             str(script_path),
             workspace=str(cwd),
             scratch=str(tmpdir),
             extra_python_paths=(str(tmpdir),),
             unix_socket=str(socket_path),
+            extra_writable=(agent_ws,) if agent_ws else (),
+            run_cwd=run_cwd,
         )
+        if run_cwd:
+            cwd = Path(run_cwd)
         if command is None:
             server.stop()
             raise BridgeRefused(

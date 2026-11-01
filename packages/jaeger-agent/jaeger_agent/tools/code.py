@@ -149,6 +149,20 @@ def _agent_workspace(layout) -> str | None:
         return None
 
 
+def _unbound_run_cwd(layout, agent_workspace: str | None) -> str | None:
+    """cwd for an unbound run that may write the agent workspace: the instance root.
+
+    From there ``workspace/...`` lands in the agent's real workspace and ``skills/...`` in skills/
+    (the same layout the shell and the write tools use). Running from skills/ sent a relative
+    ``workspace/x`` to ``skills/workspace/x``. The root itself is not made readable or writable;
+    only the two subfolders are.
+    """
+    if not agent_workspace:
+        return None
+    root = os.path.realpath(str(layout.root))
+    return root if os.path.dirname(agent_workspace) == root else None
+
+
 def _sandboxed_python_command(
     script: str,
     *,
@@ -157,6 +171,7 @@ def _sandboxed_python_command(
     extra_python_paths: tuple[str, ...] = (),
     unix_socket: str | None = None,
     extra_writable: tuple[str, ...] = (),
+    run_cwd: str | None = None,
 ) -> tuple[list[str] | None, str]:
     """Return an OS-confined Python command and its backend label.
 
@@ -258,7 +273,7 @@ def _sandboxed_python_command(
             # after creating the approved nested writable mounts so code cannot
             # create files in an unmapped parent directory such as /tmp.
             "--remount-ro", "/",
-            "--chdir", workspace,
+            "--chdir", run_cwd or workspace,
             executable, "-I", "-B", "-c", launcher,
         ))
         return command, "linux-bwrap"
@@ -296,6 +311,7 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
     # execution uses instance skills or an external scratch directory.
     workdir = None
     agent_workspace = None
+    run_cwd = None
     try:
         from jaeger_agent.core.workspace import _require_layout, get_project_root
         project = get_project_root()
@@ -306,9 +322,11 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
             # Unbound runs may also write the agent's OWN workspace folder (Matthew, 2026-11-01):
             # deliverables land where the task verifier looks. Only this one folder; nothing wider.
             agent_workspace = _agent_workspace(layout)
+            run_cwd = _unbound_run_cwd(layout, agent_workspace)
     except Exception:
         workdir = None
         agent_workspace = None
+        run_cwd = None
     with tempfile.TemporaryDirectory(prefix="jaeger_run_") as scratch:
         run_dir = os.path.realpath(str(workdir) if workdir is not None else scratch)
         # Keep execution scaffolding outside the selected project; the
@@ -320,6 +338,7 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
             command, sandbox_backend = _sandboxed_python_command(
                 script, workspace=run_dir, scratch=os.path.realpath(scratch),
                 extra_writable=(agent_workspace,) if agent_workspace else (),
+                run_cwd=run_cwd,
             )
             if command is None:
                 return {
@@ -337,7 +356,7 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
             proc = run_interruptible(
                 command,
                 timeout=timeout_s,
-                cwd=run_dir,
+                cwd=run_cwd or run_dir,
                 env={
                     "PATH": os.environ.get("PATH", ""),
                     "HOME": scratch,
