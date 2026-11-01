@@ -317,7 +317,7 @@ TOOLSETS: dict[str, frozenset[str]] = {
     "system_control": frozenset({"system_control"}),
     "media_control": frozenset({"media_control", "now_playing"}),
     "ocr": frozenset({"ocr_file"}),
-    "delegates": frozenset({"list_delegate_runtimes", "call_agent", "get_agent_result"}),
+    "delegates": frozenset({"list_delegate_runtimes", "call_agent", "get_agent_result", "run_team"}),
     "finance": frozenset({
         "finance_summary", "finance_audit", "finance_transactions",
         "finance_inbox", "finance_sync", "finance_briefing",
