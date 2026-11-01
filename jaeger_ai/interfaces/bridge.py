@@ -2033,6 +2033,12 @@ def _gateway_turn(out: TextIO, ctx: _Ctx, req: dict[str, Any], text: str,
             if gateway is not ctx.gateway:
                 # An outside caller's turn: only the owner answers its
                 # approvals, on the Gateway's own card (menu bar / WebUI).
+                # Tell the socket client (A2A/MCP) it is waiting, without an
+                # interactive request it could answer (v1 ADDITIVE fields on
+                # ``state``: approval_id / approval / tool).
+                _emit(out, {**protocol.state_frame(True, session),
+                            "approval_id": str(data["approval_id"]), "approval": "pending",
+                            **({"tool": str(data["tool"])} if data.get("tool") else {})})
                 return
             prompt = f"Allow {data.get('tool') or 'this action'}?"
             if data.get("target"):

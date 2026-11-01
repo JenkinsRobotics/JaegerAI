@@ -11,7 +11,6 @@ import argparse
 import asyncio
 import os
 import threading
-import uuid
 from typing import Any
 
 from a2a.helpers import (
@@ -24,12 +23,17 @@ from a2a.server.agent_execution import AgentExecutor, RequestContext
 from a2a.server.events import EventQueue
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.routes import create_agent_card_routes, create_jsonrpc_routes
-from a2a.server.tasks import InMemoryTaskStore, TaskUpdater
+from a2a.server.tasks import TaskStore, TaskUpdater
 from a2a.types import (
     AgentCapabilities,
     AgentCard,
     AgentInterface,
     AgentSkill,
+    HTTPAuthSecurityScheme,
+    Part,
+    SecurityRequirement,
+    SecurityScheme,
+    StringList,
     TaskState,
 )
 from starlette.applications import Starlette
@@ -37,7 +41,12 @@ from starlette.routing import Route
 
 from jaeger_ai.contract.ports import A2A_PORT, A2A_URL, LOOPBACK
 
-A2A_PROTOCOL_VERSION = "0.3"
+A2A_PROTOCOL_VERSION = "1.0"
+#: The same endpoint also serves v0.3 JSON-RPC (``enable_v0_3_compat``), so the
+#: card advertises it as a second interface at no cost.
+A2A_COMPAT_PROTOCOL_VERSION = "0.3"
+A2A_BEARER_SCHEME = "bearer"
+CANCEL_CONFIRM_TIMEOUT_S = float(os.environ.get("JAEGER_A2A_CANCEL_CONFIRM_S", "30"))
 A2A_HOST = LOOPBACK
 A2A_PUBLIC_URL = A2A_URL
 
@@ -53,14 +62,21 @@ def build_agent_card() -> AgentCard:
         version="1.0.0",
         default_input_modes=["text/plain"],
         default_output_modes=["text/plain"],
-        capabilities=AgentCapabilities(streaming=True),
+        capabilities=AgentCapabilities(streaming=True, push_notifications=False,
+                                       extended_agent_card=False),
         supported_interfaces=[
-            AgentInterface(
-                protocol_binding="JSONRPC",
-                url=public_url,
-                protocol_version=A2A_PROTOCOL_VERSION,
-            )
+            AgentInterface(protocol_binding="JSONRPC", url=public_url,
+                           protocol_version=A2A_PROTOCOL_VERSION),
+            AgentInterface(protocol_binding="JSONRPC", url=public_url,
+                           protocol_version=A2A_COMPAT_PROTOCOL_VERSION),
         ],
+        security_schemes={
+            A2A_BEARER_SCHEME: SecurityScheme(http_auth_security_scheme=HTTPAuthSecurityScheme(
+                scheme="Bearer",
+                description="Jaeger Gateway caller token (loopback; issued by `jaeger auth init`).",
+            )),
+        },
+        security_requirements=[SecurityRequirement(schemes={A2A_BEARER_SCHEME: StringList(list=[])})],
         skills=[
             AgentSkill(
                 id="chat",
@@ -92,6 +108,7 @@ class JaegerBridgeExecutor(AgentExecutor):
 
     def __init__(self, client: Any | None = None) -> None:
         self._client = client
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._active: dict[str, dict[str, Any]] = {}
         self._active_lock = threading.RLock()
 
@@ -123,26 +140,78 @@ class JaegerBridgeExecutor(AgentExecutor):
             message=new_text_message("Jaeger is working the A2A task over the live bridge."),
         )
         session = f"a2a:{task.context_id or task.id}"
-        control = {"turn_id": uuid.uuid4().hex, "accepted": False, "cancel_requested": False}
+        # A2A task id == Gateway request id: the bridge hands ``turn_id`` to
+        # the Gateway as ``request_id``, so receipts, approvals, Activity and
+        # cancellation all key on the same id the A2A client holds.
+        control = {"turn_id": task.id, "accepted": False, "cancel_requested": False,
+                   "approval": None, "done": threading.Event(), "outcome": None}
+        loop = asyncio.get_running_loop()
         with self._active_lock:
             if task.id in self._active:
                 raise ValueError("A2A task is already active")
             self._active[task.id] = control
 
+        def publish(state, text, metadata=None):
+            future = asyncio.run_coroutine_threadsafe(
+                updater.update_status(state=state, message=new_text_message(text),
+                                      metadata=metadata), loop)
+            try:
+                future.result(timeout=10)
+            except Exception:  # noqa: BLE001 - status projection must not break the turn
+                pass
+
         def event(frame):
-            if frame.get("type") in {"queued", "state"}:
+            kind = frame.get("type")
+            if kind in {"queued", "state"}:
                 with self._active_lock:
                     control["accepted"] = True
                     cancel = control["cancel_requested"]
                 if cancel:
                     self._bridge().control("cancel", turn_id=control["turn_id"])
+            approval_id = str(frame.get("approval_id") or "")
+            if kind == "state" and approval_id and frame.get("approval") == "pending":
+                # Approvals stay in Jaeger: the owner decides on the Gateway
+                # card; A2A only sees that the task is waiting on it.
+                control["approval"] = approval_id
+                publish(TaskState.TASK_STATE_INPUT_REQUIRED,
+                        f"Waiting for the owner to approve {frame.get('tool') or 'an action'} in Jaeger "
+                        f"(approval {approval_id}). A2A cannot answer this approval.",
+                        {"jaeger.approval_id": approval_id, "jaeger.request_id": task.id})
+            elif control["approval"] and kind in {"delta", "tool", "reasoning"}:
+                control["approval"] = None
+                publish(TaskState.TASK_STATE_WORKING, "Approval resolved in Jaeger; work resumed.",
+                        {"jaeger.request_id": task.id})
 
         try:
             # The Gateway runs A2A work as the ``a2a`` caller (untrusted actor,
             # ``a2a:`` sessions only), never as the bridge.
-            result = await asyncio.to_thread(self._bridge().turn, objective, session,
-                                            on_event=event, turn_id=control["turn_id"],
-                                            gateway_caller="a2a")
+            def run_turn():
+                # Track the native turn itself, not this coroutine: the SDK
+                # cancels the producer on CancelTask while the turn thread is
+                # still stopping; cancel() waits on this for confirmation.
+                outcome = "finished"
+                try:
+                    res = self._bridge().turn(objective, session, on_event=event,
+                                              turn_id=control["turn_id"], gateway_caller="a2a")
+                    if isinstance(res, dict) and (res.get("cancelled")
+                                                  or res.get("halt_reason") == "interrupted"):
+                        outcome = "cancelled"
+                    return res
+                finally:
+                    control["outcome"] = outcome
+                    control["done"].set()
+
+            native = asyncio.ensure_future(asyncio.to_thread(run_turn))
+            try:
+                result = await asyncio.shield(native)
+            except asyncio.CancelledError:
+                # CancelTask cancels this producer; the native turn keeps
+                # running until Jaeger confirms the stop. Report its real end.
+                # Any other cancellation (server shutdown) propagates; the
+                # Gateway request keeps its own durable record.
+                if not control["cancel_requested"]:
+                    raise
+                result = await asyncio.wait_for(asyncio.shield(native), CANCEL_CONFIRM_TIMEOUT_S)
         except Exception as exc:  # noqa: BLE001
             await updater.update_status(
                 state=TaskState.TASK_STATE_FAILED,
@@ -155,14 +224,36 @@ class JaegerBridgeExecutor(AgentExecutor):
 
         text = str((result or {}).get("text") or "")
         error = (result or {}).get("error")
-        if result.get("cancelled"):
+        if _auth_denied(result):
+            await updater.update_status(
+                state=TaskState.TASK_STATE_AUTH_REQUIRED,
+                message=new_text_message(f"The a2a caller is not authorized for this work: {error}"),
+                metadata={"jaeger.request_id": task.id},
+            )
+            return
+        if result.get("cancelled") or result.get("halt_reason") == "interrupted":
             await updater.update_status(state=TaskState.TASK_STATE_CANCELED,
                                         message=new_text_message("Jaeger confirmed native cancellation."))
             return
         await updater.add_artifact(
             parts=[new_text_part(text=text or str(error or "No result text was returned."), media_type="text/plain")],
             name=f"Jaeger turn {session}",
+            metadata={"jaeger.request_id": task.id},
         )
+        files = _result_files(result)
+        if files:
+            await updater.add_artifact(
+                parts=[Part(url=_file_url(path), filename=os.path.basename(path)) for path in files],
+                name="Jaeger result files",
+                metadata={"jaeger.request_id": task.id, "jaeger.local_only": True},
+            )
+        if result.get("execution_unknown"):
+            await updater.update_status(
+                state=TaskState.TASK_STATE_FAILED,
+                message=new_text_message(f"Jaeger could not confirm what ran; check request {task.id} in Jaeger."),
+                metadata={"jaeger.execution_unknown": True, "jaeger.request_id": task.id},
+            )
+            return
         if error:
             await updater.update_status(
                 state=TaskState.TASK_STATE_FAILED,
@@ -188,6 +279,34 @@ class JaegerBridgeExecutor(AgentExecutor):
                 await asyncio.to_thread(self._bridge().control, "cancel", turn_id=control["turn_id"])
         except Exception as exc:  # noqa: BLE001
             raise ValueError(f"Jaeger bridge could not cancel the task: {exc}") from exc
+        # execute() reports CANCELED only once Jaeger confirms the native stop.
+
+
+_AUTH_CODES = frozenset({"unauthorized", "forbidden", "scope_denied", "auth_required"})
+
+
+def _auth_denied(result: dict[str, Any]) -> bool:
+    code = str(result.get("halt_code") or "").lower()
+    error = str(result.get("error") or "").lower()
+    return code in _AUTH_CODES or error.startswith(("401", "403")) or "not authorized" in error
+
+
+def _result_files(result: dict[str, Any]) -> list[str]:
+    """Result file lists (worker ``artifacts`` / ``files``) → A2A file parts."""
+    out: list[str] = []
+    for key in ("artifacts", "files"):
+        value = result.get(key)
+        if isinstance(value, list):
+            out.extend(str(item) for item in value if isinstance(item, str) and item.strip())
+    return list(dict.fromkeys(out))[:20]
+
+
+def _file_url(path: str) -> str:
+    if "://" in path:
+        return path
+    from pathlib import Path as _P
+
+    return _P(path).expanduser().absolute().as_uri()
 
 
 #: Discovery routes stay public (they describe Jaeger, they run nothing).
@@ -238,7 +357,7 @@ class RequireA2ABearer:
 
 
 def build_app(client: Any | None = None, executor: AgentExecutor | None = None,
-              tokens: dict[str, str] | None = None) -> Any:
+              tokens: dict[str, str] | None = None, task_store: TaskStore | None = None) -> Any:
     """Official SDK card + JSON-RPC routes behind mandatory bearer auth.
 
     The agent card is public; every JSON-RPC call needs the ``a2a`` caller
@@ -246,7 +365,7 @@ def build_app(client: Any | None = None, executor: AgentExecutor | None = None,
     card = build_agent_card()
     handler = DefaultRequestHandler(
         agent_executor=executor or JaegerBridgeExecutor(client),
-        task_store=InMemoryTaskStore(),
+        task_store=task_store if task_store is not None else _default_task_store(),
         agent_card=card,
     )
     card_routes = create_agent_card_routes(card)
@@ -257,6 +376,12 @@ def build_app(client: Any | None = None, executor: AgentExecutor | None = None,
     routes.extend(create_jsonrpc_routes(handler, "/", enable_v0_3_compat=True))
     return RequireA2ABearer(Starlette(routes=routes),
                             tokens if tokens is not None else resolve_inbound_tokens())
+
+
+def _default_task_store() -> TaskStore:
+    from jaeger_ai.interfaces.a2a_task_store import LedgerTaskStore
+
+    return LedgerTaskStore(os.environ.get("JAEGER_A2A_TASK_DB") or None)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
