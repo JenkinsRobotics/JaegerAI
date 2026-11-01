@@ -1,5 +1,22 @@
 /** The Jaeger mark (J-085): renders the chosen logo as a crisp inline vector (or the sanitized custom image). */
-import { SHIELD_J_PATH, SHIELD_J_VIEWBOX, useLogo, type LogoId } from "./logo";
+import { useId } from "react";
+import { SHIELD_J_PATH, SHIELD_J_VIEWBOX, SPARTAN_SRC, useLogo, type LogoId } from "./logo";
+
+function Spartan({ variant }: { variant: "color" | "grey" | "mono" }) {
+  const mid = `jg-spartan-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const clip = `${mid}-c`;
+  return (
+    <svg viewBox="0 0 64 64" aria-hidden="true">
+      <defs>
+        <clipPath id={clip}><rect width="64" height="64" rx="14" /></clipPath>
+        {variant === "mono" && <mask id={mid} maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><image href={SPARTAN_SRC.mask} width="64" height="64" /></mask>}
+      </defs>
+      {variant === "mono"
+        ? <rect width="64" height="64" fill="currentColor" mask={`url(#${mid})`} />
+        : <image href={variant === "grey" ? SPARTAN_SRC.grey : SPARTAN_SRC.color} width="64" height="64" clipPath={`url(#${clip})`} preserveAspectRatio="xMidYMid slice" />}
+    </svg>
+  );
+}
 
 /** Clean geometric redraw of the brand shield J on a 64 grid: faceted shield, J stem with its echo stroke. */
 export function ShieldJ({ color = "currentColor" }: { color?: string }) {
@@ -44,6 +61,12 @@ export function LogoArt({ id, custom }: { id: LogoId; custom?: string }) {
           <path d="M37.5 20v15.6c0 6-3.6 9.4-9 9.4-3.2 0-5.8-1.2-7.5-3.4" fill="none" stroke="#fff" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       );
+    case "spartan":
+      return <Spartan variant="color" />;
+    case "spartan-grey":
+      return <Spartan variant="grey" />;
+    case "spartan-mono":
+      return <Spartan variant="mono" />;
     case "shield-j-original":
       return <svg viewBox={SHIELD_J_VIEWBOX} aria-hidden="true"><path fill="currentColor" fillRule="evenodd" d={SHIELD_J_PATH} /></svg>;
     default:

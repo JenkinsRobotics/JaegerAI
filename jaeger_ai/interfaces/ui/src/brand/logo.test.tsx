@@ -14,7 +14,7 @@ describe("Jaeger logo (J-085)", () => {
       expect(el.querySelector(".jg-mark")?.getAttribute("data-logo")).toBe(l.id);
       expect(el.querySelector(".jg-mark svg")).not.toBeNull();
     }
-    expect(storedLogo().id).toBe("classic");
+    expect(storedLogo().id).toBe(LOGOS[LOGOS.length - 1].id);
   });
   it("saves the choice through the Gateway and keeps it locally when offline", async () => {
     const f = vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
