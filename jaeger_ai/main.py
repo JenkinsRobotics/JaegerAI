@@ -1459,6 +1459,10 @@ def _register_builtins(client: Any) -> None:
 
     from jaeger_ai.features.knowledge_library import tools as _library_tools  # noqa: F401
 
+    # The vault adapter is absent from the tool catalogue unless explicitly enabled.
+    from jaeger_ai.features.obsidian.tools import register_if_enabled as _obsidian_register
+    _obsidian_register()
+
     # execute_with_tools — one script, many tool calls, one inference
     # turn. Same import-registers pattern. See
     # :mod:`jaeger_ai.core.runtime.code_bridge`.
