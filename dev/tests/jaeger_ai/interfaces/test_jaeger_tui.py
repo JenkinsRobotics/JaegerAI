@@ -242,3 +242,82 @@ def test_tui_uses_gateway_model_and_tool_events(monkeypatch):
     assert result['text'] == 'Actual answer'
     assert tui.model_name == 'actual-provider-model'
     assert [e[0] for e in events] == ['start','done']
+
+
+def test_tui_gateway_clarification_resolves_original_form(monkeypatch):
+    import threading
+    from jaeger_ai.core.gateway.client import GatewayTurnClient, TurnResult
+
+    client = GatewayTurnClient()
+    tui = JaegerTUI(skip_model=True)
+    submitted = []
+    answers = []
+    monkeypatch.setattr(client, 'answer_clarify', lambda *args: answers.append(args))
+
+    def stream(session, text, *, request_id, on_event):
+        submitted.append(request_id)
+        on_event('clarify.request', {'clarify_id': 'q1', 'revision': 3,
+                                    'question': 'Which environment?', 'choices': ['staging', 'prod']})
+        return TurnResult(request_id, 'completed', 'Using staging')
+
+    monkeypatch.setattr(client, 'stream_turn', stream)
+    result = {}
+    worker = threading.Thread(target=lambda: result.update(tui._execute_client_turn(client, 'Deploy')))
+    worker.start()
+    try:
+        import time
+        deadline = time.monotonic() + 3
+        while tui._pending_confirm is None and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert tui._pending_confirm is not None
+        # Blank input leaves the question waiting; a number selects the offered label.
+        assert tui._resolve_pending_confirm(' ') is True
+        assert not tui._pending_confirm['event'].is_set()
+        assert tui._resolve_pending_confirm('1') is True
+        worker.join(timeout=3)
+        assert not worker.is_alive()
+        assert answers == [(tui.session_id, 'q1', 3, 'staging')]
+        assert result['text'] == 'Using staging'
+        assert len(submitted) == 1
+        assert tui._pending_confirm is None
+    finally:
+        if tui._pending_confirm:
+            tui._pending_confirm['event'].set()
+        worker.join(timeout=3)
+
+
+def test_tui_gateway_clarification_stop_never_answers(monkeypatch):
+    import threading
+    from jaeger_ai.core.gateway.client import GatewayTurnClient, TurnResult
+
+    client = GatewayTurnClient()
+    tui = JaegerTUI(skip_model=True)
+    tui._gateway_cancel_event = threading.Event()
+    answers, cancelled = [], []
+    monkeypatch.setattr(client, 'answer_clarify', lambda *args: answers.append(args))
+    monkeypatch.setattr(client, 'cancel', lambda *args: cancelled.append(args))
+
+    def stream(session, text, *, request_id, on_event):
+        tui._gateway_cancel_event.set()
+        on_event('clarify.request', {'clarify_id': 'q1', 'revision': 1, 'question': 'Where?'})
+        return TurnResult(request_id, 'cancelled', '')
+
+    monkeypatch.setattr(client, 'stream_turn', stream)
+    result = tui._execute_client_turn(client, 'Deploy')
+    assert result['cancelled'] is True
+    assert not answers
+    assert cancelled and all(row[0] == tui.session_id for row in cancelled)
+    assert tui._pending_confirm is None
+
+
+def test_tui_stop_releases_pending_question_without_answer():
+    import threading
+
+    tui = JaegerTUI(skip_model=True)
+    tui._gateway_cancel_event = threading.Event()
+    box = {'kind': 'clarify', 'answer': None, 'event': threading.Event()}
+    tui._pending_confirm = box
+    assert tui._dispatch_slash('/stop') is False
+    assert tui._gateway_cancel_event.is_set()
+    assert box['event'].is_set()
+    assert box['answer'] is None

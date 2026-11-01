@@ -176,6 +176,19 @@ class GatewayTurnClient:
         return self._call("POST", f"/v1/approvals/{approval_id}",
                           {"decision": decision, "approved": decision != "deny"})
 
+    def answer_clarify(self, session_id: str, clarify_id: str, revision: int,
+                       response: str) -> dict[str, Any]:
+        """Resolve the exact Gateway form revision; never submit a new turn."""
+        from urllib.parse import quote
+
+        if type(revision) is not int or revision < 1 or not response.strip():
+            raise ValueError("A positive form revision and non-empty answer are required")
+        return self._call(
+            "POST",
+            f"/v1/sessions/{quote(session_id, safe='')}/clarify/{quote(clarify_id, safe='')}",
+            {"revision": revision, "response": response},
+        )
+
     def stream_turn(
         self,
         session_id: str,
