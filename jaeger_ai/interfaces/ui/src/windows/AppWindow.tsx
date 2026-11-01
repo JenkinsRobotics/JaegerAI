@@ -158,6 +158,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
     <ToastProvider>
     <div className={`app-window${phone ? ' app-window--phone' : ''}`} data-page={active}>
       <AppChrome active={active} sub={route.sub} pages={dockWindows} phone={phone} onSearch={() => setPaletteOpen(true)}
+        trail={<ApprovalTray source={source} onOpenChat={(agentId) => go(agentId ? `/chat?agent=${encodeURIComponent(agentId)}` : '/chat')} />}
         onPick={(id) => go(id === 'settings' && settingsTab ? `/settings/${settingsTab}` : id === active ? pathOf(id) : pathOf(id, lastSub[id]))}>
       <div className="app-window__content">
         {chatOpen && (
@@ -174,9 +175,6 @@ export function AppWindow({ source }: { source: JaegerSource }) {
         ))}
       </div>
       </AppChrome>
-
-      <ApprovalTray source={source} onOpenChat={(agentId) => go(agentId ? `/chat?agent=${encodeURIComponent(agentId)}` : '/chat')} />
-
 
       <JumpTo open={paletteOpen} agents={store.agents.filter(visible)} summaries={store.summaries} seen={store.seen}
         onClose={() => setPaletteOpen(false)} onAgent={(id) => go(`/chat?agent=${encodeURIComponent(id)}`)} actions={paletteActions} />
