@@ -14,6 +14,7 @@ import { Icon, type IconName } from "../icons/Icon";
 import type { AgentsState } from "../agents/agentsStore";
 import { rowTime } from "./usePhone";
 import { groupRows } from "../agents/sections";
+import { navigate } from "../shell/router";
 
 const SOURCE_ICON: Record<string, IconName> = { chat: "comment", message: "comment", handoff: "arrow-right", sent: "arrow-right", task: "checklist" };
 
@@ -133,11 +134,60 @@ export function PhoneChat({ agentId, agentName, avatarUrl, onBack, onInfo, child
   return (
     <div className="jg-phone-screen jg-phone-chat" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <header className="jg-pbar">
-        <button type="button" className="jg-pround" aria-label="Chats" title="Chats" onClick={onBack}><Icon name="history" size={18} /></button>
+        <button type="button" className="jg-pround" aria-label="Menu" title="Menu" onClick={onBack}><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden><path d="M3 6h12M3 12h8" /></svg></button>
         <span className="jg-pbar__pill"><AgentAvatar id={agentId} name={agentName} src={avatarUrl} size={22} /><span>{agentName}</span></span>
         <button type="button" className="jg-pround" aria-label="Agent info" onClick={onInfo}><Icon name="ellipsis" size={18} /></button>
       </header>
       <div className="jg-pchat">{children}</div>
+    </div>
+  );
+}
+
+/** Drawer nav: only pages that exist in Jaeger today. */
+export const DRAWER_NAV: readonly { id: string; label: string; icon: IconName; to: string }[] = [
+  { id: "agents", label: "Agents", icon: "account", to: "/agents" },
+  { id: "hermes", label: "Hermes", icon: "rocket", to: "/agents/hermes" },
+  { id: "openclaw", label: "OpenClaw", icon: "rocket", to: "/agents/openclaw" },
+  { id: "backlog", label: "Backlog", icon: "checklist", to: "/work/backlog" },
+  { id: "automations", label: "Automations", icon: "history", to: "/settings/automations" },
+  { id: "library", label: "Library", icon: "file", to: "/settings/library" },
+  { id: "machine", label: "Machine", icon: "server", to: "/machine" },
+];
+
+/** Push-aside drawer (ChatGPT / Gemini / Muse iOS pattern): the chat slides right and stays visible as a rounded
+ * card; tapping or swiping the card left closes. The left-edge swipe that opens lives in PhoneChat (onBack). */
+export function PhoneDrawer({ open, onClose, onSearch, onSettings, onChat, recents, children }: {
+  open: boolean; onClose: () => void; onSearch: () => void; onSettings: () => void; onChat: () => void; recents: ReactNode; children: ReactNode;
+}) {
+  const start = useRef<number | null>(null);
+  const go = (to: string) => { onClose(); navigate(to); };
+  return (
+    <div className={`jg-pdrawer${open ? " is-open" : ""}`}>
+      <aside className="jg-pdrawer__menu" aria-label="Menu" aria-hidden={!open || undefined} inert={!open || undefined}>
+        <header className="jg-pdrawer__top">
+          <span className="jg-pdrawer__title">Jaeger</span>
+          <button type="button" className="jg-pround" aria-label="Search" onClick={() => { onClose(); onSearch(); }}><Icon name="search" size={18} /></button>
+        </header>
+        <div className="jg-pdrawer__scroll">
+          <nav className="jg-pdrawer__nav" aria-label="Pages">
+            {DRAWER_NAV.map((n) => (
+              <button key={n.id} type="button" className="jg-pdrawer__item" onClick={() => go(n.to)}><Icon name={n.icon} size={18} /><span>{n.label}</span></button>
+            ))}
+          </nav>
+          <h2 className="jg-pdrawer__section">Recents</h2>
+          <div className="jg-pdrawer__recents">{recents}</div>
+        </div>
+        <footer className="jg-pdrawer__bottom">
+          <button type="button" className="jg-pdrawer__chat" onClick={() => { onClose(); onChat(); }}><Icon name="comment" size={16} /><span>Chat</span></button>
+          <button type="button" className="jg-pround" aria-label="Settings" onClick={() => { onClose(); onSettings(); }}><Icon name="settings-gear" size={18} /></button>
+        </footer>
+      </aside>
+      <div className="jg-pdrawer__card">
+        {children}
+        {open && <button type="button" className="jg-pdrawer__scrim" aria-label="Close menu" onClick={onClose}
+          onTouchStart={(e) => { start.current = e.touches[0].clientX; }}
+          onTouchEnd={(e) => { const s = start.current; start.current = null; if (s !== null && s - e.changedTouches[0].clientX > 40) onClose(); }} />}
+      </div>
     </div>
   );
 }

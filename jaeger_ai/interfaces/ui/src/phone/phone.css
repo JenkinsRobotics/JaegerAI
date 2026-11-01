@@ -71,3 +71,36 @@ html.jg-phone .jg-handoff, html.jg-phone .jg-handoff__name, html.jg-phone .jg-ha
 .jg-chrome--phone .jg-phone-screen { position: absolute; inset: 0; height: auto; }
 /* The voice orb floats above the composer card, never over it. */
 html.jg-phone .jg-voice { bottom: calc(var(--jg-phone-composer-h, 116px) + 16px); }
+
+/* Push-aside drawer (2026-11-01, after ChatGPT / Gemini / Muse iOS). Tokens only. */
+.jg-pdrawer { position: relative; flex: 1; width: 100%; height: 100%; overflow: hidden; --jg-pdrawer-w: 82%; }
+.jg-chrome--phone .jg-pdrawer { position: absolute; inset: 0; }
+.jg-pdrawer__menu { position: absolute; inset: 0 auto 0 0; width: var(--jg-pdrawer-w); display: flex; flex-direction: column; background: var(--jg-p-bg); color: var(--jg-p-fg);
+  font-family: -apple-system, system-ui, sans-serif; opacity: 0; transition: opacity .28s ease; }
+.jg-pdrawer.is-open .jg-pdrawer__menu { opacity: 1; }
+.jg-pdrawer__top { display: flex; align-items: center; gap: 8px; padding: calc(env(safe-area-inset-top) + 10px) 12px 6px 20px; }
+.jg-pdrawer__title { flex: 1; font-size: 22px; font-weight: 700; }
+.jg-pdrawer__scroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+.jg-pdrawer__nav { display: grid; padding: 4px 8px; }
+.jg-pdrawer__item { display: flex; align-items: center; gap: 14px; height: 46px; padding: 0 12px; border: 0; border-radius: 12px; background: none; color: inherit; font: inherit; font-size: 17px; text-align: left; }
+.jg-pdrawer__item:active { background: color-mix(in srgb, var(--jg-p-fg) 8%, transparent); }
+.jg-pdrawer__section { margin: 14px 20px 4px; font-size: 13px; font-weight: 600; color: var(--jg-p-dim); text-transform: uppercase; letter-spacing: .04em; }
+/* The old chat list, reused as Recents: no own top bar or lead hero, flows in the drawer. */
+.jg-pdrawer__recents .jg-phone-screen { position: static; height: auto; padding: 0; background: none; overflow: visible; }
+.jg-pdrawer__recents .jg-ptop, .jg-pdrawer__recents .jg-punread { display: none; }
+.jg-pdrawer__recents .jg-plead { display: flex; align-items: center; gap: 12px; max-width: none; width: 100%; min-height: 64px; margin: 0; padding: 0 14px 0 18px; color: var(--jg-p-fg); }
+.jg-pdrawer__recents .jg-plead__art { width: 48px; height: 48px; overflow: hidden; border-radius: 50%; }
+.jg-pdrawer__recents .jg-plead__art > :first-child { width: 48px !important; height: 48px !important; }
+.jg-pdrawer__recents .jg-plead__badge { display: none; }
+.jg-pdrawer__recents .jg-plead__name { font-size: 17px; font-weight: 600; max-width: none; }
+.jg-pdrawer__recents .jg-prow { min-height: 64px; }
+.jg-pdrawer__bottom { display: flex; align-items: center; gap: 10px; padding: 10px 14px calc(env(safe-area-inset-bottom) + 10px); }
+.jg-pdrawer__chat { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; border: 0; border-radius: 999px;
+  background: var(--jg-p-voice-bg); color: var(--jg-p-voice-fg); font: inherit; font-size: 16px; font-weight: 600; }
+.jg-pdrawer__card { position: absolute; inset: 0; z-index: 2; background: var(--jg-p-bg); transition: transform .32s cubic-bezier(.2,.8,.2,1), border-radius .32s; }
+.jg-pdrawer__card > .jg-phone-screen { position: absolute; inset: 0; height: auto; }
+.jg-pdrawer.is-open .jg-pdrawer__card { transform: translateX(var(--jg-pdrawer-w)) scale(.94); border-radius: 26px; overflow: hidden;
+  box-shadow: 0 0 0 0.5px var(--aether-color-border), 0 10px 40px color-mix(in srgb, var(--aether-color-shadow) 40%, transparent); }
+.jg-pdrawer__scrim { position: absolute; inset: 0; z-index: 20; border: 0; padding: 0; background: color-mix(in srgb, var(--jg-p-bg) 25%, transparent); }
+@media (prefers-reduced-motion: reduce) { .jg-pdrawer__card, .jg-pdrawer__menu { transition: none; } }
+html[data-jg-motion="reduce"] .jg-pdrawer__card, html[data-jg-motion="reduce"] .jg-pdrawer__menu { transition: none; }
