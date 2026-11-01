@@ -80,6 +80,9 @@ class JaegerController {
 
   activate() {
     this._createStatusBar();
+    this.context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+      if (e.affectsConfiguration('jaeger.showStatusBar')) this._syncStatusBarVisibility();
+    }));
     this._startPolling();
     this._connectEvents();
     return this;
@@ -133,8 +136,14 @@ class JaegerController {
     );
     this._statusBarItem.command = 'jaeger.openChat';
     this._updateStatusBar();
-    this._statusBarItem.show();
+    this._syncStatusBarVisibility();
     this.context.subscriptions.push(this._statusBarItem);
+  }
+
+  _syncStatusBarVisibility() {
+    if (!this._statusBarItem) return;
+    if (vscode.workspace.getConfiguration('jaeger').get('showStatusBar', true) === false) this._statusBarItem.hide();
+    else this._statusBarItem.show();
   }
 
   _updateStatusBar() {
@@ -314,6 +323,9 @@ class JaegerController {
       },
     };
 
+    const model = vscode.workspace.getConfiguration('jaeger').get('model');
+    if (model) payload.model = model;
+
     this._setState({ status: 'thinking' });
 
     try {
@@ -491,8 +503,13 @@ class JaegerController {
   async openChat() {
     const config = vscode.workspace.getConfiguration('jaeger');
     const gatewayUrl = config.get('gatewayUrl') || 'http://127.0.0.1:33418';
-    const webuiUrl = gatewayUrl.replace(':33418', ':8790'); // WebUI proxy port
+    const webuiUrl = config.get('webuiUrl') || gatewayUrl.replace(':33418', ':8790'); // WebUI proxy port
     const appleUrl = `${webuiUrl}/?ui=apple`;
+
+    if (config.get('openChatInBrowser', false)) {
+      await vscode.env.openExternal(vscode.Uri.parse(appleUrl));
+      return;
+    }
 
     // Try to open in VS Code's Simple Browser first
     try {
@@ -512,8 +529,13 @@ class JaegerController {
   async openChatSession(sessionId) {
     const config = vscode.workspace.getConfiguration('jaeger');
     const gatewayUrl = config.get('gatewayUrl') || 'http://127.0.0.1:33418';
-    const webuiUrl = gatewayUrl.replace(':33418', ':8790');
+    const webuiUrl = config.get('webuiUrl') || gatewayUrl.replace(':33418', ':8790');
     const url = `${webuiUrl}/?ui=apple&session=${sessionId}`;
+
+    if (config.get('openChatInBrowser', false)) {
+      await vscode.env.openExternal(vscode.Uri.parse(url));
+      return;
+    }
 
     try {
       await vscode.commands.executeCommand('vscode.openWith', vscode.Uri.parse(url), 'vscode.simpleBrowser', {
