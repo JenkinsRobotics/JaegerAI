@@ -66,5 +66,8 @@ html.jg-phone .jg-composer button, html.jg-phone .jg-prow__art * { min-height: 0
 html.jg-phone .jg-phone-list .jg-prow { min-height: 78px; }
 html.jg-phone .jg-handoff, html.jg-phone .jg-handoff__name, html.jg-phone .jg-handoff__who, html.jg-phone .jg-progress-text { color: var(--jg-p-dim); font-size: 15px; }
 .jg-psection { margin: 14px 18px 2px; font-size: 13px; font-weight: 600; color: var(--jg-p-dim); text-transform: none; }
-/* The chat screen is fixed full-height; inside the tabbed shell, stop above the bottom tab bar so the composer row stays visible. */
-.jg-chrome--phone .jg-phone-chat { bottom: auto; height: calc(var(--jg-vvh, 100dvh) - 67px - env(safe-area-inset-bottom, 0px)); }
+/* Inside the tabbed shell, phone screens fill the page area between the top bar and the bottom tab bar, so the
+ * Chats button stays tappable and the composer row stays visible. */
+.jg-chrome--phone .jg-phone-screen { position: absolute; inset: 0; height: auto; }
+/* The voice orb floats above the composer card, never over it. */
+html.jg-phone .jg-voice { bottom: calc(var(--jg-phone-composer-h, 116px) + 16px); }
