@@ -234,8 +234,8 @@
 
 /* ── Sparkline ──────────────────────────────────────────────────────────── */
 .wg-spark { width: 100%; display: block; }
-.wg-spark__line { fill: none; stroke: var(--jg-color-accent); stroke-width: 1.5; }
-.wg-spark__area { fill: var(--jg-color-accent); opacity: 0.16; }
+.wg-spark__line { fill: none; stroke: var(--jg-chart-color); stroke-width: var(--jg-chart-stroke); }
+.wg-spark__area { fill: var(--jg-chart-color); opacity: var(--jg-chart-fill); }
 .wg-spark--empty { border-bottom: 1px solid var(--jg-color-border); }
 
 /* ── Gateway health widget ──────────────────────────────────────────────── */
