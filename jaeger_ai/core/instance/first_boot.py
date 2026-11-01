@@ -807,6 +807,17 @@ def complete(instance_root: Path | Any) -> FirstBootStatus:
     return status(instance_root)
 
 
+def skip(instance_root: Path | Any) -> FirstBootStatus:
+    """Durably dismiss first run without claiming commissioning ran."""
+    doc = _read(instance_root)
+    if status(instance_root) is FirstBootStatus.COMPLETED:
+        return FirstBootStatus.COMPLETED
+    doc["status"] = FirstBootStatus.COMPLETED.value
+    doc["skipped_at"] = _now()
+    _write(instance_root, doc)
+    return FirstBootStatus.COMPLETED
+
+
 #: Rewind table for ``step_back``. Each entry: the status being left →
 #: (status to land on, keys written by the answer that left it). Clearing
 #: the keys is not cosmetic: ``_after_social_target`` reads
@@ -955,6 +966,18 @@ def classify_existing(layout: Any) -> str:
     return FirstBootStatus.NOT_STARTED.value
 
 
+def reserve_fresh_instance(layout: Any) -> FirstBootStatus:
+    """Classify before Gateway startup creates its empty memory database.
+
+    A fresh instance needs a durable NOT_STARTED record so later migration
+    cannot mistake the Gateway's own state.db for prior operator use.
+    """
+    result = ensure_migrated(layout)
+    if result is FirstBootStatus.NOT_STARTED and not state_path(layout).is_file():
+        _write(layout, {"status": FirstBootStatus.NOT_STARTED.value})
+    return result
+
+
 def ensure_migrated(layout: Any) -> FirstBootStatus:
     """Classify an established identity once, so it skips the welcome.
 
@@ -1009,8 +1032,10 @@ __all__ = [
     "record_persona_name",
     "record_q2",
     "record_voice",
+    "reserve_fresh_instance",
     "reset",
     "snapshot",
+    "skip",
     "state_path",
     "status",
     "voice_profile",
