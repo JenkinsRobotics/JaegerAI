@@ -87,6 +87,9 @@ def test_no_mcp_tool_can_reach_any_bridge_command(cmd):
             "jaeger.generate", "jaeger.tools", "jaeger.tool", "jaeger_search_docs",
             # Backlog (Gateway relay only).
             "jaeger.backlog_list", "jaeger.backlog_add", "jaeger.backlog_update",
+            # AppControl: reads + proposals only, Gateway relay (approval is UI-only).
+            "jaeger.apps_list", "jaeger.app_status", "jaeger.app_action", "jaeger.app_config_get",
+            "jaeger.app_config_propose",
         }
         with pytest.raises(Exception) if rejects_invalid_input else _nullcontext():
             _call(server, tool.name, args)

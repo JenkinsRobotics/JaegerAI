@@ -1,6 +1,6 @@
 """MCP adapter: token identity is relayed to the Gateway on every call."""
 
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from mcp.server.fastmcp import Context
 
@@ -374,3 +374,42 @@ def register(mcp, client_for_context):
         body = {k: v for k, v in {"status": status, "priority": priority, "title": title, "detail": detail,
                                   "worker": worker}.items() if v}
         return call(ctx, "POST", f"/v1/backlog/{key(id)}", body)
+
+    # ── AppControl (features.app_control): reads + proposals only. Nothing here applies a
+    # change; Matthew approves every start/stop/restart/invoke/config edit in the Jaeger UI.
+
+    @mcp.tool(name="jaeger.apps_list")
+    @_off_event_loop
+    def jaeger_apps_list(ctx: Context | None = None) -> dict:
+        """List Matthew's agent apps and Jaeger services: installed, running, supported actions,
+        config files and their editable keys, built-in connection surfaces."""
+        return call(ctx, "GET", "/v1/apps")
+
+    @mcp.tool(name="jaeger.app_status")
+    @_off_event_loop
+    def jaeger_app_status(app: str, ctx: Context | None = None) -> dict:
+        """Status of one app (id from jaeger.apps_list): running, version, pending proposals."""
+        return call(ctx, "GET", f"/v1/apps/{quote(app, safe='')}")
+
+    @mcp.tool(name="jaeger.app_action")
+    @_off_event_loop
+    def jaeger_app_action(app: str, action: str, prompt: str = "", ctx: Context | None = None) -> dict:
+        """PROPOSE start, stop, restart or invoke:<name> (e.g. invoke:exec for Codex, invoke:prompt
+        for Claude Code / Gemini CLI, with a prompt). Returns a pending proposal id; nothing runs
+        until Matthew approves it in Jaeger. Poll jaeger.app_status for the result."""
+        return call(ctx, "POST", f"/v1/apps/{quote(app, safe='')}/proposals", {"action": action, "prompt": prompt})
+
+    @mcp.tool(name="jaeger.app_config_get")
+    @_off_event_loop
+    def jaeger_app_config_get(app: str, index: int = 0, ctx: Context | None = None) -> dict:
+        """Read an app's config file (secrets redacted) and its editable key allow-list."""
+        return call(ctx, "GET", f"/v1/apps/{quote(app, safe='')}/config?{urlencode({'index': index})}")
+
+    @mcp.tool(name="jaeger.app_config_propose")
+    @_off_event_loop
+    def jaeger_app_config_propose(app: str, ops: list[dict], index: int = 0, reason: str = "",
+                                  ctx: Context | None = None) -> dict:
+        """PROPOSE config edits: ops=[{"op":"set","path":"mcpServers.x","value":{...}} or
+        {"op":"delete","path":"..."}] on allow-listed keys only. Returns a redacted diff and a
+        pending proposal id. Matthew approves in Jaeger; a backup and ROLLBACK.sh are made first."""
+        return call(ctx, "POST", f"/v1/apps/{quote(app, safe='')}/proposals", {"ops": ops, "index": index, "reason": reason})
