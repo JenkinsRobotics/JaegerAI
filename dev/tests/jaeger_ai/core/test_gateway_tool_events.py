@@ -76,6 +76,24 @@ def test_tool_callbacks_preserve_text_order_and_distinguish_repeated_calls(tmp_p
         assert event.data["tool"] == "read_file"
 
 
+def test_tool_sources_publish_only_explicit_safe_locations(tmp_path):
+    app, _store, _ = _admitted_app(tmp_path)
+    callbacks, flush = app._turn_stream_callbacks("session", "request")
+    callbacks.on_tool_done("search_web", {}, {"results": [
+        {"url": "https://example.org/page?token=private", "title": "safe"},
+        {"path": "/tmp/report.txt", "content": "PRIVATE BODY"},
+        {"path": "/tmp/.hidden/key"},
+    ]}, True, None, 0.1)
+    flush()
+    sources = [event for event in _request_events(app, "session", "request") if event.event == "sources"]
+    assert len(sources) == 1
+    assert sources[0].data["sources"] == [
+        {"kind": "url", "location": "https://example.org/page"},
+        {"kind": "file", "location": "/tmp/report.txt"},
+    ]
+    assert "PRIVATE BODY" not in str(sources[0].data)
+
+
 def test_tool_failure_is_sanitized_and_replays_from_durable_cursor(tmp_path):
     app, store, _admitted = _admitted_app(tmp_path)
     callbacks, _flush = app._turn_stream_callbacks("session", "request")
