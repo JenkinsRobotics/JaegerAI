@@ -77,6 +77,7 @@ export interface SessionRow {
   last_event_id?: number;
   message_count?: number;
   archived?: boolean;
+  workspace?: string;
 }
 
 /** One persisted response part (core/gateway/turn_parts.py). */
