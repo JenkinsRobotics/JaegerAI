@@ -112,7 +112,7 @@ def test_default_registry_covers_every_app():
     ids = {s.id for s in default_specs()}
     for a in ("muse", "codex_app", "codex_cli", "claude_desktop", "claude_code", "gemini_desktop", "gemini_cli", "copilot",
               "opencode", "antigravity", "antigravity_ide", "cursor", "vscode", "homeclaw", "cuadriver", "sam", "openclaw",
-              "ollama", "n8n", "jaeger-gateway", "jaeger-webui", "jaeger-mcp-http", "jaeger-jobs", "jaeger-ares-worker"):
+              "ollama", "obsidian", "n8n", "jaeger-gateway", "jaeger-webui", "jaeger-mcp-http", "jaeger-jobs", "jaeger-ares-worker"):
         assert a in ids, a
     specs = {s.id: s for s in default_specs()}
     assert specs["jaeger-gateway"].actions == ["restart"]
@@ -120,6 +120,38 @@ def test_default_registry_covers_every_app():
     assert specs["claude_code"].configs[0].vendor_cli == "claude"
     assert specs["claude_desktop"].configs[0].rewritten_by_app
     assert not specs["muse"].configs and not specs["gemini_desktop"].configs
+
+
+def test_obsidian_status_only_and_vault_state(tmp_path, monkeypatch):
+    spec = next(s for s in default_specs() if s.id == "obsidian")
+    host = FakeHost(installed={"obsidian"}, running={"obsidian"})
+    ctl = _ctl(tmp_path, [spec], host)
+    monkeypatch.delenv("JAEGER_OBSIDIAN_VAULT", raising=False)
+    disabled = ctl.app_status("obsidian")
+    assert disabled["installed"] and not disabled["running"]
+    assert disabled["vault_enabled"] is False and disabled["actions"] == [] and disabled["surfaces"] == []
+    assert disabled["configs"] == [] and host.calls == []
+    for action in ("start", "stop", "restart", "invoke:read"):
+        with pytest.raises(AppControlError):
+            ctl.propose_action("obsidian", action, "ares")
+    with pytest.raises(AppControlError):
+        ctl.config_get("obsidian")
+
+    vault = tmp_path / "private-vault"
+    vault.mkdir()
+    monkeypatch.setenv("JAEGER_OBSIDIAN_VAULT", str(vault))
+    enabled = ctl.app_status("obsidian")
+    assert enabled["vault_enabled"] is True
+    assert enabled["surfaces"] == ["obsidian_list_notes", "obsidian_read_note", "obsidian_search_notes"]
+    assert str(vault) not in str(enabled)
+    vault.rmdir()
+    assert ctl.app_status("obsidian")["vault_enabled"] is False
+    vault.mkdir()
+    link = tmp_path / "vault-link"
+    link.symlink_to(vault, target_is_directory=True)
+    monkeypatch.setenv("JAEGER_OBSIDIAN_VAULT", str(link))
+    assert ctl.app_status("obsidian")["vault_enabled"] is False
+    assert host.calls == []
 
 
 @pytest.mark.parametrize("spec", default_specs(), ids=lambda s: s.id)
