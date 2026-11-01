@@ -117,7 +117,8 @@ def _is_loopback_ip(addr: str) -> bool:
 
 
 def host_allowed(handler, cfg: dict) -> bool:
-    allowed = set(_LOOPBACK_NAMES)
+    allowed = set(_LOOPBACK_NAMES) | {"host.docker.internal"}
+    allowed |= {h.strip().lower() for h in os.getenv("JAEGER_WEBUI_ALLOWED_HOSTS", "").split(",") if h.strip()}
     ph, _ = _public_host(cfg)
     if ph:
         allowed.add(ph)
