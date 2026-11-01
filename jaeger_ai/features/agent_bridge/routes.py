@@ -114,6 +114,13 @@ def register(gateway):
             _handoff_activity(caller, message)
             from jaeger_ai.features.backlog.routes import on_message as backlog_on_message
             backlog_on_message(gateway, caller, message)
+            try:
+                from jaeger_ai.features.backlog.store import record_hub_message
+                store = getattr(gateway, "backlog_store", None)
+                if store is not None:
+                    record_hub_message(store, caller, message)
+            except Exception:  # noqa: BLE001
+                __import__("logging").getLogger(__name__).warning("backlog hub recording failed", exc_info=True)
         return web.json_response(message)
 
     def _unsent(caller, ident):

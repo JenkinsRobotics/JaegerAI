@@ -219,9 +219,9 @@ def required_scope(method: str, route: str | None) -> str | None:
 #: Extra read-only GET routes for one named outside caller (not every prefixed caller).
 #: grokbot reads the Agents-tab activity feed (handoff.sent / handoff.result rows).
 CALLER_READ_ROUTES: Mapping[str, frozenset[str]] = {
-    "grokbot": frozenset({"/v1/activity", "/v1/backlog"}),
-    "ares": frozenset({"/v1/backlog"}),
-    "muse": frozenset({"/v1/backlog"}),
+    "grokbot": frozenset({"/v1/activity", "/v1/backlog", "/v1/backlog/sweep"}),
+    "ares": frozenset({"/v1/backlog", "/v1/backlog/sweep"}),
+    "muse": frozenset({"/v1/backlog", "/v1/backlog/sweep"}),
 }
 
 
