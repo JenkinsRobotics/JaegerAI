@@ -521,5 +521,5 @@
 .companion-chat .companion-turn.user { opacity: 0.85; }
 .companion-chat .companion-error { color: var(--danger, #ff453a); }
 .companion-chat .companion-input { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
-.companion-chat .companion-input input { flex: 1 1 180px; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid rgba(127,127,127,.4); background: transparent; color: inherit; }
+.companion-chat .companion-input input { flex: 1 1 180px; min-width: 0; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--aether-color-border); background: transparent; color: inherit; }
 .companion-chat .companion-input button { padding: 8px 12px; border-radius: 8px; }
