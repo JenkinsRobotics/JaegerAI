@@ -8,7 +8,8 @@ describe("ChatHome", () => {
   it("renders the mark and only real quick actions that navigate", async () => {
     const el = document.createElement("div"); document.body.appendChild(el);
     await act(async () => createRoot(el).render(<ChatHome />));
-    expect(el.querySelector(".jg-chat-home__mark")?.getAttribute("src")).toBe("/jaeger-icon.svg");
+    expect(el.querySelector(".jg-chat-home__mark")?.getAttribute("data-logo")).toBe("shield-j");
+    expect(el.querySelector(".jg-chat-home__mark svg path")).not.toBeNull();
     const chips = [...el.querySelectorAll<HTMLButtonElement>(".jg-chat-home__chip")];
     expect(chips.map((c) => c.textContent)).toEqual(HOME_CHIPS.map((c) => c.label));
     await act(async () => chips[0].click());

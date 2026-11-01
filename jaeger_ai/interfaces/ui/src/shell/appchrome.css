@@ -77,3 +77,5 @@
 @media (prefers-reduced-motion: reduce) { .jg-sidebar { transition: none; } }
 /* Native JaegerShell (transparent titlebar): keep the traffic lights clear. */
 :root.jg-native .jg-sidebar__head { padding-left: var(--jg-titlebar-inset-left); }
+.jg-topbar__logo.jg-mark { width: 22px; height: 22px; flex: none; }
+.jg-topbar__logo.jg-mark[data-logo="wordmark"] { width: auto; height: 18px; }

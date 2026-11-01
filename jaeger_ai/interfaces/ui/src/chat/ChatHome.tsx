@@ -3,6 +3,7 @@
  * composer below. Styled entirely from tokens so Glass, Arc, Linear and Dia each restyle it. */
 import type { ReactNode } from "react";
 import { navigate } from "../shell/router";
+import { JaegerMark } from "../brand/JaegerMark";
 import { AppsIcon, SearchIcon, StarIcon, TasksIcon } from "../icons";
 
 export interface HomeChip { id: string; label: string; icon: ReactNode; run: () => void }
@@ -20,7 +21,7 @@ export const HOME_CHIPS: readonly HomeChip[] = [
 export function ChatHome({ chips = HOME_CHIPS }: { chips?: readonly HomeChip[] }) {
   return (
     <div className="jg-chat-home" data-testid="chat-home">
-      <img className="jg-chat-home__mark" src="/jaeger-icon.svg" alt="" aria-hidden="true" />
+      <JaegerMark className="jg-chat-home__mark" />
       <p className="jg-chat-home__title">What should we work on?</p>
       <div className="jg-chat-home__chips" role="list" aria-label="Quick actions">
         {chips.map((c) => (
