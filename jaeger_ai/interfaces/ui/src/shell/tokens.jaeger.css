@@ -21,8 +21,8 @@
   --jg-alpha-hover: 6%;
   --jg-alpha-active: 8%;
   --jg-alpha-bubble-assistant: 6%;
-  --jg-color-accent: #1680f3;
-  --jg-color-accent-text: #1680f3;
+  --jg-color-accent: #0b62d6; /* Jaeger Blue: 5.6:1 with white (AA); was #1680f3 at 3.88 */
+  --jg-color-accent-text: #0b62d6;
   /* Agent avatar hues (measured on the reference roster; saturated, same in both themes). */
   --jg-avatar-red: #fb2b3e;
   --jg-avatar-green: #14c16f;
@@ -63,7 +63,8 @@
     --jg-alpha-border: 10%;
     --jg-alpha-border-tertiary: 6%;
     --jg-alpha-bubble-assistant: 4%;
-    --jg-color-accent-text: #4d9bff;
+    --jg-color-accent-text: #5ea2ff;
+    --jg-color-accent: #1f6fe5;
     --jg-shadow-card: 0 1px 2px color-mix(in srgb, var(--jg-color-shadow) 40%, transparent),
                       0 4px 16px color-mix(in srgb, var(--jg-color-shadow) 32%, transparent);
     --jg-shadow-control: none;

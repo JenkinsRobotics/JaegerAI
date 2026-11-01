@@ -9,6 +9,7 @@ import "./agents/agents.css";
 import "./chat/chat.css";
 import "./settings/settings.css";
 import "./tasks/tasks.css";
+import "./shell/presets.css";
 import "./shell/motion.css";
 // One app: the unified shell (dock pages at real routes). The old `?ui=apple|windows|default`
 // switch and its localStorage flags are retired; old links land on the matching page.
@@ -19,6 +20,7 @@ import { AppWindow } from "./windows/AppWindow";
 import { clearLegacyFlags, legacyRedirect } from "./shell/router";
 import { applyAppearance, storedAppearance } from "./settings/SettingsDialog";
 import { applyDensity, applyFeel, applyIcon, storedDensity, storedFeel, storedIcon } from "./settings/appearance";
+import { applyPreset, storedPreset, syncPresetFromGateway } from "./shell/layoutPresets";
 
 const redirect = legacyRedirect(location.pathname, location.search);
 if (redirect) history.replaceState(null, "", redirect + location.hash);
@@ -27,6 +29,8 @@ applyAppearance(storedAppearance());
 applyFeel(storedFeel());
 applyIcon(storedIcon());
 applyDensity(storedDensity());
+applyPreset(storedPreset());
+void syncPresetFromGateway();
 
 const source = await createSource();
 

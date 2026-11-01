@@ -1405,6 +1405,8 @@ class JaegerGatewayApp:
         register_oss_stack(self)
         from jaeger_ai.features.backlog.routes import register as register_backlog
         register_backlog(self)
+        from jaeger_ai.features.ui_layout.routes import register as register_ui_layout
+        register_ui_layout(self)
         from jaeger_ai.features.app_control.routes import register as register_app_control
         register_app_control(self)
 
