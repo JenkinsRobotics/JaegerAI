@@ -19,6 +19,11 @@ from jaeger_ai.features.finance.security import FinanceCipher
 from jaeger_ai.features.finance.store import FinanceStore
 
 
+# Finance is deprecated (removal in v0.14.0); its /v1/finance routes were unmounted from the Gateway in v0.13.0
+# (bee8950c), so the HTTP-level review tests cannot reach a route. The store/policy tests below still run.
+FINANCE_ROUTES_UNMOUNTED = pytest.mark.skip(reason='/v1/finance routes are unmounted (finance deprecated, v0.13.0)')
+
+
 @pytest.fixture
 def setup(tmp_path, monkeypatch):
     monkeypatch.setenv('JAEGER_STATE_DIR', str(tmp_path))
@@ -51,6 +56,7 @@ def test_closed_policy_has_no_purchase_or_implicit_operation_authority(setup):
     assert review.policy()['provider'] == 'not_probed'
 
 
+@FINANCE_ROUTES_UNMOUNTED
 @pytest.mark.asyncio
 async def test_status_never_initializes_keys_or_store_and_denies_readonly_caller(setup, monkeypatch):
     root, app = setup
@@ -69,6 +75,7 @@ async def test_status_never_initializes_keys_or_store_and_denies_readonly_caller
         assert (await client.post('/v1/finance/actions/act_000000000001/review', json={})).status == 403
 
 
+@FINANCE_ROUTES_UNMOUNTED
 @pytest.mark.asyncio
 async def test_http_scope_review_receipt_no_effect_and_redaction(setup, monkeypatch):
     root, app = setup; store = existing(root)
@@ -141,6 +148,7 @@ def test_expiration_at_final_commit_rolls_back_approved_review(setup, monkeypatc
     assert not result['execution_performed']
 
 
+@FINANCE_ROUTES_UNMOUNTED
 @pytest.mark.asyncio
 async def test_lost_postcommit_response_recovers_original_receipt_without_resubmit(setup, monkeypatch):
     root, app = setup; store = existing(root); action(store)
