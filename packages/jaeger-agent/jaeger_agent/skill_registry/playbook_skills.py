@@ -219,6 +219,30 @@ def _disabled_playbook_names() -> set[str]:
         return set()
 
 
+def active_skill_path(root: Path, path: Path) -> bool:
+    """Hidden retirement/staging trees are never live skill sources.
+
+    Check every component; a symlink must not reintroduce an archived or
+    outside skill under an active-looking name. Shared by management readers.
+
+    Restored verbatim from commit b8afc5c3 — the helper was dropped in a later
+    refactor while jaeger_ai.core.skills.service still calls it (4 call sites),
+    which made every managed skill read/write raise AttributeError.
+    """
+    try:
+        relative = path.relative_to(root)
+        if any(part.startswith(".") for part in relative.parts):
+            return False
+        current = root
+        for part in relative.parts:
+            current = current / part
+            if current.is_symlink():
+                return False
+        return path.resolve().is_relative_to(root.resolve())
+    except (OSError, ValueError):
+        return False
+
+
 def _instance_skills_dir() -> Path | None:
     """The bound instance's ``skills/`` dir — where agent-authored
     playbooks live (the agent's writes are sandboxed to it). ``None``
@@ -246,6 +270,8 @@ def _discovery_signature(roots: list[Path]) -> tuple:
         if not root.is_dir():
             continue
         for md in sorted(root.rglob("SKILL.md")):
+            if not active_skill_path(root, md):
+                continue
             try:
                 st = md.stat()
                 sig.append((str(md), st.st_mtime, st.st_size))
@@ -305,6 +331,11 @@ def discover_playbooks() -> list[PlaybookSkill]:
             continue
         for md in root.rglob("SKILL.md"):
             folder = md.parent
+            # Hidden archive/staging trees and symlinked paths are never live
+            # sources (active_skill_path, restored from b8afc5c3) — otherwise
+            # an archived or resurrected skill re-enters discovery.
+            if not active_skill_path(root, md):
+                continue
             # Presence-based unification: ANY folder with a SKILL.md is a recipe.
             # A folder that ALSO ships a module registers tools (skill_loader) —
             # so a skill can be both. No "code_skill vs playbook" split. See

@@ -1311,3 +1311,102 @@ def test_durable_task_uses_real_owner_tools_and_delivers_after_restart(gateway):
     messages = session.get('session', session)['messages']
     assert len([m for m in messages if m['role'] == 'assistant']) == 1
     assert (gateway.root/'provider-calls.jsonl').read_text() == before
+
+
+def test_memory_remember_recall_correct_forget_across_gateway_restart(gateway):
+    """One memory authority (the Gateway's bound store): remember, recall,
+    correct, forget — all still true after full process restarts."""
+    from jaeger_agent.memory import memory as mem
+    from jaeger_agent.memory import sqlite_store
+
+    gateway.request("/v1/runtime/tier", {"tier": "jaeger"})
+    layout = _contract_layout(gateway)
+    sqlite_store.bind(layout)
+    try:
+        mem.remember("operator callsign", "Maverick")
+        assert mem.recall("operator callsign") == "Maverick"
+        mem.remember("operator callsign", "Viper")          # correct
+        assert mem.recall("operator callsign") == "Viper"
+    finally:
+        sqlite_store.close()
+    gateway.stop()
+    gateway.start()
+    gateway.request("/v1/runtime/tier", {"tier": "jaeger"})
+    sqlite_store.bind(layout)
+    try:
+        assert mem.recall("operator callsign") == "Viper", "correction must survive restart"
+        assert mem.forget("operator callsign") is True
+        assert mem.recall("operator callsign") is None
+    finally:
+        sqlite_store.close()
+    gateway.stop()
+    gateway.start()
+    gateway.request("/v1/runtime/tier", {"tier": "jaeger"})
+    sqlite_store.bind(layout)
+    try:
+        assert mem.recall("operator callsign") is None, "forget must be durable across restart"
+    finally:
+        sqlite_store.close()
+
+
+def test_skill_discover_load_and_owner_turn(gateway):
+    """A skill installed in the instance store is discoverable through the
+    live catalog, readable by name, and the owner Gateway still executes a
+    real turn in the same instance."""
+    from jaeger_ai.core.instance.instance import InstanceLayout
+    from jaeger_ai.core.skills import service
+
+    layout = InstanceLayout(gateway.root / "instances" / "contract")
+    service.install_skill(layout, "contract-ritual",
+                          "---\nname: contract-ritual\ndescription: contract skill\n---\n\nReply SKILL-APPLIED.\n",
+                          category="test")
+    rows = service.list_skills(layout)["skills"]
+    assert any(r["name"] == "contract-ritual" for r in rows), rows
+    body = service.get_skill(layout, "contract-ritual")
+    assert "SKILL-APPLIED" in body["content"]
+    gateway.request("/v1/sessions", {"session_id": "skill-session", "profile": "jaeger"})
+    gateway.request("/v1/sessions/skill-session/turns", {
+        "text": "Say CONTRACT-ANSWER", "request_id": "skill-turn",
+    })
+    row = gateway.wait_for_terminal("skill-session", "skill-turn")
+    assert row["status"] == "completed", row
+    assert row["result"]["output"] == "CONTRACT-ANSWER"
+
+
+def test_scheduled_work_fires_once_and_survives_restart(gateway):
+    """A persisted schedule produces exactly one durable turn; a Gateway
+    restart afterwards must not re-fire it (no duplicate provider call)."""
+    from datetime import datetime, timedelta
+
+    from jaeger_agent.memory import memory as mem
+    from jaeger_agent.memory import sqlite_store
+
+    gateway.request("/v1/runtime/tier", {"tier": "jaeger"})
+    layout = _contract_layout(gateway)
+    sqlite_store.bind(layout)
+    try:
+        when = (datetime.now().astimezone() - timedelta(seconds=2)).isoformat()
+        mem.add_schedule("", "Say CONTRACT-ANSWER", name="restart-once", at=when)
+    finally:
+        sqlite_store.close()
+    deadline = time.monotonic() + 15
+    session = None
+    while time.monotonic() < deadline:
+        try:
+            _, session = gateway.request("/v1/sessions/cron:restart-once")
+        except HTTPError:
+            session = None
+        if session and any(m.get("role") == "assistant" for m in session.get("messages") or []):
+            break
+        time.sleep(0.1)
+    assert session is not None, (gateway.root / "gateway.log").read_text()
+    texts = [m.get("content") for m in session["messages"] if m.get("role") == "assistant"]
+    assert any("CONTRACT-ANSWER" in (t or "") for t in texts), session
+    calls_before = len(_provider_calls(gateway))
+    gateway.stop()
+    gateway.start()
+    time.sleep(1.5)
+    assert len(_provider_calls(gateway)) == calls_before, "restart must not re-fire a completed schedule"
+    _, session = gateway.request("/v1/sessions/cron:restart-once")
+    texts = [m.get("content") for m in session.get("messages") or [] if m.get("role") == "assistant"]
+    assert sum("CONTRACT-ANSWER" in (t or "") for t in texts) == 1, session
