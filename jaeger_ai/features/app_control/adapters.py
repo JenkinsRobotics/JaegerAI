@@ -35,10 +35,13 @@ class AppSpec:
     invoke: dict[str, list[str]] = field(default_factory=dict)   # action -> argv template ({prompt})
     surfaces: tuple[str, ...] = ()
     self_service: bool = False                 # Jaeger's own gateway/webui/mcp: stop refused
+    status_only: bool = False                  # inventory entry; no app lifecycle actions
     notes: str = ""
 
     @property
     def actions(self) -> list[str]:
+        if self.status_only:
+            return []
         acts = []
         if self.kind in ("macapp", "launchd"):
             acts += ["restart"] if self.self_service else ["start", "stop", "restart"]
@@ -100,6 +103,8 @@ def default_specs() -> list[AppSpec]:
         _app("cuadriver", "CuaDriver", "com.trycua.driver", "/Applications/CuaDriver.app",
              notes="Screen control. Invoke disabled; start/stop need Matthew's approval."),
         _app("sam", "SAM", "com.fewtarius.syntheticautonomicmind", "/Applications/SAM.app", notes="Opaque store."),
+        _app("obsidian", "Obsidian", "md.obsidian", "/Applications/Obsidian.app",
+             status_only=True, notes="Read-only vault adapter; no app control or config access."),
         AppSpec("openclaw", "OpenClaw", "cli", binary="openclaw",
                 configs=(ConfigSpec(HOME / ".openclaw/openclaw.json", "json", ("mcp.servers.*",)),), surfaces=("cli", "mcp client")),
         _app("ollama", "Ollama", "com.electron.ollama", "/Applications/Ollama.app", surfaces=("http 127.0.0.1:11434",),
