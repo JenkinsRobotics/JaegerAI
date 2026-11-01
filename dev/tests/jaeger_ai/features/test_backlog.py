@@ -10,7 +10,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from jaeger_ai.core.gateway import agent_activity, caller_auth
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 from jaeger_ai.features.backlog import importer, routes as bl_routes
-from jaeger_ai.features.backlog.store import BacklogError, BacklogStore, status_from_message
+from jaeger_ai.features.backlog.store import BacklogError, BacklogStore, record_hub_message, status_from_message, sweep
 
 
 # ── store ────────────────────────────────────────────────────────────
@@ -269,3 +269,61 @@ def test_mcp_backlog_tools_relay(monkeypatch):
     assert c.calls[1] == ("POST", "/v1/backlog", {"title": "New", "detail": "", "priority": "P0", "status": "open", "worker": ""})
     assert c.calls[2] == ("POST", "/v1/backlog/bl-0123456789", {"status": "done"})
     assert c.calls[3] == ("POST", "/v1/backlog/bl-0123456789/assign", {"worker": "muse"})
+
+
+def test_sweep_flags_without_mutating(tmp_path):
+    store = BacklogStore(tmp_path / "sweep.sqlite3")
+    stale = store.add("Work", status="in_progress")
+    waiting = store.add("Sign", status="needs_ok")
+    blocked = store.add("Blocked by device", status="open")
+    finished = store.add("Needs reconciliation", status="open")
+    store.update(finished["id"], handoff_id="h1", handoff_result="done")
+    now = max(row["updated_at"] for row in store.list()) + 101
+    flags = {item["task"]["id"]: item["reasons"] for item in sweep(store, now, 100)}
+    assert flags[stale["id"]] == ["stale"]
+    assert flags[waiting["id"]] == ["waiting_on_matthew"]
+    assert flags[blocked["id"]] == ["blocked"]
+    assert flags[finished["id"]] == ["finished_not_marked"]
+    assert store.get(finished["id"])["status"] == "open"
+
+
+def test_record_hub_message_is_idempotent_and_links_existing(tmp_path):
+    store = BacklogStore(tmp_path / "hub.sqlite3")
+    task = {"id": "h1", "thread": "t1", "to": "ares", "kind": "task",
+            "title": "Do work", "body": "Details", "refs": []}
+    first = record_hub_message(store, "grokbot", task)
+    assert record_hub_message(store, "grokbot", task)["id"] == first["id"]
+    assert len(store.list()) == 1
+    record_hub_message(store, "ares", {"kind": "status", "thread": "t1", "status_line": "needs ok"})
+    assert store.get(first["id"])["status"] == "needs_ok"
+    record_hub_message(store, "ares", {"kind": "result", "thread": "t1", "status_line": "done"})
+    assert store.get(first["id"])["status"] == "done"
+    existing = store.add("Preexisting")
+    linked = record_hub_message(store, "grokbot", {**task, "id": "h2", "thread": "t2",
+                                               "refs": [f"backlog:{existing['id']}"]})
+    assert linked["id"] == existing["id"] and len(store.list()) == 2
+
+
+def test_sweep_route_and_mcp(gw, monkeypatch):
+    async def flow(c):
+        await c.post("/v1/backlog", json={"title": "Wait", "status": "needs_ok"})
+        response = await c.get("/v1/backlog/sweep", headers={"X-Caller": "ares"})
+        assert response.status == 200
+        assert (await response.json())["flagged"][0]["reasons"] == ["waiting_on_matthew"]
+    _run(gw, flow)
+    import jaeger_ai.features.agent_bridge.mcp as mod
+    class M:
+        tools = {}
+        def tool(self, name=None):
+            def deco(fn):
+                self.tools[name or fn.__name__] = fn
+                return fn
+            return deco
+    class C:
+        def _call(self, method, path, body=None):
+            assert method == "GET" and path.startswith("/v1/backlog/sweep?")
+            return {"ok": True}
+    monkeypatch.setattr(mod, "enabled", lambda: None)
+    m = M()
+    mod.register(m, lambda ctx: C())
+    assert asyncio.run(m.tools["jaeger.backlog_sweep"]()) == {"ok": True}
