@@ -11,7 +11,7 @@ export function pressure(s: ResourceSnapshot, c: ResourceConfig): string[] {
   const out: string[] = [];
   if (s.mem_free_gb < c.min_free_mem_gb) out.push(`Free memory ${s.mem_free_gb.toFixed(1)} GB < ${c.min_free_mem_gb} GB`);
   if (s.mem_pressure > c.max_memory_pressure) out.push(`Memory pressure level ${s.mem_pressure}`);
-  if (s.cpu_load > c.max_cpu_load) out.push(`CPU load ${Math.round(s.cpu_load * 100)}% > ${Math.round(c.max_cpu_load * 100)}%`);
+  if (s.cpu_load > c.max_cpu_load) out.push(`CPU load ${cpuText(s.cpu_load)} is over the ${Math.round(c.max_cpu_load * 100)}% limit`);
   if (s.gpu_util != null && s.gpu_util > c.max_gpu_util_pct) out.push(`GPU ${s.gpu_util}% > ${c.max_gpu_util_pct}%`);
   if (s.disk_free_gb < c.min_free_disk_gb) out.push(`Disk ${s.disk_free_gb.toFixed(0)} GB free < ${c.min_free_disk_gb} GB`);
   if (s.research_gb > c.research_disk_budget_gb) out.push(`Research cache ${s.research_gb.toFixed(1)} GB over budget`);
@@ -21,3 +21,9 @@ export function pressure(s: ResourceSnapshot, c: ResourceConfig): string[] {
 
 export const logsUrl = (source: string, o: { lines?: number; q?: string; level?: string } = {}) =>
   `/v1/machine/logs?${new URLSearchParams({ source, lines: String(o.lines ?? 300), ...(o.q ? { q: o.q } : {}), ...(o.level ? { level: o.level } : {}) })}`;
+
+/** Load average per core as a percent of the whole CPU (J-087): capped at 100%, with the queue depth when oversubscribed. */
+export function cpuText(loadPerCore: number): string {
+  const pct = Math.min(100, Math.round(loadPerCore * 100));
+  return loadPerCore > 1 ? `${pct}% (${loadPerCore.toFixed(1)}× queued)` : `${pct}%`;
+}

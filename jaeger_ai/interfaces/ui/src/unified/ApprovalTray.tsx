@@ -53,15 +53,19 @@ export function ApprovalList({ source, sessions, onOpenChat }: { source: JaegerS
   </div>;
 }
 
-/** Dock badge + popover: approvals reachable from any page. */
+/** One label everywhere (J-087): "1 approval needs you" / "5 approvals need you". */
+export const approvalsLabel = (n: number) => `${n} approval${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} you`;
+
+/** Top-bar badge + popover: approvals reachable from any page. */
 export function ApprovalTray({ source, onOpenChat }: { source: JaegerSource; onOpenChat?: (agentId?: string | null) => void }) {
   const pending = useApprovalSessions(source);
   const [open, setOpen] = useState(false);
   const total = pending.reduce((n, p) => n + p.count, 0);
   if (!total && !open) return null;
   return <div className="jg-u-tray">
-    <button type="button" className="jg-u-tray__button" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-      {total} approval{total === 1 ? "" : "s"} waiting
+    <button type="button" className="jg-u-tray__button" aria-expanded={open} onClick={() => setOpen((v) => !v)}
+      aria-label={approvalsLabel(total)} title={approvalsLabel(total)}>
+      <span className="jg-u-tray__icon" aria-hidden="true">!</span><span className="jg-u-tray__count">{total}</span>
     </button>
     {open && <div className="jg-u-tray__panel" role="dialog" aria-label="Pending approvals">
       <ApprovalList source={source} sessions={pending} onOpenChat={(id) => { setOpen(false); onOpenChat?.(id); }} />
