@@ -20,7 +20,8 @@ from pathlib import Path
 
 from aiohttp import web
 
-BUILTINS = ("shield-j", "shield-j-original", "shield-j-tile", "shield", "j", "wordmark", "classic")
+BUILTINS = ("shield-j", "shield-j-original", "shield-j-tile", "shield", "j", "wordmark", "classic",
+            "spartan", "spartan-grey", "spartan-mono")
 DEFAULT = "shield-j"
 MAX_BYTES = 200_000
 RASTER = {"image/png": b"\x89PNG\r\n\x1a\n", "image/webp": b"RIFF", "image/jpeg": b"\xff\xd8\xff"}
