@@ -328,3 +328,10 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
   .jg-composer { width: calc(100% - 20px); }
   .jg-chat-home { margin-top: 10vh; }
 }
+/* J-085: the mark is an inline vector in currentColor, so it stays crisp and follows each preset/theme. */
+.jg-mark { display: inline-flex; align-items: center; justify-content: center; line-height: 0; color: var(--jg-color-text, var(--aether-color-text)); }
+.jg-mark > svg, .jg-mark > img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.jg-mark[data-logo="wordmark"] { aspect-ratio: 232 / 64; }
+.jg-chat-home__mark.jg-mark { width: min(26vw, 112px); height: min(26vw, 112px); opacity: 0.9; filter: none; color: var(--aether-color-text); }
+.jg-chat-home__mark.jg-mark[data-logo="shield-j"], .jg-chat-home__mark.jg-mark[data-logo="shield"], .jg-chat-home__mark.jg-mark[data-logo="j"] { opacity: 0.85; }
+.jg-chat-home__mark.jg-mark[data-logo="wordmark"] { width: min(60vw, 240px); height: auto; }
