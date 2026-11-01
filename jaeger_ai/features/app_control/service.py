@@ -89,12 +89,22 @@ class AppControl:
 
     def _summary(self, s: AppSpec, deep: bool = False) -> dict:
         installed = self.host.installed(s)
+        vault_enabled = False
+        if s.id == "obsidian":
+            raw = os.environ.get("JAEGER_OBSIDIAN_VAULT", "")
+            if raw:
+                vault = Path(raw).expanduser()
+                vault_enabled = not vault.is_symlink() and vault.is_dir()
         row = {"id": s.id, "name": s.name, "kind": s.kind, "bundle_id": s.bundle_id, "label": s.label, "binary": s.binary,
-               "installed": installed, "running": bool(installed and s.kind != "cli" and self.host.app_running(s)),
-               "actions": s.actions if installed else [], "surfaces": list(s.surfaces), "notes": s.notes,
+               "installed": installed, "running": bool(installed and s.kind != "cli" and not s.status_only and self.host.app_running(s)),
+               "actions": s.actions if installed else [],
+               "surfaces": (["obsidian_list_notes", "obsidian_read_note", "obsidian_search_notes"]
+                            if s.id == "obsidian" and vault_enabled else list(s.surfaces)), "notes": s.notes,
                "configs": [{"path": str(c.path), "format": c.fmt, "editable_keys": list(c.allow),
                             "rewritten_by_app": c.rewritten_by_app, "vendor_cli": c.vendor_cli, "exists": c.path.exists()}
                            for c in s.configs]}
+        if s.id == "obsidian":
+            row["vault_enabled"] = vault_enabled
         if deep:
             row["version"] = self.host.app_version(s)
             if s.kind == "launchd":
