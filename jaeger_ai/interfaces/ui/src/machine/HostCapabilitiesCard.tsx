@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getJson } from '../unified/webui'
+import { WidgetCard } from '../widgets/primitives/WidgetCard'
 import './machine.css'
 
 type Runtime = { present: boolean; reachable: boolean | null; loaded_models?: string[] }
@@ -23,10 +24,8 @@ export function HostCapabilitiesCard() {
     )
     return () => { live = false }
   }, [])
-  return <section className="jg-mc-card" aria-label="Host capabilities">
-    <h3>Host capabilities</h3>
-    {error && <p role="alert">{error}</p>}
-    {!data && !error && <p>Loading host capabilities…</p>}
+  return <WidgetCard title="Host capabilities" state={error ? "error" : !data ? "loading" : "ready"}
+    message={error ?? "Loading host capabilities…"}>
     {data && <>
       <div className="jg-mc-metrics">
         {([
@@ -42,5 +41,5 @@ export function HostCapabilitiesCard() {
           <strong>{runtime.reachable === true ? 'Reachable' : runtime.reachable === false ? (runtime.present ? 'Present, offline' : 'Unavailable') : runtime.present ? 'Present' : 'Unavailable'}
             {runtime.loaded_models?.length ? ` · ${runtime.loaded_models.join(', ')}` : ''}</strong></div>)}</div>
     </>}
-  </section>
+  </WidgetCard>
 }
