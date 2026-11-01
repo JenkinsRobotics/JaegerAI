@@ -28,7 +28,21 @@ it('loads older metadata without duplicates and requests a real backend category
  const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
  try{
   await act(async()=>root.render(<NotificationsPanel controls={{read,save:vi.fn(),markRead:vi.fn()}} agents={[]} onOpen={()=>{}}/>));
-  await act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Load earlier notifications')!.click());expect(read).toHaveBeenNthCalledWith(2,{category:'all',before:40});expect(host.querySelectorAll('article')).toHaveLength(2);
-  const select=host.querySelector<HTMLSelectElement>('select[aria-label="Notification category"]')!;await act(async()=>{select.value='approvals';select.dispatchEvent(new Event('change',{bubbles:true}));});expect(read).toHaveBeenLastCalledWith({category:'approvals'});expect(host.querySelectorAll('article')).toHaveLength(1);
+  await act(async()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Load earlier notifications')!.click());expect(read).toHaveBeenNthCalledWith(2,{category:'all',before:40});expect(host.querySelectorAll('.jg-widget-card[data-state="ready"]')).toHaveLength(2);
+  const select=host.querySelector<HTMLSelectElement>('select[aria-label="Notification category"]')!;await act(async()=>{select.value='approvals';select.dispatchEvent(new Event('change',{bubbles:true}));});expect(read).toHaveBeenLastCalledWith({category:'approvals'});expect(host.querySelectorAll('.jg-widget-card[data-state="ready"]')).toHaveLength(1);
  }finally{await act(async()=>root.unmount());host.remove();localStorage.removeItem(key);}
+});
+it('renders history through WidgetCard and retains loaded rows after a read error',async()=>{
+ localStorage.removeItem('jaeger.ui.notifications.draft.v1');
+ const preferences={revision:0,enabled:true,muted_agent_ids:[],read_through:0};
+ const read=vi.fn().mockResolvedValueOnce({preferences,notifications:[{event_id:7,session_id:'home',title:'Saved notification',timestamp:1,unread:true}]}).mockRejectedValueOnce(Error('read failed'));
+ const host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try{
+  await act(async()=>root.render(<NotificationsPanel controls={{read,save:vi.fn(),markRead:vi.fn()}} agents={[]} onOpen={()=>{}}/>));
+  expect(host.querySelector('.jg-widget-card[data-state="ready"]')?.textContent).toContain('Saved notification');
+  await act(async()=>{await read.mock.results[0].value;});
+  await act(async()=>{const button=[...host.querySelectorAll('button')].find(b=>b.textContent==='Check current saved preferences')!;button.click();});
+  expect(host.querySelector('.jg-widget-card[data-state="ready"]')?.textContent).toContain('Saved notification');
+  expect(host.textContent).toContain('read failed');
+ }finally{await act(async()=>root.unmount());host.remove();}
 });

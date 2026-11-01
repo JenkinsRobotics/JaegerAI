@@ -14,3 +14,15 @@ it('recovers an interrupted forget from its durable receipt without replay and k
  const view=await mount({detail:vi.fn().mockResolvedValue({...row,active:false,actions:['restore']}),mutate,operation});
  try{await click(view.element,'Check claim operation');expect(view.element.textContent).toContain('Outcome unresolved');expect(localStorage.getItem('jaeger.ui.semantic-claim.v1.owned')).not.toBeNull();await click(view.element,'Check claim operation');expect(mutate).not.toHaveBeenCalled();expect(view.element.textContent).toContain('Saved forget');expect((view.element.querySelector('textarea') as HTMLTextAreaElement).value).toBe('independent unsaved correction');expect(localStorage.getItem('jaeger.ui.semantic-claim.v1.owned')).toBeNull();}finally{await view.dispose();}
 });
+it('keeps the claim dialog semantics and controls around a WidgetCard',async()=>{
+ localStorage.clear();const close=vi.fn(),host=document.createElement('div');document.body.append(host);const root=createRoot(host);
+ try{
+  await act(async()=>root.render(<SemanticClaimEditor id="owned" controls={{detail:vi.fn().mockResolvedValue(row),mutate:vi.fn(),operation:vi.fn()}} close={close} changed={()=>{}}/>));
+  const dialog=host.querySelector('[role="dialog"]')!;
+  expect(dialog.getAttribute('aria-label')).toBe('Semantic claim details');
+  expect(dialog.getAttribute('aria-modal')).toBe('true');
+  expect(dialog.querySelector('.jg-widget-card[data-state="ready"]')).not.toBeNull();
+  await act(async()=>{[...dialog.querySelectorAll('button')].find(b=>b.textContent==='Close claim')!.click();});
+  expect(close).toHaveBeenCalledOnce();
+ }finally{await act(async()=>root.unmount());host.remove();}
+});
