@@ -172,3 +172,40 @@ def test_mcp_tools_route_through_gateway():
     assert [x[1] for x in c.calls] == ["/v1/models/generate", "/v1/models/route", "/v1/tools/list",
                                        "/v1/tools/call", "/v1/docs/search"]
     mp.undo()
+
+@pytest.mark.parametrize("address", [
+    "127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.254",
+    "192.168.1.1", "100.64.0.1", "100.127.255.254", "169.254.1.1",
+    "::1", "fc00::1", "fdff::1", "fe80::1", "febf::1",
+    "::ffff:127.0.0.1", "::ffff:192.168.1.1",
+])
+def test_browser_proxy_blocks_private_ranges(address):
+    from jaeger_ai.features.oss_stack.browser_proxy import is_blocked_address
+    assert is_blocked_address(address)
+
+
+@pytest.mark.parametrize("address", ["93.184.216.34", "1.1.1.1", "2606:4700:4700::1111", "::ffff:1.1.1.1"])
+def test_browser_proxy_allows_public_addresses(address):
+    from jaeger_ai.features.oss_stack.browser_proxy import is_blocked_address
+    assert not is_blocked_address(address)
+
+
+def test_browser_proxy_blocks_hostname_resolving_private():
+    import socket
+    from jaeger_ai.features.oss_stack.browser_proxy import DestinationBlocked, resolve_public
+
+    def resolver(host, port, **kwargs):
+        assert host == "private.example"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("192.168.1.10", port))]
+
+    with pytest.raises(DestinationBlocked):
+        resolve_public("private.example", 443, resolver)
+    with pytest.raises(DestinationBlocked):
+        resolve_public("localhost", 443, resolver)
+
+
+def test_browser_spec_has_proxy_guard():
+    args = default_specs()["browser"].args
+    assert args[args.index("--proxy-server") + 1] == "http://127.0.0.1:0"
+    assert args[args.index("--proxy-bypass") + 1] == "<-loopback>"
+    assert "--blocked-origins" in args
