@@ -199,6 +199,44 @@ def _tool_output_text(name: str, result: Any) -> str:
     return _inline_text("\n".join(parts), _INLINE_OUTPUT_MAX)
 
 
+def _tool_sources(result: Any) -> list[dict[str, str]]:
+    """Project explicit tool-result locations, never body text or URL credentials."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    found: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def visit(value: Any, depth: int = 0) -> None:
+        if depth > 3 or len(found) >= 20:
+            return
+        if isinstance(value, list):
+            for item in value[:50]:
+                visit(item, depth + 1)
+        elif isinstance(value, dict):
+            for key, raw in value.items():
+                if key in {"url", "link"} and isinstance(raw, str) and len(raw) <= 2048:
+                    parts = urlsplit(raw)
+                    if parts.scheme in {"http", "https"} and parts.hostname and not parts.username and not parts.password:
+                        location = urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+                        entry = ("url", location)
+                    else:
+                        continue
+                elif key in {"path", "file_path"} and isinstance(raw, str) and len(raw) <= 1024:
+                    if not raw.startswith("/") or any(part.startswith(".") or part.lower() == "secrets" for part in raw.split("/") if part):
+                        continue
+                    entry = ("file", raw)
+                else:
+                    if key in {"results", "files", "sources", "documents", "items"}:
+                        visit(raw, depth + 1)
+                    continue
+                if entry not in seen:
+                    seen.add(entry)
+                    found.append({"kind": entry[0], "location": entry[1]})
+
+    visit(result)
+    return found
+
+
 _ARG_VALUE_MAX = 240
 _ARGS_TOTAL_MAX = 2048
 _SECRET_ARG_KEY = re.compile(r"(?i)(pass(word|phrase)?|secret|token|api[_-]?key|auth|credential|cookie|private[_-]?key)")
@@ -4709,6 +4747,7 @@ class JaegerGatewayApp:
             # (steps, statuses, an optional note) leaves this callback.
             self._request_tools.setdefault(request_id, []).append(str(name or ""))
             output_text = _tool_output_text(str(name or ""), result)
+            sources = _tool_sources(result) if ok else []
             plan_payload = None
             if str(name or "") == "update_plan" and ok and isinstance(result, dict) and result.get("ok"):
                 plan_payload = {
@@ -4762,6 +4801,8 @@ class JaegerGatewayApp:
                 "text": detail,
                 **({"output": output_text} if output_text else {}),
             })
+            if sources:
+                self.event_bus.publish(session_id, "sources", {**ids, "sources": sources})
             if plan_payload is not None:
                 self.event_bus.publish(session_id, "turn.plan", {**ids, **plan_payload})
 

@@ -27,6 +27,17 @@ class Host {
 }
 const delta = (id, text) => ({ event_id: id, event: 'turn.delta', data: { request_id: 'r', delta: text } });
 
+test('sources events become durable visible timeline rows', () => {
+  const event = { event_id: 3, event: 'sources', data: { request_id: 'r', sources: [
+    { kind: 'url', location: 'https://example.org/page' },
+    { kind: 'file', location: '/tmp/report.txt' },
+  ] } };
+  const first = applyEvents(createTimelineState(), [event]);
+  assert.deepEqual(first.rows[0].sources, event.data.sources);
+  assert.equal(first.rows[0].kind, 'sources');
+  assert.strictEqual(applyEvents(first, [event]), first);
+});
+
 function rig() {
   const clock = new Clock(), host = new Host();
   let state = createTimelineState(), creates = 0, updates = 0;

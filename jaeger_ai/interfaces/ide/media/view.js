@@ -373,6 +373,19 @@ function updateTimelineRow(node, row) {
     content = reasoningSection(row.text || '', row.live);
   } else if (row.kind === 'plan') {
     content = planSection(row);
+  } else if (row.kind === 'sources') {
+    content = document.createElement('section'); content.className = 'sources';
+    const title = document.createElement('strong'); title.textContent = 'Sources'; content.append(title);
+    const list = document.createElement('ul');
+    for (const source of row.sources || []) {
+      const item = document.createElement('li');
+      if (source.kind === 'url' && /^https?:\/\//.test(source.location)) {
+        const link = document.createElement('a'); link.href = source.location;
+        link.textContent = source.location; link.rel = 'noopener noreferrer'; item.append(link);
+      } else item.textContent = source.location;
+      list.append(item);
+    }
+    content.append(list);
   } else if (row.kind === 'tool') {
     content = activitySection([{ name: row.name, ok: row.ok, detail: row.detail }], row.phase === 'running');
   } else if (row.kind === 'tool-group') {
