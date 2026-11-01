@@ -14,7 +14,7 @@ export const STATUSES: { value: BacklogStatus; label: string }[] = [
 ];
 export const PRIORITIES: BacklogPriority[] = ["P0", "P1", "P2"];
 export const WORKERS: { value: string; label: string }[] = [
-  { value: "ares", label: "ARES" }, { value: "muse", label: "Muse" }, { value: "rackpc", label: "Rack PC" }, { value: "grokbot", label: "Grok Bot" },
+  { value: "ares", label: "ARES" }, { value: "muse", label: "Muse" }, { value: "rackpc", label: "Rack PC" }, { value: "grokbot", label: "Grok Bot" }, { value: "hermes", label: "Hermes" }, { value: "openclaw", label: "OpenClaw" },
 ];
 export const workerLabel = (w: string) => WORKERS.find((x) => x.value === w)?.label ?? (w || "Unassigned");
 export const statusLabel = (s: string) => STATUSES.find((x) => x.value === s)?.label ?? s;
