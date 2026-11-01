@@ -239,12 +239,22 @@ def login_html(next_path: str = "/", error: str = "") -> bytes:
             .replace("{{ERROR}}", err)).encode()
 
 
+def _mark_consumed(handler) -> None:
+    """Tell the keep-alive body drain this request's body is already read."""
+    try:
+        from api.helpers import mark_request_body_consumed
+        mark_request_body_consumed(handler)
+    except Exception:
+        pass
+
+
 def _handle_login_post(handler, cfg: dict) -> None:
     key = client_key(handler)
     length = int(handler.headers.get("Content-Length") or 0)
     if length < 0 or length > 4096:
         return _json(handler, 413, {"error": "too large"})
     form = parse_qs(handler.rfile.read(length).decode("utf-8", "replace"))
+    _mark_consumed(handler)
     nxt = _safe_next((form.get("next") or ["/"])[0])
     if rate_limited(key):
         return _send(handler, 429, login_html(nxt, "Too many attempts. Try again in 15 minutes."),
