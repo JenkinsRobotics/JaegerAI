@@ -305,8 +305,9 @@ def settle() -> list[dict]:
 # ── machine / servers / robots / research progress ───────────────────
 def machine_health() -> dict:
     from api import unified_api  # type: ignore
-    snap = unified_api._rmmod().probe_mac(unified_api.state_root())
-    return {"snapshot": snap, "observed_at": now()}
+    from api.host_capabilities import capabilities  # type: ignore
+    snap = unified_api._rm().snapshot()
+    return {"snapshot": snap, "capabilities": capabilities(snap), "observed_at": now()}
 
 
 SERVERS = (("gateway", None, "/health"), ("ollama", 11434, "/api/version"), ("comfyui", 8188, "/system_stats"),

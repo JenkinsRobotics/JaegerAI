@@ -269,16 +269,16 @@ def probe_mac(root: Path) -> dict:
     idle = re.search(r'"HIDIdleTime" = (\d+)', _out(["ioreg", "-c", "IOHIDSystem"]))
     s["idle_s"] = round(int(idle.group(1)) / 1e9, 1) if idle else None
     try:
-        s["ollama_loaded"] = [m.get("name") for m in _ollama_call("/api/ps").get("models", [])]
+        s["ollama_loaded"] = [m.get("name") for m in _ollama_call("/api/ps", timeout=1).get("models", [])]
     except Exception:  # noqa: BLE001
         s["ollama_loaded"] = None
     return s
 
 
-def _ollama_call(path: str, body: dict | None = None):
+def _ollama_call(path: str, body: dict | None = None, timeout: float = 30):
     req = urllib.request.Request("http://127.0.0.1:11434" + path, data=None if body is None else json.dumps(body).encode(),
                                  headers={"Content-Type": "application/json"}, method="POST" if body is not None else "GET")
-    with urllib.request.urlopen(req, timeout=30) as r:
+    with urllib.request.urlopen(req, timeout=timeout) as r:
         raw = r.read()
         return json.loads(raw) if raw else {}
 

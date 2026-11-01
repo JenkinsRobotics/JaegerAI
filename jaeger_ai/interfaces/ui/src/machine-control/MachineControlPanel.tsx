@@ -4,6 +4,7 @@ import { nativeBridge } from '../platform/native'
 import { LocalComputerPanel } from '../settings/LocalComputerPanel'
 import './machine-control.css'
 import { ResourcesCard } from '../machine/ResourcesCard'
+import { HostCapabilitiesCard } from '../machine/HostCapabilitiesCard'
 import { LogsPanel } from '../machine/LogsPanel'
 import { AgentAppsPanel } from '../machine/AgentAppsPanel'
 
@@ -175,7 +176,7 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
       </div>
 
       <div className="machine-control-content">
-        {activeSubTab === 'overview' && <ResourcesCard />}
+        {activeSubTab === 'overview' && <><HostCapabilitiesCard /><ResourcesCard /></>}
         {activeSubTab === 'logs' && <LogsPanel />}
         {activeSubTab === 'apps' && <AgentAppsPanel />}
         {activeSubTab === 'overview' && (
