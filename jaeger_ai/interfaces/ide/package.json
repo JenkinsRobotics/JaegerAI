@@ -29,10 +29,12 @@
     "THIRD_PARTY_NOTICES.md",
     "native-turn.js",
     "build.json",
-    "copilot-bridge.js"
+    "copilot-bridge.js",
+    "chat-panel.js"
   ],
   "activationEvents": [
     "onView:jaeger.controller",
+    "onView:jaeger.conversation",
     "onStartupFinished"
   ],
   "capabilities": {
@@ -141,8 +143,7 @@
         {
           "type": "webview",
           "id": "jaeger.conversation",
-          "name": "Legacy Chat",
-          "visibility": "collapsed"
+          "name": "Chat"
         }
       ]
     },
@@ -377,7 +378,7 @@
         "id": "jaeger.chatParticipant",
         "name": "jaeger",
         "fullName": "Jaeger AI",
-        "description": "Routes to your Jaeger agent. Full chat opens in Apple-Native UI.",
+        "description": "Streams answers from your Jaeger agent in the IDE.",
         "icon": "media/jaeger.svg",
         "commands": [
           {

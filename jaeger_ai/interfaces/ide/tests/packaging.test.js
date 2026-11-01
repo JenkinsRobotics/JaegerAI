@@ -7,7 +7,7 @@ const test = require('node:test');
 const root = path.join(__dirname, '..');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const packager = fs.readFileSync(path.join(root, 'package_extension.py'), 'utf8');
-const hostModules = ['extension.js', 'conversation.js', 'gateway.js', 'commands.js', 'native-turn.js', 'controller.js', 'copilot-bridge.js'];
+const hostModules = ['extension.js', 'conversation.js', 'gateway.js', 'commands.js', 'native-turn.js', 'controller.js', 'copilot-bridge.js', 'chat-panel.js'];
 
 // A local require that is missing from the shipped file list only fails once the
 // extension is installed (activation throws), so it is checked here.
@@ -29,7 +29,7 @@ test('every module the extension host requires ships in the package', () => {
 
 test('every script and stylesheet the panel loads is a media file that exists', () => {
   const html = fs.readFileSync(path.join(root, 'media', 'index.html'), 'utf8');
-  const extension = fs.readFileSync(path.join(root, 'extension.js'), 'utf8');
+  const extension = fs.readFileSync(path.join(root, 'chat-panel.js'), 'utf8'); // the panel HTML is built here
   const placeholders = [...html.matchAll(/\{\{([A-Z_]+)\}\}/g)].map(m => m[1]).filter(k => !['CSP', 'NONCE'].includes(k));
   for (const key of new Set(placeholders)) {
     assert.ok(new RegExp(`\\b${key}\\b`).test(extension.split('html = html.replace')[1] || ''), `${key} not substituted by the extension`);

@@ -116,6 +116,10 @@ class GatewayStub {
   async cancel() { return {}; }
 }
 class GatewayErrorStub extends Error {}
+// Guard: the real Copilot bridge writes ~/.jaeger/run/vscode-bridge.json once a
+// vscode.lm API is present; a unit test must never touch operator state.
+const bridgePath = require.resolve('../copilot-bridge');
+require.cache[bridgePath] = { id: bridgePath, filename: bridgePath, loaded: true, exports: { activateBridge() {} } };
 const gwPath = require.resolve('../gateway');
 require.cache[gwPath] = { id: gwPath, filename: gwPath, loaded: true,
   exports: { Gateway: GatewayStub, GatewayError: GatewayErrorStub, localEndpoint: u => u, decodeSSE: async function* () {} } };

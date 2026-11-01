@@ -6,9 +6,9 @@ const util = require('node:util');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { Gateway } = require('./gateway');
+const { Gateway, normalizeGatewayUrl = url => url } = require('./gateway');
 const { Conversation } = require('./conversation');
-const { observeNativeTurn, renderNativeOutcome } = require('./native-turn');
+const { observeNativeTurn, renderNativeOutcome, renderNativeSources, nativeFollowups } = require('./native-turn');
 const { parseProviderModel, selectableModels, providerModelValue, modelSelectionAvailable } = require('./media/presentation');
 const commands = require('./commands');
 const execFileAsync = util.promisify(execFile);
@@ -34,8 +34,14 @@ const MIME_BY_EXTENSION = {
   '.pdf': 'application/pdf',
 };
 
-function activate(context) {
-  const output = vscode.window.createOutputChannel('Jaeger'); context.subscriptions.push(output);
+// Activated by extension.js (the shipped entry) after the controller. opts.skip
+// names commands the controller already owns, so no id is registered twice;
+// opts.output shares the controller's output channel.
+function activate(context, opts = {}) {
+  const skip = new Set(opts.skip || []);
+  const registerCommand = (id, fn) => (skip.has(id) ? { dispose() {} } : vscode.commands.registerCommand(id, fn));
+  const output = opts.output || vscode.window.createOutputChannel('Jaeger');
+  if (!opts.output) context.subscriptions.push(output);
   let view, controller, lastViewState = null, viewReady = false, requestedSession = '';
   const postToView = message => {
     if (message && typeof message === 'object' && ('connected' in message || 'status' in message)) lastViewState = message;
@@ -350,7 +356,7 @@ function activate(context) {
     },
   }));
   const storageKey = () => `connection:${endpoint()}`;
-  const endpoint = () => vscode.workspace.getConfiguration('jaeger').get('gatewayUrl') || contract.gatewayUrl;
+  const endpoint = () => normalizeGatewayUrl(vscode.workspace.getConfiguration('jaeger').get('gatewayUrl') || contract.gatewayUrl);
   const callerTokenSetting = () => (vscode.workspace.getConfiguration('jaeger').get('callerToken') || '').trim();
   let currentCallerToken = callerTokenSetting();
   const getStoredCallerToken = async () => {
@@ -1102,7 +1108,7 @@ function activate(context) {
     ...(typeof vscode.window?.registerWebviewViewProvider === 'function' ? [
       vscode.window.registerWebviewViewProvider('jaeger.conversation', provider, { webviewOptions: { retainContextWhenHidden: true } })
     ] : []),
-    vscode.commands.registerCommand('jaeger.open', async () => {
+    registerCommand('jaeger.open', async () => {
       if (typeof vscode.commands?.executeCommand === 'function') {
         try {
           return await vscode.commands.executeCommand('jaeger.conversation.focus');
@@ -1111,14 +1117,14 @@ function activate(context) {
         }
       }
     }),
-    vscode.commands.registerCommand('jaeger.newConversation', () => report(async () => {
+    registerCommand('jaeger.newConversation', () => report(async () => {
       await vscode.commands.executeCommand('jaeger.conversation.focus');
       postToView({ showHistory: false });
       if (controller) await controller.newSession('New conversation', selectedWorkspace);
     })),
-    vscode.commands.registerCommand('jaeger.refreshConversation', () => report(async () => { if (controller) await controller.refresh(undefined, true); })),
-    vscode.commands.registerCommand('jaeger.showHistory', () => report(async () => { postToView({ showHistory: true }); if (controller) await controller.refresh(null); })),
-    vscode.commands.registerCommand('jaeger.openSession', sessionId => report(async () => {
+    registerCommand('jaeger.refreshConversation', () => report(async () => { if (controller) await controller.refresh(undefined, true); })),
+    registerCommand('jaeger.showHistory', () => report(async () => { postToView({ showHistory: true }); if (controller) await controller.refresh(null); })),
+    registerCommand('jaeger.openSession', sessionId => report(async () => {
       if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 200) throw new Error('Invalid conversation identifier.');
       requestedSession = sessionId;
       await vscode.commands.executeCommand('jaeger.conversation.focus');
@@ -1127,7 +1133,7 @@ function activate(context) {
         requestedSession = '';
       }
     })),
-    vscode.commands.registerCommand('jaeger.openChatTab', async () => {
+    registerCommand('jaeger.openChatTab', async () => {
       if (typeof vscode.commands?.executeCommand === 'function') {
         try {
           return await vscode.commands.executeCommand('workbench.action.chat.openInEditor');
@@ -1136,8 +1142,8 @@ function activate(context) {
         }
       }
     }),
-    vscode.commands.registerCommand('jaeger.settings', settings),
-    vscode.commands.registerCommand('jaeger.setToken', async () => {
+    registerCommand('jaeger.settings', settings),
+    registerCommand('jaeger.setToken', async () => {
       const current = currentCallerToken || (await getStoredCallerToken());
       const token = await vscode.window.showInputBox({
         title: 'Jaeger Gateway Caller Token',
@@ -1172,7 +1178,7 @@ function activate(context) {
         }
       }
     }),
-    vscode.commands.registerCommand('jaeger.selectModel', async () => {
+    registerCommand('jaeger.selectModel', async () => {
       const gw = gatewayClient();
       let catalog;
       try {
@@ -1203,7 +1209,7 @@ function activate(context) {
         if (view) view.webview.postMessage({ configuredModel: picked.modelValue });
       }
     }),
-    vscode.commands.registerCommand('jaeger.onboarding', async () => {
+    registerCommand('jaeger.onboarding', async () => {
       const lines = [
         '# Jaeger Thin IDE Client — Remote Setup Guide',
         '',
@@ -1238,7 +1244,7 @@ function activate(context) {
       output.appendLine(lines.join('\n'));
       output.show(true);
     }),
-    vscode.commands.registerCommand('jaeger.diagnostics', () => report(async () => {
+    registerCommand('jaeger.diagnostics', () => report(async () => {
       output.appendLine(JSON.stringify({ extensionVersion: context.extension?.packageJSON?.version || require('./package.json').version, build }, null, 2));
       output.show(true);
       const gw = gatewayClient(), version = await gw.json('/version').catch(error => ({ error: error.message }));
@@ -1299,13 +1305,14 @@ function activate(context) {
     }),
     // Register Microsoft VS Code native Chat Participant (@jaeger) if supported by host
     ...(typeof vscode.chat?.createChatParticipant === 'function' ? [
-      vscode.chat.createChatParticipant('jaeger.chatParticipant', async (request, chatContext, stream, token) => {
+      withFollowups(vscode.chat.createChatParticipant('jaeger.chatParticipant', async (request, chatContext, stream, token) => {
         let sessionId = '', requestId = '';
         let cancellation;
         const requestAbort = new AbortController();
         try {
           const workspace = contextRoot();
-          const ide = request.command ? null : ideContext(workspace);
+          const editorCommand = editorCommandPrompts[request.command];
+          const ide = request.command && !editorCommand ? null : ideContext(workspace);
           const model = parseProviderModel(configuredModel());
           const storedToken = await getStoredCallerToken();
           if (storedToken) currentCallerToken = storedToken;
@@ -1354,12 +1361,13 @@ function activate(context) {
             return;
           }
 
-          const prompt = String(request.prompt || '').trim();
+          const typed = String(request.prompt || '').trim();
+          const prompt = editorCommand ? `${editorCommand}${typed ? `\n\n${typed}` : ''}` : typed;
           if (!prompt) return;
           if (!sessionId) {
             const created = await gw.create({
               session_id: randomUUID(), title: prompt.replace(/\s+/g, ' ').slice(0, 72),
-              workspace, source: 'ide',
+              workspace, ...(path.isAbsolute(workspace || '') ? { workspace_folder: workspace } : {}), source: 'ide',
             });
             sessionId = created.session_id;
           }
@@ -1392,8 +1400,11 @@ function activate(context) {
             },
           });
           renderNativeOutcome(stream, outcome, cancelRequested);
+          renderNativeSources(stream, outcome, sourceUri);
           if (!outcome.receipt || !['completed', 'failed', 'cancelled', 'execution_unknown'].includes(outcome.receipt.status)) openConversation();
-          return { metadata: { jaegerSessionId: sessionId, jaegerRequestId: requestId } };
+          const completed = outcome.receipt?.status === 'completed';
+          return { metadata: { jaegerSessionId: sessionId, jaegerRequestId: requestId,
+            ...(completed && outcome.followUps.length ? { jaegerFollowUps: outcome.followUps } : {}) } };
 
         } catch (err) {
           stream.markdown('**Jaeger Gateway Error:** ' + err.message);
@@ -1406,7 +1417,7 @@ function activate(context) {
           cancellation?.dispose();
           requestAbort.abort();
         }
-      })
+      }), context)
     ] : []),
     { dispose: () => {
       controller?.dispose();
@@ -1417,4 +1428,24 @@ function activate(context) {
     } },
   );
 }
-module.exports = { activate };
+// Slash commands the controller used to fire and forget; they now stream an answer
+// here, with the editor context attached like a typed prompt.
+const editorCommandPrompts = {
+  explain: 'Explain the current file or selection.',
+  fix: 'Fix the errors in the current file or selection.',
+  test: 'Write tests for the current file or selection.',
+};
+
+// A Sources entry becomes a native reference: URLs as-is, files as file URIs.
+function sourceUri(item) {
+  return item.kind === 'url' ? vscode.Uri.parse(item.location) : vscode.Uri.file(item.location);
+}
+
+function withFollowups(participant, context) {
+  if (!participant) return participant;
+  participant.followupProvider = { provideFollowups: result => nativeFollowups(result) };
+  try { participant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'jaeger.svg'); } catch { /* icon is cosmetic */ }
+  return participant;
+}
+
+module.exports = { activate, editorCommandPrompts };
