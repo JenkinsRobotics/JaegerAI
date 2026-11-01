@@ -77,7 +77,7 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
     catch(e){if(owner===generation.current)setError(String((e as Error).message??e));}
     finally{locked.current=false;setBusy(false);}
   };
-  return <><button type="button" className="aui-button jg-runtime-trigger" disabled={disabled} onClick={() => setOpen(true)}>Gateway settings</button>
+  return <><button type="button" className="aui-button jg-runtime-trigger" aria-label="Gateway settings" title="Model and gateway settings" disabled={disabled} onClick={() => setOpen(true)}>Model</button>
     {createPortal(<Dialog open={open} title="Gateway settings" onClose={() => { if (!busy) setOpen(false); }} actions={<button type="button" className="aui-button" disabled={busy} onClick={() => setOpen(false)}>Close</button>}>
       <p>Choose the model for this conversation. Global provider configuration, credentials and tool permissions are managed by the Gateway.</p>
       {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
