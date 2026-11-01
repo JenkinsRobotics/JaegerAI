@@ -346,9 +346,9 @@ function createGatewayClient() {
   const url = config.get('gatewayUrl') || contract.gatewayUrl;
 
   return new Gateway(url, {
-    token: async (caller) => {
-      // Try secure storage first
-      const stored = await vscode.workspace.getConfiguration('jaeger').get('callerToken');
+    token: (caller) => {
+      // Gateway.auth() is synchronous; return the configured token itself.
+      const stored = vscode.workspace.getConfiguration('jaeger').get('callerToken');
       if (stored) return stored;
       // Fall back to keychain/file
       return callerToken(caller);
