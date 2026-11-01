@@ -5,7 +5,7 @@ const { observeNativeTurn, renderNativeOutcome } = require('../native-turn');
 
 function fixture() {
   const markdown = [], progress = [], approvals = [], cursors = [], results = [];
-  const done = { status: 'completed', result: { output: 'Hello 🌱' } };
+  const done = { status: 'completed', result: { output: '# Hello 🌱' } };
   const controller = new AbortController();
   const event = (id, name, data = {}) => ({ event_id: id, event: name, session_id: 's', data: { request_id: 'r', ...data } });
   const gateway = { receipt: async () => done, async *events(sid, cursor) { cursors.push(cursor); },
@@ -21,15 +21,15 @@ test('native stream delivers deltas before completion, ignores foreign/replayed 
   f.gateway.events = async function* () {
     yield f.event(1, 'turn.delta', { request_id: 'other', delta: 'wrong' });
     yield { ...f.event(2, 'turn.delta', { delta: 'wrong' }), session_id: 'other' };
-    yield f.event(3, 'turn.delta', { delta: 'Hello ' });
-    assert.deepEqual(f.markdown, ['Hello '], 'first delta must render before the next event');
+    yield f.event(3, 'turn.delta', { delta: '# Hello ' });
+    assert.deepEqual(f.markdown, ['# Hello '], 'first answer-shaped delta must render before the next event');
     yield f.event(3, 'turn.delta', { delta: 'duplicate' });
     yield f.event(4, 'turn.delta', { delta: '🌱' });
     yield f.event(5, 'turn.finish');
   };
   const result = await f.run();
   renderNativeOutcome(f.stream, result, false);
-  assert.deepEqual(f.markdown, ['Hello ', '🌱']);
+  assert.deepEqual(f.markdown, ['# Hello ', '🌱']);
 });
 
 test('native observer reconnects from cursor without a new admission and exposes approvals and editor requests', async () => {
@@ -38,7 +38,7 @@ test('native observer reconnects from cursor without a new admission and exposes
   f.gateway.events = async function* (sid, cursor) {
     f.cursors.push(cursor);
     if (cursor === 0) {
-      yield f.event(1, 'turn.delta', { delta: 'Hello ' });
+      yield f.event(1, 'turn.delta', { delta: '# Hello ' });
       throw new Error('connection reset');
     }
     yield f.event(1, 'turn.delta', { delta: 'replay' });
@@ -54,7 +54,7 @@ test('native observer reconnects from cursor without a new admission and exposes
   assert.match(f.progress.join('\n'), /Reconnecting/);
   assert.match(f.progress.join('\n'), /Approval resolved/);
   assert.deepEqual(f.results, [['s', 'i', { ok: true, result: { file: 'a.py' } }]]);
-  assert.deepEqual(f.markdown, ['Hello ', '🌱']);
+  assert.deepEqual(f.markdown, ['# Hello ', '🌱']);
 });
 
 test('native observer bounds retries and reports an unconfirmed execution outcome after EOF', async () => {
@@ -81,13 +81,13 @@ test('confirmed cancellation and failed/unknown receipts remain distinct from co
   }
 });
 
-test('receipt failure reports uncertainty, and a corrected final answer is explicitly labelled', async () => {
+test('receipt failure reports uncertainty, and a corrected final answer is shown once, after a rule', async () => {
   const f = fixture(); f.gateway.receipt = async () => { throw new Error('offline'); };
   renderNativeOutcome(f.stream, await f.run(), false);
   assert.match(f.markdown.join(''), /not confirmed/);
   const g = fixture();
   renderNativeOutcome(g.stream, { receipt: g.done, text: 'provisional' }, false);
-  assert.deepEqual(g.markdown, ['\n\n**Final confirmed answer**\n\nHello 🌱']);
+  assert.deepEqual(g.markdown, ['\n\n---\n\n# Hello 🌱']);
 });
 
 
@@ -97,5 +97,5 @@ test('already-terminal admission still loads the authoritative receipt', async (
   const result = await observeNativeTurn({ gateway: f.gateway, sessionId: 's', requestId: 'r', admitted: { status: 'completed' },
     signal: f.controller.signal, stream: f.stream });
   renderNativeOutcome(f.stream, result, false);
-  assert.deepEqual(f.markdown, ['Hello 🌱']);
+  assert.deepEqual(f.markdown, ['# Hello 🌱']);
 });
