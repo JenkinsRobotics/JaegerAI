@@ -595,6 +595,11 @@ class _GatewayToolConfirmationProvider:
             return self._decided(self._prompt(request))
         if skill_name and skill_name in self._session_grants():
             return True
+        if self._approved_task_code_step(request):
+            # Matthew, 2026-11-01: "Skip the confirmation for all code steps in approved tasks."
+            # Only code tools, only inside a durable task the owner already authorized; the sandbox
+            # limits are unchanged and chat outside a task keeps its card.
+            return True
         if self._write_or_exec(request) and not self._autonomy_auto():
             # Gateway-turn policy: writes and code/shell execution get a card
             # unless a project grant covers the target or the owner granted
@@ -646,6 +651,23 @@ class _GatewayToolConfirmationProvider:
 
     _DELETE_TOOLS = frozenset({"delete_file", "remove_file", "delete_path", "delete", "rm"})
     _EXEC_TOOLS = frozenset({"execute_code", "run_code", "python_exec"})
+
+    _CODE_STEP_TOOLS = frozenset({"execute_code", "execute_with_tools"})
+
+    def _approved_task_code_step(self, request: Any) -> bool:
+        """A code step (execute_code / execute_with_tools) inside an owner-approved durable task run."""
+        if str(getattr(request, "operation", "") or "") not in self._CODE_STEP_TOOLS:
+            return False
+        if not str(self.session_id or "").startswith("task:"):
+            return False
+        try:
+            owner = getattr(self.app, "task_owner", None)
+            task = owner.store.get_task(self.session_id[len("task:"):]) if owner is not None else None
+            if task is None or task.is_terminal:
+                return False
+            return task.provenance.get("authorized") is True
+        except Exception:  # noqa: BLE001 - unknown task state means "ask"
+            return False
 
     def _write_or_exec(self, request: Any) -> bool:
         names = {str(getattr(request, "operation", "") or "")}
