@@ -17,7 +17,7 @@ export const PAGES: readonly PageId[] = ["home", "chat", "agents", "work", "rese
 /** Sub-tabs of merged pages, in display order; the first is the default. */
 export const SUBTABS: Partial<Record<PageId, readonly { id: string; title: string }[]>> = {
   home: [{ id: "overview", title: "Overview" }, { id: "widgets", title: "My widgets" }],
-  agents: [{ id: "roster", title: "Agents" }, { id: "characters", title: "Characters" }],
+  agents: [{ id: "roster", title: "Agents" }, { id: "characters", title: "Characters" }, { id: "hermes", title: "Hermes" }, { id: "openclaw", title: "OpenClaw" }],
   work: [{ id: "pipeline", title: "Pipeline" }, { id: "backlog", title: "Backlog" }, { id: "tasks", title: "Tasks" }, { id: "production", title: "Production" }, { id: "calendar", title: "Calendar" }, { id: "workspace", title: "Workspace" }],
   research: [{ id: "runs", title: "Research" }, { id: "youtube", title: "YouTube" }, { id: "documents", title: "Documents" }, { id: "knowledge", title: "Memory & Skills" }, { id: "sharepoint", title: "SharePoint" }],
   models: [{ id: "library", title: "Models" }, { id: "compare", title: "Compare" }, { id: "usage", title: "Usage" }],

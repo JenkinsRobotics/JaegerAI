@@ -35,6 +35,7 @@ const WorkspacePage = lazy(() => import('./WorkspacePage').then((m) => ({ defaul
 const WorkspaceBrowser = lazy(() => import('../unified/WorkspaceBrowser').then((m) => ({ default: m.WorkspaceBrowser })))
 const MachineControlPanel = lazy(() => import('../machine-control/MachineControlPanel').then((m) => ({ default: m.MachineControlPanel })))
 const SharePointPanel = lazy(() => import('../sharepoint/SharePointPanel').then((m) => ({ default: m.SharePointPanel })))
+const EnginePanel = lazy(() => import('../unified/EnginePanel').then((m) => ({ default: m.EnginePanel })))
 const AgentsRoster = lazy(() => import('../unified/AgentsRoster').then((m) => ({ default: m.AgentsRoster })))
 const AgentsActivityPage = lazy(() => import('../orchestration/AgentsActivityPage').then((m) => ({ default: m.AgentsActivityPage })))
 const CharactersPage = lazy(() => import('../unified/CharactersPage').then((m) => ({ default: m.CharactersPage })))
@@ -109,7 +110,8 @@ export function AppWindow({ source }: { source: JaegerSource }) {
   const render = (id: WindowId) => {
     switch (id) {
       case 'home': return tabbed('home', (t) => t === 'widgets' ? <WorkspacePage source={source} /> : <HomeDashboard source={source} store={store} onNavigate={go} />)
-      case 'agents': return tabbed('agents', (t) => t === 'characters'
+      case 'agents': return tabbed('agents', (t) => t === 'hermes' || t === 'openclaw' ? <EnginePanel engine={t} />
+        : t === 'characters'
         ? <CharactersPage characterId={active === 'agents' && route.sub === 'characters' ? route.params.get('character') : null} source={source} refresh={store.refresh} onNavigate={go} />
         : active === 'agents' && route.rest === 'activity' ? <AgentsActivityPage source={source} onNavigate={go} />
         : <AgentsRoster source={source} store={store} refresh={store.refresh} onNavigate={go} avatarFor={active === 'agents' ? (/^(.+)\/avatar$/.exec(route.rest)?.[1] ?? null) : null} />)

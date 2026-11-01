@@ -145,10 +145,12 @@ def register(mcp, client_for_context):
             roster = {"error": str(exc)}
         peers = [
             {"id": name, "label": label}
-            for name, label in APP_CALLERS.items()
+            for name, label in APP_CALLERS.items() if name != "openclaw"
         ] + [
             {"id": "ares", "label": "ARES (OpenAI Codex worker: runs handed-off tasks with codex exec)",
              "worker": True},
+            {"id": "hermes", "worker": True, "label": "Hermes (research, synthesis, tool workflows)"},
+            {"id": "openclaw", "worker": True, "label": "OpenClaw (app and channel automation)"},
             {"id": "rackpc", "worker": True, "compute": "rackpc",
              "label": "Rack PC (Ollama on GTX 1080 Ti 11 GB: local models up to ~14B; "
                       "start the task with 'model: <name>' to pick one)"},

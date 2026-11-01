@@ -94,6 +94,8 @@ CALLERS: Mapping[str, CallerSpec] = {
                    description="ARES agent bridge client; dedicated credential required"),
         CallerSpec("grokbot", "mcp:grokbot", frozenset({"read", "turn", "search"}), session_prefix="grokbot:",
                    description="GrokBot local bridge client; dedicated credential required"),
+        CallerSpec("hermes", "mcp:hermes", frozenset({"read", "turn"}), session_prefix="hermes:",
+                   description="Hermes headless hub worker"),
         CallerSpec("rackpc", "mcp:rackpc", frozenset({"read", "turn"}), session_prefix="rackpc:",
                    description="Rack PC Ollama worker (claims hub tasks, posts results only)"),
         CallerSpec("a2a", "a2a", frozenset({"read", "turn", "stop"}), session_prefix="a2a:",
@@ -228,6 +230,10 @@ CALLER_READ_ROUTES: Mapping[str, frozenset[str]] = {
 #: Callers confined to an exact route allow-list (both reads and writes).
 #: rackpc is a job worker: it reads its inbox/threads and posts results, nothing else.
 CALLER_ONLY_ROUTES: Mapping[str, frozenset[tuple[str, str]]] = {
+    "hermes": frozenset({
+        ("GET", "/v1/agent-messages"), ("GET", "/v1/agent-threads/{thread}"),
+        ("POST", "/v1/agent-messages"),
+    }),
     "rackpc": frozenset({
         ("GET", "/v1/agent-messages"), ("GET", "/v1/agent-threads/{thread}"),
         ("POST", "/v1/agent-messages"),

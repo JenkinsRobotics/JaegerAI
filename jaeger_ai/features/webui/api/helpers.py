@@ -101,7 +101,9 @@ _CSP_SHARED_POLICY_TEMPLATE = (
 # via HERMES_WEBUI_CSP_FRAME_EXTRA — e.g. to embed a self-hosted dashboard in an
 # extension tab. This governs what THIS page may embed; it does NOT affect
 # frame-ancestors (who may embed the WebUI), which stays 'none'.
-_CSP_FRAME_BASE = "'self'"
+# J-083: Hermes/OpenClaw's own UIs via Jaeger's loopback-only embed proxy.
+_ENGINE_EMBED_ORIGINS = "http://127.0.0.1:8797 http://127.0.0.1:8798"
+_CSP_FRAME_BASE = "'self' " + _ENGINE_EMBED_ORIGINS
 
 
 def _valid_csp_extra_connect_source(source: str) -> bool:
