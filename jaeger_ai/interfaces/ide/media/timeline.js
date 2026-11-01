@@ -93,6 +93,13 @@
       return next;
     }
     if (event.event === 'turn.plan') return applyPlan(rows, event);
+    if (event.event === 'sources') {
+      const sources = (Array.isArray(event.data?.sources) ? event.data.sources : [])
+        .filter(item => ['url', 'file'].includes(item?.kind) && typeof item?.location === 'string')
+        .slice(0, 20);
+      return sources.length ? [...rows, { key: `sources:${requestId(event)}:${eventId(event)}`,
+        kind: 'sources', requestId: requestId(event), sources, live: false }] : rows;
+    }
     if (STREAM_EVENTS.has(event.event)) return appendStream(rows, event);
     if (['tool.started', 'tool.completed', 'tool.failed'].includes(event.event)) return applyTool(rows, event);
     if (TERMINAL_EVENTS.has(event.event)) {
