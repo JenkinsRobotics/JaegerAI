@@ -1,7 +1,8 @@
 /** Machine › Agent Apps: status of Matthew's agent apps and Jaeger services, with proposals that
  * only run after he approves them here. Configs are shown redacted; edits create backups. */
 import { useCallback, useEffect, useState } from "react";
-import { Badge, Empty, SkeletonRows } from "../unified/ui";
+import { Badge } from "../unified/ui";
+import { WidgetCard } from "../widgets/primitives/WidgetCard";
 import { getJson, sendJson } from "../unified/webui";
 import { actionLabel, groupApps, isLifecycle, statusTone, type AgentApp, type Proposal } from "./agentApps";
 import "./machine.css";
@@ -36,12 +37,12 @@ export function AgentAppsPanel() {
   const recent = props.filter((p) => p.status !== "pending").slice(0, 8);
   return (
     <div className="jg-mc-apps">
-      {err && <div className="machine-control-error" role="alert">{err}</div>}
-      <section className="jg-mc-card" aria-label="Waiting for your approval">
-        <div className="jg-mc-card__head"><h3>Waiting for your approval</h3><Badge tone={pending.length ? "warn" : "ok"}>{pending.length}</Badge></div>
-        {pending.length === 0 ? <Empty title="Nothing waiting">Agents can only propose app changes; they run after you approve them here.</Empty> : pending.map((p) => (
+      {err && <WidgetCard title="Agent apps error" state="error" message={err} />}
+      <WidgetCard title="Waiting for your approval" status={<Badge tone={pending.length ? "warn" : "ok"}>{pending.length}</Badge>}
+        state={pending.length === 0 ? "empty" : "ready"} message="Nothing waiting (0). Agents can only propose app changes; they run after you approve them here.">
+        {pending.map((p) => (
           <article key={p.id} className="jg-mc-proposal">
-            <div className="jg-mc-card__head"><strong>{p.summary}</strong><span className="jg-mc-muted">from {p.proposed_by}</span></div>
+            <div className="jg-mc-inline-head"><strong>{p.summary}</strong><span className="jg-mc-muted">from {p.proposed_by}</span></div>
             {p.reason && <p className="jg-mc-muted">{p.reason}</p>}
             {p.prompt_preview && <pre className="jg-mc-pre">{p.prompt_preview}</pre>}
             {p.diff && <ul className="jg-mc-diff">{p.diff.map((d) => <li key={d.path} data-change={d.change}><code>{d.path}</code> {d.change}{d.after !== undefined && <> → <code>{show(d.after)}</code></>}</li>)}</ul>}
@@ -51,14 +52,13 @@ export function AgentAppsPanel() {
             </div>
           </article>
         ))}
-      </section>
-      {apps === null ? <section className="jg-mc-card"><SkeletonRows n={6} /></section> : groupApps(apps).map((g) => (
-        <section key={g.title} className="jg-mc-card" aria-label={g.title}>
-          <h3>{g.title}</h3>
+      </WidgetCard>
+      {apps === null ? <WidgetCard title="Agent apps" state="loading" message="Loading agent apps…" /> : groupApps(apps).map((g) => (
+        <WidgetCard key={g.title} title={g.title}>
           <div className="jg-mc-appgrid">
             {g.apps.map((a) => (
               <article key={a.id} className="jg-mc-app">
-                <div className="jg-mc-card__head">
+                <div className="jg-mc-inline-head">
                   <strong>{a.name}</strong>
                   {a.kind !== "cli" ? <Badge tone={a.running ? "ok" : undefined}>{a.running ? "Running" : "Stopped"}</Badge> : <Badge>CLI</Badge>}
                 </div>
@@ -73,26 +73,24 @@ export function AgentAppsPanel() {
               </article>
             ))}
           </div>
-        </section>
+        </WidgetCard>
       ))}
       {cfg && (
-        <section className="jg-mc-card" aria-label="Config">
-          <div className="jg-mc-card__head"><h3>{cfg.app} config (secrets hidden)</h3><button className="jg-u-btn" onClick={() => setCfg(null)}>Close</button></div>
+        <WidgetCard title={`${cfg.app} config (secrets hidden)`} actions={<button className="jg-u-btn" onClick={() => setCfg(null)}>Close</button>}>
           <pre className="jg-mc-pre">{cfg.text}</pre>
-        </section>
+        </WidgetCard>
       )}
       {recent.length > 0 && (
-        <section className="jg-mc-card" aria-label="Recent app changes">
-          <h3>Recent</h3>
+        <WidgetCard title="Recent">
           {recent.map((p) => (
-            <div key={p.id} className="jg-mc-card__head jg-mc-recent">
+            <div key={p.id} className="jg-mc-inline-head jg-mc-recent">
               <span>{p.summary}</span>
               <span className="jg-mc-row"><Badge tone={statusTone(p.status)}>{p.status.replace("_", " ")}</Badge>
                 {p.action === "config" && p.status === "done" && <button className="jg-u-btn" disabled={busy === p.id} onClick={() => void rollback(p.id)}>Roll back</button>}</span>
               {p.error && <span className="jg-mc-muted">{p.error}</span>}
             </div>
           ))}
-        </section>
+        </WidgetCard>
       )}
     </div>
   );
