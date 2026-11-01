@@ -86,7 +86,7 @@ def test_no_mcp_tool_can_reach_any_bridge_command(cmd):
             # OSS stack: model router, shared MCP tools, Documents RAG (Gateway relay only).
             "jaeger.generate", "jaeger.tools", "jaeger.tool", "jaeger_search_docs",
             # Backlog (Gateway relay only).
-            "jaeger.backlog_list", "jaeger.backlog_add", "jaeger.backlog_update",
+            "jaeger.backlog_list", "jaeger.backlog_add", "jaeger.backlog_update", "jaeger.backlog_sweep",
             # AppControl: reads + proposals only, Gateway relay (approval is UI-only).
             "jaeger.apps_list", "jaeger.app_status", "jaeger.app_action", "jaeger.app_config_get",
             "jaeger.app_config_propose",
