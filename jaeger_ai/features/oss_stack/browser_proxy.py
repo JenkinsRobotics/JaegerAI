@@ -42,7 +42,24 @@ async def _pipe(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> N
         writer.close()
 
 
-async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+LOOPBACK_HOSTS = frozenset({'127.0.0.1', 'localhost', '::1'})
+
+
+def resolve_destination(host: str, port: int, *, loopback_ports: frozenset = frozenset(),
+                        public: bool = True, resolver=socket.getaddrinfo) -> tuple:
+    """Loopback only on an explicitly allowed port; public hosts only when ``public``."""
+    name = host.lower().rstrip('.').strip('[]')
+    if name in LOOPBACK_HOSTS:
+        if port in loopback_ports:
+            return (socket.AF_INET, socket.SOCK_STREAM, 0, '', ('127.0.0.1', port))
+        raise DestinationBlocked(host)
+    if not public:
+        raise DestinationBlocked(host)
+    return resolve_public(host, port, resolver)
+
+
+async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter, *,
+                  loopback_ports: frozenset = frozenset(), public: bool = True) -> None:
     upstream = None
     try:
         header = await asyncio.wait_for(reader.readuntil(b'\r\n\r\n'), 10)
@@ -60,7 +77,8 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
             if parsed.scheme != 'http' or not parsed.hostname:
                 raise ValueError('invalid proxy target')
             host, port = parsed.hostname, parsed.port or 80
-        family, _, _, _, sockaddr = await asyncio.to_thread(resolve_public, host, port)
+        family, _, _, _, sockaddr = await asyncio.to_thread(
+            resolve_destination, host, port, loopback_ports=loopback_ports, public=public)
         upstream_reader, upstream = await asyncio.open_connection(sockaddr[0], sockaddr[1], family=family)
         if method == 'CONNECT':
             writer.write(b'HTTP/1.1 200 Connection Established\r\n\r\n')
@@ -81,5 +99,7 @@ async def _handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) ->
         writer.close()
 
 
-async def start_proxy() -> asyncio.AbstractServer:
-    return await asyncio.start_server(_handle, '127.0.0.1', 0, limit=65537)
+async def start_proxy(*, loopback_ports: frozenset = frozenset(), public: bool = True) -> asyncio.AbstractServer:
+    async def handle(reader, writer):
+        await _handle(reader, writer, loopback_ports=loopback_ports, public=public)
+    return await asyncio.start_server(handle, '127.0.0.1', 0, limit=65537)

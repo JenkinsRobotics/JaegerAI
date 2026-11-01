@@ -45,6 +45,7 @@ class ServerSpec:
     description: str = ""
 
 
+DEVTOOLS_LOOPBACK_PORTS = frozenset({8790})  # WebUI only, for UI audits
 LOCAL_PORTS = (5678, 6333, 6334, 8090, 8790, 8791, 8792, 8793, 8796, 8811, 8888, 11434, 11435, 18792, 33418, 62518)
 CHROME_DEVTOOLS_MCP = os.environ.get("JAEGER_CHROME_DEVTOOLS_MCP", "chrome-devtools-mcp@1.12.0")  # pinned
 # Chrome for Testing from Playwright's cache: never Matthew's own Chrome or profile.
@@ -84,15 +85,15 @@ def default_specs() -> dict[str, ServerSpec]:
                     "--block-service-workers", "--blocked-origins", BLOCKED_ORIGINS,
                     "--proxy-server", "http://127.0.0.1:0", "--proxy-bypass", "<-loopback>", "--output-dir", str(OSS / "playwright-out")], None,
                    description="Shared headless Chromium (own profile, no network listener)"),
-        # Loopback-only: every non-loopback request is sent to a dead proxy (Chrome bypasses
-        # proxies for localhost/127.0.0.1 by default), so only local dev/WebUI pages load.
+        # Every request (loopback included, via <-loopback>) goes through a guard proxy that only
+        # allows the WebUI port: no public sites, no hub (8792), gateway (33418) or other local ports.
         ServerSpec("devtools", os.environ.get("JAEGER_NPX", "/opt/homebrew/bin/npx"),
                    ["-y", CHROME_DEVTOOLS_MCP, "--headless", "--isolated", "--executablePath", DEVTOOLS_CHROME,
                     "--no-usage-statistics", "--no-performance-crux", "--javascriptEvaluation=false",
                     "--fileNavigations=false", "--viewport", "1440x900",
-                    "--chrome-arg=--proxy-server=http://127.0.0.1:9", "--chrome-arg=--proxy-bypass-list=<-loopback>;localhost;127.0.0.1",
+                    "--chrome-arg=--proxy-server=http://127.0.0.1:9", "--chrome-arg=--proxy-bypass-list=<-loopback>",
                     "--chrome-arg=--no-first-run"], DEVTOOLS_ALLOW,
-                   description="Chrome DevTools (headless, temp profile, loopback-only, no JS eval)"),
+                   description="Chrome DevTools (headless, temp profile, WebUI port only, no JS eval)"),
     ]
     return {s.name: s for s in specs}
 
@@ -124,6 +125,11 @@ class _Server:
                 proxy = await start_proxy()
                 port = proxy.sockets[0].getsockname()[1]
                 args[args.index("--proxy-server") + 1] = f"http://127.0.0.1:{port}"
+            elif self.spec.name == "devtools":
+                proxy = await start_proxy(loopback_ports=DEVTOOLS_LOOPBACK_PORTS, public=False)
+                port = proxy.sockets[0].getsockname()[1]
+                args = [f"--chrome-arg=--proxy-server=http://127.0.0.1:{port}"
+                        if a.startswith("--chrome-arg=--proxy-server=") else a for a in args]
             params = StdioServerParameters(command=self.spec.command, args=args, env=env,
                                            cwd=str(OSS))
             async with stdio_client(params) as (r, w), ClientSession(r, w) as session:
