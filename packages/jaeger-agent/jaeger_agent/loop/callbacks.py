@@ -110,6 +110,8 @@ class AgentCallbacks:
     # call. 2026-10-22 seam note: the host Gateway subscribes to this for its
     # context receipts (cognition_router / knowledge_library reference
     # provenance). Payload is content-free — see input_outline.
+    model_call_start: Callable[[], None] | None = None
+    model_call_done: Callable[[dict[str, int]], None] | None = None
     model_input: Callable[[dict[str, Any]], None] | None = None
     context_references: tuple[Any, ...] = ()
 
@@ -117,6 +119,20 @@ class AgentCallbacks:
     # Always call these from the agent loop rather than reaching for the
     # field directly: they no-op on missing callbacks and swallow handler
     # exceptions so a buggy observer never breaks the turn.
+
+    def on_model_call_start(self) -> None:
+        try:
+            if self.model_call_start is not None:
+                self.model_call_start()
+        except Exception:
+            pass
+
+    def on_model_call_done(self, usage: dict[str, int]) -> None:
+        try:
+            if self.model_call_done is not None:
+                self.model_call_done(usage)
+        except Exception:
+            pass
 
     def on_model_input(self, payload: Any) -> None:
         if self.model_input is None:

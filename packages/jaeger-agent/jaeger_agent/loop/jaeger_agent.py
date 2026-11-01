@@ -1757,7 +1757,11 @@ class JaegerAgent:
                         self.messages, self.tools, self.system_prompt,
                     )
                     self.callbacks.on_model_input(formatted)
-                    raw = adapter.call(
+                    self.callbacks.on_model_call_start()
+                    before_prompt_tokens = self.last_prompt_tokens
+                    before_completion_tokens = self.last_completion_tokens
+                    try:
+                        raw = adapter.call(
                         formatted,
                         self._interrupt_event,
                         stale_timeout=self.stale_call_timeout_s,
@@ -1781,11 +1785,18 @@ class JaegerAgent:
                             else None
                         ),
                     )
+                    except BaseException:
+                        self.callbacks.on_model_call_done({})
+                        raise
                     if self.last_ttft_s is None:
                         adapter_ttft = getattr(adapter, "last_ttft_s", None)
                         if adapter_ttft:
                             self.last_ttft_s = float(adapter_ttft)
                     per_call_prompt = self._accumulate_usage(raw, adapter)
+                    self.callbacks.on_model_call_done({
+                        "prompt_tokens": max(0, self.last_prompt_tokens - before_prompt_tokens),
+                        "completion_tokens": max(0, self.last_completion_tokens - before_completion_tokens),
+                    })
                     if self.context_guard is not None and per_call_prompt:
                         try:
                             self.context_guard.observed_call(
