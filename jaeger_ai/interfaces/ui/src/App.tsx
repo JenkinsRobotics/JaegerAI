@@ -53,7 +53,7 @@ import { AppShell } from "./shell/AppShell";
 import { ErrorState } from "./shell/ErrorState";
 import { TasksBoard } from "./tasks/TasksBoard";
 import { IntegrationsPage } from "./unified/IntegrationsPage";
-import { PhoneChat, PhoneList } from "./phone/PhoneShell";
+import { PhoneChat, PhoneDrawer, PhoneList } from "./phone/PhoneShell";
 import { usePhone } from "./phone/usePhone";
 import { AgentContextMenu, AgentPrompt, type AgentMenuAction } from "./agents/AgentContextMenu";
 import { capabilitiesOf, type HostCapabilities } from "./chat/hostH8";
@@ -377,12 +377,17 @@ export function App({ source, view = "chat", settingsTab, settingsSegment, onSet
     : <div className="jg-av-chat"><div className="jg-chat-voice-host"><ChatPane host={host} sessionId={sessionId} agents={store.agents} /><VoiceDictation /></div>
         {avatarAgent && !phone && <AvatarPanel size={avatarSize} agent={avatarAgent} presence={store.summaries.find((s) => s.id === avatarAgent.id)?.status} onOpenAgents={onNavigate ? (id) => onNavigate(`/agents/${encodeURIComponent(id)}/avatar`) : undefined} />}</div>;
   const phoneAgent = store.agents.find((a) => a.id === (selectedAgentId ?? defaultAgentId));
+  // iPhone: always the chat; "list" = the push-aside drawer is open (menu button or left-edge swipe), Recents inside it.
   const main = phone
-    ? (phoneView === "chat"
-      ? <PhoneChat agentId={phoneAgent?.id ?? LEAD_ID} agentName={phoneAgent ? label(phoneAgent) : "Jaeger"} avatarUrl={phoneAgent?.avatar_url}
+    ? <PhoneDrawer open={phoneView === "list"} onClose={() => setPhoneView("chat")}
+        onSearch={() => (onOpenPalette ? onOpenPalette() : setJumpOpen(true))}
+        onSettings={() => (onNavigate ? onNavigate("/settings") : setSettingsOpen(true))}
+        onChat={() => { newChat(defaultAgentId); onNavigate?.("/"); }}
+        recents={<PhoneList state={store} userInitials="MJ" statusOk={!store.error} onOpen={(agentId) => { newChat(agentId); setPhoneView("chat"); }}
+          onSearch={() => (onOpenPalette ? onOpenPalette() : setJumpOpen(true))} onNew={setNewChatAnchor} onSettings={() => (onNavigate ? onNavigate("/settings") : setSettingsOpen(true))} onAgentMenu={openAgentMenu} />}>
+        <PhoneChat agentId={phoneAgent?.id ?? LEAD_ID} agentName={phoneAgent ? label(phoneAgent) : "Jaeger"} avatarUrl={phoneAgent?.avatar_url}
           onBack={() => { setPhoneView("list"); void store.refresh(); }} onInfo={() => host.openDetails?.(phoneAgent?.id ?? LEAD_ID)}>{chatBody}</PhoneChat>
-      : <PhoneList state={store} userInitials="MJ" statusOk={!store.error} onOpen={(agentId) => { newChat(agentId); setPhoneView("chat"); }}
-          onSearch={() => (onOpenPalette ? onOpenPalette() : setJumpOpen(true))} onNew={setNewChatAnchor} onSettings={() => (onNavigate ? onNavigate("/settings") : setSettingsOpen(true))} onAgentMenu={openAgentMenu} />)
+      </PhoneDrawer>
     : null;
   return (
     <>
