@@ -17,6 +17,8 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createSource } from "./api";
 import { AppWindow } from "./windows/AppWindow";
+import { FirstRunGate, firstRunApi } from "./first-run/FirstRun";
+import { GatewayClient } from "./api/gateway";
 import { clearLegacyFlags, legacyRedirect } from "./shell/router";
 import { applyAppearance, storedAppearance } from "./settings/SettingsDialog";
 import { applyDensity, applyFeel, applyIcon, storedDensity, storedFeel, storedIcon } from "./settings/appearance";
@@ -36,6 +38,6 @@ const source = await createSource();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <AppWindow source={source} />
+    <FirstRunGate api={source instanceof GatewayClient ? firstRunApi(source) : null}><AppWindow source={source} /></FirstRunGate>
   </StrictMode>,
 );
