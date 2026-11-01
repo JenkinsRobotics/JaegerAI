@@ -51,15 +51,20 @@ html.jg-phone .jg-chat { background: var(--jg-p-bg); color: var(--jg-p-fg); }
 html.jg-phone .jg-chat__scroll { padding-top: calc(env(safe-area-inset-top) + 64px); padding-left: 16px; padding-right: 16px; }
 html.jg-phone .jg-bubble { max-width: 100%; font-size: 17px; line-height: 1.4; border-radius: 20px; padding: 12px 14px; }
 html.jg-phone .jg-bubble--assistant { align-self: stretch; background: var(--jg-p-raised); color: var(--jg-p-fg); }
-html.jg-phone .jg-composer { position: relative; display: flex; align-items: center; gap: 10px; margin: 0; padding: 8px 14px calc(env(safe-area-inset-bottom) + 8px);
-  border: 0; border-radius: 0; box-shadow: none; background: var(--jg-p-bg); }
-html.jg-phone .jg-composer__icon--filled[aria-label="Attach file"] { width: 44px; height: 44px; border-radius: 50%; background: var(--jg-p-button); color: var(--jg-p-fg); flex: none; }
-html.jg-phone .jg-composer__input { min-height: 44px; padding: 11px 92px 11px 16px; border-radius: 22px; background: var(--jg-p-raised); color: var(--jg-p-fg); font-size: 17px; box-sizing: border-box; }
+/* Composer card (2026-11-01, after the Grok iOS home): input on top, + · Model · mic · Speak/Send below. */
+html.jg-phone .jg-composer { display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: calc(100% - 20px); margin: 0 auto calc(env(safe-area-inset-bottom) + 10px);
+  padding: 12px 12px 10px; border: 0; border-radius: 26px; background: var(--jg-p-raised); box-shadow: 0 0 0 0.5px var(--aether-color-border); }
+html.jg-phone .jg-composer__input { min-height: 34px; padding: 6px 6px; background: transparent; color: var(--jg-p-fg); font-size: 17px; box-sizing: border-box; }
 html.jg-phone .jg-composer__input::placeholder { color: var(--jg-p-dim); }
-html.jg-phone .jg-composer .jg-composer__icon--filled:not([aria-label="Attach file"]) { position: absolute; right: 62px; width: 36px; height: 36px; background: none; color: var(--jg-p-dim); }
-html.jg-phone .jg-send { position: absolute; right: 22px; width: 36px; height: 36px; border-radius: 50%; background: var(--jg-p-voice-bg); color: var(--jg-p-voice-fg); }
+html.jg-phone .jg-composer__bar .jg-composer__icon { width: 40px; height: 40px; color: var(--jg-p-fg); }
+html.jg-phone .jg-composer__bar .jg-runtime-trigger { height: 40px; color: var(--jg-p-fg); }
+html.jg-phone .jg-send { width: 40px; height: 40px; border-radius: 50%; background: var(--jg-p-voice-bg); color: var(--jg-p-voice-fg); }
+html.jg-phone .jg-send--speak { border-radius: 999px; }
+html.jg-phone .jg-chat-home__chip { background: var(--jg-p-raised); color: var(--jg-p-fg); }
 html.jg-phone button, html.jg-phone [role="menuitem"] { min-height: 44px; }
 html.jg-phone .jg-composer button, html.jg-phone .jg-prow__art * { min-height: 0; }
 html.jg-phone .jg-phone-list .jg-prow { min-height: 78px; }
 html.jg-phone .jg-handoff, html.jg-phone .jg-handoff__name, html.jg-phone .jg-handoff__who, html.jg-phone .jg-progress-text { color: var(--jg-p-dim); font-size: 15px; }
 .jg-psection { margin: 14px 18px 2px; font-size: 13px; font-weight: 600; color: var(--jg-p-dim); text-transform: none; }
+/* The chat screen is fixed full-height; inside the tabbed shell, stop above the bottom tab bar so the composer row stays visible. */
+.jg-chrome--phone .jg-phone-chat { bottom: auto; height: calc(var(--jg-vvh, 100dvh) - 67px - env(safe-area-inset-bottom, 0px)); }
