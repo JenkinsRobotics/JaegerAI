@@ -731,6 +731,23 @@ class GatewayTaskOwner:
             runs.transition(run_id, state, reason=task.error)
 
     @staticmethod
+    def _execution_root(task):
+        """The workspace the turn actually ran in.
+
+        An empty execution workspace means the turn used the effective instance
+        workspace (see ``_read_roots``), never the Gateway process cwd, which is
+        what ``Path('').resolve()`` would give.
+        """
+        raw = str((task.payload.get('execution') or {}).get('workspace') or '')
+        if not raw:
+            try:
+                from jaeger_agent.core.workspace import get_effective_workspace_dir
+                raw = str(get_effective_workspace_dir() or '')
+            except Exception:  # noqa: BLE001
+                raw = ''
+        return Path(raw).expanduser().resolve() if raw else None
+
+    @staticmethod
     def verify(task, result):
         paths = task.payload.get('artifacts') or []
         if paths:
@@ -747,7 +764,9 @@ class GatewayTaskOwner:
         completion = result.get('task_completion') or {}
         receipts = [r for r in (completion.get('verification_receipts') or []) if r.get('kind') == 'file_sha256']
         if completion.get('ok') and receipts:
-            root = Path(task.payload['execution'].get('workspace') or '').resolve()
+            root = GatewayTaskOwner._execution_root(task)
+            if root is None:
+                return False, 'No workspace to verify artifacts against'
             for receipt in receipts:
                 raw = receipt.get('resolved') or receipt.get('path') or ''
                 path = Path(raw).expanduser()
@@ -774,10 +793,9 @@ class GatewayTaskOwner:
         """
         from jaeger_ai.core.runtime.autonomous_runner import _required_paths
         names = _required_paths(task.goal or '')
-        workspace = str((task.payload.get('execution') or {}).get('workspace') or '')
-        if not names or not workspace:
+        root = GatewayTaskOwner._execution_root(task)
+        if not names or root is None:
             return None
-        root = Path(workspace).resolve()
         receipts, fresh = [], False
         for raw in names:
             path = Path(raw).expanduser()
