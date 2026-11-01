@@ -471,7 +471,7 @@ def test_integration_contract_is_versioned_and_self_describing():
     # v13 added ``model_picker`` — the clickable /model overlay catalog.
     # v15 adds the Dispatcher projection over native facts and board memory.
     # v18 exposes the bundled OS utility for setup, diagnostics, and recovery.
-    assert contract["contract_version"] == 22
+    assert contract["contract_version"] == 23  # bumped in d921b779 (native controls)
     assert "system_utility_status" in contract["operations"]["queries"]
     assert "system_utility" in contract["operations"]["queries"]
     assert "onboarding_guide" in contract["operations"]["queries"]
