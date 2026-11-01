@@ -12,6 +12,9 @@ import os
 import time
 import uuid
 from typing import Any, Callable
+
+APPROVAL_POLL_S = 0.5
+APPROVAL_WAIT_S = 300
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -76,6 +79,84 @@ def _request_json(method: str, path: str, body: dict[str, Any] | None = None, ti
         return 503, {"error": f"gateway unreachable: {exc}", "http_status": 503}
 
 
+def _handoff_body(work, turn, *, from_agent_id, require_approval, request_id,
+                  parent_run_id, permitted_context, timeout_seconds, tools,
+                  project_id=""):
+    execution = turn.get("execution") or {}
+    body = {
+        "task": work,
+        "from_agent_id": from_agent_id or "native:jaeger",
+        "require_approval": bool(require_approval),
+        "request_id": request_id,
+        "parent_run_id": parent_run_id or turn.get("request_id") or None,
+        "session_id": turn.get("session_id") or None,
+        "permitted_context": permitted_context,
+        "timeout_seconds": int(timeout_seconds),
+        "allowed_tools": tools,
+    }
+    if project_id:
+        body["project_id"] = project_id
+    elif execution.get("workspace"):
+        body["workspace"] = str(execution["workspace"])
+    return body
+
+
+@register_tool_from_function(name="run_team", side_effect="external")
+def run_team(assignments: str, project_id: str = "", timeout_seconds: int = 1800) -> dict[str, Any]:
+    """Submit bounded specialist tasks and collect each durable result."""
+    try:
+        items = json.loads(assignments) if isinstance(assignments, str) else list(assignments or [])
+    except (TypeError, ValueError) as exc:
+        return {"ok": False, "error": f"assignments must be a JSON list: {exc}"}
+    if not isinstance(items, list) or not items or not all(
+        isinstance(item, dict) and item.get("agent_id") and item.get("task") for item in items
+    ):
+        return {"ok": False, "error": 'assignments must be [{"agent_id": ..., "task": ...}, ...]'}
+    from jaeger_agent.task_port import current_task_context
+    turn = current_task_context() or {}
+    submitted = []
+    for item in items:
+        target = str(item["agent_id"]).strip()
+        rid = uuid.uuid4().hex
+        status, payload = _request_json(
+            "POST", f"/v1/agents/{target}/handoff",
+            _handoff_body(str(item["task"]).strip(), turn,
+                          from_agent_id="native:jaeger", require_approval=True,
+                          request_id=rid, parent_run_id="",
+                          permitted_context=str(item.get("context") or ""),
+                          timeout_seconds=timeout_seconds, tools=[], project_id=project_id),
+            timeout=15,
+        )
+        submitted.append({"agent_id": target, "status_code": status, "handoff": payload})
+    latest = {s["handoff"]["id"]: s["handoff"] for s in submitted if s["handoff"].get("id")}
+    pending = set(latest)
+    deadline = time.monotonic() + max(1, int(timeout_seconds)) + APPROVAL_WAIT_S
+    while pending and time.monotonic() < deadline:
+        for hid in list(pending):
+            _, current = _request_json("GET", f"/v1/handoffs/{hid}", timeout=10)
+            if current.get("error"):
+                latest[hid] = {"id": hid, "status": "failed", "result": current}
+                pending.discard(hid)
+            else:
+                latest[hid] = current
+                if current.get("status") in {"completed", "failed", "cancelled", "denied", "execution_unknown"}:
+                    pending.discard(hid)
+        if pending:
+            time.sleep(APPROVAL_POLL_S)
+    results = []
+    for item in submitted:
+        handoff = latest.get(item["handoff"].get("id"), item["handoff"])
+        result = handoff.get("result") or {}
+        results.append({
+            "agent_id": item["agent_id"], "handoff_id": handoff.get("id"),
+            "status": handoff.get("status") or "rejected",
+            "ok": handoff.get("status") == "completed" and bool(result.get("ok", False)),
+            "summary": result.get("summary") or handoff.get("error") or "",
+        })
+    return {"ok": all(result["ok"] for result in results), "results": results,
+            "still_running": sorted(pending), "project_id": project_id or None}
+
+
 @register_tool_from_function(name="call_agent", side_effect="external")
 def call_agent(
     agent_id: str,
@@ -88,6 +169,7 @@ def call_agent(
     permitted_context: str = "",
     timeout_seconds: int = 120,
     allowed_tools: str = "",
+    project_id: str = "",
 ) -> dict[str, Any]:
     """Hand a bounded task to a standing specialist and return its evidence.
 
@@ -124,34 +206,32 @@ def call_agent(
 
     rid = (request_id or "").strip() or uuid.uuid4().hex
     tools = [part.strip() for part in str(allowed_tools or "").split(",") if part.strip()]
+    from jaeger_agent.task_port import current_task_context
+    turn = current_task_context() or {}
     status, payload = _request_json(
-        "POST",
-        f"/v1/agents/{target}/handoff",
-        {
-            "task": work,
-            "from_agent_id": from_agent_id or "native:jaeger",
-            "require_approval": bool(require_approval),
-            "request_id": rid,
-            "parent_run_id": parent_run_id or None,
-            "permitted_context": permitted_context,
-            "timeout_seconds": int(timeout_seconds),
-            "allowed_tools": tools,
-        },
+        "POST", f"/v1/agents/{target}/handoff",
+        _handoff_body(work, turn, from_agent_id=from_agent_id,
+                      require_approval=require_approval, request_id=rid,
+                      parent_run_id=parent_run_id, permitted_context=permitted_context,
+                      timeout_seconds=timeout_seconds, tools=tools, project_id=project_id),
         timeout=15,
     )
     if status >= 400 or payload.get("error"):
         return {"ok": False, "status": payload.get("status") or "failed", **payload}
     handoff_id = payload.get("id")
-    if payload.get("status") == "pending_approval":
-        return {
-            "ok": False,
-            "status": "pending_approval",
-            "error": "Specialist is waiting for an explicit approval decision",
-            "handoff": payload,
-            "request_id": rid,
-        }
-    deadline = time.monotonic() + max(1, int(timeout_seconds))
     current = payload
+    if current.get("status") == "pending_approval" and turn:
+        approval_deadline = time.monotonic() + APPROVAL_WAIT_S
+        while current.get("status") == "pending_approval" and time.monotonic() < approval_deadline:
+            time.sleep(APPROVAL_POLL_S)
+            _, current = _request_json("GET", f"/v1/handoffs/{handoff_id}", timeout=10)
+            if current.get("error"):
+                return {"ok": False, "status": "failed", **current, "request_id": rid}
+    if current.get("status") == "pending_approval":
+        return {"ok": False, "status": "pending_approval",
+                "error": "Specialist is waiting for an explicit approval decision",
+                "handoff": current, "request_id": rid}
+    deadline = time.monotonic() + max(1, int(timeout_seconds))
     if native_parent and current.get("status") in {"admitted", "running"}:
         return {"ok": True, "completed": False, "status": current["status"],
                 "handoff_id": handoff_id, "request_id": rid,
