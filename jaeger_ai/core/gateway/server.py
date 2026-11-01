@@ -865,6 +865,7 @@ class JaegerGatewayApp:
         self._owner_declined: set[str] = set()
         # Tool names each live request has run, in order (for the owner's check step).
         self._request_tools: dict[str, list[str]] = {}
+        self._turn_timings: dict[str, Any] = {}
         # Requests whose approval the owner never answered. That is needs_owner, not blocked.
         self._owner_unanswered: set[str] = set()
         # Request-scoped live ReAct agents. The Gateway does not own the agent;
@@ -1371,6 +1372,8 @@ class JaegerGatewayApp:
                 "turn_id": turn_id, "request_id": rid, "text": text,
             })
         if admitted.get("accepted") and rid not in self._running_tasks:
+            from .turn_timing import TurnTiming
+            self._turn_timings[rid] = TurnTiming(admitted.get("timing_admitted_at"))
             self._cancellations.register(rid)
             self._running_tasks[rid] = asyncio.create_task(
                 self._execute_turn(
@@ -3740,6 +3743,7 @@ class JaegerGatewayApp:
         requested = self._requested_from_body(body)
         try:
             model_revision=await self._turn_model_revision(session_id,requested,request_id)
+            timing_admitted_at = time.monotonic()
             admitted = self.store.admit_request(
                 session_id, text, request_id=request_id, requested=requested,
                 expected_model_revision=model_revision,
@@ -3760,6 +3764,8 @@ class JaegerGatewayApp:
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
 
+        if not admitted.get("replayed"):
+            admitted["timing_admitted_at"] = timing_admitted_at
         turn_id = admitted["turn_id"]
         rid = admitted["request_id"]
         options = (admitted.get("execution") or {}).get("options") or {}
@@ -4460,6 +4466,7 @@ class JaegerGatewayApp:
         context_ids: tuple[str, str] | None = None,
         context_references: tuple[Any, ...] = (),
         on_model_identity: Callable[[str | None], None] | None = None,
+        timing: Any = None,
     ) -> str:
         """Live text turn via locked Ollama — never routes through :8813."""
         target_model = model or DEFAULT_OLLAMA_MODEL
@@ -4579,6 +4586,11 @@ class JaegerGatewayApp:
             ollama_headers["Authorization"] = f"Bearer {ollama_key}"
 
         timeout = ClientTimeout(total=90)
+        if timing is not None:
+            try:
+                timing.model_start()
+            except Exception:
+                logger.debug("Model timing observer unavailable", exc_info=False)
         async with ClientSession(timeout=timeout) as session:
             if context_ids is not None:
                 from jaeger_agent.loop.input_outline import input_outline
@@ -4599,6 +4611,14 @@ class JaegerGatewayApp:
                         f"Ollama chat HTTP {resp.status}: {body[:500]}"
                     )
                 data = json.loads(body)
+        if timing is not None:
+            try:
+                timing.model_done({
+                    "prompt_tokens": data.get("prompt_eval_count"),
+                    "completion_tokens": data.get("eval_count"),
+                })
+            except Exception:
+                logger.debug("Model timing observer unavailable", exc_info=False)
         if on_model_identity is not None:
             from jaeger_ai.core.redaction import redact_text
             reported=data.get('model')
@@ -4650,6 +4670,7 @@ class JaegerGatewayApp:
         """
         from jaeger_agent.loop.callbacks import AgentCallbacks
 
+        timing = self._turn_timings.get(request_id)
         row = self.store.get_request(request_id) or {}
         ids = {"turn_id": row.get("turn_id") or request_id, "request_id": request_id}
         lock = threading.Lock()
@@ -4697,6 +4718,8 @@ class JaegerGatewayApp:
                     "duration_ms": max(0, int((time.time() - started) * 1000))})
 
         def on_delta(piece: str) -> None:
+            if timing is not None and piece:
+                timing.first_token()
             end_reasoning()
             with lock:
                 pending.append(str(piece))
@@ -4726,6 +4749,8 @@ class JaegerGatewayApp:
             flush()
             end_reasoning()
             raw_name = str(name or "")
+            if timing is not None:
+                timing.tool_start(_safe_tool_event_name(name))
             self.event_bus.publish(session_id, "turn.progress", {**ids, "channel": "progress"})
             activity_id = f"tool_{uuid.uuid4().hex}"
             with lock:
@@ -4784,6 +4809,8 @@ class JaegerGatewayApp:
             flush()
             end_reasoning()
             raw_name = str(name or "")
+            if timing is not None:
+                timing.tool_done(_safe_tool_event_name(name))
             with lock:
                 queued = active_tools.get(raw_name)
                 activity_id = queued.pop(0) if queued else f"tool_{uuid.uuid4().hex}"
@@ -4836,6 +4863,8 @@ class JaegerGatewayApp:
 
         return AgentCallbacks(
             model_input=on_model_input,
+            model_call_start=timing.model_start if timing is not None else None,
+            model_call_done=timing.model_done if timing is not None else None,
             stream_delta=on_delta,
             reasoning=on_reasoning,
             tool_progress=on_tool_progress,
@@ -4921,8 +4950,11 @@ class JaegerGatewayApp:
         from jaeger_ai.core.runtime.autonomous_runner import run_continued_turn
 
         continuation_state: dict[str, Any] = {}
+        timing = self._turn_timings.get(request_id)
 
         def step(inner_prompt: str) -> dict[str, Any]:
+            if timing is not None:
+                timing.continuation()
             before = len(self._request_tools.get(request_id, []))
             out = self._owner_react_turn(
                 inner_prompt, session_key=session_key, request_id=request_id,
@@ -4984,6 +5016,8 @@ class JaegerGatewayApp:
                             "Owner verification requires correction: your completion carried no receipt for a "
                             "file the owner can check. Finish the work if it is not done, then " + EVIDENCE_CONTRACT)
                         result = {**result, **fix, "text": fix.get("text") or result.get("text")}
+                if timing is not None and "tool calls in a single turn" in str(result.get("halt_reason") or ""):
+                    timing.halt_reason = result["halt_reason"]
                 return {**result, "task_completion": last_completion()}
             finally:
                 self._active_agents.pop(request_id, None)
@@ -5079,6 +5113,7 @@ class JaegerGatewayApp:
             })
         rid = request_id or turn_id
         admitted_request = self.store.get_request(rid)
+        timing = self._turn_timings.get(rid)
         # One Goal/TaskCard per operational turn (see _open_turn_card). None for conversation.
         card_task_id: str | None = None
         self._present(session_id, "listening", intent="turn")
@@ -5187,6 +5222,7 @@ class JaegerGatewayApp:
                             context_ids=(session_id, request_id or turn_id),
                             context_references=context_references,
                             on_model_identity=observed_model,
+                            timing=timing,
                         ),
                         loop,
                     )
@@ -5257,6 +5293,7 @@ class JaegerGatewayApp:
                         context_ids=(session_id, request_id or turn_id),
                         context_references=context_references,
                         on_model_identity=observed_model,
+                        timing=timing,
                     ),
                     loop,
                 )
@@ -5278,6 +5315,8 @@ class JaegerGatewayApp:
             # One turn shape. The main loop is the agent loop: build the request with
             # its fenced memory, run it, record the answer. Chat turns and durable
             # child tasks take exactly this path; nothing gates it.
+            if timing is not None:
+                timing.prepare_turn_start_ms = timing.now()
             try:
                 prepared = await asyncio.to_thread(
                     runtime.prepare_turn,
@@ -5297,6 +5336,8 @@ class JaegerGatewayApp:
                 logger.warning("turn context unavailable for %s; running the bare request", rid, exc_info=True)
                 prepared, prompt = None, text
                 context_references = pinned_references
+            if timing is not None:
+                timing.prepare_turn_end_ms = timing.now()
             self._present(session_id, "thinking", intent="turn")
             card_task_id, execution = self._open_turn_card(
                 runtime, prepared, session=session, session_id=session_id, rid=rid,
@@ -5391,6 +5432,9 @@ class JaegerGatewayApp:
                 **agent_fields,
                 **proactive_fields,
             }
+            if timing is not None:
+                timing.turn_finish_ms = timing.now()
+                result["timing"] = timing.snapshot()
             self._persist_terminal(rid, session_id, "completed", result, assistant_text=response_text, record_entity_event=False)
         except asyncio.CancelledError:
             # Global Stop cancels this task. Persist how the request ended (cancelled, or
@@ -5448,6 +5492,9 @@ class JaegerGatewayApp:
             result.update(self._close_turn_card(card_task_id, result, status, session_id=session_id))
             if not card_task_id:
                 self._present(session_id, "stopped" if status == "cancelled" else "failed", status=status)
+            if timing is not None:
+                timing.turn_finish_ms = timing.now()
+                result["timing"] = timing.snapshot()
             self._persist_terminal(
                 rid,
                 session_id,
@@ -5466,6 +5513,7 @@ class JaegerGatewayApp:
             self._owner_unanswered.discard(rid)
             self._running_tasks.pop(rid, None)
             self._cancellations.release(rid)
+            self._turn_timings.pop(rid, None)
 
     @staticmethod
     def _lane_model(request_text: str, requested: str | None) -> str:
