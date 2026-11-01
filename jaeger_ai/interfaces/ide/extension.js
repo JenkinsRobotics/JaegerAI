@@ -3,21 +3,18 @@
  *
  * ARCHITECTURE: Centralized Brain + Thin Clients
  * ────────────────────────────────────────────────
- * The Apple-Native Web UI is the ONE chat interface.
- * This extension is a CONTROLLER — it sends context and
- * quick actions to the Gateway, shows agent status,
- * and opens the chat when you need to see/talk.
+ * The Gateway owns conversations. This extension is a controller
+ * (context, quick actions, agent status) plus the in-IDE chat.
  *
  * What this extension does:
  * - Status bar: Shows what Jaeger is doing (idle/thinking/working)
  * - Sidebar: Agent state, quick actions, recent tasks
  * - Code actions: Right-click → "Ask Jaeger" (explain, fix, test, refactor)
- * - @jaeger: Chat participant that routes to the agent
- * - Opens main chat: Click status bar or press Cmd+Shift+J
+ * - Opens the web chat: Click status bar or press Cmd+Shift+J
+ * - In-IDE chat: the Chat view (chat-panel.js + media/index.html on
+ *   conversation.js) and a streaming @jaeger with Sources and follow-ups
  *
  * What this extension does NOT do:
- * - No chat UI (the web UI is the chat)
- * - No conversation state (Gateway owns it)
  * - No model calls (Gateway + Ollama Cloud handle that)
  */
 
@@ -32,6 +29,13 @@ const {
   JaegerSidebarProvider,
 } = require('./controller');
 const { activateBridge } = require('./copilot-bridge');
+const chatPanel = require('./chat-panel');
+
+// Commands the controller below registers itself. The chat panel owns the rest:
+// jaeger.open (focus the in-IDE chat), jaeger.setToken (scoped per endpoint),
+// jaeger.selectModel (provider::model, decoded by every admission path),
+// the conversation commands and the one streaming @jaeger participant.
+const CONTROLLER_OWNED = ['jaeger.settings'];
 
 // ─────────────────────────────────────────────────────────────
 // Activation
@@ -146,11 +150,6 @@ function activate(context) {
   );
 
   // Open controller panel
-  context.subscriptions.push(
-    vscode.commands.registerCommand('jaeger.open', () => {
-      vscode.commands.executeCommand('jaeger.controller.focus');
-    })
-  );
 
   // Settings
   context.subscriptions.push(
@@ -160,43 +159,8 @@ function activate(context) {
   );
 
   // Set caller token (secure storage)
-  context.subscriptions.push(
-    vscode.commands.registerCommand('jaeger.setToken', async () => {
-      const token = await vscode.window.showInputBox({
-        prompt: 'Gateway Caller Token',
-        placeHolder: 'Paste your token (stored in OS SecretStorage)',
-        password: true,
-        ignoreFocusOut: true,
-      });
-      if (token) {
-        await context.secrets.store('jaeger.callerToken', token);
-        vscode.window.showInformationMessage('Jaeger: Token saved securely.');
-      }
-    })
-  );
 
   // Select model
-  context.subscriptions.push(
-    vscode.commands.registerCommand('jaeger.selectModel', async () => {
-      try {
-        const models = await gateway.models();
-        const items = (models.models || models || []).map(m => ({
-          label: m.name || m.id,
-          description: m.provider || m.type,
-          detail: m.id,
-        }));
-        const picked = await vscode.window.showQuickPick(items, {
-          placeHolder: 'Select default model',
-        });
-        if (picked) {
-          await vscode.workspace.getConfiguration('jaeger').update('model', picked.detail, true);
-          vscode.window.showInformationMessage(`Jaeger: Model set to ${picked.label}`);
-        }
-      } catch (error) {
-        vscode.window.showErrorMessage(`Failed to load models: ${error.message}`);
-      }
-    })
-  );
 
   // Implement TODO (from inline completion)
   context.subscriptions.push(
@@ -249,69 +213,9 @@ function activate(context) {
   // Chat Participant (@jaeger)
   // ─────────────────────────────────────────────────────────
 
-  const chatParticipant = vscode.chat.createChatParticipant('jaeger.chatParticipant', async (request, context, stream, token) => {
-    output.appendLine(`[jaeger] @jaeger invoked: ${request.command || 'message'}`);
-
-    try {
-      // Handle slash commands locally
-      if (request.command === 'status') {
-        const health = await gateway.json('/health');
-        stream.markdown(`**Jaeger Gateway Status**\n\n` +
-          `- Status: ${health.status}\n` +
-          `- Version: ${health.version}\n` +
-          `- Model: ${health.model || 'default'}\n` +
-          `- Endpoint: ${gateway.url}\n\n` +
-          `[Open Full Chat](command:jaeger.openChat)`);
-        return;
-      }
-
-      if (request.command === 'verify') {
-        stream.progress('Running verification suite...');
-        // Delegate to controller's runTests
-        await controller.runTests();
-        stream.markdown('Verification request sent. See chat for results.');
-        return { metadata: { command: 'verify' } };
-      }
-
-      if (request.command === 'explain') {
-        await controller.explainCode();
-        stream.markdown('Explanation request sent. Opening chat...');
-        return { metadata: { command: 'explain' } };
-      }
-
-      if (request.command === 'fix') {
-        await controller.fixCode();
-        stream.markdown('Fix request sent. Opening chat...');
-        return { metadata: { command: 'fix' } };
-      }
-
-      if (request.command === 'test') {
-        await controller.writeTests();
-        stream.markdown('Test generation request sent. Opening chat...');
-        return { metadata: { command: 'test' } };
-      }
-
-      // Regular message — send to agent
-      const prompt = request.prompt;
-      if (!prompt) return;
-
-      stream.progress('Sending to Jaeger...');
-      await controller.ask(prompt, {
-        includeCode: true,
-        chatRequest: request,
-      });
-
-      stream.markdown(`Request sent to Jaeger. [Open chat to see the response](command:jaeger.openChat)`);
-
-      return { metadata: { command: request.command } };
-    } catch (error) {
-      stream.markdown(`**Error:** ${error.message}\n\nIs the Gateway running? Try \`jaeger gateway daemon\`.`);
-      return { metadata: { error: error.message } };
-    }
-  });
-
-  chatParticipant.iconPath = vscode.Uri.joinPath(context.extensionUri, 'media', 'jaeger.svg');
-  context.subscriptions.push(chatParticipant);
+  // The in-IDE chat: the conversation panel (media/index.html + view.js on
+  // conversation.js) and the streaming @jaeger participant (native-turn.js).
+  chatPanel.activate(context, { skip: CONTROLLER_OWNED, output });
 
   // ─────────────────────────────────────────────────────────
   // Status bar click → open chat
@@ -320,7 +224,12 @@ function activate(context) {
   // Already handled by controller's status bar item
 
   // Copilot bridge: Jaeger on this Mac can use VS Code's Copilot models (no API keys).
-  activateBridge(vscode, context, (line) => output.appendLine(line));
+  // The bridge publishes ~/.jaeger/run/vscode-bridge.json for the operator's
+  // Jaeger. Only an installed (Production) extension may do that: a dev host or
+  // test run would overwrite the real file. JAEGER_COPILOT_BRIDGE=off also opts out.
+  const bridgeOff = copilotBridgeBlocked(context);
+  if (bridgeOff) output.appendLine(`[jaeger] Copilot bridge off: ${bridgeOff}`);
+  else activateBridge(vscode, context, (line) => output.appendLine(line));
 
   output.appendLine('[jaeger] Extension activated successfully.');
   output.appendLine('[jaeger] Chat UI: Open with Cmd+Shift+J or click status bar.');
@@ -329,6 +238,16 @@ function activate(context) {
     controller,
     getGateway: () => gateway,
   };
+}
+
+function copilotBridgeBlocked(context, env = process.env) {
+  if (String(env.JAEGER_COPILOT_BRIDGE || '').toLowerCase() === 'off') return 'JAEGER_COPILOT_BRIDGE=off';
+  const production = vscode.ExtensionMode ? vscode.ExtensionMode.Production : 1;
+  if (context?.extensionMode !== production) {
+    const names = { 2: 'Development', 3: 'Test' };
+    return `extension mode ${names[context?.extensionMode] || String(context?.extensionMode)} (bridge runs only when installed)`;
+  }
+  return '';
 }
 
 function deactivate() {
@@ -366,4 +285,4 @@ try { contract = require('./contract.json'); } catch (_) {}
 // Exports
 // ─────────────────────────────────────────────────────────────
 
-module.exports = { activate, deactivate };
+module.exports = { activate, deactivate, copilotBridgeBlocked };

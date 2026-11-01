@@ -29,6 +29,7 @@ function activateWith(settings) {
       if (request === './gateway') return { Gateway, GatewayError: Error, callerToken: () => 'fallback-token' };
       if (request === './controller') return { JaegerController: Controller, JaegerCodeActionProvider: class {}, JaegerInlineCompletionsProvider: class {}, JaegerSidebarProvider: class {} };
       if (request === './copilot-bridge') return { activateBridge() {} };
+      if (request === './chat-panel') return { activate() {} };
     }
     return original.call(this, request, parent, isMain);
   };
