@@ -11,7 +11,7 @@ type GitFile = { path: string; status: string; staged: boolean; unstaged: boolea
 type GitStatus = { is_git: boolean; branch?: string; files?: GitFile[]; truncated?: boolean };
 type Branches = { current: string; local: { name: string }[]; remote: { name: string }[] };
 const query = (path: string, values: Record<string, string>) => `${path}?${new URLSearchParams(values)}`;
-const errorText = (error: unknown) => String(error).includes("HTTP 404") ? "Session not found. Choose another session or refresh." : (error as Error).message;
+const errorText = (error: unknown) => String(error).includes("HTTP 404") ? "This session has no workspace to browse. Choose another session." : (error as Error).message;
 
 export function WorkspaceBrowser({ source, params }: { source: JaegerSource; params: URLSearchParams }) {
   const requested = params.get("session") ?? "";
@@ -30,7 +30,7 @@ export function WorkspaceBrowser({ source, params }: { source: JaegerSource; par
   const [loading, setLoading] = useState(false);
   const [revision, setRevision] = useState(0);
 
-  useEffect(() => { let live = true; source.sessions().then(rows => { if (live) { setSessions(rows); setSessionId(id => id || rows[0]?.session_id || ""); } }, e => { if (live) setError((e as Error).message); }); return () => { live = false; }; }, [source]);
+  useEffect(() => { let live = true; source.sessions().then(all => { const rows = all.filter(s => s.workspace); if (live) { setSessions(rows); setSessionId(id => id || rows[0]?.session_id || ""); } }, e => { if (live) setError((e as Error).message); }); return () => { live = false; }; }, [source]);
   useEffect(() => { setSessionId(requested); setFolder("."); setSelected(""); setDiffPath(""); }, [requested]);
   useEffect(() => {
     if (!sessionId) return;
@@ -63,7 +63,7 @@ export function WorkspaceBrowser({ source, params }: { source: JaegerSource; par
   return <div className="jg-u-page jg-workspace-browser">
     <PageHead title="Workspace" subtitle="Browse session files and Git changes. Read only." actions={<button type="button" className="jg-u-btn" onClick={() => setRevision(v => v + 1)}>Refresh</button>} />
     <label className="jg-workspace-browser__session">Session <select aria-label="Workspace session" value={sessionId} onChange={e => chooseSession(e.target.value)}><option value="">Choose a session</option>{sessionId && !sessions.some(s => s.session_id === sessionId) && <option value={sessionId}>{sessionId}</option>}{sessions.map(s => <option key={s.session_id} value={s.session_id}>{s.title || s.session_id}</option>)}</select></label>
-    {!sessionId && <Empty title="No session selected">Choose a Gateway session to browse its workspace.</Empty>}
+    {!sessionId && <Empty title="No session selected">{sessions.length ? "Choose a Gateway session to browse its workspace." : "No sessions have a workspace yet."}</Empty>}
     {error && <p role="alert" className="jg-u-error">{error}</p>}
     {loading && <SkeletonRows n={3} />}
     {sessionId && !error && !loading && <div className="jg-workspace-browser__grid">

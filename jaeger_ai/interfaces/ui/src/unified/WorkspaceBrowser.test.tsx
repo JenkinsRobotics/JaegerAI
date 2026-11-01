@@ -4,7 +4,7 @@ import { createRoot } from "react-dom/client";
 import { WorkspaceBrowser } from "./WorkspaceBrowser";
 import type { JaegerSource } from "../api/source";
 
-const source = { sessions: vi.fn(async () => [{ session_id: "gateway-1", title: "Gateway chat" }]) } as unknown as JaegerSource;
+const source = { sessions: vi.fn(async () => [{ session_id: "chat-only", title: "No workspace" }, { session_id: "gateway-1", title: "Gateway chat", workspace: "/tmp/ws" }]) } as unknown as JaegerSource;
 afterEach(() => { vi.unstubAllGlobals(); document.body.innerHTML = ""; });
 async function mount(reply: (url: string) => Response, params = "") {
   const calls: string[] = [];
@@ -32,6 +32,12 @@ it("shows a clear empty workspace state", async () => {
 });
 it("handles a missing Gateway session without a file or Git panel", async () => {
   const { el } = await mount(() => Response.json({ error: "Session not found" }, { status: 404 }), "session=missing");
-  expect(el.querySelector('[role="alert"]')?.textContent).toContain("Session not found");
+  expect(el.querySelector('[role="alert"]')?.textContent).toContain("no workspace to browse");
   expect(el.querySelector('[aria-label="File browser"]')).toBeNull();
+});
+it("defaults to the first session that has a workspace", async () => {
+  const { calls, el } = await mount(url => url.startsWith("/api/list") ? Response.json({ entries: [] }) : url.startsWith("/api/git/status") ? Response.json({ git: { is_git: false } }) : Response.json({ branches: null }));
+  expect(calls.length).toBeGreaterThan(0);
+  expect(calls.every(url => new URL(url, "http://localhost").searchParams.get("session_id") === "gateway-1")).toBe(true);
+  expect([...el.querySelectorAll("option")].map(o => o.textContent)).not.toContain("No workspace");
 });
