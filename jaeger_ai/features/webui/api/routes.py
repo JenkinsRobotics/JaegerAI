@@ -17012,8 +17012,13 @@ def _handle_list_dir(handler, parsed):
                     cli_meta = cs
                     break
             if not cli_meta:
-                return bad(handler, "Session not found", 404)
-            workspace = cli_meta.get("workspace", "")
+                from .gateway_read_workspace import gateway_read_workspace
+                try:
+                    workspace = gateway_read_workspace(sid)
+                except KeyError:
+                    return bad(handler, "Session not found", 404)
+            else:
+                workspace = cli_meta.get("workspace", "")
         except Exception:
             return bad(handler, "Session not found", 404)
     try:
@@ -19221,13 +19226,27 @@ def _handle_file_raw(handler, parsed):
     sid = qs.get("session_id", [""])[0]
     if not sid:
         return bad(handler, "session_id is required")
+    gateway_session = False
     try:
         s = get_session_for_file_ops(sid)
     except KeyError:
-        return bad(handler, "Session not found", 404)
+        from .gateway_read_workspace import gateway_read_workspace
+        from types import SimpleNamespace
+        try:
+            s = SimpleNamespace(workspace=str(gateway_read_workspace(sid)))
+            gateway_session = True
+        except KeyError:
+            return bad(handler, "Session not found", 404)
     rel = qs.get("path", [""])[0]
     force_download = qs.get("download", [""])[0] == "1"
-    resolved = _file_raw_target(s, sid, rel)
+    try:
+        resolved = ((Path(s.workspace), safe_resolve(Path(s.workspace), rel))
+                    if gateway_session else _file_raw_target(s, sid, rel))
+    except ValueError:
+        resolved = None
+    if gateway_session and resolved is not None and (
+            not resolved[1].exists() or not resolved[1].is_file()):
+        resolved = None
     if resolved is None:
         return j(handler, {"error": "not found"}, status=404)
     anchor_root, target = resolved
@@ -19261,10 +19280,17 @@ def _handle_file_read(handler, parsed):
     sid = qs.get("session_id", [""])[0]
     if not sid:
         return bad(handler, "session_id is required")
+    gateway_session = False
     try:
         s = get_session_for_file_ops(sid)
     except KeyError:
-        return bad(handler, "Session not found", 404)
+        from .gateway_read_workspace import gateway_read_workspace
+        from types import SimpleNamespace
+        try:
+            s = SimpleNamespace(workspace=str(gateway_read_workspace(sid)))
+            gateway_session = True
+        except KeyError:
+            return bad(handler, "Session not found", 404)
     rel = qs.get("path", [""])[0]
     if not rel:
         return bad(handler, "path is required")
