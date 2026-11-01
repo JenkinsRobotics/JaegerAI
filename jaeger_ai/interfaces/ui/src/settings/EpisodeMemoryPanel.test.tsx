@@ -10,7 +10,7 @@ it('requires explicit confirmation, resolves a lost receipt without replay and p
  const el=document.createElement('div');document.body.appendChild(el);let root=createRoot(el);
  try{
   await act(async()=>{root.render(<EpisodeMemoryPanel controls={controls}/>);});await wait();
-  await act(async()=>click(el,'Inspect episode context'));
+  expect(el.querySelector('[aria-label="human.message · Recall eligible"][data-state="ready"]')).not.toBeNull();await act(async()=>click(el,'Inspect episode context'));
   const input=el.querySelector('textarea')!;
   await act(async()=>{const setter=Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!;setter.call(input,'Owned correction draft');input.dispatchEvent(new Event('input',{bubbles:true}));});
   await act(async()=>click(el,'Review recoverable forget'));expect(mutate).not.toHaveBeenCalled();
