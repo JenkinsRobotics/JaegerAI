@@ -137,11 +137,15 @@ TURN_ROUTES = frozenset({
     ("POST", "/v1/sessions/{id}/feedback"),
     ("POST", "/v1/sessions/{id}/branch"),
     ("POST", "/v1/sessions/{id}/retry"),
+    # AppControl proposals only queue a needs-confirmation approval; nothing is applied.
+    ("POST", "/v1/apps/{app}/proposals"),
 })
 #: Owner decisions. Answering a clarify form is owner input, never an agent self-answer (GB-033).
 APPROVE_ROUTES = frozenset({("POST", "/v1/approvals/{id}"), ("POST", "/v1/approvals/{id}/decision"),
                             ("POST", "/v1/approvals/{id}/decide"), ("POST", "/v1/approvals/batch"), ("POST", "/v1/approvals/{id}/viewed"),
                             ("POST", "/v1/tasks/{id}/approve"),
+                            # AppControl: the handler further limits these to the webui/menubar callers.
+                            ("POST", "/v1/apps/proposals/{pid}/decision"), ("POST", "/v1/apps/proposals/{pid}/rollback"),
                             ("POST", "/v1/sessions/{id}/clarify/{clarify_id}")})
 IDE_ROUTES = frozenset({("POST", "/v1/sessions/{id}/ide/{ide_request_id}")})
 STOP_ROUTES = frozenset({("POST", "/v1/stop")})
@@ -169,6 +173,8 @@ PREFIXED_READ_ROUTES = frozenset({
     # session content, so outside callers may read them.
     "/v1/agents",
     "/v1/approvals/counts",
+    # AppControl reads: status and redacted config only.
+    "/v1/apps", "/v1/apps/proposals", "/v1/apps/proposals/{pid}", "/v1/apps/{app}", "/v1/apps/{app}/config",
 })
 
 
