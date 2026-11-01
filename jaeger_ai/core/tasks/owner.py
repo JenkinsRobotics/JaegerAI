@@ -747,7 +747,7 @@ class GatewayTaskOwner:
         completion = result.get('task_completion') or {}
         receipts = [r for r in (completion.get('verification_receipts') or []) if r.get('kind') == 'file_sha256']
         if completion.get('ok') and receipts:
-            root = Path(task.payload['execution'].get('workspace') or '').resolve()
+            root = GatewayTaskOwner._verify_root(task)
             for receipt in receipts:
                 raw = receipt.get('resolved') or receipt.get('path') or ''
                 path = Path(raw).expanduser()
@@ -765,6 +765,17 @@ class GatewayTaskOwner:
         return False, UNVERIFIABLE
 
     @staticmethod
+    def _verify_root(task) -> Path:
+        """The admitted workspace, or (J-087) the owning instance's workspace when the task was admitted
+        without one (chat proposals, workflow proposals). The empty path used to resolve to the Gateway's
+        cwd, so every receipt the agent wrote in its own workspace read as 'outside workspace'."""
+        raw = str(task.payload.get('execution', {}).get('workspace') or '')
+        if raw:
+            return Path(raw).expanduser().resolve()
+        from jaeger_ai.core.instance.instance import resolve_instance_dir
+        return (Path(resolve_instance_dir(None)) / 'workspace').resolve()
+
+    @staticmethod
     def _named_path_receipts(task):
         """The owner checks the files the request names itself; no worker ritual needed.
 
@@ -774,10 +785,9 @@ class GatewayTaskOwner:
         """
         from jaeger_ai.core.runtime.autonomous_runner import _required_paths
         names = _required_paths(task.goal or '')
-        workspace = str((task.payload.get('execution') or {}).get('workspace') or '')
-        if not names or not workspace:
+        if not names:
             return None
-        root = Path(workspace).resolve()
+        root = GatewayTaskOwner._verify_root(task)
         receipts, fresh = [], False
         for raw in names:
             path = Path(raw).expanduser()
