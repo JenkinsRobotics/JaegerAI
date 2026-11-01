@@ -64,7 +64,6 @@ def test_g1_backfill_from_existing_events(tmp_path):
     s = GatewaySessionStore(tmp_path / "g.sqlite3")
     with s._immediate() as conn:
         conn.execute("DROP TABLE IF EXISTS agent_activity")
-    agent_activity._ready.clear()
     s.append_event("*", "agent.handoff", {"handoff": H("h9")})
     assert s.agent_activity()["items"][0]["refs"]["handoff_id"] == "h9"
 
