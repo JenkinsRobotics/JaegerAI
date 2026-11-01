@@ -21,6 +21,8 @@ export interface ChromeProps {
   phone: boolean
   onPick: (id: WindowId) => void
   onSearch: () => void
+  /** Top-bar status slot (approvals badge, J-087). */
+  trail?: React.ReactNode
 }
 
 const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
@@ -81,7 +83,7 @@ function PhoneTabs({ active, pages, onPick, onSearch }: Pick<ChromeProps, 'activ
 }
 
 /** The leading/top chrome. Rendered by AppWindow around its page stack. */
-export function AppChrome({ active, sub, pages, phone, onPick, onSearch, children }: ChromeProps & { children: React.ReactNode }) {
+export function AppChrome({ active, sub, pages, phone, onPick, onSearch, trail, children }: ChromeProps & { children: React.ReactNode }) {
   const preset = usePreset()
   const [collapsed, setCollapsed] = useState(false)
   const title = WINDOW_DEFINITIONS[active].title
@@ -99,6 +101,7 @@ export function AppChrome({ active, sub, pages, phone, onPick, onSearch, childre
         <header className="jg-topbar jg-topbar--compact">
           <JaegerMark className="jg-topbar__logo" />
           <h1 className="jg-topbar__title">{title}</h1>
+          {trail}
           <button type="button" className="jg-iconbtn" onClick={onSearch} aria-label={`Search or ask (${KEY})`}><Search size={18} /></button>
         </header>
         <main className="jg-chrome__main">{children}</main>
@@ -113,6 +116,7 @@ export function AppChrome({ active, sub, pages, phone, onPick, onSearch, childre
       <nav className="jg-sidebar" aria-label="Pages">
         <div className="jg-sidebar__head">
           <span className="jg-traffic" aria-hidden="true" />
+          {!topbar && trail}
           {!topbar && <button type="button" className="jg-iconbtn" onClick={() => setCollapsed((v) => !v)} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-keyshortcuts="Control+Meta+S"><Menu size={16} /></button>}
         </div>
         {preset.layout.command === 'sidebar' && <CommandField preset={preset} onSearch={onSearch} compact={collapsed} />}
@@ -129,7 +133,7 @@ export function AppChrome({ active, sub, pages, phone, onPick, onSearch, childre
               <span className="jg-crumb"><b>{title}</b>{subTitle && <span className="jg-crumb__sub"> / {subTitle}</span>}</span>
             </div>
             <div className="jg-topbar__center"><CommandField preset={preset} onSearch={onSearch} /></div>
-            <div className="jg-topbar__trail" />
+            <div className="jg-topbar__trail">{trail}</div>
           </header>
         )}
         <main className="jg-chrome__main">{children}</main>

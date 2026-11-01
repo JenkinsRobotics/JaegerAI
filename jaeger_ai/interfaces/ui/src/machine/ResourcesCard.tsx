@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { Badge } from "../unified/ui";
 import { getJson } from "../unified/webui";
-import { pressure, type ResourceStatus } from "./machineData";
+import { cpuText, pressure, type ResourceStatus } from "./machineData";
 import { WidgetCard } from "../widgets/primitives/WidgetCard";
 import "./machine.css";
 
@@ -14,7 +14,7 @@ export function ResourcesCard() {
   if (!r) return <WidgetCard title="Resources" state="loading" message="Loading resources…" />;
   const s = r.snapshot, c = r.config, hits = pressure(s, c);
   const metrics: [string, string][] = [
-    ["Memory free", `${s.mem_free_gb.toFixed(1)} / ${s.mem_total_gb.toFixed(0)} GB`], ["CPU load", `${Math.round(s.cpu_load * 100)}%`],
+    ["Memory free", `${s.mem_free_gb.toFixed(1)} / ${s.mem_total_gb.toFixed(0)} GB`], ["CPU load", cpuText(s.cpu_load)],
     ["GPU", s.gpu_util == null ? "–" : `${s.gpu_util}%`], ["Disk free", `${s.disk_free_gb.toFixed(0)} GB`],
     ["Thermal", s.thermal], ["Research cache", `${s.research_gb.toFixed(2)} / ${c.research_disk_budget_gb} GB`],
     ["Loaded models", s.ollama_loaded.length ? s.ollama_loaded.join(", ") : "none"], ["Concurrency", `${c.concurrency.heavy} heavy · ${c.concurrency.light} light`],

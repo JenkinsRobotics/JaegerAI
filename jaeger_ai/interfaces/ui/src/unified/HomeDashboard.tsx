@@ -11,7 +11,7 @@ import type { SessionRow, Task } from "../api/types";
 import type { AgentsState } from "../agents/agentsStore";
 import { label, visible } from "../agents/agentsLogic";
 import { AgentFace } from "./AgentFace";
-import { ApprovalList, useApprovalSessions } from "./ApprovalTray";
+import { ApprovalList, approvalsLabel, useApprovalSessions } from "./ApprovalTray";
 import { Badge, Empty, SkeletonRows, Sparkline, useToast, type Tone, PageHead } from "./ui";
 import { getJson, sendJson, type Metrics, type SystemStatus } from "./webui";
 import { summarizeRunner, type RunnerStatus } from "./jobsRunner";
@@ -198,7 +198,7 @@ export function HomeDashboard({ source, store, onNavigate }: { source: JaegerSou
       </>) },
     approvals: { title: "Approvals", wide: true, body: (
       <>
-        <h2>Approvals <Badge tone={pendingCount ? "warn" : "ok"}>{pendingCount} waiting</Badge></h2>
+        <h2>Approvals <Badge tone={pendingCount ? "warn" : "ok"}>{approvalsLabel(pendingCount)}</Badge></h2>
         {source.pendingApprovals ? <ApprovalList source={source} sessions={approvals} onOpenChat={chat} /> : <Empty title="Approvals unavailable">This gateway does not expose approvals.</Empty>}
       </>) },
     recent: { title: "Recent chats", body: (
@@ -231,7 +231,7 @@ export function HomeDashboard({ source, store, onNavigate }: { source: JaegerSou
         <Tile icon={<Moon size={18} />} title="Focus" value={!source.notifications ? "Unavailable" : !prefs ? "…" : focusOn ? "On · notifications paused" : "Off"} on={focusOn} onClick={source.notifications && prefs ? () => void toggleFocus() : undefined} />
         <Tile icon={<Sparkles size={18} />} title="Research jobs" value={rs.value} tone={rs.tone} hint={rs.hint} on={rs.job?.paused} onClick={rs.job ? () => void toggleJob() : undefined} />
         <Tile icon={<Mic size={18} />} title="Voice" value="Voice settings" onClick={() => onNavigate("/settings/voice")} />
-        <Tile icon={<Sparkles size={18} />} title="Approvals" value={`${pendingCount + needsYou.length} need you`} tone={pendingCount + needsYou.length ? "warn" : "ok"} onClick={() => onNavigate("/work/tasks?filter=needs")} />
+        <Tile icon={<Sparkles size={18} />} title="Approvals" value={approvalsLabel(pendingCount)} tone={pendingCount ? "warn" : "ok"} onClick={() => onNavigate(needsYou.length && !pendingCount ? "/work/tasks?filter=needs" : "/chat")} />
         <Tile icon={<MessageSquare size={18} />} title="New chat" value="Talk to Jaeger" onClick={() => chat()} />
         <Tile icon={<Cloud size={18} />} title="New agent" value="From a character" onClick={() => onNavigate("/agents/characters")} />
       </section>

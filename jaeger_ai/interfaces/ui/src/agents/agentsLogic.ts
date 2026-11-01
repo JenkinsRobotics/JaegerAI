@@ -15,7 +15,12 @@ export const ROLE_TEXT: Record<string, string> = {
 };
 const SHOWN_ROLES = new Set(["specialist", "native", ...Object.keys(ROLE_TEXT)]);
 
+/** Test fixtures and backup copies (J-087): onboarding-*-test-*, *.bak.*, mac-acceptance-*, mac-controls-*. Hidden from every agent list. */
+export const TEST_OR_BACKUP = /(^|[:._-])(test|tests|acceptance)([._-]|$)|\.bak(\.|$)|^(native:)?mac-(acceptance|controls)-/i;
+export const isTestOrBackup = (agent: Pick<Agent, "id" | "name">) => TEST_OR_BACKUP.test(agent.id) || TEST_OR_BACKUP.test(agent.name);
+
 export function visible(agent: Agent): boolean {
+  if (isTestOrBackup(agent)) return false;
   if (agent.hidden || agent.archived || agent.metadata?.internal) return false;
   if (INTERNAL_IDS.has(agent.id) || INTERNAL_IDS.has(agent.name)) return false;
   if (agent.kind === "third_party" || agent.id.startsWith("tp:")) return false;

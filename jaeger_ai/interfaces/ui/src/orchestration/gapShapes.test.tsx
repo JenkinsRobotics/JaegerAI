@@ -1,3 +1,4 @@
+import { FEED_KINDS } from "./adapter";
 import { fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { Handoff } from "../api/types";
@@ -50,7 +51,7 @@ describe("gateway G1–G6 shapes", () => {
     expect(activityItemRow({ event_id: 2, kind: "approval.request", ts: 10, agent_id: "a", needs_me: false, data: { approval_id: "z" } }, names)?.needsYou).toBe(true);
     const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ items: [], has_more: false, next_before: null })));
     await gatewayActivity("", fetchImpl as unknown as typeof fetch)({ before: 81200, names });
-    expect(fetchImpl).toHaveBeenCalledWith("/v1/activity?limit=50&before=81200", expect.anything());
+    expect(fetchImpl).toHaveBeenCalledWith(`/v1/activity?limit=50&kind=${encodeURIComponent(FEED_KINDS.join(","))}&before=81200`, expect.anything());
     const missing = vi.fn(async () => new Response("{}", { status: 404 }));
     expect(await gatewayActivity("", missing as unknown as typeof fetch)({ names })).toEqual({ rows: [] });
     resetActivityProbe();

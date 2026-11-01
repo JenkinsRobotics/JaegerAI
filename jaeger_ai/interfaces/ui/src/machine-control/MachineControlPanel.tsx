@@ -3,6 +3,8 @@ import type { ComputerSnapshot, JaegerSource, PolicySources } from '../api/sourc
 import { nativeBridge } from '../platform/native'
 import { LocalComputerPanel } from '../settings/LocalComputerPanel'
 import './machine-control.css'
+import { PageHeader } from '../components/PageHeader'
+import { Badge, SubTabs } from '../unified/ui'
 import { ResourcesCard } from '../machine/ResourcesCard'
 import { HostCapabilitiesCard } from '../machine/HostCapabilitiesCard'
 import { LogsPanel } from '../machine/LogsPanel'
@@ -98,82 +100,19 @@ export function MachineControlPanel({ source }: MachineControlPanelProps) {
   }, [source])
 
   return (
-    <div className="machine-control-page">
-      <header className="machine-control-header">
-        <div className="machine-control-header__info">
-          <div className="machine-control-header__badge">
-            <span className="machine-control-status-dot online" />
-            <span>Host Active</span>
-          </div>
-          <h1 className="machine-control-title">Machine Control & Hardware Telemetry</h1>
-          <p className="machine-control-subtitle">
-            Local computer inventory, screen capture authorization, accessibility automation, and runtime safety policies.
-          </p>
-        </div>
-        <div className="machine-control-actions">
-          <button
-            type="button"
-            className="machine-control-button"
-            disabled={busy}
-            onClick={() => {
-              void refreshInventory()
-              if (isNativeAvailable) void readNative()
-            }}
-          >
-            Refresh Status
-          </button>
-        </div>
-      </header>
-
+    <div className="machine-control-page jg-u-page">
+      <PageHeader title="Machine"
+        subtitle="This Mac: hardware, permissions, agent apps, logs and safety rules."
+        actions={<>
+          <Badge tone={native && native.screen_os_permission !== 'granted' ? 'warn' : 'ok'}>{native && native.screen_os_permission !== 'granted' ? 'Online · permissions needed' : 'Online'}</Badge>
+          <button type="button" className="jg-u-btn" disabled={busy} onClick={() => { void refreshInventory(); if (isNativeAvailable) void readNative() }}>Refresh</button>
+        </>} />
       {notice && <div className="machine-control-notice" role="status">{notice}</div>}
       {error && <div className="machine-control-error" role="alert">{error}</div>}
 
-      <div className="machine-control-nav">
-        <button
-          type="button"
-          className={`machine-control-nav-tab ${activeSubTab === 'overview' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('overview')}
-        >
-          Host & Permissions
-        </button>
-        <button
-          type="button"
-          className={`machine-control-nav-tab ${activeSubTab === 'apps' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('apps')}
-        >
-          Agent Apps
-        </button>
-        <button
-          type="button"
-          className={`machine-control-nav-tab ${activeSubTab === 'logs' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('logs')}
-        >
-          Logs
-        </button>
-        <button
-          type="button"
-          className={`machine-control-nav-tab ${activeSubTab === 'permissions' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('permissions')}
-        >
-          OS Settings
-        </button>
-        <button
-          type="button"
-          className={`machine-control-nav-tab ${activeSubTab === 'policy' ? 'active' : ''}`}
-          onClick={() => setActiveSubTab('policy')}
-        >
-          Safety Policies
-        </button>
-        {source && (
-          <button
-            type="button"
-            className={`machine-control-nav-tab ${activeSubTab === 'legacy' ? 'active' : ''}`}
-            onClick={() => setActiveSubTab('legacy')}
-          >
-            Diagnostics Inspector
-          </button>
-        )}
-      </div>
+      <SubTabs label="Machine sections" active={activeSubTab} onPick={(t) => setActiveSubTab(t as typeof activeSubTab)}
+        tabs={[{ id: 'overview', title: 'Overview' }, { id: 'apps', title: 'Apps' }, { id: 'logs', title: 'Logs' }, { id: 'permissions', title: 'OS settings' },
+          { id: 'policy', title: 'Safety' }, ...(source ? [{ id: 'legacy', title: 'Diagnostics' }] : [])]} />
 
       <div className="machine-control-content">
         {activeSubTab === 'overview' && <><HostCapabilitiesCard /><ResourcesCard /></>}

@@ -16,16 +16,20 @@ const value = (x: string | number | boolean | null) => x == null ? 'Unknown' : t
 export function HostCapabilitiesCard() {
   const [data, setData] = useState<HostCapabilities | null>(null)
   const [error, setError] = useState<string>()
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     let live = true
-    getJson<{ capabilities: HostCapabilities }>('/v1/machine/health').then(
-      result => { if (live) setData(result.capabilities) },
-      reason => { if (live) setError(String(reason)) },
+    setError(undefined)
+    const timeout = new Promise<never>((_, reject) => setTimeout(() => reject(new Error('The Mac took longer than 15 s to answer')), 15000))
+    Promise.race([getJson<{ capabilities?: HostCapabilities }>('/v1/machine/health'), timeout]).then(
+      result => { if (!live) return; if (result.capabilities) setData(result.capabilities); else setError('The Gateway returned no host capabilities') },
+      reason => { if (live) setError(reason instanceof Error ? reason.message : String(reason)) },
     )
     return () => { live = false }
-  }, [])
-  return <WidgetCard title="Host capabilities" state={error ? "error" : !data ? "loading" : "ready"}
-    message={error ?? "Loading host capabilities…"}>
+  }, [attempt])
+  return <WidgetCard title="Host capabilities" state={error && !data ? "error" : !data ? "loading" : "ready"}
+    message={error ? `Couldn't read host capabilities: ${error}` : "Loading host capabilities…"}
+    actions={error ? <button type="button" className="jg-u-btn" onClick={() => setAttempt((n) => n + 1)}>Retry</button> : undefined}>
     {data && <>
       <div className="jg-mc-metrics">
         {([
