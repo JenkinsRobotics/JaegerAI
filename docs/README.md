@@ -16,6 +16,7 @@ Operator instructions live in the root [README](../README.md) and
 
 | Document | Classification | Purpose |
 | --- | --- | --- |
+| [STATUS-2026-11-01.md](STATUS-2026-11-01.md) | CURRENT STATUS | Nov 1, 2026 handoff: tab scores, fixes, open issues, failing tests, next steps |
 | [PRODUCT.md](PRODUCT.md) | CURRENT AUTHORITATIVE | Current product definition: standalone intelligence, companion + operator, Jenkins Robotics, humanoid direction, JROS, Aether, NAS, YouTube, cloud today / on-device goal |
 | [STACK.md](STACK.md) | CURRENT REFERENCE | Centre = jaeger-agent + JaegerAI on top, stack layers, dependencies |
 | [TRUST.md](TRUST.md) | CURRENT REFERENCE | On-device trust: what stays, what leaves, what never leaves without a separate yes |
