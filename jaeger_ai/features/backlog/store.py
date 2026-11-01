@@ -241,5 +241,6 @@ def record_hub_message(store: BacklogStore, sender: str, message: dict) -> dict 
             changes["handoff_result"] = "failed" if state == "needs_ok" else "done"
         if task["status"] != "done":
             changes["status"] = state
-        return store.update(task["id"], **changes)
+        changes = {key: value for key, value in changes.items() if task.get(key) != value}
+        return store.update(task["id"], **changes) if changes else task
     return None
