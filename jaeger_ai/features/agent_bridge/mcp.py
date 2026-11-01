@@ -352,6 +352,12 @@ def register(mcp, client_for_context):
                                           "limit": limit}.items() if v})
         return call(ctx, "GET", "/v1/backlog" + (f"?{qs}" if qs else ""))
 
+    @mcp.tool(name="jaeger.backlog_sweep")
+    @_off_event_loop
+    def jaeger_backlog_sweep(stale_after_s: int = 86400, ctx: Context | None = None) -> dict:
+        """Read-only backlog sweep: stale work, Matthew waits, blockers, and unmarked results."""
+        return call(ctx, "GET", f"/v1/backlog/sweep?{urlencode({'stale_after_s': stale_after_s})}")
+
     @mcp.tool(name="jaeger.backlog_add")
     @_off_event_loop
     def jaeger_backlog_add(title: str, detail: str = "", priority: str = "P1", status: str = "open",
