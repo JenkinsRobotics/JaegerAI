@@ -12961,6 +12961,10 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/escape/list":
         return _handle_escape_list_dir(handler, parsed)
 
+    if parsed.path in ("/api/checkpoints/list", "/api/checkpoints/diff"):
+        from api.route_checkpoints import handle_checkpoints_get
+        return handle_checkpoints_get(handler, parsed)
+
     if parsed.path == "/api/git/status":
         return _handle_git_status(handler, parsed)
 
