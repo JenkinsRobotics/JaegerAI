@@ -156,6 +156,9 @@ def final_text(engine: str, stdout: str) -> str:
             except ValueError:
                 start = stdout.find("{", start + 1)
                 continue
+            if isinstance(doc.get("result"), dict):  # gateway mode wraps the turn in "result"
+                top_err = doc.get("error")
+                doc = {**doc["result"], "error": top_err or doc["result"].get("error")}
             meta = doc.get("meta") or {}
             text = meta.get("finalAssistantVisibleText")
             if not text:
