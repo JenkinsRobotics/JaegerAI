@@ -49,7 +49,8 @@ def test_agent_card_route_uses_official_a2a_sdk():
     body = response.json()
     assert body["name"] == "Jaeger"
     assert body["supportedInterfaces"][0]["protocolBinding"] == "JSONRPC"
-    assert body["supportedInterfaces"][0]["protocolVersion"] == "0.3"
+    assert body["supportedInterfaces"][0]["protocolVersion"] == "1.0"
+    assert body["supportedInterfaces"][1]["protocolVersion"] == "0.3"
     assert body["supportedInterfaces"][0]["url"] == A2A_PUBLIC_URL
     skill_ids = {skill["id"] for skill in body["skills"]}
     assert skill_ids == {"chat", "delegate"}
