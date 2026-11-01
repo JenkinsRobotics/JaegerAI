@@ -83,8 +83,10 @@ export function Sparkline({ values, max, height = 56, label, color = "var(--jg-c
   const last = nums[nums.length - 1];
   return (
     <svg className="jg-ui-spark" viewBox={`0 0 ${w} ${height}`} preserveAspectRatio="none" width="100%" height={height} role="img" aria-label={`${label}: latest ${Math.round(last * 10) / 10}`}>
-      {nums.length === values.length && <path d={`${d}L${w},${height}L0,${height}Z`} fill={color} opacity=".10" />}
-      <path d={d} fill="none" stroke={color} strokeWidth="1.75" vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+      {/* Stroke width, fill strength and gridlines come from the layout preset's chart tokens (presets.css). */}
+      <line className="jg-ui-spark__grid" x1="0" x2={w} y1={height / 2} y2={height / 2} vectorEffect="non-scaling-stroke" />
+      {nums.length === values.length && <path className="jg-ui-spark__area" d={`${d}L${w},${height}L0,${height}Z`} fill={color} />}
+      <path className="jg-ui-spark__line" d={d} fill="none" stroke={color} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
 }

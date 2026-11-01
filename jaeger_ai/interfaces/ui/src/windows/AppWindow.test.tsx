@@ -78,12 +78,31 @@ it("shows Settings as a grouped page and deep-links a tab", async () => {
   expect(document.querySelector(".jg-sheet__title")).toBeNull();
 });
 
-it("lists the nine tabs in the dock and persists which pages are open", async () => {
+it("lists the nine tabs in the sidebar (Settings pinned at the bottom) and persists which pages are open", async () => {
   await mount("/tasks");
   expect(location.pathname).toBe("/work/tasks");
-  const dock = [...document.querySelectorAll(".window-dock__label")].map((l) => l.textContent);
-  expect(dock).toEqual(["Home", "Chat", "Agents", "Work", "Research", "Studio", "Models", "Machine", "Settings"]);
+  const nav = [...document.querySelectorAll(".jg-sidebar .jg-nav__label")].map((l) => l.textContent);
+  expect(nav).toEqual(["Home", "Chat", "Agents", "Work", "Research", "Studio", "Models", "Machine", "Settings"]);
+  expect(document.querySelector(".jg-nav--foot .jg-nav__label")?.textContent).toBe("Settings");
+  expect(document.querySelector(".window-dock")).toBeNull();
+  expect(document.querySelector(".jg-crumb")?.textContent).toContain("Work");
   expect(JSON.parse(localStorage.getItem(LAYOUT_KEY)!).open).toContain("work");
+});
+
+it("the app bar follows the layout preset and its ⌘K field opens the palette", async () => {
+  const { applyPreset } = await import("../shell/layoutPresets");
+  applyPreset("glass");
+  await mount("/");
+  expect(document.documentElement.dataset.layout).toBe("glass");
+  expect(document.querySelector('.jg-topbar[role="toolbar"] .jg-cmd--floating')).not.toBeNull();
+  await flush(() => (document.querySelector(".jg-topbar .jg-cmd") as HTMLButtonElement).click());
+  expect(document.querySelector(".jg-palette__label")).not.toBeNull();
+  await flush(() => applyPreset("arc"));
+  expect(document.querySelector(".jg-topbar")).toBeNull();
+  expect(document.querySelector(".jg-sidebar .jg-cmd--sidebar")).not.toBeNull();
+  await flush(() => applyPreset("dia"));
+  expect(document.querySelector(".jg-topbar .jg-cmd--ask")?.textContent).toContain("Search or ask");
+  await flush(() => applyPreset("glass"));
 });
 
 it("Home shows the approvals section and the ⌘K palette offers pages and characters", async () => {
