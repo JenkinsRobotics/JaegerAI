@@ -8,3 +8,6 @@ screenshots/
 
 # The repo root ignores vendor/; this vendored copy of @aether/ui is tracked on purpose.
 !vendor/
+
+# never track a node_modules symlink (J-087)
+node_modules
