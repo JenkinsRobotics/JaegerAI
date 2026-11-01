@@ -224,7 +224,12 @@ function activate(context) {
   // Already handled by controller's status bar item
 
   // Copilot bridge: Jaeger on this Mac can use VS Code's Copilot models (no API keys).
-  activateBridge(vscode, context, (line) => output.appendLine(line));
+  // The bridge publishes ~/.jaeger/run/vscode-bridge.json for the operator's
+  // Jaeger. Only an installed (Production) extension may do that: a dev host or
+  // test run would overwrite the real file. JAEGER_COPILOT_BRIDGE=off also opts out.
+  const bridgeOff = copilotBridgeBlocked(context);
+  if (bridgeOff) output.appendLine(`[jaeger] Copilot bridge off: ${bridgeOff}`);
+  else activateBridge(vscode, context, (line) => output.appendLine(line));
 
   output.appendLine('[jaeger] Extension activated successfully.');
   output.appendLine('[jaeger] Chat UI: Open with Cmd+Shift+J or click status bar.');
@@ -233,6 +238,16 @@ function activate(context) {
     controller,
     getGateway: () => gateway,
   };
+}
+
+function copilotBridgeBlocked(context, env = process.env) {
+  if (String(env.JAEGER_COPILOT_BRIDGE || '').toLowerCase() === 'off') return 'JAEGER_COPILOT_BRIDGE=off';
+  const production = vscode.ExtensionMode ? vscode.ExtensionMode.Production : 1;
+  if (context?.extensionMode !== production) {
+    const names = { 2: 'Development', 3: 'Test' };
+    return `extension mode ${names[context?.extensionMode] || String(context?.extensionMode)} (bridge runs only when installed)`;
+  }
+  return '';
 }
 
 function deactivate() {
@@ -270,4 +285,4 @@ try { contract = require('./contract.json'); } catch (_) {}
 // Exports
 // ─────────────────────────────────────────────────────────────
 
-module.exports = { activate, deactivate };
+module.exports = { activate, deactivate, copilotBridgeBlocked };

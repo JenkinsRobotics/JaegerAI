@@ -22,6 +22,7 @@ function inert() {
 function activateEntry() {
   const commands = [], participants = [], views = [], bridge = [];
   const vscode = new Proxy({
+    ExtensionMode: { Production: 1, Development: 2, Test: 3 },
     commands: { registerCommand: (id, fn) => { commands.push(id); return { dispose() {} }; }, executeCommand: async () => {} },
     chat: { createChatParticipant: (id, handler) => { const p = { id, handler, dispose() {} }; participants.push(p); return p; } },
     window: new Proxy({
@@ -45,7 +46,7 @@ function activateEntry() {
   cached.forEach(k => delete require.cache[k]);
   try {
     const entry = require(path.join(root, manifest.main));
-    const api = entry.activate({ subscriptions: { push() {} }, extensionUri: { toString: () => 'ext' }, extensionPath: root,
+    const api = entry.activate({ extensionMode: 1, subscriptions: { push() {} }, extensionUri: { toString: () => 'ext' }, extensionPath: root,
       secrets: { get: async () => undefined, store: async () => {}, onDidChange: () => ({ dispose() {} }) },
       globalState: { get: () => undefined, update: async () => {} }, workspaceState: { get: () => undefined, update: async () => {} },
       globalStorageUri: { fsPath: path.join(require('node:os').tmpdir(), 'jaeger-wiring-test') } });
