@@ -27,7 +27,7 @@ def test_runs_once_and_posts_result(tmp_path, monkeypatch):
     monkeypatch.setattr(w, "run_job", lambda m: ran.append(m["id"]) or {"status": "done", "body": "PONG", "elapsed_s": 1})
     assert w.tick(w.State(tmp_path / "state.json")) == 1 and ran == ["h1"]
     tool, args = posted[0]
-    assert tool == "post_result" and args["to"] == "grokbot" and args["reply_to"] == "h1"
+    assert tool == "send_message" and args["to"] == "grokbot" and args["reply_to"] == "h1"
     assert args["title"] == "Rack PC result"
     assert w.tick(w.State(tmp_path / "state.json")) == 0  # never twice
 
