@@ -28,7 +28,7 @@
 'use strict';
 
 const vscode = require('vscode');
-const { Gateway, GatewayError } = require('./gateway');
+const { Gateway, GatewayError, normalizeGatewayUrl = url => url } = require('./gateway');
 const { parseProviderModel } = require('./media/presentation');
 const { execFileSync } = require('child_process');
 const fs = require('fs');
@@ -505,7 +505,7 @@ class JaegerController {
    */
   async openChat() {
     const config = vscode.workspace.getConfiguration('jaeger');
-    const gatewayUrl = config.get('gatewayUrl') || 'http://127.0.0.1:33418';
+    const gatewayUrl = normalizeGatewayUrl(config.get('gatewayUrl') || 'http://127.0.0.1:33418');
     const webuiUrl = config.get('webuiUrl') || gatewayUrl.replace(':33418', ':8790'); // WebUI proxy port
     const appleUrl = `${webuiUrl}/?ui=apple`;
 
@@ -531,7 +531,7 @@ class JaegerController {
    */
   async openChatSession(sessionId) {
     const config = vscode.workspace.getConfiguration('jaeger');
-    const gatewayUrl = config.get('gatewayUrl') || 'http://127.0.0.1:33418';
+    const gatewayUrl = normalizeGatewayUrl(config.get('gatewayUrl') || 'http://127.0.0.1:33418');
     const webuiUrl = config.get('webuiUrl') || gatewayUrl.replace(':33418', ':8790');
     const url = `${webuiUrl}/?ui=apple&session=${sessionId}`;
 

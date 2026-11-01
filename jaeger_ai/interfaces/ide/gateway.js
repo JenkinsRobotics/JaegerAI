@@ -70,8 +70,19 @@ function isAllowedGatewayHost(hostname) {
   return false;
 }
 
+// Clients address the API as <origin>/v1/..., so a configured URL that already
+// ends in /v1 or /v1/ (how other Jaeger clients write it) means the same origin.
+function normalizeGatewayUrl(value) {
+  const text = String(value || '').trim();
+  try {
+    const url = new URL(text);
+    if (/^\/v1\/?$/.test(url.pathname)) url.pathname = '/';
+    return url.search || url.hash ? url.toString() : url.toString().replace(/\/$/, '');
+  } catch { return text; }
+}
+
 function localEndpoint(value) {
-  const url = new URL(value);
+  const url = new URL(normalizeGatewayUrl(value));
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('Gateway URL must use http: or https:');
   }
@@ -232,4 +243,4 @@ class Gateway {
   }
 }
 
-module.exports = { Gateway, GatewayError, localEndpoint, isAllowedGatewayHost, decodeSSE, callerToken, nativeRequest };
+module.exports = { Gateway, GatewayError, localEndpoint, normalizeGatewayUrl, isAllowedGatewayHost, decodeSSE, callerToken, nativeRequest };

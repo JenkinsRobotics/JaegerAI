@@ -6,7 +6,7 @@ const util = require('node:util');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { Gateway } = require('./gateway');
+const { Gateway, normalizeGatewayUrl = url => url } = require('./gateway');
 const { Conversation } = require('./conversation');
 const { observeNativeTurn, renderNativeOutcome, renderNativeSources, nativeFollowups } = require('./native-turn');
 const { parseProviderModel, selectableModels, providerModelValue, modelSelectionAvailable } = require('./media/presentation');
@@ -356,7 +356,7 @@ function activate(context, opts = {}) {
     },
   }));
   const storageKey = () => `connection:${endpoint()}`;
-  const endpoint = () => vscode.workspace.getConfiguration('jaeger').get('gatewayUrl') || contract.gatewayUrl;
+  const endpoint = () => normalizeGatewayUrl(vscode.workspace.getConfiguration('jaeger').get('gatewayUrl') || contract.gatewayUrl);
   const callerTokenSetting = () => (vscode.workspace.getConfiguration('jaeger').get('callerToken') || '').trim();
   let currentCallerToken = callerTokenSetting();
   const getStoredCallerToken = async () => {
