@@ -665,16 +665,21 @@ class _GatewayToolConfirmationProvider:
             return False
 
     def _session_grants(self) -> set[str]:
-        """Skills the owner allowed "for this session" (session metadata)."""
+        """Skills allowed in this session during this Gateway process."""
         try:
             meta = (self.app.store.get_session(self.session_id) or {}).get("metadata") or {}
+            if meta.get("session_grants_boot_id") != self.app._session_grants_boot_id:
+                return set()
             return {str(s) for s in meta.get("session_grants") or []}
         except Exception:  # noqa: BLE001 — unreadable means "ask", never "allow"
             return set()
 
     def _grant_for_session(self, skill: str) -> None:
         grants = sorted(self._session_grants() | {skill})
-        self.app.store.update_metadata(self.session_id, {"session_grants": grants})
+        self.app.store.update_metadata(self.session_id, {
+            "session_grants": grants,
+            "session_grants_boot_id": self.app._session_grants_boot_id,
+        })
 
     def _decided(self, approved: bool) -> bool:
         if not approved and self.request_id not in self.app._owner_unanswered:
@@ -777,7 +782,7 @@ class _GatewayToolConfirmationProvider:
 
 
 #: Tool-confirm card choices. ``session`` = "Allow for this session": recorded
-#: in the session's metadata (``session_grants``), never for force_prompt calls.
+#: in session metadata with a Gateway-process boot id, never for force_prompt calls.
 APPROVAL_OPTIONS = ["once", "session", "deny"]
 
 
@@ -838,6 +843,7 @@ class JaegerGatewayApp:
         self._background_task: asyncio.Task | None = None
         self._background_status: dict[str, Any] = {"enabled": background_client is not None}
         self.store = store or GatewaySessionStore()
+        self._session_grants_boot_id = uuid.uuid4().hex
         from .file_changes import FileChanges
         self.file_changes = FileChanges(self.store.path.parent / "turn-file-changes")
         from jaeger_ai.core.agent_registry.projects import ProjectStore

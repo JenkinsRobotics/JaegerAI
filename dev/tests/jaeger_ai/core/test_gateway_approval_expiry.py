@@ -18,7 +18,8 @@ from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
 
 @pytest.fixture
-def running_app(tmp_path):
+def running_app(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
     app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "approvals.sqlite3"))
     loop = asyncio.new_event_loop()
     thread = threading.Thread(target=loop.run_forever, daemon=True)
@@ -160,7 +161,10 @@ def test_allow_for_this_session_skips_later_prompts_in_that_session_only(running
 
     monkeypatch.setattr(running_app.store, "create_approval", answer)
     assert provider.confirm(_write_request()) is True
-    assert running_app.store.get_session("s")["metadata"]["session_grants"] == ["files"]
+    metadata = running_app.store.get_session("s")["metadata"]
+    assert metadata["session_grants"] == ["files"]
+    assert metadata["session_grants_boot_id"] == running_app._session_grants_boot_id
+    assert not (running_app.store.path.parent / "permissions.json").exists()
     monkeypatch.setattr(running_app.store, "create_approval",
                         lambda **k: (_ for _ in ()).throw(AssertionError("prompted again")))
     assert provider.confirm(_write_request()) is True
@@ -171,3 +175,56 @@ def test_allow_for_this_session_skips_later_prompts_in_that_session_only(running
     assert provider.confirm(forced) is False  # policy-required prompts ignore session grants
     other = _GatewayToolConfirmationProvider(running_app, "other", "r2")
     assert "files" not in other._session_grants()
+
+
+def test_session_grant_expires_on_gateway_restart_without_losing_metadata(tmp_path, monkeypatch):
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+    path = tmp_path / "restart.sqlite3"
+    first = JaegerGatewayApp(store=GatewaySessionStore(path))
+    first.store.ensure_session("s")
+    first.store.update_metadata("s", {"resume_marker": "kept"})
+    _GatewayToolConfirmationProvider(first, "s", "r")._grant_for_session("files")
+
+    restarted = JaegerGatewayApp(store=GatewaySessionStore(path))
+    provider = _GatewayToolConfirmationProvider(restarted, "s", "r2")
+    assert restarted.store.get_session("s")["metadata"]["resume_marker"] == "kept"
+    assert provider._session_grants() == set()
+    monkeypatch.setattr(provider, "_prompt", lambda request: False)
+    assert provider.confirm(_write_request()) is False
+    assert not (tmp_path / "permissions.json").exists()
+
+
+@pytest.mark.parametrize("decision,second_allowed", [("once", False), ("always", True)])
+def test_other_approval_scopes_keep_their_behavior(
+    running_app, monkeypatch, tmp_path, decision, second_allowed,
+):
+    from jaeger_ai.core.entity.runtime import EntityRuntime
+    from jaeger_os.core.safety.permissions import PermissionTier
+
+    layout = SimpleNamespace(root=tmp_path, config_path=tmp_path / "config.yaml")
+    monkeypatch.setattr(EntityRuntime, "get_singleton",
+                        classmethod(lambda cls, *a, **kw: SimpleNamespace(layout=layout)))
+    running_app.store.ensure_session("s")
+    provider = _GatewayToolConfirmationProvider(running_app, "s", "r")
+    original = running_app.store.create_approval
+
+    def answer(**kwargs):
+        row = original(**kwargs)
+
+        def resolve():
+            running_app.store.resolve_approval(kwargs["approval_id"], approved=True, decision=decision)
+            running_app.pending_approvals.pop(kwargs["approval_id"]).set_result(True)
+        running_app._loop.call_soon(resolve)
+        return row
+
+    monkeypatch.setattr(running_app.store, "create_approval", answer)
+    request = SimpleNamespace(tier=PermissionTier.EXTERNAL_EFFECT, skill="calendar",
+                              operation="create_event", summary="create event", arguments={})
+    assert provider.confirm(request) is True
+    monkeypatch.setattr(provider, "_prompt", lambda request: False)
+    assert provider.confirm(request) is second_allowed
+    restarted = JaegerGatewayApp(store=GatewaySessionStore(running_app.store.path))
+    after_restart = _GatewayToolConfirmationProvider(restarted, "s", "r2")
+    monkeypatch.setattr(after_restart, "_prompt", lambda request: False)
+    assert after_restart.confirm(request) is second_allowed
+    assert (tmp_path / "permissions.json").exists() is second_allowed
