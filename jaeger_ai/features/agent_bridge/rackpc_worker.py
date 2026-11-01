@@ -4,7 +4,7 @@ Runs on the rack PC (Windows, GTX 1080 Ti). It polls the Mac hub *as the
 rackpc caller* (its own token; the Gateway confines that caller to reading its
 messages and posting results) through a reverse SSH tunnel the Mac opens, so
 the hub itself stays loopback-only. One job at a time, per-job timeout,
-at-most-once (a durable done-set is written before a job runs), size caps.
+durable result outbox, idempotent delivery, size caps.
 
 A task body may start with ``model: <name>`` to pick an Ollama model; the
 body ``capabilities`` returns this machine's CPU/RAM/GPU/load/loaded models.
@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import hashlib
 import os
 import platform
 import subprocess
@@ -154,7 +155,7 @@ def run_job(m: dict) -> dict:
     except TimeoutError:
         body, status, tps = "", f"timed out after {TIMEOUT_S}s", 0
     except Exception as exc:  # noqa: BLE001
-        body, status, tps = "", f"error: {str(exc)[:300]}", 0
+        body, status, tps = "", f"error: {_error_text(exc)}", 0
     elapsed = round(time.time() - t0, 1)
     body = (body or f"rackpc run {status}") + f"\n\n— rackpc · {model} · {tps} tok/s · {elapsed}s"
     return {"status": status, "body": body, "elapsed_s": elapsed, "model": model}
@@ -178,19 +179,59 @@ def pending(state: State) -> list[dict]:
     return tasks
 
 
+def _error_text(exc: BaseException) -> str:
+    if isinstance(exc, BaseExceptionGroup):
+        return "; ".join(_error_text(child) for child in exc.exceptions)[:300]
+    return str(exc)[:300]
+
+
+def _outbox_path(task_id: str) -> Path:
+    return WORKDIR / "outbox" / (hashlib.sha256(task_id.encode("utf-8")).hexdigest() + ".json")
+
+
+def _queue(task_id: str, args: dict) -> None:
+    path = _outbox_path(task_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"task_id": task_id, "args": args}), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _flush_outbox() -> None:
+    for path in sorted((WORKDIR / "outbox").glob("*.json")):
+        item = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            call("send_message", item["args"])
+        except Exception as exc:  # noqa: BLE001 - retry on the next tick
+            _log("post_error", id=item["task_id"], error=_error_text(exc)[:500])
+            continue
+        path.unlink()
+        _log("posted", id=item["task_id"])
+
+
 def tick(state: State) -> int:
+    _flush_outbox()
     n = 0
     for m in pending(state):
         _log("start", id=m["id"], thread=m.get("thread"), sender=m.get("from"))
-        state.data["done"].append(m["id"]); state.data["done"] = state.data["done"][-2000:]; state.save()
+        if _outbox_path(m["id"]).exists():
+            continue
         try:
             out = run_job(m)
         except Exception as exc:  # noqa: BLE001
-            out = {"status": f"error: {exc}", "body": f"rackpc worker error: {exc}", "elapsed_s": 0}
+            detail = _error_text(exc)
+            out = {"status": f"error: {detail}", "body": f"rackpc worker error: {detail}", "elapsed_s": 0}
         title = "Rack PC result" if out["status"] == "done" else f"Rack PC result: {out['status']}"
-        call("post_result", {"to": m["from"], "thread": m["thread"], "title": title, "body": out["body"],
-                "artifacts": [], "reply_to": m["id"]})
-        _log("finish", id=m["id"], status=out["status"], elapsed_s=out["elapsed_s"])
+        task_id = m["id"]
+        args = {"id": "rackpc-result-" + hashlib.sha256(task_id.encode("utf-8")).hexdigest(),
+                "to": m["from"], "thread": m["thread"], "kind": "result", "title": title,
+                "body": out["body"], "refs": [], "status_line": "done", "reply_to": task_id}
+        _queue(task_id, args)
+        state.data["done"].append(task_id)
+        state.data["done"] = state.data["done"][-2000:]
+        state.save()
+        _flush_outbox()
+        _log("finish", id=task_id, status=out["status"], elapsed_s=out["elapsed_s"])
         n += 1
     state.save()
     return n
@@ -226,7 +267,7 @@ def main(argv=None) -> int:
         try:
             tick(state)
         except Exception as exc:  # noqa: BLE001 - tunnel/hub restarts must not kill the worker
-            _log("tick_error", error=str(exc)[:500])
+            _log("tick_error", error=_error_text(exc)[:500])
         if a.once:
             return 0
         time.sleep(POLL_S)
