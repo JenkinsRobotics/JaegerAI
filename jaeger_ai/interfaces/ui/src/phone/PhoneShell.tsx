@@ -133,7 +133,7 @@ export function PhoneChat({ agentId, agentName, avatarUrl, onBack, onInfo, child
   return (
     <div className="jg-phone-screen jg-phone-chat" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <header className="jg-pbar">
-        <button type="button" className="jg-pround" aria-label="Back" onClick={onBack}><Icon name="chevron-left" size={18} /></button>
+        <button type="button" className="jg-pround" aria-label="Chats" title="Chats" onClick={onBack}><Icon name="history" size={18} /></button>
         <span className="jg-pbar__pill"><AgentAvatar id={agentId} name={agentName} src={avatarUrl} size={22} /><span>{agentName}</span></span>
         <button type="button" className="jg-pround" aria-label="Agent info" onClick={onInfo}><Icon name="ellipsis" size={18} /></button>
       </header>

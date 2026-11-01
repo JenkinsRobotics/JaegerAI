@@ -100,7 +100,8 @@ export function App({ source, view = "chat", settingsTab, settingsSegment, onSet
   }, [source, hostKind]);
   const store = useAgentsStore(source);
   const phone = usePhone();
-  const [phoneView, setPhoneView] = useState<"list" | "chat">("list");
+  // iPhone opens straight into the chat (ChatHome when empty); the chat list is one tap away (top-left).
+  const [phoneView, setPhoneView] = useState<"list" | "chat">("chat");
   const [agentMenu, setAgentMenu] = useState<{ agentId: string; x: number; y: number } | null>(null);
   const [replyHandoffId, setReplyHandoffId] = useState<string | null>(null);
   const [agentPrompt, setAgentPrompt] = useState<{ kind: "rename" | "delete" | "section" | "duplicate"; agent: Agent } | null>(null);
@@ -374,7 +375,7 @@ export function App({ source, view = "chat", settingsTab, settingsSegment, onSet
   const chatBody = sessionError
     ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
     : <div className="jg-av-chat"><div className="jg-chat-voice-host"><ChatPane host={host} sessionId={sessionId} agents={store.agents} /><VoiceDictation /></div>
-        {avatarAgent && <AvatarPanel size={avatarSize} agent={avatarAgent} presence={store.summaries.find((s) => s.id === avatarAgent.id)?.status} onOpenAgents={onNavigate ? (id) => onNavigate(`/agents/${encodeURIComponent(id)}/avatar`) : undefined} />}</div>;
+        {avatarAgent && !phone && <AvatarPanel size={avatarSize} agent={avatarAgent} presence={store.summaries.find((s) => s.id === avatarAgent.id)?.status} onOpenAgents={onNavigate ? (id) => onNavigate(`/agents/${encodeURIComponent(id)}/avatar`) : undefined} />}</div>;
   const phoneAgent = store.agents.find((a) => a.id === (selectedAgentId ?? defaultAgentId));
   const main = phone
     ? (phoneView === "chat"
