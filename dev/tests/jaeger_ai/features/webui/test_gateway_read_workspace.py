@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 import pytest
 
+from jaeger_ai.contract.ports import resolve_gateway_url
+
 SRC = Path(__file__).resolve().parents[5]
 FILE = SRC / 'jaeger_ai/features/webui/api/gateway_read_workspace.py'
 source = FILE.read_text()
@@ -23,7 +25,7 @@ def resolver(tmp_path):
     module.__package__ = pkg
     exec(compile(source, str(FILE), 'exec'), module.__dict__)
     gateway = types.ModuleType(pkg + '.jaeger_agents')
-    gateway.gateway_base = lambda: 'http://127.0.0.1:8810'
+    gateway.gateway_base = resolve_gateway_url
     profiles = types.ModuleType(pkg + '.profiles')
     profiles._profiles_match = lambda row, active: row == active
     profiles.get_active_profile_name = lambda: 'default'
