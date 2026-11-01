@@ -17,6 +17,7 @@ import { getJson, sendJson, type Metrics, type SystemStatus } from "./webui";
 import { summarizeRunner, type RunnerStatus } from "./jobsRunner";
 import { loadPanels, movePanel, savePanels, type HomePanel } from "./homeLayout";
 import { Cloud, Globe, Mic, MessageSquare, Moon, Sparkles, Zap, ChevronLeft, ChevronRight } from "../components/Icons";
+import { WidgetCard } from "../widgets/primitives/WidgetCard";
 
 const OPEN_STATES = new Set(["queued", "running", "needs_owner", "paused", "blocked", "waiting_approval"]);
 const ACTIVE = new Set(["working", "waiting_approval", "blocked"]);
@@ -69,10 +70,14 @@ function useSeries(value: number | null, keep = 120) {
 }
 
 function Tile({ icon, title, value, tone, on, onClick, disabled, hint }: { icon: React.ReactNode; title: string; value: string; tone?: Tone; on?: boolean; onClick?: () => void; disabled?: boolean; hint?: string }) {
-  const body = (<><span className="jg-cc__icon" data-tone={tone}>{icon}</span><span className="jg-cc__text"><strong>{title}</strong><span>{value}</span></span></>);
-  return onClick
-    ? <button type="button" className="jg-cc__tile" aria-pressed={on} onClick={onClick} disabled={disabled} title={hint}>{body}</button>
-    : <div className="jg-cc__tile" role="status" title={hint}>{body}</div>;
+  return <div className="jg-cc__tile" data-pressed={on || undefined} title={hint}>
+    <WidgetCard title={title} status={<span role={onClick ? undefined : "status"}>{value}</span>} actions={onClick &&
+      <button type="button" className="jg-cc__action" aria-label={`${title} ${value}`} aria-pressed={on} onClick={onClick} disabled={disabled} title={hint}>
+        <span className="jg-cc__icon" data-tone={tone}>{icon}</span>
+      </button>}>
+      {!onClick && <span className="jg-cc__icon" data-tone={tone}>{icon}</span>}
+    </WidgetCard>
+  </div>;
 }
 
 function useRunner() {
