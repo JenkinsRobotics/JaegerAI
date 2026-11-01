@@ -74,7 +74,7 @@ def clean(raw: Any) -> dict[str, Any] | None:
         if cursor := _line(raw.get("cursor_line")):
             out["cursor_line"] = cursor
     selection = raw.get("selection")
-    if isinstance(selection, dict):
+    if out.get("active_file") and isinstance(selection, dict):
         body = str(selection.get("text") or "")
         if body.strip():
             start, end = selection.get("start"), selection.get("end")

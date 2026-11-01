@@ -117,3 +117,22 @@ test('routed Gateway catalog ids remain one provider/model selection', () => {
   assert.deepEqual(rows, [{ provider: 'ollama-cloud', id: 'model:cloud' }]);
   assert.deepEqual(parseProviderModel(providerModelValue(rows[0].provider, rows[0].id)), { provider: 'ollama-cloud', model: 'model:cloud' });
 });
+
+
+test('automatic context never emits files outside any workspace root', () => {
+  const canonicalPath = file => file === '/w/link/secret.py' ? '/private/secret.py' : path.resolve(file);
+  const context = commands.buildIdeContext({ folders: ['/w'], canonicalPath,
+    active: { path: '/private/secret.py', selectionText: 'secret' },
+    openPaths: ['/w/a.py', '/private/other.py', '/w/link/secret.py'] });
+  assert.deepEqual(context, { workspace_folders: ['/w'], open_files: ['a.py'] });
+});
+
+test('active editor in another root is scoped to that root when none was chosen', () => {
+  const canonicalPath = path.resolve;
+  const context = commands.buildIdeContext({ folders: ['/first', '/second'], canonicalPath,
+    active: { path: '/second/b.py', selectionText: 'chosen', startLine: 2, endLine: 2 },
+    openPaths: ['/first/a.py'] });
+  assert.equal(context.active_file, 'b.py');
+  assert.equal(context.selection.text, 'chosen');
+  assert.deepEqual(context.open_files, ['a.py']);
+});
