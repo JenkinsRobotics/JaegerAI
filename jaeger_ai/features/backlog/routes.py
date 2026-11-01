@@ -146,6 +146,14 @@ def register(gateway, store: BacklogStore | None = None):
     @guard
     async def listing(request, caller, _body):
         q = request.query
+        owner = getattr(gateway, "task_owner", None)
+        if owner is not None:
+            from .task_mirror import mirror_tasks
+            try:
+                tasks = [t.to_dict() for t in owner.store.list_tasks()]
+                await asyncio.to_thread(mirror_tasks, store, tasks)
+            except Exception:  # the Backlog still lists when the task store is unavailable
+                pass
         tasks = await asyncio.to_thread(store.list, q.get("status", ""), q.get("priority", ""), q.get("worker", ""),
                                         q.get("q", ""), int(q.get("limit", "500") or 500))
         return {"tasks": tasks, "counts": store.counts(), "now": time.time()}
