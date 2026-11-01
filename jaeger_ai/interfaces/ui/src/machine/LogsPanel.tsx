@@ -1,6 +1,7 @@
 /** Machine › Logs: tail of one Jaeger log (whitelisted sources, secrets redacted server-side), with level filter, search and follow. */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Empty, Segmented, SkeletonRows } from "../unified/ui";
+import { Segmented } from "../unified/ui";
+import { WidgetCard } from "../widgets/primitives/WidgetCard";
 import { getJson } from "../unified/webui";
 import { logsUrl, type LogSource, type LogTail } from "./machineData";
 import "./machine.css";
@@ -18,7 +19,7 @@ export function LogsPanel() {
   useEffect(() => { if (!follow) return; const t = setInterval(() => { if (!document.hidden) void read(); }, 5000); return () => clearInterval(t); }, [follow, read]);
   useEffect(() => { if (follow && box.current) box.current.scrollTop = box.current.scrollHeight; }, [tail, follow]);
   return (
-    <section className="jg-mc-card jg-mc-logs" aria-label="Logs">
+    <div className="jg-mc-logs">
       <div className="jg-ui-toolbar">
         <label className="jg-ui-field">Source
           <select className="jg-ui-input" value={src} onChange={(e) => setSrc(e.target.value)}>{(sources.length ? sources : [{ id: "gateway", exists: true, bytes: 0, mtime: null }]).map((s) => <option key={s.id} value={s.id} disabled={!s.exists}>{s.id}{s.exists ? "" : " (none yet)"}</option>)}</select>
@@ -28,10 +29,13 @@ export function LogsPanel() {
         <button className="jg-u-btn" aria-pressed={follow} onClick={() => setFollow(!follow)}>{follow ? "Pause" : "Follow"}</button>
         <button className="jg-u-btn" onClick={() => void navigator.clipboard?.writeText((tail?.lines ?? []).map((l) => l.text).join("\n"))}>Copy</button>
       </div>
-      {err ? <Empty title="Logs unavailable">{err}</Empty> : !tail ? <SkeletonRows n={8} /> : !tail.exists ? <Empty title="No log yet">{src} hasn't written a log file.</Empty> :
-        tail.lines.length === 0 ? <Empty title="No matching lines" /> :
-        <div ref={box} className="jg-mc-logbox" role="log" aria-live="off" tabIndex={0}>{tail.lines.map((l, i) => <div key={i} className="jg-mc-logline" data-level={l.level}>{l.text}</div>)}</div>}
-      {tail?.truncated && <p className="jg-mc-note">Showing the latest {tail.lines.length} lines.</p>}
-    </section>
+      <WidgetCard title="Logs" state={err ? "error" : !tail ? "loading" : !tail.exists || tail.lines.length === 0 ? "empty" : "ready"}
+        message={err ? `Logs unavailable: ${err}` : !tail ? "Loading logs…" : !tail.exists ? `No log yet: ${src} hasn't written a log file.` : "No matching lines"}>
+        {tail?.exists && tail.lines.length > 0 && <>
+          <div ref={box} className="jg-mc-logbox" role="log" aria-live="off" tabIndex={0}>{tail.lines.map((l, i) => <div key={i} className="jg-mc-logline" data-level={l.level}>{l.text}</div>)}</div>
+          {tail.truncated && <p className="jg-mc-note">Showing the latest {tail.lines.length} lines.</p>}
+        </>}
+      </WidgetCard>
+    </div>
   );
 }
