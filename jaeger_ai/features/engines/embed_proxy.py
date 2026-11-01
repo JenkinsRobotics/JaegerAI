@@ -96,13 +96,16 @@ def make_app(target: Target) -> web.Application:
         raise resp
 
     async def health(request: web.Request):
+        cors = {}
+        if request.headers.get("Origin") in JAEGER_ORIGINS:
+            cors = {"Access-Control-Allow-Origin": request.headers["Origin"], "Vary": "Origin"}
         try:
             async with request.app["client"].get(base + "/", timeout=3) as r:
                 return web.json_response({"engine": target.name, "upstream": base, "ok": r.status < 500,
-                                          "status": r.status})
+                                          "status": r.status}, headers=cors)
         except Exception as exc:  # noqa: BLE001
             return web.json_response({"engine": target.name, "upstream": base, "ok": False,
-                                      "error": type(exc).__name__}, status=503)
+                                      "error": type(exc).__name__}, status=503, headers=cors)
 
     async def proxy(request: web.Request):
         client: ClientSession = request.app["client"]
