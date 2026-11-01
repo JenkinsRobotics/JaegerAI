@@ -495,6 +495,32 @@ _SKILL_SUMMARY: dict[str, str] = {}
 # skill, a configured MCP server is deliberately loaded, so its tools
 # are never lean-filtered out of the model's view.
 _MCP_TOOLS: set[str] = set()
+_MCP_SERVER_TOOLS: dict[str, frozenset[str]] = {}
+_GATED_MCP_TOOLS: set[str] = set()
+
+
+def register_mcp_server_toolset(name: str, tools: list[str], *, gated: bool = False) -> None:
+    """Replace one server's inventory without retaining stale tool names."""
+    unregister_mcp_server_toolset(name)
+    members = frozenset(tools)
+    _MCP_SERVER_TOOLS[name] = members
+    _MCP_TOOLS.update(members)
+    if gated:
+        _GATED_MCP_TOOLS.update(members)
+        register_skill_toolset(name, list(members), f"the {name} MCP server")
+
+
+def unregister_mcp_server_toolset(name: str) -> None:
+    members = _MCP_SERVER_TOOLS.pop(name, frozenset())
+    _GATED_MCP_TOOLS.difference_update(members)
+    _MCP_TOOLS.difference_update(members)
+    _SKILL_TOOLSETS.pop(name, None)
+    _SKILL_SUMMARY.pop(name, None)
+    _active.discard(name)
+
+
+def is_gated_tool(name: str) -> bool:
+    return name in _GATED_MCP_TOOLS
 
 
 def register_mcp_tools(names: list[str]) -> None:
@@ -569,6 +595,12 @@ def tool_visible(name: str) -> bool:
     """
     if _untrusted.get():
         return name in UNTRUSTED_SAFE
+    if name in _GATED_MCP_TOOLS:
+        from jaeger_agent.tool_executor import active_tool_allowlist
+        allowed = active_tool_allowlist()
+        return (allowed is not None and name in allowed) or any(
+            name in _members(toolset) for toolset in _active
+        )
     if not _scoping_enabled():
         return True
     return scoped_tool_visible(name)
