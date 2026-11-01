@@ -8,7 +8,10 @@ const endEvents = new Set(['turn.finish', 'turn.failed', 'turn.cancelled', 'turn
 // last event cursor; a closed stream never proves that execution completed.
 async function observeNativeTurn({ gateway, sessionId, requestId, admitted, signal, stream, ideHandler, onApproval }) {
   let cursor = Math.max(0, Number(admitted.start_event_id || 1) - 1);
-  let text = '', receipt = admitted, interrupted = false;
+  // ChatResponseStream cannot retract markdown, so a segment's text is held
+  // until it looks like an answer (see looksLikeAnswer); `text` is what this
+  // segment already pushed, `segment` is all of it, pushed or held.
+  let text = '', segment = '', live = false, receipt = admitted, interrupted = false;
   // Sources, follow-ups and the search count arrive before turn.finish (the
   // Gateway stores them in the same transaction, with lower event ids).
   const sources = [], seenSources = new Set();
@@ -16,7 +19,7 @@ async function observeNativeTurn({ gateway, sessionId, requestId, admitted, sign
   const extras = () => ({ sources, followUps, searchCount });
   if (terminal.has(receipt.status)) {
     try { receipt = await gateway.receipt(sessionId, requestId); }
-    catch { return { receipt: null, text, interrupted: true, ...extras() }; }
+    catch { return { receipt: null, text, held: live ? '' : segment, interrupted: true, ...extras() }; }
   }
   for (let attempt = 0; attempt < 3 && !terminal.has(receipt.status); attempt++) {
     if (!signal.aborted) {
@@ -31,11 +34,21 @@ async function observeNativeTurn({ gateway, sessionId, requestId, admitted, sign
           if (event.event === 'ide.request') await answerIdeRequest(gateway, ideHandler, sessionId, data);
           else if (event.event === 'turn.delta') {
             const delta = String(data.delta || '');
-            if (delta) { stream.markdown(delta); text += delta; }
+            if (delta) {
+              segment += delta;
+              if (live) { stream.markdown(delta); text += delta; }
+              else if (looksLikeAnswer(segment)) { live = true; stream.markdown(segment); text = segment; }
+            }
           } else if (event.event === 'approval.request') onApproval?.(data);
           else if (event.event === 'approval.resolved') stream.progress('Approval resolved · Jaeger is working...');
           else if (event.event === 'turn.progress') stream.progress(String(data.text || 'Jaeger is working...'));
-          else if (event.event === 'tool.started') stream.progress(`Jaeger is using ${String(data.tool || 'a tool')}...`);
+          else if (event.event === 'tool.started') {
+            // Text before a tool call is commentary, not the answer. Held-back
+            // commentary becomes a progress line; the next segment starts fresh.
+            if (!live && segment.trim()) stream.progress(oneLine(segment));
+            segment = ''; live = false; text = '';
+            stream.progress(`Jaeger is using ${String(data.tool || 'a tool')}...`);
+          }
           else if (event.event === 'sources') {
             for (const item of parseSources(data)) {
               const key = `${item.kind}:${item.location}`;
@@ -53,13 +66,22 @@ async function observeNativeTurn({ gateway, sessionId, requestId, admitted, sign
       }
     }
     try { receipt = await gateway.receipt(sessionId, requestId); }
-    catch { return { receipt: null, text, interrupted: true, ...extras() }; }
+    catch { return { receipt: null, text, held: live ? '' : segment, interrupted: true, ...extras() }; }
     if (terminal.has(receipt.status) || signal.aborted) break;
     interrupted = true;
     if (attempt < 2) stream.progress('Connection interrupted · Reconnecting to the accepted request...');
   }
-  return { receipt, text, interrupted, ...extras() };
+  return { receipt, text, held: live ? '' : segment, interrupted, ...extras() };
 }
+
+// Short lead-in text ("I'll read the files first") is usually followed by a
+// tool call. Stream a segment once it is long or structured enough to be the
+// answer; until then hold it, so a preamble never lands in the answer.
+const HOLD_CHARS = 200;
+function looksLikeAnswer(segment) {
+  return segment.length >= HOLD_CHARS || segment.includes('\n\n') || /(^|\n)\s*(#{1,6} |\||```|[-*] |\d+\. )/.test(segment);
+}
+const oneLine = value => { const line = value.replace(/\s+/g, ' ').trim(); return line.length > 120 ? `${line.slice(0, 117)}...` : line; };
 
 // Same filters as the panel (media/timeline.js and conversation.js) so both
 // surfaces show the same Sources and follow-ups.
@@ -108,7 +130,7 @@ function nativeFollowups(result) {
   return list.filter(item => typeof item === 'string' && item).slice(0, 5).map(prompt => ({ prompt, label: prompt }));
 }
 
-function renderNativeOutcome(stream, { receipt, text }, cancelled) {
+function renderNativeOutcome(stream, { receipt, text, held = '' }, cancelled) {
   if (!receipt || !terminal.has(receipt.status)) {
     stream.markdown(`\n\n**${cancelled ? 'Cancellation requested' : 'Connection interrupted'}:** the Gateway has not confirmed the outcome. Open this conversation in Jaeger to check its status; do not resend the task automatically.`);
     return;
@@ -117,15 +139,11 @@ function renderNativeOutcome(stream, { receipt, text }, cancelled) {
     stream.markdown(`\n\n**Jaeger request ${receipt.status}:** ${String(receipt.result?.error || 'No completed answer was returned.')}`);
     return;
   }
+  // The confirmed answer replaces the stream and is shown exactly once.
   const answer = String(receipt.result?.output || receipt.result?.text || '');
-  if (!text) stream.markdown(answer || 'Jaeger completed the request.');
-  else if (answer.startsWith(text)) {
-    if (answer.length > text.length) stream.markdown(answer.slice(text.length));
-  } else if (answer) {
-    // Native chat is append-only. Label a server correction rather than silently
-    // concatenating a different final answer onto the provisional stream.
-    stream.markdown(`\n\n**Final confirmed answer**\n\n${answer}`);
-  }
+  if (!text) stream.markdown(answer || held || 'Jaeger completed the request.'); // nothing pushed: write it whole
+  else if (answer.startsWith(text)) { if (answer.length > text.length) stream.markdown(answer.slice(text.length)); } // identical or prefix
+  else if (answer) stream.markdown(`\n\n---\n\n${answer}`); // pushed text was not the answer
 }
 
-module.exports = { observeNativeTurn, renderNativeOutcome, renderNativeSources, nativeFollowups, parseSources, parseFollowUps, parseSearchCount };
+module.exports = { looksLikeAnswer, observeNativeTurn, renderNativeOutcome, renderNativeSources, nativeFollowups, parseSources, parseFollowUps, parseSearchCount };

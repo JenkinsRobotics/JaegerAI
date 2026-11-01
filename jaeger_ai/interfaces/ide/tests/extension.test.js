@@ -223,7 +223,8 @@ test('native chat participant uses one Gateway-owned session across turns', asyn
   assert.equal(gateway.sent.sessionId, sessionId);
   assert.equal(gateway.sent.text, 'Follow-up');
   assert.equal(second.metadata.jaegerSessionId, sessionId);
-  assert.deepEqual(responses, ['Jaeger ', 'answer', 'Jaeger ', 'answer']);
+  // Short lead-in text is held until confirmed, so each turn shows the answer once.
+  assert.deepEqual(responses, ['Jaeger answer', 'Jaeger answer']);
 });
 
 test('native chat answers editor requests once through the shared panel bridge', async () => {

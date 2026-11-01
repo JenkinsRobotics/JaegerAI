@@ -16,7 +16,7 @@ function fakeGateway(script) {
   gw.send = async (sessionId, body) => { gw.sent.push({ sessionId, ...body }); return { start_event_id: 1, status: 'running' }; };
   gw.events = async function* () { yield* script(gw.sent.at(-1).request_id); };
   gw.receipt = async () => gw.receiptFor(gw.sent.at(-1).request_id);
-  gw.receiptFor = () => ({ status: 'completed', result: { output: 'Hello world' } });
+  gw.receiptFor = () => ({ status: 'completed', result: { output: '# Hello world' } });
   return gw;
 }
 
@@ -63,7 +63,7 @@ function recorder() {
 const token = { isCancellationRequested: false, onCancellationRequested: () => ({ dispose() {} }) };
 
 const fullTurn = function* (rid) {
-  yield { event_id: 2, event: 'turn.delta', data: { request_id: rid, delta: 'Hello ' } };
+  yield { event_id: 2, event: 'turn.delta', data: { request_id: rid, delta: '# Hello ' } };
   yield { event_id: 3, event: 'sources', data: { request_id: rid, sources: [
     { kind: 'file', location: '/w/package.json' }, { kind: 'url', location: 'https://example.com/a', title: 'A' },
     { kind: 'file', location: '/w/package.json' }, { kind: 'bogus', location: 'x' }] } };
@@ -80,7 +80,7 @@ test('@jaeger streams deltas in the IDE, then Sources and follow-ups', async () 
   assert.equal(participant.id, 'jaeger.chatParticipant');
   const { out, stream } = recorder();
   const result = await participant.handler({ prompt: 'Summarize' }, { history: [] }, stream, token);
-  assert.deepEqual(out.markdown.slice(0, 2), ['Hello ', 'world'], 'deltas stream in order, no "Request sent" stub');
+  assert.deepEqual(out.markdown.slice(0, 2), ['# Hello ', 'world'], 'deltas stream in order, no "Request sent" stub');
   assert.ok(!out.markdown.join('').includes('LEAK'));
   assert.ok(!out.markdown.join('').includes('Request sent'));
   assert.match(out.markdown.join(''), /Searched 2 times/);
@@ -120,14 +120,14 @@ test('/explain streams an answer with editor context instead of firing and forge
 });
 
 test('observeNativeTurn filters sources, follow-ups and search counts like the panel', async () => {
-  const gw = { events: async function* () { yield* fullTurn('r1'); }, receipt: async () => ({ status: 'completed', result: { output: 'Hello world' } }) };
+  const gw = { events: async function* () { yield* fullTurn('r1'); }, receipt: async () => ({ status: 'completed', result: { output: '# Hello world' } }) };
   const { out, stream } = recorder();
   const outcome = await observeNativeTurn({ gateway: gw, sessionId: sid, requestId: 'r1', admitted: { start_event_id: 1, status: 'running' }, signal: new AbortController().signal, stream });
-  assert.equal(outcome.text, 'Hello world');
+  assert.equal(outcome.text, '# Hello world');
   assert.deepEqual(outcome.sources.map(s => s.location), ['/w/package.json', 'https://example.com/a']);
   assert.deepEqual(outcome.followUps, ['Show the tests?']);
   assert.deepEqual(outcome.searchCount, { searches: 2, completed: 2, failed: 0 });
-  assert.deepEqual(out.markdown, ['Hello ', 'world']);
+  assert.deepEqual(out.markdown, ['# Hello ', 'world']);
 });
 
 test('without stream.reference, Sources render as a markdown list', () => {
