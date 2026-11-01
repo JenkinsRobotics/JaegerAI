@@ -21,7 +21,7 @@ for (const [file, query, click] of shots) {
   page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
   await page.goto(base + query, { waitUntil: "networkidle" });
   await page.waitForSelector(".jg-bubble--assistant");
-  if (click) { await page.locator(".jg-nav-entry", { hasText: click }).click(); await page.waitForSelector(".jg-card"); }
+  if (click) { await page.locator(".jg-nav-entry", { hasText: click }).click(); await page.waitForSelector(".jg-widget-card"); }
   await page.waitForTimeout(300);
   await page.screenshot({ path: `screenshots/${file}` });
   console.log(`screenshots/${file}`, errors.length ? `errors: ${errors.join(" | ")}` : "no console errors");
