@@ -118,3 +118,16 @@ def test_bridge_client_refuses_to_relay_without_the_caller_token(monkeypatch):
     client = bridge_client.BridgeClient.__new__(bridge_client.BridgeClient)
     with pytest.raises(bridge_client.HermesWebUIAdapterBridgeError, match="caller token"):
         client.turn("hi", session="mcp:x", gateway_caller="mcp")
+
+
+def test_clarify_answer_uses_revision_and_encodes_identifiers(monkeypatch):
+    client = GatewayTurnClient()
+    calls = []
+    monkeypatch.setattr(client, '_call', lambda *args: calls.append(args) or {'status': 'answered'})
+    assert client.answer_clarify('s/a', 'q?1', 2, 'staging')['status'] == 'answered'
+    assert calls == [('POST', '/v1/sessions/s%2Fa/clarify/q%3F1',
+                      {'revision': 2, 'response': 'staging'})]
+    for revision, answer in [(True, 'yes'), (0, 'yes'), (1, ' ')]:
+        with pytest.raises(ValueError):
+            client.answer_clarify('s', 'q', revision, answer)
+    assert len(calls) == 1

@@ -189,6 +189,51 @@ def _fingerprint_live_roots() -> dict[str, tuple[int, int]]:
                     # this concurrent heartbeat is not a test-induced write.
                     if path == root / "control/lifecycle-lease.json":
                         continue
+                    # Live agent-bridge workers (engine_worker / ares_worker /
+                    # muse_file_bridge) rewrite their heartbeat state.json and
+                    # the ARES worker appends worker.jsonl every poll tick
+                    # (~15s), and the WebUI jobs runner heartbeats
+                    # jobs/runner.json every heartbeat_s (30s). Those daemons
+                    # hold flock locks on their dirs; a test that needs worker
+                    # state uses the pinned JAEGER_HOME root above. Stat deltas
+                    # on these liveness files are daemon heartbeats, not test
+                    # leakage — verified by attribution: the files change
+                    # while no pytest process is running, and the writing code
+                    # is the locked daemon loop, not any test fixture.
+                    if "agent-workspaces" in path.parts and path.parent.name in {
+                        ".worker", ".bridge",
+                    } and (
+                        path.name == "state.json"
+                        or path.name == "worker.jsonl"
+                    ):
+                        continue
+                    if path == root / "jobs/runner.json":
+                        continue
+                    # The live OSS docs indexer daemon (own venv, own process)
+                    # rewrites its index state file as it crawls; a stat delta
+                    # is that daemon's heartbeat, not test leakage.
+                    if path == root / "oss/docs-index.json":
+                        continue
+                    # The live WebUI server (features/webui/server.py, :8790)
+                    # serves the backlog store from this main DB file and
+                    # checkpoints its WAL into it while running — same
+                    # ownership pattern as gateway_sessions.sqlite3 above.
+                    # Tests get their own store under the pinned JAEGER_HOME.
+                    if path == root / "backlog.sqlite3":
+                        continue
+                    # The live OpenClaw gateway/bridge daemons (openclaw-gateway,
+                    # engine_worker openclaw) own this host store and checkpoint
+                    # its WAL into the main file while running — same ownership
+                    # pattern as gateway_sessions.sqlite3. Note: "openclaw" is
+                    # already excluded as a path part above, but this file lives
+                    # under openclaw-host/, so name it explicitly.
+                    if path == root / "openclaw-host/state/openclaw.sqlite":
+                        continue
+                    # The live YouTube research job servers (webui :8790 + the
+                    # jobs runner) heartbeat each active job's job.json and drop
+                    # timeline.json outputs under research/youtube/<job>/.
+                    if "research" in path.parts and "youtube" in path.parts:
+                        continue
                     st = path.stat()
                     out[str(path)] = (st.st_size, st.st_mtime_ns)
             except OSError:  # racing with the running app is not our failure

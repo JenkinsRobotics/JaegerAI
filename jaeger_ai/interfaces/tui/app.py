@@ -1011,6 +1011,26 @@ class JaegerTUI:
             if name in {'tool.started', 'tool.completed', 'tool.failed'}:
                 self._on_tool_event('start' if name == 'tool.started' else 'done', str(data.get('tool') or 'tool'),
                                     str(data.get('text') or ''), float(data.get('elapsed_s') or 0))
+            elif name == 'clarify.request' and data.get('clarify_id'):
+                # Surface the Gateway's question on the same input lane as
+                # approvals. The REPL stays responsive to Stop while the worker
+                # waits; the answer resolves this form, never a second turn.
+                self.console.print(str(data.get('question') or 'Clarification needed'), markup=False)
+                choices = [str(choice) for choice in data.get('choices') or []]
+                for index, choice in enumerate(choices, 1):
+                    self.console.print(f'  {index}. {choice}', markup=False)
+                self.console.print('Type your answer or a choice number. /stop cancels.')
+                box = {'event': threading.Event(), 'answer': None, 'kind': 'clarify', 'choices': choices}
+                self._pending_confirm = box
+                try:
+                    answered = box['event'].wait(timeout=600)
+                finally:
+                    self._pending_confirm = None
+                if not answered or cancel.is_set() or box['answer'] is None:
+                    client.cancel(self.session_id, rid)
+                    return
+                client.answer_clarify(self.session_id, str(data['clarify_id']),
+                                      data['revision'], str(box['answer']))
             elif name == 'approval.request' and data.get('approval_id'):
                 self.console.print(str(data.get('prompt') or data.get('target') or 'Action requires approval'))
                 self.console.print('Answer y / n at the prompt.')
@@ -1835,6 +1855,17 @@ class JaegerTUI:
         box = self._pending_confirm
         if box is None:
             return False
+        if box.get("kind") == "clarify":
+            answer = line.strip()
+            if not answer:
+                self.console.print('Please enter an answer, or /stop to cancel.')
+                return True
+            choices = box.get("choices") or []
+            if answer.isdecimal() and 1 <= int(answer) <= len(choices):
+                answer = choices[int(answer) - 1]
+            box["answer"] = answer
+            box["event"].set()
+            return True
         box["answer"] = line
         box["event"].set()
         return True
@@ -2006,6 +2037,11 @@ class JaegerTUI:
         refused while a turn is running."""
         words = line.strip().lstrip("/").split()
         name = words[0].lower() if words else ""
+        if name == 'stop' and self._pending_confirm is not None and self._pending_confirm.get('kind') == 'clarify':
+            self._gateway_cancel_event.set()
+            self._pending_confirm['event'].set()
+            self.console.print('[dim]Question cancelled; stopping the turn.[/]')
+            return False
         if name in _TURN_UNSAFE_SLASH and self._turn_running.is_set():
             self.console.print(
                 f"[yellow]⏳ a turn is running[/] — Ctrl-C to stop it, or "
@@ -2067,6 +2103,11 @@ class JaegerTUI:
                     break
                 if raw is CTRL_C:                     # Ctrl-C
                     if self._pending_confirm is not None:
+                        if self._pending_confirm.get('kind') == 'clarify':
+                            self._gateway_cancel_event.set()
+                            self._pending_confirm['event'].set()
+                            self.console.print('[dim]Question cancelled; stopping the turn.[/]')
+                            continue
                         # A permission prompt is waiting — Ctrl-C denies
                         # it and lets the turn unwind.
                         self._resolve_pending_confirm("")
@@ -2162,6 +2203,11 @@ class JaegerTUI:
         wind down.
         """
         # Cancel any in-flight turn so the worker unwinds promptly.
+        gateway_cancel = getattr(self, '_gateway_cancel_event', None)
+        if gateway_cancel is not None:
+            gateway_cancel.set()
+        if self._pending_confirm is not None:
+            self._pending_confirm['event'].set()
         try:
             from jaeger_ai.main import request_turn_cancel
             request_turn_cancel()
