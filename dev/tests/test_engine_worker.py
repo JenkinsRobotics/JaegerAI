@@ -67,3 +67,8 @@ def test_openclaw_uses_running_gateway(tmp_path, monkeypatch):
     monkeypatch.setattr(w, "openclaw_gateway_up", lambda port=None: True)
     cmd = w.command("openclaw", "task", tmp_path)
     assert "--local" not in cmd and cmd[1] == "agent" and "--deliver" not in cmd
+
+
+def test_final_text_gateway_shape():
+    out = '{"runId":"r","status":"ok","result":{"payloads":[{"text":"OC-GW-OK"}],"meta":{"finalAssistantVisibleText":"OC-GW-OK"}}}'
+    assert w.final_text("openclaw", out) == "OC-GW-OK"
