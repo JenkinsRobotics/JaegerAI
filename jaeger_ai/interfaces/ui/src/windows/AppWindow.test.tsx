@@ -58,8 +58,8 @@ it("switches sub-tabs through the URL and keeps the sub-tab bar consistent", asy
   await mount("/work");
   expect(subtab()).toBe("Pipeline");
   const tabs = [...document.querySelectorAll(".app-window__page--active .jg-subtabs [role=tab]")].map((t) => t.textContent);
-  expect(tabs).toEqual(["Pipeline", "Tasks", "Production", "Calendar"]);
-  await flush(() => (document.querySelectorAll(".app-window__page--active .jg-subtabs [role=tab]")[3] as HTMLButtonElement).click());
+  expect(tabs).toEqual(["Pipeline", "Backlog", "Tasks", "Production", "Calendar"]);
+  await flush(() => (document.querySelectorAll(".app-window__page--active .jg-subtabs [role=tab]")[4] as HTMLButtonElement).click());
   await settle();
   expect(location.pathname).toBe("/work/calendar");
   expect(document.title).toBe("Calendar · Work · Jaeger");

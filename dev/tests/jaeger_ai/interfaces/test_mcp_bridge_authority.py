@@ -85,6 +85,8 @@ def test_no_mcp_tool_can_reach_any_bridge_command(cmd):
             "jaeger.search", "jaeger.fetch",
             # OSS stack: model router, shared MCP tools, Documents RAG (Gateway relay only).
             "jaeger.generate", "jaeger.tools", "jaeger.tool", "jaeger_search_docs",
+            # Backlog (Gateway relay only).
+            "jaeger.backlog_list", "jaeger.backlog_add", "jaeger.backlog_update",
         }
         with pytest.raises(Exception) if rejects_invalid_input else _nullcontext():
             _call(server, tool.name, args)
