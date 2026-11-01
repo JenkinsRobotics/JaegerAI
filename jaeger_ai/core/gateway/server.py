@@ -6187,14 +6187,18 @@ class JaegerGatewayApp:
         task.*, connect_app.updated. Same framing, resume (``last_event_id``) and
         410 rules as the session stream; session-prefixed callers (mcp/a2a) are
         refused by the scope middleware (not in PREFIXED_READ_ROUTES)."""
-        return await self._sse_stream(request, "*")
+        return await self._sse_stream(request, "*", live_without_cursor=True)
 
-    async def _sse_stream(self, request: web.Request, session_id: str) -> web.StreamResponse:
+    async def _sse_stream(self, request: web.Request, session_id: str, live_without_cursor: bool = False) -> web.StreamResponse:
         try:
             last_event_id = int(request.query.get("last_event_id") or request.headers.get("Last-Event-ID") or 0)
         except ValueError:
             return web.json_response({"error": "last_event_id must be an integer"}, status=400)
         window = self.event_bus.replay_window(session_id, last_event_id)
+        if live_without_cursor and "last_event_id" not in request.query and "Last-Event-ID" not in request.headers:
+            # J-087: a fresh global subscriber gets live events only; replaying the whole retained
+            # history (~5k rows) on every connect stalled the Agents tab. ?last_event_id=0 still replays all.
+            last_event_id = int(window.get("latest_event_id") or 0)
         if window.get("cursor_expired"):
             return web.json_response(
                 {

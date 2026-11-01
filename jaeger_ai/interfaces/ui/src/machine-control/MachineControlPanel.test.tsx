@@ -49,14 +49,14 @@ it('renders Machine Control panel with host and OS permission telemetry', async 
 
   try {
     await act(async () => root.render(<MachineControlPanel source={source} />))
-    expect(el.textContent).toContain('Machine Control & Hardware Telemetry')
+    expect(el.textContent).toContain('This Mac: hardware, permissions')
     expect(el.textContent).toContain('host-unit-01')
     expect(el.textContent).toContain('1337')
     expect(el.textContent).toContain('Native Shell PID')
 
     // Switch to OS Settings sub-tab
     const buttons = el.querySelectorAll('button')
-    const osSettingsBtn = [...buttons].find((b) => b.textContent?.includes('OS Settings'))
+    const osSettingsBtn = [...buttons].find((b) => b.textContent?.includes('OS settings'))
     expect(osSettingsBtn).toBeDefined()
     await act(async () => osSettingsBtn!.click())
     expect(el.textContent).toContain('macOS Privacy & Security Shortcut Panes')

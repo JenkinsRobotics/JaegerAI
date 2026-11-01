@@ -208,7 +208,7 @@ async def test_global_stream_replays_only_global_events_and_respects_scopes(tmp_
     gateway.event_bus.publish("s1", "session.updated", {"session": {}})
     glob = gateway.event_bus.publish("*", "agent.created", {"agent": {"id": "x"}})
     async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as client:
-        resp = await client.get("/v1/events/stream")
+        resp = await client.get("/v1/events/stream?last_event_id=0")
         assert resp.status == 200 and resp.headers["Content-Type"].startswith("text/event-stream")
         chunk = await asyncio.wait_for(resp.content.readuntil(b"\n\n"), 5)
         resp.close()
@@ -253,3 +253,21 @@ async def test_summary_route_reads_active_receipt_then_returns_idle(gateway):
     app.store.complete_request('owned-live-request',status='completed',result={'output':'done'})
     data=await (await client.get('/v1/agents/summary')).json()
     assert next(a for a in data['agents'] if a['id']==aid)['status']=='idle'
+
+
+
+@pytest.mark.asyncio
+async def test_global_stream_without_cursor_starts_live(tmp_path):
+    """J-087: no cursor means live events only, not the whole retained history."""
+    import asyncio
+    gateway = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "s.db"))
+    gateway.app.on_startup.clear()
+    old = gateway.event_bus.publish("*", "agent.created", {"agent": {"id": "old"}})
+    async with TestClient(TestServer(gateway.app), headers=client_headers("webui")) as client:
+        resp = await client.get("/v1/events/stream")
+        assert resp.status == 200
+        await asyncio.sleep(0.2)
+        new = gateway.event_bus.publish("*", "agent.created", {"agent": {"id": "new"}})
+        chunk = (await asyncio.wait_for(resp.content.readuntil(b"\n\n"), 5)).decode()
+        resp.close()
+        assert chunk.startswith(f"id: {new.event_id}\n") and new.event_id != old.event_id

@@ -67,7 +67,7 @@ export function ModelsPage() {
   return (
     <div className="jg-u-page jg-models">
       <PageHead title="Models" subtitle={<>{loading ? "Loading models…" : `${total} models across ${groups.length} provider${groups.length === 1 ? "" : "s"} · ${gb(totalLocal)} on this Mac`}</>} actions={<>
-          <input className="jg-u-search" type="search" placeholder="Search name, family, quant, capability" aria-label="Search models" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="jg-u-search" type="search" placeholder="Search models" aria-label="Search models" value={q} onChange={(e) => setQ(e.target.value)} />
           <Segmented label="Show" value={kind} onChange={setKind} options={[{ value: "all", label: "All" }, { value: "local", label: "Local" }, { value: "cloud", label: "Cloud" }, { value: "loaded", label: "Loaded" }, { value: "embedding", label: "Embedding" }]} />
           <button type="button" className="jg-u-btn" onClick={() => void load()}>Refresh</button>
         </>} />
