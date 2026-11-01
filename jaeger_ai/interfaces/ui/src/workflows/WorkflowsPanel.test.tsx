@@ -53,3 +53,18 @@ it('recovers every saved operation when two tabs race on the pending pointer',as
  await act(async()=>check().click());expect(operation.mock.calls.map(call=>call[0])).toEqual(['owned-second','owned-first']);expect(mutate).not.toHaveBeenCalled();expect(localStorage.getItem(key+'.pending.owned-first')).toBe(JSON.stringify(first));
  await act(async()=>root.unmount());element.remove();localStorage.removeItem(key);localStorage.removeItem(key+'.pending.owned-first');
 });
+it('maps catalog loading and read error to cards while retaining the prior list',async()=>{
+ let resolve!: (value:unknown)=>void;
+ const list=vi.fn().mockImplementationOnce(()=>new Promise(r=>{resolve=r;})).mockRejectedValueOnce(Error('offline'));
+ const workflows={list}as unknown as WorkflowControls;
+ const element=document.createElement('div');document.body.append(element);const root=createRoot(element);
+ try {
+  await act(async()=>root.render(<WorkflowsPanel source={{workflows} as JaegerSource} agents={[]}/>));
+  expect(element.querySelector('[aria-label="Workflows"][data-state="loading"]')).not.toBeNull();
+  await act(async()=>resolve({workflows:[{id:'owned',title:'Owned workflow',revision:1,archived:false}],format:'owned-format',limits:{steps:20,bytes:64000}}));
+  expect(element.textContent).toContain('Owned workflow');
+  await act(async()=>[...element.querySelectorAll('button')].find(b=>b.textContent==='Refresh workflows')!.click());
+  expect(element.textContent).toContain('Could not load workflows: Error: offline');
+  expect(element.textContent).toContain('Owned workflow');
+ } finally {await act(async()=>root.unmount());element.remove();}
+});
