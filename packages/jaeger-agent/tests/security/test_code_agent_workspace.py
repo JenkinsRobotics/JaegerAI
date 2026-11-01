@@ -1,0 +1,69 @@
+"""execute_code may write the agent's own workspace folder, and nothing wider (Matthew, 2026-11-01)."""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from jaeger_agent.tools import code
+
+
+def _layout(tmp_path: Path) -> SimpleNamespace:
+    root = tmp_path / "instances" / "jaeger"
+    (root / "skills").mkdir(parents=True)
+    return SimpleNamespace(root=root, skills_dir=root / "skills", workspace_dir=root / "workspace")
+
+
+def test_agent_workspace_is_the_instance_workspace_only(tmp_path: Path) -> None:
+    lay = _layout(tmp_path)
+    assert code._agent_workspace(lay) == os.path.realpath(lay.root / "workspace")
+
+
+def test_symlinked_or_relocated_workspace_is_refused(tmp_path: Path) -> None:
+    lay = _layout(tmp_path)
+    (tmp_path / "elsewhere").mkdir()
+    (lay.root / "workspace").symlink_to(tmp_path / "elsewhere")
+    assert code._agent_workspace(lay) is None
+    other = SimpleNamespace(root=lay.root, workspace_dir=tmp_path / "other-agent" / "workspace")
+    assert code._agent_workspace(other) is None
+
+
+def test_linux_binds_only_the_extra_workspace(monkeypatch, tmp_path: Path) -> None:
+    ws, scratch, extra = tmp_path / "skills", tmp_path / "scratch", tmp_path / "workspace"
+    for d in (ws, scratch, extra):
+        d.mkdir()
+    monkeypatch.setattr(code.sys, "platform", "linux")
+    monkeypatch.setattr(code.shutil, "which", lambda name: "/usr/bin/bwrap")
+    monkeypatch.setattr(code, "_probe_linux_bwrap", lambda path: (True, ""))
+    cmd, _ = code._sandboxed_python_command(str(ws / "s.py"), workspace=str(ws), scratch=str(scratch),
+                                            extra_writable=(str(extra),))
+    binds = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--bind"]
+    assert binds == [str(ws), str(scratch), str(extra)]
+
+
+@pytest.mark.skipif(sys.platform != "darwin" or not os.path.isfile("/usr/bin/sandbox-exec"), reason="macOS seatbelt")
+def test_macos_seatbelt_writes_agent_workspace_but_not_tmp_or_siblings(tmp_path: Path) -> None:
+    base = Path(os.path.realpath(tmp_path))
+    skills, scratch, ws, sibling = base / "skills", base / "scratch", base / "workspace", base / "other-agent"
+    for d in (skills, scratch, ws, sibling):
+        d.mkdir()
+    script = scratch / "s.py"
+    script.write_text(
+        "import sys\n"
+        "def tryw(p):\n"
+        "    try:\n        open(p,'w').write('x'); return 'ok'\n"
+        "    except OSError as e:\n        return 'denied'\n"
+        f"print(tryw({str(ws / 'out.txt')!r}), tryw({str(sibling / 'x.txt')!r}), tryw('/private/tmp/jaeger-j087-probe.txt'))\n",
+        encoding="utf-8",
+    )
+    cmd, backend = code._sandboxed_python_command(str(script), workspace=str(skills), scratch=str(scratch),
+                                                  extra_writable=(str(ws),))
+    assert backend == "macos-seatbelt"
+    out = subprocess.run(cmd, capture_output=True, text=True, timeout=60).stdout.split()
+    assert out == ["ok", "denied", "denied"]
+    assert (ws / "out.txt").read_text() == "x"

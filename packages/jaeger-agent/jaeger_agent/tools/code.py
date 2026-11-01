@@ -129,6 +129,26 @@ def _macos_python_libraries() -> tuple[str, ...]:
     return tuple(sorted(libraries))
 
 
+def _agent_workspace(layout) -> str | None:
+    """The agent's own workspace folder (``<instance>/workspace``), created if missing, or None.
+
+    Refuses anything that is not a real directory directly inside the instance root, so a
+    symlinked or relocated workspace can never widen the sandbox's writable set.
+    """
+    try:
+        root = os.path.realpath(str(layout.root))
+        ws = layout.workspace_dir
+        ws.mkdir(parents=True, exist_ok=True)
+        if os.path.islink(str(ws)):
+            return None
+        real = os.path.realpath(str(ws))
+        if os.path.dirname(real) != root or not os.path.isdir(real):
+            return None
+        return real
+    except Exception:
+        return None
+
+
 def _sandboxed_python_command(
     script: str,
     *,
@@ -136,6 +156,7 @@ def _sandboxed_python_command(
     scratch: str,
     extra_python_paths: tuple[str, ...] = (),
     unix_socket: str | None = None,
+    extra_writable: tuple[str, ...] = (),
 ) -> tuple[list[str] | None, str]:
     """Return an OS-confined Python command and its backend label.
 
@@ -152,9 +173,11 @@ def _sandboxed_python_command(
     launcher = f"import runpy,sys;{path_setup}runpy.run_path({script!r},run_name='__main__')"
 
     if sys.platform == "darwin" and os.path.isfile("/usr/bin/sandbox-exec"):
+        writable = tuple(dict.fromkeys(os.path.realpath(p) for p in extra_writable if p and os.path.isdir(p)))
         read_roots = {
             workspace,
             scratch,
+            *writable,
             os.path.dirname(executable),
             sys.base_prefix,
             sys.prefix,
@@ -184,7 +207,9 @@ def _sandboxed_python_command(
             f"(allow file-read* {readable} {library_reads} "
             '(literal "/dev/null") (literal "/dev/urandom"))',
             f"(allow file-write* (subpath {_sandbox_literal(workspace)}) "
-            f"(subpath {_sandbox_literal(scratch)}) (literal \"/dev/null\"))",
+            f"(subpath {_sandbox_literal(scratch)}) "
+            + "".join(f"(subpath {_sandbox_literal(p)}) " for p in writable)
+            + "(literal \"/dev/null\"))",
         ]
         if unix_socket:
             rules.append(
@@ -227,6 +252,8 @@ def _sandboxed_python_command(
         command.extend((
             "--bind", workspace, workspace,
             "--bind", scratch, scratch,
+            *[arg for p in extra_writable if p and os.path.isdir(p)
+              for arg in ("--bind", os.path.realpath(p), os.path.realpath(p))],
             # Bubblewrap's otherwise-empty root is a tmpfs. Freeze that mount
             # after creating the approved nested writable mounts so code cannot
             # create files in an unmapped parent directory such as /tmp.
@@ -268,12 +295,20 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
     # Share the admitted project binding with file tools. Unbound standalone
     # execution uses instance skills or an external scratch directory.
     workdir = None
+    agent_workspace = None
     try:
         from jaeger_agent.core.workspace import _require_layout, get_project_root
-        workdir = get_project_root() or _require_layout().skills_dir
+        project = get_project_root()
+        layout = _require_layout()
+        workdir = project or layout.skills_dir
         workdir.mkdir(parents=True, exist_ok=True)
+        if project is None:
+            # Unbound runs may also write the agent's OWN workspace folder (Matthew, 2026-11-01):
+            # deliverables land where the task verifier looks. Only this one folder; nothing wider.
+            agent_workspace = _agent_workspace(layout)
     except Exception:
         workdir = None
+        agent_workspace = None
     with tempfile.TemporaryDirectory(prefix="jaeger_run_") as scratch:
         run_dir = os.path.realpath(str(workdir) if workdir is not None else scratch)
         # Keep execution scaffolding outside the selected project; the
@@ -284,6 +319,7 @@ def run_python(code: str, timeout_s: float = 10.0) -> dict[str, Any]:
                 fh.write(cleaned)
             command, sandbox_backend = _sandboxed_python_command(
                 script, workspace=run_dir, scratch=os.path.realpath(scratch),
+                extra_writable=(agent_workspace,) if agent_workspace else (),
             )
             if command is None:
                 return {
