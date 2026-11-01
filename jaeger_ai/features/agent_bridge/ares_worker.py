@@ -33,7 +33,8 @@ WORKER_DIR = WORKSPACE / ".worker"
 HUB_URL = os.environ.get("ARES_HUB_URL", "http://127.0.0.1:8792/mcp")
 TOKEN_PATHS = [STATE_ROOT / "caller_tokens" / "ares.token", STATE_ROOT / "secrets" / "mcp-ares.token"]
 CODEX = os.environ.get("ARES_CODEX_BIN", "/opt/homebrew/bin/codex")
-HUB_MCP = os.environ.get("ARES_HUB_MCP_NAME", "jaeger-ares")
+#: Both Jaeger hub entries in Codex's config; a run may pick either one.
+HUB_MCP = tuple(n for n in os.environ.get("ARES_HUB_MCP_NAMES", "jaeger-ares,jaeger-local").split(",") if n)
 #: Report-only hub tools: posting a result back is a report, not an action, so a headless
 #: run (approval policy "never") may call them without an owner card. Everything else
 #: (send_message, handoff_task, goals, app/backlog writes...) stays on Codex's default gate.
@@ -42,8 +43,9 @@ REPORT_TOOLS = ("post_result",)
 
 def report_overrides() -> list[str]:
     out = []
-    for tool in REPORT_TOOLS:
-        out += ["-c", f'mcp_servers.{HUB_MCP}.tools.{tool}.approval_mode="approve"']
+    for server in HUB_MCP:
+        for tool in REPORT_TOOLS:
+            out += ["-c", f'mcp_servers.{server}.tools.{tool}.approval_mode="approve"']
     return out
 # The Codex config default may be a model the ChatGPT login can't use in exec.
 MODEL = os.environ.get("ARES_CODEX_MODEL", "gpt-6-sol")
