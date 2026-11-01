@@ -5660,6 +5660,8 @@ class JaegerGatewayApp:
                 session_status=session_status,
                 follow_ups=_explicit_follow_ups(result) if status == "completed" else None,
             )
+            if persisted.get("search_count_event"):
+                self.event_bus.fanout(persisted["search_count_event"])
             if persisted.get("follow_up_event"):
                 self.event_bus.fanout(persisted["follow_up_event"])
             try:

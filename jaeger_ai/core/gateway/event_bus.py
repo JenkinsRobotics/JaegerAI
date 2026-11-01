@@ -38,7 +38,7 @@ EVENT_TYPES = frozenset({
     # Turn lifecycle (IDE + WebUI + CLI render these identically).
     "turn.start", "turn.delta", "turn.reasoning", "turn.reasoning.done", "turn.progress", "queue.updated",
     "turn.model", "turn.context", "turn.plan", "turn.steer", "turn.finish", "turn.failed", "turn.cancelled",
-    "turn.unknown", "turn.cancel", "follow_ups",
+    "turn.unknown", "turn.cancel", "follow_ups", "search.count",
     # Tools and files.
     # The Gateway publishes tool.completed / tool.failed; tool.done / tool.error
     # are the older names some clients still accept.

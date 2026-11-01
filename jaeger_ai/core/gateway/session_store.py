@@ -1698,6 +1698,43 @@ class GatewaySessionStore:
             ).fetchone()
             payload = self._request_row(updated)
             payload["replayed"] = False
+            # Count catalog search invocations from this request's durable tool lifecycle.
+            # Started calls count even if interrupted; completed and failed are
+            # independently observed outcomes. This runs in the terminal transaction.
+            search_tools = {
+                "search_files", "grep_files", "grep_search", "search_memory",
+                "session_search", "library_search", "web_search", "docs_search",
+                "search_docs", "jaeger.search", "docs.search", "web.search",
+            }
+            search_events = conn.execute(
+                "SELECT event, data_json FROM activity_history WHERE session_id=? "
+                "AND event IN ('tool.started', 'tool.completed', 'tool.failed') "
+                "AND json_extract(data_json, '$.request_id')=? ORDER BY event_id",
+                (row["session_id"], request_id),
+            )
+            starts: set[str] = set()
+            completed: set[str] = set()
+            failed: set[str] = set()
+            for tool_event in search_events:
+                data = json.loads(tool_event["data_json"] or "{}")
+                if data.get("tool") not in search_tools:
+                    continue
+                call_id = str(data.get("activity_id") or data.get("call_id") or "")
+                if not call_id:
+                    continue
+                if tool_event["event"] == "tool.started":
+                    starts.add(call_id)
+                elif tool_event["event"] == "tool.completed":
+                    completed.add(call_id)
+                else:
+                    failed.add(call_id)
+            if starts:
+                payload["search_count_event"] = self._insert_event(
+                    conn, row["session_id"], "search.count",
+                    {"session_id": row["session_id"], "request_id": request_id,
+                     "turn_id": row["turn_id"], "searches": len(starts),
+                     "completed": len(starts & completed), "failed": len(starts & failed)}, now,
+                )
             if follow_ups and status == "completed":
                 payload["follow_up_event"] = self._insert_event(
                     conn, row["session_id"], "follow_ups",

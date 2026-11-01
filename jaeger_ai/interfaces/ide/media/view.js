@@ -250,6 +250,7 @@ function transcriptRows() {
   const history = state.session?.messages || [];
   const rows = [], placed = new Set();
   let userIndex = -1;
+  const searchRow = rid => (state.timeline || []).find(row => row.requestId === rid && row.kind === 'search-count');
   const workRow = work => ({ ...work, key: `work:${work.requestId}`, kind: 'work',
     live: !work.finishedAt && state.busy,
     rows: (state.timeline || []).filter(row => row.requestId === work.requestId
@@ -263,7 +264,9 @@ function transcriptRows() {
     if (item.role === 'user') {
       userIndex++;
       for (const work of state.workTurns || []) if (work.userIndex === userIndex) {
-        rows.push(workRow(work)); placed.add(work.requestId);
+        rows.push(workRow(work));
+        const count = searchRow(work.requestId); if (count) rows.push(count);
+        placed.add(work.requestId);
         const nextMsg = filtered[index + 1];
         if (!nextMsg || nextMsg.role !== 'assistant') {
           const liveAnswers = (state.timeline || []).filter(r => r.requestId === work.requestId && r.kind === 'answer');
@@ -276,7 +279,9 @@ function transcriptRows() {
     }
   });
   for (const work of state.workTurns || []) if (!placed.has(work.requestId) && !work.finishedAt) {
-    rows.push(workRow(work)); placed.add(work.requestId);
+    rows.push(workRow(work));
+    const count = searchRow(work.requestId); if (count) rows.push(count);
+    placed.add(work.requestId);
     const liveAnswers = (state.timeline || []).filter(r => r.requestId === work.requestId && r.kind === 'answer');
     const answerText = liveAnswers.map(r => r.text || '').join('');
     if (answerText) {
@@ -373,6 +378,9 @@ function updateTimelineRow(node, row) {
     content = reasoningSection(row.text || '', row.live);
   } else if (row.kind === 'plan') {
     content = planSection(row);
+  } else if (row.kind === 'search-count') {
+    content = document.createElement('div'); content.className = 'subtle';
+    content.textContent = `${row.searches} ${row.searches === 1 ? 'search' : 'searches'} · ${row.completed} completed · ${row.failed} failed`;
   } else if (row.kind === 'sources') {
     content = document.createElement('section'); content.className = 'sources';
     const title = document.createElement('strong'); title.textContent = 'Sources'; content.append(title);
