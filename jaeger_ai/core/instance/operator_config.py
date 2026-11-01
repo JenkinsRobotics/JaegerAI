@@ -201,7 +201,7 @@ def write_default_config(path: Path | None = None, *, force: bool = False) -> Pa
 # business_name = "My Company"
 
 # Paths
-# project_root = "/Users/alex/projects"
+# project_root = "~/projects"
 # nas_path = "/Volumes/MyNAS"
 
 # YouTube channel (for content automation)
@@ -216,7 +216,7 @@ def write_default_config(path: Path | None = None, *, force: bool = False) -> Pa
 # never_list = ["spam@example.com", "newsletter@example.com"]
 
 # Extra paths tools are allowed to access (beyond defaults)
-# allowed_paths = ["/Users/alex/special-project"]
+# allowed_paths = ["~/special-project"]
 
 # Notifications (ntfy self-hosted over Tailscale)
 # ntfy_url = "https://your-host.ts.net:8443/ntfy/jaeger"
@@ -238,7 +238,7 @@ def write_default_config(path: Path | None = None, *, force: bool = False) -> Pa
 #                  (see jaeger_ai/contract/tool_bundles.py)
 # [[operator.projects]]
 # name = "Robot Arm v2"
-# root = "/Users/alex/projects/robot-arm"
+# root = "~/projects/robot-arm"
 # build_cmd = "swift test"
 # tool_bundle = "robotics.build"
 """
