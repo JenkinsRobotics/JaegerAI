@@ -10,7 +10,9 @@ import { WINDOW_DEFINITIONS, type WindowId } from '../windows/WindowManager'
 import { Menu, MoreHorizontal, Search, Sparkles } from '../components/Icons'
 import { SUBTABS } from './router'
 import { usePreset, type Preset } from './layoutPresets'
+import { JaegerMark } from '../brand/JaegerMark'
 import './appchrome.css'
+
 
 export interface ChromeProps {
   active: WindowId
@@ -95,7 +97,7 @@ export function AppChrome({ active, sub, pages, phone, onPick, onSearch, childre
     return (
       <div className="jg-chrome jg-chrome--phone" data-preset={preset.id}>
         <header className="jg-topbar jg-topbar--compact">
-          <img className="jg-topbar__logo" src="/icon-shield-blue-180.png" alt="" width={22} height={22} />
+          <JaegerMark className="jg-topbar__logo" />
           <h1 className="jg-topbar__title">{title}</h1>
           <button type="button" className="jg-iconbtn" onClick={onSearch} aria-label={`Search or ask (${KEY})`}><Search size={18} /></button>
         </header>

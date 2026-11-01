@@ -23,6 +23,7 @@ import { clearLegacyFlags, legacyRedirect } from "./shell/router";
 import { applyAppearance, storedAppearance } from "./settings/SettingsDialog";
 import { applyDensity, applyFeel, applyIcon, storedDensity, storedFeel, storedIcon } from "./settings/appearance";
 import { applyPreset, storedPreset, syncPresetFromGateway } from "./shell/layoutPresets";
+import { syncLogoFromGateway } from "./brand/logo";
 
 const redirect = legacyRedirect(location.pathname, location.search);
 if (redirect) history.replaceState(null, "", redirect + location.hash);
@@ -33,6 +34,7 @@ applyIcon(storedIcon());
 applyDensity(storedDensity());
 applyPreset(storedPreset());
 void syncPresetFromGateway();
+void syncLogoFromGateway();
 
 const source = await createSource();
 
