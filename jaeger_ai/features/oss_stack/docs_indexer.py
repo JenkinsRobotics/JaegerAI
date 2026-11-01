@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 import uuid
@@ -81,19 +82,37 @@ class Indexer:
 
     # -- environment -------------------------------------------------------
     def _gate(self) -> list[str]:
-        why = []
+        # Load average counts runnable work across the whole Mac and is not a
+        # useful admission signal for this low-priority embedding job.
         try:
             from jaeger_ai.features.webui.api.resource_manager import ResourceManager
-            why = ResourceManager(lambda: STATE_DIR).check("light", docs.EMBED_MODEL)
-        except Exception:  # noqa: BLE001 - fall back to a cheap load check
-            if os.getloadavg()[0] / (os.cpu_count() or 8) > 0.85:
-                why.append("cpu load")
+            manager = ResourceManager(lambda: STATE_DIR)
+            snap = manager.snapshot().copy()
+            snap["cpu_load"] = None
+            why = manager.check("light", snap=snap)
+        except Exception:  # noqa: BLE001 - minimal native pressure check if manager is unavailable
+            why = []
+            try:
+                level = subprocess.run(
+                    ["sysctl", "-n", "kern.memorystatus_vm_pressure_level"],
+                    capture_output=True, text=True, timeout=3, check=True,
+                ).stdout.strip()
+                if level.isdigit() and int(level) > 1:
+                    why.append(f"memory pressure level {level}")
+            except (OSError, subprocess.SubprocessError):
+                pass
         try:
             cfg = json.loads((STATE_DIR / "resources.json").read_text())
+            if not isinstance(cfg, dict):
+                cfg = {}
         except (OSError, ValueError):
             cfg = {}
-        if shutil.disk_usage(HOME).free / 1e9 < float(cfg.get("min_free_disk_gb", 15)):
-            why.append("low disk")
+        try:
+            if shutil.disk_usage(HOME).free / 1e9 < float(cfg.get("min_free_disk_gb", 15)):
+                if not any("disk" in reason for reason in why):
+                    why.append("low disk")
+        except OSError:
+            why.append("disk probe unavailable")
         return why
 
     def save(self):
@@ -201,8 +220,14 @@ class Indexer:
             if prev.get("sig") == sig or prev.get("tries", 0) >= 3:
                 continue
             while (why := self.gate()):
+                self.state["skip_reasons"] = why
+                self.state["last_skip"] = time.time()
+                self.save()
                 log("hold", reasons=why)
                 time.sleep(60)
+            if self.state.get("skip_reasons"):
+                self.state["skip_reasons"] = []
+                self.save()
             if self.state.get("points", 0) >= MAX_POINTS:
                 log("budget_reached", points=self.state["points"])
                 break
@@ -214,6 +239,8 @@ class Indexer:
                 files[key] = {"sig": sig, "chunks": n}
                 self.state["points"] = self.state.get("points", 0) + n
                 added += n
+                self.state["last_successful_index"] = time.time()
+                self.save()
             except Exception as exc:  # noqa: BLE001 - one bad file never stops the pass
                 errors += 1
                 files[key] = {"sig": "", "chunks": 0, "error": str(exc)[:200], "tries": files.get(key, {}).get("tries", 0) + 1}
