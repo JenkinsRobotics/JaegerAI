@@ -100,6 +100,7 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 from api.auth import check_auth, reset_trusted_auth_request_state
+from api.jaeger_signin import gate as jaeger_signin_gate
 from api.config import HOST, PORT, STATE_DIR, SESSION_DIR, DEFAULT_WORKSPACE
 from api.helpers import (
     j,
@@ -379,6 +380,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             _legacy_hit(self.command, parsed.path)
+            if not jaeger_signin_gate(self, parsed): return
             if not check_auth(self, parsed): return
             result = handle_get(self, parsed)
             if result is False:
@@ -410,6 +412,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             parsed = urlparse(self.path)
             _legacy_hit(self.command, parsed.path)
+            if not jaeger_signin_gate(self, parsed): return
             _is_csp_report_post = (
                 parsed.path == "/api/csp-report" and self.command == "POST"
             )
