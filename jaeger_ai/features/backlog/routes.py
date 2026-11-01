@@ -22,7 +22,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from .store import BacklogError, BacklogStore, status_from_message
+from .store import BacklogError, BacklogStore, status_from_message, sweep
 
 logger = logging.getLogger(__name__)
 ROUTES = frozenset({("POST", "/v1/backlog"), ("POST", "/v1/backlog/{id}"), ("POST", "/v1/backlog/{id}/assign"),
@@ -151,6 +151,14 @@ def register(gateway, store: BacklogStore | None = None):
         return {"tasks": tasks, "counts": store.counts(), "now": time.time()}
 
     @guard
+    async def sweep_route(request, caller, _body):
+        try:
+            stale_after_s = float(request.query.get("stale_after_s", "86400"))
+        except ValueError as exc:
+            raise BacklogError("invalid stale_after_s") from exc
+        return {"flagged": await asyncio.to_thread(sweep, store, time.time(), stale_after_s)}
+
+    @guard
     async def create(request, caller, body):
         allowed = {"title", "detail", "source", "status", "priority", "worker"}
         if set(body) - allowed:
@@ -192,6 +200,7 @@ def register(gateway, store: BacklogStore | None = None):
         return out
 
     gateway.app.router.add_get("/v1/backlog", listing)
+    gateway.app.router.add_get("/v1/backlog/sweep", sweep_route)
     gateway.app.router.add_post("/v1/backlog", create)
     gateway.app.router.add_post("/v1/backlog/import", import_route)
     gateway.app.router.add_post("/v1/backlog/{id}", update)
