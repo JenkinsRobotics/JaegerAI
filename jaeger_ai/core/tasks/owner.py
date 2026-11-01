@@ -731,6 +731,23 @@ class GatewayTaskOwner:
             runs.transition(run_id, state, reason=task.error)
 
     @staticmethod
+    def _execution_root(task):
+        """The workspace the turn actually ran in.
+
+        An empty execution workspace means the turn used the effective instance
+        workspace (see ``_read_roots``), never the Gateway process cwd, which is
+        what ``Path('').resolve()`` would give.
+        """
+        raw = str((task.payload.get('execution') or {}).get('workspace') or '')
+        if not raw:
+            try:
+                from jaeger_agent.core.workspace import get_effective_workspace_dir
+                raw = str(get_effective_workspace_dir() or '')
+            except Exception:  # noqa: BLE001
+                raw = ''
+        return Path(raw).expanduser().resolve() if raw else None
+
+    @staticmethod
     def verify(task, result):
         paths = task.payload.get('artifacts') or []
         if paths:
