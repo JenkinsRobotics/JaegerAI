@@ -13,7 +13,7 @@ def create_runtime() -> SubprocessDelegateRuntime:
     return SubprocessDelegateRuntime(
         CommandSpec(
             runtime_id="cursor",
-            executables=("cursor",),
+            executables=("cursor-agent",),
             build_args=_args,
             capabilities=frozenset({"code", "filesystem", "terminal"}),
             local=False,
