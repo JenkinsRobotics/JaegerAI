@@ -116,14 +116,29 @@ def engine_env(engine: str) -> dict:
         state = os.environ.get("JAEGER_OPENCLAW_STATE", str(HOME / ".jaeger" / "openclaw-host"))
         env["OPENCLAW_STATE_DIR"] = state
         env["OPENCLAW_CONFIG_PATH"] = str(Path(state) / "openclaw.json")
+        try:  # the host gateway's own token, so runs go through (and show in) its Control UI
+            env["OPENCLAW_GATEWAY_TOKEN"] = (Path(state) / "gateway.token").read_text().strip()
+        except OSError:
+            pass
     return env
+
+
+def openclaw_gateway_up(port: int | None = None) -> bool:
+    import socket
+    port = port or int(os.environ.get("JAEGER_OPENCLAW_UI_PORT", "18789"))
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            return True
+    except OSError:
+        return False
 
 
 def command(engine: str, prompt: str, jobdir: Path) -> list[str]:
     if engine == "hermes":
         return [os.environ.get("HERMES_BIN", str(HOME / ".local/bin/hermes")),
                 "chat", "-Q", "--oneshot", "--query-file", str(jobdir / "prompt.md")]
-    return [os.environ.get("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw"), "agent", "--local",
+    mode = [] if openclaw_gateway_up() else ["--local"]
+    return [os.environ.get("OPENCLAW_BIN", "/opt/homebrew/bin/openclaw"), "agent", *mode,
             "--agent", "main", "--session-id", "jaeger-" + jobdir.name,
             "--message-file", str(jobdir / "prompt.md"), "--json"]
 
