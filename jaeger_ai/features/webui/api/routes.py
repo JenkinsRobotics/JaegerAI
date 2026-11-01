@@ -13413,6 +13413,11 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/v1/gateway-health":
         return _proxy_jaeger_gateway(handler, "GET", "/health")
 
+    # ── AppControl (Machine tab "Agent Apps"): reads proxied to the Gateway ──
+    if parsed.path == "/v1/apps" or parsed.path.startswith("/v1/apps/"):
+        qs = ("?" + parsed.query) if parsed.query else ""
+        return _proxy_jaeger_gateway(handler, "GET", parsed.path + qs)
+
     # ── Jaeger Gateway agents (GET) — Surfaces spine parity with the Gateway ──
     if parsed.path in {"/api/agents", "/v1/agents"}:
         qs = ("?" + parsed.query) if parsed.query else ""
@@ -15514,6 +15519,12 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path in {"/api/gateway/start", "/api/gateway/stop", "/api/gateway/restart"}:
         return _handle_gateway_lifecycle(handler, parsed.path.rsplit("/", 1)[-1], body)
+
+    # ── AppControl: proposals and Matthew's decisions (webui caller; CSRF-checked page) ──
+    if parsed.path.startswith("/v1/apps/") and (parsed.path.endswith("/proposals") or parsed.path.endswith("/decision")
+                                                or parsed.path.endswith("/rollback")):
+        import json as _json
+        return _proxy_jaeger_gateway(handler, "POST", parsed.path, _json.dumps(body or {}).encode("utf-8"))
 
     # ── Profile API (POST) ──
     # ── Jaeger Gateway handoff + approvals (POST) ──
