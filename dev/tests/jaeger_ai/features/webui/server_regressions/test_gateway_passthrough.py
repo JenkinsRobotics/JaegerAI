@@ -113,3 +113,14 @@ def test_allowlist_routes_exist_on_the_gateway(tmp_path):
         path = urlparse(url).path
         assert any(m == method and re.fullmatch(re.sub(r"\\\{[^}]+\\\}|\{[^}]+\}", "[^/]+", re.escape(c).replace(r"\{", "{").replace(r"\}", "}")), path)
                    for m, c in served), (method, path)
+
+
+@pytest.mark.parametrize("method,path", [
+    ("GET", "/v1/models"),
+    ("GET", "/v1/projects"),
+    ("POST", "/v1/projects"),
+    ("GET", "/version"),
+    ("POST", "/v1/agent-goals"),
+])
+def test_unused_gateway_routes_stay_out_of_webui_passthrough(method, path):
+    assert not js.passthrough_match(path, method)
