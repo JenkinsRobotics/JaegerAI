@@ -7,7 +7,11 @@ non-loopback peer. Config lives in ``<state>/config/webui-auth.json``::
 
     {"webui": {"public_url": "https://host.ts.net:8443",
                "basic_auth": {"username": "...", "password_hash": "scrypt$...",
-                              "secret": "<base64 >=32 bytes>"}}}
+                              "secret": "<base64 >=32 bytes>",
+                              "enabled": false}}}
+
+The gate is OFF unless ``enabled`` is true or env ``JAEGER_WEBUI_SIGNIN=1``.
+The Host-header allow-list stays active either way.
 
 No plaintext password is ever stored. Standard library only.
 """
@@ -86,7 +90,8 @@ def load_config() -> dict | None:
             ba = webui.get("basic_auth") or {}
             ok = all(isinstance(ba.get(k), str) and ba.get(k) for k in ("username", "password_hash", "secret"))
             cfg = {"username": ba["username"], "password_hash": ba["password_hash"],
-                   "secret": ba["secret"].encode(), "public_url": str(webui.get("public_url") or "")} if ok else None
+                   "secret": ba["secret"].encode(), "public_url": str(webui.get("public_url") or ""),
+                   "enabled": ba.get("enabled") is True} if ok else None
             if cfg and len(cfg["secret"]) < 32:
                 cfg = None
         except Exception:
@@ -274,6 +279,16 @@ def _handle_login_post(handler, cfg: dict) -> None:
     return _send(handler, 401, login_html(nxt, "Wrong username or password."), "text/html; charset=utf-8")
 
 
+def signin_enabled(cfg: dict) -> bool:
+    """Sign-in is wired up but off unless enabled in config or JAEGER_WEBUI_SIGNIN=1."""
+    env = os.getenv("JAEGER_WEBUI_SIGNIN", "").strip().lower()
+    if env in {"1", "true", "yes", "on"}:
+        return True
+    if env in {"0", "false", "no", "off"}:
+        return False
+    return bool(cfg.get("enabled"))
+
+
 def gate(handler, parsed) -> bool:
     """Return True to continue normal routing; False when the gate already responded."""
     cfg = load_config()
@@ -282,6 +297,12 @@ def gate(handler, parsed) -> bool:
     if not host_allowed(handler, cfg):
         _json(handler, 400, {"error": "Invalid Host header"})
         return False
+    if not signin_enabled(cfg):
+        if parsed.path in STATUS_PATHS and handler.command == "GET" and is_remote(handler, cfg):
+            _json(handler, 200, {"ok": True, "auth_required": False, "auth_providers": [],
+                                 "authenticated": False, "enabled": False})
+            return False
+        return True
     if not is_remote(handler, cfg):
         return True  # loopback machine clients and JaegerShell
     path = parsed.path

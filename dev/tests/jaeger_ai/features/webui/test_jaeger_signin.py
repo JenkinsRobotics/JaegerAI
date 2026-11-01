@@ -21,6 +21,7 @@ def cfg(tmp_path, monkeypatch):
     path.write_text(json.dumps({"webui": {"public_url": PUBLIC, "basic_auth": {
         "username": "matthew", "password_hash": js.hash_password("s3cret-pass"), "secret": "x" * 44}}}))
     monkeypatch.setenv("JAEGER_WEBUI_AUTH_CONFIG", str(path))
+    monkeypatch.setenv("JAEGER_WEBUI_SIGNIN", "1")
     js._cache.update(mtime=None, cfg=None)
     js._fails.clear()
     return js.load_config()
@@ -133,3 +134,41 @@ def test_logout_clears_cookie(cfg):
 def test_server_wires_gate_before_auth():
     text = (WEBUI / "server.py").read_text()
     assert text.count("if not jaeger_signin_gate(self, parsed): return") == 2
+
+
+def _disabled(tmp_path, monkeypatch, enabled=None):
+    ba = {"username": "matthew", "password_hash": js.hash_password("s3cret-pass"), "secret": "x" * 44}
+    if enabled is not None:
+        ba["enabled"] = enabled
+    path = tmp_path / "auth-off.json"
+    path.write_text(json.dumps({"webui": {"public_url": PUBLIC, "basic_auth": ba}}))
+    monkeypatch.setenv("JAEGER_WEBUI_AUTH_CONFIG", str(path))
+    monkeypatch.delenv("JAEGER_WEBUI_SIGNIN", raising=False)
+    js._cache.update(mtime=None, cfg=None)
+
+
+@pytest.mark.parametrize("enabled", [None, False])
+def test_disabled_by_default_no_login(tmp_path, monkeypatch, enabled):
+    _disabled(tmp_path, monkeypatch, enabled)
+    assert run(H("/work", REMOTE)) is True
+    assert run(H("/api/sessions", REMOTE)) is True
+    h = H("/api/auth/status", REMOTE)
+    assert run(h) is False
+    body = json.loads(h.wfile.getvalue())
+    assert body["auth_required"] is False and body["auth_providers"] == []
+
+
+def test_disabled_still_checks_host(tmp_path, monkeypatch):
+    _disabled(tmp_path, monkeypatch)
+    h = H("/", {**REMOTE, "Host": "evil.example.com"})
+    assert run(h) is False and h.status == 400
+
+
+def test_enabled_flag_and_env(tmp_path, monkeypatch):
+    _disabled(tmp_path, monkeypatch, True)
+    h = H("/", REMOTE)
+    assert run(h) is False and h.status == 302
+    _disabled(tmp_path, monkeypatch, False)
+    monkeypatch.setenv("JAEGER_WEBUI_SIGNIN", "1")
+    h = H("/", REMOTE)
+    assert run(h) is False and h.status == 302
