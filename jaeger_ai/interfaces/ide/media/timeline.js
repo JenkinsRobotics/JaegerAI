@@ -113,13 +113,29 @@
     if (STREAM_EVENTS.has(event.event)) return appendStream(rows, event);
     if (['tool.started', 'tool.completed', 'tool.failed'].includes(event.event)) return applyTool(rows, event);
     if (TERMINAL_EVENTS.has(event.event)) {
-      const rid = requestId(event), settled = settle(rows, rid);
+      const rid = requestId(event), settled = settle(reconcileAnswer(rows, event), rid);
       return [...settled, { key: `terminal:${rid}:${eventId(event) || settled.length}`,
         kind: 'terminal', requestId: rid, status: event.event.slice(5), live: false }];
     }
     return [...rows, { key: `control:${requestId(event)}:${eventId(event) || rows.length}`,
       kind: 'control', requestId: requestId(event), name: event.event,
       detail: String(event.data?.text || event.data?.status || ''), live: false }];
+  }
+
+  // The saved final text is the answer. Replace the streamed body with it so it
+  // is shown once: identical keeps the rows, a prefix or a different stream is
+  // replaced in place, and an empty stream gains the answer row.
+  function reconcileAnswer(rows, event) {
+    const output = event.event === 'turn.finish' && typeof event.data?.output === 'string' ? event.data.output : '';
+    if (!output) return rows;
+    const rid = requestId(event);
+    const indexes = rows.map((row, i) => (row.requestId === rid && row.kind === 'answer' ? i : -1)).filter(i => i >= 0);
+    if (indexes.map(i => rows[i].text).join('') === output) return rows;
+    if (!indexes.length) return [...rows, { key: `answer:${rid}:final`, kind: 'answer', requestId: rid, text: output, live: false }];
+    const [first, ...rest] = indexes;
+    const next = rows.filter((_, i) => !rest.includes(i));
+    const at = next.indexOf(rows[first]);
+    return replaceAt(next, at, { ...rows[first], text: output });
   }
 
   function applyEvents(state, events) {
