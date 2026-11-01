@@ -31,7 +31,8 @@ def test_worker_outbox_retry_and_gate(tmp_path, monkeypatch):
     assert sent[0][2]["id"] == "hermes-result-" + __import__("hashlib").sha256(b"handoff-1").hexdigest()
 
 
-def test_engine_commands_and_caller_ceiling(tmp_path):
+def test_engine_commands_and_caller_ceiling(tmp_path, monkeypatch):
+    monkeypatch.setattr(w, "openclaw_gateway_up", lambda port=None: False)
     cmd = w.command("hermes", "task", tmp_path)
     assert cmd[1:4] == ["chat", "-Q", "--oneshot"] and "--query-file" in cmd
     cmd = w.command("openclaw", "task", tmp_path)
@@ -60,3 +61,9 @@ def test_final_text_parsing():
     oc = 'migrations...\n{"payloads":[{"text":"OPENCLAW-OK 42"}],"meta":{"finalAssistantVisibleText":"OPENCLAW-OK 42"}}\n{"x":1}'
     assert w.final_text("openclaw", oc) == "OPENCLAW-OK 42"
     assert w.final_text("openclaw", '{"ok":false,"error":{"message":"bad config"}}').startswith("OpenClaw error")
+
+
+def test_openclaw_uses_running_gateway(tmp_path, monkeypatch):
+    monkeypatch.setattr(w, "openclaw_gateway_up", lambda port=None: True)
+    cmd = w.command("openclaw", "task", tmp_path)
+    assert "--local" not in cmd and cmd[1] == "agent" and "--deliver" not in cmd
