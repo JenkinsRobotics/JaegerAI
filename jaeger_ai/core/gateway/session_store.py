@@ -1410,6 +1410,7 @@ class GatewaySessionStore:
         requested: dict[str, Any] | None = None,
         expected_model_revision: int | None = None,
         admission_guard: Callable[[sqlite3.Connection], None] | None = None,
+        retry_of: str | None = None,
         _ack_events: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         """Atomically accept a client request and freeze what it executes.
@@ -1520,9 +1521,36 @@ class GatewaySessionStore:
                  json.dumps(execution, sort_keys=True), REQUEST_FINGERPRINT_VERSION),
             )
             visible = choices["display_text"] if "display_text" in choices else text
-            msg_id = self.append_message(session_id, "user", visible, timestamp=now, conn=conn,
-                                         meta={"request_id": rid, "turn_id": turn_id},
-                                         parts=_attachment_parts(conn, session_id, execution))
+            if retry_of:
+                previous = conn.execute(
+                    "SELECT request_id, status FROM client_requests WHERE request_id=? AND session_id=?",
+                    (retry_of, session_id),
+                ).fetchone()
+                if previous is None or previous["status"] in {"running", "admitted", "cancelling"}:
+                    raise RequestConflict("Previous request is unavailable for retry")
+                original = conn.execute(
+                    "SELECT id FROM messages WHERE session_id=? AND role='user' "
+                    "AND json_extract(meta_json, '$.request_id')=? ORDER BY id DESC LIMIT 1",
+                    (session_id, retry_of),
+                ).fetchone()
+                if original is None:
+                    raise RequestConflict("Previous user turn is unavailable for retry")
+                msg_id = original["id"]
+                # The reused message now belongs to this retry. A later retry
+                # finds it through the latest request without duplicating the turn.
+                conn.execute(
+                    "UPDATE messages SET meta_json=? WHERE id=?",
+                    (json.dumps({"request_id": rid, "turn_id": turn_id}), msg_id),
+                )
+                # Replace the visible answer while retaining its durable receipt/events.
+                conn.execute(
+                    "DELETE FROM messages WHERE session_id=? AND role='assistant' "
+                    "AND json_extract(meta_json, '$.request_id')=?", (session_id, retry_of),
+                )
+            else:
+                msg_id = self.append_message(session_id, "user", visible, timestamp=now, conn=conn,
+                                             meta={"request_id": rid, "turn_id": turn_id},
+                                             parts=_attachment_parts(conn, session_id, execution))
             conn.execute(
                 "UPDATE sessions SET status='running', metadata_json=?, updated_at=? WHERE session_id=?",
                 (json.dumps(meta), now, session_id),
