@@ -225,6 +225,8 @@ _ID = r"(?!inbox(?:/|$))[A-Za-z0-9_.:-]+"
 GATEWAY_PASSTHROUGH: tuple[tuple[frozenset, "re.Pattern[str]"], ...] = tuple(
     (frozenset(methods), re.compile(rx)) for methods, rx in (
         ({"GET"}, r"^/v1/activity$"),
+        ({"GET", "POST"}, r"^/v1/backlog$"),
+        ({"POST"}, r"^/v1/backlog/(?:import|bl-[a-f0-9]{10}(?:/assign)?)$"),
         ({"POST"}, rf"^/v1/handoffs/{_ID}/check$"),
         ({"GET"}, r"^/v1/approvals/counts$"),
         ({"GET"}, rf"^/v1/approvals/{_ID}/events$"),
