@@ -16,7 +16,7 @@ from pathlib import Path
 
 STATUSES = ("open", "in_progress", "needs_ok", "done")
 PRIORITIES = ("P0", "P1", "P2")
-WORKERS = ("ares", "muse", "rackpc", "grokbot")
+WORKERS = ("ares", "muse", "rackpc", "grokbot", "hermes", "openclaw")
 WORKER_RE = re.compile(r"[a-z][a-z0-9_-]{0,39}\Z")
 FIELDS = ("title", "detail", "source", "status", "priority", "worker")
 MAX = {"title": 300, "detail": 8000, "source": 300}
