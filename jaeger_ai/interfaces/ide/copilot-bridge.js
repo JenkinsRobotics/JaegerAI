@@ -197,9 +197,9 @@ function createBridge({ vscode, log = () => {}, home = os.homedir(), now = () =>
 }
 
 /** Wire into the extension: honours `jaeger.copilotBridge.enabled`, registers the consent command. */
-function activateBridge(vscode, context, log) {
+function activateBridge(vscode, context, log, makeBridge = createBridge) {
   if (!vscode.lm || typeof vscode.lm.selectChatModels !== 'function') { log('[jaeger] Copilot bridge: this VS Code has no Language Model API'); return null; }
-  const bridge = createBridge({ vscode, log });
+  const bridge = makeBridge({ vscode, log });
   const enabled = () => vscode.workspace.getConfiguration('jaeger').get('copilotBridge.enabled', true) !== false;
   const sync = () => { if (enabled()) bridge.start().catch((e) => log(`[jaeger] Copilot bridge failed to start: ${e.message}`)); else bridge.stop(); };
   sync();
