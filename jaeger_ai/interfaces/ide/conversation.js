@@ -401,7 +401,9 @@ class Conversation {
       if (epoch !== this.epoch) return;
       this.publish({ accepted: true, submittedText: text });
       this.stagedGen++; this.staged = [];
-      this.state.session = await this.gateway.session(sid);
+      // Admission is durable; observe its event cursor immediately. The
+      // message.created event (and finish()) refreshes authoritative history.
+      // A separate session GET here delays every first streamed token.
       this.state.status = 'Working'; this.emit();
       if (terminal.has(admitted.status)) await this.finish(sid, requestId, epoch);
       else this.observe(sid, requestId, this.pending[sid].startCursor, epoch);
