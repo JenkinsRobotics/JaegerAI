@@ -230,6 +230,15 @@ CALLER_READ_ROUTES: Mapping[str, frozenset[str]] = {
 #: Callers confined to an exact route allow-list (both reads and writes).
 #: rackpc is a job worker: it reads its inbox/threads and posts results, nothing else.
 CALLER_ONLY_ROUTES: Mapping[str, frozenset[tuple[str, str]]] = {
+    "muse": frozenset({
+        ("GET", "/v1/agent-messages"), ("GET", "/v1/agent-threads/{thread}"),
+        ("POST", "/v1/agent-messages"),
+        ("GET", "/v1/agents"), ("GET", "/v1/approvals/counts"),
+        ("GET", "/v1/agent-goals/{goal_id}"),
+        ("GET", "/v1/backlog"), ("GET", "/v1/backlog/sweep"),
+        ("POST", "/v1/backlog"), ("POST", "/v1/backlog/{id}"),
+        ("POST", "/v1/backlog/{id}/assign"),
+    }),
     "hermes": frozenset({
         ("GET", "/v1/agent-messages"), ("GET", "/v1/agent-threads/{thread}"),
         ("POST", "/v1/agent-messages"),
