@@ -100,7 +100,13 @@ function activate(context) {
   }
   // What the agent's ide_* tools can ask of the editor. Reads are bounded; opening a
   // file only changes what the operator is looking at.
-  const contextRoot = () => selectedWorkspace || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+  // Context follows an explicitly chosen workspace; otherwise the active editor's own folder
+  // (multi-root), and only then the first folder. selectedWorkspace itself keeps its
+  // first-folder default for new sessions, so read the explicit choice from workspaceState.
+  const explicitWorkspace = () => { const stored = context.workspaceState.get(workspaceStorageKey(), ''); return typeof stored === 'string' ? stored : ''; };
+  const contextRoot = () => explicitWorkspace() || (vscode.window.activeTextEditor?.document.uri.scheme === 'file'
+    ? vscode.workspace.getWorkspaceFolder(vscode.window.activeTextEditor.document.uri)?.uri.fsPath : '')
+    || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
   const canonicalPath = file => fs.realpathSync(file);
   const ideCall = async (kind, args, root = contextRoot()) => {
     const roots = (vscode.workspace.workspaceFolders || []).map(folder => folder.uri.fsPath);

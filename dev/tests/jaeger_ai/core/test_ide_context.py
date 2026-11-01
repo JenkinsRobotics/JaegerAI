@@ -98,3 +98,10 @@ class TestAdmission(_CallerAuthedTestCase):
         await self.client.request("POST", "/v1/sessions/s/turns",
                                   json={"text": "hi", "request_id": "r2", "options": {"ide": "garbage"}})
         assert not self.app_obj.store.get_request("r2")["execution"]["options"]
+
+
+def test_orphan_selection_is_not_rendered_for_the_model(monkeypatch, tmp_path):
+    monkeypatch.setenv("JAEGER_HOME", str(tmp_path))
+    raw = {"workspace_folders": ["/w"], "selection": {"text": "secret"}}
+    assert "selection" not in ide_context.clean(raw)
+    assert "secret" not in ide_context.format_block(raw)

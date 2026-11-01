@@ -158,14 +158,13 @@ function isWorkspacePath(file, root, canonicalPath = fs.realpathSync) {
 
 function buildIdeContext({ folders = [], active = null, openPaths = [], selectedRoot = '', canonicalPath = fs.realpathSync } = {}) {
   const roots = (selectedRoot ? [selectedRoot] : folders).map(String).filter(Boolean);
-  if (selectedRoot) {
-    if (active?.path && !isWorkspacePath(active.path, selectedRoot, canonicalPath)) active = null;
-    openPaths = openPaths.filter(file => isWorkspacePath(file, selectedRoot, canonicalPath));
-  }
+  const scopedRoot = file => roots.find(root => isWorkspacePath(file, root, canonicalPath));
+  if (active?.path && !scopedRoot(active.path)) active = null;
+  openPaths = openPaths.filter(file => scopedRoot(file));
   const relative = file => {
-    const value = String(file || '');
-    const root = roots.find(r => value === r || value.startsWith(r.endsWith('/') ? r : `${r}/`));
-    return (root ? value.slice(root.length).replace(/^\//, '') : value).slice(0, IDE_LIMITS.path);
+    const root = scopedRoot(file);
+    // Only emit a path after canonical containment has been established.
+    return root ? path.relative(canonicalPath(root), canonicalPath(file)).slice(0, IDE_LIMITS.path) : '';
   };
   const context = {};
   if (roots.length) context.workspace_folders = roots.slice(0, IDE_LIMITS.folders).map(r => r.slice(0, IDE_LIMITS.path));
