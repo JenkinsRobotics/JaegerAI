@@ -160,6 +160,8 @@ ALLOWED_ROOT_ITEMS = {
     "CHANGELOG.md",
     "CLAUDE.md",
     "CONTRIBUTING.md",
+    "DESIGN.md",  # design-system spec for agents (Stitch DESIGN.md convention)
+    "INVESTOR_DEMO_GUIDE.md",
     "Install Jaeger AI.command",
     "LICENSE",
     "MANIFEST.in",
