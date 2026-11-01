@@ -422,7 +422,7 @@ class Conversation {
   }
   async retry() {
     const sid = this.state.session?.session_id;
-    if (!sid || !this.state.connected || this.state.busy || this.sending) return false;
+    if (!sid || !this.state.connected || this.state.busy || this.sending || this.pending[sid]) return false;
     const epoch = this.epoch;
     this.sending = true;
     this.state.busy = true; this.state.error = ''; this.state.status = 'Retrying…'; this.emit();
@@ -433,15 +433,16 @@ class Conversation {
       this.pending[sid] = { requestId: rid, startCursor };
       this.workBySession[sid] = [...(this.workBySession[sid] || []), {
         requestId: rid, startedAt: Date.now(), finishedAt: null, status: 'running',
-        userIndex: (this.state.session.messages || []).filter(m => m.role === 'user').length,
+        userIndex: (this.state.session.messages || []).filter(m => m.role === 'user').length - 1,
       }];
       await this.persist();
       this.state.session = await this.gateway.session(sid);
       this.state.status = 'Working'; this.emit();
-      this.observe(sid, rid, startCursor, epoch);
+      if (terminal.has(admitted.status)) await this.finish(sid, rid, epoch);
+      else this.observe(sid, rid, startCursor, epoch);
       return true;
     } catch (error) {
-      this.state.busy = false; this.state.error = error.message; this.state.status = 'Retry not accepted';
+      this.state.busy = Boolean(this.pending[sid]); this.state.error = error.message; this.state.status = 'Retry not accepted';
       this.emit(); return false;
     } finally { this.sending = false; }
   }

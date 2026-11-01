@@ -3441,6 +3441,8 @@ class JaegerGatewayApp:
     async def handle_retry_session(self, request: web.Request) -> web.Response:
         """Replay the last completed request with a new durable identity."""
         session_id = request.match_info["id"]
+        if self.store.get_session(session_id) is None:
+            return web.json_response({"error": "Session not found"}, status=404)
         previous = self.store.latest_request(session_id)
         if previous is None:
             return web.json_response({"error": "No previous request to retry"}, status=404)
@@ -3463,14 +3465,15 @@ class JaegerGatewayApp:
         # receipts, locking, approvals, and SSE behavior as a new turn.
         # Invoke the shared admission path through a tiny internal dispatch
         # payload instead of duplicating the normal turn handler.
-        return await self._admit_and_start_retry(session_id, body)
+        return await self._admit_and_start_retry(session_id, body, previous["request_id"])
 
-    async def _admit_and_start_retry(self, session_id: str, body: dict[str, Any]) -> web.Response:
+    async def _admit_and_start_retry(self, session_id: str, body: dict[str, Any], retry_of: str) -> web.Response:
         text = str(body.get("text") or "").strip()
         requested = self._requested_from_body(body)
         try:
             admitted = self.store.admit_request(
                 session_id, text, request_id=body["request_id"], requested=requested,
+                retry_of=retry_of,
             )
         except (RequestConflict, RequestBusy, ValueError) as exc:
             return web.json_response({"error": str(exc)}, status=409 if isinstance(exc, RequestBusy) else 400)
