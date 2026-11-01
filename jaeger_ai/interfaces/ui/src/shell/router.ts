@@ -45,10 +45,13 @@ export interface Route {
   params: URLSearchParams;
 }
 
+/** The page "/" opens to (2026-11-01: Jaeger opens straight to Chat; Home lives at /home). */
+export const DEFAULT_PAGE: PageId = "chat";
+
 export function pathOf(page: PageId, sub?: string): string {
-  const base = page === "home" ? "/" : `/${page}`;
+  const base = page === DEFAULT_PAGE ? "/" : `/${page}`;
   if (!sub || sub === SUBTABS[page]?.[0]?.id) return base;
-  return page === "home" ? `/home/${sub}` : `${base}/${sub}`;
+  return `/${page}/${sub}`;
 }
 
 /** Old top-level paths (/characters, /tasks/gallery?x=1 …) → the new path, or null when already current. */
@@ -61,15 +64,15 @@ export function canonicalPath(pathname: string, search = ""): string | null {
   return `${target}${tail ? `/${tail}` : ""}${search}`;
 }
 
-/** Parse a location (path + search). Unknown paths fall back to Home; retired paths resolve to their new tab. */
+/** Parse a location (path + search). "/" and unknown paths open DEFAULT_PAGE (Chat); retired paths resolve to their new tab. */
 export function parseRoute(pathname: string, search = ""): Route {
   const legacy = canonicalPath(pathname);
   if (legacy) pathname = legacy;
   const params = new URLSearchParams(search);
   const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
-  const head = (parts[0] ?? "home") as PageId;
+  const head = (parts[0] ?? DEFAULT_PAGE) as PageId;
   const known = PAGES.includes(head);
-  const page: PageId = known ? head : "home";
+  const page: PageId = known ? head : DEFAULT_PAGE;
   const rest = known ? parts.slice(1) : [];
   const subs = SUBTABS[page];
   if (!subs) return { page, sub: "", rest: rest.join("/"), params };
@@ -83,7 +86,7 @@ export function legacyRedirect(pathname: string, search: string): string | null 
   const ui = params.get("ui");
   if (ui === null) return null;
   params.delete("ui");
-  const target = ui === "apple" ? "/agents/characters" : ui === "windows" ? "/" : "/chat";
+  const target = ui === "apple" ? "/agents/characters" : ui === "windows" ? "/home" : "/chat";
   const keep = params.toString();
   const base = pathname === "/" || pathname === "" ? target : pathname;
   return keep ? `${base}?${keep}` : base;

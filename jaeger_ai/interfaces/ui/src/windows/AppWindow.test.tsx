@@ -106,7 +106,7 @@ it("the app bar follows the layout preset and its ⌘K field opens the palette",
 });
 
 it("Home shows the approvals section and the ⌘K palette offers pages and characters", async () => {
-  await mount("/");
+  await mount("/home");
   expect(front()).toBe("Home");
   expect(document.querySelector('[aria-label="Approvals"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="Control Center"]')).not.toBeNull();
