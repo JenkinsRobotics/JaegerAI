@@ -130,6 +130,11 @@ def _real_operator_state_roots() -> tuple[Path, ...]:
 
 
 _LIVE_ROOTS = _real_operator_state_roots()
+# Enforce writes in this Python process before collection. Subprocess suites
+# still require disposable state/credentials and owned listeners: this hook is
+# not an OS sandbox and does not claim to constrain arbitrary native children.
+from dev.tests.fixtures.live_write_guard import install as _protect_live_writes
+_protect_live_writes(_LIVE_ROOTS)
 _live_fingerprint_at_start: dict[str, tuple[int, int]] | None = None
 
 
@@ -205,7 +210,8 @@ def pytest_sessionstart(session: "pytest.Session") -> None:  # noqa: ARG001
     the run.
     """
     global _live_fingerprint_at_start, _registry_snapshot
-    _live_fingerprint_at_start = _fingerprint_live_roots()
+    _live_fingerprint_at_start = (
+        _fingerprint_live_roots() if os.environ.get("JAEGER_MONITOR_LIVE_STATE") == "1" else None)
     import jaeger_agent.tools  # noqa: F401 — module-level registrations
     try:
         from jaeger_ai.main import _register_builtins
@@ -232,8 +238,8 @@ def pytest_sessionfinish(session: "pytest.Session", exitstatus: int) -> None:  #
     if not (added or removed or changed):
         return
     report = ["", "=" * 70,
-              "TEST ISOLATION FAILURE: the suite modified a LIVE instance tree.",
-              "Tests must write only to tmp_path (set JAEGER_HOME to it).", ""]
+              "LIVE STATE MONITOR: files changed during this run; writer is unattributed.",
+              "Python test writes are blocked separately; concurrent services may write here.", ""]
     for label, names in (("added", added), ("removed", removed),
                          ("modified", changed)):
         for name in names[:10]:
@@ -242,7 +248,6 @@ def pytest_sessionfinish(session: "pytest.Session", exitstatus: int) -> None:  #
             report.append(f"  ... and {len(names) - 10} more {label}")
     report.append("=" * 70)
     print("\n".join(report))
-    session.exitstatus = 1
 
 
 def pytest_unconfigure(config: pytest.Config) -> None:  # noqa: ARG001

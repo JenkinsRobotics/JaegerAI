@@ -15,14 +15,14 @@ test('/diagnostics maps to a real extension-host command', () => {
 });
 
 test('diagnostics snapshot resolves workspace roots inside its own scope', () => {
-  const extension = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'chat-panel.js'), 'utf8');
   const start = extension.indexOf('const diagnosticsSnapshot =');
   const body = extension.slice(start, extension.indexOf('const ideContext =', start));
   assert.match(body, /const roots = \(vscode\.workspace\.workspaceFolders/);
 });
 
 test('IDE startup targets the canonical Gateway daemon, not stack bootstrap or the macOS app', () => {
-  const extension = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'chat-panel.js'), 'utf8');
   assert.match(extension, /const daemonArgs = \['gateway', 'daemon'\]/);
   assert.match(extension, /jaeger_ai\.core\.gateway\.server/);
   assert.doesNotMatch(extension, /stack', 'up/);
@@ -30,7 +30,7 @@ test('IDE startup targets the canonical Gateway daemon, not stack bootstrap or t
 });
 
 test('Gateway auto-start is an opt-in user setting, off by default', () => {
-  const extension = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'chat-panel.js'), 'utf8');
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   const setting = pkg.contributes.configuration.properties['jaeger.autoStartGateway'];
   assert.equal(setting.default, false);
@@ -41,7 +41,7 @@ test('Gateway auto-start is an opt-in user setting, off by default', () => {
 });
 
 test('testCommand is user-scoped so a workspace cannot choose a shell command', () => {
-  const extension = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'chat-panel.js'), 'utf8');
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
   assert.equal(pkg.contributes.configuration.properties['jaeger.testCommand'].scope, 'application');
   assert.match(extension, /const configured = userSetting\('testCommand'\)/);
@@ -76,7 +76,7 @@ test('diagnosticsLines summarize and bound workspace problems', () => {
 test('the IDE projects context chips from the existing ideContext contract', () => {
   const html = readMedia('index.html');
   const view = readMedia('view.js');
-  const extension = readMedia('../extension.js');
+  const extension = readMedia('../chat-panel.js');
   assert.match(html, /id="context-chips"/);
   assert.match(view, /renderContextChips\(\)/);
   assert.match(view, /context\.active_file/);

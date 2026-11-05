@@ -13,6 +13,16 @@ import os
 import sys
 
 sys.dont_write_bytecode = True
+# AGENTS.md §1: bytecode never lands in the source tree, even when this
+# conftest is imported before PYTHONDONTWRITEBYTECODE/PYTHONPYCACHEPREFIX
+# could take effect (e.g. a bare `pytest` from the repo root with a
+# Homebrew python that ignores -B). Redirect the cache out of the repo so
+# the root __pycache__ tripwire cannot fire. The pyc for THIS file is the
+# one exception: python must write it to cache or package-compile it
+# before running conftest, and PYTHONPYCACHEPREFIX (set by verify.sh and
+# ci-local.sh) already covers that case; the setdefault keeps a direct
+# invocation safe too.
+os.environ.setdefault("PYTHONPYCACHEPREFIX", os.path.expanduser("~/.cache/jaeger/pycache"))
 os.environ.setdefault("JAEGER_NO_GUI", "1")
 os.environ.setdefault("JAEGER_NO_ATTACH", "1")
 

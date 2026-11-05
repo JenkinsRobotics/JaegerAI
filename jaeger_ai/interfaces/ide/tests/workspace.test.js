@@ -10,7 +10,7 @@ const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8');
 test('the IDE exposes a real workspace picker control', () => {
   const html = read('media/index.html');
   const view = read('media/view.js');
-  const extension = read('extension.js');
+  const extension = read('chat-panel.js');
   assert.match(html, /id="workspace"/);
   assert.match(view, /post\('selectWorkspace'\)/);
   assert.match(view, /selectedWorkspace/);
@@ -27,7 +27,7 @@ test('/workspace opens the real workspace picker', () => {
 });
 
 test('workspace selection is persisted per Gateway endpoint and used for queued work', () => {
-  const extension = read('extension.js');
+  const extension = read('chat-panel.js');
   assert.match(extension, /workspaceStorageKey = \(\) => `workspace:\$\{endpoint\(\)\}`/);
   assert.match(extension, /context\.workspaceState\.update\(workspaceStorageKey\(\), selectedWorkspace\)/);
   assert.match(extension, /controller\.queue\(message\.text, model, provider, workspace/);

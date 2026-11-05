@@ -26,6 +26,13 @@
 # its upstream with:
 #     git subtree pull --prefix=packages/jaeger-os <url> <ref>
 
+# Installed wheels must describe the complete stack too. The source installer
+# supplies these distributions from packages/ before resolving this file.
+jaeger-os>=0.10.0
+jaeger-agent>=1.2.0
+jaeger-kokoro-tts>=0.12.0
+jaeger-whisper-stt>=0.13.0
+
 # --- agent core ---
 pydantic>=2.0
 requests>=2.32

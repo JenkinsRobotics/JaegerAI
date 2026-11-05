@@ -125,7 +125,7 @@ require.cache[gwPath] = { id: gwPath, filename: gwPath, loaded: true,
   exports: { Gateway: GatewayStub, GatewayError: GatewayErrorStub, localEndpoint: u => u, decodeSSE: async function* () {} } };
 
 // ---- Load extension ------------------------------------------------------
-const { activate } = require('../extension');
+const { activate } = require('../chat-panel');
 
 // ---- Test harness ---------------------------------------------------------
 const waitFor = async predicate => {
@@ -134,12 +134,13 @@ const waitFor = async predicate => {
 };
 
 function makeContext() {
+  const workspaceState = new Map();
   return {
     subscriptions: { push: () => {} },
     extensionUri: { toString: () => 'ext' },
     extensionPath: path.join(__dirname, '..'),
     globalStorageUri: { fsPath: '/tmp/jaeger-extension-global-storage-test' },
-    workspaceState: { get: () => ({}), update: async () => {} },
+    workspaceState: { get: (key, fallback) => workspaceState.has(key) ? workspaceState.get(key) : fallback, update: async (key, value) => { workspaceState.set(key, value); } },
   };
 }
 
@@ -165,12 +166,11 @@ function wireExtension(options = {}) {
     onDidDispose: fn => { disposeHandler = fn; return { dispose: () => {} }; },
   };
   const context = makeContext();
-  activate(context);
   // Trigger resolveWebviewView — captured by registerWebviewViewProvider.
   // Extension registers via subscriptions.push; we call it through the provider
   // object captured during registerWebviewViewProvider mock.
   mockVscode.window.registerWebviewViewProvider = (id, provider) => {
-    provider.resolveWebviewView(mockView);
+    if (id === 'jaeger.conversation') provider.resolveWebviewView(mockView);
     return { dispose: () => {} };
   };
   // Re-activate to pick up the updated mock
@@ -273,19 +273,19 @@ test('native chat answers editor requests once through the shared panel bridge',
 });
 
 test('explicit workspace selection reaches the Gateway admission body', async () => {
-  const { send, gateway, posted } = wireExtension();
-  send({ type: 'ready' });
-  await waitFor(() => gateway.instance !== undefined);
-  gateway.instance.sessions = async () => ({ sessions: [{ session_id: 'ws', title: 'T', status: 'idle', messages: [] }] });
-  gateway.instance.session = async id => ({ session_id: id, title: 'T', status: 'idle', messages: [] });
-  send({ type: 'select', id: 'ws' });
-  await new Promise(r => setTimeout(r, 50));
-
-  send({ type: 'selectWorkspace' });
-  await waitFor(() => posted.some(message => message.selectedWorkspace === '/workspace/two'));
-  send({ type: 'send', text: 'hello', model: '' });
-  await waitFor(() => gateway.sent !== null);
-  assert.equal(gateway.sent.workspace, '/workspace/two', 'selected workspace must be frozen into admission');
+  const f = workspaceFixture(); let wired;
+  try {
+    wired = wireExtension();
+    await wired.send({ type: 'ready' });
+    const gw = wired.gateway.instance;
+    gw.sessions = async () => ({ sessions: [{ session_id: 'ws', title: 'T', status: 'idle', messages: [] }] });
+    gw.session = async id => ({ session_id: id, title: 'T', status: 'idle', messages: [] });
+    await wired.send({ type: 'select', id: 'ws' });
+    await wired.send({ type: 'selectWorkspace' });
+    assert.ok(wired.posted.some(message => message.selectedWorkspace === f.b));
+    await wired.send({ type: 'send', text: 'hello', model: '' });
+    assert.equal(wired.gateway.sent.workspace, f.b, 'selected workspace must be frozen into admission');
+  } finally { wired?.dispose(); f.close(); }
 });
 
 test('@ mention stages the picked workspace file through the Gateway attachment contract', async () => {
@@ -550,21 +550,21 @@ test('native chat cancellation during admission is sent once after acceptance an
 });
 
 test('selected workspace controls automatic admission context and mention search root', async () => {
-  jaegerModelSetting = '';
-  const wired = wireExtension(); await wired.send({ type: 'ready' });
-  await wired.send({ type: 'selectWorkspace' });
-  await wired.send({ type: 'select', id: 'context-session' });
-  mockVscode.window.activeTextEditor = { document: { uri: { scheme: 'file', fsPath: '/workspace/one/private.py' }, getText() { assert.fail('outside selection must not be read'); } },
-    selection: { isEmpty: false, start: { line: 0 }, end: { line: 1 }, active: { line: 1 } } };
+  const f = workspaceFixture(); let wired;
   const oldFind = mockVscode.workspace.findFiles;
-  let searched;
-  mockVscode.workspace.findFiles = async pattern => { searched = pattern; return [{ fsPath: '/workspace/two/main.py' }]; };
   try {
+    jaegerModelSetting = '';
+    wired = wireExtension(); await wired.send({ type: 'ready' });
+    await wired.send({ type: 'selectWorkspace' });
+    await wired.send({ type: 'select', id: 'context-session' });
+    mockVscode.window.activeTextEditor = f.editor(f.fileA, () => { assert.fail('outside selection must not be read'); });
+    let searched;
+    mockVscode.workspace.findFiles = async pattern => { searched = pattern; return [{ fsPath: f.fileB }]; };
     await wired.send({ type: 'send', text: 'Inspect', model: '' });
-    assert.deepEqual(wired.gateway.sent.options.ide, { workspace_folders: ['/workspace/two'] });
+    assert.deepEqual(wired.gateway.sent.options.ide, { workspace_folders: [f.b] });
     await wired.send({ type: 'mentionFile' });
-    assert.equal(searched.base, '/workspace/two');
-  } finally { mockVscode.window.activeTextEditor = undefined; mockVscode.workspace.findFiles = oldFind; }
+    assert.equal(searched.base, f.b);
+  } finally { wired?.dispose(); mockVscode.workspace.findFiles = oldFind; f.close(); }
 });
 
 test('native chat preserves request identity after an uncertain admission instead of inviting a resend', async () => {

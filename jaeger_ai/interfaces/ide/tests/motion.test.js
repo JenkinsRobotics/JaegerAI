@@ -8,7 +8,7 @@ const path = require('node:path');
 const media = path.join(__dirname, '..', 'media');
 const css = fs.readFileSync(path.join(media, 'motion.css'), 'utf8');
 const html = fs.readFileSync(path.join(media, 'index.html'), 'utf8');
-const extension = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+const extension = fs.readFileSync(path.join(__dirname, '..', 'chat-panel.js'), 'utf8');
 
 test('motion stylesheet is loaded by the panel and substituted by the extension', () => {
   assert.match(html, /href="\{\{MOTION\}\}"/);
