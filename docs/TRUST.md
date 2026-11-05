@@ -27,6 +27,6 @@ Each leaving item is logged: what, why, for which job, and what was approved.
 ## Apple-first, staged
 
 - Target Apple Silicon (Mac Studio, iPhone) with MLX / Core ML where a model actually exists, and plain Swift / Python tooling where it does not.
-- Cloud LLM proposer now, MLX on-device later, same interface, only when a small model passes the same checks as the cloud model on the same tasks.
+- Cloud LLM today, MLX on-device later, same interface, only when a small model passes the same checks as the cloud model on the same tasks. (Corrected 2026-11-05: "proposer" described the old approval-gate-as-default design; Jaeger is an autonomous operator within enforced authority tiers — cloud vs on-device is about the model, not about who decides.)
 - No custom chip, custom OS, or custom inference engine in v1.
 - Current state, honestly: Jaeger LLM work today uses cloud models. On-device is the direction to build toward, not something to claim today.
