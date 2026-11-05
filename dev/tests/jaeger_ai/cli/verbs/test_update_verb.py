@@ -459,6 +459,7 @@ def test_update_download_rebuilds_swift_app(tmp_path, monkeypatch):
     monkeypatch.setattr(U, "_download_tarball",
                         lambda repo, ref, dest: dest.write_bytes(b""))
     monkeypatch.setattr(U, "_extract_product", fake_extract)
+    monkeypatch.setattr(U, "_reinstall_deps", lambda h: 0)
     rebuilds: list = []
     monkeypatch.setattr(U, "_rebuild_mac_shell", lambda h: rebuilds.append(h))
     assert U._update_download(home, ref="9.9.9") == 0

@@ -1,5 +1,6 @@
 'use strict';
 const assert = require('node:assert/strict');
+const path = require('node:path');
 const test = require('node:test');
 const slash = require('../media/slash-commands');
 const commands = require('../commands');
@@ -123,26 +124,26 @@ test('export writes a Markdown transcript of user and assistant turns only', () 
 
 test('IDE context: active file and selection are relative to the workspace and bounded', () => {
   const ctx = commands.buildIdeContext({
-    folders: ['/w/proj'],
+    folders: ['/w/proj'], canonicalPath: path.resolve,
     active: { path: '/w/proj/src/app.py', language: 'python', cursorLine: 12,
       selectionText: 'def f():\n  return 1', startLine: 10, endLine: 11 },
     openPaths: ['/w/proj/src/app.py', '/w/proj/README.md', '/w/proj/README.md', '/elsewhere/notes.txt'],
   });
   assert.equal(ctx.active_file, 'src/app.py');
   assert.deepEqual(ctx.selection, { text: 'def f():\n  return 1', truncated: false, start_line: 10, end_line: 11 });
-  assert.deepEqual(ctx.open_files, ['README.md', '/elsewhere/notes.txt']);
+  assert.deepEqual(ctx.open_files, ['README.md']);
   assert.equal(ctx.cursor_line, 12);
   assert.deepEqual(ctx.workspace_folders, ['/w/proj']);
 });
 
 test('IDE context: a long selection and many tabs are truncated; nothing open gives null', () => {
   const ctx = commands.buildIdeContext({
-    folders: ['/w'], active: { path: '/w/a.py', selectionText: 'x'.repeat(9000) },
+    folders: ['/w'], canonicalPath: path.resolve, active: { path: '/w/a.py', selectionText: 'x'.repeat(9000) },
     openPaths: Array.from({ length: 50 }, (_, i) => `/w/f${i}.py`),
   });
   assert.equal(ctx.selection.text.length, commands.IDE_LIMITS.selection);
   assert.equal(ctx.selection.truncated, true);
   assert.equal(ctx.open_files.length, commands.IDE_LIMITS.openFiles);
   assert.equal(commands.buildIdeContext({}), null);
-  assert.equal(commands.buildIdeContext({ active: { path: '/x/y.py', selectionText: '   ' } }).selection, undefined);
+  assert.equal(commands.buildIdeContext({ active: { path: '/x/y.py', selectionText: '   ' } }), null);
 });

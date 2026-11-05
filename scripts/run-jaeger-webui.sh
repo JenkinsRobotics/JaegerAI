@@ -65,7 +65,7 @@ export JAEGER_GATEWAY_URL
 export JAEGER_OLLAMA_URL="${JAEGER_OLLAMA_URL:-http://127.0.0.1:11434}"
 export HERMES_WEBUI_EXTENSION_DIR="$repo_root/jaeger_ai/assets"
 
-export PYTHONPATH="${repo_root}${PYTHONPATH:+:$PYTHONPATH}"
+export PYTHONPATH="${repo_root}:${repo_root}/packages/jaeger-agent:${repo_root}/packages/jaeger-os:${repo_root}/packages/jaeger-kokoro-tts:${repo_root}/packages/jaeger-whisper-stt${PYTHONPATH:+:$PYTHONPATH}"
 
 # The sidebar listing needs a current-schema state.db in the agent home.
 "$python_exe" -c \

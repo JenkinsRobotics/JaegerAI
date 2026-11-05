@@ -53,7 +53,7 @@ test('queued plan work also carries the update_plan-only grant', async () => {
 test('the webview and extension expose the real Plan mode contract', () => {
   const html = readMedia('index.html');
   const view = readMedia('view.js');
-  const extension = readMedia('../extension.js');
+  const extension = readMedia('../chat-panel.js');
   assert.match(html, /id="mode-switch"/);
   assert.match(view, /planModeOn/);
   assert.match(view, /planOnly: planModeOn/);

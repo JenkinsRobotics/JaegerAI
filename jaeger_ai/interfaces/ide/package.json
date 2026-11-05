@@ -370,6 +370,12 @@
           "type": "boolean",
           "default": true,
           "description": "Let Jaeger on this Mac use your VS Code Copilot models over a private loopback bridge (127.0.0.1, new token each VS Code start, ~/.jaeger/run/vscode-bridge.json). No API keys."
+        },
+        "jaeger.testCommand": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "description": "User-selected verification command. Empty detects the workspace test runner; workspace settings cannot override this command."
         }
       }
     },

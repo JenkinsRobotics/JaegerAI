@@ -34,7 +34,12 @@ self.addEventListener('fetch', () => {});
 
 
 def dist_root() -> Path | None:
-    root = Path(os.environ.get("JAEGER_WEBUI_UI_DIST") or _DIST_DEFAULT).expanduser()
+    override = os.environ.get("JAEGER_WEBUI_UI_DIST")
+    # Release wheels carry the built screen. Developer builds retain their
+    # external cache, but cannot shadow an installed release's packaged bytes.
+    bundled = Path(__file__).resolve().parents[3] / "assets" / "shared-ui"
+    root = Path(override).expanduser() if override else (
+        bundled if (bundled / "index.html").is_file() else _DIST_DEFAULT)
     return root.resolve() if (root / "index.html").is_file() else None
 
 

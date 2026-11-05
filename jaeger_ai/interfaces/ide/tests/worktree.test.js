@@ -46,7 +46,7 @@ test('/worktree is a real command and routes to the existing-worktree picker', (
   const parsed = parse('/worktree', {});
   assert.equal(parsed.command.name, 'worktree');
   const view = read('media/view.js');
-  const extension = read('extension.js');
+  const extension = read('chat-panel.js');
   assert.match(view, /post\('selectWorktree'\)/);
   assert.match(extension, /git.*worktree.*list.*porcelain|worktree.*list.*porcelain/);
   assert.match(extension, /selectedWorkspace = picked\.row\.path/);

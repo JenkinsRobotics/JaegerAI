@@ -226,7 +226,7 @@ test('Gateway.capabilities() calls /v1/runtime/capabilities', async () => {
 });
 
 test('onboarding guidance truthfully specifies zero local models and Settings Sync boundaries', () => {
-  const extSource = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const extSource = fs.readFileSync(path.join(__dirname, '..', 'chat-panel.js'), 'utf8');
   // Thin client: zero local models downloaded or executed
   assert.match(extSource, /Zero local models are downloaded, installed, or executed/);
   // Remote execution: all models run on or are accessed by remote server

@@ -1,26 +1,29 @@
 #!/usr/bin/env bash
 #
-# build-shell.sh — assemble the JaegerShell dev app (debug only).
+# build-shell.sh — assemble the canonical shell (debug by default).
 #
 #   Output:    ~/.cache/jaeger/macos-shell/JaegerShell.app (JAEGER_MAC_BUILD overrides)
 #   Bundle ID: com.jenkinsrobotics.JaegerAI.uirebuild                   (asserted)
 #
-# It never builds release, never installs, never touches JaegerAI.app (either
+# JAEGER_MAC_CONFIGURATION=release builds a portable candidate. Never installs
+# or touches JaegerAI.app (either
 # location), launchd or the venv. Takes no arguments; never installs or launches.
 set -euo pipefail
-[[ $# -eq 0 ]] || { echo "build-shell.sh takes no arguments (debug only)" >&2; exit 2; }
+[[ $# -eq 0 ]] || { echo "build-shell.sh takes no arguments" >&2; exit 2; }
+CONFIGURATION="${JAEGER_MAC_CONFIGURATION:-debug}"
+case "$CONFIGURATION" in debug|release) ;; *) echo "Invalid Mac configuration" >&2; exit 2 ;; esac
 
 PKG="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-REPO="$(git -C "$PKG" rev-parse --show-toplevel)"
+REPO="$(cd "$PKG/../../.." && pwd)"
 ROOT="$(bash "$PKG/Scripts/build-root.sh")"
 SCRATCH="$ROOT/scratch"
 APP="$ROOT/JaegerShell.app"
 WANT_ID="com.jenkinsrobotics.JaegerAI.uirebuild"
 mkdir -p "$ROOT"
 
-echo "[build-shell] swift build -c debug --scratch-path $SCRATCH"
-swift build -c debug --package-path "$PKG" --scratch-path "$SCRATCH"
-BIN="$(swift build -c debug --package-path "$PKG" --scratch-path "$SCRATCH" --show-bin-path)"
+echo "[build-shell] swift build -c "$CONFIGURATION" --scratch-path $SCRATCH"
+swift build -c "$CONFIGURATION" --package-path "$PKG" --scratch-path "$SCRATCH"
+BIN="$(swift build -c "$CONFIGURATION" --package-path "$PKG" --scratch-path "$SCRATCH" --show-bin-path)"
 [[ -x "$BIN/JaegerShell" ]] || { echo "[build-shell] missing $BIN/JaegerShell" >&2; exit 1; }
 
 STAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/jaeger-shell.XXXXXX")"
@@ -31,10 +34,15 @@ cp "$PKG/Resources/Info.plist" "$STAGE/Contents/Info.plist"
 ID="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$STAGE/Contents/Info.plist")"
 [[ "$ID" == "$WANT_ID" ]] || { echo "[build-shell] wrong bundle id: $ID" >&2; exit 1; }
 VER="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' "$REPO/jaeger_ai/__init__.py")"
-SHA="$(git -C "$REPO" rev-parse --short HEAD)"
+SHA="$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || printf archive)"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${VER:-0.0.0}" \
     -c "Set :CFBundleVersion ${VER:-0.0.0}+$SHA" "$STAGE/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Add :JaegerLauncher string $REPO/jaeger" "$STAGE/Contents/Info.plist"
+if [[ "$CONFIGURATION" == debug ]]; then
+    /usr/libexec/PlistBuddy -c "Add :JaegerLauncher string $REPO/jaeger" "$STAGE/Contents/Info.plist"
+else
+    # Explicit installed-console pin; no CI workstation path and no legacy app fallback.
+    /usr/libexec/PlistBuddy -c 'Add :JaegerLauncher string ~/.jaeger/venv/bin/jaeger' "$STAGE/Contents/Info.plist"
+fi
 cp "$BIN/JaegerShell" "$STAGE/Contents/MacOS/JaegerShell"
 
 # Loose resources (status-bar icons etc.) go straight into Contents/Resources.
@@ -55,7 +63,7 @@ cp "$A/jaeger_app_icon_512.png" "$ICONSET/icon_512x512.png"
 cp "$A/jaeger_app_icon.png"     "$ICONSET/icon_512x512@2x.png"
 iconutil -c icns -o "$STAGE/Contents/Resources/AppIcon.icns" "$ICONSET"
 
-git -C "$REPO" rev-parse HEAD > "$STAGE/Contents/Resources/build-commit"
+git -C "$REPO" rev-parse HEAD > "$STAGE/Contents/Resources/build-commit" 2>/dev/null || printf "archive\n" > "$STAGE/Contents/Resources/build-commit"
 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH="$REPO" python3 -B - "$REPO" <<'PY' > "$STAGE/Contents/Resources/build-source-hash"
 from pathlib import Path
 from jaeger_ai.cli._common import mac_source_fingerprint

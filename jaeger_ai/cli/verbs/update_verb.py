@@ -160,7 +160,9 @@ def _restore(home: Path, prev: Path, items: list[str]) -> list[str]:
         cur = home / item
         if cur.exists():
             shutil.rmtree(cur) if cur.is_dir() else cur.unlink()
-        os.replace(saved, home / item)
+        # Keep the recovery source intact until dependency and app restoration
+        # have succeeded. A failed reinstall must be safely retryable.
+        shutil.copytree(saved, home / item) if saved.is_dir() else shutil.copy2(saved, home / item)
         restored.append(item)
     return restored
 
@@ -219,7 +221,9 @@ def _update_download(home: Path, *, ref: str | None = None,
         swapped = _swap_in(home, staging, copied, prev)
         print(f"[jaeger update] applied {len(swapped)} item(s); previous kept "
               f"in {_PREV_DIR}/ (`jaeger update --rollback` to revert).")
-        if force or _deps_changed(home, prev):
+        # Code can change without a requirements/version change. Installed
+        # wheels and the shared UI must always follow the swapped source.
+        if swapped:
             rc = _reinstall_deps(home)
             if rc != 0:
                 print(f"[jaeger update] dep resync exited {rc} — `jaeger update "
@@ -227,7 +231,9 @@ def _update_download(home: Path, *, ref: str | None = None,
                 return rc
         else:
             print("[jaeger update] dependencies unchanged — skipped reinstall.")
-        _rebuild_mac_shell(home)
+        rc = _rebuild_mac_shell(home)
+        if rc:
+            return rc
     finally:
         shutil.rmtree(staging, ignore_errors=True)
     verb = "reinstalled" if force else "now at"
@@ -235,24 +241,25 @@ def _update_download(home: Path, *, ref: str | None = None,
     return 0
 
 
-def _rebuild_mac_shell(home: Path, *, only_if_stale: bool = False) -> None:
+def _rebuild_mac_shell(home: Path, *, only_if_stale: bool = False) -> int:
     """Build the canonical shared-UI shell without installing or starting it."""
     from jaeger_ai.cli._common import mac_app_bundle, mac_app_is_stale
     script = home / "jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh"
     if not script.is_file():
-        return
+        return 0
     try:
         bundle = mac_app_bundle(home)
         if only_if_stale and not mac_app_is_stale(home, bundle):
-            return
+            return 0
     except ValueError as exc:
         print(f"[jaeger update] Mac build configuration invalid: {exc}", file=sys.stderr)
-        return
+        return 1
     if shutil.which("swift") is None:
         print("[jaeger update] Swift unavailable; canonical Mac shell was not built", file=sys.stderr)
-        return
+        return 0
     result = subprocess.run(["bash", str(script)], stdout=subprocess.DEVNULL)
     print(f"[jaeger update] canonical Mac shell build exited {result.returncode}")
+    return result.returncode
 
 
 def jaeger_exe() -> Path:
@@ -319,8 +326,15 @@ def _do_rollback(home: Path) -> int:
         return 1
     restored = _restore(home, prev, items)
     print(f"[jaeger update] rolled back {len(restored)} item(s).")
-    _reinstall_deps(home)
-    _rebuild_mac_shell(home)   # the built app must match the restored core
+    rc = _reinstall_deps(home)
+    if rc:
+        print(f"[jaeger update] rollback dependency restoration failed ({rc}); "
+              f"recovery copy retained at {prev}. Retry --rollback.", file=sys.stderr)
+        return rc
+    rc = _rebuild_mac_shell(home)   # the built app must match the restored core
+    if rc:
+        print(f"[jaeger update] rollback app build failed ({rc}); recovery copy retained.", file=sys.stderr)
+        return rc
     shutil.rmtree(prev, ignore_errors=True)
     print("[jaeger update] restart `jaeger` to apply the rolled-back version.")
     return 0
@@ -351,8 +365,9 @@ def _update_editable(*, ref: str | None = None) -> int:
     # The .app is a build artifact the pull can't deliver — rebuild whenever
     # the Swift tree moved past the built bundle's stamp (also catches pulls
     # done by hand and installs whose first build failed → missing app).
-    _rebuild_mac_shell(repo, only_if_stale=True)
-    return rc
+    if rc:
+        return rc
+    return _rebuild_mac_shell(repo, only_if_stale=True) or 0
 
 
 def _run_upgrade(method: str, *, ref: str | None = None) -> int:

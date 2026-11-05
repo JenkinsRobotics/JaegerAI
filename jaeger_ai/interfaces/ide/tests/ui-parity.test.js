@@ -70,7 +70,7 @@ test('composer groups attachments, execution controls, send, and location metada
 test('chat search is wired to Gateway transcript search', () => {
   const gateway = fs.readFileSync(path.join(__dirname, '..', 'gateway.js'), 'utf8');
   const conversation = fs.readFileSync(path.join(__dirname, '..', 'conversation.js'), 'utf8');
-  const extension = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'chat-panel.js'), 'utf8');
   assert.match(gateway, /sessions\(query = ''\)/);
   assert.match(conversation, /searchSessions\(query = ''\)/);
   assert.match(extension, /message\.type === 'searchChats'/);
@@ -82,7 +82,7 @@ test('transcript matches survive the client-side chat projection', () => {
 });
 
 test('editing a message creates a Gateway branch before resending', () => {
-  const extension = fs.readFileSync(path.join(__dirname, '..', 'extension.js'), 'utf8');
+  const extension = fs.readFileSync(path.join(__dirname, '..', 'chat-panel.js'), 'utf8');
   assert.match(extension, /message\.type === 'editMessage'/);
   assert.match(extension, /gateway\.branch\(id, \{ message_id: message\.messageId \}\)/);
   assert.match(extension, /controller\.send\(text\)/);
