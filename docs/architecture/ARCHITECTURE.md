@@ -1,5 +1,5 @@
 > **Classification:** CURRENT AUTHORITATIVE.
-> **Current product definition:** [`docs/PRODUCT.md`](../PRODUCT.md) — JaegerAI is the standalone intelligence stack, not a workspace hub. Thin clients -> Gateway (control plane only) -> intelligence (jaeger-agent + JaegerAI modules) -> JROS (body) / Aether (CAD/sim) / NAS (store), with a checker + approval gate separate from the turn loop.
+> **Current product definition:** [`docs/PRODUCT.md`](../PRODUCT.md) — JaegerAI is the standalone intelligence stack, not a workspace hub. Thin clients -> Gateway (control plane only) -> intelligence (jaeger-agent + JaegerAI modules) -> JROS (body) / Aether (CAD/sim) / NAS (store), with policy enforced at tool boundaries in code by the authority kernel (`core/authority/kernel.py`): Tier 1 autonomous, Tier 2 act-and-notify, Tier 3 owner authorization (approval is the Tier 3 gate, not the default).
 
 # Jaeger Architecture (surviving design)
 

@@ -35,7 +35,8 @@ a standalone intelligence stack — a platform for proactive, world-model AI
 companions and operators. It is one identity that listens, sees live,
 speaks to you, remembers you and your work, helps day to day, runs your
 projects, and eventually moves in a robotic body, with the same memory and
-the same approval gate in every case. It integrates with robot operating
+the same enforced authority tiers in every case (Tier 1 autonomous,
+Tier 2 act-and-notify, Tier 3 owner authorization — see docs/PRODUCT.md). It integrates with robot operating
 systems (JROS/JaegerOS), CAD and simulation tools (Aether Suite or alternatives),
 your NAS or file storage, and YouTube (real engineering work, the fastest
 revenue engine). It is not a workspace hub, not a CAD suite, and not

@@ -8,7 +8,7 @@ Source + copy:
 - NOT in the Jaeger repo before this module: Jaeger has features/dispatcher (primary/worker sessions + Kanban + sidecar) and core/runtime work_ledger, but neither is a generic SQLite job queue with this exact schema. Overlap check: dispatcher is session routing, work_ledger is runtime bookkeeping, vault-queue is a job queue — different jobs, so this is an OPTIONAL alternative, not a duplicate to delete. Do NOT merge it into dispatcher without an import check.
 
 How it bolts on (wire later):
-- Register as a Jaeger tool / host service via the tool registry, with a bound database path (never a model-named path, never ~/.jaeger state without an owner). Jobs are data, not permission: claiming a job does NOT authorize its effect — the effect still goes through proposer/checker/approval gate.
+- Register as a Jaeger tool / host service via the tool registry, with a bound database path (never a model-named path, never ~/.jaeger state without an owner). Jobs are data, not permission: claiming a job does NOT authorize its effect — the effect still goes through the policy kernel authority check (Tier 1/2/3; Tier 3 requires owner authorization).
 - Keep it single-writer: one process owns the queue DB, readers use the module, not direct SQLite opens from multiple agents (see project-boundaries module).
 
 Test to run when code-run is available, alone first: enqueue 3 jobs with different priorities, claim in priority order, fail one twice then succeed, fail one past max_retries and record error, restart and verify no job is lost or double-claimed, WAL mode on.

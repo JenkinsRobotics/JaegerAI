@@ -6,7 +6,7 @@ Copy this whole file into your IDE agent. Work ONLY in /path/to/JaegerAI. Do NOT
 
 Owner: The operator (configurable — detected from OS account or set in instance config). Explain results in plain, checkable language. No coder jargon without explaining it, no claim that code existing proves it works.
 
-JaegerAI is the standalone repo for the intelligence stack (configurable business context). It is a proactive, world-model AI companion and operator, with ONE identity, the same memory and the same approval gate whether it is talking, running the business, or eventually in a robotic body.
+JaegerAI is the standalone repo for the intelligence stack (configurable business context). It is a proactive, world-model AI companion and operator, with ONE identity, the same memory and the same enforced authority tiers (Tier 1/2/3, policy kernel) whether it is talking, running the business, or eventually in a robotic body.
 
 It is NOT a workspace hub, NOT a CAD suite, NOT a machine project, NOT a chatbot or model wrapper, NOT a plugin marketplace, NOT a multi-agent swarm, NOT a custom CAD kernel/renderer/OS/chip.
 
@@ -16,7 +16,7 @@ Your first customer/project: turn ideas into products, build YouTube and become 
 
 Cloud LLM today, on-device is the goal — do NOT describe Jaeger as local-model by default. The app/runtime may run locally, LLM work today uses cloud models.
 
-Core rules, never break them: MODEL != AGENT, SESSION != AGENT, CLIENT != AGENT, DEVICE != AGENT. PROPOSED ACTION != AUTHORIZED ACTION. TOOL SUCCESS != VERIFIED SUCCESS. MEMORY != CONTEXT WINDOW. OBSERVATION != CLAIM != BELIEF != FACT. ONE FACT = ONE AUTHORITATIVE OWNER. The LLM proposes only. A checker simulates/verifies the exact artefact. A human approves that exact artefact. Only then does it act. Re-plan = re-simulate + re-approve. A worker claiming done is not proof.
+Core rules, never break them: MODEL != AGENT, SESSION != AGENT, CLIENT != AGENT, DEVICE != AGENT. PROPOSED ACTION != AUTHORIZED ACTION. TOOL SUCCESS != VERIFIED SUCCESS. MEMORY != CONTEXT WINDOW. OBSERVATION != CLAIM != BELIEF != FACT. ONE FACT = ONE AUTHORITATIVE OWNER. Authority is tiered and enforced in code by the policy kernel (core/authority/kernel.py), not by prompt: Tier 1 acts independently (research, reads, drafts, authorised edits, tests, LOCAL git commits, service restarts); Tier 2 acts and notifies; Tier 3 requires owner authorization (financial, external comms, publishing, destructive, permission changes, physical actuation — plus independent hardware safety checks). REMOVED 2026-11-05: the old "LLM proposes only, human approves every artefact" rule was an earlier agent's misreading, not the owner's design; approval is the Tier 3 gate, not the default. A worker claiming done is not proof — verification is engineering (before/during/after), not a human bottleneck. Local commits are Tier 1; remote pushes need an explicit repo/branch grant.
 
 Personalities ARE included, they are a JaegerAI framework feature, do NOT park them. JaegerAI features/personality/ (schema, character.py, compose.py, persona_state.py, 20 character folders, HEXACO/SPECIAL/Expression/Domains, YAML editable, always on) is the main personality system. Characters are persona packs for the ONE companion identity, not separate identities, not separate products. jaeger-agent has NO personality file and NO character library, only persona_lane.py (Mode C routing, a different job) and tools/persona.py which IMPORTS JaegerAI personality — that import is a host-seam issue, do NOT fix it by editing jaeger-agent. Default companion character is NOT yet confirmed — do NOT assume one, ask the operator or leave it as an open question in your report.
 
@@ -63,7 +63,7 @@ Step 6 — Git commit, ONLY after Steps 1-4 pass. From Terminal in /path/to/Jaeg
 
 From Desktop "Ai  work " (double space + trailing space, open via trailing slash). All are in jaeger_ai/modules/, all are NOT yet wired:
 
-- wake-word-swabble: Swabble local-only wake-word gate, upstream steipete/swabble, NOT Jaeger code. the operator must pick a Jaeger wake word — do NOT use upstream default "clawd"/"claude". Hook -> Gateway turn, approval gate still applies.
+- wake-word-swabble: Swabble local-only wake-word gate, upstream steipete/swabble, NOT Jaeger code. the operator must pick a Jaeger wake word — do NOT use upstream default "clawd"/"claude". Hook -> Gateway turn; authority is checked by the policy kernel per the tier model (Tier 3 items still require authorization).
 - ios-client-donor: Hermex/HermesMobile iOS donor reference ONLY, HISTORICAL/DONOR, targets Hermes WebUI not Jaeger Gateway. License check + re-target to Gateway :33418 / WebUI :8790 + rebrand before any code use. Do NOT copy wholesale, do NOT present as a Jaeger iOS app.
 - apple-mail-cleanup: ares-mail inbox_zero/junk_kill + AppleScript mail cleaning. Mail deletion is irreversible: dry-run + report + approval bound to exact batch first, NEVER. NEVER list is personal, review it, do NOT hardcode it.
 - vault-queue: vault_queue.py copied verbatim, SQLite WAL job queue, stdlib only. Test alone, then wire via tool registry, single-writer DB, claiming a job does NOT authorize its effect.

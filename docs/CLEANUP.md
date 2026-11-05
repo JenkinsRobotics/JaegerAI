@@ -4,7 +4,7 @@ What was done by Muse (Mac app, no code-run, no git, no Terminal), under Matthew
 
 ## Confirmed definition used for all docs edits
 
-JaegerAI is the standalone repo for the intelligence stack for Jenkins Robotics. Proactive, world-model AI companion and operator, one identity, same memory and same approval gate, whether talking, running the business, or eventually in a robotic body. NOT a workspace hub, NOT a CAD suite, NOT a machine project. Cloud LLM today, on-device is the goal. JROS is our ROS 2 alternative, Aether Suite is CAD and simulations, NAS at /Volumes/Jenkins_Robotics is the business home, YouTube is the fastest revenue engine. Personalities are a JaegerAI framework feature (see modules/personality/) — characters are persona packs for the one companion, not separate identities.
+JaegerAI is the standalone repo for the intelligence stack for Jenkins Robotics. Proactive, world-model AI companion and operator, one identity, same memory and same enforced authority tiers (Tier 1 autonomous / Tier 2 notify / Tier 3 authorize), whether talking, running the business, or eventually in a robotic body. NOT a workspace hub, NOT a CAD suite, NOT a machine project. Cloud LLM today, on-device is the goal. JROS is our ROS 2 alternative, Aether Suite is CAD and simulations, NAS at /Volumes/Jenkins_Robotics is the business home, YouTube is the fastest revenue engine. Personalities are a JaegerAI framework feature (see modules/personality/) — characters are persona packs for the one companion, not separate identities.
 
 ## Docs realigned (no code changed in this step)
 
