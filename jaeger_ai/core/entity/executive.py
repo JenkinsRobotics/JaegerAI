@@ -186,6 +186,22 @@ class ExecutiveStrategySelector:
                     target_specialist=spec,
                 )
 
+            # Voice fast lane (vNext M3, 2026-11-05): a spoken turn on a voice
+            # session takes the direct lane — no deliberate planning, no tool
+            # loop unless the turn itself asks for work. Authority is still
+            # enforced per action by the policy kernel; this only picks the
+            # cognition strategy, never skips verification.
+            if payload.get("source") == "voice" or bool(payload.get("fast_lane")):
+                asks_for_work = bool(
+                    re.search(r"(?i)\b(?:run|build|fix|test|commit|push|create|write|edit|delete|check|find|search|look up|refactor|deploy|start|stop|restart)\b", text)
+                )
+                if not asks_for_work:
+                    return ExecutiveDecision(
+                        strategy=CognitiveStrategy.DIRECT_RESPONSE,
+                        reason="Voice fast lane: conversational turn on a voice session, direct reply",
+                        estimated_steps=1,
+                    )
+
             # Explicit text-only session or explicit no-tools instruction -> DIRECT_RESPONSE
             explicit_no_tools = bool(
                 re.search(r"(?i)\b(?:text[- ]only|no\s+tools|do\s+not\s+use\s+tools|without\s+tools)\b", text)

@@ -263,7 +263,7 @@ class GatewayTurnClient:
             raw=row,
         )
 
-    def turn(self, session_id: str, text: str, *, timeout_s: float = 600.0) -> TurnResult:
+    def turn(self, session_id: str, text: str, *, timeout_s: float = 600.0, fast_lane: bool = False) -> TurnResult:
         submitted_at = time.time()
-        rid = self.submit(session_id, text)
+        rid = self.submit(session_id, text, fast_lane=True) if fast_lane else self.submit(session_id, text)
         return self.wait(session_id, rid, timeout_s=timeout_s, submitted_at=submitted_at)

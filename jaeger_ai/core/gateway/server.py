@@ -3707,6 +3707,15 @@ class JaegerGatewayApp:
                 requested["provider"] = lane
         if "interaction_tier" not in requested:
             requested["interaction_tier"] = self._current_tier()
+        # vNext M3 fast lane: a client may mark a turn fast_lane (voice uses
+        # this); it lands in options so the executive can route it to the
+        # direct cognition lane. It selects a strategy only — authority and
+        # verification are unchanged.
+        if body.get("fast_lane"):
+            opts = requested.get("options")
+            opts = dict(opts) if isinstance(opts, dict) else {}
+            opts["fast_lane"] = True
+            requested["options"] = opts
         # The acting caller is assigned here from the authenticated request,
         # never taken from the body.
         requested.pop("caller", None)
@@ -5325,6 +5334,15 @@ class JaegerGatewayApp:
             runtime = EntityRuntime.get_singleton()
 
             tier = (execution or {}).get("interaction_tier") or self._current_tier()
+            # vNext M3 fast lane: turns on a voice-* session are spoken
+            # conversation; the executive routes them to DIRECT_RESPONSE
+            # unless the utterance asks for work. Authority and verification
+            # are unchanged — this only selects the cognition strategy.
+            is_voice_session = str(session_id or "").startswith("voice-")
+            # Client-marked fast lane (voice client sends fast_lane=True) is
+            # frozen into the admission execution options; honor it here too.
+            req_opts = (execution or {}).get("options") or {}
+            fast_lane = is_voice_session or bool(req_opts.get("fast_lane"))
             turn_meta = {
                 "execution_mode": "text_only" if (text_only or tier == "chat") else "agent",
                 "interaction_tier": tier,
@@ -5332,6 +5350,7 @@ class JaegerGatewayApp:
                 "role": role_s,
                 "agent_id": agent_fields.get("agent_id"),
                 "specialist": agent_fields.get("agent_id") if role_s == "specialist" else None,
+                "fast_lane": True if fast_lane else None,
             }
 
             # One turn shape. The main loop is the agent loop: build the request with
