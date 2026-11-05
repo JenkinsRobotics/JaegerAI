@@ -100,6 +100,7 @@ class VoiceSession:
         self.turn_timeout_s = turn_timeout_s
         self.on_turn = on_turn
         self._barge_in = threading.Event()
+        self._barge_in_at: float | None = None  # when speech interrupted playback
 
     def open(self) -> str:
         """Attach to the Entity. Returns its id; raises if the Gateway is down."""
@@ -119,6 +120,7 @@ class VoiceSession:
         self._barge_in.set()
         stop = getattr(self.speaker, "stop", None)
         if callable(stop) and getattr(self.speaker, "is_playing", lambda: False)():
+            self._barge_in_at = time.time()
             stop()
 
     def step(self, timeout: float | None = 1.0) -> VoiceTurn | None:
@@ -132,7 +134,9 @@ class VoiceSession:
 
         timing["submitted"] = time.time()
         try:
-            result = self.gateway.turn(self.session_id, turn.transcript, timeout_s=self.turn_timeout_s)
+            # fast_lane=True routes conversational voice turns to the direct
+            # cognition lane at the Gateway (no deliberate planning loop).
+            result = self.gateway.turn(self.session_id, turn.transcript, timeout_s=self.turn_timeout_s, fast_lane=True)
         except GatewayUnavailable as exc:
             turn.error = f"Jaeger is not reachable: {exc}"
             self._emit(turn)

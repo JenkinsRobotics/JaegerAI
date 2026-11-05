@@ -146,9 +146,9 @@ class JaegerEvent:
         else:
             digest = hashlib.sha256(f"{session_id}:{text}".encode()).hexdigest()[:16]
             idemp_key = f"human-msg-{digest}"
-        payload: dict[str, Any] = {"text": text, "request_id": request_id}
+        payload: dict[str, Any] = {"text": text, "request_id": request_id, "source": source}
         if metadata:
-            for k in ("role", "execution_mode", "actionable", "specialist", "agent_id", "reflection_count"):
+            for k in ("role", "execution_mode", "actionable", "specialist", "agent_id", "reflection_count", "fast_lane"):
                 if k in metadata:
                     payload[k] = metadata[k]
         return cls(
