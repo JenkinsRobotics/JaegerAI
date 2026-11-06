@@ -32,3 +32,15 @@ Pipeline chosen (modern, Apple-Silicon optimized, no robotic built-in voices):
   moondream2 (mlx-vlm, cached) describes it in 1.2–1.5 s inference ("game controller and
   keyboard on a wooden desk with cables" — verified correct against the actual photo).
   Script: dev/scripts/m4_webcam_vlm.py.
+
+## 2026-11-06 M5 evidence — controlled restart with work in progress
+
+- Pre-restart: a durable task (`m5-probe-task`) planted in the task store and a voice
+  turn completed on session `voice-m5-probe` ("the probe word is orion") — turn ok.
+- Restart: `launchctl kickstart -k .../com.jenkinsrobotics.jaeger-gateway`; /health back
+  ok in ~10 s serving commit `1a66e0e9`, fail_closed=true.
+- Post-restart: task store re-opened on the same DB — `m5-probe-task` still present
+  (state queued). New voice turn on the SAME session id `voice-m5-probe` asking
+  "what was the probe word?" -> entity replied "orion". Conversation + task survived
+  the controlled service restart. (Backlog J-007 FULL REBOOT test still pending —
+  needs Matthew's go-ahead; not claimed here.)
