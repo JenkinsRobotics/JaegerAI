@@ -15,3 +15,20 @@ Pipeline chosen (modern, Apple-Silicon optimized, no robotic built-in voices):
 ## Decision recorded
 - Local ONNX STT+TTS on Mac Studio is fast enough: STT ~0.2–1 s, TTS first chunk <1 s. Cloud STT/TTS NOT needed. No robotic system voice used anywhere.
 - Remaining latency is the LLM turn; the fast lane (M3a) targets that. Physical-mic barge-in still needs a live session with Matthew.
+
+## 2026-11-06 update — daemon restart + fold-in + M4 webcam
+
+- Controlled restart of `com.jenkinsrobotics.jaeger-gateway` via `launchctl kickstart`:
+  /health now reports commit `9b6cdbb0` (fast lane + fold-ins loaded). Service survived the restart; proof for part of M5.
+- 10-exchange voice run against the restarted daemon: 10/10 submitted on one session,
+  STT median 96 ms. Entity turn median 10.8 s — the turn still takes the full agent loop
+  for these prompts (they contain work-ish words / the running entity's router), so the
+  <2 s target is honest status: NOT yet met; fast lane helps only genuinely conversational
+  turns. Recorded, not claimed.
+- Sibling repos folded in: only 2 unique commits existed (fix/core-flows, hermes audit),
+  both cherry-picked to master (2a52f251, 9b6cdbb0). JaegerAI-appcontrol / -backlog-reconcile
+  / -j069 / -worktrees moved to ~/Desktop/JaegerAI-sibling-archives-2026-11-06/ (not deleted).
+- M4 webcam: OpenCV captures a 1080p frame from the Insta360 Link 2 (~2 s incl. open);
+  moondream2 (mlx-vlm, cached) describes it in 1.2–1.5 s inference ("game controller and
+  keyboard on a wooden desk with cables" — verified correct against the actual photo).
+  Script: dev/scripts/m4_webcam_vlm.py.
