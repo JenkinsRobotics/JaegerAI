@@ -8,7 +8,6 @@ import {MachineControlPanel} from './machine-control/MachineControlPanel';
 import {SharePointPanel} from './sharepoint/SharePointPanel';
 import { DangerReset } from './settings/DangerReset';
 import type { Tab as SettingsTab } from './settings/SettingsDialog';
-import { VoiceDictation } from './chat/VoiceDictation';
 import {useNotificationNavigation} from './platform/useNotificationNavigation';
 import {localConversationLink,notificationConversation} from './platform/notificationNavigation';
 import {TaskArtifacts} from './library/TaskArtifacts';
@@ -374,7 +373,7 @@ export function App({ source, view = "chat", settingsTab, settingsSegment, onSet
   const avatarAgent = store.agents.find((a) => a.id === (selectedAgentId ?? defaultAgentId));
   const chatBody = sessionError
     ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
-    : <div className="jg-av-chat"><div className="jg-chat-voice-host"><ChatPane host={host} sessionId={sessionId} agents={store.agents} /><VoiceDictation /></div>
+    : <div className="jg-av-chat"><div className="jg-chat-voice-host"><ChatPane host={host} sessionId={sessionId} agents={store.agents} /></div>
         {avatarAgent && !phone && <AvatarPanel size={avatarSize} agent={avatarAgent} presence={store.summaries.find((s) => s.id === avatarAgent.id)?.status} onOpenAgents={onNavigate ? (id) => onNavigate(`/agents/${encodeURIComponent(id)}/avatar`) : undefined} />}</div>;
   const phoneAgent = store.agents.find((a) => a.id === (selectedAgentId ?? defaultAgentId));
   // iPhone: always the chat; "list" = the push-aside drawer is open (menu button or left-edge swipe), Recents inside it.

@@ -4,7 +4,7 @@ import { requestOutcome } from "./requestOutcome";
  * Mirrors core/gateway/openai_compat.py (_follow): send first, then stream
  * from `start_event_id - 1`, keep only this request's events, and stop on its
  * own terminal event. On top of that:
- *   - the cursor never moves backwards (`max(start-1, last seen)`) and any
+ *   - within this request the cursor never moves backwards, and any
  *     frame with id <= cursor is dropped, so a replay cannot settle the turn;
  *   - when the stream drops or ends early, reconnect with backoff and resume
  *     from the cursor (`?last_event_id=`, per server.py _sse_stream);
@@ -17,6 +17,8 @@ import { mapEvent } from "./eventMap";
 import type { ChatPart, TurnState } from "./host";
 
 export const DEFAULT_BACKOFF_MS = [250, 500, 1000, 2000, 4000, 8000];
+/** Heartbeats prove transport liveness, not that this request is still running. */
+export const REQUEST_STATUS_POLL_MS = 5_000;
 
 export interface FollowOptions {
   source: Pick<JaegerSource, "stream" | "requestStatus">;
@@ -79,17 +81,32 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
     opts.signal.addEventListener("abort", stop, { once: true });
     let terminal: TurnState | undefined;
     let progressed = false;
+    let polling = false;
+    let settleStatus!: () => void;
+    const statusDone = new Promise<void>(resolve => { settleStatus = resolve; });
+    const statusTimer = opts.source.requestStatus ? setInterval(async () => {
+      if (polling || terminal || local.signal.aborted || ownerGeneration !== generation) return;
+      polling = true;
+      try {
+        const row = await opts.source.requestStatus!(opts.sessionId, opts.requestId);
+        if (terminal || local.signal.aborted || ownerGeneration !== generation) return;
+        if (row?.request_id !== opts.requestId || row.session_id !== opts.sessionId || (opts.turnId && row.turn_id && row.turn_id !== opts.turnId)) return;
+        const state = requestOutcome(row, opts.onPart, answer);
+        if (state) { terminal = state; local.abort(); settleStatus(); }
+      } catch { /* A failed lookup is not proof of execution failure. Keep the stream. */ }
+      finally { polling = false; }
+    }, REQUEST_STATUS_POLL_MS) : undefined;
     try {
-      await opts.source.stream(opts.sessionId, cursor, (event) => {
+      await Promise.race([opts.source.stream(opts.sessionId, cursor, (event) => {
         if (terminal || ownerGeneration !== generation || local.signal.aborted) return;
         const id = typeof event.event_id === "number" && Number.isFinite(event.event_id) ? event.event_id : undefined;
         if (id !== undefined) {
           if (id <= cursor) return; // replayed or duplicate frame
           cursor = id;
-          progressed = true;
           opts.onCursor?.(id);
         }
         if (!belongsToTurn(event, opts.requestId, opts.turnId)) return;
+        progressed = true;
         const mapped = mapEvent(event, opts.agentName);
         mapped?.parts.forEach((part) => {
           if (part.kind === "markdownContent") answer += part.text;
@@ -106,7 +123,7 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
           }
         }
         if (mapped?.state) { terminal = mapped.state; local.abort(); }
-      }, local.signal);
+      }, local.signal), statusDone]);
     } catch (error) {
       if (terminal) return { state: terminal };
       if (opts.signal.aborted) break;
@@ -119,6 +136,8 @@ export async function followTurn(opts: FollowOptions): Promise<{ state: TurnStat
         return reconcile();
       }
     } finally {
+      if (statusTimer !== undefined) clearInterval(statusTimer);
+      local.abort();
       if (generation === ownerGeneration) generation++;
       opts.signal.removeEventListener("abort", stop);
     }

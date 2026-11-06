@@ -20,6 +20,7 @@ import { ErrorState } from "../shell/ErrorState";
 import { badge, messageCount, unreadSince } from "./scrollFollow";
 import { RuntimeSettings } from "../settings/RuntimeSettings";
 import { SessionFiles } from "./SessionFiles";
+import { VoiceDictation } from "./VoiceDictation";
 import { SessionQueue } from "./SessionQueue";
 import { WebHost } from "./webHost";
 import type { HomeEntry, HomeSessions } from "./homeSession";
@@ -191,9 +192,11 @@ export function ProgressLine({ phrase, agent, state = "thinking" }: { phrase: st
   );
 }
 
-/** The line stays for the whole pending turn, also while text streams. */
+/** Text is its own streaming indicator. Keep activity only before text or for live tools. */
 export function showsProgress(turn: ChatTurn): boolean {
-  return turn.state === "pending";
+  if (turn.state !== "pending") return false;
+  const last = turn.parts.filter(p => p.kind !== "modelContext" && p.kind !== "modelIdentity" && p.kind !== "knowledgeContext").at(-1);
+  return !(last?.kind === "markdownContent" && last.text);
 }
 
 const replyText = (turn: ChatTurn) => turn.parts.filter((p) => p.kind === "markdownContent").map((p) => (p as { text: string }).text).join("\n\n");
@@ -422,6 +425,8 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     if (!el || !column || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => { if (stick.current) follow(el); });
     ro.observe(column);
+    // Keyboard/visual-viewport and composer resizes change the viewport, not the column.
+    ro.observe(el);
     return () => ro.disconnect();
   }, []);
   const markInput = () => { inputAt.current = Date.now(); };
@@ -556,10 +561,16 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     catch (error) { setFileNote(`Request lookup unavailable: ${String(error)}`); if (!silent) setRecoveryStatus("unknown"); return; }
     finally { checkingRequest.current = false; }
     if (!intent) { if (!silent) setRecoveryStatus("clear"); return; }
-    observingRequest.current = intent.requestId; setRecoveryStatus("checking"); setUnknownRequest(intent.requestId);
+    // Lookup has finished. Observing accepted work is not a composer recovery check.
+    observingRequest.current = intent.requestId; setRecoveryStatus("clear"); setUnknownRequest(intent.requestId);
     recovering.current = session.id;
     const turnId = intent.requestId;
-    setSession(s => s && s.id === intent.sessionId ? { ...s, turns: [...s.turns.filter(t => t.turnId !== turnId), { turnId, requestId: intent.requestId, message: intent.text, state: "pending", parts: [] }] } : s);
+    setSession(s => {
+      if (!s || s.id !== intent.sessionId) return s;
+      const previous = s.turns.find(t => t.turnId === turnId || t.requestId === intent.requestId);
+      const recovered: ChatTurn = { ...previous, turnId, requestId: intent.requestId, message: intent.text || previous?.message || "", state: "pending", parts: [] };
+      return { ...s, turns: previous ? s.turns.map(t => t === previous ? recovered : t) : [...s.turns, recovered] };
+    });
     const handle = host.recoverTurn(intent, part => updateTurn(turnId, t => ({ ...t, parts: applyPart(t.parts, part) })), () => {
       if (intent.deviceDraft !== false) {
         setDraft(current => current === (intent.draftBody ?? intent.text) ? "" : current);
@@ -573,6 +584,11 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       updateTurn(turnId, t => ({ ...t, state }));
       setRecoveryStatus(state === "unknown" ? "unknown" : "clear");
       if (state !== "unknown") setUnknownRequest(undefined);
+      setActive(null);
+    }, error => {
+      observingRequest.current = undefined;
+      updateTurn(turnId, t => ({ ...t, state: "unknown", parts: [...t.parts, { kind: "warning", message: `Request observation interrupted: ${String(error)}. Nothing was resent.` }] }));
+      setRecoveryStatus("unknown");
       setActive(null);
     });
   };
@@ -722,9 +738,10 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
                 : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
-              {showsProgress(turn) && <ProgressLine phrase={turn.parts.length ? activityPhrase(turn, agentName) : "Waiting for progress…"} agent={agent} state={turnAvatarState(turn)} />}
+              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} agent={agent} state={turnAvatarState(turn)} />}
             </section>
           ))}
+          {recoveryStatus !== "clear" && <div role="status" className="jg-recovery">{recoveryStatus === "checking" ? "Checking saved work…" : <>Previous request outcome unknown. It was not replayed. <button type="button" disabled={acknowledging || !unknownRequest} onClick={() => void continueWithoutReplay()}>Continue without replaying</button> <button type="button" onClick={() => void checkSavedRequest()}>Check again</button></>}</div>}
           {sessionId && host instanceof WebHost && <SessionApprovals key={sessionId} sessionId={sessionId} host={host} excludeIds={session?.turns.flatMap(t => t.parts.flatMap(p => p.kind === "confirmation" ? [p.callId] : []))} />}
           {sessionId && host instanceof WebHost && <SessionClarifications key={`clarifications:${sessionId}`} sessionId={sessionId} host={host} excludeIds={session?.turns.flatMap(t => t.parts.flatMap(p => p.kind === "question" ? [p.callId] : []))} />}
         </div>
@@ -751,7 +768,6 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
           </div>
         )}
         <input ref={picker} type="file" multiple hidden tabIndex={-1} onChange={(e) => { takeFiles(e.currentTarget.files); e.currentTarget.value = ""; }} />
-        {recoveryStatus !== "clear" && <div role="status" className="jg-recovery">{recoveryStatus === "checking" ? "Checking saved work…" : <>Previous request outcome unknown. It was not replayed. <button type="button" disabled={acknowledging || !unknownRequest} onClick={() => void continueWithoutReplay()}>Continue without replaying</button> <button type="button" onClick={() => void checkSavedRequest()}>Check again</button></>}</div>}
         {fileNote && !files.length && <div role="status">{fileNote}</div>}
         {quote && <div className="jg-chip" aria-label="Quoted reply"><span>{quote.text}</span><button type="button" aria-label="Cancel reply" onClick={() => setQuote(undefined)}>×</button></div>}
         {preparingFiles && <div role="status">Preparing attachments…</div>}
@@ -765,6 +781,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
           onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
           <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={Boolean(active)} />
           <span className="jg-composer__spacer" />
+          {host instanceof WebHost && <VoiceDictation />}
         {dictation && primary !== "dictate" && (
           <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
             aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}

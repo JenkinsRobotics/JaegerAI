@@ -34,27 +34,37 @@ html.jg-phone.aether-light-theme { color-scheme: light; }
 .jg-punread { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 64px); z-index: 5;
   display: flex; align-items: center; gap: 6px; height: 36px; padding: 0 16px; border: 0; border-radius: 18px; background: var(--jg-p-blue); color: var(--jg-p-on-color); font-size: 15px; }
 
-/* Chat screen: floating translucent bar over the scrolling conversation. */
+/* Chat screen: Muse-style overlay — menu and more float over the feed; large avatar + name sit in the window. */
 .jg-phone-chat { display: flex; flex-direction: column; }
-.jg-pbar { position: absolute; z-index: 10; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 8px;
-  padding: calc(env(safe-area-inset-top) + 8px) 14px 8px; background: linear-gradient(var(--jg-p-bg) 40%, transparent); }
+.jg-pbar { position: absolute; z-index: 10; top: 0; left: 0; right: 0; display: grid; grid-template-columns: 44px 1fr 44px; align-items: start;
+  padding: calc(env(safe-area-inset-top) + 8px) 14px 8px; background: none; pointer-events: none; }
+.jg-pbar > * { pointer-events: auto; }
 .jg-pbar .jg-pround { background: color-mix(in srgb, var(--jg-p-button) 85%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
-.jg-pbar__pill { flex: 1; min-width: 0; height: 44px; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 0 14px; border-radius: 22px;
-  background: color-mix(in srgb, var(--jg-p-button) 85%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); font-size: 17px; font-weight: 500; }
-.jg-pbar__pill > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jg-pbar__identity { justify-self: center; display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+.jg-pbar__avatar { width: 78px; height: 78px; border-radius: 50%; overflow: hidden; display: grid; place-items: center;
+  background: var(--jg-p-raised); box-shadow: 0 0 0 3px var(--jg-p-bg), 0 10px 28px color-mix(in srgb, var(--aether-color-shadow) 35%, transparent); pointer-events: auto; }
+.jg-pbar__name { margin-top: -12px; max-width: 160px; padding: 4px 14px; border-radius: 14px;
+  background: color-mix(in srgb, var(--jg-p-button) 92%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
+  font-size: 15px; font-weight: 650; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; pointer-events: auto; }
 .jg-pchat { flex: 1; min-height: 0; display: flex; }
 .jg-pchat .jg-chat-mount, .jg-pchat .jg-chat-mount__inner { flex: 1; display: flex; min-height: 0; min-width: 0; }
 
 /* MinimalChat restyled for the phone: full-width bubbles at 17px, scrolls under the bar, no floating agent pill. */
 html.jg-phone .jg-agent-pill-wrap { display: none; }
 html.jg-phone .jg-chat { background: var(--jg-p-bg); color: var(--jg-p-fg); }
-html.jg-phone .jg-chat__scroll { padding-top: calc(env(safe-area-inset-top) + 64px); padding-left: 16px; padding-right: 16px; }
+html.jg-phone .jg-chat__scroll { display: flex; flex-direction: column; padding-top: calc(env(safe-area-inset-top) + 104px); padding-left: 16px; padding-right: 16px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, var(--aether-color-text) 88px);
+  mask-image: linear-gradient(to bottom, transparent 0, var(--aether-color-text) 88px); }
+/* Never flex-shrink the transcript: Safari otherwise lays overflowing turns over the composer. */
+html.jg-phone .jg-chat__column { flex: 0 0 auto; box-sizing: border-box; margin-top: auto; width: 100%; max-width: none; padding: 8px 0 12px; }
+html.jg-phone .jg-turn { content-visibility: visible; contain-intrinsic-size: none; }
+html.jg-phone .jg-session-queue { display: none; }
 html.jg-phone .jg-bubble { max-width: 100%; font-size: 17px; line-height: 1.4; border-radius: 20px; padding: 12px 14px; }
 html.jg-phone .jg-bubble--assistant { align-self: stretch; background: var(--jg-p-raised); color: var(--jg-p-fg); }
 /* Composer card (2026-11-01, after the Grok iOS home): input on top, + · Model · mic · Speak/Send below. */
-html.jg-phone .jg-composer { display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: calc(100% - 20px); margin: 0 auto calc(env(safe-area-inset-bottom) + 10px);
+html.jg-phone .jg-composer { display: flex; flex-direction: column; align-items: stretch; gap: 8px; width: calc(100% - 20px); margin: 0 auto 10px;
   padding: 12px 12px 10px; border: 0; border-radius: 26px; background: var(--jg-p-raised); box-shadow: 0 0 0 0.5px var(--aether-color-border); }
-html.jg-phone .jg-composer__input { min-height: 34px; padding: 6px 6px; background: transparent; color: var(--jg-p-fg); font-size: 17px; box-sizing: border-box; }
+html.jg-phone .jg-composer__input { flex: none; width: 100%; max-height: min(160px, 25dvh); min-height: 34px; padding: 6px 6px; background: transparent; color: var(--jg-p-fg); font-size: 17px; box-sizing: border-box; }
 html.jg-phone .jg-composer__input::placeholder { color: var(--jg-p-dim); }
 html.jg-phone .jg-composer__bar .jg-composer__icon { width: 40px; height: 40px; color: var(--jg-p-fg); }
 html.jg-phone .jg-composer__bar .jg-runtime-trigger { height: 40px; color: var(--jg-p-fg); }
@@ -69,8 +79,10 @@ html.jg-phone .jg-handoff, html.jg-phone .jg-handoff__name, html.jg-phone .jg-ha
 /* Inside the tabbed shell, phone screens fill the page area between the top bar and the bottom tab bar, so the
  * Chats button stays tappable and the composer row stays visible. */
 .jg-chrome--phone .jg-phone-screen { position: absolute; inset: 0; height: auto; }
-/* The voice orb floats above the composer card, never over it. */
-html.jg-phone .jg-voice { bottom: calc(var(--jg-phone-composer-h, 116px) + 16px); }
+html.jg-phone .jg-jump { bottom: calc(var(--jg-composer-h, 116px) + 18px); }
+html.jg-phone .jg-recovery { flex: none; padding: 10px 12px; margin-top: 8px; border-radius: 14px; background: var(--jg-p-raised); font-size: 13px; overflow-wrap: anywhere; }
+html.jg-phone .jg-recovery button { min-height: 36px; }
+html.jg-phone .jg-chat__scroll { overscroll-behavior: contain; overflow-anchor: none; }
 
 /* Push-aside drawer (2026-11-01, after ChatGPT / Gemini / Muse iOS). Tokens only. */
 .jg-pdrawer { position: relative; flex: 1; width: 100%; height: 100%; overflow: hidden; --jg-pdrawer-w: 82%; }
@@ -94,9 +106,10 @@ html.jg-phone .jg-voice { bottom: calc(var(--jg-phone-composer-h, 116px) + 16px)
 .jg-pdrawer__recents .jg-plead__badge { display: none; }
 .jg-pdrawer__recents .jg-plead__name { font-size: 17px; font-weight: 600; max-width: none; }
 .jg-pdrawer__recents .jg-prow { min-height: 64px; }
+.jg-pdrawer__hint { margin: 0 20px 8px; font-size: 13px; color: var(--jg-p-dim); }
 .jg-pdrawer__bottom { display: flex; align-items: center; gap: 10px; padding: 10px 14px calc(env(safe-area-inset-bottom) + 10px); }
-.jg-pdrawer__chat { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 44px; border: 0; border-radius: 999px;
-  background: var(--jg-p-voice-bg); color: var(--jg-p-voice-fg); font: inherit; font-size: 16px; font-weight: 600; }
+.jg-pdrawer__search { flex: 1; display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 16px; border: 0; border-radius: 22px;
+  background: var(--jg-p-raised); color: var(--jg-p-dim); font: inherit; font-size: 16px; text-align: left; }
 .jg-pdrawer__card { position: absolute; inset: 0; z-index: 2; background: var(--jg-p-bg); transition: transform .32s cubic-bezier(.2,.8,.2,1), border-radius .32s; }
 .jg-pdrawer__card > .jg-phone-screen { position: absolute; inset: 0; height: auto; }
 .jg-pdrawer.is-open .jg-pdrawer__card { transform: translateX(var(--jg-pdrawer-w)) scale(.94); border-radius: 26px; overflow: hidden;

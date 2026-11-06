@@ -248,7 +248,9 @@ export class WebHost implements ChatHost {
         sessionId: request.sessionId,
         requestId: receipt.request_id ?? requestId,
         turnId: receipt.turn_id,
-        cursor: Math.max(start, this.cursorFor(request.sessionId)),
+        // A concurrent home snapshot may already be ahead of this new request's first token.
+        // Its admission cursor, not that snapshot cursor, owns the initial replay window.
+        cursor: typeof receipt.start_event_id === "number" ? start : this.cursorFor(request.sessionId),
         signal: controller.signal,
         onPart,
         onCursor: (id) => this.advance(request.sessionId, id),

@@ -48,10 +48,10 @@ describe("phone list", () => {
 });
 
 describe("phone chat", () => {
-  it("shows Menu, the agent pill and …; Menu and a left-edge swipe return to the list", () => {
+  it("shows Menu, the floating agent identity and …; Menu and a left-edge swipe return to the list", () => {
     const onBack = vi.fn();
     const { el, root } = mount(<PhoneChat agentId="native:gw" agentName="Jaeger Gateway & WebUI" onBack={onBack} onInfo={() => {}}><p>chat</p></PhoneChat>);
-    expect(el.querySelector(".jg-pbar__pill")!.textContent).toContain("Jaeger Gateway & WebUI");
+    expect(el.querySelector(".jg-pbar__identity")!.textContent).toContain("Jaeger Gateway & WebUI");
     act(() => el.querySelector<HTMLButtonElement>('[aria-label="Menu"]')!.click());
     const screen = el.querySelector(".jg-phone-chat")!;
     const touch = (type: string, x: number) => { const e = new Event(type, { bubbles: true }); Object.assign(e, { touches: [{ clientX: x, clientY: 300 }], changedTouches: [{ clientX: x, clientY: 300 }] }); screen.dispatchEvent(e); };

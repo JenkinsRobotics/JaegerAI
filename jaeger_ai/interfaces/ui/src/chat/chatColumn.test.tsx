@@ -47,10 +47,10 @@ describe("chat column", () => {
     expect(open.match(/<li>/g)).toHaveLength(3);
   });
 
-  it("shows the progress line for the whole pending turn, also while text streams", () => {
+  it("shows activity before text and during tools, but not a redundant line while text streams", () => {
     expect(showsProgress(turn([]))).toBe(true);
     expect(showsProgress(turn([tool("a", "web_search", "executing")]))).toBe(true);
-    expect(showsProgress(turn([{ kind: "markdownContent", text: "Hel" }]))).toBe(true);
+    expect(showsProgress(turn([{ kind: "markdownContent", text: "Hel" }]))).toBe(false);
     expect(showsProgress(turn([{ kind: "markdownContent", text: "Let me check" }, tool("a", "shell", "executing")]))).toBe(true);
     expect(showsProgress(turn([], "complete"))).toBe(false);
     expect(showsProgress(turn([], "cancelled"))).toBe(false);

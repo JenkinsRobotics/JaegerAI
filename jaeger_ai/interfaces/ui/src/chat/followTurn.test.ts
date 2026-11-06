@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { GatewayError } from "../api/gateway";
 import type { JaegerSource, TurnReceipt } from "../api/source";
 import type { GatewayEvent } from "../api/types";
-import { followTurn } from "./followTurn";
+import { followTurn, REQUEST_STATUS_POLL_MS } from "./followTurn";
 import type { ChatPart } from "./host";
 import { WebHost } from "./webHost";
 
@@ -206,4 +206,37 @@ it('retains late descendant Stop warning when the parent observation already end
  finish(ev(2,'turn.cancelled','owned-late-stop'));expect((await handle.done).state).toBe('cancelled');
  ack({session_id:'fixture',request_id:'owned-late-stop',cancel_requested:true,cancellation_confirmed:false,unconfirmed_task_ids:['owned-child']});
  await vi.waitFor(()=>expect(parts).toContainEqual({kind:'warning',message:expect.stringContaining('Parent observation ended; Stop remains unconfirmed for owned work: owned-child')}));expect(cancel).toHaveBeenCalledTimes(1);
+});
+
+
+describe("request stream liveness", () => {
+  it("settles a completed request even if SSE only sends heartbeats forever", async () => {
+    vi.useFakeTimers();
+    try {
+      const parts: ChatPart[] = [];
+      const requestStatus = vi.fn(async () => ({ request_id: "r", session_id: "s", status: "completed", result: { output: "hello" } }));
+      const stream: Stream = async (_s, _c, emit, signal) => {
+        emit(ev(1, "turn.delta", "r", { delta: "hel" }));
+        await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+      };
+      const done = followTurn({ source: { stream, requestStatus }, sessionId: "s", requestId: "r", cursor: 0, signal: new AbortController().signal, onPart: p => parts.push(p) });
+      expect(parts).toEqual([{ kind: "markdownContent", text: "hel" }]);
+      await vi.advanceTimersByTimeAsync(REQUEST_STATUS_POLL_MS);
+      expect((await done).state).toBe("complete");
+      expect(parts).toEqual([{ kind: "markdownContent", text: "hel" }, { kind: "markdownContent", text: "lo" }]);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("does not skip a new request's deltas when a home snapshot has a newer cursor", async () => {
+    const seen: Array<number | undefined> = [];
+    const host = new WebHost({ kind: "live", send: async () => ({ request_id: "new-r", start_event_id: 10 }),
+      stream: (async (_s, cursor, emit) => { seen.push(cursor); emit(ev(10, "turn.delta", "new-r", { delta: "live" })); emit(ev(11, "turn.finish", "new-r")); }) as Stream
+    } as unknown as JaegerSource);
+    host.noteCursor("s", 20);
+    const parts: ChatPart[] = [];
+    expect((await host.startTurn({ sessionId: "s", turnId: "new-r", message: "fixture" }, p => parts.push(p)).done).state).toBe("complete");
+    expect(seen).toEqual([9]);
+    expect(parts).toContainEqual({ kind: "markdownContent", text: "live" });
+  });
 });

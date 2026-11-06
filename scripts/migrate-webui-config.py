@@ -7,8 +7,6 @@ import argparse
 import os
 from pathlib import Path
 
-import yaml
-
 RETIRED_KEYS = {
     "use_hermes_webui",
     "hermes_webui_container",
@@ -17,6 +15,10 @@ RETIRED_KEYS = {
 
 
 def migrate(path: Path) -> bool:
+    try:
+        import yaml
+    except ImportError:
+        return False
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     containers = raw.get("containers")
     if not isinstance(containers, dict) or not RETIRED_KEYS.intersection(containers):
@@ -41,11 +43,20 @@ def main() -> int:
         default=Path(os.environ.get("JAEGER_STATE_DIR") or os.environ.get("JAEGER_HOME") or Path.home() / ".jaeger"),
     )
     args = parser.parse_args()
+    configs = list((args.state_root / "instances").glob("*/config.yaml"))
+    if not configs:
+        return 0
+    try:
+        import yaml
+    except ImportError:
+        print("[migrate] pyyaml not installed; skipping config migration.")
+        return 0
     changed = []
-    for path in sorted((args.state_root / "instances").glob("*/config.yaml")):
+    for path in sorted(configs):
         if migrate(path):
             changed.append(str(path))
-    print(f"Migrated {len(changed)} Jaeger instance configuration(s).")
+    if changed:
+        print(f"Migrated {len(changed)} Jaeger instance configuration(s).")
     return 0
 
 

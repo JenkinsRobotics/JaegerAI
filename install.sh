@@ -26,6 +26,7 @@ export JAEGER_INSTALL_ROOT="$REPO_ROOT"
 
 SKIP_DEPS=0
 PRODUCT_MODE=0
+SETUP_ROBOT=0
 for arg in "$@"; do
   case "$arg" in
     --skip-deps) SKIP_DEPS=1 ;;
@@ -36,6 +37,7 @@ for arg in "$@"; do
     # install from a developer's own checkout. This flag is the
     # explicit signal instead: only the curl path sets it.
     --product) PRODUCT_MODE=1 ;;
+    --setup-robot|--appliance) SETUP_ROBOT=1 ;;
   esac
 done
 
@@ -43,25 +45,46 @@ echo "JaegerAI local install"
 echo "  repo: $REPO_ROOT"
 echo
 
+# Ensure standard package manager paths are on PATH
+for p in /opt/homebrew/bin /opt/homebrew/sbin /usr/local/bin "$HOME/.local/bin"; do
+  if [[ -d "$p" && ":$PATH:" != *":$p:"* ]]; then
+    export PATH="$p:$PATH"
+  fi
+done
+
 # 1. Verify Python version. Respect a ``PY`` exported by the curl-side
-# installer (scripts/install.sh) — it already did the explicit-version
-# search and we don't want to disagree. Fall back to our own search
-# when invoked directly (``./install.sh`` from a fresh clone).
-PY="${PY:-$(command -v python3.12 || command -v python3.11 || command -v python3 || true)}"
-if [[ -z "${PY:-}" ]]; then
-  echo "✗ python3 not found — install Python 3.11 or 3.12 first" >&2
-  echo "  hint: macOS — 'brew install python@3.12'" >&2
+# installer (scripts/install.sh) if valid, otherwise search candidates.
+find_working_python() {
+  if [[ -n "${PY:-}" ]] && "$PY" -c 'import sys; sys.exit(0 if sys.version_info[:2] in [(3, 11), (3, 12)] else 1)' 2>/dev/null; then
+    echo "$PY"
+    return 0
+  fi
+  for candidate in python3.12 python3.11 /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.11 /usr/local/bin/python3.12 /usr/local/bin/python3.11 python3; do
+    if cmd=$(command -v "$candidate" 2>/dev/null) && "$cmd" -c 'import sys; sys.exit(0 if sys.version_info[:2] in [(3, 11), (3, 12)] else 1)' 2>/dev/null; then
+      echo "$cmd"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! PY="$(find_working_python)"; then
+  echo "✗ Supported Python (3.11 or 3.12) not found or not executable" >&2
+  echo "  hint: macOS — 'brew install python@3.12' (or python@3.11)" >&2
   echo "        Ubuntu — 'apt install python3.12 python3.12-venv'" >&2
   exit 1
 fi
 PY_VERSION=$("$PY" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-case "$PY_VERSION" in
-  3.11|3.12) echo "✓ Python $PY_VERSION at $PY" ;;
-  *)
-    echo "✗ Python $PY_VERSION not supported — need 3.11 or 3.12" >&2
-    exit 1
-    ;;
-esac
+echo "✓ Python $PY_VERSION at $PY"
+
+# 1b. Node.js & npm (required to compile the shared web interface)
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "✗ Node.js and npm are required to build the web interface" >&2
+  echo "  hint: macOS — 'brew install node'" >&2
+  echo "        Ubuntu — 'apt install nodejs npm'" >&2
+  exit 1
+fi
+echo "✓ Node.js $(node -v) and npm $(npm -v)"
 
 # C toolchain — deps (msgspec, llama-cpp-python, …) build from source. Mirrors
 # the curl-side check in scripts/install.sh, for the direct `./install.sh` path.
@@ -128,10 +151,15 @@ fi
 
 # 4. Scaffold ~/.jaeger/ (idempotent) — operator state root (OpenClaw standard)
 STATE_ROOT="${JAEGER_STATE_DIR:-$HOME/.jaeger}"
-mkdir -p "$STATE_ROOT/instances"
+mkdir -p "$STATE_ROOT/instances" "$STATE_ROOT/logs"
 if [[ -f "$REPO_ROOT/scripts/migrate-webui-config.py" ]]; then
   "$VENV/bin/python" "$REPO_ROOT/scripts/migrate-webui-config.py" --state-root "$STATE_ROOT"
 fi
+
+# 4b. Initialize Gateway caller authentication tokens
+echo "→ Initializing Gateway caller tokens..."
+"$VENV/bin/python" -m jaeger_ai.cli.verbs.dispatch auth init ||
+  echo "  ⚠ Could not initialize caller tokens automatically; run './jaeger auth init' manually"
 
 # A one-line product install is intentionally still a Git checkout so the
 # public installer can refresh it efficiently. Mark it explicitly so the CLI
@@ -160,6 +188,23 @@ if [[ "$PRODUCT_MODE" -eq 1 ]]; then
     echo "✓ jaeger added to PATH via $RC — open a new terminal (or: source $RC)"
   fi
 fi
+
+# 5b. Post-install verification smoke check
+echo "→ Verifying installation health..."
+"$VENV/bin/python" -c "
+import importlib.metadata, sys
+packages = ('jaeger-ai', 'jaeger-os', 'jaeger-agent', 'jaeger-kokoro-tts', 'jaeger-whisper-stt')
+missing = []
+for pkg in packages:
+    try:
+        v = importlib.metadata.version(pkg)
+        print(f'  ✓ {pkg:<20} {v}')
+    except Exception as e:
+        print(f'  ✗ {pkg:<20} NOT FOUND ({e})')
+        missing.append(pkg)
+if missing:
+    sys.exit(1)
+" 2>/dev/null || echo "  ⚠ Package metadata check reported warnings (modules may still be available via source)"
 
 echo
 echo "✓ Local install complete"
@@ -203,4 +248,23 @@ else
   echo "Optional:"
   echo "  export PATH=\"\$PATH:$REPO_ROOT\"   # 'jaeger' from anywhere"
   echo "  ./jaeger autostart enable          # run unattended at login"
+fi
+
+# 6. Autonomous Robot / Dedicated Appliance Host Setup (macOS)
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  if [[ "$SETUP_ROBOT" -eq 1 ]]; then
+    echo
+    bash "$REPO_ROOT/scripts/setup-mac-robot.sh" --non-interactive
+  elif [[ -t 0 ]]; then
+    echo
+    echo "─────────────────────────────────────────────────────────────────"
+    echo "  Autonomous Robot / Dedicated Host Setup"
+    echo "─────────────────────────────────────────────────────────────────"
+    echo "  Configure this Mac as a 24/7 Persistent Robot Appliance?"
+    echo "  (Power recovery, memory tuning, dedicated user, auto-startup)"
+    read -r -p "  Run host setup now? [y/N]: " RUN_SETUP || RUN_SETUP="n"
+    if [[ "$RUN_SETUP" =~ ^[Yy]$ ]]; then
+      bash "$REPO_ROOT/scripts/setup-mac-robot.sh"
+    fi
+  fi
 fi
