@@ -73,9 +73,9 @@
 /* Dock search. */
 
 /* Phone: the dock becomes a bottom tab bar. */
-.phone-tabs { display: flex; justify-content: space-around; padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px)); background: color-mix(in srgb, var(--jg-color-sidebar) 92%, transparent); border-top: 1px solid var(--jg-color-border-tertiary); backdrop-filter: blur(16px); flex: none; z-index: 40; }
-.phone-tabs__tab { flex: 1; display: grid; justify-items: center; gap: 2px; padding: 4px 0; border: 0; background: none; color: var(--jg-color-text-tertiary); font: inherit; font-size: 10.5px; cursor: pointer; }
-.phone-tabs__tab.is-active { color: var(--jg-color-accent-text); }
+.phone-tabs { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom, 0px) + 10px); transform: translateX(-50%); display: flex; justify-content: center; gap: 2px; padding: 6px; width: min(352px, calc(100% - 24px)); box-sizing: border-box; background: color-mix(in srgb, var(--jg-color-elevated) 88%, transparent); border: 0; border-radius: 28px; box-shadow: 0 0 0 0.5px var(--jg-color-border-tertiary), 0 10px 28px color-mix(in srgb, var(--jg-color-shadow) 28%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); flex: none; z-index: 40; }
+.phone-tabs__tab { flex: 1 1 0; min-width: 0; display: grid; justify-items: center; gap: 2px; padding: 8px 4px 6px; border: 0; border-radius: 22px; background: none; color: var(--jg-color-text-tertiary); font: inherit; font-size: 10.5px; cursor: pointer; }
+.phone-tabs__tab.is-active { color: var(--jg-color-text); background: color-mix(in srgb, var(--jg-color-text) 12%, transparent); }
 .phone-tabs__more { position: fixed; inset: 0; z-index: 45; background: color-mix(in srgb, var(--jg-color-shadow) 30%, transparent); display: flex; align-items: flex-end; }
 .phone-tabs__sheet { width: 100%; padding: 10px 10px calc(76px + env(safe-area-inset-bottom, 0px)); background: var(--jg-color-elevated); border-radius: 16px 16px 0 0; display: grid; gap: 2px; }
 .phone-tabs__more-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 0; border-radius: 10px; background: none; color: var(--jg-color-text); font: inherit; font-size: 15px; text-align: left; cursor: pointer; }

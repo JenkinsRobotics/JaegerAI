@@ -135,8 +135,11 @@ export function PhoneChat({ agentId, agentName, avatarUrl, onBack, onInfo, child
     <div className="jg-phone-screen jg-phone-chat" onTouchStart={onTouchStart} onTouchEnd={onTouchEnd}>
       <header className="jg-pbar">
         <button type="button" className="jg-pround" aria-label="Menu" title="Menu" onClick={onBack}><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden><path d="M3 6h12M3 12h8" /></svg></button>
-        <span className="jg-pbar__pill"><AgentAvatar id={agentId} name={agentName} src={avatarUrl} size={22} /><span>{agentName}</span></span>
-        <button type="button" className="jg-pround" aria-label="Agent info" onClick={onInfo}><Icon name="ellipsis" size={18} /></button>
+        <div className="jg-pbar__identity">
+          <span className="jg-pbar__avatar"><AgentAvatar id={agentId} name={agentName} src={avatarUrl} size={78} /></span>
+          <span className="jg-pbar__name">{agentName}</span>
+        </div>
+        <button type="button" className="jg-pround" aria-label="More" onClick={onInfo}><Icon name="ellipsis" size={18} /></button>
       </header>
       <div className="jg-pchat">{children}</div>
     </div>
@@ -145,13 +148,11 @@ export function PhoneChat({ agentId, agentName, avatarUrl, onBack, onInfo, child
 
 /** Drawer nav: only pages that exist in Jaeger today. */
 export const DRAWER_NAV: readonly { id: string; label: string; icon: IconName; to: string }[] = [
-  { id: "agents", label: "Agents", icon: "account", to: "/agents" },
-  { id: "hermes", label: "Hermes", icon: "rocket", to: "/agents/hermes" },
-  { id: "openclaw", label: "OpenClaw", icon: "rocket", to: "/agents/openclaw" },
-  { id: "backlog", label: "Backlog", icon: "checklist", to: "/work/backlog" },
-  { id: "automations", label: "Automations", icon: "history", to: "/settings/automations" },
-  { id: "library", label: "Library", icon: "file", to: "/settings/library" },
-  { id: "machine", label: "Machine", icon: "server", to: "/machine" },
+  { id: "chat", label: "Main chat", icon: "comment", to: "/" },
+  { id: "feed", label: "Feed", icon: "comment-discussion", to: "/home" },
+  { id: "ideas", label: "Ideas", icon: "color-mode", to: "/research" },
+  { id: "tasks", label: "Tasks", icon: "checklist", to: "/work/tasks" },
+  { id: "artifacts", label: "Artifacts", icon: "file", to: "/settings/library" },
 ];
 
 /** Push-aside drawer (ChatGPT / Gemini / Muse iOS pattern): the chat slides right and stays visible as a rounded
@@ -166,20 +167,22 @@ export function PhoneDrawer({ open, onClose, onSearch, onSettings, onChat, recen
       <aside className="jg-pdrawer__menu" aria-label="Menu" aria-hidden={!open || undefined} inert={!open || undefined}>
         <header className="jg-pdrawer__top">
           <span className="jg-pdrawer__title">Jaeger</span>
-          <button type="button" className="jg-pround" aria-label="Search" onClick={() => { onClose(); onSearch(); }}><Icon name="search" size={18} /></button>
         </header>
         <div className="jg-pdrawer__scroll">
-          <nav className="jg-pdrawer__nav" aria-label="Pages">
+          <h2 className="jg-pdrawer__section">Tabs</h2>
+          <p className="jg-pdrawer__hint">You can reorder with long press</p>
+          <nav className="jg-pdrawer__nav" aria-label="Tabs">
             {DRAWER_NAV.map((n) => (
               <button key={n.id} type="button" className="jg-pdrawer__item" onClick={() => go(n.to)}><Icon name={n.icon} size={18} /><span>{n.label}</span></button>
             ))}
           </nav>
-          <h2 className="jg-pdrawer__section">Recents</h2>
+          <h2 className="jg-pdrawer__section">Side chats</h2>
           <div className="jg-pdrawer__recents">{recents}</div>
         </div>
         <footer className="jg-pdrawer__bottom">
-          <button type="button" className="jg-pdrawer__chat" onClick={() => { onClose(); onChat(); }}><Icon name="comment" size={16} /><span>Chat</span></button>
           <button type="button" className="jg-pround" aria-label="Settings" onClick={() => { onClose(); onSettings(); }}><Icon name="settings-gear" size={18} /></button>
+          <button type="button" className="jg-pdrawer__search" onClick={() => { onClose(); onSearch(); }}><Icon name="search" size={16} /><span>Search</span></button>
+          <button type="button" className="jg-pround" aria-label="New chat" onClick={() => { onClose(); onChat(); }}><Icon name="edit" size={18} /></button>
         </footer>
       </aside>
       <div className="jg-pdrawer__card">

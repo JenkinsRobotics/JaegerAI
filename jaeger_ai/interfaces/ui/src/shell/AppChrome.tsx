@@ -5,10 +5,10 @@
  * Phone: a compact top bar (title, search) and a bottom tab bar (Home, Chat, Agents, Work + More).
  */
 import type React from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { WINDOW_DEFINITIONS, type WindowId } from '../windows/WindowManager'
-import { Menu, MoreHorizontal, Search, Sparkles } from '../components/Icons'
-import { SUBTABS } from './router'
+import { Check, FileText, Globe, Menu, MessageSquare, Search, Sparkles } from '../components/Icons'
+import { SUBTABS, navigate } from './router'
 import { usePreset, type Preset } from './layoutPresets'
 import { JaegerMark } from '../brand/JaegerMark'
 import './appchrome.css'
@@ -51,40 +51,43 @@ function NavItem({ id, active, collapsed, onPick }: { id: WindowId; active: bool
   )
 }
 
-function PhoneTabs({ active, pages, onPick, onSearch }: Pick<ChromeProps, 'active' | 'pages' | 'onPick' | 'onSearch'>) {
-  const [more, setMore] = useState(false)
-  const tabs = pages.filter((id) => WINDOW_DEFINITIONS[id].phoneTab)
-  const rest = pages.filter((id) => !WINDOW_DEFINITIONS[id].phoneTab)
-  const pick = (id: WindowId) => { setMore(false); onPick(id) }
+const PHONE_BAR: readonly { id: string; label: string; page: WindowId; to: string; Icon: typeof MessageSquare }[] = [
+  { id: 'chat', label: 'Chat', page: 'chat', to: '/', Icon: MessageSquare },
+  { id: 'feed', label: 'Feed', page: 'home', to: '/home', Icon: Globe },
+  { id: 'ideas', label: 'Ideas', page: 'research', to: '/research', Icon: Sparkles },
+  { id: 'tasks', label: 'Tasks', page: 'work', to: '/work/tasks', Icon: Check },
+  { id: 'artifacts', label: 'Artifacts', page: 'settings', to: '/settings/library', Icon: FileText },
+]
+
+function PhoneTabs({ active }: Pick<ChromeProps, 'active'>) {
   return (
-    <>
-      {more && (
-        <div className="phone-tabs__more" role="menu" aria-label="More pages" onClick={() => setMore(false)}>
-          <div className="phone-tabs__sheet" onClick={(e) => e.stopPropagation()}>
-            <button type="button" role="menuitem" className="phone-tabs__more-item" onClick={() => { setMore(false); onSearch() }}><Search size={18} /> Search</button>
-            {rest.map((id) => { const Icon = WINDOW_DEFINITIONS[id].icon; return (
-              <button key={id} type="button" role="menuitem" className={`phone-tabs__more-item${id === active ? ' is-active' : ''}`} onClick={() => pick(id)}><Icon size={18} /> {WINDOW_DEFINITIONS[id].title}</button>
-            ) })}
-          </div>
-        </div>
-      )}
-      <nav className="phone-tabs" aria-label="Pages">
-        {tabs.map((id) => { const Icon = WINDOW_DEFINITIONS[id].icon; const on = id === active; return (
-          <button key={id} type="button" className={`phone-tabs__tab${on ? ' is-active' : ''}`} aria-current={on ? 'page' : undefined} onClick={() => pick(id)}>
-            <Icon size={22} /><span>{WINDOW_DEFINITIONS[id].title}</span>
+    <nav className="phone-tabs" aria-label="Pages">
+      {PHONE_BAR.map((t) => {
+        const on = t.page === active
+        return (
+          <button key={t.id} type="button" className={`phone-tabs__tab${on ? ' is-active' : ''}`} aria-current={on ? 'page' : undefined} onClick={() => navigate(t.to)}>
+            <t.Icon size={22} /><span>{t.label}</span>
           </button>
-        ) })}
-        <button type="button" className={`phone-tabs__tab${rest.includes(active) || more ? ' is-active' : ''}`} aria-expanded={more} onClick={() => setMore((v) => !v)}>
-          <MoreHorizontal size={22} /><span>More</span>
-        </button>
-      </nav>
-    </>
+        )
+      })}
+    </nav>
   )
 }
 
 /** The leading/top chrome. Rendered by AppWindow around its page stack. */
 export function AppChrome({ active, sub, pages, phone, onPick, onSearch, trail, children }: ChromeProps & { children: React.ReactNode }) {
   const preset = usePreset()
+  const phoneChrome = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const root = phoneChrome.current, tabs = root?.querySelector<HTMLElement>('.phone-tabs')
+    if (!root || !tabs) return
+    const measure = () => root.style.setProperty('--jg-phone-tabs-h', `${Math.ceil(tabs.getBoundingClientRect().height)}px`)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(tabs)
+    return () => observer.disconnect()
+  }, [phone])
   const [collapsed, setCollapsed] = useState(false)
   const title = WINDOW_DEFINITIONS[active].title
   const subTitle = SUBTABS[active]?.find((t) => t.id === sub && t.id !== SUBTABS[active]![0].id)?.title
@@ -97,15 +100,17 @@ export function AppChrome({ active, sub, pages, phone, onPick, onSearch, trail, 
 
   if (phone) {
     return (
-      <div className="jg-chrome jg-chrome--phone" data-preset={preset.id}>
-        <header className="jg-topbar jg-topbar--compact">
-          <JaegerMark className="jg-topbar__logo" />
-          <h1 className="jg-topbar__title">{title}</h1>
-          {trail}
-          <button type="button" className="jg-iconbtn" onClick={onSearch} aria-label={`Search or ask (${KEY})`}><Search size={18} /></button>
-        </header>
+      <div ref={phoneChrome} className="jg-chrome jg-chrome--phone" data-preset={preset.id}>
+        {active !== 'chat' && (
+          <header className="jg-topbar jg-topbar--compact">
+            <JaegerMark className="jg-topbar__logo" />
+            <h1 className="jg-topbar__title">{title}</h1>
+            {trail}
+            <button type="button" className="jg-iconbtn" onClick={onSearch} aria-label={`Search or ask (${KEY})`}><Search size={18} /></button>
+          </header>
+        )}
         <main className="jg-chrome__main">{children}</main>
-        <PhoneTabs active={active} pages={pages} onPick={onPick} onSearch={onSearch} />
+        <PhoneTabs active={active} />
       </div>
     )
   }

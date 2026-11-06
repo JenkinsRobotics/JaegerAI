@@ -14,6 +14,13 @@
 
 set -euo pipefail
 
+# Ensure standard package manager paths are on PATH
+for p in /opt/homebrew/bin /opt/homebrew/sbin /usr/local/bin "$HOME/.local/bin"; do
+  if [[ -d "$p" && ":$PATH:" != *":$p:"* ]]; then
+    export PATH="$p:$PATH"
+  fi
+done
+
 # Since 0.12 the product name and default folder agree: Jaeger AI lives at
 # ~/JaegerAI. 0.9.x used ~/jaeger. A normal install detects that legacy tree,
 # copies its operator state after the new checkout is created, and leaves the
@@ -117,28 +124,39 @@ case "$(uname -s)" in
     ;;
 esac
 
-# Python: prefer an explicit 3.12 / 3.11 binary, fall back to python3.
-# macOS often has python3 → 3.13 (Xcode/python.org) while the workable
-# interpreter is python3.12 from Homebrew; search explicitly. kokoro/
-# whisper (the voice engines) pin <3.13 — 3.13 resolves but can't
-# actually install the voice stack, so it's rejected here too.
-PY="$(command -v python3.12 || command -v python3.11 || command -v python3 || true)"
-if [[ -z "$PY" ]]; then
-  echo "✗ No python3.12 / python3.11 / python3 found on PATH" >&2
-  echo "  hint: macOS — 'brew install python@3.12'" >&2
+# Python: prefer an explicit working 3.12 / 3.11 binary, fall back to python3.
+find_working_python() {
+  if [[ -n "${PY:-}" ]] && "$PY" -c 'import sys; sys.exit(0 if sys.version_info[:2] in [(3, 11), (3, 12)] else 1)' 2>/dev/null; then
+    echo "$PY"
+    return 0
+  fi
+  for candidate in python3.12 python3.11 /opt/homebrew/bin/python3.12 /opt/homebrew/bin/python3.11 /usr/local/bin/python3.12 /usr/local/bin/python3.11 python3; do
+    if cmd=$(command -v "$candidate" 2>/dev/null) && "$cmd" -c 'import sys; sys.exit(0 if sys.version_info[:2] in [(3, 11), (3, 12)] else 1)' 2>/dev/null; then
+      echo "$cmd"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if ! PY="$(find_working_python)"; then
+  echo "✗ Supported Python (3.11 or 3.12) not found or not executable" >&2
+  echo "  hint: macOS — 'brew install python@3.12' (or python@3.11)" >&2
   echo "        Ubuntu — 'apt install python3.12 python3.12-venv'" >&2
   exit 1
 fi
+export PY
 PY_VERSION=$("$PY" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-case "$PY_VERSION" in
-  3.11|3.12) ;;
-  *)
-    echo "✗ Python $PY_VERSION at $PY is not supported (need 3.11 or 3.12)" >&2
-    echo "  hint: macOS — 'brew install python@3.12'" >&2
-    echo "        Ubuntu — 'apt install python3.12 python3.12-venv'" >&2
-    exit 1
-    ;;
-esac
+echo "✓ Python $PY_VERSION at $PY"
+
+# Node.js & npm (required to compile the shared web interface)
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "✗ Node.js and npm are required to build the web interface" >&2
+  echo "  hint: macOS — 'brew install node'" >&2
+  echo "        Ubuntu — 'apt install nodejs npm'" >&2
+  exit 1
+fi
+echo "✓ Node.js $(node -v) and npm $(npm -v)"
 
 # Disk space — the model + voice/vision weights are multi-GB; fail loud
 # rather than 90% through a download.
@@ -201,7 +219,7 @@ fi
 #    has a dev/ tree now (0.9 split), so that can no longer be the
 #    dev-vs-product signal on its own.
 echo "→ running local installer..."
-bash "$JAEGER_INSTALL_ROOT/install.sh" --product
+bash "$JAEGER_INSTALL_ROOT/install.sh" --product "$@"
 
 cat <<EOF
 
