@@ -113,11 +113,19 @@ def test_process_runtime_cancel_reaps_a_detached_descendant(tmp_path) -> None:
 
     async def run():
         handle = await runtime.start(_request(tmp_path, timeout=60))
+        grandchild = None
         for _ in range(50):
-            if pidfile.exists():
+            try:
+                grandchild = int(pidfile.read_text())
+            except (FileNotFoundError, ValueError):
+                # exists() can observe the file between open(O_CREAT) and the
+                # child writing its PID. Readiness is a complete integer, not
+                # merely the directory entry appearing.
+                pass
+            else:
                 break
             await asyncio.sleep(0.05)
-        grandchild = int(pidfile.read_text())
+        assert grandchild is not None
         await runtime.cancel(handle)
         return grandchild, await runtime.result(handle)
 
