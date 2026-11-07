@@ -35,8 +35,17 @@ export function SessionClarifications({ sessionId, host, excludeIds = [] }: {
     if (deciding.current.has(form.clarify_id)) throw new Error("Clarification answer is already in progress");
     deciding.current.add(form.clarify_id);
     setBusy(form.clarify_id);
+    const owner = generation.current;
     try {
-      return await host.answerClarify(sessionId, form.clarify_id, form.revision, response);
+      const result = await host.answerClarify(sessionId, form.clarify_id, form.revision, response);
+      // The transcript can temporarily own this card while SSE catches up.
+      // Keep the acknowledged outcome in its session owner, so remounting the
+      // card cannot reopen a question the Gateway has already resolved.
+      if (generation.current === owner) setRows(current => current.map(row =>
+        row.clarify_id === form.clarify_id && row.session_id === sessionId && row.revision === form.revision
+          ? { ...row, status: result?.status ?? "answered", answer: result?.status === "answered" ? result.answer : result ? null : response }
+          : row));
+      return result;
     } finally {
       deciding.current.delete(form.clarify_id);
       setBusy(undefined);

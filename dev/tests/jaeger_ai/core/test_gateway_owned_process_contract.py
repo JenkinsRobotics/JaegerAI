@@ -733,7 +733,11 @@ def test_owned_browser_clarification_survives_reload_and_answers_once(tmp_path, 
                 playwright.expect(question).to_be_visible(timeout=20000)
                 question.locator("input[aria-label='Your answer']").fill("staging")
                 question.get_by_role("button", name="Answer").click()
-                playwright.expect(question).to_contain_text("Answered: staging", timeout=10000)
+                try:
+                    playwright.expect(question).to_contain_text("Answered: staging", timeout=10000)
+                except AssertionError as error:
+                    _, saved = stack.request(f"/v1/sessions/{session_id}/clarify?include_resolved=true", caller="webui")
+                    raise AssertionError(f"{error}\nSaved forms: {saved}\nAPI trace: {api_trace}\nPage errors: {page_errors}") from error
                 # The follow-up turn replays after the reload; the SSE relay
                 # paces in the observed 10-15s range, so do not tighten this.
                 # The rendered transcript places the tool steps block after the
