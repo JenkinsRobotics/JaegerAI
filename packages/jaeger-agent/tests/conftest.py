@@ -66,6 +66,15 @@ def pytest_sessionstart(session: pytest.Session) -> None:  # noqa: ARG001
     """
     global _registry_snapshot
 
+    # In this monorepo the product is discoverable, so executors must use its
+    # real authority boundary. Importing a package no longer bootstraps a host;
+    # this integration harness must do so explicitly, as production entrypoints
+    # do. A standalone package checkout has no product host to bind.
+    import importlib.util
+    if importlib.util.find_spec("jaeger_ai") is not None:
+        from jaeger_ai.core.agent_host import bind_agent_host
+        bind_agent_host()
+
     import jaeger_agent.tools  # noqa: F401 -- populate built-in tools
     from jaeger_os.core.tools.tool_registry import snapshot_registry
 
