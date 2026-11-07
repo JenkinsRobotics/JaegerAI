@@ -30,7 +30,7 @@ import { ChatHome } from "./ChatHome";
 import { stageSavedMedia, addFiles, autoGrow, bytesUploadEnabled, readBase64, fileSize, fromHost, MAX_ATTACHMENT_BYTES, MAX_ATTACHMENTS, primaryAction, restoreRejected, toAttachments, type PendingFile, type RejectedAttachment } from "./composer";
 import { capabilitiesOf, filePicker, type HostCapabilities } from "./hostH8";
 import { activityPhrase, stepLine, stepsSummary, type ToolPart } from "./activity";
-import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type ClarifyAnswerResult, type TurnHandle } from "./host";
+import { applyPart, isSessionMissingError, type ChatHost, type ChatPart, type ChatSession, type ChatTurn, type ClarifyAnswerResult, type TurnHandle } from "./host";
 import { Markdown } from "./Markdown";
 import { SessionApprovals } from "./SessionApprovals";
 import { SessionClarifications } from "./SessionClarifications";
@@ -208,7 +208,7 @@ const replyText = (turn: ChatTurn) => turn.parts.filter((p) => p.kind === "markd
 /** Inline transcript retention budget (turns); older durable pages are refetched on demand. */
 export const RETAINED_TURNS_MAX = 400;
 
-export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessionId?: string; agents?: Agent[] }) {
+export function MinimalChat({ host, sessionId, agents, onSessionMissing }: { host: ChatHost; sessionId?: string; agents?: Agent[]; onSessionMissing?: (sessionId: string) => void }) {
   const devicePreferences = useDevicePreferences();
   const [filesOpen,setFilesOpen]=useState(false);
   useEffect(()=>setFilesOpen(false),[sessionId]);
@@ -232,6 +232,16 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   const [busyMessages, setBusyMessages] = useState<BusyMessage[]>([]);
   const [queuedRequests, setQueuedRequests] = useState<QueuedRequest[]>([]);
   const [deliveryNotice, setDeliveryNotice] = useState<string>();
+  const missingSessionReported = useRef<string | undefined>(undefined);
+  useEffect(() => { missingSessionReported.current = undefined; }, [sessionId]);
+  const reportMissingSession = useCallback((error: unknown) => {
+    if (!sessionId || !onSessionMissing || !isSessionMissingError(error)) return false;
+    if (missingSessionReported.current !== sessionId) {
+      missingSessionReported.current = sessionId;
+      onSessionMissing(sessionId);
+    }
+    return true;
+  }, [onSessionMissing, sessionId]);
   const [autonomy, setAutonomy] = useState<"ask" | "scoped" | "auto">();
   const [atBottom, setAtBottom] = useState(true);
   const [listening, setListening] = useState<"dictation" | "voice" | null>(null);
@@ -278,12 +288,12 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     const load = async () => {
       if (reading) return; reading = true;
       try { const snapshot = await host.messageReactions!.load(sessionId); if (live && owner === reactionGeneration.current) { applyReactions(snapshot); setReactionError(undefined); } }
-      catch (e) { if (live) setReactionError(`Reactions unavailable: ${String((e as Error).message ?? e)}`); }
+      catch (e) { if (live && !reportMissingSession(e)) setReactionError(`Reactions unavailable: ${String((e as Error).message ?? e)}`); }
       finally { reading = false; }
     };
     void load(); const timer = setInterval(load, 5000);
     return () => { live = false; reactionGeneration.current++; clearInterval(timer); };
-  }, [host, sessionId]);
+  }, [host, sessionId, reportMissingSession]);
   useEffect(() => { setBusyMessages([]); setDeliveryNotice(undefined); }, [sessionId]);
   useEffect(() => {
     if (!sessionId || !host.sessionQueue) { setQueuedRequests([]); return; }
@@ -294,13 +304,13 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       try {
         const result = await host.sessionQueue!.list(sessionId);
         if (live && result.session_id === sessionId) setQueuedRequests(result.items);
-      } catch { /* the next poll reconciles transient queue read failures */ }
+      } catch (error) { reportMissingSession(error); /* otherwise the next poll reconciles a transient read failure */ }
       finally { reading = false; }
     };
     void load();
     const timer = setInterval(load, 3000);
     return () => { live = false; clearInterval(timer); };
-  }, [host, sessionId]);
+  }, [host, sessionId, reportMissingSession]);
   useEffect(() => {
     let live = true;
     if (!host.runtimeAutonomy) { setAutonomy(undefined); return; }
@@ -319,7 +329,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     if (reactionBusy.current.has(key)) return; reactionBusy.current.add(key);
     void host.messageReactions.save(sessionId, { request_id: requestId, role, emoji, active }).then(snapshot => {
       if (owner === reactionGeneration.current) { applyReactions(snapshot); setReactionError(undefined); }
-    }, e => { if (owner === reactionGeneration.current) setReactionError(`Reaction not confirmed: ${String((e as Error).message ?? e)}. Status will refresh; nothing was resent.`); }).finally(() => reactionBusy.current.delete(key));
+    }, e => { if (owner === reactionGeneration.current && !reportMissingSession(e)) setReactionError(`Reaction not confirmed: ${String((e as Error).message ?? e)}. Status will refresh; nothing was resent.`); }).finally(() => reactionBusy.current.delete(key));
   };
   const picker = useRef<HTMLInputElement>(null);
   const stick = useRef(true);
@@ -342,7 +352,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     stick.current = true;
     if (!sameOwner) { setEntries({}); setOlder(undefined); }
     setOlderError(undefined);
-    const fail = (error: unknown) => { if (live) setLoadError(String((error as Error)?.message ?? error)); };
+    const fail = (error: unknown) => { if (live && !reportMissingSession(error)) setLoadError(String((error as Error)?.message ?? error)); };
     const loadStandardTranscript = () => sessionId ? host.sessions.load(sessionId).then(
       (s) => { if (live) { loadedTurns.current = new Set(s.turns.map((t) => t.turnId)); setSession(current => mergeSessionSnapshot(current, s)); } },
       fail,
@@ -360,7 +370,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     }, () => { void loadStandardTranscript(); });
     else if (sessionId) void loadStandardTranscript();
     return () => { live = false; };
-  }, [host, home, sessionId, attempt]);
+  }, [host, home, sessionId, attempt, reportMissingSession]);
 
   useEffect(() => {
     const reconnect = () => { if (loadError) setAttempt(n => n + 1); };
@@ -597,7 +607,10 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     if (!silent) setRecoveryStatus("checking");
     let intent;
     try { intent = await host.findPendingIntent(session.id, silent ? undefined : session.turns.find(t => t.state === "unknown")?.turnId); }
-    catch (error) { setFileNote(`Request lookup unavailable: ${String(error)}`); if (!silent) setRecoveryStatus("unknown"); return; }
+    catch (error) {
+      if (reportMissingSession(error)) return;
+      setFileNote(`Request lookup unavailable: ${String(error)}`); if (!silent) setRecoveryStatus("unknown"); return;
+    }
     finally { checkingRequest.current = false; }
     setFileNote(note => note?.startsWith("Request lookup unavailable:") ? undefined : note);
     if (!intent) { if (!silent) setRecoveryStatus("clear"); return; }

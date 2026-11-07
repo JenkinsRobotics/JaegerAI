@@ -133,9 +133,17 @@ export interface ChatHost {
 export interface ChatPaneOptions {
   agents?: Agent[];
   sessionId?: string;
+  /** The selected durable session disappeared while this pane was mounted. */
+  onSessionMissing?: (sessionId: string) => void;
 }
 
 export type ChatPaneMount = (el: HTMLElement, host: ChatHost, opts: ChatPaneOptions) => (() => void) & { updateAgents?: (agents: Agent[]) => void };
+
+/** Gateway errors retain their transport prefix, so classify by the durable error message. */
+export function isSessionMissingError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /\bsession not found\b/i.test(message);
+}
 
 /** Apply the onPart contract to a part list. */
 export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {

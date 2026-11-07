@@ -105,6 +105,28 @@ for (const width of [301, 320, 390, 502, 1280]) {
         expect(composer, '.jg-composer must be visible').not.toBeNull();
         expect(900 - composer!.y - composer!.height, '.jg-composer must use the bottom edge when the mobile dock is absent').toBeLessThanOrEqual(32);
       }
+      if (width === 502) {
+        const form = page.locator('.jg-composer');
+        await form.evaluate((node) => {
+          const input = node.querySelector('textarea');
+          for (let index = 0; index < 3; index += 1) {
+            const notice = document.createElement('div');
+            notice.dataset.layoutProbe = '';
+            notice.setAttribute('role', 'status');
+            notice.textContent = 'A long Gateway recovery notice must wrap inside the composer without creating another flex column.';
+            node.insertBefore(notice, input);
+          }
+        });
+        const formBox = await form.boundingBox();
+        expect(formBox).not.toBeNull();
+        for (const probe of await form.locator(':scope > [data-layout-probe]').all()) {
+          const box = await probe.boundingBox();
+          expect(box).not.toBeNull();
+          expect(box!.x).toBeGreaterThanOrEqual(formBox!.x);
+          expect(box!.x + box!.width).toBeLessThanOrEqual(formBox!.x + formBox!.width + 1);
+        }
+        await form.locator(':scope > [data-layout-probe]').evaluateAll(nodes => nodes.forEach(node => node.remove()));
+      }
       if (width <= 320) {
         for (const selector of ['.jg-stable-demo__header', '.jg-composer', '.jg-composer__input', '.jg-composer__bar']) {
           const box = await page.locator(selector).boundingBox();
