@@ -76,6 +76,9 @@ set -Eeuo pipefail
 
 EXPECTED_COMMIT="$1"
 PUBLIC_URL="$2"
+# launchd and noninteractive SSH intentionally have a minimal PATH. Resolve the
+# Homebrew Node toolchain explicitly instead of relying on the user's shell rc.
+export PATH="/opt/homebrew/bin:/usr/local/bin:${PATH}"
 REPO_ROOT="${HOME}/.jaeger/source"
 UI_ROOT="${REPO_ROOT}/jaeger_ai/interfaces/ui"
 SERVED_PARENT="${HOME}/.cache/jaeger/ui-rebuild-mainscreen"
@@ -87,6 +90,7 @@ PUBLIC_INDEX="$(mktemp -t jaeger-live-index.XXXXXX)"
 OLD_COMMIT=""
 BACKUP_DIR=""
 CUTOVER_STARTED=0
+SOURCE_UPDATED=0
 
 cleanup() {
   rm -f "${STATUS_FILE}" "${HEALTH_FILE}" "${PUBLIC_INDEX}"
@@ -95,22 +99,26 @@ cleanup() {
 rollback() {
   local code=$?
   trap - ERR
-  if ((code != 0 && CUTOVER_STARTED == 1)); then
-    echo "[deploy-live] Verification failed; restoring ${OLD_COMMIT}." >&2
+  if ((code != 0 && SOURCE_UPDATED == 1)); then
+    echo "[deploy-live] Deployment failed; restoring source ${OLD_COMMIT}." >&2
     set +e
     cd "${REPO_ROOT}"
-    ./jaeger stack down --json >&2
+    if ((CUTOVER_STARTED == 1)); then
+      ./jaeger stack down --json >&2
+    fi
     git reset --hard "${OLD_COMMIT}" >&2
-    if [[ -n "${BACKUP_DIR}" && -d "${BACKUP_DIR}" ]]; then
+    if ((CUTOVER_STARTED == 1)) && [[ -n "${BACKUP_DIR}" && -d "${BACKUP_DIR}" ]]; then
       rm -rf "${SERVED_DIST}.rollback-next"
       cp -a "${BACKUP_DIR}" "${SERVED_DIST}.rollback-next"
       rm -rf "${SERVED_DIST}"
       mv "${SERVED_DIST}.rollback-next" "${SERVED_DIST}"
     fi
-    cd "${UI_ROOT}"
-    npm ci >&2
-    cd "${REPO_ROOT}"
-    ./jaeger stack up gateway agent webui mcp --json >&2
+    if ((CUTOVER_STARTED == 1)); then
+      cd "${UI_ROOT}"
+      npm ci >&2
+      cd "${REPO_ROOT}"
+      ./jaeger stack up gateway agent webui mcp --json >&2
+    fi
     set -e
   fi
   cleanup
@@ -133,6 +141,7 @@ if [[ "$(git rev-parse origin/master)" != "${EXPECTED_COMMIT}" ]]; then
   exit 1
 fi
 git reset --hard "${EXPECTED_COMMIT}"
+SOURCE_UPDATED=1
 
 echo "[deploy-live] Reinstalling UI dependencies and building production assets..."
 cd "${UI_ROOT}"
