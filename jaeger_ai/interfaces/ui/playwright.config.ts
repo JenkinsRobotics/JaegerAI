@@ -83,7 +83,7 @@ export default defineConfig({
 
   // Run local dev server before starting the tests
   webServer: {
-    command: 'python ../../../dev/scripts/ui_browser_contract.py',
+    command: 'python3.12 ../../../dev/scripts/ui_browser_contract.py',
     url: BASE_URL,
     reuseExistingServer: false,
     timeout: 120000,
