@@ -10,18 +10,26 @@ test.beforeEach(async ({ context }) => {
 async function openChat(page: Page) {
   page.on('response', response => { if (response.status() >= 400) console.log('HTTP', response.status(), new URL(response.url()).pathname); });
   await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Start conversation' }).or(page.getByRole('button', { name: 'Skip setup' }))).toBeVisible();
+  const input = page.getByRole('textbox', { name: 'Message', exact: true });
+  const start = page.getByRole('button', { name: 'Start conversation' });
+  await expect(start.or(page.getByRole('button', { name: 'Skip setup' })).or(input)).toBeVisible();
   if (await page.getByRole('button', { name: 'Skip setup' }).isVisible()) {
     await page.getByRole('button', { name: 'Skip setup' }).click();
   }
-  await page.getByRole('button', { name: 'Start conversation' }).click();
-  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+  // A clean Gateway offers Start conversation. A new browser pointed at an
+  // existing Gateway resumes its durable active conversation instead. Wait
+  // for either stable state so the contract covers both first-use and
+  // cross-device continuity without racing the session-list response.
+  await expect.poll(async () => await input.isEnabled() || await start.isEnabled()).toBe(true);
+  if (!await input.isEnabled()) await start.click();
+  await expect(input).toBeEnabled();
 }
 
-test('default screen exposes Chat, Tasks and the preserved preview', async ({ page }) => {
+test('default screen exposes the current workspace navigation and chat controls', async ({ page }) => {
   await openChat(page);
-  await expect(page.getByRole('navigation', { name: 'Demo navigation' }).getByRole('button')).toHaveText(['Chat', 'Tasks']);
-  await expect(page.getByRole('link', { name: 'Full workspace (preview)' })).toHaveAttribute('href', '/?full=1');
+  await expect(page.getByRole('navigation', { name: 'Jaeger navigation' }).getByRole('button')).toHaveText(['Chat', 'Agents', 'Work', 'Tasks', 'Research', 'Studio', 'Machine']);
+  await expect(page.locator('header[aria-label="Conversation toolbar"]')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Toggle navigation' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
 });
 
@@ -47,19 +55,21 @@ test('keyboard send reaches Gateway, persists history and keeps chat across Task
 test('Shift+Enter retains an unsent multiline draft across navigation', async ({ page }) => {
   await openChat(page);
   const input = page.getByRole('textbox', { name: 'Message', exact: true });
+  const sentBefore = await page.locator('.jg-bubble--user').count();
   await input.fill('First line'); await input.press('Shift+Enter'); await input.pressSequentially('Second line');
   await page.getByRole('button', { name: 'Tasks', exact: true }).click();
   await page.getByRole('button', { name: 'Chat', exact: true }).click();
   await expect(input).toHaveValue('First line\nSecond line');
-  await expect(page.locator('.jg-bubble--user')).toHaveCount(0);
+  await expect(page.locator('.jg-bubble--user')).toHaveCount(sentBefore);
 });
 
-test('missing saved session reports failure without replacing or resending it', async ({ page }) => {
+test('a stale device-local selection resumes the durable Gateway conversation', async ({ page }) => {
   await page.addInitScript(() => localStorage.setItem('jaeger.stable-demo.session.v1', 'missing-browser-contract'));
   await page.goto('/');
   if (await page.getByRole('button', { name: 'Skip setup' }).isVisible()) await page.getByRole('button', { name: 'Skip setup' }).click();
-  await expect(page.getByRole('alert')).toBeVisible();
-  expect(await page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).toBe('missing-browser-contract');
+  await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).not.toBe('missing-browser-contract');
+  expect(await page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).toBeTruthy();
 });
 
 for (const width of [390, 1280]) {
