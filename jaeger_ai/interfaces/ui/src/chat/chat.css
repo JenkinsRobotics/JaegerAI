@@ -316,9 +316,10 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
 .jg-chat-home__chip-icon svg { width: 15px; height: 15px; }
 
 .jg-composer {
-  flex-direction: column; align-items: stretch; gap: 10px; width: calc(100% - 48px); max-width: 920px; min-height: 142px;
+  flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 10px; min-width: 0; width: calc(100% - 48px); max-width: 920px; min-height: 142px;
   margin: 0 auto 18px; padding: 16px 16px 12px; border-radius: 30px;
 }
+.jg-composer > [role="status"], .jg-composer > [role="alert"] { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .jg-composer__input { padding: 4px 8px; min-height: 64px; font-size: max(var(--jg-font-body), 16px); }
 .jg-composer__bar { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .jg-composer__spacer { flex: 1; }

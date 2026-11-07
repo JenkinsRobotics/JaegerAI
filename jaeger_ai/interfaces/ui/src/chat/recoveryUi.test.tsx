@@ -9,6 +9,22 @@ import { WebHost } from "./webHost";
 vi.mock("./reveal", () => ({ useRevealedText: (text: string) => text }));
 beforeEach(() => localStorage.clear());
 
+it("reports a session deleted after mount without rendering raw endpoint errors", async () => {
+  const onSessionMissing = vi.fn();
+  const source = {
+    kind: "live", agents: async () => [],
+    session: vi.fn().mockRejectedValue(new Error("GatewayError: Session not found")),
+  } as unknown as JaegerSource;
+  const el = document.createElement("div"); document.body.append(el); const root = createRoot(el);
+  try {
+    await act(async () => root.render(<MinimalChat host={new WebHost(source)} sessionId="gone" onSessionMissing={onSessionMissing} />));
+    await vi.waitFor(() => expect(onSessionMissing).toHaveBeenCalledWith("gone"));
+    expect(el.textContent).not.toContain("Session not found");
+    expect(el.textContent).not.toContain("Request lookup unavailable");
+    expect(el.textContent).not.toContain("Reactions unavailable");
+  } finally { act(() => root.unmount()); el.remove(); }
+});
+
 it("clears the recovery check once observing saved work, streams into one bubble, and leaves the composer separate", async () => {
   let emit!: (event: GatewayEvent) => void;
   const send = vi.fn();

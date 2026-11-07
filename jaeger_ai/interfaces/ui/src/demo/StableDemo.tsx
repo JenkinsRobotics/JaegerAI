@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import type { JaegerSource } from "../api/source";
 import type { Agent, SessionRow } from "../api/types";
 import { ChatPane } from "../chat/ChatPane";
+import { isSessionMissingError } from "../chat/host";
 import { WebHost } from "../chat/webHost";
 import { contractHome, httpGetJson } from "../chat/homeSession";
 import { ApprovalTray } from "../unified/ApprovalTray";
@@ -72,6 +73,14 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const unavailableSessions = useRef(new Set<string>());
+  const recoverMissingSession = useCallback((missingSession: string) => {
+    unavailableSessions.current.add(missingSession);
+    setRecent(rows => rows.filter(row => row.session_id !== missingSession));
+    setError(""); setReady(true); setHeaderPopup(null);
+    setSession(current => current === missingSession ? "" : current);
+    try { if (localStorage.getItem(DEMO_SESSION_KEY) === missingSession) localStorage.removeItem(DEMO_SESSION_KEY); } catch { /* the in-memory recovery still works */ }
+  }, []);
   useEffect(() => {
     if (!sidebarOpen) return;
     const close = (event: KeyboardEvent) => {
@@ -90,9 +99,13 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     let live = true;
     Promise.all([source.agents(), session ? source.session(session) : Promise.resolve(null)]).then(([rows]) => {
       if (live) { setAgents(rows); setReady(true); setError(""); }
-    }).catch((e: unknown) => { if (live) { setError(String((e as Error).message)); setReady(false); } });
+    }).catch((e: unknown) => {
+      if (!live) return;
+      if (session && isSessionMissingError(e)) recoverMissingSession(session);
+      else { setError(String((e as Error).message)); setReady(false); }
+    });
     return () => { live = false; };
-  }, [source, session]);
+  }, [source, session, recoverMissingSession]);
   useEffect(() => {
     if (!headerPopup) return;
     const close = (event: MouseEvent) => { if (!toolsRef.current?.contains(event.target as Node)) setHeaderPopup(null); };
@@ -112,7 +125,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     let live = true;
     source.sessions({ agent_id: "native:jaeger" }).then(rows => {
       if (!live) return;
-      const available = rows.filter(row => !row.archived).sort((a, b) => sessionActivity(b) - sessionActivity(a));
+      const available = rows.filter(row => !row.archived && !unavailableSessions.current.has(row.session_id)).sort((a, b) => sessionActivity(b) - sessionActivity(a));
       setRecent(available);
       setHistoryReady(true);
       setHistoryError("");
@@ -361,7 +374,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       </header>
       {error && <p className="jg-stable-demo__connection-alert" role="alert"><span>{error}</span><button type="button" onClick={() => location.reload()}>Reconnect</button></p>}
       <section className="jg-stable-demo__body" hidden={workspacePage} aria-label="Chat">
-        {session && ready ? <ChatPane host={host} sessionId={session} agents={agent ? [agent] : agents} /> : !ready || !historyReady || historyError || session ?
+        {session && ready ? <ChatPane host={host} sessionId={session} agents={agent ? [agent] : agents} onSessionMissing={recoverMissingSession} /> : !ready || !historyReady || historyError || session ?
           <div className="jg-stable-demo__empty" role="status"><h1>{error || historyError ? "Waiting to reconnect" : "Restoring your conversation"}</h1><p>{error || historyError ? "Jaeger is temporarily unavailable. Your saved conversation will return when the connection is restored." : "Loading your saved conversation from Jaeger."}</p></div> :
           <div className="jg-stable-demo__empty"><span className="jg-stable-demo__eyebrow">YOUR AI COMPANION</span><h1>What would you like to work on?</h1><p>Talk with Jaeger, follow a task, or explore your files.<br />Your conversation stays here when you return.</p>
           <button type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "Start conversation"}</button></div>}

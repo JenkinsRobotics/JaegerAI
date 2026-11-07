@@ -3,7 +3,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { MockSource } from "../api/mock";
 import { StableDemo, DEMO_SESSION_KEY } from "./StableDemo";
-vi.mock("../chat/ChatPane", () => ({ ChatPane: ({sessionId}: {sessionId: string}) => <div data-chat-session={sessionId}>Real host mount point</div> }));
+vi.mock("../chat/ChatPane", () => ({ ChatPane: ({sessionId, onSessionMissing}: {sessionId: string; onSessionMissing?: (id: string) => void}) => <div data-chat-session={sessionId}>Real host mount point<button type="button" aria-label="Report missing session" onClick={() => onSessionMissing?.(sessionId)}>Report missing</button></div> }));
 vi.mock("../windows/AppWindow", () => ({ AppWindow: ({embedded}: {embedded?: boolean}) => <div data-workspace-embedded={embedded}>Workspace page</div> }));
 (globalThis as {IS_REACT_ACT_ENVIRONMENT?: boolean}).IS_REACT_ACT_ENVIRONMENT = true;
 let root: Root;
@@ -96,6 +96,22 @@ it("recovers a phone whose saved conversation was deleted on another device", as
  expect(document.querySelector('[data-chat-session]')?.getAttribute('data-chat-session')).toBe('shared-latest');
  expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('shared-latest');
  expect(document.querySelector('[role=alert]')).toBeNull();
+});
+it("leaves a session that disappears while the chat is already mounted", async () => {
+ localStorage.setItem(DEMO_SESSION_KEY, 'deleted-after-mount');
+ const source = new MockSource();
+ Object.defineProperty(source, 'kind', {value: 'live'});
+ vi.spyOn(source, 'sessions').mockResolvedValue([
+  {session_id: 'deleted-after-mount', title: 'Deleted elsewhere', agent_id: 'native:jaeger', last_activity_at: 30},
+  {session_id: 'shared-fallback', title: 'Shared fallback', agent_id: 'native:jaeger', last_activity_at: 20},
+ ]);
+ vi.spyOn(source, 'session').mockImplementation(async id => ({session_id: id} as never));
+ await mount(source);
+ expect(document.querySelector('[data-chat-session]')?.getAttribute('data-chat-session')).toBe('deleted-after-mount');
+ await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Report missing session"]')!.click());
+ await vi.waitFor(() => expect(document.querySelector('[data-chat-session]')?.getAttribute('data-chat-session')).toBe('shared-fallback'));
+ expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('shared-fallback');
+ expect(document.body.textContent).not.toContain('Deleted elsewhere');
 });
 it("opens and closes the work panel without replacing the conversation", async () => {
  await mount();
