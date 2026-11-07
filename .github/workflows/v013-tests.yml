@@ -8,6 +8,13 @@ on:
       - 'jaeger_ai/interfaces/ide/**'
       - 'jaeger_ai/core/memory/dreaming.py'
       - 'jaeger_ai/core/gateway/websocket.py'
+      - 'jaeger_ai/core/**'
+      - 'jaeger_ai/main.py'
+      - 'jaeger_ai/__init__.py'
+      - 'packages/jaeger-agent/**'
+      - 'requirements.txt'
+      - 'dev/tests/fixtures/**'
+      - 'dev/scripts/ui_browser_contract.py'
       - '.github/workflows/v013-tests.yml'
   pull_request:
     branches: [main, develop, master]
@@ -16,6 +23,13 @@ on:
       - 'jaeger_ai/interfaces/ide/**'
       - 'jaeger_ai/core/memory/dreaming.py'
       - 'jaeger_ai/core/gateway/websocket.py'
+      - 'jaeger_ai/core/**'
+      - 'jaeger_ai/main.py'
+      - 'jaeger_ai/__init__.py'
+      - 'packages/jaeger-agent/**'
+      - 'requirements.txt'
+      - 'dev/tests/fixtures/**'
+      - 'dev/scripts/ui_browser_contract.py'
       - '.github/workflows/v013-tests.yml'
 
 env:

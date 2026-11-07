@@ -19,6 +19,21 @@ def ok(stdout=""):
     return subprocess.CompletedProcess([], 0, stdout, "")
 
 
+def test_missing_host_command_is_reported_as_unavailable(monkeypatch):
+    from jaeger_ai.features.app_control import adapters
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("launchctl")
+
+    monkeypatch.setattr(adapters.subprocess, "run", missing)
+    host = Host()
+    assert not host.launchd_loaded("com.jenkinsrobotics.jaeger-gateway")
+    assert host.launchd_pid("com.jenkinsrobotics.jaeger-gateway") is None
+    result = adapters.run(["launchctl", "print", "gui/501/missing"])
+    assert result.returncode == 127
+    assert "launchctl" in result.stderr
+
+
 class FakeHost(Host):
     """Records commands; simulates pgrep/launchctl/open/osascript. No real process is run."""
 

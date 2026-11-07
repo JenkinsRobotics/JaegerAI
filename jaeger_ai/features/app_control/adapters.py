@@ -125,7 +125,12 @@ Runner = Callable[..., subprocess.CompletedProcess]
 
 
 def run(argv: list[str], timeout: float = 30, input: str | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, input=input, check=False)
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout, input=input, check=False)
+    except FileNotFoundError:
+        # Optional host commands (notably launchctl outside macOS) are absent,
+        # rather than a failure of the Gateway's read-only inventory endpoint.
+        return subprocess.CompletedProcess(argv, 127, stdout="", stderr=f"command unavailable: {argv[0]}")
 
 
 class Host:
