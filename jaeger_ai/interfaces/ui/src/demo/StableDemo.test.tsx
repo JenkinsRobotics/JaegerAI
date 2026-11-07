@@ -68,3 +68,20 @@ it("collapses each column independently without remounting the chat", async () =
  expect(document.querySelector('[data-chat-session]')).toBe(chat);
  expect(document.querySelector('.jg-stable-demo__identity')?.textContent).toContain('Jaeger');
 });
+it("opens searchable draft settings and returns to the same chat", async () => {
+ localStorage.setItem(DEMO_SESSION_KEY, 'saved');
+ const source = new MockSource();
+ vi.spyOn(source, 'session').mockResolvedValue({session_id: 'saved'} as never);
+ await mount(source);
+ const chat = document.querySelector('[data-chat-session]');
+ await flush(() => { const settings = [...document.querySelectorAll('button')].find(button => button.textContent === 'Settings')!; settings.focus(); settings.click(); });
+ expect(document.querySelector('#jaeger-settings-title')?.textContent).toBe('General');
+ const nav = document.querySelector('[aria-label="Settings categories"]')!;
+ expect(nav.querySelectorAll('button')).toHaveLength(23);
+ await flush(() => [...nav.querySelectorAll('button')].find(button => button.textContent === 'Worktrees')!.click());
+ expect(document.querySelector('#jaeger-settings-title')?.textContent).toBe('Worktrees');
+ await flush(() => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})));
+ expect(document.querySelector('[aria-label="Settings navigation"]')).toBeNull();
+ expect(document.querySelector('[data-chat-session]')).toBe(chat);
+ expect(document.activeElement?.textContent).toBe('Settings');
+});
