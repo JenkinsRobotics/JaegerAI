@@ -161,6 +161,7 @@ export class WebHost implements ChatHost {
   /** The chat view puts refused files back on the composer as error chips. */
   onAttachmentsRejected?: (turnId: string, rejected: RejectedAttachment[]) => void;
   get modelSettings() { return this.source.modelSettings; }
+  get runtimeAutonomy() { return this.source.runtimeAutonomy?.bind(this.source); }
   get messageReactions() { return this.source.messageReactions; }
   get sessionQueue() { return this.source.sessionQueue; }
   async listModels() {

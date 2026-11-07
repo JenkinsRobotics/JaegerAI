@@ -92,6 +92,7 @@ export interface ChatHost {
   readonly sessionQueue?: import("../api/source").SessionQueue;
   readonly messageReactions?: import("../api/source").JaegerSource["messageReactions"];
   readonly modelSettings?: import("../api/source").ModelSettings;
+  readonly runtimeAutonomy?: import("../api/source").JaegerSource["runtimeAutonomy"];
   readonly kind: HostKind;
   getConfig(): Promise<ChatConfig>;
   listModels(): Promise<ChatModel[]>;

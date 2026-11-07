@@ -6069,6 +6069,7 @@ class JaegerGatewayApp:
             "queued": True,
         })
         return web.json_response({
+            "session_id": session_id,
             "request_id": request_id,
             "steered": True,
             "queued": True,

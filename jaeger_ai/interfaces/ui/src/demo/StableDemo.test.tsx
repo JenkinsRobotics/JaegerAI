@@ -48,6 +48,18 @@ it("switches saved conversations without creating a session and keeps the select
  expect(create).not.toHaveBeenCalled();
  expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('saved');
 });
+it("opens the same most-recent durable conversation on a new live browser", async () => {
+ const source = new MockSource();
+ Object.defineProperty(source, 'kind', {value: 'live'});
+ vi.spyOn(source, 'sessions').mockResolvedValue([
+  {session_id: 'older', title: 'Older', agent_id: 'native:jaeger', last_activity_at: 10},
+  {session_id: 'shared-latest', title: 'Shared latest', agent_id: 'native:jaeger', last_activity_at: 20},
+ ]);
+ vi.spyOn(source, 'session').mockResolvedValue({session_id: 'shared-latest'} as never);
+ await mount(source);
+ expect(document.querySelector('[data-chat-session]')?.getAttribute('data-chat-session')).toBe('shared-latest');
+ expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('shared-latest');
+});
 it("opens and closes the work panel without replacing the conversation", async () => {
  await mount();
  const summary = document.querySelector<HTMLButtonElement>('[aria-label="Toggle pinned summary"]')!;

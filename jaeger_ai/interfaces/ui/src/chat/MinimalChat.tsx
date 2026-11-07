@@ -3,7 +3,7 @@ import {TaskArtifacts} from '../library/TaskArtifacts';
 import { mergeSessionSnapshot } from "./sessionProjection";
 import { useDraft } from "./useDraft";
 import type { Agent } from "../api/types";
-import type { ReactionSnapshot } from "../api/source";
+import type { QueuedRequest, ReactionSnapshot } from "../api/source";
 /* Minimal stand-in chat renderer, styled to the Grok Bot Mac target. The
  * shared VS Code-derived widget replaces it through ChatPaneMount.
  * Jenkins Robotics 2026-10-17: tool steps fold into a "Show steps" card, and a
@@ -16,12 +16,13 @@ import { AgentAvatar } from "../agents/AgentAvatar";
 import { avatarColor } from "../agents/avatarColor";
 import { HandoffMarker } from "../agents/HandoffMarker";
 import { ArrowDownIcon, CloseIcon, MicIcon, PlusIcon, SendIcon, StopIcon, WaveIcon } from "../icons";
+import { Shield } from "../components/Icons";
 import { ErrorState } from "../shell/ErrorState";
 import { badge, messageCount, unreadSince } from "./scrollFollow";
 import { RuntimeSettings } from "../settings/RuntimeSettings";
 import { SessionFiles } from "./SessionFiles";
 import { VoiceDictation } from "./VoiceDictation";
-import { queuePrefix, SessionQueue } from "./SessionQueue";
+import { queuePrefix } from "./SessionQueue";
 import { WebHost } from "./webHost";
 import type { HomeEntry, HomeSessions } from "./homeSession";
 import { PostMessage, SummaryCard } from "./HomeEntries";
@@ -33,6 +34,7 @@ import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTur
 import { Markdown } from "./Markdown";
 import { SessionApprovals } from "./SessionApprovals";
 import { SessionClarifications } from "./SessionClarifications";
+import { GatewayError } from "../api/gateway";
 import { ClarificationAnswers, clarificationAnswerKey } from "./clarificationAnswers";
 import { ApprovalCard, QuestionCard } from "./ApprovalCard";
 import { MessageMenu, Reactions, type MessageAction } from "./MessageMenu";
@@ -43,6 +45,7 @@ import type { VoiceHost } from "./nativeHost";
 
 const seconds = (ms?: number) => Math.max(1, Math.round((ms ?? 0) / 1000));
 type Decide = (callId: string, decision: "approve" | "deny") => void;
+type BusyMessage = { id: string; text: string; delivery: "steered" | "queued"; createdAt: number };
 type CardPart = Extract<ChatPart, { kind: "confirmation" | "question" }>;
 type MarkerPart = Extract<ChatPart, { kind: "handoff" }>;
 type Links = { onCopy: (text: string) => void; onOpen: (url: string) => void };
@@ -225,8 +228,11 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   const [agent, setAgent] = useState<{ id: string; name: string }>({ id: "native:jaeger", name: "Jaeger" });
   const { draft, setDraft, quote, setQuote, files, setFiles, ready: draftReady, error: draftError } = useDraft(sessionId);
   const [active, setActive] = useState<TurnHandle | null>(null);
-  const [busyInputMode, setBusyInputMode] = useState<"steer" | "queue">("steer");
   const [followUpBusy, setFollowUpBusy] = useState(false);
+  const [busyMessages, setBusyMessages] = useState<BusyMessage[]>([]);
+  const [queuedRequests, setQueuedRequests] = useState<QueuedRequest[]>([]);
+  const [deliveryNotice, setDeliveryNotice] = useState<string>();
+  const [autonomy, setAutonomy] = useState<"ask" | "scoped" | "auto">();
   const [atBottom, setAtBottom] = useState(true);
   const [listening, setListening] = useState<"dictation" | "voice" | null>(null);
   const sending = useRef(false);
@@ -278,6 +284,35 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     void load(); const timer = setInterval(load, 5000);
     return () => { live = false; reactionGeneration.current++; clearInterval(timer); };
   }, [host, sessionId]);
+  useEffect(() => { setBusyMessages([]); setDeliveryNotice(undefined); }, [sessionId]);
+  useEffect(() => {
+    if (!sessionId || !host.sessionQueue) { setQueuedRequests([]); return; }
+    let live = true, reading = false;
+    const load = async () => {
+      if (reading) return;
+      reading = true;
+      try {
+        const result = await host.sessionQueue!.list(sessionId);
+        if (live && result.session_id === sessionId) setQueuedRequests(result.items);
+      } catch { /* the next poll reconciles transient queue read failures */ }
+      finally { reading = false; }
+    };
+    void load();
+    const timer = setInterval(load, 3000);
+    return () => { live = false; clearInterval(timer); };
+  }, [host, sessionId]);
+  useEffect(() => {
+    let live = true;
+    if (!host.runtimeAutonomy) { setAutonomy(undefined); return; }
+    void host.runtimeAutonomy().then(result => { if (live) setAutonomy(result.autonomy); }, () => { if (live) setAutonomy(undefined); });
+    return () => { live = false; };
+  }, [host]);
+  useEffect(() => {
+    if (!session?.turns.length || !busyMessages.length) return;
+    const recorded = new Set(session.turns.map(turn => turn.message?.trim()).filter(Boolean));
+    if (!busyMessages.some(message => recorded.has(message.text))) return;
+    setBusyMessages(current => current.filter(message => !recorded.has(message.text)));
+  }, [session?.turns, busyMessages.length]);
   const changeReaction = (requestId: string | undefined, role: "user" | "assistant", emoji: string, active: boolean) => {
     if (!requestId || !sessionId || !host.messageReactions) return;
     const key = `${requestId}|${role}|${emoji}`, owner = reactionGeneration.current;
@@ -646,19 +681,19 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   };
   const stop = () => active?.cancel();
 
-  const submitWhileBusy = async () => {
+  const submitWhileBusy = async (delivery: "steer" | "queue" = "steer") => {
     const text = draft.trim();
     if (!active || !session || !text || followUpBusy || !host.sessionQueue) return;
     setFollowUpBusy(true);
-    setFileNote(undefined);
+    setDeliveryNotice(undefined);
     try {
-      if (busyInputMode === "steer") {
+      if (delivery === "steer") {
         const requestId = [...session.turns].reverse().find(turn => turn.state === "pending" && turn.requestId)?.requestId;
         if (!requestId || !host.sessionQueue.steer) throw Error("The active request cannot accept steering yet");
         const receipt = await host.sessionQueue.steer(session.id, requestId, text);
         if (receipt.session_id !== session.id || receipt.request_id !== requestId || !receipt.steered) throw Error("Steer receipt did not match the active request");
         setDraft(current => current.trim() === text ? "" : current);
-        setFileNote("Steered the current turn.");
+        setBusyMessages(current => [...current, { id: crypto.randomUUID(), text, delivery: "steered", createdAt: Date.now() }]);
       } else {
         const intent = { requestId: crypto.randomUUID(), text };
         const intentKey = queuePrefix(session.id) + ".intent";
@@ -667,18 +702,23 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         if (receipt.session_id !== session.id || receipt.request_id !== intent.requestId || !receipt.status) throw Error("Queue receipt did not match the saved follow-up");
         localStorage.removeItem(intentKey);
         setDraft(current => current.trim() === text ? "" : current);
-        setFileNote("Queued for the next turn.");
+        setBusyMessages(current => [...current, { id: intent.requestId, text, delivery: "queued", createdAt: Date.now() }]);
+        const snapshot = await host.sessionQueue.list(session.id).catch(() => undefined);
+        if (snapshot?.session_id === session.id) setQueuedRequests(snapshot.items);
         setAttempt(value => value + 1);
         void checkSavedRequest(true);
       }
     } catch (error) {
-      setFileNote(`${busyInputMode === "steer" ? "Steer" : "Queue"} not confirmed: ${String((error as Error).message ?? error)}. Your text was kept.`);
+      const rejectedSteer = delivery === "steer" && error instanceof GatewayError && error.status === 409;
+      setDeliveryNotice(rejectedSteer
+        ? "Jaeger could not accept that steer. Your message is still here; use Queue next to send it after the current turn."
+        : `${delivery === "steer" ? "Message" : "Queue"} not confirmed: ${String((error as Error).message ?? error)}. Your text was kept.`);
     } finally {
       setFollowUpBusy(false);
     }
   };
 
-  const submitComposer = () => active ? void submitWhileBusy() : send();
+  const submitComposer = () => active ? void submitWhileBusy("steer") : send();
 
   const toggleListening = async (mode: "dictation" | "voice") => {
     if (!voiceHost) return;
@@ -806,6 +846,19 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
               {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} agent={agent} state={turnAvatarState(turn)} />}
             </section>
           ))}
+          {busyMessages.map(message => (
+            queuedRequests.some(row => row.request_id === message.id) ? null :
+            <section key={message.id} className="jg-turn jg-turn--busy-message" aria-label={message.delivery === "steered" ? "Message sent to the active turn" : "Message queued for the next turn"}>
+              <div className="jg-bubble jg-bubble--user" data-sender="user">{message.text}</div>
+              <small className="jg-busy-message__status">{message.delivery === "steered" ? "Sent to Jaeger" : "Queued next"}</small>
+            </section>
+          ))}
+          {queuedRequests.map(request => (
+            <section key={request.request_id} className="jg-turn jg-turn--busy-message" aria-label="Message queued for the next turn">
+              <div className="jg-bubble jg-bubble--user" data-sender="user">{request.input_text}</div>
+              <small className="jg-busy-message__status">{request.status === "paused" ? "Queue paused" : "Queued next"}</small>
+            </section>
+          ))}
           {recoveryStatus !== "clear" && <div role="status" className="jg-recovery">{recoveryStatus === "checking" ? "Checking saved work…" : <>Previous request outcome unknown. It was not replayed. <button type="button" disabled={acknowledging || !unknownRequest} onClick={() => void continueWithoutReplay()}>Continue without replaying</button> <button type="button" onClick={() => void checkSavedRequest()}>Check again</button></>}</div>}
           {sessionId && host instanceof WebHost && <SessionApprovals key={sessionId} sessionId={sessionId} host={host} excludeIds={session?.turns.flatMap(t => t.parts.flatMap(p => p.kind === "confirmation" ? [p.callId] : []))} />}
           {sessionId && host instanceof WebHost && <SessionClarifications key={`clarifications:${sessionId}`} sessionId={sessionId} host={host} excludeIds={session?.turns.flatMap(t => t.parts.flatMap(p => p.kind === "question" ? [p.callId] : []))} />}
@@ -818,7 +871,6 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       </button>
       <MessageMenu at={messageMenu ? { x: messageMenu.x, y: messageMenu.y } : null} requestId={messageMenu?.requestId} reactionEmojis={messageMenu?.requestId ? reactionEmojis : []} onAction={onMessageAction} onClose={() => setMessageMenu(null)} />
       {reactionError && <p role="alert">{reactionError}</p>}
-      {sessionId && host.sessionQueue && <SessionQueue key={sessionId} controls={host.sessionQueue} sessionId={sessionId} onAccepted={() => { setAttempt(n => n + 1); void checkSavedRequest(true); }} />}
       <form ref={composer} className="jg-composer" onSubmit={(e) => { e.preventDefault(); submitComposer(); }}>
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">
@@ -837,20 +889,23 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         {quote && <div className="jg-chip" aria-label="Quoted reply"><span>{quote.text}</span><button type="button" aria-label="Cancel reply" onClick={() => setQuote(undefined)}>×</button></div>}
         {preparingFiles && <div role="status">Preparing attachments…</div>}
         {draftError && <div role="alert">{draftError}</div>}
-        <textarea spellCheck={devicePreferences.spellcheck} disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : agent.id === "native:jaeger" ? "Ask Anything" : `Ask ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
+        {deliveryNotice && <div className="jg-composer__notice" role="alert">{deliveryNotice}</div>}
+        <textarea spellCheck={devicePreferences.spellcheck} disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : agent.id === "native:jaeger" ? "Do anything" : `Ask ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
         <div className="jg-composer__bar">
         <button ref={plus} type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach file" title="Attach file" aria-haspopup="menu"
           aria-expanded={composerMenu} onClick={() => setComposerMenu(true)}><PlusIcon /></button>
         <Menu open={composerMenu} anchor={composerMenu ? plus.current : null} ariaLabel="Composer actions" placement="top-start" onClose={() => setComposerMenu(false)}
           items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
           onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
+          <span className="jg-composer__policy" title="Current Gateway tool approval policy"><Shield size={15} />{autonomy === "auto" ? "Approve for me" : autonomy === "scoped" ? "Scoped approval" : "Ask for approval"}</span>
           {active && host.sessionQueue ? (
-            <button type="button" className="jg-busy-mode" aria-label={`Message action: ${busyInputMode === "steer" ? "steer current turn" : "queue next"}`}
-              onClick={() => setBusyInputMode(mode => mode === "steer" ? "queue" : "steer")}>
-              {busyInputMode === "steer" ? "Steer" : "Queue next"}
+            <button type="button" className="jg-busy-mode" aria-label="Queue next message" title="Send this after the current turn"
+              disabled={!hasText || followUpBusy} onClick={() => void submitWhileBusy("queue")}>
+              Queue next
             </button>
-          ) : <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={false} />}
+          ) : null}
           <span className="jg-composer__spacer" />
+          <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={Boolean(active)} />
           {!active && host instanceof WebHost && <VoiceDictation />}
         {!active && dictation && primary !== "dictate" && (
           <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
@@ -858,8 +913,8 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
             disabled={listening === "voice"} onClick={() => void toggleListening("dictation")}><MicIcon /></button>
         )}
         {active
-          ? <><button type="submit" className="jg-send" aria-label={busyInputMode === "steer" ? "Steer current turn" : "Queue follow-up"}
-                disabled={!hasText || followUpBusy || !host.sessionQueue || (busyInputMode === "steer" && !host.sessionQueue.steer)}><SendIcon /></button>
+          ? <><button type="submit" className="jg-send" aria-label="Send message" title="Send to the active turn"
+                disabled={!hasText || followUpBusy || !host.sessionQueue?.steer}><SendIcon /></button>
               <button type="button" className="jg-send jg-send--stop" aria-label="Stop current turn (⌘Esc)" onClick={stop}><StopIcon /></button></>
           : primary === "send"
             ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText || recoveryBlocked || preparingFiles || !draftReady || !session || recoveryStatus === "unknown"}><SendIcon /></button>

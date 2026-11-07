@@ -51,7 +51,12 @@ class TestGatewayLiveSteering:
 
         assert response.status == 200
         payload = json.loads(response.text)
-        assert payload == {"request_id": "steer-1", "steered": True, "queued": True}
+        assert payload == {
+            "session_id": "session",
+            "request_id": "steer-1",
+            "steered": True,
+            "queued": True,
+        }
         assert agent.seen == ["use metric units"]
         steering = [e for e in app.event_bus.get_replay_events("session") if e.event == "turn.steer"]
         assert len(steering) == 1
