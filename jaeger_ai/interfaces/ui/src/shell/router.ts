@@ -114,6 +114,13 @@ export function navigate(to: PageId | string, opts: { replace?: boolean } = {}):
   let url = (PAGES as readonly string[]).includes(to) ? pathOf(to as PageId) : to;
   const q = url.indexOf("?");
   url = canonicalPath(q < 0 ? url : url.slice(0, q), q < 0 ? "" : url.slice(q)) ?? url;
+  // The in-memory MockSource is selected from this development-only flag at boot.
+  // Keep it across internal navigation so a Vite reload cannot silently switch the
+  // preview to the live Gateway (which presents as an unrelated 500 chat failure).
+  if (import.meta.env.DEV && !url.includes("?")) {
+    const mock = new URLSearchParams(location.search).get("mock");
+    if (mock === "1" || mock === "true") url += `?mock=${mock}`;
+  }
   if (url === location.pathname + location.search) return;
   if (opts.replace) history.replaceState(null, "", url); else history.pushState(null, "", url);
   dispatchEvent(new Event(EVENT));
