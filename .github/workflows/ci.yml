@@ -25,7 +25,8 @@ jobs:
           import compileall
           from pathlib import Path
           root = Path('jaeger_ai/features/webui')
-          required = (root/'server.py', root/'api/routes.py', root/'static/index.html')
+          required = (root/'server.py', root/'api/routes.py', root/'api/ui_shell.py',
+                      root/'static/login.js', Path('jaeger_ai/interfaces/ui/index.html'))
           if not all(path.is_file() for path in required):
               raise SystemExit('Integrated WebUI source is incomplete')
           if not compileall.compile_dir(root / 'api', quiet=1):
