@@ -1,5 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { StarIcon } from "../icons";
+import { JaegerCharacter } from "./JaegerCharacter";
 import { avatarColor, avatarFace, avatarShape, type AvatarShape } from "./avatarColor";
 import type { AvatarState } from "./avatarMotion";
 
@@ -28,6 +29,7 @@ export function leadDriftPhase(now = Date.now()): number {
 export function AgentAvatar({ id, name, src, size = 36, state, primary = false, preset }: { preset?: string | null; primary?: boolean; id: string; name: string; src?: string; size?: number; state?: AvatarState }) {
   const shape = avatarShape(id);
   const face = avatarFace(id, shape);
+  const character = id === "native:jaeger" && !src && !preset;
   const style = {
     width: size, height: size, "--jg-avatar-color": avatarColor(id),
     "--jg-avatar-spin": `${face.spin}deg`, "--jg-eye-x": `${(face.dx * size) / 100}px`,
@@ -37,13 +39,15 @@ export function AgentAvatar({ id, name, src, size = 36, state, primary = false, 
     ...(shape === "squircle" ? { "--jg-drift-delay": `-${leadDriftPhase()}s` } : {}),
   } as CSSProperties;
   return (
-    <span className={`jg-avatar jg-avatar--${src ? "image" : shape}`} style={style} title={name} data-shape={src ? undefined : shape} data-state={state && state !== "idle" ? state : undefined} data-running={state === "thinking" || state === "streaming" || state === "working" ? "true" : undefined}>
+    <span className={`jg-avatar jg-avatar--${character ? "character" : src ? "image" : shape}`} style={style} title={name} data-shape={character ? "character" : src ? undefined : shape} data-state={state && state !== "idle" ? state : undefined} data-running={state === "thinking" || state === "streaming" || state === "working" ? "true" : undefined}>
+      {character ? <JaegerCharacter /> : <>
       {preset ? <svg className="jg-avatar__robot" viewBox="0 0 36 36" aria-hidden="true"><path d={preset === "robot-shield" ? "M5 5h26v16c0 7-13 13-13 13S5 28 5 21Z" : preset === "robot-square" ? "M4 6h28v25H4Z" : "M8 7h20a5 5 0 0 1 5 5v14a5 5 0 0 1-5 5H8a5 5 0 0 1-5-5V12a5 5 0 0 1 5-5Z"} fill="currentColor" /><path d="M18 2v5M1 16v7m34-7v7" stroke="currentColor" strokeWidth="2" /><rect x="9" y="13" width="18" height="12" rx="4" fill="white" /><circle cx="14" cy="19" r="2" fill="currentColor" /><circle cx="22" cy="19" r="2" fill="currentColor" /></svg> : src ? <img src={src} alt="" /> : (
         <span className="jg-avatar__body">
           <svg className="jg-avatar__shape" viewBox="0 0 36 36" fill="currentColor" aria-hidden="true">{SHAPES[shape]}</svg>
           <span className={`jg-avatar__face jg-avatar__face--${face.eyes}`}><i /><i /></span>
         </span>
       )}
+      </>}
       {primary && <span className="jg-primary-badge" role="img" aria-label="Primary bot" data-primary-agent-id={id}><StarIcon width={8} height={8} /></span>}
       {state && OVERLAY[state] && <span className={`jg-avatar__fx jg-avatar__fx--${OVERLAY[state]}`}><i /><i /><i /></span>}
     </span>

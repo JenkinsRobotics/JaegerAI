@@ -9,6 +9,25 @@ vi.mock("../windows/AppWindow", () => ({ AppWindow: ({embedded}: {embedded?: boo
 let root: Root;
 afterEach(async () => { await act(async () => root?.unmount()); localStorage.clear(); document.body.innerHTML = ""; history.replaceState(null, "", "/"); });
 const flush = async (f: () => void = () => {}) => act(async () => {f();await new Promise(r=>setTimeout(r,0));});
+it("closes the sidebar from its own control and with Escape", async () => {
+ await mount();
+ const shell = document.querySelector('.jg-stable-demo')!;
+ const toggle = document.querySelector<HTMLButtonElement>('[aria-controls="jaeger-navigation"].jg-stable-demo__top-button')!;
+ if (shell.getAttribute('data-sidebar') !== 'true') await flush(() => toggle.click());
+ await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Close sidebar"]')!.click());
+ expect(shell).toHaveAttribute('data-sidebar', 'false');
+ await flush(() => toggle.click());
+ expect(shell).toHaveAttribute('data-sidebar', 'true');
+ await flush(() => document.dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape'})));
+ expect(shell).toHaveAttribute('data-sidebar', 'false');
+});
+it("does not present a new-chat welcome when history cannot be restored", async () => {
+ const source = new MockSource();
+ vi.spyOn(source, 'sessions').mockRejectedValue(new Error('Gateway unavailable'));
+ await mount(source);
+ expect(document.body.textContent).toContain('Waiting to reconnect');
+ expect(document.body.textContent).not.toContain('What would you like to work on?');
+});
 async function mount(source = new MockSource()) {const el=document.createElement("div");document.body.append(el);root=createRoot(el);await flush(()=>root.render(<StableDemo source={source}/>));return source;}
 it("offers one navigation for chat and every workspace page", async () => {
  await mount();expect([...document.querySelectorAll('#jaeger-navigation nav button')].map(e=>e.textContent)).toEqual(["Chat","Agents","Work","Tasks","Research","Studio","Machine"]);
