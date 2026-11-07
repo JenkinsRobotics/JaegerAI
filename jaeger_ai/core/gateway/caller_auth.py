@@ -61,6 +61,10 @@ class CallerSpec:
     scopes: frozenset[str]
     session_prefix: str | None = None
     description: str = ""
+    display_name: str | None = None
+    peer_kind: str | None = None
+    transport: str | None = None
+    framework_id: str | None = None
 
 
 #: Local agent apps that reach Jaeger over loopback MCP (127.0.0.1:8792/mcp),
@@ -87,21 +91,32 @@ CALLERS: Mapping[str, CallerSpec] = {
         CallerSpec("bridge", "owner:bridge", frozenset({"read", "turn", "approve", "stop"}),
                    description="bridge socket (Swift chat, TUI attach)"),
         CallerSpec("jaegerd", "agent:jaeger", frozenset({"read", "turn", "delegate"}),
-                   description="jaegerd's own tools calling back into the Gateway"),
+                   description="jaegerd's own tools calling back into the Gateway",
+                   display_name="Jaeger", peer_kind="resident", transport="gateway",
+                   framework_id="jaeger"),
         CallerSpec("mcp", "mcp", frozenset({"read", "turn", "stop"}), session_prefix="mcp:",
                    description="Jaeger MCP server (agentgateway, OpenClaw, Hermes, other AIs)"),
         CallerSpec("ares", "mcp:ares", frozenset({"read", "turn", "search"}), session_prefix="ares:",
-                   description="ARES agent bridge client; dedicated credential required"),
+                   description="ARES agent bridge client; dedicated credential required",
+                   display_name="ARES", peer_kind="agent_service", transport="agent_bridge",
+                   framework_id="ares"),
         CallerSpec("grokbot", "mcp:grokbot", frozenset({"read", "turn", "search"}), session_prefix="grokbot:",
-                   description="GrokBot local bridge client; dedicated credential required"),
+                   description="GrokBot local bridge client; dedicated credential required",
+                   display_name="Grok Bot", peer_kind="external_agent", transport="agent_bridge",
+                   framework_id="grok"),
         CallerSpec("hermes", "mcp:hermes", frozenset({"read", "turn"}), session_prefix="hermes:",
-                   description="Hermes headless hub worker"),
+                   description="Hermes headless hub worker",
+                   display_name="Hermes", peer_kind="external_agent", transport="message_hub",
+                   framework_id="hermes"),
         CallerSpec("rackpc", "mcp:rackpc", frozenset({"read", "turn"}), session_prefix="rackpc:",
-                   description="Rack PC Ollama worker (claims hub tasks, posts results only)"),
+                   description="Rack PC Ollama worker (claims hub tasks, posts results only)",
+                   display_name="Rack PC", peer_kind="worker", transport="message_hub"),
         CallerSpec("a2a", "a2a", frozenset({"read", "turn", "stop"}), session_prefix="a2a:",
                    description="Jaeger A2A server"),
         *(CallerSpec(name, f"mcp:{name}", APP_CALLER_SCOPES, session_prefix=f"{name}:",
-                     description=f"{label} (local MCP client, dedicated credential)")
+                     description=f"{label} (local MCP client, dedicated credential)",
+                     display_name=label, peer_kind="agent_app", transport="mcp",
+                     framework_id=name)
           for name, label in APP_CALLERS.items()),
     )
 }
@@ -174,10 +189,34 @@ PREFIXED_READ_ROUTES = frozenset({
     # Hub collaboration: the agent roster and pending-approval totals carry no
     # session content, so outside callers may read them.
     "/v1/agents",
+    "/v1/agent-peers",
     "/v1/approvals/counts",
     # AppControl reads: status and redacted config only.
     "/v1/apps", "/v1/apps/proposals", "/v1/apps/proposals/{pid}", "/v1/apps/{app}", "/v1/apps/{app}/config",
 })
+
+
+def agent_peer_catalog() -> list[dict[str, object]]:
+    """Stable agent identities that can participate through the Gateway.
+
+    Caller authentication remains the authority for identity, scopes, and
+    session namespaces.  This is its public read model for clients and agent
+    bridges; it deliberately does not create a second editable registry.
+    """
+    return [
+        {
+            "id": spec.name,
+            "display_name": spec.display_name or spec.name,
+            "kind": spec.peer_kind,
+            "actor": spec.actor,
+            "transport": spec.transport,
+            "framework_id": spec.framework_id,
+            "session_prefix": spec.session_prefix,
+            "scopes": sorted(spec.scopes),
+        }
+        for spec in CALLERS.values()
+        if spec.peer_kind is not None
+    ]
 
 
 #: OpenAI-compatible surface (core/gateway/openai_compat.py). It runs a turn,
@@ -490,6 +529,6 @@ def session_allowed(spec: CallerSpec, session_id: str | None) -> bool:
 __all__ = [
     "ALL_SCOPES", "CALLERS", "CallerAuthenticator", "CallerSpec",
     "KEYCHAIN_SERVICE", "TOKEN_DIR_ENV", "TokenStoreError", "bearer", "client_headers", "client_token",
-    "default_caller", "ensure_tokens", "prefixed_route_allowed", "read_token",
+    "agent_peer_catalog", "default_caller", "ensure_tokens", "prefixed_route_allowed", "read_token",
     "required_scope", "session_allowed",
 ]

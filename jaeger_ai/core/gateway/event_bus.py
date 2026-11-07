@@ -44,7 +44,7 @@ EVENT_TYPES = frozenset({
     # are the older names some clients still accept.
     "tool.started", "tool.completed", "tool.failed", "tool.done", "tool.error", "files.changed", "sources",
     # Session lifecycle (the projection's list is built from these).
-    "session.created", "session.updated", "session.deleted",
+    "session.created", "session.updated", "session.deleted", "session.active.changed",
     # Owner/auto handoff of a session to an agent; ``agent.direct_chat`` is the
     # global twin of an owner handoff (Agents View sidebar).
     "session.handoff", "agent.direct_chat",

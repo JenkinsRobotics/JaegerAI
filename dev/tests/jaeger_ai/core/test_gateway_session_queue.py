@@ -11,6 +11,7 @@ from jaeger_ai.core.gateway.server import JaegerGatewayApp
 from jaeger_ai.core.gateway.session_store import (
     GatewaySessionStore,
     RequestConflict,
+    SCHEMA_VERSION,
 )
 
 
@@ -38,7 +39,7 @@ def test_durable_queue_survives_store_restart_and_preserves_order(tmp_path: Path
     store = GatewaySessionStore(path)
     store.enqueue_request("session", "first", request_id="q1")
     second = store.enqueue_request("session", "second", request_id="q2", requested={"model": "glm"})
-    assert store.schema_version() == 15  # Current canonical schema; queue was introduced at12.
+    assert store.schema_version() == SCHEMA_VERSION  # Queue was introduced at 12.
     import sqlite3
     with sqlite3.connect(path) as conn:
         columns = {row[1] for row in conn.execute('PRAGMA table_info(client_requests)')}

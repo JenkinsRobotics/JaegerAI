@@ -41,7 +41,13 @@ from .event_bus import GatewayEventBus, ReplayGap
 from jaeger_ai.core.runtime.cancellation import CancellationRegistry
 from jaeger_ai.core.runtime.salience import SalienceLevel
 
-from .session_store import EXECUTION_INPUT_KEYS, GatewaySessionStore, RequestBusy, RequestConflict
+from .session_store import (
+    EXECUTION_INPUT_KEYS,
+    GatewaySessionStore,
+    RequestBusy,
+    RequestConflict,
+    StateConflict,
+)
 
 logger = logging.getLogger("jaeger.gateway")
 
@@ -908,7 +914,9 @@ class JaegerGatewayApp:
         self._lifecycle_shutdown = asyncio.Event()
         self._background_producers: Any = None
         self._last_human_at = time.monotonic()
-        self._last_human_session = "desktop-app"
+        self._last_human_session = (
+            self.store.active_session_state().get("active_session_id") or "desktop-app"
+        )
         if orchestration is not None:
             self.orchestration = orchestration
         else:
@@ -1547,6 +1555,7 @@ class JaegerGatewayApp:
         
         # Agent catalog — persistence spine for Mac app + WebUI clients.
         self.app.router.add_get("/v1/agents", self.handle_list_agents)
+        self.app.router.add_get("/v1/agent-peers", self.handle_agent_peers)
         self.app.router.add_get("/v1/frameworks", self.handle_list_frameworks)
         self.app.router.add_post("/v1/frameworks/{id}/grants", self.handle_framework_grant)
         self.app.router.add_post("/v1/agents", self.handle_create_agent)
@@ -1576,6 +1585,8 @@ class JaegerGatewayApp:
         self.app.router.add_get("/v1/projects/{id}", self.handle_get_project)
         self.app.router.add_post("/v1/projects/{id}/check", self.handle_project_check)
         self.app.router.add_get("/v1/sessions", self.handle_list_sessions)
+        self.app.router.add_get("/v1/operator/session-state", self.handle_operator_session_state)
+        self.app.router.add_patch("/v1/operator/session-state", self.handle_operator_session_state)
         self.app.router.add_post("/v1/sessions", self.handle_create_session)
         self.app.router.add_get("/v1/sessions/{id}", self.handle_get_session)
         self.app.router.add_delete("/v1/sessions/{id}", self.handle_delete_session)
@@ -2243,6 +2254,19 @@ class JaegerGatewayApp:
                 payload["role"] = role
             return web.json_response(payload)
         return web.json_response(self._with_skills(registry.to_catalog()))
+
+    async def handle_agent_peers(self, request: web.Request) -> web.Response:
+        """Stable identities for resident, app, bridge, and worker agents.
+
+        The caller registry is the authority for authentication, scopes, and
+        session namespaces.  This endpoint is its read model, so Grok Bot,
+        Muse, Hermes, and future peers cannot drift between bridge and UI
+        definitions.
+        """
+        return web.json_response({
+            "contract_version": 1,
+            "peers": caller_auth.agent_peer_catalog(),
+        })
 
     async def handle_agent_primary(self, request: web.Request) -> web.Response:
         """Operator presentation default only: never activate or rewrite an agent."""
@@ -3292,6 +3316,92 @@ class JaegerGatewayApp:
         return web.json_response({"sessions": sessions})
 
     @staticmethod
+    def _request_caller(request: web.Request) -> Any:
+        """Return middleware caller metadata, including for direct handler tests."""
+        getter = getattr(request, "get", None)
+        return getter("caller") if callable(getter) else None
+
+    @staticmethod
+    def _owner_session_state_allowed(request: web.Request) -> bool:
+        getter = getattr(request, "get", None)
+        caller = getter("caller") if callable(getter) else None
+        actor = getter("caller_actor") if callable(getter) else None
+        return bool(
+            caller is not None
+            and caller.session_prefix is None
+            and str(actor or "").startswith("owner:")
+        )
+
+    def _activate_owner_session(
+        self,
+        request: web.Request,
+        session_id: str,
+        *,
+        surface: str | None = None,
+    ) -> dict[str, Any] | None:
+        """Select a conversation for every owner client and publish one event."""
+        if not self._owner_session_state_allowed(request):
+            return None
+        caller = self._request_caller(request)
+        surface = str(str(surface or "").strip() or getattr(caller, "name", ""))[:64] or None
+        current = self.store.active_session_state()
+        if (current.get("active_session_id") == session_id
+                and current.get("surface") == surface):
+            self._last_human_session = session_id
+            return current
+        state = self.store.save_active_session(
+            session_id,
+            actor=str(request["caller_actor"]),
+            surface=surface,
+        )
+        self._last_human_session = session_id
+        self.event_bus.publish("*", "session.active.changed", {"state": state})
+        return state
+
+    async def handle_operator_session_state(self, request: web.Request) -> web.Response:
+        """GET/PATCH the one active conversation shared across owner devices."""
+        if not self._owner_session_state_allowed(request):
+            return web.json_response({"error": "Owner access required"}, status=403)
+        if request.method == "GET":
+            return web.json_response(self.store.active_session_state())
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"error": "Body must be JSON"}, status=400)
+        allowed = {"active_session_id", "surface", "expected_revision"}
+        if not isinstance(body, dict) or "active_session_id" not in body or set(body) - allowed:
+            return web.json_response({
+                "error": "active_session_id is required; only surface and expected_revision are optional",
+            }, status=400)
+        session_id = body["active_session_id"]
+        if session_id is not None and (not isinstance(session_id, str) or not session_id.strip()):
+            return web.json_response({"error": "active_session_id must be a non-empty string or null"}, status=400)
+        session_id = session_id.strip() if isinstance(session_id, str) else None
+        surface = body.get("surface")
+        if surface is not None and (not isinstance(surface, str) or not surface.strip() or len(surface) > 64):
+            return web.json_response({"error": "surface must be 1-64 characters or null"}, status=400)
+        expected = body.get("expected_revision")
+        if expected is not None and (type(expected) is not int or expected < 0):
+            return web.json_response({"error": "expected_revision must be a non-negative integer"}, status=400)
+        try:
+            state = self.store.save_active_session(
+                session_id,
+                actor=str(request["caller_actor"]),
+                surface=surface.strip() if isinstance(surface, str) else None,
+                expected_revision=expected,
+            )
+        except ValueError:
+            return web.json_response({"error": "Session not found"}, status=404)
+        except StateConflict as exc:
+            return web.json_response({
+                "error": str(exc),
+                "state": self.store.active_session_state(),
+            }, status=409)
+        self._last_human_session = session_id or "desktop-app"
+        self.event_bus.publish("*", "session.active.changed", {"state": state})
+        return web.json_response(state)
+
+    @staticmethod
     def _validate_workspace_folder(raw: Any) -> tuple[str, str | None]:
         """(realpath, None) or ("", error): absolute, existing directory, not / or $HOME."""
         value = str(raw or "").strip()
@@ -3364,6 +3474,11 @@ class JaegerGatewayApp:
             from jaeger_ai.core.gateway.session_hygiene import archive_on_create
             session = archive_on_create(self.store, session)
         self.event_bus.publish(session_id, "session.created", {"session": session})
+        self._activate_owner_session(
+            request,
+            session_id,
+            surface=surface or getattr(self._request_caller(request), "name", None),
+        )
         return web.json_response(session, status=201)
 
     async def handle_get_session(self, request: web.Request) -> web.Response:
@@ -3606,10 +3721,27 @@ class JaegerGatewayApp:
 
     async def handle_delete_session(self, request: web.Request) -> web.Response:
         session_id = request.match_info["id"]
+        active_state = self.store.active_session_state()
+        was_active = active_state.get("active_session_id") == session_id
         deleted = self.store.delete_session(session_id)
         if not deleted:
             return web.json_response({"error": "Session not found"}, status=404)
         self.event_bus.publish(session_id, "session.deleted", {"session_id": session_id})
+        if was_active and self._owner_session_state_allowed(request):
+            try:
+                state = self.store.save_active_session(
+                    None,
+                    actor=str(request["caller_actor"]),
+                    surface=getattr(request.get("caller"), "name", None),
+                    expected_revision=int(active_state["revision"]),
+                )
+            except StateConflict:
+                # Another device selected a conversation while deletion was
+                # in flight. Its newer selection wins and must not be cleared.
+                pass
+            else:
+                self._last_human_session = "desktop-app"
+                self.event_bus.publish("*", "session.active.changed", {"state": state})
         return web.json_response({"deleted": True})
 
     async def handle_session_handoff(self, request: web.Request) -> web.Response:
@@ -3799,6 +3931,11 @@ class JaegerGatewayApp:
 
         if not admitted.get("replayed"):
             admitted["timing_admitted_at"] = timing_admitted_at
+        self._activate_owner_session(
+            request,
+            session_id,
+            surface=body.get("source") or getattr(self._request_caller(request), "name", None),
+        )
         turn_id = admitted["turn_id"]
         rid = admitted["request_id"]
         options = (admitted.get("execution") or {}).get("options") or {}
@@ -3868,6 +4005,12 @@ class JaegerGatewayApp:
             return web.json_response({"error": str(exc), "session_id": session_id}, status=409)
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
+
+        self._activate_owner_session(
+            request,
+            session_id,
+            surface=body.get("source") or getattr(self._request_caller(request), "name", None),
+        )
 
         promoted = self.store.promote_next_queue_item(session_id)
         self._queue_updated(session_id)
