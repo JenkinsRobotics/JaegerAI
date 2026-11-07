@@ -1,5 +1,7 @@
 # voice — speak to the resident Entity
 
+For the persistent Stream Deck voice/video controls, see [Droid conversation](CONVERSATION.md).
+
 ```text
 microphone → speech detection → STT        stt slot: jaeger-whisper-stt (whisper.cpp)
            → Gateway :33418 → Entity         the same turn path as the WebUI
