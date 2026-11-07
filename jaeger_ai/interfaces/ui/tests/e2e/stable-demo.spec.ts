@@ -29,9 +29,15 @@ async function openChat(page: Page) {
   await expect(input).toBeEnabled();
 }
 
-test('default screen exposes the current workspace navigation and chat controls', async ({ page }) => {
+test('default screen exposes the current workspace navigation and chat controls', async ({ page }, testInfo) => {
   await openChat(page);
-  await expect(page.getByRole('navigation', { name: 'Jaeger navigation' }).getByRole('button')).toHaveText(['Chat', 'Agents', 'Work', 'Tasks', 'Research', 'Studio', 'Machine']);
+  if (testInfo.project.name === 'Mobile Safari') {
+    for (const name of ['Chat', 'Agents', 'Work', 'Tasks', 'More']) {
+      await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+    }
+  } else {
+    await expect(page.getByRole('navigation', { name: 'Jaeger navigation' }).getByRole('button')).toHaveText(['Chat', 'Agents', 'Work', 'Tasks', 'Research', 'Studio', 'Machine']);
+  }
   await expect(page.locator('header[aria-label="Conversation toolbar"]')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Toggle navigation' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
@@ -59,12 +65,15 @@ test('keyboard send reaches Gateway, persists history and keeps chat across Task
 test('Shift+Enter retains an unsent multiline draft across navigation', async ({ page }) => {
   await openChat(page);
   const input = page.getByRole('textbox', { name: 'Message', exact: true });
-  const sentBefore = await page.locator('.jg-bubble--user').count();
-  await input.fill('First line'); await input.press('Shift+Enter'); await input.pressSequentially('Second line');
+  await input.fill('First line');
+  await input.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(element.value.length, element.value.length));
+  await input.press('Shift+Enter');
+  await input.pressSequentially('Second line');
+  await expect(input).toHaveValue('First line\nSecond line');
   await page.getByRole('button', { name: 'Tasks', exact: true }).click();
   await page.getByRole('button', { name: 'Chat', exact: true }).click();
   await expect(input).toHaveValue('First line\nSecond line');
-  await expect(page.locator('.jg-bubble--user')).toHaveCount(sentBefore);
+  await expect(page.locator('.jg-bubble--user').filter({ hasText: 'First line' })).toHaveCount(0);
 });
 
 test('a stale device-local selection resumes the durable Gateway conversation', async ({ page }) => {
@@ -77,7 +86,7 @@ test('a stale device-local selection resumes the durable Gateway conversation', 
   await expect.poll(() => page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).toBe(durable);
 });
 
-for (const width of [320, 390, 1280]) {
+for (const width of [301, 320, 390, 1280]) {
   test(`Chat and Tasks fit ${width}px in light and dark without browser exceptions`, async ({ page }) => {
     const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
     await page.setViewportSize({ width, height: 900 });
@@ -88,7 +97,7 @@ for (const width of [320, 390, 1280]) {
         await page.getByRole('button', { name, exact: true }).click();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       }
-      if (width === 320) {
+      if (width <= 320) {
         for (const selector of ['.jg-stable-demo__header', '.jg-composer', '.jg-composer__input', '.jg-composer__bar', '.jg-stable-demo__mobile-dock']) {
           const box = await page.locator(selector).boundingBox();
           expect(box, `${selector} must be visible`).not.toBeNull();
