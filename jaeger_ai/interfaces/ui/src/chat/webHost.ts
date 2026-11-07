@@ -37,10 +37,13 @@ function persistedToPart(p: PersistedPart, agentName: (id: string) => string): C
       kind: "toolInvocation", callId: String(p.call_id ?? ""), toolName: String(p.tool ?? "tool"), input: p.input ?? null,
       state: toolState(p.state ?? p.status), output: p.output,
     };
-    // Pending: the card. Decided: the tool part carries the outcome; no card.
-    case "approval": return (p.state ?? p.status) === "pending"
-      ? { kind: "confirmation", callId: p.approval_id, title: p.tool ? `Run ${p.tool}?` : "Approval needed", message: p.target ?? "" }
-      : null;
+    // Keep the compact Approved / Denied receipt in the feed after reload.
+    case "approval": {
+      const state = p.state ?? p.status;
+      const denied = ["deny", "denied", "rejected", "cancelled", "expired"].includes(String(p.decision ?? state));
+      const decision = state === "pending" || (!p.decision && state === "resolved") ? undefined : denied ? "deny" : "approve";
+      return { kind: "confirmation", callId: p.approval_id, title: p.tool ? `Run ${p.tool}?` : "Approval needed", message: p.target ?? "", decision };
+    }
     case "handoff": {
       const agentId = String(p.agent_id ?? "");
       return { kind: "handoff", status: p.status ?? "unverified", handoffId: String(p.handoff_id ?? ""), agentId, agentName: p.agent_name || agentName(agentId), count: 1, direction: p.direction };

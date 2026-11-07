@@ -25,7 +25,7 @@ describe("417d8a0c contract", () => {
     expect(summary).toMatchObject({ kind: "summary", id: "10", count: 13, toAt: 1760815000000 });
   });
 
-  it("maps tool state and pending approvals (tool+target, call_id null)", () => {
+  it("maps tool state and keeps pending and resolved approval receipts (tool+target, call_id null)", () => {
     const messages = [
       { role: "user", content: "commit it", request_id: "r1" },
       { role: "assistant", content: "", parts: [
@@ -36,10 +36,11 @@ describe("417d8a0c contract", () => {
       ] },
     ] as unknown as SessionMessage[];
     const [turn] = messagesToTurns(messages);
-    expect(turn.parts.map((p) => p.kind)).toEqual(["toolInvocation", "toolInvocation", "confirmation"]);
+    expect(turn.parts.map((p) => p.kind)).toEqual(["toolInvocation", "toolInvocation", "confirmation", "confirmation"]);
     expect(turn.parts[0]).toMatchObject({ state: "completed" });
     expect(turn.parts[1]).toMatchObject({ toolName: "shell", state: "waitingForConfirmation" });
     expect(turn.parts[2]).toMatchObject({ callId: "ap1", title: "Run shell?", message: "git commit -m x" });
+    expect(turn.parts[3]).toMatchObject({ callId: "ap0", title: "Run write_file?", message: "a.txt", decision: "approve" });
   });
 
   it("sends an Idempotency-Key with an upload", async () => {
