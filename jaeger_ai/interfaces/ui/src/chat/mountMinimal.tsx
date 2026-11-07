@@ -6,7 +6,7 @@ import { MinimalChat } from "./MinimalChat";
  * like a framework-free widget would own `el`. */
 export const mountMinimalChat: ChatPaneMount = (el, host, opts) => {
   const root = createRoot(el);
-  const render = (agents = opts.agents) => root.render(<MinimalChat host={host} sessionId={opts.sessionId} agents={agents} onSessionMissing={opts.onSessionMissing} />);
+  const render = (agents = opts.agents) => root.render(<MinimalChat host={host} sessionId={opts.sessionId} agents={agents} onAvatarState={opts.onAvatarState} onSessionMissing={opts.onSessionMissing} />);
   render();
   return Object.assign(() => root.unmount(), { updateAgents: render });
 };

@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import type { ChatHost, ChatPaneMount } from "./host";
 import { mountMinimalChat } from "./mountMinimal";
 
-export function ChatPane({ host, sessionId, agents, onSessionMissing, mount = mountMinimalChat }: { host: ChatHost; sessionId?: string; agents?: Agent[]; onSessionMissing?: (sessionId: string) => void; mount?: ChatPaneMount }) {
+export function ChatPane({ host, sessionId, agents, onAvatarState, onSessionMissing, mount = mountMinimalChat }: { host: ChatHost; sessionId?: string; agents?: Agent[]; onAvatarState?: (state: import("../avatar/avatar").ClipState) => void; onSessionMissing?: (sessionId: string) => void; mount?: ChatPaneMount }) {
   const el = useRef<HTMLDivElement>(null);
   const mounted = useRef<ReturnType<ChatPaneMount> | null>(null);
   useEffect(() => {
@@ -14,10 +14,10 @@ export function ChatPane({ host, sessionId, agents, onSessionMissing, mount = mo
     const child = document.createElement("div");
     child.className = "jg-chat-mount__inner";
     el.current.appendChild(child);
-    const dispose = mount(child, host, { sessionId, agents, onSessionMissing });
+    const dispose = mount(child, host, { sessionId, agents, onAvatarState, onSessionMissing });
     mounted.current = dispose;
     return () => { mounted.current = null; queueMicrotask(() => { dispose(); child.remove(); }); };
-  }, [host, sessionId, onSessionMissing, mount]);
+  }, [host, sessionId, onSessionMissing, mount, onAvatarState]);
   useEffect(() => { if (agents) mounted.current?.updateAgents?.(agents); }, [agents]);
   return <div className="jg-chat-mount" ref={el} />;
 }

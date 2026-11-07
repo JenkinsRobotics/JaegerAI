@@ -131,6 +131,7 @@ export interface ChatHost {
 }
 
 export interface ChatPaneOptions {
+  onAvatarState?: (state: import("../avatar/avatar").ClipState) => void;
   agents?: Agent[];
   sessionId?: string;
   /** The selected durable session disappeared while this pane was mounted. */

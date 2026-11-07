@@ -101,21 +101,9 @@
 .jg-action { height: 30px; padding: 0 14px; border-radius: 999px; border: 0; background: var(--aether-color-bg-inset); color: var(--aether-color-text); font: inherit; cursor: pointer; }
 .jg-action--primary { background: var(--aether-color-accent); color: var(--aether-color-text-on-selected); }
 
-/* Progress line: the current activity in words, three agent-tinted dots and a moving highlight. */
-.jg-progress-line { align-self: flex-start; display: inline-flex; align-items: center; gap: 8px; padding: 0 2px; font-size: var(--jg-font-body); line-height: var(--jg-line-height-base); }
-.jg-progress-dots { display: inline-flex; gap: 3px; }
-.jg-progress-dots i { width: 6px; height: 6px; border-radius: 50%; animation: jg-dot 1.2s ease-in-out infinite; }
-.jg-progress-dots i:nth-child(1) { background: color-mix(in srgb, var(--jg-agent-color, var(--aether-color-accent)) 55%, transparent); }
-.jg-progress-dots i:nth-child(2) { background: var(--jg-agent-color, var(--aether-color-accent)); animation-delay: .15s; }
-.jg-progress-dots i:nth-child(3) { background: color-mix(in srgb, var(--jg-agent-color, var(--aether-color-accent)) 75%, transparent); animation-delay: .3s; }
-/* Plain secondary grey, like the reference (no shimmer); the avatar carries the motion. */
-.jg-progress-text { color: var(--jg-color-text-tertiary); }
-.jg-progress-avatar { display: inline-flex; animation: jg-bob 1.8s ease-in-out infinite; }
-@keyframes jg-bob { 0%, 100% { translate: 0 0; } 50% { translate: 0 -1.5px; } }
-@keyframes jg-dot { 0%, 100% { transform: translateY(0); } 40% { transform: translateY(-2px); } }
-@media (prefers-reduced-motion: reduce) {
-  .jg-progress-dots i, .jg-progress-avatar { animation: none; }
-}
+/* Compact text-only progress bubble. Motion lives in the header avatar. */
+.jg-progress-line { align-self: flex-start; display: inline-flex; width: fit-content; max-width: 100%; box-sizing: border-box; padding: 10px 14px; border-radius: 18px; background: color-mix(in srgb,var(--jg-color-text) 8%,var(--jg-color-pane)); font-size: var(--jg-font-body); line-height: var(--jg-line-height-base); overflow-wrap: anywhere; }
+.jg-progress-text { color: var(--jg-color-text-secondary); }
 
 /* Tool steps: one elevated summary row, "Show steps" expands the list. */
 .jg-steps {

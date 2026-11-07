@@ -1,3 +1,5 @@
+import {ClipAvatar} from "../avatar/ClipAvatar";
+import {STATUS_TEXT,type ClipState} from "../avatar/avatar";
 /* Phone layout (≤ 700px or touch), rebuilt from a reference description of Grok Bot's iOS app — no window chrome.
  * List: top bar (user avatar + presence dot; round Search and New buttons), the lead featured large with a star
  * badge, then full-width agent rows (avatar + active dot, bold name, time, a one-line preview with a type icon,
@@ -122,8 +124,8 @@ export function PhoneList({ state, userInitials, onOpen, onSearch, onNew, onSett
   );
 }
 
-export function PhoneChat({ agentId, agentName, avatarUrl, onBack, onInfo, children }: {
-  agentId: string; agentName: string; avatarUrl?: string; onBack: () => void; onInfo: () => void; children: ReactNode;
+export function PhoneChat({ agentId, agentName, avatarUrl, avatarState="idle", onBack, onInfo, children }: {
+  avatarState?: ClipState; agentId: string; agentName: string; avatarUrl?: string; onBack: () => void; onInfo: () => void; children: ReactNode;
 }) {
   const start = useRef<{ x: number; y: number } | null>(null);
   const onTouchStart = (e: TouchEvent) => { const t = e.touches[0]; start.current = t.clientX < 24 ? { x: t.clientX, y: t.clientY } : null; };
@@ -136,8 +138,8 @@ export function PhoneChat({ agentId, agentName, avatarUrl, onBack, onInfo, child
       <header className="jg-pbar">
         <button type="button" className="jg-pround" aria-label="Menu" title="Menu" onClick={onBack}><svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden><path d="M3 6h12M3 12h8" /></svg></button>
         <div className="jg-pbar__identity">
-          <span className="jg-pbar__avatar"><AgentAvatar id={agentId} name={agentName} src={avatarUrl} size={78} /></span>
-          <span className="jg-pbar__name">{agentName}</span>
+          <span className="jg-pbar__avatar">{agentId === "native:jaeger" && !avatarUrl ? <ClipAvatar name={agentName} state={avatarState} /> : <AgentAvatar id={agentId} name={agentName} src={avatarUrl} size={94} />}</span>
+          <span className="jg-pbar__name">{agentName}<span className="jg-clip-status" role="status">{STATUS_TEXT[avatarState]}</span></span>
         </div>
         <button type="button" className="jg-pround" aria-label="More" onClick={onInfo}><Icon name="ellipsis" size={18} /></button>
       </header>

@@ -1,3 +1,4 @@
+import type {ClipState} from "./avatar/avatar";
 import {FinancePanel} from "./settings/FinancePanel";
 import {useDevicePreferences} from "./settings/devicePreferences";
 import {WebhooksPanel} from './webhooks/WebhooksPanel';
@@ -101,6 +102,7 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
   const store = useAgentsStore(source);
   const phone = usePhone();
   // iPhone opens straight into the chat (ChatHome when empty); the chat list is one tap away (top-left).
+  const [clipState,setClipState] = useState<ClipState>("idle");
   const [phoneView, setPhoneView] = useState<"list" | "chat">("chat");
   const [agentMenu, setAgentMenu] = useState<{ agentId: string; x: number; y: number } | null>(null);
   const [replyHandoffId, setReplyHandoffId] = useState<string | null>(null);
@@ -374,8 +376,8 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
   const avatarAgent = store.agents.find((a) => a.id === (selectedAgentId ?? defaultAgentId));
   const chatBody = sessionError
     ? <ErrorState title="Couldn't open this chat" error={sessionError} onRetry={() => setSessionAttempt((n) => n + 1)} />
-    : <div className="jg-av-chat"><div className="jg-chat-voice-host"><ChatPane host={host} sessionId={sessionId} agents={store.agents} /></div>
-        {avatarAgent && !phone && <AvatarPanel size={avatarSize} agent={avatarAgent} presence={store.summaries.find((s) => s.id === avatarAgent.id)?.status} onOpenAgents={onNavigate ? (id) => onNavigate(`/agents/${encodeURIComponent(id)}/avatar`) : undefined} />}</div>;
+    : <div className="jg-av-chat"><div className="jg-chat-voice-host"><ChatPane onAvatarState={setClipState} host={host} sessionId={sessionId} agents={store.agents} /></div>
+        {avatarAgent && !phone && <AvatarPanel clipState={store.error ? "connecting" : clipState} size={avatarSize} agent={avatarAgent} presence={store.summaries.find((s) => s.id === avatarAgent.id)?.status} onOpenAgents={onNavigate ? (id) => onNavigate(`/agents/${encodeURIComponent(id)}/avatar`) : undefined} />}</div>;
   const phoneAgent = store.agents.find((a) => a.id === (selectedAgentId ?? defaultAgentId));
   // iPhone: always the chat; "list" = the push-aside drawer is open (menu button or left-edge swipe), Recents inside it.
   const main = phone
@@ -385,7 +387,7 @@ export function App({ source, settingsDestinations, view = "chat", settingsTab, 
         onChat={() => { newChat(defaultAgentId); onNavigate?.("/"); }}
         recents={<PhoneList state={store} userInitials="MJ" statusOk={!store.error} onOpen={(agentId) => { newChat(agentId); setPhoneView("chat"); }}
           onSearch={() => (onOpenPalette ? onOpenPalette() : setJumpOpen(true))} onNew={setNewChatAnchor} onSettings={() => (onNavigate ? onNavigate("/settings") : setSettingsOpen(true))} onAgentMenu={openAgentMenu} />}>
-        <PhoneChat agentId={phoneAgent?.id ?? LEAD_ID} agentName={phoneAgent ? label(phoneAgent) : "Jaeger"} avatarUrl={phoneAgent?.avatar_url}
+        <PhoneChat avatarState={store.error ? "connecting" : clipState} agentId={phoneAgent?.id ?? LEAD_ID} agentName={phoneAgent ? label(phoneAgent) : "Jaeger"} avatarUrl={phoneAgent?.avatar_url}
           onBack={() => { setPhoneView("list"); void store.refresh(); }} onInfo={() => host.openDetails?.(phoneAgent?.id ?? LEAD_ID)}>{chatBody}</PhoneChat>
       </PhoneDrawer>
     : null;

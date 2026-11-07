@@ -1,3 +1,4 @@
+import {useChatAvatar} from "../avatar/useChatAvatar";
 import {displayDate, displayDayKey, displayDayDistance, useDevicePreferences} from "../settings/devicePreferences";
 import {TaskArtifacts} from '../library/TaskArtifacts';
 import { mergeSessionSnapshot } from "./sessionProjection";
@@ -7,7 +8,7 @@ import type { QueuedRequest, ReactionSnapshot } from "../api/source";
 /* Minimal stand-in chat renderer, styled to the Grok Bot Mac target. The
  * shared VS Code-derived widget replaces it through ChatPaneMount.
  * Jenkins Robotics 2026-10-17: tool steps fold into a "Show steps" card, and a
- * pending turn shows an activity-named progress line with a shimmer for as long as it runs. The composer
+ * pending turn shows an text-only activity bubble for as long as it runs. The composer
  * auto-grows (JS fallback), takes picked or pasted files as chips and morphs its primary button. */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type KeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import { AppMenu as Menu } from "../popups/AppMenu";
@@ -40,7 +41,6 @@ import { ApprovalCard, QuestionCard } from "./ApprovalCard";
 import { MessageMenu, Reactions, type MessageAction } from "./MessageMenu";
 import { useRevealedText } from "./reveal";
 import { useStreamStyle, type StreamStyleParams } from "./streamStyle";
-import { turnAvatarState, type AvatarState } from "../agents/avatarMotion";
 import type { VoiceHost } from "./nativeHost";
 
 const seconds = (ms?: number) => Math.max(1, Math.round((ms ?? 0) / 1000));
@@ -183,14 +183,10 @@ export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete
   return out;
 }
 
-/** Activity-named progress line ("Searching the web…"): three agent-tinted dots and a shimmer. */
-/** While a turn runs: the agent's avatar (gently bobbing) + what it's doing; three dots without an agent. */
-export function ProgressLine({ phrase, agent, state = "thinking" }: { phrase: string; agent?: { id: string; name: string }; state?: AvatarState }) {
+/** A text-only activity bubble; avatar motion belongs in the conversation header. */
+export function ProgressLine({ phrase }: { phrase: string }) {
   return (
     <div className="jg-progress-line" role="status" aria-live="polite" data-sender="assistant">
-      {agent
-        ? <span className="jg-progress-avatar" aria-hidden="true"><AgentAvatar id={agent.id} name={agent.name} size={24} state={state} /></span>
-        : <span className="jg-progress-dots" aria-hidden="true"><i /><i /><i /></span>}
       <span className="jg-progress-text">{phrase}</span>
     </div>
   );
@@ -208,7 +204,7 @@ const replyText = (turn: ChatTurn) => turn.parts.filter((p) => p.kind === "markd
 /** Inline transcript retention budget (turns); older durable pages are refetched on demand. */
 export const RETAINED_TURNS_MAX = 400;
 
-export function MinimalChat({ host, sessionId, agents, onSessionMissing }: { host: ChatHost; sessionId?: string; agents?: Agent[]; onSessionMissing?: (sessionId: string) => void }) {
+export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionMissing }: { host: ChatHost; sessionId?: string; agents?: Agent[]; onAvatarState?: (state: import("../avatar/avatar").ClipState) => void; onSessionMissing?: (sessionId: string) => void }) {
   const devicePreferences = useDevicePreferences();
   const [filesOpen,setFilesOpen]=useState(false);
   useEffect(()=>setFilesOpen(false),[sessionId]);
@@ -228,6 +224,7 @@ export function MinimalChat({ host, sessionId, agents, onSessionMissing }: { hos
   const [agent, setAgent] = useState<{ id: string; name: string }>({ id: "native:jaeger", name: "Jaeger" });
   const { draft, setDraft, quote, setQuote, files, setFiles, ready: draftReady, error: draftError } = useDraft(sessionId);
   const [active, setActive] = useState<TurnHandle | null>(null);
+  useChatAvatar(session, Boolean(active), loadError, onAvatarState);
   const [followUpBusy, setFollowUpBusy] = useState(false);
   const [busyMessages, setBusyMessages] = useState<BusyMessage[]>([]);
   const [queuedRequests, setQueuedRequests] = useState<QueuedRequest[]>([]);
@@ -856,7 +853,7 @@ export function MinimalChat({ host, sessionId, agents, onSessionMissing }: { hos
                 : "steps" in seg ? <StepsFold key={i} tools={seg.steps} />
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
-              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} agent={agent} state={turnAvatarState(turn)} />}
+              {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} />}
             </section>
           ))}
           {busyMessages.map(message => (
