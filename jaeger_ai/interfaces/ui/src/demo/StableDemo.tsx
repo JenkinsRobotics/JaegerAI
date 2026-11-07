@@ -106,9 +106,11 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       const available = rows.filter(row => !row.archived).sort((a, b) => sessionActivity(b) - sessionActivity(a));
       setRecent(available);
       setHistoryError("");
-      // A new browser has no device-local selection yet. Open Jaeger's most recently active
-      // durable conversation so Mac and iPhone land in the same place without creating a chat.
-      if (source.kind === "live" && !session && available[0]) {
+      // A new browser has no device-local selection yet. A returning phone can also retain
+      // the id of a conversation deleted on another device. In either case, open Jaeger's
+      // most recently active durable conversation instead of stranding the device on 404.
+      const selectedStillExists = Boolean(session && available.some(row => row.session_id === session));
+      if (source.kind === "live" && !selectedStillExists && available[0]) {
         setSession(available[0].session_id);
         try { localStorage.setItem(DEMO_SESSION_KEY, available[0].session_id); } catch { /* still usable for this visit */ }
       }
