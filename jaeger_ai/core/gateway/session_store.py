@@ -23,7 +23,7 @@ from jaeger_ai.core.gateway import agent_activity as _agent_activity
 from jaeger_ai.core.gateway import handoff_outputs as _handoff_outputs
 
 
-SCHEMA_VERSION = 15
+SCHEMA_VERSION = 16
 
 MAX_RETAINED_EVENTS = 5000
 REQUEST_ID_MAX = 128
@@ -37,6 +37,10 @@ class RequestConflict(ValueError):
 
 class RequestBusy(RuntimeError):
     """A session already has in-flight or unreconciliation work."""
+
+
+class StateConflict(RuntimeError):
+    """A revisioned Gateway state record changed before this write."""
 
 
 def default_store_path(*, create: bool = True) -> Path:
@@ -551,6 +555,20 @@ class GatewaySessionStore:
                 conn.execute("ALTER TABLE agent_goals ADD COLUMN source_message_id TEXT")
             conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS agent_goal_source ON agent_goals(caller,source_message_id) WHERE source_message_id IS NOT NULL")
             current = 15
+        if current < 16:
+            # Shared operator projection.  Browser, Mac, iPhone and IDE clients
+            # read the same active conversation after reconnect or restart;
+            # no UI window owns a competing current-session preference.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS operator_state (
+                    key TEXT PRIMARY KEY,
+                    value_json TEXT NOT NULL,
+                    revision INTEGER NOT NULL,
+                    updated_at REAL NOT NULL,
+                    updated_by TEXT NOT NULL
+                )
+            """)
+            current = 16
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -561,6 +579,85 @@ class GatewaySessionStore:
         with self._get_conn() as conn:
             row = conn.execute("SELECT value FROM schema_meta WHERE key='version'").fetchone()
             return int(row["value"]) if row else 1
+
+    def operator_state(self, key: str) -> dict[str, Any] | None:
+        """Read one Gateway-owned operator projection."""
+        with self._get_conn() as conn:
+            row = conn.execute(
+                "SELECT value_json, revision, updated_at, updated_by FROM operator_state WHERE key=?",
+                (key,),
+            ).fetchone()
+        if row is None:
+            return None
+        value = _row_meta(row["value_json"])
+        return {
+            **value,
+            "revision": int(row["revision"]),
+            "updated_at": float(row["updated_at"]),
+            "updated_by": row["updated_by"],
+        }
+
+    def save_operator_state(
+        self,
+        key: str,
+        value: dict[str, Any],
+        *,
+        actor: str,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        """Compare-and-set one operator projection and return its receipt."""
+        now = time.time()
+        with self._immediate() as conn:
+            row = conn.execute(
+                "SELECT revision FROM operator_state WHERE key=?", (key,),
+            ).fetchone()
+            revision = int(row["revision"]) if row else 0
+            if expected_revision is not None and int(expected_revision) != revision:
+                raise StateConflict(
+                    f"operator state changed; expected revision {expected_revision}, current revision {revision}"
+                )
+            next_revision = revision + 1
+            conn.execute(
+                "INSERT INTO operator_state(key,value_json,revision,updated_at,updated_by) "
+                "VALUES(?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET "
+                "value_json=excluded.value_json, revision=excluded.revision, "
+                "updated_at=excluded.updated_at, updated_by=excluded.updated_by",
+                (key, json.dumps(value, sort_keys=True), next_revision, now, actor),
+            )
+        return {
+            **value,
+            "revision": next_revision,
+            "updated_at": now,
+            "updated_by": actor,
+        }
+
+    def active_session_state(self) -> dict[str, Any]:
+        """The active owner conversation shared by every client device."""
+        return self.operator_state("active_session") or {
+            "active_session_id": None,
+            "surface": None,
+            "revision": 0,
+            "updated_at": None,
+            "updated_by": None,
+        }
+
+    def save_active_session(
+        self,
+        session_id: str | None,
+        *,
+        actor: str,
+        surface: str | None = None,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        """Select one durable owner conversation, or clear the selection."""
+        if session_id is not None and self.get_session(session_id) is None:
+            raise ValueError("Session not found")
+        return self.save_operator_state(
+            "active_session",
+            {"active_session_id": session_id, "surface": surface},
+            actor=actor,
+            expected_revision=expected_revision,
+        )
 
     def backup(self, dest: Path | str) -> Path:
         """Copy a consistent snapshot. Caller owns retention of dest."""

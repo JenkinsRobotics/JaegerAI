@@ -12,7 +12,7 @@ from aiohttp.test_utils import TestClient, TestServer
 from jaeger_ai.core.agent_registry.specialists import REA_READ_ONLY_TOOLS
 from jaeger_ai.core.gateway import caller_auth
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
-from jaeger_ai.core.gateway.session_store import GatewaySessionStore
+from jaeger_ai.core.gateway.session_store import GatewaySessionStore, SCHEMA_VERSION
 from jaeger_ai.features.agent_bridge.service import AgentMessages, BridgeError
 
 
@@ -35,7 +35,7 @@ def headers(caller="mcp"):
 def test_migration_and_durable_redacted_idempotency(tmp_path):
     path = tmp_path / "sessions.sqlite3"
     store = GatewaySessionStore(path)
-    assert store.schema_version() == 15
+    assert store.schema_version() == SCHEMA_VERSION
     service = AgentMessages(store)
     item = message(body="api_key=very-secret sk-abcdefghijklmnopqrst")
     result = service.send("mcp", item)
@@ -48,7 +48,7 @@ def test_migration_and_durable_redacted_idempotency(tmp_path):
     with store._get_conn() as conn:
         assert conn.execute("SELECT count(*) FROM agent_messages").fetchone()[0] == 1
         conn.execute("UPDATE schema_meta SET value='12' WHERE key='version'")
-    assert GatewaySessionStore(path).schema_version() == 15
+    assert GatewaySessionStore(path).schema_version() == SCHEMA_VERSION
 
 
 @pytest.mark.parametrize(
