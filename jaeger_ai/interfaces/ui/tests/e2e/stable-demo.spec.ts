@@ -77,7 +77,7 @@ test('a stale device-local selection resumes the durable Gateway conversation', 
   await expect.poll(() => page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).toBe(durable);
 });
 
-for (const width of [390, 1280]) {
+for (const width of [320, 390, 1280]) {
   test(`Chat and Tasks fit ${width}px in light and dark without browser exceptions`, async ({ page }) => {
     const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
     await page.setViewportSize({ width, height: 900 });
@@ -87,6 +87,14 @@ for (const width of [390, 1280]) {
       for (const name of ['Tasks', 'Chat']) {
         await page.getByRole('button', { name, exact: true }).click();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      }
+      if (width === 320) {
+        for (const selector of ['.jg-stable-demo__header', '.jg-composer', '.jg-composer__input', '.jg-composer__bar', '.jg-stable-demo__mobile-dock']) {
+          const box = await page.locator(selector).boundingBox();
+          expect(box, `${selector} must be visible`).not.toBeNull();
+          expect(box!.x, `${selector} must stay inside the left edge`).toBeGreaterThanOrEqual(0);
+          expect(box!.x + box!.width, `${selector} must stay inside the right edge`).toBeLessThanOrEqual(width);
+        }
       }
     }
     expect(errors).toEqual([]);
