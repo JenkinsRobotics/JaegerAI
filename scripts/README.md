@@ -39,11 +39,12 @@ change is tested, commit and push it to `master`, then run:
 ```
 
 The command refuses dirty, unpushed, or non-`master` source. It fetches the
-same commit on the Studio, installs frontend dependencies, builds the canonical
-UI, backs up the served bundle, restarts the managed Gateway/agent/Web UI/MCP
-stack, and verifies the running commit plus source/served/public HTML hashes.
-It rolls the source and UI back if post-cutover verification fails. A pushed
-commit is not considered delivered until this command succeeds.
+same commit on the Studio, refreshes the external Python environment when a
+runtime dependency manifest changed, installs frontend dependencies, builds the
+canonical UI, backs up the served bundle, restarts the managed Gateway/agent/
+Web UI/MCP stack, and verifies the running commit plus source/served/public HTML
+hashes. It rolls source, dependencies, and UI back if verification fails. A
+pushed commit is not considered delivered until this command succeeds.
 
 ## Verification
 
