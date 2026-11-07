@@ -20,7 +20,7 @@ async function openChat(page: Page) {
   // existing Gateway resumes its durable active conversation instead. Wait
   // for either stable state so the contract covers both first-use and
   // cross-device continuity without racing the session-list response.
-  if (!await input.isEnabled()) {
+  if (!await input.isVisible()) {
     await Promise.race([
       start.click().catch(() => undefined),
       input.waitFor({ state: 'visible' }),
