@@ -237,11 +237,13 @@ class HookedToolExecutor:
         runtime = None
         authority_evaluated = False
         try:
-            from jaeger_ai.core.entity.authority import (
-                AuthorityLayer, AuthorizationStatus, ProposedAction,
-            )
-            from jaeger_ai.core.entity.events import JaegerEvent
-            from jaeger_ai.core.entity.runtime import EntityRuntime
+            from jaeger_agent.core.host import service
+            authority_api = service("authority")
+            AuthorityLayer = authority_api.AuthorityLayer
+            AuthorizationStatus = authority_api.AuthorizationStatus
+            ProposedAction = authority_api.ProposedAction
+            JaegerEvent = service("entity_events").JaegerEvent
+            EntityRuntime = service("entity_runtime").EntityRuntime
         except ImportError:
             if _jaeger_ai_installed():
                 # The product is installed but its authority boundary will not
@@ -378,7 +380,8 @@ class HookedToolExecutor:
             is_err = isinstance(result, dict) and (result.get("ok") is False or result.get("error"))
             err_str = str(result.get("error")) if is_err else None
             try:
-                from jaeger_ai.core.entity.runtime import EntityRuntime
+                from jaeger_agent.core.host import service
+                EntityRuntime = service("entity_runtime").EntityRuntime
                 rt = EntityRuntime.get_singleton()
                 tool_ev = rt.record_tool_result(
                     tool.name,
@@ -400,7 +403,8 @@ class HookedToolExecutor:
         except Exception as exc:
             dur = time.time() - t0
             try:
-                from jaeger_ai.core.entity.runtime import EntityRuntime
+                from jaeger_agent.core.host import service
+                EntityRuntime = service("entity_runtime").EntityRuntime
                 rt = EntityRuntime.get_singleton()
                 tool_ev = rt.record_tool_result(
                     tool.name,

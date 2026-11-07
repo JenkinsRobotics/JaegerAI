@@ -14,6 +14,9 @@ metadata:
     category: mlops
 ---
 
+Earlier imported material is preserved in
+[the legacy reference](../audiocraft/references/imported-entry.md).
+
 # AUDIOCRAFT AUDIO GENERATION
 
 Use AudioCraft for explicit local MusicGen, AudioGen, or EnCodec work. For

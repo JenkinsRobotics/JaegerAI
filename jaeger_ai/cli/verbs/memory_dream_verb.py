@@ -52,9 +52,9 @@ def cmd_memory_dream(args: argparse.Namespace) -> int:
         if report.promoted_memories:
             print("")
             print("   Promoted memories:")
-            for memory in report.promoted_memories[:5]:
-                preview = memory.content[:80] + "..." if len(memory.content) > 80 else memory.content
-                print(f"     • [{memory.score:.2f}] {preview}")
+            for promoted in report.promoted_memories[:5]:
+                preview = promoted.content[:80] + "..." if len(promoted.content) > 80 else promoted.content
+                print(f"     • [{promoted.score:.2f}] {preview}")
         
         if args.json:
             print("")

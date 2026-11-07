@@ -120,7 +120,8 @@ def audit_catalog(
                 "plugin lifecycle skill does not declare requires-plugins",
             ))
         try:
-            from jaeger_ai.core.safety.skills_guard import scan_skill
+            from jaeger_agent.core.host import service
+            scan_skill = service("skill_guard").scan_skill
             scan = scan_skill(skill.path.parent, name=skill.name)
             if scan.is_danger:
                 findings.append(_finding(

@@ -179,7 +179,7 @@ class UnifiedScheduler:
         """
         task_id = f"cron:{name}"
         task = self.store.get_task(task_id)
-        if task is None:
+        if task is None or task.state == TaskState.CANCELLED:
             return False
 
         # Cancel in durable store

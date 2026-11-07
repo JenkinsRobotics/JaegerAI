@@ -16,6 +16,10 @@ metadata:
 
 # LM EVALUATION HARNESS
 
+The earlier imported entry is preserved as
+[reference material](../lm-evaluation-harness/references/imported-entry.md).
+This is the single active entry for `evaluating-llms-harness`.
+
 ## SOP
 
 1. Record the model revision, backend, precision, prompt/chat template, tasks,

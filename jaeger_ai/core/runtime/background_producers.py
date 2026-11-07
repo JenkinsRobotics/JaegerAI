@@ -57,6 +57,14 @@ def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in _TRUTHY
 
 
+def background_producers_enabled() -> bool:
+    """Tests opt into background work; normal operator processes keep it on."""
+    return not (
+        (_env_flag("JAEGER_TEST_HEADLESS") or bool(os.environ.get("PYTEST_CURRENT_TEST")))
+        and not _env_flag("JAEGER_BACKGROUND_PRODUCERS")
+    )
+
+
 def _float_env(name: str, default: float) -> float:
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -224,10 +232,7 @@ class BackgroundProducers:
         lease is an exclusive flock, so two starters in one process
         cannot both win.
         """
-        if (
-            (_env_flag("JAEGER_TEST_HEADLESS") or bool(os.environ.get("PYTEST_CURRENT_TEST")))
-            and not _env_flag("JAEGER_BACKGROUND_PRODUCERS")
-        ):
+        if not background_producers_enabled():
             # Isolated tests boot the bridge without opting into background
             # threads. Owned-process and producer tests set the opt-in.
             return False

@@ -101,7 +101,8 @@ def extract_envelope(text: str) -> list[dict[str, Any]]:
         elif attr_name:
             # Body is arguments directly
             try:
-                from jaeger_ai.core.runtime.tool_repair import safe_parse_tool_arguments
+                from jaeger_agent.core.host import service
+                safe_parse_tool_arguments = service("tool_repair").safe_parse_tool_arguments
                 args = safe_parse_tool_arguments(body)
             except Exception:
                 args = {}
@@ -109,7 +110,8 @@ def extract_envelope(text: str) -> list[dict[str, Any]]:
         else:
             # Check for XML child tags (<name>...</name>)
             try:
-                from jaeger_ai.core.runtime.tool_repair import extract_xml_tool_call
+                from jaeger_agent.core.host import service
+                extract_xml_tool_call = service("tool_repair").extract_xml_tool_call
                 xml_call = extract_xml_tool_call(match.group(0))
                 if xml_call:
                     out.append({"name": xml_call[0], "args": xml_call[1]})

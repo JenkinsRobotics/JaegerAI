@@ -20,6 +20,7 @@ import sys
 import tempfile
 import time
 from typing import Any
+from pathlib import Path
 
 from jaeger_os.core.tools.tool_registry import register_tool_from_function
 from jaeger_agent.core.workspace import _audit, _require_layout

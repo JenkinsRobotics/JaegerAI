@@ -243,7 +243,8 @@ def skill(action: str, name: str = "", query: str = "",
         # Surface a warning so the model treats a flagged skill with
         # care; never blocks the read (the model still needs to see it).
         try:
-            from jaeger_ai.core.safety.skills_guard import scan_skill
+            from jaeger_agent.core.host import service
+            scan_skill = service("skill_guard").scan_skill
             scan = scan_skill(s.path.parent, name=s.name)
             if not scan.is_clean:
                 result["safety"] = scan.verdict

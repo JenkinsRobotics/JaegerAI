@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import re
 import sys
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,27 @@ from typing import Any
 # inside this package now, so resolve within it.
 _SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 _CATALOG_PATH = _SKILLS_DIR / "catalog.yaml"
+
+_SKILL_SCOPE: ContextVar[frozenset[str] | None] = ContextVar("agent_skill_scope", default=None)
+
+
+def active_skill_scope() -> frozenset[str] | None:
+    return _SKILL_SCOPE.get()
+
+
+@contextmanager
+def skill_scope(names):
+    """Constrain this execution context; sibling/concurrent turns keep theirs."""
+    token = _SKILL_SCOPE.set(None if names is None else frozenset(str(n).lower() for n in names))
+    try:
+        yield
+    finally:
+        _SKILL_SCOPE.reset(token)
+
+
+def _in_scope(skill: PlaybookSkill) -> bool:
+    scope = active_skill_scope()
+    return scope is None or skill.name.lower() in scope
 
 
 # Where a skill came from — for trust decisions and a future curator
@@ -424,7 +447,7 @@ def available_playbooks(
     and (when ``available_tools`` is given) those whose required tools are
     absent. The `skill` tool and the prompt index use this; the raw
     :func:`discover_playbooks` is kept for internal callers (e.g. curation)."""
-    return _select_available(discover_playbooks(), _disabled_playbook_names(),
+    return _select_available([s for s in discover_playbooks() if _in_scope(s)], _disabled_playbook_names(),
                              available_tools)
 
 
@@ -438,7 +461,7 @@ def callable_playbooks() -> list[PlaybookSkill]:
     disabled = _disabled_playbook_names()
     return [
         skill for skill in discover_playbooks()
-        if _platform_ok(skill) and skill.name not in disabled
+        if _platform_ok(skill) and skill.name not in disabled and _in_scope(skill)
     ]
 
 
@@ -547,7 +570,7 @@ def find_playbook(name: str) -> PlaybookSkill | None:
     disabled = _disabled_playbook_names()
     skills = [
         s for s in discover_playbooks()
-        if _platform_ok(s) and s.name not in disabled
+        if _platform_ok(s) and s.name not in disabled and _in_scope(s)
     ]
     for s in skills:
         if s.name.lower() == needle:

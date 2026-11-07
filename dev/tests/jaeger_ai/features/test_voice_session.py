@@ -28,7 +28,8 @@ class _Gateway:
     def ensure_session(self, session_id, *, title, source):
         self.sessions.append((session_id, source))
 
-    def turn(self, session_id, text, *, timeout_s):
+    def turn(self, session_id, text, *, timeout_s, fast_lane=False):
+        assert fast_lane is True
         if self.down:
             raise GatewayUnavailable("connection refused")
         self.turns.append((session_id, text))

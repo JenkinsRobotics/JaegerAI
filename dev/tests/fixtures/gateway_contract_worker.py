@@ -223,7 +223,7 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
 
         # Real handlers and authentication, without production launcher's
         # optional model warmups, service management or package installation.
-        webui = QuietHTTPServer(("127.0.0.1", 0), Handler)
+        webui = QuietHTTPServer(("127.0.0.1", int(os.environ.get("JAEGER_CONTRACT_WEBUI_PORT", "0"))), Handler)
         threading.Thread(target=webui.serve_forever, daemon=True).start()
     runtime = EntityRuntime.get_singleton()
     ready = state / "listener.tmp"

@@ -29,7 +29,8 @@ def _remote_session(topic: str) -> str:
 
 
 def _honcho():
-    from jaeger_ai.features.shared_memory.honcho_client import HonchoClient
+    from jaeger_agent.core.host import service
+    HonchoClient = service("shared_memory").HonchoClient
     return HonchoClient()
 
 

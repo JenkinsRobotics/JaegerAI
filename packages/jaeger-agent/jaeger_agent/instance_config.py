@@ -57,7 +57,9 @@ def load(layout: Any = None) -> Any | None:
             return hit[1]
 
     try:
-        from jaeger_ai.core.instance.schemas import Config, load_yaml
+        from jaeger_agent.core.host import service
+        schemas = service("instance_schemas")
+        Config, load_yaml = schemas.Config, schemas.load_yaml
         cfg = load_yaml(path, Config)
     except Exception as exc:
         logger.debug("instance_config: load failed (%s)", exc)

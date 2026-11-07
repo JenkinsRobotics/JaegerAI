@@ -63,6 +63,8 @@ def test_entity_runtime_owns_subordinate_react(isolated_entity_runtime):
     layout_mock.config_path = rt.state_root / "config.yaml"
     layout_mock.workspace_dir = rt.state_root / "workspace"
     layout_mock.root = rt.state_root
+    layout_mock.name = "test-control-plane"
+    layout_mock.config_path.write_text("instance_name: test-control-plane\nmodel:\n  model_path: /dev/null\n")
     rt.layout = layout_mock
 
     mock_agent = MagicMock()

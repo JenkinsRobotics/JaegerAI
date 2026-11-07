@@ -40,8 +40,10 @@ async def test_message_execution_reply_and_followup(tool_bridge, decision):
     first = await goal('first', 'question')
     assert first.status == 200, await first.text()
     assert (await goal('duplicate', 'question')).status == 409
+    answer = None
     for gid, mid in [('first', 'question'), ('followup', 'follow-question')]:
         if gid == 'followup':
+            assert answer is not None
             await message(mid, answer['id'])
             assert (await goal(gid, mid)).status == 200
         await wait_for(lambda: bool(app.store.list_pending_approvals()))

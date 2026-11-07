@@ -162,10 +162,10 @@ def test_status_renders_active_instance(sandbox) -> None:
 
 def test_roadmap_renders_active_version() -> None:
     """Without a versioned ROADMAP ledger, `jaeger roadmap` renders the
-    single execution entry point (docs/CONTINUE_FROM_HERE.md)."""
+    current product definition (docs/PRODUCT.md), without inventing a plan."""
     code, out = _run("roadmap")
     assert code == 0
-    assert "Continuation entry point" in out
+    assert "Product definition (no versioned roadmap)" in out
 
 
 def test_roadmap_unknown_version_errors() -> None:

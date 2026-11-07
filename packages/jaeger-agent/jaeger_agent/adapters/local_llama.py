@@ -862,7 +862,14 @@ class LocalLlamaAdapter(OpenAIAdapter):
 
         # All model-generated tool calls pass through jaeger_ai.core.runtime.tool_repair
         # to automatically recover from malformed JSON, markdown fences, Python literals, or single quotes
-        from jaeger_ai.core.runtime.tool_repair import repair_tool_call
+        from jaeger_agent.core.host import service
+        try:
+            repair_tool_call = service("tool_repair").repair_tool_call
+        except ImportError:
+            # Standalone adapters retain their existing parsed calls. Product
+            # adapters always use the canonical repair service injected at boot.
+            message["tool_calls"] = all_calls
+            return message
         repaired_calls = []
         for tc in all_calls:
             tc_id = tc.get("id") or "call_0"
