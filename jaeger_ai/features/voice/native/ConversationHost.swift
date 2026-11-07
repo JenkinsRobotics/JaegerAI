@@ -5,9 +5,31 @@ final class ConversationHost: NSObject, NSApplicationDelegate {
     private var service: Process?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        reportPermissions()
         startService()
         request(.audio) { [weak self] in
-            self?.request(.video) {}
+            self?.reportPermissions()
+            self?.request(.video) { self?.reportPermissions() }
+        }
+    }
+
+    private func reportPermissions() {
+        guard let root = ProcessInfo.processInfo.environment["JAEGER_STATE_DIR"] else { return }
+        func status(_ media: AVMediaType) -> String {
+            switch AVCaptureDevice.authorizationStatus(for: media) {
+            case .authorized: return "authorized"
+            case .denied: return "denied"
+            case .restricted: return "restricted"
+            case .notDetermined: return "notDetermined"
+            @unknown default: return "unknown"
+            }
+        }
+        let destination = URL(fileURLWithPath: root).appendingPathComponent("conversation-permissions.json")
+        do {
+            let data = try JSONSerialization.data(withJSONObject: ["microphone": status(.audio), "camera": status(.video)])
+            try data.write(to: destination, options: .atomic)
+        } catch {
+            NSLog("Could not report capture permissions: %@", error.localizedDescription)
         }
     }
 

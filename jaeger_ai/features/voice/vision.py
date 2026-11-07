@@ -19,6 +19,14 @@ class LocalVision:
             age = time.monotonic() - self.observed_at
             return f"{age:.0f} seconds ago: {self.observation}" if self.observation and age < 30 else ""
 
+    def wait_for_observation(self, timeout):
+        deadline = time.monotonic() + timeout
+        while not self.stopped.is_set() and time.monotonic() < deadline:
+            if self.latest():
+                return True
+            self.stopped.wait(0.1)
+        return False
+
     def start(self):
         self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
@@ -61,7 +69,12 @@ class LocalVision:
                 image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
                 image.thumbnail((768, 768))
                 with torch.inference_mode():
-                    answer = model.query(image, "Describe the visible person, objects and activity briefly. Do not infer identity or emotions.")
+                    answer = model.query(image, "Describe only this camera view in priority order: "
+                        "1. Visible people, positions and observable actions, without identity or emotion guesses. "
+                        "2. Clearly visible immediate hazards or moving objects; do not invent hazards. "
+                        "3. Important objects and left/center/right, foreground/background relationships. "
+                        "4. Likely room type and activity, explicitly labelling guesses and uncertainty. "
+                        "Do not claim measured distances, hidden objects, or a view behind the camera.")
                 with self._lock:
                     self.observation = str(answer.get("answer", ""))[:1500]
                     self.observed_at = captured_at

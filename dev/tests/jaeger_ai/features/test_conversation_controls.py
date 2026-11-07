@@ -69,7 +69,7 @@ def test_camera_context_only_in_execution_not_display_text():
         return SimpleNamespace(ok=True, text="A mug")
 
     vision = SimpleNamespace(latest=lambda: "2 seconds ago: a blue mug")
-    Conversation(Listener(), Speaker(), gateway=SimpleNamespace(stream_turn=turn), vision=vision).turn("What is this?")
+    Conversation(Listener(), Speaker(), gateway=SimpleNamespace(stream_turn=turn), vision=vision, share_visual_context=True).turn("What is this?")
     assert received["display_text"] == "What is this?"
     assert "blue mug" in received["text"]
     assert received["fast_lane"] is True
@@ -98,3 +98,33 @@ def test_interruption_cancels_request_and_prevents_later_speech():
     session.turn("hello")
     assert cancelled.wait(2)
     assert speaker.stopped and not speaker.spoken
+
+
+def test_camera_descriptions_are_not_shared_by_default():
+    received = {}
+    def turn(session, text, **kwargs):
+        received["text"] = text
+        return SimpleNamespace(ok=True, text="Hello")
+    vision = SimpleNamespace(latest=lambda: "private room detail")
+    Conversation(Listener(), Speaker(), gateway=SimpleNamespace(stream_turn=turn), vision=vision).turn("hello")
+    assert "private room detail" not in received["text"]
+
+
+def test_open_eyes_speaks_local_observation_without_cloud():
+    changes = []
+    vision = SimpleNamespace(latest=lambda: "A person on the left.", wait_for_observation=lambda timeout: True)
+    def camera(enabled):
+        changes.append(enabled)
+        return vision if enabled else None
+    speaker = Speaker()
+    conversation = Conversation(Listener(), speaker, gateway=object(), set_camera=camera)
+    conversation.turn("Open your eyes.")
+    conversation.turn("Close your eyes.")
+    assert changes == [True, False]
+    assert speaker.spoken == ["A person on the left.", "My camera is off. I'm still listening."]
+
+
+def test_missing_camera_evidence_is_not_invented():
+    speaker = Speaker()
+    Conversation(Listener(), speaker, gateway=object()).turn("What do you see?")
+    assert speaker.spoken == ["I don't have a fresh camera observation yet."]
