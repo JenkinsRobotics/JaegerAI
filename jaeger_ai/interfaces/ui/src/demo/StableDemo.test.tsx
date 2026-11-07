@@ -11,8 +11,11 @@ afterEach(async () => { await act(async () => root?.unmount()); localStorage.cle
 const flush = async (f: () => void = () => {}) => act(async () => {f();await new Promise(r=>setTimeout(r,0));});
 async function mount(source = new MockSource()) {const el=document.createElement("div");document.body.append(el);root=createRoot(el);await flush(()=>root.render(<StableDemo source={source}/>));return source;}
 it("offers one navigation for chat and every workspace page", async () => {
- await mount();expect([...document.querySelectorAll('nav button')].map(e=>e.textContent)).toEqual(["Chat","Agents","Work","Tasks","Research","Studio","Machine"]);
+ await mount();expect([...document.querySelectorAll('#jaeger-navigation nav button')].map(e=>e.textContent)).toEqual(["Chat","Agents","Work","Tasks","Research","Studio","Machine"]);
  expect(document.body.textContent).not.toContain('Full workspace (preview)');
+ expect(document.querySelector('[aria-label="Conversation toolbar"]')).toHaveClass('jg-stable-demo__header');
+ expect(document.querySelector('.jg-stable-demo__profile-avatar')).not.toBeNull();
+ expect([...document.querySelectorAll('[aria-label="Mobile navigation"] button')].map(button => button.textContent)).toEqual(['Chat','Agents','Work','Tasks','More']);
  expect(document.querySelectorAll('.jg-stable-demo__top-button')).toHaveLength(5);
  expect([...document.querySelectorAll<HTMLButtonElement>('.jg-stable-demo__tools > .jg-stable-demo__top-button')].map(button => button.getAttribute('aria-label'))).toEqual(["Conversation actions", "Toggle pinned summary", "Open tabs"]);
 });

@@ -23,6 +23,7 @@ import { clampWidth, SIDEBAR } from "../shell/sidebarSizing";
 export const DEMO_SESSION_KEY = "jaeger.stable-demo.session.v1";
 const PINNED_SESSION_KEY = "jaeger.stable-demo.pinned-sessions.v1";
 const SIDEBAR_WIDTH_KEY = "jaeger.stable-demo.sidebar-width.v1";
+const COMPACT_SHELL_QUERY = "(max-width: 820px), (max-height: 520px) and (max-width: 1000px)";
 function storedSession() { try { return localStorage.getItem(DEMO_SESSION_KEY) || ""; } catch { return ""; } }
 function storedPins() { try { return new Set<string>(JSON.parse(localStorage.getItem(PINNED_SESSION_KEY) || "[]")); } catch { return new Set<string>(); } }
 function storedSidebarWidth() { try { return clampWidth(Number(localStorage.getItem(SIDEBAR_WIDTH_KEY) || SIDEBAR.defaultWidth)); } catch { return SIDEBAR.defaultWidth; } }
@@ -46,7 +47,7 @@ function ConversationRow({ row, active, pinned, selecting, selected, onOpen, onS
 export function StableDemo({ source }: { source: JaegerSource }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(() => typeof matchMedia === "function" ? !matchMedia(COMPACT_SHELL_QUERY).matches : true);
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   const shellRef = useRef<HTMLDivElement>(null);
   const [headerPopup, setHeaderPopup] = useState<HeaderPopup>(null);
@@ -90,6 +91,13 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     document.addEventListener("keydown", escape);
     return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
   }, [headerPopup]);
+  useEffect(() => {
+    if (typeof matchMedia !== "function") return;
+    const compact = matchMedia(COMPACT_SHELL_QUERY);
+    const adapt = (event: MediaQueryListEvent) => { if (event.matches) setSidebarOpen(false); };
+    compact.addEventListener("change", adapt);
+    return () => compact.removeEventListener("change", adapt);
+  }, []);
   useEffect(() => {
     let live = true;
     source.sessions({ agent_id: "native:jaeger" }).then(rows => {
@@ -274,13 +282,13 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       <div className="jg-stable-demo__resize" role="separator" aria-label="Resize navigation" aria-orientation="vertical" aria-valuemin={SIDEBAR.minWidth} aria-valuemax={SIDEBAR.maxWidth} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={beginSidebarResize} onKeyDown={resizeSidebarWithKeyboard} />
     </aside>
     <main className="jg-stable-demo__main">
-      <header className="jg-stable-demo__header">
+      <header className="jg-stable-demo__header" aria-label="Conversation toolbar">
         <div className="jg-stable-demo__header-start">
           <button className="jg-stable-demo__top-button" type="button" aria-label="Toggle navigation" title="Toggle navigation" aria-expanded={sidebarOpen} aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(value => !value)}><PanelLeft size={18} /></button>
           <button className="jg-stable-demo__top-button" type="button" aria-label="New conversation" title="New conversation" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} /></button>
         </div>
-        <div className="jg-stable-demo__profile">
-          <span className="jg-stable-demo__profile-avatar">{agent ? <AgentFace agent={agent} size={44} /> : <RobotIcon id="native:jaeger" name="Jaeger" size={44} />}</span>
+        <div className="jg-stable-demo__profile" title={workspacePage ? routeTitle[route.page] : currentTitle}>
+          <span className="jg-stable-demo__profile-avatar">{agent ? <AgentFace agent={agent} size={50} /> : <RobotIcon id="native:jaeger" name="Jaeger" size={50} />}</span>
           <span className="jg-stable-demo__profile-copy"><strong>Jaeger</strong><small>{workspacePage ? routeTitle[route.page] : currentTitle}</small></span>
         </div>
         <div className="jg-stable-demo__tools" ref={toolsRef}><ApprovalTray source={source} onOpenChat={() => navigate("/")} />
@@ -324,7 +332,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
           </div>}
         </div>
       </header>
-      {error && <p role="alert">{error} <button onClick={() => location.reload()}>Reconnect</button></p>}
+      {error && <p className="jg-stable-demo__connection-alert" role="alert"><span>{error}</span><button type="button" onClick={() => location.reload()}>Reconnect</button></p>}
       <section className="jg-stable-demo__body" hidden={workspacePage} aria-label="Chat">
         {session && ready ? <ChatPane host={host} sessionId={session} agents={agent ? [agent] : agents} /> :
           <div className="jg-stable-demo__empty"><span className="jg-stable-demo__eyebrow">YOUR AI COMPANION</span><h1>What would you like to work on?</h1><p>Talk with Jaeger, follow a task, or explore your files.<br />Your conversation stays here when you return.</p>
@@ -335,6 +343,13 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       </section>
       <footer className="jg-stable-demo__footer">Saved by Gateway · Automatic recovery after worker interruption is not verified.</footer>
     </main>
+    <nav className="jg-stable-demo__mobile-dock" aria-label="Mobile navigation">
+      <button type="button" aria-current={activeSection === "chat" ? "page" : undefined} onClick={() => { navigate("/"); setSidebarOpen(false); }}><MessageSquare size={20} /><span>Chat</span></button>
+      <button type="button" aria-current={activeSection === "agents" ? "page" : undefined} onClick={() => { navigate(pathOf("agents")); setSidebarOpen(false); }}><Bot size={20} /><span>Agents</span></button>
+      <button type="button" aria-current={activeSection === "work" ? "page" : undefined} onClick={() => { navigate(pathOf("work")); setSidebarOpen(false); }}><Workflow size={20} /><span>Work</span></button>
+      <button type="button" aria-current={activeSection === "tasks" ? "page" : undefined} onClick={() => { navigate(pathOf("work", "tasks")); setSidebarOpen(false); }}><CheckCircle size={20} /><span>Tasks</span></button>
+      <button type="button" aria-expanded={sidebarOpen} aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(value => !value)}><MoreHorizontal size={20} /><span>More</span></button>
+    </nav>
     {inspector && <aside id="jaeger-work-panel" className="jg-stable-demo__inspector" aria-label="Work panel">
       <header><strong>Work panel</strong><button type="button" aria-label="Close work panel" onClick={() => setInspector(null)}><X size={18} /></button></header>
       <div className="jg-stable-demo__tabs" role="group" aria-label="Work panel view">
