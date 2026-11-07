@@ -56,7 +56,7 @@ const ProductionPage = lazy(() => import('../unified/PipelinePage').then((m) => 
 const TaskBanner = lazy(() => import('../unified/PipelinePage').then((m) => ({ default: m.TaskBanner })))
 const PageFallback = () => <div className="jg-u-page"><SkeletonRows n={6} /></div>
 
-export function AppWindow({ source }: { source: JaegerSource }) {
+export function AppWindow({ source, embedded = false }: { source: JaegerSource; embedded?: boolean }) {
   const route = useRoute()
   const active = route.page as WindowId
   const { windows, visibleWindows, dockWindows } = useWindowManager(active)
@@ -152,6 +152,12 @@ export function AppWindow({ source }: { source: JaegerSource }) {
   // Chat and Settings share one App instance (its stores, streams, dialogs and settings panels).
   const appView = active === 'settings' ? 'settings' : 'chat'
   const chatOpen = windows.some((w) => w.id === 'chat')
+
+  if (embedded && active !== 'chat' && active !== 'settings') {
+    return <ToastProvider><div className="app-window__embedded" data-page={active} aria-label={WINDOW_DEFINITIONS[active].title}>
+      <Suspense fallback={<PageFallback />}>{render(active)}</Suspense>
+    </div></ToastProvider>
+  }
 
   return (
     <ToastProvider>

@@ -103,11 +103,6 @@ export function legacyRedirect(pathname: string, search: string): string | null 
   return keep ? `${base}?${keep}` : base;
 }
 
-/** Deep links must retain the routed workspace after a reload; only / is the minimal entry. */
-export function usesFullWorkspace(pathname: string, search = ""): boolean {
-  return new URLSearchParams(search).get("full") === "1" || pathname.replace(/\/+$/, "") !== "";
-}
-
 /** Retire the old per-app flags so a stale browser can't pin itself to a removed UI. */
 export function clearLegacyFlags(storage: Pick<Storage, "removeItem"> | undefined = globalThis.localStorage): void {
   try { storage?.removeItem("jaeger.ui.apple"); storage?.removeItem("jaeger.ui.windows"); } catch { /* private mode */ }
@@ -119,12 +114,6 @@ export function navigate(to: PageId | string, opts: { replace?: boolean } = {}):
   let url = (PAGES as readonly string[]).includes(to) ? pathOf(to as PageId) : to;
   const q = url.indexOf("?");
   url = canonicalPath(q < 0 ? url : url.slice(0, q), q < 0 ? "" : url.slice(q)) ?? url;
-  // Returning home from the routed shell must also survive a reload.
-  const destination = new URL(url, location.href);
-  if (destination.pathname === "/" && usesFullWorkspace(location.pathname, location.search)) {
-    destination.searchParams.set("full", "1");
-    url = destination.pathname + destination.search + destination.hash;
-  }
   if (url === location.pathname + location.search) return;
   if (opts.replace) history.replaceState(null, "", url); else history.pushState(null, "", url);
   dispatchEvent(new Event(EVENT));

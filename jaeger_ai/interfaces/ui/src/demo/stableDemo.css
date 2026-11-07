@@ -22,11 +22,15 @@
 .jg-stable-demo__main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .jg-stable-demo__header { min-height: 68px; display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 24px; }
 .jg-stable-demo__header > strong { font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.jg-stable-demo__header-start { display: flex; align-items: center; gap: 8px; }
 .jg-stable-demo__tools { display: flex; align-items: center; gap: 8px; }
 .jg-stable-demo__tools > button { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.jg-stable-demo__top-button { width: 40px; height: 40px; padding: 0 !important; align-items: center; justify-content: center; }
 .jg-stable-demo__header button, .jg-stable-demo__inspector button { border: 1px solid var(--jg-color-border); border-radius: 8px; padding: 7px 10px; background: transparent; }
 .jg-stable-demo__body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: auto; position: relative; }
 .jg-stable-demo__body[hidden] { display: none; }
+.jg-stable-demo__body--workspace { overflow: auto; background: var(--jg-color-pane); }
+.jg-stable-demo__body--workspace .app-window__embedded { min-height: 100%; min-width: 0; }
 .jg-stable-demo__empty { width: min(580px,calc(100% - 48px)); margin: auto; padding: 48px 0 96px; }
 .jg-stable-demo__eyebrow { color: var(--jg-color-text-tertiary); font-size: 10px; letter-spacing: 2px; }
 .jg-stable-demo__empty h1 { font-size: clamp(26px,3vw,36px); font-weight: 500; letter-spacing: -1.2px; line-height: 1.2; margin: 20px 0 16px; }
