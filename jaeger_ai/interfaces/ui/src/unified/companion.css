@@ -1,0 +1,26 @@
+/* Shared presentation for companion destinations; agent roster stays unchanged. */
+.jg-companion-page { width: min(1100px, 100%); margin: 0 auto; padding: clamp(20px, 4vw, 56px); box-sizing: border-box; }
+.jg-companion-page > header { margin-bottom: 32px; }
+.jg-companion-page > section, .jg-companion-page > .jg-u-page { margin-top: 28px; }
+.jg-companion-page :is(input,textarea,select) { color: var(--jg-color-text); background: var(--jg-color-pane); border: 1px solid var(--jg-color-border); border-radius: 10px; padding: 10px 12px; max-width: 100%; box-sizing: border-box; }
+.jg-companion-page button { color: var(--jg-color-text); background: var(--jg-color-elevated); border: 1px solid var(--jg-color-border); border-radius: 10px; padding: 9px 14px; }
+.jg-companion-page button:hover { background: var(--jg-color-hover); }
+.jg-companion-page button:disabled { opacity: .5; }
+.jg-companion-page pre { overflow: auto; max-width: 100%; }
+.jg-companion-feed__item { padding: 28px 0; border-bottom: 1px solid var(--jg-color-border); }
+.jg-companion-feed__item h2 { font-size: 21px; line-height: 1.4; margin: 10px 0; }
+.jg-companion-feed__item small, .jg-companion-note { color: var(--jg-color-text-secondary); }
+.jg-companion-empty { padding: 70px 0; max-width: 520px; }
+@media(max-width:600px) { .jg-companion-page { padding:20px 16px; } }
+.jg-studio { max-width: 1160px; margin-inline:auto; }
+.jg-studio > .jg-ui-split { display: flex; flex-direction: column; gap: 36px; }
+.jg-studio > .jg-ui-split > section { width: min(800px,100%); margin: 32px auto 0; padding: 28px; border-radius: 22px; box-sizing: border-box; }
+.jg-studio > .jg-ui-split h2 { font-size: clamp(25px,3vw,36px); letter-spacing: -.025em; margin: 0 0 28px; }
+.jg-studio__form textarea { min-height: 140px; }
+.jg-studio__providers { display:flex; flex-wrap:wrap; gap:12px; }
+.jg-studio__provider { flex:1 1 200px; }
+.jg-studio .jg-ui-inspector { width: 100%; }
+.jg-companion-page > section > button { margin: 0 8px 20px 0; }
+.jg-companion-page .jg-task-form { display:grid; gap:18px; margin-top:28px; }
+.jg-companion-page .jg-task-form label { display:grid; gap:8px; }
+@media(max-width:600px) { .jg-studio > .jg-ui-split > section { padding:16px; margin-top:8px; } }

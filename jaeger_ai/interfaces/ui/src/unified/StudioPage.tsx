@@ -9,6 +9,7 @@ import type { JaegerSource } from "../api/source";
 import type { Agent } from "../api/types";
 import { label, visible } from "../agents/agentsLogic";
 import { Badge, Empty, Segmented, Sheet, SkeletonRows, useToast, PageHead } from "./ui";
+import "./companion.css";
 import { getJson, sendJson } from "./webui";
 
 export interface Provider { id: string; name: string; kind: string; available: boolean; cost: string; note: string | null }
@@ -21,9 +22,9 @@ function readAsBase64(file: File): Promise<string> {
   return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(",")[1] ?? ""); r.onerror = () => rej(r.error); r.readAsDataURL(file); });
 }
 
-export function StudioPage({ source, agents, onNavigate }: { source: JaegerSource; agents: Agent[]; onNavigate: (to: string) => void }) {
+export function StudioPage({ source, agents, onNavigate, initialSection = "create" }: { initialSection?: "create" | "library" | "board"; source: JaegerSource; agents: Agent[]; onNavigate: (to: string) => void }) {
   const toast = useToast();
-  const [tab, setTab] = useState<"create" | "library" | "board">("create");
+  const [tab, setTab] = useState<"create" | "library" | "board">(initialSection);
   const [assets, setAssets] = useState<Asset[] | null>(null);
   const [err, setErr] = useState<string>();
   const load = useCallback(() => getJson<{ assets: Asset[] }>("/v1/studio/assets").then((r) => { setAssets(r.assets); setErr(undefined); }, (e: Error) => setErr(e.message)), []);
@@ -40,7 +41,7 @@ export function StudioPage({ source, agents, onNavigate }: { source: JaegerSourc
   };
   return (
     <div className="jg-u-page jg-studio">
-      <PageHead title="Studio" subtitle="Generate images, keep an asset library and lay ideas out on a board." actions={<>
+      <PageHead title={initialSection === "library" ? "Media" : "Imagine"} subtitle="Generate images, keep an asset library and lay ideas out on a board." actions={<>
           <Segmented label="Studio section" value={tab} onChange={setTab} options={[{ value: "create", label: "Generate" }, { value: "library", label: `Library${assets ? ` (${assets.length})` : ""}` }, { value: "board", label: "Board" }]} />
           <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif" multiple hidden onChange={(e) => { void importFiles(e.target.files); e.target.value = ""; }} />
           <button type="button" className="jg-u-btn" onClick={() => fileInput.current?.click()}>Import images</button>
@@ -73,7 +74,7 @@ function Generate({ onMade, assets }: { onMade: () => Promise<void>; assets: Ass
   return (
     <div className="jg-ui-split">
       <section className="jg-u-card" aria-label="Generate">
-        <h2>Generate an image</h2>
+        <h2>What should we imagine?</h2>
         {!providers && !err && <SkeletonRows />}
         {providers && (
           <form className="jg-studio__form" onSubmit={(e) => { e.preventDefault(); void run(); }}>

@@ -78,11 +78,11 @@ it("shows Settings as a grouped page and deep-links a tab", async () => {
   expect(document.querySelector(".jg-sheet__title")).toBeNull();
 });
 
-it("lists the six tabs in the sidebar (Settings pinned at the bottom) and persists which pages are open", async () => {
+it("lists companion destinations in the sidebar (Settings pinned at the bottom) and persists which pages are open", async () => {
   await mount("/tasks");
   expect(location.pathname).toBe("/work/tasks");
   const nav = [...document.querySelectorAll(".jg-sidebar .jg-nav__label")].map((l) => l.textContent);
-  expect(nav).toEqual(["Chat", "Agents", "Work", "Research", "Studio", "Machine", "Settings"]);
+  expect(nav).toEqual(["Chat", "Agents", "Work", "Research", "Imagine", "Machine", "Library", "Automations", "Feed", "Settings"]);
   expect(document.querySelector(".jg-nav--foot .jg-nav__label")?.textContent).toBe("Settings");
   expect(document.querySelector(".window-dock")).toBeNull();
   expect(document.querySelector(".jg-crumb")?.textContent).toContain("Work");

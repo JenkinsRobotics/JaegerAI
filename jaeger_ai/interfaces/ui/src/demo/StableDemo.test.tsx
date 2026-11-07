@@ -30,11 +30,11 @@ it("does not present a new-chat welcome when history cannot be restored", async 
 });
 async function mount(source = new MockSource()) {const el=document.createElement("div");document.body.append(el);root=createRoot(el);await flush(()=>root.render(<StableDemo source={source}/>));return source;}
 it("offers one navigation for chat and every workspace page", async () => {
- await mount();expect([...document.querySelectorAll('#jaeger-navigation nav button')].map(e=>e.textContent)).toEqual(["Chat","Agents","Work","Tasks","Research","Studio","Machine"]);
+ await mount();expect([...document.querySelectorAll('#jaeger-navigation nav button')].map(e=>e.textContent)).toEqual(["Chat","Imagine","Library","Automations","Feed","Agents","Work","Research","Machine","Tasks"]);
  expect(document.body.textContent).not.toContain('Full workspace (preview)');
  expect(document.querySelector('[aria-label="Conversation toolbar"]')).toHaveClass('jg-stable-demo__header');
  expect(document.querySelector('.jg-stable-demo__profile-avatar')).not.toBeNull();
- expect([...document.querySelectorAll('[aria-label="Mobile navigation"] button')].map(button => button.textContent)).toEqual(['Chat','Agents','Work','Tasks','More']);
+ expect(document.querySelector('[aria-label="Mobile navigation"]')).toBeNull();
  expect(document.querySelectorAll('.jg-stable-demo__top-button')).toHaveLength(5);
  expect([...document.querySelectorAll<HTMLButtonElement>('.jg-stable-demo__tools > .jg-stable-demo__top-button')].map(button => button.getAttribute('aria-label'))).toEqual(["Conversation actions", "Toggle pinned summary", "Open tabs"]);
 });

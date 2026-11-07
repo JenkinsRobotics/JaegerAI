@@ -41,6 +41,7 @@ const AgentsRoster = lazy(() => import('../unified/AgentsRoster').then((m) => ({
 const AgentsActivityPage = lazy(() => import('../orchestration/AgentsActivityPage').then((m) => ({ default: m.AgentsActivityPage })))
 const CharactersPage = lazy(() => import('../unified/CharactersPage').then((m) => ({ default: m.CharactersPage })))
 const TasksWorkspace = lazy(() => import('../unified/TasksWorkspace').then((m) => ({ default: m.TasksWorkspace })))
+const CompanionPage = lazy(() => import('../unified/CompanionPage').then((m) => ({ default: m.CompanionPage })))
 const StudioPage = lazy(() => import('../unified/StudioPage').then((m) => ({ default: m.StudioPage })))
 const ModelsPage = lazy(() => import('../unified/ModelsPage').then((m) => ({ default: m.ModelsPage })))
 const ComparePage = lazy(() => import('../unified/ComparePage').then((m) => ({ default: m.ComparePage })))
@@ -143,6 +144,9 @@ export function AppWindow({ source, embedded = false }: { source: JaegerSource; 
           default: return <ResearchPage source={source} agents={store.agents} onNavigate={go} />
         }
       }, (() => { const t = taskFor('research'); return t ? <Suspense fallback={null}><TaskBanner source={source} taskId={t} stage="research" onNavigate={go} clearTo={pathOf('research', route.sub)} /></Suspense> : undefined })())
+      case 'library':
+      case 'automations':
+      case 'feed': return <CompanionPage page={id} source={source} agents={store.agents} onNavigate={go} />
       case 'machine': return <MachineControlPanel source={source} />
       case 'studio': return <div className="jg-tabbed">{banner('studio', 'studio')}<div className="jg-tabbed__body"><StudioPage source={source} agents={store.agents} onNavigate={go} /></div></div>
       default: return null
