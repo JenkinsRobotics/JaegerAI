@@ -1068,6 +1068,8 @@ def _register_builtins(client: Any) -> None:
     AFTER this — instance skills can override built-ins by registering
     a higher version of the same name (last-write-wins in the registry).
     """
+    from jaeger_ai.core.agent_host import bind_agent_host
+    bind_agent_host()
     t = jaeger_tools
 
     # External agent runtimes are feature packages under

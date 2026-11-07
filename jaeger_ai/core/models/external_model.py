@@ -338,6 +338,8 @@ class ExternalModelClient:
     llm = None  # no in-process Llama — kept so `client.llm` access is safe
 
     def __init__(self, ext: ExternalModelConfig, layout: Any | None = None) -> None:
+        from jaeger_ai.core.agent_host import bind_agent_host
+        bind_agent_host()
         self.ext = ext
         self._api_key = validate_external_provider(
             ext, resolve_api_key(ext, layout),
