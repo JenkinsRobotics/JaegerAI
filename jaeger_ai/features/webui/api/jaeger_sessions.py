@@ -26,6 +26,7 @@ proxies server-side. Routes mirror the gateway exactly (audited from
     POST   /v1/sessions/{id}/clarify/{cid}  answer a clarify form (revision + response)
     POST   /v1/approvals/{id}               resolve an approval
     GET    /v1/approvals                    list pending approvals
+    GET    /v1/approvals/{id}               fetch durable approval status
     GET    /health                          gateway liveness (NOT /v1/health)
 
 Errors are surfaced, never swallowed. A gateway that is down returns 503
@@ -233,6 +234,7 @@ GATEWAY_PASSTHROUGH: tuple[tuple[frozenset, "re.Pattern[str]"], ...] = tuple(
         ({"GET"}, r"^/v1/companion/[a-z0-9_]+/(?:ccv3|memories)$"),
         ({"POST"}, r"^/v1/companion/(?:import|[a-z0-9_]+/chat)$"),
         ({"GET"}, r"^/v1/approvals/counts$"),
+        ({"GET"}, rf"^/v1/approvals/{_ID}$"),
         ({"GET"}, rf"^/v1/approvals/{_ID}/events$"),
         ({"POST"}, r"^/v1/approvals/(?:batch|requests)$"),
         ({"POST"}, rf"^/v1/approvals/{_ID}/(?:decide|viewed)$"),

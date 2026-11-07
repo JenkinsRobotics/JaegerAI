@@ -17,6 +17,7 @@ CASES = [
     ("GET", "/v1/activity?limit=5&agent_id=codex", None),
     ("POST", "/v1/handoffs/h-1/check", {"state": "passed"}),
     ("GET", "/v1/approvals/counts", None),
+    ("GET", "/v1/approvals/approval_resolved", None),
     ("GET", "/v1/approvals/ap-1/events?format=json", None),
     ("POST", "/v1/approvals/batch", {"ids": ["a", "b"], "decision": "approve"}),
     ("POST", "/v1/approvals/requests", {"source": "widget", "title": "t", "risk": "low"}),
