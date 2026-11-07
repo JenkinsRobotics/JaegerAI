@@ -809,6 +809,9 @@ def main() -> int:
                              "Track A.7 broker + Track B node split)")
     args = parser.parse_args()
 
+    if args.update:
+        return cmd_update()
+
     if not DEV_INSTANCE.exists():
         fail(f"dev instance not found at {DEV_INSTANCE}")
         say("run ./run.sh setup jaeger-dev to create it", prefix="launch")
