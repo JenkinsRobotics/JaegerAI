@@ -67,7 +67,9 @@ it("opens the three Codex-style header popovers with real Jaeger destinations", 
  expect(document.querySelector('[aria-label="Pinned workspace summary"]')?.textContent).toContain('Environment');
  expect(document.querySelector('[aria-label="Pinned workspace summary"]')?.textContent).toContain('Background processes');
  await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Open tabs"]')!.click());
- expect(document.querySelector('[aria-label="Open tabs menu"]')?.textContent).toContain('Tasks · Work · Jaeger');
+ expect(document.querySelector('[aria-label="Open tabs menu"]')?.textContent).toContain('Working and shared tabs');
+ expect(document.querySelector('[aria-label="Open tabs menu"]')?.textContent).toContain('No tabs are currently shared with Jaeger');
+ expect(document.querySelector('[aria-label="Open tabs menu"]')?.textContent).not.toContain('Settings');
 });
 
 it("collapses each column independently without remounting the chat", async () => {
@@ -84,7 +86,7 @@ it("collapses each column independently without remounting the chat", async () =
  await flush(() => toggle.click());
  expect(document.querySelector<HTMLElement>('#jaeger-navigation')?.hidden).toBe(false);
  expect(document.querySelector('[data-chat-session]')).toBe(chat);
- expect(document.querySelector('.jg-stable-demo__identity')?.textContent).toContain('Jaeger');
+ expect(document.querySelector('.jg-stable-demo__profile')?.textContent).toContain('Jaeger');
 });
 it("opens searchable draft settings and returns to the same chat", async () => {
  localStorage.setItem(DEMO_SESSION_KEY, 'saved');

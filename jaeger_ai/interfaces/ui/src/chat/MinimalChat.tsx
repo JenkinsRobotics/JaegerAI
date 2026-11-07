@@ -21,7 +21,7 @@ import { badge, messageCount, unreadSince } from "./scrollFollow";
 import { RuntimeSettings } from "../settings/RuntimeSettings";
 import { SessionFiles } from "./SessionFiles";
 import { VoiceDictation } from "./VoiceDictation";
-import { SessionQueue } from "./SessionQueue";
+import { queuePrefix, SessionQueue } from "./SessionQueue";
 import { WebHost } from "./webHost";
 import type { HomeEntry, HomeSessions } from "./homeSession";
 import { PostMessage, SummaryCard } from "./HomeEntries";
@@ -88,9 +88,9 @@ export function RevealMarkdown({ text, live, links, style }: { text: string; liv
 function BubblePart({ part, links, live = false, style }: { part: ChatPart; links: Links; live?: boolean; style: StreamStyleParams }) {
   switch (part.kind) {
     case "modelIdentity":
-      return <details className="jg-knowledge-context"><summary>Actual model · {part.actualModel??"Unknown"}</summary><p>{part.actualModel?"Model identity reported by the provider response; this is not independent backend verification.":"No provider model identity was retained for this response. The configured or requested model is not proof of the actual remote model."}</p></details>;
+      return <details className="jg-knowledge-context jg-knowledge-context--diagnostic"><summary>Actual model · {part.actualModel??"Unknown"}</summary><p>{part.actualModel?"Model identity reported by the provider response; this is not independent backend verification.":"No provider model identity was retained for this response. The configured or requested model is not proof of the actual remote model."}</p></details>;
     case "modelContext":
-      return <details className="jg-knowledge-context"><summary>Model dispatch context · {part.outline.messages.length} messages</summary><p>Observed immediately before an adapter call; provider acceptance and consumption are unknown. No prompt content is retained.</p><p>Format: {part.outline.shape} · Separate system text: {part.outline.system_chars} characters · Tool schemas: {part.outline.tool_count}</p><ol>{part.outline.messages.map((row, index) => <li key={index}>{row.role} · {row.text_chars} text characters · {row.omitted_blocks} non-text blocks omitted</li>)}</ol>{part.outline.truncated && <p>Outline limited; some entries omitted.</p>}<p>Character counts are not token usage.</p>{part.outline.items && <><h4>Context item provenance</h4><ul>{part.outline.items.map(item=><li key={item.reference}>{item.owner} · {item.claim_id ?? item.event_id ?? (item.document_id?item.document_id+" revision "+item.document_revision:item.record_ref.slice(0,16))} · {({retained_exact:"Complete item retained at dispatch",budget_dropped:"Excluded by context budget",not_retained_exact:"Complete item absent after formatting/compaction",unobservable:"Adapter representation unobservable"} as Record<string,string>)[item.state]}</li>)}</ul><p>Checks require the complete owner-framed item, not a matching marker or count. An absent item may have been summarized; this does not mean its durable record was forgotten. Opaque references identify source records without exposing paths or private text.</p></>}<p>Provider consumption and execution permissions are not inferred from these receipts.</p></details>;
+      return <details className="jg-knowledge-context jg-knowledge-context--diagnostic"><summary>Model dispatch context · {part.outline.messages.length} messages</summary><p>Observed immediately before an adapter call; provider acceptance and consumption are unknown. No prompt content is retained.</p><p>Format: {part.outline.shape} · Separate system text: {part.outline.system_chars} characters · Tool schemas: {part.outline.tool_count}</p><ol>{part.outline.messages.map((row, index) => <li key={index}>{row.role} · {row.text_chars} text characters · {row.omitted_blocks} non-text blocks omitted</li>)}</ol>{part.outline.truncated && <p>Outline limited; some entries omitted.</p>}<p>Character counts are not token usage.</p>{part.outline.items && <><h4>Context item provenance</h4><ul>{part.outline.items.map(item=><li key={item.reference}>{item.owner} · {item.claim_id ?? item.event_id ?? (item.document_id?item.document_id+" revision "+item.document_revision:item.record_ref.slice(0,16))} · {({retained_exact:"Complete item retained at dispatch",budget_dropped:"Excluded by context budget",not_retained_exact:"Complete item absent after formatting/compaction",unobservable:"Adapter representation unobservable"} as Record<string,string>)[item.state]}</li>)}</ul><p>Checks require the complete owner-framed item, not a matching marker or count. An absent item may have been summarized; this does not mean its durable record was forgotten. Opaque references identify source records without exposing paths or private text.</p></>}<p>Provider consumption and execution permissions are not inferred from these receipts.</p></details>;
     case "knowledgeContext":
       return <details className="jg-knowledge-context"><summary>Knowledge context · {part.documents.length} documents</summary><ul>{part.documents.map(doc => <li key={doc.id}>{doc.title} · revision {doc.revision}<small> · {doc.digest.slice(0, 12)}</small></li>)}</ul><p>Loaded as reference material. Tool permissions and approvals are unchanged.</p></details>;
     case "markdownContent":
@@ -225,6 +225,8 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   const [agent, setAgent] = useState<{ id: string; name: string }>({ id: "native:jaeger", name: "Jaeger" });
   const { draft, setDraft, quote, setQuote, files, setFiles, ready: draftReady, error: draftError } = useDraft(sessionId);
   const [active, setActive] = useState<TurnHandle | null>(null);
+  const [busyInputMode, setBusyInputMode] = useState<"steer" | "queue">("steer");
+  const [followUpBusy, setFollowUpBusy] = useState(false);
   const [atBottom, setAtBottom] = useState(true);
   const [listening, setListening] = useState<"dictation" | "voice" | null>(null);
   const sending = useRef(false);
@@ -644,6 +646,40 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   };
   const stop = () => active?.cancel();
 
+  const submitWhileBusy = async () => {
+    const text = draft.trim();
+    if (!active || !session || !text || followUpBusy || !host.sessionQueue) return;
+    setFollowUpBusy(true);
+    setFileNote(undefined);
+    try {
+      if (busyInputMode === "steer") {
+        const requestId = [...session.turns].reverse().find(turn => turn.state === "pending" && turn.requestId)?.requestId;
+        if (!requestId || !host.sessionQueue.steer) throw Error("The active request cannot accept steering yet");
+        const receipt = await host.sessionQueue.steer(session.id, requestId, text);
+        if (receipt.session_id !== session.id || receipt.request_id !== requestId || !receipt.steered) throw Error("Steer receipt did not match the active request");
+        setDraft(current => current.trim() === text ? "" : current);
+        setFileNote("Steered the current turn.");
+      } else {
+        const intent = { requestId: crypto.randomUUID(), text };
+        const intentKey = queuePrefix(session.id) + ".intent";
+        localStorage.setItem(intentKey, JSON.stringify(intent));
+        const receipt = await host.sessionQueue.enqueue(session.id, text, intent.requestId);
+        if (receipt.session_id !== session.id || receipt.request_id !== intent.requestId || !receipt.status) throw Error("Queue receipt did not match the saved follow-up");
+        localStorage.removeItem(intentKey);
+        setDraft(current => current.trim() === text ? "" : current);
+        setFileNote("Queued for the next turn.");
+        setAttempt(value => value + 1);
+        void checkSavedRequest(true);
+      }
+    } catch (error) {
+      setFileNote(`${busyInputMode === "steer" ? "Steer" : "Queue"} not confirmed: ${String((error as Error).message ?? error)}. Your text was kept.`);
+    } finally {
+      setFollowUpBusy(false);
+    }
+  };
+
+  const submitComposer = () => active ? void submitWhileBusy() : send();
+
   const toggleListening = async (mode: "dictation" | "voice") => {
     if (!voiceHost) return;
     if (listening) {
@@ -663,7 +699,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Escape" && (event.metaKey || event.ctrlKey)) { event.preventDefault(); stop(); return; }
     // WebKit (WKWebView, Safari) reports the IME-committing Enter with keyCode 229 and isComposing=false.
-    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); send(); }
+    if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) { event.preventDefault(); submitComposer(); }
   };
 
   /** Decisions made here; only ever set by a click on Allow once / Deny once (never automatically). */
@@ -758,7 +794,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       <MessageMenu at={messageMenu ? { x: messageMenu.x, y: messageMenu.y } : null} requestId={messageMenu?.requestId} reactionEmojis={messageMenu?.requestId ? reactionEmojis : []} onAction={onMessageAction} onClose={() => setMessageMenu(null)} />
       {reactionError && <p role="alert">{reactionError}</p>}
       {sessionId && host.sessionQueue && <SessionQueue key={sessionId} controls={host.sessionQueue} sessionId={sessionId} onAccepted={() => { setAttempt(n => n + 1); void checkSavedRequest(true); }} />}
-      <form ref={composer} className="jg-composer" onSubmit={(e) => { e.preventDefault(); send(); }}>
+      <form ref={composer} className="jg-composer" onSubmit={(e) => { e.preventDefault(); submitComposer(); }}>
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">
             {files.map((f) => (
@@ -783,16 +819,23 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         <Menu open={composerMenu} anchor={composerMenu ? plus.current : null} ariaLabel="Composer actions" placement="top-start" onClose={() => setComposerMenu(false)}
           items={[{ id: "attach", label: "Attach files" }, ...(host.capabilities.voice ? [{ id: "dictate", label: "Dictate" }] : [])]}
           onSelect={(id) => { setComposerMenu(false); if (id === "attach") attach(); else void toggleListening("dictation"); }} />
-          <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={Boolean(active)} />
+          {active && host.sessionQueue ? (
+            <button type="button" className="jg-busy-mode" aria-label={`Message action: ${busyInputMode === "steer" ? "steer current turn" : "queue next"}`}
+              onClick={() => setBusyInputMode(mode => mode === "steer" ? "queue" : "steer")}>
+              {busyInputMode === "steer" ? "Steer" : "Queue next"}
+            </button>
+          ) : <RuntimeSettings settings={host.modelSettings} sessionId={sessionId} disabled={false} />}
           <span className="jg-composer__spacer" />
-          {host instanceof WebHost && <VoiceDictation />}
-        {dictation && primary !== "dictate" && (
+          {!active && host instanceof WebHost && <VoiceDictation />}
+        {!active && dictation && primary !== "dictate" && (
           <button type="button" className={`jg-composer__icon jg-composer__icon--filled${listening === "dictation" ? " is-listening" : ""}`}
             aria-label={listening === "dictation" ? "Stop dictation" : "Dictate"} title="Dictate" aria-pressed={listening === "dictation"}
             disabled={listening === "voice"} onClick={() => void toggleListening("dictation")}><MicIcon /></button>
         )}
-        {primary === "stop"
-          ? <button type="button" className="jg-send" aria-label="Stop (⌘Esc)" onClick={stop}><StopIcon /></button>
+        {active
+          ? <><button type="submit" className="jg-send" aria-label={busyInputMode === "steer" ? "Steer current turn" : "Queue follow-up"}
+                disabled={!hasText || followUpBusy || !host.sessionQueue || (busyInputMode === "steer" && !host.sessionQueue.steer)}><SendIcon /></button>
+              <button type="button" className="jg-send jg-send--stop" aria-label="Stop current turn (⌘Esc)" onClick={stop}><StopIcon /></button></>
           : primary === "send"
             ? <button type="submit" className="jg-send" aria-label="Send" disabled={!hasText || recoveryBlocked || preparingFiles || !draftReady || !session || recoveryStatus === "unknown"}><SendIcon /></button>
             : primary === "dictate"
