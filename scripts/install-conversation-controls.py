@@ -127,10 +127,10 @@ def main():
         backup = root / "backups" / f"stream-deck-{time.time_ns()}.json"
         backup.parent.mkdir(exist_ok=True)
         shutil.copy2(manifest, backup)
-        subprocess.run(["osascript", "-e", 'tell application "Stream Deck" to quit'], check=True)
+        subprocess.run(["osascript", "-e", 'tell application id "com.elgato.StreamDeck" to quit'], check=True)
         time.sleep(2)
         manifest.write_text(json.dumps(data, indent=2))
-        subprocess.run(["open", "-a", "Stream Deck"], check=True)
+        subprocess.run(["open", "-b", "com.elgato.StreamDeck"], check=True)
     print("Conversation controls installed. Microphone and camera remain off until a mode key is pressed.")
 
 
