@@ -94,7 +94,7 @@ def _route(argv: list[str], py: str) -> list[str]:
         if ((_repo / "pyproject.toml").exists() and (_repo / ".git").exists()
                 and not (_repo / ".jaeger-product-install").exists()):
             return [py, "-m", "jaeger_ai.cli.devtools", "--update", *rest]
-        return [py, "-m", "jaeger_ai.cli.run", "update", *rest]
+        return [py, "-m", "jaeger_ai.cli.verbs.dispatch", "update", *rest]
     if cmd in ("--dev", "dev"):
         # Developer toolbox (dev TUI, dev-state app build/run, health,
         # stop/status) — lives IN the package since launch.py was removed.
