@@ -112,6 +112,8 @@ class EntityRuntime:
         salience_engine: SalienceEngine | None = None,
         mode: EntityRuntimeMode | None = None,
     ) -> None:
+        from jaeger_ai.core.agent_host import bind_agent_host
+        bind_agent_host()
         self.mode = mode or infer_runtime_mode()
         try:
             self.layout = instance_layout()

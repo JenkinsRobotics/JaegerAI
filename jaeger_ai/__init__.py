@@ -28,7 +28,3 @@ if _os.uname().sysname == "Darwin":
     _os.environ.setdefault("OBJC_DISABLE_INITIALIZE_FORK_SAFETY", "YES")
 
 __version__ = "0.13.0"
-
-# Bind product adapters without importing their implementations or booting state.
-from jaeger_ai.core.agent_host import bind_agent_host as _bind_agent_host
-_bind_agent_host()

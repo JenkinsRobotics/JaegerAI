@@ -19,6 +19,12 @@ REPO = pathlib.Path(__file__).resolve().parents[4]
 RETIRED_PORT = str(8800 + 10)  # spelled out so this file is not a grep hit
 
 
+def _child_env(**overrides):
+    return {"PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1",
+            "PYTHONPYCACHEPREFIX": str(pathlib.Path.home() / ".cache/jaeger/pycache"),
+            **overrides}
+
+
 def test_gateway_url_is_loopback_on_the_contract_port():
     assert ports.GATEWAY_URL == f"http://{ports.LOOPBACK}:{ports.GATEWAY_PORT}"
     assert ports.LOOPBACK == "127.0.0.1"
@@ -28,7 +34,7 @@ def test_gateway_url_is_loopback_on_the_contract_port():
 
 def test_port_env_override_still_works():
     code = "from jaeger_ai.contract import ports; print(ports.GATEWAY_PORT, ports.GATEWAY_URL)"
-    env = {"JAEGER_GATEWAY_PORT": "40001", "PATH": "/usr/bin:/bin"}
+    env = _child_env(JAEGER_GATEWAY_PORT="40001")
     out = subprocess.run([sys.executable, "-c", code], cwd=REPO, env=env,
                          capture_output=True, text=True, check=True).stdout.split()
     assert out == ["40001", "http://127.0.0.1:40001"]
@@ -45,7 +51,7 @@ def test_resolve_is_explicit_url_else_contract_port_without_probing():
 def test_server_binds_loopback_by_default():
     code = ("from jaeger_ai.core.gateway import server; "
             "print(server.DEFAULT_GATEWAY_HOST, server.DEFAULT_GATEWAY_PORT)")
-    env = {"PATH": "/usr/bin:/bin", "JAEGER_NO_GUI": "1"}
+    env = _child_env(JAEGER_NO_GUI="1")
     out = subprocess.run([sys.executable, "-c", code], cwd=REPO, env=env,
                          capture_output=True, text=True, check=True).stdout.split()
     assert out[-2:] == [ports.LOOPBACK, str(ports.GATEWAY_PORT)]
