@@ -1,0 +1,15 @@
+.jg-settings-workspace { height: 100dvh; display: grid; grid-template-columns: 280px minmax(0,1fr); background: var(--jg-color-pane); color: var(--jg-color-text); font: 14px/1.5 system-ui,sans-serif; }
+.jg-settings-workspace aside { min-height: 0; overflow: auto; padding: 24px 16px; background: var(--jg-color-sidebar); border-right: 1px solid var(--jg-color-border); }
+.jg-settings-workspace button, .jg-settings-workspace a { display: flex; gap: 12px; align-items: center; width: 100%; padding: 10px 12px; border: 0; border-radius: 10px; background: transparent; color: inherit; font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.jg-settings-workspace svg { flex-shrink: 0; }
+.jg-settings-workspace button:hover, .jg-settings-workspace a:hover { background: var(--jg-color-hover); }
+.jg-settings-workspace button[aria-current] { background: var(--jg-color-active); }
+.jg-settings-workspace :is(button,a,input):focus-visible { outline: 2px solid var(--jg-color-accent); outline-offset: 2px; }
+.jg-settings-workspace__search { display: flex; align-items: center; gap: 10px; margin: 18px 0 24px; padding: 10px 12px; background: var(--jg-color-elevated); border-radius: 12px; }
+.jg-settings-workspace input { width: 100%; min-width: 0; border: 0; background: transparent; color: inherit; font: inherit; }
+.jg-settings-workspace h2 { font-size: 12px; font-weight: 500; color: var(--jg-color-text-tertiary); padding: 0 12px; margin: 26px 0 8px; }
+.jg-settings-workspace main { padding: clamp(24px,5vw,64px); min-width: 0; overflow: auto; }
+.jg-settings-workspace main header { display: flex; align-items: center; gap: 16px; border-bottom: 1px solid var(--jg-color-border); padding-bottom: 20px; }
+.jg-settings-workspace h1 { margin: 0; font-size: 24px; font-weight: 600; }
+.jg-settings-workspace main :is(p,span) { color: var(--jg-color-text-secondary); font-size: 13px; }
+@media(max-width:650px) { .jg-settings-workspace { grid-template-columns: minmax(150px,42%) minmax(0,1fr); } .jg-settings-workspace aside { padding: 12px 6px; } .jg-settings-workspace button { gap: 8px; padding: 10px 8px; font-size: 12px; } .jg-settings-workspace main { padding: 20px 12px; } .jg-settings-workspace h1 { font-size: 20px; } }

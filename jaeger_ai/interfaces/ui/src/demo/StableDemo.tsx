@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { JaegerSource } from "../api/source";
 import type { Agent, SessionRow } from "../api/types";
 import { ChatPane } from "../chat/ChatPane";
@@ -16,11 +16,14 @@ import { AgentFace } from "../unified/AgentFace";
 import { RobotIcon } from "../agents/RobotIcon";
 import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, PanelRight } from "../components/Icons";
 import "./stableDemo.css";
+import { SettingsWorkspace } from "./SettingsWorkspace";
 
 export const DEMO_SESSION_KEY = "jaeger.stable-demo.session.v1";
 function storedSession() { try { return localStorage.getItem(DEMO_SESSION_KEY) || ""; } catch { return ""; } }
 /** Recovery surface: existing chat renderer and Gateway-owned task runner, no parallel backend. */
 export function StableDemo({ source }: { source: JaegerSource }) {
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const closeSettings = useCallback(() => setSettingsOpen(false), []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [appearance, setAppearance] = useState(storedAppearance);
   const [page, setPage] = useState<"chat" | "tasks">("chat");
@@ -68,7 +71,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     finally { setBusy(false); }
   };
   const agent = agents.find(a => a.id === "native:jaeger");
-  return <ToastProvider><div className="jg-stable-demo" data-stable-demo="1" data-inspector={!!inspector} data-sidebar={sidebarOpen}>
+  return <ToastProvider><div hidden={settingsOpen}><div className="jg-stable-demo" data-stable-demo="1" data-inspector={!!inspector} data-sidebar={sidebarOpen}>
     <aside id="jaeger-navigation" hidden={!sidebarOpen} className="jg-stable-demo__sidebar" aria-label="Jaeger navigation">
       <div className="jg-stable-demo__brand"><span className="jg-stable-demo__mark">J</span><strong>Jaeger</strong></div>
       <button className="jg-stable-demo__new" type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "New conversation"}</button>
@@ -82,6 +85,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
         {!recent.length && !historyError && <p>Your conversations will appear here.</p>}
         {recent.map(row => <button type="button" key={row.session_id} title={row.title || "Untitled conversation"} aria-current={session === row.session_id ? "true" : undefined} onClick={() => selectSession(row.session_id)}>{row.title || "Untitled conversation"}</button>)}
       </div>
+      <button type="button" onClick={() => setSettingsOpen(true)}><Settings size={18} />Settings</button>
       <label className="jg-stable-demo__appearance"><Settings size={16} />Appearance<select aria-label="Appearance" value={appearance} onChange={e => { const mode = e.target.value as Appearance; setAppearance(mode); applyAppearance(mode); }}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
       <div className="jg-stable-demo__connection" role="status"><span className="jg-stable-demo__dot" data-ready={ready && !error} />{error ? "Connection error" : ready ? source.kind === "mock" ? "Design preview · sample data" : "Live Gateway" : "Connecting…"}</div>
     </aside>
@@ -116,5 +120,5 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       </div>
       <p className="jg-stable-demo__panel-note">Use Refresh to check for new outputs or file changes.</p>
     </aside>}
-  </div></ToastProvider>;
+  </div></div>{settingsOpen && <SettingsWorkspace onClose={closeSettings} />}</ToastProvider>;
 }
