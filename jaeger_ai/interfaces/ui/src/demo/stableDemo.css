@@ -58,3 +58,26 @@
 .jg-stable-demo__appearance select { background: var(--jg-color-elevated); color: var(--jg-color-text); border: 1px solid var(--jg-color-border); border-radius: 8px; padding: 6px; font: inherit; }
 .jg-stable-demo__appearance select:focus-visible { outline: 2px solid var(--jg-color-accent); }
 @media (max-width: 650px) { .jg-stable-demo__appearance { margin-left: auto; } }
+
+/* Independent columns keep the conversation mounted when either panel closes. */
+.jg-stable-demo[data-sidebar=false] { grid-template-columns: minmax(0,1fr); }
+.jg-stable-demo[data-sidebar=false][data-inspector=true] { grid-template-columns: minmax(0,1fr) minmax(300px,38%); }
+.jg-stable-demo__sidebar[hidden] { display: none; }
+.jg-stable-demo__header > strong { flex: 1; }
+.jg-stable-demo__header > button { display: grid; place-items: center; flex-shrink: 0; }
+.jg-stable-demo__identity { display: flex; align-items: center; gap: 12px; padding: 12px 28px 20px; border-bottom: 1px solid var(--jg-color-border); }
+.jg-stable-demo__identity > div { display: flex; flex-direction: column; gap: 4px; }
+.jg-stable-demo__identity strong { font-size: 16px; font-weight: 600; }
+.jg-stable-demo__identity span { color: var(--jg-color-text-secondary); font-size: 12px; }
+.jg-stable-demo__tabs button { display: flex; align-items: center; justify-content: center; gap: 6px; }
+/* Match the IDE extension's message and code typography (media/view.css). */
+.jg-stable-demo .jg-bubble { font-family: system-ui, sans-serif; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.jg-stable-demo .jg-bubble--assistant { background: transparent; border: 0; padding: 2px 0 6px; }
+.jg-stable-demo .jg-bubble--user { border-radius: 6px; padding: 8px 12px; max-width: 90%; margin-left: auto; width: fit-content; }
+.jg-stable-demo .jg-bubble pre { font-family: ui-monospace, monospace; font-size: 12px; line-height: 1.5; overflow: auto; }
+.jg-stable-demo .jg-bubble code { font-family: ui-monospace, monospace; font-size: .92em; }
+@media (max-width: 1100px) { .jg-stable-demo[data-sidebar=false][data-inspector=true] { grid-template-columns: minmax(0,1fr); } }
+@media (max-width: 650px) { .jg-stable-demo[data-sidebar=false] { grid-template-rows: minmax(0,1fr); } .jg-stable-demo__tools > button span { display: none; } }
+
+.jg-stable-demo__inspector .jg-workspace-browser__grid[data-file-selected=true] > [aria-label="File viewer"] { grid-row: 1; }
+.jg-stable-demo__inspector [aria-label="File browser"] button { display: inline-flex; align-items: center; gap: 8px; }

@@ -5,6 +5,7 @@ import type { SessionRow } from "../api/types";
 import { Empty, PageHead, SkeletonRows } from "./ui";
 import { getJson } from "./webui";
 import "./workspaceBrowser.css";
+import { FolderOpen, FileText } from "../components/Icons";
 
 type Entry = { name: string; path: string; type?: string; is_dir?: boolean; target_outside_workspace?: boolean };
 const isDir = (entry: Entry) => entry.type === "dir" || entry.is_dir === true;
@@ -50,7 +51,7 @@ export function WorkspaceBrowser({ source, params }: { source: JaegerSource; par
     getJson<{ content?: string }>(query("/api/file", { session_id: sessionId, path: selected }), controller.signal)
       .then(data => { if (!controller.signal.aborted) setContent(data.content ?? "Preview unavailable for this file."); }, e => { if (!controller.signal.aborted) setFileError(String(e).includes("HTTP 404") ? "This file can't be opened here." : (e as Error).message); });
     return () => controller.abort();
-  }, [sessionId, selected]);
+  }, [sessionId, selected, revision]);
   useEffect(() => {
     if (!sessionId || !diffPath) return;
     const controller = new AbortController(); setDiff("");
@@ -58,7 +59,7 @@ export function WorkspaceBrowser({ source, params }: { source: JaegerSource; par
     getJson<{ diff: { diff: string; binary?: boolean; too_large?: boolean } }>(query("/api/git/diff", { session_id: sessionId, kind, path }), controller.signal)
       .then(data => { if (!controller.signal.aborted) setDiff(data.diff.binary ? "Binary diff unavailable." : data.diff.diff || "No diff for this file."); }, e => { if (!controller.signal.aborted) setDiff(errorText(e)); });
     return () => controller.abort();
-  }, [sessionId, diffPath]);
+  }, [sessionId, diffPath, revision]);
   const chooseSession = useCallback((id: string) => { setSessionId(id); setFolder("."); setSelected(""); setDiffPath(""); }, []);
   const parent = folder === "." ? "." : folder.split("/").slice(0, -1).join("/") || ".";
   return <div className="jg-u-page jg-workspace-browser">
@@ -67,10 +68,10 @@ export function WorkspaceBrowser({ source, params }: { source: JaegerSource; par
     {!sessionId && <Empty title="No session selected">{sessions.length ? "Choose a Gateway session to browse its workspace." : "No sessions have a workspace yet."}</Empty>}
     {error && <p role="alert" className="jg-u-error">{error}</p>}
     {loading && <SkeletonRows n={3} />}
-    {sessionId && !error && !loading && <div className="jg-workspace-browser__grid">
+    {sessionId && !error && !loading && <div className="jg-workspace-browser__grid" data-file-selected={!!selected}>
       <section className="jg-u-card" aria-label="File browser"><h3>Files</h3><p className="jg-workspace-browser__path">{folder}</p>{folder !== "." && <button type="button" onClick={() => setFolder(parent)}>.. Parent folder</button>}
         {entries.length === 0 && <p>This workspace folder is empty.</p>}
-        <ul>{entries.map(entry => <li key={entry.path}><button type="button" disabled={entry.target_outside_workspace} onClick={() => isDir(entry) ? (setFolder(entry.path), setSelected("")) : setSelected(entry.path)}>{isDir(entry) ? "📁" : "📄"} {entry.name}</button></li>)}</ul>
+        <ul>{entries.map(entry => <li key={entry.path}><button type="button" disabled={entry.target_outside_workspace} onClick={() => isDir(entry) ? (setFolder(entry.path), setSelected("")) : setSelected(entry.path)}>{isDir(entry) ? <FolderOpen size={16} /> : <FileText size={16} />} {entry.name}</button></li>)}</ul>
       </section>
       <section className="jg-u-card" aria-label="File viewer"><h3>{selected || "File viewer"}</h3>{selected ? <>{fileError && <p role="alert">{fileError}</p>}{!fileError && <pre>{content || "Loading file…"}</pre>}<a href={query("/api/file/raw", { session_id: sessionId, path: selected, download: "1" })}>Download original</a></> : <p>Select a file to read it.</p>}</section>
       <section className="jg-u-card" aria-label="Git status"><h3>Git status</h3>{status?.is_git ? <><p>Branch: {status.branch}</p>{status.files?.length ? <ul>{status.files.map(file => <li key={file.path}><span>{file.status} {file.path}</span>{file.staged && <button type="button" onClick={() => setDiffPath(`staged:${file.path}`)}>Staged diff</button>}{(file.unstaged || file.untracked) && <button type="button" onClick={() => setDiffPath(`unstaged:${file.path}`)}>Diff</button>}</li>)}</ul> : <p>No changes.</p>}{status.truncated && <p>Showing a limited set of changes.</p>}</> : <p>This workspace is not a Git repository.</p>}</section>

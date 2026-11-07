@@ -43,7 +43,7 @@ it("defaults to the first session that has a workspace", async () => {
 });
 it("opens folders reported with type dir", async () => {
   const { el, calls } = await mount(url => url.startsWith("/api/list") ? Response.json({ entries: url.includes("path=docs") ? [] : [{ name: "docs", path: "docs", type: "dir" }] }) : url.startsWith("/api/git/status") ? Response.json({ git: { is_git: false } }) : Response.json({ branches: null }), "session=gateway-1");
-  expect(el.textContent).toContain("📁 docs");
+  expect([...el.querySelectorAll("button")].some(button => button.textContent?.trim() === "docs")).toBe(true);
   await act(async () => { [...el.querySelectorAll("button")].find(b => b.textContent?.includes("docs"))?.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
   expect(calls.some(url => url.includes("path=docs"))).toBe(true);
   expect(calls.some(url => url.startsWith("/api/file?"))).toBe(false);

@@ -51,3 +51,20 @@ it("opens and closes the work panel without replacing the conversation", async (
  expect(document.querySelector('#jaeger-work-panel')).toBeNull();
  expect(toggle.getAttribute('aria-expanded')).toBe('false');
 });
+
+it("collapses each column independently without remounting the chat", async () => {
+ localStorage.setItem(DEMO_SESSION_KEY, 'saved');
+ const source = new MockSource();
+ vi.spyOn(source, 'session').mockResolvedValue({session_id: 'saved'} as never);
+ await mount(source);
+ const chat = document.querySelector('[data-chat-session]');
+ const toggle = document.querySelector<HTMLButtonElement>('[aria-label="Toggle navigation"]')!;
+ await flush(() => toggle.click());
+ expect(document.querySelector<HTMLElement>('#jaeger-navigation')?.hidden).toBe(true);
+ expect(toggle.getAttribute('aria-expanded')).toBe('false');
+ expect(document.querySelector('[data-chat-session]')).toBe(chat);
+ await flush(() => toggle.click());
+ expect(document.querySelector<HTMLElement>('#jaeger-navigation')?.hidden).toBe(false);
+ expect(document.querySelector('[data-chat-session]')).toBe(chat);
+ expect(document.querySelector('.jg-stable-demo__identity')?.textContent).toContain('Jaeger');
+});
