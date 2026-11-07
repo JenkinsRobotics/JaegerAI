@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JaegerSource } from "../api/source";
 import type { Agent, SessionRow } from "../api/types";
 import { ChatPane } from "../chat/ChatPane";
@@ -13,22 +13,34 @@ import { TaskArtifacts } from "../library/TaskArtifacts";
 import { WorkspaceBrowser } from "../unified/WorkspaceBrowser";
 import { AgentFace } from "../unified/AgentFace";
 import { RobotIcon } from "../agents/RobotIcon";
-import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, PanelRight, Bot, Workflow, Search, Code, Cpu } from "../components/Icons";
+import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, Bot, Workflow, Search, Code, Cpu, MoreHorizontal, Pencil, Pin, Share, Copy, Clock, ChevronLeft, ChevronRight } from "../components/Icons";
 import "./stableDemo.css";
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import { navigate, pathOf, useRoute, type PageId } from "../shell/router";
 import { AppWindow } from "../windows/AppWindow";
 
 export const DEMO_SESSION_KEY = "jaeger.stable-demo.session.v1";
+const PINNED_SESSION_KEY = "jaeger.stable-demo.pinned-sessions.v1";
 function storedSession() { try { return localStorage.getItem(DEMO_SESSION_KEY) || ""; } catch { return ""; } }
+function storedPins() { try { return new Set<string>(JSON.parse(localStorage.getItem(PINNED_SESSION_KEY) || "[]")); } catch { return new Set<string>(); } }
+function SummaryGlyph() { return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="6" cy="7" r="2"/><path d="M11 7h8"/><circle cx="6" cy="17" r="2"/><path d="M11 17h8"/></svg>; }
+function TabsGlyph({ count }: { count: number }) { return <span className="jg-stable-demo__tabs-glyph" aria-hidden="true"><span>{count}</span></span>; }
+type HeaderPopup = "menu" | "summary" | "tabs" | null;
+type MenuPage = "main" | "copy" | "open";
 /** Recovery surface: existing chat renderer and Gateway-owned task runner, no parallel backend. */
 export function StableDemo({ source }: { source: JaegerSource }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [headerPopup, setHeaderPopup] = useState<HeaderPopup>(null);
+  const [menuPage, setMenuPage] = useState<MenuPage>("main");
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [pinnedSessions, setPinnedSessions] = useState(storedPins);
+  const toolsRef = useRef<HTMLDivElement>(null);
   const [appearance, setAppearance] = useState(storedAppearance);
   const route = useRoute();
-  const [inspector, setInspector] = useState<"outputs" | "files" | null>(() => window.innerWidth > 1100 ? "outputs" : null);
+  const [inspector, setInspector] = useState<"outputs" | "files" | null>(null);
   const [recent, setRecent] = useState<SessionRow[]>([]);
   const [historyError, setHistoryError] = useState("");
   const [agents, setAgents] = useState<Agent[]>([]);
@@ -39,6 +51,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const host = useMemo(() => {
     const h = new WebHost(source);
     h.home = contractHome(httpGetJson(), { agentName: id => id === "native:jaeger" ? "Jaeger" : id, onCursor: (sid, cursor) => h.noteCursor(sid, cursor) }, source.stream.bind(source));
+    h.openDetails = () => navigate(pathOf("agents"));
     return h;
   }, [source]);
   useEffect(() => {
@@ -48,6 +61,14 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     }).catch((e: unknown) => { if (live) { setError(String((e as Error).message)); setReady(false); } });
     return () => { live = false; };
   }, [source, session]);
+  useEffect(() => {
+    if (!headerPopup) return;
+    const close = (event: MouseEvent) => { if (!toolsRef.current?.contains(event.target as Node)) setHeaderPopup(null); };
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setHeaderPopup(null); };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("mousedown", close); document.removeEventListener("keydown", escape); };
+  }, [headerPopup]);
   useEffect(() => {
     let live = true;
     source.sessions({ agent_id: "native:jaeger" }).then(rows => {
@@ -70,6 +91,48 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       selectSession(row.session_id);
     } catch (e) { setError(String((e as Error).message)); }
     finally { setBusy(false); }
+  };
+  const currentRow = recent.find(row => row.session_id === session);
+  const currentTitle = currentRow?.title || "Chat with Jaeger";
+  const togglePopup = (popup: Exclude<HeaderPopup, null>) => {
+    setHeaderPopup(value => value === popup ? null : popup);
+    setMenuPage("main"); setRenameOpen(false);
+  };
+  const togglePinned = () => {
+    if (!session) return;
+    setPinnedSessions(previous => {
+      const next = new Set(previous);
+      if (next.has(session)) next.delete(session); else next.add(session);
+      try { localStorage.setItem(PINNED_SESSION_KEY, JSON.stringify([...next])); } catch { /* preference remains in memory */ }
+      return next;
+    });
+  };
+  const renameSession = async () => {
+    const title = renameDraft.trim();
+    if (!session || !title) return;
+    try { await source.updateSession(session, { title }); setRecent(rows => rows.map(row => row.session_id === session ? { ...row, title } : row)); setRenameOpen(false); }
+    catch (e) { setHistoryError(String((e as Error).message)); }
+  };
+  const archiveSession = async () => {
+    if (!session) return;
+    try {
+      await source.updateSession(session, { archived: true });
+      setRecent(rows => rows.filter(row => row.session_id !== session));
+      setSession(""); setHeaderPopup(null);
+      try { localStorage.removeItem(DEMO_SESSION_KEY); } catch { /* session simply remains unpersisted */ }
+      navigate("/");
+    } catch (e) { setHistoryError(String((e as Error).message)); }
+  };
+  const copyText = async (text: string) => {
+    try { await navigator.clipboard.writeText(text); setHeaderPopup(null); }
+    catch { setHistoryError("Clipboard access was unavailable."); }
+  };
+  const shareConversation = async () => {
+    try {
+      if (navigator.share) await navigator.share({ title: currentTitle, url: location.href });
+      else await navigator.clipboard.writeText(location.href);
+      setHeaderPopup(null);
+    } catch (e) { if ((e as DOMException).name !== "AbortError") setHistoryError("This conversation could not be shared."); }
   };
   const agent = agents.find(a => a.id === "native:jaeger");
   const workspacePage = route.page !== "chat" && route.page !== "settings";
@@ -102,11 +165,46 @@ export function StableDemo({ source }: { source: JaegerSource }) {
           <button className="jg-stable-demo__top-button" type="button" aria-label="Toggle navigation" title="Toggle navigation" aria-expanded={sidebarOpen} aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(value => !value)}><PanelLeft size={18} /></button>
           <button className="jg-stable-demo__top-button" type="button" aria-label="New conversation" title="New conversation" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} /></button>
         </div>
-        <strong>{workspacePage ? routeTitle[route.page] : recent.find(row => row.session_id === session)?.title || "Chat with Jaeger"}</strong>
-        <div className="jg-stable-demo__tools"><ApprovalTray source={source} onOpenChat={() => navigate("/")} />
-          <button className="jg-stable-demo__top-button" type="button" aria-label="Open tasks" title="Tasks" onClick={() => navigate(pathOf("work", "tasks"))}><CheckCircle size={17} /></button>
-          <button className="jg-stable-demo__top-button" type="button" aria-label="Open settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={17} /></button>
-          <button className="jg-stable-demo__top-button" type="button" aria-label="Toggle work panel" title="Work panel" aria-expanded={!!inspector} aria-controls="jaeger-work-panel" onClick={() => setInspector(inspector ? null : "outputs")}><PanelRight size={17} /></button>
+        <strong>{workspacePage ? routeTitle[route.page] : currentTitle}</strong>
+        <div className="jg-stable-demo__tools" ref={toolsRef}><ApprovalTray source={source} onOpenChat={() => navigate("/")} />
+          <button className="jg-stable-demo__top-button" type="button" aria-label="Conversation actions" data-tooltip="Conversation actions" aria-expanded={headerPopup === "menu"} onClick={() => togglePopup("menu")}><MoreHorizontal size={19} /></button>
+          <button className="jg-stable-demo__top-button" type="button" aria-label="Toggle pinned summary" data-tooltip="Toggle pinned summary" aria-expanded={headerPopup === "summary"} onClick={() => togglePopup("summary")}><SummaryGlyph /></button>
+          <button className="jg-stable-demo__top-button" type="button" aria-label="Open tabs" data-tooltip="Open tabs" aria-expanded={headerPopup === "tabs"} onClick={() => togglePopup("tabs")}><TabsGlyph count={4} /></button>
+          {headerPopup === "menu" && <div className="jg-stable-demo__popover jg-stable-demo__popover--menu" role="menu" aria-label="Conversation actions menu">
+            {menuPage !== "main" && <button className="jg-stable-demo__popover-back" type="button" onClick={() => setMenuPage("main")}><ChevronLeft size={16} />{menuPage === "copy" ? "Copy" : "Open in"}</button>}
+            {menuPage === "main" && <>
+              {renameOpen ? <form className="jg-stable-demo__rename" onSubmit={e => { e.preventDefault(); void renameSession(); }}><label htmlFor="jaeger-rename">Conversation name</label><input id="jaeger-rename" autoFocus value={renameDraft} onChange={e => setRenameDraft(e.target.value)} /><div><button type="button" onClick={() => setRenameOpen(false)}>Cancel</button><button type="submit" disabled={!renameDraft.trim()}>Save</button></div></form> : <button role="menuitem" type="button" disabled={!session} onClick={() => { setRenameDraft(currentTitle); setRenameOpen(true); }}><Pencil size={17} />Rename</button>}
+              <button role="menuitem" type="button" disabled={!session} onClick={togglePinned}><Pin size={17} />{pinnedSessions.has(session) ? "Unpin" : "Pin"}</button>
+              <button role="menuitem" type="button" disabled={!session} onClick={() => void archiveSession()}><FolderOpen size={17} />Archive</button>
+              <div className="jg-stable-demo__menu-separator" />
+              <button role="menuitem" type="button" onClick={() => void shareConversation()}><Share size={17} />Share</button>
+              <button role="menuitem" type="button" onClick={() => setMenuPage("copy")}><Copy size={17} />Copy<ChevronRight className="jg-stable-demo__menu-chevron" size={16} /></button>
+              <div className="jg-stable-demo__menu-separator" />
+              <button role="menuitem" type="button" disabled={!ready || busy} onClick={() => { setHeaderPopup(null); void start(); }}><MessageSquare size={17} />New side chat</button>
+              <button role="menuitem" type="button" disabled data-tooltip="Conversation forking needs Gateway support"><Workflow size={17} />Fork<span className="jg-stable-demo__soon">Gateway support needed</span></button>
+              <button role="menuitem" type="button" disabled><Clock size={17} />Add scheduled task…</button>
+              <div className="jg-stable-demo__menu-separator" />
+              <button role="menuitem" type="button" onClick={() => setMenuPage("open")}><ChevronRight size={17} />Open in<ChevronRight className="jg-stable-demo__menu-chevron" size={16} /></button>
+              <button role="menuitem" type="button" onClick={() => window.open(location.href, "_blank", "noopener,noreferrer")}><PanelLeft size={17} />Open in new window</button>
+            </>}
+            {menuPage === "copy" && <><button role="menuitem" type="button" onClick={() => void copyText(location.href)}><Copy size={17} />Conversation link</button><button role="menuitem" type="button" disabled={!session} onClick={() => void copyText(session)}><Copy size={17} />Conversation ID</button></>}
+            {menuPage === "open" && <><button role="menuitem" type="button" onClick={() => { navigate("/"); setHeaderPopup(null); }}><MessageSquare size={17} />Chat</button><button role="menuitem" type="button" onClick={() => { navigate(pathOf("work", "tasks")); setHeaderPopup(null); }}><CheckCircle size={17} />Tasks</button><button role="menuitem" type="button" onClick={() => { navigate(pathOf("agents")); setHeaderPopup(null); }}><Bot size={17} />Agents</button><button role="menuitem" type="button" onClick={() => { setSettingsOpen(true); setHeaderPopup(null); }}><Settings size={17} />Settings</button></>}
+          </div>}
+          {headerPopup === "summary" && <div className="jg-stable-demo__popover jg-stable-demo__popover--summary" role="dialog" aria-label="Pinned workspace summary">
+            <section><header><h2>Environment</h2><button type="button" aria-label="Open files and changes" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><Plus size={19} /></button></header>
+              <button type="button" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><FileText size={18} /><span>Changes</span></button>
+              <div><Cpu size={18} /><span>Local Gateway</span></div>
+              <div><FolderOpen size={18} /><span>{currentRow?.workspace ? currentRow.workspace.split("/").pop() : "Conversation workspace"}</span></div>
+            </section>
+            <section><h2>Background processes</h2><div><span className="jg-stable-demo__status-dot" data-ready={ready && !error} /><span>{ready ? "Gateway connected" : "Connecting to Gateway"}</span></div><div><Bot size={18} /><span>{agent?.display_name || agent?.name || "Jaeger agent"}</span></div></section>
+            <section><header><h2>Sources</h2><button type="button" aria-label="Open outputs" onClick={() => { setInspector("outputs"); setHeaderPopup(null); }}><Plus size={19} /></button></header><button type="button" onClick={() => { setInspector("outputs"); setHeaderPopup(null); }}><FileText size={18} /><span>Outputs and artifacts</span></button><button type="button" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><FolderOpen size={18} /><span>Files and changes</span></button></section>
+          </div>}
+          {headerPopup === "tabs" && <div className="jg-stable-demo__popover jg-stable-demo__popover--tabs" role="menu" aria-label="Open tabs menu"><h2>Open tabs</h2>
+            <button role="menuitem" type="button" onClick={() => { navigate("/"); setHeaderPopup(null); }}><span className="jg-stable-demo__tab-mark">J</span>{currentTitle}</button>
+            <button role="menuitem" type="button" onClick={() => { navigate(pathOf("agents")); setHeaderPopup(null); }}><span className="jg-stable-demo__tab-mark">J</span>Agents · Jaeger</button>
+            <button role="menuitem" type="button" onClick={() => { navigate(pathOf("work", "tasks")); setHeaderPopup(null); }}><CheckCircle size={18} />Tasks · Work · Jaeger</button>
+            <button role="menuitem" type="button" onClick={() => { setSettingsOpen(true); setHeaderPopup(null); }}><Settings size={18} />Settings · Jaeger</button>
+          </div>}
         </div>
       </header>
       {!workspacePage && <div className="jg-stable-demo__identity">{agent ? <AgentFace agent={agent} size={48} /> : <RobotIcon id="native:jaeger" name="Jaeger" size={48} />}<div><strong>Jaeger</strong><span>Your AI companion</span></div></div>}

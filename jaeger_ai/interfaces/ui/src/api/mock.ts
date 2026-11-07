@@ -106,6 +106,15 @@ const turnScript = (sessionId: string, text: string): Array<[number, GatewayEven
 
 export class MockSource implements JaegerSource {
   readonly kind = "mock" as const;
+  private modelChoices = new Map<string, string | null>();
+  readonly modelSettings = {
+    inventory: async () => ({ active: { provider: "ollama", model: "glm-5.3-flash:cloud" }, providers: [
+      { id: "ollama", display_name: "Ollama", reachable: true, configured: true, models: [{ id: "glm-5.3-flash:cloud", available: true, usable_for_react: true }, { id: "qwen3:8b", available: true, usable_for_react: true }] },
+      { id: "openai", display_name: "OpenAI", reachable: false, configured: false, availability: "not_configured" as const, reason: "No credential configured in this preview", models: [] },
+    ] }),
+    read: async (sessionId: string) => ({ session_id: sessionId, model: this.modelChoices.get(sessionId) ?? null, model_choice_revision: 0, atomic_model_operations: false }),
+    save: async (sessionId: string, model: string | null) => { this.modelChoices.set(sessionId, model); },
+  };
   private listeners = new Map<string, Set<(event: GatewayEvent) => void>>();
   /** Per-session event log so stream(cursor) replays like the gateway does. */
   private log = new Map<string, GatewayEvent[]>();

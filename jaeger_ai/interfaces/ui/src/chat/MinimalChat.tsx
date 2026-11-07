@@ -306,6 +306,10 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     if (!sameOwner) { setEntries({}); setOlder(undefined); }
     setOlderError(undefined);
     const fail = (error: unknown) => { if (live) setLoadError(String((error as Error)?.message ?? error)); };
+    const loadStandardTranscript = () => sessionId ? host.sessions.load(sessionId).then(
+      (s) => { if (live) { loadedTurns.current = new Set(s.turns.map((t) => t.turnId)); setSession(current => mergeSessionSnapshot(current, s)); } },
+      fail,
+    ) : Promise.resolve();
     if (sessionId && home) home.page(sessionId).then((p) => {
       if (!live) return;
       loadedTurns.current = new Set(p.turns.map((t) => t.turnId));
@@ -316,11 +320,8 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       if (!sameOwner) setOlder(p.before);
       const reset = summarizedSnapshot.current; summarizedSnapshot.current = false;
       setSession(current => mergeSessionSnapshot(current, { id: p.sessionId, title: p.title ?? "", agentId: p.agentId, turns: p.turns }, reset));
-    }, fail);
-    else if (sessionId) host.sessions.load(sessionId).then(
-      (s) => { if (live) { loadedTurns.current = new Set(s.turns.map((t) => t.turnId)); setSession(current => mergeSessionSnapshot(current, s)); } },
-      fail,
-    );
+    }, () => { void loadStandardTranscript(); });
+    else if (sessionId) void loadStandardTranscript();
     return () => { live = false; };
   }, [host, home, sessionId, attempt]);
 

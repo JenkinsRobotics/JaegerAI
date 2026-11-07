@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { Dialog } from "@aether/ui";
-import { createPortal } from "react-dom";
 import type { ModelInventory, ModelSettings, ModelChoiceSnapshot, ModelChoiceIntent, ModelChoiceReceipt } from "../api/source";
 import { useExclusivePopup } from "../popups/coordinator";
+import { ChevronDown, Search, X } from "../components/Icons";
 
 /** Session choice only. Credentials, global routing and permissions stay Gateway-owned. */
 export function RuntimeSettings({ settings, sessionId, disabled = false }: { settings?: ModelSettings; sessionId?: string; disabled?: boolean }) {
   const [open, setOpen] = useState(false), [attempt, setAttempt] = useState(0);
+  const [query, setQuery] = useState("");
+  const trigger = useRef<HTMLButtonElement>(null);
   const [inventory, setInventory] = useState<ModelInventory>();
   const [selected, setSelected] = useState(""), [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string>(), [notice, setNotice] = useState<string>();
@@ -15,7 +16,13 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
   const journal='jaeger.ui.model-choice.v1.'+sessionId,draftKey=journal+'.draft';
   const choice=(value:ModelChoiceSnapshot)=>value.model?value.provider?`@${value.provider}:${value.model}`:value.model:'';
 
-  useExclusivePopup(open, () => { if (!locked.current) setOpen(false); });
+  useExclusivePopup(open, () => { if (!locked.current) setOpen(false); }, trigger.current);
+  useEffect(() => {
+    if (!settings || !sessionId) return;
+    let live = true;
+    void settings.read(sessionId).then(current => { if (live && current.session_id === sessionId) setBase(current); }, () => { /* the opened picker shows the actionable error */ });
+    return () => { live = false; };
+  }, [settings, sessionId]);
   useEffect(() => {
     if (!open || !settings || !sessionId) return;
     let live = true; generation.current++;setConfirmCancel(false);setNeedsRefresh(false);setLoaded(false);setBase(undefined); setError(undefined); setNotice(undefined);
@@ -35,6 +42,9 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
   }, [open, settings, sessionId, attempt]);
   if (!settings || !sessionId) return null;
   const choices = inventory?.providers.filter(p => p.reachable).flatMap(p => p.models.filter(m => m.available !== false).map(m => ({ id: `@${p.id}:${m.id}`, label: `${p.display_name} · ${m.id}`, certified: m.usable_for_react }))) ?? [];
+  const filteredChoices = choices.filter(model => !query.trim() || model.label.toLowerCase().includes(query.trim().toLowerCase()));
+  const currentChoice = base ? choice(base) : "";
+  const currentLabel = currentChoice ? currentChoice.replace(/^@/, "").replace(":", " · ") : inventory?.active?.model || "Gateway default";
   const finish=async(receipt:ModelChoiceReceipt,intent:ModelChoiceIntent,owner:number)=>{
     if(owner!==generation.current)return;
     if(receipt.operation_id!==intent.operation_id||receipt.domain!=='model_choice'||receipt.session_id!==sessionId||typeof receipt.ok!=='boolean')throw Error('Model receipt identity/scope mismatch; pending journal retained');
@@ -77,23 +87,26 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
     catch(e){if(owner===generation.current)setError(String((e as Error).message??e));}
     finally{locked.current=false;setBusy(false);}
   };
-  return <><button type="button" className="aui-button jg-runtime-trigger" aria-label="Gateway settings" title="Model and gateway settings" disabled={disabled} onClick={() => setOpen(true)}>Model</button>
-    {createPortal(<Dialog open={open} title="Gateway settings" onClose={() => { if (!busy) setOpen(false); }} actions={<button type="button" className="aui-button" disabled={busy} onClick={() => setOpen(false)}>Close</button>}>
-      <p>Choose the model for this conversation. Global provider configuration, credentials and tool permissions are managed by the Gateway.</p>
-      {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
-      {!loaded && !error && !pending && !needsRefresh && <p role="status">Loading models and conversation settings…</p>}
-      <button type="button" disabled={busy} onClick={() => setAttempt(n => n + 1)}>Refresh models and settings</button>
-      {base&&<p>Current saved choice: {choice(base)||'Gateway default'}{base.atomic_model_operations?` · revision ${base.model_choice_revision}`:' · server has no versioned model receipts'}</p>}
-      {pending&&<p role="status">A model save needs its original receipt. Refreshing does not resubmit it.</p>}
-      {pending&&settings.operation&&<button type="button" disabled={busy} onClick={()=>void check()}>Check original model save</button>}
-      {pending&&settings.cancelPending&&!confirmCancel&&<button type="button" disabled={busy} onClick={()=>setConfirmCancel(true)}>Review pending model cancellation</button>}
-      {pending&&confirmCancel&&<div role="group" aria-label="Confirm model save cancellation"><p>This preserves any already committed model choice. If the original command has no receipt, it records rejection atomically so a late handler cannot apply it. Your proposal is retained.</p><button type="button" disabled={busy} onClick={()=>void check(true)}>Confirm pending model cancellation</button><button type="button" disabled={busy} onClick={()=>setConfirmCancel(false)}>Keep pending model save</button></div>}
-      {loaded && <><label>Conversation model <select aria-label="Conversation model" value={selected} disabled={busy} onChange={e => {proposalRef.current={owner:sessionId,value:e.target.value};setSelected(e.target.value);if(base?.atomic_model_operations)try{localStorage.setItem(draftKey,e.target.value);}catch{setError("Model proposal could not be saved on this device; draft retained in memory");}}}>
-        <option value="">Gateway default{inventory?.active?.model ? ` · ${inventory.active.provider}/${inventory.active.model}` : ""}</option>
-        {selected && !choices.some(m => m.id === selected) && <option value={selected} disabled>{selected} (currently unavailable)</option>}
-        {choices.map(m => <option key={m.id} value={m.id}>{m.label}{m.certified ? "" : " (tool certification not verified)"}</option>)}
-      </select></label><button type="button" disabled={busy || Boolean(pending) || Boolean(selected && !choices.some(m => m.id === selected))} onClick={() => void save()}>Save conversation model</button></>}
-      <ul>{inventory?.providers.map(provider => <li key={provider.id}><strong>{provider.display_name}</strong> · {provider.availability==='unknown'?"Configuration unknown":provider.availability==='not_probed'?"Configured · health not probed":provider.reachable ? "Reachable" : provider.configured ? "Unreachable" : "Not configured"}{provider.reason ? ` · ${provider.reason}` : ""}</li>)}</ul>
-    </Dialog>, document.body)}
-  </>;
+  const select = (value: string) => { proposalRef.current={owner:sessionId,value};setSelected(value);if(base?.atomic_model_operations)try{localStorage.setItem(draftKey,value);}catch{setError("Model proposal could not be saved on this device; draft retained in memory");} };
+  return <div className="jg-runtime-picker"><button ref={trigger} type="button" className="jg-runtime-trigger" aria-label="Choose conversation model" title="Choose model" aria-expanded={open} disabled={disabled} onClick={() => { setQuery(""); setOpen(value => !value); }}><span>{currentLabel}</span><ChevronDown size={14} /></button>
+    {open && <section className="jg-runtime-menu" role="dialog" aria-label="Gateway models and settings" data-jg-popup>
+      <header><strong>Model for this conversation</strong><button type="button" aria-label="Close model picker" onClick={() => setOpen(false)}><X size={16} /></button></header>
+      <label className="jg-runtime-search"><Search size={15} /><input type="search" autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search models…" aria-label="Search models" /></label>
+      {error && <p className="jg-runtime-message is-error" role="alert">{error}</p>}{notice && <p className="jg-runtime-message" role="status">{notice}</p>}
+      {!loaded && !error && !pending && !needsRefresh && <p className="jg-runtime-message" role="status">Loading Gateway models…</p>}
+      {base && <p className="jg-runtime-message">Current saved choice: {choice(base)||"Gateway default"}{base.atomic_model_operations ? ` · revision ${base.model_choice_revision}` : ""}</p>}
+      {loaded && <div className="jg-runtime-models" role="listbox" aria-label="Conversation model">
+        <button type="button" role="option" aria-selected={selected === ""} onClick={() => select("")}><span><strong>Gateway default</strong>{inventory?.active?.model && <small>{inventory.active.provider} · {inventory.active.model}</small>}</span>{selected === "" && <span className="jg-runtime-check">✓</span>}</button>
+        {selected && !choices.some(m => m.id === selected) && <button type="button" disabled><span><strong>{selected}</strong><small>Currently unavailable</small></span></button>}
+        {filteredChoices.map(model => <button key={model.id} type="button" role="option" aria-selected={selected === model.id} onClick={() => select(model.id)}><span><strong>{model.label}</strong>{!model.certified && <small>Tool certification not verified</small>}</span>{selected === model.id && <span className="jg-runtime-check">✓</span>}</button>)}
+        {!filteredChoices.length && <p className="jg-runtime-message">No available models match “{query}”.</p>}
+      </div>}
+      {pending&&<p className="jg-runtime-message" role="status">A model save needs its original receipt. It will not be resubmitted.</p>}
+      {pending&&settings.operation&&<button className="jg-runtime-secondary" type="button" disabled={busy} onClick={()=>void check()}>Check original model save</button>}
+      {pending&&settings.cancelPending&&!confirmCancel&&<button className="jg-runtime-secondary" type="button" disabled={busy} onClick={()=>setConfirmCancel(true)}>Review pending model cancellation</button>}
+      {pending&&confirmCancel&&<div className="jg-runtime-confirm" role="group" aria-label="Confirm model save cancellation"><p>Cancel the pending command while preserving the committed choice and this proposal?</p><button type="button" disabled={busy} onClick={()=>void check(true)}>Confirm pending model cancellation</button><button type="button" disabled={busy} onClick={()=>setConfirmCancel(false)}>Keep pending model save</button></div>}
+      <details className="jg-runtime-providers"><summary>Gateway provider status</summary><ul>{inventory?.providers.map(provider => <li key={provider.id}><strong>{provider.display_name}</strong> · {provider.availability==='unknown'?"Configuration unknown":provider.availability==='not_probed'?"Configured · health not probed":provider.reachable ? "Reachable" : provider.configured ? "Unreachable" : "Not configured"}{provider.reason ? ` · ${provider.reason}` : ""}</li>)}</ul></details>
+      <footer><button type="button" disabled={busy} onClick={() => setAttempt(n => n + 1)}>Refresh models and settings</button><button className="jg-runtime-save" type="button" disabled={!loaded || busy || Boolean(pending) || Boolean(selected && !choices.some(m => m.id === selected))} onClick={() => void save()}>Save conversation model</button></footer>
+    </section>}
+  </div>;
 }

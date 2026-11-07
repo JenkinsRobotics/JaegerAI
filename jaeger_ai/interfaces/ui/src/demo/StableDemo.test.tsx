@@ -14,6 +14,7 @@ it("offers one navigation for chat and every workspace page", async () => {
  await mount();expect([...document.querySelectorAll('nav button')].map(e=>e.textContent)).toEqual(["Chat","Agents","Work","Tasks","Research","Studio","Machine"]);
  expect(document.body.textContent).not.toContain('Full workspace (preview)');
  expect(document.querySelectorAll('.jg-stable-demo__top-button')).toHaveLength(5);
+ expect([...document.querySelectorAll<HTMLButtonElement>('.jg-stable-demo__tools > .jg-stable-demo__top-button')].map(button => button.getAttribute('aria-label'))).toEqual(["Conversation actions", "Toggle pinned summary", "Open tabs"]);
 });
 it("creates an isolated Jaeger session only after the user starts, then keeps chat mounted across task navigation", async () => {
  const source=new MockSource();const create=vi.spyOn(source,'createSession').mockResolvedValue({session_id:'demo-safe',agent_id:'native:jaeger'} as never);
@@ -46,13 +47,27 @@ it("switches saved conversations without creating a session and keeps the select
 });
 it("opens and closes the work panel without replacing the conversation", async () => {
  await mount();
- const toggle = document.querySelector<HTMLButtonElement>('[aria-label="Toggle work panel"]')!;
- if (!document.querySelector('#jaeger-work-panel')) await flush(() => toggle.click());
+ const summary = document.querySelector<HTMLButtonElement>('[aria-label="Toggle pinned summary"]')!;
+ await flush(() => summary.click());
+ await flush(() => [...document.querySelectorAll('button')].find(b => b.textContent === 'Files and changes')!.click());
  await flush(() => [...document.querySelectorAll('button')].find(b => b.textContent === 'Files & changes')!.click());
  expect(document.querySelector('#jaeger-work-panel')?.textContent).toContain('Start a conversation');
  await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Close work panel"]')!.click());
  expect(document.querySelector('#jaeger-work-panel')).toBeNull();
- expect(toggle.getAttribute('aria-expanded')).toBe('false');
+ expect(summary.getAttribute('aria-expanded')).toBe('false');
+});
+
+it("opens the three Codex-style header popovers with real Jaeger destinations", async () => {
+ await mount();
+ const actions = document.querySelector<HTMLButtonElement>('[aria-label="Conversation actions"]')!;
+ await flush(() => actions.click());
+ expect(document.querySelector('[aria-label="Conversation actions menu"]')?.textContent).toContain('Rename');
+ expect(document.querySelector('[aria-label="Conversation actions menu"]')?.textContent).toContain('Open in new window');
+ await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Toggle pinned summary"]')!.click());
+ expect(document.querySelector('[aria-label="Pinned workspace summary"]')?.textContent).toContain('Environment');
+ expect(document.querySelector('[aria-label="Pinned workspace summary"]')?.textContent).toContain('Background processes');
+ await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Open tabs"]')!.click());
+ expect(document.querySelector('[aria-label="Open tabs menu"]')?.textContent).toContain('Tasks · Work · Jaeger');
 });
 
 it("collapses each column independently without remounting the chat", async () => {

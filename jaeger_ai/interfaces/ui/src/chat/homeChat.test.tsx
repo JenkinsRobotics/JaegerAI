@@ -115,6 +115,17 @@ describe("home chat in MinimalChat", () => {
     expect(h.openHistory).toHaveBeenCalledWith("native:jaeger");
     done();
   });
+  it("falls back to the standard transcript when the richer home feed is unavailable", async () => {
+    const h = host();
+    h.home = { ...h.home!, page: vi.fn().mockRejectedValue(new Error("home feed unavailable")) };
+    h.sessions.load = vi.fn().mockResolvedValue({ id: "saved", title: "Recovered chat", agentId: "native:jaeger", turns: [{ turnId: "t1", message: "Recovered message", parts: [], state: "complete" }] });
+    const { el, done } = await mount(<MinimalChat host={h} sessionId="saved" />);
+    await flush();
+    expect(el.textContent).toContain("Recovered message");
+    expect(el.textContent).not.toContain("Couldn't load this chat");
+    expect(h.sessions.load).toHaveBeenCalledWith("saved");
+    done();
+  });
 });
 
 describe("HistoryPanel", () => {

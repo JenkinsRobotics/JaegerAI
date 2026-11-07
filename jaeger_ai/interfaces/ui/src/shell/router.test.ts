@@ -72,3 +72,12 @@ it("navigates home without a separate workspace mode", async () => {
   navigate("chat");
   expect(location.pathname + location.search).toBe("/");
 });
+
+it("keeps the development mock source across internal navigation", async () => {
+  const { navigate } = await import("./router");
+  history.replaceState(null, "", "/?mock=1");
+  navigate("agents");
+  expect(location.pathname + location.search).toBe("/agents?mock=1");
+  navigate("chat");
+  expect(location.pathname + location.search).toBe("/?mock=1");
+});
