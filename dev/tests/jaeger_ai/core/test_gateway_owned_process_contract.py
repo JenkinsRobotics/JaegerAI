@@ -566,6 +566,7 @@ def test_owner_honors_session_model_without_changing_instance_default(gateway, s
     assert config_path.read_bytes() == config_before
 
 
+@pytest.mark.timeout(240)  # 20 turns + long output + cancel/reload measured ~127s locally.
 def test_owned_browser_multiturn_render_cancel_and_reload(tmp_path):
     """Real Chromium composer/DOM against owned servers; only model is scripted."""
     playwright = pytest.importorskip("playwright.sync_api")
@@ -587,6 +588,12 @@ def test_owned_browser_multiturn_render_cancel_and_reload(tmp_path):
             page.on("pageerror", lambda error: page_errors.append(error.stack or str(error)))
             try:
                 page.goto(stack.webui_url + "/", wait_until="domcontentloaded")
+                start = page.get_by_role("button", name="Start conversation", exact=True)
+                skip = page.get_by_role("button", name="Skip setup", exact=True)
+                playwright.expect(start.or_(skip)).to_be_visible(timeout=20000)
+                if skip.is_visible():
+                    skip.click()
+                start.click()
                 # Canonical shared UI (interfaces/ui); the archived shell's ids
                 # (#msg, #btnSend, onboarding overlay) no longer ship (12235c56).
                 composer = page.locator('textarea[aria-label="Message"]')
@@ -615,10 +622,10 @@ def test_owned_browser_multiturn_render_cancel_and_reload(tmp_path):
                 playwright.expect(stop).to_have_count(0, timeout=20000)
                 submit("Say BROWSER-AFTER-CANCEL", "BROWSER-AFTER-CANCEL")
                 page.reload(wait_until="domcontentloaded")
-                playwright.expect(page.locator("main")).to_contain_text("BROWSER-AFTER-CANCEL", timeout=20000)
+                playwright.expect(page.get_by_role("region", name="Chat", exact=True)).to_contain_text("BROWSER-AFTER-CANCEL", timeout=20000)
                 # Reload may intentionally render a bounded tail; the most
                 # recent turns must remain visible without a fake new session.
-                playwright.expect(page.locator("main")).to_contain_text("BROWSER-TURN-20")
+                playwright.expect(page.get_by_role("region", name="Chat", exact=True)).to_contain_text("BROWSER-TURN-20")
                 # These dashboards were archived out of the checkout (7c2c3be2).
                 # A clean CI tree must not require them. If they are restored,
                 # the owned WebUI still has to serve each document.
@@ -636,11 +643,7 @@ def test_owned_browser_multiturn_render_cancel_and_reload(tmp_path):
                 assert not page_errors, page_errors
                 page.screenshot(path=str(tmp_path / "browser-success.png"), full_page=True)
                 page.set_viewport_size({"width": 390, "height": 844})
-                # <=700px is the phone shell: it opens on the agent list, so
-                # open the lead conversation through its visible control.
-                lead = page.locator('button[aria-label^="Open "]').first
-                if lead.count():
-                    lead.click()
+                # The default minimal surface keeps the same chat on phones.
                 submit("Say BROWSER-NARROW-WINDOW", "BROWSER-NARROW-WINDOW")
                 bounds = composer.bounding_box()
                 assert bounds and bounds["x"] >= 0 and bounds["x"] + bounds["width"] <= 391
@@ -672,6 +675,7 @@ def test_owned_browser_clarification_survives_reload_and_answers_once(tmp_path, 
         with playwright.sync_playwright() as pw:
             browser = pw.chromium.launch(headless=True)
             context = browser.new_context(viewport={"width": 1280, "height": 900})
+            context.add_init_script("localStorage.setItem('jaeger.stable-demo.session.v1', " + json.dumps(session_id) + ")")
             context.route("**/*", lambda route: route.continue_()
                           if route.request.url.startswith(stack.webui_url + "/") else route.abort())
             cookies = CookieJar()
@@ -706,6 +710,10 @@ def test_owned_browser_clarification_survives_reload_and_answers_once(tmp_path, 
                 assert any(cookie["name"] == "hermes_session" for cookie in context.cookies())
                 assert page.locator('meta[name="jaeger-csrf"]').get_attribute("content")
                 composer = page.locator('textarea[aria-label="Message"]')
+                skip = page.get_by_role("button", name="Skip setup", exact=True)
+                playwright.expect(composer.or_(skip)).to_be_visible(timeout=20000)
+                if skip.is_visible():
+                    skip.click()
                 playwright.expect(composer).to_be_enabled(timeout=20000)
                 composer.fill("CONTRACT-CLARIFY")
                 send = page.locator('button.jg-send[aria-label="Send"]')
@@ -853,7 +861,7 @@ def _complete_instance(instance):
     """identity.yaml + manifest.json beside the worker's config.yaml, so the
     bridge treats the instance as set up (it never boots an agent here)."""
     from jaeger_ai.core.instance.schemas import (
-        Config, Identity, Manifest, dump_json, dump_yaml)
+        Config, Identity, Manifest, ModelConfig, dump_json, dump_yaml)
 
     if not (instance / "identity.yaml").exists():
         dump_yaml(instance / "identity.yaml", Identity(
@@ -873,7 +881,13 @@ def _complete_instance(instance):
     else:
         dump_yaml(config_path,
                   Config(instance_name="contract",
+                         model=ModelConfig(model_path="/dev/null"),
                          automation={"autonomy": "ask"}))
+    # The Gateway reserves NOT_STARTED before these fixture files exist.
+    # An explicitly configured contract fixture must dismiss that record too;
+    # skip does not claim commissioning ran or grant any tool permissions.
+    from jaeger_ai.core.instance.first_boot import skip
+    skip(instance)
 
 
 @pytest.fixture
