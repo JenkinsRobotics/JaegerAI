@@ -65,7 +65,7 @@ describe("chat column", () => {
   it("shows the agent's avatar instead of the dots when it knows the agent", () => {
     const html = renderToStaticMarkup(<ProgressLine phrase="Working on it" agent={{ id: "native:jaeger", name: "Jaeger" }} />);
     expect(html).toContain("jg-progress-avatar");
-    expect(html).toContain('data-shape="squircle"');
+    expect(html).toContain('data-shape="character"');
     expect(html).not.toContain("jg-progress-dots");
   });
 });
