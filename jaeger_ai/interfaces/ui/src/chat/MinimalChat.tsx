@@ -33,6 +33,7 @@ import { applyPart, type ChatHost, type ChatPart, type ChatSession, type ChatTur
 import { Markdown } from "./Markdown";
 import { SessionApprovals } from "./SessionApprovals";
 import { SessionClarifications } from "./SessionClarifications";
+import { ClarificationAnswers, clarificationAnswerKey } from "./clarificationAnswers";
 import { ApprovalCard, QuestionCard } from "./ApprovalCard";
 import { MessageMenu, Reactions, type MessageAction } from "./MessageMenu";
 import { useRevealedText } from "./reveal";
@@ -139,7 +140,7 @@ export function StepsFold({ tools, defaultOpen = false }: { tools: ToolPart[]; d
 }
 
 function Card({ part, onDecide, onAnswer, tool, decided }: { part: CardPart; onDecide: Decide; onAnswer?: (clarifyId: string, revision: number, response: string) => Promise<ClarifyAnswerResult>; tool?: { toolName: string; input: unknown }; decided?: "approve" | "deny" }) {
-  if (part.kind === "question") return <QuestionCard title={part.title} options={part.options} chosenId={part.chosenId} status={part.status}
+  if (part.kind === "question") return <QuestionCard title={part.title} options={part.options} chosenId={part.chosenId} status={part.status} answerKey={clarificationAnswerKey(part.callId, part.revision ?? 1)}
     onAnswer={onAnswer && part.status === "pending" ? (response) => onAnswer(part.callId, part.revision ?? 1, response) : undefined} />;
   return <ApprovalCard title={part.title} message={part.message} toolName={tool?.toolName} input={tool?.input} decided={decided} onDecide={(d) => onDecide(part.callId, d)} />;
 }
@@ -689,6 +690,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
   const primary = primaryAction({ running: Boolean(active), hasContent: hasText, voiceChat, dictation });
   const tint = { "--jg-agent-color": avatarColor(agent.id) } as CSSProperties;
   return (
+    <ClarificationAnswers key={sessionId}>
     <div className={`jg-chat${session && !session.turns.length ? " is-home" : ""}${dropping ? " is-dropping" : ""}`} style={tint} ref={chatRoot} onDragOver={onDragOver} onDragLeave={onDragLeave} onDrop={onDrop}>
       <div className="jg-chat__band" data-aether-window-drag-region>
         {host.sessionFiles && sessionId && <button type="button" aria-expanded={filesOpen} onClick={()=>setFilesOpen(value=>!value)}>Files</button>}
@@ -801,5 +803,6 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
         </div>
       </form>
     </div>
+    </ClarificationAnswers>
   );
 }

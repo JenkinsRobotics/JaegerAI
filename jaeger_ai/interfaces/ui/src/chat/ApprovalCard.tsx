@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useClarificationAnswers } from "./clarificationAnswers";
 /* Approval card in Grok's shape (REA catalog: "Approve terminal command" / "Approve tool call", "Allow once",
  * "Deny once (Esc)", "Approved" / "Denied"): a titled card with the EXACT command or target in a code block, then
  * Allow once / Deny once. Nothing is ever approved without an explicit click: there is no auto-approve and no
@@ -57,10 +58,14 @@ export function ApprovalCard({ title, message, toolName, input, decided, onDecid
 /** An agent's question, in the approval card's shape: question icon + title, lettered options, the chosen one
  * checked and highlighted, and an "Answered" footer once a choice exists (the gateway records the answer).
  * A pending server clarify form (GB-033) is answerable once: a choice or free text, at its revision. */
-export function QuestionCard({ title, options, chosenId, answer: savedAnswer, status, onAnswer }: {
+export function QuestionCard({ title, options, chosenId, answer: savedAnswer, status: serverStatus, onAnswer, answerKey }: {
   title: string; options: Array<{ id: string; label: string }>; chosenId?: string; answer?: string | null;
-  status?: "pending" | "answered" | "cancelled" | "expired"; onAnswer?: (response: string) => Promise<void | ClarifyAnswerResult>;
+  status?: "pending" | "answered" | "cancelled" | "expired"; onAnswer?: (response: string) => Promise<void | ClarifyAnswerResult>; answerKey?: string;
 }) {
+  const answers = useClarificationAnswers();
+  const acknowledged = answerKey ? answers?.outcomes[answerKey] : undefined;
+  const status = acknowledged?.status ?? serverStatus;
+  if (acknowledged?.status === "answered") savedAnswer = acknowledged.answer;
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -74,6 +79,7 @@ export function QuestionCard({ title, options, chosenId, answer: savedAnswer, st
     lock.current = true; setBusy(true); setError("");
     try {
       const result = await onAnswer(value);
+      if (answerKey) answers?.record(answerKey, result ?? { status: "answered", answer: value });
       if (result?.status === "cancelled" || result?.status === "expired") setResolved(result.status);
       else setSent(result?.status === "answered" && typeof result.answer === "string" ? result.answer : value);
     }
