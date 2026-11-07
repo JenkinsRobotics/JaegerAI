@@ -91,6 +91,17 @@ OLD_COMMIT=""
 BACKUP_DIR=""
 CUTOVER_STARTED=0
 SOURCE_UPDATED=0
+RUNTIME_DEPS_CHANGED=0
+
+refresh_runtime_deps() {
+  local python="${HOME}/.jaeger/venv/bin/python"
+  "${python}" "${REPO_ROOT}/scripts/install-packages.py" --python "${python}" \
+    "${REPO_ROOT}/packages/jaeger-os" \
+    "${REPO_ROOT}/packages/jaeger-agent[multimodal-duplex]" \
+    "${REPO_ROOT}/packages/jaeger-kokoro-tts" \
+    "${REPO_ROOT}/packages/jaeger-whisper-stt" \
+    "${REPO_ROOT}"
+}
 
 cleanup() {
   rm -f "${STATUS_FILE}" "${HEALTH_FILE}" "${PUBLIC_INDEX}"
@@ -107,6 +118,9 @@ rollback() {
       ./jaeger stack down --json >&2
     fi
     git reset --hard "${OLD_COMMIT}" >&2
+    if ((RUNTIME_DEPS_CHANGED == 1)); then
+      refresh_runtime_deps >&2
+    fi
     if ((CUTOVER_STARTED == 1)) && [[ -n "${BACKUP_DIR}" && -d "${BACKUP_DIR}" ]]; then
       rm -rf "${SERVED_DIST}.rollback-next"
       cp -a "${BACKUP_DIR}" "${SERVED_DIST}.rollback-next"
@@ -140,8 +154,17 @@ if [[ "$(git rev-parse origin/master)" != "${EXPECTED_COMMIT}" ]]; then
   echo "[deploy-live] Remote origin/master does not match the requested commit." >&2
   exit 1
 fi
+if ! git diff --quiet "${OLD_COMMIT}" "${EXPECTED_COMMIT}" -- \
+  requirements.txt pyproject.toml packages; then
+  RUNTIME_DEPS_CHANGED=1
+fi
 git reset --hard "${EXPECTED_COMMIT}"
 SOURCE_UPDATED=1
+
+if ((RUNTIME_DEPS_CHANGED == 1)); then
+  echo "[deploy-live] Runtime dependency manifests changed; refreshing the external environment..."
+  refresh_runtime_deps
+fi
 
 echo "[deploy-live] Reinstalling UI dependencies and building production assets..."
 cd "${UI_ROOT}"
