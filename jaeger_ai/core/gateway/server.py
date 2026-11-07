@@ -1039,7 +1039,9 @@ class JaegerGatewayApp:
             except Exception:
                 logger.exception("Legacy task import failed; original queue retained")
         self.task_owner.start()
-        self._backlog_sweep_task = asyncio.create_task(self._backlog_sweep_loop())
+        from jaeger_ai.core.runtime.background_producers import background_producers_enabled
+        if background_producers_enabled():
+            self._backlog_sweep_task = asyncio.create_task(self._backlog_sweep_loop())
         self._drain_all_queues()
         resume_workers = getattr(self.orchestration, 'resume_pending', None)
         if callable(resume_workers):
@@ -7168,7 +7170,8 @@ class JaegerGatewayApp:
         files = body.get("expect_files") or []
         if not isinstance(commands, list) or not isinstance(files, list):
             return web.json_response({"error": "commands and expect_files must be lists"}, status=400)
-        from jaeger_agent.tools.build_check import check_project
+        from importlib import import_module
+        check_project = import_module("jaeger_ai.modules.build-check.build_check").check_project
         result = await asyncio.to_thread(check_project, project["root"], [str(c) for c in commands],
                                          [str(f) for f in files], float(body.get("timeout_s") or 300))
         result["project_id"] = project["id"]

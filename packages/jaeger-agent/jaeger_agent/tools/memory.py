@@ -244,3 +244,34 @@ def _t_memory(action: str, key: str = "", value: str = "",
 
 # Specialist notes tool: registered with the memory tools it sits beside.
 from .agent_notes import agent_notes  # noqa: E402,F401
+
+
+@register_tool_from_function(name="session_search")
+def _t_session_search(query: str = "", session: str = "", limit: int = 10,
+                      since: str = "") -> dict:
+    """Search or list the agent's PAST CONVERSATIONS — its own session
+    history. Use for "what did we decide last week?", "which session was
+    the deploy one?", "show me my recent conversations", or to pick up a
+    thread from another session.
+
+    Differs from `search_memory`, which scores the CURRENT instance's
+    episodic log by meaning: this one is literal text matching ACROSS
+    sessions, and can list conversations rather than turns. Leave `query`
+    empty to browse recent turns; leave everything empty to list
+    conversations with their turn counts and time ranges.
+
+    `session` narrows to one conversation, `since` is an ISO date lower
+    bound ("2026-08-01"), `limit` caps results (max 100)."""
+    from jaeger_agent.memory import memory as mem
+
+    try:
+        if not (query or "").strip() and not session and not since:
+            sessions = mem.list_sessions(limit=limit)
+            return {"ok": True, "sessions": sessions, "count": len(sessions)}
+        hits = mem.search_sessions(
+            query=query, session_key=session or None,
+            limit=limit, since=since or None,
+        )
+        return {"ok": True, "turns": hits, "count": len(hits)}
+    except Exception as exc:  # noqa: BLE001 — a failed lookup is not a crash
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}

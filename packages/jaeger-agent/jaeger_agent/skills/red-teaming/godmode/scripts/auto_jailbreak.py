@@ -53,6 +53,11 @@ if _parseltongue_path.exists():
 if _race_path.exists():
     exec(compile(open(_race_path).read(), str(_race_path), 'exec'), _caller_globals)
 
+# Bind the dynamically loaded sibling exports explicitly, as normal imports
+# would. Missing helper files now fail here rather than halfway through a run.
+score_response = _caller_globals['score_response']
+escalate_encoding = _caller_globals['escalate_encoding']
+
 # ═══════════════════════════════════════════════════════════════════
 # Hermes config paths
 # ═══════════════════════════════════════════════════════════════════

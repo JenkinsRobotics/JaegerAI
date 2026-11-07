@@ -90,7 +90,8 @@ async def test_runtime_passes_none_for_standing_tools_and_project_kwargs():
 
 
 def test_checker(tmp_path):
-    from jaeger_agent.tools.build_check import check_project
+    from importlib import import_module
+    check_project = import_module("jaeger_ai.modules.build-check.build_check").check_project
     root = tmp_path / "app"
     (root / "test").mkdir(parents=True)
     (root / "package.json").write_text(json.dumps({"name": "x", "scripts": {"test": "node --test"}}))

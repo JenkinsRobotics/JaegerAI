@@ -103,9 +103,10 @@ def test_product_never_uses_packages_default_in_repo_workspace():
     )
 
 
-def test_operator_state_root_defaults_to_user_home(monkeypatch):
+def test_operator_state_root_defaults_to_user_home(monkeypatch, tmp_path):
     """Verify that operator_state_root resolves to ~/.jaeger when no test sandbox is set."""
     from jaeger_ai.core.instance.instance import operator_state_root
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
 
     monkeypatch.delenv("JAEGER_HOME", raising=False)
     monkeypatch.delenv("JAEGER_STATE_DIR", raising=False)

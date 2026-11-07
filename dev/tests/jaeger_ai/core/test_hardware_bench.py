@@ -9,7 +9,7 @@ from jaeger_ai.core.instance import hardware_bench as hw
 def test_hardware_bench_start_and_status():
     started = hw.start()
     assert started["status"] in {"running", "done"}
-    assert started.get("brand") == "Jenkins Robotics Jaeger AI OS1"
+    assert started.get("brand") == "Jaeger AI OS1"
     job_id = started["id"]
     deadline = time.time() + 30
     snap = started

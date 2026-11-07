@@ -50,6 +50,7 @@ def test_gate_flag_off(monkeypatch):
 
 def test_strips_api_keys_and_timeout(tmp_path, monkeypatch):
     monkeypatch.setattr(w, "WORKSPACE", tmp_path)
+    monkeypatch.setattr(w, "_token", lambda: "synthetic-test-ares-token")
     monkeypatch.setenv("OPENAI_API_KEY", "x")
     seen = {}
 

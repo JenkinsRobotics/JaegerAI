@@ -922,12 +922,12 @@ def _job_thread(tid: str, force: set, with_style: bool, stop: threading.Event) -
             try:
                 build_style_guide(tid, force="style_guide" in force)
             except Exception as exc:  # noqa: BLE001
-                _update(tid, lambda j: j["style_guide"].update(status="error", error=str(exc)[:500]))
+                _update(tid, lambda j, error=str(exc)[:500]: j["style_guide"].update(status="error", error=error))
         try:
             n = write_kb(tid)
             _update(tid, lambda j: j["kb"].update(status="done", path=str(kb_root()), notes=n, at=time.time()))
         except Exception as exc:  # noqa: BLE001
-            _update(tid, lambda j: j["kb"].update(status="error", error=str(exc)[:500]))
+            _update(tid, lambda j, error=str(exc)[:500]: j["kb"].update(status="error", error=error))
         rm = _deps.get("rm")
         if rm:
             with contextlib.suppress(Exception):
@@ -936,7 +936,7 @@ def _job_thread(tid: str, force: set, with_style: bool, stop: threading.Event) -
         errs = sum(1 for v in j["videos"] if any(s.get("status") == "error" for s in v["steps"].values()))
         _update(tid, lambda j: j.update(state="done" if not errs and j["style_guide"].get("status") == "done" else "done_with_errors"))
     except Exception as exc:  # noqa: BLE001
-        _update(tid, lambda j: j.update(state="error", error=str(exc)[:500]))
+        _update(tid, lambda j, error=str(exc)[:500]: j.update(state="error", error=error))
     finally:
         with _glock:
             _running.pop(tid, None)

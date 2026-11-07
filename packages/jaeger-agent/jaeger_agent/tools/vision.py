@@ -134,7 +134,8 @@ def _ensure_native_vision() -> tuple[Any, Any]:
     and the configured llama.cpp projector; loading a second Transformers
     VLM here was the source of the CPU/MPS failure and split Jaeger's brain.
     """
-    from jaeger_ai.main import _pipeline
+    from jaeger_agent.core.host import service
+    _pipeline = service("pipeline")._pipeline
 
     client = _pipeline.get("client")
     llm = getattr(client, "llm", None)

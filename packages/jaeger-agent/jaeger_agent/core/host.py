@@ -1,41 +1,30 @@
-"""Core host seams — none left. Kept as the guard that keeps it that way.
+"""Explicit lazy services supplied by a host application.
 
-The 0.11 move brought the agent surface across from JaegerAI, and about
-fourteen call sites still reached back for something the module did not
-own: a memory backend, a credential store, a venv manager, a lazy-dep
-gate, a refusal detector. Each was bound through :func:`host_required`
-so the package still imported with no host installed and only the
-individual tool failed.
-
-That list is now empty, and it emptied in two different ways:
-
-  MOVED IN — they were agent infrastructure sitting in an application.
-    jaeger_agent/memory/             conversation + fact memory (1,796 lines)
-    jaeger_agent/core/credentials.py the secret store
-    jaeger_agent/skill_improvement/  skill notes and revisions
-    jaeger_agent/util/venv.py        per-skill virtualenvs
-    jaeger_agent/util/lazy_deps.py   the optional-dependency gate
-    prompts/persona_lane._is_refusal three lines and a word list
-
-  MOVED OUT — they were product features sitting in the agent.
-    avatar tools     → jaeger_ai/nodes/animation/tools.py, beside the
-                       node whose face they drive
-    generate_*_fal   → stayed with JaegerAI's fal.ai plugin; a cloud
-                       image generator is not something a robot's brain
-                       needs to own
-
-The distinction is the whole test, and it is not "is this useful" —
-everything is useful. It is whether the thing needs an application to
-mean anything. Memory does not; an avatar does.
-
-:func:`host_required` survives because the next extraction will want it,
-and because a lazy binding is the right answer when one genuinely
-appears: a missing host should cost one tool, not the package.
+The reusable agent owns its loop, memory and tools. Product-only integrations
+(authority, runtime events, configured backends and optional host features) are
+factories injected by the application, never imports back into it. Missing
+services raise ImportError at the feature boundary; the executor preserves its
+existing fail-closed behavior when a product authority service is unavailable.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+_services: dict[str, Any] = {}
+
+
+def bind_services(services: dict[str, Any]) -> None:
+    """Install lazy product-owned service factories; never import the host here."""
+    _services.update(services)
+
+
+def service(name: str) -> Any:
+    """Resolve an explicitly injected host service, or fail at the feature edge."""
+    factory = _services.get(name)
+    if factory is None:
+        raise ImportError(f"Host service {name!r} is not bound")
+    return factory()
 
 
 def host_required(module: str, symbol: str = "") -> Any:
@@ -60,4 +49,4 @@ def host_required(module: str, symbol: str = "") -> Any:
     return _unavailable
 
 
-__all__ = ["host_required"]
+__all__ = ["bind_services", "service", "host_required"]

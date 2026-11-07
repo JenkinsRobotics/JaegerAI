@@ -167,7 +167,8 @@ def _identity_name(ctx: FragmentContext) -> str:
 def _entity_self_state(_ctx: FragmentContext) -> str:
     """Truthful live self-state from the canonical EntityRuntime."""
     try:
-        from jaeger_ai.core.entity.runtime import EntityRuntime
+        from jaeger_agent.core.host import service
+        EntityRuntime = service("entity_runtime").EntityRuntime
         runtime = EntityRuntime.get_singleton()
         if runtime and runtime.current_state:
             return runtime.current_state.to_prompt_context_block()
@@ -179,7 +180,8 @@ def _entity_self_state(_ctx: FragmentContext) -> str:
 def _retrieved_reflections(ctx: FragmentContext) -> str:
     """Relevant failure warnings & hypotheses from ReflexionStore."""
     try:
-        from jaeger_ai.core.entity.runtime import EntityRuntime
+        from jaeger_agent.core.host import service
+        EntityRuntime = service("entity_runtime").EntityRuntime
         runtime = EntityRuntime.get_singleton()
         if runtime and hasattr(runtime, "reflexion_store") and runtime.reflexion_store:
             query = ctx.goal or ctx.context or ""

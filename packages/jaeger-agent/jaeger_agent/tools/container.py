@@ -33,7 +33,8 @@ def container(
     here rather than at module scope: a robot that installed jaeger-agent
     without JaegerAI still imports the package, and loses only this tool.
     """
-    from jaeger_ai.core.runtime import container_service as cs
+    from jaeger_agent.core.host import service
+    cs = service("containers")
 
     act = (action or "").strip().lower()
     if act in ("list", "ls", "ps"):

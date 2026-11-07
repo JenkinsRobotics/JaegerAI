@@ -209,7 +209,8 @@ def call_agent(
     native_parent = host is not None and getattr(host, "_pipeline", {}).get("client") is not None
 
     try:
-        from jaeger_ai.core.agent_registry import get_default_registry
+        from jaeger_agent.core.host import service
+        get_default_registry = service("agent_registry").get_default_registry
 
         record = get_default_registry().get_agent(target)
         if record is None:

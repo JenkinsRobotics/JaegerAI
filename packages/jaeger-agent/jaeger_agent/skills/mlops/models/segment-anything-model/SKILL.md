@@ -14,6 +14,9 @@ metadata:
     category: mlops
 ---
 
+Earlier imported material is preserved in
+[the legacy reference](../segment-anything/references/imported-entry.md).
+
 # SEGMENT ANYTHING
 
 ## SOP

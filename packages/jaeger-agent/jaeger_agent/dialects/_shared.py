@@ -262,7 +262,8 @@ def parse_drift_payload(raw: str) -> dict[str, Any] | None:
 
     # Tool call repair pass (code fences, single quotes, Python constants, truncated brackets)
     try:
-        from jaeger_ai.core.runtime.tool_repair import repair_json_string
+        from jaeger_agent.core.host import service
+        repair_json_string = service("tool_repair").repair_json_string
         repaired = repair_json_string(text)
         if repaired and repaired != text:
             parsed = json.loads(repaired, strict=False)

@@ -174,7 +174,9 @@ class CliBackendAdapter(ProviderAdapter):
     def _load_spec(self) -> Any:
         if self._spec is not None:
             return self._spec
-        from jaeger_ai.features.cli_backends.discovery import get_spec, probe_backend
+        from jaeger_agent.core.host import service
+        discovery = service("cli_backends")
+        get_spec, probe_backend = discovery.get_spec, discovery.probe_backend
 
         spec = get_spec(self.backend_id)
         if not self._executable:

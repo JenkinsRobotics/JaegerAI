@@ -1157,7 +1157,9 @@ def _register_builtins(client: Any) -> None:
             "boot_readiness": _pipeline.get("readiness"),
         }
 
-    @register_tool_from_function(side_effect="read")
+    # Product sessions belong to Gateway; replace the standalone episodic
+    # search default explicitly rather than registering a second tool owner.
+    @register_tool_from_function(side_effect="read", replace=True)
     @requires_tier(PermissionTier.READ_ONLY, skill="host",
                    operation="session_search",
                    summary="search, browse, or read conversation sessions")

@@ -56,6 +56,8 @@ class ChannelConfig:
         return f"""\
 You write episodes for the YouTube channel "{self.channel_name}", {self.channel_description}.
 
+Project: {self.project_name}. {self.project_description}
+
 On-screen cast:
 - HOST: {self.host_description}.
 - ROBOT: {self.robot_description}.

@@ -16,6 +16,8 @@ class _AllGranted:
 
 
 def _provider(tmp_path, monkeypatch, autonomy="scoped"):
+    from jaeger_ai.core.runtime import autonomy as autonomy_state
+    monkeypatch.setattr(autonomy_state, "_state", {"mode": "scoped", "explicit": False})
     app = JaegerGatewayApp(store=GatewaySessionStore(tmp_path / "g.sqlite3"))
     app.store.ensure_session("s")
     cfg = tmp_path / "config.yaml"
