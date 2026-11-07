@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ClarificationSnapshot } from "../api/source";
 import type { ChatHost } from "./host";
 import { QuestionCard } from "./ApprovalCard";
+import { clarificationAnswerKey } from "./clarificationAnswers";
 import type { ClarifyAnswerResult } from "./host";
 
 type Host = Pick<ChatHost, "clarifications" | "answerClarify">;
@@ -56,6 +57,7 @@ export function SessionClarifications({ sessionId, host, excludeIds = [] }: {
     {error && <p role="alert">Couldn't load or answer question: {error}</p>}
     {rows.filter((form) => !excludeIds.includes(form.clarify_id)).map((form) => <fieldset key={form.clarify_id} disabled={busy === form.clarify_id} style={{ border: 0, padding: 0, margin: 0 }}>
       <QuestionCard title={form.question} options={form.choices.map((label, index) => ({ id: `c${index}`, label }))}
+        answerKey={clarificationAnswerKey(form.clarify_id, form.revision)}
         answer={form.answer} status={form.status}
         onAnswer={form.status === "pending" && host.answerClarify ? (response) => answer(form, response) : undefined} />
     </fieldset>)}
