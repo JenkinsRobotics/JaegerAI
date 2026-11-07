@@ -58,14 +58,14 @@ describe("chat column", () => {
     expect(html).toContain('role="status"');
     expect(html).toContain('<span class="jg-progress-text">Searching the web…</span>');
     expect(html).not.toContain("jg-shimmer");
-    expect(html.match(/<i><\/i>/g)).toHaveLength(3);
-    expect(html).toContain('class="jg-progress-dots" aria-hidden="true"');
+    expect(html).not.toContain("<i>");
+    expect(html).not.toContain("jg-progress-dots");
   });
 
-  it("shows the agent's avatar instead of the dots when it knows the agent", () => {
-    const html = renderToStaticMarkup(<ProgressLine phrase="Working on it" agent={{ id: "native:jaeger", name: "Jaeger" }} />);
-    expect(html).toContain("jg-progress-avatar");
-    expect(html).toContain('data-shape="character"');
+  it("renders only the text in an accessible progress bubble", () => {
+    const html = renderToStaticMarkup(<ProgressLine phrase="Working on it" />);
+    expect(html).not.toContain("jg-progress-avatar");
+    expect(html).toContain('aria-live="polite"');
     expect(html).not.toContain("jg-progress-dots");
   });
 });

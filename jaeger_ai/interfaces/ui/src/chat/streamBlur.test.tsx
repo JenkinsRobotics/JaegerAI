@@ -24,9 +24,10 @@ describe("grok stream preset", () => {
     expect(css).toMatch(/@keyframes jg-stream-enter \{ from \{[^}]*filter: blur\(var\(--jg-enter-blur/);
     expect(css).toMatch(/prefers-reduced-motion: reduce\) \{ \.jg-md--enter-fade > \*[^}]*animation: none/);
   });
-  it("indicator 'avatar' renders our avatar progress row", async () => {
+  it("progress remains text-only even with an avatar stream preset", async () => {
     expect(STREAM_STYLES.grok.indicator.kind).toBe("avatar");
-    await act(async () => { root.render(<ProgressLine phrase="Thinking" agent={{ id: "native:jaeger", name: "Jaeger" }} />); });
-    expect(el.querySelector(".jg-progress-line .jg-progress-avatar")).toBeTruthy();
+    await act(async () => { root.render(<ProgressLine phrase="Thinking" />); });
+    expect(el.querySelector(".jg-progress-line .jg-progress-avatar")).toBeNull();
+    expect(el.querySelector(".jg-progress-line")?.textContent).toBe("Thinking");
   });
 });

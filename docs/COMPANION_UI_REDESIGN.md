@@ -28,3 +28,19 @@ control, Escape, or the backdrop.
 
 Image capabilities remain those of configured providers; the UI does not bypass
 provider policy or silently select a paid provider.
+
+## Avatar and mode-switch delivery (2026-11-07)
+
+- The approved sculpted Jaeger character now has six silent, pre-rendered H.264
+  loops and a 512px portrait in public/assets/avatar/jaeger. These are offline
+  2.5D motion composites (including smile motion), not newly generated 3D rigs.
+- Only the conversation header animates and shows live activity text. Lists,
+  cards and the separate avatar panel stay static. Reduced motion and failed
+  playback use the portrait. Existing custom portraits remain respected.
+- Chat lifecycle and structured tool/handoff events choose the activity state;
+  historical completed turns do not trigger celebrations.
+- The sidebar title has a Jaeger/Team picker. Team opens the existing Agents
+  workspace; Jaeger returns to the mounted conversation. This is the entry point,
+  not yet a full digital-office visualization.
+- Avatar restyling/new-character generation with bundle preview and confirmation
+  remains pending. The shipped bundle is the approved default, not that editor.

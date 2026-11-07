@@ -1,3 +1,6 @@
+import {CompanionMode} from "./CompanionMode";
+import {ClipAvatar} from "../avatar/ClipAvatar";
+import {STATUS_TEXT,type ClipState} from "../avatar/avatar";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { JaegerSource } from "../api/source";
 import type { Agent, SessionRow } from "../api/types";
@@ -12,8 +15,6 @@ import "../unified/design.css";
 import { applyAppearance, storedAppearance, type Appearance } from "../settings/SettingsDialog";
 import { TaskArtifacts } from "../library/TaskArtifacts";
 import { WorkspaceBrowser } from "../unified/WorkspaceBrowser";
-import { AgentFace } from "../unified/AgentFace";
-import { AgentAvatar } from "../agents/AgentAvatar";
 import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, Bot, Workflow, Search, Image, Compass, Cpu, MoreHorizontal, Pencil, Pin, Share, Copy, Clock, ChevronLeft, ChevronRight, Trash2 } from "../components/Icons";
 import "./stableDemo.css";
 import { SettingsWorkspace } from "./SettingsWorkspace";
@@ -71,6 +72,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const [agents, setAgents] = useState<Agent[]>([]);
   const [session, setSession] = useState(storedSession);
   const [ready, setReady] = useState(false);
+  const [avatarState, setAvatarState] = useState<ClipState>("idle");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const unavailableSessions = useRef(new Set<string>());
@@ -281,7 +283,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
         <button className="jg-stable-demo__rail-settings" type="button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={20} /><span>Settings</span></button>
       </div>
       <section className="jg-stable-demo__context" aria-label={`${routeTitle[route.page]} sidebar`}>
-        <div className="jg-stable-demo__brand"><strong>{activeSection === "chat" ? "Jaeger" : routeTitle[route.page]}</strong>{activeSection === "chat" && <button type="button" className="jg-stable-demo__manage" aria-pressed={selectionMode} onClick={() => selectionMode ? leaveSelectionMode() : setSelectionMode(true)}>{selectionMode ? "Done" : "Manage"}</button>}</div>
+        <div className="jg-stable-demo__brand"><CompanionMode team={route.page === "agents"} onChange={team => navigate(pathOf(team ? "agents" : "chat"))} />{activeSection === "chat" && <button type="button" className="jg-stable-demo__manage" aria-pressed={selectionMode} onClick={() => selectionMode ? leaveSelectionMode() : setSelectionMode(true)}>{selectionMode ? "Done" : "Manage"}</button>}</div>
         {activeSection === "chat" && <>
           <button className="jg-stable-demo__new" type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "New conversation"}</button>
           {selectionMode && <div className="jg-stable-demo__selection-tools">
@@ -328,8 +330,8 @@ export function StableDemo({ source }: { source: JaegerSource }) {
           <button className="jg-stable-demo__top-button" type="button" aria-label="New conversation" title="New conversation" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} /></button>
         </div>
         <div className="jg-stable-demo__profile" title={workspacePage ? routeTitle[route.page] : currentTitle}>
-          <span className="jg-stable-demo__profile-avatar">{agent ? <AgentFace agent={agent} size={76} /> : <AgentAvatar id="native:jaeger" name="Jaeger" size={76} />}</span>
-          <span className="jg-stable-demo__profile-copy"><strong>Jaeger</strong><small>{workspacePage ? routeTitle[route.page] : currentTitle}</small></span>
+          <span className="jg-stable-demo__profile-avatar"><ClipAvatar portraitOverride={agent?.avatar_url} state={!ready || error ? "connecting" : avatarState} /></span>
+          <span className="jg-stable-demo__profile-copy"><strong>Jaeger<span className="jg-clip-status" role="status">{STATUS_TEXT[!ready || error ? "connecting" : avatarState]}</span></strong><small>{workspacePage ? routeTitle[route.page] : currentTitle}</small></span>
         </div>
         <div className="jg-stable-demo__tools" ref={toolsRef}><ApprovalTray source={source} onOpenChat={() => navigate("/")} />
           <button className="jg-stable-demo__top-button" type="button" aria-label="Conversation actions" data-tooltip="Conversation actions" aria-expanded={headerPopup === "menu"} onClick={() => togglePopup("menu")}><MoreHorizontal size={19} /></button>
@@ -374,7 +376,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       </header>
       {error && <p className="jg-stable-demo__connection-alert" role="alert"><span>{error}</span><button type="button" onClick={() => location.reload()}>Reconnect</button></p>}
       <section className="jg-stable-demo__body" hidden={workspacePage} aria-label="Chat">
-        {session && ready ? <ChatPane host={host} sessionId={session} agents={agent ? [agent] : agents} onSessionMissing={recoverMissingSession} /> : !ready || !historyReady || historyError || session ?
+        {session && ready ? <ChatPane onAvatarState={setAvatarState} host={host} sessionId={session} agents={agent ? [agent] : agents} onSessionMissing={recoverMissingSession} /> : !ready || !historyReady || historyError || session ?
           <div className="jg-stable-demo__empty" role="status"><h1>{error || historyError ? "Waiting to reconnect" : "Restoring your conversation"}</h1><p>{error || historyError ? "Jaeger is temporarily unavailable. Your saved conversation will return when the connection is restored." : "Loading your saved conversation from Jaeger."}</p></div> :
           <div className="jg-stable-demo__empty"><span className="jg-stable-demo__eyebrow">YOUR AI COMPANION</span><h1>What would you like to work on?</h1><p>Talk with Jaeger, follow a task, or explore your files.<br />Your conversation stays here when you return.</p>
           <button type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "Start conversation"}</button></div>}
