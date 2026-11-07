@@ -17,8 +17,8 @@ describe("PhoneDrawer", () => {
     await act(async () => el.querySelector<HTMLButtonElement>('[aria-label="New chat"]')!.click());
     await act(async () => el.querySelector<HTMLButtonElement>('.jg-pdrawer__search')!.click());
     expect(onChat).toHaveBeenCalled(); expect(onSearch).toHaveBeenCalled();
-    await act(async () => [...el.querySelectorAll<HTMLButtonElement>(".jg-pdrawer__item")].find((b) => b.textContent?.endsWith("Tasks"))!.click());
-    expect(location.pathname).toBe("/work/tasks");
+    await act(async () => [...el.querySelectorAll<HTMLButtonElement>(".jg-pdrawer__item")].find((b) => b.textContent?.endsWith("Work"))!.click());
+    expect(location.pathname).toBe("/work");
     await act(async () => root.render(<PhoneDrawer open={false} onClose={onClose} onSearch={onSearch} onSettings={onSettings} onChat={onChat} recents={null}><p>chat</p></PhoneDrawer>));
     expect(el.querySelector('[aria-label="Close menu"]')).toBeNull();
     act(() => root.unmount());

@@ -11,16 +11,16 @@ import { LEGACY_SETTINGS } from "../settings/registry";
 
 export type PageId = "home" | "chat" | "agents" | "work" | "research" | "studio" | "models" | "machine" | "settings";
 
-/** The nine top-level tabs (2026-10-30 consolidation; 17 → 9). */
-export const PAGES: readonly PageId[] = ["home", "chat", "agents", "work", "research", "studio", "models", "machine", "settings"];
+/** Rev 3: six primary destinations; Settings is a separate gear. Retired IDs stay typed for legacy callers only. */
+export const PRIMARY_PAGES = ["chat", "agents", "work", "research", "studio", "machine"] as const;
+export const PAGES: readonly PageId[] = [...PRIMARY_PAGES, "settings"];
 
 /** Sub-tabs of merged pages, in display order; the first is the default. */
 export const SUBTABS: Partial<Record<PageId, readonly { id: string; title: string }[]>> = {
-  home: [{ id: "overview", title: "Overview" }, { id: "widgets", title: "My widgets" }],
-  agents: [{ id: "roster", title: "Agents" }, { id: "characters", title: "Characters" }, { id: "hermes", title: "Hermes" }, { id: "openclaw", title: "OpenClaw" }],
-  work: [{ id: "pipeline", title: "Pipeline" }, { id: "backlog", title: "Backlog" }, { id: "tasks", title: "Tasks" }, { id: "production", title: "Production" }, { id: "calendar", title: "Calendar" }, { id: "workspace", title: "Workspace" }, { id: "checkpoints", title: "Checkpoints" }],
-  research: [{ id: "runs", title: "Research" }, { id: "youtube", title: "YouTube" }, { id: "documents", title: "Documents" }, { id: "knowledge", title: "Memory & Skills" }, { id: "sharepoint", title: "SharePoint" }],
-  models: [{ id: "library", title: "Models" }, { id: "compare", title: "Compare" }, { id: "usage", title: "Usage" }],
+  agents: [{ id: "roster", title: "Agents" }, { id: "characters", title: "Characters" }, { id: "knowledge", title: "Memory & Skills" }],
+  // Separate record sources and actions remain intact until the Milestone 4 board projection.
+  work: [{ id: "pipeline", title: "Pipeline" }, { id: "backlog", title: "Backlog" }, { id: "tasks", title: "Tasks" }, { id: "production", title: "Production" }, { id: "calendar", title: "Calendar" }, { id: "youtube", title: "YouTube" }],
+  research: [{ id: "runs", title: "Research" }, { id: "documents", title: "Documents" }, { id: "workspace", title: "Workspace" }],
 };
 
 /** Every retired top-level path → its new home (path after the page segment is kept). */
@@ -29,11 +29,11 @@ export const LEGACY_PATHS: Record<string, string> = {
   tasks: "/work/tasks",
   calendar: "/work/calendar",
   documents: "/research/documents",
-  knowledge: "/research/knowledge",
-  sharepoint: "/research/sharepoint",
-  compare: "/models/compare",
+  knowledge: "/agents/knowledge",
+  sharepoint: "/settings/integrations/sharepoint",
+  compare: "/settings/models/compare",
   integrations: "/settings/integrations",
-  workspace: "/home/widgets",
+  workspace: "/settings/widgets",
 };
 
 export interface Route {
@@ -58,6 +58,17 @@ export function pathOf(page: PageId, sub?: string): string {
 export function canonicalPath(pathname: string, search = ""): string | null {
   const parts = pathname.replace(/^\/+|\/+$/g, "").split("/").filter(Boolean);
   if (parts[0] === "settings" && parts[1] && LEGACY_SETTINGS[parts[1]]) return `/settings/${LEGACY_SETTINGS[parts[1]]}${search}`;
+  const moved: Record<string, string> = {
+    "/home/widgets": "/settings/widgets", "/home/overview": "/work", "/home": "/work",
+    "/models/library": "/settings/models/library", "/models/compare": "/settings/models/compare", "/models/usage": "/settings/models/usage", "/models": "/settings/models/library",
+    "/agents/hermes": "/settings/integrations/hermes", "/agents/openclaw": "/settings/integrations/openclaw",
+    "/work/workspace": "/research/workspace", "/work/checkpoints": "/settings/checkpoints",
+    "/research/youtube": "/work/youtube", "/research/knowledge": "/agents/knowledge", "/research/sharepoint": "/settings/integrations/sharepoint",
+  };
+  // Longest prefix first: keep deep-link tails and queries without redirecting current paths.
+  const path = `/${parts.join("/")}`;
+  const from = Object.keys(moved).sort((a, b) => b.length - a.length).find((key) => path === key || path.startsWith(`${key}/`));
+  if (from) return `${moved[from]}${path.slice(from.length)}${search}`;
   const target = parts[0] ? LEGACY_PATHS[parts[0]] : undefined;
   if (!target) return null;
   const tail = parts.slice(1).join("/");
@@ -86,7 +97,7 @@ export function legacyRedirect(pathname: string, search: string): string | null 
   const ui = params.get("ui");
   if (ui === null) return null;
   params.delete("ui");
-  const target = ui === "apple" ? "/agents/characters" : ui === "windows" ? "/home" : "/chat";
+  const target = ui === "apple" ? "/agents/characters" : ui === "windows" ? "/work" : "/chat";
   const keep = params.toString();
   const base = pathname === "/" || pathname === "" ? target : pathname;
   return keep ? `${base}?${keep}` : base;

@@ -7,7 +7,7 @@
 import type React from 'react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { WINDOW_DEFINITIONS, type WindowId } from '../windows/WindowManager'
-import { Check, FileText, Globe, Menu, MessageSquare, Search, Sparkles } from '../components/Icons'
+import { Check, Users, Globe, Menu, MessageSquare, Search, Sparkles } from '../components/Icons'
 import { SUBTABS, navigate } from './router'
 import { usePreset, type Preset } from './layoutPresets'
 import { JaegerMark } from '../brand/JaegerMark'
@@ -45,7 +45,7 @@ function NavItem({ id, active, collapsed, onPick }: { id: WindowId; active: bool
   const Icon = def.icon
   return (
     <button type="button" className={`jg-nav__item${active ? ' is-active' : ''}`} aria-current={active ? 'page' : undefined}
-      title={collapsed ? def.title : def.description} onClick={() => onPick(id)}>
+      aria-label={id === 'settings' ? 'Settings' : undefined} title={collapsed ? def.title : def.description} onClick={() => onPick(id)}>
       <Icon size={18} /><span className="jg-nav__label">{def.title}</span>
     </button>
   )
@@ -53,17 +53,18 @@ function NavItem({ id, active, collapsed, onPick }: { id: WindowId; active: bool
 
 const PHONE_BAR: readonly { id: string; label: string; page: WindowId; to: string; Icon: typeof MessageSquare }[] = [
   { id: 'chat', label: 'Chat', page: 'chat', to: '/', Icon: MessageSquare },
-  { id: 'feed', label: 'Feed', page: 'home', to: '/home', Icon: Globe },
+  { id: 'feed', label: 'Feed', page: 'chat', to: '/?feed=1', Icon: Globe },
   { id: 'ideas', label: 'Ideas', page: 'research', to: '/research', Icon: Sparkles },
-  { id: 'tasks', label: 'Tasks', page: 'work', to: '/work/tasks', Icon: Check },
-  { id: 'artifacts', label: 'Artifacts', page: 'settings', to: '/settings/library', Icon: FileText },
+  { id: 'tasks', label: 'Work', page: 'work', to: '/work/tasks', Icon: Check },
+  { id: 'agents', label: 'Agents', page: 'agents', to: '/agents', Icon: Users },
 ]
 
 function PhoneTabs({ active }: Pick<ChromeProps, 'active'>) {
   return (
     <nav className="phone-tabs" aria-label="Pages">
       {PHONE_BAR.map((t) => {
-        const on = t.page === active
+        const feed = new URLSearchParams(location.search).has('feed')
+        const on = t.page === active && (t.id === 'feed' ? feed : t.id === 'chat' ? !feed : true)
         return (
           <button key={t.id} type="button" className={`phone-tabs__tab${on ? ' is-active' : ''}`} aria-current={on ? 'page' : undefined} onClick={() => navigate(t.to)}>
             <t.Icon size={22} /><span>{t.label}</span>

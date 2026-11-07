@@ -148,11 +148,12 @@ export function PhoneChat({ agentId, agentName, avatarUrl, onBack, onInfo, child
 
 /** Drawer nav: only pages that exist in Jaeger today. */
 export const DRAWER_NAV: readonly { id: string; label: string; icon: IconName; to: string }[] = [
-  { id: "chat", label: "Main chat", icon: "comment", to: "/" },
-  { id: "feed", label: "Feed", icon: "comment-discussion", to: "/home" },
-  { id: "ideas", label: "Ideas", icon: "color-mode", to: "/research" },
-  { id: "tasks", label: "Tasks", icon: "checklist", to: "/work/tasks" },
-  { id: "artifacts", label: "Artifacts", icon: "file", to: "/settings/library" },
+  { id: "chat", label: "Chat", icon: "comment", to: "/" },
+  { id: "agents", label: "Agents", icon: "account", to: "/agents" },
+  { id: "tasks", label: "Work", icon: "checklist", to: "/work" },
+  { id: "research", label: "Research", icon: "search", to: "/research" },
+  { id: "studio", label: "Studio", icon: "file", to: "/studio" },
+  { id: "machine", label: "Machine", icon: "terminal", to: "/machine" },
 ];
 
 /** Push-aside drawer (ChatGPT / Gemini / Muse iOS pattern): the chat slides right and stays visible as a rounded

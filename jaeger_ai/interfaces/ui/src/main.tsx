@@ -16,6 +16,7 @@ import "./shell/motion.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { createSource } from "./api";
+import { StableDemo } from "./demo/StableDemo";
 import { AppWindow } from "./windows/AppWindow";
 import { FirstRunGate, firstRunApi } from "./first-run/FirstRun";
 import { GatewayClient } from "./api/gateway";
@@ -40,6 +41,6 @@ const source = await createSource();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <FirstRunGate api={source instanceof GatewayClient ? firstRunApi(source) : null}><AppWindow source={source} /></FirstRunGate>
+    <FirstRunGate api={source instanceof GatewayClient ? firstRunApi(source) : null}>{new URLSearchParams(location.search).get("full") === "1" ? <AppWindow source={source} /> : <StableDemo source={source} />}</FirstRunGate>
   </StrictMode>,
 );

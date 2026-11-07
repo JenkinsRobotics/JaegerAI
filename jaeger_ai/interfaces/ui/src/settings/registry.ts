@@ -1,8 +1,8 @@
 /** Settings search registry (TAB-01 §3): every searchable row → panel + anchor id. */
-export type PanelId = "appearance" | "general" | "voice" | "notifications" | "agents" | "memory" | "integrations" | "models" | "automations" | "machine" | "privacy" | "limits" | "about";
+export type PanelId = "checkpoints" | "widgets" | "appearance" | "general" | "voice" | "notifications" | "agents" | "memory" | "integrations" | "models" | "automations" | "machine" | "privacy" | "limits" | "about";
 export interface Entry { id: string; panel: PanelId; anchor: string; label: string; keywords: string[] }
 export const PANEL_LABEL: Record<PanelId, string> = {
-  appearance: "Appearance", general: "General", voice: "Voice & audio", notifications: "Notifications", agents: "Agents", memory: "Memory & skills",
+  checkpoints: "Checkpoints", widgets: "My widgets", appearance: "Appearance", general: "General", voice: "Voice & audio", notifications: "Notifications", agents: "Agents", memory: "Memory & skills",
   integrations: "Integrations & MCP", models: "Models & Providers", automations: "Automations", machine: "Machine & devices", privacy: "Privacy & data", limits: "Spending limits", about: "About & diagnostics",
 };
 export const GROUPS: { id: string; label: string; panels: PanelId[] }[] = [
@@ -11,7 +11,7 @@ export const GROUPS: { id: string; label: string; panels: PanelId[] }[] = [
   { id: "connections", label: "Connections", panels: ["integrations", "models", "automations"] },
   { id: "machine", label: "Machine", panels: ["machine"] },
   { id: "privacy", label: "Privacy", panels: ["privacy", "limits"] },
-  { id: "system", label: "System", panels: ["about"] },
+  { id: "system", label: "System", panels: ["checkpoints", "widgets", "about"] },
 ];
 /** Old /settings/<id> → new panel (+ optional segment). */
 export const LEGACY_SETTINGS: Record<string, string> = {
@@ -20,6 +20,14 @@ export const LEGACY_SETTINGS: Record<string, string> = {
 };
 const e = (panel: PanelId, anchor: string, label: string, ...keywords: string[]): Entry => ({ id: `${panel}.${anchor}`, panel, anchor, label, keywords });
 export const REGISTRY: Entry[] = [
+  e("checkpoints", "checkpoints", "Checkpoints", "workspace", "versions", "restore"),
+  e("widgets", "widgets", "My widgets", "personalisation", "layout"),
+  e("models", "library", "Model library", "models", "inventory"),
+  e("models", "compare", "Compare models", "compare"),
+  e("models", "usage", "Model usage", "usage"),
+  e("integrations", "hermes", "Hermes", "engine"),
+  e("integrations", "openclaw", "OpenClaw", "engine"),
+  e("integrations", "sharepoint", "SharePoint", "documents"),
   e("appearance", "theme", "Theme (Light, Dark, System)", "theme", "dark", "light", "mode", "appearance"),
   e("appearance", "feel", "Feel", "feel", "style", "colors", "accent", "jaeger blue", "skin"),
   e("appearance", "icon", "App icon", "icon", "logo", "favicon", "dock", "custom icon", "upload"),
