@@ -15,7 +15,7 @@ export type ChatPart =
   | { kind: "markdownContent"; text: string }
   | { kind: "thinking"; text: string; durationMs?: number }
   | { kind: "toolInvocation"; callId: string; toolName: string; input: unknown; state: ToolInvocationState; output?: unknown }
-  | { kind: "confirmation"; callId: string; title: string; message: string }
+  | { kind: "confirmation"; callId: string; title: string; message: string; decision?: "approve" | "deny" }
   | { kind: "progress"; message: string }
   | { kind: "error"; message: string }
   | { kind: "warning"; message: string }

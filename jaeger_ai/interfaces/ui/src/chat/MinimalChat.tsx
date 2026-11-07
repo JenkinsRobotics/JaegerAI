@@ -142,7 +142,7 @@ export function StepsFold({ tools, defaultOpen = false }: { tools: ToolPart[]; d
 function Card({ part, onDecide, onAnswer, tool, decided }: { part: CardPart; onDecide: Decide; onAnswer?: (clarifyId: string, revision: number, response: string) => Promise<ClarifyAnswerResult>; tool?: { toolName: string; input: unknown }; decided?: "approve" | "deny" }) {
   if (part.kind === "question") return <QuestionCard title={part.title} options={part.options} chosenId={part.chosenId} status={part.status} answerKey={clarificationAnswerKey(part.callId, part.revision ?? 1)}
     onAnswer={onAnswer && part.status === "pending" ? (response) => onAnswer(part.callId, part.revision ?? 1, response) : undefined} />;
-  return <ApprovalCard title={part.title} message={part.message} toolName={tool?.toolName} input={tool?.input} decided={decided} onDecide={(d) => onDecide(part.callId, d)} />;
+  return <ApprovalCard title={part.title} message={part.message} toolName={tool?.toolName} input={tool?.input} decided={decided ?? part.decision} onDecide={(d) => onDecide(part.callId, d)} />;
 }
 
 /** Split a response into bubbles, cards, centered markers and one steps fold.
