@@ -107,7 +107,7 @@ export function activityPhrase(turn: Pick<ChatTurn, "turnId" | "parts">, agentNa
     if (p.kind === "markdownContent" && p.text) return inOpenFence(p.text) ? CODING : workingPhrase(turn.turnId);
     if (p.kind === "toolInvocation" || p.kind === "handoff") return workingPhrase(turn.turnId);
   }
-  return thinkingPhrase(turn.turnId);
+  return "Waiting for agent progress…";
 }
 
 const DONE: Record<ToolCategory, (n: number) => string> = {

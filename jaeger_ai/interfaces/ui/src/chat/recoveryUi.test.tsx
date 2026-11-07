@@ -38,3 +38,21 @@ it("clears the recovery check once observing saved work, streams into one bubble
     expect(send).not.toHaveBeenCalled();
   } finally { act(() => root.unmount()); el.remove(); }
 });
+
+it("clears a failed lookup notice after a successful check without resending work", async () => {
+  const send = vi.fn();
+  const source = {
+    kind: "live", send, agents: async () => [],
+    session: async () => ({ session_id: "s", messages: [] }),
+    sessionControl: vi.fn().mockRejectedValueOnce(new Error("Gateway timed out")).mockResolvedValue({}),
+  } as unknown as JaegerSource;
+  const el = document.createElement("div"); document.body.append(el); const root = createRoot(el);
+  try {
+    await act(async () => root.render(<MinimalChat host={new WebHost(source)} sessionId="s" />));
+    await vi.waitFor(() => expect(el.textContent).toContain("Request lookup unavailable"));
+    await act(async () => [...el.querySelectorAll("button")].find(b => b.textContent === "Check again")!.click());
+    await vi.waitFor(() => expect(el.textContent).not.toContain("Request lookup unavailable"));
+    expect(el.textContent).not.toContain("Previous request outcome unknown");
+    expect(send).not.toHaveBeenCalled();
+  } finally { act(() => root.unmount()); el.remove(); }
+});

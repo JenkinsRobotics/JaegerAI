@@ -59,7 +59,7 @@ describe("activity", () => {
     expect(thinkingPhrase("abc")).toBe(thinkingPhrase("abc"));
     expect(new Set(["a", "b", "c", "d", "e", "f"].map(thinkingPhrase)).size).toBeGreaterThan(1);
     expect(new Set(["a", "b", "c", "d", "e", "f", "g", "h"].map(workingPhrase)).size).toBeGreaterThan(1);
-    expect(activityPhrase({ turnId: "abc", parts: [] })).toBe(thinkingPhrase("abc"));
+    expect(activityPhrase({ turnId: "abc", parts: [{ kind: "thinking" }] })).toBe(thinkingPhrase("abc"));
   });
 
   it("summarises steps in first-seen order", () => {
@@ -74,4 +74,8 @@ describe("activity", () => {
 it("does not count rejected/failed edits as files edited", () => {
  const item: ToolPart={kind:"toolInvocation",callId:"rejected",toolName:"write_file",input:{path:"fixture"},state:"rejected"};
  expect(stepsSummary([item,{...item,callId:"failed",state:"failed"}])).toBe("1 failed · 1 rejected");
+});
+
+it("does not claim the agent is thinking before any progress arrives", () => {
+  expect(activityPhrase({turnId: "admitted", parts: []})).toBe("Waiting for agent progress…");
 });
