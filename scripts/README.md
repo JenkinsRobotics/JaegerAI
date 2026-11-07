@@ -13,6 +13,7 @@ run, and verify the shared agent stack. Developer-only tooling is indexed in
 | `run-host-capability-server.py` | Host capability service compatibility launcher |
 | `run-hermes-native-api.py` | Start the Hermes Agent native API from the host checkout |
 | `hermes-native-api-service.py` | Host launchd entry point for the Hermes Agent API |
+| `deploy-live-mac-studio.sh` | Deploy the exact pushed `master` commit to the Mac Studio and verify the public UI |
 
 ## Setup and migration
 
@@ -27,6 +28,22 @@ run, and verify the shared agent stack. Developer-only tooling is indexed in
 Setup scripts can change deployment state. Read the corresponding
 [workspace migration notes](../integrations/agent_workspaces/README.md) before
 using them. Ordinary startup does not require rerunning setup.
+
+## Live Mac Studio release
+
+The operator deployment currently uses the default branch directly. After a
+change is tested, commit and push it to `master`, then run:
+
+```bash
+./scripts/deploy-live-mac-studio.sh
+```
+
+The command refuses dirty, unpushed, or non-`master` source. It fetches the
+same commit on the Studio, installs frontend dependencies, builds the canonical
+UI, backs up the served bundle, restarts the managed Gateway/agent/Web UI/MCP
+stack, and verifies the running commit plus source/served/public HTML hashes.
+It rolls the source and UI back if post-cutover verification fails. A pushed
+commit is not considered delivered until this command succeeds.
 
 ## Verification
 

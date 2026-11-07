@@ -104,6 +104,15 @@ bash jaeger_ai/interfaces/macos-shell/Scripts/build-shell.sh # external dev bund
 Isolate a scratch instance with `JAEGER_STATE_DIR=/tmp/gw-iso` — it isolates
 the session store, so a test run cannot touch the operator's live database.
 
+### Current operator release path
+
+Until the operator changes this policy, ordinary product changes land directly
+on `master`; do not create a feature branch for them. A requested live change
+is incomplete after commit or push. After focused verification, push the exact
+commit to `origin/master` and run `./scripts/deploy-live-mac-studio.sh`. Report
+completion only after that command confirms the Mac Studio services run the
+same commit and the source, installed, and public UI hashes match.
+
 
 ---
 
