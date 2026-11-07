@@ -94,9 +94,9 @@ jobs:
         working-directory: jaeger_ai/interfaces/ui
         run: npm ci
 
-      - name: Install Playwright Chromium
+      - name: Install Playwright Chromium and WebKit
         working-directory: jaeger_ai/interfaces/ui
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
 
       - uses: actions/setup-python@v5
         with:
@@ -110,7 +110,7 @@ jobs:
 
       - name: Run E2E tests
         working-directory: jaeger_ai/interfaces/ui
-        run: npx playwright test --project=chromium --reporter=line
+        run: npx playwright test --project=chromium --project=webkit --project="Mobile Safari" --reporter=line
 
       - name: Upload Playwright report
         if: always()
