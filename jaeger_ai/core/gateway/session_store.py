@@ -21,6 +21,7 @@ from typing import Any, Callable, Iterator
 
 from jaeger_ai.core.gateway import agent_activity as _agent_activity
 from jaeger_ai.core.gateway import handoff_outputs as _handoff_outputs
+from jaeger_ai.core.sqlite_connection import ClosingConnection
 
 
 SCHEMA_VERSION = 16
@@ -296,7 +297,7 @@ class GatewaySessionStore:
                     pass
 
     def _get_conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.path), timeout=10.0)
+        conn = sqlite3.connect(str(self.path), timeout=10.0, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode = WAL;")
         conn.execute("PRAGMA busy_timeout = 5000;")

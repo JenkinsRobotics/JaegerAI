@@ -13,6 +13,7 @@ import threading
 import time
 import uuid
 from pathlib import Path
+from jaeger_ai.core.sqlite_connection import ClosingConnection
 
 STATUSES = ("open", "in_progress", "needs_ok", "done")
 PRIORITIES = ("P0", "P1", "P2")
@@ -90,7 +91,7 @@ class BacklogStore:
                 c.execute("ALTER TABLE backlog_tasks ADD COLUMN handoff_result TEXT")
 
     def _conn(self):
-        conn = sqlite3.connect(self.path, timeout=10)
+        conn = sqlite3.connect(self.path, timeout=10, factory=ClosingConnection)
         conn.row_factory = sqlite3.Row
         return conn
 
