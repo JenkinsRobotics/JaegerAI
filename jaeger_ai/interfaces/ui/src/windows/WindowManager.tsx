@@ -34,9 +34,9 @@ export interface WindowInstance {
 export const WINDOW_DEFINITIONS: Record<WindowId, WindowDefinition> = {
   home: { id: 'home', title: 'Home', icon: Home, description: 'Overview of agents, approvals and tasks, plus your widgets', closable: false, phoneTab: true },
   chat: { id: 'chat', title: 'Chat', icon: MessageSquare, description: 'Chat with Jaeger and your specialists', closable: false, phoneTab: true },
-  agents: { id: 'agents', title: 'Agents', icon: Users, description: 'Your agents, and new agents from characters', closable: true, phoneTab: true },
+  agents: { id: 'agents', title: 'Agents', icon: Users, description: 'Agents, characters, memory and skills', closable: true, phoneTab: true },
   work: { id: 'work', title: 'Work', icon: Zap, description: 'Task pipeline, tasks, production deliverables and calendar', closable: true, phoneTab: true },
-  research: { id: 'research', title: 'Research', icon: Compass, description: 'Research runs, documents, memory & skills and SharePoint', closable: true },
+  research: { id: 'research', title: 'Research', icon: Compass, description: 'Research runs, documents and workspace files', closable: true },
   studio: { id: 'studio', title: 'Studio', icon: Image, description: 'Generate images, asset library and board', closable: true },
   models: { id: 'models', title: 'Models', icon: Database, description: 'Model inventory and side-by-side compare', closable: true },
   machine: { id: 'machine', title: 'Machine', icon: Cpu, description: 'Local computer control, screen and permissions', closable: true },
@@ -44,14 +44,14 @@ export const WINDOW_DEFINITIONS: Record<WindowId, WindowDefinition> = {
 }
 
 /** Pages retired by the 9-tab consolidation → the tab that holds them now (for saved layouts). */
-const LEGACY_IDS: Record<string, WindowId> = { characters: 'agents', tasks: 'work', calendar: 'work', documents: 'research', knowledge: 'research', sharepoint: 'research', compare: 'models', integrations: 'settings', workspace: 'home' }
+const LEGACY_IDS: Record<string, WindowId> = { characters: 'agents', tasks: 'work', calendar: 'work', documents: 'research', knowledge: 'agents', sharepoint: 'settings', compare: 'settings', integrations: 'settings', workspace: 'settings', home: 'chat', models: 'settings' }
 const upgrade = (ids: unknown[] | undefined): WindowId[] => (ids ?? []).map((v) => (typeof v === 'string' && LEGACY_IDS[v]) || v).filter(isPage)
 
 export const LAYOUT_KEY = 'jaeger.shell.layout.v1'
 
 export interface StoredLayout { open: WindowId[]; minimized: WindowId[]; order: WindowId[] }
 
-const DEFAULT_LAYOUT: StoredLayout = { open: ['home', 'chat'], minimized: [], order: [...PAGES] }
+const DEFAULT_LAYOUT: StoredLayout = { open: ['chat'], minimized: [], order: [...PAGES] }
 
 function isPage(v: unknown): v is WindowId { return typeof v === 'string' && (PAGES as readonly string[]).includes(v) }
 
@@ -62,9 +62,9 @@ export function loadLayout(storage: Pick<Storage, 'getItem'> | undefined = globa
     const parsed = JSON.parse(raw) as Partial<StoredLayout>
     const open = upgrade(parsed.open)
     const order = upgrade(parsed.order)
-    for (const id of ['home', 'chat'] as WindowId[]) if (!open.includes(id)) open.unshift(id)
+    for (const id of ['chat'] as WindowId[]) if (!open.includes(id)) open.unshift(id)
     for (const id of PAGES) if (!order.includes(id)) order.push(id)
-    return { open: [...new Set(open)], minimized: [...new Set(upgrade(parsed.minimized))], order: [...new Set(order)] }
+    return { open: [...new Set(open)], minimized: [...new Set(upgrade(parsed.minimized))], order: [...PAGES] }
   } catch { return DEFAULT_LAYOUT }
 }
 
@@ -100,7 +100,7 @@ export function useWindowManager(activeWindowId: WindowId) {
     windows,
     activeWindowId,
     visibleWindows: windows.filter((w) => !w.minimized),
-    dockWindows: layout.order,
+    dockWindows: [...PAGES],
     closeWindow,
     minimizeWindow,
     moveWindow,

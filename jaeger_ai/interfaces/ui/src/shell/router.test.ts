@@ -2,12 +2,12 @@ import { describe, expect, it } from "vitest";
 import { LEGACY_PATHS, PAGES, SUBTABS, canonicalPath, legacyRedirect, parseRoute, pathOf } from "./router";
 
 describe("router", () => {
-  it("has the nine consolidated tabs", () => {
-    expect(PAGES).toEqual(["home", "chat", "agents", "work", "research", "studio", "models", "machine", "settings"]);
+  it("has six tabs and a separate settings destination", () => {
+    expect(PAGES).toEqual(["chat", "agents", "work", "research", "studio", "machine", "settings"]);
   });
   it("opens / to Chat, keeps /home, and falls back to Chat", () => {
     expect(parseRoute("/").page).toBe("chat");
-    expect(parseRoute("/home").page).toBe("home");
+    expect(parseRoute("/home").page).toBe("work");
     expect(parseRoute("/chat").page).toBe("chat");
     expect(parseRoute("/settings/voice/").rest).toBe("voice");
     expect(parseRoute("/nope").page).toBe("chat");
@@ -17,21 +17,21 @@ describe("router", () => {
     expect(parseRoute("/work")).toMatchObject({ page: "work", sub: "pipeline", rest: "" });
     expect(parseRoute("/work/tasks/gallery")).toMatchObject({ page: "work", sub: "tasks", rest: "gallery" });
     expect(parseRoute("/research/knowledge").sub).toBe("knowledge");
-    expect(parseRoute("/home").sub).toBe("overview");
-    expect(parseRoute("/home/widgets").sub).toBe("widgets");
+    expect(parseRoute("/home").sub).toBe("pipeline");
+    expect(parseRoute("/home/widgets")).toMatchObject({ page: "settings", rest: "widgets" });
   });
   it("maps every page and sub-tab to a path", () => {
     expect(pathOf("chat")).toBe("/");
     expect(pathOf("home")).toBe("/home");
     expect(pathOf("home", "widgets")).toBe("/home/widgets");
     expect(pathOf("agents", "characters")).toBe("/agents/characters");
-    expect(pathOf("models", "library")).toBe("/models");
+    expect(canonicalPath(pathOf("models", "library"))).toBe("/settings/models/library");
     for (const p of PAGES) for (const t of SUBTABS[p] ?? []) expect(parseRoute(pathOf(p, t.id))).toMatchObject({ page: p, sub: t.id });
   });
   it.each([
     ["/characters", "agents", "characters"], ["/tasks", "work", "tasks"], ["/calendar", "work", "calendar"],
-    ["/documents", "research", "documents"], ["/knowledge", "research", "knowledge"], ["/sharepoint", "research", "sharepoint"],
-    ["/compare", "models", "compare"], ["/workspace", "home", "widgets"],
+    ["/documents", "research", "documents"], ["/knowledge", "agents", "knowledge"],
+
   ])("redirects retired %s to %s › %s", (old, page, sub) => {
     expect(parseRoute(old)).toMatchObject({ page, sub });
   });
@@ -44,8 +44,24 @@ describe("router", () => {
   });
   it("rewrites the old ?ui= links to the matching page", () => {
     expect(legacyRedirect("/", "?ui=apple")).toBe("/agents/characters");
-    expect(legacyRedirect("/", "?ui=windows")).toBe("/home");
+    expect(legacyRedirect("/", "?ui=windows")).toBe("/work");
     expect(legacyRedirect("/", "?ui=default&home=fallback")).toBe("/chat?home=fallback");
     expect(legacyRedirect("/", "")).toBeNull();
+  });
+});
+
+describe("Rev 3 complete destination migration", () => {
+  it.each([
+    ["/home", "/work"], ["/home/overview", "/work"], ["/home/widgets", "/settings/widgets"],
+    ["/agents/hermes", "/settings/integrations/hermes"], ["/agents/openclaw", "/settings/integrations/openclaw"],
+    ["/work/workspace", "/research/workspace"], ["/work/checkpoints", "/settings/checkpoints"],
+    ["/research/youtube", "/work/youtube"], ["/research/knowledge", "/agents/knowledge"], ["/research/sharepoint", "/settings/integrations/sharepoint"],
+    ["/models", "/settings/models/library"], ["/models/library", "/settings/models/library"], ["/models/compare", "/settings/models/compare"], ["/models/usage", "/settings/models/usage"],
+    ["/knowledge", "/agents/knowledge"], ["/sharepoint", "/settings/integrations/sharepoint"], ["/compare", "/settings/models/compare"], ["/workspace", "/settings/widgets"],
+  ])("moves %s to %s without losing queries or tails", (old, target) => {
+    expect(canonicalPath(old, "?task=real-id")).toBe(`${target}?task=real-id`);
+    expect(canonicalPath(`${old}/detail`, "?x=1")).toBe(`${target}/detail?x=1`);
+    expect(canonicalPath(target)).toBeNull();
+    expect(parseRoute(old)).toMatchObject(parseRoute(target));
   });
 });

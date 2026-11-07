@@ -46,19 +46,19 @@ it("opens the page the URL names, redirects retired paths to sub-tabs and follow
   expect(subtab()).toBe("Agents");
   await flush(() => navigate("/compare"));
   await settle();
-  expect(location.pathname).toBe("/models/compare");
-  expect(front()).toBe("Models");
-  expect(subtab()).toBe("Compare");
+  expect(location.pathname).toBe("/settings/models/compare");
+  expect(front()).toBe("Settings");
+  expect(document.querySelector('[aria-label="Compare"]')).not.toBeNull();
   await flush(() => { history.back(); });
   await flush(() => dispatchEvent(new PopStateEvent("popstate")));
-  expect(["Agents", "Models"]).toContain(front());
+  expect(["Agents", "Settings"]).toContain(front());
 });
 
 it("switches sub-tabs through the URL and keeps the sub-tab bar consistent", async () => {
   await mount("/work");
   expect(subtab()).toBe("Pipeline");
   const tabs = [...document.querySelectorAll(".app-window__page--active .jg-subtabs [role=tab]")].map((t) => t.textContent);
-  expect(tabs).toEqual(["Pipeline", "Backlog", "Tasks", "Production", "Calendar", "Workspace", "Checkpoints"]);
+  expect(tabs).toEqual(["Pipeline", "Backlog", "Tasks", "Production", "Calendar", "YouTube"]);
   await flush(() => (document.querySelectorAll(".app-window__page--active .jg-subtabs [role=tab]")[4] as HTMLButtonElement).click());
   await settle();
   expect(location.pathname).toBe("/work/calendar");
@@ -78,11 +78,11 @@ it("shows Settings as a grouped page and deep-links a tab", async () => {
   expect(document.querySelector(".jg-sheet__title")).toBeNull();
 });
 
-it("lists the nine tabs in the sidebar (Settings pinned at the bottom) and persists which pages are open", async () => {
+it("lists the six tabs in the sidebar (Settings pinned at the bottom) and persists which pages are open", async () => {
   await mount("/tasks");
   expect(location.pathname).toBe("/work/tasks");
   const nav = [...document.querySelectorAll(".jg-sidebar .jg-nav__label")].map((l) => l.textContent);
-  expect(nav).toEqual(["Home", "Chat", "Agents", "Work", "Research", "Studio", "Models", "Machine", "Settings"]);
+  expect(nav).toEqual(["Chat", "Agents", "Work", "Research", "Studio", "Machine", "Settings"]);
   expect(document.querySelector(".jg-nav--foot .jg-nav__label")?.textContent).toBe("Settings");
   expect(document.querySelector(".window-dock")).toBeNull();
   expect(document.querySelector(".jg-crumb")?.textContent).toContain("Work");
@@ -105,9 +105,9 @@ it("the app bar follows the layout preset and its ⌘K field opens the palette",
   await flush(() => applyPreset("glass"));
 });
 
-it("Home shows the approvals section and the ⌘K palette offers pages and characters", async () => {
+it("Work retains the former Home approvals section and the ⌘K palette offers pages and characters", async () => {
   await mount("/home");
-  expect(front()).toBe("Home");
+  expect(front()).toBe("Work");
   expect(document.querySelector('[aria-label="Approvals"]')).not.toBeNull();
   expect(document.querySelector('[aria-label="Control Center"]')).not.toBeNull();
   await flush(() => dispatchEvent(new KeyboardEvent("keydown", { key: "k", metaKey: true })));
@@ -123,4 +123,30 @@ it("creates an agent from a character with its role and instructions", () => {
   const body = characterAgentBody(jarvis, "op-1");
   expect(body).toMatchObject({ operation_id: "op-1", display_name: jarvis.name, metadata: { character_id: "jarvis", specialty: jarvis.role } });
   expect(vi.isMockFunction(characterAgentBody)).toBe(false);
+});
+
+it("relocates knowledge, workspace and Settings destinations without duplicate top-level pages", async () => {
+  await mount("/research/knowledge");
+  expect(location.pathname).toBe("/agents/knowledge");
+  expect(subtab()).toBe("Memory & Skills");
+  for (const [old, current, label] of [
+    ["/work/workspace", "/research/workspace", "Research"],
+    ["/work/checkpoints", "/settings/checkpoints", "Settings"],
+    ["/home/widgets", "/settings/widgets", "Settings"],
+    ["/agents/hermes", "/settings/integrations/hermes", "Settings"],
+    ["/research/sharepoint", "/settings/integrations/sharepoint", "Settings"],
+  ]) {
+    await flush(() => navigate(old)); await settle();
+    expect(location.pathname).toBe(current); expect(front()).toBe(label);
+    expect(document.querySelector('.app-window__page--active')).not.toBeNull();
+  }
+});
+it("uses six ordered keyboard destinations and preserves the mounted chat", async () => {
+  await mount("/");
+  const chat = document.querySelector('.app-window__page--chat');
+  for (const [index, page] of ["chat", "agents", "work", "research", "studio", "machine"].entries()) {
+    await flush(() => dispatchEvent(new KeyboardEvent("keydown", { key: String(index + 1), metaKey: true }))); await settle();
+    expect(document.querySelector('.app-window')?.getAttribute('data-page')).toBe(page);
+    expect(document.querySelector('.app-window__page--chat')).toBe(chat);
+  }
 });

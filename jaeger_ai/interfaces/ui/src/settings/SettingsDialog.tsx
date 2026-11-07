@@ -42,7 +42,7 @@ export function applyAppearance(mode: Appearance) {
 
 export type Tab = PanelId;
 const ICON: Record<PanelId, IconName> = {
-  appearance: "symbol-color", general: "settings-gear", voice: "mic", notifications: "comment", agents: "account", memory: "history",
+  checkpoints: "history", widgets: "settings-gear", appearance: "symbol-color", general: "settings-gear", voice: "mic", notifications: "comment", agents: "account", memory: "history",
   integrations: "link", models: "server", automations: "rocket", machine: "terminal", privacy: "eye-closed", limits: "pass", about: "info",
 };
 /** Kept for callers that list the groups (Home index etc.). */
@@ -67,9 +67,9 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 }
 const Anchor = ({ id, children }: { id: string; children: ReactNode }) => <div id={`set-${id}`} className="jg-set-anchor">{children}</div>;
 
-export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, resetPanel, open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel, computerPanel, financePanel, integrationsPanel }: {
+export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, resetPanel, open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel, computerPanel, financePanel, integrationsPanel, modelsContent, integrationsExtras, checkpointsPanel, widgetsPanel }: {
   /** Render as a page (the /settings route) instead of a modal sheet. */ inline?: boolean; tab?: Tab; segment?: string; onTab?: (tab: Tab | "") => void; resetPanel?: ReactNode;
-  integrationsPanel?: ReactNode;
+  integrationsPanel?: ReactNode; modelsContent?: ReactNode; integrationsExtras?: ReactNode; checkpointsPanel?: ReactNode; widgetsPanel?: ReactNode;
   financePanel?:ReactNode;computerPanel?:ReactNode;clipboardPanel?:ReactNode;updatesPanel?:ReactNode;requestedTab?:{tab:Tab;sequence:number}; open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode; toolsPanel?: ReactNode; diagnosticsPanel?: ReactNode; workflowsPanel?: ReactNode; channelsPanel?: ReactNode; notificationsPanel?: ReactNode; memoryPanel?:ReactNode;
 }) {
   const [ownTab, setOwnTab] = useState<Tab>("appearance");
@@ -96,7 +96,7 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
   const { cls, short } = useSizeClass(root);
   const compact = cls === "compact";
   useExclusivePopup(open && !inline, onClose);
-  const available = (id: Tab) => (id !== "limits" || !!financePanel) && (id !== "memory" || !!(memoryPanel || skillsPanel || libraryPanel)) && (id !== "notifications" || !!notificationsPanel)
+  const available = (id: Tab) => (id !== "checkpoints" || !!checkpointsPanel) && (id !== "widgets" || !!widgetsPanel) && (id !== "limits" || !!financePanel) && (id !== "memory" || !!(memoryPanel || skillsPanel || libraryPanel)) && (id !== "notifications" || !!notificationsPanel)
     && (id !== "automations" || !!(automationsPanel || workflowsPanel || channelsPanel)) && (id !== "integrations" || !!(integrationsPanel || toolsPanel));
   const results = useMemo(() => searchSettings(q, available), [q, financePanel, memoryPanel, skillsPanel, libraryPanel, notificationsPanel, automationsPanel, workflowsPanel, channelsPanel, integrationsPanel]); // eslint-disable-line react-hooks/exhaustive-deps
   // ⌘F or / focuses search; Esc clears it.
@@ -117,7 +117,7 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
     return () => window.clearTimeout(t);
   }, [flash, tab]);
   if (!open && !inline) return null;
-  const openResult = (panel: Tab, anchor: string) => { setQ(""); setTab(panel); if (panel === "integrations" || panel === "automations") setAutoSeg(anchor); setFlash(anchor); };
+  const openResult = (panel: Tab, anchor: string) => { setQ(""); setTab(panel); if (panel === "integrations" || panel === "automations" || panel === "models") setAutoSeg(anchor); setFlash(anchor); };
   const navKey = (e: KeyboardEvent<HTMLElement>) => {
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
     const items = [...(navRef.current?.querySelectorAll<HTMLButtonElement>(".jg-sheet__tab") ?? [])];
@@ -181,8 +181,10 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
             </Section>
           </>}
           {tab === "agents" && <>{header("Agents", "Your agents, primary agent and pins.")}<Anchor id="agents">{agentsPanel ?? <p>Agent management is not available from this host.</p>}</Anchor></>}
-          {tab === "models" && <>{header("Models & Providers", "Sign-in and status for the apps and local models Jaeger runs. No API keys.")}<Anchor id="cli"><ProvidersPanel /></Anchor><span id="set-ollama" /></>}
-          {tab === "integrations" && (integ ?? toolsPanel)}
+          {tab === "models" && <>{header("Models & Providers", "Sign-in and status for the apps and local models Jaeger runs. No API keys.")}<Anchor id="cli"><ProvidersPanel /></Anchor><span id="set-ollama" />{modelsContent}</>}
+          {tab === "integrations" && <>{integ ?? toolsPanel}{integrationsExtras}</>}
+          {tab === "checkpoints" && checkpointsPanel}
+          {tab === "widgets" && widgetsPanel}
           {tab === "memory" && <>{header("Memory & skills")}
             {memoryPanel && <Section title="Memory" anchor="memory">{memoryPanel}</Section>}
             {skillsPanel && <Section title="Skills" anchor="skills">{skillsPanel}</Section>}

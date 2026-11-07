@@ -2,7 +2,7 @@
  * AppWindow — the one Jaeger shell (unified UI, Jenkins Robotics 2026-10-30).
  *
  * AppChrome (sidebar + app bar, per layout preset) is the frame; every feature is a page at a real route
- * Nine tabs: Home, Chat, Agents, Work, Research, Studio, Models, Machine, Settings. Merged tabs
+ * Six tabs: Chat, Agents, Work, Research, Studio, Machine; Settings is a bottom gear. Merged tabs
  * carry sub-tabs at /<tab>/<sub> (e.g. /work/calendar); retired paths (/tasks, /compare …) redirect.
  * Open pages stay mounted (chat streams, drafts and approvals keep running while you look
  * elsewhere); the URL decides which one is in front. ⌘K opens the one command palette,
@@ -19,7 +19,7 @@ import { visible } from '../agents/agentsLogic'
 import { JumpTo, type JumpAction } from '../agents/JumpTo'
 import { CHARACTERS } from '../components/CharacterLibrary'
 import { usePhone } from '../phone/usePhone'
-import { navigate, useRoute, PAGES, SUBTABS, pathOf, type PageId } from '../shell/router'
+import { navigate, useRoute, PAGES, PRIMARY_PAGES, SUBTABS, pathOf, type PageId } from '../shell/router'
 import { parseSettingsRest, type Tab as SettingsTab } from '../settings/SettingsDialog'
 import { HomeDashboard } from '../unified/HomeDashboard'
 import { ApprovalTray } from '../unified/ApprovalTray'
@@ -73,6 +73,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen((v) => !v) }
+      else if ((e.metaKey || e.ctrlKey) && /^[1-6]$/.test(e.key)) { e.preventDefault(); go(pathOf(PRIMARY_PAGES[Number(e.key) - 1])) }
       else if ((e.metaKey || e.ctrlKey) && e.key === ',' && active !== 'chat') { e.preventDefault(); go('/settings') }
     }
     const onPalette = () => setPaletteOpen(true)
@@ -94,6 +95,9 @@ export function AppWindow({ source }: { source: JaegerSource }) {
     { id: 'settings:integrations', label: 'Integrations', hint: 'Settings → Integrations', run: () => go('/settings/integrations') },
     { id: 'settings:agents', label: 'Manage agents', hint: 'Settings → Agents', run: () => go('/settings/agents') },
     { id: 'settings:general', label: 'Appearance and text size', hint: 'Settings → General', run: () => go('/settings/general') },
+    ...['library', 'compare', 'usage'].map((section) => ({ id: `models:${section}`, label: `Go to ${section === 'library' ? 'Model library' : section === 'compare' ? 'Compare' : 'Usage'}`, hint: 'Settings → Models', run: () => go(`/settings/models/${section}`) })),
+    ...['hermes', 'openclaw', 'sharepoint'].map((section) => ({ id: `integration:${section}`, label: `Go to ${section === 'hermes' ? 'Hermes' : section === 'openclaw' ? 'OpenClaw' : 'SharePoint'}`, hint: 'Settings → Integrations', run: () => go(`/settings/integrations/${section}`) })),
+    ...['checkpoints', 'widgets'].map((section) => ({ id: `settings:${section}`, label: `Go to ${section === 'widgets' ? 'My widgets' : 'Checkpoints'}`, hint: 'Settings', run: () => go(`/settings/${section}`) })),
     ...CHARACTERS.map((c) => ({ id: `character:${c.id}`, label: `New agent: ${c.name}`, hint: c.role, run: () => go(`/agents/characters?character=${encodeURIComponent(c.id)}`) })),
   ], [go])
 
@@ -112,8 +116,7 @@ export function AppWindow({ source }: { source: JaegerSource }) {
 
   const render = (id: WindowId) => {
     switch (id) {
-      case 'home': return tabbed('home', (t) => t === 'widgets' ? <WorkspacePage source={source} /> : <HomeDashboard source={source} store={store} onNavigate={go} />)
-      case 'agents': return tabbed('agents', (t) => t === 'hermes' || t === 'openclaw' ? <EnginePanel engine={t} />
+      case 'agents': return tabbed('agents', (t) => t === 'knowledge' ? <KnowledgePage source={source} agents={store.agents} />
         : t === 'characters'
         ? <CharactersPage characterId={active === 'agents' && route.sub === 'characters' ? route.params.get('character') : null} source={source} refresh={store.refresh} onNavigate={go} />
         : active === 'agents' && route.rest === 'activity' ? <AgentsActivityPage source={source} onNavigate={go} />
@@ -129,21 +132,17 @@ export function AppWindow({ source }: { source: JaegerSource }) {
           case 'production': return <ProductionPage source={source} params={active === 'work' && route.sub === 'production' ? route.params : new URLSearchParams()} onNavigate={go} />
           case 'calendar': return <CalendarPage source={source} onNavigate={go} />
           case 'backlog': return <BacklogPage params={paramsOf('work')} />
-          case 'checkpoints': return <CheckpointsView source={source} params={paramsOf('work')} />
-          case 'workspace': return <WorkspaceBrowser source={source} params={paramsOf('work')} />
-          default: return <PipelinePage source={source} params={active === 'work' && route.sub === 'pipeline' ? route.params : new URLSearchParams()} onNavigate={go} />
+          case 'youtube': return <YouTubePage params={paramsOf('work')} onNavigate={go} />
+          default: return <><HomeDashboard source={source} store={store} onNavigate={go} /><PipelinePage source={source} params={active === 'work' && route.sub === 'pipeline' ? route.params : new URLSearchParams()} onNavigate={go} /></>
         }
       }, banner('work', 'production', 'production'))
       case 'research': return tabbed('research', (t) => {
         switch (t) {
           case 'documents': return <DocumentsPage params={active === 'research' && route.sub === 'documents' ? route.params : new URLSearchParams()} />
-          case 'youtube': return <YouTubePage params={active === 'research' && route.sub === 'youtube' ? route.params : new URLSearchParams()} onNavigate={go} />
-          case 'knowledge': return <KnowledgePage source={source} agents={store.agents} />
-          case 'sharepoint': return <SharePointPanel source={source} />
+          case 'workspace': return <WorkspaceBrowser source={source} params={paramsOf('research')} />
           default: return <ResearchPage source={source} agents={store.agents} onNavigate={go} />
         }
       }, (() => { const t = taskFor('research'); return t ? <Suspense fallback={null}><TaskBanner source={source} taskId={t} stage="research" onNavigate={go} clearTo={pathOf('research', route.sub)} /></Suspense> : undefined })())
-      case 'models': return tabbed('models', (t) => t === 'compare' ? <ComparePage /> : t === 'usage' ? <UsagePage /> : <ModelsPage />)
       case 'machine': return <MachineControlPanel source={source} />
       case 'studio': return <div className="jg-tabbed">{banner('studio', 'studio')}<div className="jg-tabbed__body"><StudioPage source={source} agents={store.agents} onNavigate={go} /></div></div>
       default: return null
@@ -164,7 +163,20 @@ export function AppWindow({ source }: { source: JaegerSource }) {
         {chatOpen && (
           <div className={`app-window__page app-window__page--chat${active === 'chat' || active === 'settings' ? ' app-window__page--active' : ''}`}
             hidden={active !== 'chat' && active !== 'settings'} aria-label={active === 'settings' ? 'Settings' : 'Chat'}>
-            <Suspense fallback={<PageFallback />}><App source={source} view={appView} settingsTab={settingsTab} settingsSegment={settingsSegment} onSettingsTab={(t) => navigate(t ? `/settings/${t}` : '/settings', { replace: !!t && !!settingsTab })}
+            <Suspense fallback={<PageFallback />}><App source={source} settingsDestinations={{
+              models: <MovedSections active={settingsTab === 'models' ? settingsSegment : undefined} sections={[
+                { id: 'library', title: 'Library', body: <ModelsPage /> },
+                { id: 'compare', title: 'Compare', body: <ComparePage /> },
+                { id: 'usage', title: 'Usage', body: <UsagePage /> },
+              ]} />,
+              integrations: <MovedSections active={settingsTab === 'integrations' ? settingsSegment : undefined} sections={[
+                { id: 'hermes', title: 'Hermes', body: <EnginePanel engine="hermes" /> },
+                { id: 'openclaw', title: 'OpenClaw', body: <EnginePanel engine="openclaw" /> },
+                { id: 'sharepoint', title: 'SharePoint', body: <SharePointPanel source={source} /> },
+              ]} />,
+              checkpoints: <CheckpointsView source={source} params={paramsOf('settings')} />,
+              widgets: <WorkspacePage source={source} />,
+            }} view={appView} settingsTab={settingsTab} settingsSegment={settingsSegment} onSettingsTab={(t) => navigate(t ? `/settings/${t}` : '/settings', { replace: !!t && !!settingsTab })}
               onNavigate={go} requestedAgent={active === 'chat' ? route.params.get('agent') : null} onOpenPalette={() => setPaletteOpen(true)} /></Suspense>
           </div>
         )}
@@ -184,3 +196,14 @@ export function AppWindow({ source }: { source: JaegerSource }) {
 }
 
 export default AppWindow
+
+/** IA relocation only: existing panels remain real, with sections instead of model sub-tabs. */
+function MovedSections({ active, sections }: { active?: string; sections: { id: string; title: string; body: React.ReactNode }[] }) {
+  useEffect(() => { if (active) document.getElementById(`set-${active}`)?.scrollIntoView?.({ block: 'start' }) }, [active])
+  return <>
+    <nav className="jg-ui-toolbar" aria-label="Sections">{sections.map((section) => <a className="jg-u-btn" key={section.id} href={`#set-${section.id}`}>{section.title}</a>)}</nav>
+    {sections.map((section) => <section id={`set-${section.id}`} key={section.id} aria-label={section.title}>
+      <h2>{section.title}</h2><Suspense fallback={<PageFallback />}>{section.body}</Suspense>
+    </section>)}
+  </>
+}
