@@ -196,6 +196,20 @@
   .jg-stable-demo .jg-composer__bar { overflow: hidden; }
 }
 
+@media (max-width: 380px) {
+  .jg-stable-demo__mobile-dock { min-height: 58px; border-radius: 22px; }
+  .jg-stable-demo__mobile-dock button { min-height: 46px; gap: 0; }
+  .jg-stable-demo__mobile-dock button span { display: none; }
+  .jg-stable-demo .jg-composer__bar .jg-runtime-trigger {
+    width: 40px;
+    max-width: 40px;
+    padding: 0;
+    justify-content: center;
+  }
+  .jg-stable-demo .jg-runtime-trigger span,
+  .jg-stable-demo .jg-runtime-trigger svg:last-child { display: none; }
+}
+
 .jg-stable-demo__inspector .jg-workspace-browser__grid { grid-template-columns: minmax(0,1fr); }
 
 .jg-stable-demo__appearance { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 9px 14px; color: var(--jg-color-text-secondary); font-size: 14px; }

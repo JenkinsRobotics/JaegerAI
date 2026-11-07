@@ -95,6 +95,11 @@ for (const width of [320, 390, 1280]) {
           expect(box!.x, `${selector} must stay inside the left edge`).toBeGreaterThanOrEqual(0);
           expect(box!.x + box!.width, `${selector} must stay inside the right edge`).toBeLessThanOrEqual(width);
         }
+        await expect(page.locator('.jg-runtime-trigger span')).toBeHidden();
+        await expect(page.locator('.jg-stable-demo__mobile-dock span').first()).toBeHidden();
+        for (const name of ['Chat', 'Agents', 'Work', 'Tasks', 'More']) {
+          await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+        }
       }
     }
     expect(errors).toEqual([]);

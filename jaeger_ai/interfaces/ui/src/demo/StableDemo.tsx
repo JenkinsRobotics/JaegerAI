@@ -366,11 +366,11 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       </section>
     </main>
     <nav className="jg-stable-demo__mobile-dock" aria-label="Mobile navigation">
-      <button type="button" aria-current={activeSection === "chat" ? "page" : undefined} onClick={() => { navigate("/"); setSidebarOpen(false); }}><MessageSquare size={20} /><span>Chat</span></button>
-      <button type="button" aria-current={activeSection === "agents" ? "page" : undefined} onClick={() => { navigate(pathOf("agents")); setSidebarOpen(false); }}><Bot size={20} /><span>Agents</span></button>
-      <button type="button" aria-current={activeSection === "work" ? "page" : undefined} onClick={() => { navigate(pathOf("work")); setSidebarOpen(false); }}><Workflow size={20} /><span>Work</span></button>
-      <button type="button" aria-current={activeSection === "tasks" ? "page" : undefined} onClick={() => { navigate(pathOf("work", "tasks")); setSidebarOpen(false); }}><CheckCircle size={20} /><span>Tasks</span></button>
-      <button type="button" aria-expanded={sidebarOpen} aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(value => !value)}><MoreHorizontal size={20} /><span>More</span></button>
+      <button type="button" aria-label="Chat" aria-current={activeSection === "chat" ? "page" : undefined} onClick={() => { navigate("/"); setSidebarOpen(false); }}><MessageSquare size={20} /><span>Chat</span></button>
+      <button type="button" aria-label="Agents" aria-current={activeSection === "agents" ? "page" : undefined} onClick={() => { navigate(pathOf("agents")); setSidebarOpen(false); }}><Bot size={20} /><span>Agents</span></button>
+      <button type="button" aria-label="Work" aria-current={activeSection === "work" ? "page" : undefined} onClick={() => { navigate(pathOf("work")); setSidebarOpen(false); }}><Workflow size={20} /><span>Work</span></button>
+      <button type="button" aria-label="Tasks" aria-current={activeSection === "tasks" ? "page" : undefined} onClick={() => { navigate(pathOf("work", "tasks")); setSidebarOpen(false); }}><CheckCircle size={20} /><span>Tasks</span></button>
+      <button type="button" aria-label="More" aria-expanded={sidebarOpen} aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(value => !value)}><MoreHorizontal size={20} /><span>More</span></button>
     </nav>
     {inspector && <aside id="jaeger-work-panel" className="jg-stable-demo__inspector" aria-label="Work panel">
       <header><strong>Work panel</strong><button type="button" aria-label="Close work panel" onClick={() => setInspector(null)}><X size={18} /></button></header>
