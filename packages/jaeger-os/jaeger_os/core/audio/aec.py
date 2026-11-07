@@ -65,10 +65,11 @@ class AECWrapper:
             # factory. We import that name explicitly so we don't trip over
             # forks that ship a different surface; if the factory isn't
             # present we fall through to passthrough.
-            from speexdsp import EchoCanceller_create  # type: ignore
-            self._impl = EchoCanceller_create(
-                self.frame_samples, filter_length, sample_rate,
-            )
+            import speexdsp
+            factory = getattr(speexdsp, "EchoCanceller_create", None)
+            if factory is None:
+                factory = speexdsp.EchoCanceller.create
+            self._impl = factory(self.frame_samples, filter_length, sample_rate)
             self.enabled = True
             self.backend = "speexdsp"
         except Exception:
