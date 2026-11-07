@@ -105,3 +105,34 @@ it("opens searchable draft settings and returns to the same chat", async () => {
  expect(document.querySelector('[data-chat-session]')).toBe(chat);
  expect(document.activeElement?.textContent).toBe('Settings');
 });
+
+it("organizes sessions into pinned, projects, and recents and permanently deletes a selected session", async () => {
+ const source = new MockSource();
+ vi.spyOn(source, "sessions").mockResolvedValue([
+  {session_id:"project-chat",agent_id:"native:jaeger",title:"Project chat",workspace:"/Users/demo/JaegerAI"},
+  {session_id:"recent-chat",agent_id:"native:jaeger",title:"Recent chat"},
+ ]);
+ const remove = vi.spyOn(source, "deleteSession");
+ await mount(source);
+ expect(document.querySelector(".jg-stable-demo__project")?.textContent).toContain("JaegerAI");
+ expect(document.querySelector(".jg-stable-demo__project")?.textContent).toContain("Project chat");
+ const pin = document.querySelector<HTMLButtonElement>('[aria-label="Pin Recent chat"]')!;
+ await flush(() => pin.click());
+ expect([...document.querySelectorAll(".jg-stable-demo__session-section")][0].textContent).toContain("Recent chat");
+ await flush(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Manage")!.click());
+ await flush(() => document.querySelector<HTMLInputElement>('[aria-label="Select Recent chat"]')!.click());
+ await flush(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Delete selected")!.click());
+ expect(document.querySelector('[role="alertdialog"]')?.textContent).toContain("cannot be undone");
+ await flush(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Delete permanently")!.click());
+ expect(remove).toHaveBeenCalledWith("recent-chat");
+ expect(document.body.textContent).not.toContain("Recent chat");
+});
+
+it("resizes the navigation with the accessible separator and remembers the width", async () => {
+ await mount();
+ const shell = document.querySelector<HTMLElement>(".jg-stable-demo")!;
+ const separator = document.querySelector<HTMLElement>('[aria-label="Resize navigation"]')!;
+ await flush(() => separator.dispatchEvent(new KeyboardEvent("keydown", {key:"End",bubbles:true})));
+ expect(shell.style.getPropertyValue("--jg-stable-sidebar-width")).toBe("400px");
+ expect(localStorage.getItem("jaeger.stable-demo.sidebar-width.v1")).toBe("400");
+});

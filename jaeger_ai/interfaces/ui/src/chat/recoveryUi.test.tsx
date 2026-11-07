@@ -56,3 +56,25 @@ it("clears a failed lookup notice after a successful check without resending wor
     expect(send).not.toHaveBeenCalled();
   } finally { act(() => root.unmount()); el.remove(); }
 });
+
+it("reconciles a persisted approval card with its durable resolved decision after reload", async () => {
+  const approvalStatus = vi.fn().mockResolvedValue({approval_id:"approval-old",status:"resolved",decision:"once"});
+  const source = {
+    kind:"live", agents:async()=>[], approvalStatus,
+    session:async()=>({session_id:"s",messages:[
+      {role:"user",request_id:"r",content:"run the safe tool",timestamp:1793470740},
+      {role:"assistant",request_id:"r",content:"",timestamp:1793470741,parts:[
+        {type:"tool",call_id:"call-old",tool:"shell.run_shell",input:{command:"echo ok"},state:"completed",output:"ok"},
+        {type:"approval",approval_id:"approval-old",tool:"shell.run_shell",target:"echo ok",state:"pending"},
+      ]},
+    ]}),
+    stream:async()=>{}, approve:vi.fn(),
+  } as unknown as JaegerSource;
+  const el=document.createElement("div");document.body.append(el);const root=createRoot(el);
+  try {
+    await act(async()=>root.render(<MinimalChat host={new WebHost(source)} sessionId="s"/>));
+    await vi.waitFor(()=>expect(el.textContent).toContain("Approved"));
+    expect(el.textContent).not.toContain("Allow once");
+    expect(approvalStatus).toHaveBeenCalledWith("approval-old");
+  } finally { act(()=>root.unmount());el.remove(); }
+});

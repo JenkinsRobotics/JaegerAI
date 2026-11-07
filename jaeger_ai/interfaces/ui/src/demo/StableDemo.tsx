@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
 import type { JaegerSource } from "../api/source";
 import type { Agent, SessionRow } from "../api/types";
 import { ChatPane } from "../chat/ChatPane";
@@ -13,30 +13,51 @@ import { TaskArtifacts } from "../library/TaskArtifacts";
 import { WorkspaceBrowser } from "../unified/WorkspaceBrowser";
 import { AgentFace } from "../unified/AgentFace";
 import { RobotIcon } from "../agents/RobotIcon";
-import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, Bot, Workflow, Search, Code, Cpu, MoreHorizontal, Pencil, Pin, Share, Copy, Clock, ChevronLeft, ChevronRight } from "../components/Icons";
+import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, Bot, Workflow, Search, Code, Cpu, MoreHorizontal, Pencil, Pin, Share, Copy, Clock, ChevronLeft, ChevronRight, Trash2 } from "../components/Icons";
 import "./stableDemo.css";
 import { SettingsWorkspace } from "./SettingsWorkspace";
 import { navigate, pathOf, useRoute, type PageId } from "../shell/router";
 import { AppWindow } from "../windows/AppWindow";
+import { clampWidth, SIDEBAR } from "../shell/sidebarSizing";
 
 export const DEMO_SESSION_KEY = "jaeger.stable-demo.session.v1";
 const PINNED_SESSION_KEY = "jaeger.stable-demo.pinned-sessions.v1";
+const SIDEBAR_WIDTH_KEY = "jaeger.stable-demo.sidebar-width.v1";
 function storedSession() { try { return localStorage.getItem(DEMO_SESSION_KEY) || ""; } catch { return ""; } }
 function storedPins() { try { return new Set<string>(JSON.parse(localStorage.getItem(PINNED_SESSION_KEY) || "[]")); } catch { return new Set<string>(); } }
+function storedSidebarWidth() { try { return clampWidth(Number(localStorage.getItem(SIDEBAR_WIDTH_KEY) || SIDEBAR.defaultWidth)); } catch { return SIDEBAR.defaultWidth; } }
+function projectLabel(workspace: string) { return workspace.split(/[\\/]/).filter(Boolean).pop() || workspace; }
 function SummaryGlyph() { return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="6" cy="7" r="2"/><path d="M11 7h8"/><circle cx="6" cy="17" r="2"/><path d="M11 17h8"/></svg>; }
 function TabsGlyph({ count }: { count: number }) { return <span className="jg-stable-demo__tabs-glyph" aria-hidden="true"><span>{count}</span></span>; }
 type HeaderPopup = "menu" | "summary" | "tabs" | null;
 type MenuPage = "main" | "copy" | "open";
+function ConversationRow({ row, active, pinned, selecting, selected, onOpen, onSelect, onPin, onDelete }: { row: SessionRow; active: boolean; pinned: boolean; selecting: boolean; selected: boolean; onOpen(): void; onSelect(): void; onPin(): void; onDelete(): void }) {
+  const title = row.title || "Untitled conversation";
+  return <div className="jg-stable-demo__session-row" data-selected={selected || undefined}>
+    {selecting && <label className="jg-stable-demo__session-check"><input type="checkbox" aria-label={`Select ${title}`} checked={selected} onChange={onSelect} /></label>}
+    <button className="jg-stable-demo__session-title" type="button" title={title} aria-current={active ? "true" : undefined} onClick={onOpen}>{title}</button>
+    {!selecting && <span className="jg-stable-demo__session-actions">
+      <button type="button" aria-label={`${pinned ? "Unpin" : "Pin"} ${title}`} title={pinned ? "Unpin" : "Pin"} onClick={onPin}><Pin size={14} /></button>
+      <button type="button" aria-label={`Delete ${title}`} title="Delete permanently" onClick={onDelete}><Trash2 size={14} /></button>
+    </span>}
+  </div>;
+}
 /** Recovery surface: existing chat renderer and Gateway-owned task runner, no parallel backend. */
 export function StableDemo({ source }: { source: JaegerSource }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
+  const shellRef = useRef<HTMLDivElement>(null);
   const [headerPopup, setHeaderPopup] = useState<HeaderPopup>(null);
   const [menuPage, setMenuPage] = useState<MenuPage>("main");
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameDraft, setRenameDraft] = useState("");
   const [pinnedSessions, setPinnedSessions] = useState(storedPins);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedSessions, setSelectedSessions] = useState<Set<string>>(() => new Set());
+  const [deleteConfirm, setDeleteConfirm] = useState<string[] | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const toolsRef = useRef<HTMLDivElement>(null);
   const [appearance, setAppearance] = useState(storedAppearance);
   const route = useRoute();
@@ -98,15 +119,16 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     setHeaderPopup(value => value === popup ? null : popup);
     setMenuPage("main"); setRenameOpen(false);
   };
-  const togglePinned = () => {
-    if (!session) return;
+  const togglePinnedSession = (id: string) => {
+    if (!id) return;
     setPinnedSessions(previous => {
       const next = new Set(previous);
-      if (next.has(session)) next.delete(session); else next.add(session);
+      if (next.has(id)) next.delete(id); else next.add(id);
       try { localStorage.setItem(PINNED_SESSION_KEY, JSON.stringify([...next])); } catch { /* preference remains in memory */ }
       return next;
     });
   };
+  const togglePinned = () => togglePinnedSession(session);
   const renameSession = async () => {
     const title = renameDraft.trim();
     if (!session || !title) return;
@@ -123,6 +145,56 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       navigate("/");
     } catch (e) { setHistoryError(String((e as Error).message)); }
   };
+  const toggleSelected = (id: string) => setSelectedSessions(previous => {
+    const next = new Set(previous);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const leaveSelectionMode = () => { setSelectionMode(false); setSelectedSessions(new Set()); };
+  const deleteSessions = async () => {
+    if (!deleteConfirm?.length || deleting) return;
+    if (!source.deleteSession) { setHistoryError("This Gateway does not support permanent session deletion."); setDeleteConfirm(null); return; }
+    setDeleting(true); setHistoryError("");
+    const results = await Promise.allSettled(deleteConfirm.map(id => source.deleteSession!(id)));
+    const deleted = deleteConfirm.filter((_, index) => results[index].status === "fulfilled" && (results[index] as PromiseFulfilledResult<{deleted:boolean}>).value.deleted);
+    const failed = deleteConfirm.length - deleted.length;
+    if (deleted.length) {
+      const removed = new Set(deleted);
+      setRecent(rows => rows.filter(row => !removed.has(row.session_id)));
+      setPinnedSessions(previous => {
+        const next = new Set([...previous].filter(id => !removed.has(id)));
+        try { localStorage.setItem(PINNED_SESSION_KEY, JSON.stringify([...next])); } catch { /* preference remains in memory */ }
+        return next;
+      });
+      setSelectedSessions(previous => new Set([...previous].filter(id => !removed.has(id))));
+      if (removed.has(session)) {
+        setSession(""); setReady(true); setHeaderPopup(null);
+        try { localStorage.removeItem(DEMO_SESSION_KEY); } catch { /* session simply remains unpersisted */ }
+        navigate("/");
+      }
+    }
+    if (failed) setHistoryError(`${failed} conversation${failed === 1 ? "" : "s"} could not be deleted. The others were removed.`);
+    setDeleting(false); setDeleteConfirm(null);
+    if (!failed) leaveSelectionMode();
+  };
+  const persistSidebarWidth = (width: number) => { try { localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width)); } catch { /* width remains in memory */ } };
+  const beginSidebarResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    const left = shellRef.current?.getBoundingClientRect().left ?? 0;
+    const move = (next: PointerEvent) => setSidebarWidth(clampWidth(next.clientX - left));
+    const finish = (next: PointerEvent) => {
+      const width = clampWidth(next.clientX - left);
+      setSidebarWidth(width); persistSidebarWidth(width);
+      document.removeEventListener("pointermove", move); document.removeEventListener("pointerup", finish);
+    };
+    document.addEventListener("pointermove", move); document.addEventListener("pointerup", finish, { once: true });
+  };
+  const resizeSidebarWithKeyboard = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const width = event.key === "Home" ? SIDEBAR.minWidth : event.key === "End" ? SIDEBAR.maxWidth : event.key === "ArrowLeft" ? clampWidth(sidebarWidth - SIDEBAR.keyStep) : event.key === "ArrowRight" ? clampWidth(sidebarWidth + SIDEBAR.keyStep) : null;
+    if (width === null) return;
+    event.preventDefault(); setSidebarWidth(width); persistSidebarWidth(width);
+  };
   const copyText = async (text: string) => {
     try { await navigator.clipboard.writeText(text); setHeaderPopup(null); }
     catch { setHistoryError("Clipboard access was unavailable."); }
@@ -135,11 +207,20 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     } catch (e) { if ((e as DOMException).name !== "AbortError") setHistoryError("This conversation could not be shared."); }
   };
   const agent = agents.find(a => a.id === "native:jaeger");
+  const pinnedRows = recent.filter(row => pinnedSessions.has(row.session_id));
+  const unpinnedRows = recent.filter(row => !pinnedSessions.has(row.session_id));
+  const projectGroups = [...unpinnedRows.reduce((groups, row) => {
+    if (!row.workspace) return groups;
+    const rows = groups.get(row.workspace) ?? [];
+    rows.push(row); groups.set(row.workspace, rows);
+    return groups;
+  }, new Map<string, SessionRow[]>())];
+  const recentRows = unpinnedRows.filter(row => !row.workspace);
   const workspacePage = route.page !== "chat" && route.page !== "settings";
   const routeTitle: Record<PageId, string> = { home: "Chat", chat: "Chat", agents: "Agents", work: "Work", research: "Research", studio: "Studio", models: "Models", machine: "Machine", settings: "Settings" };
   const activeSection = route.page === "work" && route.sub === "tasks" ? "tasks" : route.page === "models" ? "studio" : route.page === "home" ? "chat" : route.page;
   const openTabCount = (session ? 1 : 0) + (inspector ? 1 : 0);
-  return <ToastProvider><div hidden={settingsOpen}><div className="jg-stable-demo" data-stable-demo="1" data-inspector={!!inspector} data-sidebar={sidebarOpen}>
+  return <ToastProvider><div hidden={settingsOpen}><div ref={shellRef} className="jg-stable-demo" data-stable-demo="1" data-inspector={!!inspector} data-sidebar={sidebarOpen} style={{ "--jg-stable-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
     <aside id="jaeger-navigation" hidden={!sidebarOpen} className="jg-stable-demo__sidebar" aria-label="Jaeger navigation">
       <div className="jg-stable-demo__rail">
         <span className="jg-stable-demo__mark" aria-label="Jaeger">J</span>
@@ -155,13 +236,29 @@ export function StableDemo({ source }: { source: JaegerSource }) {
         <button className="jg-stable-demo__rail-settings" type="button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={20} /><span>Settings</span></button>
       </div>
       <section className="jg-stable-demo__context" aria-label={`${routeTitle[route.page]} sidebar`}>
-        <div className="jg-stable-demo__brand"><strong>{activeSection === "chat" ? "Jaeger" : routeTitle[route.page]}</strong></div>
+        <div className="jg-stable-demo__brand"><strong>{activeSection === "chat" ? "Jaeger" : routeTitle[route.page]}</strong>{activeSection === "chat" && <button type="button" className="jg-stable-demo__manage" aria-pressed={selectionMode} onClick={() => selectionMode ? leaveSelectionMode() : setSelectionMode(true)}>{selectionMode ? "Done" : "Manage"}</button>}</div>
         {activeSection === "chat" && <>
           <button className="jg-stable-demo__new" type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "New conversation"}</button>
-          <div className="jg-stable-demo__recents"><h2>Recents</h2>
+          {selectionMode && <div className="jg-stable-demo__selection-tools">
+            <button type="button" onClick={() => setSelectedSessions(selectedSessions.size === recent.length ? new Set() : new Set(recent.map(row => row.session_id)))}>{selectedSessions.size === recent.length && recent.length ? "Clear all" : "Select all"}</button>
+            <span>{selectedSessions.size} selected</span>
+            <button className="jg-stable-demo__danger" type="button" disabled={!selectedSessions.size} onClick={() => setDeleteConfirm([...selectedSessions])}>Delete selected</button>
+            <button className="jg-stable-demo__danger" type="button" disabled={!recent.length} onClick={() => setDeleteConfirm(recent.map(row => row.session_id))}>Delete all</button>
+          </div>}
+          <div className="jg-stable-demo__recents">
             {historyError && <p role="alert">{historyError}</p>}
-            {!recent.length && !historyError && <p>Your conversations will appear here.</p>}
-            {recent.map(row => <button type="button" key={row.session_id} title={row.title || "Untitled conversation"} aria-current={session === row.session_id ? "true" : undefined} onClick={() => selectSession(row.session_id)}>{row.title || "Untitled conversation"}</button>)}
+            <section className="jg-stable-demo__session-section"><h2>Pinned</h2>
+              {!pinnedRows.length && <p>Pin conversations you want to keep close.</p>}
+              {pinnedRows.map(row => <ConversationRow key={row.session_id} row={row} active={session === row.session_id} pinned selecting={selectionMode} selected={selectedSessions.has(row.session_id)} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} />)}
+            </section>
+            <section className="jg-stable-demo__session-section"><h2>Projects</h2>
+              {!projectGroups.length && <p>Conversations with a workspace appear here.</p>}
+              {projectGroups.map(([workspace, rows]) => <div className="jg-stable-demo__project" key={workspace}><h3 title={workspace}><FolderOpen size={15} />{projectLabel(workspace)}</h3>{rows.map(row => <ConversationRow key={row.session_id} row={row} active={session === row.session_id} pinned={false} selecting={selectionMode} selected={selectedSessions.has(row.session_id)} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} />)}</div>)}
+            </section>
+            <section className="jg-stable-demo__session-section"><h2>Recents</h2>
+              {!recentRows.length && !historyError && <p>{recent.length ? "All conversations are pinned or in projects." : "Your conversations will appear here."}</p>}
+              {recentRows.map(row => <ConversationRow key={row.session_id} row={row} active={session === row.session_id} pinned={false} selecting={selectionMode} selected={selectedSessions.has(row.session_id)} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} />)}
+            </section>
           </div>
         </>}
         {activeSection === "agents" && <div className="jg-stable-demo__context-list"><h2>Agent team</h2>{agents.map(row => <button key={row.id} type="button" onClick={() => navigate(pathOf("agents"))}><Bot size={17} />{row.display_name || row.name || row.id}</button>)}</div>}
@@ -174,6 +271,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
           <div className="jg-stable-demo__connection" role="status"><span className="jg-stable-demo__dot" data-ready={ready && !error} />{error ? "Connection error" : ready ? source.kind === "mock" ? "Design preview · sample data" : "Live Gateway" : "Connecting…"}</div>
         </div>
       </section>
+      <div className="jg-stable-demo__resize" role="separator" aria-label="Resize navigation" aria-orientation="vertical" aria-valuemin={SIDEBAR.minWidth} aria-valuemax={SIDEBAR.maxWidth} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={beginSidebarResize} onKeyDown={resizeSidebarWithKeyboard} />
     </aside>
     <main className="jg-stable-demo__main">
       <header className="jg-stable-demo__header">
@@ -248,5 +346,13 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       </div>
       <p className="jg-stable-demo__panel-note">Use Refresh to check for new outputs or file changes.</p>
     </aside>}
+    {deleteConfirm && <div className="jg-stable-demo__dialog-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !deleting) setDeleteConfirm(null); }}>
+      <div className="jg-stable-demo__delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-conversations-title" aria-describedby="delete-conversations-description">
+        <span className="jg-stable-demo__delete-icon"><Trash2 size={21} /></span>
+        <h2 id="delete-conversations-title">Delete {deleteConfirm.length === 1 ? "this conversation" : `${deleteConfirm.length} conversations`}?</h2>
+        <p id="delete-conversations-description">Messages, approvals, queued work, and saved turn data for {deleteConfirm.length === 1 ? "this conversation" : "these conversations"} will be permanently removed from the Gateway. This cannot be undone.</p>
+        <div><button type="button" disabled={deleting} onClick={() => setDeleteConfirm(null)}>Cancel</button><button className="jg-stable-demo__delete-confirm" type="button" disabled={deleting} onClick={() => void deleteSessions()}>{deleting ? "Deleting…" : "Delete permanently"}</button></div>
+      </div>
+    </div>}
   </div></div>{settingsOpen && <SettingsWorkspace onClose={closeSettings} />}</ToastProvider>;
 }

@@ -100,6 +100,8 @@ export interface ChatHost {
    * it; everything else appends. */
   startTurn(request: StartTurnRequest, onPart: (part: ChatPart) => void): TurnHandle;
   respondToConfirmation(turnId: string, callId: string, decision: "approve" | "deny", scope?: "once" | "session"): Promise<void>;
+  /** Durable lookup used to reconcile approval cards after a reload or a decision from another surface. */
+  approvalStatus?(approvalId: string): Promise<{ approval_id: string; status: string; decision?: string }>;
   /** Answer a server clarify form once (GB-033). Absent: the card is display-only. */
   answerClarify?(sessionId: string, clarifyId: string, revision: number, response: string): Promise<ClarifyAnswerResult>;
   /** Recover server forms and terminal outcomes after navigation or reload. */

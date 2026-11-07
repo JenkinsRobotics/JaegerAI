@@ -120,6 +120,7 @@ export class MockSource implements JaegerSource {
   private log = new Map<string, GatewayEvent[]>();
   private eventId = 1000;
   private timers: ReturnType<typeof setTimeout>[] = [];
+  private deletedSessions = new Set<string>();
 
   /** ?agentspec=1: the agents payload carries the proposed agent-menu fields, so the new items show (dev only). */
   private spec = typeof location !== "undefined" && new URLSearchParams(location.search).has("agentspec");
@@ -165,9 +166,10 @@ export class MockSource implements JaegerSource {
   };
   async agentsSummary() { return MOCK_SUMMARY; }
   async sessions(query: { agent_id?: string } = {}): Promise<SessionRow[]> {
-    return MOCK_SUMMARY.filter((s) => !query.agent_id || s.id === query.agent_id).map((s) => ({
+    return MOCK_SUMMARY.filter((s) => (!query.agent_id || s.id === query.agent_id) && !this.deletedSessions.has(s.session_id!)).map((s) => ({
       session_id: s.session_id!, agent_id: s.id, title: MOCK_TRANSCRIPTS[s.session_id!]?.title ?? s.display_name,
       last_message_preview: s.last_preview, last_activity_at: s.last_activity_at ?? undefined, updated_at: s.last_activity_at ?? undefined,
+      workspace: s.id === "native:jaeger" ? "/Users/demo/Projects/JaegerAI" : undefined,
     }));
   }
   async session(id: string): Promise<SessionDetail> {
@@ -201,7 +203,9 @@ export class MockSource implements JaegerSource {
   }
   async clarifications() { return []; }
   async approve() { /* mock: accepted */ }
+  async approvalStatus(approvalId: string) { return { approval_id: approvalId, kind: "tool", prompt: "Approved mock tool", status: "resolved", decision: "once" }; }
   async updateSession() { /* mock: accepted */ }
+  async deleteSession(id: string) { this.deletedSessions.add(id); return { deleted: true }; }
   async createAgent(body: { name: string; display_name?: string }) {
     return { id: `native:${body.name}`, name: body.name, display_name: body.display_name, role: "specialist", kind: "jaeger_native" };
   }
