@@ -189,7 +189,8 @@ export class GatewayClient implements JaegerSource {
     const controller = new AbortController();
     const onAbort=()=>controller.abort();
     if(signal?.aborted)controller.abort();else signal?.addEventListener("abort",onAbort,{once:true});
-    const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
+    let timedOut = false;
+    const timer = setTimeout(() => { timedOut = true; controller.abort(); }, TIMEOUT_MS);
     try {
       const response = await fetch(`${this.base}${path}`, {
         method: method ?? (body === undefined ? "GET" : "POST"),
@@ -206,6 +207,9 @@ export class GatewayClient implements JaegerSource {
         throw new GatewayError(String(message), response.status, data);
       }
       return data as T;
+    } catch (error) {
+      if (timedOut && !signal?.aborted) throw new GatewayError("Gateway did not respond within 15 seconds. Check the connection and try again. Nothing was automatically resent.", 408);
+      throw error;
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort",onAbort);

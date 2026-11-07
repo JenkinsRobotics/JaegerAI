@@ -65,3 +65,15 @@ describe("Rev 3 complete destination migration", () => {
     expect(parseRoute(old)).toMatchObject(parseRoute(target));
   });
 });
+
+it("keeps full workspace deep links on reload and when navigating home", async () => {
+  const { usesFullWorkspace, navigate } = await import("./router");
+  expect(usesFullWorkspace("/", "")).toBe(false);
+  expect(usesFullWorkspace("/", "?full=1")).toBe(true);
+  for (const path of ["/work", "/work/tasks", "/research/workspace", "/settings/about"]) expect(usesFullWorkspace(path)).toBe(true);
+  history.replaceState(null, "", "/work/tasks");
+  navigate("chat");
+  expect(location.pathname + location.search).toBe("/?full=1");
+  expect(usesFullWorkspace(location.pathname, location.search)).toBe(true);
+  history.replaceState(null, "", "/");
+});

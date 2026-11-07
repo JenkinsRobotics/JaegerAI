@@ -561,6 +561,7 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
     try { intent = await host.findPendingIntent(session.id, silent ? undefined : session.turns.find(t => t.state === "unknown")?.turnId); }
     catch (error) { setFileNote(`Request lookup unavailable: ${String(error)}`); if (!silent) setRecoveryStatus("unknown"); return; }
     finally { checkingRequest.current = false; }
+    setFileNote(note => note?.startsWith("Request lookup unavailable:") ? undefined : note);
     if (!intent) { if (!silent) setRecoveryStatus("clear"); return; }
     // Lookup has finished. Observing accepted work is not a composer recovery check.
     observingRequest.current = intent.requestId; setRecoveryStatus("clear"); setUnknownRequest(intent.requestId);
