@@ -4,6 +4,7 @@
  * GET /v1/studio/providers; an unavailable one is shown disabled with its setup note and is
  * never simulated. Send to chat uploads the image into the chosen agent's conversation.
  */
+import { useRoute } from "../shell/router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { JaegerSource } from "../api/source";
 import type { Agent } from "../api/types";
@@ -24,7 +25,10 @@ function readAsBase64(file: File): Promise<string> {
 
 export function StudioPage({ source, agents, onNavigate, initialSection = "create" }: { initialSection?: "create" | "library" | "board"; source: JaegerSource; agents: Agent[]; onNavigate: (to: string) => void }) {
   const toast = useToast();
+  const route = useRoute();
+  const section = route.page === "studio" ? route.params.get("section") : null;
   const [tab, setTab] = useState<"create" | "library" | "board">(initialSection);
+  useEffect(() => { setTab(section === "library" || section === "board" ? section : initialSection); }, [section, initialSection]);
   const [assets, setAssets] = useState<Asset[] | null>(null);
   const [err, setErr] = useState<string>();
   const load = useCallback(() => getJson<{ assets: Asset[] }>("/v1/studio/assets").then((r) => { setAssets(r.assets); setErr(undefined); }, (e: Error) => setErr(e.message)), []);

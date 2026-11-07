@@ -1,3 +1,4 @@
+import { useRoute } from "../shell/router";
 import { useEffect, useState } from "react";
 import type { JaegerSource, Notifications } from "../api/source";
 import type { Agent } from "../api/types";
@@ -10,7 +11,10 @@ import "./companion.css";
 
 type Props = { page: "library" | "automations" | "feed"; source: JaegerSource; agents: Agent[]; onNavigate(to: string): void };
 export function CompanionPage({ page, source, agents, onNavigate }: Props) {
+  const route = useRoute();
+  const routeSection = route.params.get("section");
   const [section, setSection] = useState<"media" | "documents" | "outputs">("media");
+  useEffect(() => { setSection(routeSection === "documents" || routeSection === "outputs" ? routeSection : "media"); }, [routeSection]);
   return <div className="jg-companion-page">
     <PageHead title={page === "library" ? "Library" : page === "automations" ? "Automations" : "Feed"}
       subtitle={page === "library" ? "Your creations, saved documents and work from your team." : page === "automations" ? "The routines Jaeger runs for you. Review schedules and see what happened." : "Updates from your agent."} />
