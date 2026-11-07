@@ -60,6 +60,24 @@ it("opens the same most-recent durable conversation on a new live browser", asyn
  expect(document.querySelector('[data-chat-session]')?.getAttribute('data-chat-session')).toBe('shared-latest');
  expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('shared-latest');
 });
+it("recovers a phone whose saved conversation was deleted on another device", async () => {
+ localStorage.setItem(DEMO_SESSION_KEY, 'deleted-on-mac');
+ const source = new MockSource();
+ Object.defineProperty(source, 'kind', {value: 'live'});
+ vi.spyOn(source, 'sessions').mockResolvedValue([
+  {session_id: 'shared-latest', title: 'Shared latest', agent_id: 'native:jaeger', last_activity_at: 20},
+  {session_id: 'older', title: 'Older', agent_id: 'native:jaeger', last_activity_at: 10},
+ ]);
+ vi.spyOn(source, 'session').mockImplementation(async id => {
+  if (id === 'deleted-on-mac') throw new Error('Session not found');
+  return {session_id: id} as never;
+ });
+ await mount(source);
+ await flush();
+ expect(document.querySelector('[data-chat-session]')?.getAttribute('data-chat-session')).toBe('shared-latest');
+ expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('shared-latest');
+ expect(document.querySelector('[role=alert]')).toBeNull();
+});
 it("opens and closes the work panel without replacing the conversation", async () => {
  await mount();
  const summary = document.querySelector<HTMLButtonElement>('[aria-label="Toggle pinned summary"]')!;
