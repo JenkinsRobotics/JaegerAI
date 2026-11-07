@@ -20,8 +20,12 @@ async function openChat(page: Page) {
   // existing Gateway resumes its durable active conversation instead. Wait
   // for either stable state so the contract covers both first-use and
   // cross-device continuity without racing the session-list response.
-  await expect.poll(async () => await input.isEnabled() || await start.isEnabled()).toBe(true);
-  if (!await input.isEnabled()) await start.click();
+  if (!await input.isEnabled()) {
+    await Promise.race([
+      start.click().catch(() => undefined),
+      input.waitFor({ state: 'visible' }),
+    ]);
+  }
   await expect(input).toBeEnabled();
 }
 
@@ -64,12 +68,13 @@ test('Shift+Enter retains an unsent multiline draft across navigation', async ({
 });
 
 test('a stale device-local selection resumes the durable Gateway conversation', async ({ page }) => {
-  await page.addInitScript(() => localStorage.setItem('jaeger.stable-demo.session.v1', 'missing-browser-contract'));
-  await page.goto('/');
-  if (await page.getByRole('button', { name: 'Skip setup' }).isVisible()) await page.getByRole('button', { name: 'Skip setup' }).click();
+  await openChat(page);
+  const durable = await page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'));
+  expect(durable).toBeTruthy();
+  await page.evaluate(() => localStorage.setItem('jaeger.stable-demo.session.v1', 'missing-browser-contract'));
+  await page.reload();
   await expect(page.getByRole('textbox', { name: 'Message', exact: true })).toBeEnabled();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).not.toBe('missing-browser-contract');
-  expect(await page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).toBeTruthy();
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).toBe(durable);
 });
 
 for (const width of [390, 1280]) {
