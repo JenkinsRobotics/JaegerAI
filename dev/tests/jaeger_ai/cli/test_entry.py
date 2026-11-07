@@ -89,7 +89,7 @@ def test_product_checkout_update_uses_full_end_user_updater(tmp_path, monkeypatc
     (tmp_path / ".jaeger-product-install").write_text("")
     monkeypatch.setattr(entry, "_REPO_ROOT", tmp_path)
     assert route(["update", "--check"]) == [
-        PY, "-m", "jaeger_ai.cli.run", "update", "--check",
+        PY, "-m", "jaeger_ai.cli.verbs.dispatch", "update", "--check",
     ]
 
 
