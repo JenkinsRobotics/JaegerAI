@@ -137,28 +137,43 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const agent = agents.find(a => a.id === "native:jaeger");
   const workspacePage = route.page !== "chat" && route.page !== "settings";
   const routeTitle: Record<PageId, string> = { home: "Chat", chat: "Chat", agents: "Agents", work: "Work", research: "Research", studio: "Studio", models: "Models", machine: "Machine", settings: "Settings" };
+  const activeSection = route.page === "work" && route.sub === "tasks" ? "tasks" : route.page === "models" ? "studio" : route.page === "home" ? "chat" : route.page;
   const openTabCount = (session ? 1 : 0) + (inspector ? 1 : 0);
   return <ToastProvider><div hidden={settingsOpen}><div className="jg-stable-demo" data-stable-demo="1" data-inspector={!!inspector} data-sidebar={sidebarOpen}>
     <aside id="jaeger-navigation" hidden={!sidebarOpen} className="jg-stable-demo__sidebar" aria-label="Jaeger navigation">
-      <div className="jg-stable-demo__brand"><span className="jg-stable-demo__mark">J</span><strong>Jaeger</strong></div>
-      <button className="jg-stable-demo__new" type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "New conversation"}</button>
-      <nav aria-label="Jaeger navigation">
-        <button type="button" aria-current={route.page === "chat" ? "page" : undefined} onClick={() => navigate("/")}><MessageSquare size={18} />Chat</button>
-        <button type="button" aria-current={route.page === "agents" ? "page" : undefined} onClick={() => navigate(pathOf("agents"))}><Bot size={18} />Agents</button>
-        <button type="button" aria-current={route.page === "work" && route.sub !== "tasks" ? "page" : undefined} onClick={() => navigate(pathOf("work"))}><Workflow size={18} />Work</button>
-        <button type="button" aria-current={route.page === "work" && route.sub === "tasks" ? "page" : undefined} onClick={() => navigate(pathOf("work", "tasks"))}><CheckCircle size={18} />Tasks</button>
-        <button type="button" aria-current={route.page === "research" ? "page" : undefined} onClick={() => navigate(pathOf("research"))}><Search size={18} />Research</button>
-        <button type="button" aria-current={route.page === "studio" ? "page" : undefined} onClick={() => navigate(pathOf("studio"))}><Code size={18} />Studio</button>
-        <button type="button" aria-current={route.page === "machine" ? "page" : undefined} onClick={() => navigate(pathOf("machine"))}><Cpu size={18} />Machine</button>
-      </nav>
-      <div className="jg-stable-demo__recents"><h2>Recents</h2>
-        {historyError && <p role="alert">{historyError}</p>}
-        {!recent.length && !historyError && <p>Your conversations will appear here.</p>}
-        {recent.map(row => <button type="button" key={row.session_id} title={row.title || "Untitled conversation"} aria-current={session === row.session_id ? "true" : undefined} onClick={() => selectSession(row.session_id)}>{row.title || "Untitled conversation"}</button>)}
+      <div className="jg-stable-demo__rail">
+        <span className="jg-stable-demo__mark" aria-label="Jaeger">J</span>
+        <nav aria-label="Jaeger navigation">
+          <button type="button" title="Chat" aria-label="Chat" aria-current={activeSection === "chat" ? "page" : undefined} onClick={() => navigate("/")}><MessageSquare size={20} /><span>Chat</span></button>
+          <button type="button" title="Agents" aria-label="Agents" aria-current={activeSection === "agents" ? "page" : undefined} onClick={() => navigate(pathOf("agents"))}><Bot size={20} /><span>Agents</span></button>
+          <button type="button" title="Work" aria-label="Work" aria-current={activeSection === "work" ? "page" : undefined} onClick={() => navigate(pathOf("work"))}><Workflow size={20} /><span>Work</span></button>
+          <button type="button" title="Tasks" aria-label="Tasks" aria-current={activeSection === "tasks" ? "page" : undefined} onClick={() => navigate(pathOf("work", "tasks"))}><CheckCircle size={20} /><span>Tasks</span></button>
+          <button type="button" title="Research" aria-label="Research" aria-current={activeSection === "research" ? "page" : undefined} onClick={() => navigate(pathOf("research"))}><Search size={20} /><span>Research</span></button>
+          <button type="button" title="Studio" aria-label="Studio" aria-current={activeSection === "studio" ? "page" : undefined} onClick={() => navigate(pathOf("studio"))}><Code size={20} /><span>Studio</span></button>
+          <button type="button" title="Machine" aria-label="Machine" aria-current={activeSection === "machine" ? "page" : undefined} onClick={() => navigate(pathOf("machine"))}><Cpu size={20} /><span>Machine</span></button>
+        </nav>
+        <button className="jg-stable-demo__rail-settings" type="button" aria-label="Settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={20} /><span>Settings</span></button>
       </div>
-      <button type="button" onClick={() => setSettingsOpen(true)}><Settings size={18} />Settings</button>
-      <label className="jg-stable-demo__appearance"><Settings size={16} />Appearance<select aria-label="Appearance" value={appearance} onChange={e => { const mode = e.target.value as Appearance; setAppearance(mode); applyAppearance(mode); }}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
-      <div className="jg-stable-demo__connection" role="status"><span className="jg-stable-demo__dot" data-ready={ready && !error} />{error ? "Connection error" : ready ? source.kind === "mock" ? "Design preview · sample data" : "Live Gateway" : "Connecting…"}</div>
+      <section className="jg-stable-demo__context" aria-label={`${routeTitle[route.page]} sidebar`}>
+        <div className="jg-stable-demo__brand"><strong>{activeSection === "chat" ? "Jaeger" : routeTitle[route.page]}</strong></div>
+        {activeSection === "chat" && <>
+          <button className="jg-stable-demo__new" type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "New conversation"}</button>
+          <div className="jg-stable-demo__recents"><h2>Recents</h2>
+            {historyError && <p role="alert">{historyError}</p>}
+            {!recent.length && !historyError && <p>Your conversations will appear here.</p>}
+            {recent.map(row => <button type="button" key={row.session_id} title={row.title || "Untitled conversation"} aria-current={session === row.session_id ? "true" : undefined} onClick={() => selectSession(row.session_id)}>{row.title || "Untitled conversation"}</button>)}
+          </div>
+        </>}
+        {activeSection === "agents" && <div className="jg-stable-demo__context-list"><h2>Agent team</h2>{agents.map(row => <button key={row.id} type="button" onClick={() => navigate(pathOf("agents"))}><Bot size={17} />{row.display_name || row.name || row.id}</button>)}</div>}
+        {(activeSection === "work" || activeSection === "tasks") && <div className="jg-stable-demo__context-list"><h2>Workspace</h2><button type="button" aria-current={activeSection === "work" ? "page" : undefined} onClick={() => navigate(pathOf("work"))}><Workflow size={17} />Work</button><button type="button" aria-current={activeSection === "tasks" ? "page" : undefined} onClick={() => navigate(pathOf("work", "tasks"))}><CheckCircle size={17} />Tasks</button></div>}
+        {activeSection === "research" && <div className="jg-stable-demo__context-list"><h2>Explore</h2><button type="button" aria-current="page" onClick={() => navigate(pathOf("research"))}><Search size={17} />Research</button></div>}
+        {activeSection === "studio" && <div className="jg-stable-demo__context-list"><h2>Build</h2><button type="button" aria-current={route.page === "studio" ? "page" : undefined} onClick={() => navigate(pathOf("studio"))}><Code size={17} />Studio</button><button type="button" aria-current={route.page === "models" ? "page" : undefined} onClick={() => navigate(pathOf("models"))}><Bot size={17} />Models</button></div>}
+        {activeSection === "machine" && <div className="jg-stable-demo__context-list"><h2>System</h2><button type="button" aria-current="page" onClick={() => navigate(pathOf("machine"))}><Cpu size={17} />Machine</button></div>}
+        <div className="jg-stable-demo__context-footer">
+          <label className="jg-stable-demo__appearance">Appearance<select aria-label="Appearance" value={appearance} onChange={e => { const mode = e.target.value as Appearance; setAppearance(mode); applyAppearance(mode); }}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
+          <div className="jg-stable-demo__connection" role="status"><span className="jg-stable-demo__dot" data-ready={ready && !error} />{error ? "Connection error" : ready ? source.kind === "mock" ? "Design preview · sample data" : "Live Gateway" : "Connecting…"}</div>
+        </div>
+      </section>
     </aside>
     <main className="jg-stable-demo__main">
       <header className="jg-stable-demo__header">
