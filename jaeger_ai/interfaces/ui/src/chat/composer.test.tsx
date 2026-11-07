@@ -130,6 +130,52 @@ describe("refused attachments", () => {
   });
 });
 
+describe("composer while Jaeger is working", () => {
+  it("steers by default, can queue the next message, and keeps Stop separate", async () => {
+    const el = document.createElement("div");
+    document.body.append(el);
+    const root = createRoot(el);
+    const cancel = vi.fn();
+    const steer = vi.fn(async (sessionId: string, requestId: string) => ({ session_id: sessionId, request_id: requestId, steered: true }));
+    const enqueue = vi.fn(async (sessionId: string, _text: string, requestId: string) => ({ session_id: sessionId, request_id: requestId, status: "queued" }));
+    let started: StartTurnRequest | undefined;
+    const host = {
+      capabilities: { voice: false },
+      startTurn: vi.fn((request: StartTurnRequest) => { started = request; request.onAccepted?.(); return { cancel, done: new Promise(() => {}) }; }),
+      respondToConfirmation: vi.fn(), copy: vi.fn(), openExternal: vi.fn(),
+      sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [] })) },
+      sessionQueue: { list: vi.fn(async (id: string) => ({ session_id: id, items: [] })), steer, enqueue, update: vi.fn(), reorder: vi.fn(), status: vi.fn() },
+    } as unknown as ChatHost;
+    const type = async (value: string) => {
+      const field = el.querySelector<HTMLTextAreaElement>('.jg-composer__input')!;
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      await act(async () => { setter.call(field, value); field.dispatchEvent(new Event("input", { bubbles: true })); });
+    };
+    try {
+      await act(async () => { root.render(<MinimalChat host={host} sessionId="s1" />); });
+      await type("Begin the task");
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click(); });
+      expect(started).toBeTruthy();
+      expect(el.querySelector('button[aria-label="Stop current turn (⌘Esc)"]')).not.toBeNull();
+
+      await type("Use the compact layout");
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Steer current turn"]')!.click(); });
+      expect(steer).toHaveBeenCalledWith("s1", started!.turnId, "Use the compact layout");
+
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label^="Message action:"]')!.click(); });
+      await type("Run visual checks next");
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Queue follow-up"]')!.click(); });
+      expect(enqueue).toHaveBeenCalledWith("s1", "Run visual checks next", expect.any(String));
+
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Stop current turn (⌘Esc)"]')!.click(); });
+      expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      await act(async () => root.unmount());
+      el.remove();
+    }
+  });
+});
+
 describe("jump button (DOM)", () => {
   it("is always mounted, hidden at the bottom, and the chat root carries --jg-composer-h", async () => {
     const el = document.createElement("div");

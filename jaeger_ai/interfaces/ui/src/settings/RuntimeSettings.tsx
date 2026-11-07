@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { ModelInventory, ModelSettings, ModelChoiceSnapshot, ModelChoiceIntent, ModelChoiceReceipt } from "../api/source";
 import { useExclusivePopup } from "../popups/coordinator";
-import { ChevronDown, Search, X } from "../components/Icons";
+import { Bot, ChevronDown, Search, X } from "../components/Icons";
 
 /** Session choice only. Credentials, global routing and permissions stay Gateway-owned. */
 export function RuntimeSettings({ settings, sessionId, disabled = false }: { settings?: ModelSettings; sessionId?: string; disabled?: boolean }) {
@@ -88,7 +88,7 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
     finally{locked.current=false;setBusy(false);}
   };
   const select = (value: string) => { proposalRef.current={owner:sessionId,value};setSelected(value);if(base?.atomic_model_operations)try{localStorage.setItem(draftKey,value);}catch{setError("Model proposal could not be saved on this device; draft retained in memory");} };
-  return <div className="jg-runtime-picker"><button ref={trigger} type="button" className="jg-runtime-trigger" aria-label="Choose conversation model" title="Choose model" aria-expanded={open} disabled={disabled} onClick={() => { setQuery(""); setOpen(value => !value); }}><span>{currentLabel}</span><ChevronDown size={14} /></button>
+  return <div className="jg-runtime-picker"><button ref={trigger} type="button" className="jg-runtime-trigger" aria-label="Choose conversation model" title="Choose model" aria-expanded={open} disabled={disabled} onClick={() => { setQuery(""); setOpen(value => !value); }}><Bot size={14} /><span>{currentLabel}</span><ChevronDown size={14} /></button>
     {open && <section className="jg-runtime-menu" role="dialog" aria-label="Gateway models and settings" data-jg-popup>
       <header><strong>Model for this conversation</strong><button type="button" aria-label="Close model picker" onClick={() => setOpen(false)}><X size={16} /></button></header>
       <label className="jg-runtime-search"><Search size={15} /><input type="search" autoFocus value={query} onChange={e => setQuery(e.target.value)} placeholder="Search models…" aria-label="Search models" /></label>

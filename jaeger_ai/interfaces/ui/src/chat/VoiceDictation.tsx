@@ -1,14 +1,13 @@
 /**
  * VoiceDictation (unified UI, 2026-10-30): the Apple UI's voice button, made real.
  *
- * Hold (or click to toggle) the orb to dictate into the chat composer with the
- * browser's speech recognition. The orb level comes from the mic analyser
- * (VoiceOrb's useAudioLevel). Text is only inserted into the composer — nothing
+ * Click the microphone to dictate into the chat composer with the browser's
+ * speech recognition. Text is only inserted into the composer — nothing
  * is sent until the operator presses Send. Hidden where the browser has no
  * speech recognition (the native Mac app has its own voice controls).
  */
 import { useEffect, useRef, useState } from "react";
-import { VoiceOrb, useAudioLevel } from "../components/VoiceOrb";
+import { MicIcon } from "../icons";
 
 type Recognition = { lang: string; interimResults: boolean; continuous: boolean; start(): void; stop(): void;
   onresult: ((e: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null;
@@ -37,7 +36,6 @@ export function VoiceDictation() {
   const [listening, setListening] = useState(false);
   const [error, setError] = useState<string>();
   const rec = useRef<Recognition | null>(null);
-  const level = useAudioLevel(listening);
   useEffect(() => () => rec.current?.stop(), []);
   if (!Ctor) return null;
   const start = () => {
@@ -55,8 +53,8 @@ export function VoiceDictation() {
   const stop = () => { rec.current?.stop(); setListening(false); };
   return (
     <div className="jg-voice" data-listening={listening || undefined}>
-      <VoiceOrb state={listening ? "listening" : "idle"} audioLevel={level} size={36} onClick={() => (listening ? stop() : start())} />
-      <span className="jg-voice__label" role="status">{error ?? (listening ? "Listening… tap to stop" : "Dictate")}</span>
+      <button type="button" className={`jg-composer__icon${listening ? " is-listening" : ""}`} aria-label={listening ? "Stop dictation" : "Dictate message"} title={listening ? "Stop dictation" : "Dictate message"} aria-pressed={listening} onClick={() => (listening ? stop() : start())}><MicIcon /></button>
+      {(error || listening) && <span className="jg-voice__label" role="status">{error ?? "Listening… tap to stop"}</span>}
     </div>
   );
 }
