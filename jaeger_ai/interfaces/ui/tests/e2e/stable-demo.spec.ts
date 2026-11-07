@@ -89,7 +89,7 @@ test('a stale device-local selection resumes the durable Gateway conversation', 
   await expect.poll(() => page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).toBe(durable);
 });
 
-for (const width of [301, 320, 390, 1280]) {
+for (const width of [301, 320, 390, 502, 1280]) {
   test(`Chat and Tasks fit ${width}px in light and dark without browser exceptions`, async ({ page }) => {
     const errors: string[] = []; page.on('pageerror', e => errors.push(e.message));
     await page.setViewportSize({ width, height: 900 });
@@ -99,6 +99,11 @@ for (const width of [301, 320, 390, 1280]) {
       for (const name of ['Tasks', 'Chat']) {
         await pickPage(page, name);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      }
+      if (width <= 520) {
+        const composer = await page.locator('.jg-composer').boundingBox();
+        expect(composer, '.jg-composer must be visible').not.toBeNull();
+        expect(900 - composer!.y - composer!.height, '.jg-composer must use the bottom edge when the mobile dock is absent').toBeLessThanOrEqual(32);
       }
       if (width <= 320) {
         for (const selector of ['.jg-stable-demo__header', '.jg-composer', '.jg-composer__input', '.jg-composer__bar']) {
