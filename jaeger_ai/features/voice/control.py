@@ -79,6 +79,8 @@ def serve():
                     try:
                         action = connection.recv(128).decode().strip()
                         if action != "status":
+                            if process and process.poll() is None and (run / "status.json").exists():
+                                mode = json.loads((run / "status.json").read_text()).get("mode", mode)
                             mode = next_mode(mode if process and process.poll() is None else "off", action)
                             stop_worker()
                             (run / "status.json").unlink(missing_ok=True)
@@ -156,13 +158,30 @@ def worker(mode):
         report(state="loading speech", duplex=duplex, input_device=input_device, output_device=output_device)
         speaker.warm()
         listener = WhisperSTTContinuous(bus=bus, model_name=config.get("stt_model", "base.en"), phrase_timeout_s=0.6)
-        if mode == "video":
+        def set_camera(enabled):
+            nonlocal vision
+            if not enabled:
+                if vision:
+                    vision.close()
+                    vision = None
+                report(mode="voice", camera="off")
+                return None
+            if vision:
+                return vision
             model_path = config.get("vision_model_path")
             if not model_path or not Path(model_path).is_dir():
                 raise RuntimeError("Video chat needs a cached local Moondream model in conversation.json")
             vision = LocalVision(int(config.get("camera_index", 0)), model_path, report)
             vision.start()
-        conversation = Conversation(listener, speaker, vision=vision, duplex=duplex, report=report)
+            report(mode="video")
+            return vision
+
+        if mode == "video":
+            set_camera(True)
+        conversation = Conversation(
+            listener, speaker, vision=vision, duplex=duplex, report=report,
+            set_camera=set_camera, share_visual_context=config.get("share_visual_context") is True,
+        )
         conversation.run()
     except KeyboardInterrupt:
         return 0

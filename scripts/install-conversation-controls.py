@@ -22,6 +22,7 @@ def main():
     parser.add_argument("--camera-index", type=int, default=0)
     parser.add_argument("--vision-model-path", required=True)
     parser.add_argument("--install-deck", action="store_true")
+    parser.add_argument("--visual-context", choices=["local", "cloud"], help="Keep visual answers local or share text descriptions with the Gateway model")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(repo))
@@ -34,15 +35,28 @@ def main():
     if not model.is_dir():
         raise SystemExit("Local vision model directory does not exist")
     config = root / "conversation.json"
+    settings = json.loads(config.read_text()) if config.exists() else {}
     if config.exists():
         shutil.copy2(config, config.with_suffix(f".backup-{time.time_ns()}.json"))
-    config.write_text(json.dumps({"input_device": args.input_device, "output_device": args.output_device,
-                                  "camera_index": args.camera_index, "vision_model_path": str(model)}, indent=2))
+    settings.update(input_device=args.input_device, output_device=args.output_device,
+                    camera_index=args.camera_index, vision_model_path=str(model))
+    if args.visual_context is not None:
+        settings["share_visual_context"] = args.visual_context == "cloud"
+    settings.setdefault("share_visual_context", False)
+    config.write_text(json.dumps(settings, indent=2))
     config.chmod(0o600)
     label = "com.jenkinsrobotics.jaeger.conversation"
     agents = Path.home() / "Library/LaunchAgents"
     agents.mkdir(parents=True, exist_ok=True)
     plist = agents / f"{label}.plist"
+    domain = f"gui/{os.getuid()}"
+    service = f"{domain}/{label}"
+    subprocess.run(["launchctl", "bootout", service], capture_output=True)
+    deadline = time.monotonic() + 10
+    while subprocess.run(["launchctl", "print", service], capture_output=True).returncode == 0:
+        if time.monotonic() >= deadline:
+            raise SystemExit("Previous conversation service did not unload")
+        time.sleep(0.2)
     environment = {"PYTHONDONTWRITEBYTECODE": "1", "PYTHONUNBUFFERED": "1",
                    "PYTHONPATH": os.pathsep.join(str(repo / path) for path in
                        (".", "packages/jaeger-os", "packages/jaeger-agent",
@@ -70,8 +84,6 @@ def main():
                       "RunAtLoad": True, "KeepAlive": True, "ThrottleInterval": 10,
                       "StandardOutPath": str(logs / "conversation-control.log"),
                       "StandardErrorPath": str(logs / "conversation-control.log")}, output)
-    domain = f"gui/{os.getuid()}"
-    subprocess.run(["launchctl", "bootout", f"{domain}/{label}"], capture_output=True)
     subprocess.run(["launchctl", "bootstrap", domain, str(plist)], check=True)
 
     if args.install_deck:
