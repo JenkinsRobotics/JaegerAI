@@ -248,6 +248,7 @@ export interface JaegerSource {
   tools?(query?: string): Promise<ToolInventory>;
   specialistControls?: SpecialistControls;
   sessionQueue?: SessionQueue;
+  runtimeAutonomy?(): Promise<{ autonomy: "ask" | "scoped" | "auto"; options: string[] }>;
   messageReactions?: {
     load(sessionId: string): Promise<ReactionSnapshot>;
     save(sessionId: string, body: { request_id: string; role: "user" | "assistant"; emoji: string; active: boolean }): Promise<ReactionSnapshot>;

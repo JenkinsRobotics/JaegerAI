@@ -6,6 +6,7 @@ import { WebHost } from "./webHost";
 import type { JaegerSource } from "../api/source";
 import type { ChatHost, StartTurnRequest } from "./host";
 import { MinimalChat } from "./MinimalChat";
+import { GatewayError } from "../api/gateway";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -131,7 +132,7 @@ describe("refused attachments", () => {
 });
 
 describe("composer while Jaeger is working", () => {
-  it("steers by default, can queue the next message, and keeps Stop separate", async () => {
+  it("sends like normal chat, exposes Queue next separately, and keeps Stop separate", async () => {
     const el = document.createElement("div");
     document.body.append(el);
     const root = createRoot(el);
@@ -159,16 +160,59 @@ describe("composer while Jaeger is working", () => {
       expect(el.querySelector('button[aria-label="Stop current turn (⌘Esc)"]')).not.toBeNull();
 
       await type("Use the compact layout");
-      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Steer current turn"]')!.click(); });
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!.click(); });
       expect(steer).toHaveBeenCalledWith("s1", started!.turnId, "Use the compact layout");
+      expect(el.querySelector('[aria-label="Message sent to the active turn"] .jg-bubble--user')?.textContent).toBe("Use the compact layout");
+      expect(el.querySelector('[aria-label="Message sent to the active turn"] .jg-busy-message__status')?.textContent).toBe("Sent to Jaeger");
+      expect(el.querySelector('[aria-label^="Message action:"]')).toBeNull();
+      expect(el.querySelector('.jg-composer__chips')?.textContent ?? "").not.toContain("Steered");
 
-      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label^="Message action:"]')!.click(); });
       await type("Run visual checks next");
-      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Queue follow-up"]')!.click(); });
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Queue next message"]')!.click(); });
       expect(enqueue).toHaveBeenCalledWith("s1", "Run visual checks next", expect.any(String));
+      expect(el.querySelector('[aria-label="Message queued for the next turn"] .jg-bubble--user')?.textContent).toBe("Run visual checks next");
+      expect(el.querySelector('[aria-label="Message queued for the next turn"] .jg-busy-message__status')?.textContent).toBe("Queued next");
+      expect(el.querySelector('.jg-composer__chips')?.textContent ?? "").not.toContain("Queued for the next turn");
 
       await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Stop current turn (⌘Esc)"]')!.click(); });
       expect(cancel).toHaveBeenCalledOnce();
+    } finally {
+      await act(async () => root.unmount());
+      el.remove();
+    }
+  });
+
+  it("keeps a rejected steer in the normal message field", async () => {
+    const el = document.createElement("div");
+    document.body.append(el);
+    const root = createRoot(el);
+    let started: StartTurnRequest | undefined;
+    const host = {
+      capabilities: { voice: false },
+      startTurn: vi.fn((request: StartTurnRequest) => { started = request; request.onAccepted?.(); return { cancel() {}, done: new Promise(() => {}) }; }),
+      respondToConfirmation: vi.fn(), copy: vi.fn(), openExternal: vi.fn(),
+      sessions: { list: vi.fn(), load: vi.fn(async (id: string) => ({ id, title: "t", turns: [] })) },
+      sessionQueue: {
+        list: vi.fn(async (id: string) => ({ session_id: id, items: [] })),
+        steer: vi.fn(async () => { throw new GatewayError("no active ReAct agent", 409); }),
+        enqueue: vi.fn(), update: vi.fn(), reorder: vi.fn(), status: vi.fn(),
+      },
+    } as unknown as ChatHost;
+    const type = async (value: string) => {
+      const field = el.querySelector<HTMLTextAreaElement>('.jg-composer__input')!;
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!;
+      await act(async () => { setter.call(field, value); field.dispatchEvent(new Event("input", { bubbles: true })); });
+    };
+    try {
+      await act(async () => { root.render(<MinimalChat host={host} sessionId="s1" />); });
+      await type("Begin the task");
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Send"]')!.click(); });
+      expect(started).toBeTruthy();
+      await type("Keep this instruction");
+      await act(async () => { el.querySelector<HTMLButtonElement>('button[aria-label="Send message"]')!.click(); });
+      expect(el.querySelector<HTMLTextAreaElement>('.jg-composer__input')!.value).toBe("Keep this instruction");
+      expect(el.querySelector('.jg-composer__notice')?.textContent).toContain("use Queue next");
+      expect(el.querySelector('[aria-label="Message sent to the active turn"]')).toBeNull();
     } finally {
       await act(async () => root.unmount());
       el.remove();

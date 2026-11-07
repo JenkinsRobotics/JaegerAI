@@ -28,6 +28,7 @@ function storedSession() { try { return localStorage.getItem(DEMO_SESSION_KEY) |
 function storedPins() { try { return new Set<string>(JSON.parse(localStorage.getItem(PINNED_SESSION_KEY) || "[]")); } catch { return new Set<string>(); } }
 function storedSidebarWidth() { try { return clampWidth(Number(localStorage.getItem(SIDEBAR_WIDTH_KEY) || SIDEBAR.defaultWidth)); } catch { return SIDEBAR.defaultWidth; } }
 function projectLabel(workspace: string) { return workspace.split(/[\\/]/).filter(Boolean).pop() || workspace; }
+function sessionActivity(row: SessionRow) { return row.last_activity_at ?? row.updated_at ?? row.created_at ?? 0; }
 function SummaryGlyph() { return <svg aria-hidden="true" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><circle cx="6" cy="7" r="2"/><path d="M11 7h8"/><circle cx="6" cy="17" r="2"/><path d="M11 17h8"/></svg>; }
 function TabsGlyph({ count }: { count: number }) { return <span className="jg-stable-demo__tabs-glyph" aria-hidden="true"><span>{count}</span></span>; }
 type HeaderPopup = "menu" | "summary" | "tabs" | null;
@@ -101,7 +102,16 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   useEffect(() => {
     let live = true;
     source.sessions({ agent_id: "native:jaeger" }).then(rows => {
-      if (live) { setRecent(rows.filter(row => !row.archived)); setHistoryError(""); }
+      if (!live) return;
+      const available = rows.filter(row => !row.archived).sort((a, b) => sessionActivity(b) - sessionActivity(a));
+      setRecent(available);
+      setHistoryError("");
+      // A new browser has no device-local selection yet. Open Jaeger's most recently active
+      // durable conversation so Mac and iPhone land in the same place without creating a chat.
+      if (source.kind === "live" && !session && available[0]) {
+        setSession(available[0].session_id);
+        try { localStorage.setItem(DEMO_SESSION_KEY, available[0].session_id); } catch { /* still usable for this visit */ }
+      }
     }, e => { if (live) setHistoryError(String((e as Error).message)); });
     return () => { live = false; };
   }, [source, session]);
@@ -341,7 +351,6 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       <section className="jg-stable-demo__body jg-stable-demo__body--workspace" hidden={!workspacePage} aria-label={routeTitle[route.page]}>
         {workspacePage && <AppWindow source={source} embedded />}
       </section>
-      <footer className="jg-stable-demo__footer">Saved by Gateway · Automatic recovery after worker interruption is not verified.</footer>
     </main>
     <nav className="jg-stable-demo__mobile-dock" aria-label="Mobile navigation">
       <button type="button" aria-current={activeSection === "chat" ? "page" : undefined} onClick={() => { navigate("/"); setSidebarOpen(false); }}><MessageSquare size={20} /><span>Chat</span></button>

@@ -48,6 +48,7 @@ export function normalizeFrame(frame: SSEFrame): GatewayEvent {
 export class GatewayClient implements JaegerSource {
   readonly kind = "live" as const;
   constructor(private readonly base = "") {}
+  runtimeAutonomy = () => this.json<{ autonomy: "ask" | "scoped" | "auto"; options: string[] }>("/v1/runtime/autonomy");
   sessionQueue: SessionQueue = {
     list: id => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`),
     enqueue: (id, text, request_id) => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue`, { text, request_id }),
