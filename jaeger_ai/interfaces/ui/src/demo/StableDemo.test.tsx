@@ -188,3 +188,23 @@ it("resizes the navigation with the accessible separator and remembers the width
  expect(shell.style.getPropertyValue("--jg-stable-sidebar-width")).toBe("400px");
  expect(localStorage.getItem("jaeger.stable-demo.sidebar-width.v1")).toBe("400");
 });
+
+it("keeps the icon rail beside a context panel that changes with the selected tab", async () => {
+ await mount();
+ const rail=document.querySelector('.jg-stable-demo__rail')!;
+ const context=document.querySelector('.jg-stable-demo__context')!;
+ expect(rail.parentElement).toBe(context.parentElement);
+ const choose=async (name:string)=>flush(()=>rail.querySelector<HTMLButtonElement>(`button[aria-label="${name}"]`)!.click());
+ await choose('Library');
+ expect(context.getAttribute('aria-label')).toBe('Library sidebar');
+ expect(context.textContent).toContain('Documents');
+ expect(context.textContent).not.toContain('New conversation');
+ const documents=[...context.querySelectorAll('button')].find(button=>button.textContent==='Documents')!;
+ await flush(()=>documents.click());
+ expect(location.pathname+location.search).toBe('/library?section=documents');
+ await choose('Agents');
+ expect(context.textContent).toContain('Agent team');
+ await choose('Chat');
+ expect(context.textContent).toContain('New conversation');
+ expect(document.querySelector('[aria-label="Mobile navigation"]')).toBeNull();
+});

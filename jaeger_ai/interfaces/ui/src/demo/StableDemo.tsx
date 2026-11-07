@@ -13,10 +13,10 @@ import { TaskArtifacts } from "../library/TaskArtifacts";
 import { WorkspaceBrowser } from "../unified/WorkspaceBrowser";
 import { AgentFace } from "../unified/AgentFace";
 import { AgentAvatar } from "../agents/AgentAvatar";
-import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, Bot, Workflow, Search, Code, Image, Compass, Cpu, MoreHorizontal, Pencil, Pin, Share, Copy, Clock, ChevronLeft, ChevronRight, Trash2 } from "../components/Icons";
+import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, Bot, Workflow, Search, Image, Compass, Cpu, MoreHorizontal, Pencil, Pin, Share, Copy, Clock, ChevronLeft, ChevronRight, Trash2 } from "../components/Icons";
 import "./stableDemo.css";
 import { SettingsWorkspace } from "./SettingsWorkspace";
-import { navigate, pathOf, useRoute, type PageId } from "../shell/router";
+import { navigate, pathOf, useRoute, SUBTABS, type PageId } from "../shell/router";
 import { AppWindow } from "../windows/AppWindow";
 import { clampWidth, SIDEBAR } from "../shell/sidebarSizing";
 
@@ -254,14 +254,14 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     <aside id="jaeger-navigation" hidden={!sidebarOpen} className="jg-stable-demo__sidebar" aria-label="Jaeger navigation">
       <div className="jg-stable-demo__rail">
         <button type="button" aria-label="Close sidebar" title="Close sidebar" aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(false)}><PanelLeft size={20} /></button>
-        <nav aria-label="Jaeger navigation" onClick={event => { if ((event.target as Element).closest("button") && window.matchMedia("(max-width: 820px)").matches) setSidebarOpen(false); }}>
+        <nav aria-label="Jaeger navigation">
           {([
             ["chat", "Chat", MessageSquare], ["studio", "Imagine", Image],
             ["library", "Library", FolderOpen], ["automations", "Automations", Clock],
             ["feed", "Feed", Compass], ["agents", "Agents", Bot],
-          ] as const).map(([id, title, Icon]) => <button key={id} type="button" aria-label={title} aria-current={route.page === id ? "page" : undefined} onClick={() => navigate(pathOf(id))}><Icon size={20} /><span>{title}</span></button>)}
-          <details className="jg-stable-demo__more"><summary>More tools</summary>
-            {([["work", "Work", Workflow], ["research", "Research", Search], ["machine", "Machine", Cpu]] as const).map(([id,title,Icon]) => <button key={id} type="button" aria-label={title} onClick={() => navigate(pathOf(id))}><Icon size={20}/><span>{title}</span></button>)}
+          ] as const).map(([id, title, Icon]) => <button key={id} type="button" title={title} aria-label={title} aria-current={route.page === id ? "page" : undefined} onClick={() => navigate(pathOf(id))}><Icon size={20} /><span>{title}</span></button>)}
+          <details className="jg-stable-demo__more"><summary aria-label="More tools" title="More tools"><MoreHorizontal size={20} /></summary>
+            {([["work", "Work", Workflow], ["research", "Research", Search], ["machine", "Machine", Cpu]] as const).map(([id,title,Icon]) => <button key={id} type="button" title={title} aria-label={title} onClick={() => navigate(pathOf(id))}><Icon size={20}/><span>{title}</span></button>)}
           <button type="button" aria-label="Tasks" aria-current={activeSection === "tasks" ? "page" : undefined} onClick={() => navigate(pathOf("work", "tasks"))}><CheckCircle size={20} /><span>Tasks</span></button>
           </details>
         </nav>
@@ -294,9 +294,11 @@ export function StableDemo({ source }: { source: JaegerSource }) {
           </div>
         </>}
         {activeSection === "agents" && <div className="jg-stable-demo__context-list"><h2>Agent team</h2>{agents.map(row => <button key={row.id} type="button" onClick={() => navigate(pathOf("agents"))}><Bot size={17} />{row.display_name || row.name || row.id}</button>)}</div>}
-        {(activeSection === "work" || activeSection === "tasks") && <div className="jg-stable-demo__context-list"><h2>Workspace</h2><button type="button" aria-current={activeSection === "work" ? "page" : undefined} onClick={() => navigate(pathOf("work"))}><Workflow size={17} />Work</button><button type="button" aria-current={activeSection === "tasks" ? "page" : undefined} onClick={() => navigate(pathOf("work", "tasks"))}><CheckCircle size={17} />Tasks</button></div>}
-        {activeSection === "research" && <div className="jg-stable-demo__context-list"><h2>Explore</h2><button type="button" aria-current="page" onClick={() => navigate(pathOf("research"))}><Search size={17} />Research</button></div>}
-        {activeSection === "studio" && <div className="jg-stable-demo__context-list"><h2>Build</h2><button type="button" aria-current={route.page === "studio" ? "page" : undefined} onClick={() => navigate(pathOf("studio"))}><Code size={17} />Studio</button><button type="button" aria-current={route.page === "models" ? "page" : undefined} onClick={() => navigate(pathOf("models"))}><Bot size={17} />Models</button></div>}
+        {(route.page === "work" || route.page === "research") && <div className="jg-stable-demo__context-list"><h2>{route.page === "work" ? "Your work" : "Explore"}</h2>{SUBTABS[route.page]?.map(tab => <button type="button" key={tab.id} aria-current={route.sub === tab.id ? "page" : undefined} onClick={() => navigate(pathOf(route.page,tab.id))}>{tab.title}</button>)}</div>}
+        {activeSection === "studio" && <div className="jg-stable-demo__context-list"><h2>Create with Jaeger</h2>{[["create","Generate images"],["library","Saved images"],["board","Idea board"]].map(([section,title]) => <button type="button" key={section} aria-current={(route.params.get("section") || "create") === section ? "page" : undefined} onClick={() => navigate(`/studio?section=${section}`)}>{title}</button>)}</div>}
+        {activeSection === "library" && <div className="jg-stable-demo__context-list"><h2>Your library</h2>{[["media","Media"],["documents","Documents"],["outputs","Task outputs"]].map(([section,title]) => <button type="button" key={section} aria-current={(route.params.get("section") || "media") === section ? "page" : undefined} onClick={() => navigate(`/library?section=${section}`)}>{title}</button>)}</div>}
+        {activeSection === "automations" && <div className="jg-stable-demo__context-list"><h2>Routines</h2><button type="button" aria-current="page" onClick={() => navigate("/automations")}>Schedules and run history</button><p>Manage schedules, pause a routine, or review its latest runs.</p></div>}
+        {activeSection === "feed" && <div className="jg-stable-demo__context-list"><h2>From Jaeger</h2><button type="button" aria-current="page" onClick={() => navigate("/feed")}>Agent updates</button><p>Recent activity and updates from your agent.</p></div>}
         {activeSection === "machine" && <div className="jg-stable-demo__context-list"><h2>System</h2><button type="button" aria-current="page" onClick={() => navigate(pathOf("machine"))}><Cpu size={17} />Machine</button></div>}
         <div className="jg-stable-demo__context-footer">
           <label className="jg-stable-demo__appearance">Appearance<select aria-label="Appearance" value={appearance} onChange={e => { const mode = e.target.value as Appearance; setAppearance(mode); applyAppearance(mode); }}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label>

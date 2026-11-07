@@ -31,14 +31,15 @@ async function openChat(page: Page) {
 
 async function pickPage(page: Page, name: string) {
   if (!await page.locator('#jaeger-navigation').isVisible()) await page.getByRole('button', {name:'Toggle navigation'}).click();
-  if (['Work','Research','Machine','Tasks'].includes(name) && !await page.locator('.jg-stable-demo__more').evaluate(el => (el as HTMLDetailsElement).open)) await page.getByText('More tools', {exact:true}).click();
+  if (['Work','Research','Machine','Tasks'].includes(name) && !await page.locator('.jg-stable-demo__more').evaluate(el => (el as HTMLDetailsElement).open)) await page.getByLabel('More tools', {exact:true}).click();
   await page.getByRole('navigation', {name:'Jaeger navigation'}).getByRole('button', {name, exact:true}).click();
+  if ((page.viewportSize()?.width ?? 1280) <= 820) await page.getByRole('button', {name:'Close sidebar'}).click();
 }
 
 test('default screen exposes the current workspace navigation and chat controls', async ({ page }) => {
   await openChat(page);
   if (!await page.locator('#jaeger-navigation').isVisible()) await page.getByRole('button', {name:'Toggle navigation'}).click();
-  await page.getByText('More tools', {exact:true}).click();
+  await page.getByLabel('More tools', {exact:true}).click();
   await expect(page.getByRole('navigation', { name: 'Jaeger navigation' }).getByRole('button')).toHaveText(['Chat', 'Imagine', 'Library', 'Automations', 'Feed', 'Agents', 'Work', 'Research', 'Machine', 'Tasks']);
   await expect(page.locator('header[aria-label="Conversation toolbar"]')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Toggle navigation' })).toBeVisible();

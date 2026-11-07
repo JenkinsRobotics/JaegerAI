@@ -3,10 +3,10 @@
 ## Shipped foundation
 
 The existing Agents tabs remain unchanged. Chat retains its durable session and
-mounted conversation while navigating. The outer shell uses one labeled sidebar;
+mounted conversation while navigating. The outer shell uses a narrow icon rail beside a tab-specific context panel;
 secondary work/research/machine/task destinations live under More tools. There is
-no second bottom dock. On small screens the drawer closes after choosing a
-page, via its close control, Escape, or the backdrop.
+no second bottom dock. Selecting a tab keeps its context panel open. The drawer closes via its close
+control, Escape, or the backdrop.
 
 - Imagine: existing Studio providers, generation, asset imports and board.
 - Library: Media, Documents and Outputs reuse Studio, LibraryControls and
