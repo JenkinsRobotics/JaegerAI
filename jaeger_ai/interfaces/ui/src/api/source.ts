@@ -277,6 +277,8 @@ export interface JaegerSource {
   requestStatus?(sessionId: string, requestId: string): Promise<RequestSnapshot>;
   /** Owner accepts an unknown outcome: nothing is replayed; the request stays execution_unknown. */
   acknowledgeUnknown?(sessionId: string, requestId: string): Promise<RequestSnapshot>;
+  /** Read the durable decision so reloaded transcripts do not leave resolved approval cards active. */
+  approvalStatus?(approvalId: string): Promise<PendingApproval & { decision?: string; resolved_at?: number }>;
   sessionControl?(sessionId: string): Promise<{ latest_request?: { request_id: string; status: string } | null }>;
   readonly kind: "live" | "mock";
   agents(): Promise<Agent[]>;
@@ -286,6 +288,8 @@ export interface JaegerSource {
   createSession(body: { agent_id?: string; title?: string }): Promise<SessionRow>;
   /** PATCH /v1/sessions/{id}: rename or archive a chat. */
   updateSession(id: string, body: { title?: string; archived?: boolean }): Promise<void>;
+  /** DELETE /v1/sessions/{id}: permanently remove the Gateway-owned session and its dependent records. */
+  deleteSession?(id: string): Promise<{ deleted: boolean }>;
   /** POST /v1/agents: a new specialist the lead can hand work to. */
   /** Agent context-menu actions (agentActions.ts); optional, gated by agentCaps. */
   agentActions?: AgentActions;

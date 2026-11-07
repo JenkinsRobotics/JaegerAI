@@ -363,6 +363,10 @@ export class WebHost implements ChatHost {
   async respondToConfirmation(turnId: string, callId: string, decision: "approve" | "deny") {
     await this.source.approve(turnId, callId, decision === "approve");
   }
+  approvalStatus(approvalId: string) {
+    if (!this.source.approvalStatus) return Promise.reject(new Error("Approval status lookup is unavailable"));
+    return this.source.approvalStatus(approvalId);
+  }
 
   sessions = {
     list: async () => (await this.source.sessions()).map((s) => ({

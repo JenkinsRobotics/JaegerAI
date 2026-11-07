@@ -235,6 +235,9 @@ export class GatewayClient implements JaegerSource {
   async updateSession(id: string, body: { title?: string; archived?: boolean }) {
     await this.json(`/v1/sessions/${encodeURIComponent(id)}`, body, "PATCH");
   }
+  deleteSession(id: string) {
+    return this.json<{ deleted: boolean }>(`/v1/sessions/${encodeURIComponent(id)}`, undefined, "DELETE");
+  }
   // Finance is DEPRECATED (removal in v0.14.0) and its /v1/finance routes are
   // not mounted, so the gateway source exposes no finance controls and
   // Settings hides the Spending limits tab instead of showing a 404.
@@ -338,6 +341,9 @@ export class GatewayClient implements JaegerSource {
   async pendingApprovals(sessionId: string): Promise<PendingApproval[]> {
     const data = await this.json<{ approvals: PendingApproval[] }>(`/v1/approvals?session_id=${encodeURIComponent(sessionId)}`);
     return data.approvals;
+  }
+  approvalStatus(approvalId: string) {
+    return this.json<PendingApproval & { decision?: string; resolved_at?: number }>(`/v1/approvals/${encodeURIComponent(approvalId)}`);
   }
   async clarifications(sessionId: string): Promise<ClarificationSnapshot[]> {
     const data = await this.json<{ forms: ClarificationSnapshot[] }>(`/v1/sessions/${encodeURIComponent(sessionId)}/clarify?include_resolved=true`);

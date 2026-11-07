@@ -704,6 +704,21 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
 
   /** Decisions made here; only ever set by a click on Allow once / Deny once (never automatically). */
   const [decisions, setDecisions] = useState<Record<string, "approve" | "deny">>({});
+  const checkedApprovalIds = useRef(new Set<string>());
+  useEffect(() => { checkedApprovalIds.current.clear(); setDecisions({}); }, [sessionId]);
+  useEffect(() => {
+    if (!host.approvalStatus || !session) return;
+    const ids = [...new Set(session.turns.flatMap(turn => turn.parts.flatMap(part => part.kind === "confirmation" ? [part.callId] : [])))];
+    for (const id of ids) {
+      if (!id || checkedApprovalIds.current.has(id)) continue;
+      checkedApprovalIds.current.add(id);
+      void host.approvalStatus(id).then(snapshot => {
+        if (snapshot.status === "pending") return;
+        const decision: "approve" | "deny" = ["deny", "cancelled", "expired"].includes(snapshot.decision ?? snapshot.status) ? "deny" : "approve";
+        setDecisions(current => ({ ...current, [id]: decision }));
+      }).catch(() => { /* an unknown card stays visible rather than guessing its decision */ });
+    }
+  }, [host, session, sessionId]);
   const decidingIds = useRef(new Set<string>());
   const decide = (turnId: string): Decide => (callId, decision) => {
     if (decisions[callId] || decidingIds.current.has(callId)) return;
@@ -715,7 +730,17 @@ export function MinimalChat({ host, sessionId, agents }: { host: ChatHost; sessi
       parts: t.parts.map((p) =>
         p.kind === "toolInvocation" && p.callId === callId ? { ...p, state: decision === "approve" ? "executing" : "denied" } : p),
       }));
-    }, error => updateTurn(turnId, t => ({ ...t, parts: [...t.parts, { kind: "error", message: `Approval decision not confirmed: ${String(error)}` }] })))
+    }, async error => {
+      try {
+        const snapshot = await host.approvalStatus?.(callId);
+        if (snapshot && snapshot.status !== "pending") {
+          const settled: "approve" | "deny" = ["deny", "cancelled", "expired"].includes(snapshot.decision ?? snapshot.status) ? "deny" : "approve";
+          setDecisions(current => ({ ...current, [callId]: settled }));
+          return;
+        }
+      } catch { /* report the original decision failure below */ }
+      updateTurn(turnId, t => ({ ...t, parts: [...t.parts, { kind: "error", message: `Approval decision not confirmed: ${String(error)}` }] }));
+    })
       .finally(() => decidingIds.current.delete(callId));
   };
 
