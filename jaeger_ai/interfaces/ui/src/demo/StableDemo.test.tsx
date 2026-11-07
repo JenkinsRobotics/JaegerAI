@@ -26,3 +26,28 @@ it("retains a saved session and reports a connection failure without replacing i
  localStorage.setItem(DEMO_SESSION_KEY,'existing-session');const source=new MockSource();vi.spyOn(source,'session').mockRejectedValue(new Error('Gateway unavailable'));const create=vi.spyOn(source,'createSession');await mount(source);
  expect(document.querySelector('[role=alert]')?.textContent).toContain('Gateway unavailable');expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('existing-session');expect(create).not.toHaveBeenCalled();
 });
+
+it("switches saved conversations without creating a session and keeps the selected chat usable", async () => {
+ const source = new MockSource();
+ vi.spyOn(source, 'sessions').mockResolvedValue([{session_id: 'saved', title: 'Saved work', agent_id: 'native:jaeger'}]);
+ vi.spyOn(source, 'session').mockResolvedValue({session_id: 'saved'} as never);
+ const create = vi.spyOn(source, 'createSession');
+ await mount(source);
+ const saved = [...document.querySelectorAll('button')].find(b => b.textContent === 'Saved work')!;
+ await flush(() => saved.click());
+ expect(document.querySelector('[data-chat-session]')?.getAttribute('data-chat-session')).toBe('saved');
+ await flush(() => saved.click());
+ expect(document.querySelector('[data-chat-session]')).not.toBeNull();
+ expect(create).not.toHaveBeenCalled();
+ expect(localStorage.getItem(DEMO_SESSION_KEY)).toBe('saved');
+});
+it("opens and closes the work panel without replacing the conversation", async () => {
+ await mount();
+ const toggle = [...document.querySelectorAll('button')].find(b => b.textContent === 'Work panel')!;
+ if (!document.querySelector('#jaeger-work-panel')) await flush(() => toggle.click());
+ await flush(() => [...document.querySelectorAll('button')].find(b => b.textContent === 'Files & changes')!.click());
+ expect(document.querySelector('#jaeger-work-panel')?.textContent).toContain('Start a conversation');
+ await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Close work panel"]')!.click());
+ expect(document.querySelector('#jaeger-work-panel')).toBeNull();
+ expect(toggle.getAttribute('aria-expanded')).toBe('false');
+});
