@@ -326,7 +326,7 @@ button.jg-handoff__chip:hover { color: var(--aether-color-text); background: col
 .jg-amenu__glyph { flex: none; width: 18px; height: 18px; }
 
 /* Only live execution can animate; waiting/queued/history/unread are static. */
-.jg-avatar:not([data-running="true"]), .jg-avatar:not([data-running="true"]) *, .jg-avatar:not([data-running="true"])::before, .jg-avatar:not([data-running="true"])::after { animation: none !important; }
+.jg-avatar:not([data-running="true"]):not(.jg-avatar--character), .jg-avatar:not([data-running="true"]):not(.jg-avatar--character) *, .jg-avatar:not([data-running="true"]):not(.jg-avatar--character)::before, .jg-avatar:not([data-running="true"]):not(.jg-avatar--character)::after { animation: none !important; }
 .jg-avatar__robot { width: 100%; height: 100%; }
 .jg-avatar[data-running="true"] .jg-avatar__robot { animation: jg-robot-work 1.2s ease-in-out infinite alternate; }
 @keyframes jg-robot-work { to { transform: translateY(-2px); } }

@@ -10,6 +10,11 @@ import { HandoffMarker } from "./HandoffMarker";
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 describe("avatar silhouettes", () => {
+  it("uses the articulated character for Jaeger while preserving image and preset overrides", () => {
+    expect(renderToStaticMarkup(<AgentAvatar id="native:jaeger" name="Jaeger" />)).toContain('jg-character__forearm');
+    expect(renderToStaticMarkup(<AgentAvatar id="native:jaeger" name="Jaeger" src="/custom.png" />)).not.toContain('jg-character__forearm');
+    expect(renderToStaticMarkup(<AgentAvatar id="native:jaeger" name="Jaeger" preset="robot-square" />)).not.toContain('jg-character__forearm');
+  });
   it("picks a stable shape per id, spread over the set, supervisor round", () => {
     expect(avatarShape("agent:swe")).toBe(avatarShape("agent:swe"));
     expect(avatarShape("native:jaeger")).toBe("squircle");

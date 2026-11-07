@@ -6,6 +6,6 @@ import { label } from "../agents/agentsLogic";
 
 export function AgentFace({ agent, size = 28, status }: { agent: Agent; size?: number; status?: string }) {
   const [robots] = useRobotIcons();
-  if (agent.avatar_url || !robots) return <AgentAvatar id={agent.id} name={label(agent)} src={agent.avatar_url} size={size} primary={agent.primary} />;
+  if (agent.id === "native:jaeger" || agent.avatar_url || !robots) return <AgentAvatar id={agent.id} name={label(agent)} src={agent.avatar_url} size={size} primary={agent.primary} />;
   return <RobotIcon id={agent.id} name={label(agent)} size={size} status={status} />;
 }
