@@ -59,7 +59,7 @@ describe("activity", () => {
     expect(thinkingPhrase("abc")).toBe(thinkingPhrase("abc"));
     expect(new Set(["a", "b", "c", "d", "e", "f"].map(thinkingPhrase)).size).toBeGreaterThan(1);
     expect(new Set(["a", "b", "c", "d", "e", "f", "g", "h"].map(workingPhrase)).size).toBeGreaterThan(1);
-    expect(activityPhrase({ turnId: "abc", parts: [{ kind: "thinking" }] })).toBe(thinkingPhrase("abc"));
+    expect(activityPhrase({ turnId: "abc", parts: [{ kind: "thinking", text: "" }] })).toBe(thinkingPhrase("abc"));
   });
 
   it("summarises steps in first-seen order", () => {
