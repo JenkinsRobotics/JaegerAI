@@ -9,11 +9,11 @@
 import { useEffect, useState } from "react";
 import { LEGACY_SETTINGS } from "../settings/registry";
 
-export type PageId = "home" | "chat" | "agents" | "work" | "research" | "studio" | "models" | "machine" | "settings";
+export type PageId = "library" | "automations" | "feed" | "home" | "chat" | "agents" | "work" | "research" | "studio" | "models" | "machine" | "settings";
 
 /** Rev 3: six primary destinations; Settings is a separate gear. Retired IDs stay typed for legacy callers only. */
 export const PRIMARY_PAGES = ["chat", "agents", "work", "research", "studio", "machine"] as const;
-export const PAGES: readonly PageId[] = [...PRIMARY_PAGES, "settings"];
+export const PAGES: readonly PageId[] = [...PRIMARY_PAGES, "library", "automations", "feed", "settings"];
 
 /** Sub-tabs of merged pages, in display order; the first is the default. */
 export const SUBTABS: Partial<Record<PageId, readonly { id: string; title: string }[]>> = {

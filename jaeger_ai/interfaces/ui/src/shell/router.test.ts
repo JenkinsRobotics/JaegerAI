@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import { LEGACY_PATHS, PAGES, SUBTABS, canonicalPath, legacyRedirect, parseRoute, pathOf } from "./router";
 
 describe("router", () => {
-  it("has six tabs and a separate settings destination", () => {
-    expect(PAGES).toEqual(["chat", "agents", "work", "research", "studio", "machine", "settings"]);
+  it("keeps existing routes and exposes companion destinations", () => {
+    expect(PAGES).toEqual(["chat", "agents", "work", "research", "studio", "machine", "library", "automations", "feed", "settings"]);
   });
   it("opens / to Chat, keeps /home, and falls back to Chat", () => {
     expect(parseRoute("/").page).toBe("chat");

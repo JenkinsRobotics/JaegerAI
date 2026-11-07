@@ -1,22 +1,17 @@
-.jg-character {
-  --jg-character-skin: #faf9f5;
-  --jg-character-edge: #d3d1cb;
-  --jg-character-ink: #171718;
-  display: block; width: 100%; height: 100%; overflow: visible; pointer-events: none;
+.jg-character { display: block; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.jg-character__body { transform-origin: 500px 870px; animation: jg-character-breathe 6s ease-in-out infinite; }
+.jg-character__smile { transform-origin: 495px 350px; animation: jg-character-grin 8s ease-in-out infinite; }
+.jg-avatar[data-running="true"] .jg-character__body { animation-duration: 3.5s; }
+.jg-avatar[data-running="true"] .jg-character__smile { animation-duration: 3s; }
+@keyframes jg-character-breathe {
+  0%,100% { transform: rotate(-1deg) scaleY(1); }
+  50% { transform: rotate(1deg) scaleY(1.018) translateY(-3px); }
 }
-.jg-character__skin { fill: var(--jg-character-skin); stroke: var(--jg-character-edge); stroke-width: .8; }
-.jg-character__limb { fill: none; stroke: var(--jg-character-skin); stroke-width: 15; stroke-linecap: round; stroke-linejoin: round; }
-.jg-character__mouth { fill: var(--jg-character-skin); stroke: var(--jg-character-ink); stroke-width: 2; stroke-linejoin: round; }
-.jg-character__teeth { fill: none; stroke: var(--jg-character-ink); stroke-width: 1.3; }
-.jg-character__body { transform-origin: 80px 150px; animation: jg-character-breathe 5s ease-in-out infinite; }
-.jg-character__head { transform-origin: 79px 77px; animation: jg-character-look 12s ease-in-out infinite; }
-.jg-character__arm { transform-origin: 60px 78px; animation: jg-character-shoulder 18s ease-in-out infinite; }
-.jg-character__forearm { transform-origin: 35px 98px; animation: jg-character-hand 18s ease-in-out infinite; }
-.jg-avatar[data-running="true"] .jg-character__body { animation-duration: 2.8s; }
-@keyframes jg-character-breathe { 0%,100% { transform: translateY(0) scaleY(1); } 50% { transform: translateY(-1px) scaleY(1.025); } }
-@keyframes jg-character-look { 0%,25%,100% { transform: rotate(-3deg); } 45%,65% { transform: rotate(5deg) translateY(1px); } }
-@keyframes jg-character-shoulder { 0%,66%,96%,100% { transform: rotate(0deg); } 76%,86% { transform: rotate(52deg); } }
-@keyframes jg-character-hand { 0%,66%,96%,100% { transform: rotate(0deg); } 76%,86% { transform: rotate(-105deg); } }
+@keyframes jg-character-grin {
+  0%,20%,100% { transform: scale(1); }
+  48%,58% { transform: scale(1.075,1.10); }
+  75% { transform: scale(1.025,1.035); }
+}
 @media (prefers-reduced-motion: reduce) {
-  .jg-character__body, .jg-character__head, .jg-character__arm, .jg-character__forearm { animation: none; }
+  .jg-character__body, .jg-character__smile { animation: none !important; }
 }

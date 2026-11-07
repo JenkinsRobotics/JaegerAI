@@ -32,12 +32,15 @@ export interface WindowInstance {
 }
 
 export const WINDOW_DEFINITIONS: Record<WindowId, WindowDefinition> = {
+  library: { id: 'library', title: 'Library', icon: Database, description: 'Images, documents and task outputs', closable: true },
+  automations: { id: 'automations', title: 'Automations', icon: Zap, description: 'Schedules and run history', closable: true },
+  feed: { id: 'feed', title: 'Feed', icon: Compass, description: 'Updates from Jaeger', closable: true },
   home: { id: 'home', title: 'Home', icon: Home, description: 'Overview of agents, approvals and tasks, plus your widgets', closable: false, phoneTab: true },
   chat: { id: 'chat', title: 'Chat', icon: MessageSquare, description: 'Chat with Jaeger and your specialists', closable: false, phoneTab: true },
   agents: { id: 'agents', title: 'Agents', icon: Users, description: 'Agents, characters, memory and skills', closable: true, phoneTab: true },
   work: { id: 'work', title: 'Work', icon: Zap, description: 'Task pipeline, tasks, production deliverables and calendar', closable: true, phoneTab: true },
   research: { id: 'research', title: 'Research', icon: Compass, description: 'Research runs, documents and workspace files', closable: true },
-  studio: { id: 'studio', title: 'Studio', icon: Image, description: 'Generate images, asset library and board', closable: true },
+  studio: { id: 'studio', title: 'Imagine', icon: Image, description: 'Generate images, asset library and board', closable: true },
   models: { id: 'models', title: 'Models', icon: Database, description: 'Model inventory and side-by-side compare', closable: true },
   machine: { id: 'machine', title: 'Machine', icon: Cpu, description: 'Local computer control, screen and permissions', closable: true },
   settings: { id: 'settings', title: 'Settings', icon: Settings, description: 'Settings, integrations and providers (⌘,)', closable: true },

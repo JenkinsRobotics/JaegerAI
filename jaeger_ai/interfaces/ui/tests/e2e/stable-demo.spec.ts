@@ -29,15 +29,17 @@ async function openChat(page: Page) {
   await expect(input).toBeEnabled();
 }
 
-test('default screen exposes the current workspace navigation and chat controls', async ({ page }, testInfo) => {
+async function pickPage(page: Page, name: string) {
+  if (!await page.locator('#jaeger-navigation').isVisible()) await page.getByRole('button', {name:'Toggle navigation'}).click();
+  if (['Work','Research','Machine','Tasks'].includes(name) && !await page.locator('.jg-stable-demo__more').evaluate(el => (el as HTMLDetailsElement).open)) await page.getByText('More tools', {exact:true}).click();
+  await page.getByRole('navigation', {name:'Jaeger navigation'}).getByRole('button', {name, exact:true}).click();
+}
+
+test('default screen exposes the current workspace navigation and chat controls', async ({ page }) => {
   await openChat(page);
-  if (testInfo.project.name === 'Mobile Safari') {
-    for (const name of ['Chat', 'Agents', 'Work', 'Tasks', 'More']) {
-      await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
-    }
-  } else {
-    await expect(page.getByRole('navigation', { name: 'Jaeger navigation' }).getByRole('button')).toHaveText(['Chat', 'Agents', 'Work', 'Tasks', 'Research', 'Studio', 'Machine']);
-  }
+  if (!await page.locator('#jaeger-navigation').isVisible()) await page.getByRole('button', {name:'Toggle navigation'}).click();
+  await page.getByText('More tools', {exact:true}).click();
+  await expect(page.getByRole('navigation', { name: 'Jaeger navigation' }).getByRole('button')).toHaveText(['Chat', 'Imagine', 'Library', 'Automations', 'Feed', 'Agents', 'Work', 'Research', 'Machine', 'Tasks']);
   await expect(page.locator('header[aria-label="Conversation toolbar"]')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Toggle navigation' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
@@ -53,9 +55,9 @@ test('keyboard send reaches Gateway, persists history and keeps chat across Task
   await expect(input).toHaveValue('');
   const session = await page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'));
   expect(session).toBeTruthy();
-  await page.getByRole('button', { name: 'Tasks', exact: true }).click();
+  await pickPage(page, 'Tasks');
   await expect(page.getByRole('heading', { name: 'Tasks', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Chat', exact: true }).click();
+  await pickPage(page, 'Chat');
   await expect(page.locator('.jg-bubble--assistant').last()).toContainText('BROWSER-CONTRACT-ANSWER');
   await page.reload();
   await expect(page.locator('.jg-bubble--assistant').last()).toContainText('BROWSER-CONTRACT-ANSWER');
@@ -65,15 +67,15 @@ test('keyboard send reaches Gateway, persists history and keeps chat across Task
 test('Shift+Enter retains an unsent multiline draft across navigation', async ({ page }) => {
   await openChat(page);
   const input = page.getByRole('textbox', { name: 'Message', exact: true });
+  // Restored history may still arrive after the composer becomes ready.
+  // Assert the actual unsent text never enters history rather than racing its count.
   await input.fill('First line');
   await input.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(element.value.length, element.value.length));
-  await input.press('Shift+Enter');
-  await input.pressSequentially('Second line');
+  await input.press('Shift+Enter'); await input.pressSequentially('Second line');
+  await pickPage(page, 'Tasks');
+  await pickPage(page, 'Chat');
   await expect(input).toHaveValue('First line\nSecond line');
-  await page.getByRole('button', { name: 'Tasks', exact: true }).click();
-  await page.getByRole('button', { name: 'Chat', exact: true }).click();
-  await expect(input).toHaveValue('First line\nSecond line');
-  await expect(page.locator('.jg-bubble--user').filter({ hasText: 'First line' })).toHaveCount(0);
+  await expect(page.locator('.jg-bubble--user').filter({hasText:'First line\nSecond line'})).toHaveCount(0);
 });
 
 test('a stale device-local selection resumes the durable Gateway conversation', async ({ page }) => {
@@ -94,21 +96,22 @@ for (const width of [301, 320, 390, 1280]) {
     for (const colorScheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme });
       for (const name of ['Tasks', 'Chat']) {
-        await page.getByRole('button', { name, exact: true }).click();
+        await pickPage(page, name);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       }
       if (width <= 320) {
-        for (const selector of ['.jg-stable-demo__header', '.jg-composer', '.jg-composer__input', '.jg-composer__bar', '.jg-stable-demo__mobile-dock']) {
+        for (const selector of ['.jg-stable-demo__header', '.jg-composer', '.jg-composer__input', '.jg-composer__bar']) {
           const box = await page.locator(selector).boundingBox();
           expect(box, `${selector} must be visible`).not.toBeNull();
           expect(box!.x, `${selector} must stay inside the left edge`).toBeGreaterThanOrEqual(0);
           expect(box!.x + box!.width, `${selector} must stay inside the right edge`).toBeLessThanOrEqual(width);
         }
         await expect(page.locator('.jg-runtime-trigger span')).toBeHidden();
-        await expect(page.locator('.jg-stable-demo__mobile-dock span').first()).toBeHidden();
-        for (const name of ['Chat', 'Agents', 'Work', 'Tasks', 'More']) {
-          await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
-        }
+        await expect(page.locator('.jg-stable-demo__mobile-dock')).toHaveCount(0);
+        await page.getByRole('button', {name:'Toggle navigation'}).click();
+        await expect(page.getByRole('button', {name:'Close sidebar'})).toBeVisible();
+        await page.getByRole('button', {name:'Dismiss navigation'}).click({position:{x:width-3,y:450}});
+        await expect(page.locator('#jaeger-navigation')).toBeHidden();
       }
     }
     expect(errors).toEqual([]);

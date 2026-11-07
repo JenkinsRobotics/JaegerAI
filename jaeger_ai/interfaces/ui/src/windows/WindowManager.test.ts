@@ -8,7 +8,7 @@ describe("window layout persistence", () => {
     const l = loadLayout(mem());
     expect(l.open).toEqual(["chat"]);
     expect(l.order).toContain("work");
-    expect(l.order).toHaveLength(7);
+    expect(l.order).toHaveLength(10);
   });
   it("round-trips through storage and drops unknown pages", () => {
     const s = mem();
@@ -17,7 +17,7 @@ describe("window layout persistence", () => {
     const l = loadLayout(s);
     expect(l.open).toEqual(["chat", "work"]);
     expect(l.minimized).toEqual(["work"]);
-    expect(l.order).toEqual(["chat", "agents", "work", "research", "studio", "machine", "settings"]);
+    expect(l.order).toEqual(["chat", "agents", "work", "research", "studio", "machine", "library", "automations", "feed", "settings"]);
     expect(l.order).toContain("settings");
   });
   it("migrates saved layouts from the 17-tab dock", () => {
