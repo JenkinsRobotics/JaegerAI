@@ -64,3 +64,18 @@ it("restores the saved answer and terminal status without answer controls", asyn
   expect(el.querySelector(".jg-question__pick")).toBeNull();
   act(() => root.unmount()); el.remove();
 });
+
+it("keeps an acknowledged answer when transcript ownership remounts the card", async () => {
+  const form: ClarificationSnapshot = { clarify_id: "q1", session_id: "s1", request_id: "r1", question: "Where?", choices: ["staging"], revision: 1, status: "pending", answer: null };
+  const host = { clarifications: vi.fn().mockResolvedValue([form]), answerClarify: vi.fn().mockResolvedValue({ status: "answered" as const, answer: "staging" }) };
+  const el = document.createElement("div"); document.body.append(el); const root = createRoot(el);
+  await act(async () => root.render(<SessionClarifications sessionId="s1" host={host} />));
+  await act(async () => el.querySelector<HTMLButtonElement>(".jg-question__pick")!.click());
+  await act(async () => root.render(<SessionClarifications sessionId="s1" host={host} excludeIds={["q1"]} />));
+  expect(el.textContent).not.toContain("Where?");
+  await act(async () => root.render(<SessionClarifications sessionId="s1" host={host} />));
+  expect(el.textContent).toContain("Answered: staging");
+  expect(el.querySelector("input")).toBeNull();
+  expect(host.answerClarify).toHaveBeenCalledTimes(1);
+  act(() => root.unmount()); el.remove();
+});
