@@ -4,7 +4,6 @@ import type { Agent, SessionRow } from "../api/types";
 import { ChatPane } from "../chat/ChatPane";
 import { WebHost } from "../chat/webHost";
 import { contractHome, httpGetJson } from "../chat/homeSession";
-import { TasksWorkspace } from "../unified/TasksWorkspace";
 import { ApprovalTray } from "../unified/ApprovalTray";
 import { ToastProvider } from "../unified/ui";
 import "../unified/unified.css";
@@ -14,9 +13,11 @@ import { TaskArtifacts } from "../library/TaskArtifacts";
 import { WorkspaceBrowser } from "../unified/WorkspaceBrowser";
 import { AgentFace } from "../unified/AgentFace";
 import { RobotIcon } from "../agents/RobotIcon";
-import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, PanelRight } from "../components/Icons";
+import { Plus, MessageSquare, FolderOpen, FileText, CheckCircle, X, Settings, PanelLeft, PanelRight, Bot, Workflow, Search, Code, Cpu } from "../components/Icons";
 import "./stableDemo.css";
 import { SettingsWorkspace } from "./SettingsWorkspace";
+import { navigate, pathOf, useRoute, type PageId } from "../shell/router";
+import { AppWindow } from "../windows/AppWindow";
 
 export const DEMO_SESSION_KEY = "jaeger.stable-demo.session.v1";
 function storedSession() { try { return localStorage.getItem(DEMO_SESSION_KEY) || ""; } catch { return ""; } }
@@ -26,7 +27,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const closeSettings = useCallback(() => setSettingsOpen(false), []);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [appearance, setAppearance] = useState(storedAppearance);
-  const [page, setPage] = useState<"chat" | "tasks">("chat");
+  const route = useRoute();
   const [inspector, setInspector] = useState<"outputs" | "files" | null>(() => window.innerWidth > 1100 ? "outputs" : null);
   const [recent, setRecent] = useState<SessionRow[]>([]);
   const [historyError, setHistoryError] = useState("");
@@ -57,7 +58,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const workspaceParams = useMemo(() => new URLSearchParams({ session }), [session]);
   const selectSession = (id: string) => {
     if (id !== session) { setReady(false); setSession(id); }
-    setPage("chat");
+    navigate("/");
     try { localStorage.setItem(DEMO_SESSION_KEY, id); } catch { setHistoryError("This browser could not remember the selected conversation."); }
   };
   const start = async () => {
@@ -71,15 +72,21 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     finally { setBusy(false); }
   };
   const agent = agents.find(a => a.id === "native:jaeger");
+  const workspacePage = route.page !== "chat" && route.page !== "settings";
+  const routeTitle: Record<PageId, string> = { home: "Chat", chat: "Chat", agents: "Agents", work: "Work", research: "Research", studio: "Studio", models: "Models", machine: "Machine", settings: "Settings" };
   return <ToastProvider><div hidden={settingsOpen}><div className="jg-stable-demo" data-stable-demo="1" data-inspector={!!inspector} data-sidebar={sidebarOpen}>
     <aside id="jaeger-navigation" hidden={!sidebarOpen} className="jg-stable-demo__sidebar" aria-label="Jaeger navigation">
       <div className="jg-stable-demo__brand"><span className="jg-stable-demo__mark">J</span><strong>Jaeger</strong></div>
       <button className="jg-stable-demo__new" type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "New conversation"}</button>
-      <nav aria-label="Demo navigation">
-        <button type="button" aria-current={page === "chat" ? "page" : undefined} onClick={() => setPage("chat")}><MessageSquare size={18} />Chat</button>
-        <button type="button" aria-current={page === "tasks" ? "page" : undefined} onClick={() => setPage("tasks")}><CheckCircle size={18} />Tasks</button>
+      <nav aria-label="Jaeger navigation">
+        <button type="button" aria-current={route.page === "chat" ? "page" : undefined} onClick={() => navigate("/")}><MessageSquare size={18} />Chat</button>
+        <button type="button" aria-current={route.page === "agents" ? "page" : undefined} onClick={() => navigate(pathOf("agents"))}><Bot size={18} />Agents</button>
+        <button type="button" aria-current={route.page === "work" && route.sub !== "tasks" ? "page" : undefined} onClick={() => navigate(pathOf("work"))}><Workflow size={18} />Work</button>
+        <button type="button" aria-current={route.page === "work" && route.sub === "tasks" ? "page" : undefined} onClick={() => navigate(pathOf("work", "tasks"))}><CheckCircle size={18} />Tasks</button>
+        <button type="button" aria-current={route.page === "research" ? "page" : undefined} onClick={() => navigate(pathOf("research"))}><Search size={18} />Research</button>
+        <button type="button" aria-current={route.page === "studio" ? "page" : undefined} onClick={() => navigate(pathOf("studio"))}><Code size={18} />Studio</button>
+        <button type="button" aria-current={route.page === "machine" ? "page" : undefined} onClick={() => navigate(pathOf("machine"))}><Cpu size={18} />Machine</button>
       </nav>
-      <a className="jg-stable-demo__workspace-link" href="/?full=1"><FolderOpen size={18} />Full workspace (preview)</a>
       <div className="jg-stable-demo__recents"><h2>Recents</h2>
         {historyError && <p role="alert">{historyError}</p>}
         {!recent.length && !historyError && <p>Your conversations will appear here.</p>}
@@ -91,21 +98,26 @@ export function StableDemo({ source }: { source: JaegerSource }) {
     </aside>
     <main className="jg-stable-demo__main">
       <header className="jg-stable-demo__header">
-        <button type="button" aria-label="Toggle navigation" title="Toggle navigation" aria-expanded={sidebarOpen} aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(value => !value)}><PanelLeft size={18} /></button>
-        <strong>{page === "tasks" ? "Tasks" : recent.find(row => row.session_id === session)?.title || "Chat with Jaeger"}</strong>
-        <div className="jg-stable-demo__tools"><ApprovalTray source={source} onOpenChat={() => setPage("chat")} />
-          <button type="button" aria-expanded={!!inspector} aria-controls="jaeger-work-panel" onClick={() => setInspector(inspector ? null : "outputs")}><PanelRight size={17} /><span>Work panel</span></button>
+        <div className="jg-stable-demo__header-start">
+          <button className="jg-stable-demo__top-button" type="button" aria-label="Toggle navigation" title="Toggle navigation" aria-expanded={sidebarOpen} aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(value => !value)}><PanelLeft size={18} /></button>
+          <button className="jg-stable-demo__top-button" type="button" aria-label="New conversation" title="New conversation" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} /></button>
+        </div>
+        <strong>{workspacePage ? routeTitle[route.page] : recent.find(row => row.session_id === session)?.title || "Chat with Jaeger"}</strong>
+        <div className="jg-stable-demo__tools"><ApprovalTray source={source} onOpenChat={() => navigate("/")} />
+          <button className="jg-stable-demo__top-button" type="button" aria-label="Open tasks" title="Tasks" onClick={() => navigate(pathOf("work", "tasks"))}><CheckCircle size={17} /></button>
+          <button className="jg-stable-demo__top-button" type="button" aria-label="Open settings" title="Settings" onClick={() => setSettingsOpen(true)}><Settings size={17} /></button>
+          <button className="jg-stable-demo__top-button" type="button" aria-label="Toggle work panel" title="Work panel" aria-expanded={!!inspector} aria-controls="jaeger-work-panel" onClick={() => setInspector(inspector ? null : "outputs")}><PanelRight size={17} /></button>
         </div>
       </header>
-      {page === "chat" && <div className="jg-stable-demo__identity">{agent ? <AgentFace agent={agent} size={48} /> : <RobotIcon id="native:jaeger" name="Jaeger" size={48} />}<div><strong>Jaeger</strong><span>Your AI companion</span></div></div>}
+      {!workspacePage && <div className="jg-stable-demo__identity">{agent ? <AgentFace agent={agent} size={48} /> : <RobotIcon id="native:jaeger" name="Jaeger" size={48} />}<div><strong>Jaeger</strong><span>Your AI companion</span></div></div>}
       {error && <p role="alert">{error} <button onClick={() => location.reload()}>Reconnect</button></p>}
-      <section className="jg-stable-demo__body" hidden={page !== "chat"} aria-label="Chat">
+      <section className="jg-stable-demo__body" hidden={workspacePage} aria-label="Chat">
         {session && ready ? <ChatPane host={host} sessionId={session} agents={agent ? [agent] : agents} /> :
           <div className="jg-stable-demo__empty"><span className="jg-stable-demo__eyebrow">YOUR AI COMPANION</span><h1>What would you like to work on?</h1><p>Talk with Jaeger, follow a task, or explore your files.<br />Your conversation stays here when you return.</p>
           <button type="button" disabled={!ready || busy} onClick={() => void start()}><Plus size={18} />{busy ? "Opening…" : "Start conversation"}</button></div>}
       </section>
-      <section className="jg-stable-demo__body" hidden={page !== "tasks"} aria-label="Tasks">
-        {page === "tasks" && <TasksWorkspace source={source} agents={agents} params={new URLSearchParams()} onNavigate={(to) => { location.href = `${to}${to.includes("?") ? "&" : "?"}full=1`; }} />}
+      <section className="jg-stable-demo__body jg-stable-demo__body--workspace" hidden={!workspacePage} aria-label={routeTitle[route.page]}>
+        {workspacePage && <AppWindow source={source} embedded />}
       </section>
       <footer className="jg-stable-demo__footer">Saved by Gateway · Automatic recovery after worker interruption is not verified.</footer>
     </main>
