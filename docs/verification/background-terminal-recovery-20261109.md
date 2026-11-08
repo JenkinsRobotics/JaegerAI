@@ -157,3 +157,65 @@ All earlier diagnostic failures remain retained: hard-coded schema test,
 invalid pending-effect API, Research approval assertion, pre-binding native
 recovery, in-place Research normalization, and independent held-out failures.
 The cross-store fingerprint limitation above remains unchanged.
+
+
+## Completion-graph correction after the second hold
+
+The first corrective freeze `a1ab122beb3cadfc0e8f40c8f1c4d79496a64501`
+(tree `cea569ff713ad30e0bc73a91e3b346030e7c8ce8`) remains unchanged.
+Its immutable `qualified-a1ab122` runner captured unit 318, full verify, smoke
+170 and HTTP 12, each exit 0, plus runner exit 0 and unchanged source receipts.
+Independent review nevertheless held it: five new adversarial failures covered
+an indirect Gateway child native effect, truncating an earlier accepted-native
+list, and incompatible native lifecycle after request projection. Three other
+controls passed. A real schema17 upgrade probe produced by unchanged `ccda0c`
+also exposed two pending-work false completions without any journal or replay;
+its clean control passed. These failures are retained and are not superseded
+by the passing original regression counts.
+
+The next isolated checkout is
+`/workspace/shared/jaeger-background-completion-graph-fix-20261109`, with evidence
+under `/workspace/shared/bg-completion-graph-state-20261109`.
+Schema 19 adds a single owner-written native enrollment record per request.
+The guarded native binding transaction appends accepted IDs, including the
+legitimate continuation pre-bind that occurs before the resident journal starts.
+The record stores the exact request/admission identity and cannot be synthesized
+from a shortened mutable task list. Source-side exclusivity consults this record
+as well as retained legacy task ownership; even deleting a request does not
+silently free an enrolled native for a foreign receiver. No upgrade backfills
+historical task JSON as enrollment authority.
+
+Version-3 seals require exact enrollment for every retained attempt. Missing or
+inconsistent enrollment, request/admission identities or accepted root lineage
+refuse completion proof. Bound same-task root reuse/rotation remains valid.
+The ordinary completion veto follows qualified Gateway child request identities
+into separately bound native roots, checks their recorded native identities and
+native descendants, and refuses missing, pending or nonterminal work. A terminal
+handoff label is not sufficient. This remains a negative safety check, never
+recursive child seal/replay authority; any child still excludes a seal.
+
+The negative veto also applies to identity-qualified background_admission_version
+1 tasks with no journal. It can preserve ordinary clean retained completion or
+pause known unresolved work, but creates neither journal nor enrollment records
+and invokes no producer. Legacy tasks lacking that admission identity do not gain
+recovery eligibility. Synthetic schema17/18 migration tests are in the repository;
+the independent reviewer additionally regenerates actual ccda0c-produced inputs.
+
+Accepted native waiting/blocked/failed states veto completion before task
+publication. On a verified canonical background result, TaskOwner validates the
+candidate outcome, performs the legal native completion transition, and only
+then publishes the task completion. A transition failure pauses the task rather
+than committing completed_verified and raising afterward. Gateway and native
+stores still have no shared atomic transaction: a task-commit failure can leave
+a legally completed native for later reconciliation, not require replay. The
+previous cross-store and external-writer limitations remain explicit.
+
+Preserved new diagnostics: `initial-tests.log/.exit` had 19 failed / 81 passed
+(exit 1), revealing that a journal-only enrollment column missed legitimate
+pre-dispatch binding. The guarded-binding record corrected that boundary;
+`bind-tests.log/.exit` had 100 passed (exit 0). `graph-tests.log/.exit` had
+115 passed (exit 0), covering the first graph tests. Later source-exclusivity
+variants and pre-bind drift tests require final-frozen qualification; those
+prior counts must not be presented as the final result. Final immutable runner
+receipts and independent requalification determine whether this child can leave
+HOLD. Neither preceding held checkout nor its evidence was modified.

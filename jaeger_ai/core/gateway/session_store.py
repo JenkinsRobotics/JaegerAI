@@ -25,7 +25,7 @@ from jaeger_ai.core.gateway import handoff_outputs as _handoff_outputs
 from jaeger_ai.core.sqlite_connection import ClosingConnection
 
 
-SCHEMA_VERSION = 18
+SCHEMA_VERSION = 19
 
 MAX_RETAINED_EVENTS = 5000
 REQUEST_ID_MAX = 128
@@ -590,6 +590,10 @@ class GatewaySessionStore:
             from jaeger_ai.core.tasks.background_receipts import migrate
             migrate(conn)
             current = 18
+        if current < 19:
+            from jaeger_ai.core.tasks.background_receipts import migrate_native_enrollment
+            migrate_native_enrollment(conn)
+            current = 19
         conn.execute(
             "INSERT INTO schema_meta(key, value) VALUES('version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
