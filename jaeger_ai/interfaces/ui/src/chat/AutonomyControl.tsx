@@ -17,6 +17,7 @@ const details = (mode?: RuntimeAutonomy) => modes.find(item => item.id === mode)
 
 export function AutonomyControl({ host }: { host: AutonomyHost }) {
   const [current, setCurrent] = useState<RuntimeAutonomy>();
+  const [reading, setReading] = useState(false);
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState<RuntimeAutonomy>();
   const [error, setError] = useState<string>();
@@ -26,6 +27,7 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
 
   useEffect(() => {
     let live = true;
+    setCurrent(undefined);
     if (!host.runtimeAutonomy) return;
     void host.runtimeAutonomy().then(
       snapshot => { if (live) { setCurrent(snapshot.autonomy); setError(undefined); } },
@@ -50,7 +52,14 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
     }
   };
 
-  const active = details(current);
+  const refresh = async () => {
+    if (!host.runtimeAutonomy) return;
+    setReading(true);
+    try { const snapshot = await host.runtimeAutonomy(); setCurrent(snapshot.autonomy); setError(undefined); }
+    catch { setCurrent(undefined); setError("Cannot verify approval mode. Retry before changing permissions."); }
+    finally { setReading(false); }
+  };
+  const active = current ? details(current) : {label: "Approval mode unavailable"};
   return (
     <div className="jg-autonomy">
       <button
@@ -62,14 +71,14 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
         aria-expanded={open}
         disabled={!available}
         title={available ? "Choose how Jaeger asks before using tools" : "Approval mode is unavailable"}
-        onClick={() => { setError(undefined); setOpen(value => !value); }}
+        onClick={() => { setOpen(value => !value); if (!open) void refresh(); }}
       >
         <ToolShield size={20} />
         <span className="jg-composer__policy-label">{active.label}</span>
       </button>
       {open && (
         <div className="jg-autonomy-menu" role="menu" aria-label="Tool approval mode">
-          <header>How should Jaeger actions be approved?</header>
+          <header>How should Jaeger actions be approved?</header><p className="jg-autonomy-scope">Applies to this Jaeger instance across conversations and devices. System safety restrictions still apply.</p>
           {modes.map(mode => (
             <button
               key={mode.id}
@@ -77,7 +86,7 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
               role="menuitemradio"
               aria-checked={current === mode.id}
               className={mode.id === "auto" ? "is-full-access" : undefined}
-              disabled={Boolean(saving)}
+              disabled={Boolean(saving) || reading || !current}
               onClick={() => void select(mode.id)}
             >
               <Shield size={18} />
@@ -85,7 +94,7 @@ export function AutonomyControl({ host }: { host: AutonomyHost }) {
               {saving === mode.id ? <span className="jg-autonomy-saving" aria-label="Saving" /> : current === mode.id ? <Check size={18} /> : null}
             </button>
           ))}
-          {error && <p className="jg-autonomy-error" role="alert">{error}</p>}
+          {error && <p className="jg-autonomy-error" role="alert">{error} <button type="button" disabled={reading} onClick={() => void refresh()}>Retry</button></p>}
         </div>
       )}
     </div>

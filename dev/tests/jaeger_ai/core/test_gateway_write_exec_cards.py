@@ -61,3 +61,12 @@ def test_session_grant_or_project_grant_covers_it(tmp_path, monkeypatch):
 def test_explicit_autonomy_auto_is_still_honored(tmp_path, monkeypatch):
     p = _provider(tmp_path, monkeypatch, autonomy="auto")
     assert p.confirm(WRITE) is True and p.prompts == []
+
+
+def test_ask_mode_overrides_standing_grants(tmp_path, monkeypatch):
+    p = _provider(tmp_path, monkeypatch, autonomy="ask")
+    external = PermissionRequest(tier=PermissionTier.EXTERNAL_EFFECT, skill="calendar", operation="create_event", arguments={})
+    assert p.confirm(external) is False
+    assert p.confirm(WRITE) is False
+    assert p.confirm(READ) is True
+    assert p.prompts == ["create_event", "write_file"]

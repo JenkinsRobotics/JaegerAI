@@ -606,6 +606,15 @@ class _GatewayToolConfirmationProvider:
             # Only code tools, only inside a durable task the owner already authorized; the sandbox
             # limits are unchanged and chat outside a task keeps its card.
             return True
+        # Explicit ask mode takes precedence over standing grants.
+        # Explicit session/task approvals above remain valid; force_prompt always wins.
+        from jaeger_ai.core.runtime.autonomy import effective_autonomy
+        try:
+            mode = effective_autonomy(self.app._config_path())
+        except Exception:
+            mode = "ask"
+        if mode == "ask" and getattr(request, "tier", None) != PermissionTier.READ_ONLY:
+            return self._decided(self._prompt(request))
         if self._write_or_exec(request) and not self._autonomy_auto():
             # Gateway-turn policy: writes and code/shell execution get a card
             # unless a project grant covers the target or the owner granted

@@ -176,3 +176,39 @@ for (const width of [390, 794, 1280, 1600]) {
     expect(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 }
+
+test('approval selections persist through the real isolated Gateway and refresh',async({page})=>{
+ await openChat(page);
+ const initial=await (await page.request.get('/v1/runtime/autonomy')).json();
+ try {
+  for(const [mode,label] of [['scoped','Approve for me'],['auto','Full access'],['ask','Ask for approval']]) {
+   await page.getByRole('button',{name:/^Approval mode:/}).click();
+   const option=page.getByRole('menuitemradio',{name:new RegExp(label)});
+   await expect(option).toBeEnabled();await option.click();
+   await expect(page.getByRole('button',{name:`Approval mode: ${label}`})).toBeVisible();
+   expect((await (await page.request.get('/v1/runtime/autonomy')).json()).autonomy).toBe(mode);
+   await page.reload();await expect(page.getByRole('button',{name:`Approval mode: ${label}`})).toBeVisible();
+  }
+ } finally {await page.request.post('/v1/runtime/autonomy',{data:{autonomy:initial.autonomy}});}
+});
+test('minimap jumps to loaded turns without sending a message',async({page})=>{
+ test.setTimeout(90000);
+ await openChat(page);
+ const field=page.getByRole('textbox',{name:'Message',exact:true});
+ for(let i=0;i<2;i++){
+  const before=await page.locator('.jg-bubble--assistant').count();
+  await field.fill(`Say BROWSER-CONTRACT-ANSWER ${i}`);
+  await expect(page.getByRole('button',{name:'Send',exact:true})).toBeEnabled();
+  await field.press('Enter');
+  await expect(field).toHaveValue('');
+  await expect(page.locator('.jg-bubble--assistant')).toHaveCount(before+1);
+  await expect(page.locator('.jg-bubble--assistant').last()).toContainText('BROWSER-CONTRACT-ANSWER');
+  await expect(page.getByRole('button',{name:/^Stop current turn/})).toHaveCount(0,{timeout:30000});
+ }
+ const minimap=page.getByRole('navigation',{name:'Conversation minimap'});
+ await expect(minimap).toBeVisible();
+ const count=await minimap.getByRole('button').count();expect(count).toBeGreaterThanOrEqual(2);
+ await minimap.getByRole('button').first().click();
+ await expect(minimap.getByRole('button').first()).toHaveAttribute('aria-current','location');
+ await expect(minimap.getByRole('button')).toHaveCount(count);
+});
