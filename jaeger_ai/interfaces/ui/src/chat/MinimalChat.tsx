@@ -909,7 +909,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
       <MessageMenu at={messageMenu ? { x: messageMenu.x, y: messageMenu.y } : null} requestId={messageMenu?.requestId} reactionEmojis={messageMenu?.requestId ? reactionEmojis : []} onAction={onMessageAction} onClose={() => setMessageMenu(null)} />
       {reactionError && <p role="alert">{reactionError}</p>}
       {session && <AgentActivity turns={session.turns} onOpen={host.openHandoff ? id=>host.openHandoff?.(id) : undefined}/> }
-      <form ref={composer} className="jg-composer" onSubmit={(e) => { e.preventDefault(); submitComposer(); }}>
+      <form ref={composer} className="jg-composer" data-expanded={Boolean(draft || files.length || quote || preparingFiles || draftError || deliveryNotice || fileNote)} onSubmit={(e) => { e.preventDefault(); submitComposer(); }}>
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">
             {files.map((f) => (
@@ -951,7 +951,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
             disabled={listening === "voice"} onClick={() => void toggleListening("dictation")}><MicIcon /></button>
         )}
         {active
-          ? <><button type="submit" className="jg-send" aria-label="Send message" title="Send to the active turn"
+          ? <><button type="submit" className="jg-send jg-send--steer" aria-label="Send message" title="Send to the active turn"
                 disabled={!hasText || followUpBusy || !host.sessionQueue?.steer}><SendIcon /></button>
               <button type="button" className="jg-send jg-send--stop" aria-label="Stop current turn (⌘Esc)" onClick={stop}><StopIcon /></button></>
           : primary === "send"

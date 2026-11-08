@@ -53,6 +53,29 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const [sidebarOpen, setSidebarOpen] = useState(() => typeof matchMedia === "function" ? !matchMedia(COMPACT_SHELL_QUERY).matches : true);
   const [sidebarWidth, setSidebarWidth] = useState(storedSidebarWidth);
   const shellRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    const shell = shellRef.current;
+    if (!viewport || !shell) return;
+    // iOS leaves the layout viewport tall when the keyboard opens. Size the
+    // shell to the visible viewport so the composer stays above the keyboard.
+    const update = () => {
+      if (viewport.scale !== 1) {
+        shell.style.removeProperty("--jg-viewport-height");
+        shell.style.removeProperty("--jg-viewport-top");
+        return;
+      }
+      shell.style.setProperty("--jg-viewport-height", `${viewport.height}px`);
+      shell.style.setProperty("--jg-viewport-top", `${viewport.offsetTop}px`);
+    };
+    update();
+    viewport.addEventListener("resize", update);
+    viewport.addEventListener("scroll", update);
+    return () => {
+      viewport.removeEventListener("resize", update);
+      viewport.removeEventListener("scroll", update);
+    };
+  }, []);
   const [headerPopup, setHeaderPopup] = useState<HeaderPopup>(null);
   const [menuPage, setMenuPage] = useState<MenuPage>("main");
   const [renameOpen, setRenameOpen] = useState(false);
