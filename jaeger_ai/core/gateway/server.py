@@ -5446,13 +5446,33 @@ class JaegerGatewayApp:
         # allowed tools (intersected with any admitted grant) and its own notes
         # (Claude Code subagent pattern). Without a scoped set it stays model-only.
         specialist_scope = self._specialist_scope(agent, execution) if role_s == "specialist" else None
+        from contextlib import nullcontext
+        from jaeger_agent.skill_registry.playbook_skills import skill_scope
+
+        # Scope both preparation and execution, including to_thread copies.
+        # Reset on every exit, even when a caller awaits another turn in the
+        # same task or setup fails before the execution cleanup is reached.
+        with (skill_scope(specialist_scope["skills"])
+              if specialist_scope is not None else nullcontext()):
+            await self._execute_scoped_turn(
+                session_id, turn_id, text, request_id=request_id, execution=execution,
+                session=session, agent=agent, agent_fields=agent_fields,
+                system_prompt=system_prompt, specialist_scope=specialist_scope,
+                identity_error=identity_error, session_agent_id=session_agent_id,
+            )
+
+    async def _execute_scoped_turn(
+        self, session_id: str, turn_id: str, text: str, *,
+        request_id: str | None, execution: dict[str, Any] | None,
+        session: dict[str, Any] | None, agent: Any,
+        agent_fields: dict[str, Any], system_prompt: str,
+        specialist_scope: dict[str, Any] | None,
+        identity_error: Exception | None, session_agent_id: str | None,
+    ) -> None:
+        """Execute under the caller and skill contexts established by admission."""
+        role_s = str(agent_fields.get("role") or "")
         if specialist_scope is not None:
             execution = specialist_scope["execution"]
-            # This turn runs in its own asyncio task, so the skill scope set
-            # here covers its prepare/run threads (to_thread copies context)
-            # and ends with the task: the specialist sees only its own skills.
-            from jaeger_agent.skill_registry.playbook_skills import bind_skill_scope
-            bind_skill_scope(specialist_scope["skills"])
             logger.info("specialist run agent=%s session=%s skills=%s tools=%d",
                         getattr(agent, "id", None), session_id, specialist_scope["skills"],
                         len(execution.get("allowed_tools") or []))

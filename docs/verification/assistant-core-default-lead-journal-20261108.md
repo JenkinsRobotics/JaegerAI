@@ -116,3 +116,8 @@ and candidate. No shim is shipped. The separate canonical skill-scope repair is
 required for unshimmed specialist execution qualification. Final combined main
 build/HTTP gates are a later integration check, not implied by this increment's
 focused results. All product/tab acceptance remains PARTIAL.
+
+The subsequent [specialist skill-scope repair](assistant-core-specialist-scope-20261108.md)
+replaces the missing import with the existing scoped context manager. Its actual
+unshimmed OWNER autoroute qualification supersedes only the missing-symbol limit,
+not the explicitly bounded journal eligibility or historical identity limits.
