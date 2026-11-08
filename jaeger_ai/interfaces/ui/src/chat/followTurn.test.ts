@@ -230,6 +230,22 @@ describe("request stream liveness", () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it("promotes identical provisional bytes to the durable final result", async () => {
+    vi.useFakeTimers();
+    try {
+      const parts: ChatPart[] = [];
+      const requestStatus = vi.fn(async () => ({ request_id: "same-r", session_id: "s", status: "completed", result: { output: "same answer" } }));
+      const stream: Stream = async (_s, _c, emit, signal) => {
+        emit(ev(1, "turn.delta", "same-r", { delta: "same answer", content_type: "provisional", item_id: "text-1" }));
+        await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
+      };
+      const done = followTurn({ source: { stream, requestStatus }, sessionId: "s", requestId: "same-r", cursor: 0, signal: new AbortController().signal, onPart: part => parts.push(part) });
+      await vi.advanceTimersByTimeAsync(REQUEST_STATUS_POLL_MS);
+      expect((await done).state).toBe("complete");
+      expect(parts.reduce(applyPart, [] as ChatPart[])).toEqual([{ kind: "markdownContent", text: "same answer", role: "final", itemId: "final" }]);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("does not skip a new request's deltas when a home snapshot has a newer cursor", async () => {
     const seen: Array<number | undefined> = [];
     const host = new WebHost({ kind: "live", send: async () => ({ request_id: "new-r", start_event_id: 10 }),
