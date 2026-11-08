@@ -1,8 +1,42 @@
-import { fireEvent, render } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-import { JaegerAvatar } from "./JaegerAvatar";
+import { act, fireEvent, render } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { ACTIVITY_POSE, APPROVED_POSES, JaegerAvatar } from "./JaegerAvatar";
+import { AVATAR_STATES } from "./avatar";
+
+afterEach(() => vi.useRealTimers());
 
 describe("Jaeger cutout avatar", () => {
+  it("includes only the ten approved poses, never rejected 4 or 9", () => {
+    expect(APPROVED_POSES.map(pose => pose.number)).toEqual([1, 2, 3, 5, 6, 7, 8, 10, 11, 12]);
+    const { getByLabelText } = render(<JaegerAvatar />);
+    expect(getByLabelText("Avatar pose").querySelectorAll("option")).toHaveLength(11);
+  });
+
+  it.each(AVATAR_STATES)("uses approved automatic activity for %s", state => {
+    const { container } = render(<JaegerAvatar state={state} />);
+    const pose = APPROVED_POSES[ACTIVITY_POSE[state]];
+    expect(container.querySelector(".jg-jaeger-avatar")).toHaveAttribute("data-pose", String(pose?.number ?? "signature"));
+    expect([4, 8, 9, 10, 11, 12]).not.toContain(pose?.number);
+  });
+
+  it("previews the chosen pose then restores the unchanged signature icon", () => {
+    vi.useFakeTimers();
+    const { container, getByLabelText } = render(<JaegerAvatar />);
+    fireEvent.change(getByLabelText("Avatar pose"), { target: { value: "9" } });
+    expect(container.querySelector(".jg-jaeger-avatar")).toHaveAttribute("data-pose", "12");
+    expect(container.querySelector<HTMLElement>(".jg-jaeger-pose")!.style.backgroundPosition).toBe("100% 100%");
+    act(() => vi.advanceTimersByTime(8000));
+    expect(container.querySelector(".jg-jaeger-avatar")).toHaveAttribute("data-pose", "signature");
+    expect(container.querySelector("img")!.src).toContain("jaeger-signature-grin.png");
+  });
+
+  it("clears a playful preview when activity changes and supports still mode", () => {
+    const { container, getByLabelText, rerender } = render(<JaegerAvatar />);
+    fireEvent.change(getByLabelText("Avatar pose"), { target: { value: "7" } });
+    rerender(<JaegerAvatar state="connecting" still />);
+    expect(container.querySelector(".jg-jaeger-avatar")).toHaveAttribute("data-pose", "7");
+    expect(container.querySelector(".jg-jaeger-avatar")).toHaveAttribute("data-motion", "still");
+  });
   it("uses the canonical artwork for the body, smile, and both arm layers", () => {
     const { container } = render(<JaegerAvatar state="idle" />);
     const rig = container.querySelector(".jg-jaeger-avatar")!;
