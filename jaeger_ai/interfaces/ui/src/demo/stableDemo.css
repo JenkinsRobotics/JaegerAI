@@ -300,6 +300,29 @@
  .jg-stable-demo__inspector { position:static; width:auto; box-shadow:none; }
 }
 .jg-stable-demo__profile { flex-direction:column; gap:0; }
+.jg-stable-demo__profile-avatar {
+ transition: width .45s ease, height .45s ease, flex-basis .45s ease;
+}
+.jg-stable-demo__profile-avatar > :is(.jg-jaeger-avatar,.jg-clip-avatar) {
+ width:100% !important;
+ height:100% !important;
+}
+.jg-stable-demo__main:has(> .jg-stable-demo__body:not([hidden]) .jg-chat-home) .jg-stable-demo__profile-avatar {
+ width: min(34dvh,44vw,360px);
+ height: min(34dvh,44vw,360px);
+ flex-basis: min(34dvh,44vw,360px);
+}
+.jg-stable-demo__main .jg-chat-home { margin-top:24px; }
+@media (max-height:520px) {
+ .jg-stable-demo__main:has(> .jg-stable-demo__body:not([hidden]) .jg-chat-home) .jg-stable-demo__profile-avatar {
+  width:94px;
+  height:94px;
+  flex-basis:94px;
+ }
+}
+@media (prefers-reduced-motion:reduce) {
+ .jg-stable-demo__profile-avatar { transition:none; }
+}
 .jg-stable-demo__profile-copy { align-items:center; }
 .jg-stable-demo__profile-copy small { position:absolute; width:1px; height:1px; clip-path:inset(50%); }
 @media(max-width:520px) {
