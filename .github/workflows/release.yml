@@ -83,7 +83,7 @@ jobs:
           test -s "$RUNNER_TEMP/jaeger.vsix"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |
             ${{ runner.temp }}/jaeger-dist/*
