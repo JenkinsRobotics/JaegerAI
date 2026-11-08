@@ -1,5 +1,6 @@
 import "../../../ide/media/timeline.js";
 import { modelContext } from "./modelContext";
+import { requestOutcome } from "./requestOutcome";
 /* Gateway SSE event -> ChatPart mapping. ONE place, on purpose: this file is
  * meant to be regenerated from the gateway's events.schema.json later.
  * Event names follow core/gateway/event_bus.py EVENT_TYPES. */
@@ -86,8 +87,21 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       const agentId = str(direction === "to" ? h.to_agent_id : h.to_agent_id ?? h.from_agent_id);
       return { parts: [{ kind: "handoff", status: (h.metadata as Payload | undefined)?.delivery_message_id ? "delivered" : str(h.status || "unverified"), handoffId: str(h.id ?? h.handoff_id), agentId, agentName: agentName(agentId), count: 1, direction }] };
     }
-    case "turn.finish":
     case "turn.reconciled": {
+      // Reconciliation is an observation, not a success event. Share the
+      // durable lookup's terminal semantics; incomplete/malformed receipts
+      // must never turn unknown execution into a successful completion.
+      const status = ["completed", "failed", "cancelled", "execution_unknown"].includes(str(p.status))
+        ? str(p.status) : "execution_unknown";
+      const parts: ChatPart[] = [];
+      const state = requestOutcome({ status, result: {
+        ...(typeof p.output === "string" ? { output: p.output } : {}),
+        ...(typeof p.error === "string" ? { error: p.error } : {}),
+        ...(typeof p.summary === "string" ? { summary: p.summary } : {}),
+      } }, part => parts.push(part));
+      return { parts, state };
+    }
+    case "turn.finish": {
       const output = str(p.output);
       return { parts: output ? [{kind:"markdownContent",text:output,role:"final",itemId:"final"}] : [], state: "complete" };
     }
