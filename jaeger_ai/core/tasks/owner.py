@@ -136,14 +136,17 @@ class GatewayTaskOwner:
         if research_contract is not None:
             from .research import artifact_paths
             research_artifacts = artifact_paths(tid)
+        # Client identity describes the original choices, not later resolved
+        # defaults. Only newly qualified tasks persist this without a nonce.
+        candidate_fingerprint = hashlib.sha256(json.dumps({'goal': goal, 'execution': execution, 'artifacts': paths,
+            'proposal': proposal, 'agent_id': context.get('agent_id') or '', 'eta': context.get('eta'),
+            'runner': context.get('runner') or 'native', **({'research_contract': research_contract, 'research_artifacts': research_artifacts} if research_contract is not None else {})}, sort_keys=True).encode()).hexdigest()
         fingerprint = None
         if submission_id:
             from .store import TaskConflict
             if not isinstance(submission_id, str) or len(submission_id) > 128:
                 raise ValueError('Client submission ID must be text of at most128 characters')
-            fingerprint = hashlib.sha256(json.dumps({'goal': goal, 'execution': execution, 'artifacts': paths,
-                'proposal': proposal, 'agent_id': context.get('agent_id') or '', 'eta': context.get('eta'),
-                'runner': context.get('runner') or 'native', **({'research_contract': research_contract, 'research_artifacts': research_artifacts} if research_contract is not None else {})}, sort_keys=True).encode()).hexdigest()
+            fingerprint = candidate_fingerprint
             matches = self.store.client_submissions(parent, submission_id)
             if len(matches) > 1:
                 raise TaskConflict('Multiple legacy tasks share this submission identity; inspect them without replay')
@@ -175,6 +178,13 @@ class GatewayTaskOwner:
                 existing = self.store.get_task_in_transaction(conn, tid)
                 if existing is None:
                     prepare(self, conn, task)
+                    if task.payload.get('background_admission_version') == 1 and not fingerprint:
+                        task.provenance.update(submission_fingerprint=candidate_fingerprint, submission_goal=goal)
+                elif (existing.payload.get('background_admission_version') == 1
+                      and existing.provenance.get('submission_fingerprint') and not fingerprint):
+                    # Exact replay compares retained raw-input identity, without
+                    # rereading changed defaults or upgrading unmarked history.
+                    task.provenance.update(submission_fingerprint=candidate_fingerprint, submission_goal=goal)
                 task, replayed = self.store.admit_task_in_transaction(conn, task)
         else:
             task, replayed = self.store.admit_task(task)

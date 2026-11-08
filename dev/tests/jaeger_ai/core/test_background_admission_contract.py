@@ -15,8 +15,13 @@ from jaeger_ai.core.tasks.research import RESEARCH_CONTRACT
 def owner(tmp_path, monkeypatch):
     from jaeger_ai.core.agent_registry.specialists import LEAD_AGENT_ID
     from jaeger_ai.core.gateway import owner_receipts
+    from jaeger_ai.core.tasks import background_admission
     identity = {'id': LEAD_AGENT_ID, 'kind': 'jaeger_native', 'role': 'lead', 'disabled': False}
-    monkeypatch.setattr(owner_receipts, 'session_agent_identity', lambda sid, meta: deepcopy(identity))
+    lookup = lambda sid, meta: deepcopy(identity)
+    # Both consumers import this boundary. Restore both targets so the fixture
+    # cannot leak a mock or depend on which test imported the module first.
+    monkeypatch.setattr(owner_receipts, 'session_agent_identity', lookup)
+    monkeypatch.setattr(background_admission, 'session_agent_identity', lookup)
     store = GatewaySessionStore(tmp_path/'gateway.sqlite3')
     store.ensure_session('parent', metadata={'agent_id': LEAD_AGENT_ID, 'agent_pinned': True})
     defaults = {'workspace': str(tmp_path/'workspace'), 'model': 'contract-model',
@@ -160,6 +165,11 @@ def test_historical_and_explicit_provider_tasks_are_not_upgraded(owner):
     assert 'background_admission_version' not in owner.store.get_task(tid).payload
     tid = owner.submit('Historical', context={**ctx, 'execution': {}})['task_id']
     assert 'background_admission_version' not in owner.store.get_task(tid).payload
+    before = owner.store.get_task(tid).to_dict()
+    replay = owner.submit('Historical', context={**ctx, 'execution': {}}, canonical_background=True)
+    assert replay['replayed'] and replay['task_id'] == tid
+    assert owner.store.get_task(tid).to_dict() == before
+    assert not before['provenance'].get('submission_fingerprint')
 
 
 def test_transaction_rollback_does_not_leave_attempt_proof(owner):
@@ -333,3 +343,42 @@ def test_legacy_sources_do_not_acquire_new_exclusivity(owner):
     store.admit_request('legacy-other', 'other old work', request_id='old-other')
     store.bind_native('old-other', native_run_id='unprotected', native_session='owner:legacy-other')
     assert store.get_request('old-other')['native_run_id'] == 'unprotected'
+
+
+def test_nonce_free_canonical_replay_preserves_original_input_and_scope(owner):
+    from jaeger_ai.core.tasks.research import RESEARCH_CONTRACT
+    context = {'source': 'client', 'session_id': 'parent', 'execution': {'caller': 'webui'}}
+    result = owner.submit('Research no nonce', context=context, canonical_background=True,
+        research_contract=RESEARCH_CONTRACT, proposal=True)
+    tid = result['task_id']
+    saved = owner.store.get_task(tid).to_dict()
+    # A fresh owner replays persisted input identity, never resolves new defaults.
+    restored = GatewayTaskOwner(owner.gateway)
+    defaults = owner.gateway._foreground_execution_defaults
+    owner.test_defaults.update(model='changed-default', route_fingerprint='changed-route',
+                               workspace=owner.test_defaults['workspace']+'/changed')
+    replay = restored.submit('Research no nonce', context=context, canonical_background=True,
+        research_contract=RESEARCH_CONTRACT, proposal=True)
+    assert replay['replayed'] and replay['task_id'] == tid
+    assert restored.store.get_task(tid).to_dict() == saved
+    assert len(owner.gateway.store.list_pending_approvals()) == 1
+    owner.gateway._foreground_execution_defaults = lambda: pytest.fail('replay re-resolved defaults')
+    assert restored.submit('Research no nonce', context=context, canonical_background=True,
+        research_contract=RESEARCH_CONTRACT, proposal=True)['replayed']
+    with pytest.raises(ValueError):
+        restored.submit('Research no nonce', context={**context, 'agent_id': 'foreign-agent'},
+            canonical_background=True, research_contract=RESEARCH_CONTRACT, proposal=True)
+    for changed in ({'caller': 'foreign'}, {'caller': 'webui', 'allowed_tools': []},
+                    {'caller': 'webui', 'model': 'foreign-model'}):
+        with pytest.raises(ValueError):
+            restored.submit('Research no nonce', context={**context, 'execution': changed},
+                canonical_background=True, research_contract=RESEARCH_CONTRACT, proposal=True)
+    with pytest.raises(ValueError):
+        restored.submit('Research no nonce', context=context, canonical_background=True, proposal=True)
+    assert restored.store.get_task(tid).to_dict() == saved
+    owner.gateway._foreground_execution_defaults = defaults
+    new = restored.submit('Different explicit objective', context=context, canonical_background=True,
+        research_contract=RESEARCH_CONTRACT, proposal=True)
+    assert not new['replayed'] and new['task_id'] != tid
+    assert restored.store.get_task(new['task_id']).payload['execution']['model'] == 'changed-default'
+    assert restored.store.get_task(tid).to_dict() == saved
