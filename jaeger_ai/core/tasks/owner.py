@@ -1309,6 +1309,14 @@ class GatewayTaskOwner:
                 current.payload['native_run_id'] = row['native_run_id']
             current.payload['verification'] = evidence
             native_unknown = False
+            if can_verify and current.payload.get('background_admission_version') == 1:
+                from .background_receipts import assert_settlement_safe
+                try:
+                    assert_settlement_safe(settlement_conn, self, current)
+                except Exception:
+                    # An unsealed unsupported tree or late retained-state
+                    # change cannot become verified merely from file bytes.
+                    native_unknown = True
             if current.payload.get('foreground_resume_version') == 1:
                 from jaeger_ai.core.entity.runtime import EntityRuntime
                 native = row.get('native_run_id') or current.payload.get('native_run_id')
@@ -1376,7 +1384,8 @@ class GatewayTaskOwner:
                     error=str(result.get('error') or evidence or 'Outcome not verified after retries'),
                 )
             self._checkpoint(current, row)
-        task = self.store.update_task(task_id, settle)
+        with self.gateway.store._immediate() as settlement_conn:
+            task = self.store.update_task_in_transaction(settlement_conn, task_id, settle)
         if self._visible_task(task) != before:
             self.gateway.event_bus.publish(task.notification_policy.recipient_session_id or sid,
                                            'task.updated', {'task': task.to_dict()})
