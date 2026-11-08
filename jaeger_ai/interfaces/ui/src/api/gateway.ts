@@ -46,6 +46,12 @@ export function normalizeFrame(frame: SSEFrame): GatewayEvent {
 }
 
 export class GatewayClient implements JaegerSource {
+  connectionInfo = async () => {
+    const health = await this.json<{host?:string;commit?:string;service?:string}>('/api/jaeger/gateway/health');
+    const remote = await this.json<{webui_origin?:string}>('/api/remote/connection-info').catch(() => ({}));
+    return {...health,...remote};
+  };
+  operatorSession = () => this.json<{active_session_id:string|null;revision:number}>('/v1/operator/session-state');
   readonly kind = "live" as const;
   constructor(private readonly base = "") {}
   runtimeAutonomy = () => this.json<RuntimeAutonomySnapshot>("/v1/runtime/autonomy");
@@ -59,6 +65,19 @@ export class GatewayClient implements JaegerSource {
     update: (id, requestId, body) => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue/${encodeURIComponent(requestId)}`, body, "PATCH"),
     reorder: (id, order) => this.json(`/v1/sessions/${encodeURIComponent(id)}/queue/reorder`, { order }),
     status: (id, requestId) => this.requestStatus(id, requestId),
+  };
+  messageReadState: NonNullable<JaegerSource["messageReadState"]> = {
+    load: async id => {
+      try { return await this.json(`/v1/sessions/${encodeURIComponent(id)}/read-state`); }
+      catch (error) {
+        if (error instanceof GatewayError && error.status === 404 && !/session not found/i.test(error.message)) {
+          throw new GatewayError("Mark as unread is unavailable on this Gateway version.", 404, error.body);
+        }
+        throw error;
+      }
+    },
+    save: (id, body) => this.json(`/v1/sessions/${encodeURIComponent(id)}/read-state`, body),
+    clear: id => this.json(`/v1/sessions/${encodeURIComponent(id)}/read-state`, undefined, "DELETE"),
   };
   messageReactions = {
     load: (id: string) => this.json<ReactionSnapshot>(`/v1/sessions/${encodeURIComponent(id)}/feedback`),

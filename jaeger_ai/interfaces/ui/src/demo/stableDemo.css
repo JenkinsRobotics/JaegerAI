@@ -373,3 +373,5 @@
  .jg-stable-demo__sidebar { top:var(--jg-viewport-top,0px); height:var(--jg-viewport-height,100dvh); max-height:none; padding-top:var(--jg-safe-top); padding-bottom:var(--jg-safe-bottom); }
  .jg-stable-demo__popover { max-height:calc(var(--jg-viewport-height,100dvh) - var(--jg-safe-top) - var(--jg-safe-bottom) - 80px); overflow-y:auto; }
 }
+
+.jg-stable-demo__unread { display: inline-block; flex-shrink: 0; width: 7px; height: 7px; margin-inline-end: 7px; border-radius: 50%; background: currentColor; }

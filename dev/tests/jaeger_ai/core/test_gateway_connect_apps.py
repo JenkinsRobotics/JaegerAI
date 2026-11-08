@@ -18,11 +18,11 @@ from jaeger_ai.core.gateway.event_bus import EVENT_TYPES
 from jaeger_ai.core.gateway.server import JaegerGatewayApp
 from jaeger_ai.core.gateway.session_store import GatewaySessionStore
 
-EXT = "jenkins-robotics.jaeger-chat"
+EXT = "jenkins-robotics.jaeger-ide"
 
 
 class FakeCode:
-    def __init__(self, installed: str | None = None, version: str = "1.142.0", rc: int = 0):
+    def __init__(self, installed: str | None = None, version: str = "1.145.2", rc: int = 0):
         self.installed, self.version, self.rc, self.calls = installed, version, rc, []
 
     def __call__(self, argv, **kw):
@@ -35,7 +35,7 @@ class FakeCode:
             return subprocess.CompletedProcess(argv, 0, f"{self.version}\nabc\n", "")
         if argv[1] == "--install-extension":
             if self.rc == 0:
-                self.installed = argv[2].rsplit("jaeger-chat-", 1)[1].removesuffix(".vsix")
+                self.installed = argv[2].rsplit("jaeger-ide-", 1)[1].removesuffix(".vsix")
             return subprocess.CompletedProcess(argv, self.rc, "", "boom" if self.rc else "")
         raise AssertionError(argv)
 
@@ -47,8 +47,8 @@ def env(tmp_path):
     code.chmod(0o755)
     apps = tmp_path / "apps"
     apps.mkdir()
-    (apps / "jaeger-chat-0.1.0.vsix").write_bytes(b"old")
-    (apps / "jaeger-chat-0.2.0.vsix").write_bytes(b"new")
+    (apps / "jaeger-ide-0.1.0.vsix").write_bytes(b"old")
+    (apps / "jaeger-ide-0.2.0.vsix").write_bytes(b"new")
     argv = tmp_path / "argv.json"
     argv.write_text('{\n // comment\n "enable-proposed-api": ["%s"],\n}\n' % EXT)
     return {"JAEGER_CONNECT_APPS_CODE_CLI": str(code), "JAEGER_CONNECT_APPS_DIR": str(apps),
@@ -65,6 +65,32 @@ def test_registry_is_local_and_placeholders_have_no_actions():
     assert "connect_app.updated" in EVENT_TYPES
 
 
+def test_registry_targets_the_shipped_extension():
+    from pathlib import Path
+    manifest = json.loads((Path(__file__).resolve().parents[4] / "jaeger_ai/interfaces/ide/package.json").read_text())
+    app = next(a for a in load_registry()["apps"] if a["id"] == "vscode")
+    assert app["install"]["extension_id"] == f'{manifest["publisher"]}.{manifest["name"]}'
+    assert "argv_proposed_api" not in app["state_probe"]
+
+
+def test_legacy_extension_and_higher_version_package_are_not_selected(env, tmp_path):
+    (tmp_path / "apps/jaeger-chat-99.0.0.vsix").write_bytes(b"obsolete")
+    apps = ConnectApps(runner=FakeCode(), environ=env)
+    assert apps.find_vsix()["name"] == "jaeger-ide-0.2.0.vsix"
+    code = env["JAEGER_CONNECT_APPS_CODE_CLI"]
+    def legacy_only(argv, **kwargs):
+        if argv[1] == "--list-extensions":
+            return subprocess.CompletedProcess(argv, 0, "jenkins-robotics.jaeger-chat@0.1.0\n", "")
+        return subprocess.CompletedProcess(argv, 0, "1.145.2\n", "")
+    assert ConnectApps(runner=legacy_only, environ=env).state("vscode")["value"] == "not_installed"
+    fake = FakeCode()
+    apps = ConnectApps(runner=fake, environ=env)
+    _, _, plan = apps.begin_install("vscode")
+    result = apps.run_install("vscode", plan, caller="cli")
+    assert result["state"]["value"] == "installed"
+    assert [code, "--install-extension", str(tmp_path / "apps/jaeger-ide-0.2.0.vsix")] in fake.calls
+
+
 def test_jsonc_strip_keeps_strings():
     assert json.loads(_strip_jsonc('{"a": "x//y", /* c */ "b": [1,],}')) == {"a": "x//y", "b": [1]}
 
@@ -74,7 +100,7 @@ def test_probe_states(env, tmp_path):
     apps = ConnectApps(runner=fake, environ=env)
     assert apps.state("vscode")["value"] == "not_installed"
     vsix = apps.find_vsix()
-    assert (vsix["name"], vsix["version"]) == ("jaeger-chat-0.2.0.vsix", "0.2.0") and len(vsix["sha256"]) == 64
+    assert (vsix["name"], vsix["version"]) == ("jaeger-ide-0.2.0.vsix", "0.2.0") and len(vsix["sha256"]) == 64
     assert apps.state("github")["value"] == "coming_soon"
     assert apps.state("nope") is None
     assert ConnectApps(runner=fake, environ={**env, "JAEGER_CONNECT_APPS_CODE_CLI": str(tmp_path / "x")}
@@ -83,10 +109,10 @@ def test_probe_states(env, tmp_path):
     assert ConnectApps(runner=fake, environ={**env, "JAEGER_CONNECT_APPS_DIR": str(tmp_path / "none")}
                        ).state("vscode")["detail"] == "apps_dir_missing"
     (tmp_path / "argv.json").write_text("{}")
-    assert ConnectApps(runner=fake, environ=env).state("vscode")["detail"] == "argv_missing"
+    assert ConnectApps(runner=fake, environ=env).state("vscode")["value"] == "not_installed"
     assert ConnectApps(runner=FakeCode(installed="0.1.0"), environ=env).state("vscode") \
         | {"checked_at": 0} == {"value": "installed", "version": "0.1.0", "checked_at": 0,
-                                 "vscode_version": "1.142.0"}
+                                 "vscode_version": "1.145.2"}
     assert not (tmp_path / "none").exists()  # probes never create directories
 
 
@@ -96,7 +122,7 @@ def test_vsix_symlink_out_of_dir_is_refused(env, tmp_path):
     apps_dir = tmp_path / "apps"
     for f in apps_dir.iterdir():
         f.unlink()
-    (apps_dir / "jaeger-chat-9.9.9.vsix").symlink_to(outside)
+    (apps_dir / "jaeger-ide-9.9.9.vsix").symlink_to(outside)
     assert ConnectApps(runner=FakeCode(), environ=env).find_vsix() is None
 
 

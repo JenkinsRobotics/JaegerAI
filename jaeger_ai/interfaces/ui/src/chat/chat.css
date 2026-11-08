@@ -446,3 +446,41 @@ button.jg-post__chip:hover { color: var(--jg-color-fg); }
  .jg-turn-activity .jg-steps__summary { font-size: var(--jg-font-small); }
 }
 @media (prefers-reduced-motion: reduce) { .jg-turn-activity .jg-steps__toggle { transition: none; } }
+
+/* Touch holds use the desktop commands in a thumb-sized sheet. Native scrolling
+   stays enabled; only an in-progress hold suppresses text selection. */
+.jg-bubble { -webkit-touch-callout: none; }
+.jg-bubble--holding { -webkit-user-select: none; user-select: none; }
+.jg-bubble:focus-visible { outline: 2px solid var(--jg-color-accent, Highlight); outline-offset: 4px; }
+.jg-msgmenu { max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; }
+.jg-msgmenu__reactions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; }
+.jg-msgmenu__emoji { width: 36px; height: 36px; }
+.jg-msgmenu__emoji[aria-checked=true] { background: color-mix(in srgb, currentColor 16%, transparent); box-shadow: inset 0 0 0 1px currentColor; }
+.jg-msgmenu__item { min-height: 38px; }
+.jg-msgmenu__item:disabled { opacity: .45; cursor: not-allowed; }
+.jg-msgmenu__backdrop, .jg-text-select__backdrop { position: fixed; inset: 0; background: color-mix(in srgb, var(--jg-color-text) 24%, transparent); z-index: 140; }
+.jg-msgmenu--touch { z-index: 141; left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); bottom: max(8px, env(safe-area-inset-bottom)); top: auto;
+  width: auto; max-width: 500px; margin-inline: auto; min-width: 0; max-height: calc(100dvh - 32px); padding: 12px 16px; border-radius: 28px; gap: 0; }
+.jg-msgmenu__handle { width: 38px; height: 4px; border-radius: 3px; background: currentColor; opacity: .25; justify-self: center; margin: 0 0 16px; }
+.jg-msgmenu--touch .jg-msgmenu__reactions { gap: 10px; padding: 0 0 10px; }
+.jg-msgmenu--touch .jg-msgmenu__emoji { width: 100%; min-height: 44px; height: 48px; border-radius: 50%; background: color-mix(in srgb, currentColor 5%, transparent); font-size: 27px; }
+.jg-msgmenu--touch .jg-msgmenu__emoji[aria-checked=true] { background: color-mix(in srgb, currentColor 16%, transparent); }
+.jg-msgmenu--touch .jg-msgmenu__item { height: 52px; font-size: 17px; border-radius: 0; gap: 14px; border-bottom: 1px solid color-mix(in srgb, currentColor 8%, transparent); }
+.jg-msgmenu__dismiss { min-height: 44px; border: 0; background: transparent; color: inherit; font: inherit; margin-top: 8px; border-radius: 12px; }
+.jg-msgmenu__dismiss:focus-visible { outline: 2px solid currentColor; }
+.jg-text-select__backdrop { z-index: 142; display: grid; place-items: center; padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left)); }
+.jg-text-select { display: flex; flex-direction: column; gap: 12px; width: min(640px, 100%); max-height: calc(100dvh - 40px); padding: 18px; border-radius: 20px;
+  box-sizing: border-box; background: var(--aui-color-surface-raised, var(--aui-color-bg, Canvas)); color: var(--aui-color-fg, CanvasText); box-shadow: 0 10px 30px var(--aether-color-shadow); }
+.jg-text-select header, .jg-text-select footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.jg-text-select p { margin: 0; font-size: 14px; }
+.jg-text-select textarea { width: 100%; height: min(50dvh, 480px); min-height: 100px; box-sizing: border-box; resize: none; padding: 12px; border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 10px;
+  background: var(--aui-color-bg, Canvas); color: inherit; font: 16px/1.6 var(--aether-font-sans, sans-serif); -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+.jg-text-select button { min-height: 44px; padding: 8px 12px; border: 1px solid color-mix(in srgb, currentColor 16%, transparent); border-radius: 10px; color: inherit; background: transparent; font: inherit; }
+.jg-message-notice, .jg-unread-banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0; padding: 8px 16px; font-size: 13px; color: var(--aether-color-text); background: color-mix(in srgb, var(--jg-color-text) 5%, var(--jg-color-pane)); }
+.jg-message-notice button, .jg-unread-banner button { min-height: 36px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.jg-unread-marker { display: flex; align-items: center; gap: 10px; margin: 12px 0; font-size: 12px; color: var(--aether-color-text-muted); }
+.jg-unread-marker::before, .jg-unread-marker::after { content: ""; flex: 1; border-top: 1px solid currentColor; opacity: .35; }
+@media (max-height: 520px) { .jg-msgmenu--touch .jg-msgmenu__item { height: 44px; } .jg-msgmenu--touch .jg-msgmenu__reactions { grid-template-columns: repeat(11, minmax(0, 1fr)); gap: 2px; } .jg-msgmenu--touch .jg-msgmenu__emoji { font-size: 21px; min-height: 36px; height: 36px; } }
+
+.jg-msgmenu__note { max-width: 280px; padding: 8px 10px; font-size: 12px; line-height: 1.4; opacity: .65; }
+.jg-bubble a { -webkit-touch-callout: default; }

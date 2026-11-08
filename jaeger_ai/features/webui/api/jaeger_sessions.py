@@ -463,6 +463,9 @@ def route(handler, parsed, method: str) -> bool:
     # The composer reads and changes autonomy through the same authenticated
     # Gateway as native clients. Keep the route exact; Gateway owns validation
     # and the admin scope required for changes.
+    if path == '/v1/operator/session-state' and method in {'GET', 'PATCH'}:
+        return _proxy(handler, method, path, _body_bytes(handler) if method == 'PATCH' else None)
+
     if path in {'/v1/runtime/autonomy', '/v1/runtime/tier'} and method in {'GET', 'POST'}:
         return _proxy(handler, method, path, _body_bytes(handler) if method == 'POST' else None)
 
@@ -534,6 +537,10 @@ def route(handler, parsed, method: str) -> bool:
         return _proxy(handler, 'POST', f'/v1/sessions/{session_id}/queue/reorder', _body_bytes(handler))
     if len(parts) == 3 and parts[1] == 'queue' and method == 'PATCH':
         return _proxy(handler, 'PATCH', f'/v1/sessions/{session_id}/queue/{parts[2]}', _body_bytes(handler))
+
+    if len(parts) == 2 and parts[1] == 'read-state' and method in {'GET', 'POST', 'DELETE'}:
+        return _proxy(handler, method, f'/v1/sessions/{session_id}/read-state',
+                      _body_bytes(handler) if method == 'POST' else None)
 
     # /v1/sessions/{id}/stream — long-lived, handled separately
     if len(parts) == 2 and parts[1] == "stream" and method == "GET":

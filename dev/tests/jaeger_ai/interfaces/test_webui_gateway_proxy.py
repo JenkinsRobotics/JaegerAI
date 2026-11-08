@@ -108,6 +108,16 @@ def test_health_uses_the_real_route_not_v1_health(overlay):
     assert overlay._calls[-1] == ("GET", "/health")
 
 
+def test_operator_continuity_uses_the_existing_owner_gateway_contract(overlay):
+    assert _route(overlay, '/v1/operator/session-state')
+    assert overlay._calls[-1] == ('GET', '/v1/operator/session-state')
+    assert _route(overlay, '/v1/operator/session-state', 'PATCH')
+    assert overlay._calls[-1] == ('PATCH', '/v1/operator/session-state')
+    for method in ('POST', 'DELETE', 'PUT'):
+        assert not _route(overlay, '/v1/operator/session-state', method)
+    assert not _route(overlay, '/v1/operator/session-state/other', 'PATCH')
+
+
 def test_stream_is_proxied_by_the_streaming_path(overlay):
     """SSE must not go through the buffering unary proxy."""
     assert _route(overlay, "/api/jaeger/sessions/abc/stream") is True
@@ -462,3 +472,13 @@ def test_local_computer_status_is_read_only_proxy(overlay):
     assert _route(overlay,'/v1/runtime/computers') is True
     assert overlay._calls[-1]==('GET','/v1/runtime/computers')
     assert _route(overlay,'/v1/runtime/computers/allocate','POST') is False
+
+
+@pytest.mark.parametrize('method', ['GET', 'POST', 'DELETE'])
+def test_message_read_state_proxy_preserves_method_and_body(overlay, monkeypatch, method):
+    calls = []
+    body = b'{"request_id":"request","role":"assistant"}'
+    monkeypatch.setattr(overlay, '_body_bytes', lambda handler: body)
+    monkeypatch.setattr(overlay, '_proxy', lambda handler, verb, path, payload=None: calls.append((verb, path, payload)) or True)
+    assert _route(overlay, '/v1/sessions/owned/read-state', method)
+    assert calls == [(method, '/v1/sessions/owned/read-state', body if method == 'POST' else None)]
