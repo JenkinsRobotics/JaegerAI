@@ -24,8 +24,9 @@ def auth(caller="cli"):
 
 
 class OwnedGateway:
-    def __init__(self, root, *, webui=False, receipt_fault=None):
+    def __init__(self, root, *, webui=False, receipt_fault=None, research=False):
         self.root = root
+        self.research = research
         self.receipt_fault = receipt_fault
         self.process = None
         self.log = None
@@ -82,6 +83,7 @@ class OwnedGateway:
             "JAEGER_BACKGROUND_PRODUCERS": "1",
             "JAEGER_WEBHOOK_PORT": "0",
         }
+        environment["JAEGER_CONTRACT_RESEARCH"] = "1" if self.research else "0"
         command = [sys.executable, str(REPO / "dev/tests/fixtures/gateway_contract_worker.py"), str(self.root)]
         if self.receipt_fault is not None:
             environment["JAEGER_CONTRACT_RECEIPT_FAULT"] = json.dumps(self.receipt_fault)
