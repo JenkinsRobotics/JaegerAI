@@ -35,3 +35,39 @@ it("restores tool approval after reload without an active turn, and never decide
  expect(host.respondToConfirmation).toHaveBeenCalledExactlyOnceWith('home','restored-tool','deny');
  expect(el.textContent).not.toContain('Allow fixture write?');await act(async()=>root.unmount());
 });
+
+it("shows the full long multiline action after reload, with honest display limits", async () => {
+ const action='command='+ 'x'.repeat(12000) + '\nSECOND_ACTION\ncwd=/synthetic/other-directory';
+ const host={pendingApprovals:vi.fn().mockResolvedValue([{approval_id:"full",session_id:"home",kind:"tool_confirm",status:"pending",prompt:action}]),respondToConfirmation:vi.fn().mockResolvedValue(undefined)};
+ const el=document.createElement('div');const root=createRoot(el);
+ await act(async()=>root.render(<SessionApprovals sessionId="home" host={host}/>));
+ expect(el.querySelector('pre')?.textContent).toBe(action);
+ expect(el.querySelector('pre')?.getAttribute('aria-label')).toBe('Requested action');
+ expect(el.textContent).toContain('Secret values may be redacted');
+ expect(el.textContent).toContain('Older requests may contain only a summary');
+ expect(host.respondToConfirmation).not.toHaveBeenCalled();
+ await act(async()=>root.unmount());
+});
+
+it("offers no action while loading or when permission to read is refused", async () => {
+ let refuse!: (error: Error) => void;
+ const host={pendingApprovals:vi.fn().mockImplementation(()=>new Promise((_resolve,reject)=>{refuse=reject})),respondToConfirmation:vi.fn()};
+ const el=document.createElement('div');const root=createRoot(el);
+ await act(async()=>root.render(<SessionApprovals sessionId="home" host={host}/>));
+ expect(el.querySelector('button')).toBeNull();
+ await act(async()=>refuse(new Error('403 Forbidden')));
+ expect(el.textContent).toContain('403 Forbidden');expect(el.querySelector('button')).toBeNull();
+ expect(host.respondToConfirmation).not.toHaveBeenCalled();await act(async()=>root.unmount());
+});
+
+it("keeps the authoritative approval message visible beside a tool-event preview", async () => {
+ const { ApprovalCard } = await import('./ApprovalCard');
+ const prompt='Allow terminal.run_terminal? command="'+'x'.repeat(240)+'; SECOND_ACTION"\ncwd="/synthetic"';
+ // Event and reload both use the broker's full prompt, not tool.started previews.
+ const el=document.createElement('div');const root=createRoot(el);const decide=vi.fn();
+ await act(async()=>root.render(<ApprovalCard title="Run terminal?" message={prompt} toolName="terminal" input={{command:'preview…'}} onDecide={decide}/>));
+ expect(el.querySelector('pre[aria-label="Approval details"]')?.textContent).toBe(prompt);
+ expect(el.querySelector('pre[aria-label="Approval details"]')?.className).toBe('jg-approval__cmd');
+ expect(decide).not.toHaveBeenCalled();
+ await act(async()=>root.unmount());
+});

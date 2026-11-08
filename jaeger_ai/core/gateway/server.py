@@ -119,15 +119,72 @@ _APPROVAL_TARGET_KEYS = (
 
 
 def _approval_target(request: Any) -> str:
-    """What this call will touch, for the approval prompt."""
-    arguments = getattr(request, "arguments", None) or {}
-    parts = []
-    for key in _APPROVAL_TARGET_KEYS:
-        value = arguments.get(key)
-        if value not in (None, ""):
-            text = str(value)
-            parts.append(f"{key}={text[:200]}{'…' if len(text) > 200 else ''}")
-    return "; ".join(parts)
+    """Complete supplied arguments, not a progress preview or execution payload.
+
+    Redaction is display-only. Never reuse these strings as authority or tool
+    input. Omitted tool defaults are not inferred here.
+    """
+    from jaeger_ai.core.redaction import MASK, redact_text
+
+    active: set[int] = set()
+
+    def clean(value: Any) -> Any:
+        # Only builtin JSON-compatible data is displayable. Never invoke a
+        # custom object's str/repr or container methods to populate a card.
+        kind = type(value)
+        if kind is str:
+            return redact_text(value)
+        if value is None or kind in (bool, int):
+            return value
+        if kind is float:
+            return value if math.isfinite(value) else "[Unavailable: non-finite number]"
+        if kind not in (dict, list, tuple):
+            return "[Unavailable: unsupported argument value]"
+        if id(value) in active:
+            return "[Unavailable: cyclic argument value]"
+        active.add(id(value))
+        try:
+            if kind is dict:
+                if any(type(key) is not str for key in value):
+                    return "[Unavailable: mapping contains unsupported argument key]"
+                cleaned = {}
+                for key, item in value.items():
+                    # Whole labels preserve author and token_count while
+                    # masking credentials, including environment prefixes.
+                    label = re.sub(r"([a-z])([A-Z])", r"\1_\2", key)
+                    sensitive = re.search(
+                        r"(?:^|[ _-])(?:api[ _-]?key|private[ _-]?key|access[ _-]?token|"
+                        r"auth(?:orization)?|cookie|credentials?|password|passwd|secret)"
+                        r"(?:$|[ _-])|(?:^|[ _-])token$",
+                        label, re.IGNORECASE,
+                    )
+                    cleaned[key] = MASK if sensitive else clean(item)
+                return cleaned
+            return [clean(item) for item in value]
+        finally:
+            active.remove(id(value))
+
+    # Sanitize raw leaves before JSON escapes quoted shell assignments, then
+    # sanitize serialized pairs as well. Neither pass changes execution input.
+    arguments = clean(getattr(request, "arguments", None))
+    if type(arguments) is not dict:
+        return "[Unavailable: supplied arguments are not a displayable mapping]"
+
+    keys = [key for key in _APPROVAL_TARGET_KEYS if key in arguments]
+    keys.extend(key for key in arguments if key not in keys)
+
+    def display_key(key: str) -> str:
+        # MCP extra arguments may have arbitrary string keys. Quote/escape
+        # nonidentifiers so a label cannot forge another argument line or use
+        # control/bidi characters to disguise the scope being reviewed.
+        return key if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key) else json.dumps(key, ensure_ascii=True)
+
+    # Escape Unicode formatting characters in values too: HTML escaping does
+    # not prevent bidi/zero-width text from disguising a displayed command.
+    return "\n".join(
+        redact_text(f"{display_key(key)}={json.dumps(arguments[key], ensure_ascii=True)}")
+        for key in keys
+    )
 
 
 # Opening words of a request that only asks about what an image shows.
@@ -792,7 +849,9 @@ class _GatewayToolConfirmationProvider:
             return False
         skill = str(getattr(request, "skill", "") or "")
         op = str(getattr(request, "operation", "") or "")
-        summary = str(getattr(request, "summary", "") or "")
+        from jaeger_ai.core.redaction import redact_text
+
+        summary = redact_text(str(getattr(request, "summary", "") or ""))
         target = _approval_target(request) or summary
         tier_name = getattr(getattr(request, "tier", None), "name", str(getattr(request, "tier", "")))
         aid = f"approval_{uuid.uuid4().hex[:12]}"

@@ -92,3 +92,22 @@ bash scripts/verify.sh all
 No production code, live runtime, real credentials, Mac installation, remote
 branch or deployment was changed by this increment. Overall Research acceptance
 remains PARTIAL.
+
+
+## Follow-up integration with complete approval display
+
+The approval correction removes the truncation limitation described above for
+new candidate requests. Research acceptance now independently parses every
+JSON-valued pair, compares full mappings against the exact issued fixture call,
+pins each file path to its call ID and rejects duplicate keys/approval IDs.
+An initial failure revealed the native terminal adapter's default timeout in its
+permission request; the fixture now explicitly supplies timeout_s=60.0. No
+unknown argument is ignored. Independent corrected acceptance passed 3 tests
+and 24 assertion-mutation controls. Its original failed run is retained.
+
+The twenty-seventh combined source separately reruns this journey in the full
+54-case HTTP gate and uses a fresh production UI build with 913 component tests.
+See the combined report for exact source and all exclusions. Original
+commit26 counts/fingerprint above remain historical, not relabeled final results.
+This does not close automatic Research evidence enforcement, factual truth,
+retrieval provenance or interrupted-research recovery gaps.

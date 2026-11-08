@@ -2,11 +2,11 @@
 
 ## Candidate and boundaries
 
-The isolated branch preserves twenty-five commits over review base
-ff71bb769bc56e4c6d7be6d540a86be73e291e07. The latest increment redacts recognized provider-failure diagnostics while
-preserving operational receipts. It follows truthful procedure review and
-fresh-process retrieval, default-report delivery and safe provider settings. The separately inspected latest
-master adds only two CI/documentation commits; see the
+The isolated branch preserves twenty-seven commits over review base
+ff71bb769bc56e4c6d7be6d540a86be73e291e07. The latest increments qualify the cooperative Research report journey and
+complete escaped approval-request visibility. They follow recognized provider
+diagnostic protection, truthful procedure review and safe provider settings. Latest observed master 315f6eacbf99cab11b6a3edf3441a545140ca4c4 adds
+four commits, including runtime changes overlapping five candidate paths; see the
 [upstream check](assistant-core-upstream-check-20261108.md). No combined upstream
 revision was executed. The final source is identified by its frozen Python manifest. The bundle README and
 commits.txt identify its final commit/tree and cumulative patch hash.
@@ -21,16 +21,17 @@ remain preserved outside this isolated checkout.
 - Repository verification: 430 passed; production path: 88 passed.
 - Security: 203 passed, 2 platform skips; durable/recovery/artifact: 560 passed.
 - Agent runtime/commitment: 120 passed; separate unshimmed specialist OWNER integration: 1 passed.
-- Owned HTTP/process: 51 passed, 3 infrastructure exclusions in 589.40 seconds, including four strengthened SIGKILL/two-restart cases and the default-report delivery journey.
-- Provider diagnostics and adjacent tests: 207 passed. Independent exact final: 272 focused/adjacent, 203 security with 2 skips, and 430 aggregate passed. Prior rejected candidate results remain separate.
-- Procedure retrieval/review and adjacent tests: 31 passed, 1 HTTP case excluded from this group. The separate HTTP gate covers its own selected tests. Prior independent procedure review remains 57 focused/adjacent and 430 aggregate passed.
-- Provider settings: 80 passed. Prior independent final transaction review remains 89 passed, 5 VS Code cases excluded; hygiene: 9 passed.
-- UI evidence reused: 910 tests in 201 files, theme/TypeScript/Vite/no-mock build, with 866 source files and 857 manifest inputs independently matched again. This is not new rendered-browser qualification.
-- Root wheel/source archives rebuilt without installation; eight unchanged agent/companion archives retained; all 10 archives inspected. Sixteen root and five agent runtime modules match current source, with matching UI provenance.
+- Owned HTTP/process: 54 passed, 3 infrastructure exclusions in 647.96 seconds, including four strengthened SIGKILL/two-restart cases, default-report delivery and cooperative Research acceptance.
+- Approval visibility/identity/expiry and adjacent tests: 98 passed. Independent rejected and corrected candidates remain separately identified in the approval report and evidence.
+- Provider diagnostics and adjacent tests: 207 passed. Prior independent exact correction: 272 focused/adjacent, 203 security with 2 skips, and 430 aggregate passed.
+- Procedure retrieval/review and adjacent tests: 31 passed, 1 HTTP case excluded from this group. Prior independent procedure review: 57 focused/adjacent and 430 aggregate passed.
+- Provider settings: 80 passed. Prior independent final transaction review: 89 passed, 5 VS Code cases excluded; hygiene: 9 passed.
+- Fresh production UI build and full snapshot suite: 913 tests in 201 files, theme/TypeScript/Vite/no-mock checks passed. All 866 source files and 857 manifest inputs match the final checkout. This is not rendered-browser/phone qualification.
+- Root wheel/source archives rebuilt without installation; eight unchanged agent/companion archives retained; all 10 archives inspected. Sixteen root and five agent runtime modules match final source, with matching UI provenance.
 - Critical Python lint, final source freeze and whitespace checks passed.
 
-Unchanged UI source fingerprint:
-`36612489016ec2283f86dcc22d435be6aa80478591ab9dcb4551833c7be0fc1f`.
+Current UI source fingerprint:
+`fe68df49783f2e0d88104f371b921a75578b5b4f13a836b5efb482de9b4e8b82`.
 
 All tests use external state, cache and temporary directories. The final Python
 source SHA-256 manifest was checked after testing. Critical Python lint and git
@@ -97,8 +98,8 @@ immutable retry equality assertion, with 3 exclusions. Its four strengthened
 process-loss cases passed. That failed log remains http-seventeenth-final.log;
 its source and other passing gate logs remain preserved. The nineteenth run
 then passed 50 HTTP cases, with 3 exclusions, after the producer correction.
-Those logs remain included separately. The latest twenty-third run above
-reruns the combined source and adds the new report journey.
+Those logs remain included separately. Later corrected runs preserve those earlier failures separately. The current
+run above includes the cooperative Research journey as well.
 
 Independent review also rejected the initial default-artifact patch: it could
 hash a file under root A, then re-resolve a worker path and issue trusted metadata
@@ -130,7 +131,7 @@ necessary. Evolution work is still deferred.
 
 ## Evidence and reproduction
 
-The bundle includes run-twentyfifth-final.sh and per-gate logs, source hashes,
+The bundle includes run-twentyseventh-final.sh and per-gate logs, source hashes,
 artifact inspection, machine-readable UI results, and independent review logs.
 Invoke each runner case from the isolated clone with its recorded external venv,
 and select a fresh external basetemp for every rerun. Do not reuse pytest basetemp
@@ -149,7 +150,7 @@ The [default report delivery test](assistant-core-default-report-delivery-202611
 adds actual default-mode task/approval/tool/artifact HTTP acceptance, authenticated
 download, restart/replay identity and scope-drift denial. That twentieth increment changed no production bytes. Its first integrated run
 passed separately, as did a fresh 430-check repository verification. It is now
-also included in the actual 51-case final run above. Research source support
+also included in the actual 54-case final run above. Research source support
 remains distinct from artifact-byte proof: ordinary research completion does
 not automatically enforce the existing grounded-citations procedure.
 
@@ -187,7 +188,8 @@ Overall learning and all tabs remain PARTIAL; there is no model-weight training.
 The prior twenty-third combined HTTP run independently passed 51 cases with
 3 exclusions in 654.54 seconds; its full logs remain preserved. The twenty-fourth combined run then independently passed 51 HTTP cases
 with 3 exclusions in 581.50 seconds. Those logs also remain separate; the latest
-gates above belong to the twenty-fifth frozen source.
+twenty-fifth gates passed 51 cases with 3 exclusions in 589.40 seconds. The
+latest gates above belong to the twenty-seventh frozen source.
 The first archive-inspector command used file arguments instead of the required
 directory and was rejected before inspection. The corrected directory invocation
 with require-packages passed for all ten archives; both records are retained.
@@ -214,3 +216,36 @@ secrecy contract. Arbitrary opaque/encoded values, successful text,
 nondiagnostic metadata, historical records and unrelated logging paths remain
 outside the scrub guarantee. No real provider/account or live runtime was used.
 All tabs and the overall product remain PARTIAL.
+
+
+## Cooperative Research and complete approval display
+
+The [Research journey](assistant-core-research-journey-20261108.md) uses real
+proposal/approval, native tools, citation CLI, owner file proof, authenticated
+artifact download and Documents save/reopen across a completed-runtime restart.
+Model and retrieval responses are scripted. Citation consistency does not prove
+claim entailment or actual source provenance; ordinary Research completion still
+does not automatically enforce that procedure. That separate gap remains open.
+
+[Approval visibility](assistant-core-approval-visibility-20261108.md) shows all
+supplied permission-request arguments with explicit escaping and best-effort
+credential masking. Unsupported objects are unavailable without custom string
+conversion; the authoritative prompt remains wrapped and scrollable beside
+bounded previews. Existing UUID/future authority and grant policies are unchanged.
+No immutable authorization hash, effective-default expansion or universal secret
+recognition is claimed. Rendered browser/phone interaction remains untested.
+
+The first integrated HTTP run passed 53 cases and failed one Research assertion,
+with 3 exclusions: the native terminal adapter supplies a 60-second timeout not
+present in the original scripted model call. The fixture now explicitly supplies
+it, preserving exact whole-map scope checks. Independent Research correction
+passed 3 acceptance tests and 24 assertion controls. The original failure and
+source remain retained. The final full HTTP rerun above uses corrected source.
+
+A later adversarial review also superseded the earlier approval-display pass:
+raw MCP argument keys could forge extra visual lines, and directional controls
+in values survived JSON serialization. Final labels/values explicitly escape
+those characters without changing execution arguments. Earlier passing gates
+and failing controls remain separate; final backend gates were rerun after the
+correction. UI source did not change during those backend corrections, and its
+fresh 913-test build snapshot was independently matched again.

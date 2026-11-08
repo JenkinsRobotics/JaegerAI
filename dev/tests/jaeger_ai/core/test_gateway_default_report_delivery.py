@@ -40,7 +40,8 @@ def test_default_report_delivery_survives_restart_and_denies_scope_drift(tmp_pat
                 assert approval['request_id'] == tid + ':0'
                 metadata = approval['metadata']
                 assert metadata['tool'] == 'files.write_file'
-                assert metadata['target'] == 'path=workspace/durable-report.txt'
+                assert metadata['target'] == ('path="workspace/durable-report.txt"\n'
+                                              'content="DURABLE-VERIFIED-CONTENT"')
                 assert metadata['origin'] == {
                     'task_id': tid, 'child_session_id': 'task:' + tid,
                     'agent_id': 'native:jaeger', 'parent_session_id': sid}

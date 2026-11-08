@@ -72,7 +72,7 @@ def model_response(messages):
         ('write_file', {'path':'workspace/retrieval.json', 'content':json.dumps(result(1)) if len(results) > 1 else ''}),
         ('write_file', {'path':'workspace/page.txt', 'content':result(2)['text'] if len(results) > 2 else ''}),
         ('write_file', {'path':'workspace/research-report.md', 'content':'# Synthetic research fixture\n\n' + QUOTE + '[1]\n'}),
-        ('terminal', {'command':terminal_command()}),
+        ('terminal', {'command':terminal_command(), 'timeout_s':60.0}),
         ('read_file', {'path':'workspace/research-report.md'}),
         ('work_ledger', {'action':'update','completed_ids':['report'],'remaining_count':0}),
         ('complete_task', {'summary':'Synthetic citation ledger checked; not independent factual verification.',

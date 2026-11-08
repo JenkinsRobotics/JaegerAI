@@ -161,9 +161,10 @@ def test_prompt_names_the_target_not_just_the_operation(running_app, monkeypatch
     provider.confirm(_write_request())
 
     [kw] = created
-    assert kw["prompt"] == "Allow files.write_file? path=workspace/audit/a.txt"
+    assert kw["prompt"] == ('Allow files.write_file? path="workspace/audit/a.txt"\n'
+                            'content="' + 'x' * 5000 + '"')
     assert kw["metadata"]["reason"] == "WRITE_LOCAL"
-    assert "content" not in kw["prompt"]
+    assert kw["metadata"]["target"] in kw["prompt"]
 
 
 def test_restart_expires_tool_confirms_but_keeps_handoff_approvals(tmp_path):
@@ -196,7 +197,7 @@ def test_package_installs_name_the_package(running_app, monkeypatch):
 
     _GatewayToolConfirmationProvider(running_app, "s", "r").confirm(request)
 
-    assert created[0]["prompt"] == "Allow packages.install_package? package=pytest"
+    assert created[0]["prompt"] == 'Allow packages.install_package? package="pytest"'
 
 
 def test_allow_for_this_session_skips_later_prompts_in_that_session_only(running_app, monkeypatch):
