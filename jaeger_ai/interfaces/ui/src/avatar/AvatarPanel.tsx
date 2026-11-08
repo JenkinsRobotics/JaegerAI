@@ -35,7 +35,7 @@ export function AvatarPanel({ agent, presence, onOpenAgents, size, clipState="id
   useEffect(() => { const t = window.setTimeout(() => setAnnounced(`${name} is ${STATE_TEXT[state].toLowerCase()}`), 1500); return () => window.clearTimeout(t); }, [state, name]);
   const builtin = agent.id === "native:jaeger" && !record?.avatar && !agent.avatar_url;
   const format = record?.avatar?.format ?? "portrait";
-  const stage = (compact: boolean) => builtin ? <ClipAvatar name={name} state={clipState} size={compact ? 120 : 200} still /> : (
+  const stage = (compact: boolean) => builtin ? <ClipAvatar name={name} state={clipState} size={compact ? 120 : 200} still={still} /> : (
     <AvatarStage name={name} record={record} state={state} emotion={emotion} intensity={record?.live.intensity || 1} still={still} compact={compact}
       paused={mode === "hidden" || mode === "rail"} mouth={mouth} portrait={<AgentFace agent={agent} size={compact ? 120 : 200} />} />
   );

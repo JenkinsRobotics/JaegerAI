@@ -296,6 +296,7 @@ def local_models() -> dict:
         lm = loaded.get(m.get("name"))
         out.append({"name": m.get("name"), "size": m.get("size"), "modified_at": m.get("modified_at"), "family": d.get("family"),
                     "parameters": d.get("parameter_size"), "quantization": d.get("quantization_level"), "format": d.get("format"),
+                    "remote_model": m.get("remote_model"), "remote_host": m.get("remote_host"),
                     "context": d.get("context_length"), "loaded": bool(lm), "vram": (lm or {}).get("size_vram")})
     return {"models": out, "pulls": list(_pulls.values())}
 
@@ -954,6 +955,9 @@ def route(handler, parsed, method: str, read_body, j) -> bool:
                 return j(handler, read_board()) or True
             if method == "PUT":
                 return j(handler, write_board(body)) or True
+        if p == "/v1/models/cloud" and method == "GET":
+            from jaeger_ai.features.webui.api.ollama_cloud import catalog
+            return j(handler, catalog(refresh=parse_qs(parsed.query).get("refresh") == ["1"])) or True
         if p == "/v1/models/local" and method == "GET":
             return j(handler, local_models()) or True
         if p == "/v1/models/hardware" and method == "GET":
