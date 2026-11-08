@@ -556,3 +556,24 @@ it('preserves an opaque historic agent selection through the new tools and summa
  expect(new URLSearchParams(location.search).get('session')).toBe(id);expect(new URLSearchParams(location.search).get('agent')).toBe('specialist');
  expect(home).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();
 });
+it.each([false, true])('fork completion must not override newer navigation, including return to original (%s)',async(returnToOriginal)=>{
+ history.replaceState(null,'','/chat?session=original');
+ const source=new MockSource();Object.defineProperty(source,'kind',{value:'live'});
+ vi.spyOn(source,'session').mockImplementation(async id=>({session_id:id,title:id}));
+ vi.spyOn(source,'sessions').mockResolvedValue([{session_id:'original',title:'Original'},{session_id:'newer',title:'Newer'}]);
+ let resolve!:(value:unknown)=>void;const pending=new Promise(r=>{resolve=r});
+ vi.stubGlobal('fetch',vi.fn().mockReturnValue(pending));
+ try {await mount(source);
+ await flush(()=>document.querySelector<HTMLButtonElement>('[aria-label="Conversation actions"]')!.click());
+ await flush(()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Fork')!.click());
+ await flush(()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Fork conversation')!.click());
+ await flush(()=>{history.pushState(null,'','/chat?session=newer');dispatchEvent(new PopStateEvent('popstate'));});await flush();
+ expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session','newer');
+ if (returnToOriginal) await flush(()=>{history.pushState(null,'','/chat?session=original');dispatchEvent(new PopStateEvent('popstate'));});
+ const selected=returnToOriginal ? 'original' : 'newer';
+ await flush(()=>resolve({ok:true,text:async()=>JSON.stringify({session_id:'forked',title:'Original fork'})}));await flush();
+ expect(document.querySelector('[data-chat-session]')).toHaveAttribute('data-chat-session',selected);
+ expect(location.search).toBe('?session='+selected);
+ expect(document.body.textContent).toContain('Original fork');
+ } finally {vi.unstubAllGlobals();}
+});

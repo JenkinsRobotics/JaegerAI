@@ -120,6 +120,14 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const requestedSession = route.page === "chat" ? route.params.get("session") || "" : "";
   const [session, setSession] = useState(() => linkedSession !== null ? invalidLinkedSession ? '' : linkedSession : storedSession());
   const routeKey = `${route.page}/${route.sub}/${route.rest}?${route.params.toString()}`;
+  // A completed mutation owns its result, not navigation that happened later.
+  const navigationGeneration = useRef(0);
+  useEffect(() => {
+    const advance = () => { navigationGeneration.current += 1; };
+    window.addEventListener("popstate", advance);
+    window.addEventListener("jaeger:navigate", advance);
+    return () => { advance(); window.removeEventListener("popstate", advance); window.removeEventListener("jaeger:navigate", advance); };
+  }, []);
   useEffect(() => {
     if (typeof matchMedia === "function" && matchMedia(COMPACT_SHELL_QUERY).matches) setSidebarOpen(false);
     setHeaderPopup(null);
@@ -292,11 +300,14 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const openWork = (view: WorkView) => { setWorkView(view); setPanelOpen(true); setHeaderPopup(null); };
   const forkSession = async (side: boolean) => {
     if (!session || forkBusy) return;
+    const generation = navigationGeneration.current, address = location.href;
     setForkBusy(true); setHistoryError("");
     try {
       const row = await sendJson<SessionRow>("POST", `/v1/sessions/${encodeURIComponent(session)}/branch`, { title: `${currentTitle} (fork)` });
       if (!validConversationId(row.session_id) || row.session_id === session) throw Error("Invalid fork response");
-      setRecent(rows => [row, ...rows]); setHeaderPopup(null);
+      setRecent(rows => [row, ...rows.filter(existing => existing.session_id !== row.session_id)]);
+      if (generation !== navigationGeneration.current || address !== location.href) return;
+      setHeaderPopup(null);
       if (side) window.open(conversationLink(row.session_id, shareOrigin), "_blank", "noopener,noreferrer");
       else selectSession(row.session_id);
     } catch (e) { setHistoryError(`Fork could not be confirmed: ${String((e as Error).message || e)}. Check Recents before trying again.`); }
