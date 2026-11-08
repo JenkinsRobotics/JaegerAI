@@ -57,3 +57,7 @@ The default-lead request-identity/recovery increment remains separate. Full owne
 HTTP and rebuilt-archive qualification for the combined next candidate must be
 rerun; the preceding43-test HTTP result belongs to the thirteen-commit snapshot,
 not this changed creation handler. Overall and per-tab acceptance stay PARTIAL.
+
+The subsequent [default-lead journal increment](assistant-core-default-lead-journal-20261108.md)
+uses this exact pinned-selection behavior and separately qualifies fresh stable
+lead identity. It does not turn other selected agents into journal-qualified leads.
