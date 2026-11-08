@@ -223,6 +223,55 @@ it("collapses each column independently without remounting the chat", async () =
  expect(document.querySelector('[data-chat-session]')).toBe(chat);
  expect(document.querySelector('.jg-stable-demo__profile')?.textContent).toContain('Jaeger');
 });
+
+it("collapses sidebar groups independently while keeping the same conversation and right panel", async () => {
+ localStorage.setItem(DEMO_SESSION_KEY, 'saved');
+ const source = new MockSource();
+ vi.spyOn(source, 'session').mockResolvedValue({session_id: 'saved'} as never);
+ const create = vi.spyOn(source, 'createSession');
+ await mount(source);
+ const chat = document.querySelector('[data-chat-session]');
+ await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Toggle pinned summary"]')!.click());
+ for (const title of ['Pinned', 'Projects', 'Recents']) {
+  const button = [...document.querySelectorAll<HTMLButtonElement>('.jg-sidebar-section__toggle')].find(b => b.textContent === title)!;
+  expect(button).toHaveAttribute('aria-expanded', 'true');
+  await flush(() => button.click());
+  expect(button).toHaveAttribute('aria-expanded', 'false');
+  expect(document.getElementById(button.getAttribute('aria-controls')!)?.hidden).toBe(true);
+  expect(document.querySelector('[data-chat-session]')).toBe(chat);
+  expect(document.querySelector('[aria-label="Pinned workspace summary"]')).not.toBeNull();
+ }
+ const recents = [...document.querySelectorAll<HTMLButtonElement>('.jg-sidebar-section__toggle')].find(b => b.textContent === 'Recents')!;
+ await flush(() => recents.click());
+ expect(recents).toHaveAttribute('aria-expanded', 'true');
+ expect(document.querySelector('.jg-sidebar-section__toggle')).toHaveAttribute('aria-expanded', 'false');
+ expect(create).not.toHaveBeenCalled();
+});
+
+it("restores each sidebar group's expansion preference after reopening the app", async () => {
+ await mount();
+ const pinned = document.querySelector<HTMLButtonElement>('.jg-sidebar-section__toggle')!;
+ await flush(() => pinned.click());
+ await flush(() => root.unmount());
+ await mount();
+ const groups = [...document.querySelectorAll<HTMLButtonElement>('.jg-sidebar-section__toggle')];
+ expect(groups.find(button => button.textContent === 'Pinned')).toHaveAttribute('aria-expanded', 'false');
+ expect(groups.find(button => button.textContent === 'Projects')).toHaveAttribute('aria-expanded', 'true');
+ expect(groups.find(button => button.textContent === 'Recents')).toHaveAttribute('aria-expanded', 'true');
+});
+
+it("keeps disclosures usable if browser storage refuses writes", async () => {
+ const storage = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {throw new Error('Storage unavailable');});
+ try {
+  await mount();
+  const pinned = document.querySelector<HTMLButtonElement>('.jg-sidebar-section__toggle')!;
+  await flush(() => pinned.click());
+  expect(pinned).toHaveAttribute('aria-expanded', 'false');
+  await flush(() => pinned.click());
+  expect(pinned).toHaveAttribute('aria-expanded', 'true');
+ } finally {storage.mockRestore();}
+});
+
 it("opens searchable draft settings and returns to the same chat", async () => {
  localStorage.setItem(DEMO_SESSION_KEY, 'saved');
  const source = new MockSource();

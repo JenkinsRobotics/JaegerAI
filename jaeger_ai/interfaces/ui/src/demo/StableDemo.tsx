@@ -1,4 +1,5 @@
 import {CompanionMode} from "./CompanionMode";
+import { ConversationSection } from "./ConversationSection";
 import {JaegerAvatar} from "../avatar/JaegerAvatar";
 import {STATUS_TEXT,type ClipState} from "../avatar/avatar";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent } from "react";
@@ -382,18 +383,18 @@ export function StableDemo({ source }: { source: JaegerSource }) {
           </div>}
           <div className="jg-stable-demo__recents">
             {historyError && <p role="alert">{historyError}</p>}
-            <section className="jg-stable-demo__session-section"><h2>Pinned</h2>
+            <ConversationSection id="pinned" title="Pinned">
               {!pinnedRows.length && <p>Pin conversations you want to keep close.</p>}
               {pinnedRows.map(row => <ConversationRow key={row.session_id} row={row} active={session === row.session_id} pinned selecting={selectionMode} selected={selectedSessions.has(row.session_id)} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} />)}
-            </section>
-            <section className="jg-stable-demo__session-section"><h2>Projects</h2>
+            </ConversationSection>
+            <ConversationSection id="projects" title="Projects">
               {!projectGroups.length && <p>Conversations with a workspace appear here.</p>}
               {projectGroups.map(([workspace, rows]) => <div className="jg-stable-demo__project" key={workspace}><h3 title={workspace}><FolderOpen size={15} />{projectLabel(workspace)}</h3>{rows.map(row => <ConversationRow key={row.session_id} row={row} active={session === row.session_id} pinned={false} selecting={selectionMode} selected={selectedSessions.has(row.session_id)} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} />)}</div>)}
-            </section>
-            <section className="jg-stable-demo__session-section"><h2>Recents</h2>
+            </ConversationSection>
+            <ConversationSection id="recents" title="Recents">
               {!recentRows.length && !historyError && <p>{recent.length ? "All conversations are pinned or in projects." : "Your conversations will appear here."}</p>}
               {recentRows.map(row => <ConversationRow key={row.session_id} row={row} active={session === row.session_id} pinned={false} selecting={selectionMode} selected={selectedSessions.has(row.session_id)} onOpen={() => selectSession(row.session_id)} onSelect={() => toggleSelected(row.session_id)} onPin={() => togglePinnedSession(row.session_id)} onDelete={() => setDeleteConfirm([row.session_id])} />)}
-            </section>
+            </ConversationSection>
           </div>
         </>}
         {activeSection === "agents" && <div className="jg-stable-demo__context-list"><h2>Agent team</h2>{agents.map(row => <button key={row.id} type="button" onClick={() => navigate(pathOf("agents"))}><Bot size={17} />{row.display_name || row.name || row.id}</button>)}</div>}
