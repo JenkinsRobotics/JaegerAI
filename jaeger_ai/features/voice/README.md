@@ -81,3 +81,18 @@ request admission, steering, queue, approvals and history as typed chat.
 `/api/jaeger/tts` renders Kokoro WAV clips for client-side playback. Closing
 voice mode releases that client's microphone and playback only. Microphone and
 speaker permissions and audibility must be qualified on the actual client.
+
+The shared client keeps microphone capture independent of Gateway work. New
+spoken follow-ups use the existing steer path while a request is active. Silent
+recording segments are discarded locally and rearmed; silence is not submitted
+as a message. Playback interruption by speech is enabled only when the live
+browser input reports echo cancellation and playback follows the system default
+route. Other adapters/routes retain the explicit Interrupt and speak control.
+Device choices are shared by Settings → Voice & audio and chat on that client.
+The VoiceIO adapter contract supplies device discovery, capture and playback; it
+contains no fixed hardware names or assumed room location.
+
+Reference behavior: [ChatGPT Voice](https://learn.chatgpt.com/docs/features/voice)
+and [OpenAI session lifecycle](https://developers.openai.com/api/docs/guides/live-conversations).
+These public contracts establish the interaction target, not equivalence of
+Jaeger's Whisper → Gateway/Ollama → Kokoro pipeline with a native speech model.
