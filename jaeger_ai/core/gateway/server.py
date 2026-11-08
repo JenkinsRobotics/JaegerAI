@@ -5525,7 +5525,11 @@ class JaegerGatewayApp:
         try:
             with self.store._get_conn() as conn:
                 row = self.store.get_request(request_id or turn_id) or {}
-                background_bound = self.task_owner.background_dispatch_guard(conn, row) is not None
+                background_task = self.task_owner.background_dispatch_guard(conn, row)
+                background_bound = background_task is not None
+                if background_bound:
+                    from jaeger_ai.core.tasks.background_admission import validate_session_metadata
+                    validate_session_metadata(background_task, (session or {}).get('metadata') or {})
                 if background_bound and (session_id != row.get('session_id') or turn_id != row.get('turn_id')
                         or text != row.get('input_text') or execution != row.get('execution')):
                     raise ValueError('Background dispatch arguments differ from canonical request')
@@ -5547,6 +5551,14 @@ class JaegerGatewayApp:
         agent = None if identity_error else (self._resolve_session_agent(session_id, read_only=True)
                  if background_bound or (execution or {}).get('_owner_agent') is not None
                  else self._resolve_session_agent(session_id))
+        if background_bound and identity_error is None:
+            from .owner_receipts import canonical_lead
+            actual = ({'id': agent.id, 'kind': getattr(agent.kind, 'value', agent.kind),
+                       'role': getattr(agent.role, 'value', agent.role), 'disabled': agent.disabled}
+                      if agent is not None else None)
+            if actual != background_task.payload['background_agent'] or not canonical_lead(actual):
+                identity_error = ValueError('Actual background dispatch agent differs from admitted identity')
+                agent = None
         system_prompt = self._system_prompt_for_agent(agent)
         agent_fields: dict[str, Any] = {}
         if session_agent_id:

@@ -93,6 +93,10 @@ def validate(owner, task, conn=None):
 def _validate_session(conn, task):
     row = conn.execute('SELECT metadata_json FROM sessions WHERE session_id=?', ('task:'+task.task_id,)).fetchone()
     metadata = json.loads(row['metadata_json']) if row else {}
+    validate_session_metadata(task, metadata)
+
+
+def validate_session_metadata(task, metadata):
     if (metadata.get('task_id') != task.task_id or metadata.get('agent_id') != task.agent_id
             or not metadata.get('agent_pinned') or not metadata.get('route_checked')
             or metadata.get('execution_mode') != 'agent' or metadata.get('actionable') is not True

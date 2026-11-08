@@ -176,12 +176,13 @@ def test_transaction_rollback_does_not_leave_attempt_proof(owner):
     assert not owner.store.get_task(tid).payload.get('background_admissions')
 
 
-@pytest.mark.parametrize('mode', ['foreign-task', 'unsettled', 'settled'])
+@pytest.mark.parametrize('mode', ['foreign-task', 'unsettled', 'busy', 'old-lease', 'active', 'settled'])
 def test_native_reuse_requires_same_task_settled_attempt(owner, monkeypatch, mode):
     import os
     from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
     from jaeger_ai.core.entity.runtime import EntityRuntime
-    monkeypatch.setattr(SqliteRunStore, 'get', lambda self, native: SimpleNamespace(owner_pid=os.getpid(), state='completed'))
+    lifecycle = {'state': 'active'}
+    monkeypatch.setattr(SqliteRunStore, 'get', lambda self, native: SimpleNamespace(owner_pid=os.getpid(), state=lifecycle['state']))
     monkeypatch.setattr(EntityRuntime, 'run_has_indeterminate_effects', lambda native: mode == 'unsettled')
     tid = submit(owner)
     asyncio.run(owner._execute(tid))
@@ -189,6 +190,11 @@ def test_native_reuse_requires_same_task_settled_attempt(owner, monkeypatch, mod
     store.bind_native(tid+':0', native_run_id='original', native_session='owner:task:'+tid,
         native_binding_guard=owner.background_binding_guard)
     store.complete_request(tid+':0', status='completed', result={'output': 'checkpoint', 'halt_reason': 'yielded'})
+    lifecycle['state'] = 'active' if mode in {'active', 'busy', 'old-lease'} else 'completed'
+    if mode == 'busy':
+        owner.gateway._running_tasks[tid+':0'] = SimpleNamespace(done=lambda: False)
+    if mode == 'old-lease':
+        owner.store.update_task(tid, lambda t: t.payload['background_admissions'][tid+':0'].update(lease={}))
     def next_attempt(task):
         task.payload['attempt'] = 1
         task.payload['native_run_id'] = 'original'
@@ -196,16 +202,18 @@ def test_native_reuse_requires_same_task_settled_attempt(owner, monkeypatch, mod
     if mode == 'foreign-task':
         foreign = store.admit_request('unrelated', 'foreign', request_id='foreign')
         store.bind_native('foreign', native_run_id='original', native_session='owner:unrelated')
-    if mode == 'settled':
+    if mode in {'settled', 'active'}:
         asyncio.run(owner._execute(tid))
         task = owner.store.get_task(tid)
         row = store.get_request(tid+':1')
         assert not owner._continuation_receipt_error(task, row)
         assert task.payload['background_admissions'][tid+':1']['native_run_id'] == 'original'
     else:
-        with pytest.raises(ValueError):
-            asyncio.run(owner._execute(tid))
+        asyncio.run(owner._execute(tid))
+        assert owner.store.get_task(tid).state.value == 'paused'
         assert not store.get_request(tid+':1')['native_run_id']
+        asyncio.run(owner.tick())
+        assert not owner._active
 
 
 def test_objective_edit_cannot_bless_scope_drift(owner):
@@ -239,4 +247,31 @@ def test_actual_dispatch_arguments_match_frozen_request(owner, field):
     else: actual[field] = 'foreign'
     asyncio.run(JaegerGatewayApp._execute_turn_inner(gateway, actual['session_id'], actual['turn_id'],
         actual['input_text'], request_id=row['request_id'], execution=actual['execution']))
+    assert errors and errors[0] is not None
+
+
+@pytest.mark.parametrize('field', ['execution_mode', 'agent'])
+def test_actual_dispatch_objects_cannot_differ_from_validated_database(owner, monkeypatch, field):
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    tid = submit(owner)
+    asyncio.run(owner._execute(tid))
+    row = owner.gateway.store.get_request(tid+':0')
+    gateway = owner.gateway
+    gateway.task_owner = owner
+    gateway._session_agent_id = lambda session: owner.store.get_task(tid).agent_id
+    gateway._resolve_session_agent = lambda sid, **kwargs: SimpleNamespace(id='foreign', kind='jaeger_native', role='lead', disabled=False)
+    gateway._system_prompt_for_agent = lambda agent: ''
+    if field == 'execution_mode':
+        original = gateway.store.get_session
+        def stale(sid):
+            session = original(sid)
+            if sid == row['session_id']:
+                session['metadata']['execution_mode'] = 'text_only'
+            return session
+        monkeypatch.setattr(gateway.store, 'get_session', stale)
+    errors = []
+    async def capture(*args, **kwargs): errors.append(kwargs.get('identity_error'))
+    gateway._execute_scoped_turn = capture
+    asyncio.run(JaegerGatewayApp._execute_turn_inner(gateway, row['session_id'], row['turn_id'], row['input_text'],
+        request_id=row['request_id'], execution=row['execution']))
     assert errors and errors[0] is not None
