@@ -84,7 +84,7 @@ export function JaegerAvatar({
     onPointerMove={point}
     onPointerLeave={center}
   >
-    {pose ? <span key={pose.number} className="jg-jaeger-pose" role="img" aria-label={`${name}: ${pose.label}`} style={{ backgroundImage: `url(${poseArtwork})`, backgroundPosition: `${poseIndex % 5 * 25}% ${Math.floor(poseIndex / 5) * 100}%` }} /> : <span className="jg-jaeger-cutout" role="img" aria-label={`${name} avatar`}>
+    {pose ? <span key={pose.number} className="jg-jaeger-pose" role="img" aria-label={`${name} avatar`} title={pose.label} style={{ backgroundImage: `url(${poseArtwork})`, backgroundPosition: `${poseIndex % 5 * 25}% ${Math.floor(poseIndex / 5) * 100}%` }} /> : <span className="jg-jaeger-cutout" role="img" aria-label={`${name} avatar`}>
       <img className="jg-jaeger-cutout__base" src={jaegerArtwork} alt="" draggable={false} />
       <span className="jg-jaeger-cutout__part jg-jaeger-cutout__smile" aria-hidden="true">
         <img src={jaegerArtwork} alt="" draggable={false} />
