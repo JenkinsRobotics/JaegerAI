@@ -8,15 +8,16 @@ const tool = (callId: string, toolName: string, state: "completed" | "executing"
 const turn = (parts: ChatPart[], state: ChatTurn["state"] = "pending"): ChatTurn => ({ turnId: "t1", message: "hi", parts, state });
 
 describe("chat column", () => {
-  it("groups commentary, reasoning and tools before the final answer", () => {
+  it("keeps commentary between chronological reasoning and tool groups", () => {
     const parts: ChatPart[] = [
       { kind: "thinking", text: "plan" }, tool("a", "shell"), { kind: "markdownContent", text: "Looking" }, tool("b", "read_file"), tool("c", "bash"),
       { kind: "progress", message: "Checking" }, { kind: "markdownContent", text: "done" },
     ];
     const segs = segments(parts, "complete");
-    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["activity", "bubble"]);
-    expect("activity" in segs[0] && segs[0].activity.filter(p=>p.kind==="toolInvocation").map(t=>t.callId)).toEqual(["a", "b", "c"]);
-    expect(segs[1]).toEqual({bubble:[{kind:"markdownContent",text:"done"}]});
+    expect(segs.map((s) => Object.keys(s)[0])).toEqual(["activity", "bubble", "activity", "bubble"]);
+    expect("activity" in segs[0] && segs[0].activity.filter(p=>p.kind==="toolInvocation").map(t=>t.callId)).toEqual(["a"]);
+    expect(segs[1]).toEqual({bubble:[{kind:"markdownContent",text:"Looking"}]});
+    expect(segs[3]).toEqual({bubble:[{kind:"markdownContent",text:"done"}]});
     // The same grouping is available while streaming and after completion.
     expect(segments(parts, "pending")).toEqual(segs);
     // A tool left running in an ended turn reads as stopped.
