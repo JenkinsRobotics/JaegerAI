@@ -232,3 +232,20 @@ async def test_an_image_name_in_recalled_history_does_not_make_an_image_turn(app
     await app._execute_turn("s", admitted["turn_id"], "What is my audit memory token?", request_id="r5")
 
     assert lanes == ["entity_react"]
+
+
+@pytest.mark.asyncio
+async def test_a_stalled_agent_is_not_recorded_as_a_successful_answer(app, monkeypatch):
+    runtime = _StubRuntime()
+    monkeypatch.setattr(EntityRuntime, "get_singleton", classmethod(lambda cls, *a, **k: runtime))
+    calls = _agent_loop(monkeypatch, app, {"text": "[halted: stalled]", "halt_reason": "stalled"})
+    admitted = app.store.admit_request("s", "inspect the result", request_id="stalled-r1")
+    await app._execute_turn("s", admitted["turn_id"], "inspect the result", request_id="stalled-r1")
+    [finish] = _terminal_events(app)
+    assert finish.event == "turn.failed"
+    assert "stopped before completing" in finish.data["error"]
+    row = app.store.get_request("stalled-r1")
+    assert row["status"] == "failed"
+    assert not row["result"].get("output")
+    assert runtime.finished == []
+    assert calls == ["inspect the result"]

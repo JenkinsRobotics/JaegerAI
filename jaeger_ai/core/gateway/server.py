@@ -4718,6 +4718,7 @@ class JaegerGatewayApp:
         context_references: tuple[Any, ...] = (),
         on_model_identity: Callable[[str | None], None] | None = None,
         timing: Any = None,
+        on_delta: Callable[[str], None] | None = None,
     ) -> str:
         """Live text turn via locked Ollama — never routes through :8813."""
         target_model = model or DEFAULT_OLLAMA_MODEL
@@ -4785,7 +4786,7 @@ class JaegerGatewayApp:
                 },
                 *messages,
             ],
-            "stream": False,
+            "stream": on_delta is not None,
         }
         # Ollama Cloud models (":cloud" suffix, e.g. kimi-k2.7-code:cloud)
         # require Authorization: Bearer <key>. This call never attached one,
@@ -4833,12 +4834,34 @@ class JaegerGatewayApp:
             async with session.post(
                 f"{LOCKED_OLLAMA_URL}/api/chat", json=payload, headers=ollama_headers
             ) as resp:
-                body = await resp.text()
                 if resp.status >= 400:
-                    raise RuntimeError(
-                        f"Ollama chat HTTP {resp.status}: {body[:500]}"
-                    )
-                data = json.loads(body)
+                    body = await resp.text()
+                    raise RuntimeError(f"Ollama chat HTTP {resp.status}: {body[:500]}")
+                if on_delta is None:
+                    body = await resp.text()
+                    data = json.loads(body)
+                else:
+                    pieces: list[str] = []
+                    data = {}
+                    finished = False
+                    async for line in resp.content:
+                        if not line.strip():
+                            continue
+                        chunk = json.loads(line)
+                        if chunk.get("error"):
+                            raise RuntimeError(f"Ollama stream failed: {str(chunk['error'])[:500]}")
+                        data.update(chunk)
+                        piece = str((chunk.get("message") or {}).get("content") or "")
+                        if piece:
+                            pieces.append(piece)
+                            on_delta(piece)
+                        if chunk.get("done") is True:
+                            finished = True
+                            break
+                    if not finished:
+                        raise RuntimeError("Ollama stream ended before confirming completion")
+                    data["message"] = {"content": "".join(pieces)}
+                    body = json.dumps(data)
         if timing is not None:
             try:
                 timing.model_done({
@@ -5203,7 +5226,7 @@ class JaegerGatewayApp:
                 **out,
                 "text": out.get("text") or "",
                 "halt_reason": out.get("halt_reason"),
-                "status": "completed",
+                "status": out.get("status") or ("failed" if out.get("error") else "completed"),
                 "tools_used": list(self._request_tools.get(request_id, [])[before:]),
             }
 
@@ -5255,6 +5278,15 @@ class JaegerGatewayApp:
                         result = {**result, **fix, "text": fix.get("text") or result.get("text")}
                 if timing is not None and "tool calls in a single turn" in str(result.get("halt_reason") or ""):
                     timing.halt_reason = result["halt_reason"]
+                halt = str(result.get("halt_reason") or "")
+                from jaeger_ai.core.runtime.continuation import is_loop_breaker
+                if not result.get("error") and is_loop_breaker(halt) and halt not in {"needs_owner", "blocked", "yielded"}:
+                    # A backstop is an incomplete run, even if the inner loop
+                    # returned display text. Never record it as a final answer.
+                    result = {**result, "status": "failed", "error": (
+                        f"Jaeger stopped before completing this request ({halt}). "
+                        "Completed tool actions remain recorded; review activity before retrying."
+                    )}
                 return {**result, "task_completion": last_completion()}
             finally:
                 self._active_agents.pop(request_id, None)
@@ -5520,6 +5552,8 @@ class JaegerGatewayApp:
                 backend = LOCKED_OLLAMA_URL
                 model = self._lane_model(request_text, active_model)
                 current = self.store.get_session(session_id) or {}
+                callbacks, finish_stream = self._turn_stream_callbacks(session_id, rid)
+                stream_options = {"on_delta": callbacks.stream_delta} if fast_lane else {}
                 chat_fut = asyncio.run_coroutine_threadsafe(
                     self._ollama_chat(
                         prompt,
@@ -5531,10 +5565,14 @@ class JaegerGatewayApp:
                         context_references=context_references,
                         on_model_identity=observed_model,
                         timing=timing,
+                        **stream_options,
                     ),
                     loop,
                 )
-                return {"text": chat_fut.result(), "status": "completed"}
+                try:
+                    return {"text": chat_fut.result(), "status": "completed"}
+                finally:
+                    finish_stream()
 
             from jaeger_ai.core.entity.runtime import EntityRuntime
             runtime = EntityRuntime.get_singleton()

@@ -5,6 +5,7 @@
  * a close button top-right. Only settings Jaeger really has: device typography, Theme (Aether's aether-appearance), Stream style
  * (streamStyle.ts, per device), file uploads (composer BYTES_UPLOAD_FLAG); Voice and Connection are read-only
  * status. Esc / a click outside / ⌘, again close it (popup coordinator). Icons: codicons (MIT). */
+import { AudioSettingsPanel } from "./AudioSettingsPanel";
 import {DevicePreferencesPanel} from "./DevicePreferencesPanel";
 import { ProvidersPanel } from "./ProvidersPanel";
 import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
@@ -67,7 +68,7 @@ function Toggle({ label, checked, onChange }: { label: string; checked: boolean;
 }
 const Anchor = ({ id, children }: { id: string; children: ReactNode }) => <div id={`set-${id}`} className="jg-set-anchor">{children}</div>;
 
-export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, resetPanel, open, onClose, capabilities, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel, computerPanel, financePanel, integrationsPanel, modelsContent, integrationsExtras, checkpointsPanel, widgetsPanel }: {
+export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, resetPanel, open, onClose, gateway, agentsPanel, automationsPanel, skillsPanel, libraryPanel, toolsPanel, diagnosticsPanel, workflowsPanel, channelsPanel, notificationsPanel, memoryPanel, requestedTab, updatesPanel, clipboardPanel, computerPanel, financePanel, integrationsPanel, modelsContent, integrationsExtras, checkpointsPanel, widgetsPanel }: {
   /** Render as a page (the /settings route) instead of a modal sheet. */ inline?: boolean; tab?: Tab; segment?: string; onTab?: (tab: Tab | "") => void; resetPanel?: ReactNode;
   integrationsPanel?: ReactNode; modelsContent?: ReactNode; integrationsExtras?: ReactNode; checkpointsPanel?: ReactNode; widgetsPanel?: ReactNode;
   financePanel?:ReactNode;computerPanel?:ReactNode;clipboardPanel?:ReactNode;updatesPanel?:ReactNode;requestedTab?:{tab:Tab;sequence:number}; open: boolean; onClose: () => void; capabilities?: HostCapabilities; gateway?: string; agentsPanel?: ReactNode; automationsPanel?: ReactNode; skillsPanel?: ReactNode; libraryPanel?: ReactNode; toolsPanel?: ReactNode; diagnosticsPanel?: ReactNode; workflowsPanel?: ReactNode; channelsPanel?: ReactNode; notificationsPanel?: ReactNode; memoryPanel?:ReactNode;
@@ -125,7 +126,6 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
     const n = e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : (i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
     e.preventDefault(); items[n]?.focus();
   };
-  const yes = (v?: boolean) => (v === undefined ? "Not checked" : v ? "Available" : "Not available");
   const seg = autoSeg ?? segment;
   const embedded = !inline;
   const header = (title: string, subtitle?: string) => <PageHeader title={title} subtitle={short ? undefined : subtitle} embedded={embedded}
@@ -215,11 +215,7 @@ export function SettingsDialog({ inline, tab: controlledTab, segment, onTab, res
               <Row label="Token" hint="Held by the server, never by this page."><span className="jg-sheet__value">Server-side</span></Row>
             </Section>
           </>}
-          {tab === "voice" && <>{header("Voice & audio")}<Section title="This device" anchor="dictation">
-            <Row label="Dictation"><span className="jg-sheet__value">{yes(capabilities?.dictation ?? (capabilities?.voice === false ? false : undefined))}</span></Row>
-            <Row label="Spoken turns" anchor="spoken" hint="Tap to record, then stop to send and hear a reply; not hands-free listening."><span className="jg-sheet__value">{yes(capabilities?.voiceChat ?? (capabilities?.voice === false ? false : undefined))}</span></Row>
-            <Row label="Ambient listening / barge-in"><span className="jg-sheet__value">Not implemented in this app</span></Row>
-          </Section></>}
+          {tab === "voice" && <>{header("Voice & audio")}<Section title="This device" anchor="dictation"><AudioSettingsPanel /></Section></>}
           {tab === "about" && <>{header("About & diagnostics")}
             <Section title="Jaeger AI" anchor="version">
               {updatesPanel}
