@@ -855,7 +855,10 @@ class _GatewayToolConfirmationProvider:
             self.app._owner_unanswered.add(self.request_id)     # nobody answered: needs the owner
             return False
         row = self.app.store.get_approval(aid) or {}
-        return row.get("decision") not in {None, "deny", "expired"}
+        # A concurrent negative settlement (including changes/cancelled) is
+        # never authority. Only an explicitly affirmative durable answer wins.
+        return (row.get("decision") in {"once", "session", "always", "allow", "yes"}
+                and not (scope is not None and scope.cancelled))
 
 
 #: Tool-confirm card choices. ``session`` = "Allow for this session": recorded

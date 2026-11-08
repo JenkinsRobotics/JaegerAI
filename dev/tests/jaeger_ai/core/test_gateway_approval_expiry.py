@@ -75,19 +75,75 @@ def test_unanswered_approval_is_expired_when_the_tool_is_refused(running_app, mo
     assert not running_app.pending_approvals
 
 
-def test_answer_that_lands_first_is_honoured(running_app, monkeypatch):
+@pytest.mark.parametrize("winning_decision", ["once", "session", "always", "allow", "yes"])
+def test_answer_that_lands_first_is_honoured(running_app, monkeypatch, winning_decision):
     monkeypatch.setattr(gateway_server, "APPROVAL_WAIT_S", 0.3)
     provider = _GatewayToolConfirmationProvider(running_app, "s", "r")
     original = running_app.store.resolve_approval
+    create = running_app.store.create_approval
+
+    def offer(**kwargs):
+        if winning_decision == "always":
+            kwargs["options"] = [*kwargs["options"], "always"]
+        return create(**kwargs)
+
+    monkeypatch.setattr(running_app.store, "create_approval", offer)
 
     def operator_wins(approval_id, *, approved, decision=None):
         if decision == "expired":
-            original(approval_id, approved=True, decision="once")
+            original(approval_id, approved=True, decision=winning_decision)
         return original(approval_id, approved=approved, decision=decision)
 
     monkeypatch.setattr(running_app.store, "resolve_approval", operator_wins)
 
     assert provider.confirm(_write_request()) is True
+
+
+def test_cancellation_after_positive_timeout_winner_still_refuses(
+    running_app, monkeypatch,
+):
+    monkeypatch.setattr(gateway_server, "APPROVAL_WAIT_S", 0.1)
+    scope = running_app._cancellations.register("r")
+    provider = _GatewayToolConfirmationProvider(running_app, "s", "r")
+    original = running_app.store.resolve_approval
+    settled = []
+
+    def answer_then_cancel(approval_id, *, approved, decision=None):
+        if decision == "expired":
+            settled.append(original(approval_id, approved=True, decision="once"))
+            scope.cancel()
+        return original(approval_id, approved=approved, decision=decision)
+
+    monkeypatch.setattr(running_app.store, "resolve_approval", answer_then_cancel)
+
+    assert provider.confirm(_write_request()) is False
+    # Cancellation blocks further execution, not the immutable winning receipt.
+    assert len(settled) == 1 and settled[0]["decision"] == "once"
+    assert running_app.store.get_approval(settled[0]["approval_id"])["decision"] == "once"
+    assert not running_app.pending_approvals
+
+
+@pytest.mark.parametrize("winning_decision", ["changes", "cancelled"])
+def test_negative_answer_winning_timeout_race_never_authorizes(
+    running_app, monkeypatch, winning_decision,
+):
+    monkeypatch.setattr(gateway_server, "APPROVAL_WAIT_S", 0.1)
+    provider = _GatewayToolConfirmationProvider(running_app, "s", "r")
+    original = running_app.store.resolve_approval
+    settled = []
+
+    def negative_wins(approval_id, *, approved, decision=None):
+        if decision == "expired":
+            settled.append(original(approval_id, approved=False, decision=winning_decision))
+        return original(approval_id, approved=approved, decision=decision)
+
+    monkeypatch.setattr(running_app.store, "resolve_approval", negative_wins)
+
+    assert provider.confirm(_write_request()) is False
+    assert len(settled) == 1 and settled[0]["decision"] == winning_decision
+    assert running_app.store.get_approval(settled[0]["approval_id"])["decision"] == winning_decision
+    assert running_app.store.list_pending_approvals() == []
+    assert not running_app.pending_approvals
 
 
 def test_prompt_names_the_target_not_just_the_operation(running_app, monkeypatch):
@@ -211,6 +267,10 @@ def test_other_approval_scopes_keep_their_behavior(
     original = running_app.store.create_approval
 
     def answer(**kwargs):
+        # Legacy/specialized cards can explicitly offer persistent permission;
+        # ordinary current cards must not accept an unoffered wider scope.
+        if decision == "always":
+            kwargs["options"] = [*kwargs["options"], "always"]
         row = original(**kwargs)
 
         def resolve():

@@ -34,8 +34,16 @@ export function parseSSEChunk(buffer: string, observer?:SSEIssueObserver): { fra
     }
     if (!data.length) continue;
     const raw = data.join("\n");
-    let parsed: unknown = raw;
-    try { parsed = JSON.parse(raw); } catch { issue(observer,"malformed_json",id); /* keep existing raw-frame behavior, never report content */ }
+    let parsed: unknown;
+    try { parsed = JSON.parse(raw); } catch {
+      issue(observer, "malformed_json", id);
+      // This transport carries JSON, not arbitrary text. Emitting a raw
+      // malformed frame lets consumers trust its id while losing its request
+      // identity/content, permanently skipping it when reconnecting. Fail the
+      // stream before publishing that cursor so the retained event is replayed.
+      // Valid JSON string payloads remain supported. Never expose raw content.
+      throw new Error("Malformed JSON event; reconnecting from the last trusted cursor");
+    }
     frames.push({ id, event, data: parsed });
   }
   return { frames, rest };

@@ -10,6 +10,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 import hashlib
 import json
+import math
 import os
 import sqlite3
 import time
@@ -2319,6 +2320,26 @@ class GatewaySessionStore:
             ).fetchone()
             if row is None or row["status"] != "pending":
                 return None
+            # Every adapter must enforce the saved deadline, not just inbox
+            # reads/decisions. Check under the write lock: waiting for another
+            # writer must not extend authority past its expiration. Negative
+            # settlement remains possible so sweep/cancel can close the row.
+            metadata = json.loads(row["metadata_json"] or "{}")
+            expires_at = metadata.get("expires_at")
+            now = time.time()
+            if (approved and expires_at is not None and metadata.get("on_expire") != "keep"
+                    and (not isinstance(expires_at, (int, float))
+                         or isinstance(expires_at, bool) or not math.isfinite(expires_at)
+                         or expires_at <= now)):
+                return None
+            options = json.loads(row["options_json"] or "[]")
+            # Legacy affirmative aliases mean once, never a wider grant.
+            # Internal negative decisions (expired/cancelled/changes) must
+            # remain able to settle a pending row even when not on its card.
+            scope = "once" if choice in {"allow", "yes"} else choice
+            offered_scopes = {"once" if option in {"allow", "yes"} else option for option in options}
+            if approved and scope not in offered_scopes:
+                return None
             if any(value is not None for value in (expected_session_id, expected_request_id, expected_profile)):
                 # Native recovered decisions bind to the exact still-live permission context.
                 if not all((expected_session_id, expected_request_id, expected_profile)):
@@ -2330,7 +2351,7 @@ class GatewaySessionStore:
                 if (not session or session["profile"] != expected_profile or not request
                         or request["session_id"] != expected_session_id
                         or request["status"] not in ("admitted", "running", "awaiting_approval")
-                        or choice not in json.loads(row["options_json"] or "[]")):
+                        or scope not in offered_scopes):
                     return None
             conn.execute(
                 "UPDATE approvals SET status='resolved', decision=?, resolved_at=? WHERE approval_id=?",
