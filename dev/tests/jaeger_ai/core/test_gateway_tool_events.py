@@ -315,4 +315,7 @@ def test_tool_outcome_retains_permission_category_without_error_contents(tmp_pat
     assert event.event == "tool.failed" and event.data["outcome"] == "denied"
     assert "PRIVATE-ERROR" not in json.dumps(event.data)
     store.complete_request("request", status="completed", result={}, assistant_text="Fixture declined")
-    assert store.get_session("session")["messages"][-1]["parts"][-1]["status"] == "denied"
+    parts = store.get_session("session")["messages"][-1]["parts"]
+    assert next(part for part in parts if "status" in part)["status"] == "denied"
+    assert parts[-1] == {"type": "text", "text": "Fixture declined"}
+    assert "PRIVATE-ERROR" not in json.dumps(parts)

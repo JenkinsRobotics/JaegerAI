@@ -1,3 +1,4 @@
+import "../../../ide/media/timeline.js";
 import { modelContext } from "./modelContext";
 /* Gateway SSE event -> ChatPart mapping. ONE place, on purpose: this file is
  * meant to be regenerated from the gateway's events.schema.json later.
@@ -29,8 +30,24 @@ export function mapEvent(event: GatewayEvent, agentName: (id: string) => string 
       return { parts: [{ kind: "thinking", text: str(p.text ?? p.delta), durationMs: typeof p.duration_ms === "number" ? p.duration_ms : undefined }] };
     case "turn.reasoning.done":
       return { parts: [{ kind: "thinking", text: "", durationMs: typeof p.duration_ms === "number" ? p.duration_ms : undefined }] };
+    case "turn.plan": {
+      const plan=globalThis.JaegerTimeline.parsePlan(p);
+      return plan.length ? {parts:[{kind:"plan",plan,explanation:str(p.explanation)}]} : null;
+    }
+    case "turn.checkpoint": return {parts:[{kind:"checkpoint",text:str(p.text ?? p.message)}]};
+    case "sources": {
+      const sources=globalThis.JaegerTimeline.parseSources(p);
+      return sources.length ? {parts:[{kind:"sources",sources}]} : null;
+    }
+    case "search.count": {
+      const count=globalThis.JaegerTimeline.parseSearchCount(p);
+      return count ? {parts:[{kind:"searchCount",...count}]} : null;
+    }
+    case "follow_ups": {
+      const prompts=globalThis.JaegerTimeline.parseFollowUps(p);
+      return prompts.length ? {parts:[{kind:"followUps",prompts}]} : null;
+    }
     case "turn.progress":
-    case "turn.plan":
       return { parts: [{ kind: "progress", message: str(p.message ?? p.text ?? p.summary) }] };
     case "tool.started":
       return { parts: [{ kind: "toolInvocation", callId: str(p.call_id ?? p.activity_id), toolName: str(p.tool), input: p.input ?? p.args ?? null, state: "executing" }] };

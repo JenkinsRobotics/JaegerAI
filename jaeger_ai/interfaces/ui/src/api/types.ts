@@ -82,6 +82,7 @@ export interface SessionRow {
 
 /** One persisted response part (core/gateway/turn_parts.py). */
 export type PersistedPart =
+  | {type:"progress"|"checkpoint"|"sources"|"search_count"|"follow_ups";[key:string]:unknown}
   | {type:"model_identity";actual_model:string|null;scope:string}
   | { type: "model_context"; outline: unknown }
   | { type: "knowledge"; documents: { id: string; revision: number; digest: string; title: string }[] }

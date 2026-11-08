@@ -1791,29 +1791,6 @@ class GatewaySessionStore:
                 "UPDATE client_requests SET status=?, result_json=?, updated_at=? WHERE request_id=?",
                 (status, json.dumps(result), now, request_id),
             )
-            if assistant_text is not None:
-                from jaeger_ai.core.gateway.turn_parts import PART_EVENTS, project_parts
-                marks = ",".join("?" * len(PART_EVENTS))
-                turn_events = [
-                    {"event": e["event"], "data": json.loads(e["data_json"] or "{}"), "timestamp": e["timestamp"]}
-                    for e in conn.execute(
-                        f"SELECT event, data_json, timestamp FROM activity_history WHERE session_id=? AND event IN ({marks}) "
-                        "AND json_extract(data_json, '$.request_id')=? ORDER BY event_id ASC",
-                        (row["session_id"], *PART_EVENTS, request_id),
-                    )
-                ]
-                turn_parts = project_parts(turn_events)
-                for appr in conn.execute(
-                    "SELECT approval_id, kind, status, decision, metadata_json FROM approvals "
-                    "WHERE request_id=? ORDER BY created_at", (request_id,)):
-                    ameta = _row_meta(appr["metadata_json"])
-                    turn_parts.append({"type": "approval", "approval_id": appr["approval_id"],
-                                       "call_id": ameta.get("call_id"), "tool": ameta.get("tool"),
-                                       "target": ameta.get("target"), "status": appr["status"],
-                                       "decision": appr["decision"]})
-                self.append_message(row["session_id"], "assistant", assistant_text, timestamp=now, conn=conn,
-                                    meta={"request_id": request_id, "turn_id": row["turn_id"]},
-                                    parts=turn_parts or None)
             sess_status = session_status or ("idle" if status == "completed" else status)
             conn.execute(
                 "UPDATE sessions SET status=?, updated_at=? WHERE session_id=?",
@@ -1866,6 +1843,31 @@ class GatewaySessionStore:
                     conn, row["session_id"], "follow_ups",
                     {"request_id": request_id, "turn_id": row["turn_id"], "follow_ups": follow_ups}, now,
                 )
+            if assistant_text is not None:
+                from jaeger_ai.core.gateway.turn_parts import PART_EVENTS, project_parts
+                marks = ",".join("?" * len(PART_EVENTS))
+                turn_events = [
+                    {"event": e["event"], "data": json.loads(e["data_json"] or "{}"), "timestamp": e["timestamp"]}
+                    for e in conn.execute(
+                        f"SELECT event, data_json, timestamp FROM activity_history WHERE session_id=? AND event IN ({marks}) "
+                        "AND json_extract(data_json, '$.request_id')=? ORDER BY event_id ASC",
+                        (row["session_id"], *PART_EVENTS, request_id),
+                    )
+                ]
+                turn_parts = project_parts(turn_events)
+                if assistant_text and not any(p["type"] == "text" for p in turn_parts):
+                    turn_parts.append({"type": "text", "text": assistant_text})
+                for appr in conn.execute(
+                    "SELECT approval_id, kind, status, decision, metadata_json FROM approvals "
+                    "WHERE request_id=? ORDER BY created_at", (request_id,)):
+                    ameta = _row_meta(appr["metadata_json"])
+                    turn_parts.append({"type": "approval", "approval_id": appr["approval_id"],
+                                       "call_id": ameta.get("call_id"), "tool": ameta.get("tool"),
+                                       "target": ameta.get("target"), "status": appr["status"],
+                                       "decision": appr["decision"]})
+                self.append_message(row["session_id"], "assistant", assistant_text, timestamp=now, conn=conn,
+                                    meta={"request_id": request_id, "turn_id": row["turn_id"]},
+                                    parts=turn_parts or None)
             payload["event"] = self._insert_event(
                 conn, row["session_id"], event_name,
                 {**result, "request_id": request_id, "turn_id": row["turn_id"], "status": status}, now,

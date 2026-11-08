@@ -60,9 +60,13 @@ test('keyboard send reaches Gateway, persists history and keeps chat across Task
   await expect(page.getByRole('heading', { name: 'Tasks', exact: true })).toBeVisible();
   await pickPage(page, 'Chat');
   await expect(page.locator('.jg-bubble--assistant').last()).toContainText('BROWSER-CONTRACT-ANSWER');
-  await page.reload();
-  await expect(page.locator('.jg-bubble--assistant').last()).toContainText('BROWSER-CONTRACT-ANSWER');
-  expect(await page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).toBe(session);
+  const answerCount = await page.locator('.jg-bubble--assistant').count();
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.reload();
+    await expect(page.locator('.jg-bubble--assistant').last()).toContainText('BROWSER-CONTRACT-ANSWER');
+    await expect(page.locator('.jg-bubble--assistant')).toHaveCount(answerCount);
+    expect(await page.evaluate(() => localStorage.getItem('jaeger.stable-demo.session.v1'))).toBe(session);
+  }
 });
 
 test('Shift+Enter retains an unsent multiline draft across navigation', async ({ page }) => {
