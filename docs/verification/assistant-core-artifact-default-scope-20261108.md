@@ -97,3 +97,8 @@ The subsequent [combined qualification](assistant-core-combined-qualification-20
 passes the expanded 558-case durable/artifact gate and all 50 selected owned
 HTTP cases. A separate default-report full-process catalog/download journey is
 not inferred from these verifier/handler controls.
+
+The subsequent [default report delivery test](assistant-core-default-report-delivery-20261108.md)
+qualifies the additional real owned HTTP path for default-mode execution,
+authorized report download, restart/replay and scope-drift denial. It is test-only
+and does not convert artifact verification into citation-support verification.

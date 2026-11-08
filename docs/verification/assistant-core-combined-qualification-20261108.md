@@ -140,3 +140,12 @@ candidates, and process-fixture prompt/event-contract errors. The historical
 four-case process result used fewer assertions. Only the final combined run
 qualifies the strengthened two-restart checks. No prior failure is relabeled a
 pass and no test deadline or safety boundary was weakened to obtain these results.
+
+## Later test-only default-report journey
+
+The [default report delivery test](assistant-core-default-report-delivery-20261108.md)
+adds actual default-mode task/approval/tool/artifact HTTP acceptance, authenticated
+download, restart/replay identity and scope-drift denial. Production bytes remain
+unchanged. Its integrated run passed separately, as did a fresh 430-check
+repository verification. The 50-case combined result above is not relabeled a
+51-case run. Research source support remains distinct from artifact-byte proof.
