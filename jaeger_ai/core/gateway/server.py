@@ -5379,6 +5379,7 @@ class JaegerGatewayApp:
         self.store.bind_native(request_id, native_run_id=run_id,
                                native_session=f'{OWNER_RUN_SESSION_PREFIX}{session_id}',
                                owner_receipt_token=token,
+                               native_binding_guard=self.task_owner.background_binding_guard,
                                native_reuse_guard=self.task_owner.native_reuse_guard(
                                    task_id, run_id, f'{OWNER_RUN_SESSION_PREFIX}{session_id}') if task_id else None)
 
@@ -5520,7 +5521,19 @@ class JaegerGatewayApp:
         """
         session = self.store.get_session(session_id)
         identity_error = None
-        if (execution or {}).get('_owner_agent') is not None:
+        background_bound = False
+        try:
+            with self.store._get_conn() as conn:
+                row = self.store.get_request(request_id or turn_id) or {}
+                background_bound = self.task_owner.background_dispatch_guard(conn, row) is not None
+                if background_bound and (session_id != row.get('session_id') or turn_id != row.get('turn_id')
+                        or text != row.get('input_text') or execution != row.get('execution')):
+                    raise ValueError('Background dispatch arguments differ from canonical request')
+        except ValueError as exc:
+            identity_error = exc
+        if identity_error is not None:
+            pass
+        elif (execution or {}).get('_owner_agent') is not None:
             from .owner_receipts import check_agent_identity, OwnerReceiptConflict
             try:
                 with self.store._get_conn() as conn:
@@ -5528,11 +5541,11 @@ class JaegerGatewayApp:
                     check_agent_identity(conn, row)
             except OwnerReceiptConflict as exc:
                 identity_error = exc
-        elif self._auto_route(session, text):
+        elif not background_bound and self._auto_route(session, text):
             session = self.store.get_session(session_id)
         session_agent_id = self._session_agent_id(session)
         agent = None if identity_error else (self._resolve_session_agent(session_id, read_only=True)
-                 if (execution or {}).get('_owner_agent') is not None
+                 if background_bound or (execution or {}).get('_owner_agent') is not None
                  else self._resolve_session_agent(session_id))
         system_prompt = self._system_prompt_for_agent(agent)
         agent_fields: dict[str, Any] = {}
@@ -7962,7 +7975,7 @@ class JaegerGatewayApp:
                 context={'session_id': parent['session_id'], 'source': 'client', 'execution': execution,
                          'request_id': submission_id, 'client_submission_id': submission_id, **board},
                 artifacts=body.get('artifacts'), proposal=bool(body.get('proposal')),
-                research_contract=body.get('research_contract'))
+                research_contract=body.get('research_contract'), canonical_background=True)
         except ValueError as exc:
             from jaeger_ai.core.tasks.store import TaskConflict
             return web.json_response({'error': str(exc)}, status=409 if isinstance(exc, TaskConflict) else 400)

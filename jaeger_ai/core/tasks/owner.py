@@ -98,7 +98,7 @@ class GatewayTaskOwner:
         return sorted(set(paths))
 
     def submit(self, goal: str, *, context: dict, artifacts: list[str] | None = None,
-               proposal: bool = False, key: str = '', workflow_reference: dict | None = None, research_contract: dict | None = None) -> dict:
+               proposal: bool = False, key: str = '', workflow_reference: dict | None = None, research_contract: dict | None = None, canonical_background: bool = False) -> dict:
         if research_contract is not None:
             from .research import validate_contract
             if context.get('source') != 'client':
@@ -166,7 +166,18 @@ class GatewayTaskOwner:
                         'source': context.get('source'), 'session_id': parent, **workflow_provenance, **({'submission_fingerprint': fingerprint, 'submission_goal': goal} if fingerprint else {})},
             agent_id=str(context.get('agent_id') or ''), eta=context.get('eta'),
             runner=str(context.get('runner') or 'native'))
-        task, replayed = self.store.admit_task(task)
+        if canonical_background:
+            if context.get('source') != 'client':
+                raise ValueError('Canonical background admission requires explicit client intent')
+            from .background_admission import prepare
+            with self.gateway.store._immediate() as conn:
+                # Replay was checked above; never upgrade an existing task.
+                existing = self.store.get_task_in_transaction(conn, tid)
+                if existing is None:
+                    prepare(self, conn, task)
+                task, replayed = self.store.admit_task_in_transaction(conn, task)
+        else:
+            task, replayed = self.store.admit_task(task)
         if not replayed:
             def checkpoint_admission(current):
                 current.payload['completion_criteria'] = {
@@ -217,7 +228,14 @@ class GatewayTaskOwner:
                 raise ValueError("Only an unstarted proposal can be edited")
             if task.updated_at != expected_updated_at:
                 raise ValueError("Task changed; refresh before editing")
+            if task.payload.get('background_admission_version') == 1:
+                from .background_admission import validate
+                validate(self, task)
             task.goal = goal.strip()
+            if task.payload.get('background_admission_version') == 1:
+                from .background_admission import authority
+                task.payload['background_authority'] = authority(task)
+                task.payload['background_objective_version'] += 1
             if 'completion_criteria' in task.payload:
                 task.payload['completion_criteria']['objective'] = task.goal
             self._checkpoint(task, {})
@@ -243,6 +261,11 @@ class GatewayTaskOwner:
             if task.provenance.get('authorized'):
                 # Approval is admission, never permission to replay uncertain effects.
                 return
+            if approved:
+                if task.payload.get('background_admission_version') == 1 and task.cancellation:
+                    raise ValueError('Cancelled background authority cannot be approved')
+                from .background_admission import validate
+                validate(self, task)
             task.provenance['authorized'] = approved
             authoritative_transition(
                 task, TaskState.QUEUED if approved else TaskState.CANCELLED, error=None,
@@ -731,11 +754,13 @@ class GatewayTaskOwner:
                     'actionable': True}
         if previous.get('task_id') not in (None, task.task_id):
             raise ValueError('Task child belongs to a different saved task; no dispatch')
-        if task.payload.get('foreground_resume_version') == 1:
+        if task.payload.get('foreground_resume_version') == 1 or task.payload.get('background_admission_version') == 1:
             if existing and (previous.get('task_id') != task.task_id
                     or str(existing.get('agent_id') or previous.get('agent_id') or '') != task.agent_id):
                 raise ValueError('Foreground continuation session identity differs; no dispatch')
             metadata['route_checked'] = True
+        if task.payload.get('background_admission_version') == 1:
+            metadata['execution_mode'] = 'agent'
         if task.agent_id:
             bound = (existing or {}).get('agent_id') or previous.get('agent_id')
             if bound and bound != task.agent_id:
@@ -759,6 +784,8 @@ class GatewayTaskOwner:
 
     @staticmethod
     def _instance_defaults_source(task):
+        if task.payload.get('background_admission_version') == 1:
+            return None  # Its canonical source is this task, not a foreground request.
         marker = (task.payload.get('execution') or {}).get('_instance_defaults')
         if marker is None:
             return None
@@ -766,6 +793,8 @@ class GatewayTaskOwner:
                 'session_id': task.provenance.get('session_id'), 'claimed': marker}
 
     def _validate_instance_defaults(self, task, execution, conn=None):
+        from .background_admission import validate
+        validate(self, task, conn)
         from jaeger_ai.core.runtime.execution_defaults import inherit_instance_defaults
         origin = self._instance_defaults_source(task)
         if origin is None:
@@ -792,6 +821,14 @@ class GatewayTaskOwner:
         current = DurableTask.from_dict(json.loads(row[0])) if row else None
         if current is None or current.is_terminal or current.cancellation or not current.provenance.get('authorized'):
             raise TaskAdmissionChanged('Task authorization or cancellation changed before admission; no dispatch')
+        if current.payload.get('background_admission_version') == 1:
+            from .background_admission import validate, authority
+            try:
+                validate(self, current, conn)
+                if authority(current) != authority(task):
+                    raise ValueError('Background task authority changed before admission')
+            except ValueError as exc:
+                raise TaskAdmissionChanged(str(exc)) from exc
         if self._instance_defaults_source(task) is not None:
             if (current.payload.get('execution') != task.payload.get('execution')
                     or self._instance_defaults_source(current) != self._instance_defaults_source(task)):
@@ -826,6 +863,103 @@ class GatewayTaskOwner:
         if self.gateway._current_tier() == 'chat' or not execution_allowed(self.gateway, current, connection=conn):
             raise ValueError('Webhook subscription revoked or changed before admission; no dispatch')
 
+    def background_dispatch_guard(self, conn, row):
+        """Find authority by canonical request/session, not caller task options."""
+        sid = row.get('session_id') or ''
+        if not sid.startswith('task:'):
+            return None
+        task = self.store.get_task_in_transaction(conn, sid[5:])
+        if task is None or task.payload.get('background_admission_version') != 1:
+            return None
+        from jaeger_ai.core.gateway.owner_receipts import _lease
+        lease = self.gateway._owner_receipt_lease
+        _lease(conn, lease['owner_pid'], lease['started_at'])
+        self._admission_guard(conn, task)
+        if (row.get('request_id') != f'{task.task_id}:{task.payload.get("attempt", 0)}'
+                or self.gateway._cancellations.is_cancelled(row['request_id'])
+                or self._continuation_receipt_error(task, row)):
+            raise TaskAdmissionChanged('Background dispatch differs from current task admission')
+        return task
+
+    def background_binding_guard(self, conn, row, native, native_session):
+        task = self.background_dispatch_guard(conn, row)
+        if task is None:
+            return
+        if (native_session != 'owner:task:'+task.task_id or not native
+                or row.get('status') not in {'admitted', 'running', 'awaiting_approval'}):
+            raise TaskAdmissionChanged('Background native binding is not an active owner run')
+        contract = task.payload['background_admissions'][row['request_id']]
+        from jaeger_ai.core.entity.runtime import EntityRuntime
+        from jaeger_agent.cognition.sqlite_runs import SqliteRunStore
+        import os
+        run = SqliteRunStore().get(native)
+        if run is None:
+            raise TaskAdmissionChanged('Background native run is unavailable')
+        previous = contract.get('native_run_id')
+        if previous and previous != native:
+            prior = SqliteRunStore().get(previous)
+            if (prior is None or prior.state not in {'completed', 'failed', 'cancelled'}
+                    or EntityRuntime.run_has_indeterminate_effects(previous)):
+                raise TaskAdmissionChanged('Background previous native run is unsettled')
+        sources = conn.execute('''SELECT DISTINCT r.* FROM client_requests r
+            WHERE r.request_id<>? AND (r.native_run_id=? OR r.request_id IN (
+                SELECT admissions.key FROM durable_tasks t,
+                json_each(t.task_json, '$.payload.background_admissions') admissions,
+                json_each(admissions.value, '$.native_run_ids') runs WHERE runs.value=?))''',
+            (row['request_id'], native, native)).fetchall()
+        from jaeger_ai.core.gateway.session_store import pid_is_alive
+        if ((not sources and run.owner_pid != os.getpid())
+                or (sources and run.owner_pid not in {None, os.getpid()} and pid_is_alive(run.owner_pid))):
+            raise TaskAdmissionChanged('Background native run has no qualified producer ownership')
+        for source in sources:
+            source = self.gateway.store._request_row(source)
+            admission = task.payload['background_admissions'].get(source['request_id'])
+            if (not admission or admission['attempt'] >= contract['attempt']
+                    or source['status'] not in {'completed', 'failed'}
+                    or self._continuation_receipt_error(task, source)
+                    or any(EntityRuntime.run_has_indeterminate_effects(run_id)
+                           for run_id in admission.get('native_run_ids', [native]))
+                    or self._background_children_unsettled(source)):
+                raise TaskAdmissionChanged('Background native run belongs to another or unsettled attempt')
+        contract.setdefault('native_run_ids', [])
+        if native not in contract['native_run_ids']:
+            contract['native_run_ids'].append(native)
+        contract.update(native_run_id=native, native_session=native_session)
+        conn.execute('UPDATE durable_tasks SET task_json=? WHERE task_id=?',
+                     (json.dumps(task.to_dict()), task.task_id))
+
+    def _background_children_unsettled(self, source):
+        from jaeger_ai.core.gateway.handoff_ownership import owned_children
+        from jaeger_ai.core.gateway.handoff_cancellation import status, unconfirmed_ids
+        return bool(unconfirmed_ids([status(self.gateway, child)
+                    for child in owned_children(self.gateway, source)]))
+
+    def _background_admission_guard(self, conn, task, resolved, prompt):
+        """Bind the exact final request snapshot atomically, never caller options."""
+        from .background_admission import clone, authority
+        self._admission_guard(conn, task)
+        from jaeger_ai.core.gateway.owner_receipts import _lease
+        lease = self.gateway._owner_receipt_lease
+        _lease(conn, lease['owner_pid'], lease['started_at'])
+        expected = self._continuation_execution(task)
+        expected.pop('attachment_ids', None)
+        marker = expected.pop('_instance_defaults', None)
+        if resolved != expected or prompt != self._continuation_prompt(task):
+            raise TaskAdmissionChanged('Resolved background request differs from saved task scope')
+        if marker:
+            resolved['_instance_defaults'] = marker
+        current = self.store.get_task_in_transaction(conn, task.task_id)
+        rid = f'{task.task_id}:{task.payload.get("attempt", 0)}'
+        proof = {'task_id': task.task_id, 'attempt': task.payload.get('attempt', 0),
+            'request_id': rid, 'session_id': 'task:'+task.task_id,
+            'execution': clone(resolved), 'input_text': prompt,
+            'authority': authority(task), 'objective_version': task.payload['background_objective_version'],
+            'research_contract': clone(task.payload.get('research_contract')),
+            'research_artifacts': clone(task.payload.get('research_artifacts'))}
+        current.payload.setdefault('background_admissions', {})[rid] = proof
+        conn.execute('UPDATE durable_tasks SET task_json=? WHERE task_id=?',
+                     (json.dumps(current.to_dict()), current.task_id))
+
     @staticmethod
     def _continuation_execution(task):
         execution = json.loads(json.dumps(task.payload['execution']))
@@ -837,7 +971,7 @@ class GatewayTaskOwner:
         execution['options'] = {**(execution.get('options') or {}), 'background': True,
                                 'source': 'durable_task', 'task_id': task.task_id,
                                 'verification_error': task.error}
-        if task.payload.get('foreground_resume_version') == 1:
+        if task.payload.get('foreground_resume_version') == 1 or task.payload.get('background_admission_version') == 1:
             execution['attachment_ids'] = []  # never inherit new child-session inputs
         return execution
 
@@ -895,6 +1029,9 @@ class GatewayTaskOwner:
         sid = f'task:{task.task_id}'
         if row.get('session_id') != sid:
             return 'Continuation receipt belongs to another session; inspect without replay'
+        if task.payload.get('background_admission_version') == 1:
+            from .background_admission import receipt_error
+            return receipt_error(task, row)
         if task.payload.get('foreground_resume_version') != 1:
             return None  # Legacy tasks do not have a full frozen authority contract.
         rid = row.get('request_id')
@@ -1023,7 +1160,9 @@ class GatewayTaskOwner:
             try:
                 admitted = self.gateway.store.admit_request(sid, prompt, request_id=rid, requested=execution,
                     admission_guard=lambda conn: self._admission_guard(conn, task, execution=execution, prompt=prompt),
-                    instance_defaults_source=self._instance_defaults_source(task))
+                    instance_defaults_source=self._instance_defaults_source(task),
+                    admission_snapshot_guard=(lambda conn, resolved: self._background_admission_guard(conn, task, resolved, prompt))
+                        if task.payload.get('background_admission_version') == 1 else None)
             except ValueError as exc:
                 if isinstance(exc, TaskAdmissionChanged):
                     # The current durable row owns the decision. In particular,
@@ -1061,7 +1200,8 @@ class GatewayTaskOwner:
             if task.payload.get('native_run_id'):
                 from jaeger_ai.core.gateway.server import OWNER_RUN_SESSION_PREFIX
                 self.gateway.store.bind_native(rid, native_run_id=task.payload['native_run_id'], native_session=f'{OWNER_RUN_SESSION_PREFIX}{sid}',
-                    native_reuse_guard=self.native_reuse_guard(task_id, task.payload['native_run_id'], f'{OWNER_RUN_SESSION_PREFIX}{sid}'))
+                    native_reuse_guard=self.native_reuse_guard(task_id, task.payload['native_run_id'], f'{OWNER_RUN_SESSION_PREFIX}{sid}'),
+                    native_binding_guard=self.background_binding_guard)
             self.gateway._start_admitted_turn(admitted, sid, prompt)
         elif row.get('status') in {'admitted', 'running'} and rid not in self.gateway._running_tasks:
             if task.payload.get('foreground_resume_version') == 1:
@@ -1127,6 +1267,12 @@ class GatewayTaskOwner:
             # Compare under the store's write transaction, not before the await.
             if current.is_terminal or int(current.payload.get('attempt', 0)) != attempt:
                 return
+            if current.payload.get('background_admission_version') == 1:
+                reason = self._continuation_receipt_error(current, row)
+                if reason or not current.provenance.get('authorized'):
+                    authoritative_transition(current, TaskState.PAUSED,
+                        error=reason or 'Background authorization revoked before verification')
+                    return
             current.result = result.get('output') or result
             if row.get('native_run_id'):
                 current.payload['native_run_id'] = row['native_run_id']
