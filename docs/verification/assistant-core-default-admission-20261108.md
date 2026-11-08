@@ -146,3 +146,9 @@ real provider/account and live deployment acceptance remain unqualified. No
 default-branch merge, PR or deployment is represented by a local patch. Existing
 runtime-local work and all user data remain untouched; reconciliation, backups,
 complete acceptance and separate cutover approval remain required.
+
+## Later queued admission repair
+
+The [ninth increment](assistant-core-queue-defaults-20261108.md) extends the same
+fresh-default producer to Queue next, with actual queue/native and bare-path
+evidence. It does not backfill historical receipts or expand supported routes.

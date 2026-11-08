@@ -92,6 +92,9 @@ workspace destinations. The other shell's tests alone do not prove the actual en
   snapshots supported server defaults for ordinary new Chat while retaining
   instance workspace semantics, authority and drift rejection. Unresolved routes,
   historic work and queued default admission are not accepted by inference.
+- The [queued Chat repair](assistant-core-queue-defaults-20261108.md) extends
+  immutable defaults to Queue next, preserving replay, promotion and instance
+  paths. Confirmed-reconciliation queue continuity remains a separate follow-up.
 - Source-backed capability presence does not prove native-host availability, real provider credentials, external connector authorization, output quality, or a completed autonomous workflow.
 
 ### Parallel workspace error-state repair
