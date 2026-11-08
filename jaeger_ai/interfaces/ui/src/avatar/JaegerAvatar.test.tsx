@@ -10,6 +10,7 @@ describe("Jaeger cutout avatar", () => {
     expect(rig).toHaveAttribute("data-motion", "rigged");
     expect(images).toHaveLength(4);
     expect(new Set(images.map(image => image.src)).size).toBe(1);
+    expect(images[0].src).toContain("jaeger-signature-grin.png");
     expect(container.querySelector("canvas")).toBeNull();
   });
 

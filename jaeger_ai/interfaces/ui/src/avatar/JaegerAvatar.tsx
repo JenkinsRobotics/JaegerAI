@@ -1,5 +1,5 @@
 import { useRef, type PointerEvent as ReactPointerEvent } from "react";
-import jaegerArtwork from "../assets/characters/jaeger-sculpted.png";
+import jaegerArtwork from "../assets/characters/jaeger-signature-grin.png";
 import { ClipAvatar } from "./ClipAvatar";
 import { useReducedMotion } from "./AvatarStage";
 import { STATUS_TEXT, type ClipState } from "./avatar";
