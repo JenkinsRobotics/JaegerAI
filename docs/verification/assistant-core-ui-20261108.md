@@ -172,5 +172,26 @@ Report: `/tmp/jaeger-ui-tests-integrated-final.json`; log:
 `/tmp/jaeger-ui-tests-integrated-final.log`. Existing React act/key warnings remain.
 
 `git diff --check`: **PASS**. These results do not upgrade destination-level
-**PARTIAL** statuses or the browser **BLOCKED** status. The parent owns the final
-production build/backend acceptance and records those separately.
+**PARTIAL** statuses or the browser **BLOCKED** status. Final production build/backend acceptance is recorded separately in the
+combined qualification report.
+
+
+## Later verified scope, still PARTIAL per tab
+
+- Library/Research/Work: the [default report journey](assistant-core-default-report-delivery-20261108.md)
+  now exercises real default-mode task admission, one intended approval, native
+  tools and independently hashed artifacts through authenticated catalog/download
+  and two restarts, including denial after scope drift. The model remains scripted;
+  this is not rendered-client or factual research-quality acceptance.
+- Research: search URLs and unavailable/no-results states are preserved, but an
+  artifact SHA proves bytes, not that citations support the report. The existing
+  grounded-citations procedure is not automatically enforced by ordinary research
+  task completion. That source-support requirement remains unqualified.
+- Settings: [read preservation](assistant-core-provider-settings-preservation-20261108.md),
+  [input validation](assistant-core-provider-settings-validation-20261108.md) and
+  [revision-bound saves](assistant-core-provider-settings-transaction-20261108.md)
+  repair the existing CLI Providers control path using synthetic configurations.
+  They do not qualify real CLI accounts or physical Mac/browser behavior.
+
+The latest combined report distinguishes refreshed gates from reused UI evidence.
+No unsupported control or tab is promoted to PASS by these scoped results.

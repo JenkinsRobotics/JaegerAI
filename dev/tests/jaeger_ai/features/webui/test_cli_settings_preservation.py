@@ -42,16 +42,16 @@ def test_read_failure_does_not_overwrite_or_expose_error(cli, monkeypatch):
     path.parent.mkdir(parents=True)
     original = b'{"claude": {"enabled": false}}'
     path.write_bytes(original)
-    read = Path.read_text
+    read = Path.read_bytes
     def denied(self, *args, **kwargs):
         if self == path:
             raise PermissionError('synthetic-private-error-detail')
         return read(self, *args, **kwargs)
-    monkeypatch.setattr(Path, 'read_text', denied)
+    monkeypatch.setattr(Path, 'read_bytes', denied)
     with pytest.raises(ValueError) as exc:
         cli.update('codex', {'enabled': False})
     assert 'synthetic-private-error-detail' not in str(exc.value)
-    assert path.read_bytes() == original
+    assert read(path) == original
 
 
 def test_missing_and_existing_document_remain_compatible(cli):

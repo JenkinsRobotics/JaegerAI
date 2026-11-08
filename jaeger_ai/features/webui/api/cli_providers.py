@@ -260,20 +260,13 @@ def _state_path() -> Path:
     return root / "providers" / "cli.json"
 
 
-def _settings(*, for_update: bool = False) -> dict:
+def _settings() -> dict:
     try:
         d = json.loads(_state_path().read_text("utf-8"))
-        if not isinstance(d, dict):
-            raise ValueError("expected a settings object")
-        return d
-    except FileNotFoundError:
-        return {}  # First save may create the document.
+        return d if isinstance(d, dict) else {}
     except (OSError, ValueError):
-        if for_update:
-            # A display fallback is not a writable snapshot. Preserve the original
-            # bytes on failed reads, and never expose file contents/error details.
-            raise ValueError("Existing CLI provider settings could not be read; no changes saved") from None
         return {}
+
 
 
 _bg: dict = {"thread": None}
@@ -366,27 +359,54 @@ def _decorate(data: list[dict]) -> list[dict]:
 def update(pid: str, body: dict) -> dict:
     if not known(pid):
         raise KeyError(pid)
-    st = _settings(for_update=True)
-    saved = st.get(pid, {})
-    if not isinstance(saved, dict):
-        raise ValueError("Existing CLI provider settings entry must be an object; no changes saved")
-    cur = dict(saved)
+    # Validate requested fields before reading state or creating lock files.
+    patch = {}
     if "enabled" in body:
         if not isinstance(body["enabled"], bool):
             raise ValueError("enabled must be a boolean")
-        cur["enabled"] = body["enabled"]
+        patch["enabled"] = body["enabled"]
     if "models" in body:
         ms = body["models"]
         if not isinstance(ms, list) or not all(isinstance(m, str) and MODEL_RE.match(m) for m in ms) or len(ms) > 40:
             raise ValueError("models must be a list of model ids")
-        cur["models"] = list(dict.fromkeys(ms))
-    st[pid] = cur
+        patch["models"] = list(dict.fromkeys(ms))
+
+    import hashlib
+    from jaeger_ai.core.instance.atomic_files import mutate_json
+
     p = _state_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(json.dumps(st, indent=2), "utf-8")
-    os.replace(tmp, p)
-    return next(r for r in detect() if r["id"] == pid)
+    try:
+        try:
+            raw = p.read_bytes()
+        except FileNotFoundError:
+            raw = None
+        # Decode the exact bytes whose revision fences the transaction. The
+        # generic JSON helper also accepts UTF-16/BOM; this owner's contract does not.
+        st = json.loads(raw.decode("utf-8")) if raw is not None else {}
+        if not isinstance(st, dict):
+            raise ValueError("expected a settings object")
+    except (OSError, ValueError):
+        raise ValueError("Existing CLI provider settings could not be read; no changes saved") from None
+    if not isinstance(st.get(pid, {}), dict):
+        raise ValueError("Existing CLI provider settings entry must be an object; no changes saved")
+    revision = hashlib.sha256(raw).hexdigest() if raw is not None else "missing"
+
+    def change(current):
+        # mutate_json has checked the exact revision and holds the document lock.
+        return {**current, pid: {**current.get(pid, {}), **patch}}
+
+    try:
+        mutate_json(p, change, expected_revision=revision, default={})
+    except ValueError:
+        raise ValueError("CLI provider settings changed or writer is busy; refresh before saving again") from None
+    except OSError:
+        # Replacement may precede a directory-fsync failure. Never claim that
+        # nothing was saved, or replay a command with an uncertain outcome.
+        raise ValueError("CLI provider settings save could not be confirmed; reload saved settings before trying again") from None
+    try:
+        return next(r for r in detect() if r["id"] == pid)
+    except Exception:
+        raise ValueError("CLI provider settings saved, but provider status could not be read; refresh before saving again") from None
 
 
 # ── running a prompt ─────────────────────────────────────────────────
