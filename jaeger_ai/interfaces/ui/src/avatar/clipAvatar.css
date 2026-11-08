@@ -9,3 +9,18 @@
 .jg-avatar--character .jg-clip-avatar { border:0; }
 
 .jg-clip-avatar video { object-fit:cover; }
+
+/* The encoded character loop carries the expressive motion. A lightweight
+   transform keeps presence visible when Safari temporarily refuses autoplay;
+   pageshow/visibility recovery in ClipAvatar retries the real clip. */
+.jg-clip-avatar[data-motion="poster"] img { animation:jg-clip-poster-breathe 3.6s ease-in-out infinite; }
+.jg-clip-avatar[data-motion="video"] video { animation:jg-clip-video-breathe 3.6s ease-in-out infinite; }
+.jg-clip-identity[data-avatar-state="working"] .jg-clip-avatar[data-motion="poster"] img,
+.jg-clip-identity[data-avatar-state="making_something"] .jg-clip-avatar[data-motion="poster"] img { animation:jg-clip-poster-work 1.8s ease-in-out infinite; }
+.jg-clip-identity[data-avatar-state="working"] .jg-clip-avatar[data-motion="video"] video,
+.jg-clip-identity[data-avatar-state="making_something"] .jg-clip-avatar[data-motion="video"] video { animation:jg-clip-video-work 1.8s ease-in-out infinite; }
+@keyframes jg-clip-poster-breathe { 50% { transform:translateY(-3%) scale(1.035); } }
+@keyframes jg-clip-poster-work { 35% { transform:translateY(-4%) rotate(-1deg) scale(1.04); } 70% { transform:translateY(-1%) rotate(1deg) scale(1.02); } }
+@keyframes jg-clip-video-breathe { 50% { transform:translateY(-2%) scale(1.025); } }
+@keyframes jg-clip-video-work { 35% { transform:translateY(-3%) rotate(-.7deg) scale(1.03); } 70% { transform:rotate(.7deg) scale(1.015); } }
+@media (prefers-reduced-motion:reduce) { .jg-clip-avatar img,.jg-clip-avatar video { animation:none !important; } }

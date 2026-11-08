@@ -27,6 +27,14 @@ describe("AvatarPanel", () => {
     await act(async () => { fireEvent.keyDown(window, { code: "KeyA", altKey: true, metaKey: true }); });
     expect(screen.getByRole("img", { name: /Jaeger avatar/ })).toBeTruthy();
   });
+  it("animates the built-in Jaeger character unless Still is selected", async () => {
+    const native = { id: "native:jaeger", name: "Jaeger" } as Agent;
+    const { container } = render(<AvatarPanel agent={native} clipState="working" size={{ cls: "expanded", short: false }} />);
+    expect(await screen.findByRole("img", { name: "Jaeger avatar" })).toBeTruthy();
+    expect(container.querySelector('video[src$="/working.mp4"]')).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Still" }));
+    expect(container.querySelector("video")).toBeNull();
+  });
 });
 
 describe("AvatarStage", () => {
