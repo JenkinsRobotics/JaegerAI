@@ -14,6 +14,7 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
     # attach to an existing bridge. Every output belongs to this test process.
     os.environ.update({
         "JAEGER_STATE_DIR": str(state),
+        "JAEGER_STATE_HOME": str(state),
         "JAEGER_HOME": str(state),
         "JAEGER_INSTANCE_DIR": str(state / "instances" / "contract"),
         "HERMES_HOME": str(state / "hermes"),
@@ -79,6 +80,10 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
 
         JaegerGatewayApp._commit_owner_outcome = fault_commit
 
+    if os.environ.get("JAEGER_CONTRACT_RESEARCH") == "1":
+        from dev.tests.fixtures.research_contract import install_retrieval
+        install_retrieval()
+
     def current_request(messages):
         """The request this call serves: the last user message, minus the
         other-session context EntityRuntime prefixes above its "Current
@@ -96,6 +101,10 @@ async def main(state: Path, *, serve_webui: bool = False) -> None:
         with (state / "provider-requests.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(json.dumps({"request": request,
                 "request_id": (current_task_context() or {}).get("request_id")}) + "\n")
+        if "CONTRACT-RESEARCH" in request:
+            assert os.environ.get("JAEGER_CONTRACT_RESEARCH") == "1"
+            from dev.tests.fixtures.research_contract import model_response as research_response
+            return research_response(messages)
         if "CONTRACT-QUEUE-DEFAULT" in request:
             responses = [m for m in messages if m.get('tool_call_id') == 'queue-default']
             if not responses:
