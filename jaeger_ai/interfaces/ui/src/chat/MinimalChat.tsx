@@ -1,3 +1,5 @@
+import {AgentActivity} from "./AgentActivity";
+import {ChevronIcon, GlyphCode} from "../icons";
 import {partitionChatParts} from "./workGrouping";
 import {useChatAvatar} from "../avatar/useChatAvatar";
 import {displayDate, displayDayKey, displayDayDistance, useDevicePreferences} from "../settings/devicePreferences";
@@ -110,7 +112,7 @@ function BubblePart({ part, links, live = false, style }: { part: ChatPart; link
     case "markdownContent":
       return <RevealMarkdown text={part.text} live={live} links={links} style={style} />;
     case "thinking":
-      return <details className="jg-thinking"><summary>Thought for {seconds(part.durationMs)} s</summary><p>{part.text}</p></details>;
+      return <details className="jg-thinking"><summary>{part.durationMs === undefined ? "Thinking" : `Thought for ${seconds(part.durationMs)} s`}</summary><p>{part.text}</p></details>;
     case "progress":
       return null; // shown live by the progress line
     case "toolInvocation":
@@ -126,13 +128,16 @@ function BubblePart({ part, links, live = false, style }: { part: ChatPart; link
 
 function ToolLine({ part }: { part: ToolPart }) {
   const { verb, target, mono } = stepLine(part);
-  return (
-    <div className={`jg-tool jg-tool--${part.state}`}>
-      <span className="jg-tool__verb">{verb}</span>{" "}
+  const output = part.output === undefined ? undefined : typeof part.output === "string" ? part.output : JSON.stringify(part.output,null,2);
+  return <details className={`jg-tool jg-tool--${part.state}`}>
+    <summary><span className="jg-tool__verb">{verb}</span>{" "}
       {mono ? <code className="jg-tool__target">{target}</code> : <span className="jg-tool__target">{target}</span>}
-      <span className="jg-tool__outcome"> · {part.state}</span>
+      <span className="jg-tool__outcome"> · {part.state}</span></summary>
+    <div className="jg-tool__details"><strong>{part.toolName}</strong>
+      <pre>{output === undefined ? "No output retained for this tool call." : output.slice(0,16000)}</pre>
+      {output && output.length>16000 && <small>Output preview truncated.</small>}
     </div>
-  );
+  </details>;
 }
 
 /** Tool steps, collapsed to one summary row ("Ran 3 commands · Read 2 files"). */
@@ -163,11 +168,20 @@ function Card({ part, onDecide, onAnswer, tool, decided }: { part: CardPart; onD
 export function segments(parts: ChatPart[], state: ChatTurn["state"] = "complete") {
   const out: Array<{ marker: MarkerPart } | { card: CardPart } | { bubble: ChatPart[] } | { activity: ChatPart[] }> = [];
   const {work,visible} = partitionChatParts(parts);
+  // Reuse shared classification while preserving the original event order.
+  // Commentary is always readable, even when more tool rounds follow it.
+  const workIndices = new Set(work.filter(row=>row.part.kind!=="markdownContent").map(row=>row.index));
   const ended = state !== "pending";
-  const activity = work.map(({part}) => part.kind === "toolInvocation" && ended && (part.state === "executing" || part.state === "streaming")
-    ? {...part,state:state === "cancelled" ? "cancelled" as const : "unknown" as const} : part);
-  if (activity.length) out.push({activity});
-  for (const {part} of visible) {
+  const ordered = [...work,...visible].sort((a,b)=>a.index-b.index);
+  for (const {part:original,index} of ordered) {
+    const part = original.kind === "toolInvocation" && ended && (original.state === "executing" || original.state === "streaming")
+      ? {...original,state:state === "cancelled" ? "cancelled" as const : "unknown" as const} : original;
+    if(workIndices.has(index)) {
+      const previous=out.at(-1);
+      if(previous && "activity" in previous) previous.activity.push(part);
+      else out.push({activity:[part]});
+      continue;
+    }
     const last = out.at(-1);
     if (part.kind === "handoff") {
       const prev = last && "marker" in last ? last.marker : undefined;
@@ -191,9 +205,10 @@ export function ActivityFold({parts,live,links,style}:{parts:ChatPart[];live:boo
   useEffect(()=>{if(!live)setOpen(false);},[live]);
   const tools=parts.filter((p):p is ToolPart=>p.kind==="toolInvocation");
   return <div className="jg-steps jg-turn-activity" data-sender="assistant">
-    <button type="button" className="jg-steps__summary" aria-expanded={open} onClick={()=>setOpen(!open)}>
-      <span>{live ? "Working" : "Activity"}{tools.length ? " · "+stepsSummary(tools) : ""}</span>
-      <span className="jg-steps__toggle">{open ? "Hide activity" : "Show activity"}</span>
+    <button type="button" className="jg-steps__summary" aria-label={`${open ? "Hide" : "Show"} activity${tools.length ? ": "+stepsSummary(tools) : ""}`} aria-expanded={open} onClick={()=>setOpen(!open)}>
+      <span className="jg-stream-icon" aria-hidden="true"><GlyphCode/></span>
+      <span className="jg-steps__text">{tools.length ? stepsSummary(tools) : parts.every(p=>p.kind==="thinking") ? "Thinking" : live ? "Working" : "Activity"}</span>
+      <span className="jg-steps__toggle" aria-label={open ? "Hide activity" : "Show activity"}><ChevronIcon/></span>
     </button>
     {open && <div className="jg-turn-activity__body">{parts.map((part,i)=>
       part.kind==="progress" ? <p key={i}>{part.message}</p> :
@@ -862,7 +877,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
                 "marker" in seg ? <div key={i} data-sender="marker"><HandoffMarker part={seg.marker} onOpen={host.openHandoff ? (id) => host.openHandoff?.(id) : undefined} /></div>
                 : "card" in seg ? <Card key={i} part={seg.card} onDecide={decide(turn.turnId)} onAnswer={host.answerClarify && session ? (cid, rev, response) => host.answerClarify!(session.id, cid, rev, response) : undefined} decided={decisions[seg.card.callId]}
                   tool={turn.parts.find((p): p is Extract<ChatPart, { kind: "toolInvocation" }> => p.kind === "toolInvocation" && p.callId === seg.card.callId)} />
-                : "activity" in seg ? <ActivityFold key="activity" parts={seg.activity} live={turn.state === "pending"} links={links} style={streamStyle} />
+                : "activity" in seg ? <ActivityFold key={`activity:${i}`} parts={seg.activity} live={turn.state === "pending"} links={links} style={streamStyle} />
                 : <div key={i} className="jg-bubble jg-bubble--assistant" data-sender="assistant">{seg.bubble.map((p, j) => <BubblePart key={j} part={p} links={links} live={turn.state === "pending"} style={streamStyle} />)}</div>)}
               <Reactions emojis={reactions[`${turn.requestId}|assistant`] ?? []} onRemove={emoji => changeReaction(turn.requestId, "assistant", emoji, false)} />
               {showsProgress(turn) && <ProgressLine phrase={activityPhrase(turn, agentName)} />}
@@ -893,6 +908,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
       </button>
       <MessageMenu at={messageMenu ? { x: messageMenu.x, y: messageMenu.y } : null} requestId={messageMenu?.requestId} reactionEmojis={messageMenu?.requestId ? reactionEmojis : []} onAction={onMessageAction} onClose={() => setMessageMenu(null)} />
       {reactionError && <p role="alert">{reactionError}</p>}
+      {session && <AgentActivity turns={session.turns} onOpen={host.openHandoff ? id=>host.openHandoff?.(id) : undefined}/> }
       <form ref={composer} className="jg-composer" onSubmit={(e) => { e.preventDefault(); submitComposer(); }}>
         {(files.length > 0 || fileNote) && (
           <div className="jg-composer__chips" role="list" aria-label="Attachments">
@@ -912,7 +928,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
         {preparingFiles && <div role="status">Preparing attachments…</div>}
         {draftError && <div role="alert">{draftError}</div>}
         {deliveryNotice && <div className="jg-composer__notice" role="alert">{deliveryNotice}</div>}
-        <textarea spellCheck={devicePreferences.spellcheck} disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : agent.id === "native:jaeger" ? "Do anything" : `Ask ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
+        <textarea spellCheck={devicePreferences.spellcheck} disabled={!draftReady} ref={field} className="jg-composer__input" rows={1} placeholder={listening ? "Listening… tap again to stop" : active ? "Follow up" : agent.id === "native:jaeger" ? "Do anything" : `Ask ${agent.name}`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={onKeyDown} onPaste={onPaste} aria-label="Message" />
         <div className="jg-composer__bar">
         <button ref={plus} type="button" className="jg-composer__icon jg-composer__icon--filled" aria-label="Attach file" title="Attach file" aria-haspopup="menu"
           aria-expanded={composerMenu} onClick={() => setComposerMenu(true)}><PlusIcon /></button>
