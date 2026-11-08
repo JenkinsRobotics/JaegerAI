@@ -12,12 +12,12 @@ try {
       <div class="jg-stable-demo" data-sidebar="false">
         <main class="jg-stable-demo__main">
           <header class="jg-stable-demo__header">
-            <div class="jg-stable-demo__header-start">New chat</div>
+            <div class="jg-stable-demo__header-start"><button class="jg-stable-demo__top-button">New</button></div>
             <div class="jg-stable-demo__profile">
               <span class="jg-stable-demo__profile-avatar"><span class="jg-jaeger-avatar" style="width:94px;height:94px"></span></span>
               <span class="jg-stable-demo__profile-copy"><strong>Jaeger</strong></span>
             </div>
-            <div class="jg-stable-demo__tools">Menu</div>
+            <div class="jg-stable-demo__tools"><button class="jg-stable-demo__top-button">Menu</button><button class="jg-stable-demo__top-button">Side</button><button class="jg-stable-demo__top-button">Tabs</button></div>
           </header>
           <section class="jg-stable-demo__body"><div class="jg-chat-home">Jenkins Robotics</div></section>
         </main>
@@ -25,6 +25,11 @@ try {
     const avatar = page.locator(".jg-jaeger-avatar");
     const home = page.locator(".jg-chat-home");
     const expanded = await avatar.boundingBox();
+    const controlBoxes = () => page.locator('.jg-stable-demo__top-button').evaluateAll(buttons => buttons.map(button => {
+      const { x, y, width, height } = button.getBoundingClientRect();
+      return { x, y, width, height };
+    }));
+    const controls = await controlBoxes();
     const logo = await home.boundingBox();
     assert.ok(expanded.y + expanded.height <= logo.y, "Avatar stays above logo");
     assert.ok(expanded.x >= 0 && expanded.x + expanded.width <= viewport.width, "Avatar fits viewport");
@@ -33,7 +38,10 @@ try {
       window.originalAvatar = document.querySelector(".jg-jaeger-avatar");
       document.querySelector(".jg-chat-home").remove();
     });
-    await page.waitForTimeout(550);
+    await page.waitForTimeout(180);
+    assert.deepEqual(await controlBoxes(), controls, "Controls stay fixed during retreat");
+    await page.waitForTimeout(370);
+    assert.deepEqual(await controlBoxes(), controls, "Controls stay fixed after send");
     assert.equal(Math.round((await avatar.boundingBox()).width), 94, "First message docks avatar");
     assert.ok(await page.evaluate(() => window.originalAvatar === document.querySelector(".jg-jaeger-avatar")), "Same avatar survives transition");
     await page.evaluate(() => {
@@ -41,6 +49,7 @@ try {
     });
     await page.waitForTimeout(550);
     assert.equal(Math.round((await avatar.boundingBox()).width), Math.round(expanded.width), "New chat expands again");
+    assert.deepEqual(await controlBoxes(), controls, "Controls stay fixed in a new chat");
     await page.locator(".jg-stable-demo__body").evaluate(element => { element.hidden = true; });
     await page.waitForTimeout(550);
     assert.equal(Math.round((await avatar.boundingBox()).width), 94, "Hidden chat does not expand workspace header");
