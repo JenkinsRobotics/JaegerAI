@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import queue
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs
 
@@ -46,7 +47,13 @@ def _terminal_session_lookup(body_or_query: dict) -> tuple[str, Any]:
     try:
         s = _get_session(sid)
     except KeyError:
-        raise KeyError("Session not found")
+        # Resolve the existing Gateway session through its authenticated, profile-
+        # scoped owner. Do not create a shadow legacy session for the terminal.
+        from .gateway_read_workspace import gateway_read_workspace
+        try:
+            s = SimpleNamespace(workspace=str(gateway_read_workspace(sid)))
+        except KeyError:
+            raise KeyError("Session not found") from None
     return sid, s
 
 
