@@ -83,17 +83,11 @@ class TurnExecutive:
                 if existing is not None:
                     self.runs.heartbeat(existing.id, owner_pid=os.getpid())
                     return existing
-        open_commitments = [
-            item for item in self.commitments.list()
-            if item.kind == TURN_LOOP_KIND and item.state in {"created", "active"}
-        ]
-        if open_commitments:
-            commitment = open_commitments[0]
-            if commitment.state == "created":
-                commitment = self.commitments.transition(commitment.id, "active")
-        else:
-            commitment = self.commitments.create(TURN_LOOP_KIND, kind=TURN_LOOP_KIND)
-            commitment = self.commitments.transition(commitment.id, "active")
+        # Acquisition belongs to the store: another unbound turn can activate
+        # this shared intention between a separate list() and transition().
+        commitment = self.commitments.ensure_active_for_kind(
+            TURN_LOOP_KIND, title=TURN_LOOP_KIND,
+        )
         # An unbound turn is a new request and gets its own run. Adopting
         # some other active or orphaned run here put unrelated requests —
         # from other sessions and other processes — under one run id, and

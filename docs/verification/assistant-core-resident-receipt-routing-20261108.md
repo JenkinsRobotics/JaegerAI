@@ -91,3 +91,8 @@ production skill initialization or non-core missing-smoke gates. No browser,
 phone, native host, real configured provider or installed-runtime acceptance is
 claimed. All product/tab acceptance remains PARTIAL. Whole-request resident
 journal work is separate and is not part of this guard increment.
+
+The subsequent [commitment activation repair](assistant-core-commitment-activation-20261108.md)
+addresses the reproduced cron/initiative race. Its deterministic and actual
+concurrent HTTP controls pass; consult its combined-qualification evidence rather
+than treating this historical failed aggregate as silently replaced.

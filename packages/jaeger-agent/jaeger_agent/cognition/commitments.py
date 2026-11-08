@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 import uuid
+from threading import RLock
 
 from jaeger_agent.cognition.lifecycle import (
     ALLOWED as _ALLOWED,
@@ -65,6 +66,8 @@ class CommitmentStore(Protocol):
 
     def transition(self, commitment_id: str, new_state: str) -> Commitment: ...
 
+    def ensure_active_for_kind(self, kind: str, *, title: str) -> Commitment: ...
+
 
 def guard_open_children(
     item: Commitment, new_state: str, children: list[Commitment]
@@ -88,25 +91,42 @@ def guard_open_children(
 class InMemoryCommitmentStore:
     def __init__(self) -> None:
         self._items: dict[str, Commitment] = {}
+        self._lock = RLock()
+
+    def ensure_active_for_kind(self, kind: str, *, title: str) -> Commitment:
+        """Atomically reuse an open intention or create and activate one.
+
+        This acquisition is idempotent; transition() remains strict. A shared
+        intention does not authorize adopting another caller's execution run.
+        """
+        with self._lock:
+            item = next((row for row in self._items.values()
+                         if row.kind == kind and row.state in {"created", "active"}), None)
+            if item is None:
+                item = self.create(title, kind=kind)
+            if item.state == "created":
+                item = self.transition(item.id, "active")
+            return item
 
     def create(self, title: str, *, kind: str = "goal",
                payload: dict[str, Any] | None = None,
                parent_id: str | None = None) -> Commitment:
-        if parent_id is not None and parent_id not in self._items:
-            raise CommitmentError(f"no parent commitment {parent_id!r}")
-        now = _now()
-        item = Commitment(
-            id=new_id(),
-            title=title.strip() or "(untitled)",
-            state="created",
-            kind=kind,
-            payload=dict(payload or {}),
-            created_at=now,
-            updated_at=now,
-            parent_id=parent_id,
-        )
-        self._items[item.id] = item
-        return item
+        with self._lock:
+            if parent_id is not None and parent_id not in self._items:
+                raise CommitmentError(f"no parent commitment {parent_id!r}")
+            now = _now()
+            item = Commitment(
+                id=new_id(),
+                title=title.strip() or "(untitled)",
+                state="created",
+                kind=kind,
+                payload=dict(payload or {}),
+                created_at=now,
+                updated_at=now,
+                parent_id=parent_id,
+            )
+            self._items[item.id] = item
+            return item
 
     def get(self, commitment_id: str) -> Commitment | None:
         return self._items.get(commitment_id)
@@ -121,14 +141,15 @@ class InMemoryCommitmentStore:
         return [r for r in self._items.values() if r.parent_id == commitment_id]
 
     def transition(self, commitment_id: str, new_state: str) -> Commitment:
-        item = self._items.get(commitment_id)
-        if item is None:
-            raise CommitmentError(f"no commitment {commitment_id!r}")
-        check_transition(item.id, item.state, new_state, error=CommitmentError)
-        guard_open_children(item, new_state, self.children(commitment_id))
-        item.state = new_state
-        item.updated_at = _now()
-        return item
+        with self._lock:
+            item = self._items.get(commitment_id)
+            if item is None:
+                raise CommitmentError(f"no commitment {commitment_id!r}")
+            check_transition(item.id, item.state, new_state, error=CommitmentError)
+            guard_open_children(item, new_state, self.children(commitment_id))
+            item.state = new_state
+            item.updated_at = _now()
+            return item
 
 
 __all__ = [

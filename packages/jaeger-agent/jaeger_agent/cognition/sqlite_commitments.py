@@ -29,6 +29,32 @@ def _row(row) -> Commitment:
 
 
 class SqliteCommitmentStore:
+    def ensure_active_for_kind(self, kind: str, *, title: str) -> Commitment:
+        """Select/create and activate under one cross-process write transaction."""
+        with sqlite_store.writer() as conn:
+            row = conn.execute(
+                "SELECT * FROM commitments WHERE kind = ? "
+                "AND state IN ('created', 'active') ORDER BY created_at, rowid LIMIT 1",
+                (kind,),
+            ).fetchone()
+            now = _now()
+            if row is None:
+                ident = new_id()
+                conn.execute(
+                    "INSERT INTO commitments (id, title, state, kind, payload_json, "
+                    "created_at, updated_at, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (ident, title.strip() or "(untitled)", "active", kind, "{}", now, now, None),
+                )
+            else:
+                ident = str(row["id"])
+                if row["state"] == "created":
+                    check_transition(ident, "created", "active", error=CommitmentError)
+                    conn.execute(
+                        "UPDATE commitments SET state = 'active', updated_at = ? WHERE id = ?",
+                        (now, ident),
+                    )
+            return _row(conn.execute("SELECT * FROM commitments WHERE id = ?", (ident,)).fetchone())
+
     def create(self, title: str, *, kind: str = "goal",
                payload: dict[str, Any] | None = None,
                parent_id: str | None = None) -> Commitment:
