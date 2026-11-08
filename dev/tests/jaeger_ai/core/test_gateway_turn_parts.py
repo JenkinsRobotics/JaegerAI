@@ -85,7 +85,7 @@ def test_handoffs_stream_on_the_origin_turn_and_persist_as_parts(tmp_path):
     store.complete_request("r1", status="completed", result={}, assistant_text="Research says hi")
     parts = store.get_session("s1")["messages"][-1]["parts"]
     assert [(p["type"], p.get("direction"), p.get("agent_name")) for p in parts] == [
-        ("handoff", "to", "Research"), ("handoff", "from", "Research")]
+        ("handoff", "to", "Research"), ("handoff", "from", "Research"), ("text", None, None)]
 
 
 def test_handoff_without_a_matching_origin_turn_stays_global(tmp_path):
@@ -196,3 +196,28 @@ def test_context_and_tools_persist_after_sse_retention_prunes_early_events(tmp_p
     parts=store.get_session('owned-history')['messages'][-1]['parts']
     assert any(part['type']=='knowledge' and part['documents']==documents for part in parts)
     assert any(part['type']=='tool' and part['call_id']=='owned-tool' and part['status']=='completed' for part in parts)
+
+def test_stream_extras_survive_completion_and_repeated_reload(tmp_path):
+    gateway = _gateway(tmp_path)
+    store = gateway.store
+    store.admit_request("s1", "look up details", request_id="r1")
+    for event, data in [
+        ("turn.plan", {"plan": [{"step": "Research", "status": "in_progress"}]}),
+        ("turn.progress", {"text": "Checking"}),
+        ("turn.checkpoint", {"text": "Found a reference"}),
+        ("tool.started", {"call_id": "c1", "tool": "web_search"}),
+        ("tool.completed", {"call_id": "c1", "tool": "web_search"}),
+        ("sources", {"sources": [{"kind": "url", "location": "https://example.com"}]}),
+    ]:
+        gateway.event_bus.publish("s1", event, {"request_id": "r1", **data})
+    store.complete_request("r1", status="completed", result={"output": "Answer"},
+                           assistant_text="Answer", follow_ups=["Explain more"])
+    first = store.get_session("s1")["messages"][-1]["parts"]
+    kinds = [part["type"] for part in first]
+    assert all(kind in kinds for kind in ["plan", "progress", "checkpoint", "sources", "search_count", "follow_ups", "text"])
+    assert next(part for part in first if part["type"] == "text")["text"] == "Answer"
+    for _ in range(3):
+        assert store.get_session("s1")["messages"][-1]["parts"] == first
+    replay = store.complete_request("r1", status="completed", result={}, assistant_text="Do not duplicate")
+    assert replay["replayed"] is True
+    assert store.get_session("s1")["messages"][-1]["parts"] == first

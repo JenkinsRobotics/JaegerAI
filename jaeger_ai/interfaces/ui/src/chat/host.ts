@@ -9,6 +9,11 @@ export type HostKind = "vscode" | "native" | "web";
 export type ToolInvocationState = "streaming" | "waitingForConfirmation" | "executing" | "completed" | "cancelled" | "failed" | "denied" | "rejected" | "unsupported" | "unknown";
 
 export type ChatPart =
+  | {kind:"plan";plan:Array<{step:string;status:"pending"|"in_progress"|"completed"}>;explanation:string}
+  | {kind:"checkpoint";text:string}
+  | {kind:"sources";sources:Array<{kind:"url"|"file";location:string;title?:string}>}
+  | {kind:"searchCount";searches:number;completed:number;failed:number}
+  | {kind:"followUps";prompts:string[]}
   | {kind:"modelIdentity";actualModel:string|null;scope:string}
   | { kind: "modelContext"; outline: import("./modelContext").ModelContextOutline }
   | { kind: "knowledgeContext"; documents: { id: string; revision: number; digest: string; title: string }[] }
@@ -153,6 +158,10 @@ export function applyPart(parts: ChatPart[], part: ChatPart): ChatPart[] {
   if (part.kind === "handoff") {
     const index = parts.findIndex((p) => p.kind === "handoff" && p.handoffId === part.handoffId && p.direction === part.direction);
     if (index >= 0) return parts.map((p, i) => i === index && !(p.kind === "handoff" && p.status === "delivered" && part.status !== "delivered") ? part : p);
+  }
+  if (["plan","searchCount","followUps"].includes(part.kind)) {
+    const index=parts.findIndex(p=>p.kind===part.kind);
+    if(index>=0)return parts.map((p,i)=>i===index?part:p);
   }
   const last = parts[parts.length - 1];
   if ((part.kind === "markdownContent" || part.kind === "thinking") && last?.kind === part.kind) {

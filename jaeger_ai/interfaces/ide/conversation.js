@@ -127,9 +127,8 @@ class Conversation {
   applySuggestionsEvent(event) {
     if (event.event === 'turn.start') this.state.suggestions = [];
     if (event.event === 'follow_ups') {
-      this.state.suggestions = (Array.isArray(event.data?.follow_ups) ? event.data.follow_ups : [])
-        .filter(item => typeof item === 'string' && item.trim() && item.trim().length <= 160)
-        .slice(0, 5).map(prompt => ({ label: prompt.trim(), prompt: prompt.trim(), title: prompt.trim() }));
+      this.state.suggestions = require('./media/timeline').parseFollowUps(event.data)
+        .map(prompt=>({label:prompt,prompt,title:prompt}));
     }
   }
   async persist() {

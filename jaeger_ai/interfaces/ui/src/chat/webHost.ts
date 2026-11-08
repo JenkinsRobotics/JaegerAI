@@ -1,3 +1,4 @@
+import {mapEvent} from "./eventMap";
 import { modelContext } from "./modelContext";
 import { readIntent, saveIntent, settleIntent, type SendIntent } from "./sendJournal";
 import { requestOutcome } from "./requestOutcome";
@@ -9,6 +10,7 @@ import type { PersistedPart, SessionMessage } from "../api/types";
 import { bytesUploadEnabled, UPLOAD_MAX_BYTES, UPLOAD_TOO_LARGE, type RejectedAttachment } from "./composer";
 import { followTurn } from "./followTurn";
 import type { HomeSessions } from "./homeSession";
+import {applyPart} from "./host";
 import type { ChatAgentRef, ChatHost, ChatPart, ChatSession, ClarifyAnswerResult, HostKind, StartTurnRequest, ToolInvocationState, TurnHandle, TurnState } from "./host";
 import type { HostAttachment, HostCapabilities } from "./hostH8";
 
@@ -28,6 +30,15 @@ function holdApprovedTools(source: PersistedPart[], parts: ChatPart[]) {
 
 function persistedToPart(p: PersistedPart, agentName: (id: string) => string): ChatPart | null {
   switch (p.type) {
+    case "plan":
+    case "progress":
+    case "checkpoint":
+    case "sources":
+    case "search_count":
+    case "follow_ups": {
+      const event={plan:"turn.plan",progress:"turn.progress",checkpoint:"turn.checkpoint",sources:"sources",search_count:"search.count",follow_ups:"follow_ups"}[p.type];
+      return mapEvent({event,payload:p})?.parts[0] ?? null;
+    }
     case "model_identity": return {kind:"modelIdentity",actualModel:p.scope==="provider_reported"&&typeof p.actual_model==="string"?p.actual_model:null,scope:p.scope==="provider_reported"?"provider_reported":"unknown"};
     case "model_context": return {kind: "modelContext", outline: modelContext(p.outline)};
     case "knowledge": return { kind: "knowledgeContext", documents: p.documents };
@@ -72,7 +83,7 @@ export function messagesToTurns(messages: SessionMessage[] = [], agentName: (id:
         ? m.parts.map((p) => persistedToPart(p, agentName)).filter((p): p is ChatPart => p !== null)
         : [{ kind: "markdownContent" as const, text: m.content ?? "" }];
       if (m.parts?.length) holdApprovedTools(m.parts, parts);
-      turns[turns.length - 1].parts.push(...parts);
+      turns[turns.length - 1].parts = parts.reduce(applyPart,turns[turns.length - 1].parts);
     }
   }
   return turns;

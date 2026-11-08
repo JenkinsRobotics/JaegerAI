@@ -85,24 +85,7 @@ const oneLine = value => { const line = value.replace(/\s+/g, ' ').trim(); retur
 
 // Same filters as the panel (media/timeline.js and conversation.js) so both
 // surfaces show the same Sources and follow-ups.
-function parseSources(data) {
-  return (Array.isArray(data?.sources) ? data.sources : [])
-    .filter(item => ['url', 'file'].includes(item?.kind) && typeof item?.location === 'string' && item.location)
-    .map(item => ({ kind: item.kind, location: item.location, ...(typeof item.title === 'string' && item.title ? { title: item.title } : {}) }));
-}
-
-function parseFollowUps(data) {
-  return (Array.isArray(data?.follow_ups) ? data.follow_ups : [])
-    .filter(item => typeof item === 'string' && item.trim() && item.length <= 160)
-    .map(item => item.trim()).slice(0, 5);
-}
-
-function parseSearchCount(data) {
-  const searches = data?.searches, completed = data?.completed, failed = data?.failed;
-  if (!Number.isSafeInteger(searches) || searches < 1) return null;
-  if (![completed, failed].every(n => Number.isSafeInteger(n) && n >= 0 && n <= searches)) return null;
-  return { searches, completed, failed };
-}
+const {parseSources,parseFollowUps,parseSearchCount} = require('./media/timeline');
 
 // Native chat equivalent of the panel's Sources row. stream.reference takes a
 // vscode.Uri; toUri is injected so this module stays free of the vscode API.

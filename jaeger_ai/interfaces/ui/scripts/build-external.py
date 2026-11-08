@@ -23,7 +23,14 @@ def main():
     if cache == repo or repo in cache.parents:
         parser.error('output-root must be outside the repository')
     cache.mkdir(parents=True, exist_ok=True)
-    work = Path(tempfile.mkdtemp(prefix='build-', dir=cache))
+    snapshot = Path(tempfile.mkdtemp(prefix='build-', dir=cache))
+    work = snapshot / 'ui'
+    # Preserve the canonical sibling layout for the shared IDE/browser reducer.
+    shared = source.parent / 'ide' / 'media'
+    shared_files = ('timeline.js', 'timeline.d.ts')
+    (snapshot / 'ide' / 'media').mkdir(parents=True)
+    for name in shared_files:
+        shutil.copy2(shared / name, snapshot / 'ide' / 'media' / name)
     shutil.copytree(source, work, dirs_exist_ok=True,
                     ignore=shutil.ignore_patterns('node_modules', 'dist', '.git',
                                                  'test-results', 'playwright-report'))
@@ -49,6 +56,8 @@ def main():
     inputs = {str(p.relative_to(source)): hashlib.sha256(p.read_bytes()).hexdigest()
               for folder in ('src', 'public', 'vendor', 'scripts')
               for p in sorted((source / folder).rglob('*')) if p.is_file()}
+    for name in shared_files:
+        inputs['../ide/media/' + name] = hashlib.sha256((shared / name).read_bytes()).hexdigest()
     for name in ('package.json', 'package-lock.json', 'vite.config.ts', 'index.html', 'tsconfig.json'):
         inputs[name] = hashlib.sha256((source / name).read_bytes()).hexdigest()
     (work / 'dist/build.json').write_text(json.dumps({

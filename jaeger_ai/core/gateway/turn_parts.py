@@ -11,7 +11,7 @@ from typing import Any, Iterable
 _TOOL_END = {"tool.completed": "done", "tool.done": "done", "tool.failed": "error", "tool.error": "error"}
 _HANDOFF = {"agent.handoff": "to", "agent.handoff.finished": "from"}
 PART_EVENTS = ("turn.delta", "turn.reasoning", "turn.reasoning.done", "tool.started", "agent.knowledge", "turn.context", "turn.model",
-               *_TOOL_END, "turn.plan", *_HANDOFF)
+               *_TOOL_END, "turn.plan", "turn.progress", "turn.checkpoint", "sources", "search.count", "follow_ups", *_HANDOFF)
 
 
 def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -57,6 +57,9 @@ def project_parts(events: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             parts.append({"type": "model_context", "outline": data.get("outline") or {}})
         elif name == "agent.knowledge":
             parts.append({"type": "knowledge", "documents": data.get("documents") or []})
+        elif name in {"turn.progress", "turn.checkpoint", "sources", "search.count", "follow_ups"}:
+            kind = {"turn.progress": "progress", "turn.checkpoint": "checkpoint", "search.count": "search_count"}.get(name, name)
+            parts.append({**{k: v for k, v in data.items() if k not in {"turn_id", "request_id", "session_id", "type"}}, "type": kind})
         elif name == "turn.plan":
             parts.append({"type": "plan", **{k: v for k, v in data.items() if k not in {"turn_id", "request_id"}}})
         elif name in _HANDOFF:

@@ -52,6 +52,27 @@
     return { work, visible };
   }
 
+  function parseSources(data) {
+    return (Array.isArray(data?.sources) ? data.sources : [])
+      .filter(item => ['url','file'].includes(item?.kind) && typeof item.location === 'string' && item.location)
+      .slice(0,20).map(item=>({kind:item.kind,location:item.location,...(typeof item.title==='string'?{title:item.title}:{})}));
+  }
+  function parseFollowUps(data) {
+    return (Array.isArray(data?.follow_ups) ? data.follow_ups : [])
+      .filter(item=>typeof item==='string' && item.trim() && item.trim().length<=160)
+      .slice(0,5).map(item=>item.trim());
+  }
+  function parseSearchCount(data) {
+    const {searches,completed,failed}=data||{};
+    return Number.isSafeInteger(searches) && searches>0 &&
+      [completed,failed].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=searches)
+      ? {searches,completed,failed} : null;
+  }
+  function parsePlan(data) {
+    return (Array.isArray(data?.plan)?data.plan:[]).filter(item=>typeof item?.step==='string' && item.step.trim())
+      .map(item=>({step:item.step,status:['pending','in_progress','completed'].includes(item.status)?item.status:'pending'}));
+  }
+
   function applyTool(rows, event) {
     const rid = requestId(event);
     // Text preceding a tool call is commentary, not the final answer.
@@ -72,15 +93,12 @@
     return index >= 0 ? replaceAt(rows, index, row) : [...rows, row];
   }
 
-  const PLAN_STATUSES = new Set(['pending', 'in_progress', 'completed']);
 
   // The latest plan wins: the model resends the whole plan each time it changes,
   // so one row per request is replaced in place and keeps its chronological spot.
   function applyPlan(rows, event) {
     const rid = requestId(event), key = `plan:${rid}`;
-    const plan = (Array.isArray(event.data?.plan) ? event.data.plan : [])
-      .map(item => ({ step: String(item?.step || ''), status: PLAN_STATUSES.has(item?.status) ? item.status : 'pending' }))
-      .filter(item => item.step);
+    const plan = parsePlan(event.data);
     if (!plan.length) return rows;
     const row = { key, kind: 'plan', requestId: rid, plan,
       explanation: String(event.data?.explanation || ''), live: false };
@@ -112,16 +130,14 @@
       const rid = requestId(event), count = event.data?.searches;
       if (!Number.isSafeInteger(count) || count < 1) return rows;
       const completed = event.data?.completed, failed = event.data?.failed;
-      if (![completed, failed].every(n => Number.isSafeInteger(n) && n >= 0 && n <= count)) return rows;
+      if (!parseSearchCount(event.data)) return rows;
       const key = `search-count:${rid}`;
       const row = { key, kind: 'search-count', requestId: rid, searches: count, completed, failed, live: false };
       const index = rows.findIndex(item => item.key === key);
       return index >= 0 ? replaceAt(rows, index, row) : [...rows, row];
     }
     if (event.event === 'sources') {
-      const sources = (Array.isArray(event.data?.sources) ? event.data.sources : [])
-        .filter(item => ['url', 'file'].includes(item?.kind) && typeof item?.location === 'string')
-        .slice(0, 20);
+      const sources = parseSources(event.data);
       return sources.length ? [...rows, { key: `sources:${requestId(event)}:${eventId(event)}`,
         kind: 'sources', requestId: requestId(event), sources, live: false }] : rows;
     }
@@ -168,5 +184,5 @@
     return changed || cursor !== state.cursor ? { cursor, seen, rows } : state;
   }
 
-  return { partitionTurn, applyEvents, createTimelineState, isStreamEvent: event => STREAM_EVENTS.has(event.event) };
+  return { parseSources, parseFollowUps, parseSearchCount, parsePlan, partitionTurn, applyEvents, createTimelineState, isStreamEvent: event => STREAM_EVENTS.has(event.event) };
 });

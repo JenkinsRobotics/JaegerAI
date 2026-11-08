@@ -49,7 +49,7 @@ type Decide = (callId: string, decision: "approve" | "deny") => void;
 type BusyMessage = { id: string; text: string; delivery: "steered" | "queued"; createdAt: number };
 type CardPart = Extract<ChatPart, { kind: "confirmation" | "question" }>;
 type MarkerPart = Extract<ChatPart, { kind: "handoff" }>;
-type Links = { onCopy: (text: string) => void; onOpen: (url: string) => void };
+type Links = { onSuggest?: (text:string)=>void; onCopy: (text: string) => void; onOpen: (url: string) => void };
 
 /** A new separator when the day changes or after a 30-minute gap. */
 const SEPARATOR_GAP_MS = 30 * 60 * 1000;
@@ -91,6 +91,16 @@ export function RevealMarkdown({ text, live, links, style }: { text: string; liv
 
 function BubblePart({ part, links, live = false, style }: { part: ChatPart; links: Links; live?: boolean; style: StreamStyleParams }) {
   switch (part.kind) {
+    case "plan":
+      return <section aria-label="Work plan">{part.explanation && <p>{part.explanation}</p>}<ol>{part.plan.map((item,i)=><li key={i}>{item.step} <small>({item.status.replace("_"," ")})</small></li>)}</ol></section>;
+    case "checkpoint":
+      return <p>{part.text}</p>;
+    case "sources":
+      return <section aria-label="Sources"><strong>Sources</strong><ul>{part.sources.map((source,i)=><li key={i}>{source.kind==="url" && /^https?:\/\//i.test(source.location) ? <a href={source.location} target="_blank" rel="noopener noreferrer">{source.title || source.location}</a> : <span>{source.location}</span>}</li>)}</ul></section>;
+    case "searchCount":
+      return <small>{part.searches} searches · {part.completed} completed · {part.failed} failed</small>;
+    case "followUps":
+      return <section aria-label="Suggested follow-ups"><strong>Suggested follow-ups</strong><ul>{part.prompts.map(prompt=><li key={prompt}>{links.onSuggest ? <button type="button" className="jg-action" onClick={()=>links.onSuggest?.(prompt)}>{prompt}</button> : prompt}</li>)}</ul></section>;
     case "modelIdentity":
       return <details className="jg-knowledge-context jg-knowledge-context--diagnostic"><summary>Actual model · {part.actualModel??"Unknown"}</summary><p>{part.actualModel?"Model identity reported by the provider response; this is not independent backend verification.":"No provider model identity was retained for this response. The configured or requested model is not proof of the actual remote model."}</p></details>;
     case "modelContext":
@@ -796,7 +806,7 @@ export function MinimalChat({ host, sessionId, agents, onAvatarState, onSessionM
       .finally(() => decidingIds.current.delete(callId));
   };
 
-  const links: Links = { onCopy: (text) => void host.copy(text), onOpen: (url) => host.openExternal(url) };
+  const links: Links = { onSuggest: draftReady && !draftError ? (text)=>{setDraft(old=>old ? old+"\n"+text : text);field.current?.focus();} : undefined, onCopy: (text) => void host.copy(text), onOpen: (url) => host.openExternal(url) };
   const agentName = (id: string) => (id === agent.id ? agent.name : undefined);
   const dictation = Boolean(voiceHost) && Boolean(caps.dictation ?? caps.voice);
   const voiceChat = Boolean(voiceHost) && Boolean(caps.voiceChat ?? caps.voice);
