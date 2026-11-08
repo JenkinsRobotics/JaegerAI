@@ -332,8 +332,8 @@ export class GatewayClient implements JaegerSource {
     return this.json<HandoffExchange>(`/api/handoffs/${encodeURIComponent(handoffId)}/messages`);
   }
   /** attachment_ids is always sent: left out, the gateway would attach every file the chat ever had. */
-  send(sessionId: string, text: string, requestId: string, attachmentIds: string[] = []) {
-    return this.json<TurnReceipt>(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`, { text, request_id: requestId, attachment_ids: attachmentIds });
+  send(sessionId: string, text: string, requestId: string, attachmentIds: string[] = [], options?:{fast_lane?:boolean}) {
+    return this.json<TurnReceipt>(`/v1/sessions/${encodeURIComponent(sessionId)}/turns`, { text, request_id: requestId, attachment_ids: attachmentIds, ...(options?.fast_lane ? {fast_lane:true} : {}) });
   }
   sessionControl(sessionId: string) {
     return this.json<{ latest_request?: { request_id: string; status: string } | null }>(`/v1/sessions/${encodeURIComponent(sessionId)}?view=control`);

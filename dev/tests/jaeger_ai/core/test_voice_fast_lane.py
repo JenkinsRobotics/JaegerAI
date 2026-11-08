@@ -43,3 +43,21 @@ def test_non_voice_turn_unchanged():
     dec = ExecutiveStrategySelector.select_strategy(ev, _state())
     # a plain chat message must NOT be forced onto the fast lane
     assert dec.strategy != CognitiveStrategy.DIRECT_RESPONSE or ev.payload.get("fast_lane")
+
+
+def test_gateway_executes_conversational_voice_on_existing_model_lane():
+    from types import SimpleNamespace
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    runtime = SimpleNamespace(executive_selector=ExecutiveStrategySelector, current_state=_state())
+    prepared = SimpleNamespace(event=_event("Hello Jaeger", source="gateway"))
+    assert JaegerGatewayApp._voice_direct_lane(runtime, prepared, fast_lane=True)
+    assert not JaegerGatewayApp._voice_direct_lane(runtime, prepared, fast_lane=False)
+    work = SimpleNamespace(event=_event("Run the tests", source="gateway"))
+    assert not JaegerGatewayApp._voice_direct_lane(runtime, work, fast_lane=True)
+
+
+def test_gateway_keeps_owner_execution_when_voice_strategy_is_unavailable():
+    from types import SimpleNamespace
+    from jaeger_ai.core.gateway.server import JaegerGatewayApp
+    assert not JaegerGatewayApp._voice_direct_lane(SimpleNamespace(), None, fast_lane=True)
+    assert not JaegerGatewayApp._voice_direct_lane(SimpleNamespace(), SimpleNamespace(event=None), fast_lane=True)

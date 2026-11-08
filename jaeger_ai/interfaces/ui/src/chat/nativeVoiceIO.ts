@@ -23,13 +23,13 @@ export class NativeVoiceIO implements VoiceIO {
       void bridge.post('mic.start',{mode:'dictation'}).then(()=>{started=true;if(signal.aborted){abort();return;}onStopReady(stop);},e=>{cleanup();reject(e);});
     });
   }
-  async speak(text:string,signal:AbortSignal,_output:string):Promise<void>{
+  async speak(text:string,signal:AbortSignal,_output:string,onPlaying?:()=>void):Promise<void>{
     const bridge=nativeBridge();if(!bridge)throw Error('Native speech bridge unavailable.');if(signal.aborted)throw abortError();
     return new Promise<void>((resolve,reject)=>{
       const cleanup=()=>{signal.removeEventListener('abort',abort);off();};
       const abort=()=>{void bridge.post('tts.stop');cleanup();reject(abortError());};
       const off=onNativeEvent(raw=>{const event=raw as {type:string;completed?:boolean;message?:string};if(event.type==='tts.done'){cleanup();event.completed===false?reject(Error('Speech interrupted.')):resolve();}else if(event.type==='voice.error'){cleanup();reject(Error(event.message || 'Speech failed.'));}});
-      signal.addEventListener('abort',abort,{once:true});void bridge.post('tts.speak',{text}).catch(e=>{cleanup();reject(e);});
+      signal.addEventListener('abort',abort,{once:true});void bridge.post('tts.speak',{text}).then(()=>{if(!signal.aborted)onPlaying?.();}).catch(e=>{cleanup();reject(e);});
     });
   }
 }
