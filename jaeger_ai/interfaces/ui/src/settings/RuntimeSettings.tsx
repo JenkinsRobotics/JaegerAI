@@ -42,6 +42,8 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
   useEffect(() => {
     if (!settings || !sessionId) return;
     let live = true;
+    setInventory(undefined);
+    void settings.inventory().then(models => { if (live) setInventory(models); }, () => { /* Keep an honest fallback until the picker can show the error. */ });
     void settings.read(sessionId).then(current => { if (live && current.session_id === sessionId) setBase(current); }, () => { /* the opened picker shows the actionable error */ });
     return () => { live = false; };
   }, [settings, sessionId]);
@@ -71,7 +73,7 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
   const providerGroups = Array.from(new Map(choices.map(model => [model.group, model.groupLabel])).entries());
   const filteredChoices = choices.filter(model => (providerGroup === "all" || model.group === providerGroup) && (!query.trim() || `${model.model} ${model.providerLabel} ${model.groupLabel}`.toLowerCase().includes(query.trim().toLowerCase())));
   const currentChoice = base ? choice(base) : "";
-  const currentLabel = currentChoice ? currentChoice.replace(/^@/, "").replace(":", " · ") : inventory?.active?.model || "Gateway default";
+  const currentLabel = currentChoice ? currentChoice.replace(/^@/, "").replace(":", " · ") : inventory?.active?.model || "Default model";
   const finish=async(receipt:ModelChoiceReceipt,intent:ModelChoiceIntent,owner:number)=>{
     if(owner!==generation.current)return;
     if(receipt.operation_id!==intent.operation_id||receipt.domain!=='model_choice'||receipt.session_id!==sessionId||typeof receipt.ok!=='boolean')throw Error('Model receipt identity/scope mismatch; pending journal retained');
@@ -115,7 +117,7 @@ export function RuntimeSettings({ settings, sessionId, disabled = false }: { set
     finally{locked.current=false;setBusy(false);}
   };
   const select = (value: string) => { proposalRef.current={owner:sessionId,value};setSelected(value);if(base?.atomic_model_operations)try{localStorage.setItem(draftKey,value);}catch{setError("Model proposal could not be saved on this device; draft retained in memory");} };
-  return <div className="jg-runtime-picker"><button ref={trigger} type="button" className="jg-runtime-trigger" aria-label="Choose conversation model" title={`Choose model: ${currentLabel}`} aria-expanded={open} disabled={disabled} onClick={() => { setQuery(""); setOpen(value => !value); }}><Gauge size={20} /><span>{currentLabel}</span><ChevronDown size={14} /></button>
+  return <div className="jg-runtime-picker"><button ref={trigger} type="button" className="jg-runtime-trigger" aria-label="Choose conversation model" title={`Configured model: ${currentLabel}. Provider execution is verified separately.`} aria-expanded={open} disabled={disabled} onClick={() => { setQuery(""); setOpen(value => !value); }}><Gauge size={20} /><span>{currentLabel}</span><ChevronDown size={14} /></button>
     {open && <section className="jg-runtime-menu" role="dialog" aria-label="Gateway models and settings" data-jg-popup>
       <header><strong>Model for this conversation</strong><button type="button" aria-label="Close model picker" onClick={() => setOpen(false)}><X size={16} /></button></header>
       {loaded && <div className="jg-runtime-tabs" role="tablist" aria-label="Model providers">

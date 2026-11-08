@@ -42,7 +42,7 @@ test('default screen exposes the current workspace navigation and chat controls'
   await page.getByLabel('More tools', {exact:true}).click();
   await expect(page.getByRole('navigation', { name: 'Jaeger navigation' }).getByRole('button')).toHaveText(['Chat', 'Imagine', 'Library', 'Automations', 'Feed', 'Agents', 'Work', 'Research', 'Machine', 'Tasks']);
   await expect(page.locator('header[aria-label="Conversation toolbar"]')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Toggle navigation' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Close sidebar', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
 });
 
@@ -132,6 +132,7 @@ for (const width of [301, 320, 390, 502, 1280]) {
         await form.locator(':scope > [data-layout-probe]').evaluateAll(nodes => nodes.forEach(node => node.remove()));
       }
       if (width <= 320) {
+        await page.getByRole('textbox', {name:'Message', exact:true}).focus();
         for (const selector of ['.jg-stable-demo__header', '.jg-composer', '.jg-composer__input', '.jg-composer__bar']) {
           const box = await page.locator(selector).boundingBox();
           expect(box, `${selector} must be visible`).not.toBeNull();
@@ -147,5 +148,31 @@ for (const width of [301, 320, 390, 502, 1280]) {
       }
     }
     expect(errors).toEqual([]);
+  });
+}
+
+for (const width of [390, 794, 1280, 1600]) {
+  test(`conversation details do not obscure chat at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({width,height:975});
+    await openChat(page);
+    const chat = page.locator('.jg-stable-demo__main');
+    const profile = await page.locator('.jg-stable-demo__profile').boundingBox();
+    const body = await page.locator('section[aria-label="Chat"]:not([hidden])').boundingBox();
+    expect(profile!.y + profile!.height).toBeLessThanOrEqual(body!.y + 1);
+    await page.getByRole('button',{name:'Toggle pinned summary',exact:true}).click();
+    const summary = page.getByRole('dialog',{name:'Pinned workspace summary'});
+    await expect(summary).toBeVisible();
+    if(width > 1100) {
+      const left = await chat.boundingBox();
+      const right = await summary.boundingBox();
+      expect(left!.x + left!.width).toBeLessThanOrEqual(right!.x + 1);
+      await expect(page.getByRole('textbox',{name:'Message',exact:true})).toBeVisible();
+    } else {
+      await expect(chat).toBeHidden();
+    }
+    await page.getByRole('button',{name:'Close summary',exact:true}).click();
+    await expect(chat).toBeVisible();
+    await expect(page.getByRole('textbox',{name:'Message',exact:true})).toBeEnabled();
+    expect(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   });
 }

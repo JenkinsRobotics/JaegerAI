@@ -156,7 +156,7 @@ it("opens the three Codex-style header popovers with real Jaeger destinations", 
  expect(document.querySelector('[aria-label="Conversation actions menu"]')?.textContent).toContain('Open in new window');
  await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Toggle pinned summary"]')!.click());
  expect(document.querySelector('[aria-label="Pinned workspace summary"]')?.textContent).toContain('Environment');
- expect(document.querySelector('[aria-label="Pinned workspace summary"]')?.textContent).toContain('Background processes');
+ expect(document.querySelector('[aria-label="Pinned workspace summary"]')?.textContent).toContain('Connection and activity');
  await flush(() => document.querySelector<HTMLButtonElement>('[aria-label="Open tabs"]')!.click());
  expect(document.querySelector('[aria-label="Open tabs menu"]')?.textContent).toContain('Working and shared tabs');
  expect(document.querySelector('[aria-label="Open tabs menu"]')?.textContent).toContain('No tabs are currently shared with Jaeger');

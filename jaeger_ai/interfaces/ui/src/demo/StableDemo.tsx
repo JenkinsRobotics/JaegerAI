@@ -37,9 +37,10 @@ type HeaderPopup = "menu" | "summary" | "tabs" | null;
 type MenuPage = "main" | "copy" | "open";
 function ConversationRow({ row, active, pinned, selecting, selected, onOpen, onSelect, onPin, onDelete }: { row: SessionRow; active: boolean; pinned: boolean; selecting: boolean; selected: boolean; onOpen(): void; onSelect(): void; onPin(): void; onDelete(): void }) {
   const title = row.title || "Untitled conversation";
+  const generic = !row.title || ["Jaeger stable chat", "New conversation"].includes(row.title);
   return <div className="jg-stable-demo__session-row" data-selected={selected || undefined}>
     {selecting && <label className="jg-stable-demo__session-check"><input type="checkbox" aria-label={`Select ${title}`} checked={selected} onChange={onSelect} /></label>}
-    <button className="jg-stable-demo__session-title" type="button" title={title} aria-current={active ? "true" : undefined} onClick={onOpen}>{title}</button>
+    <button className="jg-stable-demo__session-title" type="button" title={title} aria-current={active ? "true" : undefined} onClick={onOpen}>{title}{generic && <small className="jg-stable-demo__session-id">{row.session_id.slice(-8)}</small>}</button>
     {!selecting && <span className="jg-stable-demo__session-actions">
       <button type="button" aria-label={`${pinned ? "Unpin" : "Pin"} ${title}`} title={pinned ? "Unpin" : "Pin"} onClick={onPin}><Pin size={14} /></button>
       <button type="button" aria-label={`Delete ${title}`} title="Delete permanently" onClick={onDelete}><Trash2 size={14} /></button>
@@ -133,7 +134,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   }, [source, session, recoverMissingSession]);
   useEffect(() => {
     if (!headerPopup) return;
-    const close = (event: MouseEvent) => { if (!toolsRef.current?.contains(event.target as Node)) setHeaderPopup(null); };
+    const close = (event: MouseEvent) => { if (headerPopup !== "summary" && !toolsRef.current?.contains(event.target as Node)) setHeaderPopup(null); };
     const escape = (event: KeyboardEvent) => { if (event.key === "Escape") setHeaderPopup(null); };
     document.addEventListener("mousedown", close);
     document.addEventListener("keydown", escape);
@@ -288,7 +289,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
   const routeTitle: Record<PageId, string> = { library: "Library", automations: "Automations", feed: "Feed", home: "Chat", chat: "Chat", agents: "Agents", work: "Work", research: "Research", studio: "Imagine", models: "Models", machine: "Machine", settings: "Settings" };
   const activeSection = route.page === "work" && route.sub === "tasks" ? "tasks" : route.page === "models" ? "studio" : route.page === "home" ? "chat" : route.page;
   const openTabCount = (session ? 1 : 0) + (inspector ? 1 : 0);
-  return <ToastProvider><div hidden={settingsOpen}><div ref={shellRef} className="jg-stable-demo" data-stable-demo="1" data-inspector={!!inspector} data-sidebar={sidebarOpen} style={{ "--jg-stable-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
+  return <ToastProvider><div hidden={settingsOpen}><div ref={shellRef} className="jg-stable-demo" data-stable-demo="1" data-inspector={!!inspector || headerPopup === "summary"} data-summary={headerPopup === "summary"} data-sidebar={sidebarOpen} style={{ "--jg-stable-sidebar-width": `${sidebarWidth}px` } as CSSProperties}>
     <aside id="jaeger-navigation" hidden={!sidebarOpen} className="jg-stable-demo__sidebar" aria-label="Jaeger navigation">
       <div className="jg-stable-demo__rail">
         <button type="button" aria-label="Close sidebar" title="Close sidebar" aria-controls="jaeger-navigation" onClick={() => setSidebarOpen(false)}><PanelLeft size={20} /></button>
@@ -340,7 +341,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
         {activeSection === "machine" && <div className="jg-stable-demo__context-list"><h2>System</h2><button type="button" aria-current="page" onClick={() => navigate(pathOf("machine"))}><Cpu size={17} />Machine</button></div>}
         <div className="jg-stable-demo__context-footer">
           <label className="jg-stable-demo__appearance">Appearance<select aria-label="Appearance" value={appearance} onChange={e => { const mode = e.target.value as Appearance; setAppearance(mode); applyAppearance(mode); }}><option value="system">System</option><option value="dark">Dark</option><option value="light">Light</option></select></label>
-          <div className="jg-stable-demo__connection" role="status"><span className="jg-stable-demo__dot" data-ready={ready && !error} />{error ? "Connection error" : ready ? source.kind === "mock" ? "Design preview · sample data" : "Live Gateway" : "Connecting…"}</div>
+          <div className="jg-stable-demo__connection" role="status"><span className="jg-stable-demo__dot" data-ready={ready && !error} />{error ? "Connection error" : ready ? source.kind === "mock" ? "Design preview · sample data" : "Gateway connected" : "Connecting…"}</div>
         </div>
       </section>
       <div className="jg-stable-demo__resize" role="separator" aria-label="Resize navigation" aria-orientation="vertical" aria-valuemin={SIDEBAR.minWidth} aria-valuemax={SIDEBAR.maxWidth} aria-valuenow={sidebarWidth} tabIndex={0} onPointerDown={beginSidebarResize} onKeyDown={resizeSidebarWithKeyboard} />
@@ -354,7 +355,7 @@ export function StableDemo({ source }: { source: JaegerSource }) {
         </div>
         <div className="jg-stable-demo__profile" title={workspacePage ? routeTitle[route.page] : currentTitle}>
           <span className="jg-stable-demo__profile-avatar"><ClipAvatar portraitOverride={agent?.avatar_url} state={!ready || error ? "connecting" : avatarState} /></span>
-          <span className="jg-stable-demo__profile-copy"><strong>Jaeger<span className="jg-clip-status" role="status">{STATUS_TEXT[!ready || error ? "connecting" : avatarState]}</span></strong><small>{workspacePage ? routeTitle[route.page] : currentTitle}</small></span>
+          <span className="jg-stable-demo__profile-copy"><strong>Jaeger<span className="jg-clip-status" role="status">{(ready && !error && avatarState === "idle" ? "Idle" : STATUS_TEXT[!ready || error ? "connecting" : avatarState])}</span></strong><small>{workspacePage ? routeTitle[route.page] : currentTitle}</small></span>
         </div>
         <div className="jg-stable-demo__tools" ref={toolsRef}><ApprovalTray source={source} onOpenChat={() => navigate("/")} />
           <button className="jg-stable-demo__top-button" type="button" aria-label="Conversation actions" data-tooltip="Conversation actions" aria-expanded={headerPopup === "menu"} onClick={() => togglePopup("menu")}><MoreHorizontal size={19} /></button>
@@ -380,15 +381,6 @@ export function StableDemo({ source }: { source: JaegerSource }) {
             {menuPage === "copy" && <><button role="menuitem" type="button" onClick={() => void copyText(location.href)}><Copy size={17} />Conversation link</button><button role="menuitem" type="button" disabled={!session} onClick={() => void copyText(session)}><Copy size={17} />Conversation ID</button></>}
             {menuPage === "open" && <><button role="menuitem" type="button" onClick={() => { navigate("/"); setHeaderPopup(null); }}><MessageSquare size={17} />Chat</button><button role="menuitem" type="button" onClick={() => { navigate(pathOf("work", "tasks")); setHeaderPopup(null); }}><CheckCircle size={17} />Tasks</button><button role="menuitem" type="button" onClick={() => { navigate(pathOf("agents")); setHeaderPopup(null); }}><Bot size={17} />Agents</button><button role="menuitem" type="button" onClick={() => { setSettingsOpen(true); setHeaderPopup(null); }}><Settings size={17} />Settings</button></>}
           </div>}
-          {headerPopup === "summary" && <div className="jg-stable-demo__popover jg-stable-demo__popover--summary" role="dialog" aria-label="Pinned workspace summary">
-            <section><header><h2>Environment</h2><button type="button" aria-label="Open files and changes" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><Plus size={19} /></button></header>
-              <button type="button" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><FileText size={18} /><span>Changes</span></button>
-              <div><Cpu size={18} /><span>Local Gateway</span></div>
-              <div><FolderOpen size={18} /><span>{currentRow?.workspace ? currentRow.workspace.split("/").pop() : "Conversation workspace"}</span></div>
-            </section>
-            <section><h2>Background processes</h2><div><span className="jg-stable-demo__status-dot" data-ready={ready && !error} /><span>{ready ? "Gateway connected" : "Connecting to Gateway"}</span></div><div><Bot size={18} /><span>{agent?.display_name || agent?.name || "Jaeger agent"}</span></div></section>
-            <section><header><h2>Sources</h2><button type="button" aria-label="Open outputs" onClick={() => { setInspector("outputs"); setHeaderPopup(null); }}><Plus size={19} /></button></header><button type="button" onClick={() => { setInspector("outputs"); setHeaderPopup(null); }}><FileText size={18} /><span>Outputs and artifacts</span></button><button type="button" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><FolderOpen size={18} /><span>Files and changes</span></button></section>
-          </div>}
           {headerPopup === "tabs" && <div className="jg-stable-demo__popover jg-stable-demo__popover--tabs" role="menu" aria-label="Open tabs menu"><h2>Working and shared tabs</h2>
             {session && <button role="menuitem" type="button" onClick={() => { navigate("/"); setHeaderPopup(null); }}><span className="jg-stable-demo__tab-mark">J</span>{currentTitle}</button>}
             {inspector === "outputs" && <button role="menuitem" type="button" onClick={() => setHeaderPopup(null)}><FileText size={18} />Outputs and artifacts</button>}
@@ -409,7 +401,17 @@ export function StableDemo({ source }: { source: JaegerSource }) {
       </section>
     </main>
 
-    {inspector && <aside id="jaeger-work-panel" className="jg-stable-demo__inspector" aria-label="Work panel">
+          {headerPopup === "summary" && <div className="jg-stable-demo__popover jg-stable-demo__popover--summary jg-stable-demo__summary-dock" role="dialog" aria-label="Pinned workspace summary">
+            <header className="jg-stable-demo__summary-heading"><strong>Conversation details</strong><button type="button" aria-label="Close summary" onClick={() => setHeaderPopup(null)}><X size={18} /></button></header><section><header><h2>Environment</h2><button type="button" aria-label="Open files and changes" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><Plus size={19} /></button></header>
+              <button type="button" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><FileText size={18} /><span>Changes</span></button>
+              <div><Cpu size={18} /><span>Connected Gateway</span></div>
+              <div><FolderOpen size={18} /><span>{currentRow?.workspace ? currentRow.workspace.split("/").pop() : "No workspace attached"}</span></div>
+            </section>
+            <section><h2>Connection and activity</h2><div><span className="jg-stable-demo__status-dot" data-ready={ready && !error} /><span>{error ? "Connection error" : ready ? "Gateway connected (transport)" : "Connecting to Gateway"}</span></div><div><Bot size={18} /><span>{(agent?.display_name || agent?.name || "Jaeger") + " · " + (ready && !error && avatarState === "idle" ? "Idle" : STATUS_TEXT[!ready || error ? "connecting" : avatarState])}</span></div></section>
+            <section><header><h2>Conversation outputs</h2><button type="button" aria-label="Open outputs" onClick={() => { setInspector("outputs"); setHeaderPopup(null); }}><Plus size={19} /></button></header><button type="button" onClick={() => { setInspector("outputs"); setHeaderPopup(null); }}><FileText size={18} /><span>Outputs and artifacts</span></button><button type="button" onClick={() => { setInspector("files"); setHeaderPopup(null); }}><FolderOpen size={18} /><span>Files and changes</span></button>{session && source.taskArtifacts && <TaskArtifacts controls={source.taskArtifacts} sessionId={session} />}</section>
+          </div>}
+
+    {inspector && headerPopup !== "summary" && <aside id="jaeger-work-panel" className="jg-stable-demo__inspector" aria-label="Work panel">
       <header><strong>Work panel</strong><button type="button" aria-label="Close work panel" onClick={() => setInspector(null)}><X size={18} /></button></header>
       <div className="jg-stable-demo__tabs" role="group" aria-label="Work panel view">
         <button type="button" aria-pressed={inspector === "outputs"} onClick={() => setInspector("outputs")}><FileText size={16} />Outputs</button>
