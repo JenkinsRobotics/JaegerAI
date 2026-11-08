@@ -10,12 +10,11 @@
     {"id": "home", "label": "Home", "overflow": true}
   ],
   "apps": [
-    {"id": "vscode", "name": "VS Code", "description": "Chat with Jaeger in VS Code through the Jaeger Chat extension.",
+    {"id": "vscode", "name": "VS Code", "description": "Chat with Jaeger in VS Code through the Jaeger IDE extension.",
      "icon": "app-icons/vscode.svg", "category": "code", "recommended": true, "status": "available",
      "kind": "vscode_extension", "actions": ["install"],
-     "install": {"extension_id": "jenkins-robotics.jaeger-chat", "vsix_glob": "jaeger-chat-*.vsix"},
-     "state_probe": {"type": "vscode_extension", "extension_id": "jenkins-robotics.jaeger-chat",
-                     "argv_proposed_api": "jenkins-robotics.jaeger-chat"}},
+     "install": {"extension_id": "jenkins-robotics.jaeger-ide", "vsix_glob": "jaeger-ide-*.vsix"},
+     "state_probe": {"type": "vscode_extension"}},
     {"id": "apple_reminders", "name": "Apple Reminders", "description": "Let Jaeger read and add reminders.",
      "icon": "glyph:items", "category": "productivity", "recommended": true,
      "status": "coming_soon", "kind": "placeholder", "actions": []},
